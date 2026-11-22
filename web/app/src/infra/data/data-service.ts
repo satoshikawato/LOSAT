@@ -10,10 +10,9 @@ import { RunOutputReceiver } from 'losat';
 import {
   CUSTOM_OUTPUT,
   OUTPUT_FORMATS,
-  type FastaParserKind,
+  type FastaReader,
   type IndexedRecord,
-  type InputRole,
-  type ProgramId,
+  type OutputPlace,
   type RecordKey,
   type RunOutput,
 } from 'losat/domain';
@@ -28,10 +27,12 @@ import {
   type RecordScanner,
 } from 'losat/ports';
 import { includedRecords, normalizeExclusion, recordKey, type DatasetRevision } from '../../domain/dataset';
+import { fastaParser, programById } from '../../domain/programs';
 import { hspTable, type HspTable } from '../../domain/hsp-table';
 import type {
   CleanupState,
   DataGateway,
+  KeptRun,
   ResultSetRef,
   RunInput,
   SourceRef,
@@ -41,6 +42,7 @@ import type {
 import { concatBytes } from '../bytes';
 import { asStorageFull, isStorageFull, isStorageRemoved, type BlockStore, type BlockWriter } from './block-store';
 import { inflateFile } from './inflate';
+import { hasEntryBytes } from './zip-entries';
 
 export interface DataServiceDeps {
   readonly store: BlockStore;
@@ -54,6 +56,8 @@ export interface DataServiceDeps {
   /** A new random token; tokens name blocks, so they never contain input names. */
   readonly newToken: () => string;
   readonly fallbackReason?: string;
+  /** The error behind fallbackReason, "<name>: <message>", for developers (session.ts). */
+  readonly fallbackError?: string;
   /** Settles when the removal of abandoned sessions has finished (session.ts). */
   readonly cleanup: Promise<CleanupState>;
   readonly estimate?: () => Promise<{ readonly usage: number; readonly quota: number } | undefined>;
@@ -88,6 +92,8 @@ interface StagedRun {
   readonly writers: ReadonlyMap<OutputStream, BlockWriter>;
   readonly receiver: RunOutputReceiver;
   readonly lengths: Lengths;
+  /** The outputs that the engine said failed, with where their errors are (its discards, `clear`): `ResultSetRef.failed`. */
+  readonly failed: Map<RunOutput, OutputPlace>;
   /** HSP records so far: the lines of stream 1 that are not blank, as `readHits` reads them. */
   hitLines: number;
   /** The current line of stream 1 has a character other than white space. */
@@ -127,10 +133,11 @@ export class DataService implements DataGateway {
     return { sourceId, name: file.name, size: file.size };
   }
 
-  async indexSource(sourceId: string, parser: FastaParserKind): Promise<DatasetRevision> {
+  async indexSource(sourceId: string, reader: FastaReader): Promise<DatasetRevision> {
     const file = this.source(sourceId);
-    const { records } = await this.deps.scanner.scan(parser, readChunks(file, this.chunkBytes));
-    checkRecordTable(records, file.size);
+    const parser = fastaParser(programById(reader.program), reader.role);
+    const { records, reader_error: stop } = await this.deps.scanner.scan(reader, readChunks(file, this.chunkBytes));
+    checkRecordTable(records, file.size, stop?.offset);
     const hashes = await this.hashRecords(file, records);
     return this.keep({
       revisionId: this.deps.newToken(),
@@ -138,6 +145,7 @@ export class DataService implements DataGateway {
       parser,
       records: Object.freeze(records.map((record, i) => Object.freeze({ ...record, sha256: hashes[i]! }))),
       excluded: Object.freeze([]),
+      ...(stop === undefined ? {} : { readerError: Object.freeze({ offset: stop.offset, defline: stop.defline, message: stop.message }) }),
     });
   }
 
@@ -155,7 +163,12 @@ export class DataService implements DataGateway {
     return { bytes, sha256: await this.deps.digest(bytes), records };
   }
 
-  /** The bytes and record keys of a run input, without its SHA-256. */
+  /**
+   * The bytes and record keys of a run input, without its SHA-256. A source whose reading ends with
+   * the reader's error (`DatasetRevision.readerError`) keeps the bytes from the error on after its
+   * included records, so that the run meets the error as the command line meets it in the file, and
+   * ends the input: the engine reads no record after it (line WQA's D10, 2026-11-19).
+   */
   private async runInputBytes(revisionIds: readonly string[]): Promise<Omit<RunInput, 'sha256'>> {
     if (revisionIds.length === 0) throw new Error('a run input needs at least one dataset revision');
     const parts: Uint8Array[] = [];
@@ -164,13 +177,14 @@ export class DataService implements DataGateway {
       const revision = this.revision(revisionId);
       const file = this.source(revision.sourceId);
       const included = includedRecords(revision);
+      const stop = revision.readerError?.offset;
       const bytes =
         revision.excluded.length === 0
           ? await readRange(file, 0, file.size)
-          : await readRanges(
-              file,
-              included.map((record) => [record.header_offset, record.end_offset] as const),
-            );
+          : await readRanges(file, [
+              ...included.map((record) => [record.header_offset, record.end_offset] as const),
+              ...(stop === undefined ? [] : [[stop, file.size] as const]),
+            ]);
       const previous = parts[parts.length - 1];
       if (bytes.length > 0 && previous !== undefined && previous[previous.length - 1] !== LF) {
         parts.push(NEWLINE);
@@ -178,13 +192,14 @@ export class DataService implements DataGateway {
       if (bytes.length > 0) parts.push(bytes);
       // One by one: spreading a large table into push() overflows the call stack.
       for (const record of included) records.push(recordKey(record));
+      if (stop !== undefined) break;
     }
     return { bytes: concatBytes(parts), records: Object.freeze(records) };
   }
 
-  async checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck> {
+  async checkInput(reader: FastaReader, revisionIds: readonly string[]): Promise<InputCheck> {
     const { bytes } = await this.runInputBytes(revisionIds);
-    return this.deps.checker.check(program, role, bytes);
+    return this.deps.checker.check(reader, bytes);
   }
 
   async dropSource(sourceId: string): Promise<void> {
@@ -221,9 +236,10 @@ export class DataService implements DataGateway {
       receiver: new RunOutputReceiver(
         channel.port2,
         (stream, bytes) => this.append(run, stream, bytes),
-        (stream) => this.clear(run, stream),
+        (stream, error) => this.clear(run, stream, error),
       ),
       lengths,
+      failed: new Map(),
       hitLines: 0,
       hitLineOpen: false,
       failure: undefined,
@@ -245,7 +261,11 @@ export class DataService implements DataGateway {
     if (this.runs.get(runId) !== run) throw new Error(`run ${runId} was discarded`);
     const failure =
       run.failure ??
-      (result.state === 'broken' ? new Error(`The output of the run arrived incomplete: ${result.detail}`) : undefined);
+      (result.state === 'broken'
+        ? new Error(`The output of the run arrived incomplete: ${result.detail}`)
+        : result.state === 'failed'
+          ? new Error('The engine failed the run')
+          : undefined);
     // A failure to clean up must not hide why the run failed.
     if (failure !== undefined) {
       await this.discardRun(runId).catch(() => undefined);
@@ -258,16 +278,69 @@ export class DataService implements DataGateway {
       throw isStorageFull(error) ? asStorageFull(error) : error;
     }
     this.runs.set(runId, { state: 'committed', token: run.token, lengths: Object.freeze({ ...run.lengths }) });
+    return this.resultOf(runId, run);
+  }
+
+  /** The result of a run that was committed: the sizes of its outputs, its HSP records and the outputs that it could not write. */
+  private resultOf(runId: string, run: StagedRun): ResultSetRef {
     const hitCount = run.hitLines + (run.hitLineOpen ? 1 : 0);
     const custom = run.lengths[CUSTOM_OUTPUT];
     const byteLengths = { 0: run.lengths[0]!, 6: run.lengths[6]!, 7: run.lengths[7]!, ...(custom === undefined ? {} : { [CUSTOM_OUTPUT]: custom }) };
-    return { runId, byteLengths, hitCount };
+    const failed = [...run.failed].sort(([a], [b]) => a - b).map(([output, error]) => ({ output, error }));
+    return { runId, byteLengths, hitCount, failed };
   }
 
   async discardRun(runId: string): Promise<void> {
     const run = this.runs.get(runId);
     if (run?.state !== 'staged') return;
     await this.drop(runId, run);
+  }
+
+  async keepFailedRun(runId: string): Promise<KeptRun | undefined> {
+    const run = this.runs.get(runId);
+    if (run?.state !== 'staged') return undefined;
+    // The chunks of a failed run, then its `fail`: the outputs and stream 3 are whole once `fail` arrived.
+    const result = await run.receiver.finished;
+    if (result.state === 'failed' && run.failure === undefined && this.runs.get(runId) === run) {
+      try {
+        for (const writer of run.writers.values()) await writer.seal();
+        const length = run.lengths[DIAGNOSTICS_STREAM]!;
+        const diagnostics =
+          length === 0 ? '' : new TextDecoder().decode(await this.deps.store.read(blockPath(run.token, DIAGNOSTICS_STREAM), 0, length));
+        if (this.runs.get(runId) === run) {
+          if (!(await this.keptBytes(run))) {
+            // Nothing was written to a kept output (an empty file, an archive of empty entries): the run keeps only
+            // its warnings, as a failed run did before version 7.
+            await this.drop(runId, run).catch(() => undefined);
+            return { diagnostics };
+          }
+          // The commit of a completed run: its outputs are read, and exported, as a completed run's are.
+          this.runs.set(runId, { state: 'committed', token: run.token, lengths: Object.freeze({ ...run.lengths }) });
+          return { diagnostics, result: this.resultOf(runId, run) };
+        }
+      } catch {
+        // The outputs could not be kept: the run is dropped, as a failed run was.
+      }
+    }
+    // As the callers of `discardRun` do, a failure to remove the blocks does not hide why the run failed.
+    const current = this.runs.get(runId);
+    if (current !== undefined) await this.drop(runId, current).catch(() => undefined);
+    return undefined;
+  }
+
+  /**
+   * Whether a failed run wrote something to an output that it keeps: bytes of its own, or, for an archive (outfmt 13
+   * and 14), bytes in its entries, not in the archive's own records (the empty master file of a run that failed
+   * before writing it is an archive of 22 + 46 + 30 bytes of records and no data).
+   */
+  private async keptBytes(run: StagedRun): Promise<boolean> {
+    for (const output of [0, 6, 7, CUSTOM_OUTPUT] as const) {
+      const length = run.lengths[output] ?? 0;
+      if (length === 0 || run.failed.has(output)) continue;
+      const read = (start: number, end: number) => this.deps.store.read(blockPath(run.token, output), start, end - start);
+      if (await hasEntryBytes(read, length)) return true;
+    }
+    return false;
   }
 
   async readOutput(runId: string, output: RunOutput): Promise<Uint8Array> {
@@ -336,6 +409,7 @@ export class DataService implements DataGateway {
     return {
       backend: this.deps.store.backend,
       ...(this.deps.fallbackReason === undefined ? {} : { fallbackReason: this.deps.fallbackReason }),
+      ...(this.deps.fallbackError === undefined ? {} : { fallbackError: this.deps.fallbackError }),
       sessionBytes: this.deps.store.usage(),
       ...(estimate === undefined ? {} : { estimate }),
       cleanup: this.cleanup,
@@ -372,11 +446,11 @@ export class DataService implements DataGateway {
   }
 
   /**
-   * Drops what a staged run received of one of its outputs, which the engine discarded (it failed
-   * alone after some of its chunks were sent, docs/web/abi_v2.md §5): the output stays empty. After a
-   * failure, the run keeps nothing.
+   * Records that one output of a staged run failed, and where its error is, as the engine said (docs/web/abi_v2.md
+   * §5: it failed alone, or its search failed in a run of two searches), and drops what the run received of it: the
+   * output stays empty. After a failure, the run keeps nothing.
    */
-  private clear(run: StagedRun, stream: RunOutput): void {
+  private clear(run: StagedRun, stream: RunOutput, error: OutputPlace): void {
     if (run.failure !== undefined) return;
     try {
       const writer = run.writers.get(stream);
@@ -388,6 +462,7 @@ export class DataService implements DataGateway {
       return;
     }
     run.lengths[stream] = 0;
+    run.failed.set(stream, error);
   }
 
   private async readStream(runId: string, stream: OutputStream): Promise<Uint8Array> {
@@ -465,10 +540,11 @@ function blockPath(token: string, stream: OutputStream): string {
 }
 
 /**
- * Rejects a record table whose offsets do not describe ordered records inside the source.
- * Only a first record without a defline starts its sequence at its header offset (both 0).
+ * Rejects a record table whose offsets do not describe ordered records inside the source, and the
+ * offset of a reader's error (`stop`) that is not after them inside the source. Only a first record
+ * without a defline starts its sequence at its header offset (both 0).
  */
-function checkRecordTable(records: readonly IndexedRecord[], size: number): void {
+function checkRecordTable(records: readonly IndexedRecord[], size: number, stop: number | undefined): void {
   let previousEnd = 0;
   records.forEach((record, i) => {
     const ordered =
@@ -480,6 +556,9 @@ function checkRecordTable(records: readonly IndexedRecord[], size: number): void
     if (!ordered) throw new Error(`the index scan returned an invalid record table (record ${i + 1})`);
     previousEnd = record.end_offset;
   });
+  if (stop !== undefined && !(Number.isSafeInteger(stop) && previousEnd <= stop && stop <= size)) {
+    throw new Error('the index scan returned an invalid offset of the reader\'s error');
+  }
 }
 
 async function* readChunks(file: Blob, chunkBytes: number): AsyncGenerator<Uint8Array> {

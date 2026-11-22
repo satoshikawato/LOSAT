@@ -17,20 +17,8 @@ pub(crate) mod x_fence;
 // base per byte, or on a one-byte copy of the whole subject (see its doc for the NCBI references).
 pub mod x_greedy_prelim;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:385-389
-// ```c
-//           query = query_blk->sequence +
-//               query_info->contexts[hsp->context].query_offset;
-//           query_nomask = query_blk->sequence_nomask +
-//               query_info->contexts[hsp->context].query_offset;
-//           query_length = query_info->contexts[hsp->context].query_length;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:385-390
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:466-469
-// ```c
-//              AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
-//                                 query_length, &start_shift);
-//              adjusted_subject = subject + start_shift;
-// ```
 /// NCBI's pointer into a larger buffer with the `Int4` length NCBI gives with it: the pointer is
 /// `buf` from `start`, the length `len`. NCBI's `Int4` offsets relative to the pointer (`at`) read
 /// the buffer outside `0..len` too, before the pointer for a negative offset and past `len` for one
@@ -88,22 +76,22 @@ impl<'a> SeqPointer<'a> {
 
 // Re-export public APIs
 pub use greedy::{
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
     greedy_gapped_alignment_with_traceback,
     GreedyAlignScratch,
 };
-// NCBI reference: blast_gapalign.c:3248-3305 (BlastGetOffsetsForGappedAlignment)
-// NCBI reference: blast_gapalign.c:3323-3389 (BlastGetStartForGappedAlignmentNucl)
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3248-3305 (BlastGetOffsetsForGappedAlignment)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3323-3389 (BlastGetStartForGappedAlignmentNucl)
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
 // The traceback extension reads its matrix with `get_unchecked` for letters below 16 (BLASTNA,
 // which `run_local` encodes first), so it is the crate's only.
 pub use gapped::{
     blast_get_offsets_for_gapped_alignment,
     blast_get_start_for_gapped_alignment_nucl,
     build_blastna_matrix,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     extend_gapped_heuristic_with_scratch,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     GapAlignScratch,
 };
 pub(crate) use gapped::{extend_gapped_heuristic_with_traceback_with_scratch, stats_from_edit_ops};

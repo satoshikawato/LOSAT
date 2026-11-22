@@ -1,11 +1,12 @@
 pub mod losat
 pub mod losat::api
 #[non_exhaustive] pub enum losat::api::Error
-pub losat::api::Error::Argv(alloc::string::String)
-pub losat::api::Error::Input(alloc::string::String)
-pub losat::api::Error::Search(alloc::string::String)
+pub losat::api::Error::Argv(alloc::vec::Vec<u8>)
+pub losat::api::Error::Input(alloc::vec::Vec<u8>)
+pub losat::api::Error::Search(alloc::vec::Vec<u8>)
 impl losat::api::Error
-pub fn losat::api::Error::message(&self) -> &str
+pub fn losat::api::Error::message(&self) -> &[u8]
+pub fn losat::api::Error::to_string_lossy(&self) -> alloc::borrow::Cow<'_, str>
 impl core::clone::Clone for losat::api::Error
 pub fn losat::api::Error::clone(&self) -> losat::api::Error
 impl core::cmp::Eq for losat::api::Error
@@ -58,6 +59,27 @@ impl core::marker::Unpin for losat::api::Program
 impl core::marker::UnsafeUnpin for losat::api::Program
 impl core::panic::unwind_safe::RefUnwindSafe for losat::api::Program
 impl core::panic::unwind_safe::UnwindSafe for losat::api::Program
+pub enum losat::api::QueryEnd
+pub losat::api::QueryEnd::BlankLines
+pub losat::api::QueryEnd::Error(losat::api::QueryError)
+pub losat::api::QueryEnd::Input
+impl core::clone::Clone for losat::api::QueryEnd
+pub fn losat::api::QueryEnd::clone(&self) -> losat::api::QueryEnd
+impl core::cmp::Eq for losat::api::QueryEnd
+impl core::cmp::PartialEq for losat::api::QueryEnd
+pub fn losat::api::QueryEnd::eq(&self, &losat::api::QueryEnd) -> bool
+impl core::default::Default for losat::api::QueryEnd
+pub fn losat::api::QueryEnd::default() -> losat::api::QueryEnd
+impl core::fmt::Debug for losat::api::QueryEnd
+pub fn losat::api::QueryEnd::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for losat::api::QueryEnd
+impl core::marker::Freeze for losat::api::QueryEnd
+impl core::marker::Send for losat::api::QueryEnd
+impl core::marker::Sync for losat::api::QueryEnd
+impl core::marker::Unpin for losat::api::QueryEnd
+impl core::marker::UnsafeUnpin for losat::api::QueryEnd
+impl core::panic::unwind_safe::RefUnwindSafe for losat::api::QueryEnd
+impl core::panic::unwind_safe::UnwindSafe for losat::api::QueryEnd
 pub enum losat::api::Role
 pub losat::api::Role::Query
 pub losat::api::Role::Subject
@@ -153,7 +175,7 @@ pub fn losat::api::Batches<'_>::query_count(&self) -> usize
 impl core::iter::traits::iterator::Iterator for losat::api::Batches<'_>
 pub type losat::api::Batches<'_>::Item = core::result::Result<losat::api::Batch, losat::api::Error>
 pub fn losat::api::Batches<'_>::next(&mut self) -> core::option::Option<Self::Item>
-impl<'a> core::marker::Freeze for losat::api::Batches<'a>
+impl<'a> !core::marker::Freeze for losat::api::Batches<'a>
 impl<'a> core::marker::Send for losat::api::Batches<'a>
 impl<'a> core::marker::Sync for losat::api::Batches<'a>
 impl<'a> core::marker::Unpin for losat::api::Batches<'a>
@@ -222,7 +244,7 @@ pub losat::api::HspRecord::q_idx: usize
 pub losat::api::HspRecord::q_start: usize
 pub losat::api::HspRecord::query_aligned: core::option::Option<alloc::string::String>
 pub losat::api::HspRecord::query_frame: core::option::Option<i32>
-pub losat::api::HspRecord::query_id: alloc::sync::Arc<str>
+pub losat::api::HspRecord::query_id: losat::api::Id
 pub losat::api::HspRecord::query_length: usize
 pub losat::api::HspRecord::query_strand: core::option::Option<losat::api::Strand>
 pub losat::api::HspRecord::rank: usize
@@ -233,7 +255,7 @@ pub losat::api::HspRecord::s_idx: usize
 pub losat::api::HspRecord::s_start: usize
 pub losat::api::HspRecord::subject_aligned: core::option::Option<alloc::string::String>
 pub losat::api::HspRecord::subject_frame: core::option::Option<i32>
-pub losat::api::HspRecord::subject_id: alloc::sync::Arc<str>
+pub losat::api::HspRecord::subject_id: losat::api::Id
 pub losat::api::HspRecord::subject_length: usize
 pub losat::api::HspRecord::subject_strand: core::option::Option<losat::api::Strand>
 pub losat::api::HspRecord::sum_n: core::option::Option<i32>
@@ -255,13 +277,87 @@ impl core::marker::Unpin for losat::api::HspRecord
 impl core::marker::UnsafeUnpin for losat::api::HspRecord
 impl core::panic::unwind_safe::RefUnwindSafe for losat::api::HspRecord
 impl core::panic::unwind_safe::UnwindSafe for losat::api::HspRecord
+pub struct losat::api::Id
+impl losat::api::Id
+pub fn losat::api::Id::as_bytes(&self) -> &[u8]
+pub fn losat::api::Id::to_str(&self) -> core::result::Result<&str, core::str::error::Utf8Error>
+pub fn losat::api::Id::to_string_lossy(&self) -> alloc::borrow::Cow<'_, str>
+impl core::borrow::Borrow<[u8]> for losat::api::Id
+pub fn losat::api::Id::borrow(&self) -> &[u8]
+impl core::clone::Clone for losat::api::Id
+pub fn losat::api::Id::clone(&self) -> losat::api::Id
+impl core::cmp::Eq for losat::api::Id
+impl core::cmp::Ord for losat::api::Id
+pub fn losat::api::Id::cmp(&self, &losat::api::Id) -> core::cmp::Ordering
+impl core::cmp::PartialEq for losat::api::Id
+pub fn losat::api::Id::eq(&self, &losat::api::Id) -> bool
+impl core::cmp::PartialEq<&[u8]> for losat::api::Id
+pub fn losat::api::Id::eq(&self, &&[u8]) -> bool
+impl core::cmp::PartialEq<&str> for losat::api::Id
+pub fn losat::api::Id::eq(&self, &&str) -> bool
+impl core::cmp::PartialEq<[u8]> for losat::api::Id
+pub fn losat::api::Id::eq(&self, &[u8]) -> bool
+impl core::cmp::PartialEq<alloc::string::String> for losat::api::Id
+pub fn losat::api::Id::eq(&self, &alloc::string::String) -> bool
+impl core::cmp::PartialEq<alloc::vec::Vec<u8>> for losat::api::Id
+pub fn losat::api::Id::eq(&self, &alloc::vec::Vec<u8>) -> bool
+impl core::cmp::PartialEq<losat::api::Id> for &str
+pub fn &str::eq(&self, &losat::api::Id) -> bool
+impl core::cmp::PartialEq<losat::api::Id> for [u8]
+pub fn [u8]::eq(&self, &losat::api::Id) -> bool
+impl core::cmp::PartialEq<losat::api::Id> for str
+pub fn str::eq(&self, &losat::api::Id) -> bool
+impl core::cmp::PartialEq<str> for losat::api::Id
+pub fn losat::api::Id::eq(&self, &str) -> bool
+impl core::cmp::PartialOrd for losat::api::Id
+pub fn losat::api::Id::partial_cmp(&self, &losat::api::Id) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::AsRef<[u8]> for losat::api::Id
+pub fn losat::api::Id::as_ref(&self) -> &[u8]
+impl core::fmt::Debug for losat::api::Id
+pub fn losat::api::Id::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for losat::api::Id
+pub fn losat::api::Id::hash<H: core::hash::Hasher>(&self, &mut H)
+impl<const N: usize> core::cmp::PartialEq<&[u8; N]> for losat::api::Id
+pub fn losat::api::Id::eq(&self, &&[u8; N]) -> bool
+impl<const N: usize> core::cmp::PartialEq<[u8; N]> for losat::api::Id
+pub fn losat::api::Id::eq(&self, &[u8; N]) -> bool
+impl core::marker::Freeze for losat::api::Id
+impl core::marker::Send for losat::api::Id
+impl core::marker::Sync for losat::api::Id
+impl core::marker::Unpin for losat::api::Id
+impl core::marker::UnsafeUnpin for losat::api::Id
+impl core::panic::unwind_safe::RefUnwindSafe for losat::api::Id
+impl core::panic::unwind_safe::UnwindSafe for losat::api::Id
+pub struct losat::api::InputRecords
+pub losat::api::InputRecords::query: alloc::vec::Vec<losat::api::FastaRecord>
+pub losat::api::InputRecords::query_end: losat::api::QueryEnd
+pub losat::api::InputRecords::subject: alloc::vec::Vec<losat::api::FastaRecord>
+impl losat::api::InputRecords
+pub fn losat::api::InputRecords::database<'a>(&'a self, &'a str) -> losat::api::Inputs<'a>
+pub fn losat::api::InputRecords::inputs(&self) -> losat::api::Inputs<'_>
+impl core::clone::Clone for losat::api::InputRecords
+pub fn losat::api::InputRecords::clone(&self) -> losat::api::InputRecords
+impl core::default::Default for losat::api::InputRecords
+pub fn losat::api::InputRecords::default() -> losat::api::InputRecords
+impl core::fmt::Debug for losat::api::InputRecords
+pub fn losat::api::InputRecords::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for losat::api::InputRecords
+impl core::marker::Send for losat::api::InputRecords
+impl core::marker::Sync for losat::api::InputRecords
+impl core::marker::Unpin for losat::api::InputRecords
+impl core::marker::UnsafeUnpin for losat::api::InputRecords
+impl core::panic::unwind_safe::RefUnwindSafe for losat::api::InputRecords
+impl core::panic::unwind_safe::UnwindSafe for losat::api::InputRecords
 pub struct losat::api::Inputs<'a>
 impl<'a> losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::database(&'a [losat::api::FastaRecord], &'a str) -> Self
+pub fn losat::api::Inputs<'a>::msa(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self
+pub fn losat::api::Inputs<'a>::msa_database(&'a std::path::Path, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::named(self, &'a str, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::new(&'a [losat::api::FastaRecord], &'a [losat::api::FastaRecord]) -> Self
 pub fn losat::api::Inputs<'a>::pssm(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self
 pub fn losat::api::Inputs<'a>::pssm_database(&'a std::path::Path, &'a str) -> Self
+pub fn losat::api::Inputs<'a>::query_end(self, &'a losat::api::QueryEnd) -> Self
 impl<'a> core::clone::Clone for losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::clone(&self) -> losat::api::Inputs<'a>
 impl<'a> core::fmt::Debug for losat::api::Inputs<'a>
@@ -319,6 +415,26 @@ impl core::marker::Unpin for losat::api::Parameter
 impl core::marker::UnsafeUnpin for losat::api::Parameter
 impl core::panic::unwind_safe::RefUnwindSafe for losat::api::Parameter
 impl core::panic::unwind_safe::UnwindSafe for losat::api::Parameter
+pub struct losat::api::QueryError
+impl losat::api::QueryError
+pub fn losat::api::QueryError::message(&self) -> &[u8]
+impl core::clone::Clone for losat::api::QueryError
+pub fn losat::api::QueryError::clone(&self) -> losat::api::QueryError
+impl core::cmp::Eq for losat::api::QueryError
+impl core::cmp::PartialEq for losat::api::QueryError
+pub fn losat::api::QueryError::eq(&self, &losat::api::QueryError) -> bool
+impl core::fmt::Debug for losat::api::QueryError
+pub fn losat::api::QueryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for losat::api::QueryError
+pub fn losat::api::QueryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for losat::api::QueryError
+impl core::marker::Freeze for losat::api::QueryError
+impl core::marker::Send for losat::api::QueryError
+impl core::marker::Sync for losat::api::QueryError
+impl core::marker::Unpin for losat::api::QueryError
+impl core::marker::UnsafeUnpin for losat::api::QueryError
+impl core::panic::unwind_safe::RefUnwindSafe for losat::api::QueryError
+impl core::panic::unwind_safe::UnwindSafe for losat::api::QueryError
 #[non_exhaustive] pub struct losat::api::QueryHits<'a>
 pub losat::api::QueryHits::hsps: &'a [losat::api::HspRecord]
 pub losat::api::QueryHits::q_idx: usize
@@ -446,6 +562,7 @@ pub const losat::api::VERSION: &str
 pub fn losat::api::describe(losat::api::Program) -> losat::api::Description
 pub fn losat::api::read_fasta(losat::api::Program, losat::api::Role, &[u8]) -> core::result::Result<alloc::vec::Vec<losat::api::FastaRecord>, losat::api::Error>
 pub fn losat::api::read_input_file(losat::api::Role, &std::path::Path) -> core::result::Result<alloc::vec::Vec<u8>, losat::api::Error>
+pub fn losat::api::read_input_records(&losat::api::Search, &[u8], &[u8]) -> core::result::Result<losat::api::InputRecords, losat::api::Error>
 pub fn losat::api::read_inputs(&losat::api::Search, &[u8], &[u8]) -> core::result::Result<(alloc::vec::Vec<losat::api::FastaRecord>, alloc::vec::Vec<losat::api::FastaRecord>), losat::api::Error>
 pub fn losat::api::run(&losat::api::Search, losat::api::Inputs<'_>, &mut [(&str, &mut (dyn std::io::Write + core::marker::Send))], &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_batches<'a>(&'a losat::api::Search, losat::api::Inputs<'a>) -> core::result::Result<losat::api::Batches<'a>, losat::api::Error>
@@ -454,6 +571,8 @@ pub fn losat::api::run_collect(&losat::api::Search, losat::api::Inputs<'_>, &[&s
 pub fn losat::api::run_convert2blastmask(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_dustmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_makeblastdb(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
+pub fn losat::api::run_makembindex(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_segmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_to_file(&losat::api::Search, losat::api::Inputs<'_>, &str, &std::path::Path, &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), losat::api::Error>
+pub fn losat::api::run_windowmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::validate(losat::api::Program, &[&str]) -> core::result::Result<losat::api::Search, losat::api::Error>

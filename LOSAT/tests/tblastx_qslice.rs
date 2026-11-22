@@ -6,12 +6,6 @@
 //! other targets every search runs the unsliced scan).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-516
-//! ```c
-//! while (scan_range[1] <= scan_range[2]) {
-//!     /* scan the subject sequence for hits */
-//!     hits = scansub(lookup_wrap, subject,
-//!                               offset_pairs, array_size, scan_range);
-//! ```
 //! NCBI scans each subject range once with the whole query's table; the path scans it once per
 //! slice, with the same hits in the same order on each diagonal (the module's argument), so the
 //! property under test is that the report does not depend on it. That reports equal NCBI's is the

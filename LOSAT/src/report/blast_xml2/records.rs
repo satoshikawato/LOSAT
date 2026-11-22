@@ -24,29 +24,8 @@ impl Xml2Target {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196
-// ```c++
-//     m_IsBl2Seq = (m_DbName == kEmptyStr ? true : false);
-//     ...
-//     m_IsIterative = options.IsIterativeSearch();
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:862-866
-// ```c++
-// CBlastOptions::IsIterativeSearch() const{
-//     switch ( GetProgram()) {
-//     	case ePSIBlast :
-//     	case ePSITblastn :
-//     	case eDeltaBlast :
-//     		return true;
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2364, :2376-2377
-// ```c++
-// 	if((m_IsIterative) || (m_IsBl2Seq)) {
-// 		if(m_AccumulatedResults.empty()) {
-// 			_ASSERT(m_AccumulatedQueries->size() == 0);
-// 			...
-// 			CConstRef<CSeq_id> query_id = results.GetSeqId();
-// 			if(m_AccumulatedResults[0].GetSeqId()->Match(*query_id)) {
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:862-867
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2377, :2376-2377
 /// NCBI's `m_IsBl2Seq || m_IsIterative`: whether the XML2 and JSON documents of a search hold each
 /// query's report back until a result of a query whose Seq-id does not match arrives (or the
 /// epilog): a search of subject records (`subject_search`: `-subject`, no database name) or of an
@@ -59,12 +38,6 @@ pub fn reports_held(subject_search: bool, iterative: bool) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:174-185
-// ```c++
-//         for (unsigned int i = 0; i < subjectsInfo->Size(); i++) {
-//             CConstRef<CSeq_id> subject_id = subjectsInfo->GetSeqId(i);
-//             ...
-//             m_SubjectIds.push_back(CAlignFormatUtil::GetBareId(*subject_id));
-// ```
 // The Seq-id of a subject's Seq-loc is the `BestRank` best of its ids
 // (blast_fasta_input.cpp:458-466).
 /// The `subjects` strings of the records `records` (their ids under `-parse_deflines`): the bare id

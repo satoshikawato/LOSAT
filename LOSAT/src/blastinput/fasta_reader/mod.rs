@@ -10,49 +10,6 @@
 //! residue in a masked interval is in lower case, every other residue in upper case.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:316-361
-//! ```c++
-//! void
-//! CBlastFastaInputSource::x_InitInputReader()
-//! {
-//!     CFastaReader::TFlags flags = m_Config.GetBelieveDeflines() ?
-//!                                     CFastaReader::fParseRawID:
-//!                                     (CFastaReader::fNoParseID |
-//!                                      CFastaReader::fDLOptional);
-//!
-//!     // Allow CFastaReader fSkipCheck flag to be set based
-//!     // on new CBlastInputSourceConfig property - GetSkipSeqCheck() -RMH-
-//!     flags += ( m_Config.GetSkipSeqCheck() ? CFastaReader::fSkipCheck : 0 );
-//!
-//!     flags += (m_ReadProteins
-//!               ? CFastaReader::fAssumeProt
-//!               : CFastaReader::fAssumeNuc);
-//!     const char* env_var = getenv("BLASTINPUT_GEN_DELTA_SEQ");
-//!     if (env_var == NULL || (env_var && string(env_var) == kEmptyStr)) {
-//!         flags += CFastaReader::fNoSplit;
-//!     }
-//!     // This is necessary to enable the ignoring of gaps in classes derived from
-//!     // CFastaReader
-//!
-//!    	flags+= CFastaReader::fHyphensIgnoreAndWarn;
-//!
-//!     flags+= CFastaReader::fDisableNoResidues;
-//!     // Do not check more than few characters in local ID for illegal characters.
-//!     // Illegal characters can be things like = and we want to let those through.
-//!     flags+= CFastaReader::fQuickIDCheck;
-//!
-//!     if (m_Config.GetDataLoaderConfig().UseDataLoaders()) {
-//!         m_InputReader.reset
-//!             (new CBlastInputReader(m_Config.GetDataLoaderConfig(),
-//!                                    m_ReadProteins,
-//!                                    m_Config.RetrieveSeqData(),
-//!                                    m_Config.GetSeqLenThreshold2Guess(),
-//!                                    *m_LineReader,
-//!                                    flags));
-//!     } else {
-//!         m_InputReader.reset(new CCustomizedFastaReader(*m_LineReader, flags,
-//!                                        m_Config.GetSeqLenThreshold2Guess()));
-//!     }
-//! ```
 //! `-parse_deflines` (`fParseRawID`) is `believed`; `fSkipCheck` is not set by the BLAST programs.
 
 pub mod believed;
@@ -129,16 +86,6 @@ impl ReaderConfig {
     /// The query reader of `program`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:66-74
-    /// ```c++
-    ///     // Set an appropriate default for the strand
-    ///     if (m_Strand == eNa_strand_other) {
-    ///         m_Strand = (m_DLConfig.m_IsLoadingProteins)
-    ///             ? eNa_strand_unknown
-    ///             : eNa_strand_both;
-    ///     }
-    ///     SetQueryLocalIdMode();
-    /// }
-    /// ```
     pub fn query(program: &'static str, protein: bool, data_loaders: bool) -> Self {
         Self {
             protein,
@@ -160,16 +107,6 @@ impl ReaderConfig {
     /// The subject reader of `program`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:230-237
-    /// ```c++
-    ///     SDataLoaderConfig dlconfig(read_proteins);
-    ///     dlconfig.OptimizeForWholeLargeSequenceRetrieval();
-    ///
-    ///     CBlastInputSourceConfig iconfig(dlconfig);
-    ///     iconfig.SetRange(range);
-    ///     iconfig.SetBelieveDeflines(parse_deflines);
-    ///     iconfig.SetLowercaseMask(use_lcase_masking);
-    ///     iconfig.SetSubjectLocalIdMode();
-    /// ```
     pub fn subject(program: &'static str, protein: bool, data_loaders: bool) -> Self {
         Self {
             protein,
@@ -187,6 +124,35 @@ impl ReaderConfig {
             },
         }
     }
+}
+
+/// The longest record that LOSAT reads, gaps included: NCBI keeps positions in `TSeqPos` (32
+/// bits) and BLAST's sequence lengths in `Int4`.
+pub const MAX_RECORD_LETTERS: u64 = i32::MAX as u64;
+
+/// LOSAT's refusal of a record longer than [`MAX_RECORD_LETTERS`] letters, which the reader of
+/// `config` gives as it reads one (`FastaReader::check_length`) and LOSAT Web's index scan as it
+/// scans one (`web/adapter/src/scan/ncbi.rs`, which cannot read such a record into the reader).
+pub fn record_too_long(config: &ReaderConfig) -> ReadError {
+    ReadError::Unsupported(anyhow::anyhow!(
+        "a {} record longer than {MAX_RECORD_LETTERS} letters is not supported by LOSAT's {}",
+        config.role,
+        config.program
+    ))
+}
+
+/// The letters of the gap line `line` (`>?` and what follows on its line, after NCBI's
+/// `TruncateSpaces` and its change of `>?_` into `>`): the run of `N` or `X` that the reader puts
+/// in the record for it (`FastaReader::parse_gap_line`, `reader::gap_line_size`), without the
+/// line's warnings; `None` for a line that does not start with `>?`. LOSAT Web's index scan
+/// counts a gap line's letters with it, so that its lengths are the reader's
+/// (`web/adapter/src/scan/ncbi.rs`).
+pub fn gap_line_letters(line: &[u8]) -> Option<u32> {
+    if !line.starts_with(b">?") {
+        return None;
+    }
+    // Only the warnings can fail, and these are dropped.
+    reader::gap_line_size(line, 0, &mut |_| Ok(())).ok()
 }
 
 /// The parts of a record that only the BLAST archive writes.
@@ -230,6 +196,12 @@ impl FastaRecord {
     /// The Seq-ids `-parse_deflines` read, `None` without the option.
     pub fn believed(&self) -> Option<&believed::BelievedIds> {
         self.source.as_ref()?.believed.as_deref()
+    }
+
+    /// `believed`, shared (for a reader of the records that does not hold them:
+    /// `query_batch::BatchCount::next_batch`).
+    pub fn believed_shared(&self) -> Option<std::sync::Arc<believed::BelievedIds>> {
+        self.source.as_ref()?.believed.clone()
     }
 
     /// The record of the Bioseq whose Seq-ids are `ids` (at least one), shown as `-parse_deflines`
@@ -300,17 +272,6 @@ impl FastaRecord {
     /// interval, and no messages (the reader wrote them when it read the whole record).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-466
-    /// ```c++
-    ///     // set sequence range
-    ///     retval->SetInt().SetFrom(from);
-    ///     retval->SetInt().SetTo((to > 0 && to < seqlen) ? to : (seqlen-1));
-    ///
-    ///     // set ID
-    ///     retval->SetInt().SetId().Assign(*FindBestChoice(itr->GetId(), CSeq_id::BestRank));
-    ///
-    ///     return retval;
-    /// }
-    /// ```
     /// NCBI keeps the whole record and searches the interval of its location; LOSAT keeps
     /// the interval's letters and where it lies (`seq_range::Placements`).
     pub fn cut(&self, from: usize, to_exclusive: usize) -> Self {
@@ -387,11 +348,6 @@ impl<'a> RecordNames<'a> {
     /// (`local_id`, `BelievedIds::bare_id`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
-    /// ```c++
-    ///     string all_id_str = GetSeqIdString(cbs, believe_query);
-    ///     all_id_str += " ";
-    ///     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
-    /// ```
     pub fn query_line(self) -> Cow<'a, [u8]> {
         if self.believed.is_none() {
             return Cow::Borrowed(self.title);
@@ -490,15 +446,6 @@ pub trait InputRecord: Sized {
     /// without one).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:366-372
-    /// ```c++
-    ///     string title(kEmptyStr);
-    ///     if (bh.CanGetDescr())
-    ///     {
-    ///     	const CSeq_descr::Tdata& descr = bh.GetDescr();
-    ///     	ITERATE(CSeq_descr::Tdata, desc, descr) {
-    ///         	if ((*desc)->Which() == CSeqdesc::e_Title && title == kEmptyStr) {
-    ///             		title = (*desc)->GetTitle();
-    /// ```
     fn title_bytes(&self) -> Cow<'_, [u8]>;
 
     /// The id of the record in NCBI's warnings when `-parse_deflines` read it.
@@ -565,23 +512,11 @@ impl std::error::Error for ReadError {}
 
 impl ReadError {
     /// The error as the programs end with it: a reader exception is NCBI's `BLAST query
-    /// error: <message>` with exit 1, a rejection is LOSAT's, and a failed write of the
-    /// messages is the write error.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
-    /// ```c++
-    ///     catch (const CObjReaderParseException& e) {                             \
-    ///         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-    ///         exit_code = BLAST_INPUT_ERROR;                                      \
-    ///     }                                                                       \
-    /// ```
+    /// error: <message>` with exit 1 (`blastinput::app::query_error`, the one producer of that
+    /// line), a rejection is LOSAT's, and a failed write of the messages is the write error.
     pub fn into_app_error(self) -> anyhow::Error {
         match self {
-            ReadError::Parse { message, .. } => crate::cli::NativeError {
-                exit: 1,
-                message: format!("BLAST query error: {message}\n"),
-            }
-            .into(),
+            ReadError::Parse { message, .. } => crate::blastinput::app::query_error(&message),
             ReadError::Unsupported(error) => error,
             ReadError::Write(error) => error.into(),
         }
@@ -592,18 +527,6 @@ impl ReadError {
     /// error (`no_defline_error`), every other error is `into_app_error`'s.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:205-214
-    /// ```c++
-    ///         catch (const CObjReaderParseException& e) {
-    ///             auto err = e.GetErrCode();
-    ///             if (err == CObjReaderParseException::eEOF) {
-    ///                 break;
-    ///             } else if (err == CObjReaderParseException::eNoDefline) {
-    ///                 CNcbiStrstream ss;
-    ///                 ss << "Query input doesn't start with "
-    ///                     "a defline or comment, line " << e.GetPos() << ends;
-    ///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
-    ///             }
-    /// ```
     pub fn into_all_seqs_error(self) -> anyhow::Error {
         match self {
             ReadError::Parse {
@@ -622,22 +545,7 @@ impl ReadError {
 /// (`report::diag_log::sanitize`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214
-/// ```c++
-///             } else if (err == CObjReaderParseException::eNoDefline) {
-///                 CNcbiStrstream ss;
-///                 ss << "Query input doesn't start with "
-///                     "a defline or comment, line " << e.GetPos() << ends;
-///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
-///             }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176
-/// ```c++
-///     catch (const blast::CInputException& e) {                               \
-///         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
-///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
-///         exit_code = BLAST_INPUT_ERROR;                                      \
-///     }                                                                       \
-/// ```
 pub fn no_defline_error(line: u64) -> anyhow::Error {
     crate::blastinput::app::options_error(&format!(
         "Query input doesn't start with a defline or comment, line {line}\0"
@@ -654,18 +562,6 @@ impl FastaInputSource<crate::blastinput::input_files::InputFile> {
     /// the argument's stream, which reads as `stream::InputBackend::of` says).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:291-300
-    /// ```c++
-    /// CBlastFastaInputSource::CBlastFastaInputSource(CNcbiIstream& infile,
-    ///                                        const CBlastInputSourceConfig& iconfig)
-    ///     : m_Config(iconfig),
-    ///       m_LineReader(iconfig.GetConvertGapsToNs() ?
-    ///                    new CStreamLineReaderConverter(infile) :
-    ///                    new CStreamLineReader(infile)),
-    ///       m_ReadProteins(iconfig.IsProteinInput())
-    /// {
-    ///     x_InitInputReader();
-    /// }
-    /// ```
     /// `GetConvertGapsToNs` is set only by the mapper (magicblast).
     pub fn from_file(
         file: impl Into<crate::blastinput::input_files::InputFile>,
@@ -702,48 +598,7 @@ impl<R: Read + Seek> FastaInputSource<R> {
     /// Call it before the first record is read.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:845-875
-    /// ```c++
-    /// bool
-    /// IsIStreamEmpty(CNcbiIstream & in)
-    /// {
-    /// #ifdef NCBI_OS_MSWIN
-    /// 	char c;
-    /// 	in.setf(ios::skipws);
-    /// 	if (!(in >> c))
-    /// 		return true;
-    /// 	in.unget();
-    /// 	return false;
-    /// #else
-    /// 	char c;
-    /// 	CNcbiStreampos orig_p = in.tellg();
-    /// 	// Piped input
-    /// 	if(orig_p < 0)
-    /// 		return false;
-    ///
-    /// 	IOS_BASE::iostate orig_state = in.rdstate();
-    /// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-    ///
-    /// 	if(! (in >> c))
-    /// 		return true;
-    ///
-    /// 	in.seekg(orig_p);
-    /// 	in.flags(orig_flags);
-    /// 	in.clear();
-    /// 	in.setstate(orig_state);
-    ///
-    /// 	return false;
-    /// #endif
-    /// }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:209-214
-    /// ```c++
-    ///         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())) {
-    ///            	ERR_POST(Warning << "Query is Empty!");
-    ///            	return BLAST_EXIT_SUCCESS;
-    ///         }
-    ///         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
-    ///         CBlastInput input(&fasta);
-    /// ```
     /// LOSAT takes the Linux branch on every platform: the oracle is NCBI BLAST+ on Linux
     /// (`AUTHORITY.md` §C1).
     pub fn stream_is_empty(&mut self) -> bool {
@@ -770,16 +625,6 @@ impl<R: Read> FastaInputSource<R> {
     /// file's reader reads after `lines` lines, with the local ID `next_id`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:48-56
-    /// ```c++
-    /// CBlastInputSourceConfig::CBlastInputSourceConfig
-    ///     (const SDataLoaderConfig& dlconfig,
-    ///      objects::ENa_strand strand         /* = objects::eNa_strand_other */,
-    ///      bool lowercase                     /* = false */,
-    ///      bool believe_defline               /* = false */,
-    ///      TSeqRange range                    /* = TSeqRange() */,
-    ///      bool retrieve_seq_data             /* = true */,
-    ///      int local_id_counter               /* = 1 */,
-    /// ```
     /// The BLAST programs leave `local_id_counter` at 1 (`FastaReader::new`); a part's reader starts
     /// it where the file's one reader is (`FastaReader::x_start_at`).
     #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
@@ -802,13 +647,6 @@ impl<R: Read> FastaInputSource<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:370-374
-    /// ```c++
-    /// bool
-    /// CBlastFastaInputSource::End()
-    /// {
-    ///     return m_LineReader->AtEOF();
-    /// }
-    /// ```
     pub fn end(&mut self) -> bool {
         self.reader.lines.at_eof()
     }
@@ -827,19 +665,6 @@ impl<R: Read> FastaInputSource<R> {
     /// go to `warn` as NCBI writes them, and are also kept in the record.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:376-387
-    /// ```c++
-    /// CRef<CSeq_loc>
-    /// CBlastFastaInputSource::x_FastaToSeqLoc(CRef<objects::CSeq_loc>& lcase_mask,
-    ///                                         CScope& scope)
-    /// {
-    ///     static const TSeqRange kEmptyRange(TSeqRange::GetEmpty());
-    ///     CRef<CBlastScopeSource> query_scope_source;
-    ///
-    ///     if (m_Config.GetLowercaseMask())
-    ///         lcase_mask = m_InputReader->SaveMask();
-    ///
-    ///     CRef<CSeq_entry> seq_entry(m_InputReader->ReadOneSeq());
-    /// ```
     /// The molecule checks after it (`Nucleotide FASTA provided for protein sequence` and
     /// the reverse) cannot fail: `AssignMolType` sets the molecule of the input.
     ///
@@ -877,31 +702,6 @@ impl<R: Read> FastaInputSource<R> {
 /// `warn` as they are written; a reader error stops the reading.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:198-219
-/// ```c++
-/// CRef<CBlastQueryVector>
-/// CBlastInput::GetAllSeqs(CScope& scope)
-/// {
-///     CRef<CBlastQueryVector> retval(new CBlastQueryVector);
-///
-///     while (!End()) {
-///         try { retval->AddQuery(m_Source->GetNextSequence(scope)); }
-///         catch (const CObjReaderParseException& e) {
-///             auto err = e.GetErrCode();
-///             if (err == CObjReaderParseException::eEOF) {
-///                 break;
-///             } else if (err == CObjReaderParseException::eNoDefline) {
-///                 CNcbiStrstream ss;
-///                 ss << "Query input doesn't start with "
-///                     "a defline or comment, line " << e.GetPos() << ends;
-///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
-///             }
-///             throw;
-///         }
-///     }
-///
-///     return retval;
-/// }
-/// ```
 /// `eNoDefline` needs a reader without `fDLOptional`; the error is returned as the reader gave
 /// it, and a caller that reads subjects ends with `ReadError::into_all_seqs_error`.
 pub fn read_all<R: Read>(
@@ -929,68 +729,8 @@ pub fn read_all<R: Read>(
 /// records are returned whole (`seq_range::cut_subjects` cuts them to `range`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:221-247
-/// ```c++
-/// CRef<CScope>
-/// ReadSequencesToBlast(CNcbiIstream& in,
-///                      bool read_proteins,
-///                      const TSeqRange& range,
-///                      bool parse_deflines,
-///                      bool use_lcase_masking,
-///                      CRef<CBlastQueryVector>& sequences,
-///                      bool gaps_to_Ns /* = false */)
-/// {
-///     SDataLoaderConfig dlconfig(read_proteins);
-///     dlconfig.OptimizeForWholeLargeSequenceRetrieval();
-///
-///     CBlastInputSourceConfig iconfig(dlconfig);
-///     iconfig.SetRange(range);
-///     iconfig.SetBelieveDeflines(parse_deflines);
-///     iconfig.SetLowercaseMask(use_lcase_masking);
-///     iconfig.SetSubjectLocalIdMode();
-///     if (!read_proteins && gaps_to_Ns) {
-///         iconfig.SetConvertGapsToNs(true);
-///     }
-///
-///     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
-///     CRef<CBlastInput> input(new CBlastInput(fasta));
-///     CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-///     sequences = input->GetAllSeqs(*scope);
-///     return scope;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:198-219
-/// ```c++
-/// CRef<CBlastQueryVector>
-/// CBlastInput::GetAllSeqs(CScope& scope)
-/// {
-///     CRef<CBlastQueryVector> retval(new CBlastQueryVector);
-///
-///     while (!End()) {
-///         try { retval->AddQuery(m_Source->GetNextSequence(scope)); }
-///         catch (const CObjReaderParseException& e) {
-///             auto err = e.GetErrCode();
-///             if (err == CObjReaderParseException::eEOF) {
-///                 break;
-///             } else if (err == CObjReaderParseException::eNoDefline) {
-///                 CNcbiStrstream ss;
-///                 ss << "Query input doesn't start with "
-///                     "a defline or comment, line " << e.GetPos() << ends;
-///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
-///             }
-///             throw;
-///         }
-///     }
-///
-///     return retval;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:450-453
-/// ```c++
-///     if (from > seqlen) {
-///         NCBI_THROW(CInputException, eInvalidRange,
-///                    "Invalid from coordinate (greater than sequence length)");
-///     }
-/// ```
 /// `eNoDefline` needs a reader without `fDLOptional` (`-parse_deflines`): it is `GetAllSeqs`'s
 /// `CInputException` (`no_defline_error`). The range's `CInputException` is also
 /// `BLAST query/options error: ...` (`seq_range::record_interval`, `app::options_error`); any other
@@ -1067,30 +807,6 @@ pub enum QueryEnd {
 /// records (written later, batch by batch, by the caller).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-171
-/// ```c++
-/// CRef<CBlastQueryVector>
-/// CBlastInput::GetNextSeqBatch(CScope& scope)
-/// {
-///     CRef<CBlastQueryVector> retval(new CBlastQueryVector);
-///     TSeqPos size_read = 0;
-///
-///     while (size_read < GetBatchSize()) {
-///
-///         if (End())
-///             break;
-///
-///         CRef<CBlastSearchQuery> q;
-///         try { q.Reset(m_Source->GetNextSequence(scope)); }
-///         catch (const CObjReaderParseException& e) {
-///             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-///                 break;
-///             }
-///             throw;
-///         }
-///         catch (const exception&) {
-///             continue; //SB-2307. ignore well formed, not found accession
-///         }
-/// ```
 /// The `catch (const exception&)` skips a query whose Seq-id was not found or whose
 /// range does not fit (`seq_range.rs`); LOSAT rejects Seq-id lines.
 pub fn read_queries<R: Read>(source: &mut FastaInputSource<R>) -> QueryRecords {

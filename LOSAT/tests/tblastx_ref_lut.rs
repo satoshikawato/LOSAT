@@ -4,12 +4,6 @@
 //! `x_build_direct` in `x_lut_direct.rs`) instead of being copied out of one chain per cell.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360
-//! ```c
-//!             for (j=0; j <lookup->thin_backbone[i][1]; j++)
-//!                 dest[j] = lookup->thin_backbone[i][j + 2];
-//!             /* done with this chain- free it */
-//!             sfree(lookup->thin_backbone[i]);
-//! ```
 //! The table must be the same, so the report must be: the tests run the reference frame loop
 //! (`LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, whose gate sends every batch to the frame loop at any
 //! threshold and thread count) and compare the report with the switch (the default), whose in-place

@@ -1,0 +1,1 @@
+- `tblastn -max_intron_length N` with sum statistics (the default, and `-sum_stats true` with `-in_pssm`), which LOSAT refused for every N other than 0: the largest subject gap between linked alignments follows N as in NCBI BLAST+ 2.17.0, and 1 to 4 turn the linking off (line RG, X3).

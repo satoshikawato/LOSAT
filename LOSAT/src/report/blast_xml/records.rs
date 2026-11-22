@@ -54,7 +54,6 @@ impl XmlRun<'_> {
     pub(crate) fn check_sums(&self, outfmt: i32) -> anyhow::Result<()> {
         crate::algorithm::common::database::check_sums_of(
             self.db_num,
-            self.db_len,
             self.db_len_overflow,
             outfmt,
             &self.program.to_ascii_uppercase(),
@@ -98,10 +97,11 @@ pub struct XmlQuery<'a> {
     pub stats: XmlStats,
     /// `Iteration_message` (`names::xml_message`); none when empty.
     pub message: Option<&'a [u8]>,
-    /// Whether NCBI searched the query's batch (it has a valid context in it). The XML2
-    /// `Search` of a query that it did not search has no `hits` member and adds
-    /// ` \nNo hits found` to its message (blastxml2_format.cpp:614-622); outfmt 5 does not
-    /// read it.
+    /// Whether NCBI's result of the query has an alignment set: its batch was searched (it has a
+    /// valid context in it), or the merge of several RPS volumes made one for every query
+    /// (rpsblast_local.cpp:139-185). The XML2 `Search` of a query without one has no `hits`
+    /// member and adds ` \nNo hits found` to its message (blastxml2_format.cpp:614-622);
+    /// outfmt 5 does not read it.
     pub searched: bool,
     /// The query's masked regions in NCBI's order and frames (`TMaskedQueryRegions`):
     /// outfmt 5 masks an HSP's row with the regions of the HSP's own frame, XML2 lists every
@@ -153,13 +153,6 @@ impl<'a> XmlHit<'a> {
 /// been asked (`s_SeqAlignToXMLHit`, blastxml2_format.cpp:380-386; DECISIONS 28).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-386
-/// ```c++
-///             if (data->HasTaxDB()) {
-///                 SSeqDBTaxInfo taxinfo;
-///                 CSeqDB::GetTaxInfo(taxid, taxinfo);
-///                 hit_descr->SetSciname(taxinfo.scientific_name);
-///             }
-/// ```
 /// (`GetTaxInfo` throws when the taxid is not found; the `catch` of the hit replaces its
 /// description by the sequence id alone.)
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

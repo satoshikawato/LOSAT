@@ -1,0 +1,186 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">YP_009220493.1 thymidylate synthetase [White
+ spot syndrome virus]"
+                  }
+                }
+              },
+              title "YP_009220493.1 thymidylate synthetase [White spot
+ syndrome virus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 289,
+              seq-data ncbieaa "MEGEHQYLNLVREILERGVKKDDRTGTGTLSIFGPQMRFSLRDDTI
+PVLTTKKIFWRGVVEELSWFIRGNTDAKELAKKKIHIWNANGSREFLDSRGLYDRAEGDLGPVYGFQWRHFGAEYDTC
+SSDYTGKGIDQLANILKTLRENPDDRRMIMTAWNPMDLHLMALPPCHMTAQFYVANGELSCQLYQRSGDVGLGVPFNI
+ASYSLLTHLMASMVGLKPGEFILTLGDAHIYNTHIEVLKKQLCRVPRPFPKLRILMAPEKIEDFTIDMFYLEGYQPHS
+GNLQMKMAV"
+            }
+          }
+        }
+      },
+      subject database "rps_mini3v",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 0
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "DbLength",
+          value big-integer 560
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        },
+        {
+          name "GapOpeningCost",
+          value integer 11
+        },
+        {
+          name "GapExtensionCost",
+          value integer 1
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 121730
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 32
+          },
+          {
+            id str "blast_score",
+            value int 32
+          },
+          {
+            id str "e_value",
+            value real { 102413139626343, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 166375909337931, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 10
+          },
+          {
+            id str "num_positives",
+            value int 20
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 167629757785467, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 101
+            }
+          },
+          starts {
+            25,
+            123
+          },
+          lens {
+            47
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 322386638992538, 10, -15 },
+        k { 139682321459061, 10, -15 },
+        h { 433359157699465, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 50373036, 10, -9 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 121730",
+      "Effective search space used: 121730",
+      "Length adjustment: 30"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST Database error: Error: File
+ ({db_dir}/rps_mini3v.01.psq) not found."
+    }
+  }
+}

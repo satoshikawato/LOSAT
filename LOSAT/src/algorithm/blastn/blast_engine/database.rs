@@ -27,7 +27,7 @@
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -44,6 +44,7 @@ pub(super) use crate::algorithm::common::database::{HeaderReadError, Preliminary
 use crate::blastinput::db_mask::{DbMaskOption, ResolvedMask};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::ncbi_exception::NcbiException;
 use crate::report::db_subject::{HitLoads, ParsedSubject};
 use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::{PrintedIds, SubjectFetch};
@@ -129,33 +130,14 @@ impl XWaitingBytes for u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:75-78
-// ```c
-// const char BLASTNA_TO_IUPACNA[BLASTNA_SIZE] = {
-//     'A', 'C', 'G', 'T', 'R', 'Y', 'M', 'K',
-//     'W', 'S', 'B', 'D', 'H', 'V', 'N', '-'
-// };
-// ```
 /// The IUPAC letter of a BLASTNA code.
 #[cfg(test)]
 const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:375,388-391
-// ```c++
-//         len = seqdb.GetSequence(oid, &buf);
-//     ...
-//     /* For preliminary stage, even though sequence buffer points to a memory
-//        mapped location, we still need to call ReleaseSequence. This can only be
-//        guaranteed by making the engine believe tat sequence is allocated.
-//     */
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1376-1378
-// ```c
-//     if ((status =
-//        s_BlastSetUpAuxStructures(seq_src, lookup_wrap, word_params,
-//           ext_options, hit_options, query, query_info, &aux_struct)) != 0)
-// ```
 // NCBI's preliminary stage reads each sequence in place in the mapped volume (`GetFileDataPtr`,
-// seqdbvol.cpp:1817, quoted above `block_subject`), and each search thread allocates its search
+// seqdbvol.cpp:1817, cited above `block_subject`), and each search thread allocates its search
 // structures once. LOSAT reads a block with one positioned read (`seqdb::file`, no mapping, so
 // that native builds and WebAssembly share the reader): each worker keeps one buffer for its
 // blocks, read again for each block. It is allocated once per worker and grows only for a larger
@@ -284,17 +266,6 @@ pub(super) struct SamLetterCache(RefCell<HashMap<u32, NucleotideAmbiguity>>);
 impl BlastnDatabase {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2645-2668
     // (`Blast_HSPListReevaluateUngapped`)
-    // ```c
-    //       	seq_arg.oid = subject_blk->oid;
-    //       	seq_arg.encoding =
-    //        	  (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
-    //         seq_arg.check_oid_exclusion = TRUE;
-    //       	seq_arg.seq = subject_blk;
-    //       	/* Return the packed sequence to the database */
-    //       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-    //       	/* Get the unpacked sequence */
-    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
-    // ```
     /// Calls `use_letters` with the letters of database sequence `ordinal` in BLASTNA, without
     /// the sentinel bytes: the subject that an ungapped (`-ungapped`) search re-evaluates its
     /// HSPs on in the preliminary stage (NCBI gets the sequence again, unpacked, for a sequence
@@ -325,9 +296,6 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:185
-    // ```c++
-    //             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));
-    // ```
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
     /// parsed Seq-ids (`gnl|BL_ORD_ID|n`).
     pub(super) fn oid_map(&self) -> crate::seqdb::OidMap<'_> {
@@ -345,16 +313,6 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
-    // ```c++
-    //             	CRef<CBlast_def_line_set> bdlRef =
-    //             			CSeqDB::ExtractBlastDefline(subject_bh);
-    //             	if(setSubjectIds) {
-    //             		x_SetSubjectIds(subject_bh, bdlRef);
-    //             	}
-    //             	if(setSubjectTaxInfoAll) {
-    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
-    //             	}
-    // ```
     /// The taxonomy of the tabular fields (`staxid`, `staxids`;
     /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported sequences `ordinals`, by
     /// rank: from the definition lines of a sequence with parsed Seq-ids (`parsed[rank]`), else
@@ -418,9 +376,6 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
-    // ```c++
-    //             vect.GetSeqData(tgt_rg.GetFrom(), tgt_rg.GetToOpen(), seq_data);
-    // ```
     /// The IUPAC letters `[from, to)` of database sequence `ordinal` (outfmt 17 with `SQ`):
     /// only the bytes of the range are read, and the sequence's length and ambiguity runs are
     /// read once per call and kept in `cache` (NCBI's `CSeqVector` also keeps them).
@@ -452,27 +407,10 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
-    // ```c++
-    //         /*** Initialize the database/subject ***/
-    //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-    //         CRef<CLocalDbAdapter> db_adapter;
-    //         CRef<CScope> scope;
-    //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-    //                          db_adapter, scope);
-    //         _ASSERT(db_adapter && scope);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:182-187
-    // ```c++
-    // static Int8
-    // s_SeqDbGetTotLen(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetTotalLength();
-    // }
-    // ```
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
-    /// with the command line's errors. The total length is NCBI's `Int8`; one that the
-    /// engine cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
+    /// with the command line's errors. The total length is NCBI's `Int8`, which the engine holds
+    /// as such (`SubjectMetadata::db_len_total`) on every target.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         Self::open_restricted(name, settings, None, None, &mut std::io::sink())
     }
@@ -491,19 +429,11 @@ impl BlastnDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
             shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
-        // BLASTN has no Gumbel block: NCBI's average subject length divides by the statistics'
-        // number of sequences (`shared::check_statistics_count`).
-        shared::check_statistics_count(&db, PROGRAM)?;
-        let (total, num_seqs) = db.statistics_numbers();
+        // BLASTN has no Gumbel block: the setup of a batch with a valid context divides by the
+        // statistics' number of sequences, a count of 0 LOSAT's refusal there
+        // (`context_statistics`, `shared::check_setup_count`).
         // The setup's total is not negative (`DbStatistics::setup_total`).
-        let db_len_total = usize::try_from(total)
-            .ok()
-            .filter(|&letters| i64::try_from(letters).is_ok())
-            .with_context(|| {
-                format!(
-                    "a database of {total} letters is not supported by LOSAT's BLASTN on this platform"
-                )
-            })?;
+        let (db_len_total, num_seqs) = db.statistics_numbers();
         let metadata = SubjectMetadata {
             db_len_total,
             db_num_seqs: num_seqs,
@@ -517,70 +447,53 @@ impl BlastnDatabase {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:665-675,792-797
-    // ```c++
-    // void CIndexedDb_New::AddIndexInfo(
-    //         const std::string & vol_name, bool & partial )
-    // {
-    //     ...
-    //     try {
-    //         shdr.Reset( GetIndexSuperHeader( vol_name + ".shd" ) );
-    // ...
-    //         if( !has_index ) {
-    //             NCBI_THROW( CDbIndex_Exception, eBadOption,
-    //                         "no database volume has an index" );
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:950-968,998-1003
-    // ```c++
-    //         while( start != string::npos ) {
-    //             end = indexnames.find_first_of( " ", start );
-    //             dbnames.push_back( indexnames.substr( start, end - start ) );
-    //             start = indexnames.find_first_not_of( " ", end );
-    //         }
-    // ...
-    //             end = indexname.find_first_of( ",", start );
-    //             string index_base = indexname.substr( start, end );
-    // ...
-    //                 for( long i = start_vol; (unsigned long)i <= stop_vol; ++i ) {
-    //                     ostringstream os;
-    //                     os << index_base << "." << setw( 2 ) << setfill( '0' )
-    //                        << i << ".idx";
-    //                     string name = SeqDB_ResolveDbPath( os.str() );
-    // ```
-    /// A file of a MegaBLAST index of this database that NCBI's index loader would find for the
-    /// `-db` value `index_name` (`DbIndexInit`): a new-style superheader `<volume>.shd` of one of
-    /// its volumes, or an old-style volume `<name>.NN.idx` (00 to 99, NCBI's range without the
-    /// commas that name others) of one of the space-separated names, on the search path. `None`:
-    /// NCBI finds no index and searches without one.
-    pub(super) fn megablast_index_file(&self, index_name: &str) -> Option<PathBuf> {
-        for volume in self.db.volumes() {
-            let mut superheader = volume.base().as_os_str().to_os_string();
-            superheader.push(".shd");
-            let superheader = PathBuf::from(superheader);
-            if superheader.is_file() {
-                return Some(superheader);
-            }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:643-651
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:664-668
+    /// The volumes that NCBI's loader of a new-style MegaBLAST index finds for the `-db` value
+    /// `indexname` (`EnumerateDbVolumes`: `FindVolumePaths(vols, true)` of the database opened
+    /// again by that name, as given, on the search path of this one), each with its number of
+    /// sequences (`CSeqDB(volume).GetNumOIDs()`, the volume's in this database). Where that
+    /// name does not open (a `-db` value with white space other than spaces at its ends, which
+    /// the search trims and the loader keeps), the database reader's exception, or `None` where
+    /// LOSAT does not know its place or the name opens other volumes than this database's.
+    pub(super) fn index_volumes(
+        &self,
+        indexname: &str,
+    ) -> Result<Vec<(String, u32)>, Option<NcbiException>> {
+        let path = self.db.search_path().ok_or(None)?;
+        let (paths, _) =
+            crate::seqdb::SeqDb::volume_and_alias_paths(indexname, SeqType::Nucleotide, path)
+                .map_err(|error| {
+                    if let Some(exception) = error.ncbi_exception() {
+                        return Some(exception.clone());
+                    }
+                    let text = error.ncbi_message()?;
+                    let site = crate::seqdb::throw_site(&text)?;
+                    Some(NcbiException::new(site, text))
+                })?;
+        paths
+            .into_iter()
+            .map(|vol_name| {
+                let volume = self
+                    .db
+                    .volumes()
+                    .iter()
+                    .find(|volume| volume.base() == Path::new(&vol_name))
+                    .ok_or(None)?;
+                Ok((vol_name, volume.num_oids()))
+            })
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:453-462
+    /// `SeqDB_ResolveDbPath(file)` on this database's search path: the path of the first
+    /// directory that holds the regular file `file` (an absolute `file` as it is), `None` for
+    /// NCBI's empty string.
+    pub(super) fn resolve_db_path(&self, file: &str) -> Option<String> {
+        match self.db.search_path() {
+            Some(search) => search.resolve_file(file),
+            None => Some(file.to_string()).filter(|path| Path::new(path).is_file()),
         }
-        let resolve = |file: &str| match self.db.search_path() {
-            Some(search) => search.resolve_file(file).map(PathBuf::from),
-            None => Some(PathBuf::from(file)).filter(|path| path.is_file()),
-        };
-        let mut start = Some(0);
-        while let Some(at) = start {
-            let end = index_name[at..].find(' ').map(|offset| at + offset);
-            let base = &index_name[at..end.unwrap_or(index_name.len())];
-            for volume in 0..=99 {
-                if let Some(file) = resolve(&format!("{base}.{volume:02}.idx")) {
-                    return Some(file);
-                }
-            }
-            start = end.and_then(|end| {
-                index_name[end..]
-                    .find(|c| c != ' ')
-                    .map(|offset| end + offset)
-            });
-        }
-        None
     }
 
     /// Whether NCBI's prefetch of a batch can fail at a subject (a database with parsed
@@ -665,61 +578,43 @@ impl BlastnDatabase {
     /// [`Self::prefetch_messages`] by subject (`shared::subject_read_texts`; `loads`: as there): the text of the
     /// first read of each subject that writes one, with its ordinal id, where a query's report
     /// reads its subjects one by one: in the order of the hit lists, or, for the pairwise report
-    /// (`pairwise`, its `-sorthits` and `-sorthsps`), in the order of its sorted groups
-    /// (`QueryGroup::read_order` of the rows' hits, `pairwise::Rows::list`: `into_hit` of each
-    /// HSP and its `num_ident`; the rows' later shift to the records of a ranged query moves
-    /// every HSP of the query alike, which no sort reads, and the rows name the subjects by rank,
-    /// in the order of the ordinal ids).
+    /// (`pairwise`: how it reads them), those that it shows in the order that it reads them
+    /// (`pairwise_read_order`, `PairwiseReads::subjects`).
     pub(super) fn subject_read_texts(
         &self,
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
         rows_open: bool,
-        pairwise: Option<crate::report::hit_sort::ReportSort>,
+        pairwise: Option<crate::report::pairwise::PairwiseReading>,
         loads: &HitLoads,
     ) -> Result<crate::report::query_warnings::QueryReads> {
-        let lists = hit_lists
-            .iter()
-            .flatten()
-            .flat_map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                &hit_list.hsplist_array[..count]
-            })
-            .filter(|hsp_list| !hsp_list.hsps.is_empty())
-            .filter(|hsp_list| loads.loaded(hsp_list.oid as usize));
         let parsed = |oid: u32| match titles.get(&oid) {
             Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
             _ => None,
         };
         let ordinals: Vec<u32> = match pairwise {
-            Some(sort) => crate::report::x_pairwise_par::QueryGroup::read_order(
-                lists.flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| (hsp_list.oid, hsp))),
-                |hsp| {
-                    crate::report::hit_sort::HspScores::of_hit(
-                        &crate::algorithm::blastn::hsp::BlastnHsp::clone(hsp).into_hit(),
-                        hsp.num_ident,
-                    )
-                },
-                |previous, oid| match (parsed(previous), parsed(oid)) {
-                    (Some(earlier), Some(later)) => {
-                        crate::report::db_subject::joins_as_copy(earlier, later)
-                    }
-                    _ => false,
-                },
-                sort,
-                false,
-            ),
-            None => lists.map(|hsp_list| hsp_list.oid).collect(),
+            Some(reading) => pairwise_read_order(hit_lists, reading, |oid| {
+                titled_parsed(titles, oid as usize)
+            })
+            .subjects()
+            .into_iter()
+            .map(|oid| oid as u32)
+            .collect(),
+            None => hit_lists
+                .iter()
+                .flat_map(shown_lists)
+                .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                .map(|hsp_list| hsp_list.oid)
+                .collect(),
         };
-        let subjects = ordinals.into_iter().map(|oid| (oid, oid, parsed(oid)));
+        let subjects = ordinals
+            .into_iter()
+            .filter(|&oid| loads.loaded(oid as usize))
+            .map(|oid| (oid, oid, parsed(oid)));
         shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:307-308
-    // ```c++
-    //     case C_Segs::e_Dendiag:
-    //         return GetSegs().GetDendiag().front()->GetSeqStrand(row);
-    // ```
     // A gapped search makes a Seq-align of each HSP; an ungapped one makes one Seq-align of a
     // subject's HSPs, a Dense-diag each (`shared::subject_seq_aligns`), whose strand is its
     // first one's: the subject's first HSP (probe of line DBID pfwarn, `R/pfwarn` W4). BLASTN's
@@ -766,13 +661,13 @@ impl BlastnDatabase {
         titles: &DatabaseTitles,
         before: &[Option<BlastnHitList>],
         spans: &[std::ops::Range<usize>],
-        after: Option<crate::report::db_subject::RunThrow>,
+        after: crate::report::db_subject::FormatThrow,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
         let prefetch = batches_prefetch(before, 0, spans, gapped);
-        let loads = hit_loads(before, &prefetch, after, |ordinal| {
+        let loads = hit_loads(before, &prefetch, after, None, |ordinal| {
             titled_parsed(titles, ordinal)
         });
         shared::held_batch_prefetch_stop(
@@ -888,6 +783,12 @@ impl BlastnDatabase {
         self.db.first_oid_read_fails()
     }
 
+    /// The error of the preliminary search's first read of the sequences after a batch's set-up
+    /// checks, where a sequence file cannot be opened (`shared::sequence_file_read_error`).
+    pub(super) fn sequence_file_read_error(&self) -> Option<anyhow::Error> {
+        shared::sequence_file_read_error(&self.db, PROGRAM)
+    }
+
     /// `BlastSeqSrcGetAvgSeqLen` (`SeqDb::average_length`).
     pub(super) fn average_length(&self) -> i32 {
         self.db.average_length()
@@ -947,11 +848,15 @@ impl BlastnDatabase {
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`),
     /// whose scan reads words of `scanned_word` letters.
     pub(super) fn check_mask_limits(&self, mask: &ResolvedMask, scanned_word: usize) -> Result<()> {
-        mask.check_losat_limits(&self.db, PROGRAM, scanned_word)
+        mask.check_losat_limits(
+            &self.db,
+            PROGRAM,
+            crate::blastinput::db_mask::HardScan::Nucleotide { scanned_word },
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:197-218 and
-    // c++/include/objtools/blast/seqdb_reader/seqdb.hpp:286-306 (quoted at
+    // c++/include/objtools/blast/seqdb_reader/seqdb.hpp:286-306 (cited at
     // `core::subject_split::complement_masks`): the complement of the masks in the order they
     // are stored, nothing sorted or merged (decision D3 of M4a-2).
     /// The ranges (`seq_ranges`) of database sequence `ordinal` of length `length`, read in the
@@ -976,16 +881,6 @@ impl BlastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
-    // ```c++
-    //     CSeqDB::TSequenceRanges ranges;
-    //     m_iSeqDb->GetMaskData(index, m_FilteringAlgoId, ranges);
-    //     ITERATE(CSeqDB::TSequenceRanges, itr, ranges) {
-    //         for (size_t it=0; it<target.size(); it++) {
-    //             if (target[it] != TSeqRange::GetEmpty() &&
-    //                 target[it].IntersectingWith(*itr)) {
-    //                 CRef<CSeq_interval> si
-    //                     (new CSeq_interval(*id, itr->first, itr->second-1));
-    // ```
     /// The stored masks of database sequence `ordinal` for the algorithm `algo_id`, in the order
     /// they are stored (`[start, end)`), which the reports of a masked search show in lowercase
     /// where they meet an HSP (`pairwise::Rows`); `masks` is the reports' block buffer.
@@ -1042,6 +937,7 @@ impl BlastnDatabase {
         self.db.read_mask_block(block, algo_id, masks);
         match masks.ranges(block.first + (ordinal - block.first_ordinal)) {
             Ok(BlockMasks::Ranges(stored)) => Ok(stored),
+            Ok(BlockMasks::NoMaskData) => Ok(&[]),
             Ok(BlockMasks::AlgorithmNotInVolume) => Err(anyhow::anyhow!(
                 "LOSAT internal error: the volume of sequence {ordinal} has no mask algorithm {algo_id}"
             )),
@@ -1051,44 +947,8 @@ impl BlastnDatabase {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538
-// ```c++
-// static void s_SeqDBMaskSequence(char                    * seq,
-//                                 CSeqDB::TSequenceRanges * masks,
-//                                 char                      mask_letter,
-//                                 const SSeqDBSlice       & range)
-// {
-//     if (!masks || masks->empty()) return;
-//
-//     // TODO This could be optimized with binary search
-//     unsigned int i(0);
-//     unsigned int begin(range.begin);
-//     unsigned int end(range.end);
-//
-//     while (i < masks->size() && (*masks)[i].second <= begin) ++i;
-//
-//     while (i < masks->size() && (*masks)[i].first < end) {
-//         for (size_t j = max((*masks)[i].first, begin);
-//                  j < min((*masks)[i].second, end); ++j) {
-//             seq[j] = mask_letter;
-//         }
-//         ++i;
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1665-1673
-// ```c++
-//         if (!use_range_set) {
-//             s_SeqDBMapNA2ToNA8(tmp, seq, range);
-//             s_SeqDBRebuildDNA_NA8(seq, ambchars, range);
-//             s_SeqDBMaskSequence(seq, masks, (char)14, range);
-//             if (sentinel) s_SeqDBMapNcbiNA8ToBlastNA8(seq, range);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:590-606
-// ```c++
-// unsigned SeqDB_ncbina8_to_blastna8[] = {
-//     ...
-//     10, /* B,  14 */
-// ```
 /// BLASTNA 'B' (NCBI4na 14 mapped to BLASTNA).
 const HARD_MASK_BLASTNA: u8 = 10;
 
@@ -1118,30 +978,7 @@ fn mask_hard_letters(blastna: &mut [u8], masks: &[(u32, u32)], ranges: &[(usize,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1401-1405
-// ```c
-//     memset((void*) &seq_arg, 0, sizeof(seq_arg));
-//
-//     /* Encoding is set so there are no sentinel bytes, and protein/nucleotide
-//        sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
-//     seq_arg.encoding = eBlastEncodingProtein;
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1838
-// ```c++
-//     } else if ('n' == seqtype) {
-//         // The last byte is partially full; the last two bits of the
-//         // last byte store the number of nucleotides in the last byte
-//         // (0 to 3).
-//     ...
-//         *buffer = m_Seq->GetFileDataPtr(start_offset);
-//     ...
-//         int whole_bytes = int(end_offset - start_offset - 1);
-//
-//         char last_char = (*buffer)[whole_bytes];
-//
-//         int remainder = last_char & 3;
-//         length = (whole_bytes * 4) + remainder;
-//     }
-// ```
 // The preliminary stage searches the stored 2-bit data as makeblastdb wrote it (its
 // ambiguous bases already replaced by makeblastdb's random bases), in the layout of the
 // subject set's packed letters (four bases per byte from the high bits down, the count of
@@ -1169,25 +1006,7 @@ fn block_subject<'a>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
-// ```c
-//     db_length = BlastSeqSrcGetTotLen(seq_src);
-//
-//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-//        Int4 stat_length;
-//        if (seq_arg.oid == BLAST_SEQSRC_ERROR)
-//            break;
-//        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0)
-//            continue;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1554
-// ```c
-//           /* Save the results. */
-//           status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-// ```
 /// The preliminary stage of a database search: every sequence, in the order of its
 /// ordinal id, through `search` (the per-subject kernel), and what it keeps of a sequence
 /// (`Some`) through `merge` in that order (NCBI's loop with one thread; `merge` puts the
@@ -1268,7 +1087,7 @@ where
 }
 
 // No NCBI counterpart (scheduling only): the rounds of LOSAT's parallel stage; the merges in
-// ordinal order are NCBI's one-thread order (blast_engine.c:1553-1554, quoted above
+// ordinal order are NCBI's one-thread order (blast_engine.c:1553-1554, cited above
 // `search_blocks`).
 /// The rounds of `search_blocks_of` with `parallel` (without LOSAT_X_BNDBSTREAM):
 /// `blocks_per_thread` blocks of at most `block_bytes` per thread
@@ -1424,50 +1243,9 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:196-203
-// ```c
-//    /* sort in order of decreasing subject OID. HSPLists will be
-//       read out from the end of hsplist_array later */
-//
-//    hsp_stream->num_hsplists = num_hsplists;
-//    if (num_hsplists > 1) {
-//       qsort(hsp_stream->sorted_hsplists, num_hsplists,
-//                     sizeof(BlastHSPList *), s_SortHSPListByOid);
-//    }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:819-828
-// ```c
-// EBlastEncoding Blast_TracebackGetEncoding(EBlastProgramType program_number)
-// {
-//     if (Blast_SubjectIsProtein(program_number)) {
-//         return eBlastEncodingProtein;
-//     } else if (Blast_SubjectIsTranslated(program_number)) {
-//         return eBlastEncodingNcbi4na;
-//     } else {
-//         return eBlastEncodingNucleotide;
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1573
-// ```c
-//                 seq_arg.oid = batch->hsplist_array[0]->oid;
-//                 seq_arg.encoding = encoding;
-//                 seq_arg.check_oid_exclusion = TRUE;
-//                 seq_arg.reset_ranges = FALSE;
-//                 seq_arg.ranges = ranges;
-//
-//                 if (BlastSeqSrcGetSequence(seqsrc, &seq_arg) < 0) {
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
-// ```c++
-//     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,
-//                                                   m_InternalData,
-//                                                   m_Opts,
-//                                                   seqinfo_src,
-//                                                   search_msgs));
-//     ...
-//     m_TbackSearch->SetNumberOfThreads(GetNumberOfThreads());
-//     CRef<CSearchResultSet> retval = m_TbackSearch->Run();
-// ```
 // The sequence comes in BLASTNA with its ambiguity codes, as the whole sequence (NCBI's
 // partial fetch of the HSP ranges with fences gives the same alignments; decision 87 of
 // the campaign: the whole sequence first).
@@ -1522,19 +1300,6 @@ where
     let x_ranged = super::x_bn_tb_range();
     let x_min = super::x_tb_range_min();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-353
-    // ```c++
-    //     if (datap->mask_type != eNoSubjMasking) {
-    //         ASSERT(datap->mask_algo_id != -1);
-    //         seqdb.GetMaskData(oid, datap->mask_algo_id, datap->seq_ranges);
-    //     }
-    //     ...
-    //           len = seqdb.GetAmbigSeqAlloc(oid,
-    //                                  const_cast<char **>(&buf),
-    //                                  has_sentinel_byte,
-    //                                  eMalloc,
-    //                                  ((datap->mask_type == eHardSubjMasking) ?
-    //                                 		 &(datap->seq_ranges) : NULL));
-    // ```
     // The masks are read before the letters, and outside the handler of the preliminary
     // search's read errors, as the letters are.
     let hard_masks = |ordinal: u32, algo_id: i32| -> Result<Vec<(u32, u32)>> {
@@ -1672,32 +1437,6 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seqsrc.c:467-519
-// ```c
-//     begin = MAX(0, begin - BLAST_SEQSRC_OVERHANG);
-//     end = MIN(end + BLAST_SEQSRC_OVERHANG, len);
-//     arg->ranges[arg->num_ranges++] = begin;
-//     arg->ranges[arg->num_ranges++] = end;
-// ...
-//     arg->num_ranges /= 2;
-//     if (arg->num_ranges <= 1) return;
-//     qsort(arg->ranges, arg->num_ranges, 2*sizeof(Int4), BeginCompareHSPs);
-//     i=0;
-//     for (j=1; j<arg->num_ranges; ++j) {
-//         Int4 begin = arg->ranges[j*2];
-//         Int4 end = arg->ranges[j*2+1];
-//         ASSERT(begin >= arg->ranges[2*i]);
-//         if (begin > arg->ranges[2*i+1] + BLAST_SEQSRC_MINGAP) {
-//             /* insert as a new range */
-//             ++i;
-//             arg->ranges[i*2] = begin;
-//             arg->ranges[i*2+1] = end;
-//         } else if (end > arg->ranges[2*i+1]) {
-//             /* merge into the previous range */
-//             arg->ranges[i*2+1] = end;
-//         }
-//     }
-//     arg->num_ranges = i+1;
-// ```
 // (blast_seqsrc.h:203-204: BLAST_SEQSRC_MINGAP 1024, BLAST_SEQSRC_OVERHANG 1024.) The ranges
 // come from every HSP that the batch keeps of the sequence (`BLAST_SetupPartialFetching`,
 // blast_traceback.c:1320-1370); the merged ranges do not depend on the order of equal starts.
@@ -1818,38 +1557,8 @@ pub(super) fn drop_unaligned(database: &BlastnDatabase, hit_lists: &mut [Option<
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
-// ```c++
-//     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);
-//
-//     vector<TSeqLocInfoVector> subj_masks;
-//     TSeqAlignVector aligns =
-//         LocalBlastResults2SeqAlign(hsp_results,
-//                                    *qdata,
-//                                    *m_SeqInfoSrc,
-//                                    m_OptsMemento->m_ProgramType,
-//                                    m_Options->GetGappedMode(),
-//                                    m_Options->GetOutOfFrameMode(),
-//                                    subj_masks,
-//                                    m_ResultType);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1582
-// ```c++
-//     for (int index = 0; index < hit_list->hsplist_count; index++) {
-//         BlastHSPList* hsp_list = hit_list->hsplist_array[index];
-//         if (!hsp_list)
-//             continue;
-//
-//         // Sort HSPs with e-values as first priority and scores as
-//         // tie-breakers, since that is the order we want to see them in
-//         // in Seq-aligns.
-//         Blast_HSPListSortByEvalue(hsp_list);
-//
-//         const Uint4 kOid = hsp_list->oid;
-//         TSeqPos subj_length = 0;
-//         CRef<CSeq_id> subject_id;
-//         GetSequenceLengthAndId(seqinfo_src, kOid, subject_id, &subj_length);
-// ```
-// NCBI first reads a header file (and opens it, seqdbvol.cpp:127-133) when the traceback's
+// NCBI first reads a header file (and opens it, c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:127-133) when the traceback's
 // results become Seq-aligns: after the batch's traceback, for the final hit lists only
 // (after their sort by e-value and their cut to the hit list size, before the HSPs of
 // score 0 are dropped), query by query and in the order of each hit list. A header file
@@ -1952,7 +1661,7 @@ pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -
         .sum()
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (cited at
 // `common::database::prefetch_may_be_off`: `s_PreFetchSeqs` counts the Seq-aligns of one batch's
 // results against `PRE_FETCH_SEQS_LIMIT`)
 /// Whether the batch of each query of `hit_lists` (final hit lists by query) prefetches
@@ -2014,24 +1723,83 @@ fn most_identities(hsp_list: &BlastnHspList) -> usize {
         .unwrap_or(0)
 }
 
+/// What a pairwise report (outfmt 0 to 4) of the hit lists `hit_lists` reads, by the key that
+/// `hit_lists` names the subjects by (`QueryGroup::read_order` of the HSPs as the writer reads
+/// them, `reading`; `parsed` gives the subject with parsed Seq-ids of a key, whose copies join a
+/// hit). The rows that the writer reads are these HSPs (`pairwise::Rows::list`: `into_hit` of
+/// each HSP and its `num_ident`; the rows' later shift to the records of a ranged query moves
+/// every HSP of the query alike, which no sort reads, and the rows name the subjects by rank, in
+/// the order of the ordinal ids).
+fn pairwise_read_order<'p>(
+    hit_lists: &[Option<BlastnHitList>],
+    reading: crate::report::pairwise::PairwiseReading,
+    parsed: impl Fn(u32) -> Option<&'p ParsedSubject>,
+) -> crate::report::db_subject::PairwiseReads {
+    let lists = hit_lists
+        .iter()
+        .flat_map(shown_lists)
+        .filter(|hsp_list| !hsp_list.hsps.is_empty());
+    crate::report::x_pairwise_par::QueryGroup::read_order(
+        lists.flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| (hsp_list.oid, hsp))),
+        |hsp| {
+            crate::report::hit_sort::HspScores::of_hit(
+                &crate::algorithm::blastn::hsp::BlastnHsp::clone(hsp).into_hit(),
+                hsp.num_ident,
+            )
+        },
+        |previous, oid| match (parsed(previous), parsed(oid)) {
+            (Some(earlier), Some(later)) => {
+                crate::report::db_subject::joins_as_copy(earlier, later)
+            }
+            _ => false,
+        },
+        reading,
+        false,
+        None,
+    )
+}
+
+/// The subjects of the query report of `hit_list` for `HitLoads::of` where the run's formats
+/// are pairwise (`pairwise`: how its report reads them, with `after` a pairwise one): the
+/// report's reads (`pairwise_read_order`). `None` otherwise (the HSP lists' order).
+fn pairwise_keys<'p>(
+    hit_list: &Option<BlastnHitList>,
+    after: crate::report::db_subject::FormatThrow,
+    pairwise: Option<crate::report::pairwise::PairwiseReading>,
+    parsed: impl Fn(u32) -> Option<&'p ParsedSubject>,
+) -> Option<crate::report::db_subject::ReportKeys> {
+    let reading = pairwise.filter(|_| after.run().is_some_and(|run| run.after.is_pairwise()))?;
+    Some(crate::report::db_subject::ReportKeys::Pairwise(
+        pairwise_read_order(std::slice::from_ref(hit_list), reading, parsed),
+    ))
+}
+
 /// What the reports of `hit_lists` load where their batch's prefetch is off (`RunLoads::loads` of
 /// those reports alone, by ordinal id, after the reports before them in the run, `run`): the
 /// subjects of its reads one by one (`DatabaseTitles`' texts of a batch whose prefetch is off),
-/// not one whose load throws, nor one that no report reaches after it.
+/// not one whose load throws, nor one that no report reaches after it. `pairwise`: how a
+/// pairwise report reads them (`pairwise_keys`).
 fn report_loads(
     run: &crate::report::db_subject::RunLoads,
     titles: &DatabaseTitles,
     hit_lists: &[Option<BlastnHitList>],
+    pairwise: Option<crate::report::pairwise::PairwiseReading>,
 ) -> HitLoads {
     run.loads(
         hit_lists.iter().map(|hit_list| {
-            (
-                true,
-                shown_lists(hit_list)
-                    .iter()
-                    .map(|hsp_list| (!hsp_list.hsps.is_empty()).then_some(hsp_list.oid as usize))
-                    .collect(),
-            )
+            let parsed = |oid: u32| titled_parsed(titles, oid as usize);
+            let keys =
+                pairwise_keys(hit_list, run.answer(), pairwise, parsed).unwrap_or_else(|| {
+                    crate::report::db_subject::ReportKeys::Entries(
+                        shown_lists(hit_list)
+                            .iter()
+                            .map(|hsp_list| {
+                                (!hsp_list.hsps.is_empty()).then_some(hsp_list.oid as usize)
+                            })
+                            .collect(),
+                    )
+                });
+            (true, keys)
         }),
         |ordinal| titled_parsed(titles, ordinal),
         |report, list| most_identities(&shown_lists(&hit_lists[report])[list]),
@@ -2052,8 +1820,11 @@ pub(super) struct QueryFetches<'a> {
     /// Whether the first format is a table with a plural name, which looks every taxid of its
     /// rows up, taxid 0 too (`TabularSpec::looks_up_every_taxid`), with `taxdb.bti` found.
     pub(super) plural_names: bool,
-    /// The pairwise report's order of reads (`-sorthits`).
-    pub(super) pairwise: Option<crate::report::hit_sort::ReportSort>,
+    /// How the run's pairwise reports read the subjects (`pairwise_reading`), for the loads.
+    pub(super) pairwise: Option<crate::report::pairwise::PairwiseReading>,
+    /// Whether the first format is a pairwise one, which places the texts in the order of its
+    /// reads (`places`).
+    pub(super) pairwise_first: bool,
     /// Whether each HSP is a Seq-align (`seq_aligns_of`).
     pub(super) gapped: bool,
 }
@@ -2103,7 +1874,7 @@ impl QueryFetches<'_> {
             .enumerate()
             .map(|(index, hit_list)| {
                 let shown = std::slice::from_ref(hit_list);
-                let loads = report_loads(self.run, self.titles, shown);
+                let loads = report_loads(self.run, self.titles, shown, self.pairwise);
                 let mut messages = Vec::new();
                 if fetches && seq_aligns_of(shown, self.gapped) > 0 {
                     if self.places {
@@ -2111,7 +1882,7 @@ impl QueryFetches<'_> {
                             self.titles,
                             shown,
                             self.plural_names,
-                            self.pairwise,
+                            self.pairwise.filter(|_| self.pairwise_first),
                             &loads,
                         )?;
                     } else {
@@ -2128,24 +1899,59 @@ impl QueryFetches<'_> {
 }
 
 /// What the formats `output_formats` do after a subject whose lookup throws where its batch's
-/// prefetch is off (`FormatThrow::of_run`, for `hit_loads` and the run's `RunLoads`).
+/// prefetch is off (`FormatThrow::of_formats`, for `hit_loads` and the run's `RunLoads`), with the
+/// call's refusal over the `-outfmt` values of its other searches, `others`
+/// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
 pub(super) fn after_throw(
     output_formats: &[BlastnOutputFormat],
-) -> Option<crate::report::db_subject::RunThrow> {
-    crate::report::db_subject::FormatThrow::of_run(
+    others: &[&str],
+) -> crate::report::db_subject::FormatThrow {
+    crate::report::db_subject::FormatThrow::of_formats(
         output_formats.iter().map(BlastnOutputFormat::format_throw),
+    )
+    .of_search(
+        others,
+        crate::blastinput::app::Program::Blastn,
+        crate::report::archive::options::RequestKind::Blastn,
     )
 }
 
-/// What the XML2 and JSON reports of `hit_lists` (final hit lists by query, in the order of the
-/// reports; the subjects named by `key`, an ordinal id or a rank) do at each subject's `Hit`
-/// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch reads one by
-/// one (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a
-/// key; the `Hit`s are those that `blast_xml::write_blastn_xml` makes.
+/// How the pairwise reports of the run's formats `output_formats` read each query's subjects
+/// (`QueryGroup::read_order`): as the first pairwise format's view reads them
+/// (`PairwiseView::reading` of `-sorthits` and `-sorthsps` `sort` and the run's numbers
+/// `counts`; the formats of a run whose loads they make share one view's order,
+/// `FormatThrow::and`); `None` without one.
+pub(super) fn pairwise_reading(
+    output_formats: &[BlastnOutputFormat],
+    sort: crate::report::hit_sort::ReportSort,
+    counts: crate::blastinput::report_counts::ReportCounts,
+) -> Option<crate::report::pairwise::PairwiseReading> {
+    output_formats.iter().find_map(|format| match format {
+        BlastnOutputFormat::Pairwise(view) => Some(view.reading(sort, counts.shown())),
+        _ => None,
+    })
+}
+
+/// Whether every format of `output_formats` writes the same where every load of a subject with a
+/// positive taxid throws (`BlastnOutputFormat::unchanged_by_load_throws`, for the batch's
+/// prefetch, `shared::PrefetchQueries::where_reports_unchanged_by_load_throws`).
+pub(super) fn reports_unchanged_by_load_throws(output_formats: &[BlastnOutputFormat]) -> bool {
+    output_formats
+        .iter()
+        .all(BlastnOutputFormat::unchanged_by_load_throws)
+}
+
+/// What the reports of `hit_lists` (final hit lists by query, in the order of the reports; the
+/// subjects named by `key`, an ordinal id or a rank) do at each subject's `Hit` (`HitLoads::of`,
+/// the one answer): `prefetch` tells by query whether its batch reads one by one
+/// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a
+/// key; the `Hit`s are those that `blast_xml::write_blastn_xml` makes, or the pairwise reports'
+/// reads (`pairwise`: how they read them, `pairwise_keys`).
 pub(super) fn hit_loads<'p>(
     hit_lists: &[Option<BlastnHitList>],
     prefetch: &shared::BatchPrefetch,
-    after: Option<crate::report::db_subject::RunThrow>,
+    after: crate::report::db_subject::FormatThrow,
+    pairwise: Option<crate::report::pairwise::PairwiseReading>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
     let lists = |query: usize| {
@@ -2156,15 +1962,25 @@ pub(super) fn hit_loads<'p>(
     HitLoads::of(
         after,
         (0..hit_lists.len()).map(|query| {
-            (
-                prefetch.reads_one_by_one(query),
-                lists(query)
-                    .iter()
-                    .map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize))
-                    .collect(),
+            // A batch that prefetches loads every subject, in any order.
+            let one_by_one = prefetch.reads_one_by_one(query);
+            let keys = pairwise_keys(
+                &hit_lists[query],
+                after,
+                pairwise.filter(|_| one_by_one),
+                |oid| parsed(oid as usize),
             )
+            .unwrap_or_else(|| {
+                crate::report::db_subject::ReportKeys::Entries(
+                    lists(query)
+                        .iter()
+                        .map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize))
+                        .collect(),
+                )
+            });
+            (one_by_one, keys)
         }),
-        parsed,
+        &parsed,
         |query, list| most_identities(&lists(query)[list]),
     )
 }
@@ -2178,24 +1994,7 @@ fn titled_parsed(titles: &DatabaseTitles, ordinal: usize) -> Option<&ParsedSubje
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1406-1414
-// ```c++
-//             x_GetAmbChar(oid, ambchars);
-//
-//             if (ambchars.empty()) {
-//                 // keep as 2 bit
-//                 s_SeqDBWriteSeqDataNucl(seqinst, seq_buffer, length);
-//             } else {
-//                 // translate to 4 bit
-//                 s_SeqDBWriteSeqDataNucl(seqinst, seq_buffer, length, ambchars);
-//             }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:80-83
-// ```c
-// const char NCBI4NA_TO_IUPACNA[BLASTNA_SIZE] = {
-//     '-', 'A', 'C', 'M', 'G', 'R', 'S', 'V',
-//     'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N'
-// };
-// ```
 // The formatter reads a database sequence from its Bioseq: the stored 2-bit data, or with
 // ambiguity codes their NCBI4na values (`x_GetAmbigSeq`'s letters before their mapping to
 // BLASTNA). LOSAT keeps the stored 2-bit data and ambiguity runs (`reported_store`), and a
@@ -2214,7 +2013,8 @@ fn titled_parsed(titles: &DatabaseTitles, ordinal: usize) -> Option<&ParsedSubje
 /// the prefetch reads a subject, is `batches_prefetch`'s, with the Seq-aligns of a `gapped`
 /// search or not; `after`: what the formats do after a subject whose lookup throws
 /// (`after_throw`), for the one answer of the reports' loads, `hit_loads`, which the refusals
-/// take). The records are made on `pool` (`x_reported_records`).
+/// take, with how the pairwise reports read them, `pairwise`, `pairwise_reading`). The records are made on
+/// `pool` (`x_reported_records`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
     database: &BlastnDatabase,
@@ -2222,7 +2022,10 @@ pub(super) fn reported_subjects(
     hit_lists: &mut [Option<BlastnHitList>],
     letters: bool,
     shown: ParsedShown,
-    after: Option<crate::report::db_subject::RunThrow>,
+    (after, pairwise): (
+        crate::report::db_subject::FormatThrow,
+        Option<crate::report::pairwise::PairwiseReading>,
+    ),
     batches: &[std::ops::Range<usize>],
     first_query: usize,
     gapped: bool,
@@ -2256,7 +2059,7 @@ pub(super) fn reported_subjects(
             }),
     );
     // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below).
-    let loads = hit_loads(hit_lists, &prefetch, after, |ordinal| {
+    let loads = hit_loads(hit_lists, &prefetch, after, pairwise, |ordinal| {
         titled_parsed(titles, ordinal)
     });
     let rank = |ordinal: u32| -> u32 {
@@ -2486,1002 +2289,5 @@ impl ReportedSubjects {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::algorithm::blastn::hsp::{BlastnHsp, BlastnHspList};
-    #[cfg(unix)]
-    use crate::cli::NativeError;
-
-    fn fixture(name: &str) -> String {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/seqdb/db")
-            .join(name)
-            .to_str()
-            .expect("fixture path is UTF-8")
-            .to_string()
-    }
-
-    fn open(name: &str) -> BlastnDatabase {
-        BlastnDatabase::open(&fixture(name), &ApplicationSettings::default())
-            .unwrap_or_else(|error| panic!("{name}: {error:#}"))
-    }
-
-    fn open_dbmask(name: &str) -> BlastnDatabase {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/db_search/dbmask")
-            .join(name);
-        BlastnDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default())
-            .unwrap_or_else(|error| panic!("{name}: {error:#}"))
-    }
-
-    // blast_util.c:197-218 and seqdb.hpp:286-306 (quoted at `seq_ranges_into`): the soft ranges
-    // of a masked database sequence are the complement of its masks in stored order, inverted
-    // members included; a sequence without masks has the one range of its letters.
-    #[test]
-    fn soft_ranges_are_the_complement_of_the_masks_in_stored_order() {
-        let mut ranges = vec![(5, 6)];
-        for (masks, expected) in [
-            (&[][..], &[(0, 1200)][..]),
-            (
-                &[(600, 700), (100, 200)],
-                &[(0, 600), (700, 100), (200, 1200)],
-            ),
-            (
-                &[(100, 300), (200, 400)],
-                &[(0, 100), (300, 200), (400, 1200)],
-            ),
-            (
-                &[(0, 100), (1100, 1200)],
-                &[(0, 0), (100, 1100), (1200, 1200)],
-            ),
-            (&[(0, 1200)], &[(0, 0), (1200, 1200)]),
-        ] {
-            crate::core::subject_split::complement_masks(masks, 1200, &mut ranges);
-            assert_eq!(ranges, expected, "{masks:?}");
-        }
-    }
-
-    // The masks of the M4a-2 edge database `edge1` (NCBI's makeblastdb of hand-made maskinfo; NCBI's
-    // blastdbcmd `-outfmt "%o %m11"` reads `600-700;100-200;` for sequence 4): read with the masks
-    // of the block that holds the sequence (one read for all its sequences, review 1 F3 of
-    // M4a-2a), the soft ranges in stored order, the display masks as stored.
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538,
-    // 1665-1673, 1694-1700 (quoted at `mask_hard_letters`)
-    // `-db_hard_mask`'s traceback letters (series NP, M4a-2b decision H2): after the decode, every
-    // masked position of a decoded part is BLASTNA 'B' (10), as `s_SeqDBMaskSequence` writes
-    // NCBI4na 14 before `SeqDB_ncbina8_to_blastna8`, on the whole sequence and on each slice of
-    // the partial decode; the other letters (and the fences, the sentinel bytes) stay. Against a
-    // model of the C loop per slice, for random sorted masks and slices, then on a5's s1 (masks
-    // 1000-1100 and 2000-2024) through `traceback_listed` (whole) and the ranged decode.
-    #[test]
-    fn hard_masked_letters_are_b_in_each_decoded_part() {
-        let model = |letters: &[u8], masks: &[(u32, u32)], slices: &[(usize, usize)]| {
-            let mut seq = letters.to_vec();
-            for &(begin, end) in slices {
-                let mut i = 0;
-                while i < masks.len() && masks[i].1 as usize <= begin {
-                    i += 1;
-                }
-                while i < masks.len() && (masks[i].0 as usize) < end {
-                    for j in (masks[i].0 as usize).max(begin)..(masks[i].1 as usize).min(end) {
-                        seq[1 + j] = 10;
-                    }
-                    i += 1;
-                }
-            }
-            seq
-        };
-        let mut seed = 0x2545_F491_4F6C_DD1Du64;
-        let mut next = |bound: u64| {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            (seed % bound) as usize
-        };
-        for _ in 0..500 {
-            let length = 1 + next(400);
-            let letters: Vec<u8> = (0..length + 2).map(|_| next(16) as u8).collect();
-            let mut masks = Vec::new();
-            let mut at = 0usize;
-            while masks.len() < 5 {
-                let start = at + next(80);
-                let end = start + next(30);
-                if end > length {
-                    break;
-                }
-                masks.push((start as u32, end as u32));
-                at = end;
-            }
-            let mut slices = Vec::new();
-            let mut at = 0usize;
-            while at < length {
-                let begin = at + next(60);
-                let end = (begin + 1 + next(120)).min(length);
-                if begin >= end {
-                    break;
-                }
-                slices.push((begin, end));
-                at = end + 1;
-            }
-            for parts in [&[(0, length)][..], &slices] {
-                let mut found = letters.clone();
-                mask_hard_letters(&mut found, &masks, parts);
-                assert_eq!(found, model(&letters, &masks, parts), "{masks:?} {parts:?}");
-            }
-        }
-
-        let database = open_dbmask("a5");
-        let stored = database.db.read_sequence(0).unwrap();
-        let length = stored.nucleotide_len(0).unwrap();
-        let whole = stored.nucleotide_blastna(0).unwrap();
-        let masked =
-            |position: usize| (1000..1100).contains(&position) || (2000..2024).contains(&position);
-        let found = crate::utils::threading::with_search_pool(1, "blastn", |pool| {
-            traceback_listed(
-                &database,
-                Some(11),
-                pool,
-                false,
-                &[(0u32, ())],
-                &|| (),
-                &|_: &mut (), _: u32, subject: BlastnSubjectRef<'_>, _: &()| {
-                    Some(subject.blastna.expect("the traceback's letters").to_vec())
-                },
-                &|_: &()| Vec::new(),
-            )
-        })
-        .unwrap();
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].len(), length);
-        for (position, &code) in found[0].iter().enumerate() {
-            let want = if masked(position) {
-                10
-            } else {
-                whole[1 + position]
-            };
-            assert_eq!(code, want, "position {position}");
-        }
-        // The ranged decode: slices across both masks and between them, fences kept.
-        let ranges = [(900usize, 1050usize), (1080, 1500), (1990, 2010)];
-        let mut ranged = stored.x_nucleotide_blastna_ranges(0, &ranges).unwrap();
-        let before = ranged.clone();
-        mask_hard_letters(&mut ranged, &[(1000, 1100), (2000, 2024)], &ranges);
-        for position in 0..length {
-            let decoded = ranges
-                .iter()
-                .any(|&(from, to)| (from..to).contains(&position));
-            let want = if decoded && masked(position) {
-                10
-            } else {
-                before[1 + position]
-            };
-            assert_eq!(ranged[1 + position], want, "position {position}");
-        }
-    }
-
-    #[test]
-    fn a_masked_search_reads_each_sequence_s_masks() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/db_search/dbmask/edge1")
-            .to_str()
-            .unwrap()
-            .to_string();
-        let database = BlastnDatabase::open(&path, &ApplicationSettings::default()).unwrap();
-        let block = database.db.x_block_range(0, 5).unwrap();
-        assert_eq!((block.first, block.end), (0, 5));
-        let mut masks = MaskBlock::default();
-        let mut ranges = Vec::new();
-        database
-            .seq_ranges_into(block, 4, 11, 1200, &mut masks, &mut ranges)
-            .unwrap();
-        assert_eq!(ranges, [(0, 600), (700, 100), (200, 1200)]);
-        // Sequence 0 has no masks of algorithm 11.
-        database
-            .seq_ranges_into(block, 0, 11, 3000, &mut masks, &mut ranges)
-            .unwrap();
-        assert_eq!(ranges, [(0, 3000)]);
-        // Another algorithm reads the block again.
-        database
-            .seq_ranges_into(block, 4, 15, 1200, &mut masks, &mut ranges)
-            .unwrap();
-        assert_eq!(ranges, [(0, 301), (302, 500), (503, 703), (706, 1200)]);
-        // A block of one sequence gives its masks alike.
-        let one = database.db.x_block_range(4, 5).unwrap();
-        database
-            .seq_ranges_into(one, 4, 11, 1200, &mut masks, &mut ranges)
-            .unwrap();
-        assert_eq!(ranges, [(0, 600), (700, 100), (200, 1200)]);
-        let shown = database.display_masks(4, 12, &mut masks).unwrap();
-        assert_eq!(
-            shown,
-            [
-                crate::utils::dust::MaskedInterval::new(100, 300),
-                crate::utils::dust::MaskedInterval::new(200, 400)
-            ]
-        );
-    }
-
-    // DECISIONS 3 Q8 of line DBID: NCBI's choice of the Seq-ids of a database with parsed
-    // Seq-ids depends on SEQ_ID_PREFER_ACCESSION_OVER_GI and SEQ_ID_AVOID_GI.
-    #[test]
-    fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
-        let path = |name: &str| {
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join(name)
-                .to_str()
-                .expect("fixture path is UTF-8")
-                .to_string()
-        };
-        let settings = ApplicationSettings {
-            seq_id_rank_variable: Some("SEQ_ID_PREFER_ACCESSION_OVER_GI"),
-            ..ApplicationSettings::default()
-        };
-        let parsed = path("tests/db_search/ids/nucl_v5");
-        BlastnDatabase::open(&parsed, &ApplicationSettings::default())
-            .expect("a database with parsed Seq-ids opens");
-        let Err(error) = BlastnDatabase::open(&parsed, &settings) else {
-            panic!("a database with parsed Seq-ids opened with SEQ_ID_PREFER_ACCESSION_OVER_GI")
-        };
-        assert_eq!(
-            format!("{error:#}"),
-            "the environment variable SEQ_ID_PREFER_ACCESSION_OVER_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's BLASTN"
-        );
-        BlastnDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
-            .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
-    }
-
-    /// LOSAT/tests/seqdb/expected/nucl_mv.entries.tsv (blastdbcmd): the lengths, letters and
-    /// titles in ordinal order.
-    fn entries() -> Vec<(usize, String, String)> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/seqdb/expected/nucl_mv.entries.tsv");
-        std::fs::read_to_string(path)
-            .unwrap()
-            .lines()
-            .map(|line| {
-                let fields: Vec<&str> = line.split('\t').collect();
-                (
-                    fields[1].parse().unwrap(),
-                    fields[3].to_string(),
-                    fields[4].to_string(),
-                )
-            })
-            .collect()
-    }
-
-    /// A temporary directory of this test (removed by the test).
-    fn temp_dir(tag: &str) -> std::path::PathBuf {
-        let dir = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-blastn-db-{tag}-{}-{:?}",
-            crate::utils::test_dir::process_id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn test_hsp(s_idx: u32, raw_score: i32) -> BlastnHsp {
-        BlastnHsp {
-            identity: 100.0,
-            length: 10,
-            mismatch: 0,
-            gapopen: 0,
-            q_start: 1,
-            q_end: 10,
-            s_start: 1,
-            s_end: 10,
-            e_value: 1e-5,
-            bit_score: 30.0,
-            num_ident: 10,
-            query_frame: 1,
-            query_length: 20,
-            q_idx: 0,
-            s_idx,
-            raw_score,
-            internal_q_offset_0: 0,
-            internal_q_end_0: 10,
-            internal_s_offset_0: 0,
-            internal_s_end_0: 10,
-            internal_query_context_offset: 0,
-            gap_info: None,
-            num_positives: 10,
-        }
-    }
-
-    fn hit_list(lists: Vec<(u32, f64)>, count: usize) -> Option<BlastnHitList> {
-        let mut hit_list = BlastnHitList::new(10);
-        hit_list.hsplist_array = lists
-            .into_iter()
-            .map(|(oid, best_evalue)| BlastnHspList {
-                oid,
-                query_index: 0,
-                hsps: vec![test_hsp(oid, 60)],
-                best_evalue,
-            })
-            .collect();
-        hit_list.hsplist_count = count;
-        Some(hit_list)
-    }
-
-    // NCBI BLAST+ 2.17.0 `blastdbcmd -info` of the fixture
-    // (LOSAT/tests/seqdb/expected/nucl_mv.info.tsv), and align_format_util.cpp:385-391.
-    #[test]
-    fn database_numbers_come_from_the_index_files() {
-        let database = open("nucl_mv");
-        assert_eq!(database.metadata().db_num_seqs, 12);
-        assert_eq!(database.metadata().db_len_total, 850);
-        let shown = database.pairwise_database();
-        assert_eq!(shown.definition, b"nucleotide in volumes");
-        assert_eq!(shown.databases[0].date, "Oct 12, 2026  4:12 PM");
-        assert_eq!((shown.num_sequences, shown.total_letters), (12, 850));
-        assert_eq!(database.name(), fixture("nucl_mv"));
-    }
-
-    // blast_app_util.hpp:185-203 and seqdb.cpp:155-165: NCBI's errors with exit status 2,
-    // LOSAT's refusals in LOSAT's wording, naming BLASTN.
-    // (A path in an error text: Unix spelling.)
-    #[cfg(unix)]
-    #[test]
-    fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
-        let native = |error: anyhow::Error| {
-            let native = error
-                .downcast_ref::<NativeError>()
-                .unwrap_or_else(|| panic!("not a native error: {error:#}"));
-            (native.exit, native.message.clone())
-        };
-        let settings = ApplicationSettings::default();
-        let Err(error) = BlastnDatabase::open("", &settings) else {
-            panic!("an empty name opened")
-        };
-        assert_eq!(
-            native(error),
-            (
-                2,
-                "BLAST Database error: Database name is required.\n".to_string()
-            )
-        );
-        // A protein database is not found as a nucleotide one.
-        for name in ["no_such_database", "prot_v4"] {
-            let Err(error) = BlastnDatabase::open(&fixture(name), &settings) else {
-                panic!("{name} opened")
-            };
-            let (exit, message) = native(error);
-            assert_eq!(exit, 2);
-            assert!(
-                message.starts_with(
-                    "BLAST Database error: No alias or index file found for nucleotide database ["
-                ),
-                "{message}"
-            );
-        }
-        // The reader's refusals name BLASTN.
-        let error = database_error(SeqDbError::Unsupported {
-            path: "/data/db.nal".into(),
-            message: "the alias file filters sequences".to_string(),
-        });
-        assert!(error.downcast_ref::<NativeError>().is_none());
-        assert!(
-            format!("{error:#}").ends_with("; this database is not supported by LOSAT's BLASTN"),
-            "{error:#}"
-        );
-        let read = search_read_error(SeqDbError::Open {
-            path: "/data/db.nsq".into(),
-            source: std::io::Error::from_raw_os_error(13),
-        })
-        .downcast::<PreliminaryReadError>()
-        .expect("NCBI's error of the search stage");
-        assert_eq!(
-            read.to_string(),
-            "BLAST engine error: Database memory map file error"
-        );
-    }
-
-    /// A kernel that records what it is given and keeps every third sequence.
-    fn recording_kernel(
-        seen: &std::sync::Mutex<Vec<(u32, usize, Vec<u8>)>>,
-    ) -> impl Fn(&mut u32, u32, BlastnSubjectRef<'_>) -> Option<u32> + Sync + Send + '_ {
-        move |calls, ordinal, subject| {
-            *calls += 1;
-            assert!(subject.letters.is_none() && subject.blastna.is_none());
-            seen.lock()
-                .unwrap()
-                .push((ordinal, subject.length, subject.packed.to_vec()));
-            (ordinal % 3 == 0).then_some(ordinal)
-        }
-    }
-
-    fn run_blocks(
-        database: &BlastnDatabase,
-        threads: usize,
-        block_bytes: u64,
-    ) -> (Vec<(u32, usize, Vec<u8>)>, Vec<u32>) {
-        let seen = std::sync::Mutex::new(Vec::new());
-        let mut merged = Vec::new();
-        crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-            search_blocks_of(
-                database,
-                pool,
-                threads > 1,
-                block_bytes,
-                2,
-                &|| 0u32,
-                &recording_kernel(&seen),
-                &mut |ordinal, kept| {
-                    assert_eq!(ordinal, kept);
-                    merged.push(ordinal);
-                },
-            )
-        })
-        .unwrap();
-        let mut seen = seen.into_inner().unwrap();
-        seen.sort_by_key(|entry| entry.0);
-        (seen, merged)
-    }
-
-    // blast_engine.c:1407-1426 (the sequences in the order of their ordinal ids) and
-    // blast_engine.c:1401-1405 (the stored 2-bit data): the block driver gives the kernel
-    // every sequence once with its stored data, and merges what it keeps in ordinal order,
-    // whatever the block size and the thread count, across the six volumes of the fixture.
-    #[test]
-    #[cfg_attr(
-        not(feature = "parallel"),
-        ignore = "needs threads: a build without the parallel feature has none"
-    )]
-    fn blocks_give_every_sequence_once_and_merge_in_ordinal_order() {
-        let database = open("nucl_mv");
-        let single = open("nucl_v4");
-        let entries = entries();
-        let (reference, merged) = run_blocks(&database, 1, u64::MAX);
-        assert_eq!(reference.len(), 12);
-        for (ordinal, (seen_ordinal, length, packed)) in reference.iter().enumerate() {
-            assert_eq!(*seen_ordinal as usize, ordinal);
-            assert_eq!(*length, entries[ordinal].0, "sequence {ordinal}");
-            // The stored layout of the subject set's packed letters: length / 4 + 1 bytes,
-            // the count of the last byte's bases in its two low bits.
-            assert_eq!(packed.len(), length / 4 + 1, "sequence {ordinal}");
-            assert_eq!(usize::from(packed[length / 4] & 3), length % 4);
-        }
-        assert_eq!(merged, [0, 3, 6, 9]);
-        assert_eq!(run_blocks(&single, 1, u64::MAX).0, reference);
-        for threads in [1usize, 2, 4] {
-            for block_bytes in [1u64, 16, 64, 1 << 20] {
-                for db in [&database, &single] {
-                    let (seen, order) = run_blocks(db, threads, block_bytes);
-                    assert_eq!(
-                        seen, reference,
-                        "{threads} threads, blocks of {block_bytes}"
-                    );
-                    assert_eq!(order, merged, "{threads} threads, blocks of {block_bytes}");
-                }
-            }
-        }
-    }
-
-    // blast_traceback.c:819-828 and 1567-1573: the traceback reads each listed sequence
-    // again by ordinal id, in BLASTNA with its ambiguity codes; the results come in the
-    // order of the listed ordinal ids at every thread count.
-    #[test]
-    #[cfg_attr(
-        not(feature = "parallel"),
-        ignore = "needs threads: a build without the parallel feature has none"
-    )]
-    fn listed_sequences_are_read_again_with_their_ambiguity_codes() {
-        let database = open("nucl_mv");
-        let entries = entries();
-        // n02, n06 (every ambiguity code), n08 (all N), n12 (ambiguity at both ends).
-        let listed: Vec<(u32, u32)> = vec![(1, 10), (5, 50), (7, 70), (11, 110)];
-        for threads in [1usize, 2, 4] {
-            let found = crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                traceback_listed(
-                    &database,
-                    None,
-                    pool,
-                    threads > 1,
-                    &listed,
-                    &|| (),
-                    &|_: &mut (), ordinal: u32, subject: BlastnSubjectRef<'_>, kept: &u32| {
-                        assert_eq!(*kept, ordinal * 10);
-                        let blastna = subject.blastna.expect("the traceback's letters");
-                        assert_eq!(blastna.len(), subject.length);
-                        assert_eq!(subject.packed.len(), subject.length / 4 + 1);
-                        let letters: String = blastna
-                            .iter()
-                            .map(|&code| BLASTNA_TO_IUPACNA[usize::from(code)] as char)
-                            .collect();
-                        (ordinal != 7).then_some((ordinal, letters))
-                    },
-                    &|_: &u32| Vec::new(),
-                )
-            })
-            .unwrap();
-            let expected: Vec<(u32, String)> = [1u32, 5, 11]
-                .iter()
-                .map(|&ordinal| (ordinal, entries[ordinal as usize].1.clone()))
-                .collect();
-            assert_eq!(found, expected, "{threads} threads");
-        }
-    }
-
-    // A traceback without nested parallel work makes a scratch per worker at most (a sequence
-    // takes an idle one; `map_init` made one per rayon task, at least twice the threads), and the
-    // results come in the order of `listed`: at 1 to 8 threads, uneven work per sequence so that
-    // the threads steal from each other.
-    #[test]
-    #[cfg_attr(
-        not(feature = "parallel"),
-        ignore = "needs threads: a build without the parallel feature has none"
-    )]
-    fn the_parallel_traceback_reuses_the_idle_scratches() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        let database = open("nucl_mv");
-        let work = |entry: u32| -> u64 {
-            let rounds = if entry % 37 == 5 {
-                200_000
-            } else {
-                50 + (entry * 7919) % 3_000
-            };
-            (0..u64::from(rounds)).fold(u64::from(entry), |acc, x| {
-                acc.wrapping_mul(31).wrapping_add(x)
-            })
-        };
-        // Each sequence 50 times, in ascending ordinal order, numbered in `kept`.
-        let listed: Vec<(u32, u32)> = (0..12u32 * 50).map(|i| (i / 50, i)).collect();
-        let want: Vec<(u32, u64)> = listed
-            .iter()
-            .filter(|&&(ordinal, _)| ordinal % 3 != 2)
-            .map(|&(_, entry)| (entry, work(entry)))
-            .collect();
-        for threads in 1..=8usize {
-            let scratches = AtomicU64::new(0);
-            let found = crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                traceback_listed(
-                    &database,
-                    None,
-                    pool,
-                    threads > 1,
-                    &listed,
-                    &|| {
-                        scratches.fetch_add(1, Ordering::Relaxed);
-                    },
-                    &|_: &mut (), ordinal: u32, _: BlastnSubjectRef<'_>, kept: &u32| {
-                        (ordinal % 3 != 2).then(|| (*kept, work(*kept)))
-                    },
-                    &|_: &u32| Vec::new(),
-                )
-            })
-            .unwrap();
-            assert_eq!(found, want, "{threads} threads");
-            let made = scratches.load(Ordering::Relaxed);
-            assert!(
-                (1..=threads as u64).contains(&made),
-                "{threads} threads: {made} scratches"
-            );
-        }
-    }
-
-    // blast_seqsrc.c:467-519: each HSP widened by 1024 bases within the sequence, sorted by
-    // start, merged unless it starts more than 1024 bases after the range before.
-    #[test]
-    fn partial_ranges_are_ncbis() {
-        assert_eq!(x_partial_ranges_padded([], 100, 1024), vec![]);
-        assert_eq!(
-            x_partial_ranges_padded([(10, 20)], 100, 1024),
-            vec![(0, 100)]
-        );
-        // 3976..7024, 5476..8024, 8976..11124: each within 1024 of the one before.
-        assert_eq!(
-            x_partial_ranges_padded([(6500, 7000), (5000, 6000), (10000, 10100)], 20000, 1024),
-            vec![(3976, 11124)]
-        );
-        // 0..1124 and 3172..6124: 3172 > 1124 + 1024.
-        assert_eq!(
-            x_partial_ranges_padded([(4196, 5100), (0, 100)], 5500, 1024),
-            vec![(0, 1124), (3172, 5500)]
-        );
-        // 0..1124 and 2148..: exactly 1024 apart merges.
-        assert_eq!(
-            x_partial_ranges_padded([(0, 100), (3172, 3200)], 10000, 1024),
-            vec![(0, 4224)]
-        );
-        // A range inside the one before.
-        assert_eq!(
-            x_partial_ranges_padded([(5000, 9000), (6000, 6100)], 20000, 1024),
-            vec![(3976, 10024)]
-        );
-    }
-
-    // seqdbvol.cpp:1565-1595 (`GetAmbigPartialSeq`): the bases of the ranges as the whole
-    // decode gives them, a fence before and after each range inside the sequence, the two
-    // sentinels, and nothing written elsewhere.
-    #[test]
-    fn blastna_in_ranges_is_the_whole_decode_inside_them() {
-        let database = open("nucl_mv");
-        let mut checked = 0;
-        for ordinal in 0..12u32 {
-            let block = database.db.read_sequence(ordinal).unwrap();
-            let length = block.nucleotide_len(0).unwrap();
-            let whole = block.nucleotide_blastna(0).unwrap();
-            let mut lists: Vec<Vec<(usize, usize)>> = vec![
-                vec![(0, length)],
-                vec![(1, length.saturating_sub(1).max(1))],
-            ];
-            if length >= 3 {
-                lists.push(vec![(0, 1), (length - 1, length)]);
-            }
-            if length >= 12 {
-                lists.push(vec![(2, 5), (7, 9), (11, length)]);
-                lists.push(vec![(0, 3), (length / 2, length / 2 + 2)]);
-            }
-            for ranges in lists {
-                let ranges: Vec<(usize, usize)> =
-                    ranges.into_iter().filter(|r| r.0 < r.1).collect();
-                let ranged = block.x_nucleotide_blastna_ranges(0, &ranges).unwrap();
-                assert_eq!(ranged.len(), length + 2);
-                let mut expected = vec![0u8; length + 2];
-                for &(from, to) in &ranges {
-                    if from > 0 {
-                        expected[from] = crate::seqdb::FENCE_SENTRY;
-                    }
-                    if to < length {
-                        expected[to + 1] = crate::seqdb::FENCE_SENTRY;
-                    }
-                }
-                for &(from, to) in &ranges {
-                    expected[from + 1..=to].copy_from_slice(&whole[from + 1..=to]);
-                }
-                expected[0] = whole[0];
-                expected[length + 1] = whole[length + 1];
-                assert_eq!(ranged, expected, "sequence {ordinal}, ranges {ranges:?}");
-                checked += 1;
-            }
-        }
-        assert!(checked >= 36);
-    }
-
-    // blast_seqalign.cpp:1569-1582 and seqdbvol.cpp:2302-2310: NCBI opens a volume's
-    // header file when the Seq-aligns of a batch's final hit lists are made, query by query
-    // and in the order of each hit list; a list past the hit list's count is not read, and
-    // a title read before is not read again.
-    // (A path in the system's temporary directory: Unix spelling.)
-    #[cfg(unix)]
-    #[test]
-    fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
-        let source = open("nucl_mv");
-        // The volume of each ordinal id.
-        let mut volume_of = Vec::new();
-        for (volume, vol) in source.db.volumes().iter().enumerate() {
-            volume_of.extend(std::iter::repeat_n(volume, vol.num_oids() as usize));
-        }
-        assert_eq!(volume_of.len(), 12);
-        let last = 11u32;
-        let first_volume_ordinal = 0u32;
-        assert_ne!(volume_of[last as usize], volume_of[0]);
-        // A sequence of a third volume, read in the first batch.
-        let middle = (0..12u32)
-            .find(|&ordinal| {
-                volume_of[ordinal as usize] != volume_of[0]
-                    && volume_of[ordinal as usize] != volume_of[last as usize]
-            })
-            .unwrap();
-        let dir = temp_dir("nohdr");
-        let missing = [
-            format!("nucl_mv.{:02}.nhr", volume_of[0]),
-            format!("nucl_mv.{:02}.nhr", volume_of[last as usize]),
-        ];
-        for entry in
-            std::fs::read_dir(fixture("nucl_mv.nal").trim_end_matches("nucl_mv.nal")).unwrap()
-        {
-            let path = entry.unwrap().path();
-            let name = path.file_name().unwrap().to_str().unwrap().to_string();
-            if name.starts_with("nucl_mv.") && !missing.contains(&name) {
-                std::fs::copy(&path, dir.join(&name)).unwrap();
-            }
-        }
-        let name = dir.join("nucl_mv").to_str().unwrap().to_string();
-        let database = BlastnDatabase::open(&name, &ApplicationSettings::default()).unwrap();
-        let mut titles = DatabaseTitles::new();
-        // Query 1 reports `middle`; ordinal id 0 (no header file) is past the count.
-        let batch = vec![
-            None,
-            hit_list(vec![(middle, 1e-9), (first_volume_ordinal, 1e-3)], 1),
-        ];
-        read_titles(&database, &batch, &mut titles).unwrap();
-        assert_eq!(titles.keys().copied().collect::<Vec<_>>(), [middle]);
-        assert_eq!(
-            titles[&middle].stored().title,
-            entries()[middle as usize].2.as_bytes()
-        );
-        // The next batch: query 0 names `middle` again (not read again), query 1 names the
-        // last sequence before ordinal id 0: the first header file read is the last
-        // volume's.
-        let batch = vec![
-            hit_list(vec![(middle, 1e-9)], 1),
-            hit_list(vec![(last, 1e-9), (first_volume_ordinal, 1e-5)], 2),
-        ];
-        let error = read_titles(&database, &batch, &mut titles)
-            .expect_err("a missing header file")
-            .downcast::<HeaderReadError>()
-            .expect("NCBI's error, with the query that reached it");
-        assert_eq!(error.query, 1);
-        let native = error
-            .error
-            .downcast_ref::<NativeError>()
-            .expect("NCBI's error");
-        assert_eq!(native.exit, 2);
-        // The volume is recorded under its directory normalised with symbolic links
-        // followed (seqdbalias.cpp:851-862), as in BLASTP's test.
-        assert_eq!(
-            native.message,
-            format!(
-                "BLAST Database error: Error: File ({}) not found.\n",
-                dir.canonicalize().unwrap().join(&missing[1]).display()
-            )
-        );
-        drop(database);
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    // The reports name the reported sequences by rank (the order of the ordinal ids), with
-    // the stored title, the id `gnl|BL_ORD_ID|n` and the stored data, whose letters are the
-    // stored letters in upper case with their ambiguity codes (seqdbvol.cpp:1406-1414,
-    // blast_encoding.c:80-83), whole and in any range, and the tabular ids are the first
-    // words of the titles.
-    #[test]
-    fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
-        let database = open("nucl_mv");
-        let entries = entries();
-        let mut hit_lists = vec![
-            hit_list(vec![(9, 1e-9), (5, 1e-5)], 2),
-            None,
-            hit_list(vec![(5, 1e-9), (11, 1e-5)], 2),
-        ];
-        let mut titles = DatabaseTitles::new();
-        read_titles(&database, &hit_lists, &mut titles).unwrap();
-        // A list left without HSPs (its HSPs had score 0) is not reported.
-        hit_lists[2].as_mut().unwrap().hsplist_array[1].hsps.clear();
-        let reported = reported_subjects(
-            &database,
-            &titles,
-            &mut hit_lists,
-            true,
-            ParsedShown::default(),
-            None,
-            &[],
-            0,
-            true,
-            None,
-        )
-        .unwrap();
-        assert_eq!(reported.ordinals, [5, 9]);
-        let ranks = |hit_list: &Option<BlastnHitList>| -> Vec<(u32, Vec<u32>)> {
-            hit_list
-                .as_ref()
-                .unwrap()
-                .hsplist_array
-                .iter()
-                .map(|list| (list.oid, list.hsps.iter().map(|hsp| hsp.s_idx).collect()))
-                .collect()
-        };
-        assert_eq!(ranks(&hit_lists[0]), [(1, vec![1]), (0, vec![0])]);
-        assert_eq!(ranks(&hit_lists[2]), [(0, vec![0]), (11, vec![])]);
-        let letters = crate::algorithm::blastn::x_subject_store::SubjectLetters::new(
-            &reported.records,
-            reported.stores.as_deref(),
-        );
-        for (rank, &ordinal) in reported.ordinals.iter().enumerate() {
-            let record = &reported.records[rank];
-            assert_eq!(record.local_id, format!("gnl|BL_ORD_ID|{ordinal}"));
-            assert_eq!(record.title, entries[ordinal as usize].2.as_bytes());
-            assert!(record.seq().is_empty(), "the records keep no letters");
-            let stored = entries[ordinal as usize].1.as_bytes();
-            assert_eq!(letters.len(rank), stored.len());
-            assert_eq!(letters.upper_letters(rank, 0, stored.len()), stored);
-            let (from, to) = (stored.len() / 3, stored.len() - stored.len() / 4);
-            assert_eq!(letters.upper_letters(rank, from, to), &stored[from..to]);
-            assert!(letters.lowercase_masks(rank).is_empty());
-        }
-        // n10 was stored from lower case letters: the database has upper case only.
-        assert!(letters
-            .upper_letters(1, 0, letters.len(1))
-            .iter()
-            .all(|letter| !letter.is_ascii_lowercase()));
-        assert_eq!(
-            reported
-                .tabular_subject_ids(database.db.oid_map(), true)
-                .unwrap()
-                .iter()
-                .map(|id| id.as_deref())
-                .collect::<Vec<_>>(),
-            [Some(&b"n06"[..]), Some(b"n10")]
-        );
-        // Without the letters (the tabular formats without alignment rows): no stored data.
-        let mut hit_lists = vec![hit_list(vec![(9, 1e-9)], 1)];
-        let reported = reported_subjects(
-            &database,
-            &titles,
-            &mut hit_lists,
-            false,
-            ParsedShown::default(),
-            None,
-            &[],
-            0,
-            true,
-            None,
-        )
-        .unwrap();
-        assert!(reported.records[0].seq().is_empty());
-        assert!(reported.stores.is_none());
-    }
-
-    // NCBI writes an error message for a stored title byte outside ' ' ..= '~' each time
-    // its formatter reads the definition line (`check_reported_title`).
-    // (A path in the system's temporary directory: Unix spelling.)
-    #[cfg(unix)]
-    #[test]
-    fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
-        let dir = temp_dir("badtitle");
-        for ext in ["nin", "nsq"] {
-            std::fs::copy(fixture("nucl_v4") + "." + ext, dir.join(format!("b.{ext}"))).unwrap();
-        }
-        let mut header = std::fs::read(fixture("nucl_v4") + ".nhr").unwrap();
-        let at = header
-            .windows(13)
-            .position(|window| window == b"n02 length 41")
-            .expect("the title of n02");
-        header[at + 5] = 0xE9;
-        std::fs::write(dir.join("b.nhr"), header).unwrap();
-        let name = dir.join("b").to_str().unwrap().to_string();
-        let database = BlastnDatabase::open(&name, &ApplicationSettings::default()).unwrap();
-        let mut titles = DatabaseTitles::new();
-        let mut clean = vec![hit_list(vec![(0, 1e-9)], 1)];
-        read_titles(&database, &clean, &mut titles).unwrap();
-        reported_subjects(
-            &database,
-            &titles,
-            &mut clean,
-            false,
-            ParsedShown::default(),
-            None,
-            &[],
-            0,
-            true,
-            None,
-        )
-        .unwrap();
-        let mut bad = vec![hit_list(vec![(1, 1e-9)], 1)];
-        read_titles(&database, &bad, &mut titles).unwrap();
-        assert_eq!(titles[&1].stored().title, b"n02 l#ngth 41");
-        let error = reported_subjects(
-            &database,
-            &titles,
-            &mut bad,
-            false,
-            ParsedShown::default(),
-            None,
-            &[],
-            0,
-            true,
-            None,
-        )
-        .err()
-        .expect("the bad byte");
-        assert!(
-            format!("{error:#}").starts_with(
-                "database sequence 1 has a stored title with a byte outside ' ' to '~'"
-            ),
-            "{error:#}"
-        );
-        assert!(format!("{error:#}").ends_with("not supported by LOSAT's BLASTN"));
-        drop(database);
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    // The records made on a pool are those made one at a time, and the error is the first one
-    // in the order of the ordinal ids.
-    #[test]
-    #[cfg_attr(
-        not(feature = "parallel"),
-        ignore = "needs threads: a build without the parallel feature has none"
-    )]
-    fn reported_records_on_a_pool_are_the_serial_ones() {
-        let ordinals: Vec<u32> = (0..500).collect();
-        let record = |&ordinal: &u32| -> Result<Reported> {
-            if ordinal >= 300 && ordinal % 2 == 0 {
-                anyhow::bail!("refused {ordinal}");
-            }
-            let record = FastaRecord {
-                local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
-                title: Vec::new(),
-                sequence: Vec::new(),
-                warnings: Vec::new(),
-                source: Default::default(),
-            };
-            Ok((record, None, None, Default::default()))
-        };
-        let ids = |made: Vec<Reported>| -> Vec<String> {
-            made.into_iter()
-                .map(|(record, _, _, _)| record.local_id)
-                .collect()
-        };
-        let serial = x_reported_records(&ordinals[..300], None, &record).unwrap();
-        crate::utils::threading::with_search_pool(4, "BLASTN", |pool| {
-            let parallel = x_reported_records(&ordinals[..300], Some(pool), &record).unwrap();
-            assert_eq!(ids(parallel), ids(serial));
-            let error = x_reported_records(&ordinals, Some(pool), &record).expect_err("refused");
-            assert_eq!(format!("{error}"), "refused 300");
-            Ok(())
-        })
-        .unwrap();
-        let error = x_reported_records(&ordinals, None, &record).expect_err("refused");
-        assert_eq!(format!("{error}"), "refused 300");
-    }
-
-    /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant
-    /// `taxdb` of `tests/seqdb/taxdb` (`None`: none) as `BLASTDB`, from the directory `cwd`.
-    fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> BlastnDatabase {
-        use crate::seqdb::alias::SearchPath;
-        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-        let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
-        let search =
-            SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
-        let path = tests.join("db_search").join(name);
-        let mut db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
-        db.read_name_records(path.to_str().unwrap(), false).unwrap();
-        let parsed_seqids = db.has_parsed_seqids().unwrap();
-        BlastnDatabase {
-            metadata: SubjectMetadata {
-                db_len_total: db.total_length() as usize,
-                db_num_seqs: db.num_seqs() as i32,
-            },
-            db,
-            name: name.to_string(),
-            taxdb: shared::TaxdbRun::default(),
-            parsed_seqids,
-        }
-    }
-
-    // DBID item T: a batch's prefetch looks up the sequences with HSPs in its final hit lists
-    // (within the hit list size), once per volume and taxid over the batches of a run, and opens
-    // the taxonomy database at the run's first lookup; nothing without `taxdb.bti`.
-    // `x16_ntaxid_99990` (two sequences of taxid 99990) with `offset_last_past_end` (the last
-    // entry, 99990, is past the end of `taxdb.btd`), `x16_ntaxid` (taxid 9606) with `bad_magic`.
-    #[test]
-    fn the_prefetch_looks_up_the_sequences_with_hsps_once_per_run() {
-        let cwd = temp_dir("prefetch");
-        let text = |database: &BlastnDatabase, hit_lists: &[Option<BlastnHitList>]| -> String {
-            let titles = DatabaseTitles::new();
-            String::from_utf8(
-                database
-                    .prefetch_messages(&titles, hit_lists, &HitLoads::default())
-                    .unwrap(),
-            )
-            .unwrap()
-        };
-        let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);
-        assert!(database.taxdb_found());
-        // Sequence 0 without HSPs (its HSPs of score 0 were dropped), sequence 1 past the hit
-        // list size: nothing is fetched, the taxonomy database is not opened.
-        let mut none = hit_list(vec![(0, 1e-9), (1, 1e-8)], 1);
-        none.as_mut().unwrap().hsplist_array[0].hsps.clear();
-        assert_eq!(text(&database, &[None, none]), "");
-        let offset = "Error: [blastn] Error: Offset error at end of taxdb file.\n";
-        assert_eq!(text(&database, &[hit_list(vec![(1, 1e-9)], 1)]), offset);
-        // The same volume and taxid in a later batch.
-        assert_eq!(
-            text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
-            ""
-        );
-        let database = open_with_taxdb("x16_ntaxid", Some("bad_magic"), &cwd);
-        assert_eq!(
-            text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
-            "Error: [blastn] Error: Tax database file has wrong magic number.\n"
-        );
-        let database = open_with_taxdb("x16_ntaxid", None, &cwd);
-        assert!(!database.taxdb_found());
-        assert_eq!(
-            text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
-            ""
-        );
-        std::fs::remove_dir_all(&cwd).unwrap();
-    }
-}
+#[path = "database_tests.rs"]
+mod tests;

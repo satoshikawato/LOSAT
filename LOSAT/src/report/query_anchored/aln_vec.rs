@@ -1,4 +1,4 @@
-//! NCBI's `CAlnMap` and `CAlnVec` (`objtools/alnmgr/alnmap.cpp`, `alnvec.cpp`) over the merged
+//! NCBI's `CAlnMap` and `CAlnVec` (`c++/src/objtools/alnmgr/alnmap.cpp`, `c++/src/objtools/alnmgr/alnvec.cpp`) over the merged
 //! Dense-seg of a query's section (`aln_mix::merge`), as the query-anchored reports read it:
 //! the anchor (`SetAnchor`), the alignment coordinates of the segments and of each row
 //! (`GetAlnStart`, `GetAlnStop`, `GetSeqAlnRange`, `GetSeqStart`, `GetSeqStop`),
@@ -12,14 +12,7 @@ use std::io;
 
 use super::{internal, Denseg, SeqKey, Sequences};
 
-/// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmap.hpp:220-233
-/// ```c++
-///     class CNumSegWithOffset
-///     {
-///     public:
-///         CNumSegWithOffset(TNumseg seg, int offset = 0)
-///             : m_AlnSeg(seg), m_Offset(offset) { }
-/// ```
+/// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmap.hpp:321-325
 #[derive(Clone, Copy)]
 struct SegWithOffset {
     aln_seg: i32,
@@ -79,20 +72,6 @@ impl<'d> AlnMap<'d> {
     /// `CAlnMap(ds)` in the vectors `b`: no anchor (`x_CreateAlnStarts`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:49-60
-    /// ```c++
-    /// void CAlnMap::x_CreateAlnStarts(void)
-    /// {
-    ///     m_AlnStarts.clear();
-    ///     m_AlnStarts.reserve(GetNumSegs());
-    ///
-    ///     int start = 0, len = 0;
-    ///     for (int i = 0;  i < GetNumSegs();  ++i) {
-    ///         start += len;
-    ///         m_AlnStarts.push_back(start);
-    ///         len = m_Lens[i];
-    ///     }
-    /// }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-755 (`x_GetSeqLeftSeg`,
     /// `x_GetSeqRightSeg`: the first and the last segment of the row with a start; "Invalid
     /// Dense-seg: Row ... contains gaps only." for a row of none, which `x_CreateDenseg` removed,
@@ -136,31 +115,6 @@ impl<'d> AlnMap<'d> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:79-121
-    /// ```c++
-    ///     int start = 0, len = 0, aln_seg = -1, offset = 0;
-    ///
-    ///     m_Anchor = anchor;
-    ///     for (int i = 0, pos = m_Anchor;  i < m_NumSegs;
-    ///          ++i, pos += m_NumRows) {
-    ///         if (m_Starts[pos] != -1) {
-    ///             ++aln_seg;
-    ///             offset = 0;
-    ///             m_AlnSegIdx.push_back(i);
-    ///             m_NumSegWithOffsets.push_back(CNumSegWithOffset(aln_seg));
-    ///             start += len;
-    ///             m_AlnStarts.push_back(start);
-    ///             len = m_Lens[i];
-    ///         } else {
-    ///             ++offset;
-    ///             m_NumSegWithOffsets.push_back(CNumSegWithOffset(aln_seg, offset));
-    ///         }
-    ///     }
-    ///     if (!m_AlnSegIdx.size()) {
-    ///         NCBI_THROW(CAlnException, eInvalidDenseg,
-    ///                    "CAlnVec::SetAnchor(): "
-    ///                    "Invalid Dense-seg: No sequence on the anchor row");
-    ///     }
-    /// ```
     /// (The query row, the anchor, has the letters of every query segment; NCBI's throw is an
     /// internal error here.)
     pub(crate) fn set_anchor(&mut self, anchor: usize) -> Result<(), &'static str> {
@@ -202,37 +156,6 @@ impl<'d> AlnMap<'d> {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmap.hpp:559-581,599-603
-    // ```c++
-    // inline
-    // int CAlnMap::GetWidth(TNumrow row) const
-    // {
-    //     if ( !m_Widths.empty() ) {
-    //         _ASSERT(m_Widths.size() == (size_t) m_NumRows);
-    //         return m_Widths[row];
-    //     } else {
-    //         return 1;
-    //     }
-    // }
-    //
-    // inline
-    // TSeqPos CAlnMap::x_GetLen(TNumrow row, TNumseg seg) const
-    // {
-    //     /// Optimization for return m_Lens[seg] * GetWidth(row);
-    //     if (GetWidth(row) != 1) {
-    //         _ASSERT(GetWidth(row) == 3);
-    //         TSeqPos len = m_Lens[seg];
-    //         return len + len + len;
-    //     } else {
-    //         return m_Lens[seg];
-    //     }
-    // }
-    // ...
-    // inline
-    // bool CAlnMap::IsPositiveStrand(TNumrow row) const
-    // {
-    //     return (m_Strands.empty()  ||  m_Strands[row] != eNa_strand_minus);
-    // }
-    // ```
     /// `GetWidth`.
     pub(crate) fn width(&self, row: usize) -> u32 {
         self.ds.widths.get(row).copied().unwrap_or(1)
@@ -283,24 +206,6 @@ impl<'d> AlnMap<'d> {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmap.hpp:481-498
-    // ```c++
-    // inline TSeqPos CAlnMap::GetAlnStart(TNumseg seg) const
-    // {
-    //     return m_AlnStarts[seg];
-    // }
-    //
-    // inline
-    // TSeqPos CAlnMap::GetAlnStop(TNumseg seg) const
-    // {
-    //     return m_AlnStarts[seg] + m_Lens[x_GetRawSegFromSeg(seg)] - 1;
-    // }
-    //
-    // inline
-    // TSeqPos CAlnMap::GetAlnStop(void) const
-    // {
-    //     return GetAlnStop(GetNumSegs() - 1);
-    // }
-    // ```
     fn aln_start(&self, seg: usize) -> u32 {
         self.b.aln_starts[seg]
     }
@@ -318,24 +223,6 @@ impl<'d> AlnMap<'d> {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmap.hpp:665-681
-    // ```c++
-    // inline
-    // TSeqPos CAlnMap::GetSeqStart(TNumrow row) const
-    // {
-    //     return
-    //         m_Starts[(IsPositiveStrand(row) ?
-    //                   x_GetSeqLeftSeg(row) :
-    //                   x_GetSeqRightSeg(row)) * m_NumRows + row];
-    // }
-    //
-    // inline
-    // TSeqPos CAlnMap::GetSeqStop(TNumrow row) const
-    // {
-    //     const TNumseg& seg = IsPositiveStrand(row) ?
-    //         x_GetSeqRightSeg(row) : x_GetSeqLeftSeg(row);
-    //     return m_Starts[seg * m_NumRows + row] + x_GetLen(row, seg) - 1;
-    // }
-    // ```
     /// `GetSeqStart` (the row's lowest position).
     pub(crate) fn seq_start(&self, row: usize) -> u32 {
         let seg = if self.is_positive_strand(row) {
@@ -361,38 +248,6 @@ impl<'d> AlnMap<'d> {
     /// `GetSeqAlnRange`: the row's first and last alignment position.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:969-998
-    /// ```c++
-    /// TSignedSeqPos CAlnMap::GetSeqAlnStart(TNumrow row) const
-    /// {
-    ///     if (IsSetAnchor()) {
-    ///         TNumseg seg = -1;
-    ///         while (++seg < (TNumseg) m_AlnSegIdx.size()) {
-    ///             if (m_Starts[m_AlnSegIdx[seg] * m_NumRows + row] >= 0) {
-    ///                 return GetAlnStart(seg);
-    ///             }
-    ///         }
-    ///         return -1;
-    ///     } else {
-    ///         return GetAlnStart(x_GetSeqLeftSeg(row));
-    ///     }
-    /// }
-    ///
-    ///
-    /// TSignedSeqPos CAlnMap::GetSeqAlnStop(TNumrow row) const
-    /// {
-    ///     if (IsSetAnchor()) {
-    ///         TNumseg seg = TNumseg(m_AlnSegIdx.size());
-    ///         while (seg--) {
-    ///             if (m_Starts[m_AlnSegIdx[seg] * m_NumRows + row] >= 0) {
-    ///                 return GetAlnStop(seg);
-    ///             }
-    ///         }
-    ///         return -1;
-    ///     } else {
-    ///         return GetAlnStop(x_GetSeqRightSeg(row));
-    ///     }
-    /// }
-    /// ```
     #[inline(always)]
     pub(crate) fn seq_aln_range(&self, row: usize) -> (i64, i64) {
         if self.anchor.is_some() {
@@ -417,133 +272,6 @@ impl<'d> AlnMap<'d> {
     /// from the last (`last - cur`), whose positions are the lowest.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:400-524
-    /// ```c++
-    /// CAlnMap::GetRawSeg(TNumrow row, TSeqPos seq_pos,
-    ///                    ESearchDirection dir, bool try_reverse_dir) const
-    /// {
-    ///     TSignedSeqPos start = -1, sseq_pos = seq_pos;
-    ///     TNumseg       btm, top, mid, cur, last, cur_top, cur_btm;
-    ///     btm = cur_btm = 0; cur = top = last = cur_top = m_NumSegs - 1;
-    ///
-    ///     bool plus = IsPositiveStrand(row);
-    ///
-    ///     // if out-of-range, return either -1 or the closest seg in dir direction
-    ///     if (sseq_pos < (TSignedSeqPos)GetSeqStart(row)) {
-    ///         if (dir == eNone) {
-    ///             return -1;
-    ///         } else if (dir == eForward  ||
-    ///                    dir == (plus ? eRight : eLeft)  ||
-    ///                    try_reverse_dir) {
-    ///             TNumseg seg;
-    ///             if (plus) {
-    ///                 seg = -1;
-    ///                 while (++seg < m_NumSegs) {
-    ///                     if (m_Starts[seg * m_NumRows + row] >= 0) {
-    ///                         return seg;
-    ///                     }
-    ///                 }
-    ///             } else {
-    ///                 seg = m_NumSegs;
-    ///                 while (seg--) {
-    ///                     if (m_Starts[seg * m_NumRows + row] >= 0) {
-    ///                         return seg;
-    ///                     }
-    ///                 }
-    ///             }
-    ///         }
-    ///     } else if (sseq_pos > (TSignedSeqPos)GetSeqStop(row)) {
-    ///         if (dir == eNone) {
-    ///             return -1;
-    ///         } else if (dir == eBackwards  ||
-    ///                    dir == (plus ? eLeft : eRight)  ||
-    ///                    try_reverse_dir) {
-    ///             TNumseg seg;
-    ///             if (plus) {
-    ///                 seg = m_NumSegs;
-    ///                 while (seg--) {
-    ///                     if (m_Starts[seg * m_NumRows + row] >= 0) {
-    ///                         return seg;
-    ///                     }
-    ///                 }
-    ///             } else {
-    ///                 seg = -1;
-    ///                 while (++seg < m_NumSegs) {
-    ///                     if (m_Starts[seg * m_NumRows + row] >= 0) {
-    ///                         return seg;
-    ///                     }
-    ///                 }
-    ///             }
-    ///         }
-    ///     }
-    ///
-    ///     // main loop
-    ///     while (btm <= top) {
-    ///         cur = mid = (top + btm) / 2;
-    ///
-    ///         while (cur <= top
-    ///                &&  (start = m_Starts[(plus ? cur : last - cur)
-    ///                                              * m_NumRows + row]) < 0) {
-    ///             ++cur;
-    ///         }
-    ///         if (cur <= top && start >= 0) {
-    ///             if (sseq_pos >= start &&
-    ///                 seq_pos < start + x_GetLen(row, plus ? cur : last - cur)) {
-    ///                 return (plus ? cur : last - cur); // found
-    ///             }
-    ///             if (sseq_pos > start) {
-    ///                 btm = cur + 1;
-    ///                 cur_btm = cur;
-    ///             } else {
-    ///                 top = mid - 1;
-    ///                 cur_top = cur;
-    ///             }
-    ///             continue;
-    ///         }
-    ///
-    ///         cur = mid-1;
-    ///         while (cur >= btm &&
-    ///                (start = m_Starts[(plus ? cur : last - cur)
-    ///                                          * m_NumRows + row]) < 0) {
-    ///             --cur;
-    ///         }
-    ///         if (cur >= btm && start >= 0) {
-    ///             if (sseq_pos >= start
-    ///                 &&  seq_pos < start + x_GetLen(row, plus ? cur : last - cur)) {
-    ///                 return (plus ? cur : last - cur); // found
-    ///             }
-    ///             if (sseq_pos > start) {
-    ///                 btm = mid + 1;
-    ///                 cur_btm = cur;
-    ///             } else {
-    ///                 top = cur - 1;
-    ///                 cur_top = cur;
-    ///             }
-    ///             continue;
-    ///         }
-    ///
-    ///         // if we get here, seq_pos falls into an unaligned region
-    ///         // return either -1 or the closest segment in dir direction
-    ///         if (dir == eNone) {
-    ///             return -1;
-    ///         } else if (dir == eBackwards  ||  dir == (plus ? eLeft : eRight)) {
-    ///             return (plus ? cur_btm : last - cur_btm);
-    ///         } else if (dir == eForward  ||  dir == (plus ? eRight : eLeft)) {
-    ///             return (plus ? cur_top : last - cur_top);
-    ///         }
-    ///     }
-    ///
-    ///     // return either -1 or the closest segment in dir direction
-    ///     if (dir == eNone) {
-    ///         return -1;
-    ///     } else if (dir == eBackwards  ||  dir == (plus ? eLeft : eRight)) {
-    ///         return (plus ? cur_btm : last - cur_btm);
-    ///     } else if (dir == eForward  ||  dir == (plus ? eRight : eLeft)) {
-    ///         return (plus ? cur_top : last - cur_top);
-    ///     }
-    ///
-    ///     return -1;
-    /// }
-    /// ```
     fn raw_seg_backwards(&self, row: usize, seq_pos: u32) -> usize {
         let sseq_pos = seq_pos as i32;
         let plus = self.is_positive_strand(row);
@@ -624,78 +352,6 @@ impl<'d> AlnMap<'d> {
     /// column on its right.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:527-596
-    /// ```c++
-    /// TSignedSeqPos CAlnMap::GetAlnPosFromSeqPos(TNumrow row, TSeqPos seq_pos,
-    ///                                            ESearchDirection dir,
-    ///                                            bool try_reverse_dir) const
-    /// {
-    ///     TNumseg raw_seg = GetRawSeg(row, seq_pos, dir, try_reverse_dir);
-    ///     if (raw_seg < 0) { // out of seq range
-    ///         return -1;
-    ///     }
-    ///
-    ///     TSeqPos start = m_Starts[raw_seg * m_NumRows + row];
-    ///     TSeqPos len   = x_GetLen(row, raw_seg);
-    ///     TSeqPos stop  = start + len -1;
-    ///     bool    plus  = IsPositiveStrand(row);
-    ///
-    ///     CNumSegWithOffset seg = x_GetSegFromRawSeg(raw_seg);
-    ///
-    ///     if (dir == eNone) {
-    ///         if (seg.GetOffset()) {
-    ///             // seq_pos is within an insert
-    ///             return -1;
-    ///         }
-    ///     } else {
-    ///         // check if within unaligned region
-    ///         // if seq_pos outside the segment returned by GetRawSeg
-    ///         // then return the edge alnpos
-    ///         if ((plus ? seq_pos < start : seq_pos > stop)) {
-    ///             return GetAlnStart(seg.GetAlnSeg());
-    ///         }
-    ///         if ((plus ? seq_pos > stop : seq_pos < start)) {
-    ///             return GetAlnStop(seg.GetAlnSeg());
-    ///         }
-    ///
-    ///
-    ///         // check if within an insert
-    ///         if (seg.GetOffset()  &&
-    ///             (dir == eRight  ||
-    ///              dir == (plus ? eForward : eBackwards))) {
-    ///
-    ///             // seek the nearest alnpos on the right
-    ///             if (seg.GetAlnSeg() < GetNumSegs() - 1) {
-    ///                 return GetAlnStart(seg.GetAlnSeg() + 1);
-    ///             } else if (try_reverse_dir) {
-    ///                 return GetAlnStop(seg.GetAlnSeg());
-    ///             } else {
-    ///                 return -1;
-    ///             }
-    ///
-    ///         }
-    ///         if (seg.GetOffset()  &&
-    ///             (dir == eLeft  ||
-    ///              dir == (plus ? eBackwards : eForward))) {
-    ///
-    ///             // seek the nearest alnpos on left
-    ///             if (seg.GetAlnSeg() >= 0) {
-    ///                 return GetAlnStop(seg.GetAlnSeg());
-    ///             } else if (try_reverse_dir) {
-    ///                 return GetAlnStart(seg.GetAlnSeg() + 1);
-    ///             } else {
-    ///                 return -1;
-    ///             }
-    ///
-    ///         }
-    ///     }
-    ///
-    ///     // main case: seq_pos is within an alnseg
-    ///     //assert(seq_pos >= start  &&  seq_pos <= stop);
-    ///     TSeqPos delta = (seq_pos - start) / GetWidth(row);
-    ///     return m_AlnStarts[seg.GetAlnSeg()]
-    ///         + (plus ? delta : m_Lens[raw_seg] - 1 - delta);
-    /// }
-    /// ```
     pub(crate) fn aln_pos_from_seq_pos(&self, row: usize, seq_pos: u32) -> i32 {
         let raw_seg = self.raw_seg_backwards(row, seq_pos);
         let start = self.raw_start(row, raw_seg) as u32;
@@ -758,200 +414,6 @@ impl<'d> AlnMap<'d> {
     /// and `scrn_rights`, in order.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:199-405
-    /// ```c++
-    ///     TSeqPos       aln_pos = 0,
-    ///         len = 0,
-    ///         curr_pos = 0,
-    ///         anchor_pos = 0,
-    ///         scrn_pos = 0,
-    ///         prev_len = 0,
-    ///         ttl_len = 0;
-    ///     TSignedSeqPos start = -1,
-    ///         stop = -1,
-    ///         scrn_lft_seq_pos = -1,
-    ///         scrn_rgt_seq_pos = -1,
-    ///         prev_aln_pos = -1,
-    ///         prev_start = -1;
-    ///     TNumseg       seg;
-    ///     int           pos, nscrns, delta;
-    ///
-    ///     TSeqPos aln_len = GetAlnStop() + 1;
-    ///
-    ///     bool anchored = IsSetAnchor();
-    ///     bool plus     = IsPositiveStrand(row);
-    ///     int  width    = GetWidth(row);
-    ///
-    ///     scrn_width *= width;
-    ///
-    ///     const bool record_inserts = insert_starts && insert_lens;
-    ///     const bool record_coords  = scrn_width && scrn_lefts && scrn_rights;
-    ///
-    ///     // allocate space for the row
-    ///     buffer.clear();
-    ///     buffer.reserve(aln_len);
-    ///     string buff;
-    ///
-    ///     const TNumseg& left_seg = x_GetSeqLeftSeg(row);
-    ///     const TNumseg& right_seg = x_GetSeqRightSeg(row);
-    ///
-    ///     // loop through all segments
-    ///     for (seg = 0, pos = row, aln_pos = 0, anchor_pos = m_Anchor;
-    ///          seg < m_NumSegs;
-    ///          ++seg, pos += m_NumRows, anchor_pos += m_NumRows) {
-    ///
-    ///         const TSeqPos& seg_len = m_Lens[seg];
-    ///         start = m_Starts[pos];
-    ///         len = seg_len * width;
-    ///
-    ///         if (anchored  &&  m_Starts[anchor_pos] < 0) {
-    ///             if (start >= 0) {
-    ///                 // record the insert if requested
-    ///                 if (record_inserts) {
-    ///                     if (prev_aln_pos == (TSignedSeqPos)(aln_pos / width)  &&
-    ///                         start == (TSignedSeqPos)(plus ? prev_start + prev_len :
-    ///                                   prev_start - len)) {
-    ///                         // consolidate the adjacent inserts
-    ///                         ttl_len += len;
-    ///                         insert_lens->pop_back();
-    ///                         insert_lens->push_back(ttl_len);
-    ///                         if (!plus) {
-    ///                             insert_starts->pop_back();
-    ///                             insert_starts->push_back(start);
-    ///                         }
-    ///                     } else {
-    ///                         prev_aln_pos = aln_pos / width;
-    ///                         ttl_len = len;
-    ///                         insert_starts->push_back(start);
-    ///                         insert_aln_starts->push_back(prev_aln_pos);
-    ///                         insert_lens->push_back(len);
-    ///                     }
-    ///                     prev_start = start;
-    ///                     prev_len = len;
-    /// 		}
-    ///             }
-    ///         } else {
-    ///             if (start >= 0) {
-    ///                 stop = start + len - 1;
-    ///
-    ///                 // add regular sequence to buffer
-    ///                 GetSeqString(buff, row, start, stop);
-    ///                 TSeqPos buf_len = min<TSeqPos>(TSeqPos(buff.size()), seg_len);
-    ///                 buffer += buff;
-    ///                 if (buf_len < seg_len) {
-    ///                     // Not enough chars in the sequence, add gap
-    ///                     buf_len = seg_len - buf_len;
-    ///                     char fill_ch;
-    ///
-    ///                     if (seg < left_seg  ||  seg > right_seg) {
-    ///                         fill_ch = GetEndChar();
-    ///                     } else {
-    ///                         fill_ch = GetGapChar(row);
-    ///                     }
-    ///
-    ///                     for (size_t i = 0; i < buf_len; ++i) {
-    ///                         buffer += fill_ch;
-    ///                     }
-    ///                 }
-    ///
-    ///                 // take care of coords if necessary
-    ///                 if (record_coords) {
-    ///                     if (scrn_lft_seq_pos < 0) {
-    ///                         scrn_lft_seq_pos = plus ? start : stop;
-    ///                         if (scrn_rgt_seq_pos < 0) {
-    ///                             scrn_rgt_seq_pos = scrn_lft_seq_pos;
-    ///                         }
-    ///                     }
-    ///                     // previous scrns
-    ///                     nscrns = (aln_pos - scrn_pos) / scrn_width;
-    ///                     for (int i = 0; i < nscrns; i++) {
-    ///                         scrn_lefts->push_back(scrn_lft_seq_pos);
-    ///                         scrn_rights->push_back(scrn_rgt_seq_pos);
-    ///                         if (i == 0) {
-    ///                             scrn_lft_seq_pos = plus ? start : stop;
-    ///                         }
-    ///                         scrn_pos += scrn_width;
-    ///                     }
-    ///                     if (nscrns > 0) {
-    ///                         scrn_lft_seq_pos = plus ? start : stop;
-    ///                     }
-    ///                     // current scrns
-    ///                     nscrns = (aln_pos + len - scrn_pos) / scrn_width;
-    ///                     curr_pos = aln_pos;
-    ///                     for (int i = 0; i < nscrns; i++) {
-    ///                         delta = (plus ?
-    ///                                  scrn_width - (curr_pos - scrn_pos) :
-    ///                                  curr_pos - scrn_pos - scrn_width);
-    ///
-    ///                         scrn_lefts->push_back(scrn_lft_seq_pos);
-    ///                         if (plus ?
-    ///                             scrn_lft_seq_pos < start :
-    ///                             scrn_lft_seq_pos > stop) {
-    ///                             scrn_lft_seq_pos = (plus ? start : stop) +
-    ///                                 delta;
-    ///                             scrn_rgt_seq_pos = scrn_lft_seq_pos +
-    ///                                 (plus ? -1 : 1);
-    ///                         } else {
-    ///                             scrn_rgt_seq_pos = scrn_lft_seq_pos + (plus ? -1 : 1)
-    ///                                 + delta;
-    ///                             scrn_lft_seq_pos += delta;
-    ///                         }
-    ///                         if (seg == left_seg  &&
-    ///                             scrn_lft_seq_pos == scrn_rgt_seq_pos) {
-    ///                             if (plus) {
-    ///                                 scrn_rgt_seq_pos--;
-    ///                             } else {
-    ///                                 scrn_rgt_seq_pos++;
-    ///                             }
-    ///                         }
-    ///                         scrn_rights->push_back(scrn_rgt_seq_pos);
-    ///                         curr_pos = scrn_pos += scrn_width;
-    ///                     }
-    ///                     if (aln_pos + len <= scrn_pos) {
-    ///                         scrn_lft_seq_pos = -1; // reset
-    ///                     }
-    ///                     scrn_rgt_seq_pos = plus ? stop : start;
-    ///                 }
-    ///             } else {
-    ///                 // add appropriate number of gap/end chars
-    ///
-    ///                 char fill_ch;
-    ///
-    ///                 if (seg < left_seg  ||  seg > right_seg) {
-    ///                     fill_ch = GetEndChar();
-    ///                 } else {
-    ///                     fill_ch = GetGapChar(row);
-    ///                 }
-    ///
-    ///                 for (size_t i = 0; i < seg_len; ++i) {
-    ///                     buffer += fill_ch;
-    ///                 }
-    ///             }
-    ///             aln_pos += len;
-    ///         }
-    ///
-    ///     }
-    ///
-    ///     // take care of the remaining coords if necessary
-    ///     if (record_coords) {
-    ///         // previous scrns
-    ///         TSeqPos pos_diff = aln_pos - scrn_pos;
-    ///         if (pos_diff > 0) {
-    ///             nscrns = pos_diff / scrn_width;
-    ///             if (pos_diff % scrn_width) {
-    ///                 nscrns++;
-    ///             }
-    ///             for (int i = 0; i < nscrns; i++) {
-    ///                 scrn_lefts->push_back(scrn_lft_seq_pos);
-    ///                 scrn_rights->push_back(scrn_rgt_seq_pos);
-    ///                 if (i == 0) {
-    ///                     scrn_lft_seq_pos = scrn_rgt_seq_pos;
-    ///                 }
-    ///                 scrn_pos += scrn_width;
-    ///             }
-    ///         }
-    ///     }
-    ///     return buffer;
-    /// ```
     /// (The arithmetic is that of NCBI's types: `TSeqPos` (`u32`) wraps, `TSignedSeqPos` and
     /// `int` are `i32`, and a quotient stored in an `int` is cut to 32 bits.) A row of width 3 counts
     /// its alignment positions and screens in its nucleotides (`scrn_width *= width`). Without
@@ -1159,54 +621,8 @@ impl<'d> AlnMap<'d> {
     /// 2100-2101).
     ///
     /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:287-313
-    /// ```c++
-    /// inline
-    /// string& CAlnVec::GetSeqString(string& buffer,
-    ///                               TNumrow row,
-    ///                               TSeqPos seq_from, TSeqPos seq_to) const
-    /// {
-    ///     if (GetWidth(row) == 3) {
-    ///         string buff;
-    ///         buffer.erase();
-    ///         if (IsPositiveStrand(row)) {
-    ///             x_GetSeqVector(row).GetSeqData(seq_from, seq_to + 1, buff);
-    ///         } else {
-    ///             CSeqVector& seq_vec = x_GetSeqVector(row);
-    ///             TSeqPos size = seq_vec.size();
-    ///             seq_vec.GetSeqData(size - seq_to - 1, size - seq_from, buff);
-    ///         }
-    ///         TranslateNAToAA(buff, buffer, GetGenCode(row));
-    ///     } else {
-    ///         if (IsPositiveStrand(row)) {
-    ///             x_GetSeqVector(row).GetSeqData(seq_from, seq_to + 1, buffer);
-    ///         } else {
-    ///             CSeqVector& seq_vec = x_GetSeqVector(row);
-    ///             TSeqPos size = seq_vec.size();
-    ///             seq_vec.GetSeqData(size - seq_to - 1, size - seq_from, buffer);
-    ///         }
-    ///     }
-    ///     return buffer;
-    /// }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:893-904
-    /// ```c++
-    /// void CAlnVec::TranslateNAToAA(const string& na,
-    ///                               string& aa,
-    ///                               int gencode)
-    /// {
-    ///     if (na.size() % 3) {
-    ///         NCBI_THROW(CAlnException, eTranslateFailure,
-    ///                    "CAlnVec::TranslateNAToAA(): "
-    ///                    "NA size expected to be divisible by 3");
-    ///     }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:554-557
-    /// ```c++
-    ///     // throw exception if failure
-    ///     NCBI_THROW (CException, eUnknown,
-    ///                 "Unable to find genetic code number " +
-    ///                 NStr::IntToString (id));
-    /// ```
     /// (A row's positions lie in its sequence and a row of width 3 has whole codons: the
     /// `TranslateNAToAA` throw is an internal error here.) A segment of length 0 (an HSP of length
     /// 0, `serial::seqalign::empty_row_segments`) reads `seq_from` to `seq_from - 1`, whose

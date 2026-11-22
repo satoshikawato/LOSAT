@@ -24,11 +24,16 @@ fn input(name: &str) -> Vec<u8> {
 
 fn run_blastp(words: &[&str]) -> Result<(), String> {
     let program = run::Program::parse("blastp").unwrap();
-    let (query, _) = store::register("blastp", 0, &input("arch_bp_q.faa")).unwrap();
-    let (subject, _) = store::register("blastp", 1, &input("arch_bp_s.faa")).unwrap();
-    let result = store::with_inputs(program, query, subject, false, |queries, subjects| {
-        run::run(words, queries, subjects)
-    });
+    let (query, _) = store::register("blastp", 0, true, &input("arch_bp_q.faa")).unwrap();
+    let (subject, _) = store::register("blastp", 1, true, &input("arch_bp_s.faa")).unwrap();
+    let result = store::with_inputs(
+        program,
+        query,
+        subject,
+        words,
+        Some(true),
+        |queries, end, subjects| run::run(words, queries, end, subjects),
+    );
     store::release(query).unwrap();
     store::release(subject).unwrap();
     result.unwrap()
@@ -43,7 +48,10 @@ fn the_start_reads_the_programs_ini_and_ncbirc() {
     let words = ["blastp", "-query", "q", "-subject", "s", "-outfmt", "6"];
     run::validate(&words).unwrap();
     let ini = register("blastp.ini", b"[x\n");
-    let report = SECTION_REPORT.repeat(2).trim_end().to_string();
+    // NCBI's text in LOSAT's words (`losat::web_adapter::losat_text`, AGENTS.md rule 8).
+    let report = losat::web_adapter::losat_text(&SECTION_REPORT.repeat(2))
+        .trim_end()
+        .to_string();
     assert_eq!(run::validate(&words).unwrap_err(), report);
     assert_eq!(run_blastp(&words).unwrap_err(), report);
     let good = register("e1w3a_other.ini", b"[BLAST]\n");

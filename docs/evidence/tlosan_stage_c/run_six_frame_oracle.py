@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """Generate fixed TBLASTN subjects and fresh, comparison-only NCBI output.
 
-NCBI c++/src/algo/blast/core/blast_engine.c:804-855:
-    for (context=first_context; context<=last_context; context++) {
-        subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-855:
         status = s_BlastSearchEngineOneContext(...);
-        Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
-    }
 """
 from __future__ import annotations
 

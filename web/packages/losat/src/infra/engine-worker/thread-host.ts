@@ -19,6 +19,7 @@
 // has one set of N-1 thread workers, all ready before the search starts (`prepare`).
 import { endWaits, growToMaximum } from '../reactor/shared-memory.js';
 import type { InstanceUse } from './instance-use.js';
+import type { MainLinks } from './link.js';
 import {
   SLOT_ENDED,
   SLOT_FAILED,
@@ -30,7 +31,6 @@ import {
   START_TAKEN,
   type KeeperCommand,
   type ThreadCommand,
-  type ThreadFault,
 } from './protocol.js';
 
 export interface ThreadHostOptions {
@@ -38,10 +38,11 @@ export interface ThreadHostOptions {
   readonly memory: WebAssembly.Memory;
   /** The maximum of `memory` in pages (shared-memory.ts). */
   readonly maximumPages: number;
-  /** BroadcastChannel name on which a thread that stops reports it (to the main thread). */
-  readonly faultChannel: string;
-  /** BroadcastChannel name on which the main thread asks the keeper to grow the memory (memory-keeper.ts). */
-  readonly keeperChannel: string;
+  /**
+   * The links to the main thread (link.ts): each thread worker's, on which a thread that stops reports it, and the
+   * keeper's, on which the main thread asks it to grow the memory (memory-keeper.ts).
+   */
+  readonly main: MainLinks;
   /**
    * The use count of the instance (instance-use.ts): each thread counts from its spawn until
    * it returns, so that the Gateway does not end the runtime at once while a thread may grow
@@ -57,6 +58,15 @@ export interface ThreadHostOptions {
   readonly readyTimeoutMs?: number;
   /** How long a prepared thread worker may take to start a thread; 30 s by default. */
   readonly startTimeoutMs?: number;
+}
+
+/**
+ * What failed in a worker, from its error event. A script that does not load fires a plain Event, without a message: a
+ * thread worker's then read "a thread worker failed: undefined" (the second review of line WQA's D1 and D2, L3,
+ * 2026-11-19).
+ */
+function workerError(event: ErrorEvent | Event): string {
+  return ('message' in event && event.message) || 'its script did not load';
 }
 
 export class ThreadHostError extends Error {
@@ -79,7 +89,6 @@ const WAIT_SLICE_MS = 100;
 export class ThreadHost {
   private readonly slots: Slot[] = [];
   private nextTid = 1;
-  private faults: BroadcastChannel | undefined;
   /** The keeper of the shared memory (memory-keeper.ts): it ends with the thread workers. */
   private readonly keeper: Worker;
   private keeperReady = false;
@@ -93,23 +102,24 @@ export class ThreadHost {
       if (event.data?.type === 'ready') this.keeperReady = true;
     };
     this.keeper.onerror = (event) => {
-      // A script that does not load fires a plain Event, without a message.
-      this.keeperError = `the memory keeper failed: ${event.message || 'its script did not load'}`;
+      this.keeperError = `the memory keeper failed: ${workerError(event)}`;
     };
+    // The keeper's link is the host's first: on it the Gateway closes the links of the host before (gateway.ts, link).
     const keep: KeeperCommand = {
       type: 'keep',
       memory: options.memory,
       maximumPages: options.maximumPages,
-      channel: options.keeperChannel,
+      port: options.main.link('keeper'),
     };
-    this.keeper.postMessage(keep);
+    this.keeper.postMessage(keep, [keep.port]);
   }
 
   /**
    * Makes `count` thread workers (the threads of a search of `count` + 1 threads), if there
    * are fewer, and waits until `count` of them are ready: also those whose thread of the
    * previous search is still returning. The keeper must hold the memory too: without it, the
-   * Gateway could not have the memory grown before it ends the runtime during the search.
+   * Gateway could not have the memory grown before it ends the runtime during the search. A
+   * thread worker or the keeper is ready only once its link carries messages (link.ts).
    */
   async prepare(count: number): Promise<void> {
     // A runtime that the Gateway ends starts no thread worker (runtime.ts, load).
@@ -157,7 +167,7 @@ export class ThreadHost {
     slot.error = `thread ${tid} did not start`;
     this.options.use.endThread(slot.state, SLOT_FAILED);
     // The search cannot go on as the engine planned it; the main thread ends this runtime.
-    this.fault({ type: 'fault', tid, message: `The engine stopped: thread ${tid} did not start in time` });
+    this.options.main.fault({ type: 'fault', tid, message: `The engine stopped: thread ${tid} did not start in time` });
     return -1;
   };
 
@@ -201,14 +211,7 @@ export class ThreadHost {
     }
     for (const slot of this.slots.splice(0)) slot.worker.terminate();
     this.keeper.terminate();
-    this.faults?.close();
-    this.faults = undefined;
     return true;
-  }
-
-  private fault(message: ThreadFault): void {
-    this.faults ??= new BroadcastChannel(this.options.faultChannel);
-    this.faults.postMessage(message);
   }
 
   /**
@@ -239,19 +242,20 @@ export class ThreadHost {
       if (event.data?.type === 'failed') slot.error = event.data.message;
     };
     worker.onerror = (event) => {
-      slot.error = `a thread worker failed: ${event.message}`;
+      slot.error = `a thread worker failed: ${workerError(event)}`;
       // An error that ended a thread that ran counts it off.
       if (!this.options.use.endThread(state, SLOT_FAILED)) Atomics.store(state, 0, SLOT_FAILED);
     };
+    const faults = this.options.main.link('thread');
     const command: ThreadCommand = {
       type: 'prepare',
       module: this.options.module,
       memory: this.options.memory,
       slot: state.buffer as SharedArrayBuffer,
-      faultChannel: this.options.faultChannel,
+      faults,
       use: this.options.use.buffer,
     };
-    worker.postMessage(command);
+    worker.postMessage(command, [faults]);
     return slot;
   }
 }

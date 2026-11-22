@@ -10,20 +10,7 @@
 //! `LOSAT_X_BPGAP128=0` and `=2` (the sixteen-bit rows in 128 bits, the rows of WebAssembly and of
 //! x86-64 without AVX2, also in the set; `=2` runs them in place of the AVX2 rows).
 //!
-//! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:3777-3786,3955-3957
-//! ```c
-//!           /* use approximate gapped alignment if the highest scoring ungapped
-//!              alignment scores below the reduced cutoff */
-//!           if (init_hsp->ungapped_data && init_hsp->ungapped_data->score <
-//!               (Int4)(kRestrictedMult *
-//!                      hit_params->cutoffs[contxt].cutoff_score)) {
-//!
-//!               restricted_align_array[query_index] = TRUE;
-//! ...
-//!            if (restricted_alignment &&
-//!                gap_align->score < cutoff &&
-//!                gap_align->score >= restricted_cutoff) {
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3777-3786,3955-3957
 //! The blastp fixtures of `ci_fast_regressions.py` and `check_losat.py` never reach this path
 //! (`[X_STATS] BPGAP` counted no restricted alignment on any of them): it needs a query whose best
 //! ungapped alignment scores below 0.68 of the cutoff, and the cutoff grows with the search space.
@@ -42,22 +29,9 @@
 //! psiblast's first round of a FASTA query runs the same engine but aligns exactly: NCBI sets
 //! restricted alignment for blastp's program only, and psiblast's is `eBlastTypePsiBlast`.
 //!
-//! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_parameters.c:852-855
-//! ```c
-//!    if (program_number == eBlastTypeBlastp && gapped_calculation &&
-//!       options->expect_value <= RESTRICTED_ALIGNMENT_WORST_EVALUE) {
-//!       params->restricted_align = TRUE;
-//!    }
-//! ```
-//! NCBI reference (2.17.0): c++/src/algo/blast/api/psiblast_options.cpp:50 and
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:852-855
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:50 and
 //! c++/src/algo/blast/api/blast_aux.cpp:739-741
-//! ```c++
-//!     m_Opts->SetProgram(ePSIBlast);
-//! ...
-//!     case ePSIBlast:
-//!     case eDeltaBlast:
-//!         return eBlastTypePsiBlast;
-//! ```
 //! Its inputs are generated in the same way with another seed (series RG Q3d's set a2): five
 //! copies of each query, with 55 % to 64 % of the letters replaced and an insertion or deletion
 //! about every sixth letter, among 1,500 random subjects. With restricted alignment the hit of

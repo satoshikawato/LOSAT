@@ -143,3 +143,5 @@ conditions.
   baseline remains recorded in `docs/release/{blastn,blastp,tblastx}_v0.1.0_certification.md`
   and `docs/release/pure_rust_runtime_v0.1.0_certification.md`; it was not
   re-executed during this documentation-only stage.
+
+`fixtures/subject_code4.fna` (with `subject_code1.fna` and `subject_code32.fna`) was added with this stage (commit 55e656cdd, 2026-09-23): a 360-base subject that differs from `subject_code1.fna` at five codons, for genetic code 4. The origin of the letters of the Stage A subjects is not recorded.

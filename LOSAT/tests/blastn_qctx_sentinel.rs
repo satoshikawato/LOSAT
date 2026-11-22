@@ -2,15 +2,7 @@
 //! context, run by the binary of the test profile, which keeps debug assertions (M-32).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:286,294
-//! ```c
-//!     len = MIN(q_ext, s_ext) / COMPRESSION_RATIO;
-//!         Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2390-2391
-//! ```c
-//!     ASSERT(init_hsp->ungapped_data == NULL ||
-//!            init_hsp->ungapped_data->q_start >= 0);
-//! ```
 //! The left loop of the approximate extension runs over the concatenated query and reads the
 //! sentinel between contexts as bases, so a result kept below the reduced cutoff (and then
 //! rejected) may start in the previous context; NCBI checks the start against the context only

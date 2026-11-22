@@ -1,0 +1,75 @@
+# name<TAB>arguments (shell words, run in a copy of in/ with the generated gen/ beside it; "< file" = stdin). NCBI BLAST+ 2.17.0 makembindex, the official Linux x64 release (local oracle), 2026-11-21, ad-RG-D5-1 (line RG item D5a); frozen by remaining-gaps-20261112/D/d5/fixture/freeze.py.
+# Not frozen: -version and -version-full (LOSAT prints its own package, as dustmasker; tests/ncbi_toolkit_version.rs), -xmlhelp (tests/ncbi_toolkit_help.rs), -legacy false strides that NCBI does not finish (src/makembindex/tests.rs).
+help	-help
+h	-h
+s1_default	-input s1db/s1
+s1_n8_stat_idmap	-input s1db/s1 -nmer 8 -stat st.txt -idmap true
+s1_show	-input s1db/s1 -show_filters
+quiet	-input s1db/s1 -verbosity quiet -nmer 8
+nmer_hex	-input s1db/s1 -nmer 0xa
+legacy_stride	-input s1db/s1 -stride 3 -ws_hint 30 -nmer 8
+out_warn	-input s1db/s1 -output x -nmer 8
+big_n8	-input gen/bigdb/big -nmer 8
+big_n8_new_s3w20	-input gen/bigdb/big -legacy false -stride 3 -ws_hint 20 -nmer 8
+big_n8_new_s16	-input gen/bigdb/big -legacy F -stride 16 -nmer 8
+big_n8_new_s21	-input gen/bigdb/big -legacy no -stride 21 -nmer 8
+big_n8_new_w100	-input gen/bigdb/big -legacy false -ws_hint 100 -nmer 8
+big_n8_new_wlow	-input gen/bigdb/big -legacy false -ws_hint 3 -nmer 8
+big_n8_vol1	-input gen/bigdb/big -volsize 1 -nmer 8
+mbig_n8_mask	-input gen/mbigdb/big -db_mask 100 -nmer 8
+mbig_show	-input gen/mbigdb/big -show_filters
+many_n8_vol1	-input gen/manydb/many -volsize 1 -nmer 8
+many_n10_vol2_new_idmap	-input gen/manydb/many -volsize 2 -legacy false -nmer 10 -idmap true
+mv_n8	-input mvdb/mv -nmer 8
+alias_n8	-input al -nmer 8 -idmap true
+alias_order_n8	-input al2 -nmer 8
+alias_extension_order_n8	-input al3 -nmer 8
+ids_idmap	-input idsdb/ids -idmap true -nmer 8
+mdb_mask11	-input mdb/m -db_mask 11 -nmer 9
+mdb_mask_dust	-input mdb/m -db_mask dust
+mdb_mask5	-input mdb/m -db_mask 5
+mdb_show	-input mdb/m -show_filters
+old_fa_big	-old_style_index true -input gen/big.fa -output o -nmer 8
+old_fa_many_vol1_idmap	-old_style_index true -input gen/many.fa -output o -volsize 1 -idmap 1 -nmer 8
+old_fa_stdin	-old_style_index true -output o -nmer 8 < s1.fa
+old_fa_crlf	-old_style_index true -input crlf.fa -output o -idmap true -nmer 8
+old_fa_empty	-old_style_index true -input empty.fa -output o -idmap true -nmer 8
+old_fa_m	-old_style_index true -input m.fa -output o -nmer 9
+old_fa_new	-old_style_index true -input s1.fa -output o -legacy false -stride 4 -nmer 8
+old_fa_stride1_rollback	-old_style_index true -input spill/spill.fa -output v -legacy false -stride 1 -ws_hint 10 -nmer 10 -volsize 12
+old_fa_show	-old_style_index true -input s1.fa -show_filters -nmer 8
+old_db	-old_style_index true -iformat blastdb -input gen/bigdb/big -output o -nmer 8
+old_db_mask11	-old_style_index true -iformat blastdb -input mdb/m -output o -db_mask 11 -nmer 8
+old_db_mask_dust	-old_style_index true -iformat blastdb -input mdb/m -output o -db_mask dust
+old_db_show	-old_style_index true -iformat blastdb -input mdb/m -show_filters
+old_noout	-old_style_index true -input s1.fa
+old_nofa	-old_style_index true -input nosuch.fa -output o
+old_fa_mask	-old_style_index true -input s1.fa -output o -db_mask 11
+old_db_noinput	-old_style_index true -iformat blastdb -output o
+fasta_new	-iformat fasta -input s1.fa
+noinput
+nodb	-input nosuch
+mask_noin	-db_mask 11
+show_out	-input s1db/s1 -show_filters -output x
+badverb	-input s1db/s1 -verbosity loud
+legacy_xyz	-input s1db/s1 -legacy xyz
+nmer7	-input s1db/s1 -nmer 7
+nmer_abc	-input s1db/s1 -nmer abc
+vol0	-input s1db/s1 -volsize 0
+legacy_missing	-legacy
+positional	-show_filters x
+titles_fa_idmap	-old_style_index true -input titles.fa -output o -idmap true -nmer 8
+titles_db_idmap	-input titlesdb/t -idmap true -nmer 8
+titles_pdb_idmap	-input titlespdb/p -idmap true -nmer 8
+tx_idmap	-input txdb/tx -idmap true -nmer 8
+# -idmap of database sequences with a tax id (in/ttdb/tt, -parse_seqids -taxid_map in/tt_taxid.txt): the first word of sequence::GetTitle, an empty title made from the scientific name in the taxonomy database (BLASTDB=taxt5, a copy of ../seqdb/taxdb/t5), else "No definition line found" (line RG item D5a-t, 2026-11-21, ad-RG-D5-3; local official release).
+tt_idmap	-input ttdb/tt -idmap true -nmer 8
+tt_taxdb_idmap	BLASTDB=taxt5 -input ttdb/tt -idmap true -nmer 8
+oidlist_new_n8	-input ol -nmer 8
+oidlist_new_missl_n8	-input olmissl -nmer 8
+oidlist_new_miss_n8	-input olmiss -nmer 8
+oidlist_old_n8	-old_style_index true -iformat blastdb -input ol -output o -nmer 8
+oidlist_old_missl_n8	-old_style_index true -iformat blastdb -input olmissl -output o -nmer 8
+oidlist_old_miss_n8	-old_style_index true -iformat blastdb -input olmiss -output o -nmer 8
+# OID_MASK_TYPE (line RG, series D, D1b-2, 2026-11-21): in/omall.nal keeps every OID of in/omdb/omn (a copy of tests/db_search/oidmask/omn's volumes, which have predicted RefSeq ids, with its .ndb) under the key's bit 0. The new style indexes the volumes and reads no alias key; the old style reads the null sequence of an OID left without a line, which LOSAT refuses (src/makembindex/tests.rs).
+oidmask_new_n8	-input omall -nmer 8

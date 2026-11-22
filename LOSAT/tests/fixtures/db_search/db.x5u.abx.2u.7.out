@@ -1,0 +1,17 @@
+# BLASTP 2.17.0+
+# Query: BDT63085.1 hypothetical protein [Sicyonia whispovirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT63085.1	BDT63516.1	35.294	51	31	1	50	100	157	205	1.8	28.5
+# BLASTP 2.17.0+
+# Query: BDT63093.1 wsv321-like protein [Sicyonia whispovirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT63093.1	BDT63543.1	54.430	79	36	0	1	79	1	79	7.00e-19	85.5
+# BLASTP 2.17.0+
+# Query: allx 50 X
+# Database: tests/db_search/paja
+# 0 hits found
+# BLAST processed 3 queries

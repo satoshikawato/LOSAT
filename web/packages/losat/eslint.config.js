@@ -30,4 +30,20 @@ export default tseslint.config(
   restrict(['src/domain/**'], ['ports', 'infra']),
   restrict(['src/ports/**'], ['infra']),
   restrict(['src/infra/**'], []),
+  // Firefox refuses `new BroadcastChannel()` where the site's data is blocked, on the page and in every worker, and every
+  // search failed (line WQA's sweep, D8, 2026-11-20): the host links its workers with MessageChannels (link.ts). Only the
+  // test hooks of test builds open one.
+  {
+    files: ['src/**'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "NewExpression[callee.name='BroadcastChannel']:not(IfStatement[test.name='__LOSAT_TEST_HOOKS__'] *, ConditionalExpression[test.name='__LOSAT_TEST_HOOKS__'] *)",
+          message: 'The browser refuses a BroadcastChannel where the site\'s data is blocked: link workers with a MessageChannel (src/infra/engine-worker/link.ts).',
+        },
+      ],
+    },
+  },
 );

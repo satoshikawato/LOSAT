@@ -78,7 +78,7 @@ fn entries(list: &[(&str, bool)], oid: u32) -> Vec<(String, u32, bool)> {
         .collect()
 }
 
-// The keys of each kind of Seq-id (writedb_lmdb.cpp:120-196, quoted at `insert_seq_id`), as
+// The keys of each kind of Seq-id (writedb_lmdb.cpp:120-196, cited at `insert_seq_id`), as
 // makeblastdb's acc2oid keys and `.pos` ids of x_keys_all show them: `saveToOidList` is true
 // for the ids that `.pos` lists.
 #[test]

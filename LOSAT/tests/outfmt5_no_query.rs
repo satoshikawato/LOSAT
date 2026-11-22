@@ -2,10 +2,6 @@
 //! input as the query): NCBI writes the epilog's end of line alone, one newline.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
-//! ```c++
-//!     if (m_FormatType == CFormattingArgs::eXml) {
-//!         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
-//! ```
 //! (`m_SerialXmlEnd` is empty until a query is formatted; frozen NCBI 2.17.0 output: `\n`.)
 
 use std::path::Path;

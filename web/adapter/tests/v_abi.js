@@ -7,19 +7,42 @@
 //
 // One subject is registered once per program and reused by consecutive runs with other
 // queries and options (plan §4.6). The serial reactor runs with 1 thread, the threaded
-// reactor with 1, 2 and 4 (the host appends -num_threads, docs/web/abi_v2.md §7).
+// reactor with 1, 2 and 4 (the host appends -num_threads, docs/web/abi_v2.md §7). A search whose
+// *start* JSON says `register_inputs` (-parse_deflines) reads its query and subject together for
+// each run's argv (`losat_web2_register_inputs`, abi_v2.md §4; line WQA's sweep, D7, 2026-11-19),
+// and the IDs that the response shows for the records are the first two columns of outfmt 6.
 //
 // The searches come from web/adapter/tools/v_abi_cases.py; where a frozen SHA-256
 // exists (Gate A, the Stage G matrix, NCBI's fixtures) the match is recorded as well, for a
 // search with `"frozen_prefix"` after the frozen path prefix is put back (`toFrozen`). A
-// search marked `"expect": "failure"` must fail in the CLI and in the ABI with the same
-// error. A search with `"outfmt"` (a format besides 0, 6 and 7, or 6 or 7 with fields) runs
+// search marked `"expect": "failure"` must fail in the CLI's run of the argv's own -outfmt (its
+// `"outfmt"`, else outfmt 0) and in the ABI with the same error, and stream 3 then the error must
+// be that run's standard error, byte for byte (abi_v2.md §5, §7; line WQA's sweep, D3 review,
+// 2026-11-19). The CLI's runs of the other formats may complete: in a run of two searches
+// (`-num_descriptions`, `-num_alignments`) the outcome is that of the argv's own search, and the
+// other writes formats that the argv does not ask for (§7). A search that completes completes in
+// the CLI's run of its own -outfmt, and the CLI's runs of its other formats may fail, whose streams
+// are then empty (the run discards them, stream 9); its stream 3 is the CLI's standard error for
+// the argv followed by what the other formats' standard error adds (§5, `nativeOutputs`; line
+// WQA's sweep, D3 review r2, 2026-11-19). A search with `"outfmt"` 0, 6 or 7 alone runs with that
+// -outfmt, which is one of the program's formats; one with another `"outfmt"` (a format besides
+// 0, 6 and 7, or 6 or 7 with fields) runs
 // with that -outfmt: its output, stream 4, is compared with the CLI's run of the same argv,
-// whose standard error is then stream 3 (abi_v2.md §5, §7); SAM's (`"sam": true`) without the
+// whose standard error then starts stream 3 (abi_v2.md §5, §7); SAM's (`"sam": true`) without the
 // CL tag of its @PG line, where each writes its own command line. The output of outfmt 13 and 14
 // (`"files": true`) is a ZIP archive, whose entries are compared with the files of the CLI's run
 // with `-out results`: the side files `results_<n>.json|xml`, and the master file as
 // `results.json|xml`.
+//
+// A search with `"fails_alone"` lists the formats of 0, 6 and 7 whose CLI run of the argv fails
+// while the argv's own format runs (a record that is both a query and a subject under
+// -parse_deflines and has masks: LOSAT refuses outfmt 0 alone; line WQA's sweep, D7, 2026-11-19),
+// and their CLI runs must fail. As for every format whose CLI run fails in a run that completes, the
+// run writes no stream for them, stream 3 adds their error after the warnings (`nativeOutputs`; the
+// adapter writes a refusal of a format that failed alone, abi_v2.md §7), and the run's signals of
+// stream 9 name them, each with the place of its error, which holds it (abi_v2.md §5). Its `"outfmt"` may be 6 or 7 (the argv's own
+// format then is that stream, and no stream 4 is written). Every run that succeeds says once where its messages go
+// (stream 10): stream 3 without -logfile (line WQA's sweep, D7, 2026-11-20).
 //
 // A BLASTN search with `-window_masker_db` names a counts file: the host registers that file under
 // the argv's value (`file_begin`, `file_chunk`, `file_end`; abi_v2.md §4) before the run, and keeps
@@ -28,6 +51,11 @@
 // cannot open. A search with `"window_masker_path"` (BLASTN `-window_masker_taxid`) runs the CLI
 // with that WINDOW_MASKER_PATH, and the host registers the directory's counts files under LOSAT
 // Web's directory (`registerTaxidCounts`).
+//
+// The words with which the command line prints its help or its version (`checkPrints`; line WQA's D14, 2026-11-20) run
+// for every program and word with the host's -num_threads: *start* says what the run prints, `validate` accepts the argv,
+// and `run`, given no inputs (handles 0), writes the CLI's standard output on stream 11 and its standard error on stream
+// 3, and no output format; the words around them, the registry file and the file of -logfile as the CLI reads them.
 //
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -49,19 +77,35 @@ const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifa
 const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7], blastx: [0, 6, 7] };
 // The stream of the output of the argv's -outfmt.
 const CUSTOM_STREAM = 4;
+// The signals that discard what the host received of an output stream (abi_v2.md §5).
+const DISCARD_STREAM = 9;
 const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx", "blastx"]);
 
 function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
+// The SHA-256 of LOSAT's output read back in NCBI's words, to compare with a frozen hash of NCBI's
+// bytes: LOSAT states its own version and error prefixes (AGENTS.md rule 8), which
+// LOSAT/tests/losat_wording.py `hash-form` (`ncbi_hash_form`) reads back exactly. An output that
+// still writes NCBI's words has no such form and matches no frozen hash.
+function ncbiHash(bytes) {
+  const read = require("node:child_process").spawnSync("python3", ["-I", path.join(ROOT, "LOSAT/tests/losat_wording.py"), "hash-form", "-"],
+                                                        { input: bytes, maxBuffer: 1 << 30 });
+  if (read.error) throw read.error;
+  return read.status === 0 ? sha256(read.stdout) : `ncbi-words:${read.stderr}`;
+}
+
 // A SAM document without the CL tag of its @PG line (LOSAT/tests/db_search_fixtures.py
-// `strip_sam_cl`: from the `\tCL:` after `\n@PG\tID:0\tVN:2.17.0+` up to the next `\tPN:blastn\n`).
+// `strip_sam_cl`: from the `\tCL:` after the version of `\n@PG\tID:0\tVN:<version>` up to the
+// next `\tPN:blastn\n`).
 function withoutCl(document) {
-  const head = Buffer.from("\n@PG\tID:0\tVN:2.17.0+\tCL:");
+  const head = Buffer.from("\n@PG\tID:0\tVN:");
   const at = document.indexOf(head);
   if (at < 0) return document;
-  const start = at + head.length - "\tCL:".length;
+  const tab = document.indexOf(Buffer.from("\t"), at + head.length);
+  if (tab < 0 || !document.subarray(tab, tab + 4).equals(Buffer.from("\tCL:"))) return document;
+  const start = tab;
   const end = document.indexOf(Buffer.from("\tPN:blastn\n"), start);
   if (end < 0) return document;
   return Buffer.concat([document.subarray(0, start), document.subarray(end)]);
@@ -143,13 +187,11 @@ function nativeFiles(directory, outfmt) {
   for (let n = 1; fs.existsSync(path.join(directory, `results_${n}.${extension}`)); n++) {
     files.push([`results_${n}.${extension}`, fs.readFileSync(path.join(directory, `results_${n}.${extension}`))]);
   }
-  files.push([`results.${extension}`, fs.readFileSync(path.join(directory, "results"))]);
+  // A run that failed leaves the master file (`results`) empty, after the side files written before the error.
+  if (fs.existsSync(path.join(directory, "results"))) files.push([`results.${extension}`, fs.readFileSync(path.join(directory, "results"))]);
   return files;
 }
 
-// The -outfmt numbers whose warnings are those of outfmt 6 (the tabular writer's): the structured
-// formats do not write the queries' warnings (`ReportFormat::writes_query_warnings`).
-const TABULAR = new Set([6, 7, 10, 20]);
 
 function parseArgs(argv) {
   const options = {};
@@ -175,8 +217,11 @@ class Reactor {
 
   // Pointers and lengths are unsigned; JavaScript receives an i32 as a signed number
   // (docs/web/abi_v2.md §6), so a pointer of 2 GiB or more arrives negative.
+  // A signal of stream 9 discards what the host received of the stream that it names (§5), as the
+  // application discards it: the stream of a run is then empty. The signals are kept on stream 9.
   emit(stream, ptr, len) {
     const chunk = Buffer.from(new Uint8Array(this.memory().buffer, ptr >>> 0, len >>> 0));
+    if (stream === DISCARD_STREAM) this.streams.delete(chunk.readUInt32LE(0));
     if (!this.streams.has(stream)) this.streams.set(stream, []);
     this.streams.get(stream).push(chunk);
   }
@@ -240,6 +285,23 @@ function registerFile(reactor, name, file, chunkSize = 1 << 20) {
   assert.equal(response.size, bytes.length);
   assert.equal(response.sha256, sha256(bytes), `${name}: the SHA-256 of the bytes given`);
   return { handle: begun.status, response };
+}
+
+// The registry file of a search's -conffile (`start`'s `conffile`), which the host registers as kind 2
+// before it validates and registers the inputs (abi_v2.md §4): the file of that name in the search's
+// directory, read as the CLI reads it; none where there is no such file, whose run fails as the CLI's
+// (`Registry file "x.ini" not found`). Returns its handle, or null.
+function registerRegistry(reactor, search, name) {
+  const file = path.resolve(search.cwd, name);
+  if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) return null;
+  const bytes = fs.readFileSync(file);
+  const begun = reactor.call("losat_web2_file_begin", 2, name, bytes.length);
+  assert.ok(begun.status > 0, `file_begin ${name}: ${begun.error}`);
+  assert.equal(reactor.call("losat_web2_file_chunk", begun.status, bytes).status, 0);
+  const ended = reactor.call("losat_web2_file_end", begun.status);
+  assert.equal(ended.status, 0, `file_end ${name}: ${ended.error}`);
+  assert.equal(JSON.parse(ended.streams.get(2).toString()).kind, "registry");
+  return begun.status;
 }
 
 // The counts files of the searches: the argv's `-window_masker_db` value -> its handle and path.
@@ -335,70 +397,195 @@ function nativeEnv(search) {
   return env;
 }
 
-// The CLI's outputs of a search, one run per format with -out. A search with
-// `"expect": "failure"` fails in the CLI (exit 3 or 1), whose files keep what was written
-// before the failure (the outfmt 0 prolog before a first query batch fails).
+// The hit list size that the CLI derives for the output format `number` from the options of `argv`
+// (`report_counts`, NCBI blast_args.cpp:2894-2973): the formats of a run with the same size are one
+// search (abi_v2.md §7).
+function hitListSize(argv, number) {
+  const value = (flag) => {
+    const at = argv.lastIndexOf(flag);
+    return at < 0 ? undefined : Number(argv[at + 1]);
+  };
+  const [max, descriptions, alignments] = ["-max_target_seqs", "-num_descriptions", "-num_alignments"].map(value);
+  if (max !== undefined) return max;
+  if (number > 4) return alignments ?? 500;
+  return descriptions === undefined && alignments === undefined ? 500 : Math.max(descriptions ?? 500, alignments ?? 250);
+}
+
+// The lines of `text` (each with its line end) that it has more times than `held` (line -> copies),
+// in order; `held` then holds them (the adapter's `Diagnostics`). The adapter compares the error
+// of a format that failed alone as one text (`Diagnostics::error`), and this compares its lines
+// too: the two agree while no line of an error is a line that stream 3 already holds from another
+// text. NCBI's exception reports and posts end with an empty line, so a case where two such texts
+// meet (BLASTX's HSPs of length 0 with -outfmt 5: the post of the XML and the refusals of 6, 7 and
+// 0, the adapter's test `formats_that_stop_after_a_query_warning_add_it_once`) is not one for this
+// harness (reviews r2 L2 and r3 L5 of 2026-11-20).
+function linesAfter(held, text) {
+  const copies = new Map();
+  let added = "";
+  for (const line of text.split(/(?<=\n)/)) {
+    if (line === "") continue;
+    const copy = (copies.get(line) || 0) + 1;
+    copies.set(line, copy);
+    if (copy > (held.get(line) || 0)) added += line;
+  }
+  for (const [line, copy] of copies) held.set(line, Math.max(held.get(line) || 0, copy));
+  return added;
+}
+
+// The formats `formats` in the order of a search's formats after its first: the tabular ones, then
+// those up to 4 (abi_v2.md §7).
+function searchOrder(formats) {
+  return [...formats.filter((format) => format > 4), ...formats.filter((format) => format <= 4)];
+}
+
+// The CLI's outputs of a search, one run per format with -out. A search with `"expect": "failure"`
+// fails in the CLI's run of the argv's own -outfmt (exit 3 or 1), whose files keep what was
+// written before the failure (the outfmt 0 prolog before a first query batch fails); the runs of
+// its other formats may complete (a run of two searches, abi_v2.md §7). A search that completes
+// completes in the CLI's run of its own -outfmt, and the runs of its other formats may fail (the
+// other search of a run of two searches, a format that fails alone, §7), whose outputs the run
+// then discards: they are empty (line WQA's sweep, D3 review r2, 2026-11-19). `own` is the CLI's
+// standard error for the run's argv: that of the search's -outfmt, else that of outfmt 0.
+// `stderr` is stream 3 of a run that completes (§5): `own`, then the lines of the other formats'
+// standard error that it does not hold, each line as many times as one of them has it more often
+// than stream 3 holds it, the formats of the argv's own search first (the tabular ones, then those
+// up to 4). A structured -outfmt's run does not write the queries' warnings, which the other
+// formats' runs add (line WQA's sweep, D3 review r3 M2, 2026-11-19: this harness kept only the
+// formatting handler's lines of the other formats there, and so took their loss), as they add the
+// error of a format that fails alone (LOSAT's refusal of outfmt 0 of a record that is both a query
+// and a subject and has masks, line WQA's sweep, D7, 2026-11-19).
 function nativeOutputs(native, search, scratch) {
   const outputs = new Map();
-  let stderr = null, status = null;
-  const stderrs = new Map();
+  const stderrs = new Map(), failed = new Map();
+  const failure = search.expect === "failure";
+  // The argv's own format: 0, 6 or 7 alone is one of the program's formats, any other -outfmt is
+  // the output of its own (`null`).
+  const outfmt = search.outfmt === undefined ? "0" : search.outfmt.trim();
+  const ownFormat = /^[067]$/.test(outfmt) ? Number(outfmt) : null;
+  // The formats that the search says fail alone (`"fails_alone"`), whose CLI run must fail.
+  const alone = new Set(search.fails_alone || []);
+  let status = null;
   for (const format of FORMATS[search.program]) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
     const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, env: nativeEnv(search), maxBuffer: 1 << 30 });
-    const failed = result.status !== 0;
-    if (failed !== (search.expect === "failure")) {
-      throw new Error(`native ${argv.join(" ")} ${failed ? "failed" : "succeeded"} (exit ${result.status}): ${result.error ?? result.stderr}`);
+    const fails = result.status !== 0;
+    if (format === ownFormat) {
+      if (fails !== failure) {
+        throw new Error(`native ${argv.join(" ")} ${fails ? "failed" : "succeeded"} (exit ${result.status}): ${result.error ?? result.stderr}`);
+      }
+      status = result.status;
+    } else if (alone.has(format) && !fails) {
+      throw new Error(`native ${argv.join(" ")} succeeded, where "fails_alone" says that it fails`);
     }
-    outputs.set(format, fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0));
+    const file = fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0);
+    outputs.set(format, fails && !failure ? Buffer.alloc(0) : file);
     fs.rmSync(out, { force: true });
     stderrs.set(format, result.stderr);
-    if (stderr === null) [stderr, status] = [result.stderr, result.status];
+    failed.set(format, fails);
   }
-  // The diagnostics are the CLI's standard error for the tabular formats (abi_v2.md §5):
-  // outfmt 6 and 7 write the same lines, and outfmt 0 the same without the formatting
-  // handler's lines, which -num_descriptions and -num_alignments can make differ, and which
-  // -line_length, -sorthits and -sorthsps give for formats above 4 (other than 0) only.
-  const handler = /^Warning: \[\w+\] (The parameter -num_descriptions is ignored|Examining 5 or more matches|The parameter -line_length is not applicable|The parameter -sorthits is ignored|The parameter -sorthsps is ignored)/;
-  const lines = (format) => stderrs.get(format).toString().split("\n");
-  const withoutHandler = (format) => lines(format).filter((line) => !handler.test(line));
-  if (stderrs.has(6)) {
-    stderr = stderrs.get(6);
-    if (stderrs.has(7)) assert.equal(sha256(stderrs.get(7)), sha256(stderr), "outfmt 7 writes the warnings of outfmt 6");
-    for (const format of FORMATS[search.program].filter((f) => f !== 6)) {
-      assert.deepEqual(withoutHandler(format), withoutHandler(6), `outfmt ${format}: the same warnings but the handler's`);
-      for (const line of lines(format)) assert.ok(lines(6).includes(line), `outfmt ${format}: ${line} is in the warnings of outfmt 6`);
-    }
-  }
-  if (search.outfmt !== undefined) {
+  let own = ownFormat === null ? null : stderrs.get(ownFormat);
+  if (ownFormat === null) {
     const directory = fs.mkdtempSync(path.join(scratch, "native.custom."));
     const out = path.join(directory, search.files ? "results" : "native.custom.out");
     const argv = [...search.argv, "-outfmt", search.outfmt, "-num_threads", "1", "-out", out];
     const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, env: nativeEnv(search), maxBuffer: 1 << 30 });
-    if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed (exit ${result.status}): ${result.error ?? result.stderr}`);
-    outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : fs.readFileSync(out));
-    fs.rmSync(directory, { recursive: true, force: true });
-    // The warnings of outfmt 6, and those of the fields' writer (NCBI's taxdb warning).
-    if (TABULAR.has(Number(search.outfmt.trim().split(" ")[0]))) {
-      for (const line of lines(6)) assert.ok(result.stderr.toString().split("\n").includes(line), `-outfmt ${search.outfmt}: ${line} is in its warnings`);
+    if ((result.status !== 0) !== failure) {
+      throw new Error(`native ${argv.join(" ")} ${failure ? "succeeded" : "failed"} (exit ${result.status}): ${result.error ?? result.stderr}`);
     }
-    stderr = result.stderr;
+    // The file of a CLI run that failed holds what it wrote before the error (line WQA's sweep, D15, 2026-11-20).
+    if (!failure || fs.existsSync(out) || search.files) {
+      outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : (fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0)));
+    }
+    fs.rmSync(directory, { recursive: true, force: true });
+    [own, status] = [result.stderr, result.status];
   }
-  return { outputs, stderr, status };
+  let stderr = null;
+  // The streams of the formats whose CLI run fails while the run completes, which the run's signals
+  // of stream 9 name (abi_v2.md §5): the other search's, or a format's that fails alone (§7).
+  let failedStreams = [];
+  if (!failure) {
+    const number = parseInt(outfmt, 10);
+    const size = hitListSize(search.argv, number);
+    const others = FORMATS[search.program].filter((format) => format !== ownFormat);
+    const same = searchOrder(others.filter((format) => hitListSize(search.argv, format) === size));
+    const other = searchOrder(others.filter((format) => hitListSize(search.argv, format) !== size));
+    const held = new Map();
+    // The CLI's standard error as bytes (latin1 keeps each byte): a reader warning may hold bytes that are not
+    // UTF-8 (`Unknown gap-type: caf\xe9`, a `>?` gap line's mods; line WQA's D13, 2026-11-20).
+    let text = linesAfter(held, own.toString("latin1"));
+    for (const format of [...same, ...other]) text += linesAfter(held, stderrs.get(format).toString("latin1"));
+    stderr = Buffer.from(text, "latin1");
+    failedStreams = others.filter((format) => failed.get(format)).sort((a, b) => a - b);
+  }
+  return { outputs, stderr, status, own, failedStreams };
+}
+
+// Whether the search's `"outfmt"` writes stream 4: a format besides 0, 6 and 7, or 6 or 7 with
+// fields (an argv's own plain 0, 6 or 7 is that stream).
+function customStream(search) {
+  return search.outfmt !== undefined && !/^\s*[067]\s*$/.test(search.outfmt);
+}
+
+// An error of `run` or `validate` as the CLI writes it (abi_v2.md §4, §5): NCBI's messages as they
+// are (with their line end), but for those of the application start, which come without their
+// last line end, and which begin with NCBI's severity and error code (`Critical: (106.23)`,
+// `Error: (CRegistryException::eSection)`); LOSAT's own errors after `Error: ` and with a line end
+// (line WQA's sweep, D3 review r2 L2, 2026-11-19).
+function cliError(error) {
+  if (error.endsWith("\n")) return error;
+  if (/^(Critical|Error): \(/.test(error)) return `${error}\n`;
+  return `Error: ${error}\n`;
 }
 
 // A run that fails as the CLI fails: the CLI's error is the last message of its standard
-// error (the warnings before it go to stream 3, which a failed run does not send), and
-// whatever the run sent of an output before it failed is the start of the CLI's file. A search with
-// `"prolog": false` fails before any output (an error of the options or of their files), so the
-// CLI's files are empty; the others fail after the CLI wrote the outfmt 0 prolog.
+// error, and the warnings that the CLI writes before it are stream 3, which a failed run sends
+// (abi_v2.md §5): stream 3 then the error are the CLI's standard error for the run's argv, byte
+// for byte (line WQA's sweep, D3, 2026-11-19), also in a run of two searches, whose outcome is
+// that of the argv's own search (§7). The output of the argv's own -outfmt (stream 4 for one of its
+// own, else the stream of its format, 0 without one) is exactly the CLI's file for the argv: what
+// it wrote before the error (version 7; line WQA's sweep, D15, 2026-11-20). Every other output of
+// the run is dropped, each with a signal of stream 9 whose place is 0xFFFFFFFE, the error that ended
+// the run (the run failed before its search made them: none, and then they are empty). A search with
+// `"prolog": false` fails before any output (an error of the options or of their files), so the CLI's
+// outfmt 0 file is empty; the others fail after the CLI wrote the outfmt 0 prolog, or the CLI's
+// outfmt 0 completes (the other search of a run whose own -outfmt is a tabular one).
 function checkFailure(run, expected, search, label) {
   const program = search.program;
   assert.equal(run.status, -1, `${label}: the run fails as the CLI (exit ${expected.status})`);
-  assert.ok(run.error.length > 0 && expected.stderr.toString().endsWith(run.error), `${label}: the CLI's error (${run.error})`);
-  for (const format of FORMATS[program]) {
-    const sent = run.streams.get(format) || Buffer.alloc(0);
-    assert.ok(expected.outputs.get(format).subarray(0, sent.length).equals(sent), `${label}: outfmt ${format} before the failure`);
+  assert.ok(run.error.length > 0 && expected.own.toString().endsWith(cliError(run.error)), `${label}: the CLI's error (${run.error})`);
+  const diagnostics = run.streams.get(3) || Buffer.alloc(0);
+  assert.equal(diagnostics.toString() + cliError(run.error), expected.own.toString(),
+               `${label}: stream 3 and the error are the CLI's standard error`);
+  const outfmt = search.outfmt === undefined ? "0" : search.outfmt.trim();
+  const own = customStream(search) ? CUSTOM_STREAM : Number(outfmt);
+  const sent = run.streams.get(own) || Buffer.alloc(0);
+  const cli = expected.outputs.get(own);
+  if (search.files) {
+    // The side files written before the error and the master file as the CLI leaves it (empty), with a
+    // central directory (D15 review round 2, 2026-11-21).
+    const entries = sent.length === 0 ? [] : storedZipEntries(sent);
+    assert.deepEqual(entries.map(([name]) => name), cli.map(([name]) => name), `${label}: -outfmt ${search.outfmt} files before the failure`);
+    for (const [index, [name, bytes]] of entries.entries()) assert.equal(sha256(bytes), sha256(cli[index][1]), `${label}: ${name}`);
+  } else if (search.sam) {
+    assert.equal(sha256(withoutCl(sent)), sha256(withoutCl(cli)), `${label}: -outfmt ${search.outfmt} before the failure`);
+  } else {
+    assert.equal(sha256(sent), sha256(cli), `${label}: the bytes of ${customStream(search) ? `-outfmt ${search.outfmt}` : `outfmt ${own}`} are the CLI's file (${sent.length} of ${cli.length} bytes)`);
+  }
+  const signals = run.streams.get(9) || Buffer.alloc(0);
+  assert.equal(signals.length % 8, 0, `${label}: signals of 8 bytes (stream 9)`);
+  const dropped = Array.from({ length: signals.length / 8 }, (_, i) => {
+    assert.equal(signals.readUInt32LE(8 * i + 4), 0xfffffffe, `${label}: the place of the error of a dropped output is the run's`);
+    return signals.readUInt32LE(8 * i);
+  }).sort((a, b) => a - b);
+  const others = FORMATS[program].filter((format) => format !== own);
+  if (dropped.length > 0) assert.deepEqual(dropped, others, `${label}: the outputs that the failed run drops (stream 9)`);
+  for (const format of others) assert.ok(!run.streams.has(format), `${label}: nothing of the dropped outfmt ${format}`);
+  assert.ok(!run.streams.has(1), `${label}: no HSP records`);
+  // `"sends"`: the formats whose report of the batches before the failure is over the adapter's chunk (1 MiB), which the
+  // run sends before it fails (review L3, 2026-11-20).
+  for (const format of search.sends || []) {
+    assert.ok((run.streams.get(format) || Buffer.alloc(0)).length > 0, `${label}: outfmt ${format} sent before the failure`);
   }
   if (search.prolog === false) {
     assert.equal(expected.outputs.get(0).length, 0, `${label}: the CLI writes no outfmt 0 before the failure`);
@@ -407,13 +594,17 @@ function checkFailure(run, expected, search, label) {
   }
 }
 
-function checkHits(streams, program, label, queryIds) {
+function checkHits(streams, program, label, queryIds, shownIds) {
   const records = (streams.get(1) || Buffer.alloc(0)).toString().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   // A stream without bytes (a search without hits) is never emitted.
   const out6 = streams.get(6) || Buffer.alloc(0), out0 = streams.get(0) || Buffer.alloc(0);
   const rows = out6.toString().split("\n").filter(Boolean);
   assert.equal(records.length, rows.length, `${label}: one record per outfmt 6 row`);
   const ranks = new Map();
+  // BLASTN's matrix-only scoring (`-task rmblastn`, reward 0 and penalty 0) opens its report with
+  // RMBLASTN and shows the raw score alone (` Score = 27204`; blast_format.cpp:168-177,
+  // showalign.cpp:3586-3591,3605); the other searches show `<bits> bits (<raw>),`.
+  const rawScoreOnly = out0.subarray(0, 9).toString() === "RMBLASTN ";
   records.forEach((record, index) => {
     assert.equal(record.index, index, `${label}: index`);
     const rank = ranks.get(record.q_idx) || 0;
@@ -430,6 +621,10 @@ function checkHits(streams, program, label, queryIds) {
     if (index > 0) assert.ok(record.q_idx >= records[index - 1].q_idx, `${label}: q_idx order at HSP ${index}`);
     const id = queryIds[record.q_idx];
     if (/^[A-Za-z_]+[0-9]+(\.[0-9]+)?$/.test(id)) assert.equal(fields[0], id, `${label}: q_idx of HSP ${index}`);
+    if (shownIds) {
+      assert.equal(fields[0], shownIds.query[record.q_idx], `${label}: the shown query ID of HSP ${index}`);
+      assert.equal(fields[1], shownIds.subject[record.s_idx], `${label}: the shown subject ID of HSP ${index}`);
+    }
     // A subject beyond the alignments that outfmt 0 shows (for example BLASTN's 250) has
     // no section and no heading.
     if (record.out0 === null) {
@@ -437,10 +632,21 @@ function checkHits(streams, program, label, queryIds) {
       return;
     }
     const section = out0.subarray(record.out0[0], record.out0[1]).toString();
+    // A subject whose title NCBI cannot decode (pd.undec.*, under -parse_deflines) has an empty
+    // heading, and NCBI's line stands in place of each alignment (showalign.cpp:1976-1981;
+    // LOSAT's report/pairwise.rs write_skipped_alignment; line WQA's sweep, D7, 2026-11-19).
+    if (/^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped\n$/.test(section)) {
+      assert.equal(record.out0_subject[0], record.out0_subject[1], `${label}: the empty heading of HSP ${index}`);
+      assert.ok(record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
+      return;
+    }
     assert.ok(section.startsWith(" Score ="), `${label}: out0 of HSP ${index}`);
-    assert.ok(section.includes(`bits (${record.raw_score}),`), `${label}: raw score in out0 of HSP ${index}`);
+    const score = rawScoreOnly ? section.startsWith(` Score = ${record.raw_score}\n`) : section.includes(`bits (${record.raw_score}),`);
+    assert.ok(score, `${label}: raw score in out0 of HSP ${index}`);
     const heading = out0.subarray(record.out0_subject[0], record.out0_subject[1]).toString();
-    assert.ok(heading.startsWith("> ") && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
+    // A local id that is not shown leaves "> " before the title; under -parse_deflines the
+    // heading starts with the subject's id (`>BK000001.1 TPA: third party`; line WQA's sweep, D7, 2026-11-19).
+    assert.ok(heading.startsWith(shownIds ? ">" : "> ") && record.out0_subject[1] <= record.out0[0], `${label}: out0_subject of HSP ${index}`);
   });
   return records.length;
 }
@@ -462,16 +668,22 @@ function checkSurface(reactor, native) {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");
       assert.ok(flags.includes("-window_masker_db"), "blastn: -window_masker_db");
       const task = description.parameters.find((parameter) => parameter.flag === "-task");
-      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short"), "blastn: tasks in -task's help");
+      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short") && task.help.includes("rmblastn"),
+                "blastn: tasks in -task's help");
     }
   }
-  // validate: accepted argv, and CLI errors with the CLI's words.
-  assert.equal(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s"].join("\0")).status, 0);
+  // validate: accepted argv, and CLI errors with the CLI's words. An accepted argv says whether its run reads the inputs
+  // with NCBI's data loaders on (the *validation* JSON, abi_v2.md §9; line WQA's D16, 2026-11-20).
+  const accepted = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s"].join("\0"));
+  assert.equal(accepted.status, 0);
+  assert.deepEqual(JSON.parse(accepted.streams.get(2).toString()), { data_loaders: true });
   // NCBI's application start (abi_v2.md §4 `losat_web2_start`, line RG E1w-3a): the *start* JSON, the
   // file of -conffile as a registry file (kind 2), and -dryrun.
   const started = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"].join("\0"));
   assert.equal(started.status, 0, started.error);
-  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", dry_run: true });
+  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", dry_run: true, register_inputs: false, prints: null });
+  const parsed = reactor.call("losat_web2_start", ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"].join("\0"));
+  assert.equal(JSON.parse(parsed.streams.get(2).toString()).register_inputs, true, "-parse_deflines reads the inputs together");
   const conffile = ["blastp", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-outfmt", "x", "-dryrun"].join("\0");
   assert.equal(reactor.call("losat_web2_validate", conffile).error, 'Critical: (106.23) Registry file "e1w3a.ini" not found, aborting.');
   const registry = Buffer.from("[BLAST]\n");
@@ -482,13 +694,21 @@ function checkSurface(reactor, native) {
   assert.equal(JSON.parse(endedRegistry.streams.get(2).toString()).kind, "registry");
   assert.equal(reactor.call("losat_web2_validate", conffile).status, 0, "a dry run reads no -outfmt");
   assert.equal(reactor.call("losat_web2_file_release", begunRegistry.status).status, 0);
+  // `[BLAST] DATA_LOADERS=none` of the registry turns the data loaders off (blast_scope_src.cpp:78-80).
+  const noLoaders = Buffer.from("[BLAST]\nDATA_LOADERS=none\n");
+  const begunNoLoaders = reactor.call("losat_web2_file_begin", 2, "nol.ini", noLoaders.length);
+  assert.equal(reactor.call("losat_web2_file_chunk", begunNoLoaders.status, noLoaders).status, 0);
+  assert.equal(reactor.call("losat_web2_file_end", begunNoLoaders.status).status, 0);
+  const off = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-conffile", "nol.ini"].join("\0"));
+  assert.equal(off.status, 0, off.error);
+  assert.deepEqual(JSON.parse(off.streams.get(2).toString()), { data_loaders: false });
+  assert.equal(reactor.call("losat_web2_file_release", begunNoLoaders.status).status, 0);
   for (const argv of [["blastp", "-query", "q", "-subject", "s", "-evalue", "abc"],
                       ["tblastn", "-query", "q", "-subject", "s", "-db_gencode", "7"],
                       ["blastn", "-query", "q", "-subject", "s", "-nosuchoption", "1"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding",
-                       "-template_length", "17"],
-                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"]]) {
+                       "-template_length", "17"]]) {
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
@@ -498,9 +718,9 @@ function checkSurface(reactor, native) {
   const blastx = ["blastx", "-query", "q", "-subject", "s"];
   assert.equal(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "1-9", "-subject_loc", "2-5"].join("\0")).status, 0);
   assert.match(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "9-1", "-subject_loc", "5-2"].join("\0")).error,
-               /^BLAST engine error: Invalid specification of subject location/);
+               /^LOSAT engine error: Invalid specification of subject location/);
   assert.match(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "9-1"].join("\0")).error,
-               /^BLAST engine error: Invalid specification of query location/);
+               /^LOSAT engine error: Invalid specification of query location/);
   // The host validates the argv that it runs, with its -num_threads, so a -num_threads in
   // the user's words is a repeated option (abi_v2.md §7). The adapter parses the argv as the
   // CLI does, so the whole message (its usage line too) and an unknown program's are the CLI's.
@@ -530,13 +750,14 @@ function checkSurface(reactor, native) {
     assert.equal(validated.error, cli.stderr.toString(), `-outfmt ${outfmt}: the CLI's message`);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-out", "x"].join("\0")).error, /not accepted/);
-  // The tasks of Session SD and NCBI's option check of a template (blast_options.c:1247-1261).
-  for (const task of ["dc-megablast", "blastn-short"]) {
+  // The tasks of Session SD and line RG X6, and NCBI's option check of a template
+  // (blast_options.c:1247-1261).
+  for (const task of ["dc-megablast", "blastn-short", "rmblastn"]) {
     assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", task].join("\0")).status, 0, task);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast",
                                                     "-word_size", "13"].join("\0")).error,
-               /^BLAST query\/options error: Invalid discontiguous template parameters: word size must be either 11 or 12/);
+               /^LOSAT query\/options error: Invalid discontiguous template parameters: word size must be either 11 or 12/);
   // BLASTN scores without a Karlin-Altschul table row (WA-FM-01). The CLI meets the tables only
   // when some query context has an ungapped Karlin-Altschul block, which depends on the query's
   // letters (a query of N only has none: a warning and rc 0). `validate` has no query, so it
@@ -575,13 +796,13 @@ function checkSurface(reactor, native) {
     assert.equal(validated.error, cli.stderr.toString(), "the CLI's message");
     fs.rmSync(dir, { recursive: true });
   }
-  // register and the scan of the program's kind (2: the TBLASTN query) agree on a
+  // register and the scan of the program's input (the TBLASTN query, NCBI's protein reader) agree on a
   // multi-record input, in chunks of any size.
   const input = fs.readFileSync(path.join(ROOT, "docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa"));
-  const registered = reactor.call("losat_web2_register", "tblastn", 0, input);
+  const registered = reactor.call("losat_web2_register", "tblastn", 0, 1, input);
   assert.ok(registered.status > 0, registered.error);
   const records = JSON.parse(registered.streams.get(2).toString()).records;
-  const scanner = reactor.exports.losat_web2_scan_begin(2);
+  const scanner = reactor.call("losat_web2_scan_begin", "tblastn", 0, 1).status;
   assert.ok(scanner > 0);
   for (let at = 0; at < input.length; at += 37) {
     assert.equal(reactor.call("losat_web2_scan_chunk", scanner, input.subarray(at, at + 37)).status, 0);
@@ -592,17 +813,160 @@ function checkSurface(reactor, native) {
   assert.deepEqual(index.map((r) => [r.id, r.length]), records.map((r) => [r.id, r.length]), "scan and register agree");
   assert.equal(reactor.call("losat_web2_release", registered.status).status, 0);
   assert.equal(reactor.call("losat_web2_release", registered.status).status, -1, "a released handle is gone");
-  // NCBI's protein reader reads a first record without a defline (its ID is empty), and
-  // LOSAT Web rejects a gap line, which its index cannot locate (abi_v2.md §4, §9).
-  const headless = reactor.call("losat_web2_register", "blastp", 0, Buffer.from("ACGT\n>x\nAC\n"));
+  // NCBI's protein reader reads a first record without a defline (its ID is empty), and a gap line's letters
+  // are its record's, as the CLI reads them (abi_v2.md §4, §9; line WQA's D13, 2026-11-20).
+  const headless = reactor.call("losat_web2_register", "blastp", 0, 1, Buffer.from("ACGT\n>x\nAC\n"));
   assert.ok(headless.status > 0, headless.error);
   assert.deepEqual(JSON.parse(headless.streams.get(2).toString()).records.map((r) => [r.id, r.length]),
                    [["", 4], ["x", 2]]);
   assert.equal(reactor.call("losat_web2_release", headless.status).status, 0);
-  const gap = reactor.call("losat_web2_register", "blastn", 1, Buffer.from(">s\nACGT\n>?10\nACGT\n"));
-  assert.equal(gap.status, -1);
-  assert.match(gap.error, /^line 3 is a gap line .*not supported in the browser$/);
+  const gap = reactor.call("losat_web2_register", "blastn", 1, 1, Buffer.from(">s\nACGT\n>?10\nACGT\n"));
+  assert.ok(gap.status > 0, gap.error);
+  assert.deepEqual(JSON.parse(gap.streams.get(2).toString()).records.map((r) => [r.id, r.length]), [["s", 18]]);
+  assert.equal(reactor.call("losat_web2_release", gap.status).status, 0);
+  // A first line that may be a Seq-id: the CLI's refusal with the data loaders on, data with them off (D13 (c), D16).
+  const seqId = Buffer.from("2HHB\nMKTAYIAKQR\n");
+  const refused = reactor.call("losat_web2_register", "blastp", 0, 1, seqId);
+  assert.equal(refused.status, -1);
+  assert.match(refused.error, /^the first line of the query \("2HHB"\) is not a defline and may be a sequence identifier .* LOSAT's BLASTP /);
+  const scanRefused = reactor.call("losat_web2_scan_begin", "blastp", 0, 1).status;
+  assert.equal(reactor.call("losat_web2_scan_chunk", scanRefused, seqId).status, 0);
+  assert.equal(reactor.call("losat_web2_scan_end", scanRefused).error, refused.error, "the scan refuses in the same words");
+  const data = reactor.call("losat_web2_register", "blastp", 0, 0, seqId);
+  assert.ok(data.status > 0, data.error);
+  assert.deepEqual(JSON.parse(data.streams.get(2).toString()).records.map((r) => [r.id, r.length]), [["", 13]]);
+  assert.equal(reactor.call("losat_web2_release", data.status).status, 0);
+  for (const [args, error] of [[["blastp", 2, 1], /^unknown input role 2$/], [["blastp", 0, 2], /^data_loaders must be 0 or 1, not 2$/],
+                               [["nosuch", 0, 1], /./]]) {
+    const begun = reactor.call("losat_web2_scan_begin", ...args);
+    assert.equal(begun.status, -1, args.join(" "));
+    assert.match(begun.error, error);
+  }
   checkFiles(reactor);
+}
+
+// The words with which the command line prints its help or its version (line WQA's D14, 2026-11-20; abi_v2.md §5 stream
+// 11, §9 `prints`), for every program and word, and the words, registry file and file of -logfile around them, each
+// compared with the native CLI's run of the same argv from an empty directory.
+const HELP_WORDS = ["-h", "-help", "-help-full", "--help", "-xmlhelp"];
+const VERSION_WORDS = ["-version", "-version-full", "-version-full-xml", "-version-full-json"];
+
+function checkPrints(reactor, native) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "losat-v-abi-prints-"));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("LOSAT_")));
+  const cli = (argv) => require("node:child_process").spawnSync(native, argv, { cwd: dir, env, maxBuffer: 1 << 26 });
+  const start = (argv) => {
+    const started = reactor.call("losat_web2_start", argv.join("\0"));
+    assert.equal(started.status, 0, `${argv.join(" ")}: start: ${started.error}`);
+    return JSON.parse(started.streams.get(2).toString());
+  };
+  const inputs = ["-query", "q.fa", "-subject", "s.fa"];
+  // A run that prints `kind`: the CLI's standard output on stream 11, its standard error on stream 3, nothing else.
+  const prints = (argv, kind) => {
+    const label = argv.join(" ");
+    const json = start(argv);
+    assert.equal(json.prints, kind, `${label}: what start says the run prints`);
+    assert.equal(json.dry_run, false, `${label}: a run that prints is not a dry run`);
+    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    assert.equal(validated.status, 0, `${label}: validate: ${validated.error}`);
+    const run = reactor.call("losat_web2_run", argv.join("\0"), 0, 0);
+    assert.equal(run.status, 0, `${label}: run: ${run.error}`);
+    const expected = cli(argv);
+    assert.equal(expected.status, 0, `${label}: the CLI's exit status`);
+    assert.ok(expected.stdout.length > 0, `${label}: the CLI prints`);
+    const printed = run.streams.get(11) || Buffer.alloc(0);
+    assert.equal(sha256(printed), sha256(expected.stdout), `${label}: stream 11 is the CLI's standard output`);
+    assert.equal((run.streams.get(3) || Buffer.alloc(0)).toString(), expected.stderr.toString(), `${label}: stream 3 is the CLI's standard error`);
+    for (const stream of [0, 1, 4, 5, 6, 7, 9]) assert.ok(!(run.streams.get(stream)?.length), `${label}: nothing on stream ${stream}`);
+    assert.equal((run.streams.get(10) || Buffer.alloc(0)).length, 4, `${label}: one signal of where the messages go (stream 10)`);
+    return { json, run };
+  };
+  let count = 0;
+  for (const program of Object.keys(FORMATS)) {
+    for (const [kind, words] of [["help", HELP_WORDS], ["version", VERSION_WORDS]]) {
+      for (const word of words) {
+        prints([program, ...inputs, word, "-num_threads", "1"], kind);
+        count++;
+      }
+    }
+  }
+  // After a help word the CLI reads no value; a version word comes before -dryrun, the registry file (none is read) and
+  // the file of -logfile, which the CLI makes empty.
+  prints(["blastn", ...inputs, "-h", "-evalue", "abc", "-num_threads", "1"], "help");
+  // `-out`, which a run refuses, does not stop the help (line WQA's D14 review, 2026-11-20).
+  prints(["blastp", ...inputs, "-h", "-out", "x", "-num_threads", "1"], "help");
+  prints(["blastn", ...inputs, "-out", "x", "-xmlhelp", "-num_threads", "1"], "help");
+  prints(["blastx", ...inputs, "-dryrun", "-help", "-num_threads", "1"], "help");
+  assert.equal(prints(["blastp", ...inputs, "-version", "-conffile", "missing.ini", "-num_threads", "1"], "version").json.conffile, null);
+  const logged = prints(["tblastx", ...inputs, "-version", "-logfile", "v.log", "-num_threads", "1"], "version");
+  assert.equal(logged.json.log_file, "v.log");
+  const made = fs.readFileSync(path.join(dir, "v.log"));
+  assert.deepEqual(storedZipEntries(logged.run.streams.get(8)).map(([name, bytes]) => [name, sha256(bytes)]), [["v.log", sha256(made)]],
+                   "the file of -logfile (stream 8) is the CLI's");
+  fs.rmSync(path.join(dir, "v.log"));
+  // A -logfile name with a directory: the CLI opens the file of -logfile before it prints its help and its version, in
+  // a working directory where the name's directories exist (`checkLogfileNames`), and the run gives that file, empty
+  // (line WQA's D14, 2026-11-21).
+  for (const [word, kind] of [["-h", "help"], ["-version", "version"]]) {
+    fs.mkdirSync(path.join(dir, "a"));
+    const run = prints(["blastp", ...inputs, word, "-logfile", "a/b.log", "-num_threads", "1"], kind).run;
+    const file = fs.readFileSync(path.join(dir, "a", "b.log"));
+    assert.deepEqual(storedZipEntries(run.streams.get(8)).map(([name, bytes]) => [name, sha256(bytes)]), [["a/b.log", sha256(file)]],
+                     `${word} -logfile a/b.log: the file of -logfile (stream 8) is the CLI's`);
+    fs.rmSync(path.join(dir, "a"), { recursive: true });
+  }
+  // A help or version word as the value of an option that takes one is that value, as the CLI's parser reads it; only
+  // NCBI's scan of the versions before the arguments reads every word (`-subject -version`).
+  prints(["blastp", "-query", "q.fa", "-subject", "-version", "-num_threads", "1"], "version");
+  prints(["tblastn", ...inputs, "-outfmt", "-version-full", "-num_threads", "1"], "version");
+  count += 10;
+  // What stops the CLI before its help: a value before the help word, and the registry file of -conffile, which the
+  // command line reads before it reads its arguments.
+  for (const argv of [["blastn", ...inputs, "-evalue", "abc", "-h", "-num_threads", "1"],
+                      ["blastp", ...inputs, "-h", "-conffile", "missing.ini", "-num_threads", "1"]]) {
+    const label = argv.join(" ");
+    start(argv);
+    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    const expected = cli(argv);
+    assert.notEqual(expected.status, 0, `${label}: the CLI fails`);
+    assert.equal(validated.status, -1, `${label}: validate fails`);
+    assert.equal(validated.error.trimEnd(), expected.stderr.toString().trimEnd(), `${label}: the CLI's message`);
+    count++;
+  }
+  // The help words that are an option's value (line WQA's D14, 2026-11-21): the run is the CLI's, which fails, given the
+  // registered inputs: `-query -h` names no subject (NCBI's error before the query is read), `-outfmt -h` and
+  // `-evalue -h` are values that the CLI rejects.
+  const sequences = { blastp: ["MKVLAAGIVG", "MKVLAAGIVG"], blastx: ["ACGTACGTAC", "MKVLAAGIVG"], tblastn: ["MKVLAAGIVG", "ACGTACGTAC"],
+                      tblastx: ["ACGTACGTAC", "ACGTACGTAC"], blastn: ["ACGTACGTAC", "ACGTACGTAC"] };
+  const fails = (argv) => {
+    const label = argv.join(" ");
+    assert.equal(start(argv).prints, null, `${label}: not a run that prints`);
+    const expected = cli(argv);
+    assert.notEqual(expected.status, 0, `${label}: the CLI fails`);
+    const message = expected.stderr.toString().trimEnd();
+    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    assert.equal(validated.status, -1, `${label}: validate fails`);
+    assert.equal(validated.error.trimEnd(), message, `${label}: validate gives the CLI's message`);
+    const [query, subject] = sequences[argv[0]].map((residues, kind) =>
+      reactor.call("losat_web2_register", argv[0], kind, 1, Buffer.from(`>r${kind}\n${residues}\n`)).status);
+    assert.ok(query > 0 && subject > 0, `${label}: the inputs are registered`);
+    const run = reactor.call("losat_web2_run", argv.join("\0"), query, subject);
+    for (const handle of [query, subject]) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
+    assert.equal(run.status, -1, `${label}: run fails`);
+    assert.equal(run.error.trimEnd(), message, `${label}: run gives the CLI's message`);
+    assert.ok(!run.streams.get(3)?.length && !run.streams.get(11)?.length, `${label}: nothing on streams 3 and 11`);
+    count++;
+  };
+  for (const program of Object.keys(FORMATS)) fails([program, "-query", "-h", "-num_threads", "1"]);
+  fails(["blastp", ...inputs, "-outfmt", "-h", "-num_threads", "1"]);
+  fails(["blastn", ...inputs, "-evalue", "-xmlhelp", "-num_threads", "1"]);
+  // `-out -h` is the file `-h` of -out, which a run refuses whatever its name (abi_v2.md §4): not the help.
+  const out = ["blastp", ...inputs, "-out", "-h", "-num_threads", "1"];
+  assert.equal(start(out).prints, null, "-out -h: not a run that prints");
+  assert.equal(reactor.call("losat_web2_validate", out.join("\0")).error.trimEnd(), "-out is not accepted: a run writes every output format of the program");
+  count++;
+  fs.rmSync(dir, { recursive: true });
+  return count;
 }
 
 // The named input files (abi_v2.md §4 `file_begin`): the same *file* JSON whatever the chunks, the
@@ -648,6 +1012,201 @@ function checkFiles(reactor) {
   assert.equal(reactor.call("losat_web2_file_release", begun.status).status, 0);
 }
 
+// -logfile names (abi_v2.md §4 *start*; line WQA's sweep, D11, 2026-11-20): a name is read as the CLI on Linux reads it
+// in a working directory where the name's directories exist. BLASTN and TBLASTX with -max_target_seqs 1 (TBLASTX
+// writes the warning where -logfile sends the diagnostics) on the outfmt11 inputs, without and with a `.ncbirc` that
+// NCBI cannot read (the one byte 0xEF: the usage report's error, which the CLI writes to its standard error at once and
+// to a -logfile file when it opens it), each against the CLI run in a new directory that has the name's directories, one
+// run per format with -out: outfmt 0, 6 and 7; stream 3 is the CLI's standard error of outfmt 6; stream 8 holds the file
+// that the name makes, under the name, or, for the names of the standard output, what the CLI writes there (its whole
+// standard output, the reports being in -out); stream 10 says where the warning went. `<dir>` is the run's directory.
+const LOG_NAMES = ["run.log", "logs/run.log", "a/b/run.log", "./run.log", "<dir>/abs/run.log", "/dev/stdout", "/dev/fd/1",
+  "-", "/dev/stderr", "/dev/fd/2", "/proc/self/fd/2", "//dev/stderr", ".", "..", "logs/", "logs/.", "", "/dev/null", "//dev/null",
+  // Line WQA's D11 round 2 (2026-11-20): names that NCBI reads otherwise than the system: a trailing '/' names the file
+  // without it, the spaces at the ends of a relative name are cut, and a file system that reports no free space
+  // (procfs: /dev/fd, /proc) gets no message; and devices whose writes are lost.
+  "run.log/", "logs//", "a/b/", "<dir>/abs/run.log/", " run.log", "run.log ", " logs/run.log", "  ", "/proc/thread-self/fd/2",
+  "/dev/fd/../stderr", "/dev/full", "/dev/zero",
+  // What the system does not open (a file descriptor that the run has not opened, a file that the user may not write, a
+  // name in a device), and what it opens otherwise than by the name: the standard input (the null device), a file of
+  // procfs (no free space) and a file of the working directory through procfs.
+  "/dev/fd/3", "/proc/self/status", "/dev/null/x", "/dev/stdout/../stderr", "/dev/stdin", "/dev/fd/0", "/proc/self/comm",
+  "/proc/self/cwd/run.log",
+  // Round 3: a directory of '/'s only is none (`CDirEntry::Reset` empties `//`), a user makes no file in a directory of
+  // root's and opens none of its devices but those whose writes are lost (a new terminal's master).
+  "//run.log", "/run.log", "/etc/run.log", "/var/log/run.log", "/home/run.log", "/dev/run.log", "/dev/kmsg", "/dev/console",
+  "/dev/ptmx",
+  // Round 4: one rule of owners (a user makes files in the working directory, a home and the directories where every user
+  // does; every other directory is root's, where only root makes one), the links of Linux (`/var/lock` is `/run/lock`,
+  // `/bin` is `/usr/bin`), and the system's limits of a path (a component of 255 bytes). `<id>` is a name of this run's
+  // own, for the files that the CLI makes outside the run's directory.
+  "/var/lock/<id>.log", "/var/run/../tmp/<id>.log", "/data/run.log", "/lost+found/run.log", "/snap/run.log",
+  "/bin/../tmp/<id>.log", "/var/lock/../tmp/<id>.log", "/dev/fd/../../tmp/<id>.log", "a".repeat(256),
+  `logs/${"b".repeat(256)}`,
+  // Round 5: a name climbs out of directories of root's that the model does not list, as the CLI passes them.
+  "/etc/default/../../tmp/<id>.log", "/usr/share/doc/../../../tmp/<id>.log",
+  // Round 6: a name looks nothing up in a directory that a user cannot search (mode 0700, root's), as the CLI's EACCES.
+  "/root/../tmp/<id>.log", "/var/cache/ldconfig/../../../tmp/<id>.log",
+  // Round 7: the system follows 40 links in a lookup (`/var/lock` is one) and refuses the 41st, as the CLI's ELOOP.
+  `${"/var/lock/../..".repeat(40)}/tmp/<id>.log`, `${"/var/lock/../..".repeat(41)}/tmp/<id>.log`];
+
+// The rows of `/`-names (LOG_NAMES) compare the Web with the CLI of the host, which must be a Linux like LOSAT Web's
+// (Ubuntu 24.04, as CI's runner): a user that is not root, `/var/lock` and `/var/run` links to `/run/lock` and `/run`,
+// `/run/lock` and `/tmp` where every user makes files (mode 1777), `/etc/default` and `/usr/share/doc`, and `/root` and
+// `/var/cache/ldconfig` that the user cannot search. Returns why this host differs, or undefined.
+function hostDiffers() {
+  const sticky = (directory) => {
+    try {
+      return (fs.statSync(directory).mode & 0o1777) === 0o1777;
+    } catch {
+      return false;
+    }
+  };
+  const resolves = (link, target) => {
+    try {
+      return fs.realpathSync(link) === target;
+    } catch {
+      return false;
+    }
+  };
+  const isDirectory = (directory) => {
+    try {
+      return fs.statSync(directory).isDirectory();
+    } catch {
+      return false;
+    }
+  };
+  const closed = (directory) => {
+    if (!isDirectory(directory)) return false;
+    try {
+      fs.accessSync(directory, fs.constants.X_OK);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  const differences = [
+    [process.getuid?.() === 0, "the run is root's"],
+    [!resolves("/var/lock", "/run/lock"), "/var/lock is not /run/lock"],
+    [!resolves("/var/run", "/run"), "/var/run is not /run"],
+    [!sticky("/run/lock"), "/run/lock is not mode 1777"],
+    [!sticky("/tmp"), "/tmp is not mode 1777"],
+    [!isDirectory("/etc/default"), "no /etc/default"],
+    [!isDirectory("/usr/share/doc"), "no /usr/share/doc"],
+    [!closed("/root"), "the user searches /root, or it is not there"],
+    [!closed("/var/cache/ldconfig"), "the user searches /var/cache/ldconfig, or it is not there"],
+  ].filter(([differs]) => differs).map(([, why]) => why);
+  return differences.length > 0 ? differences.join(", ") : undefined;
+}
+
+// The CLI's run with its standard output and error on pipes, as a shell's `|` or a terminal gives them: node's child
+// processes get sockets, which `/dev/stdout` and `/dev/stderr` cannot open (ENXIO), so that NCBI and the CLI send the
+// log to `cerr` (python's subprocess makes pipes). Its standard input is the null device, as LOSAT Web's run has none.
+function nativeOnPipes(native, argv, directory) {
+  const outFile = path.join(directory, ".stdout"), errFile = path.join(directory, ".stderr");
+  const script = "import subprocess, sys\n" +
+    "p = subprocess.run(sys.argv[3:], capture_output=True, stdin=subprocess.DEVNULL)\n" +
+    "open(sys.argv[1], 'wb').write(p.stdout); open(sys.argv[2], 'wb').write(p.stderr); sys.exit(p.returncode)\n";
+  const result = require("node:child_process").spawnSync("python3", ["-I", "-c", script, outFile, errFile, native, ...argv],
+                                                         { cwd: directory, env: { PATH: process.env.PATH, HOME: directory } });
+  assert.equal(result.stderr.length, 0, `python3: ${result.stderr}`);
+  const stdout = fs.readFileSync(outFile), stderr = fs.readFileSync(errFile);
+  fs.rmSync(outFile);
+  fs.rmSync(errFile);
+  return { status: result.status, stdout, stderr };
+}
+
+// The regular files under `directory`, as paths.
+function filesIn(directory) {
+  return fs.readdirSync(directory, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(entry.parentPath ?? entry.path, entry.name));
+}
+
+async function checkLogfileNames(reactor, native, scratch, engine, waitForWorkers) {
+  const differs = hostDiffers();
+  assert.ok(differs === undefined, `-logfile names: this host is not a Linux like LOSAT Web's (${differs}); ` +
+            "run V-ABI as a user on Ubuntu 24.04 or a Linux like it");
+  const inputs = path.join(ROOT, "LOSAT/tests/fasta/outfmt11");
+  const query = path.join(inputs, "arch_tbx_q.fna"), subject = path.join(inputs, "arch_tbx_s.fna");
+  const standardOutput = new Set(["/dev/stdout"]);
+  const device = (name) => name === "-" || name === "" || /^\/+(dev|proc|sys)\//.test(name);
+  let rows = 0;
+  for (const program of ["blastn", "tblastx"]) {
+    const handles = [0, 1].map((role) => {
+      const registered = reactor.call("losat_web2_register", program, role, 1, fs.readFileSync(role === 0 ? query : subject));
+      assert.ok(registered.status > 0, registered.error);
+      return registered.status;
+    });
+    for (const ncbirc of [false, true]) {
+      let registry;
+      if (ncbirc) {
+        const begun = reactor.call("losat_web2_file_begin", 2, ".ncbirc", 1);
+        assert.ok(begun.status > 0, begun.error);
+        assert.equal(reactor.call("losat_web2_file_chunk", begun.status, Buffer.from([0xef])).status, 0);
+        assert.equal(reactor.call("losat_web2_file_end", begun.status).status, 0);
+        registry = begun.status;
+      }
+      for (const template of LOG_NAMES) {
+        const directory = fs.mkdtempSync(path.join(scratch, "logfile."));
+        const name = template.replace("<dir>", directory).replace("<id>", `losat-v-abi-${process.pid}-${engine}-${rows}`);
+        // The file that the CLI makes outside the run's directory: the path that NCBI opens, the name read lexically.
+        const outside = template.includes("<id>") ? path.posix.normalize(name) : undefined;
+        const label = `${engine} ${program}${ncbirc ? " .ncbirc 0xEF" : ""} -logfile ${JSON.stringify(name)}`;
+        // The directories that the name gives: the one that NCBI checks (the name's, without its trailing '/'s) and that
+        // of the file it opens (the name without the spaces at its ends).
+        // Not outside it: a user makes no directory of root's (`/data`), which the CLI then does not find.
+        if (!device(name) && (!name.trim().startsWith("/") || name.startsWith(directory))) {
+          for (const given of [name.replace(/\/+$/, ""), name.trim().replace(/\/+$/, "")]) {
+            const slash = given.lastIndexOf("/");
+            if (slash > 0) fs.mkdirSync(path.resolve(directory, given.slice(0, slash)), { recursive: true });
+          }
+        }
+        if (ncbirc) fs.writeFileSync(path.join(directory, ".ncbirc"), Buffer.from([0xef]));
+        const before = new Set(filesIn(directory));
+        const words = [program, "-query", query, "-subject", subject, "-max_target_seqs", "1"];
+        const outputs = new Map();
+        let cli;
+        for (const format of FORMATS[program]) {
+          const out = path.join(directory, `native.${format}.out`);
+          const result = nativeOnPipes(native, [...words, "-outfmt", String(format), "-num_threads", "1", "-out", out, "-logfile", name], directory);
+          assert.equal(result.status, 0, `${label}: native outfmt ${format}: ${result.stderr}`);
+          outputs.set(format, fs.readFileSync(out));
+          fs.rmSync(out);
+          // The file that the run made (NCBI's name for it: `logs` for `logs/`, `run.log` for ` run.log`).
+          const madeFiles = filesIn(directory).filter((file) => !before.has(file));
+          if (outside !== undefined && fs.existsSync(outside)) madeFiles.push(outside);
+          assert.ok(madeFiles.length <= 1, `${label}: native outfmt ${format} made ${madeFiles}`);
+          const made = madeFiles.length === 1 ? fs.readFileSync(madeFiles[0]) : undefined;
+          // The next format's run appends to the file: each run starts without it.
+          if (made !== undefined) fs.rmSync(madeFiles[0]);
+          if (format === 6) cli = { stderr: result.stderr, stdout: result.stdout, made };
+        }
+        const files = standardOutput.has(name) ? [[name, cli.stdout]] : cli.made === undefined ? [] : [[name, cli.made]];
+        if (!standardOutput.has(name)) assert.equal(cli.stdout.length, 0, `${label}: the CLI's standard output with -out`);
+        const run = reactor.call("losat_web2_run", [...words, "-logfile", name, "-num_threads", "1"].join("\0"), ...handles);
+        if (waitForWorkers) await waitForWorkers();
+        assert.equal(run.status, 0, `${label}: ${run.error}`);
+        for (const format of FORMATS[program]) {
+          assert.equal(sha256(run.streams.get(format) || Buffer.alloc(0)), sha256(outputs.get(format)), `${label}: outfmt ${format}`);
+        }
+        assert.equal((run.streams.get(3) || Buffer.alloc(0)).toString(), cli.stderr.toString(), `${label}: stream 3 is the CLI's standard error`);
+        const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)).map(([entry, bytes]) => [entry, bytes.toString()]) : [];
+        assert.deepEqual(sent, files.map(([entry, bytes]) => [entry, bytes.toString()]), `${label}: the files of the run (stream 8)`);
+        const warning = `Warning: [${program}] Examining 5 or more matches is recommended\n`;
+        const place = run.streams.get(10).readUInt32LE(0);
+        const where = cli.stderr.toString().includes(warning) ? 3 : files.some(([, bytes]) => bytes.toString().includes(warning)) ? 8 : 0xffffffff;
+        assert.equal(place, where, `${label}: where the run's messages go (stream 10)`);
+        fs.rmSync(directory, { recursive: true, force: true });
+        rows++;
+      }
+      if (registry !== undefined) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
+    }
+    for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
+  }
+  return rows;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "losat-v-abi-"));
@@ -660,44 +1219,97 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor, close, waitForWorkers } = await engine.open();
-    assert.equal(reactor.exports.losat_web2_abi_version(), 3);
+    assert.equal(reactor.exports.losat_web2_abi_version(), 11);
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
-    const subjects = new Map(); // "program subject" -> handle, kept across runs
+    const logRows = await checkLogfileNames(reactor, options.native, scratch, engine.name, waitForWorkers);
+    console.log(`ok ${engine.name} -logfile names: ${logRows} runs as the CLI's`);
+    console.log(`ok ${engine.name} help and version: ${checkPrints(reactor, options.native)} argvs as the CLI`);
+    const subjects = new Map(); // "program subject data_loaders" -> handle, kept across runs
     const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
     let countsRegistered = 0, countsKept = 0;
     for (const search of all) {
       const program = search.program;
       const query = inputPath(search, "-query"), subject = inputPath(search, "-subject");
       const expected = nativeOutputs(options.native, search, scratch);
-      const subjectKey = `${program} ${subject}`;
-      if (!subjects.has(subjectKey)) {
-        const registered = reactor.call("losat_web2_register", program, 1, fs.readFileSync(subject));
-        assert.ok(registered.status > 0, `register subject: ${registered.error}`);
+      const started = reactor.call("losat_web2_start", search.argv.join("\0"));
+      const start = started.status === 0 ? JSON.parse(started.streams.get(2).toString()) : undefined;
+      const together = start?.register_inputs === true;
+      // The host registers the file of -conffile, then validates the argv, whose *validation* says whether the
+      // run reads its inputs with NCBI's data loaders on, and registers the inputs so (abi_v2.md §4, §9; line
+      // WQA's D16, 2026-11-20). An argv that validate refuses is read with them on, as before any registry.
+      const registry = start?.conffile ? registerRegistry(reactor, search, start.conffile) : null;
+      const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
+      const first = reactor.call("losat_web2_validate", [...search.argv, ...custom, "-num_threads", "1"].join("\0"));
+      const dataLoaders = first.status === 0 ? JSON.parse(first.streams.get(2).toString()).data_loaders : true;
+      const subjectKey = `${program} ${subject} ${dataLoaders}`;
+      // An input that the CLI's reader refuses (a first line that may be a Seq-id with the data loaders on) fails
+      // the search as the CLI fails, before any hit: the subject first, as the CLI reads it first. The application
+      // shows the error on the input and runs nothing; the CLI has written no output for a subject (read with the
+      // arguments) and at most the outfmt 0 prolog for a query (read after it).
+      const refusedInput = (registered, role) => {
+        assert.equal(search.expect, "failure", `${engine.name} ${search.cases.join(",")}: register ${role}: ${registered.error}`);
+        assert.ok(registered.error.length > 0 && expected.own.toString().endsWith(cliError(registered.error)),
+                  `${engine.name} ${search.cases.join(",")}: the CLI's error (${registered.error})`);
+        for (const format of FORMATS[program]) {
+          if (role === "query" && format === 0) continue;
+          assert.equal(expected.outputs.get(format).length, 0, `${search.cases.join(",")}: the CLI writes no outfmt ${format}`);
+        }
+        results.push({ engine: engine.name, threads: 0, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {}, failure: registered.error });
+        console.log(`ok ${engine.name} ${search.cases.join(",")} (fails as the CLI, reading the ${role})`);
+        if (registry !== null) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
+      };
+      if (!together && !subjects.has(subjectKey)) {
+        const registered = reactor.call("losat_web2_register", program, 1, dataLoaders ? 1 : 0, fs.readFileSync(subject));
+        if (registered.status < 0) {
+          refusedInput(registered, "subject");
+          continue;
+        }
         subjects.set(subjectKey, registered.status);
       }
-      const q = reactor.call("losat_web2_register", program, 0, fs.readFileSync(query));
-      assert.ok(q.status > 0, `register query: ${q.error}`);
-      const queryIds = JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
+      const q = together ? undefined : reactor.call("losat_web2_register", program, 0, dataLoaders ? 1 : 0, fs.readFileSync(query));
+      if (q && q.status < 0) {
+        refusedInput(q, "query");
+        continue;
+      }
+      let queryIds = q && JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
       const taxid = registerTaxidCounts(reactor, counts, search);
       const named = registerCounts(reactor, counts, search) ?? taxid;
       if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
       for (const threads of engine.threads) {
-        const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
         const argv = [...search.argv, ...custom, "-num_threads", String(threads)].join("\0");
         // The application validates the argv on the instance that holds its counts file, then runs it
-        // (abi_v2.md §4): an error of validate is the CLI's first error.
-        if (named && named.held !== "absent") {
+        // (abi_v2.md §4): an error of validate is the CLI's first error. So is that of a search that
+        // fails without a counts file, whose validate makes the checks of the argv's own search (§7).
+        if (named ? named.held !== "absent" : search.expect === "failure") {
           const validated = reactor.call("losat_web2_validate", argv);
           if (search.expect === "failure" && validated.status !== 0) {
-            assert.ok(expected.stderr.toString().endsWith(validated.error), `${engine.name} n${threads} ${search.cases.join(",")}: validate gives the CLI's error (${validated.error})`);
+            assert.ok(expected.own.toString().endsWith(cliError(validated.error)), `${engine.name} n${threads} ${search.cases.join(",")}: validate gives the CLI's error (${validated.error})`);
           } else {
             assert.equal(validated.status, 0, `${engine.name} n${threads} ${search.cases.join(",")}: validate: ${validated.error}`);
           }
         }
-        const run = reactor.call("losat_web2_run", argv, q.status, subjects.get(subjectKey));
-        if (waitForWorkers) await waitForWorkers();
         const label = `${engine.name} n${threads} ${search.cases.join(",")}`;
+        let handles = [q?.status, subjects.get(subjectKey)], shownIds;
+        if (together) {
+          const inputs = reactor.call("losat_web2_register_inputs", argv, fs.readFileSync(query), fs.readFileSync(subject));
+          if (inputs.status < 0) {
+            // The CLI fails reading the inputs, before any output.
+            assert.equal(search.expect, "failure", `${label}: register_inputs: ${inputs.error}`);
+            assert.ok(inputs.error.length > 0 && expected.own.toString().endsWith(`${inputs.error}\n`), `${label}: the CLI's error (${inputs.error})`);
+            for (const format of FORMATS[program]) assert.equal(expected.outputs.get(format).length, 0, `${label}: the CLI writes no outfmt ${format}`);
+            results.push({ engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {}, failure: inputs.error });
+            console.log(`ok ${label} (fails as the CLI, reading the inputs)`);
+            continue;
+          }
+          const response = JSON.parse(inputs.streams.get(2).toString());
+          handles = [response.query.handle, response.subject.handle];
+          queryIds = response.query.records.map((record) => record.id);
+          shownIds = { query: response.query.records.map((record) => record.shown_id), subject: response.subject.records.map((record) => record.shown_id) };
+        }
+        const run = reactor.call("losat_web2_run", argv, ...handles);
+        if (waitForWorkers) await waitForWorkers();
+        if (together) for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
         if (search.expect === "failure") {
           checkFailure(run, expected, search, label);
           results.push({ engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
@@ -712,7 +1324,7 @@ async function main() {
           const want = expected.outputs.get(format);
           assert.equal(sha256(actual), sha256(want), `${label}: outfmt ${format}`);
           row.formats[format] = sha256(actual);
-          if (search.frozen[format]) row.frozen[format] = sha256(toFrozen(actual, search.frozen_prefix)) === search.frozen[format];
+          if (search.frozen[format]) row.frozen[format] = ncbiHash(toFrozen(actual, search.frozen_prefix)) === search.frozen[format];
         }
         if (search.files) {
           const sent = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
@@ -730,27 +1342,57 @@ async function main() {
             assert.equal(sha256(bytes), sha256(cli[index][1]), `${label}: -outfmt ${search.outfmt} ${name}`);
           }
           row.formats.custom = sha256(sent);
-          const master = sha256(toFrozen(entries[entries.length - 1][1], search.frozen_prefix));
-          const sides = entries.slice(0, -1).map(([, bytes]) => sha256(toFrozen(bytes, search.frozen_prefix))).join(",");
+          const master = ncbiHash(toFrozen(entries[entries.length - 1][1], search.frozen_prefix));
+          const sides = entries.slice(0, -1).map(([, bytes]) => ncbiHash(toFrozen(bytes, search.frozen_prefix))).join(",");
           if (search.frozen.custom) row.frozen.custom = master === search.frozen.custom;
           if (search.frozen.sides !== undefined) row.frozen.sides = sides === search.frozen.sides;
-        } else if (search.outfmt !== undefined) {
+        } else if (customStream(search)) {
           const sent = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
           const actual = search.sam ? withoutCl(sent) : sent;
           const cli = expected.outputs.get(CUSTOM_STREAM);
           assert.equal(sha256(actual), sha256(search.sam ? withoutCl(cli) : cli), `${label}: -outfmt ${search.outfmt}`);
           row.formats.custom = sha256(actual);
-          if (search.frozen.custom) row.frozen.custom = sha256(toFrozen(actual, search.frozen_prefix)) === search.frozen.custom;
+          if (search.frozen.custom) row.frozen.custom = ncbiHash(toFrozen(actual, search.frozen_prefix)) === search.frozen.custom;
         } else {
-          assert.ok(!run.streams.has(CUSTOM_STREAM), `${label}: no stream ${CUSTOM_STREAM} without -outfmt`);
+          assert.ok(!run.streams.has(CUSTOM_STREAM), `${label}: no stream ${CUSTOM_STREAM} without an -outfmt of its own`);
         }
-        assert.equal(sha256(run.streams.get(3) || Buffer.alloc(0)), sha256(expected.stderr), `${label}: diagnostics`);
+        const diagnostics = run.streams.get(3) || Buffer.alloc(0);
+        assert.equal(sha256(diagnostics), sha256(expected.stderr), `${label}: diagnostics\n${diagnostics}`);
         row.diagnostics = sha256(expected.stderr);
-        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds) : null;
+        // The run's signal of stream 10 says where its messages go (abi_v2.md §5; line WQA's sweep, D7, 2026-11-20): one
+        // signal of 4 bytes; stream 3 without -logfile; the file of -logfile only where the run gave it.
+        const messages = run.streams.get(10) || Buffer.alloc(0);
+        assert.equal(messages.length, 4, `${label}: one signal of 4 bytes (stream 10)`);
+        const messagesPlace = messages.readUInt32LE(0);
+        assert.ok([3, 8, 0xffffffff].includes(messagesPlace), `${label}: the place of the run's messages (${messagesPlace})`);
+        if (!search.argv.some((word) => word === "-logfile" || word.startsWith("-logfile="))) {
+          assert.equal(messagesPlace, 3, `${label}: the run's messages go to stream 3 without -logfile`);
+        }
+        // The run's signals of stream 9 name the streams that it could not write: those whose CLI run of the argv
+        // fails (abi_v2.md §5; line WQA's sweep, D7, 2026-11-19), each with where its error is (2026-11-20): stream 3,
+        // which then holds it, or nowhere where the run's messages go nowhere; never the file of -logfile, which holds
+        // what the CLI's file holds for the argv (line WQA's sweep, D3 review r2, 2026-11-19).
+        const signals = run.streams.get(9) || Buffer.alloc(0);
+        assert.equal(signals.length % 8, 0, `${label}: signals of 8 bytes (stream 9)`);
+        const failed = Array.from({ length: signals.length / 8 }, (_, i) => [signals.readUInt32LE(8 * i), signals.readUInt32LE(8 * i + 4)]);
+        const failedStreams = failed.map(([stream]) => stream).sort((a, b) => a - b);
+        assert.deepEqual(failedStreams, expected.failedStreams, `${label}: the streams that the run says failed (stream 9)`);
+        for (const [stream, place] of failed) {
+          if (place === 3) assert.ok(diagnostics.length > 0, `${label}: the error of stream ${stream} is on stream 3, which is empty`);
+          else {
+            assert.equal(place, 0xffffffff, `${label}: the place of the error of stream ${stream}`);
+            assert.equal(messagesPlace, 0xffffffff, `${label}: the error of stream ${stream} is nowhere, where the run's messages go`);
+          }
+        }
+        if (messagesPlace === 8) assert.ok(run.streams.has(8), `${label}: the run's messages are in the file of -logfile, which the run did not give`);
+        if (search.fails_alone) row.fails_alone = search.fails_alone;
+        row.hits = WITH_HITS.has(program) ? checkHits(run.streams, program, label, queryIds, shownIds) : null;
+        if (together) row.inputs = "register_inputs";
         results.push(row);
         console.log(`ok ${label}`);
       }
-      assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
+      if (q) assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
+      if (registry !== null) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
     }
     for (const handle of subjects.values()) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
     for (const { handle } of counts.values()) assert.equal(reactor.call("losat_web2_file_release", handle).status, 0);

@@ -2,14 +2,17 @@
 //! frequency ratios 0 (BLOSUM62's rows of its letters), the redo's scaled block, and RPS-BLAST's
 //! roles (the profile is the redo's query, the user's query its subject).
 
+use super::super::ProteinSubject;
 use super::*;
 use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::compo_scale::PosMatrixInfo;
+use crate::core::composition_adjustment::smith_waterman::evalue_from_score;
 use crate::core::psi::KarlinBlk;
 use crate::stats::KarlinParams;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 
 fn encode(text: &str) -> Vec<u8> {
@@ -55,7 +58,7 @@ fn run_of(consensus: &[u8]) -> RedoRun<'_> {
             alpha: 1.9,
             beta: -30.0,
         },
-        k.ln(),
+        k.glibc_ln(),
         (11, 1),
         (25.0, 0),
         QueryPssm {
@@ -123,7 +126,7 @@ fn several_hsps_give_several_alignments() {
     let info = info_of(&consensus);
     let subject = two_copies();
     let mut run = run_of(&consensus);
-    let mut sw = SwRedoScratch::new();
+    let mut sw = RpsSwScratch::new();
     let mut heap = BlastCompoHeap::new(500, 0.002);
     let n = consensus.len() as i32;
     let hsps = [
@@ -192,6 +195,83 @@ fn the_evaluation_is_the_x_drop_redos() {
     }
 }
 
+/// `two_copies` with a stretch of one letter between the copies, which SEG masks (the redo's
+/// `subject_maybe_biased`).
+fn low_complexity_between() -> Vec<u8> {
+    let second = PROFILE
+        .replacen("WAAL", "WGAL", 1)
+        .replacen("RQQ", "RNQ", 1);
+    encode(&format!(
+        "HRDYCWTENI{PROFILE}QQQQQQQQQQQQQQ{second}YCHWRDTN"
+    ))
+}
+
+// `redo_windows` (rpstblastn's redo) is a copy of `redo_match`'s steps (DECISIONS 63 S3): its
+// instance of a protein subject, one window over the whole subject, gives `redo_match`'s list.
+// The subjects reach the copy's branches: SEG masks a stretch of `low_complexity_between`
+// (`subject_maybe_biased`), a subject of X alone has no true amino acid (`adjust_search_failed`),
+// and the redo links its alignments where psiblast's `-sum_stats true` does (`link`).
+#[test]
+fn the_window_copy_is_the_x_drop_redo() {
+    let consensus = encode(PROFILE);
+    let info = info_of(&consensus);
+    let n = consensus.len() as i32;
+    let biased = low_complexity_between();
+    assert!(!crate::utils::seg::SegMasker::new(10, 1.8, 2.1)
+        .mask_sequence(&biased)
+        .is_empty());
+    let all_x = vec![aa_char_to_ncbistdaa(b'X'); biased.len()];
+    let mut found = [0usize; 3];
+    for (index, subject) in [two_copies(), biased, all_x].iter().enumerate() {
+        for hsps in [
+            vec![
+                hsp((0, n), (10, 10 + n), 300),
+                hsp((0, n), (n + 24, 2 * n + 24), 250),
+            ],
+            vec![hsp((0, n), (n + 24, 2 * n + 24), 250)],
+            vec![hsp((0, 30), (10, 40), 90), hsp((20, n), (30, 10 + n), 120)],
+            vec![hsp((0, 30), (10, 40), 90), hsp((0, 30), (10, 40), 90)],
+            vec![
+                hsp((0, 30), (10, 40), 90),
+                hsp((0, 30), (n + 24, n + 54), 80),
+            ],
+        ] {
+            for (search_space, expect) in
+                [(20_000, 10.0), (20_000, 1e-60), (1_000_000_000_000, 10.0)]
+            {
+                for cutoff in [None, Some(1), Some(100)] {
+                    let mut matching = redo_match(&info, consensus.len(), search_space, expect);
+                    matching.link = cutoff.map(|cutoff| {
+                        super::super::RedoLink::new(
+                            cutoff,
+                            crate::core::link_hsps::LinkContext {
+                                lambda: 0.267,
+                                log_k: 0.041f64.glibc_ln(),
+                                query_length: n,
+                                length_adjustment: 0,
+                                eff_searchsp: search_space,
+                            },
+                        )
+                    });
+                    let copied = matching.redo_windows(
+                        &mut run_of(&consensus),
+                        7,
+                        &hsps,
+                        subject,
+                        ProteinSubject,
+                    );
+                    let original = matching.redo_match(&mut run_of(&consensus), 7, &hsps, subject);
+                    assert_eq!(format!("{copied:?}"), format!("{original:?}"));
+                    found[index] += usize::from(original.is_some());
+                }
+            }
+        }
+    }
+    // Alignments on both subjects of letters; none where no letter is a true amino acid.
+    assert!(found[0] > 0 && found[1] > 0, "{found:?}");
+    assert_eq!(found[2], 0);
+}
+
 // One preliminary HSP: the redo stops after its first alignment (`window->hspcnt > 1`).
 #[test]
 fn one_hsp_gives_one_alignment() {
@@ -203,7 +283,7 @@ fn one_hsp_gives_one_alignment() {
     let alignments = redo_match(&info, consensus.len(), 20_000, 10.0)
         .redo_one_match_smith_waterman(
             &mut run,
-            &mut SwRedoScratch::new(),
+            &mut RpsSwScratch::new(),
             &mut BlastCompoHeap::new(500, 0.002),
             7,
             &[hsp((0, n), (10, 10 + n), 300)],
@@ -232,7 +312,7 @@ fn the_first_alignment_must_be_significant_and_wanted_by_the_heap() {
         redo_match(&info, consensus.len(), 20_000, expect)
             .redo_one_match_smith_waterman(
                 &mut run,
-                &mut SwRedoScratch::new(),
+                &mut RpsSwScratch::new(),
                 heap,
                 7,
                 &hsps,
@@ -272,7 +352,7 @@ fn alignments_of_score_zero_fail_or_never_end() {
     let subject = encode("A");
     let outcome = matching.redo_one_match_smith_waterman(
         &mut run_of(&consensus),
-        &mut SwRedoScratch::new(),
+        &mut RpsSwScratch::new(),
         &mut BlastCompoHeap::new(500, 0.002),
         0,
         &[hsp((0, 1), (0, 1), 1)],
@@ -283,7 +363,7 @@ fn alignments_of_score_zero_fail_or_never_end() {
     let hsps = [hsp((0, 1), (0, 1), 11), hsp((0, 1), (0, 1), 11)];
     let outcome = matching.redo_one_match_smith_waterman(
         &mut run_of(&consensus),
-        &mut SwRedoScratch::new(),
+        &mut RpsSwScratch::new(),
         &mut BlastCompoHeap::new(500, 0.002),
         0,
         &hsps,
@@ -293,7 +373,7 @@ fn alignments_of_score_zero_fail_or_never_end() {
     // With one HSP the loop stops after the first alignment.
     let outcome = matching.redo_one_match_smith_waterman(
         &mut run_of(&consensus),
-        &mut SwRedoScratch::new(),
+        &mut RpsSwScratch::new(),
         &mut BlastCompoHeap::new(500, 0.002),
         0,
         &hsps[..1],
@@ -315,7 +395,7 @@ fn a_significant_score_zero_is_decided_by_the_first_cell() {
         redo_match(&info, consensus.len(), search_space, 10.0)
             .redo_one_match_smith_waterman(
                 &mut run_of(&consensus),
-                &mut SwRedoScratch::new(),
+                &mut RpsSwScratch::new(),
                 &mut BlastCompoHeap::new(500, 0.002),
                 0,
                 &two,
@@ -336,10 +416,10 @@ fn a_significant_score_zero_is_decided_by_the_first_cell() {
 #[test]
 fn the_evalue_of_a_score_is_karlin_altschuls() {
     let lambda = 0.267 / SCALING_FACTOR;
-    let log_k = (1.2f64 * 0.041).ln();
+    let log_k = (1.2f64 * 0.041).glibc_ln();
     assert_eq!(
         evalue_from_score(3200, lambda, log_k, 1e6),
-        1e6 * (-(lambda * 3200.0) + log_k).exp()
+        1e6 * (-(lambda * 3200.0) + log_k).glibc_exp()
     );
-    assert_eq!(evalue_from_score(0, lambda, log_k, 1.0), log_k.exp());
+    assert_eq!(evalue_from_score(0, lambda, log_k, 1.0), log_k.glibc_exp());
 }

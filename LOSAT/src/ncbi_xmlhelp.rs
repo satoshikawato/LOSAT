@@ -1,4 +1,4 @@
-//! NCBI corelib/ncbiargs.cpp: what an NCBI application prints for `-xmlhelp`
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp: what an NCBI application prints for `-xmlhelp`
 //! (`CArgDescriptions::PrintUsageXml`), the description of its arguments in XML.
 //!
 //! LOSAT prints NCBI BLAST+ 2.17.0's XML of each program, frozen (`ncbi_xmlhelp/<program>.xml`),
@@ -10,14 +10,6 @@
 //! `ncbi_app` refuse none), so the XML describes what the reader takes.
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690
-// ```c++
-//     catch (const CArgHelpException& e) {
-//         x_AddDefaultArgs();
-//         // Print USAGE
-//         if (e.GetErrCode() == CArgHelpException::eHelpXml) {
-//             m_ArgDesc->PrintUsageXml(cout);
-//         } else {
-// ```
 // The XML of each program as NCBI BLAST+ 2.17.0 prints it (the official x64-linux build; the
 // bioconda build prints the same bytes; rpsbproc 0.5.1 of bioconda; line RG item E2, probe `xml`).
 const PROGRAMS: &[(&str, &str)] = &[
@@ -35,9 +27,14 @@ const PROGRAMS: &[(&str, &str)] = &[
     ("dustmasker", include_str!("ncbi_xmlhelp/dustmasker.xml")),
     ("segmasker", include_str!("ncbi_xmlhelp/segmasker.xml")),
     (
+        "windowmasker",
+        include_str!("ncbi_xmlhelp/windowmasker.xml"),
+    ),
+    (
         "convert2blastmask",
         include_str!("ncbi_xmlhelp/convert2blastmask.xml"),
     ),
+    ("makembindex", include_str!("ncbi_xmlhelp/makembindex.xml")),
 ];
 
 /// NCBI 2.17.0's `-xmlhelp` of `program`, unchanged.
@@ -52,31 +49,7 @@ fn ncbi_xml(program: &str) -> Option<&'static str> {
 /// which `refused` is true (`-name` given as `name`) and the dependencies that name one; `None`
 /// for a program that NCBI does not have.
 ///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3900-3943
-/// ```c++
-/// // keys
-///     ITERATE (TArgs, a, desc.m_Args) {
-///         if (s_IsKey(**a)) {
-///             tag = (*a)->PrintXml(m_out);
-///             desc.x_PrintAliasesAsXml(m_out, (*a)->GetName());
-///             m_out << "</" << tag << ">" << endl;
-///         }
-///     }
-/// ...
-///     if (!desc.m_Dependencies.empty()) {
-///         m_out << "<" << "dependencies" << ">" << endl;
-///         ITERATE(TDependencies, dep, desc.m_Dependencies) {
-///             if (dep->second.m_Dep == eRequires) {
-///                 m_out << "<" << "first_requires_second" << ">" << endl;
-///                 s_WriteXmlLine(m_out, "arg1", dep->first);
-///                 s_WriteXmlLine(m_out, "arg2", dep->second.m_Arg);
-///                 m_out << "</" << "first_requires_second" << ">" << endl;
-///             }
-///         }
-/// ...
-///         m_out << "</" << "dependencies" << ">" << endl;
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3899-3943
 /// Each argument is an element of its own lines, from `<key name="NAME" ...>` (or `<flag`) to
 /// `</key>` (`</flag>`), and each dependency the four lines of its two names; NCBI writes
 /// `<dependencies>` only when there is one, so the block goes when none is left. The names are
@@ -121,7 +94,11 @@ pub(crate) fn print(program: &str, refused: impl Fn(&str) -> bool) -> Option<Str
         }
         out.push_str(line);
     }
-    Some(out.replace("<dependencies>\n</dependencies>\n", ""))
+    // The description states LOSAT's version (`Protein-Protein BLAST (LOSAT 0.2.0)`).
+    Some(
+        crate::wording::losat_text(&out.replace("<dependencies>\n</dependencies>\n", ""))
+            .into_owned(),
+    )
 }
 
 /// The tag (`key` or `flag`) and the name of the argument whose element starts at `line`

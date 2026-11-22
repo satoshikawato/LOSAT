@@ -161,6 +161,11 @@ fn search(
     }
 }
 
+/// The message that starts NCBI's exception of a taxonomy name with a byte >= 0x80 in an XML2 or
+/// JSON document (`CUtf8::SymbolToChar`). LOSAT's words leave out the header of NCBI's report
+/// (`NCBI C++ Exception:`, `losat::wording`), so the exception is known by its message.
+const NCBI_EXCEPTION_MESSAGE: &str = "Failed to convert symbol to requested encoding";
+
 /// The library's run ends as the command line's run of the same arguments: the same bytes on
 /// standard output and in the files, and the command line's message (the example writes LOSAT's
 /// own error without the `Error: ` before it, NCBI's exception text and posts with it, and ends
@@ -203,7 +208,9 @@ fn same_as_command_line(what: &str, library: &Run, cli: &Run) {
         .lines()
         .map(|line| match line.strip_prefix("Error: ") {
             // NCBI's own exception text and its posts keep the `Error: `; LOSAT's own errors lose it.
-            Some(own) if !own.starts_with("[blastx]") && !own.starts_with("NCBI C++ Exception") => {
+            Some(own)
+                if !own.starts_with("[blastx]") && !own.starts_with(NCBI_EXCEPTION_MESSAGE) =>
+            {
                 own
             }
             _ => line,
@@ -296,8 +303,12 @@ fn a_library_run_with_an_unreported_taxonomy_name_writes_ncbis_bytes() {
     let env = [("BLASTDB", taxdb.to_str().unwrap())];
     let fixtures = engine().join("tests/fixtures/outfmt16");
     for outfmt in ["15", "16"] {
-        let frozen = std::fs::read(fixtures.join(format!("mixtax_blastx_badname_{outfmt}.out")))
-            .expect("NCBI's bytes");
+        // NCBI's bytes in LOSAT's words (`losat::wording`).
+        let frozen = losat::wording::losat_output_bytes(
+            &std::fs::read(fixtures.join(format!("mixtax_blastx_badname_{outfmt}.out")))
+                .expect("NCBI's bytes"),
+        )
+        .into_owned();
         // The frozen run names the database as it was given from the fixtures' directory.
         let mut command = Command::new(example_binary("library_command_line"));
         clear_environment(&mut command, &dir.0.join("home"));
@@ -446,7 +457,7 @@ fn a_library_call_with_several_formats_holds_them_all() {
                 &mut diagnostics,
             )
         };
-        let message = result.expect_err("the refusal").message().to_string();
+        let message = result.expect_err("the refusal").to_string();
         assert!(message.contains(PARSED_REFUSAL), "{formats:?}: {message}");
         assert!(
             sinks.iter().all(Vec::is_empty),

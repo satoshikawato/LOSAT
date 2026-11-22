@@ -634,7 +634,7 @@ fn environment_values_are_parsed_as_ncbi_parses_them() {
         Err(crate::writedb::WriteDbError::Exception(e)) => {
             assert_eq!(
                 (e.get_msg(), e.site().line),
-                ("Cannot convert string '7x' to Int8", 870)
+                (b"Cannot convert string '7x' to Int8".as_slice(), 870)
             )
         }
         other => panic!("{other:?}"),

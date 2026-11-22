@@ -11,13 +11,6 @@
 //! order ran, not only that the output is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
-//! ```c
-//! for (i = 0; i < hits; ++i) {
-//!     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//!     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//! ...
-//!     diag_coord = (query_offset - subject_offset) & diag_mask;
-//! ```
 //! NCBI handles the hits of a scan in scan order. The bucketed order handles them one range of
 //! `diag_coord` after the other and must give the same report. The expected output
 //! (`tests/fixtures/tblastx_link_fast/short_hsp.ncbi_2.17.0.fmt6.out`) was produced by NCBI
@@ -103,13 +96,6 @@ fn counter(stderr: &str, name: &str) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
-// ```c
-// for (i = 0; i < hits; ++i) {
-//     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//     diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // By default (a table of at least the minimum cells) the scans run in the bucketed order, more than
 // one flush in at least one of them, and the report is NCBI's. The scan loop ran, not the units.
 #[test]
@@ -126,13 +112,6 @@ fn the_bucketed_order_runs_by_default_and_matches_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
-// ```c
-// for (i = 0; i < hits; ++i) {
-//     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//     diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // A table below the minimum cells (2^21, the default of `LOSAT_X_SEEDBUCKET_MIN_CELLS`; a later
 // variable overrides `SCAN_LOOP`'s 0) keeps the scan order: no bucketed scan, the report is NCBI's.
 #[test]

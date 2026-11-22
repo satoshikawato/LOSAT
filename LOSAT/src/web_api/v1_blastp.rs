@@ -28,13 +28,7 @@ pub(super) fn run_web_pair(
 /// tabular writer, which writes every one of NCBI's fields): its arguments are frozen (plan TD-1),
 /// so a field outside them stays its error.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:47-198
-/// ```c++
-/// const SFormatSpec sc_FormatSpecifiers[kNumTabularOutputFormatSpecifiers] = {
-///     SFormatSpec("qseqid",
-///                 "Query Seq-id",
-///                 eQuerySeqId),
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:44-198
 const V1_TABULAR_FIELDS: [&str; 30] = [
     "qseqid", "qacc", "qaccver", "qlen", "sseqid", "sacc", "saccver", "slen", "qstart", "qend",
     "sstart", "send", "qseq", "sseq", "evalue", "bitscore", "score", "length", "pident", "nident",
@@ -49,7 +43,7 @@ const V1_TABULAR_FIELDS: [&str; 30] = [
 /// token that is not a field).
 fn check_web_v1_request(args: &BlastpArgs) -> Result<()> {
     check_options(args)?;
-    let (format, fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
+    let (format, fields) = v1_output_format(&args.outfmt).map_err(anyhow::Error::msg)?;
     if let Some(fields) = fields {
         if format == OutputFormat::Pairwise {
             bail!("blastp outfmt 0 does not accept custom field lists");
@@ -63,6 +57,29 @@ fn check_web_v1_request(args: &BlastpArgs) -> Result<()> {
     Ok(())
 }
 
+/// ABI v1's reading of a BLASTP `-outfmt`, frozen with its errors (plan TD-1): the number as the
+/// text `0`, `6` or `7`, and the words after it. The engine reads the number as NCBI does
+/// (`blast_engine::blastp_text_format`: `06` is 6); moved here from `report::outfmt6` (line RG
+/// item D-36, review 1 S1).
+pub(super) fn v1_output_format(
+    s: &str,
+) -> std::result::Result<(OutputFormat, Option<String>), String> {
+    let (fmt_str, fields) = OutputFormat::split_fields(s);
+    let fields = fields.map(str::to_string);
+    let format = match fmt_str {
+        "0" => OutputFormat::Pairwise,
+        "6" => OutputFormat::Tabular,
+        "7" => OutputFormat::TabularWithComments,
+        _ => {
+            return Err(format!(
+                "Unsupported output format: {}. Supported: 0, 6, 7",
+                fmt_str
+            ))
+        }
+    };
+    Ok((format, fields))
+}
+
 pub(super) fn run_web_pair_bytes(
     args: BlastpArgs,
     query_fasta: &[u8],
@@ -71,36 +88,9 @@ pub(super) fn run_web_pair_bytes(
     subject_label: &str,
 ) -> Result<Vec<u8>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:484-490
-    // ```c
-    // void
-    // SetupQueries_OMF(IBlastQuerySource& queries,
-    //                  BlastQueryInfo* qinfo,
-    //                  BLAST_SequenceBlk** seqblk,
-    //                  EBlastProgramType prog,
-    //                  objects::ENa_strand strand_opt,
-    //                  TSearchMessages& messages)
-    // ```
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1427
-    // ```c
-    //     db_length = BlastSeqSrcGetTotLen(seq_src);
-    //
-    //     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-    //
-    //     /* iterate over all subject sequences */
-    //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //            != BLAST_SEQSRC_EOF) {
-    // ...
-    //        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-    //            continue;
-    //        }
-    // ```
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/api/local_blast.hpp:76-78
-    // ```c
-    // CLocalBlast(CRef<IQueryFactory> query_factory,
-    //             CRef<CBlastOptionsHandle> opts_handle,
-    //             CRef<CLocalDbAdapter> db);
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/api/local_blast.hpp:76-78
     // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
     check_web_v1_request(&args)?;
     let subjects = read_subjects(subject_fasta, "BLASTP", true)?;
@@ -112,6 +102,7 @@ pub(super) fn run_web_pair_bytes(
     run_local(
         args,
         &queries,
+        &crate::api::QueryEnd::Input,
         &subjects,
         query_label,
         subject_label,

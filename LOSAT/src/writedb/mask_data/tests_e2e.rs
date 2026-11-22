@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 
 use super::process::{process_mask_data, MaskDataError, MaskDataOptions};
 use super::tests::{bioseq, column_date, new_db};
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqdb::{MaskRanges, SeqDb, SeqType};
 use crate::writedb::build_db::BuildDatabase;
 use crate::writedb::fasta_source::Warn;
@@ -132,7 +133,7 @@ pub(super) fn run_case_with(
         let warn_ref: Warn<'_> = &mut warn;
         let mut db = BuildDatabase::new(
             out_base,
-            &case.title,
+            case.title.as_bytes(),
             case.protein,
             &mut log,
             &time_of(index_date),
@@ -305,7 +306,8 @@ fn assert_rebuilds(case: &Case, fixture_dir: &Path, fixture: &str, expected_stde
     assert_eq!(run.status, 0, "{fixture}: {}", run.stderr_text());
     assert_eq!(
         run.stderr_text(),
-        String::from_utf8_lossy(expected_stderr),
+        // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
+        crate::wording::losat_text(&String::from_utf8_lossy(expected_stderr)),
         "{fixture}: standard error"
     );
     // Every mask file of these cases holds an object: the log names it.
@@ -508,7 +510,7 @@ fn the_writer_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
             assert_eq!(run.status, 1, "{name}: the run should fail");
             assert_eq!(
                 run.stderr_text(),
-                String::from_utf8_lossy(&expected_stderr),
+                crate::wording::losat_text(&String::from_utf8_lossy(&expected_stderr)),
                 "{name}: standard error"
             );
             // The files of a failed run are removed.
@@ -603,65 +605,44 @@ pub(super) fn read_expected(parse_dir: &Path) -> BTreeMap<String, Expected> {
     runs
 }
 
-/// Files that makeblastdb reads and LOSAT does not (`MaskFileError::Unsupported`): LOSAT's
-/// outcome is its own refusal (status 1, "losat makeblastdb: mask data that LOSAT does not read: ..."),
-/// whatever NCBI did with them. A new file that LOSAT refuses must be added here. (Every Seq-loc
-/// alternative is read: `h_unsupported_*`, `b_small_whole` and the `*_seqloc_*` files equal NCBI.)
-const LOSAT_UNSUPPORTED: [&str; 3] = [
-    // NCBI replaces a byte that is not printable in a `VisibleString` with '#' and logs it, and
-    // warns about a UTF8String tag for a VisibleString; those lines are its only standard error.
-    // LOSAT does not write them, so it refuses the string.
-    "h_string_nonprint.asnt",
-    "h_utf8_in_options.asnt",
-    "b_utf8_options.asnb",
-];
-
-/// Files with which NCBI ends in `std::bad_alloc` (status 4, "BLAST ran out of memory"): a string
-/// whose length cannot be allocated. Whether an allocation of a given size fails depends on the
-/// host, so LOSAT does not tell these from the other damaged files and ends with status 255.
-const NCBI_OUT_OF_MEMORY: [&str; 1] = ["b_length_huge.asnb"];
-
+/// What makeblastdb did with a file of `tests/seqdb/mask_parse`; LOSAT does the same in every
+/// class (status, standard error, the database or its absence).
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub(super) enum Class {
-    /// "Unknown encoding for mask data in ..." (status 1): text and status equal NCBI's.
+    /// "Unknown encoding for mask data in ..." (status 1).
     UnknownEncoding,
-    /// NCBI's serial reader throws (status 255): LOSAT's status, its own text.
+    /// NCBI's serial reader throws a `CException` (status 255, "Error: NCBI C++ Exception: ...").
     Serial,
-    /// `std::bad_alloc` in NCBI (status 4): LOSAT's status 255, its own text.
+    /// The `std::length_error` of a string longer than `std::string` holds (status 255).
+    LengthError,
+    /// The `std::bad_alloc` of a string whose length cannot be allocated (status 4).
     OutOfMemory,
     /// A missing continuation (`more TRUE` and the end of the file): status 0, no database.
     NoDatabase,
-    /// LOSAT refuses a file that NCBI reads.
-    Unsupported,
-    /// Status, standard error and database equal NCBI's.
-    Equal,
+    /// The objects are read: status 0 with a database, or 1 for an error of a later step.
+    Read,
 }
 
 pub(super) fn classify(file: &str, run: &Expected) -> Class {
     if run.rc == 1 && run.stderr.contains("Unknown encoding for mask data in '") {
         Class::UnknownEncoding
-    } else if run.rc == 255 && run.stderr.starts_with("Error: NCBI C++ Exception:") {
+    } else if run.rc == 255 && run.stderr.contains("Error: NCBI C++ Exception:") {
         Class::Serial
+    } else if run.rc == 255 && run.stderr.ends_with("Error: basic_string::_M_create\n") {
+        Class::LengthError
     } else if run.rc == 4 {
-        assert!(
-            NCBI_OUT_OF_MEMORY.contains(&file),
-            "{file}: a new file with NCBI's status 4"
-        );
+        assert_eq!(run.stderr, "BLAST ran out of memory\n", "{file}");
         Class::OutOfMemory
     } else if run.rc == 0 && run.no_db {
         Class::NoDatabase
-    } else if LOSAT_UNSUPPORTED.contains(&file) {
-        Class::Unsupported
     } else {
         assert!(
-            !run.stderr.contains("NCBI C++ Exception")
-                && !run.stderr.contains("(803.")
-                && matches!(run.rc, 0 | 1),
+            !run.stderr.contains("NCBI C++ Exception") && matches!(run.rc, 0 | 1),
             "{file}: a new kind of outcome: status {}, {}",
             run.rc,
             run.stderr
         );
-        Class::Equal
+        Class::Read
     }
 }
 
@@ -707,55 +688,18 @@ fn every_mask_parse_file_runs_end_to_end() {
                 "{file}: files left behind"
             );
         };
-        // The text of the destructor of the CBuildDatabase ends the standard error of both
-        // programs when mask data were read before the failure.
-        let ends_alike = || {
-            assert_eq!(
-                stderr.ends_with(DESTRUCTOR_MESSAGE),
-                ncbi.stderr.ends_with(DESTRUCTOR_MESSAGE),
-                "{file}: the destructor message\nLOSAT: {stderr}\nNCBI: {}",
-                ncbi.stderr
-            );
-        };
-        match class {
-            Class::UnknownEncoding | Class::NoDatabase => {
-                assert_eq!(run.status, ncbi.rc, "{file}: {stderr}");
-                assert_eq!(stderr, ncbi.stderr, "{file}: standard error");
-                no_files();
-            }
-            Class::Serial | Class::OutOfMemory => {
-                assert_eq!(run.status, 255, "{file}: {stderr}");
-                assert!(
-                    stderr.starts_with(&format!("Error: mask data in '{file}': ")),
-                    "{file}: {stderr}"
-                );
-                if class == Class::OutOfMemory {
-                    assert_eq!(ncbi.rc, 4, "{file}");
-                    assert_eq!(ncbi.stderr, "BLAST ran out of memory\n", "{file}");
-                } else {
-                    assert_eq!(ncbi.rc, 255, "{file}");
-                }
-                ends_alike();
-                no_files();
-            }
-            Class::Unsupported => {
-                assert_eq!(run.status, 1, "{file}: {stderr}");
-                assert!(
-                    stderr.starts_with("losat makeblastdb: mask data that LOSAT does not read: "),
-                    "{file}: {stderr}"
-                );
-                no_files();
-            }
-            Class::Equal => {
-                assert_eq!(run.status, ncbi.rc, "{file}: {stderr}");
-                assert_eq!(stderr, ncbi.stderr, "{file}: standard error");
-                if run.status == 0 {
-                    compared += assert_database(&tmp.base("db"), protein, file, ncbi);
-                    listed += ncbi.masks.values().map(BTreeMap::len).sum::<usize>();
-                } else {
-                    no_files();
-                }
-            }
+        assert_eq!(run.status, ncbi.rc, "{file}: {stderr}");
+        // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
+        assert_eq!(
+            stderr,
+            crate::wording::losat_text(&ncbi.stderr),
+            "{file}: standard error"
+        );
+        if class == Class::Read && run.status == 0 {
+            compared += assert_database(&tmp.base("db"), protein, file, ncbi);
+            listed += ncbi.masks.values().map(BTreeMap::len).sum::<usize>();
+        } else {
+            no_files();
         }
     }
     assert_eq!(compared, listed);
@@ -765,12 +709,12 @@ fn every_mask_parse_file_runs_end_to_end() {
     assert_eq!(
         tally,
         [
-            ("Equal".to_string(), 109),
+            ("LengthError".to_string(), 3),
             ("NoDatabase".to_string(), 3),
-            ("OutOfMemory".to_string(), 1),
-            ("Serial".to_string(), 39),
+            ("OutOfMemory".to_string(), 4),
+            ("Read".to_string(), 149),
+            ("Serial".to_string(), 57),
             ("UnknownEncoding".to_string(), 7),
-            ("Unsupported".to_string(), 3),
         ]
     );
 }
@@ -884,7 +828,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             None,
             None,
             1,
-            "BLAST options error: mask_data option found, but no files were specified.\n".into(),
+            "LOSAT options error: mask_data option found, but no files were specified.\n".into(),
             vec![],
             false,
         ),
@@ -893,7 +837,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             None,
             None,
             1,
-            "BLAST options error: mask_data option found, but no files were specified.\n".into(),
+            "LOSAT options error: mask_data option found, but no files were specified.\n".into(),
             vec![],
             false,
         ),
@@ -969,7 +913,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             None,
             None,
             1,
-            "BLAST options error: Unknown encoding for mask data in 'empty.txt'\n".into(),
+            "LOSAT options error: Unknown encoding for mask data in 'empty.txt'\n".into(),
             vec![],
             false,
         ),
@@ -979,7 +923,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             Some("5"),
             None,
             1,
-            "BLAST options error: mask_id can not be numeric.\n".into(),
+            "LOSAT options error: mask_id can not be numeric.\n".into(),
             vec![],
             false,
         ),
@@ -988,7 +932,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             Some("a,-0"),
             None,
             1,
-            "BLAST options error: mask_id can not be numeric.\n".into(),
+            "LOSAT options error: mask_id can not be numeric.\n".into(),
             vec![],
             false,
         ),
@@ -997,7 +941,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             Some("a,2147483647"),
             None,
             1,
-            "BLAST options error: mask_id can not be numeric.\n".into(),
+            "LOSAT options error: mask_id can not be numeric.\n".into(),
             vec![],
             false,
         ),
@@ -1042,7 +986,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             Some("a"),
             None,
             1,
-            "BLAST options error: the size of mask_id does not match that of mask_data.\n".into(),
+            "LOSAT options error: the size of mask_id does not match that of mask_data.\n".into(),
             vec![],
             false,
         ),
@@ -1051,7 +995,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             Some("a,b,"),
             None,
             1,
-            "BLAST options error: the size of mask_id does not match that of mask_data.\n".into(),
+            "LOSAT options error: the size of mask_id does not match that of mask_data.\n".into(),
             vec![],
             false,
         ),
@@ -1060,7 +1004,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             Some(""),
             None,
             1,
-            "BLAST options error: the size of mask_id does not match that of mask_data.\n".into(),
+            "LOSAT options error: the size of mask_id does not match that of mask_data.\n".into(),
             vec![],
             false,
         ),
@@ -1088,7 +1032,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             Some("a,b"),
             Some("x"),
             1,
-            "BLAST options error: the size of mask_desc does not match that of mask_data.\n".into(),
+            "LOSAT options error: the size of mask_desc does not match that of mask_data.\n".into(),
             vec![],
             false,
         ),
@@ -1097,7 +1041,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             Some("a,b"),
             Some("x,y,"),
             1,
-            "BLAST options error: the size of mask_desc does not match that of mask_data.\n".into(),
+            "LOSAT options error: the size of mask_desc does not match that of mask_data.\n".into(),
             vec![],
             false,
         ),
@@ -1106,7 +1050,7 @@ fn process_mask_data_follows_makeblastdb_on_its_options() {
             Some("a,b"),
             Some(""),
             1,
-            "BLAST options error: the size of mask_desc does not match that of mask_data.\n".into(),
+            "LOSAT options error: the size of mask_desc does not match that of mask_data.\n".into(),
             vec![],
             false,
         ),
@@ -1190,7 +1134,7 @@ fn a_mask_file_that_cannot_be_opened_is_an_unknown_encoding() {
     assert_eq!(run.status, 1);
     assert_eq!(
         run.stderr_text(),
-        "BLAST options error: Unknown encoding for mask data in 'noperm.asnt'\n"
+        "LOSAT options error: Unknown encoding for mask data in 'noperm.asnt'\n"
     );
     assert_eq!(files_named(&out.0, "db."), Vec::<String>::new());
 }
@@ -1211,18 +1155,46 @@ fn outcomes_become_makeblastdb_s_status_and_text() {
     };
     assert_eq!(
         describe(MaskDataError::Ncbi(WriteDbError::Options("o".into()))),
-        Some((1, "BLAST options error: o".to_string()))
+        Some((1, "LOSAT options error: o".to_string()))
     );
     assert_eq!(
         describe(MaskDataError::Ncbi(WriteDbError::Creation("c".into()))),
-        Some((1, "BLAST Database creation error: c".to_string()))
+        Some((1, "LOSAT database creation error: c".to_string()))
+    );
+    // What NCBI's serial reader throws: a `CException`, `std::bad_alloc`, `std::length_error`.
+    let thrown = NcbiException::new(
+        ThrowSite {
+            file: "src/serial/objistr.cpp",
+            line: 1037,
+            kind: "CSerialException::eFormatError",
+            function: Some("ncbi::CObjectIStream::ExpectedMember"),
+        },
+        "line 3: \"masks\" expected",
+    );
+    let text = format!("Error: {}", String::from_utf8(thrown.what()).unwrap());
+    // NCBI's `Error: NCBI C++ Exception:` report in LOSAT's words (`crate::wording`): its message.
+    assert_eq!(
+        text.lines().next(),
+        Some("Error: line 3: \"masks\" expected"),
+        "{text}"
     );
     assert_eq!(
-        describe(MaskDataError::File(MaskFileError::Malformed {
-            path: path(),
-            message: "bad".into()
-        })),
-        Some((255, "Error: mask data in 'm.asnb': bad".to_string()))
+        describe(MaskDataError::File(MaskFileError::Ncbi(
+            WriteDbError::Exception(thrown)
+        ))),
+        Some((255, text))
+    );
+    assert_eq!(
+        describe(MaskDataError::File(MaskFileError::Ncbi(
+            WriteDbError::OutOfMemory
+        ))),
+        Some((4, "BLAST ran out of memory".to_string()))
+    );
+    assert_eq!(
+        describe(MaskDataError::File(MaskFileError::Ncbi(
+            WriteDbError::Other("basic_string::_M_create".into())
+        ))),
+        Some((255, "Error: basic_string::_M_create".to_string()))
     );
     assert_eq!(
         describe(MaskDataError::File(MaskFileError::Unsupported(
@@ -1243,7 +1215,7 @@ fn outcomes_become_makeblastdb_s_status_and_text() {
     let from_reader = MaskDataError::from(MaskFileError::Ncbi(WriteDbError::Options("u".into())));
     assert_eq!(
         describe(from_reader),
-        Some((1, "BLAST options error: u".to_string()))
+        Some((1, "LOSAT options error: u".to_string()))
     );
 }
 
@@ -1294,7 +1266,7 @@ fn the_message_of_a_run_without_matching_masks_is_ncbi_s() {
     let tmp = TempDir::new("mask-destructor");
     let mut db = BuildDatabase::new(
         &tmp.base("db"),
-        "t",
+        b"t",
         true,
         &mut log,
         &time_of("Oct 12, 2026  3:22 PM"),

@@ -70,6 +70,21 @@ def losat():
 
 
 @pytest.fixture(scope="session")
+def losat_fails():
+    """Runs `losat <words>`, which fails: its standard error."""
+    executable = os.environ.get("LOSAT_BIN")
+    if not executable:
+        pytest.skip("LOSAT_BIN names no losat executable")
+
+    def run(*words: str) -> bytes:
+        done = subprocess.run([executable, *words], capture_output=True)
+        assert done.returncode != 0, done
+        return done.stderr
+
+    return run
+
+
+@pytest.fixture(scope="session")
 def command_line(losat):
     """Runs `losat <program> -query <query> -subject <subject> <words>`: stdout and stderr."""
 

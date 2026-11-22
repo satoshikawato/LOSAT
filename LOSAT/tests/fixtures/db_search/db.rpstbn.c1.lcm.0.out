@@ -1,0 +1,825 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= len1
+
+Length=1
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= len2
+
+Length=2
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= len3
+
+Length=3
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 560
+
+
+Query= len4
+
+Length=4
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 560
+
+
+Query= len5
+
+Length=5
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 560
+
+
+Query= len6
+
+Length=6
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1120
+
+
+Query= len7
+
+Length=7
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1120
+
+
+Query= len11
+
+Length=11
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1680
+
+
+Query= len12
+
+Length=12
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2240
+
+
+Query= tkcut570
+
+Length=570
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  312     2e-114
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 312 bits (800),  Expect = 2e-114, Method: Composition-based stats.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  541  AEMYAAACRD  570
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 14.3 bits (26),  Expect = 3.8, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = -1
+
+Query  129  MFIASVFLLINIFQ  88
+            MF      L NI+Q
+Sbjct  22   MFAGKSTYLKNIYQ  35
+
+
+ Score = 13.6 bits (24),  Expect = 7.0, Method: Composition-based stats.
+ Identities = 7/23 (30%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+ Frame = -2
+
+Query  437  FTIELVYGSNLCMGLNIC*SEVP  369
+            +T  +V  ++ CM   I   E P
+Sbjct  140  YTNSIVKLASKCMICKIDTKEAP  162
+
+
+ Score = 13.2 bits (23),  Expect = 8.9, Method: Composition-based stats.
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = +2
+
+Query  392  LAPYTN  409
+            L PYTN
+Sbjct  137  LLPYTN  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+Query= tkrc570
+
+Length=570
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  312     2e-114
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 312 bits (800),  Expect = 2e-114, Method: Composition-based stats.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = -1
+
+Query  570  MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  391
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  390  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  211
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  210  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  31
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  30   AEMYAAACRD  1
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 14.3 bits (26),  Expect = 3.8, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = +1
+
+Query  442  MFIASVFLLINIFQ  483
+            MF      L NI+Q
+Sbjct  22   MFAGKSTYLKNIYQ  35
+
+
+ Score = 13.6 bits (24),  Expect = 7.0, Method: Composition-based stats.
+ Identities = 7/23 (30%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+ Frame = +2
+
+Query  134  FTIELVYGSNLCMGLNIC*SEVP  202
+            +T  +V  ++ CM   I   E P
+Sbjct  140  YTNSIVKLASKCMICKIDTKEAP  162
+
+
+ Score = 13.2 bits (23),  Expect = 8.9, Method: Composition-based stats.
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  179  LAPYTN  162
+            L PYTN
+Sbjct  137  LLPYTN  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+Query= tkcut571
+
+Length=571
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  312     2e-114
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 312 bits (800),  Expect = 2e-114, Method: Composition-based stats.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  541  AEMYAAACRD  570
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 14.3 bits (26),  Expect = 3.8, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = -2
+
+Query  129  MFIASVFLLINIFQ  88
+            MF      L NI+Q
+Sbjct  22   MFAGKSTYLKNIYQ  35
+
+
+ Score = 13.6 bits (24),  Expect = 7.0, Method: Composition-based stats.
+ Identities = 7/23 (30%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+ Frame = -3
+
+Query  437  FTIELVYGSNLCMGLNIC*SEVP  369
+            +T  +V  ++ CM   I   E P
+Sbjct  140  YTNSIVKLASKCMICKIDTKEAP  162
+
+
+ Score = 13.2 bits (23),  Expect = 9.0, Method: Composition-based stats.
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = +2
+
+Query  392  LAPYTN  409
+            L PYTN
+Sbjct  137  LLPYTN  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+Query= tkrc571
+
+Length=571
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  312     2e-114
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 312 bits (800),  Expect = 2e-114, Method: Composition-based stats.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = -1
+
+Query  571  MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  392
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  391  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  212
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  211  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  32
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  31   AEMYAAACRD  2
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 14.3 bits (26),  Expect = 3.8, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = +2
+
+Query  443  MFIASVFLLINIFQ  484
+            MF      L NI+Q
+Sbjct  22   MFAGKSTYLKNIYQ  35
+
+
+ Score = 13.6 bits (24),  Expect = 7.0, Method: Composition-based stats.
+ Identities = 7/23 (30%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+ Frame = +3
+
+Query  135  FTIELVYGSNLCMGLNIC*SEVP  203
+            +T  +V  ++ CM   I   E P
+Sbjct  140  YTNSIVKLASKCMICKIDTKEAP  162
+
+
+ Score = 13.2 bits (23),  Expect = 9.0, Method: Composition-based stats.
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  180  LAPYTN  163
+            L PYTN
+Sbjct  137  LLPYTN  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+Query= tkcut572
+
+Length=572
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  312     2e-114
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 312 bits (800),  Expect = 2e-114, Method: Composition-based stats.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  541  AEMYAAACRD  570
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 14.3 bits (26),  Expect = 3.8, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = -3
+
+Query  129  MFIASVFLLINIFQ  88
+            MF      L NI+Q
+Sbjct  22   MFAGKSTYLKNIYQ  35
+
+
+ Score = 13.6 bits (24),  Expect = 7.0, Method: Composition-based stats.
+ Identities = 7/23 (30%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+ Frame = -1
+
+Query  437  FTIELVYGSNLCMGLNIC*SEVP  369
+            +T  +V  ++ CM   I   E P
+Sbjct  140  YTNSIVKLASKCMICKIDTKEAP  162
+
+
+ Score = 13.2 bits (23),  Expect = 9.0, Method: Composition-based stats.
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = +2
+
+Query  392  LAPYTN  409
+            L PYTN
+Sbjct  137  LLPYTN  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+Query= tkrc572
+
+Length=572
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  312     2e-114
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 312 bits (800),  Expect = 2e-114, Method: Composition-based stats.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = -1
+
+Query  572  MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  393
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  392  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  213
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  212  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  33
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  32   AEMYAAACRD  3
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 14.3 bits (26),  Expect = 3.8, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = +3
+
+Query  444  MFIASVFLLINIFQ  485
+            MF      L NI+Q
+Sbjct  22   MFAGKSTYLKNIYQ  35
+
+
+ Score = 13.6 bits (24),  Expect = 7.0, Method: Composition-based stats.
+ Identities = 7/23 (30%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+ Frame = +1
+
+Query  136  FTIELVYGSNLCMGLNIC*SEVP  204
+            +T  +V  ++ CM   I   E P
+Sbjct  140  YTNSIVKLASKCMICKIDTKEAP  162
+
+
+ Score = 13.2 bits (23),  Expect = 9.0, Method: Composition-based stats.
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  181  LAPYTN  164
+            L PYTN
+Sbjct  137  LLPYTN  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+Query= nrun
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  294     3e-107
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 294 bits (753),  Expect = 3e-107, Method: Composition-based stats.
+ Identities = 180/190 (95%), Positives = 180/190 (95%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  181  TIVTHAGXXXXXXXXXXSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+            TIVTHAG          SIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  541  AEMYAAACRD  570
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 14.3 bits (26),  Expect = 4.0, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = -1
+
+Query  129  MFIASVFLLINIFQ  88
+            MF      L NI+Q
+Sbjct  22   MFAGKSTYLKNIYQ  35
+
+
+ Score = 13.6 bits (24),  Expect = 7.3, Method: Composition-based stats.
+ Identities = 7/23 (30%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+ Frame = -2
+
+Query  437  FTIELVYGSNLCMGLNIC*SEVP  369
+            +T  +V  ++ CM   I   E P
+Sbjct  140  YTNSIVKLASKCMICKIDTKEAP  162
+
+
+ Score = 13.2 bits (23),  Expect = 9.5, Method: Composition-based stats.
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = +2
+
+Query  392  LAPYTN  409
+            L PYTN
+Sbjct  137  LLPYTN  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 82867
+
+
+Query= lower
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  277     2e-100
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 277 bits (708),  Expect = 2e-100, Method: Composition-based stats.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  181  TIVTHAgeviegcttvssikelisvlpEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  541  AEMYAAACRD  570
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 14.7 bits (27),  Expect = 3.7, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = -1
+
+Query  129  MFIASVFLLINIFQ  88
+            MF      L NI+Q
+Sbjct  22   MFAGKSTYLKNIYQ  35
+
+
+ Score = 13.6 bits (24),  Expect = 7.3, Method: Composition-based stats.
+ Identities = 7/23 (30%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+ Frame = -2
+
+Query  437  FTIELVYGSNLCMGLNIC*SEVP  369
+            +T  +V  ++ CM   I   E P
+Sbjct  140  YTNSIVKLASKCMICKIDTKEAP  162
+
+
+ Score = 13.2 bits (23),  Expect = 9.5, Method: Composition-based stats.
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = +2
+
+Query  392  LAPYTN  409
+            L PYTN
+Sbjct  137  LLPYTN  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 82867
+
+
+Query= amb
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  303     1e-110
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 303 bits (776),  Expect = 1e-110, Method: Composition-based stats.
+ Identities = 187/190 (98%), Positives = 187/190 (98%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIXXXENGGNKHCLFVKHSLETRYGCGTG  180
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNI   ENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  541  AEMYAAACRD  570
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 13.6 bits (24),  Expect = 7.3, Method: Composition-based stats.
+ Identities = 7/23 (30%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+ Frame = -2
+
+Query  437  FTIELVYGSNLCMGLNIC*SEVP  369
+            +T  +V  ++ CM   I   E P
+Sbjct  140  YTNSIVKLASKCMICKIDTKEAP  162
+
+
+ Score = 13.2 bits (23),  Expect = 9.5, Method: Composition-based stats.
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = +2
+
+Query  392  LAPYTN  409
+            L PYTN
+Sbjct  137  LLPYTN  142
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 82867
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

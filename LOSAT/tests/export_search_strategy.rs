@@ -15,7 +15,10 @@
 //! blastx's batch of a record
 //! without letters; tblastx `-matrix BLOSUM99`, whose gap costs are 0 and 0), and the order of the
 //! errors (the file is made after the argument parser and before the other options are read: an
-//! error after it leaves the file empty, the parser's errors leave an existing file alone).
+//! error after it leaves the file empty, the parser's errors leave an existing file alone). Under
+//! `-parse_deflines`, LOSAT's refusal of two queries with one id writes no request of the refused
+//! batch: the file and the standard output are NCBI's of a near input whose reader stops at that
+//! batch (`near:` rows, line WQA D10 round 5, 2026-11-20).
 //! The first batch's request alone when NCBI fails to format that batch in BLAST XML (a matrix
 //! name its XML data does not know). psiblast's request of each query (before its rounds, with the
 //! search space of the query before; `Web_StepNumber`), rpsblast's and rpstblastn's (the profile
@@ -240,7 +243,9 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
     match case.check.as_str() {
         "ncbi" | "parser" => {
             let written = std::fs::read(&ss).ok();
-            let want = frozen(&case.name, "ss");
+            // NCBI's file in LOSAT's words: a file that also holds a report (`-out` and
+            // `-export_search_strategy` the same file) states LOSAT's version (AGENTS.md rule 8).
+            let want = frozen(&case.name, "ss").map(crate::outfmt11_blastx::expected_losat_bytes);
             assert_eq!(
                 written.is_some(),
                 want.is_some(),
@@ -259,7 +264,9 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                 assert!(output.stdout.is_empty(), "{label}: standard output");
                 assert!(stderr.starts_with("error: "), "{label}: {stderr}");
             } else {
-                let want_out = frozen(&case.name, "out").unwrap_or_default();
+                let want_out = crate::outfmt11_blastx::expected_losat_bytes(
+                    frozen(&case.name, "out").unwrap_or_default(),
+                );
                 assert!(
                     output.stdout == want_out,
                     "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
@@ -281,7 +288,9 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                 } else {
                     stderr
                 };
-                let want_err = frozen(&case.name, "err").unwrap_or_default();
+                let want_err = crate::outfmt11_blastx::expected_losat_bytes(
+                    frozen(&case.name, "err").unwrap_or_default(),
+                );
                 assert_eq!(
                     stderr,
                     String::from_utf8_lossy(&want_err),
@@ -295,6 +304,40 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                 stderr.contains(&case.expect),
                 "{label}: the refusal says {:?}: {stderr}",
                 case.expect
+            );
+        }
+        // LOSAT's refusal at a query batch: the strategy file and the standard output are NCBI's
+        // of the near input whose reader stops at that batch (line WQA D10 round 5, 2026-11-20).
+        check if check.starts_with("near:") => {
+            let near = &check["near:".len()..];
+            assert!(
+                stderr.contains(&case.expect),
+                "{label}: the refusal says {:?}: {stderr}",
+                case.expect
+            );
+            let written = std::fs::read(&ss).ok();
+            let want = frozen(near, "ss");
+            assert_eq!(
+                written.is_some(),
+                want.is_some(),
+                "{label}: the strategy file is there, as NCBI's of {near}"
+            );
+            if let (Some(written), Some(want)) = (&written, &want) {
+                assert!(
+                    written == want,
+                    "{label}: strategy file differs from {near}'s ({} bytes, NCBI wrote {}): {}",
+                    written.len(),
+                    want.len(),
+                    crate::outfmt11_blastx::first_difference(written, want)
+                );
+            }
+            let want_out = frozen(near, "out").unwrap_or_default();
+            assert!(
+                output.stdout == want_out,
+                "{label}: stdout differs from {near}'s ({} bytes, NCBI wrote {}): {}",
+                output.stdout.len(),
+                want_out.len(),
+                crate::outfmt11_blastx::first_difference(&output.stdout, &want_out)
             );
         }
         other => panic!("{label}: check {other}"),
@@ -530,6 +573,159 @@ fn a_piped_query_runs_as_the_regular_file() {
         assert_eq!(file.1, pipe.1, "{program} {path}: standard output");
         assert_eq!(file.2, pipe.2, "{program} {path}: standard error");
         assert_eq!(file.3, pipe.3, "{program} {path}: exit status");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `-out` with a strategy file and an `-outfmt` that NCBI cannot read (line RG F/d36, fix round
+/// 6): the file is created only where NCBI reaches it. NCBI runs its argument handlers in order
+/// (blast_args.cpp: `-subject` opened and `-subject_loc` read, `-query` opened, `-out` created,
+/// `-query_loc` read, then the formatting handler's error), so a query or subject file it cannot
+/// open and a `-subject_loc` it cannot read end the run with no `-out` file at all; a
+/// `-query_loc` it cannot read, and a run whose arguments are all good, end it with an empty one.
+/// The exit status and the (empty) strategy file are NCBI BLAST+ 2.17.0's, one fresh run of each
+/// row (`-num_threads 1`, under the oracle lock); the row's `-out` is `{dir}/o.txt`.
+#[test]
+fn out_is_created_only_where_ncbi_reaches_it() {
+    /// The programs' query and subject files (the rows of `cases.tsv` use the same).
+    const PROGRAMS: [(&str, &str, &str); 6] = [
+        (
+            "blastn",
+            "tests/fasta/outfmt11/arch_q.fna",
+            "tests/fasta/outfmt11/arch_s.fna",
+        ),
+        (
+            "blastp",
+            "tests/fasta/outfmt11/arch_bp_q.faa",
+            "tests/fasta/outfmt11/arch_bp_s.faa",
+        ),
+        (
+            "blastx",
+            "tests/fasta/outfmt11/arch_q.fna",
+            "tests/fasta/outfmt11/arch_bp_s.faa",
+        ),
+        (
+            "tblastn",
+            "tests/fasta/outfmt11/arch_tbn_q.faa",
+            "tests/fasta/outfmt11/arch_tbn_s.fna",
+        ),
+        (
+            "tblastx",
+            "tests/fasta/outfmt11/arch_tbx_q.fna",
+            "tests/fasta/outfmt11/arch_tbx_s.fna",
+        ),
+        (
+            "psiblast",
+            "tests/fasta/psiblast/tk.faa",
+            "tests/fasta/outfmt11/arch_bp_s.faa",
+        ),
+    ];
+    const NO_QUERY: &str = "tests/fasta/strategy/no_such_query.fa";
+    const NO_SUBJECT: &str = "tests/fasta/strategy/none.fa";
+    /// One class of row: the query and subject it replaces, the arguments it adds, its
+    /// `-outfmt`, NCBI's exit status and whether NCBI creates `-out`.
+    struct Kind {
+        name: &'static str,
+        query: Option<&'static str>,
+        subject: Option<&'static str>,
+        extra: &'static [&'static str],
+        outfmt: &'static str,
+        rc: i32,
+        out_made: bool,
+    }
+    let kinds = [
+        Kind {
+            name: "missing -query",
+            query: Some(NO_QUERY),
+            subject: None,
+            extra: &[],
+            outfmt: "99",
+            rc: 1,
+            out_made: false,
+        },
+        Kind {
+            name: "missing -subject",
+            query: None,
+            subject: Some(NO_SUBJECT),
+            extra: &[],
+            outfmt: "99",
+            rc: 1,
+            out_made: false,
+        },
+        Kind {
+            name: "bad -subject_loc",
+            query: None,
+            subject: None,
+            extra: &["-subject_loc", "abc"],
+            outfmt: "99",
+            rc: 3,
+            out_made: false,
+        },
+        Kind {
+            name: "bad -query_loc",
+            query: None,
+            subject: None,
+            extra: &["-query_loc", "abc"],
+            outfmt: "abc",
+            rc: 3,
+            out_made: true,
+        },
+        Kind {
+            name: "good arguments",
+            query: None,
+            subject: None,
+            extra: &[],
+            outfmt: "99",
+            rc: 255,
+            out_made: true,
+        },
+    ];
+    let dir = std::env::temp_dir().join(format!("losat_strategy_out_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for (program, query, subject) in PROGRAMS {
+        for (n, kind) in kinds.iter().enumerate() {
+            for threads in ["1", "4"] {
+                let run = dir.join(format!("{program}_{n}_{threads}"));
+                let _ = std::fs::remove_dir_all(&run);
+                std::fs::create_dir_all(&run).unwrap();
+                let (ss, out) = (run.join("s.ss"), run.join("o.txt"));
+                let label = format!("{program} with {} at {threads} threads", kind.name);
+                let output = Command::new(BIN)
+                    .current_dir(engine())
+                    .args([program, "-query", kind.query.unwrap_or(query)])
+                    .args(["-subject", kind.subject.unwrap_or(subject)])
+                    .args(kind.extra)
+                    .args(["-outfmt", kind.outfmt, "-num_threads", threads])
+                    .arg("-export_search_strategy")
+                    .arg(&ss)
+                    .arg("-out")
+                    .arg(&out)
+                    .stdin(Stdio::null())
+                    .output()
+                    .expect("run losat");
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert_eq!(
+                    output.status.code(),
+                    Some(kind.rc),
+                    "{label}: exit status; stderr: {stderr}"
+                );
+                assert!(output.stdout.is_empty(), "{label}: standard output");
+                // NCBI's `-out` is there (empty: the run ends before the first byte) or absent.
+                assert_eq!(
+                    std::fs::read(&out).ok(),
+                    kind.out_made.then(Vec::new),
+                    "{label}: the -out file (NCBI creates it: {})",
+                    kind.out_made
+                );
+                // The strategy file is made first, and left empty by the error after it.
+                assert_eq!(
+                    std::fs::read(&ss).ok(),
+                    Some(Vec::new()),
+                    "{label}: the strategy file"
+                );
+            }
+        }
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

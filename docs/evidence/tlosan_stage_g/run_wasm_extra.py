@@ -43,7 +43,6 @@ def main() -> int:
             assert sha(Path(base["subject"]).read_bytes()) == base["subject_sha256"]
             assert base["actual_stderr_sha256"] == base["code1_cli_stderr_sha256"]
             # NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
-            # (*thread)->Run(); (*thread)->Join(&result);
             # The hosts supply only command-WASI threads and I/O; compare raw bytes.
             for mode, n in (("serial", 1), ("threaded", 1), ("threaded", 2),
                             ("threaded", 4), ("threaded", 8)):

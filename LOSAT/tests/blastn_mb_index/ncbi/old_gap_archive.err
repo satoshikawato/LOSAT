@@ -1,0 +1,2 @@
+Error: [blastn] Index volume 1 not resolved.
+Warning: (1.1) [blastn] MegaBLAST database index requires word size greater than 8. Database index will not be used.

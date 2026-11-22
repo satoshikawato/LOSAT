@@ -1,0 +1,4 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:5528445
+@PG	ID:0	VN:2.17.0+	CL:/home/losatbench/losat-bench/tools/env_blast/bin/blastn -query tests/fasta/EDL933.fna -subject tests/fasta/MG1655.fna -task rmblastn -query_loc 1-3000 -subject_loc 1-100000 -evalue 1e-10 -outfmt 17 	PN:blastn
+Subject_1	0	Query_1	1	255	229M18D80M1I2673M4638669H	*	0	0	*	*	AS:i:2722	EV:f:0	NM:i:19	PI:f:98.22	BS:f:5396.46

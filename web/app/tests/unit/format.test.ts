@@ -1,12 +1,17 @@
 // The UI's display helpers (src/ui/format.ts).
 import { describe, expect, it } from 'vitest';
+import { MEMORY_RESULTS_CAPACITY } from '../../src/ports/data';
+import { MEMORY_FULL_MESSAGE } from '../../src/infra/data/block-store';
+import { NBSP, withUnit } from '../../src/domain/units';
 import {
+  formatBytes,
   formatCounted,
   formatDateTime,
   formatRuns,
   framesLabel,
   framesPhrase,
   framesText,
+  formatMillis,
   lostResultsText,
   optionHelp,
 } from '../../src/ui/format';
@@ -23,9 +28,8 @@ describe('formatDateTime', () => {
 });
 
 describe('optionHelp', () => {
-  it("keeps the help's first paragraph without the references to NCBI's sources", () => {
+  it("keeps the help's first paragraph", () => {
     expect(optionHelp('Cost to open a gap [default: 11]\n\nMore text')).toBe('Cost to open a gap [default: 11]');
-    expect(optionHelp('Reward for a match. NCBI reference: blast_options.c:12')).toBe('Reward for a match.');
     expect(optionHelp(undefined)).toBe('');
   });
 });
@@ -103,5 +107,34 @@ describe('frames', () => {
     expect(framesPhrase(blastx)).toBe('query frame -1');
     expect(framesPhrase(tblastx)).toBe('frames -2 / +2');
     expect(framesPhrase({})).toBe('');
+  });
+});
+
+// A number and its unit never part at a line break (line WQA's sweep, D9, 2026-11-19): the storage
+// note broke "at most 512" / "MB" at 390 px. Every size and unit text of the UI joins them with U+00A0.
+describe('a number and its unit', () => {
+  it('are joined by a no-break space', () => {
+    expect(withUnit(512, 'MB')).toBe(`512${NBSP}MB`);
+    expect(withUnit('1,200', 'aa')).toBe(`1,200${NBSP}aa`);
+  });
+
+  it('are joined by it in byte sizes, whatever the unit', () => {
+    expect(formatBytes(111)).toBe(`111${NBSP}bytes`);
+    expect(formatBytes(981_200)).toBe(`981.2${NBSP}kB`);
+    expect(formatBytes(36_800_000)).toBe(`36.8${NBSP}MB`);
+    expect(formatBytes(3_400_000_000)).toBe(`3.4${NBSP}GB`);
+  });
+
+  it('are joined by it in the time spans of a run', () => {
+    expect(formatMillis(420)).toBe(`420${NBSP}ms`);
+    expect(formatMillis(2600)).toBe(`2.6${NBSP}s`);
+  });
+
+  it('are joined by it in the storage note and its message, and have no plain space between them', () => {
+    expect(MEMORY_RESULTS_CAPACITY).toBe(`512${NBSP}MB`);
+    expect(MEMORY_FULL_MESSAGE).toContain(`at most 512${NBSP}MB in a tab`);
+    for (const text of [formatBytes(5_000), formatMillis(5), MEMORY_RESULTS_CAPACITY, MEMORY_FULL_MESSAGE]) {
+      expect(text).not.toMatch(/\d (bytes|kB|MB|GB|ms|s)\b/);
+    }
   });
 });

@@ -1,0 +1,105 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: multidb na; multidb nnp
+           17 sequences; 11,514 total letters
+
+
+
+Query= mix2_u glob1 of multidb/nnp (no accession table)
+
+Length=1043
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+FBtr0083245 cdna primary_assembly:BDGP6.54:3R:15896926:15902584:-...  1927    0.0  
+
+
+
+Query_1  1     GTAGCTTCGTTTGCTGCGTTTATTTTGTGTCAGTTGTTGTTGCCGCTCGGAAGTCTTTTA  60
+13       1     ............................................................  60
+
+Query_1  61    TAAAGGCCAGTCGGGCTAGAAATTCTATTCAGTTCAAATATTAACGGCGTCGTGTGCAGT  120
+13       61    ............................................................  120
+
+Query_1  121   TGCCTGGCATTTGATATAAACTCCTAAAAGCCATTAAGAGAGGGCCGAACGCTTATAGAG  180
+13       121   ............................................................  180
+
+Query_1  181   AGCTATAGAGTGAAAGCTGAGAAGAACCAAAACGGAGCATAAACATGAACAGCGATGAGG  240
+13       181   ............................................................  240
+
+Query_1  241   TGCAACTGATCAAGAAGACCTGGGAAATCCCCGTGGCAACACCAACAGATTCTGGAGCGG  300
+13       241   ............................................................  300
+
+Query_1  301   CGATACTGACGCAGTTTTTCAACCGCTTTCCGTCCAACTTGGAGAAGTTCCCCTTCCGCG  360
+13       301   ............................................................  360
+
+Query_1  361   ATGTTCCTTTGGAGGAGCTAAGTGGAAATGCTCGCTTCCGAGCACATGCCGGCAGAATCA  420
+13       361   ............................................................  420
+
+Query_1  421   TAAGGGTCTTTGACGAGTCCATCCAGGTCCTGGGCCAGGATGGCGATCTGGAGAAGCTGG  480
+13       421   ............................................................  480
+
+Query_1  481   ACGAGATCTGGACCAAAATTGCCGTTAGTCACATTCCGCGGACCGTTTCCAAGGAGTCTT  540
+13       481   ............................................................  540
+
+Query_1  541   ACAACCAACTGAAAGGAGTTATCCTGGATGTGCTGACAGCTGCCTGCAGTCTGGACGAGA  600
+13       541   ............................................................  600
+
+Query_1  601   GTCAAGCGGCCACGTGGGCCAAGCTGGTGGACCATGTCTACGGAATCATCTTCAAGGCGA  660
+13       601   ............................................................  660
+
+Query_1  661   TCGACGACGACGGCAACGCCAAGTAGATGAGGCAGCTGGAGGTGGAGATGCAACCGAATC  720
+13       661   ............................................................  720
+
+Query_1  721   CGCGGAAGGATGCAACTGATGCCAGCCGGTGGCACTTGCAACACATGCACAGCTTATGTA  780
+13       721   ............................................................  780
+
+Query_1  781   GTTCTAAGTAATTGATAAATGTTAGCTATTCTCGTTTTGTAATAATGAATGCGAATGTCC  840
+13       781   ............................................................  840
+
+Query_1  841   AAAACAAAAATACACACACAGTGAAAACTTATGTCTGCGTAGAGCTACTGacacacgcgc  900
+13       841   ............................................................  900
+
+Query_1  901   acaccccacacacatacacccgcacTTGCATTGCTCTGTAAAGCTTTAACCCATTGTCAG  960
+13       901   ............................................................  960
+
+Query_1  961   CCTTAAGCACTTGATAGCAAACAATACATGGAATCAGCAAAGGAGAAATAAGAAAGCTTA  1020
+13       961   ............................................................  1020
+
+Query_1  1021  TAAATAAAATCCAGTTTGAAAGC  1043
+13       1021  .......................  1043
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 11545534
+
+
+Query= ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1
+gene:ENSG00000206172.10 gene_biotype:protein_coding
+transcript_biotype:protein_coding gene_symbol:HBA1
+description:hemoglobin subunit alpha 1 [Source:HGNC
+Symbol;Acc:HGNC:4823]
+
+Length=577
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ENSTTEST0001.1 copy of record 1                                       1066    0.0  
+ENST00000320868.9 Unknown                                             1066    0.0  
+ENST00000251595.11 Unknown                                            953     0.0  
+ENST00000652335.1 Unknown                                             56.5    6e-11
+
+

@@ -27,9 +27,10 @@ fn posts(annots: &[&str]) -> String {
     String::from_utf8(outcome.posts.text()).unwrap()
 }
 
-/// `CATCH_ALL`'s report of an exception at `file`:`line` (one line of the chain).
-fn report(file: &str, line: u32, kind: &str, text: &str) -> String {
-    format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/{file}\", line {line}: Error: ({kind}) {text}\n\n")
+/// `CATCH_ALL`'s report of an exception at `file`:`line` (one line of the chain): NCBI's text in
+/// LOSAT's words (`crate::wording::losat_text`).
+fn report(file: &str, line: u32, kind: &str, text: &str) -> Vec<u8> {
+    crate::wording::losat_text(&format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/{file}\", line {line}: Error: ({kind}) {text}\n\n")).into_owned().into_bytes()
 }
 
 const TABLE: &str = "src/objmgr/seq_table_info.cpp";
@@ -121,13 +122,14 @@ fn seq_table_column_messages() {
     );
     assert_eq!(
         posts(&[&table(1, "{ header { field-name \"Seq-table location\" }, data int { 1 } }")]),
-        "Error: (CInvalidChoiceSelection::eFail) [psiblast] CSeqTable_multi_data::GetLoc(): Invalid choice selection: NCBI-SeqTable::SeqTable-multi-data.int\n\
-         Error: [psiblast] Bad 'Seq-table location' column (CInvalidChoiceSelection::eFail) CSeqTable_multi_data::GetLoc(): Invalid choice selection: NCBI-SeqTable::SeqTable-multi-data.int\n"
+        // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+        crate::wording::losat_text("Error: (CInvalidChoiceSelection::eFail) [psiblast] CSeqTable_multi_data::GetLoc(): Invalid choice selection: NCBI-SeqTable::SeqTable-multi-data.int\n\
+         Error: [psiblast] Bad 'Seq-table location' column (CInvalidChoiceSelection::eFail) CSeqTable_multi_data::GetLoc(): Invalid choice selection: NCBI-SeqTable::SeqTable-multi-data.int\n")
     );
     assert_eq!(
         posts(&[&table(1, "{ header { field-name \"Sorted, max length\" }, data string { \"a\" } }")]),
-        "Error: (CSeqTableException::eIncompatibleValueType) [psiblast] CSeqTable_multi_data::TryGetInt4(): value cannot be converted to requested type\n\
-         Error: [psiblast] Bad 'Sorted, max length' column (CSeqTableException::eIncompatibleValueType) CSeqTable_multi_data::TryGetInt4(): value cannot be converted to requested type\n"
+        crate::wording::losat_text("Error: (CSeqTableException::eIncompatibleValueType) [psiblast] CSeqTable_multi_data::TryGetInt4(): value cannot be converted to requested type\n\
+         Error: [psiblast] Bad 'Sorted, max length' column (CSeqTableException::eIncompatibleValueType) CSeqTable_multi_data::TryGetInt4(): value cannot be converted to requested type\n")
     );
     // A table that is not a feature table checks only its location (t23).
     assert_eq!(
@@ -230,7 +232,7 @@ fn exceptions_stop_the_run_with_their_report() {
         abort(&format!("{{ data align {{ {{ type global, dim 2, segs std {{ {{ dim -1, loc {{ int {{ from 0, to 5, id {Q1} }} }} }} }} }} }} }}")),
         Abort {
             exit: 255,
-            message: "Error: vector::_M_default_append\n".to_string()
+            message: b"Error: vector::_M_default_append\n".to_vec()
         }
     );
 }
@@ -284,7 +286,7 @@ fn the_failed_stream_keeps_the_headers() {
         outcome.abort,
         Some(Abort {
             exit: 255,
-            message: "\n".to_string()
+            message: b"\n".to_vec()
         })
     );
     // The null Seq-id handle of a row after the stream failed (k03).
@@ -296,7 +298,7 @@ fn the_failed_stream_keeps_the_headers() {
         ),
     ])
     .unwrap();
-    assert_eq!(outcome.abort.unwrap().message, "\n");
+    assert_eq!(outcome.abort.unwrap().message, b"\n");
 }
 
 // The values of a table's rows: a sparse bit set (t87), an int-delta column (t52), a sorted table
@@ -335,7 +337,7 @@ fn an_empty_region_after_the_failed_stream_writes_the_object() {
             outcome.abort,
             Some(Abort {
                 exit: 0,
-                message: String::new()
+                message: Vec::new()
             })
         );
         assert!(outcome.muted);
@@ -426,6 +428,7 @@ fn refusals_name_their_condition() {
         refused(&[&format!("{{ data align {{ {{ type global, dim 2, segs denseg {{ dim 2, numseg 0, ids {{ {Q1}, local id 2 }}, starts {{ 0, 0 }}, lens {{ }} }} }} }} }}")]),
         Refusal::DivideByZero
     );
+    // BitMagic data that ends after its first byte: NCBI reads past it (`bm/` case m02).
     assert_eq!(
         refused(&[&table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-id partial }}, data bit-bvector {{ size 1, data '80'H }} }}"))]),
         Refusal::BitVector
@@ -620,7 +623,7 @@ fn table_row_messages_follow_the_handle_order() {
 // The `bm/` probes p01, p03, p02 of line RG D3-1 (NCBI BLAST+ 2.17.0): the size of a bit-bvector
 // is its `size` member, which NCBI reads without decoding BitMagic's data (an int-delta over a
 // bit-bvector of size 0 has no value at row 0; an extra fuzz column is only asked `IsSet`); the
-// first value read decodes it (refused).
+// first value read decodes it (here BitMagic's exception for an unknown token).
 #[test]
 fn a_bit_bvector_decodes_only_for_a_value() {
     let bad = "'02018000000100020005040000000C'H";
@@ -634,9 +637,85 @@ fn a_bit_bvector_decodes_only_for_a_value() {
         ""
     );
     assert_eq!(
-        index(&[&table(1, &format!("{id}, {{ header {{ field-id location-from }}, data int-delta bit-bvector {{ size 1, data {bad} }} }}"))]).unwrap_err(),
-        Refusal::BitVector
+        index(&[&table(1, &format!("{id}, {{ header {{ field-id location-from }}, data int-delta bit-bvector {{ size 1, data {bad} }} }}"))]).unwrap().abort,
+        Some(bm_invalid())
     );
+}
+
+/// `CATCH_ALL`'s report of BitMagic's `std::logic_error`: NCBI's text in LOSAT's words
+/// (`crate::wording::losat_text`).
+fn bm_invalid() -> Abort {
+    Abort {
+        exit: 255,
+        message: crate::wording::losat_text("Error: BM::Invalid serialization format\n")
+            .into_owned()
+            .into_bytes(),
+    }
+}
+
+// The `bm/` probes m01-m15 of line RG D3-1 (NCBI BLAST+ 2.17.0, psiblast and tblastn): BitMagic's
+// exception as the index reads a value ends the run with `CATCH_ALL`'s report (m03: a 64-bit
+// vector, m04: an unknown token, m06: a sync mark that does not match, m07: a super-block of
+// length 0, m08: token 25, all in the `disabled` column; m11: in its sparse index; m14: in
+// `partial`), its line feed alone after the stream failed. In the column checks `NCBI_CATCH`
+// posts it and the run goes on (m12: `Sorted, max length`, m13: the sparse index of `Seq-table
+// location`; m15: a good `Sorted, max length`). Data that NCBI reads past or crashes on is refused
+// (m01, m10: empty data, which NCBI reads at a null pointer; m09: data without its last byte;
+// m05: an XOR block, which reads NCBI's null reference vector).
+#[test]
+fn bitmagic_exceptions_and_refusals() {
+    let location = format!(
+        "{{ header {{ field-id location }}, default loc int {{ from 9, to 4, id {Q1} }} }}"
+    );
+    let disabled = |data: &str| {
+        table(4, &format!("{{ header {{ field-name \"disabled\" }}, data bit-bvector {{ size 4, data {data} }} }}, {location}"))
+    };
+    let sparse = |data: &str| {
+        table(4, &format!("{{ header {{ field-name \"disabled\" }}, sparse bit-set-bvector {{ size 4, data {data} }}, default bit FALSE, sparse-other bit TRUE }}, {location}"))
+    };
+    let unknown = "'02018000000100020005040000000C'H";
+    for (case, annot) in [
+        ("m03", disabled("'3809'H")),
+        ("m04", disabled(unknown)),
+        ("m06", disabled("'0201800000010002000504000000320509'H")),
+        ("m07", disabled("'02018000000100020005040000003800000009'H")),
+        ("m08", disabled("'020180000001000200050400000019010000000000000009'H")),
+        ("m11", sparse(unknown)),
+        ("m14", table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-id partial }}, data bit-bvector {{ size 1, data {unknown} }} }}"))),
+    ] {
+        assert_eq!(index(&[&annot]).unwrap().abort, Some(bm_invalid()), "{case}");
+        assert_eq!(
+            index(&[&failing_feature(), &annot]).unwrap().abort,
+            Some(Abort {
+                exit: 255,
+                message: b"\n".to_vec()
+            }),
+            "{case}"
+        );
+    }
+    let id = format!("{{ header {{ field-id location-id }}, default id {Q1} }}");
+    // `STD_CATCH`'s posts (NCBI's text in LOSAT's words, `crate::wording::losat_text`).
+    assert_eq!(
+        posts(&[&table(1, &format!("{id}, {{ header {{ field-name \"Sorted, max length\" }}, data bit-bvector {{ size 4, data {unknown} }} }}"))]),
+        crate::wording::losat_text("Error: [psiblast] [Bad 'Sorted, max length' column] Exception: BM::Invalid serialization format\n")
+    );
+    assert_eq!(
+        posts(&[&table(1, &format!("{id}, {{ header {{ field-name \"Seq-table location\" }}, data loc {{ int {{ from 1, to 2, id {Q1} }} }}, sparse bit-set-bvector {{ size 4, data {unknown} }} }}"))]),
+        crate::wording::losat_text("Error: [psiblast] [Bad 'Seq-table location' column] Exception: BM::Invalid serialization format\n")
+    );
+    assert_eq!(
+        posts(&[&table(1, &format!("{id}, {{ header {{ field-name \"Sorted, max length\" }}, data bit-bvector {{ size 1, data '020180000001000200050100000013000009'H }} }}"))]),
+        ""
+    );
+    for (case, annot) in [
+        ("m01", disabled("''H")),
+        ("m02", disabled("'02'H")),
+        ("m05", disabled("'0201800000010002000504000000230000000009'H")),
+        ("m09", table(8, &format!("{{ header {{ field-name \"disabled\" }}, data bit-bvector {{ size 8, data '02018000000100020005080000004344720F00'H }} }}, {location}"))),
+        ("m10", sparse("''H")),
+    ] {
+        assert_eq!(index(&[&annot]).unwrap_err(), Refusal::BitVector, "{case}");
+    }
 }
 
 // The live `giim` handles across annotation objects (NCBI BLAST+ 2.17.0: review 3's gq4-gq6, `om/`

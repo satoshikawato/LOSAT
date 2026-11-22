@@ -58,6 +58,7 @@ fn try_run(
     let mut diagnostics = Vec::new();
     let result = {
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -68,12 +69,14 @@ fn try_run(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
         run_local_blastx(
             blastx_args(&inputs.query, &inputs.subject, extra),
             queries,
+            &crate::api::QueryEnd::Input,
             subjects,
             &mut outputs,
         )
@@ -113,6 +116,7 @@ impl Inputs {
             run_local_blastx(
                 blastx_args(&self.query, &self.subject, extra),
                 &queries,
+                &crate::api::QueryEnd::Input,
                 &subjects,
                 outputs,
             )
@@ -179,17 +183,6 @@ impl Drop for Batches {
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-297
-// ```c++
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-// ...
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-// ...
-//             	ITERATE(CSearchResultSet, result, *results) {
-//                	    formatter.PrintOneResultSet(**result, query_batch);
-//             	}
-// ...
-//         formatter.PrintEpilog(opt);
-// ```
 // The half of the test of this name in `LOSAT/tests/run_local_blastx.rs` that the api does not
 // reach: the observer must report the exact bytes of every HSP in every format (the CLI half
 // there compares the reports and the warnings with the CLI runs). The reference is the entry's
@@ -250,11 +243,6 @@ fn assert_observer_ranges_of(inputs: &Inputs, extra: &[&str], hits: bool, contex
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973
-// ```c++
-//     if (args.Exist(kArgNumDescriptions) && args[kArgNumDescriptions]) {
-//        m_NumDescriptions = args[kArgNumDescriptions].AsInteger();
-//     }
-// ```
 // The half of the test of this name in `LOSAT/tests/run_local_blastx.rs` that the api does not
 // reach: the entry refuses formats that need different hit list sizes (the api splits them into
 // searches itself), and the formats searched by separate calls share one pool.
@@ -299,25 +287,23 @@ fn display_counts_of_the_pairwise_report() {
     );
 }
 
-/// The side files of outfmt 13 and 14 without a file name are refused, as are the ids of the
-/// deflines of records that kept none, before anything is written.
+/// Outfmt 13 and 14 without a file name or a receiver of their side files end with NCBI's error
+/// before anything is written, as on the command line (`ReportOutputs::xinclude_check`; line RG
+/// F/d36 review 2).
 #[test]
 fn refusals_come_before_any_output() {
     let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
-    for (formats, extra) in [
-        (&["14"][..], &[][..]),
-        (&["6"][..], &["-parse_deflines"][..]),
-    ] {
-        let queries = queries(&Inputs::path(&inputs.query));
-        let subjects = subjects(&Inputs::path(&inputs.subject));
-        let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, formats, extra);
-        let error = result.expect_err("refused");
-        assert!(
-            error.to_string().contains("not supported in"),
-            "{formats:?} {extra:?}: {error}"
-        );
-        assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
-    }
+    let queries = queries(&Inputs::path(&inputs.query));
+    let subjects = subjects(&Inputs::path(&inputs.subject));
+    let (result, outputs, diagnostics) = try_run(&inputs, &queries, &subjects, &["14"], &[]);
+    let error = result.expect_err("NCBI's error");
+    assert!(
+        error
+            .to_string()
+            .contains("Please provide a file name for outfmt 14."),
+        "{error}"
+    );
+    assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
 }
 
 /// `check_options` (LOSAT Web's `validate`) fails where a run of the same formats fails before it
@@ -335,7 +321,6 @@ fn check_options_fails_as_a_run_does() {
         (&["11"][..], &[][..]),
         // NCBI's formatting handler: a custom delimiter that a field uses (W10).
         (&["6 delim=; qseqid staxids", "0"][..], &[][..]),
-        (&["6"][..], &["-parse_deflines"][..]),
         // NCBI's error of a matrix BLASTX does not take (IDENTITY, `std_matrix_only`).
         (&FORMATS[..], &["-matrix", "IDENTITY"][..]),
         (&FORMATS[..], &["-evalue", "0"][..]),
@@ -370,11 +355,34 @@ fn check_options_fails_as_a_run_does() {
         failed += usize::from(run.is_err());
     }
     // Every case but the three searches and the valid ranges fails.
-    assert_eq!(failed, 12);
+    assert_eq!(failed, 11);
+    // `-parse_deflines` passes the check: the records come later, read with the ids of their
+    // deflines (LOSAT Web's `register_inputs`; line WQA's sweep, D7, 2026-11-19).
+    let args = blastx_args(&inputs.query, &inputs.subject, &["-parse_deflines"]);
+    crate::algorithm::blastx::check_options(&args, &["6"]).unwrap();
+}
+
+// Two empty inputs end the command line's run with NCBI's error, with `-parse_deflines` as without
+// it (native CLI, `blastx -query empty -subject empty [-parse_deflines] -outfmt 6`: exit 3, `BLAST
+// engine error: Empty CBlastQueryVector`); `run_local` refused them with a message of LOSAT Web
+// under the option until line WQA's sweep, D7, 2026-11-19.
+#[test]
+fn two_empty_inputs_end_with_ncbis_error_with_parse_deflines_too() {
+    let inputs = Inputs::new("tests/fasta/small_test.fasta", "tests/fasta/PajaWSV.faa");
+    for extra in [&[][..], &["-parse_deflines"][..]] {
+        let (result, outputs, diagnostics) = try_run(&inputs, &[], &[], &["6"], extra);
+        // NCBI's message as the command line writes it to its standard error.
+        let error = format!("{:#}", result.expect_err("no records"));
+        assert_eq!(
+            error, "LOSAT engine error: Empty CBlastQueryVector\n",
+            "{extra:?}"
+        );
+        assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());
+    }
 }
 
 /// Values that the command line's parser refuses and a caller of `run_local` can set itself get
-/// NCBI's errors of the options where NCBI's core checks them (blast_options.c:1312-1348 for the
+/// NCBI's errors of the options where NCBI's core checks them (c++/src/algo/blast/core/blast_options.c:1312-1348 for the
 /// word size, :1510-1516 for the hit list size; blast_aux.cpp:662-673 for a task NCBI does not
 /// know, read in lower case), else LOSAT's refusal of what it does not run, instead of a search.
 #[test]
@@ -420,16 +428,24 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
         let result = {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
-            run_local_blastx(args, &queries, &subjects, &mut outputs)
+            run_local_blastx(
+                args,
+                &queries,
+                &crate::api::QueryEnd::Input,
+                &subjects,
+                &mut outputs,
+            )
         };
         let error = format!("{:#}", result.expect_err(message));
         assert!(error.contains(message), "{message}: {error}");
@@ -442,18 +458,21 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
     let result = {
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
         crate::api::local_blast::run_local_database_blastx(
             args,
             &queries,
+            &crate::api::QueryEnd::Input,
             crate::blastinput::ncbi_environment::ApplicationSettings::default(),
             &mut outputs,
         )
@@ -549,18 +568,6 @@ fn short_subject_between_warnings() -> PathBuf {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
-// ```c++
-//     TSeqPos size_read = 0;
-//
-//     while (size_read < GetBatchSize()) {
-// ...
-//         catch (const exception&) {
-//             continue; //SB-2307. ignore well formed, not found accession
-//         }
-// ...
-//             size_read += sequence::GetLength(loc->GetInt().GetId(),
-//                                              q->GetScope());
-// ```
 /// The half of the test of this name in `LOSAT/tests/run_local_blastx.rs` that the api does not
 /// reach: the observer's ranges are exact for the records cut by `-query_loc` and `-subject_loc`
 /// (queries skipped or without letters in the range, subjects without letters, lower-case masks,
@@ -692,7 +699,10 @@ fn errors_of_the_ranges_follow_the_command_line() {
             let native = error
                 .downcast_ref::<crate::cli::NativeError>()
                 .unwrap_or_else(|| panic!("{context}: {error:#}"));
-            assert!(native.message.contains(message), "{context}: {error:#}");
+            assert!(
+                String::from_utf8_lossy(&native.message).contains(message),
+                "{context}: {error:#}"
+            );
         }
     }
     let _ = std::fs::remove_file(&short_subject);

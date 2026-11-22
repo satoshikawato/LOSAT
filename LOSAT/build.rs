@@ -1,8 +1,11 @@
 use std::{env, path::PathBuf, process::Command};
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// TBlastThreads the_threads(GetNumberOfThreads());
-// (*thread)->Run(); (*thread)->Join(&result);
+// The argument tables of `ncbi_app::args`, from the embedded `-xmlhelp` XML (line RG DECISIONS
+// K4i-1).
+#[path = "build/ncbi_args.rs"]
+mod ncbi_args;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // WASI implementation boundary: Rust 1.92's cdylib link omits startup objects.
 // Its bundled crt1-reactor.o exports _initialize, which calls __wasi_init_tp
 // and __wasm_call_ctors. Linking it as the entry also prevents LLD from wrapping
@@ -10,6 +13,11 @@ use std::{env, path::PathBuf, process::Command};
 // runtime startup, never an NCBI runtime or build dependency.
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build/ncbi_args.rs");
+    let manifest_dir =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo CARGO_MANIFEST_DIR"));
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR"));
+    ncbi_args::write_tables(&manifest_dir, &out_dir);
     println!("cargo:rustc-check-cfg=cfg(losat_wasi_threads)");
     let target = env::var("TARGET").expect("Cargo TARGET");
     if target == "wasm32-wasip1-threads" {

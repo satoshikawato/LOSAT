@@ -99,6 +99,8 @@ test('a failed download names the site and the status and leaves the boxes as th
   await program(page, 'blastp');
   await expect(page.getByTestId('example-uniprot-ecoli-k12-note')).toHaveText('Downloads 981.2 kB from rest.uniprot.org');
   await expect(page.getByTestId('example-pdbaa-note')).toHaveText('Downloads 36.8 MB from ftp.ncbi.nlm.nih.gov');
+  // toHaveText reads a no-break space as a space; the size and its unit are joined by one (line WQA's sweep, D9, 2026-11-19).
+  expect(await page.getByTestId('example-pdbaa-note').textContent()).toBe('Downloads 36.8\u00a0MB from ftp.ncbi.nlm.nih.gov');
   await page.getByTestId('query-input').fill('>old\nMKV\n');
   await page.getByTestId('example-uniprot-ecoli-k12').click();
   await expect(page.getByTestId('example-error')).toHaveText('rest.uniprot.org answered HTTP 500: try again in a moment.');

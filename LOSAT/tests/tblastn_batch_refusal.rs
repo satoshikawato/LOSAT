@@ -10,15 +10,6 @@
 //! after the prolog).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275,289-291,300-302
-//! ```c++
-//!             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//! ...
-//!                     results = lcl_blast.Run();
-//! ...
-//!                     ITERATE(CSearchResultSet, result, *results) {
-//!                         formatter.PrintOneResultSet(**result, query);
-//!                     }
-//! ```
 //! The inputs: `qa` (31 residues without W, G, V, N, H, T or P, so no word of it scores 13 against
 //! a frame of `w11`) hits `pa`, its back-translation (93 bases), and nothing of `w11`
 //! (`TGGTGGTGGTT`); `xs_q` (`MHYWWW`) hits `w11` with `-window_size 0`, where the traceback reads
@@ -658,8 +649,8 @@ fn a_split_batch_meets_a_failing_read_of_the_database_where_ncbi_does() {
     let gaps = fasta(dir, "qg.faa", &[("qg", &QA.repeat(8))]);
     let head = fasta(dir, "xh.faa", &[("xh", &format!("{x}{QA}M"))]);
     let tail = fasta(dir, "xt.faa", &[("xt", &format!("{QA}M{x}"))]);
-    let min1 = "BLAST engine error: The average subject length is too short";
-    let memory = "BLAST engine error: Database memory map file error";
+    let min1 = "LOSAT engine error: The average subject length is too short";
+    let memory = "LOSAT engine error: Database memory map file error";
     // (database, splitting values, query, the refusal or (with exit status 3) NCBI's error)
     let nosq = "arch_tbn_snucl_nonsq";
     let cases: [(&str, usize, &PathBuf, Result<&str, &str>); 15] = [
@@ -745,8 +736,11 @@ fn a_pssm_query_is_refused_after_the_prolog() {
         let text = String::from_utf8_lossy(&refused.stdout);
         if outfmt == "0" {
             assert!(
-                text.starts_with("PSITBLASTN 2.17.0+\n")
-                    && text.ends_with(" total letters\n\n")
+                text.starts_with(concat!(
+                    "PSITBLASTN (LOSAT ",
+                    env!("CARGO_PKG_VERSION"),
+                    ")\n"
+                )) && text.ends_with(" total letters\n\n")
                     && !text.contains("Query="),
                 "{case}: {text}"
             );
@@ -780,7 +774,9 @@ fn a_masked_pssm_query_is_refused_after_the_prolog() {
     assert!(searched.status.success(), "-seg no: {text}");
     let prolog = &searched.stdout[..text.find("\n\nQuery=").expect("the query's report")];
     assert!(
-        prolog.starts_with(b"PSITBLASTN 2.17.0+\n") && prolog.ends_with(b" total letters\n\n"),
+        prolog.starts_with(
+            concat!("PSITBLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n").as_bytes()
+        ) && prolog.ends_with(b" total letters\n\n"),
         "-seg no: {text}"
     );
     for outfmt in ["0", "6"] {

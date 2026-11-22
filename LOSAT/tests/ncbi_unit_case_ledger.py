@@ -2,14 +2,6 @@
 """Count LOSAT's ports of NCBI BLAST+ unit-test cases against a ledger.
 
 NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1094-1099
-```c++
-BOOST_AUTO_TEST_CASE(testHSPListSort)
-{
-    const int kHspCnt = 10;
-    setupHSPList(kHspCnt);
-    Blast_HSPListSortByScore(m_HspList);
-    BOOST_REQUIRE(Blast_HSPListIsSortedByScore(m_HspList));
-```
 
 NCBI keeps one Boost.Test case per checked behavior. LOSAT ports a case as a
 Rust test next to the implementation, with the line

@@ -47,7 +47,17 @@ fn the_cli_writes_the_bytes_of_the_web_v1_tblastn_vector() {
             .args(["-outfmt", outfmt])
             .output()
             .expect("losat tblastn");
-        let expected = std::fs::read(dir.join(format!("{name}.{kind}"))).expect(name);
+        // The frozen bytes are NCBI-identical (see above); LOSAT writes them in its own words
+        // (`losat::wording`, AGENTS.md rule 8).
+        let mut expected = losat::wording::losat_output_bytes(
+            &std::fs::read(dir.join(format!("{name}.{kind}"))).expect(name),
+        )
+        .into_owned();
+        // ABI v1 returns LOSAT's own parser messages without a line end, as when it was frozen;
+        // the command line ends them with one (`cli::command_line_message`).
+        if kind == "err" && expected.last() != Some(&b'\n') {
+            expected.push(b'\n');
+        }
         if kind == "out" {
             assert!(output.status.success(), "{name}: {output:?}");
             assert!(output.stdout == expected, "{name}: report differs");

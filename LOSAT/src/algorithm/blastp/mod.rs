@@ -7,11 +7,10 @@ mod alignment;
 pub(crate) mod archive;
 pub mod args;
 pub mod blast_engine;
-// NCBI c++/src/algo/blast/core/blast_setup.c:382-385:
-// if (Blast_QueryIsProtein(program_number)) BLAST_ScoreSetAmbigRes(sbp, 'X');
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:382-385:
 // BLASTP and TBLASTN both encode an untranslated protein query in NCBISTDAA.
 pub(crate) mod encoding;
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:217-228
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:217-228
 // status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
 // The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
 pub(crate) mod extension;
@@ -20,7 +19,7 @@ pub(crate) mod x_ungapped_fast;
 // EXPERIMENT (LOSAT_X_BPUNGAPSENT): blastp's two-hit extension for word size 3 inlined into the
 // fused loop's candidate closure, walks stopped by the sentinels, same results.
 pub(crate) mod x_ungapped_sent;
-// NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
 // max_offset = BlastGetStartForGappedAlignment(...);
 // status = s_BlastProtGappedAlignment(...);
 // BLASTP and TBLASTN use the same protein gapped-score path.
@@ -28,11 +27,11 @@ mod blast_xml;
 pub(crate) mod gapalign;
 pub(crate) mod hsp;
 mod query_split;
-// NCBI c++/src/algo/blast/api/split_query_cxx.cpp:145-171 (`CQuerySplitter`): the protein query batch's
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171 (`CQuerySplitter`): the protein query batch's
 // chunks, used by BLASTP, TBLASTN and PSI-BLAST (moved from `common`, SW6 item 2).
 pub mod protein_query_split;
 mod seqalign;
-// NCBI c++/src/objtools/align_format/tabular.cpp: the tabular reports with a field list or a
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp: the tabular reports with a field list or a
 // delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).
 mod tabular;
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
@@ -49,13 +48,7 @@ mod x_redo_fit;
 mod x_redo_par;
 // The redo of a `-db` search reads each match's subject from the database.
 pub(crate) mod x_redo_subjects;
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
-// ```c
-// static void s_HSPListNormalizeScores(...);
-// static void s_HitlistReapContained(...);
-// static int s_HitlistEvaluateAndPurge(...);
-// static void s_ComputeNumIdentities(...);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-3691
 mod kappa;
 // The subject scan and the two-hit test in one loop.
 pub(crate) mod x_seed_fused;

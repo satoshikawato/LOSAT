@@ -37,10 +37,10 @@ dctr_e10.full	compare	-	-	-i arch/dctr_e10.asn -d data -m full -t doms
 dctr_e10.full.f	compare	-	-	-i arch/dctr_e10.asn -d data -m full -t doms -f
 tie1.rep	compare	-	-	-i arch/tie1.asn -d data -m rep -t doms
 tie1.rep.f	compare	-	-	-i arch/tie1.asn -d data -m rep -t doms -f
-tie1.std	compare	-	-	-i arch/tie1.asn -d data -m std -t doms
-tie1.std.f	compare	-	-	-i arch/tie1.asn -d data -m std -t doms -f
-tie1.full	compare	-	-	-i arch/tie1.asn -d data -m full -t doms
-tie1.full.f	compare	-	-	-i arch/tie1.asn -d data -m full -t doms -f
+tie1.std	tied	-	-	-i arch/tie1.asn -d data -m std -t doms
+tie1.std.f	tied	-	-	-i arch/tie1.asn -d data -m std -t doms -f
+tie1.full	tied	-	-	-i arch/tie1.asn -d data -m full -t doms
+tie1.full.f	tied	-	-	-i arch/tie1.asn -d data -m full -t doms -f
 tie2.rep	compare	-	-	-i arch/tie2.asn -d data -m rep -t doms
 tie2.rep.f	compare	-	-	-i arch/tie2.asn -d data -m rep -t doms -f
 tie2.std	compare	-	-	-i arch/tie2.asn -d data -m std -t doms
@@ -270,7 +270,7 @@ x.dctr_e10.e2e-6	compare	-	-	-i arch/x_dctr_e10.xml -d data -t doms -m full -e 2
 x.dctr_e10.e0.0100000001	compare	-	-	-i arch/x_dctr_e10.xml -d data -t doms -m full -e 0.0100000001
 x.dctr_e10.em1	compare	-	-	-i arch/x_dctr_e10.xml -d data -t doms -m full -e -1
 x.tie1.doms.rep	compare	-	-	-i arch/x_tie1.xml -d data -t doms -m rep
-x.tie1.doms.full	compare	-	-	-i arch/x_tie1.xml -d data -t doms -m full
+x.tie1.doms.full	tied	-	-	-i arch/x_tie1.xml -d data -t doms -m full
 x.tie2.doms.rep	compare	-	-	-i arch/x_tie2.xml -d data -t doms -m rep
 x.tie2.doms.full	compare	-	-	-i arch/x_tie2.xml -d data -t doms -m full
 x.notitle.both.rep	compare	-	-	-i arch/x_notitle.xml -d data -t both -m rep
@@ -378,10 +378,10 @@ refuse_xntqlen1	refuse	-	data-with:nt	-i arch/x_h_n_qlen1.xml -d nt -t doms -m s
 x.h_nanexpect.doms	compare	-	-	-i arch/x_h_p_nanexpect.xml -d data -t doms -m std
 x.h_bitnan.both	compare	-	-	-i arch/x_h_p_bitnan.xml -d data -t both
 x.h_evalnan.both	compare	-	-	-i arch/x_h_p_evalnan.xml -d data -t both
-x.h_tnan3.full	compare	-	-	-i arch/x_h_t_nan3.xml -d data -t doms -m full
-x.h_tnan3.both	compare	-	-	-i arch/x_h_t_nan3.xml -d data -t both
-x.h_ntnanthird.full	compare	-	data-with:nt	-i arch/x_h_n_nanthird.xml -d nt -t doms -m full -e 10
-x.h_ntnanthird.both	compare	-	data-with:nt	-i arch/x_h_n_nanthird.xml -d nt -t both -e 10
+x.h_tnan3.full	tied	-	-	-i arch/x_h_t_nan3.xml -d data -t doms -m full
+x.h_tnan3.both	tied	-	-	-i arch/x_h_t_nan3.xml -d data -t both
+x.h_ntnanthird.full	tied	-	data-with:nt	-i arch/x_h_n_nanthird.xml -d nt -t doms -m full -e 10
+x.h_ntnanthird.both	tied	-	data-with:nt	-i arch/x_h_n_nanthird.xml -d nt -t both -e 10
 x.h_ntnanall.full	compare	-	data-with:nt	-i arch/x_h_n_nanall.xml -d nt -t doms -m full -e 10
 x.h_ntbitnan.both	compare	-	data-with:nt	-i arch/x_h_n_bitnan.xml -d nt -t both -m full -e 10
 nan_threshold	compare	-	-	-i arch/bad/a_nan.asn -d data -t doms -m std

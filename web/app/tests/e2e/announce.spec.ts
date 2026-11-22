@@ -94,7 +94,11 @@ test('a failed run is told as an alert, with its reason', async ({ page }) => {
   await forget(page);
   await submit(page);
   await waitStatus(page, 1, 'failed');
-  await expect.poll(() => told(page, 'alert')).toContainEqual(expect.stringMatching(/^Run 1 failed: .+ A failed run keeps no results\.$/));
+  // Both runs write a warning before their error, which the run keeps (line WQA's sweep, D3, 2026-11-19), and the
+  // output of the command line (outfmt 0: its prolog, or the FakeEngine's marked line; D15, 2026-11-20).
+  await expect
+    .poll(() => told(page, 'alert'))
+    .toContainEqual(expect.stringMatching(/^Run 1 failed: .+ It keeps the outputs written before the error\. It keeps the warnings written before the error\.$/));
 });
 
 test('a cancelled run is told; Cancel leaves the focus on the Results heading, and Tab goes on from there', async ({ page }) => {
@@ -180,9 +184,21 @@ test("the engine's check of an input, its warnings and a refusal to read it are 
   await expect
     .poll(() => told(page, 'status'))
     .toContainEqual(expect.stringContaining('1 record looks like protein sequences, but BLASTN reads the query as nucleotide.'));
+  // The reader's error before the first record: a run ends with it, as the command line does, so the
+  // card warns (line WQA's D10, 2026-11-19; review M-a, 2026-11-20).
   await page.getByTestId('query-input').fill(`\uFEFF>q1\n${dna(3, 60)}\n`);
-  await expect(page.getByTestId('query-source-0')).toHaveAttribute('data-status', 'failed');
-  await expect.poll(() => told(page, 'status')).toContainEqual(expect.stringContaining('This input cannot be read: '));
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-reader-error', '');
+  await expect
+    .poll(() => told(page, 'status'))
+    .toContainEqual(expect.stringContaining('A run of this input ends with this error, as the command line does, and gives no results: '));
+  // A subject that the engine refuses for that error: its card's hint of the byte order mark is told too
+  // (review L1, 2026-11-20).
+  await paste(page, 'subject', `\uFEFF>s1\n${dna(5, 60)}\n`);
+  await expect(page.getByTestId('subject-source-0-check')).toHaveAttribute('data-check', 'refused');
+  await expect(page.getByTestId('subject-source-0-mark')).toBeVisible();
+  await expect
+    .poll(() => told(page, 'status'))
+    .toContainEqual(expect.stringMatching(/refuses this input: .*The text starts with a byte order mark \(U\+FEFF\)\./));
 });
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');

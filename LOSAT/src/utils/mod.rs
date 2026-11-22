@@ -1,27 +1,37 @@
 pub mod dust;
 pub mod entry_names;
-// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp (`CFormatGuess`, quoted in the module).
+// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp (`CFormatGuess`, cited in the module).
 pub(crate) mod format_guess;
 pub mod genetic_code;
+pub mod glibc_fma_libm;
+// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:331-334 (and the other calls of
+// `lower_bound` named in the module): the position, asked in the order observed of
+// `std::lower_bound`.
+pub(crate) mod lower_bound;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:252-262 (`CRpsMmappedFile`,
-// quoted in the module).
+// cited in the module).
 pub(crate) mod mapped_file;
 pub mod matrix;
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99, 615-621 (a file name's bytes in
+// NCBI's messages, cited in the module).
+pub(crate) mod os_bytes;
+// No NCBI counterpart: the C library's text of an operating system error, which NCBI's messages
+// end with, as NCBI BLAST+ 2.17.0 wrote it on Linux (cited in the module).
+pub(crate) mod os_error_text;
 pub(crate) mod process_id;
 // No NCBI counterpart: whether two names are one file where there are no inode numbers (WASI).
 pub(crate) mod same_file;
 pub mod seg;
 mod seg_lnfact;
-// libstdc++ (GCC 13): bits/stl_algo.h:1939-1951 (`std::sort`, quoted in the module): the order
-// in which rpsbproc's sorts leave equal elements (RpsbProc/src/common/cdalignproc_base.cpp:200,
-// ptrmap.hpp:171 of the 2025-05-13 package).
-pub(crate) mod std_sort;
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:665-674 (`-randomize`, cited
+// at `writedb::raw_source::RawSeqDbSource::new`): `std::shuffle` with a `std::mt19937`, in the
+// order observed of NCBI's Linux builds.
+pub(crate) mod std_shuffle;
 // No NCBI counterpart: test plumbing; the tests' temporary directory and process id
 // (`std::env::temp_dir()` and `std::process::id()` panic on WASI).
 #[cfg(test)]
 pub(crate) mod test_dir;
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
-// (*thread)->Run(); (*thread)->Join(&result);
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:177-188
 pub mod threading;
 pub mod winmask;
 pub(crate) mod x87;

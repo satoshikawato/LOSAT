@@ -334,3 +334,19 @@ db_t5b_kingdom_past_page_fasta	-infmt blastdb -in ../db_search/t5b/nmv -outfmt f
 db_t5b_kingdom_past_page_interval	-infmt blastdb -in ../db_search/t5b/nmv -outfmt interval -conffile conf/t5b_kingdom_past_page.ini
 db_t5b_names_past_page_seqloc_asn1_text	-infmt blastdb -in ../db_search/t5b/nmv -outfmt seqloc_asn1_text -conffile conf/t5b_names_past_page.ini
 db_t5b_names_past_page_maskinfo_asn1_text	-infmt blastdb -in ../db_search/t5b/nmv -outfmt maskinfo_asn1_text -conffile conf/t5b_names_past_page.ini
+# OIDLIST (line RG, series D, D1b-1, 2026-11-21): the alias files of ../db_search/oidlist (make_oidlist.py). The reader reads every OID of the volumes, the OIDs the list leaves out too; a missing OID list file stops it before the first sequence, at the constructor's scan and, under NSEQ and LENGTH, at the reader's first use of the OID list. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-21, ad-RG-D-26.
+db_oidlist_n_interval	-infmt blastdb -in ../db_search/oidlist/n_n -outfmt interval
+db_oidlist_missl_interval	-infmt blastdb -in ../db_search/oidlist/n_missl -outfmt interval
+db_oidlist_miss_interval	-infmt blastdb -in ../db_search/oidlist/n_miss -outfmt interval
+# OID_MASK_TYPE (line RG, series D, D1b-2, 2026-11-21): the alias files of ../db_search/oidmask (make_oidmask.sh). With bit 0 of the key the definition lines with a predicted RefSeq id are erased; NCBI's reader gives no Bioseq for a sequence left without a line, and dustmasker stops there on the unset Seq-entry (rc 3) after the sequences before it. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-21, ad-RG-D-27.
+db_oidmask_omnx_interval	-infmt blastdb -in ../db_search/oidmask/omnx -outfmt interval
+db_oidmask_ntall_fasta	-infmt blastdb -in ../db_search/oidmask/ntall -outfmt fasta
+db_oidmask_omn_interval	-infmt blastdb -in ../db_search/oidmask/omn -outfmt interval
+# The Seq-id that seqloc_* and maskinfo_* print, of a sequence whose first Seq-id is not the one of its handle (GetAccessSeq_id_Handle: a gi, else a Textseq-id, else the first; line NP item M5c review, NCBI BLAST+ 2.17.0 on ws, 2026-11-21)
+access_int_ps	-in in/access.fa -parse_seqids
+access_seqloc_asn1_text_ps	-in in/access.fa -outfmt seqloc_asn1_text -parse_seqids
+access_maskinfo_asn1_text_ps	-in in/access.fa -outfmt maskinfo_asn1_text -parse_seqids
+# A gi of 0 is not a gi for GetAccessSeq_id_Handle (IsGi asks for a non-zero packed value): the Seq-id that seqloc_* and maskinfo_* print (line NP M5 final review B1, NCBI BLAST+ 2.17.0 on ws, 2026-11-21)
+access_gi0_int_ps	-in in/access_gi0.fa -parse_seqids
+access_gi0_seqloc_asn1_text_ps	-in in/access_gi0.fa -outfmt seqloc_asn1_text -parse_seqids
+access_gi0_maskinfo_asn1_text_ps	-in in/access_gi0.fa -outfmt maskinfo_asn1_text -parse_seqids

@@ -35,12 +35,7 @@ pub(super) fn run_web_pair(
     query_fasta: &str,
     subject_fasta: &str,
 ) -> Result<Vec<u8>> {
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/api/local_blast.hpp:76-78
-    // ```c
-    // CLocalBlast(CRef<IQueryFactory> query_factory,
-    //             CRef<CBlastOptionsHandle> opts_handle,
-    //             CRef<CLocalDbAdapter> db);
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/api/local_blast.hpp:76-78
     // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
     let mut output = Vec::new();
     let outfmt = args.outfmt.clone();
@@ -67,16 +62,7 @@ pub(super) fn run_web_pair(
     // NCBI's errors there (fail-fast) and adds its checks of LOSAT's limits only for a
     // search.
     crate::utils::threading::validate_threads(args.num_threads)?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-    // ```c
-    // BlastSeqBlkSetSequence(subj, sequence.data.release(),
-    //    ((sentinels == eSentinels) ? sequence.length - 2 :
-    //     sequence.length));
-    // ...
-    // SBlastSequence compressed_seq =
-    //     subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
-    //                               eNa_strand_plus, eNoSentinels);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
     let subjects = read_subjects(subject_fasta.as_bytes(), "BLASTN", false)?;
     let queries = read_queries(query_fasta.as_bytes(), "BLASTN", false)?;
     if queries.is_empty() {
@@ -92,6 +78,7 @@ pub(super) fn run_web_pair(
     run_local(
         args,
         &queries,
+        &crate::api::QueryEnd::Input,
         &subjects,
         &mut ReportOutputs::single(&outfmt, OutputSink::Writer(&mut output), &mut stderr),
     )?;

@@ -9,12 +9,6 @@
 //! calling thread.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
-//! ```c
-//! #pragma omp for schedule(static)
-//!         for (b = 0; b < numMatches; ++b) {
-//! #pragma omp flush(interrupt)
-//!             if (!interrupt) {
-//! ```
 //! The order changes only which thread redoes which match, and when (the unit tests of
 //! `stage_d_pipeline.rs` compare the scope with the `par_iter` path in one process); either way
 //! the matches are applied in list order. So the property under test is that the report depends

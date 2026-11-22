@@ -6996,31 +6996,21 @@ pub fn run_local_database(
             .iter()
             .map(|format| (format.outfmt, format.side_out(args.out.as_deref()))),
     )?;
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     args.archive = archive::handle_for(
         &args,
         args.dust_filtering.as_deref(),
         output_formats.contains(&BlastnOutputFormat::Archive),
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    match args.archive.clone() {
-        Some(handle) => {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(
-                    args,
-                    query_records,
-                    query_end,
-                    output_formats,
-                    settings,
-                    view,
-                    None,
-                )
-            });
-            let no_query = query_records.is_empty() && query_end.is_input();
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        search_database(
             args,
             query_records,
             query_end,
@@ -7028,8 +7018,8 @@ pub fn run_local_database(
             settings,
             outputs,
             None,
-        ),
-    }
+        )
+    })
 }
 
 /// The repeat search of blastn's `-filtering_db` (`repeat_filter`): `args` (the search's options,

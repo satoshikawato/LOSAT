@@ -1135,39 +1135,33 @@ pub fn run_local_database(
     let requested = requested_formats(outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line
+    // (`native::RunSetup::open`).
     let archive = archive::handle_for(
         &args,
         archive_requested,
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
-    match archive {
-        Some(handle) => {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(
-                    &args,
-                    query_records,
-                    query_end,
-                    settings,
-                    (choices, resolutions),
-                    Some(&handle),
-                    view,
-                )
-            });
-            let no_query = query_records.is_empty() && query_end.is_input();
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(
-            &args,
-            query_records,
-            query_end,
-            settings,
-            (choices, resolutions),
-            None,
-            outputs,
-        ),
-    }
+    let no_query = query_records.is_empty() && query_end.is_input();
+    outputs.run_records(
+        args.strategy.as_ref(),
+        archive.as_ref(),
+        no_query,
+        |outputs| {
+            search_database(
+                &args,
+                query_records,
+                query_end,
+                settings,
+                (choices, resolutions),
+                archive.as_ref(),
+                outputs,
+            )
+        },
+    )
 }
 
 /// `run_local_database` from the taxid or seqid list on.
@@ -1206,7 +1200,7 @@ fn search_database(
     .showing_gis(args.show_gis);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
-        None,
+        args.strategy.as_ref(),
         &args.db_filter,
         database.list_taxids(),
         &database.statistics(),
@@ -1256,8 +1250,12 @@ fn search_database(
     let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
     // The formatter resolves the database masking before its other work (`native::run_inner`).
     if let Some(option) = args.db_mask.option() {
-        let mask =
-            database.resolve_mask_option(&option, archive, None, &mut *outputs.diagnostics)?;
+        let mask = database.resolve_mask_option(
+            &option,
+            archive,
+            args.strategy.as_ref(),
+            &mut *outputs.diagnostics,
+        )?;
         if let Some(mask) = &mask {
             database.check_mask_limits(mask)?;
         }
@@ -1307,7 +1305,7 @@ fn search_database(
         args.lcase_masking,
         query_range,
         batch_size,
-        archive.is_some(),
+        archive.is_some() || args.strategy.is_some(),
         false,
         xml_matrix,
         args.parse_deflines,
@@ -1334,8 +1332,9 @@ fn search_database(
                 unrecorded_calls: args.first_query_ordinal > 0,
             }),
             archive,
-            // The library writes no search strategy (`api::search::file_options`).
-            strategy: None,
+            // The search strategy file of LOSAT Web's run (`web_adapter::give_strategy`); the
+            // library writes none (`api::search::file_options`).
+            strategy: args.strategy.as_ref(),
             out: args.out.as_deref(),
             search_error: &search_error,
             xml_scan,

@@ -271,3 +271,295 @@ fn the_names_the_run_has_no_file_for() {
         "Warning: [blastp] Query is Empty!\n"
     );
 }
+
+/// The result of `run` of `words` (program name first), a search of `-db` (line WQA D12a), on the
+/// query file `query` (of `LOSAT/`), and the bytes of each stream that it emitted, joined. The
+/// names of the argv that start with `tests/` are files of `LOSAT/`, given from the adapter's
+/// directory, where its tests run (`../../LOSAT/tests/...`): a relative name, as the command line's
+/// run from `LOSAT/` gives it to the strategy's request (`db_frozen`).
+fn database_run(words: &[&str], query: &str) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
+    let words: Vec<String> = words
+        .iter()
+        .map(|word| match word.strip_prefix("tests/") {
+            Some(name) => format!("{DB_ROOT}/tests/{name}"),
+            None => word.to_string(),
+        })
+        .collect();
+    let words: Vec<&str> = words.iter().map(String::as_str).collect();
+    let bytes = std::fs::read(format!("{DB_ROOT}/{query}")).unwrap();
+    let loaders = data_loaders(&words).unwrap();
+    let (handle, _) = crate::store::register(words[0], 0, loaders, &bytes).unwrap();
+    crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+    let program = Program::parse(words[0]).unwrap();
+    let result = crate::store::with_inputs(
+        program,
+        handle,
+        0,
+        &words,
+        Some(loaders),
+        |queries, end, subjects| {
+            assert!(subjects.is_empty());
+            run(&words, queries, end, subjects)
+        },
+    );
+    crate::store::release(handle).unwrap();
+    let mut streams = BTreeMap::new();
+    crate::emit::EMITTED.with(|emitted| {
+        for (stream, bytes) in emitted.borrow().iter() {
+            streams
+                .entry(*stream)
+                .or_insert_with(Vec::new)
+                .extend_from_slice(bytes);
+        }
+    });
+    (result.unwrap(), streams)
+}
+
+/// `LOSAT/` from the adapter's directory, the current directory of its tests.
+const DB_ROOT: &str = "../../LOSAT";
+
+/// NCBI's strategy file of the `-db` row `name` (`frozen`) as the run from the adapter's directory
+/// writes it: the request names the database as the argv does (`subject database "..."`), here
+/// `../../LOSAT/tests/...` for NCBI's `tests/...` (`database_run`); nothing else of the file names
+/// a file (the lists of the filters are in it as their ids).
+fn db_frozen(name: &str) -> Vec<u8> {
+    let text = String::from_utf8(frozen(name)).unwrap();
+    text.replace("\"tests/", &format!("\"{DB_ROOT}/tests/"))
+        .into_bytes()
+}
+
+/// The rows of `cases.tsv` with `-db` that a browser's run takes as it is (no environment), one
+/// of the lower case of the query's records and one of a filter of the database (a list of ids, a
+/// list or a set of taxids) for each program: the row, its query (of `LOSAT/`) and its argv without
+/// `-query` and the option.
+const DB_ROWS: [(&str, &str, &[&str]); 10] = [
+    (
+        "blastp.db.lcase",
+        "tests/fasta/outfmt11/arch_bp_lcase.faa",
+        &[
+            "blastp",
+            "-db",
+            "tests/db_search/arch_sprot",
+            "-lcase_masking",
+            "-outfmt",
+            "6",
+        ],
+    ),
+    (
+        "blastp.db.list",
+        "tests/db_search/taxfilter/q.faa",
+        &[
+            "blastp",
+            "-db",
+            "tests/db_search/taxfilter/tfp",
+            "-seqidlist",
+            "tests/db_search/seqidlist/sl_tfp.txt",
+            "-outfmt",
+            "6",
+        ],
+    ),
+    (
+        "blastn.db.lcase",
+        "tests/fasta/outfmt11/arch_lcout.fna",
+        &[
+            "blastn",
+            "-db",
+            "tests/db_search/arch_snucl",
+            "-lcase_masking",
+            "-outfmt",
+            "6",
+        ],
+    ),
+    (
+        "blastn.db.list",
+        "tests/db_search/taxfilter/q.fna",
+        &[
+            "blastn",
+            "-db",
+            "tests/db_search/taxfilter/tfn",
+            "-taxids",
+            "9606",
+            "-no_taxid_expansion",
+            "-outfmt",
+            "6",
+        ],
+    ),
+    (
+        "blastx.db.lcase",
+        "tests/fasta/outfmt11/arch_bx_lc.fna",
+        &[
+            "blastx",
+            "-db",
+            "tests/db_search/arch_sprot",
+            "-lcase_masking",
+            "-outfmt",
+            "6",
+        ],
+    ),
+    (
+        "blastx.db.list",
+        "tests/db_search/taxfilter/q.fna",
+        &[
+            "blastx",
+            "-db",
+            "tests/db_search/taxfilter/tfp",
+            "-negative_taxids",
+            "9606",
+            "-no_taxid_expansion",
+            "-outfmt",
+            "6",
+        ],
+    ),
+    (
+        "tblastn.db.lcase",
+        "tests/fasta/outfmt11/arch_tbn_lc.faa",
+        &[
+            "tblastn",
+            "-db",
+            "tests/db_search/arch_tbn_snucl",
+            "-lcase_masking",
+            "-outfmt",
+            "6",
+        ],
+    ),
+    (
+        "tblastn.db.list",
+        "tests/db_search/taxfilter/q.faa",
+        &[
+            "tblastn",
+            "-db",
+            "tests/db_search/taxfilter/tfn",
+            "-negative_seqidlist",
+            "tests/db_search/seqidlist/sl_tfn.txt",
+            "-outfmt",
+            "6",
+        ],
+    ),
+    (
+        "tblastx.db.lcase",
+        "tests/fasta/outfmt11/arch_bx_lc.fna",
+        &[
+            "tblastx",
+            "-db",
+            "tests/db_search/arch_tbx_snucl",
+            "-lcase_masking",
+            "-outfmt",
+            "6",
+        ],
+    ),
+    (
+        "tblastx.db.list",
+        "tests/db_search/taxfilter/q.fna",
+        &[
+            "tblastx",
+            "-db",
+            "tests/db_search/taxfilter/tfn",
+            "-negative_taxidlist",
+            "tests/db_search/taxfilter/tl_neg.txt",
+            "-no_taxid_expansion",
+            "-outfmt",
+            "6",
+        ],
+    ),
+];
+
+/// A search of `-db` (line WQA D12a) writes its strategy file as the command line does, with the
+/// database in its request: each row's file is a file of the run with NCBI's bytes, and the outputs
+/// are those of the run without the option. A database that is not there is NCBI's error, after
+/// which the file stays empty, as the command line leaves it (`*.db.nodb`).
+#[test]
+fn a_database_search_writes_the_command_lines_strategy_file() {
+    for (name, query, words) in DB_ROWS {
+        let mut argv = vec![words[0], "-query", "q"];
+        argv.extend_from_slice(&words[1..]);
+        let plain = argv.clone();
+        argv.extend(["-export_search_strategy", "s.asn"]);
+        let (result, streams) = database_run(&argv, query);
+        result.unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(
+            files(&streams),
+            [("s.asn".to_string(), db_frozen(name))],
+            "{name}"
+        );
+        let (_, without) = database_run(&plain, query);
+        for stream in [0, 6, 7, 1, STREAM_DIAGNOSTICS] {
+            assert_eq!(
+                streams.get(&stream),
+                without.get(&stream),
+                "{name} {stream}"
+            );
+        }
+    }
+    for (name, program, query) in [
+        (
+            "blastp.db.nodb",
+            "blastp",
+            "tests/fasta/outfmt11/arch_bp_q.faa",
+        ),
+        (
+            "blastn.db.nodb",
+            "blastn",
+            "tests/fasta/outfmt11/arch_q.fna",
+        ),
+    ] {
+        let argv = [
+            program,
+            "-query",
+            "q",
+            "-db",
+            "tests/db_search/none",
+            "-outfmt",
+            "6",
+            "-export_search_strategy",
+            "s.asn",
+        ];
+        let (result, streams) = database_run(&argv, query);
+        let error = result.unwrap_err();
+        assert!(
+            error.starts_with("BLAST Database error: No alias or index file found"),
+            "{name}: {error}"
+        );
+        assert_eq!(frozen(name), b"");
+        assert_eq!(
+            files(&streams),
+            [("s.asn".to_string(), Vec::new())],
+            "{name}"
+        );
+    }
+}
+
+/// The files that a search of `-db` reads (the database's in the run's working directory, a list of
+/// a filter) are the files of another option of the run: LOSAT Web's refusal, at NCBI's first
+/// request (the command line's strategy file would replace the bytes that the search reads).
+#[test]
+fn the_files_of_a_database_search_are_no_strategy_file() {
+    let query = "tests/db_search/taxfilter/q.faa";
+    for (name, option) in [
+        ("tests/db_search/taxfilter/tfp.pin", "db"),
+        ("tests/db_search/seqidlist/sl_tfp.txt", "seqidlist"),
+    ] {
+        let argv = [
+            "blastp",
+            "-query",
+            "q",
+            "-db",
+            "tests/db_search/taxfilter/tfp",
+            "-seqidlist",
+            "tests/db_search/seqidlist/sl_tfp.txt",
+            "-outfmt",
+            "6",
+            "-export_search_strategy",
+            name,
+        ];
+        let (result, streams) = database_run(&argv, query);
+        assert_eq!(
+            result.unwrap_err(),
+            format!(
+                "-export_search_strategy {DB_ROOT}/{name} (the file of -{option} too, whose bytes the command line's strategy file replaces or mixes with its own) is not supported in the browser; give a file name of the run's own"
+            ),
+            "{name}"
+        );
+        assert!(files(&streams).is_empty(), "{name}");
+        assert!(streams.get(&6).is_none_or(Vec::is_empty), "{name}");
+    }
+}

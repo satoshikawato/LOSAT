@@ -63,7 +63,8 @@ pub use crate::report::archive::strategy::StrategyFile;
 /// `open_strategy_file`): after the settings and a dry run's end, before `-outfmt` is read. `None`
 /// without the option. The error is the command line's (NCBI's `File is not accessible` for a name
 /// that the command line cannot open); the run's other files that the name may be are its `-query`,
-/// `-subject`, `-logfile` and BLASTN's `-window_masker_db`.
+/// `-subject`, `-logfile`, BLASTN's `-window_masker_db`, and with `-db` the lists of its filters and
+/// the files of the run's working directory that the search reads.
 pub fn open_strategy_file(
     command: &Commands,
     words: &[&str],
@@ -126,24 +127,60 @@ pub fn open_strategy_file(
         option: "window_masker_db",
         name: std::ffi::OsStr::new(masker),
     }));
+    // A search of `-db` (line WQA D12a) reads the database and the lists of its filters from the
+    // run's working directory, which holds the files that the host gives the engine
+    // (docs/web/abi_v2.md §3): the lists under their options, and every other file of it that the
+    // name opens under `-db` (the database's, and the taxonomy database's that it reads).
+    if let Some(filter) = database_filter(command) {
+        for (option, list) in [
+            ("seqidlist", &filter.seqidlist),
+            ("negative_seqidlist", &filter.negative_seqidlist),
+            ("taxidlist", &filter.taxidlist),
+            ("negative_taxidlist", &filter.negative_taxidlist),
+        ] {
+            others.extend(list.as_deref().map(|name| RunFileName {
+                option,
+                name: std::ffi::OsStr::new(name),
+            }));
+        }
+        others.extend(path.filter(|path| path.is_file()).map(|path| RunFileName {
+            option: "db",
+            name: path.as_os_str(),
+        }));
+    }
     crate::report::archive::strategy::open_strategy_file_in(run_files, path, None, label, &others)
+}
+
+/// The filters of the database of `command`, a search of `-db` (`None` for a search of
+/// `-subject`): `open_strategy_file`.
+fn database_filter(command: &Commands) -> Option<&crate::blastinput::db_filter::DbFilterArgs> {
+    let (db, filter) = match command {
+        Commands::Blastp(args) => (&args.db, &args.db_filter),
+        Commands::Blastn(args) => (&args.db, &args.db_filter),
+        Commands::Tblastn(args) => (&args.db, &args.db_filter),
+        Commands::Tblastx(args) => (&args.db, &args.db_filter),
+        Commands::Blastx(args) => (&args.db, &args.db_filter),
+        _ => return None,
+    };
+    db.is_some().then_some(filter)
 }
 
 /// Gives the search of `command` (a search of LOSAT Web's run of the argv, `run_local`) the export
 /// of its requests into `file` (`open_strategy_file`), as the command line's run makes it
 /// (`StrategyExport::for_run`): the recorded options of the arguments, with the `HitlistSize` of
-/// the argv's format numbered `outfmt` (the archive's request shares the export's options handle,
-/// `run_local`). LOSAT Web searches no database.
+/// the argv's format numbered `outfmt` and the database of `-db` as the command line names it
+/// (the archive's request shares the export's options handle, `run_local` and
+/// `run_local_database`).
 pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
     use crate::report::archive::strategy::{HitlistArgs, StrategyExport};
     let options = crate::report::archive::OptionsHandle::default();
-    let export = |inputs, counts| {
+    let export = |inputs, counts, database: Option<&str>| {
         Some(StrategyExport::for_run(
             file,
             inputs,
             Some(outfmt),
             counts,
-            None,
+            database,
             &options,
         ))
     };
@@ -157,6 +194,7 @@ pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
             args.strategy = export(
                 crate::algorithm::blastp::archive::option_inputs(args),
                 counts,
+                args.db.as_deref().map(crate::seqdb::db_argument_name),
             );
         }
         Commands::Blastn(args) => {
@@ -169,7 +207,7 @@ pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
                 args,
                 args.dust_filtering.as_deref(),
             );
-            args.strategy = export(inputs, counts);
+            args.strategy = export(inputs, counts, args.database_name());
         }
         Commands::Tblastn(args) => {
             let counts = HitlistArgs {
@@ -180,6 +218,7 @@ pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
             args.strategy = export(
                 crate::algorithm::tblastn::archive::option_inputs(args),
                 counts,
+                args.database_name(),
             );
         }
         Commands::Tblastx(args) => {
@@ -188,7 +227,11 @@ pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
                 num_descriptions: args.num_descriptions,
                 num_alignments: args.num_alignments,
             };
-            args.strategy = export(crate::algorithm::tblastx::option_inputs(args), counts);
+            args.strategy = export(
+                crate::algorithm::tblastx::option_inputs(args),
+                counts,
+                args.database_name(),
+            );
         }
         Commands::Blastx(args) => {
             let counts = HitlistArgs {
@@ -196,7 +239,11 @@ pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
                 num_descriptions: args.num_descriptions,
                 num_alignments: args.num_alignments,
             };
-            args.strategy = export(crate::algorithm::blastx::option_inputs(args), counts);
+            args.strategy = export(
+                crate::algorithm::blastx::option_inputs(args),
+                counts,
+                args.database_name(),
+            );
         }
         _ => {}
     }

@@ -726,11 +726,12 @@ impl ReportOutputs<'_> {
         result
     }
 
-    /// A run of records (each program's `run_local`) as the command line's run of the argv ends:
-    /// with the search strategy file of the arguments (`strategy`, `with_strategy`), and with
-    /// the BLAST archive (outfmt 11) of `archive`, whose diagnostics stream saves the messages
-    /// (`with_archive_diagnostics`) and whose error archive ends the run (`finish_archive`;
-    /// `no_query`: the run has no query, NCBI's `Query is Empty!`). `run` searches and reports.
+    /// A run of records (each program's `run_local` and `run_local_database`) as the command
+    /// line's run of the argv ends: with the search strategy file of the arguments (`strategy`,
+    /// `with_strategy`), and with the BLAST archive (outfmt 11) of `archive`, whose diagnostics
+    /// stream saves the messages (`with_archive_diagnostics`) and whose error archive ends the run
+    /// (`finish_archive`; `no_query`: the run has no query, NCBI's `Query is Empty!`). `run`
+    /// searches and reports.
     pub(crate) fn run_records(
         &mut self,
         strategy: Option<&crate::report::archive::strategy::StrategyExport>,

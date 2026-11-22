@@ -334,7 +334,8 @@
   Owner's decision of 2026-11-16 on line RG's question Q-X2c), also D13's where NCBI stops (also
   on a database left without a subject, whose batch LOSAT reported before) and, with `-in_pssm`,
   that of a query whose letters give no Karlin-Altschul parameters, which came before the run's
-  first byte; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
+  first byte, and D13's of a negative `CHUNK_SIZE` whose wrapped ranges leave gaps between them,
+  as BLASTP's (1.53); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
   after 1.71, line DBID item pfoff-3, at the merge of dev of 2026-11-22; first 1.52, then 1.53 at
   the merge of dev of 2026-11-18)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -522,8 +523,11 @@ Explicit rejections (rule 3):
   hits and exits 0; LOSAT refuses at every thread count, as NCBI does at `-num_threads 1`); also on
   a database left without a subject: a seqid list that keeps none, an alias over volumes without
   sequences) after the reports of the batches before, in NCBI's order with the setup of each
-  chunk's search and its read of the database, and a negative `CHUNK_SIZE` whose wrapped ranges
-  leave gaps between them, which NCBI searches on, before the run's first byte (version 1.72).
+  chunk's search and its read of the database (version 1.72), and so does the rejection of a
+  negative `CHUNK_SIZE` whose wrapped ranges leave gaps between them, which NCBI searches on: at
+  the first chunk that NCBI searches, as BLASTP's (version 1.72; before, before the run's first
+  byte; row `db.xs.tblastn.bat.gap.6`, whose bytes are NCBI's report of the batch before, row
+  `db.xs.tblastn.bat.qa.6`).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
   exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
@@ -2170,9 +2174,10 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   loses from its output buffer is not imitated (NCBI's file lacks the end of the text that buffer
   held: 21 bytes of the `-in_pssm` prolog reach it in the probe of 2026-11-18; decision S1 (a) of
   line RG item X-short-bat, Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07). Before the run's first byte stay the refusal of a reported column of that NULLB
-  (1.44), whose alignment NCBI reports, and that of a negative `CHUNK_SIZE` whose wrapped ranges
-  leave gaps between them, which NCBI searches on (D13).
+  2026-10-07). The refusal of a negative `CHUNK_SIZE` whose wrapped ranges leave gaps between
+  them, which NCBI searches on (D13), comes after the same reports, as BLASTP's. Before the run's
+  first byte stays the refusal of a reported column of that NULLB (1.44), whose alignment NCBI
+  reports.
 
 - TBLASTX, HSPs on a subject (or its `-subject_loc` range) of fewer than 12 bases that reach the
   ungapped re-evaluation (version 1.51, 2026-11-17, line RG item X-short-tbx, Owner-delegated,

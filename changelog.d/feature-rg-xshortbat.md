@@ -12,3 +12,6 @@
   results. With a database whose shortest sequence is under 3 bases (`MIN_SEQ_LENGTH` 1 or 2), one without sequences
   or one whose sequence file is missing, the database's error and the query chunk stops now come in NCBI BLAST+'s
   order.
+- A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` whose pieces leave gaps between them, which NCBI
+  BLAST+ searches with the hits there lost and LOSAT refuses, now stops `tblastn` where that batch's search would
+  start, after the results of the query batches before, as `blastp` does; before, it stopped before any output.

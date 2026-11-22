@@ -448,7 +448,9 @@ fn a_database_search_writes_the_reports_before_the_refusal() {
 ///   chunk size, 85, is below the overlap) and 5 chunks without a query.
 ///
 /// A query of 248 residues is 2 chunks of 25 and 23 residues with 200 between them, which NCBI
-/// searches on with the hits there lost: refused before any byte (PD-LOSAT-NCBI-DEFECTS D13).
+/// searches on with the hits there lost: refused where its search would start, after the report of
+/// the query before (PD-LOSAT-NCBI-DEFECTS D13, the form of 1.40, as BLASTP's; row
+/// `db.xs.tblastn.bat.gap.6`).
 #[test]
 fn the_query_chunk_stops_are_refused_after_the_reports_before() {
     let temp = TempDir::new("chunk");
@@ -528,6 +530,13 @@ fn the_query_chunk_stops_are_refused_after_the_reports_before() {
                 EMPTY_CHUNK,
                 &short_alone,
             ),
+            (
+                "negative, gaps between the chunks",
+                &negative,
+                &gaps,
+                NEGATIVE_GAPS,
+                &alone,
+            ),
         ] {
             let case = format!("{name}, threads {threads}");
             let refused = search(dir, env, query, &subject, "6", threads);
@@ -538,10 +547,6 @@ fn the_query_chunk_stops_are_refused_after_the_reports_before() {
                 &format!("{case}: the report of the query before"),
             );
         }
-        let case = format!("negative, gaps, threads {threads}");
-        let refused = search(dir, &negative, &gaps, &subject, "6", threads);
-        assert_refused(&refused, NEGATIVE_GAPS, &case);
-        assert!(refused.stdout.is_empty(), "{case}: nothing before");
     }
 }
 

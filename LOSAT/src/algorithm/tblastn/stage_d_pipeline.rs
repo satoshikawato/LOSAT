@@ -2378,13 +2378,18 @@ fn split_preliminary_hitlists(
         }
         // The wrapped ranges of a negative CHUNK_SIZE that leave no chunk without a query leave
         // gaps between them (a chunk is then never split again), which NCBI searches on with the
-        // hits in the gaps lost (PD-LOSAT-NCBI-DEFECTS D13): refused before the run's first byte,
-        // at the first chunk that NCBI searches (with no subject in hand nothing is lost, and the
-        // batch is reported).
-        ensure!(
-            !sizes.negative_chunk_size(),
-            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's TBLASTN"
-        );
+        // hits in the gaps lost, a setting the maintainer kept refused (PD-LOSAT-NCBI-DEFECTS
+        // version 1.1, D13): refused at the first chunk that NCBI searches (with no subject in
+        // hand nothing is lost, and the batch is reported), after the reports of the batches
+        // before (the form of 1.40 for a refusal in the middle of a run, as BLASTP's: review 3 of
+        // line RG item X4).
+        if sizes.negative_chunk_size() {
+            return Err(anyhow::Error::new(
+                crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+                    "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's TBLASTN"
+                )),
+            ));
+        }
         let query_lengths: Vec<i32> = parts
             .iter()
             .map(|part| i32::try_from(part.len()))

@@ -161,7 +161,11 @@ FASTA files:
   `w12` of `xs_w12w11`) then `q`, and `xsb_ql.faa` is `qa` then `ql` (`qa` ten times, 310 residues, which
   `CHUNK_SIZE=100 OVERLAP_CHUNK_SIZE=80` split into chunks that NCBI would split again, and
   `CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200` into a first wrapped chunk that covers it and chunks without a query, at
-  which NCBI's `CQuerySplitter::Split` stops first). Rows `db.xs.tblastn.bat.nosub.7` and `.nosubneg.7` search
+  which NCBI's `CQuerySplitter::Split` stops first), and `xsb_qg.faa` is `qa` then `qg` (`qa` eight times, 248
+  residues, which `CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200` split into 2 chunks with gaps between them, row
+  `db.xs.tblastn.bat.gap.6`). `xsb_qk.faa` is `qk` alone, row `db.xs.tblastn.bat.qk.6`, whose report is what NCBI writes
+  before it crashes in row `db.xs.tblastn.bat.db.6`, as row `db.xs.tblastn.bat.qa.6` (`.qa.7`) is for rows `.6` (`.7`).
+  Rows `db.xs.tblastn.bat.nosub.7` and `.nosubneg.7` search
   `xsb_ql.faa` in `taxfilter/tfn` with `-negative_seqidlist seqidlist/sl_tfn_all.txt` (every id: no subject left),
   where NCBI still splits `ql`'s batch and stops; `xsb_l.faa` is `ql` alone, one batch, for rows
   `db.xs.tblastn.bat.min1*.6` on `aliaskeys/n_min1` (`MIN_SEQ_LENGTH 1`), where the setup of the first chunk that NCBI

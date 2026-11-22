@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.79
+- Version: 1.80
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -394,7 +394,14 @@
   searches, extended from BLASTX to TBLASTN, rule 3; Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.78; first 1.72, then 1.78 and 1.79 at the merges of
   dev that brought 1.72 to 1.77 (line NP items M5a, M5b and M5, line RG items X4b-1, D5b-3, X4b-2
-  and D3c-3a), then line RG item D5b-5's 1.78)
+  and D3c-3a), then line RG item D5b-5's 1.78);
+  1.80 2026-11-21 (RPSTBLASTN `-use_sw_tback`, line PS item PS12c: the explicit rejection of 1.30
+  of a Smith-Waterman redo that NCBI repeats without end extended from RPSBLAST to RPSTBLASTN, rule
+  3, within the class of 1.30; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.79; first 1.68, then 1.70, 1.72, 1.74, 1.77, 1.79 and 1.80 at the merges
+  of dev that brought line NP's 1.68 and 1.69, lines RG's 1.70 and DBID's 1.71, line NP's 1.72
+  and line RG's 1.73, then 1.74 to 1.76, then 1.77 and 1.78, then 1.79; with it, under
+  rule 2, a Smith-Waterman alignment that starts with a gap, refused until line PS item PS12d)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1293,6 +1300,20 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
 
 ## Reproduced as NCBI (rule 2)
 
+- RPSTBLASTN `-use_sw_tback`: a Smith-Waterman alignment that starts with a gap (version 1.80,
+  2026-11-22, line PS item PS12c, review B1, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07): with forbidden ranges NCBI's redo can give a profile's second alignment that
+  starts with a gap in the profile's row (row `db.rpstbn.rej.swgap`: `nest.faa`, the profile's
+  source twice, nested, back-translated). Its Std-seg's first segment has no location in that row,
+  so `CSeq_align::GetSeqRange` takes no id from it and throws "Row seqids not consistent" on the
+  row (`Seq_align.cpp:171-191`). The output is deterministic: the prefetch warns (every format but
+  8, 9, 11 and 12; outfmt 6 not with `PRE_FETCH_SEQS_LIMIT=0`), outfmt 0 to 4 stop after the query's
+  `Length=` (the description table) with exit status 255, 13 and 14 too, BLAST XML, JSON and XML2
+  stop their document with the exception (exit status 0), and the tables and the Seq-aligns are
+  the alignments as made. rpsblast's Dense-seg has a location in every segment. LOSAT refuses such
+  a profile with the query batch that holds it, as the endless redo of 1.80 (below), until line PS
+  item PS12d writes these reports (rule 2); the X-drop redo's alignments start with a substitution.
+
 - BLASTP unified P-values, `-comp_based_stats 1u`, `2u` and `3u` (version 1.54, 2026-11-20, line RG
   item X5, DECISIONS X5-1): for a query that has a next query in its query batch, NCBI adjusts the
   e-values with the next query's length, length adjustment and effective search space
@@ -2145,6 +2166,29 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   index the heaps are per batch), and gives the outcome of `-num_threads 1` at every thread count.
   Fixture rows `db.x4b2.*`; `LOSAT/tests/blastx_sw_tback.rs`; inputs `LOSAT/tests/fasta/x4b2` and
   the databases `LOSAT/tests/db_search/x4b2` (`make_x4b2.py`).
+
+- RPSTBLASTN `-use_sw_tback` with composition-based statistics (version 1.80, 2026-11-21, line PS
+  item PS12c, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the
+  class of 1.30; P2: no checkable result exists, P3: the round loop of 1.30 and 1.53 decides it,
+  `core::composition_adjustment::smith_waterman::smith_waterman_redo_window`): a profile with two
+  or more preliminary HSPs in a window of a query frame (`s_WindowsFromTranslatedAligns`) when the
+  e-value of a score of 0 passes `-evalue` (the search space of the query's context 0 times the
+  profile's K below it: a large `-evalue`, a small `-searchsp`, or `-strand minus`, whose invalid
+  frame +1 leaves that search space 0, so that every score passes) and the profile's first
+  position, after the window's composition adjustment, scores the window's first letter (after
+  SEG) above 0. NCBI runs the loop of 1.30 (`Blast_RedoOneMatchSmithWaterman`,
+  `redo_alignment.c:1438-1529`) on each window's letters, so it never ends either: NCBI BLAST+
+  2.17.0's rpstblastn did not end within 120 and 300 seconds on the inputs of rows
+  `db.rpstbn.rej.swendless` and `db.rpstbn.rej.swendless.minus`, whose searches without
+  `-use_sw_tback` (`tks_m.fna`, and `nq.fna` on both strands) took 0.1 to 0.2 seconds. LOSAT
+  refuses (exit 1, "a profile whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 ... is not supported by LOSAT's RPSTBLASTN")
+  with the query batch that holds the profile, after the reports of the batches before it (in outfmt
+  0 after the prolog, which NCBI writes before it searches its first batch; the form of 1.40 and of
+  BLASTP's 1.53; rows `db.rpstbn.rej.swendless.0` and, on a later batch, the probe of PS12c's
+  review S2: the same bytes at 1, 4 and 8 threads). Where that cell scores 0 or less, NCBI's redo fails
+  and drops the profile, which LOSAT reproduces (rule 2; rows `db.rpstbn.sw.*`, among them the
+  `-strand minus` inputs on which NCBI ends, `db.rpstbn.sw.tksm.minus.6`,
+  `db.rpstbn.sw.tksw.minus.6` and `db.rpstbn.sw.s5e.minus.*`).
 
 - The tabular `sacc` or `saccver` of a row whose subject lookup fails as in rule 2 above (version
   1.37, 2026-11-16, line RG item T7, Owner-delegated): outfmt 6, 7 and 10 (and 20) with them in the

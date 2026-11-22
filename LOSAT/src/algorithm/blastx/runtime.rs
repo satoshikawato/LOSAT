@@ -39,6 +39,32 @@ fn query_extent(
     )
 }
 
+/// The stream of the preliminary stage of a batch or of a query chunk (`queries`: its query
+/// information), with the writer that the options choose: culling (`-culling_limit`), the best hit
+/// writer (`-best_hit_overhang` / `-best_hit_score_edge`, which exclude culling) or NCBI's
+/// collector; each of `prelim_hitlist_size` lists per query.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:297-363
+fn prelim_stream(options: &ResolvedOptions, queries: &PreparedQueryBatch) -> HspStream {
+    let max = prelim_hitlist_size(options);
+    if options.culling_limit > 0 {
+        HspStream::with_culling(
+            queries.contexts.iter().map(|c| c.length as i32).collect(),
+            options.culling_limit,
+            max,
+        )
+    } else if let Some(params) = options.best_hit {
+        let frames = super::besthit::QueryFrames::of(&queries.contexts);
+        HspStream::with_best_hit(
+            super::besthit::BestHitWriter::new(params, frames, max),
+            queries.original_lengths.len(),
+            max,
+        )
+    } else {
+        HspStream::new(queries.original_lengths.len(), max)
+    }
+}
+
 pub struct BatchResults {
     pub query_ordinal: usize,
     pub queries: Vec<Vec<HspList>>,
@@ -74,6 +100,17 @@ pub struct BatchResults {
 }
 
 impl BatchResults {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:139-185
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
+    /// Whether NCBI's result of each query of the batch has an alignment set: a batch that NCBI
+    /// searched, and every batch of RPSTBLASTN's search of several volumes, whose merge makes a
+    /// new set for every query (empty where the batch was not searched). The one rule of the
+    /// reports that tell the two apart: outfmt 7's hit count, XML2 and JSON (`hits` and the
+    /// message), the organism report.
+    pub(crate) fn has_alignment_set(&self, options: &super::args::ResolvedOptions) -> bool {
+        !self.search_skipped || options.merged_volumes()
+    }
+
     /// The HSPs of the query `query` of the batch whose profiles left its merged lists past the
     /// formatter's cut (`unlisted`), 0 for every other search.
     pub fn unlisted_hsps(&self, query: usize) -> usize {
@@ -710,40 +747,15 @@ impl PreliminarySink for Runtime<'_> {
         _params: &[ContextParameters],
     ) -> Result<()> {
         self.ordinal = ordinal;
-        self.stream = Some(if self.options.culling_limit > 0 {
-            HspStream::with_culling(
-                batch.contexts.iter().map(|c| c.length as i32).collect(),
-                self.options.culling_limit,
-                prelim_hitlist_size(self.options),
-            )
-        } else {
-            HspStream::new(
-                batch.original_lengths.len(),
-                prelim_hitlist_size(self.options),
-            )
-        });
+        self.stream = Some(prelim_stream(self.options, batch));
         Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-244
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:185-210 (a
+    // chunk's stream and writer are set up with the chunk's own query information)
     fn chunk_start(&mut self, chunk: &QueryChunk) -> Result<()> {
-        self.chunk = Some(if self.options.culling_limit > 0 {
-            HspStream::with_culling(
-                chunk
-                    .prepared
-                    .contexts
-                    .iter()
-                    .map(|c| c.length as i32)
-                    .collect(),
-                self.options.culling_limit,
-                prelim_hitlist_size(self.options),
-            )
-        } else {
-            HspStream::new(
-                chunk.prepared.original_lengths.len(),
-                prelim_hitlist_size(self.options),
-            )
-        });
+        self.chunk = Some(prelim_stream(self.options, &chunk.prepared));
         Ok(())
     }
 
@@ -1004,6 +1016,13 @@ impl PreliminarySink for Runtime<'_> {
                 self.options.culling_limit,
                 prelim_hitlist_size(self.options),
                 self.observer,
+            );
+        } else if let Some(params) = self.options.best_hit {
+            super::besthit::traceback_pipe(
+                &mut queries,
+                &super::besthit::QueryFrames::of(&batch.contexts),
+                params,
+                prelim_hitlist_size(self.options),
             );
         }
         for query in &mut queries {

@@ -1,0 +1,11 @@
+# BLASTP 2.17.0+
+# Query: q1
+# Database: tests/db_search/oidmask/ompx
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+q1	NP_000001.1	100.000	142	0	0	1	142	1	142	9.10e-106	286
+q1	NP_000004.1	97.183	142	4	0	1	142	1	142	1.52e-102	278
+q1	loc5	96.454	141	5	0	2	142	1	141	4.56e-101	275
+q1	P00007.1	85.915	142	20	0	1	142	1	142	2.42e-92	253
+q1	WP_000008.1	88.028	142	17	0	1	142	1	142	4.24e-92	252
+# BLAST processed 1 queries

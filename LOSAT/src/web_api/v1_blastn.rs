@@ -78,6 +78,7 @@ pub(super) fn run_web_pair(
     run_local(
         args,
         &queries,
+        &crate::api::QueryEnd::Input,
         &subjects,
         &mut ReportOutputs::single(&outfmt, OutputSink::Writer(&mut output), &mut stderr),
     )?;

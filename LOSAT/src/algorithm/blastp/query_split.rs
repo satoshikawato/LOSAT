@@ -181,7 +181,8 @@ fn query_hsp_lists_merge(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1530
-// `CONTAINED_IN_HSP(a,b,c,d,e,f)` is `a <= c && b >= c && d <= f && e >= f`
+// `CONTAINED_IN_HSP` of `a`, `b`, `c`, `d`, `e`, `f` holds when `a` is at most `c`, `b` at least `c`,
+// `d` at most `f` and `e` at least `f`
 // (blast_hits.h). The gaps are allowed, and `length` follows the merged query span.
 fn merge_two_hsps(hsp1: &mut super::hsp::BlastpHsp, hsp2: &super::hsp::BlastpHsp) -> bool {
     if hsp1.subject_frame != hsp2.subject_frame {

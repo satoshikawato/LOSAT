@@ -156,7 +156,8 @@ struct TaxFields {
 // `%%x`); a `%` that ends the format reads the string's NUL and adds `%` and a NUL byte;
 // any other letter adds itself and its `%` as text.
 impl TaxFields {
-    /// `CPrintTaxFields(out, fmt)`; `Err` for NCBI's `Invalid format options for tax_info.`
+    /// `CPrintTaxFields` with `out` and `fmt`; `Err` for NCBI's
+    /// `Invalid format options for tax_info.`
     fn parse(fmt: &[u8]) -> Result<Self, ()> {
         let at = |i: usize| fmt.get(i).copied().unwrap_or(0);
         let mut fields = Vec::new();

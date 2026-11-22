@@ -1,6 +1,6 @@
 //! NCBI's alignment reader (`CAlnReader` of objtools/readers) as psiblast's `-in_msa` uses it:
-//! `CAlnReader(in).SetClustal(eAlpha_Protein).Read(false, true)`, then `GetSeqs()` (the rows) and
-//! `GetSeqEntry()` (the Bioseq of each row).
+//! a `CAlnReader` on the input, `SetClustal` with `eAlpha_Protein`, and `Read` with `false` and
+//! `true`, then `GetSeqs()` (the rows) and `GetSeqEntry()` (the Bioseq of each row).
 //!
 //! - `lines`: the peek-ahead line input (`CPeekAheadStream`).
 //! - `format_guess`: the guess of the format (`CAlnFormatGuesser`), all six tests.
@@ -115,7 +115,7 @@ pub(crate) enum AlnError {
     Internal(&'static str),
 }
 
-/// The flags of `x_ParseAndValidateSeqIds` (`fParse_AnyLocal | fParse_RawText`, cited at
+/// The flags of `x_ParseAndValidateSeqIds` (`fParse_AnyLocal` and `fParse_RawText`, cited at
 /// [`row_ids`]).
 const ID_PARSE_FLAGS: u32 = parse_flags::ANY_LOCAL | parse_flags::RAW_TEXT;
 
@@ -140,7 +140,7 @@ pub(crate) const INVALID_MOL_TYPE: &str = "Invalid Mol Type: U and T cannot appe
 pub(crate) const SEQ_ENTRY_NOT_AVAILABLE: &str =
     "CAlnReader::GetSeqEntry(): Seq_entry is not available until after Read()";
 
-/// `CAlnReader::Read(false, true)` and `GetSeqs()` and `GetSeqEntry()` of `bytes`, the whole
+/// `CAlnReader::Read` with `false` and `true`, and `GetSeqs()` and `GetSeqEntry()` of `bytes`, the whole
 /// input.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:319-339
@@ -194,7 +194,7 @@ fn verify_alignment_info(scanned: &base::Scanned) -> Result<Vec<Vec<ParsedSeqId>
 /// throws: no listener).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:349-368
-/// (`flags` is 0 here, so `flags^fGenerateLocalIDs` is not 0 and the raw text flag is set.)
+/// (`flags` is 0 here, so `flags` XOR `fGenerateLocalIDs` is not 0 and the raw text flag is set.)
 ///
 /// Two states cannot come out of the parser for a row's id, and each is LOSAT's internal error
 /// ([`AlnError::Internal`]), not a refusal, because no alignment reaches it (review S3 of line PS

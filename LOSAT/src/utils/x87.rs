@@ -1,4 +1,4 @@
-//! The x87 80-bit extended-precision (`long double`) operations that NCBI's x86-64 build
+//! The x87 80-bit extended-precision (long double) operations that NCBI's x86-64 build
 //! evaluates, in integer arithmetic: those of the serial real-number digit generator
 //! (`report::serial::real`) and of ErfC's long-double product with `expl` (`stats::spouge`;
 //! Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143).
@@ -9,28 +9,30 @@
 //! (Boost's notice and the Boost Software License 1.0: `stats::spouge` and THIRD_PARTY_NOTICES,
 //! section 3.)
 //!
-//! The oracle (NCBI BLAST+ 2.17.0 for x86-64 Linux, built with gcc) evaluates every `long double`
+//! The oracle (NCBI BLAST+ 2.17.0 for x86-64 Linux, built with gcc) evaluates every long double
 //! expression of `NStr::DoubleToString_Ecvt` and of `ErfImpl` on the x87 unit: a sign, a 15-bit
 //! exponent and a 64-bit significand with an explicit integer bit, precision control "64 bits"
 //! (the Linux control word 0x037F) and round to nearest, ties to even. LOSAT must print the same
-//! digits on every platform, including those whose `long double` is the 64-bit double (MSVC,
+//! digits on every platform, including those whose long double is the 64-bit double (MSVC,
 //! wasm32) or a 128-bit quad (aarch64 Linux), so the operations are modelled here with integers.
 //!
 //! Only the operations that the three ports perform exist. `DoubleToString_Ecvt`: exact conversion
-//! from `f64` (`fld` of a double) and from `u32` (`t1 = first`), multiplication rounded to 64 bits
-//! (`value *= ...`, `value * mult`, `(t1-first) * 1e8`), the exact subtraction `t1 - first`,
-//! comparisons and the truncating conversion to `unsigned int`. All its operands are finite and
-//! nonnegative, and every product stays between 2^-1100 and 2^1100, far inside the x87 normal
-//! range (2^-16382 .. 2^16384), so no denormal, overflow or NaN case arises. `ErfImpl`: the
-//! 64-bit `expl` result as the value nearest a double-double exponential, division and
-//! multiplication rounded to 64 bits (`/ z`, `result *= ...`) and the store to a double
-//! (`fstpl`), which rounds the 64-bit product a second time, to 53 bits. Its operands are finite
-//! and nonnegative (LOSAT's double-double stand-in for `expl` is zero where it underflows; NCBI's
-//! 80-bit `expl` is still normal there), and the store can give a subnormal double or zero.
+//! from `f64` (`fld` of a double) and from `u32` (`first` stored in `t1`), multiplication rounded
+//! to 64 bits (`value` multiplied in place, `value` times `mult`, 1e8 times the difference of `t1`
+//! and `first`), the exact subtraction of `first` from `t1`, comparisons and the truncating
+//! conversion to `unsigned int`. All its operands are finite and nonnegative, and every product
+//! stays between 2^-1100 and 2^1100, far inside the x87 normal range (2^-16382 .. 2^16384), so no
+//! denormal, overflow or NaN case arises. `ErfImpl`: the 64-bit `expl` result as the value nearest
+//! a double-double exponential, division and multiplication rounded to 64 bits (the division by
+//! `z`, `result` multiplied in place) and the store to a double (`fstpl`), which rounds the 64-bit
+//! product a second time, to 53 bits. Its operands are finite and nonnegative (LOSAT's
+//! double-double stand-in for `expl` is zero where it underflows; NCBI's 80-bit `expl` is still
+//! normal there), and the store can give a subnormal double or zero.
 //! `NStr::StringToDoublePosix` (`ncbi_str::double`): exact conversion from `u64` and `f64`, the
-//! multiplication and the addition of nonnegative values rounded to 64 bits (`second_mul *= 10`,
-//! `third * 10 + c`, `... * second_mul + third`, `ret *= mul1[...]`), comparison, the change of
-//! sign and the store to a double. Its products stay above 10^-640, but a mantissa of thousands of
+//! multiplication and the addition of nonnegative values rounded to 64 bits (`second_mul`
+//! multiplied by 10 in place, `third` times 10 plus `c`, a product with `second_mul` plus `third`,
+//! `ret` multiplied in place by an entry of `mul1`), comparison, the change of sign and the store
+//! to a double. Its products stay above 10^-640, but a mantissa of thousands of
 //! digits passes the largest 80-bit value, which the x87 unit turns into its infinity
 //! (`checked_mul`, `checked_add`).
 
@@ -347,7 +349,8 @@ impl X87 {
     }
 
     // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-    // No NCBI counterpart: the x87 `fstpl` of `result *= ...` to the double `result`.
+    // No NCBI counterpart: the x87 `fstpl` of the product that the multiply-assign puts in the
+    // double `result`.
     /// `fstpl` (the store to a double) with round to nearest, ties to even: the nearest double,
     /// subnormal results and the underflow to zero included. Values from 2^1024 up give
     /// infinity.
@@ -430,8 +433,9 @@ impl X87 {
         }
     }
 
-    /// `(unsigned int)x` for `0 <= x < 2^32`: gcc stores the value as a 64-bit integer with
-    /// truncation toward zero (`fistp` under a chopping control word) and keeps the low 32 bits.
+    /// A cast of `x` to `unsigned int`, for `x` from 0 up to below 2^32: gcc stores the value as a
+    /// 64-bit integer with truncation toward zero (`fistp` under a chopping control word) and keeps
+    /// the low 32 bits.
     pub(crate) fn to_u32_trunc(self) -> u32 {
         debug_assert!(!self.negative || self.significand == 0);
         if self.significand == 0 || self.exponent < 0 {

@@ -1306,7 +1306,7 @@ fn hundredths(table: &BlastAaLookupTable) -> u64 {
 // builder (count, hit list in order, pv, `longest_chain`, the zero padding after the cells and
 // the overflow), for tables with cells in the overflow array (its cursor over two entries) and
 // several thresholds; the width is chosen from the table's hits per used cell, on both sides of
-// the cutoff (`Choose(cutoff)` at the table's own ratio and one hundredth above it), and from
+// the cutoff (`Choose` of `cutoff`, at the table's own ratio and one hundredth above it), and from
 // the lookup query's length, at 65,535 letters (16 bits) and 65,536 (32 bits).
 #[test]
 fn bx_tables_of_u16_hits_equal_the_reference_tables() {

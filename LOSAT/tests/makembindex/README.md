@@ -16,6 +16,9 @@ not of their paths; `al3.nal` of `ext/b.nin` and `ext/b-2`, where the base name 
 `olmiss.nal` the same with a missing OID list file, with and without `NSEQ` and `LENGTH` (line RG item D1b-1, review B):
 a new style index reads each volume whole, and an old style one every OID of the alias file, as NCBI does; NCBI's
 open of the alias file scans the list without `NSEQ` and `LENGTH`, and the old style's first read builds it.
+`omdb/omn` is a copy of the volumes of `../db_search/oidmask/omn` (two volumes of four sequences with predicted RefSeq
+ids, made with `-parse_seqids`, so its `.ndb` too, which NCBI's open needs) and `omall.nal` an alias of it with `OIDLIST
+om.msk` (every OID) and `OID_MASK_TYPE 1` (line RG item D1b-2): a new style index reads the volumes and no alias key.
 
 The `-idmap` titles (line RG item D5a-t): `titles.fa` (titles with HTML entities, end punctuation, leading spaces, a tab,
 `TPA:`), `titlesdb/t` of it; `titlespdb/p` with `-parse_seqids` (`tpg`, `pat`, `lcl` and `gb` ids with and without

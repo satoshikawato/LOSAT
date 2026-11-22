@@ -25,8 +25,8 @@ const SYMBOLS: &[u8; 25] = b"ARNDCQEGHILKMFPSTWYVBJZX*";
 /// letter: all but `*` (code 25), and `-` (code 0).
 const IUPACAA_LETTERS: &[u8; 26] = b"ABCDEFGHIKLMNPQRSTVWXYZUOJ";
 
-/// `CBlastFormattingMatrix(letter, letter)` as scores, `i32::MIN` for a pair with a letter that
-/// has no entry.
+/// The scores of `CBlastFormattingMatrix` for a pair of letters, `i32::MIN` for a pair with a
+/// letter that has no entry.
 pub struct FormattingMatrix {
     scores: Box<[i32]>,
 }
@@ -164,7 +164,7 @@ impl FormattingMatrix {
         Some(Self { scores })
     }
 
-    /// `(*matrix)(query, subject)`.
+    /// The element of NCBI's `matrix` at row `query` and column `subject` (its `operator()`).
     pub fn score(&self, query: u8, subject: u8) -> i32 {
         self.scores[usize::from(query) * 256 + usize::from(subject)]
     }

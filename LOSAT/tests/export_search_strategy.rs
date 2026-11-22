@@ -15,7 +15,10 @@
 //! blastx's batch of a record
 //! without letters; tblastx `-matrix BLOSUM99`, whose gap costs are 0 and 0), and the order of the
 //! errors (the file is made after the argument parser and before the other options are read: an
-//! error after it leaves the file empty, the parser's errors leave an existing file alone).
+//! error after it leaves the file empty, the parser's errors leave an existing file alone). Under
+//! `-parse_deflines`, LOSAT's refusal of two queries with one id writes no request of the refused
+//! batch: the file and the standard output are NCBI's of a near input whose reader stops at that
+//! batch (`near:` rows, line WQA D10 round 5, 2026-11-20).
 //! The first batch's request alone when NCBI fails to format that batch in BLAST XML (a matrix
 //! name its XML data does not know). psiblast's request of each query (before its rounds, with the
 //! search space of the query before; `Web_StepNumber`), rpsblast's and rpstblastn's (the profile
@@ -301,6 +304,40 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                 stderr.contains(&case.expect),
                 "{label}: the refusal says {:?}: {stderr}",
                 case.expect
+            );
+        }
+        // LOSAT's refusal at a query batch: the strategy file and the standard output are NCBI's
+        // of the near input whose reader stops at that batch (line WQA D10 round 5, 2026-11-20).
+        check if check.starts_with("near:") => {
+            let near = &check["near:".len()..];
+            assert!(
+                stderr.contains(&case.expect),
+                "{label}: the refusal says {:?}: {stderr}",
+                case.expect
+            );
+            let written = std::fs::read(&ss).ok();
+            let want = frozen(near, "ss");
+            assert_eq!(
+                written.is_some(),
+                want.is_some(),
+                "{label}: the strategy file is there, as NCBI's of {near}"
+            );
+            if let (Some(written), Some(want)) = (&written, &want) {
+                assert!(
+                    written == want,
+                    "{label}: strategy file differs from {near}'s ({} bytes, NCBI wrote {}): {}",
+                    written.len(),
+                    want.len(),
+                    crate::outfmt11_blastx::first_difference(written, want)
+                );
+            }
+            let want_out = frozen(near, "out").unwrap_or_default();
+            assert!(
+                output.stdout == want_out,
+                "{label}: stdout differs from {near}'s ({} bytes, NCBI wrote {}): {}",
+                output.stdout.len(),
+                want_out.len(),
+                crate::outfmt11_blastx::first_difference(&output.stdout, &want_out)
             );
         }
         other => panic!("{label}: check {other}"),

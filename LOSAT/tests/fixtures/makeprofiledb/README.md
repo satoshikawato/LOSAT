@@ -31,6 +31,17 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
 - `rps/q3.faa` is the survey's three-protein query; `rps/R01.{6,0}` and `rps/R05.{6,0}` are NCBI rpsblast
   `-query q3.faa -db db/db -outfmt 6|0` on NCBI's databases of rows `O00` (score PSSMs) and `S_f2`
   (frequency-ratio-only PSSMs).
+- Rows `QC01`-`QC07` (row PS10c, run the same way on 2026-11-23 by `psiblast-20261025/PR/ps10c/fix/run_cases.sh`,
+  inputs from `PR/ps10c/scripts/make_fixture_inputs.py`, rows added by `PR/ps10c/scripts/freeze_ps10c.py`):
+  `fc.smp` cut to its first 12 columns with its query written as letters or codes, the query of a frequency-ratio
+  profile, which NCBI converts with `CSeqConvert`'s tables. `q_il.smp`: IUPACaa in lower case (the capitals'
+  codes; `rps/QC01.{6,0}` is NCBI rpsblast on its database); `q_mp.smp`, `q_ml.smp`, `q_ms30.smp`: NCBIeaa `+`,
+  NCBIeaa in lower case, the NCBIstdaa code 30 (each no residue), one letter short of the query's length (NCBI's
+  `Query sequence lengths mismatch` comes first); `q_xp.smp`: NCBIeaa `+` with the matrix `FOO` (the engine's
+  unknown matrix comes first). The same queries of the right length make NCBI's engine write outside its table
+  of residues (then a crash, an abort, or a database, by the code), which LOSAT refuses. `q_ng.smp`, `q_ngi.smp`:
+  a negative frequency ratio (exit status 1), with BLOSUM62 and with IDENTITY 15/2 (NCBI's error comes before
+  IDENTITY's missing table is read).
 
 The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
-repository (about 625 KB).
+repository (about 690 KB).

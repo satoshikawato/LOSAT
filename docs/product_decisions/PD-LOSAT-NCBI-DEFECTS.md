@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.78
+- Version: 1.79
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -389,7 +389,12 @@
   standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.77; first
   1.72, then 1.73, 1.74, 1.75, 1.76, 1.77 and 1.78 at the merges of dev that brought line NP items M5a and M5b's 1.72,
   then line RG item X4b-1's 1.73, line RG item D5b-3's 1.74, line NP item M5's 1.75, line RG item X4b-2's 1.76 and
-  line RG item D3c-3a's 1.77, and after exception 23)
+  line RG item D3c-3a's 1.77, and after exception 23);
+  1.79 2026-11-23 (the rule-3 rejection of a query letter of `losat makeprofiledb` narrowed, psiblast line
+  item PS10c: NCBI's conversion gives every byte of the query a code, 255 for one that is no residue, so a
+  lower-case IUPACaa query is built as NCBI builds it, and only a code past the 28 residues is refused,
+  where NCBI's engine counts it, after the errors of the lengths and the matrix that NCBI gives first;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2695,8 +2700,17 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   - A frequency ratio whose value times 10^9 does not fit a 64-bit integer (row S_frhuge), a word
     score threshold that is not a number after the scaling, a `-scale` whose ceiling does not fit
     `int`: NCBI's conversions of them have no defined result.
-  - A profile with frequency ratios only whose query letter NCBI's sequence conversion leaves
-    uninitialized (a lower-case letter), whose matrix has no frequency ratios, or whose query has no
+  - A profile with frequency ratios only whose query has a residue that is none of the 28 NCBIstdaa
+    codes (version 1.79, PS10c): NCBIeaa other than a capital letter, `*` or `-`, IUPACaa other than a
+    letter of either case (NCBI's `CSeqConvert` tables give them 255), or an NCBIstdaa code of 28 or
+    more. NCBI's engine counts the query's composition in an array of the 28 codes
+    (`blast_stat.c:1962-1971,1984-2007`) and writes outside it; what follows depends on the code
+    (PS10c probes, `PR/ps10c/probe*`: SIGSEGV for every such byte of 42 to 90, ten bytes outside and
+    the codes 28, 29, 64, 128 and 255, malloc's abort on its corrupted heap for 31, a database for
+    32, with or without a later error such as a negative frequency ratio). A query of the wrong
+    length and a matrix that NCBI's engine does not know are NCBI's errors first (fixture rows
+    QC02-QC05), and a lower-case IUPACaa query is built (row QC01).
+  - A profile with frequency ratios only whose matrix has no frequency ratios, or whose query has no
     ungapped Karlin block (NCBI's engine reads `kbp_psi[0]`, a null pointer).
   - `-scale 1` on frequency ratios whose scaling search does not converge: NCBI's search never ends
     (review rows RF_BLOSUM45_s1, RF_BLOSUM50_s1, RF_BLOSUM80_s1, RF_tiny1).

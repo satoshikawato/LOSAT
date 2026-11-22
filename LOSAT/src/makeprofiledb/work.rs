@@ -97,7 +97,6 @@ impl From<ProfileError> for RunError {
             ProfileError::Input(message) => RunError::Input(message),
             ProfileError::Rps(error) => error.into(),
             ProfileError::Blast(message) => RunError::Blast(message.into_bytes()),
-            ProfileError::Exception(message) => RunError::Exception(message.into_bytes()),
         }
     }
 }

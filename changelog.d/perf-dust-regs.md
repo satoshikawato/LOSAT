@@ -1,0 +1,1 @@
+- DUST, which masks low-complexity regions of every BLASTN query (and runs in `dustmasker` and `windowmasker`), takes fewer cycles: MEASURED. Masked regions and reports do not change (`LOSAT_X_DUSTREG=0` runs the previous loop).

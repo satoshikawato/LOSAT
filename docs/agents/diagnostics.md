@@ -452,6 +452,7 @@ export LOSAT_X_DP32=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
+export LOSAT_X_DUSTREG=1
 export LOSAT_X_FOLDLEAN=1
 export LOSAT_X_GREEDYROWFUSE=1
 export LOSAT_X_MB24=1
@@ -1106,6 +1107,19 @@ Same values, faster computation:
   merge (the literal `std::list` port was deleted), and `DustMasker::mask_subsequence` uses the ring buffer
   for a window of at most 64; `mask_subsequence_reference`, the port of `CSymDustMasker::operator()`, runs
   for a larger window. The unit test compares the ring buffer with that port on random sequences.
+- `LOSAT_X_DUSTREG=1` (DUST: BLASTN's query masking in every task, `dustmasker`, and the sdust step of
+  `windowmasker`; speed; in the strict set from the pull request that added it, 2026-11-2x: on unless it is `0`)
+  the symdust loop in `utils/x_dust_regs.rs` (`DustMasker::x_mask_range_regs`). `XTripletWindow` kept the
+  window's scalars in the struct that holds its arrays, and the calls of `find_perfect` took its address, so
+  every scalar was loaded and stored on every letter (line FR s1, H1 §1.2). Here the scalars are a value the
+  loop keeps in registers; the ring of triplets is written twice, so the window is one slice; a full window's
+  letters run without its length (`x_run_full`: `start` follows `pos`, and the three tests of
+  `needs_processing` are one comparison with a table of the thresholds divided by ten that has `u32::MAX`
+  past its end); and `find_perfect` tests each triplet with one comparison against a threshold chosen by a
+  conditional move (`x_gate_limit`), where a branch on whether the triplet was already in the suffix was
+  mispredicted on about every fifth iteration in cDNA. `=0` runs `XTripletWindow` (`x_mask_range`). The same
+  intervals: the unit test compares both with the port of `CSymDustMasker::operator()` on 3,000 random
+  sequences of every kind the masker distinguishes (30,000 in the probe). MEASURED
 - KARLINFAST (graduated 2026-10-22; no variable) Karlin K convolution in eight lanes (same per-lane
   order). Always run where `first == 0` and eight positions remain; the scalar loop runs for `first != 0`
   and for the remaining positions. The unit test that compared the lanes with the scalar-only run went

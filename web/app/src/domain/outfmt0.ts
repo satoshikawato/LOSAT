@@ -12,3 +12,50 @@ export function headingTitle(heading: string): string {
   const title = end < 0 ? heading : heading.slice(0, end);
   return title.replace(/^>\s?/, '');
 }
+
+/** The four entities that NCBI's HTML encoding of a title writes (`< > & "`). */
+const HTML_ENTITIES: readonly (readonly [string, string])[] = [
+  ['&quot;', '"'],
+  ['&amp;', '&'],
+  ['&lt;', '<'],
+  ['&gt;', '>'],
+];
+
+/**
+ * The text that a browser shows for outfmt 0 bytes written with `-html`: the tags removed (a tag runs
+ * from "<" to the next ">" outside a quoted attribute value; a raw "<" in the HTML text always starts
+ * one) and the four entities decoded, in one pass from left to right (`&amp;lt;` shows `&lt;`). The
+ * stored bytes and the export stay as written; only what the viewer shows changes. Do not use it for
+ * a run without `-html`, whose titles may hold `&lt;` as written.
+ */
+export function htmlShownText(html: string): string {
+  const special = /[<&]/g;
+  let out = '';
+  let at = 0;
+  for (;;) {
+    special.lastIndex = at;
+    const found = special.exec(html);
+    if (found === null) return out + html.slice(at);
+    out += html.slice(at, found.index);
+    at = found.index;
+    if (html[at] === '<') {
+      let quote = '';
+      at += 1;
+      while (at < html.length) {
+        const char = html[at]!;
+        at += 1;
+        if (quote !== '') {
+          if (char === quote) quote = '';
+        } else if (char === '"' || char === "'") {
+          quote = char;
+        } else if (char === '>') {
+          break;
+        }
+      }
+    } else {
+      const entity = HTML_ENTITIES.find(([name]) => html.startsWith(name, at));
+      out += entity === undefined ? '&' : entity[1];
+      at += entity === undefined ? 1 : entity[0].length;
+    }
+  }
+}

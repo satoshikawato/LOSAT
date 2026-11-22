@@ -1,7 +1,7 @@
 //! NCBI's ASN.1 types as its serial library knows them (the type information that NCBI's
 //! `datatool` generates from the ASN.1 modules and their `.def` files), for the types that a
 //! PSSM file reaches (`PssmWithParameters`, psiblast and tblastn `-in_pssm`), and the one generic
-//! reader of ASN.1 text that runs on them (`read`). This module owns the table (`table`, generated
+//! reader that runs on them (`read`, of ASN.1 text and ASN.1 binary). This module owns the table (`table`, generated
 //! by `scripts/asn_spec_gen.py` and checked against NCBI's generated `*_.cpp` by
 //! `scripts/asn_spec_check.py`) and the generic value (`Value`); the PSSM's typed model
 //! (`report::serial::pssm`) is built from the value at its typed boundary
@@ -9,7 +9,7 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397
 //!
-//! What the table holds of a type is what NCBI's text reader reads of it: the kind, the members
+//! What the table holds of a type is what NCBI's readers read of it: the kind, the members
 //! or variants in module order with their tags, OPTIONAL and DEFAULT marks and the delayed member
 //! of `Auth-list` (`biblio.def`: `names._delay = 1`), the value lists, the C++ storage of each
 //! INTEGER (`.def` `_type`: `TSeqPos` is read as Uint4, `TGi` as Int8, ...) and the ASN.1 name
@@ -24,18 +24,21 @@ pub(crate) mod write;
 pub(crate) mod table;
 
 #[cfg(test)]
+mod read_ber_tests;
+#[cfg(test)]
 mod read_tests;
 #[cfg(test)]
 mod write_tests;
 
-pub(crate) use read::{read_document, Post, ReadError};
+pub(crate) use crate::report::serial::asn_input::{Encoding, StringKind};
+pub(crate) use read::{read_ber_document, read_document, Post, ReadError};
 
 /// `Member::flags`: an OPTIONAL member (`->SetOptional()`).
 pub(crate) const OPTIONAL: u8 = 1;
 /// `Member::flags`: a member with a DEFAULT (`->SetDefault(...)`; NCBI reads it as optional).
 pub(crate) const DEFAULT: u8 = 2;
 /// `Member::flags`: a member that NCBI reads into a delay buffer (`->SetDelayBuffer(...)`):
-/// skipped with the skip functions and kept as the text read (`Value::Delayed`).
+/// skipped with the skip functions and kept as the bytes read (`Value::Delayed`).
 pub(crate) const DELAYED: u8 = 4;
 
 /// A name of the table: its offset and length in `table::NAMES` (the table holds no pointer, so
@@ -177,17 +180,6 @@ pub(crate) enum Storage {
     Int8,
 }
 
-/// The kind of a string.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StringKind {
-    /// VisibleString: a byte outside 0x20..0x7E is read as `#` with NCBI's error message.
-    Visible,
-    /// UTF8String: the bytes as they are (`eFNP_Allow`).
-    Utf8,
-    /// StringStore: read as a VisibleString (`ReadStringStore` is `ReadString`).
-    Store,
-}
-
 /// The type `ty` of the table.
 pub(crate) fn type_info(ty: u16) -> &'static TypeInfo {
     &table::TYPES[usize::from(ty)]
@@ -247,9 +239,14 @@ pub enum Value {
     Ints(Vec<i64>),
     /// A SEQUENCE OF or SET OF REAL, kept as the numbers (a PSSM's frequency ratios).
     Reals(Vec<f64>),
-    /// A delayed member: the text NCBI's reader keeps, from its first byte that is not white
-    /// space to the end of the value (`StartDelayBuffer`, objistrasn.cpp:1648-1652).
-    Delayed(Vec<u8>),
+    /// A delayed member: the bytes NCBI's reader keeps (`CDelayBuffer`) in the encoding they were
+    /// read in, from the value's first byte (in text, the first that is not white space,
+    /// `StartDelayBuffer`, objistrasn.cpp:1648-1652) to its end. A writer of the same encoding
+    /// copies them; another reads them first (`write`, `CDelayBuffer::Update`).
+    Delayed {
+        encoding: Encoding,
+        bytes: Vec<u8>,
+    },
     /// A Seq-id, in the Seq-id model that owns every Seq-id of LOSAT (`seqid::model`), boxed so
     /// that a `Value` stays small (the model's largest alternatives are several strings).
     SeqId(Box<crate::seqid::ParsedSeqId>),
@@ -360,7 +357,10 @@ impl Clone for Value {
                 Value::Int4s(numbers) => Some(Value::Int4s(numbers.clone())),
                 Value::Ints(numbers) => Some(Value::Ints(numbers.clone())),
                 Value::Reals(numbers) => Some(Value::Reals(numbers.clone())),
-                Value::Delayed(text) => Some(Value::Delayed(text.clone())),
+                Value::Delayed { encoding, bytes } => Some(Value::Delayed {
+                    encoding: *encoding,
+                    bytes: bytes.clone(),
+                }),
                 Value::SeqId(id) => Some(Value::SeqId(id.clone())),
                 Value::Texts(runs) => Some(Value::Texts(runs.clone())),
             };
@@ -434,7 +434,16 @@ impl PartialEq for Value {
                 (Value::Int4s(a), Value::Int4s(b)) => a == b,
                 (Value::Ints(a), Value::Ints(b)) => a == b,
                 (Value::Reals(a), Value::Reals(b)) => a == b,
-                (Value::Delayed(a), Value::Delayed(b)) => a == b,
+                (
+                    Value::Delayed {
+                        encoding: a,
+                        bytes: x,
+                    },
+                    Value::Delayed {
+                        encoding: b,
+                        bytes: y,
+                    },
+                ) => a == b && x == y,
                 (Value::SeqId(a), Value::SeqId(b)) => a == b,
                 (Value::Texts(a), Value::Texts(b)) => a == b,
                 _ => false,
@@ -506,7 +515,9 @@ impl std::fmt::Debug for Value {
                 Value::Int4s(numbers) => write!(f, "Int4s({numbers:?})")?,
                 Value::Ints(numbers) => write!(f, "Ints({numbers:?})")?,
                 Value::Reals(numbers) => write!(f, "Reals({numbers:?})")?,
-                Value::Delayed(text) => write!(f, "Delayed({text:?})")?,
+                Value::Delayed { encoding, bytes } => {
+                    write!(f, "Delayed({encoding:?}, {bytes:?})")?
+                }
                 Value::SeqId(id) => write!(f, "SeqId({id:?})")?,
                 Value::Texts(runs) => write!(f, "Texts({runs:?})")?,
             }

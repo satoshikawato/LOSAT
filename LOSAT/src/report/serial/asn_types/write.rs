@@ -16,7 +16,7 @@
 //! reads any depth), so it is written from a list on the heap, never by a recursion as deep as
 //! the nest.
 
-use super::{resolved, type_info, Kind, Member, Storage, StringKind, Value};
+use super::{resolved, type_info, Encoding, Kind, Member, Storage, StringKind, Value};
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::{Encoder, Traced};
 
@@ -58,6 +58,21 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
         }
     }
     true
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:1094-1103
+// NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
+/// A delayed member of the type `ty` read from ASN.1 binary (`bytes`): NCBI's stream of another
+/// format reads the buffer first (`CDelayBuffer::Update`, a binary stream over the bytes) and
+/// writes the value read. (The binary stream copies a buffer of its own format; no document that
+/// LOSAT writes in ASN.1 binary holds a value of a PSSM file.) The read posts a message or fails
+/// where NCBI's skip did not (a VisibleString byte replaced, a number past its storage), which
+/// NCBI reports while it writes: LOSAT does not write such a member (`Encoder::unread_delayed`).
+fn write_updated<E: Encoder>(enc: &mut E, ty: u16, bytes: &[u8]) {
+    match super::read::read_ber_value(bytes, ty) {
+        (Ok(value), posts) if posts.is_empty() => write_value(enc, ty, &value),
+        _ => enc.unread_delayed(),
+    }
 }
 
 /// `value` as one document of its type (`MSerial_AsnText << object`: `WriteFileHeader`, the
@@ -114,8 +129,11 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
     // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:716-733 (cited at
     // `AsnTextEncoder::delayed`): the delay buffer is written in place of the member's value,
     // without its type.
-    if let Value::Delayed(text) = value {
-        enc.delayed(text);
+    if let Value::Delayed { encoding, bytes } = value {
+        match encoding {
+            Encoding::Text => enc.delayed(bytes),
+            Encoding::Binary => write_updated(enc, ty, bytes),
+        }
         return;
     }
     // A named type that is not a SEQUENCE or a CHOICE (an alias, a SEQUENCE OF or SET OF, an

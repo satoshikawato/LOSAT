@@ -178,6 +178,45 @@ fn a_delayed_member_is_copied_as_read() {
     );
 }
 
+/// A delayed member read from ASN.1 binary is read again and written by its values
+/// (`CDelayBuffer::Update`); where that read posts a message (a VisibleString byte replaced), NCBI
+/// reports it while it writes, which LOSAT's writer does not write. (The bytes: `datatool` 2.24.0
+/// `-e` of `Auth-list ::= { names str { "J" }, affil str "a" }`, read back by `datatool -d` as the
+/// text below; `D/d3/c3a/probe/delay` of line RG.)
+#[test]
+fn a_delayed_member_read_from_binary_is_written_by_its_values() {
+    let bytes: &[u8] = &[
+        0x30, 0x80, 0xa0, 0x80, 0xa2, 0x80, 0x30, 0x80, 0x1a, 0x01, 0x4a, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0xa1, 0x80, 0xa0, 0x80, 0x1a, 0x01, 0x61, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+    let write = |bytes: &[u8]| {
+        let (value, posts) = super::read::read_ber_value(bytes, named::AUTH_LIST);
+        assert!(posts.is_empty(), "{posts:?}");
+        let value = value.expect("read");
+        assert!(matches!(
+            &value,
+            Value::Sequence(members)
+                if matches!(members[0].1, Value::Delayed { encoding: super::Encoding::Binary, .. })
+        ));
+        let mut out = Vec::new();
+        let mut enc = AsnTextEncoder::new(&mut out);
+        write_document(&mut enc, named::AUTH_LIST, &value);
+        let error = enc.error();
+        drop(enc);
+        (String::from_utf8(out).expect("UTF-8"), error)
+    };
+    assert_eq!(
+        write(bytes),
+        (
+            "Auth-list ::= {\n  names str {\n    \"J\"\n  },\n  affil str \"a\"\n}\n".to_owned(),
+            None
+        )
+    );
+    let mut bad = bytes.to_vec();
+    bad[10] = 0xe9;
+    assert!(matches!(write(&bad).1, Some(SerialError::Unwritten(_))));
+}
+
 /// The writer writes a value from a list on the heap: 100,000 nested Seq-loc mixes (whose text
 /// would hold some 10^10 bytes of indentation) go through an encoder that counts its calls, on a
 /// thread of 256 KiB.

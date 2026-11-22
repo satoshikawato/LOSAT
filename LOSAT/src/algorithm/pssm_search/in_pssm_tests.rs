@@ -47,21 +47,34 @@ fn only_a_file_that_does_not_open_is_inaccessible() {
 }
 use crate::report::serial::pssm::Seqdesc;
 
+/// What `-in_pssm` makes of `bytes` up to the PSSM read: the guess's answer, or the reader's
+/// (`read_in_pssm`): "read", NCBI's "Unrecognized format" of a `CSerialException`, the silent
+/// "end" of a `CEofException`.
+fn outcome(bytes: &[u8]) -> &'static str {
+    use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary};
+    let read = match guess_format(bytes) {
+        PssmFileFormat::TextAsn { start } => read_pssm(&bytes[start..]),
+        PssmFileFormat::BinaryAsn { start } => read_pssm_binary(&bytes[start..]),
+        PssmFileFormat::Unsupported => return "Unsupported format",
+        PssmFileFormat::Exception(_) => return "exception",
+        PssmFileFormat::Refused { what: XML_PSSM, .. } => return "XML refused",
+        PssmFileFormat::Refused { .. } => return "refused",
+    };
+    match read.result {
+        Ok(_) => "read",
+        Err(PssmReadError::Ncbi(ReadError::Serial(_))) => "Unrecognized format",
+        Err(PssmReadError::Ncbi(ReadError::Eof)) => "end",
+        Err(_) => "other",
+    }
+}
+
 // The expected answers are NCBI BLAST+ 2.17.0's (psiblast and tblastn `-in_pssm`, the probes of line RG D3-1
 // `F/d3a/fg`, named after each case), and review 2's item S1 (`bom2`, `bom4`, `bom7`, `bom8`, `bom10`).
 #[test]
 fn the_format_guess_is_ncbis() {
     use PssmFileFormat as P;
-    let binary = |format: &P| matches!(format, P::Refused { what: NOT_TEXT, detail } if detail.starts_with("binary"));
-    let xml = |format: &P| {
-        matches!(
-            format,
-            P::Refused {
-                what: NOT_TEXT,
-                detail: "XML"
-            }
-        )
-    };
+    let binary = |format: &P| matches!(format, P::BinaryAsn { start: 0 });
+    let xml = |format: &P| matches!(format, P::Refused { what: XML_PSSM, .. });
     assert!(matches!(guess_format(b""), P::Unsupported));
     assert!(matches!(guess_format(b"\x1f\x8b\x08\x00"), P::Unsupported));
     assert!(matches!(guess_format(b">q\nMKV\n"), P::Unsupported));
@@ -89,7 +102,8 @@ fn the_format_guess_is_ncbis() {
         b"\xef\xbb\xbf PssmWithParameters ::= {}\n".to_vec(),
         [&b"\xef\xbb\xbf1"[..], text].concat(),
     ] {
-        assert!(matches!(guess_format(&case), P::Unrecognized), "{case:?}");
+        assert!(binary(&guess_format(&case)), "{case:?}");
+        assert_eq!(outcome(&case), "Unrecognized format", "{case:?}");
     }
     // `\1` is not a binary byte (`bom10`); a NEXUS line makes it `eAlignment` (fg `n03_nexus_bom`).
     assert!(matches!(
@@ -106,16 +120,19 @@ fn the_format_guess_is_ncbis() {
     // (fg `n01_nexus_text`: exit status 0, nothing written).
     let nexus = [&text[..], b"-- #NEXUS\n"].concat();
     assert!(matches!(guess_format(&nexus), P::TextAsn { start } if start == nexus.len()));
-    // The binary reader's first tag (fg `b01`-`b08`).
-    assert!(matches!(guess_format(b"\x3f\x80"), P::Eof));
-    assert!(matches!(guess_format(b"\x3f\x81\x80"), P::Eof));
-    assert!(matches!(
-        guess_format(b"\x3f\xff\xff\xff\xff\x01"),
-        P::Unrecognized
-    ));
-    assert!(matches!(guess_format(b"\x3f\x11\x02"), P::Unrecognized));
-    assert!(matches!(guess_format(b"\x20\x02"), P::Unrecognized));
+    // The binary reader's first tag (fg `b01`-`b08`): the end of the file in a long tag ends the run
+    // without a word, a tag number of 2^24 or more and a tag other than SEQUENCE's are NCBI's
+    // `CSerialException`.
+    assert_eq!(outcome(b"\x3f\x80"), "end");
+    assert_eq!(outcome(b"\x3f\x81\x80"), "end");
+    assert_eq!(outcome(b"\x3f\xff\xff\xff\xff\x01"), "Unrecognized format");
+    assert_eq!(outcome(b"\x3f\x11\x02"), "Unrecognized format");
+    assert_eq!(outcome(b"\x20\x02"), "Unrecognized format");
+    // SEQUENCE's tag in its long form begins the PSSM; its member's tag runs into the end of the
+    // file inside the class (`HandleEOF`: a `CSerialException`).
     assert!(binary(&guess_format(b"\x3f\x10\x02")));
+    assert_eq!(outcome(b"\x3f\x10\x02"), "Unrecognized format");
+    assert_eq!(outcome(b"\x30\x80\xa0\x80"), "Unrecognized format");
     // A Glimmer3 frame beyond `int` (fg `f08`): NCBI's `CStringException`.
     assert!(matches!(
         guess_format(b">x\nA 1 2 99999999999 1.0\n"),
@@ -977,4 +994,73 @@ fn scores_fill_28_rows_by_column_or_by_row() {
     let rows = convert_2_matrix(&[1, 3, 5, 2, 4, 6], 2, 3, true, BLAST_SCORE_MIN);
     assert_eq!((rows[0][0], rows[0][1], rows[2][1]), (1, 2, 6));
     assert_eq!(rows[2][27], BLAST_SCORE_MIN);
+}
+
+// Line RG D3c-3a, finding 2: NCBI BLAST+ 2.17.0's psiblast ends by a signal on a binary PSSM whose
+// query Seq-inst length (a Uint4) is not the count of its letters: `02 01 ff` (255 for 30 letters:
+// SIGSEGV) and `02 05 00 ff ff ff ff` (2^32 - 1: SIGABRT); inputs kept in `D/d3/c3a/crash`. LOSAT
+// refuses the query as it refuses that text PSSM.
+#[test]
+fn a_binary_query_whose_length_is_not_its_letters_is_refused() {
+    let base = fixture("pssm/ps9_ber_base.asnb");
+    let length = b"\xa2\x80\x02\x01\x1e\x00\x00";
+    let at = base
+        .windows(length.len())
+        .position(|bytes| bytes == length)
+        .unwrap();
+    let read = crate::blastinput::pssm_text::read_pssm_binary(&base);
+    assert!(psi_search_and_object(read.result.unwrap(), PssmReader::PSIBLAST).is_ok());
+    for value in [&b"\x02\x01\xff"[..], b"\x02\x05\x00\xff\xff\xff\xff"] {
+        let bytes = [&base[..at + 2], value, &base[at + 5..]].concat();
+        let read = crate::blastinput::pssm_text::read_pssm_binary(&bytes);
+        let Err(error) = psi_search_and_object(read.result.unwrap(), PssmReader::PSIBLAST) else {
+            panic!("read");
+        };
+        assert_eq!(
+            error.to_string(),
+            "a PSSM query whose letters are missing or of another length than its Seq-inst is \
+             not supported by LOSAT's PSIBLAST"
+        );
+    }
+}
+
+// Line RG D3c-3a, finding 3: a binary PSSM cut before the last byte of its root's end-of-contents
+// ends inside the root class's frames, where NCBI's stack passes the `CEofException` on: psiblast
+// ends without a word, exit status 0.
+#[test]
+fn a_binary_pssm_cut_in_its_last_end_of_contents_ends_silently() {
+    let base = fixture("pssm/ps9_ber_base.asnb");
+    let read = crate::blastinput::pssm_text::read_pssm_binary(&base[..base.len() - 1]);
+    assert!(matches!(
+        read.result,
+        Err(PssmReadError::Ncbi(ReadError::Eof))
+    ));
+    assert_eq!(outcome(&base[..base.len() - 1]), "end");
+}
+
+// Line RG D3c-3a: a string whose length passes the end of a binary PSSM, as NCBI's reader reserves
+// it before it reads the bytes (`CIStreamBuffer::GetChars`): 1 byte past the end, the end of the
+// file's report ("Unrecognized format for PSSM", rc 1); 2^56 + 10 bytes, `std::bad_alloc` ("BLAST
+// ran out of memory", rc 4); 1 GiB past the end, a reservation that succeeds or fails by the
+// host's memory (NCBI's probe host: "Unrecognized format for PSSM"), which LOSAT refuses
+// (refusals.md, PD-LOSAT-NCBI-DEFECTS). Inputs: the rows `db.ber.ps.past_end1`, `len88_huge` and
+// `past_end1g` of `tests/db_search_manifest/psiblast.ber.tsv`.
+#[test]
+fn a_binary_string_past_the_end_is_reserved_as_ncbi_reserves_it() {
+    use crate::blastinput::pssm_text::read_pssm_binary;
+    assert_eq!(
+        outcome(&fixture("pssm/ps9_ber_past_end1.asnb")),
+        "Unrecognized format"
+    );
+    let read = read_pssm_binary(&fixture("pssm/ps9_ber_len88_huge.asnb"));
+    assert!(matches!(
+        read.result,
+        Err(PssmReadError::Ncbi(ReadError::OutOfMemory))
+    ));
+    let read = read_pssm_binary(&fixture("pssm/ps9_ber_past_end1g.asnb"));
+    let what = match read.result {
+        Err(PssmReadError::Refused(what)) => what,
+        other => panic!("{:?}", other.err()),
+    };
+    assert!(what.starts_with("a string whose length (1073741"), "{what}");
 }

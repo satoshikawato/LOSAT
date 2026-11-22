@@ -1,6 +1,7 @@
-//! The reader of a PSSM in ASN.1 text (`PssmWithParameters`, the file of psiblast's `-out_pssm`
-//! and of `-in_pssm`): NCBI's ASN.1 text object stream (`CObjectIStreamAsn`) for the types of
-//! `report::serial::pssm`, whose writer gives the same bytes back for a PSSM that psiblast wrote.
+//! The reader of a PSSM in ASN.1 text or ASN.1 binary (`PssmWithParameters`, the file of
+//! psiblast's `-out_pssm` and of `-in_pssm`): NCBI's object streams (`CObjectIStreamAsn`,
+//! `CObjectIStreamAsnBinary`) for the types of `report::serial::pssm`, whose writer gives the same
+//! bytes back for a PSSM in ASN.1 text that psiblast wrote.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1345
 //!
@@ -11,12 +12,12 @@
 //! the others kept as the generic reader's values: also a query `Seq-entry` that is a `set` and
 //! `Seq-data` other than `iupacaa`, `ncbieaa` and `ncbistdaa`, which NCBI's object manager takes
 //! (or stops at) before NCBI reads them; the PSSM search refuses them after the object manager's
-//! step, for a run that goes on (`pssm_search::in_pssm::psi_search_and_object`). Only the lexical
-//! reader's own limits are refused here (`PssmReadError::Refused`).
+//! step, for a run that goes on (`pssm_search::in_pssm::psi_search_and_object`). Only the
+//! readers' own limits are refused here (`PssmReadError::Refused`).
 
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::{
-    member_index, members, read_document, resolved, Kind, Post, ReadError, Value,
+    member_index, members, read_ber_document, read_document, resolved, Kind, Post, ReadError, Value,
 };
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
@@ -42,11 +43,19 @@ pub(crate) struct PssmRead {
 /// Reads the `PssmWithParameters` document at the start of `text` (what follows it is not read,
 /// as `stream >> object` reads one object), its values nested to any depth.
 pub(crate) fn read_pssm(text: &[u8]) -> PssmRead {
-    let (value, posts) = read_document(text, named::PSSMWITHPARAMETERS);
+    pssm_read(read_document(text, named::PSSMWITHPARAMETERS))
+}
+
+/// [`read_pssm`] of the `PssmWithParameters` object in ASN.1 binary at the start of `bytes`.
+pub(crate) fn read_pssm_binary(bytes: &[u8]) -> PssmRead {
+    pssm_read(read_ber_document(bytes, named::PSSMWITHPARAMETERS))
+}
+
+fn pssm_read((value, posts): (Result<Value, ReadError>, Vec<Post>)) -> PssmRead {
     PssmRead {
         result: value
             .map_err(|error| match error {
-                // LOSAT's own limit of the lexical reader: a refusal, not NCBI's error.
+                // LOSAT's own limit of a reader: a refusal, not NCBI's error.
                 ReadError::Unsupported(what) => PssmReadError::Refused(what),
                 error => PssmReadError::Ncbi(error),
             })

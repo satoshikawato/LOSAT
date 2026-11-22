@@ -300,7 +300,6 @@ fn apply<S: AsnSource>(
         "ptr" => format!("ptr {:?}", r.pointer_type()?),
         "choice" => format!("choice {}", r.choice(&names)?),
         "enum" => format!("enum {:?}", r.enumerated(&values)?),
-        "nint" => format!("nint {}", r.named_integer(&values)?),
         "{" => {
             blocks.push(r.start_block()?);
             "{".into()
@@ -616,16 +615,6 @@ const LITERAL_WALKS: &[(&[u8], usize, &str, &[&str])] = &[
             "enum (\"green\", 2) @5:1",
             "enum (\"green\", 2) @11:1",
             "error AsnTextError { line: 2, message: \"invalid value of enumerated type: 9\", kind: Format, ncbi: Some(Plain(ThrowSite { file: \"src/serial/enumerated.cpp\", line: 156, kind: \"CSerialException::eInvalidData\", function: None })) } refusal None @13:2",
-        ],
-    ),
-    (
-        b"one -77\ntwo",
-        0,
-        "nint:one=1 nint:one=1 nint:one=1",
-        &[
-            "nint 1 @3:1",
-            "nint -77 @7:1",
-            "error AsnTextError { line: 2, message: \"invalid value of enumerated type: two\", kind: Format, ncbi: Some(Plain(ThrowSite { file: \"src/serial/enumerated.cpp\", line: 133, kind: \"CSerialException::eInvalidData\", function: None })) } refusal None @11:2",
         ],
     ),
     (

@@ -100,6 +100,18 @@ const UNENDED_STRING: ThrowSite =
     asn_site(869, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::UnendedString");
 const NEXT_ELEMENT: ThrowSite =
     asn_site(1220, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::NextElement");
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:315-329
+const READ_NUMBER: ThrowSite = asn_site(319, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadNumber");
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857
+const READ_DOUBLE_OVERFLOW: ThrowSite = asn_site(
+    822,
+    "CSerialException::eOverflow",
+    "ncbi::CObjectIStreamAsn::ReadDouble",
+);
+const READ_DOUBLE_BAD: ThrowSite =
+    asn_site(828, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadDouble");
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1482-1508
+const GET_HEX_CHAR: ThrowSite = asn_site(1504, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::GetHexChar");
 /// `UnexpectedMember` (objistrasn.cpp:1306-1314).
 pub(crate) const UNEXPECTED_MEMBER: ThrowSite = asn_site(
     1313,
@@ -108,7 +120,7 @@ pub(crate) const UNEXPECTED_MEMBER: ThrowSite = asn_site(
 );
 // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:123-160
 // (NCBI's report of these two names no function.)
-const FIND_VALUE: ThrowSite = ThrowSite {
+pub(crate) const FIND_VALUE: ThrowSite = ThrowSite {
     file: "src/serial/enumerated.cpp",
     line: 133,
     kind: "CSerialException::eInvalidData",
@@ -211,6 +223,43 @@ pub(crate) trait AsnSource {
     /// The reader will not ask for a byte before `pos` again (a stream may drop them).
     #[inline]
     fn release_before(&mut self, _pos: usize) {}
+    /// Keeps the bytes from `start` on (`None`: no more), whatever `release_before` says, until
+    /// they are taken with `bytes` (the bytes of a delayed member, `Input::delay_start`).
+    #[inline]
+    fn hold(&mut self, _start: Option<usize>) {}
+    /// Appends the `count` bytes from `pos` on to `out` (fewer when the text ends first) and
+    /// returns how many it appended. `out` grows as the bytes come, so a length that the input
+    /// does not hold costs no memory, and a source may read a long value straight into `out`
+    /// instead of keeping it as well.
+    fn read_into(&mut self, pos: usize, count: u64, out: &mut Vec<u8>) -> u64 {
+        read_kept(self, pos, count, out)
+    }
+}
+
+/// `AsnSource::read_into` through the bytes the source keeps (`rest`, `fill`).
+fn read_kept<S: AsnSource + ?Sized>(
+    src: &mut S,
+    mut pos: usize,
+    count: u64,
+    out: &mut Vec<u8>,
+) -> u64 {
+    let mut done = 0;
+    while done < count {
+        let rest = src.rest(pos);
+        if rest.is_empty() {
+            if !src.fill(pos) {
+                break;
+            }
+            continue;
+        }
+        let take = rest
+            .len()
+            .min(usize::try_from(count - done).unwrap_or(usize::MAX));
+        out.extend_from_slice(&rest[..take]);
+        pos += take;
+        done += take as u64;
+    }
+    done
 }
 
 /// A text held whole in memory.
@@ -255,6 +304,8 @@ pub(crate) struct StreamSource<R: Read> {
     /// The position of `buf[0]`.
     base: usize,
     eof: bool,
+    /// The first byte that `release_before` keeps (`AsnSource::hold`).
+    held: Option<usize>,
     /// The block each read fills before its bytes are appended to `buf` (allocated once, so a
     /// short read costs only the bytes it gives).
     scratch: Box<[u8]>,
@@ -272,6 +323,7 @@ impl<R: Read> StreamSource<R> {
             buf: first.to_vec(),
             base: 0,
             eof: false,
+            held: None,
             scratch: vec![0; STREAM_BLOCK].into_boxed_slice(),
         }
     }
@@ -328,6 +380,7 @@ impl<R: Read> AsnSource for StreamSource<R> {
 
     #[inline]
     fn release_before(&mut self, pos: usize) {
+        let pos = self.held.map_or(pos, |held| held.min(pos));
         let dead = pos - self.base;
         // Drop the read bytes once they are most of a buffer of more than a few blocks: each
         // byte is moved at most once on average.
@@ -335,6 +388,43 @@ impl<R: Read> AsnSource for StreamSource<R> {
             self.buf.drain(..dead);
             self.base = pos;
         }
+    }
+
+    #[inline]
+    fn hold(&mut self, start: Option<usize>) {
+        self.held = start;
+    }
+
+    /// The kept bytes, then (when nothing is held) the rest straight from the stream into `out`:
+    /// the bytes before the end of the value are not asked for again, so they are dropped, and a
+    /// long value is not kept twice.
+    fn read_into(&mut self, pos: usize, count: u64, out: &mut Vec<u8>) -> u64 {
+        let rest = self.rest(pos);
+        let kept = rest.len().min(usize::try_from(count).unwrap_or(usize::MAX));
+        out.extend_from_slice(&rest[..kept]);
+        let mut done = kept as u64;
+        if done == count || self.held.is_some() || self.eof {
+            if done < count {
+                done += read_kept(self, pos + kept, count - done, out);
+            }
+            return done;
+        }
+        let pos = pos + kept;
+        self.buf.clear();
+        self.base = pos;
+        let before = out.len();
+        // `take` stops at `count`; a read error ends the text, as in `fill_to`.
+        let ended = std::io::Read::by_ref(&mut self.input)
+            .take(count - done)
+            .read_to_end(out)
+            .is_err();
+        let read = (out.len() - before) as u64;
+        done += read;
+        self.base = pos + read as usize;
+        if ended || done < count {
+            self.eof = true;
+        }
+        done
     }
 }
 
@@ -1252,15 +1342,6 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `ReadEnum` of an INTEGER with the named values `values` (`IsInteger()`): a name, or any
-    /// number.
-    pub(crate) fn named_integer(&mut self, values: &[(&'static str, i32)]) -> Result<i32> {
-        Ok(match self.enum_item(values)? {
-            Ok((_, value)) => value,
-            Err(value) => value,
-        })
-    }
-
     /// The item of `values` named or numbered by the text, or the number that is none of them
     /// (a name that is none of them is an error).
     fn enum_item(
@@ -1509,7 +1590,10 @@ impl<S: AsnSource> Reader<S> {
                 }
                 _ => {
                     self.pos -= 1;
-                    return Err(self.error(format!("bad char in octet string: #{}", c as i8)));
+                    return Err(self.error_at(
+                        NcbiThrow::Stream(GET_HEX_CHAR),
+                        format!("bad char in octet string: #{}", c as i8),
+                    ));
                 }
             };
             match high.take() {
@@ -1521,7 +1605,7 @@ impl<S: AsnSource> Reader<S> {
             out.push(h << 4);
         }
         if self.peek_at(0) != b'H' {
-            return Err(self.error("'H' expected"));
+            return Err(self.expected(b'H'));
         }
         self.pos += 1;
         Ok(out)
@@ -1533,7 +1617,7 @@ impl<S: AsnSource> Reader<S> {
         let (start, c) = self.white_space_at(self.pos)?;
         if c != b'-' && c != b'+' && !c.is_ascii_digit() {
             self.pos = start;
-            return Err(self.error("invalid number"));
+            return Err(self.error_at(NcbiThrow::Stream(READ_NUMBER), "invalid number"));
         }
         let (end, _) = self.src.scan(start + 1, |c| c.is_ascii_digit());
         self.pos = end;
@@ -1594,12 +1678,15 @@ impl<S: AsnSource> Reader<S> {
         let is_negative = self.skip_white_space()? == b'-';
         let mantissa_range = self.number()?;
         if mantissa_range.len() >= 128 - 1 {
-            return Err(self.error("buffer overflow"));
+            return Err(self.error_at(NcbiThrow::Stream(READ_DOUBLE_OVERFLOW), "buffer overflow"));
         }
         let mantissa_length = mantissa_range.len();
         let read = string_to_double_posix(self.bytes(mantissa_range), false);
         if read.end != mantissa_length {
-            return Err(self.error(format!("bad double in line {}", self.line)));
+            return Err(self.error_at(
+                NcbiThrow::Stream(READ_DOUBLE_BAD),
+                format!("bad double in line {}", self.line),
+            ));
         }
         Ok((read.value, is_negative))
     }

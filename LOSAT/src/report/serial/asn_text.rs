@@ -376,6 +376,15 @@ impl Encoder for AsnTextEncoder<'_> {
         self.out.extend_from_slice(text);
     }
 
+    fn unread_delayed(&mut self) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::Unwritten(
+                "a member read from ASN.1 binary into a delay buffer whose value NCBI reads with \
+                 a message or an error",
+            ));
+        }
+    }
+
     fn buffered(&self) -> usize {
         self.out.len() - self.start
     }

@@ -1421,6 +1421,17 @@ impl NativeError {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:256-259
+    /// `CATCH_ALL`'s report of a `std::bad_alloc` (a string of a PSSM file in ASN.1 binary whose
+    /// length passes every allocation, `report::serial::asn_input::reserve_string`): exit status 4
+    /// (`BLAST_OUT_OF_MEMORY`).
+    pub(crate) fn out_of_memory() -> NativeError {
+        NativeError {
+            exit: 4,
+            message: b"BLAST ran out of memory\n".to_vec(),
+        }
+    }
+
     /// The error of a report's writer as the run ends with it: an exception of NCBI's that the
     /// writer raised mid-report (`NcbiException::of_io_error`: TBLASTX's query-anchored section,
     /// `report::query_anchored::write_section`) is `CATCH_ALL`'s report of it (`exception`), after

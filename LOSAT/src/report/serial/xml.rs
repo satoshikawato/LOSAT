@@ -70,13 +70,14 @@ use crate::ncbi_exception::NcbiException;
 use crate::ncbi_str::utf8::{decode_to_ascii, Utf8Error};
 
 /// Whether `type_name`, the name that a writer gives `begin_sequence` or `variant`, stands for an
-/// anonymous ASN.1 type (NCBI's `GetName()` is empty for it): the writers pass the open member's
-/// tag (`Score_value`), which has an underscore, where a named type's name (`Seq-align`) has
-/// none. The object mode writes no tag of its own for it (`begin_object_sequence`, `variant`),
-/// and `encoder::Traced` keeps its `.E` frame (`WillHaveName`).
+/// anonymous ASN.1 type (NCBI's `GetName()` is empty for it): the typed writers pass the open
+/// member's tag (`Score_value`), which has an underscore, and the writer of the type table's
+/// values (`asn_types::write`) the type's empty name, where a named type's name (`Seq-align`)
+/// has neither. The object mode writes no tag of its own for it (`begin_object_sequence`,
+/// `variant`), and `encoder::Traced` keeps its `.E` frame (`WillHaveName`).
 #[inline(always)]
 pub(crate) fn anonymous_type(type_name: &str) -> bool {
-    type_name.contains('_')
+    type_name.is_empty() || type_name.contains('_')
 }
 
 /// What the stream writes at the start and end of a document.
@@ -773,9 +774,10 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     fn begin_object_sequence(&mut self, type_name: &str) {
         if anonymous_type(type_name) {
             debug_assert!(!self.pending_elem);
-            debug_assert_eq!(
-                &self.names[self.marks.last().copied().unwrap_or(0)..],
-                type_name.as_bytes()
+            debug_assert!(
+                type_name.is_empty()
+                    || &self.names[self.marks.last().copied().unwrap_or(0)..]
+                        == type_name.as_bytes()
             );
             self.opened.push(0);
             return;
@@ -943,9 +945,10 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
             if anonymous_type(type_name) {
                 // An anonymous CHOICE: the member's tag is already open.
                 debug_assert!(!self.pending_elem);
-                debug_assert_eq!(
-                    &self.names[self.marks.last().copied().unwrap_or(0)..],
-                    type_name.as_bytes()
+                debug_assert!(
+                    type_name.is_empty()
+                        || &self.names[self.marks.last().copied().unwrap_or(0)..]
+                            == type_name.as_bytes()
                 );
                 self.opened.push(1);
             } else {

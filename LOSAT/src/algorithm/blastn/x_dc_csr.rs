@@ -118,6 +118,29 @@ static BUILDS_ON_POOL: AtomicU64 = AtomicU64::new(0);
 static BUILT_WORDS: AtomicU64 = AtomicU64::new(0);
 static BUILDS_QS_AHEAD: AtomicU64 = AtomicU64::new(0);
 
+/// PROBE (line FD s1, not for a PR): LOSAT_X_FDQSKEEP=1 keeps the `qs` of a dropped CSR for the
+/// next build (process-wide, never freed), instead of a fresh allocation per build.
+pub(super) fn x_fd_qskeep() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("LOSAT_X_FDQSKEEP").is_ok_and(|v| v == "1"))
+}
+
+static X_QS_KEEP: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
+/// PROBE (LOSAT_X_FDQSKEEP): an empty `qs` with room for `n` words.
+pub(super) fn x_qs_buffer(n: usize) -> Vec<u32> {
+    if x_fd_qskeep() {
+        let mut k = X_QS_KEEP.lock().unwrap();
+        if k.capacity() >= n {
+            let mut v = std::mem::take(&mut *k);
+            v.clear();
+            return v;
+        }
+        *k = Vec::new();
+    }
+    Vec::with_capacity(n)
+}
+
 /// No NCBI counterpart (counters only, LOSAT_X_DCQSAHEAD): a build whose place pass brought in
 /// `qs` ahead.
 pub(super) fn count_qs_ahead() {
@@ -158,6 +181,12 @@ pub struct Csr {
 // took its buffer from it (`x_kept`).
 impl Drop for Csr {
     fn drop(&mut self) {
+        if x_fd_qskeep() && self.qs.capacity() > 0 {
+            let mut k = X_QS_KEEP.lock().unwrap();
+            if self.qs.capacity() >= k.capacity() {
+                *k = std::mem::take(&mut self.qs);
+            }
+        }
         if let Some((keep, length, dirty)) = self.x_keep.take() {
             keep.give_back_buffer(std::mem::take(&mut self.offsets), length, dirty);
         }
@@ -910,7 +939,7 @@ pub(super) fn build_with(
     debug_assert_eq!(total as usize, n_words);
     // SAFETY: `cells < cells + 1`; `offsets[cells]` is no cell's end.
     unsafe { *ob.add(cells) = total };
-    let mut qs: Vec<u32> = Vec::with_capacity(n_words);
+    let mut qs: Vec<u32> = x_qs_buffer(n_words);
     let qb = qs.as_mut_ptr();
     if qs_ahead {
         count_qs_ahead();

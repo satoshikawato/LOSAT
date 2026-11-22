@@ -1532,7 +1532,7 @@ fn csr_on_pool(
     // `offsets[cells]` below; `qs` gets one element per word (`total` positions bound them).
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
     let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 1);
-    let mut qs: Vec<u32> = Vec::with_capacity(total);
+    let mut qs: Vec<u32> = super::x_dc_csr::x_qs_buffer(total);
     let ob = Shared {
         ptr: offsets.as_mut_ptr(),
         len: cells + 1,
@@ -1887,7 +1887,7 @@ fn csr_on_pool_steps(
     // As `csr_on_pool`'s (EXPERIMENT LOSAT_X_MBLUTKEEP: `x_offsets` is the batch loop's kept table
     // or an empty vector).
     let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 1);
-    let mut qs: Vec<u32> = Vec::with_capacity(total);
+    let mut qs: Vec<u32> = super::x_dc_csr::x_qs_buffer(total);
     let ob = Shared {
         ptr: offsets.as_mut_ptr(),
         len: cells + 1,

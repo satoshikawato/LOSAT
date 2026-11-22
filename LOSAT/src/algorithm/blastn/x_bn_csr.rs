@@ -423,7 +423,7 @@ pub(super) fn x_serial_unpacked(
         )
     };
     debug_assert_eq!(total as usize, n_words);
-    let mut qs: Vec<u32> = Vec::with_capacity(n_words);
+    let mut qs: Vec<u32> = super::x_dc_csr::x_qs_buffer(n_words);
     let qb = qs.as_mut_ptr();
     if ascending {
         each_word(words, |cell, q_off_1| {

@@ -11,3 +11,7 @@
 - psiblast and tblastn `-in_pssm`: a PSSM whose gapped `lambda` is infinite or whose gapped
   `lambda`, `kappa` or `h` is not a number (psiblast also an infinite `lambdaUngapped`), in ASN.1
   text or binary, is refused; LOSAT wrote E-values NaN or other hits than NCBI BLAST+ 2.17.0.
+- rpsbproc, makeblastdb `-mask_data` and psiblast/tblastn `-in_pssm` read ASN.1 with one reader for
+  text and binary: rpsbproc of a 336 MB archive runs 6.8 % fewer instructions, `-mask_data` of a
+  text mask file 4.4 % fewer, of a binary genome mask 0.8 % fewer (read as a stream instead of the
+  whole file); outputs and peak memory unchanged.

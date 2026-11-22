@@ -1,0 +1,374 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "rpstblastn",
+      "version": "RPSTBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini3v"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "n1",
+          "query_len": 60,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 0,
+            "eff_space": 0,
+            "kappa": -1,
+            "lambda": -1,
+            "entropy": -1
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "rpstblastn",
+      "version": "RPSTBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini3v"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "n2",
+          "query_len": 40,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 0,
+            "eff_space": 0,
+            "kappa": -1,
+            "lambda": -1,
+            "entropy": -1
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "rpstblastn",
+      "version": "RPSTBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini3v"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:HBA1 description:hemoglobin subunit alpha 1 [Source:HGNC Symbol;Acc:HGNC:4823]",
+          "query_len": 577,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|CDD|102",
+                  "accession": "102",
+                  "title": "f102 ribonucleotide reductase large subunit [White spot syndrome virus] residues 301-480"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 18.1547,
+                  "score": 36,
+                  "evalue": 0.249838,
+                  "identity": 5,
+                  "positive": 9,
+                  "query_from": 269,
+                  "query_to": 316,
+                  "query_frame": 2,
+                  "hit_from": 76,
+                  "hit_to": 91,
+                  "align_len": 16,
+                  "gaps": 0,
+                  "qseq": "PNALSALSDLHAHKLR",
+                  "hseq": "PHECPGLSDVHGEEFK",
+                  "midline": "P+    LSD+H  + +"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 17.3843,
+                  "score": 34,
+                  "evalue": 0.37582,
+                  "identity": 8,
+                  "positive": 10,
+                  "query_from": 411,
+                  "query_to": 476,
+                  "query_frame": -3,
+                  "hit_from": 64,
+                  "hit_to": 81,
+                  "align_len": 22,
+                  "gaps": 4,
+                  "qseq": "RLQLNGIWRSARCSQKPGTCPG",
+                  "hseq": "RVKAGKNW-SLMC---PHECPG",
+                  "midline": "R++    W S  C   P  CPG"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 17.3843,
+                  "score": 34,
+                  "evalue": 0.43845,
+                  "identity": 5,
+                  "positive": 7,
+                  "query_from": 252,
+                  "query_to": 284,
+                  "query_frame": 3,
+                  "hit_from": 69,
+                  "hit_to": 80,
+                  "align_len": 12,
+                  "gaps": 1,
+                  "qseq": "RTWT-TCPTRCP",
+                  "hseq": "KNWSLMCPHECP",
+                  "midline": "+ W+  CP  CP"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 16.6139,
+                  "score": 32,
+                  "evalue": 0.671206,
+                  "identity": 7,
+                  "positive": 9,
+                  "query_from": 210,
+                  "query_to": 263,
+                  "query_frame": -3,
+                  "hit_from": 64,
+                  "hit_to": 81,
+                  "align_len": 18,
+                  "gaps": 0,
+                  "qseq": "RPRAPRRWSARRPPSCRG",
+                  "hseq": "RVKAGKNWSLMCPHECPG",
+                  "midline": "R +A + WS   P  C G"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 16.2287,
+                  "score": 31,
+                  "evalue": 1.10413,
+                  "identity": 6,
+                  "positive": 6,
+                  "query_from": 392,
+                  "query_to": 415,
+                  "query_frame": -1,
+                  "hit_from": 11,
+                  "hit_to": 18,
+                  "align_len": 8,
+                  "gaps": 0,
+                  "qseq": "QGGVHRRG",
+                  "hseq": "QGGDKRRG",
+                  "midline": "QGG  RRG"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 14.6879,
+                  "score": 27,
+                  "evalue": 2.80651,
+                  "identity": 7,
+                  "positive": 9,
+                  "query_from": 220,
+                  "query_to": 255,
+                  "query_frame": 1,
+                  "hit_from": 11,
+                  "hit_to": 19,
+                  "align_len": 12,
+                  "gaps": 3,
+                  "qseq": "EGGRRADQRRGA",
+                  "hseq": "QGG---DKRRGA",
+                  "midline": "+GG   D+RRGA"
+                },
+                {
+                  "num": 7,
+                  "bit_score": 14.6879,
+                  "score": 27,
+                  "evalue": 2.96354,
+                  "identity": 3,
+                  "positive": 7,
+                  "query_from": 5,
+                  "query_to": 52,
+                  "query_frame": -1,
+                  "hit_from": 15,
+                  "hit_to": 30,
+                  "align_len": 16,
+                  "gaps": 0,
+                  "qseq": "RRQHHGGFSLSLWGPE",
+                  "hseq": "KRRGAAAIYISDWHLD",
+                  "midline": "+R+      +S W  +"
+                },
+                {
+                  "num": 8,
+                  "bit_score": 14.3027,
+                  "score": 26,
+                  "evalue": 4.33719,
+                  "identity": 4,
+                  "positive": 6,
+                  "query_from": 157,
+                  "query_to": 177,
+                  "query_frame": 1,
+                  "hit_from": 49,
+                  "hit_to": 55,
+                  "align_len": 7,
+                  "gaps": 0,
+                  "qseq": "QDLLPAL",
+                  "hseq": "RDLFPAI",
+                  "midline": "+DL PA+"
+                },
+                {
+                  "num": 9,
+                  "bit_score": 14.3027,
+                  "score": 26,
+                  "evalue": 4.6212,
+                  "identity": 4,
+                  "positive": 6,
+                  "query_from": 275,
+                  "query_to": 295,
+                  "query_frame": -1,
+                  "hit_from": 9,
+                  "hit_to": 15,
+                  "align_len": 7,
+                  "gaps": 0,
+                  "qseq": "VAQGGQR",
+                  "hseq": "VSQGGDK",
+                  "midline": "V+QGG +"
+                },
+                {
+                  "num": 10,
+                  "bit_score": 13.5323,
+                  "score": 24,
+                  "evalue": 7.88361,
+                  "identity": 4,
+                  "positive": 5,
+                  "query_from": 344,
+                  "query_to": 373,
+                  "query_frame": -1,
+                  "hit_from": 12,
+                  "hit_to": 21,
+                  "align_len": 10,
+                  "gaps": 0,
+                  "qseq": "GGQGHQQAVA",
+                  "hseq": "GGDKRRGAAA",
+                  "midline": "GG   + A A"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|CDD|101",
+                  "accession": "101",
+                  "title": "f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190"
+                }
+              ],
+              "len": 190,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 15.482,
+                  "score": 29,
+                  "evalue": 1.54567,
+                  "identity": 8,
+                  "positive": 12,
+                  "query_from": 227,
+                  "query_to": 298,
+                  "query_frame": -1,
+                  "hit_from": 35,
+                  "hit_to": 56,
+                  "align_len": 24,
+                  "gaps": 2,
+                  "qseq": "QVAQGGQRVGHVVHVRHGVGQRVG",
+                  "hseq": "QQENGGNK--HCLFVKHSLETRYG",
+                  "midline": "Q   GG +  H + V+H +  R G"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|CDD|103",
+                  "accession": "103",
+                  "title": "f103 DNA polymerase [White spot syndrome virus] residues 1101-1290"
+                }
+              ],
+              "len": 190,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 15.1084,
+                  "score": 28,
+                  "evalue": 2.52127,
+                  "identity": 2,
+                  "positive": 4,
+                  "query_from": 219,
+                  "query_to": 266,
+                  "query_frame": -3,
+                  "hit_from": 79,
+                  "hit_to": 94,
+                  "align_len": 16,
+                  "gaps": 0,
+                  "qseq": "CRPRAPRRWSARRPPS",
+                  "hseq": "AEKTNNKTWCTNTSPN",
+                  "midline": "      + W     P+"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 27,
+            "eff_space": 79035,
+            "kappa": 0.050373036,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

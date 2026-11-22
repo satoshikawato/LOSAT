@@ -86,7 +86,7 @@ impl SetKey {
         })
     }
 
-    /// `CSeq_id::Match` of the two keys' Seq-align ids (`Compare(..) == e_YES`).
+    /// `CSeq_id::Match` of the two keys' Seq-align ids (`Compare` gives `e_YES`).
     pub(crate) fn matches(&self, other: &SetKey) -> bool {
         use crate::seqid::defline_set::{compare, Sic};
         match (self, other) {

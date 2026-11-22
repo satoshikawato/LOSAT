@@ -15,7 +15,7 @@
 
 use losat::api::FastaRecord;
 use losat::web_adapter::{FastaInputSource, ParseErrorCode, ReadError, ReaderConfig};
-use losat_web_adapter::scan::{scan_ncbi, NcbiScanner, ScanError, ScanRecord};
+use losat_web_adapter::scan::{scan_ncbi, NcbiScanner, ReaderStop, ScanError, ScanRecord};
 
 /// A long record's length in the generated inputs (the old checkpoint spacing of the index's
 /// line layout, which line WQA's D13 removed on 2026-11-20).
@@ -626,7 +626,9 @@ fn reference(input: &[u8], protein: bool, data_loaders: bool) -> Reference {
 enum Expected {
     Records(Vec<RefRecord>),
     SeqId(String),
-    Parse(String),
+    /// The reader's error: the records before it, and the offset of the record that it fails on
+    /// (`Scanned::stop`, line WQA's D10, 2026-11-19).
+    Parse(String, Vec<RefRecord>, u64),
 }
 
 /// What the generated inputs exercised.
@@ -686,11 +688,7 @@ fn expected(
     coverage.joins += reference.joins as usize;
     coverage.lost += reference.lost as usize;
     coverage.gap += reference.gap as usize;
-    if let EngineEnd::Parse { message, .. } = end {
-        coverage.parse += 1;
-        return Expected::Parse(message);
-    }
-    let closed = reference
+    let closed: Vec<RefRecord> = reference
         .records
         .iter()
         .take_while(|record| {
@@ -699,6 +697,16 @@ fn expected(
         })
         .cloned()
         .collect();
+    if let EngineEnd::Parse { message, .. } = end {
+        coverage.parse += 1;
+        assert_eq!(
+            closed.len(),
+            records.len(),
+            "{context}: records before the error"
+        );
+        let offset = reference.records[records.len()].header_offset as u64;
+        return Expected::Parse(message, closed, offset);
+    }
     Expected::Records(closed)
 }
 
@@ -715,12 +723,31 @@ fn check(input: &[u8], random: &mut Random, context: &str, coverage: &mut Covera
             let want = expected(input, config, &context, coverage);
             let scanned = scan_ncbi(input, config);
             match (&want, &scanned) {
-                (Expected::Records(records), Ok(scanned)) => {
-                    assert_eq!(scanned.len(), records.len(), "{context}: record count");
+                (Expected::Records(records), Ok(scanned))
+                | (Expected::Parse(_, records, _), Ok(scanned)) => {
+                    assert_eq!(
+                        scanned.records.len(),
+                        records.len(),
+                        "{context}: record count"
+                    );
+                    match &want {
+                        Expected::Parse(message, _, offset) => assert_eq!(
+                            scanned.stop,
+                            Some(ReaderStop {
+                                offset: *offset,
+                                // The record starts with a defline unless it is the input's first,
+                                // read without one (review M2, 2026-11-20).
+                                defline: input.get(*offset as usize) == Some(&b'>'),
+                                message: message.clone()
+                            }),
+                            "{context}: reader error"
+                        ),
+                        _ => assert_eq!(scanned.stop, None, "{context}: no reader error"),
+                    }
                     if refused_with_loaders[protein as usize] {
                         coverage.seq_id_read += 1;
                     }
-                    for (index, (record, got)) in records.iter().zip(scanned).enumerate() {
+                    for (index, (record, got)) in records.iter().zip(&scanned.records).enumerate() {
                         check_record(record, got, &context, index);
                         coverage.records += 1;
                         if got.length == 0 {
@@ -743,13 +770,6 @@ fn check(input: &[u8], random: &mut Random, context: &str, coverage: &mut Covera
                             record: 0
                         },
                         "{context}: refusal"
-                    )
-                }
-                (Expected::Parse(message), Err(error)) => {
-                    assert_eq!(
-                        error,
-                        &ScanError::Reader(message.clone()),
-                        "{context}: reader error"
                     )
                 }
                 _ => panic!("{context}: expected {want:?}, scanned {scanned:?}"),
@@ -1178,7 +1198,9 @@ fn ncbi_scan_agrees_with_the_reader_on_edge_cases() {
 #[test]
 fn a_record_longer_than_losat_reads_is_refused_in_the_cli_words() {
     let at_limit = b">a\nACGT\n>b\n>?2147483647\n>c\nGG\n";
-    let scanned = scan_ncbi(at_limit, ReaderConfig::query("BLASTN", false, true)).unwrap();
+    let scanned = scan_ncbi(at_limit, ReaderConfig::query("BLASTN", false, true))
+        .unwrap()
+        .records;
     let lengths: Vec<u64> = scanned.iter().map(|record| record.length).collect();
     assert_eq!(lengths, [4, 2_147_483_647, 2]);
     assert_eq!(scanned[1].residue_counts[b'N' as usize], 2_147_483_647);

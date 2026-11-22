@@ -128,7 +128,8 @@ impl<'a> Window<'a> {
         let mut iter = 0u32;
 
         loop {
-            // `++end < winend && iter < step`: `++end` runs before every test.
+            // The loop test increments `end`, then needs `end` below `winend` and `iter` below
+            // `step`: the increment runs before every test.
             self.end = self.end.wrapping_add(1);
             if !(self.end < self.winend && iter < step) {
                 break;

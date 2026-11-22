@@ -1,4 +1,44 @@
-use super::{overlay_ambiguity_runs, AmbiguityRun, NucleotideAmbiguity};
+use super::{overlay_ambiguity_runs, AmbiguityRun, NucleotideAmbiguity, SequenceBlock};
+use crate::seqdb::SeqType;
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:896-945
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:403-442
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2350-2385
+/// `GetBioseq`'s data of three nucleotides of 5 bases whose last stored byte holds bits after
+/// the last base (as NCBI's distributed databases have): without a word of ambiguity data (none,
+/// or 3 bytes) `ncbi2na` keeps those bits and clears the count; with ambiguity data (a run of N
+/// over the last base) `ncbi4na` clears them first, so the half byte after the last base is A
+/// (1).
+#[test]
+fn seq_data_keeps_the_stored_bits_of_ncbi2na_and_clears_them_for_ncbi4na() {
+    let block = SequenceBlock {
+        seqtype: SeqType::Nucleotide,
+        first_ordinal: 0,
+        first_oid: 0,
+        path: std::path::PathBuf::from("test.nsq"),
+        data: vec![
+            0x1B, 0xBD, // ACGT, G and the bits 1111, count 1
+            0x1B, 0xBD, 0, 0, 0, 1, 0xF0, 0, 0, 4, // the same, one run: N at base 4
+            0x1B, 0xBD, 0x80, 0, 0, // the same, 3 bytes of ambiguity data: no word
+        ],
+        data_start: 0,
+        seq_offsets: vec![0, 2, 12, 17],
+        amb_offsets: vec![2, 4, 14],
+    };
+    assert_eq!(
+        block.nucleotide_seq_data(0).unwrap(),
+        (true, vec![0x1B, 0xBC])
+    );
+    assert_eq!(
+        block.nucleotide_seq_data(2).unwrap(),
+        (true, vec![0x1B, 0xBC])
+    );
+    assert_eq!(
+        block.nucleotide_seq_data(1).unwrap(),
+        (false, vec![0x12, 0x48, 0xF1])
+    );
+    assert_eq!(block.nucleotide_iupac(1).unwrap(), b"ACGTN");
+}
 
 /// A small deterministic generator (xorshift), so the test needs no fixture and no crate.
 struct Rng(u64);

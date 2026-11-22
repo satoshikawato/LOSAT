@@ -924,6 +924,7 @@ mod x_db_cut_blocks {
             mask_data: None,
             mask_id: None,
             mask_desc: None,
+            randomize: false,
         };
         let now = crate::writedb::time::LocalTime {
             year: 2026,
@@ -932,6 +933,7 @@ mod x_db_cut_blocks {
             hour: 13,
             minute: 30,
             second: 0,
+            unix_seconds: 1_792_157_400,
         };
         let (mut log, mut messages) = (Vec::new(), Vec::new());
         let status = crate::writedb::makeblastdb::run_with(
@@ -1535,7 +1537,11 @@ fn listed_subjects_are_read_by_ordinal_and_renamed_to_ranks() {
         b"p01 first protein [Test organism]"
     );
     titles
-        .check_shown_titles(&database, &[0usize, 1, 2, 3].into_iter().collect())
+        .check_shown_titles(
+            &database,
+            &[0usize, 1, 2, 3].into_iter().collect(),
+            &HitLoads::default(),
+        )
         .unwrap();
     titles.check_reported_titles(&hit_lists).unwrap();
 }
@@ -1590,8 +1596,12 @@ fn lean_titles_are_the_records_titles_and_letters() {
         lean.tabular_subject_ids(&hit_lists, true).unwrap(),
         records.tabular_subject_ids(&hit_lists, true).unwrap()
     );
-    lean.check_shown_titles(&database, &[0usize, 1].into_iter().collect())
-        .unwrap();
+    lean.check_shown_titles(
+        &database,
+        &[0usize, 1].into_iter().collect(),
+        &HitLoads::default(),
+    )
+    .unwrap();
     lean.check_reported_titles(&hit_lists).unwrap();
     assert_eq!(lean.stitles(), records.stitles());
     // Titles, flags and every letter against the stored residues.
@@ -1689,7 +1699,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         native.message
     );
     // The volume is recorded under its directory normalised with symbolic links
-    // followed (seqdbalias.cpp:851-862, `NormalizePath(dir_name, eFollowLinks)`), so
+    // followed (seqdbalias.cpp:851-862, `NormalizePath` of `dir_name` with `eFollowLinks`), so
     // the message names that directory: on macOS the temporary directory under `/var`
     // is shown under `/private/var`.
     assert_eq!(

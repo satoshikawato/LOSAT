@@ -8,7 +8,7 @@
 // src/infra/fake/fake-fasta.ts).
 import type { FastaParserKind, FastaReader } from 'losat/domain';
 import type { RecordScanner, ScanResponse } from 'losat/ports';
-import { rejects, same, sameValue, type ContractCase } from './contract';
+import { check, same, sameValue, type ContractCase } from './contract';
 
 export interface RecordScannerEnv {
   readonly scanner: RecordScanner;
@@ -285,20 +285,67 @@ const CORPUS: readonly Corpus[] = [
 const NOT_PLAUSIBLE = (line: number) =>
   new RegExp(`CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment\\.$`);
 
-const ERRORS: ReadonlyArray<{ readonly name: string; readonly input: Uint8Array; readonly error: RegExp }> = [
-  { name: 'a first data line that is not plausible data', input: encoder.encode('>a\n$$$$$$\nACGT\n'), error: NOT_PLAUSIBLE(2) },
-  { name: 'a first data line after a gap line that is not plausible data', input: encoder.encode('>a\n>?5\n$$$$$$\n'), error: NOT_PLAUSIBLE(3) },
-  { name: 'a ; early in a first data line', input: encoder.encode('>a\nAC;x\nGT\n'), error: NOT_PLAUSIBLE(2) },
-  { name: 'a later record whose first data line is not plausible data', input: encoder.encode('>a\nACGT\n>b\n$$$$$$\n'), error: NOT_PLAUSIBLE(4) },
+/**
+ * The reader's own error, which ends the records (`reader_error`): the number of records before
+ * it, and the offset of the record that it fails on (line WQA's D10, 2026-11-19).
+ */
+const STOPS: ReadonlyArray<{
+  readonly name: string;
+  readonly input: Uint8Array;
+  readonly error: RegExp;
+  readonly records: number;
+  readonly offset: number;
+  /** Whether the record that the reader fails on starts with a defline (review M2, 2026-11-20). */
+  readonly defline: boolean;
+}> = [
+  {
+    name: 'a first data line that is not plausible data',
+    input: encoder.encode('>a\n$$$$$$\nACGT\n'),
+    error: NOT_PLAUSIBLE(2),
+    records: 0,
+    offset: 0,
+    defline: true,
+  },
+  {
+    name: 'a first data line after a gap line that is not plausible data',
+    input: encoder.encode('>a\n>?5\n$$$$$$\n'),
+    error: NOT_PLAUSIBLE(3),
+    records: 0,
+    offset: 0,
+    defline: true,
+  },
+  { name: 'a ; early in a first data line', input: encoder.encode('>a\nAC;x\nGT\n'), error: NOT_PLAUSIBLE(2), records: 0, offset: 0, defline: true },
+  {
+    name: 'a later record whose first data line is not plausible data',
+    input: encoder.encode('>a\nACGT\n>b\n$$$$$$\n>c\nACGT\n'),
+    error: NOT_PLAUSIBLE(4),
+    records: 1,
+    offset: 8,
+    defline: true,
+  },
   {
     name: 'a byte order mark',
     input: new Uint8Array([0xef, 0xbb, 0xbf, ...encoder.encode('>a\nAC\n')]),
     error: NOT_PLAUSIBLE(1),
+    records: 0,
+    offset: 0,
+    defline: false,
+  },
+  {
+    name: 'a first line of other text',
+    input: encoder.encode('=== list ===\n>a\nAC\n'),
+    error: NOT_PLAUSIBLE(1),
+    records: 0,
+    offset: 0,
+    defline: false,
   },
   {
     name: 'a byte that is not UTF-8 in a first data line',
     input: new Uint8Array([...encoder.encode('>a\nAC'), 0xff, ...encoder.encode('GT\n')]),
     error: NOT_PLAUSIBLE(2),
+    records: 0,
+    offset: 0,
+    defline: true,
   },
 ];
 
@@ -351,13 +398,19 @@ export const RECORD_SCANNER_CASES: readonly ContractCase<RecordScannerEnv>[] = [
       },
     }),
   ),
-  ...ERRORS.map(
-    (error): ContractCase<RecordScannerEnv> => ({
-      name: `scan: the reader's error for ${error.name}`,
+  ...STOPS.map(
+    (stop): ContractCase<RecordScannerEnv> => ({
+      name: `scan: the reader's error ends the records for ${stop.name}`,
       async run({ scanner }) {
         for (const kind of KINDS) {
           for (const size of CHUNKINGS) {
-            await rejects(scanner.scan(READERS[kind], chunked(error.input, size)), error.error, `kind ${kind}, chunks of ${size} bytes`);
+            const label = `kind ${kind}, chunks of ${size} bytes`;
+            const response = await scanner.scan(READERS[kind], chunked(stop.input, size));
+            same(response.records.length, stop.records, `${label}: records before the error`);
+            same(response.reader_error?.offset, stop.offset, `${label}: the offset of the record`);
+            same(response.reader_error?.defline, stop.defline, `${label}: whether the record starts with a defline`);
+            const message = response.reader_error?.message ?? '';
+            check(stop.error.test(message), `${label}: the reader's message, not ${JSON.stringify(message)}`);
           }
         }
       },

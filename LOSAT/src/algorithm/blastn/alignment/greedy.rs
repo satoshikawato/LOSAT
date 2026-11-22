@@ -384,8 +384,8 @@ struct GreedyNonAffineMem {
     traceback_pool: Vec<i32>,
     traceback_used: usize,
     /// The row descriptors of `last_seq2_off` (`blast_greedy_align`): NCBI allocates its row
-    /// pointers once with the scratch, `gamp->last_seq2_off = (Int4**) malloc((max_d + 2) *
-    /// sizeof(Int4*))` (blast_gapalign.c:211), so they are kept here between calls.
+    /// pointers once with the scratch (a `malloc` block of pointers, two more than `max_d`, held
+    /// by `gamp->last_seq2_off`, blast_gapalign.c:211), so they are kept here between calls.
     rows: Vec<NonAffineGreedyRow>,
 }
 
@@ -2015,8 +2015,8 @@ fn reduce_gaps(
 /// Find first mismatch with fence detection.
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:297-375 (s_FindFirstMismatch)
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:313-317
-// LOSAT passes the unpacked subject, one base per byte: NCBI's `compressed_subject = FALSE`
-// form, `rem == 4` (greedy_align.c:328-335, 349-356; blast_gapalign.c:2786-2794). The scan of
+// LOSAT passes the unpacked subject, one base per byte: NCBI's form with `compressed_subject`
+// false, `rem` 4 (greedy_align.c:328-335, 349-356; blast_gapalign.c:2786-2794). The scan of
 // the packed subject (greedy_align.c:338-344, 365-369, `NCBI2NA_UNPACK_BASE`) is not ported.
 // Keep the short mismatch scans in the recurrence to avoid a call boundary
 // for each surviving diagonal, as intended by NCBI_INLINE.
@@ -2064,7 +2064,7 @@ fn find_first_mismatch_greedy(
     seq1_index - tmp
 }
 
-/// `s_FindFirstMismatch` for `rem == 4` with its fence test, for the affine kernel: the
+/// `s_FindFirstMismatch` for a `rem` of 4 with its fence test, for the affine kernel: the
 /// word-at-a-time scan of the non-affine kernels (`x_first_mismatch`) and the same fence test as
 /// `find_first_mismatch_greedy`.
 ///
@@ -2229,7 +2229,7 @@ fn get_next_non_affine_tback(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-614,351-362,375
 // The code below is a faster form of the loop over diagonals `k` of `BLAST_GreedyAlign`
-// and of its `s_FindFirstMismatch` (`rem == 4`). Pass 1 reads only the row of distance
+// and of its `s_FindFirstMismatch` (for a `rem` of 4). Pass 1 reads only the row of distance
 // d-1 (the `seq2_index` choice and the X-drop test). Pass 2 reads only the sequences
 // (the slide length). Pass 3 applies the writes and the state updates (`diag_lower`,
 // `diag_upper`, `curr_extent`, seed, sequence ends, fence) diagonal by diagonal in the
@@ -2266,7 +2266,7 @@ struct XGreedyRowState {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:327-334,351-358,375
 /// Same result as the byte loop: the number of positions before the first one where
 /// the bytes differ or `seq1` is not a base. Eight positions are tested per step.
-/// `s_FindFirstMismatch` for `rem == 4`, without the fence test.
+/// `s_FindFirstMismatch` for a `rem` of 4, without the fence test.
 ///
 /// A position matches when the two bytes are equal and the `seq1` byte is
 /// below 4, i.e. when `(b1 ^ b2) | (b1 & 0xFC)` is zero; eight positions are
@@ -3192,7 +3192,7 @@ fn blast_greedy_align_rows(
         let current = &mut current_values[current_start..current_start + band_len];
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-615
         // `x_greedy_row` does the same distance when the lengths fit the slices (the subject is
-        // always unpacked, NCBI's `rem == 4`); a fence stop returns 0 as the C code does. The `for`
+        // always unpacked, NCBI's `rem` of 4); a fence stop returns 0 as the C code does. The `for`
         // loop that follows the `if !x_done` below is the port of this C loop and runs only for
         // lengths that do not fit the slices (no production call passes them). The loop over
         // distances `d` and everything after the diagonals (scores, convergence) is shared.
@@ -3967,7 +3967,7 @@ pub(super) struct GreedyGappedCore {
 // No NCBI counterpart: visible to `x_greedy_prelim`, which calls it on a window of the packed
 // subject, one base per byte, or on the one-byte copy of the whole subject.
 //
-// `subject` holds one base per byte: NCBI's `compressed_subject = FALSE` form, which LOSAT always
+// `subject` holds one base per byte: NCBI's form with `compressed_subject` false, which LOSAT always
 // runs (the packed form is not ported). `max_dist_len` is the `subject_length` that sizes
 // `max_dist` (blast_gapalign.c:323-330): the chunk's length for the preliminary call, also on a
 // window, which reads fewer bases, and the whole subject's for the traceback.
@@ -4016,7 +4016,7 @@ pub(super) fn greedy_gapped_alignment_internal(
     let (subject_left, s_len_left) = subject.left_of(s_off);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2793
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2833-2834
-    // LOSAT takes the `!compressed_subject` arm only: `subject + s_off` forward and `rem = 4` in
+    // LOSAT takes only the arm of an unpacked subject: `subject` from `s_off` forward, `rem` 4 in
     // both directions (`subject_right`, `subject_left`). NCBI has no early return here: a start
     // past the end of the subject range (`s_avail <= 0`) still extends to the left.
 

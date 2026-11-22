@@ -109,13 +109,13 @@ ruzstd = "0.9"
 # notice and the OpenLDAP Public License 2.8: THIRD_PARTY_NOTICES, section 2 (LMDB))
 # Rust system calls for the native readable-byte hint (`io`), and for the page size
 # of the LMDB files of version 5 (`writedb::platform::host_page_size`): `param`
-# (rustix's `sysconf(_SC_PAGESIZE)` on macOS and the BSDs) and `mm` (the kernel's
+# (rustix's `sysconf` query of `_SC_PAGESIZE` on macOS and the BSDs) and `mm` (the kernel's
 # alignment through `mmap` and `mprotect` on Linux, which needs neither /proc nor
 # the C library), and the read-only mappings of the RPS-BLAST profile files
 # (`utils::mapped_file`, as NCBI's `CMemoryFile`), and `fs` for the write-permission
 # test of makeblastdb's output directory (`access`, which NCBI's `euidaccess` calls,
-# `writedb::build_db::check_access_write`). `try_close` reports the error of `close(2)` that
-# the output files of makeblastdb can have (`writedb::ofstream`). No BLAST behavior, foreign algorithm, NCBI runtime/build
+# `writedb::build_db::check_access_write`). `try_close` reports the error of the
+# `close` system call that the output files of makeblastdb can have (`writedb::ofstream`). No BLAST behavior, foreign algorithm, NCBI runtime/build
 # dependency or libc-auxv feature (the pure-Rust runtime boundary,
 # tests/check_pure_rust_runtime_boundary.py, allows no direct libc call). A caret requirement
 # like every other dependency: Cargo.lock fixes the exact version for every build from this

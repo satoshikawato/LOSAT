@@ -305,6 +305,33 @@ impl Store {
         &self.query_input.input_lengths
     }
 
+    /// The Seq-ids that `-parse_deflines` read of the input record `ordinal`, which the loop has
+    /// not taken yet (`query_batch::BatchCount`, which counts the next batch's records before the
+    /// loop takes them); `None` for a record without them or one taken.
+    pub(super) fn believed(
+        &self,
+        ordinal: usize,
+    ) -> Option<Arc<crate::blastinput::fasta_reader::believed::BelievedIds>> {
+        if let Some(parts) = &self.parts {
+            let parts = parts.lock().unwrap_or_else(PoisonError::into_inner);
+            let (first, part) = parts
+                .parts
+                .iter()
+                .find(|(first, part)| (*first..first + part.len()).contains(&ordinal))?;
+            let index = ordinal - first;
+            let found = part
+                .special
+                .binary_search_by_key(&index, |(at, _, _)| *at)
+                .ok()?;
+            return part.special[found].2.as_ref()?.believed.clone();
+        }
+        let left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
+        left.records
+            .as_slice()
+            .get(ordinal.checked_sub(left.taken)?)?
+            .believed_shared()
+    }
+
     /// The records `range`, taken out: the loop takes its batches in order, each starting where
     /// the one before ended. Packed letters are made again (by `pool`'s threads with two or more).
     pub(super) fn take(

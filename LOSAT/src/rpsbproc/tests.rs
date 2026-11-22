@@ -26,11 +26,12 @@ fn normalize_path_as_ncbi() {
     }
 }
 
-// rpsbproc_main.cpp:1809,1836 (cited at `print_dom_line`, `print_cluster_line`): `m_iFrom +
-// COORDSBASE` of a hit that ends at 2^31 - 1 overflows `int` (both 0.5.1 builds print
+// rpsbproc_main.cpp:1809,1836 (cited at `print_dom_line`, `print_cluster_line`): `m_iFrom` plus
+// `COORDSBASE` for a hit that ends at 2^31 - 1 overflows `int` (both 0.5.1 builds print
 // -2147483648: PS16c review oracle `plusmax`); its value, 2^31, is what NCBI prints for the hit
 // moved 3 bases down plus 3 (PS16-Q1 oracle `ntplusmax` and its nearby input `ntplusmax3`;
-// PD-LOSAT-NCBI-DEFECTS exception 12). The XML input's `INT_MIN - 1` prints `INT_MIN`.
+// PD-LOSAT-NCBI-DEFECTS exception 12). The XML input's value one less than `INT_MIN` prints
+// `INT_MIN`.
 #[test]
 fn printed_positions_past_int() {
     assert_eq!(printed_position(i32::MAX), 2_147_483_648);
@@ -39,7 +40,7 @@ fn printed_positions_past_int() {
     assert_eq!(printed_position(0), 1);
 }
 
-// `ostream << double` of -0.0 is glibc's `%g`, "-0".
+// Streaming a `double` of -0.0 to an `ostream` is glibc's `%g`, "-0".
 #[test]
 fn format_g_keeps_the_sign_of_zero() {
     assert_eq!(format_g(-0.0), "-0");

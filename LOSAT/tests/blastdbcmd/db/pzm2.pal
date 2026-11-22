@@ -1,0 +1,5 @@
+#
+TITLE pzm2
+DBLIST pz4
+OIDLIST pzm.msk
+OID_MASK_TYPE 2

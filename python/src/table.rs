@@ -179,8 +179,8 @@ fn runs<T: PartialEq + Copy>(values: &[T]) -> impl Iterator<Item = (T, usize, us
 /// The HSPs of a search: one row per HSP, in the order of the final hit list.
 ///
 /// A table has `len`, indexing (an `Hsp`), slicing (a table) and iteration, and any Arrow
-/// consumer reads it without a copy through `__arrow_c_stream__`: `pyarrow.table(hsps)`,
-/// `polars.DataFrame(hsps)`, `pandas.DataFrame.from_arrow(hsps)`.
+/// consumer reads it without a copy through `__arrow_c_stream__`: `pyarrow.table`,
+/// `polars.DataFrame` and `pandas.DataFrame.from_arrow`, given the table.
 ///
 /// The ids (`qaccver`, `saccver`) are text, with one U+FFFD per maximal ill-formed subpart of
 /// their bytes, as `bytes.decode("utf-8", "replace")` gives; the exact bytes are those of the

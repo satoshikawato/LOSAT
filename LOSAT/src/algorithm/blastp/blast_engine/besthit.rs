@@ -18,7 +18,7 @@ use crate::core::hspfilter_besthit::{BestHitKey, BestHitLists, BestHitParams};
 
 /// The key of an HSP for the lists.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-243
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266
 /// A blastp context has frame 0, so the start is the HSP's own `query.offset` (`q_start - 1`,
 /// within the searched range of the query or the query part of a chunk) and the query length is
 /// not read.
@@ -48,7 +48,7 @@ fn save_list<H: HitListHsp>(lists: &mut BestHitLists<H>, query: usize, list: Bla
 /// of `prelim_hitlist_size` lists, which keeps the lists of the best e-values when there are
 /// more (`Blast_HitListUpdate`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231
 /// `s_ExportToHitlist` saves the lists into a hit list as large as the HSPs (it is never full,
 /// so `Blast_HitListUpdate` only sets each list's best e-value) and `Blast_HitListSortByEvalue`
 /// sorts it.
@@ -102,7 +102,7 @@ impl PrelimBestHit {
     /// call the parts of the chunk are its queries). The subject result is emptied, as the
     /// collector empties it.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:228-333
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-352
     pub(super) fn add(&mut self, subject_result: &mut BlastpSubjectResult) {
         for (query, list) in subject_result.x_compact_hsp_lists.drain(..) {
             save_list(&mut self.lists, query, list);

@@ -39,7 +39,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-max_file_sz` | `3000000000` | Largest size of one database file, in bytes. A larger database is split into volumes. |
 | `-logfile` | standard output and error | Write the log and messages to this file (appended). |
 | `-metadata_output_prefix` | none | Path written before each file name in the JSON metadata (`.pjs`, `.njs`), for a database that will be read from another directory. The path separator (`/`, `\` on Windows) is added when the value does not end with one. |
-| `-oid_masks` | none | `1` also writes an OID mask file per volume (`.pxm`, `.nxm`) that marks the sequences whose ids are all predicted RefSeq accessions (`XP_`, `XM_`, `XR_`, ...), which NCBI BLAST+ reads for an alias file with `OID_MASK_TYPE 1` (LOSAT refuses that alias key for now). |
+| `-oid_masks` | none | `1` also writes an OID mask file per volume (`.pxm`, `.nxm`) that marks the sequences whose ids are all predicted RefSeq accessions (`XP_`, `XM_`, `XR_`, ...), which NCBI BLAST+ and LOSAT read for an alias file with `OID_MASK_TYPE 1`. |
 
 For every option: `losat makeblastdb -help`.
 
@@ -87,7 +87,9 @@ A mask file that is damaged stops with makeblastdb's own error and exit status. 
 - `-in` names one database or several, separated by spaces, as `-db` does for the search programs. Alias names work. `-out` is required and must not be the `-in` value.
 - Without `-title` the new database takes the title of the input database. With several input databases, give `-title`.
 - The sequences keep their definition lines (ids, tax ids, membership and leaf tax ids), their PIGs, the masks of every algorithm and the data of other columns. The ids are always indexed, as with `-parse_seqids`.
+- An alias name keeps the sequences its OID ranges and lists keep. Under `OID_MASK_TYPE 1` the definition lines with a predicted RefSeq accession are left out, as in NCBI; a sequence left with no line is refused (NCBI's `makeblastdb` stops with a null-pointer report).
 - `-taxid`, `-taxid_map`, `-mask_data`, `-hash_index` and `-oid_masks` work as for FASTA input. `-taxid_map` still needs `-parse_seqids` on the command line.
+- `-randomize` (hidden in `makeblastdb`'s help, and in LOSAT's) copies the sequences in a random order, which depends on the second of the clock. LOSAT reads the clock when the build starts; `makeblastdb` reads it when the copy starts, after reading the input's definition lines. With the same second the order is the one `makeblastdb` 2.17.0 gives on Linux. `makeblastdb` on Windows and macOS shuffles with other C++ libraries, whose order has not been compared. With another `-input_type`, `-randomize` stops with `makeblastdb`'s error.
 - With `-title` or several names, an input name that is not a database is reported (`Unable to open input NAME as BLAST db`), and the build stops with the database error. A single name without `-title` that is not a database stops the build earlier, when its title is read, with the database error alone. Both are as in `makeblastdb`.
 
 ## Output
@@ -112,13 +114,13 @@ The sequence and header files have the same bytes as NCBI's. The index and metad
 
 - A `-in` file made of several bzip2 streams or zstd frames is read to the end. NCBI's `makeblastdb` stops after the first stream and drops the rest without a message. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - When the database path (`-out`) contains a space or a double quote, or when an old database of the same name has to be replaced, LOSAT removes and replaces the old files as one database, where `makeblastdb` treats the path as a list of names. Normal names are not affected. See [the decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md).
-- Database files are compared with `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform (the LMDB page size, the size of a `long`); those files have not been compared with NCBI's builds there.
+- Database files are compared with `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform (the LMDB page size, the size of a `long`); those files have not been compared with NCBI's builds there. The order of `-randomize` is the Linux builds' on every platform: NCBI's Windows and macOS builds shuffle with their own C++ libraries.
 
 The full list is on [Differences from NCBI BLAST+](../differences.md).
 
 ## What LOSAT refuses
 
-- `-randomize`, `-gi_mask` and `-gi_mask_name`: each stops with an error that names the option.
+- `-gi_mask` and `-gi_mask_name`: each stops with an error that names the option.
 - `-input_type asn1_txt` and `asn1_bin`. `fasta` and `blastdb` work.
 - A FASTA record of 4,294,967,296 letters or more whose letters NCBI would build into a sequence.
 - NCBI settings that change which ids are parsed or which titles are stored (`[BLAST] LONG_SEQID`, a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids`, `DIAG_*` variables and other `NCBI_CONFIG_*` entries).

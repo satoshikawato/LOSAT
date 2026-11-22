@@ -198,6 +198,12 @@ impl FastaRecord {
         self.source.as_ref()?.believed.as_deref()
     }
 
+    /// `believed`, shared (for a reader of the records that does not hold them:
+    /// `query_batch::BatchCount::next_batch`).
+    pub fn believed_shared(&self) -> Option<std::sync::Arc<believed::BelievedIds>> {
+        self.source.as_ref()?.believed.clone()
+    }
+
     /// The record of the Bioseq whose Seq-ids are `ids` (at least one), shown as `-parse_deflines`
     /// shows the ids it read, whose Seq-aligns take the first (`BelievedIds::of_bioseq`): the query
     /// of psiblast's and tblastn's `-in_pssm`, the PSSM's Bioseq (`pssm_search::PsiSearch::
@@ -801,7 +807,7 @@ pub enum QueryEnd {
 /// records (written later, batch by batch, by the caller).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-171
-/// The `catch (const exception&)` skips a query whose Seq-id was not found or whose
+/// The `catch` of `const exception&` skips a query whose Seq-id was not found or whose
 /// range does not fit (`seq_range.rs`); LOSAT rejects Seq-id lines.
 pub fn read_queries<R: Read>(source: &mut FastaInputSource<R>) -> QueryRecords {
     read_queries_with(source, |_, _| {})

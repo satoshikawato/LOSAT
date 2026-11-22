@@ -829,10 +829,24 @@ unsafe fn candidates_avx2(
 
 /// PROBE (exp/fx-cellbf, line FX s2): the form of [`candidates_avx2`]'s list, fixed at build time
 /// (LOSAT_FXLIST_BUILD, a digit; 2 = [`list4p`], else [`list`]).
+#[cfg(target_arch = "x86_64")]
 const X_FX_LIST: u8 = match option_env!("LOSAT_FXLIST_BUILD") {
     Some(v) => v.as_bytes()[0].wrapping_sub(b'0'),
     None => 0,
 };
+
+/// PROBE (exp/fx-cellbf): `p` through an empty `asm!` (no instruction), so that LLVM cannot fold
+/// the add that made it into the next store's address (it folded three of four into base + index
+/// stores without it).
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn x_fx_opaque(mut p: *mut u16) -> *mut u16 {
+    // SAFETY: an empty template; the register keeps its value.
+    unsafe {
+        std::arch::asm!("/* {0} */", inout(reg) p, options(pure, nomem, nostack, preserves_flags));
+    }
+    p
+}
 
 /// PROBE (exp/fx-cellbf): [`list`] four words per step with the entry kept as a pointer that moves
 /// on by each word's presence byte (as `list`), so that every store has a base-only address (the
@@ -840,6 +854,7 @@ const X_FX_LIST: u8 = match option_env!("LOSAT_FXLIST_BUILD") {
 ///
 /// # Safety
 /// As [`list`].
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 unsafe fn list4p(
     index: &[u16],
@@ -861,13 +876,13 @@ unsafe fn list4p(
                 *p.add(w[3] as usize) as usize,
             ];
             out.write(k);
-            out = out.add(b[0]);
+            out = x_fx_opaque(out.add(b[0]));
             out.write(k + 1);
-            out = out.add(b[1]);
+            out = x_fx_opaque(out.add(b[1]));
             out.write(k + 2);
-            out = out.add(b[2]);
+            out = x_fx_opaque(out.add(b[2]));
             out.write(k + 3);
-            out = out.add(b[3]);
+            out = x_fx_opaque(out.add(b[3]));
         }
         k += 4;
     }

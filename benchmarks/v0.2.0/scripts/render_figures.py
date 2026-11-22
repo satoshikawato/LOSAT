@@ -197,22 +197,22 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
     fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.02, 0.975), frameon=False, ncol=4, fontsize=8.5, columnspacing=1.6, handletextpad=0.5)
 
     # Dedicated label column + 3 plot+ratio panel pairs (guaranteed zero overlap/clipping)
-    ax_lbl = fig.add_axes([0.012, 0.11, 0.195, 0.72])
+    ax_lbl = fig.add_axes([0.012, 0.13, 0.195, 0.70])
     ax_lbl.set_facecolor(theme["surface"])
     ax_lbl.set_xlim(0, 1)
     ax_lbl.set_ylim(ymin, ymax)
     ax_lbl.axis("off")
 
     panel_rects = [
-        ([0.212, 0.11, 0.175, 0.72], [0.390, 0.11, 0.056, 0.72]),
-        ([0.464, 0.11, 0.175, 0.72], [0.642, 0.11, 0.056, 0.72]),
-        ([0.718, 0.11, 0.175, 0.72], [0.896, 0.11, 0.072, 0.72]),
+        ([0.212, 0.13, 0.175, 0.70], [0.390, 0.13, 0.056, 0.70]),
+        ([0.464, 0.13, 0.175, 0.70], [0.642, 0.13, 0.056, 0.70]),
+        ([0.718, 0.13, 0.175, 0.70], [0.896, 0.13, 0.072, 0.70]),
     ]
 
     specs = [
         ("a", "Wall time, 1 thread", 1, "wall", [5, 1e6], [10, 100, 1000, 10000], ["10", "100", "1,000", "10,000"], "Wall time (s)"),
         ("b", "Wall time, 16 threads", 16, "wall", [0.3, 1e4], [1, 10, 100, 1000], ["1", "10", "100", "1,000"], "Wall time (s)"),
-        ("c", "Peak memory (max RSS), 16 threads", 16, "rss", [10, 2e4], [20, 100, 500, 2500, 10000], ["20", "100", "500", "2,500", "10,000"], "Max RSS (MiB, includes DB mmap)"),
+        ("c", "Peak memory (max RSS), 16 threads", 16, "rss", [10, 2e4], [20, 100, 500, 2500, 10000], ["20", "100", "500", "2,500", "10,000"], "Max RSS (MiB)"),
     ]
 
     for ax_i, ((prect, rrect), (let, title, th, metric, xlim, xticks, xlbls, xlabel)) in enumerate(zip(panel_rects, specs)):
@@ -295,9 +295,12 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
             )
 
     meta = read_meta(snap)
-    footer(fig, f"LOSAT {short_sha(meta.get('losat_commit', ''))} vs NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, "
-                f"{short_hw(meta)}. FASTA subjects: LOSAT -subject, BLAST+ -db (made from same FASTA); max RSS includes mmap DB pages. "
-                f"Right: BLAST+ \u00f7 LOSAT (>1: LOSAT faster/smaller).", theme)
+    line1 = (
+        f"LOSAT {short_sha(meta.get('losat_commit', ''))} vs NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, "
+        f"{short_hw(meta)}. FASTA subjects: LOSAT -subject, BLAST+ -db (made from same FASTA)."
+    )
+    line2 = "BLAST+ max RSS includes its mapped database pages. Numbers right of each panel: BLAST+ \u00f7 LOSAT (above 1: LOSAT faster or smaller)."
+    footer(fig, f"{line1}\n{line2}", theme)
     suffix = "_dark.png" if dark else ".png"
     p = out / f"fig1_standard_workloads{suffix}"
     save_png(fig, p, theme)
@@ -455,13 +458,16 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
         ax.grid(True, which="major", color=theme["grid"], linewidth=0.6, zorder=0)
 
     meta = read_meta(snap)
-    note = ""
+    abr_row = next((r for r in warm if r["case"] == "m3_abr"), None)
+    abr_note = ""
+    if abr_row and float(abr_row["ncbi_wall_s"]) < STARTUP_S:
+        abr_note = f"; on abr_genes ({float(abr_row['x_value']):.2f} MB) BLAST+ took {float(abr_row['ncbi_wall_s']):.2f} s (start-up)"
     tm = short_sha(meta.get("toolmt_commit", ""))
     line1 = f"LOSAT {short_sha(meta.get('losat_commit', ''))} vs NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, {short_hw(meta)}. Labels: BLAST+ \u00f7 LOSAT."
     if tm and tm != short_sha(meta.get("losat_commit", "")):
-        line2 = f"c, d: core_nt and cold-cache points are LOSAT {tm}; BLAST+ max RSS includes mmap DB pages; on abr_genes (0.16 MB) BLAST+ took 0.90 s (start-up)."
+        line2 = f"c, d: core_nt and cold-cache points are LOSAT {tm}; BLAST+ max RSS includes its mapped database pages{abr_note}."
     else:
-        line2 = "c, d: BLAST+ max RSS includes mmap DB pages; on abr_genes (0.16 MB) BLAST+ took 0.90 s (start-up)."
+        line2 = f"c, d: BLAST+ max RSS includes its mapped database pages{abr_note}."
     footer(fig, f"{line1}\n{line2}", theme)
     suffix = "_dark.png" if dark else ".png"
     p = out / f"fig2_scaling{suffix}"
@@ -655,11 +661,13 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
                 ax.plot([max(1.0, min(ws, 18.0)), 22.0], [yv, yv], linestyle=":", color=theme["line"], linewidth=1.4, zorder=2)
                 ax.text(10.0, yv + 0.25, f"{fmt_fold(ws)} and {fmt_fold(ns)} (off scale)", ha="center", va="bottom", fontsize=7.6, color=theme["ink"])
 
+    wasm_sha = short_sha(meta.get("wasm_commit", ""))
+    base_sha = short_sha(meta.get("wasm_derived_from", "6a0a8719"))
     if wasm_derived:
         fig.text(
             0.975,
             0.942,
-            "Pre-C5 derived estimate (to be replaced by paired C5 run)",
+            f"Estimated from build {base_sha} (see caption)",
             ha="right",
             va="top",
             fontsize=8.0,
@@ -667,11 +675,13 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
             color=theme["muted"],
         )
     line1 = (
-        f"LOSAT {short_sha(meta.get('wasm_commit', ''))}, native and wasm32-wasip1-threads (Node.js), "
+        f"LOSAT {wasm_sha}, native and wasm32-wasip1-threads (Node.js), "
         f"vs native NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, {short_hw(meta)}."
     )
-    derived_note = " Pre-C5 derived from 6a0a8719 scaled to build above." if wasm_derived else ""
-    line2 = f"Wasm \u00f7 native: WebAssembly time over native LOSAT time.{derived_note}"
+    if wasm_derived:
+        line2 = f"Wasm \u00f7 native: WebAssembly time over native LOSAT time. {wasm_sha} times: {base_sha}'s measured times scaled by a side-by-side run of the two builds."
+    else:
+        line2 = "Wasm \u00f7 native: WebAssembly time over native LOSAT time."
     footer(fig, f"{line1}\n{line2}", theme)
     suffix = "_dark.png" if dark else ".png"
     p = out / f"fig4_webassembly{suffix}"

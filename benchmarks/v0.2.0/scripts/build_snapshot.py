@@ -94,12 +94,18 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def sanitize_input_key(path: Path) -> str:
-    """Strip machine-local user home prefixes when recording provenance keys."""
-    parts = path.parts
-    if "losat-baselines" in parts:
-        return "/".join(parts[parts.index("losat-baselines") :])
-    return path.name if path.is_absolute() else path.as_posix()
+RunRecord = tuple[float, float, str, float | None]
+
+
+def sanitize_input_key(path: Path, base: Path) -> str:
+    """Record provenance key relative to base without machine-local home prefixes."""
+    resolved_base = base.resolve()
+    resolved_path = path.resolve()
+    try:
+        rel = resolved_path.relative_to(resolved_base)
+    except ValueError:
+        sys.exit(f"input path is outside baselines root {resolved_base}: {resolved_path}")
+    return f"losat-baselines/{rel.as_posix()}"
 
 
 def parse_rss_anon_mib(row: dict[str, str]) -> float | None:
@@ -109,6 +115,90 @@ def parse_rss_anon_mib(row: dict[str, str]) -> float | None:
     if row.get("rss_anon_kb"):
         return int(row["rss_anon_kb"]) / 1024.0
     return None
+
+
+def make_standard_row(
+    *,
+    group: str,
+    cid: str,
+    prog: str,
+    task: str,
+    label: str,
+    th: int,
+    qdesc: str,
+    sdesc: str,
+    target: str,
+    opts: str,
+    lo_list: list[RunRecord],
+    nc_list: list[RunRecord],
+    v0_list: list[RunRecord],
+    is_ncbi_timeout: bool = False,
+    subject_vs_db: bool = False,
+    ncbi_n1_sha: set[str] | None = None,
+) -> dict[str, object]:
+    """Assemble and validate one standard workload summary row."""
+    if not lo_list:
+        sys.exit(f"missing LOSAT runs for {cid} t={th}")
+    lo_w = statistics.median(x[0] for x in lo_list)
+    lo_w_min = min(x[0] for x in lo_list)
+    lo_w_max = max(x[0] for x in lo_list)
+    lo_m = statistics.median(x[1] for x in lo_list)
+    lo_sha = {x[2] for x in lo_list}
+    if len(lo_sha) != 1:
+        sys.exit(f"LOSAT sha differs across rounds for {cid} t={th}: {lo_sha}")
+
+    nc_w = statistics.median(x[0] for x in nc_list) if nc_list else None
+    nc_m = statistics.median(x[1] for x in nc_list) if nc_list else None
+    nc_sha = {x[2] for x in nc_list}
+    v0_w = statistics.median(x[0] for x in v0_list) if v0_list else ""
+    v0_m = round(statistics.median(x[1] for x in v0_list), 2) if v0_list else ""
+
+    parity = "same"
+    ncbi_runs = len(nc_list)
+    if not nc_list and th == 1 and is_ncbi_timeout:
+        parity = "ncbi_timeout_6000s"
+        ncbi_runs = 1
+    elif subject_vs_db:
+        parity = "subject_vs_db"
+    elif ncbi_n1_sha is not None and th == 16 and lo_sha != nc_sha:
+        parity = "same_as_ncbi_n1" if lo_sha == ncbi_n1_sha else "diff"
+    elif lo_sha != nc_sha:
+        parity = "diff"
+
+    row_entry: dict[str, object] = {
+        "group": group,
+        "case": cid,
+        "program": prog,
+        "task": task,
+        "label": label,
+        "threads": th,
+        "losat_wall_s": round(lo_w, 3),
+        "losat_wall_min_s": round(lo_w_min, 3),
+        "losat_wall_max_s": round(lo_w_max, 3),
+        "losat_rss_mib": round(lo_m, 2),
+        "ncbi_wall_s": round(nc_w, 3) if nc_w is not None else "",
+        "ncbi_rss_mib": round(nc_m, 2) if nc_m is not None else "",
+        "v010_wall_s": round(v0_w, 3) if v0_w != "" else "",
+        "v010_rss_mib": v0_m,
+        "speedup": round(nc_w / lo_w, 4) if nc_w else "",
+        "mem_reduction": round(nc_m / lo_m, 4) if nc_m else "",
+        "losat_runs": len(lo_list),
+        "ncbi_runs": ncbi_runs,
+        "losat_sha16": next(iter(lo_sha)),
+        "ncbi_sha16": ",".join(sorted(nc_sha)),
+        "parity": parity,
+        "query_desc": qdesc,
+        "subject_desc": sdesc,
+        "target": target,
+        "options": opts,
+    }
+    lo_anon = [x[3] for x in lo_list if x[3] is not None]
+    nc_anon = [x[3] for x in nc_list if x[3] is not None]
+    if lo_anon:
+        row_entry["losat_rss_anon_mib"] = round(statistics.median(lo_anon), 2)
+    if nc_anon:
+        row_entry["ncbi_rss_anon_mib"] = round(statistics.median(nc_anon), 2)
+    return row_entry
 
 
 def build_downstream_tools(toolmt_path: Path, dt_dir: Path) -> tuple[list[dict[str, object]], list[str]]:
@@ -309,18 +399,17 @@ def main() -> int:
         if not req.is_file() or not j_n1_paths:
             sys.exit(f"missing completed input file: {req}")
 
-    rss_anon: dict[tuple[str, int, str], list[float]] = defaultdict(list)
-    j_n16: dict[tuple[str, str], list[tuple[float, float, str, int]]] = defaultdict(list)
+    j_n16: dict[tuple[str, str], list[RunRecord]] = defaultdict(list)
     for r in read_tsv(j_n16_path):
         if r["round"] == "0":
             continue
         if int(r["rc"]) != 0:
             sys.exit(f"J2 n16 rc != 0: {r}")
-        j_n16[(r["case"], r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], 0))
-        if (anon := parse_rss_anon_mib(r)) is not None:
-            rss_anon[(r["case"], 16, r["arm"])].append(anon)
+        j_n16[(r["case"], r["arm"])].append(
+            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], parse_rss_anon_mib(r))
+        )
 
-    j_n1: dict[tuple[str, str], list[tuple[float, float, str]]] = defaultdict(list)
+    j_n1: dict[tuple[str, str], list[RunRecord]] = defaultdict(list)
     j_n1_timeouts: set[tuple[str, str]] = set()
     for p in j_n1_paths:
         for r in read_tsv(p):
@@ -329,29 +418,29 @@ def main() -> int:
                 continue
             if int(r["rc"]) != 0:
                 sys.exit(f"J2 n1 rc != 0: {r}")
-            j_n1[(r["case"], r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"]))
-            if (anon := parse_rss_anon_mib(r)) is not None:
-                rss_anon[(r["case"], 1, r["arm"])].append(anon)
+            j_n1[(r["case"], r["arm"])].append(
+                (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], parse_rss_anon_mib(r))
+            )
 
-    ext_n0: dict[tuple[str, int, str], list[tuple[float, float, str]]] = defaultdict(list)
+    ext_n0: dict[tuple[str, int, str], list[RunRecord]] = defaultdict(list)
     for r in read_tsv(ext_n0_path):
         if r["round"] == "0":
             continue
         if int(r["rc"]) != 0:
             sys.exit(f"ext n0 rc != 0: {r}")
-        ext_n0[(r["case"], int(r["threads"]), r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"]))
-        if (anon := parse_rss_anon_mib(r)) is not None:
-            rss_anon[(r["case"], int(r["threads"]), r["arm"])].append(anon)
+        ext_n0[(r["case"], int(r["threads"]), r["arm"])].append(
+            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], parse_rss_anon_mib(r))
+        )
 
-    ext_n1: dict[tuple[str, int, str], list[tuple[float, float, str]]] = defaultdict(list)
+    ext_n1: dict[tuple[str, int, str], list[RunRecord]] = defaultdict(list)
     for r in read_tsv(ext_n1_path):
         if r["round"] == "0":
             continue
         if int(r["rc"]) != 0:
             sys.exit(f"ext n1 rc != 0: {r}")
-        ext_n1[(r["case"], int(r["threads"]), r["arm"])].append((float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"]))
-        if (anon := parse_rss_anon_mib(r)) is not None:
-            rss_anon[(r["case"], int(r["threads"]), r["arm"])].append(anon)
+        ext_n1[(r["case"], int(r["threads"]), r["arm"])].append(
+            (float(r["wall_s"]), int(r["maxrss_kb"]) / 1024.0, r["sha16"], parse_rss_anon_mib(r))
+        )
 
     # 2. standard_workloads.tsv (12 modes x 2 thread counts x {losat, ncbi})
     std_rows = []
@@ -368,110 +457,55 @@ def main() -> int:
                 nc_list = src.get((cid, th, "ncbi"), [])
                 v0_list = []
 
-            lo_w = statistics.median(x[0] for x in lo_list)
-            lo_w_min = min(x[0] for x in lo_list)
-            lo_w_max = max(x[0] for x in lo_list)
-            lo_m = statistics.median(x[1] for x in lo_list)
-            lo_sha = {x[2] for x in lo_list}
-            if len(lo_sha) != 1:
-                sys.exit(f"LOSAT sha differs across rounds for {cid} t={th}: {lo_sha}")
+            ncbi_n1_sha = (
+                {x[2] for x in ext_n0[(cid, 1, "ncbi")]}
+                if cid in ("rps", "rpstbn") and th == 16
+                else None
+            )
+            std_rows.append(
+                make_standard_row(
+                    group=group,
+                    cid=cid,
+                    prog=prog,
+                    task=task,
+                    label=label,
+                    th=th,
+                    qdesc=qdesc,
+                    sdesc=sdesc,
+                    target=target,
+                    opts=opts,
+                    lo_list=lo_list,
+                    nc_list=nc_list,
+                    v0_list=v0_list,
+                    is_ncbi_timeout=(cid, "ncbi") in j_n1_timeouts,
+                    subject_vs_db=cid in ("bp", "bpff"),
+                    ncbi_n1_sha=ncbi_n1_sha,
+                )
+            )
 
-            nc_w = statistics.median(x[0] for x in nc_list) if nc_list else None
-            nc_m = statistics.median(x[1] for x in nc_list) if nc_list else None
-            nc_sha = {x[2] for x in nc_list}
-            v0_w = statistics.median(x[0] for x in v0_list) if v0_list else ""
-            v0_m = round(statistics.median(x[1] for x in v0_list), 2) if v0_list else ""
-
-            parity = "same"
-            ncbi_runs = len(nc_list)
-            if not nc_list and th == 1 and (cid, "ncbi") in j_n1_timeouts:
-                parity = "ncbi_timeout_6000s"
-                ncbi_runs = 1
-            elif cid in ("bp", "bpff"):
-                parity = "subject_vs_db"
-            elif cid in ("rps", "rpstbn") and th == 16 and next(iter(lo_sha)) != next(iter(nc_sha)):
-                # Check against NCBI n1 SHA
-                ncbi1_sha = {x[2] for x in ext_n0[(cid, 1, "ncbi")]}
-                parity = "same_as_ncbi_n1" if lo_sha == ncbi1_sha else "diff"
-            elif lo_sha != nc_sha:
-                parity = "diff"
-
-            row_entry: dict[str, object] = {
-                "group": group,
-                "case": cid,
-                "program": prog,
-                "task": task,
-                "label": label,
-                "threads": th,
-                "losat_wall_s": round(lo_w, 3),
-                "losat_wall_min_s": round(lo_w_min, 3),
-                "losat_wall_max_s": round(lo_w_max, 3),
-                "losat_rss_mib": round(lo_m, 2),
-                "ncbi_wall_s": round(nc_w, 3) if nc_w is not None else "",
-                "ncbi_rss_mib": round(nc_m, 2) if nc_m is not None else "",
-                "v010_wall_s": round(v0_w, 3) if v0_w != "" else "",
-                "v010_rss_mib": v0_m,
-                "speedup": round(nc_w / lo_w, 4) if nc_w else "",
-                "mem_reduction": round(nc_m / lo_m, 4) if nc_m else "",
-                "losat_runs": len(lo_list),
-                "ncbi_runs": ncbi_runs,
-                "losat_sha16": next(iter(lo_sha)),
-                "ncbi_sha16": ",".join(sorted(nc_sha)),
-                "parity": parity,
-                "query_desc": qdesc,
-                "subject_desc": sdesc,
-                "target": target,
-                "options": opts,
-            }
-            if (lo_anon := rss_anon.get((cid, th, "cp"))):
-                row_entry["losat_rss_anon_mib"] = round(statistics.median(lo_anon), 2)
-            if (nc_anon := rss_anon.get((cid, th, "ncbi"))):
-                row_entry["ncbi_rss_anon_mib"] = round(statistics.median(nc_anon), 2)
-            std_rows.append(row_entry)
-
-            # Optional paired `-db` vs `-db` arm (C5 re-measurement, Q3=A)
-            db_cid = f"{cid}_db"
-            db_lo = (j_n1 if th == 1 else j_n16).get((db_cid, "cp"), [])
-            db_nc = (j_n1 if th == 1 else j_n16).get((db_cid, "ncbi"), [])
-            if db_lo and db_nc:
-                db_lo_w = statistics.median(x[0] for x in db_lo)
-                db_lo_m = statistics.median(x[1] for x in db_lo)
-                db_nc_w = statistics.median(x[0] for x in db_nc)
-                db_nc_m = statistics.median(x[1] for x in db_nc)
-                db_lo_sha = {x[2] for x in db_lo}
-                db_nc_sha = {x[2] for x in db_nc}
-                db_entry: dict[str, object] = {
-                    "group": group,
-                    "case": db_cid,
-                    "program": prog,
-                    "task": task,
-                    "label": f"{label} (-db)",
-                    "threads": th,
-                    "losat_wall_s": round(db_lo_w, 3),
-                    "losat_wall_min_s": round(min(x[0] for x in db_lo), 3),
-                    "losat_wall_max_s": round(max(x[0] for x in db_lo), 3),
-                    "losat_rss_mib": round(db_lo_m, 2),
-                    "ncbi_wall_s": round(db_nc_w, 3),
-                    "ncbi_rss_mib": round(db_nc_m, 2),
-                    "v010_wall_s": "",
-                    "v010_rss_mib": "",
-                    "speedup": round(db_nc_w / db_lo_w, 4),
-                    "mem_reduction": round(db_nc_m / db_lo_m, 4),
-                    "losat_runs": len(db_lo),
-                    "ncbi_runs": len(db_nc),
-                    "losat_sha16": next(iter(db_lo_sha)),
-                    "ncbi_sha16": ",".join(sorted(db_nc_sha)),
-                    "parity": "same" if db_lo_sha == db_nc_sha else "diff",
-                    "query_desc": qdesc,
-                    "subject_desc": sdesc,
-                    "target": "-db",
-                    "options": opts,
-                }
-                if (lo_anon_db := rss_anon.get((db_cid, th, "cp"))):
-                    db_entry["losat_rss_anon_mib"] = round(statistics.median(lo_anon_db), 2)
-                if (nc_anon_db := rss_anon.get((db_cid, th, "ncbi"))):
-                    db_entry["ncbi_rss_anon_mib"] = round(statistics.median(nc_anon_db), 2)
-                std_rows.append(db_entry)
+            # Optional paired `-db` vs `-db` arm
+            if not is_ext and target == "-subject":
+                db_cid = f"{cid}_db"
+                db_lo = (j_n1 if th == 1 else j_n16).get((db_cid, "cp"), [])
+                db_nc = (j_n1 if th == 1 else j_n16).get((db_cid, "ncbi"), [])
+                if db_lo and db_nc:
+                    std_rows.append(
+                        make_standard_row(
+                            group=group,
+                            cid=db_cid,
+                            prog=prog,
+                            task=task,
+                            label=f"{label} (-db)",
+                            th=th,
+                            qdesc=qdesc,
+                            sdesc=sdesc,
+                            target="-db",
+                            opts=opts,
+                            lo_list=db_lo,
+                            nc_list=db_nc,
+                            v0_list=[],
+                        )
+                    )
 
     std_fields = list(std_rows[0].keys())
     for opt_col in ("losat_rss_anon_mib", "ncbi_rss_anon_mib"):
@@ -629,6 +663,19 @@ def main() -> int:
     for tag in ("dt1", "dt13", "dt15"):
         sp = args.dt_dir / f"{tag}_sha.txt"
         dt_builds[tag] = sp.read_text(encoding="utf-8").strip() if sp.is_file() else ""
+    input_checksums: dict[str, str] = {}
+    input_files = (
+        [j_n16_path, *j_n1_paths, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path, ext_bp_path,
+         args.wasm_csv, *map(Path, dt_sources)]
+        + [args.dt_dir / f"{tag}_sha.txt" for tag in ("dt1", "dt13", "dt15")]
+    )
+    for p in input_files:
+        if not p.is_file():
+            continue
+        key = sanitize_input_key(p, base)
+        if key in input_checksums:
+            sys.exit(f"duplicate sanitized input_checksums key: {key} (from {p})")
+        input_checksums[key] = sha256_file(p)
     meta = {
         "losat_version": args.losat_version,
         "losat_commit": args.losat_commit,
@@ -640,13 +687,7 @@ def main() -> int:
         "dt_commits": dt_builds,
         "hardware": "Dual Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz (2 NUMA nodes, 64 physical cores total)",
         "bp_db_parity": bp_par,
-        "input_checksums": {
-            sanitize_input_key(p): sha256_file(p)
-            for p in [j_n16_path, *j_n1_paths, j_inputs_path, ext_n0_path, ext_n1_path, ext_inputs_path, ext_bp_path,
-                      args.wasm_csv, *map(Path, dt_sources)]
-            + [args.dt_dir / f"{tag}_sha.txt" for tag in ("dt1", "dt13", "dt15")]
-            if p.is_file()
-        },
+        "input_checksums": input_checksums,
     }
     (args.out / "metadata.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     print("full snapshot written:", args.out)

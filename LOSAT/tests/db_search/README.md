@@ -2306,7 +2306,7 @@ overlap, so that `-db_hard_mask` searches an inverted range (a chunk of negative
 previous one ends). `../../make_dbmaskp_ov.py` (seeds 20261121 and 20261122, the letters and masks of the probes of
 `ncbi-parity-20261019/M/m4b3/probe/make_p1.py` and `M/m4b3b/probe/make_p2.py`) writes `ov_<shape>.faa` and `ov_<shape>.asnt`
 (ASN.1 text, algorithm seg, `local id N`, N the order of the subject) and the queries `qov1.faa`/`qov1.fna` (probe 1: `e3`,
-`e3c`, `g3`, `nest`, `big`) and `qov2.faa`/`qov2.fna` (probe 2: `s2`, `r37`, `r36`, `nb`, `lk`; a random protein with one `WWW`
+`e3c`, `g3`, `nest`, `big`) and `qov2.faa`/`qov2.fna` (probe 2: `s2`, `tl`, `r37`, `r36`, `nb`, `lk`; a random protein with one `WWW`
 and its back-translation for BLASTX); each shape is one subject of 240 random letters without `W` but for the `W` runs named
 in the script's header (`ov_lk`: two subjects), and the database is made as the `pe_*`:
 
@@ -2318,13 +2318,17 @@ python3 ../../make_dbmaskp_ovatha.py --atha ATHA_FAA --ncbi-bin /home/kawato/mic
 
 `ov_e3` (masks [40,60) [55,70), `WWW` at 60 and 70: NCBI's two-hit scan pairs the word at 70 with the stale diagonal entry of
 the word at 60) and its control `ov_e3c` (touching masks [60,70), the same letters), `ov_g3` (two consecutive inverted chunks;
-NCBI's gapped two-hit BLASTP search of it never ends, so those runs are rejection rows), `ov_nest` (a mask inside the previous
-one), `ov_big` (overlap 60 > the window 40), `ov_s2` (an inverted chunk, then a chunk of 2 letters shorter than the word: a seed
-saved there), `ov_r37` and `ov_r36` (overlaps 37 = window - word and 36), `ov_nb` (consecutive inverted chunks with different
-words) and `ov_lk` (two subjects, A with masks [40,200) [60,238): diagonal entries that outlive A reach B; in the one-hit scan
-(`-window_size 0`) NCBI's rows depend on the thread order, and so at `-evalue 1000` and `-ungapped` do the rows at 4 threads
-(the row of B at 38-40 is missing); LOSAT refuses `ov_lk` at every window (its chunks reach diagonal entries older than the
-sequence), so all its rows are refusals). `ov_atha` at `-window_size 0` is refused too: 6 of its 40 proteins (AT1G02550.1, AT1G02800.1,
+NCBI's gapped two-hit BLASTP search of it never ends: the seed of the chunk of length -5 goes into an interval tree whose
+subject bounds that length sets, which splits its nodes without end, so those runs are rejection rows), `ov_nest` (a mask
+inside the previous one), `ov_big` (overlap 60 > the window 40), `ov_s2` (an inverted chunk, then a chunk of 2 letters shorter
+than the word: the seed of its one word, read from the stored letters past the chunk, extended with the chunk's length; NCBI
+writes the same rows in every run), `ov_tl` (`ov_s2`'s letters with the masks [65,240) then [55,64): a mask that runs to the
+end after the chunk from the start, with a mask stored after it, which LOSAT refuses before the search), `ov_r37` and
+`ov_r36` (overlaps 37 = window - word and 36), `ov_nb` (consecutive inverted chunks with different words) and `ov_lk` (two
+subjects, A with masks [40,200) [60,238): diagonal entries that outlive A reach B; in the one-hit scan (`-window_size 0`)
+NCBI's rows depend on the thread order, and so at `-evalue 1000` and `-ungapped` do the rows at 4 threads (the row of B at
+38-40 is missing); LOSAT refuses `ov_lk` at every window (A's word hits reach 98 positions past its end, 137 in the one-hit
+scan), so all its rows are refusals). `ov_atha` at `-window_size 0` is refused too: 6 of its 40 proteins (AT1G02550.1, AT1G02800.1,
 AT1G04080.2, AT1G04080.5, AT1G06760.1, AT1G09460.1) leave diagonal entries that the next subject reads (decision 52); `ov_athaw`
 (`make_dbmaskp_ovatha.py` too: the 34 other proteins, `segmasker` and `makeblastdb` as for `ov_atha`) gives the one-hit rows
 `.ov_athaw.21.w0.6` their NCBI bytes. NCBI BLAST+ 2.17.0 gave the same stdout bytes at 1 thread twice and at 4 threads for every

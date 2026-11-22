@@ -601,7 +601,9 @@ impl HardMaskShape {
     /// hard range longer than `MAX_DBSEQ_LEN` is `LongRange`, a chunk that can hold alignments
     /// starting before the end of an earlier one is `PartsOutOfOrder`, and the walk of the chunks'
     /// diagonal offsets gives `StaleDiagonals` and `WordPastEnd` (series NP, M4b-3b,
-    /// `HardMaskShape::of_protein_chunks`).
+    /// `HardMaskShape::of_protein_chunks`). Its shape is read at the sequence's length only, which
+    /// a protein database's index gives exactly (`SeqDb::first_searched_masks`): whether the one
+    /// word of a short chunk near the end covers the sentinel changes with the length.
     pub fn of_scan(
         masks: &[(u32, u32)],
         bounds: Option<(usize, usize)>,
@@ -650,13 +652,15 @@ impl HardMaskShape {
             let length = length().ok_or(())?;
             return Ok(Self::of_frames(masks, length, min_length, &mut split));
         }
-        // In a protein program the masks may overlap or be out of order, so the last one need not
-        // end last.
-        let last_end = masks
-            .iter()
-            .map(|&(_, end)| end as usize)
-            .max()
-            .unwrap_or(0);
+        if matches!(scan, HardScan::Protein { .. }) {
+            // The exact length, from the index or read.
+            let length = match bounds {
+                Some((low, high)) if low == high => low,
+                _ => length().ok_or(())?,
+            };
+            return Ok(Self::of_chunks(masks, length, scan, place, &mut split));
+        }
+        let last_end = masks[masks.len() - 1].1 as usize;
         if let Some((low, high)) = bounds.filter(|&(low, _)| last_end < low) {
             let shape = Self::of_chunks(masks, low, scan, place, &mut split);
             if Self::of_chunks(masks, high, scan, place, &mut split) == shape {
@@ -762,10 +766,7 @@ impl HardMaskShape {
     /// a new table, so the walk starts after them, and past the end of the last one no sequence
     /// reads them) or where the one word of a short chunk runs past its sentinel with an effect
     /// (`WordPastEnd`). The chunks start at their range's left, so that `ShortLastMask` never
-    /// occurs. Only the last chunk's length changes with the sequence's length, and it can hold
-    /// alignments from some length on, so the first chunk that starts before an earlier one's end
-    /// is the same at every length between two that name the same one, and none between two that
-    /// name none (`HardMaskShape::of_scan` reads the shape at two lengths).
+    /// occurs.
     fn of_protein_chunks(
         masks: &[(u32, u32)],
         length: usize,

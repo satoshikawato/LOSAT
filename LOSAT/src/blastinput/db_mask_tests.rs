@@ -1171,10 +1171,11 @@ fn tail_masks_with_masks_stored_after_them() {
         )
         .unwrap()
     };
-    let refused = Some(HardMaskShape::TailMaskWithLaterMasks {
+    let shape = HardMaskShape::TailMaskWithLaterMasks {
         start: 65,
         end: 240,
-    });
+    };
+    let refused = Some(shape);
     for window in [0, 40] {
         assert_eq!(of(&[(65, 240)], window), None);
         assert_eq!(of(&[(65, 240), (55, 64)], window), refused);
@@ -1182,7 +1183,7 @@ fn tail_masks_with_masks_stored_after_them() {
         assert_eq!(of(&[(55, 64), (65, 240)], window), None);
     }
     assert_eq!(
-        refused.unwrap().text(),
+        shape.text(),
         "has a mask, [65, 240), running to its end after the part from its start, and masks \
          stored after it, which NCBI BLAST+ 2.17.0 does not apply when it searches that part past \
          its end but applies to the letters of its alignments"
@@ -1190,10 +1191,9 @@ fn tail_masks_with_masks_stored_after_them() {
 }
 
 /// Masks at random, apart in the order of their start, overlapping in that order, or out of it:
-/// masks apart are never refused, and bounds that give one shape at both ends give it at every
-/// length between them (the chunks change only with the last chunk's length;
-/// `HardMaskShape::of_scan` reads it once). Masks out of the order of their start are searched
-/// where their chunks allow it, and many are.
+/// masks apart are never refused, and the shape is read at the sequence's exact length (bounds
+/// that are not one length read it; `HardMaskShape::of_scan`). Masks out of the order of their
+/// start are searched where their chunks allow it, and many are.
 #[test]
 fn protein_shapes_of_random_masks() {
     let mut state = 0x5851_f42d_4c95_7f2d_u64;
@@ -1207,13 +1207,13 @@ fn protein_shapes_of_random_masks() {
         HardMaskShape::of_scan(
             masks,
             Some((length, length)),
-            &|| Some(length),
+            &|| None,
             scan,
             SearchedPlace::default(),
         )
         .unwrap()
     };
-    let (mut bounded, mut refused) = (0, 0);
+    let (mut cases, mut refused) = (0, 0);
     let (mut out_of_order, mut searched, mut parts) = (0, 0, 0);
     for _ in 0..20_000 {
         let window = [0, 1, 40, 100][next(4) as usize];
@@ -1239,42 +1239,42 @@ fn protein_shapes_of_random_masks() {
             }
         }
         let last_end = masks.iter().map(|&(_, end)| end as usize).max().unwrap();
-        let low = last_end + 1 + next(20) as usize;
-        let high = low + next(12) as usize;
+        let length = last_end + 1 + next(20) as usize;
+        let high = length + 1 + next(12) as usize;
+        let found = shape(&masks, length, scan);
         if apart {
-            for length in [low, high] {
-                assert_eq!(
-                    shape(&masks, length, scan),
-                    None,
-                    "{masks:?} {length} {scan:?}"
-                );
-            }
+            assert_eq!(found, None, "{masks:?} {length} {scan:?}");
         }
-        let Ok(found) = HardMaskShape::of_scan(
-            &masks,
-            Some((low, high)),
-            &|| None,
-            scan,
-            SearchedPlace::default(),
-        ) else {
-            continue;
-        };
-        bounded += 1;
+        // Bounds of more than one length read the length.
+        assert_eq!(
+            HardMaskShape::of_scan(
+                &masks,
+                Some((length, high)),
+                &|| None,
+                scan,
+                SearchedPlace::default()
+            ),
+            Err(())
+        );
+        assert_eq!(
+            HardMaskShape::of_scan(
+                &masks,
+                Some((length, high)),
+                &|| Some(length),
+                scan,
+                SearchedPlace::default()
+            ),
+            Ok(found)
+        );
+        cases += 1;
         refused += usize::from(found.is_some());
         if masks.windows(2).any(|pair| pair[1].0 < pair[0].0) {
             out_of_order += 1;
             searched += usize::from(found.is_none());
             parts += usize::from(matches!(found, Some(HardMaskShape::PartsOutOfOrder { .. })));
         }
-        for length in low..=high {
-            assert_eq!(
-                shape(&masks, length, scan),
-                found,
-                "{masks:?} {length} in {low}..={high} {scan:?}"
-            );
-        }
     }
-    assert!(bounded > 2_000 && refused > 50, "{bounded} {refused}");
+    assert!(cases == 20_000 && refused > 50, "{cases} {refused}");
     assert!(
         out_of_order > 1_000 && searched > 500 && parts > 100,
         "{out_of_order} {searched} {parts}"

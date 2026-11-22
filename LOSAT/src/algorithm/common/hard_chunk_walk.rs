@@ -53,7 +53,9 @@ pub(crate) struct DiagonalMargins {
 
 impl DiagonalMargins {
     /// Whether the sequence's hits reach entries of another sequence, or leave entries that
-    /// another sequence's hits read (either margin above 0).
+    /// another sequence's hits read (either margin above 0; the search's check takes the
+    /// sequence's place into account, `blastinput::db_mask::HardMaskShape::of_scan`).
+    #[cfg(test)]
     pub(crate) fn stale(self) -> bool {
         self.below_start > 0 || self.past_end > 0
     }

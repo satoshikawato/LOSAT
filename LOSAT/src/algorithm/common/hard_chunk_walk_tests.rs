@@ -126,7 +126,9 @@ fn one_hit_bound_covers_a_zero_score_word() {
 }
 
 /// Masks apart in the order of their start: every offset is at least the window past the
-/// entries before it, so no chunk goes back, and the margins are 0, at every word and window.
+/// entries before it, so no chunk goes back, and the margins are 0, at every word (2 to 7, the
+/// protein programs' words: `blast_args.cpp`) and window. A one-hit word of 1 letter that scores
+/// 0 would leave an entry one past the next chunk's offset.
 #[test]
 fn walks_of_masks_apart_stay_within_the_sequence() {
     let mut state = 0x2545_f491_4f6c_dd1d_u64;
@@ -145,7 +147,7 @@ fn walks_of_masks_apart_stay_within_the_sequence() {
             chunks.push((left, (right - left) as i32));
             left = right + 1 + next(30) as usize;
         }
-        let word = 1 + next(7) as i32;
+        let word = 2 + next(6) as i32;
         let window = [0, 1, 2, 40, 1000][next(5) as usize];
         let zero_words = next(2) == 1;
         let (works, margins, _, past) = walk_of(&chunks, length, word, window, zero_words);

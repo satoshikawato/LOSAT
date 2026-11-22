@@ -636,7 +636,7 @@ fn an_empty_title_is_made_from_the_name_of_the_source() {
             .text,
         b"x"
     );
-    // `isprint ((unsigned char) m_PDBChain)` of an integer chain (create_defline.cpp:1842-1843):
+    // `isprint` of `m_PDBChain` cast to `unsigned char`, for an integer chain (create_defline.cpp:1842-1843):
     // its low byte, so 321 and -191 are `A` (65), and 383 (0x17F) is not printable.
     for (chain, text) in [
         (65, &b"Chain A"[..]),

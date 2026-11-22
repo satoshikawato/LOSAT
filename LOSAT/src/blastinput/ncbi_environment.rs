@@ -260,7 +260,7 @@ impl ProcessFacts<'static> {
     fn of_this_process() -> Self {
         Self {
             // Rust's `home_dir` on Unix reads `HOME` and, when it is not set, the `pw_dir` of
-            // `getpwuid_r(getuid())`; it is asked only when `HOME` is not set (`ncbi_home`).
+            // `getpwuid_r` of `getuid()`; it is asked only when `HOME` is not set (`ncbi_home`).
             home_by_uid: &|| std::env::home_dir().map(PathBuf::into_os_string),
             program_dirs: &this_program_directories,
             files: &FileSystem,
@@ -304,15 +304,15 @@ fn ncbi_home(
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:378-385
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbienv.cpp:373-415
-/// Before the arguments are set (`CNcbiArguments(0, 0)`, ncbiapp.cpp:190) the name is "ncbi",
+/// Before the arguments are set (`CNcbiArguments` made with two zeros, ncbiapp.cpp:190) the name is "ncbi",
 /// which has no directory, and the resolved name is on Linux the target of `/proc/<pid>/exe`
 /// (Rust's `current_exe`, the same `readlink` of `/proc/self/exe`: a path the system made, with
 /// no link in it to follow), elsewhere "ncbi" normalized (on Unix a link "ncbi" in the working
 /// directory is followed).
 ///
-/// After they are set (`m_Arguments->Reset(argc, argv, exepath, m_RealExePath)`,
-/// ncbiapp.cpp:882, 1026) the name is the path that `FindProgramExecutablePath` found
-/// (`unix_program_name` on Unix: for a link `blastn` on `PATH` that runs LOSAT, the link's
+/// After they are set (`m_Arguments->Reset` with the argument count, the
+/// arguments, `exepath` and `m_RealExePath`, ncbiapp.cpp:882, 1026) the name is the path that
+/// `FindProgramExecutablePath` found (`unix_program_name` on Unix: for a link `blastn` on `PATH` that runs LOSAT, the link's
 /// path) and the resolved name on Linux the target of `/proc/<pid>/exe` (ncbiapp.cpp:1511-1524),
 /// elsewhere on Unix the name normalized with its links followed. On Windows both come from
 /// `GetModuleFileName` (Rust's `current_exe`), the resolved name lexically normalized (no link
@@ -416,7 +416,7 @@ fn program_dirs_of(name: &[u8], resolved: Option<&[u8]>) -> Vec<Vec<u8>> {
 /// The program's path that NCBI finds from `argv[0]` on Unix (`m_ProgramName`): `argv0` as
 /// it is when absolute; else the file of that name in the working directory `cwd`; else the
 /// first file of the name's base on `PATH` (`path_env`); then normalized without reading
-/// links (`normalize_path`). `is_file` is `CFile(name).Exists()`: a file, links followed.
+/// links (`normalize_path`). `is_file` is `Exists` of a `CFile` of the name: a file, links followed.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1452-1457 (`argv[0]`, else the
 /// application's arguments' name, which before they are set is "ncbi", ncbienv.cpp:384-394)
@@ -526,7 +526,7 @@ impl PathRules {
         }
     }
 
-    /// `CDirEntry::Reset`: the path of `CDirEntry(path)`, without its trailing separators, but a
+    /// `CDirEntry::Reset`: the path of the `CDirEntry` made from it, without its trailing separators, but a
     /// lone separator and (Windows) a disk's name of 2 or 3 bytes (`C:`, `C:\`) kept: `//` and
     /// `///` are empty, a path that no directory has.
     fn reset(self, path: &[u8]) -> &[u8] {
@@ -540,7 +540,7 @@ impl PathRules {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-368, 475-483
-    /// `CDirEntry(path).GetDir()`: the directory of `path` as `reset` leaves it, up to and with
+    /// `GetDir` of the `CDirEntry` of `path`: the directory of `path` as `reset` leaves it, up to and with
     /// its last separator (`SplitPath`); `./` (Windows `.\`) for a path without one; empty for an
     /// empty one.
     fn dir(self, path: &[u8]) -> Vec<u8> {
@@ -580,7 +580,7 @@ impl PathRules {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:664-708, 776-788
-    /// `CDirEntry::CreateAbsolutePath(path)` (`eRelativeToCwd`) of a path that is not absolute
+    /// `CDirEntry::CreateAbsolutePath` (`eRelativeToCwd`) of a path that is not absolute
     /// (`is_absolute`), in the working directory `cwd` (`CDir::GetCwd`, empty where it cannot be
     /// read): `cwd` and `path`, the spaces at their ends cut, joined by a separator and
     /// normalized; on Windows a path from a separator follows the first 3 bytes of `cwd` (its
@@ -611,7 +611,7 @@ impl PathRules {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:745-773
-    /// `CDirEntry::ConvertToOSPath(path)`: the path that the system opens, `path` normalized; a
+    /// `CDirEntry::ConvertToOSPath` of `path`: the path that the system opens, `path` normalized; a
     /// relative one (also on Unix, where the working directory cannot be read) with each '\\'
     /// and '/' made the platform's separator first (`a\b.log` is `a/b.log` on Unix).
     fn os_path(self, path: &[u8]) -> Vec<u8> {
@@ -796,7 +796,7 @@ fn find_registry(
 /// Why the file of `-conffile` is not loaded (`conf_file_path`).
 #[derive(Debug, PartialEq, Eq)]
 enum ConfFile {
-    /// NCBI's post that it is not a file (`ERR_POST_X(23, Critical ...)`), after which the
+    /// NCBI's post that it is not a file (`ERR_POST_X`, subcode 23, severity `Critical`), after which the
     /// application aborts.
     NotFound(String),
     /// NCBI's report of a name with a directory whose file cannot be opened (`CAppException`
@@ -861,8 +861,8 @@ fn conf_file_path(
 // NCBI reference (598d8ae6): c++/include/corelib/metareg.hpp:64-69
 // NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:284-303 (`eName_Ini` adds `.ini`,
 // `eName_DotRc` makes `.<name>rc`)
-/// The name of NCBI's system-wide registry file, which `CMetaRegistry::Load("ncbi",
-/// eName_RcOrIni)` looks for: `.ncbirc`, and `ncbi.ini` on Windows.
+/// The name of NCBI's system-wide registry file, which `CMetaRegistry::Load` looks for
+/// under the name "ncbi" with `eName_RcOrIni`: `.ncbirc`, and `ncbi.ini` on Windows.
 const SYSTEM_WIDE_REGISTRY: &str = if cfg!(windows) { "ncbi.ini" } else { ".ncbirc" };
 
 /// One read of the registry file at `path` into `layer` (`ncbi_registry::read_registry`):
@@ -1184,7 +1184,7 @@ fn find_matrix_file(
         }
     }
     for dir in &dirs {
-        // `MakePath(dir, name)`: a separator between them unless the directory ends with one.
+        // `MakePath` of `dir` and `name`: a separator between them unless the directory ends with one.
         let between = match dir.as_encoded_bytes().last() {
             Some(last) if !separators.contains(last) => separator,
             _ => "",
@@ -1241,8 +1241,8 @@ pub fn matrix_file_refusal(name: &str, file: &Path, program: &str) -> String {
     )
 }
 
-/// `NStr::FindNoCase(value, word) != NPOS` for an ASCII `word` (case folded in the C
-/// locale, where bytes above 0x7f fold to themselves).
+/// Whether `NStr::FindNoCase` finds `word` in `value` (a result other than `NPOS`), for an ASCII
+/// `word` (case folded in the C locale, where bytes above 0x7f fold to themselves).
 fn contains_no_case(value: &[u8], word: &[u8]) -> bool {
     value
         .windows(word.len())
@@ -1603,15 +1603,15 @@ pub fn diag_target(name: Option<&OsStr>) -> DiagTarget {
 /// (`log_file_name`).
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct LogFileName {
-    /// `CDir(CFile(file_name).GetDir())`'s path (`SetLogFile`, ncbidiag.cpp:7570-7608), as
-    /// `CDirEntry::Reset` leaves it: unless it is a directory, the log is not set up and the
+    /// The path of the `CDir` made from `GetDir` of the `CFile` of `file_name` (`SetLogFile`,
+    /// ncbidiag.cpp:7570-7608), as `CDirEntry::Reset` leaves it: unless it is a directory, the log is not set up and the
     /// messages stay on `cerr`. Empty (the directory of `//run.log`): no directory; `None`: not
     /// checked (a name of separators only, `///`).
     pub directory: Option<Vec<u8>>,
-    /// `ConvertToOSPath(GetLogName())`: the file that is opened, made where it does not exist; a
+    /// `ConvertToOSPath` of `GetLogName()`: the file that is opened, made where it does not exist; a
     /// directory cannot be opened (`cerr`).
     pub path: Vec<u8>,
-    /// `CDirEntry(GetLogName()).GetDir()`: where its file system has less than 20 KiB free
+    /// `GetDir` of the `CDirEntry` of `GetLogName()`: where its file system has less than 20 KiB free
     /// (`LOW_DISK_SPACE`), the opened file gets no message.
     pub space: Vec<u8>,
 }
@@ -1704,7 +1704,7 @@ fn ncbi_cwd() -> Option<OsString> {
     getcwd_reads(std::env::current_dir().ok()?.into_os_string())
 }
 
-/// The working directory `cwd` where `getcwd(buf, 4095)` reads it (`ncbi_cwd`).
+/// The working directory `cwd` where `getcwd` reads it into `buf` with size 4095 (`ncbi_cwd`).
 fn getcwd_reads(cwd: OsString) -> Option<OsString> {
     #[cfg(windows)]
     let length = std::os::windows::ffi::OsStrExt::encode_wide(cwd.as_os_str()).count();
@@ -1775,7 +1775,7 @@ fn open_log_file(name: &OsStr, cwd: Option<&OsStr>) -> DiagTarget {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:4819-4830, 5177-5179 (Linux; Darwin's
 // branch, 5262-5264, takes the same `GET_STATFS_INFO`)
-/// `CFileUtil::GetFreeDiskSpace(directory)` on Linux and macOS: the bytes free to a user on the
+/// `CFileUtil::GetFreeDiskSpace` of `directory` on Linux and macOS: the bytes free to a user on the
 /// file system of `directory` (`statfs`'s `f_bsize * f_bavail` in 64 bits, which wraps as NCBI's
 /// `Uint8` product does: 2^64 bytes or more free is the product modulo 2^64); `None` where it
 /// cannot be read, as NCBI's exception, which `Reopen` ignores, and on the platforms that NCBI
@@ -1807,7 +1807,7 @@ fn free_space(block_size: u64, blocks: u64) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5107-5122, 5146-5152
-/// `CFileUtil::GetFreeDiskSpace(directory)` on Windows: the bytes free to the caller on the disk
+/// `CFileUtil::GetFreeDiskSpace` of `directory` on Windows: the bytes free to the caller on the disk
 /// of `directory` (`GetDiskFreeSpaceEx` of its root, `C:\`; of the network path as it is), with
 /// the working directory `cwd` (`ncbi_cwd`) for a path without a disk's name; `None` where it
 /// cannot be read, as NCBI's exception, which `Reopen` ignores. A path of fewer than 3 bytes
@@ -2302,7 +2302,7 @@ fn application_settings(
 /// The configuration load reads `.ncbirc` again unless `CMetaRegistry` keeps the usage report's
 /// read: it does when that read threw nothing and the application's load asks for it with the
 /// same flags, which it does when no `<program>.ini` was loaded (`LoadConfig` calls
-/// `IncludeNcbircIfAllowed(fWithNcbirc)`, as the usage report's registry does; after a `.ini` it
+/// `IncludeNcbircIfAllowed` with `fWithNcbirc`, as the usage report's registry does; after a `.ini` it
 /// is called with `fJustCore` added, ncbireg.cpp:1687-1692 and metareg.cpp:90). Only a read that
 /// posts without throwing shows it: a one-byte `.ncbirc` of a byte order mark's first byte is
 /// reported once, twice with a `blastn.ini` (NCBI BLAST+ 2.17.0, g_reg probes `b1full`,
@@ -2316,7 +2316,8 @@ fn application_settings(
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:210-211 (a
 /// `[BLAST] BLAST_USAGE_REPORT` of the usage report's registry that is not a Boolean throws
 /// in the constructor of the application, before `AppMain`: NCBI aborts)
-/// The environment layer of `HasEntry("NCBI", "DONT_USE_NCBIRC")` (`IncludeNcbircIfAllowed`,
+/// The environment layer of `HasEntry` for section "NCBI", entry "DONT_USE_NCBIRC"
+/// (`IncludeNcbircIfAllowed`,
 /// cited at `settings_of`) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with
 /// any value.
 fn application_start(

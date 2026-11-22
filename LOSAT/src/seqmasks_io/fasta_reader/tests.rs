@@ -65,8 +65,8 @@ fn run(input: &[u8], protein: bool, parse_seqids: bool) -> Run {
     }
 }
 
-/// `CSeq_id::GetStringDescr(bioseq, eFormat_FastA)` of a record with the ids `ids`, as the
-/// masking programs write it in their id lines (`label::bioseq_fasta`: its gi and best id).
+/// `CSeq_id::GetStringDescr` of the Bioseq with `eFormat_FastA`, for a record with the ids `ids`,
+/// as the masking programs write it in their id lines (`label::bioseq_fasta`: its gi and best id).
 fn fasta_ids(ids: &[ParsedSeqId], protein: bool) -> String {
     let mut out = Vec::new();
     label::bioseq_fasta(ids, protein, &mut out);

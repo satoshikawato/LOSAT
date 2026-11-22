@@ -37,11 +37,11 @@ impl std::fmt::Display for CaughtException {
 impl std::error::Error for CaughtException {}
 
 /// `BlastOutput_reference` of a Gapped BLAST search (every task but megablast): NCBI's text
-/// (`CReference::GetString(eGappedBlast)`, `report::reference`), whose `&auml;` is escaped again
-/// when written.
+/// (`CReference::GetString` of `eGappedBlast`, `report::reference`), whose `&auml;` is escaped
+/// again when written.
 pub const REFERENCE_GAPPED_BLAST: &str = super::reference::Publication::GappedBlast.string();
 
-/// `BlastOutput_reference` of megablast (`CReference::GetString(eMegaBlast)`).
+/// `BlastOutput_reference` of megablast (`CReference::GetString` of `eMegaBlast`).
 pub const REFERENCE_MEGABLAST: &str = super::reference::Publication::MegaBlast.string();
 
 #[cfg(test)]

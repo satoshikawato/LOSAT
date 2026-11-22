@@ -1,0 +1,8 @@
+Blast-def-line ::= {
+  title "first",
+  seqid {
+    local str "myprot9"
+  },
+  taxid 0
+}
+

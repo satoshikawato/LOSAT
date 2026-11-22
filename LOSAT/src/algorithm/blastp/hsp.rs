@@ -40,7 +40,7 @@ pub(crate) struct BlastpHsp {
     pub comp_adjustment_method: u8,
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:135-138
     /// The size of the HSP's linked set with sum statistics (psiblast's `-sum_stats true`,
-    /// `core::link_hsps`), 1 otherwise; the report's `Expect(num)` above 1.
+    /// `core::link_hsps`), 1 otherwise; above 1 the report shows it in parentheses after `Expect`.
     pub num: i32,
 }
 

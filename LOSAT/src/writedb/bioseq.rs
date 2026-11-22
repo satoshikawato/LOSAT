@@ -30,7 +30,7 @@ use crate::seqid::ParsedSeqId;
 pub struct Bioseq {
     /// The content of the first Seq-id, a local id: `lcl|<local_id>` is
     /// `AsFastaString()` (the "Ignoring sequence 'lcl|2' ..." log line) and
-    /// `<local_id>` is `GetSeqIdString(false)` ("Unable to process sequence
+    /// `<local_id>` is `GetSeqIdString` without the version ("Unable to process sequence
     /// for entry \[6\]."). Without `-parse_seqids` CFastaReader numbers the
     /// records of the input from 1.
     pub local_id: String,
@@ -43,7 +43,7 @@ pub struct Bioseq {
     /// `CBioseq::GetLength()` (`Seq-inst.length`).
     pub length: u64,
     /// `Seq-inst.seq-data` after `s_FixBioseqDeltas`; `None` when the
-    /// Seq-inst has no `seq-data` (`!CanGetSeq_data()`).
+    /// Seq-inst has no `seq-data` (`CanGetSeq_data` is false).
     pub seq_data: Option<SeqData>,
     /// With `-parse_seqids`: the parsed ids and what `ExtractBioseqDeflines` reads; the
     /// definition lines are built from them (`deflines`), and `local_id` and `title` are
@@ -68,7 +68,7 @@ pub enum PastSeqPos {
     Refused { length: u64 },
 }
 
-/// The parts of a Bioseq of `CFastaReader` with `fRequireID | fParseRawID` that the
+/// The parts of a Bioseq of `CFastaReader` with the flags `fRequireID` and `fParseRawID` that the
 /// writer reads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedIds {
@@ -85,7 +85,7 @@ pub struct ParsedIds {
 }
 
 impl Bioseq {
-    /// `GetId().front()->GetSeqIdString(false)`.
+    /// `GetSeqIdString` without the version, of the first of `GetId()`.
     pub fn first_id_string(&self) -> String {
         match self.parsed.as_ref().and_then(|parsed| parsed.ids.first()) {
             Some(id) => {

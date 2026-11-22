@@ -6,8 +6,8 @@
 use crate::ncbi_str::truncate_spaces;
 use crate::utils::format_guess::split_in_two;
 
-/// The alphabet of `CAlnReader::GetAlphabetLetters(eAlpha_Protein)`, which `psiblast -in_msa`
-/// sets (`SetClustal(eAlpha_Protein)`) and no scanner changes.
+/// The alphabet that `CAlnReader::GetAlphabetLetters` gives for `eAlpha_Protein`, which
+/// `psiblast -in_msa` sets (`SetClustal` with `eAlpha_Protein`) and no scanner changes.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:217-219
 pub(crate) const PROTEIN_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz*";
@@ -42,7 +42,7 @@ pub(crate) struct SeqInfo {
 }
 
 impl SeqInfo {
-    /// What `CAlnReader::SetClustal(eAlpha_Protein)` sets: the gap `-`, no match or missing
+    /// What `CAlnReader::SetClustal` with `eAlpha_Protein` sets: the gap `-`, no match or missing
     /// character.
     pub(crate) fn protein() -> Self {
         SeqInfo {
@@ -82,8 +82,8 @@ pub(crate) fn existing_id(ids: &[Vec<u8>], seq_id: &[u8]) -> IdMatch {
     }
 }
 
-/// `NStr::TruncateSpaces` then `NStr::Split(.., " \t", fSplit_MergeDelimiters)` and `Join(.., "")`
-/// of `AlnUtil::StripBlanks`.
+/// `NStr::TruncateSpaces`, then `NStr::Split` on space and tab with `fSplit_MergeDelimiters`, then
+/// `Join` with an empty separator, as `AlnUtil::StripBlanks` does.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_util.cpp:222-231
 pub(crate) fn strip_blanks(line: &[u8]) -> Vec<u8> {
@@ -94,7 +94,7 @@ pub(crate) fn strip_blanks(line: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// `NStr::Split(str, delims, fSplit_MergeDelimiters)`: runs of delimiters make one boundary, a
+/// `NStr::Split` with `fSplit_MergeDelimiters`: runs of delimiters make one boundary, a
 /// leading delimiter leaves an empty first token and a trailing one an empty last token; an empty
 /// string has no token.
 pub(crate) fn split_merge<'a>(str: &'a [u8], delims: &[u8]) -> Vec<&'a [u8]> {
@@ -150,8 +150,9 @@ pub(crate) fn process_defline(line: &[u8]) -> Scan<(Vec<u8>, Vec<u8>)> {
     if def_line.starts_with(b"[") {
         return Ok((Vec::new(), def_line.to_vec()));
     }
-    // NCBI takes `defLine.substr(dataStart)` of the string it already cut at `dataStart`: the
-    // start is past the end (`std::out_of_range`) when the id part is shorter than that.
+    // NCBI takes `substr` of `defLine` from `dataStart`, of the string it already cut at
+    // `dataStart`: the start is past the end (`std::out_of_range`) when the id part is shorter than
+    // that.
     if data_start > def_line.len() {
         return Err(ScanFailure::StdException(format!(
             "basic_string::substr: __pos (which is {data_start}) > this->size() (which is {})",

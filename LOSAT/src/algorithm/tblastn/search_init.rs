@@ -123,7 +123,7 @@ impl Diagonals {
 // or at the same time.
 // The two-hit pass of one (frame, chunk) unit on its
 // own diagonal array.  NCBI c++/src/algo/blast/core/blast_extend.c:162-175 ends a
-// WordFinder call with `diag_table->offset += subject_length + window`, which
+// WordFinder call by adding `subject_length` and `window` to `diag_table->offset`, which
 // makes every entry of the previous call older than a full window: the first hit
 // of the next call on that diagonal only records `last_hit` (aa_ungapped.c:
 // 516-547), exactly as on a cleared array.  A unit therefore depends on nothing

@@ -26,8 +26,8 @@
 use super::{resolved, EnumValue, Kind, Member, Storage, StringKind, Value};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_text_reader::{
-    real_of_parts, AsnSource, AsnTextError, AsnTextErrorKind, MemberId, Reader, SliceSource,
-    BAD_NUMBER, NUMBER_OVERFLOW,
+    real_of_parts, AsnSource, AsnTextError, AsnTextErrorKind, MemberId, NcbiThrow, Reader,
+    SliceSource, BAD_NUMBER, NUMBER_OVERFLOW,
 };
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
 use crate::report::serial::object_frame::{frame_info, text_frame_site, FrameKind};
@@ -58,8 +58,10 @@ impl Post {
 /// Why NCBI's reader stops: the class of what it throws.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ReadError {
-    /// A `CSerialException` (with its message, for LOSAT's tests; NCBI's callers print their own
-    /// line for it).
+    /// A `CSerialException`, with the message of NCBI's newest exception (`GetMsg()`): a stream's
+    /// `ThrowError` starts with its position (`line N: `), a rethrow has its own message
+    /// (`error while reading <member>`, `invalid enum value`). psiblast and tblastn print their
+    /// own line for it; makeprofiledb prints this message.
     Serial(String),
     /// Another `CException` that leaves the reader (`CUtilException`, `CStringException`), with
     /// the lines of NCBI's object stack.
@@ -83,7 +85,11 @@ impl From<AsnTextError> for ReadError {
     fn from(error: AsnTextError) -> Self {
         match error.kind {
             AsnTextErrorKind::Eof => ReadError::Eof,
-            AsnTextErrorKind::Format => ReadError::Serial(error.message),
+            // `ThrowError` of the stream: its position, then the message (`ThrowError1`).
+            AsnTextErrorKind::Format => ReadError::Serial(match error.ncbi {
+                Some(NcbiThrow::Stream(_)) => format!("line {}: {}", error.line, error.message),
+                _ => error.message,
+            }),
             AsnTextErrorKind::Unsupported => ReadError::Unsupported(error.message),
         }
     }
@@ -162,7 +168,8 @@ struct TypedReader<'a> {
 enum Open {
     /// The end of `ReadObject` of the type `target`: the hooks of its class (not after a skip).
     Value { target: u16, skip: bool },
-    /// A SEQUENCE reading the member at `reading` (`members`).
+    /// A SEQUENCE reading the member at `reading` (`members`), inside the member's frame, the
+    /// `frames`-th.
     Sequence {
         ty: u16,
         members: &'static [Member],
@@ -170,6 +177,7 @@ enum Open {
         values: Vec<(u16, Value)>,
         reading: usize,
         block_start: bool,
+        frames: usize,
     },
     /// A CHOICE reading its variant.
     Choice { index: u16 },
@@ -222,11 +230,30 @@ impl TypedReader<'_> {
                 let (file, line, function) = frame.site();
                 ReadError::Exception(e.rethrow_same(file, line, function, frame.info()))
             }
+            // `ThrowError(fEOF, GetFrameInfo())`: the position, then the frame's information.
             ReadError::Eof if self.frames.len() >= 2 => {
-                ReadError::Serial(format!("unexpected end of the text:{}", frame.info()))
+                ReadError::Serial(format!("line {}: {}", self.r.line, frame.info()))
             }
             other => other,
         })
+    }
+
+    /// A `ThrowError` of the stream (`ThrowError1`, objistr.cpp:828-853): a `CSerialException`
+    /// whose message is the position (`line N`) and `message`.
+    #[cold]
+    fn stream_error(&self, message: impl std::fmt::Display) -> ReadError {
+        ReadError::Serial(format!("line {}: {message}", self.r.line))
+    }
+
+    /// The frames above the `depth`-th left (`pop`) with `error`.
+    fn unwind(&mut self, depth: usize, mut error: ReadError) -> ReadError {
+        while self.frames.len() > depth {
+            error = match self.pop::<()>(Err(error)) {
+                Err(error) => error,
+                Ok(()) => unreachable!("an error stays one"),
+            };
+        }
+        error
     }
 
     fn set_member(&mut self, name: &'static str) {
@@ -267,7 +294,7 @@ impl TypedReader<'_> {
             .and_then(|id| {
                 let id = self.r.bytes(id);
                 if !id.is_empty() && id != name.as_bytes() {
-                    return Err(ReadError::Serial(format!(
+                    return Err(self.stream_error(format_args!(
                         "incompatible type {}<>{name}",
                         String::from_utf8_lossy(id)
                     )));
@@ -296,13 +323,24 @@ impl TypedReader<'_> {
                     self.resume(held, value)
                 }
                 Err(mut error) => {
-                    self.open.truncate(open);
-                    while self.frames.len() > frames {
-                        error = match self.pop::<()>(Err(error)) {
-                            Err(error) => error,
-                            Ok(()) => unreachable!("an error stays one"),
-                        };
+                    // From the innermost value out: the frames inside each member being read, then
+                    // the member's `ReadWithSetFlagMember` (`member_error`).
+                    while self.open.len() > open {
+                        if let Some(Open::Sequence {
+                            members,
+                            skip,
+                            reading,
+                            frames: depth,
+                            ..
+                        }) = self.open.pop()
+                        {
+                            error = self.unwind(depth, error);
+                            if !skip {
+                                error = member_error(error, &members[reading]);
+                            }
+                        }
                     }
+                    error = self.unwind(frames, error);
                     return Err(error);
                 }
             };
@@ -359,6 +397,7 @@ impl TypedReader<'_> {
                 mut values,
                 reading,
                 block_start,
+                frames: _,
             } => {
                 if !skip {
                     // The `num-rows` of a Seq-table, which the reserve hook of its columns' data
@@ -416,7 +455,7 @@ impl TypedReader<'_> {
             let member = &members[index];
             self.set_member(member.name());
             for missing in &members[pos..index] {
-                expected_member(missing)?;
+                self.expected_member(missing)?;
             }
             if !skip {
                 super::hooks::pre_read_member(ty, index, &values)?;
@@ -434,6 +473,7 @@ impl TypedReader<'_> {
                 values,
                 reading: index,
                 block_start,
+                frames: self.frames.len(),
             });
             if let Some(start) = start {
                 self.open.push(Open::Delayed { start });
@@ -443,7 +483,7 @@ impl TypedReader<'_> {
         }
         self.frames.pop();
         for member in &members[pos..] {
-            expected_member(member)?;
+            self.expected_member(member)?;
         }
         self.r.end_block()?;
         self.frames.pop();
@@ -462,25 +502,59 @@ impl TypedReader<'_> {
             MemberId::Name(range) => {
                 let id = self.r.bytes(range);
                 if id.is_empty() && !in_class {
-                    return Err(ReadError::Serial("choice variant id expected".into()));
+                    return Err(self.stream_error("choice variant id expected"));
                 }
-                items[pos..]
-                    .iter()
-                    .position(|item| item.name().as_bytes() == id)
-                    .map(|at| at + pos)
+                (
+                    items[pos..]
+                        .iter()
+                        .position(|item| item.name().as_bytes() == id)
+                        .map(|at| at + pos),
+                    range,
+                )
             }
             MemberId::Tag(range) => {
                 // NStr::StringToInt(id) with the default flags: its `CStringException` leaves
                 // the reader (NCBI 2.17.0: `[3x]`, `[99999999999]`, probe e03, e07).
-                let tag = crate::ncbi_str::string_to_int(self.r.bytes(range), 0)
+                let tag = crate::ncbi_str::string_to_int(self.r.bytes(range.clone()), 0)
                     .map_err(ReadError::Exception)?;
-                items[pos..]
-                    .iter()
-                    .position(|item| i32::from(item.tag) == tag)
-                    .map(|at| at + pos)
+                (
+                    items[pos..]
+                        .iter()
+                        .position(|item| i32::from(item.tag) == tag)
+                        .map(|at| at + pos),
+                    range,
+                )
             }
         };
-        found.ok_or_else(|| ReadError::Serial("unexpected member or variant".into()))
+        let (found, id) = found;
+        found.ok_or_else(|| self.unexpected_member(self.r.bytes(id), items))
+    }
+
+    /// `UnexpectedMember(id, items)`: the id read, then every member or variant of the class or
+    /// choice, each in quotes and followed by a space.
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1305-1314
+    #[cold]
+    fn unexpected_member(&self, id: &[u8], items: &'static [Member]) -> ReadError {
+        let mut message = format!(
+            "\"{}\": unexpected member, should be one of: ",
+            String::from_utf8_lossy(id)
+        );
+        for item in items {
+            message.push('"');
+            message.push_str(item.name());
+            message.push_str("\" ");
+        }
+        self.stream_error(message)
+    }
+
+    /// `ReadMissingSimpleMember` -> `ExpectedMember` of a mandatory member: "member X expected"
+    /// (`ThrowError(fFormatError, ...)`, NCBI's default verification).
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+    fn expected_member(&self, member: &Member) -> R<()> {
+        if member.optional() {
+            return Ok(());
+        }
+        Err(self.stream_error(format_args!("member {} expected", member.name())))
     }
 
     /// The delayed member: `StartDelayBuffer` (white space skipped), then the value skipped
@@ -510,7 +584,7 @@ impl TypedReader<'_> {
         self.push(FrameKind::ChoiceVariant, None, skip);
         let mut block_start = true;
         if !self.r.next_element(&mut block_start)? {
-            return Err(ReadError::Serial("choice variant id expected".into()));
+            return Err(self.stream_error("choice variant id expected"));
         }
         let index = self.item_index(variants, 0, false)?;
         let variant = &variants[index];
@@ -691,7 +765,7 @@ impl TypedReader<'_> {
             Storage::Int2 => {
                 let value = self.int4()?;
                 if i16::try_from(value).is_err() {
-                    return Err(ReadError::Serial("integer overflow".into()));
+                    return Err(self.stream_error("integer overflow"));
                 }
                 i64::from(value)
             }
@@ -718,9 +792,9 @@ impl TypedReader<'_> {
         if !c.is_ascii_digit() {
             r.pos = start;
             return Err(ReadError::Serial(format!(
-                "bad {} integer in line {}",
+                "line {0}: bad {1} integer in line {0}",
+                r.line,
                 if signed { "signed" } else { "unsigned" },
-                r.line
             )));
         }
         let (end, c) = r.src.scan(start + i, |c| c.is_ascii_digit());
@@ -762,6 +836,7 @@ impl TypedReader<'_> {
                     "invalid enum value",
                 ))
             }
+            ReadError::Serial(_) => ReadError::Serial("invalid enum value".into()),
             other => other,
         })
     }
@@ -771,15 +846,23 @@ impl TypedReader<'_> {
         let id = self.r.scan_end_of_id(c.is_ascii_lowercase())?;
         if !id.is_empty() {
             let id = self.r.bytes(id);
+            // `FindValue`'s `NCBI_THROW` (enumerated.cpp:124-138): no position.
             return values
                 .iter()
                 .find(|value| value.name().as_bytes() == id)
                 .map(|value| value.value)
-                .ok_or_else(|| ReadError::Serial("invalid value of enumerated type".into()));
+                .ok_or_else(|| {
+                    ReadError::Serial(format!(
+                        "invalid value of enumerated type: {}",
+                        String::from_utf8_lossy(id)
+                    ))
+                });
         }
         let value = self.int4()?;
         if !integer && !values.iter().any(|named| named.value == value) {
-            return Err(ReadError::Serial("invalid value of enumerated type".into()));
+            return Err(ReadError::Serial(format!(
+                "invalid value of enumerated type: {value}"
+            )));
         }
         Ok(value)
     }
@@ -807,9 +890,7 @@ impl TypedReader<'_> {
             self.skip_number(true)?;
             self.r.expect(b'}')?;
             if base != 2 && base != 10 {
-                return Err(ReadError::Serial(
-                    "illegal REAL base (must be 2 or 10)".into(),
-                ));
+                return Err(self.stream_error("illegal REAL base (must be 2 or 10)"));
             }
             return Ok(None);
         }
@@ -824,7 +905,7 @@ impl TypedReader<'_> {
         self.r.expect(b'}')?;
         real_of_parts(mantissa, is_negative, base, exp)
             .map(Some)
-            .ok_or_else(|| ReadError::Serial("illegal REAL base (must be 2 or 10)".into()))
+            .ok_or_else(|| self.stream_error("illegal REAL base (must be 2 or 10)"))
     }
 
     /// `ReadStringValue` with the fix of `kind` / `SkipString` (`Reader::visible_string`): for a
@@ -887,22 +968,25 @@ impl TypedReader<'_> {
                 self.r.pos += 1;
                 Ok(Value::Null)
             }
-            _ => Err(ReadError::Serial("'H' or 'B' expected".into())),
+            _ => Err(self.stream_error("'H' or 'B' expected")),
         }
     }
 }
 
-/// `ReadMissingSimpleMember` -> `ExpectedMember` of a mandatory member: "member X expected"
-/// (`CSerialException`, NCBI's default verification).
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
-fn expected_member(member: &Member) -> R<()> {
-    if member.optional() {
-        return Ok(());
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:715-755
+/// What reading `member` makes of `error`: `ReadWithSetFlagMember` rethrows a `CSerialException`
+/// of a member with a set flag (`Member::has_set_flag`) with `error while reading <member>`
+/// (`NCBI_RETHROW_SAME`). Its null and missing values (`eNullValue`, `eMissingValue`) are not
+/// thrown by the ASN.1 text reader (`ExpectedMember` throws `eFormatError`). (The skip of a
+/// member, `SkipSimpleMember`, and the read of a delayed one, `ReadLongMember`, 848-869, do not
+/// catch.)
+fn member_error(error: ReadError, member: &Member) -> ReadError {
+    match error {
+        ReadError::Serial(_) if member.has_set_flag() && member.flags & super::DELAYED == 0 => {
+            ReadError::Serial(format!("error while reading {}", member.name()))
+        }
+        other => other,
     }
-    Err(ReadError::Serial(format!(
-        "member {} expected",
-        member.name()
-    )))
 }
 
 /// The type `ty` refers to after its aliases (the index of `resolved(ty)`), for the hooks.

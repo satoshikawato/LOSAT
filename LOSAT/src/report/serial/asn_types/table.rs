@@ -11,7 +11,7 @@
 // 1005 members and variants, 789 named values.) The names are offsets into
 // `NAMES` and the members and values spans of `MEMBERS` and `VALUES`: the table holds no pointer.
 
-use super::{EnumValue, Kind, Member, Name, Span, Storage, StringKind, TypeInfo, DEFAULT, DELAYED, OPTIONAL};
+use super::{EnumValue, Kind, Member, Name, Span, Storage, StringKind, TypeInfo, DEFAULT, DELAYED, OPTIONAL, SET_FLAG};
 
 /// The index in `TYPES` of each named type (the reader's hooks and the PSSM's typed boundary
 /// name some of them).
@@ -1070,12 +1070,12 @@ pub(crate) static TYPES: [TypeInfo; 413] = [
 pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(31, 4), tag: 0, ty: 1, flags: 0, default: None }, // 0: PssmWithParameters.pssm
     Member { name: Name(35, 6), tag: 1, ty: 401, flags: OPTIONAL, default: None }, // 1: PssmWithParameters.params
-    Member { name: Name(49, 9), tag: 0, ty: 2, flags: DEFAULT, default: Some(Name(45, 4)) }, // 2: Pssm.isProtein
+    Member { name: Name(49, 9), tag: 0, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(45, 4)) }, // 2: Pssm.isProtein
     Member { name: Name(58, 10), tag: 1, ty: 3, flags: OPTIONAL, default: None }, // 3: Pssm.identifier
-    Member { name: Name(68, 7), tag: 2, ty: 4, flags: 0, default: None }, // 4: Pssm.numRows
-    Member { name: Name(75, 10), tag: 3, ty: 4, flags: 0, default: None }, // 5: Pssm.numColumns
-    Member { name: Name(85, 9), tag: 4, ty: 6, flags: OPTIONAL, default: None }, // 6: Pssm.rowLabels
-    Member { name: Name(99, 5), tag: 5, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 7: Pssm.byRow
+    Member { name: Name(68, 7), tag: 2, ty: 4, flags: SET_FLAG, default: None }, // 4: Pssm.numRows
+    Member { name: Name(75, 10), tag: 3, ty: 4, flags: SET_FLAG, default: None }, // 5: Pssm.numColumns
+    Member { name: Name(85, 9), tag: 4, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 6: Pssm.rowLabels
+    Member { name: Name(99, 5), tag: 5, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 7: Pssm.byRow
     Member { name: Name(104, 5), tag: 6, ty: 7, flags: OPTIONAL, default: None }, // 8: Pssm.query
     Member { name: Name(109, 16), tag: 7, ty: 399, flags: OPTIONAL, default: None }, // 9: Pssm.intermediateData
     Member { name: Name(125, 9), tag: 8, ty: 400, flags: OPTIONAL, default: None }, // 10: Pssm.finalData
@@ -1083,10 +1083,10 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(157, 3), tag: 1, ty: 5, flags: 0, default: None }, // 12: Object-id.str
     Member { name: Name(180, 3), tag: 0, ty: 8, flags: 0, default: None }, // 13: Seq-entry.seq
     Member { name: Name(183, 3), tag: 1, ty: 396, flags: 0, default: None }, // 14: Seq-entry.set
-    Member { name: Name(155, 2), tag: 0, ty: 21, flags: 0, default: None }, // 15: Bioseq.id
+    Member { name: Name(155, 2), tag: 0, ty: 21, flags: SET_FLAG, default: None }, // 15: Bioseq.id
     Member { name: Name(205, 5), tag: 1, ty: 22, flags: OPTIONAL, default: None }, // 16: Bioseq.descr
     Member { name: Name(210, 4), tag: 2, ty: 212, flags: 0, default: None }, // 17: Bioseq.inst
-    Member { name: Name(214, 5), tag: 3, ty: 395, flags: OPTIONAL, default: None }, // 18: Bioseq.annot
+    Member { name: Name(214, 5), tag: 3, ty: 395, flags: OPTIONAL | SET_FLAG, default: None }, // 18: Bioseq.annot
     Member { name: Name(236, 5), tag: 0, ty: 3, flags: 0, default: None }, // 19: Seq-id.local
     Member { name: Name(241, 6), tag: 1, ty: 4, flags: 0, default: None }, // 20: Seq-id.gibbsq
     Member { name: Name(247, 6), tag: 2, ty: 4, flags: 0, default: None }, // 21: Seq-id.gibbmt
@@ -1107,35 +1107,35 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(316, 3), tag: 17, ty: 11, flags: 0, default: None }, // 36: Seq-id.tpd
     Member { name: Name(319, 5), tag: 18, ty: 11, flags: 0, default: None }, // 37: Seq-id.gpipe
     Member { name: Name(324, 17), tag: 19, ty: 11, flags: 0, default: None }, // 38: Seq-id.named-annot-track
-    Member { name: Name(155, 2), tag: 0, ty: 4, flags: 0, default: None }, // 39: Giimport-id.id
-    Member { name: Name(352, 2), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 40: Giimport-id.db
-    Member { name: Name(354, 7), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 41: Giimport-id.release
-    Member { name: Name(371, 4), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 42: Textseq-id.name
-    Member { name: Name(375, 9), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 43: Textseq-id.accession
-    Member { name: Name(354, 7), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 44: Textseq-id.release
-    Member { name: Name(384, 7), tag: 3, ty: 4, flags: OPTIONAL, default: None }, // 45: Textseq-id.version
-    Member { name: Name(404, 5), tag: 0, ty: 4, flags: 0, default: None }, // 46: Patent-seq-id.seqid
+    Member { name: Name(155, 2), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 39: Giimport-id.id
+    Member { name: Name(352, 2), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 40: Giimport-id.db
+    Member { name: Name(354, 7), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 41: Giimport-id.release
+    Member { name: Name(371, 4), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 42: Textseq-id.name
+    Member { name: Name(375, 9), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 43: Textseq-id.accession
+    Member { name: Name(354, 7), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 44: Textseq-id.release
+    Member { name: Name(384, 7), tag: 3, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 45: Textseq-id.version
+    Member { name: Name(404, 5), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 46: Patent-seq-id.seqid
     Member { name: Name(409, 3), tag: 1, ty: 13, flags: 0, default: None }, // 47: Patent-seq-id.cit
-    Member { name: Name(429, 7), tag: 0, ty: 5, flags: 0, default: None }, // 48: Id-pat.country
+    Member { name: Name(429, 7), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 48: Id-pat.country
     Member { name: Name(155, 2), tag: 1, ty: 14, flags: 0, default: None }, // 49: Id-pat.id
-    Member { name: Name(436, 8), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 50: Id-pat.doc-type
+    Member { name: Name(436, 8), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 50: Id-pat.doc-type
     Member { name: Name(444, 6), tag: 0, ty: 5, flags: 0, default: None }, // 51: Id-pat.id.number
     Member { name: Name(450, 10), tag: 1, ty: 5, flags: 0, default: None }, // 52: Id-pat.id.app-number
-    Member { name: Name(352, 2), tag: 0, ty: 5, flags: 0, default: None }, // 53: Dbtag.db
+    Member { name: Name(352, 2), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 53: Dbtag.db
     Member { name: Name(465, 3), tag: 1, ty: 3, flags: 0, default: None }, // 54: Dbtag.tag
-    Member { name: Name(478, 3), tag: 0, ty: 18, flags: 0, default: None }, // 55: PDB-seq-id.mol
-    Member { name: Name(483, 5), tag: 1, ty: 4, flags: DEFAULT, default: Some(Name(481, 2)) }, // 56: PDB-seq-id.chain
+    Member { name: Name(478, 3), tag: 0, ty: 18, flags: SET_FLAG, default: None }, // 55: PDB-seq-id.mol
+    Member { name: Name(483, 5), tag: 1, ty: 4, flags: DEFAULT | SET_FLAG, default: Some(Name(481, 2)) }, // 56: PDB-seq-id.chain
     Member { name: Name(488, 3), tag: 2, ty: 19, flags: OPTIONAL, default: None }, // 57: PDB-seq-id.rel
-    Member { name: Name(491, 8), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 58: PDB-seq-id.chain-id
+    Member { name: Name(491, 8), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 58: PDB-seq-id.chain-id
     Member { name: Name(157, 3), tag: 0, ty: 5, flags: 0, default: None }, // 59: Date.str
     Member { name: Name(513, 3), tag: 1, ty: 20, flags: 0, default: None }, // 60: Date.std
-    Member { name: Name(524, 4), tag: 0, ty: 4, flags: 0, default: None }, // 61: Date-std.year
-    Member { name: Name(528, 5), tag: 1, ty: 4, flags: OPTIONAL, default: None }, // 62: Date-std.month
-    Member { name: Name(533, 3), tag: 2, ty: 4, flags: OPTIONAL, default: None }, // 63: Date-std.day
-    Member { name: Name(536, 6), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 64: Date-std.season
-    Member { name: Name(542, 4), tag: 4, ty: 4, flags: OPTIONAL, default: None }, // 65: Date-std.hour
-    Member { name: Name(546, 6), tag: 5, ty: 4, flags: OPTIONAL, default: None }, // 66: Date-std.minute
-    Member { name: Name(552, 6), tag: 6, ty: 4, flags: OPTIONAL, default: None }, // 67: Date-std.second
+    Member { name: Name(524, 4), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 61: Date-std.year
+    Member { name: Name(528, 5), tag: 1, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 62: Date-std.month
+    Member { name: Name(533, 3), tag: 2, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 63: Date-std.day
+    Member { name: Name(536, 6), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 64: Date-std.season
+    Member { name: Name(542, 4), tag: 4, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 65: Date-std.hour
+    Member { name: Name(546, 6), tag: 5, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 66: Date-std.minute
+    Member { name: Name(552, 6), tag: 6, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 67: Date-std.second
     Member { name: Name(574, 8), tag: 0, ty: 24, flags: 0, default: None }, // 68: Seqdesc.mol-type
     Member { name: Name(582, 5), tag: 1, ty: 26, flags: 0, default: None }, // 69: Seqdesc.modif
     Member { name: Name(587, 6), tag: 2, ty: 27, flags: 0, default: None }, // 70: Seqdesc.method
@@ -1161,73 +1161,73 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(663, 6), tag: 22, ty: 193, flags: 0, default: None }, // 90: Seqdesc.source
     Member { name: Name(669, 7), tag: 23, ty: 205, flags: 0, default: None }, // 91: Seqdesc.molinfo
     Member { name: Name(676, 7), tag: 24, ty: 209, flags: 0, default: None }, // 92: Seqdesc.modelev
-    Member { name: Name(1092, 7), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 93: Org-ref.taxname
-    Member { name: Name(1099, 6), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 94: Org-ref.common
-    Member { name: Name(1105, 3), tag: 2, ty: 29, flags: OPTIONAL, default: None }, // 95: Org-ref.mod
-    Member { name: Name(352, 2), tag: 3, ty: 30, flags: OPTIONAL, default: None }, // 96: Org-ref.db
-    Member { name: Name(1108, 3), tag: 4, ty: 29, flags: OPTIONAL, default: None }, // 97: Org-ref.syn
+    Member { name: Name(1092, 7), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 93: Org-ref.taxname
+    Member { name: Name(1099, 6), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 94: Org-ref.common
+    Member { name: Name(1105, 3), tag: 2, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 95: Org-ref.mod
+    Member { name: Name(352, 2), tag: 3, ty: 30, flags: OPTIONAL | SET_FLAG, default: None }, // 96: Org-ref.db
+    Member { name: Name(1108, 3), tag: 4, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 97: Org-ref.syn
     Member { name: Name(1111, 7), tag: 5, ty: 31, flags: OPTIONAL, default: None }, // 98: Org-ref.orgname
     Member { name: Name(371, 4), tag: 0, ty: 37, flags: OPTIONAL, default: None }, // 99: OrgName.name
-    Member { name: Name(1125, 6), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 100: OrgName.attrib
-    Member { name: Name(1105, 3), tag: 2, ty: 40, flags: OPTIONAL, default: None }, // 101: OrgName.mod
-    Member { name: Name(1131, 7), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 102: OrgName.lineage
-    Member { name: Name(1138, 5), tag: 4, ty: 4, flags: OPTIONAL, default: None }, // 103: OrgName.gcode
-    Member { name: Name(1143, 6), tag: 5, ty: 4, flags: OPTIONAL, default: None }, // 104: OrgName.mgcode
-    Member { name: Name(1149, 3), tag: 6, ty: 5, flags: OPTIONAL, default: None }, // 105: OrgName.div
-    Member { name: Name(1152, 6), tag: 7, ty: 4, flags: OPTIONAL, default: None }, // 106: OrgName.pgcode
-    Member { name: Name(1173, 5), tag: 0, ty: 5, flags: 0, default: None }, // 107: BinomialOrgName.genus
-    Member { name: Name(1178, 7), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 108: BinomialOrgName.species
-    Member { name: Name(1185, 10), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 109: BinomialOrgName.subspecies
-    Member { name: Name(1231, 11), tag: 0, ty: 36, flags: 0, default: None }, // 110: TaxElement.fixed-level
-    Member { name: Name(1242, 5), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 111: TaxElement.level
-    Member { name: Name(371, 4), tag: 2, ty: 5, flags: 0, default: None }, // 112: TaxElement.name
+    Member { name: Name(1125, 6), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 100: OrgName.attrib
+    Member { name: Name(1105, 3), tag: 2, ty: 40, flags: OPTIONAL | SET_FLAG, default: None }, // 101: OrgName.mod
+    Member { name: Name(1131, 7), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 102: OrgName.lineage
+    Member { name: Name(1138, 5), tag: 4, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 103: OrgName.gcode
+    Member { name: Name(1143, 6), tag: 5, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 104: OrgName.mgcode
+    Member { name: Name(1149, 3), tag: 6, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 105: OrgName.div
+    Member { name: Name(1152, 6), tag: 7, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 106: OrgName.pgcode
+    Member { name: Name(1173, 5), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 107: BinomialOrgName.genus
+    Member { name: Name(1178, 7), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 108: BinomialOrgName.species
+    Member { name: Name(1185, 10), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 109: BinomialOrgName.subspecies
+    Member { name: Name(1231, 11), tag: 0, ty: 36, flags: SET_FLAG, default: None }, // 110: TaxElement.fixed-level
+    Member { name: Name(1242, 5), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 111: TaxElement.level
+    Member { name: Name(371, 4), tag: 2, ty: 5, flags: SET_FLAG, default: None }, // 112: TaxElement.name
     Member { name: Name(1263, 8), tag: 0, ty: 32, flags: 0, default: None }, // 113: OrgName.name.binomial
     Member { name: Name(1271, 5), tag: 1, ty: 5, flags: 0, default: None }, // 114: OrgName.name.virus
     Member { name: Name(1276, 6), tag: 2, ty: 33, flags: 0, default: None }, // 115: OrgName.name.hybrid
     Member { name: Name(1282, 11), tag: 3, ty: 32, flags: 0, default: None }, // 116: OrgName.name.namedhybrid
     Member { name: Name(861, 7), tag: 4, ty: 34, flags: 0, default: None }, // 117: OrgName.name.partial
-    Member { name: Name(1299, 7), tag: 0, ty: 39, flags: 0, default: None }, // 118: OrgMod.subtype
-    Member { name: Name(1306, 7), tag: 1, ty: 5, flags: 0, default: None }, // 119: OrgMod.subname
-    Member { name: Name(1125, 6), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 120: OrgMod.attrib
+    Member { name: Name(1299, 7), tag: 0, ty: 39, flags: SET_FLAG, default: None }, // 118: OrgMod.subtype
+    Member { name: Name(1306, 7), tag: 1, ty: 5, flags: SET_FLAG, default: None }, // 119: OrgMod.subname
+    Member { name: Name(1125, 6), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 120: OrgMod.attrib
     Member { name: Name(1665, 4), tag: 0, ty: 42, flags: 0, default: None }, // 121: Numbering.cont
     Member { name: Name(1669, 4), tag: 1, ty: 43, flags: 0, default: None }, // 122: Numbering.enum
     Member { name: Name(1673, 3), tag: 2, ty: 45, flags: 0, default: None }, // 123: Numbering.ref
     Member { name: Name(1676, 4), tag: 3, ty: 111, flags: 0, default: None }, // 124: Numbering.real
-    Member { name: Name(1689, 6), tag: 0, ty: 4, flags: DEFAULT, default: Some(Name(1688, 1)) }, // 125: Num-cont.refnum
-    Member { name: Name(1695, 8), tag: 1, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 126: Num-cont.has-zero
-    Member { name: Name(1703, 9), tag: 2, ty: 2, flags: DEFAULT, default: Some(Name(45, 4)) }, // 127: Num-cont.ascending
-    Member { name: Name(608, 3), tag: 0, ty: 44, flags: 0, default: None }, // 128: Num-enum.num
-    Member { name: Name(1720, 5), tag: 1, ty: 6, flags: 0, default: None }, // 129: Num-enum.names
-    Member { name: Name(1328, 4), tag: 0, ty: 46, flags: 0, default: None }, // 130: Num-ref.type
+    Member { name: Name(1689, 6), tag: 0, ty: 4, flags: DEFAULT | SET_FLAG, default: Some(Name(1688, 1)) }, // 125: Num-cont.refnum
+    Member { name: Name(1695, 8), tag: 1, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 126: Num-cont.has-zero
+    Member { name: Name(1703, 9), tag: 2, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(45, 4)) }, // 127: Num-cont.ascending
+    Member { name: Name(608, 3), tag: 0, ty: 44, flags: SET_FLAG, default: None }, // 128: Num-enum.num
+    Member { name: Name(1720, 5), tag: 1, ty: 6, flags: SET_FLAG, default: None }, // 129: Num-enum.names
+    Member { name: Name(1328, 4), tag: 0, ty: 46, flags: SET_FLAG, default: None }, // 130: Num-ref.type
     Member { name: Name(1732, 6), tag: 1, ty: 47, flags: OPTIONAL, default: None }, // 131: Num-ref.aligns
-    Member { name: Name(1328, 4), tag: 0, ty: 48, flags: 0, default: None }, // 132: Seq-align.type
-    Member { name: Name(1774, 3), tag: 1, ty: 4, flags: OPTIONAL, default: None }, // 133: Seq-align.dim
-    Member { name: Name(1777, 5), tag: 2, ty: 52, flags: OPTIONAL, default: None }, // 134: Seq-align.score
+    Member { name: Name(1328, 4), tag: 0, ty: 48, flags: SET_FLAG, default: None }, // 132: Seq-align.type
+    Member { name: Name(1774, 3), tag: 1, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 133: Seq-align.dim
+    Member { name: Name(1777, 5), tag: 2, ty: 52, flags: OPTIONAL | SET_FLAG, default: None }, // 134: Seq-align.score
     Member { name: Name(1782, 4), tag: 3, ty: 108, flags: 0, default: None }, // 135: Seq-align.segs
-    Member { name: Name(1786, 6), tag: 4, ty: 109, flags: OPTIONAL, default: None }, // 136: Seq-align.bounds
-    Member { name: Name(155, 2), tag: 5, ty: 110, flags: OPTIONAL, default: None }, // 137: Seq-align.id
-    Member { name: Name(1792, 3), tag: 6, ty: 98, flags: OPTIONAL, default: None }, // 138: Seq-align.ext
+    Member { name: Name(1786, 6), tag: 4, ty: 109, flags: OPTIONAL | SET_FLAG, default: None }, // 136: Seq-align.bounds
+    Member { name: Name(155, 2), tag: 5, ty: 110, flags: OPTIONAL | SET_FLAG, default: None }, // 137: Seq-align.id
+    Member { name: Name(1792, 3), tag: 6, ty: 98, flags: OPTIONAL | SET_FLAG, default: None }, // 138: Seq-align.ext
     Member { name: Name(155, 2), tag: 0, ty: 3, flags: OPTIONAL, default: None }, // 139: Score.id
-    Member { name: Name(1815, 5), tag: 1, ty: 51, flags: 0, default: None }, // 140: Score.value
+    Member { name: Name(1815, 5), tag: 1, ty: 51, flags: SET_FLAG, default: None }, // 140: Score.value
     Member { name: Name(1676, 4), tag: 0, ty: 50, flags: 0, default: None }, // 141: Score.value.real
     Member { name: Name(1820, 3), tag: 1, ty: 4, flags: 0, default: None }, // 142: Score.value.int
-    Member { name: Name(1774, 3), tag: 0, ty: 4, flags: DEFAULT, default: Some(Name(1833, 1)) }, // 143: Dense-diag.dim
-    Member { name: Name(1834, 3), tag: 1, ty: 54, flags: 0, default: None }, // 144: Dense-diag.ids
-    Member { name: Name(1837, 6), tag: 2, ty: 55, flags: 0, default: None }, // 145: Dense-diag.starts
-    Member { name: Name(1843, 3), tag: 3, ty: 44, flags: 0, default: None }, // 146: Dense-diag.len
-    Member { name: Name(1846, 7), tag: 4, ty: 57, flags: OPTIONAL, default: None }, // 147: Dense-diag.strands
-    Member { name: Name(1853, 6), tag: 5, ty: 52, flags: OPTIONAL, default: None }, // 148: Dense-diag.scores
-    Member { name: Name(1774, 3), tag: 0, ty: 4, flags: DEFAULT, default: Some(Name(1833, 1)) }, // 149: Dense-seg.dim
-    Member { name: Name(1894, 6), tag: 1, ty: 4, flags: 0, default: None }, // 150: Dense-seg.numseg
-    Member { name: Name(1834, 3), tag: 2, ty: 54, flags: 0, default: None }, // 151: Dense-seg.ids
-    Member { name: Name(1837, 6), tag: 3, ty: 60, flags: 0, default: None }, // 152: Dense-seg.starts
-    Member { name: Name(1900, 4), tag: 4, ty: 55, flags: 0, default: None }, // 153: Dense-seg.lens
-    Member { name: Name(1846, 7), tag: 5, ty: 57, flags: OPTIONAL, default: None }, // 154: Dense-seg.strands
-    Member { name: Name(1853, 6), tag: 6, ty: 61, flags: OPTIONAL, default: None }, // 155: Dense-seg.scores
-    Member { name: Name(1774, 3), tag: 0, ty: 4, flags: DEFAULT, default: Some(Name(1833, 1)) }, // 156: Std-seg.dim
-    Member { name: Name(1834, 3), tag: 1, ty: 54, flags: OPTIONAL, default: None }, // 157: Std-seg.ids
-    Member { name: Name(1911, 3), tag: 2, ty: 77, flags: 0, default: None }, // 158: Std-seg.loc
-    Member { name: Name(1853, 6), tag: 3, ty: 52, flags: OPTIONAL, default: None }, // 159: Std-seg.scores
+    Member { name: Name(1774, 3), tag: 0, ty: 4, flags: DEFAULT | SET_FLAG, default: Some(Name(1833, 1)) }, // 143: Dense-diag.dim
+    Member { name: Name(1834, 3), tag: 1, ty: 54, flags: SET_FLAG, default: None }, // 144: Dense-diag.ids
+    Member { name: Name(1837, 6), tag: 2, ty: 55, flags: SET_FLAG, default: None }, // 145: Dense-diag.starts
+    Member { name: Name(1843, 3), tag: 3, ty: 44, flags: SET_FLAG, default: None }, // 146: Dense-diag.len
+    Member { name: Name(1846, 7), tag: 4, ty: 57, flags: OPTIONAL | SET_FLAG, default: None }, // 147: Dense-diag.strands
+    Member { name: Name(1853, 6), tag: 5, ty: 52, flags: OPTIONAL | SET_FLAG, default: None }, // 148: Dense-diag.scores
+    Member { name: Name(1774, 3), tag: 0, ty: 4, flags: DEFAULT | SET_FLAG, default: Some(Name(1833, 1)) }, // 149: Dense-seg.dim
+    Member { name: Name(1894, 6), tag: 1, ty: 4, flags: SET_FLAG, default: None }, // 150: Dense-seg.numseg
+    Member { name: Name(1834, 3), tag: 2, ty: 54, flags: SET_FLAG, default: None }, // 151: Dense-seg.ids
+    Member { name: Name(1837, 6), tag: 3, ty: 60, flags: SET_FLAG, default: None }, // 152: Dense-seg.starts
+    Member { name: Name(1900, 4), tag: 4, ty: 55, flags: SET_FLAG, default: None }, // 153: Dense-seg.lens
+    Member { name: Name(1846, 7), tag: 5, ty: 57, flags: OPTIONAL | SET_FLAG, default: None }, // 154: Dense-seg.strands
+    Member { name: Name(1853, 6), tag: 6, ty: 61, flags: OPTIONAL | SET_FLAG, default: None }, // 155: Dense-seg.scores
+    Member { name: Name(1774, 3), tag: 0, ty: 4, flags: DEFAULT | SET_FLAG, default: Some(Name(1833, 1)) }, // 156: Std-seg.dim
+    Member { name: Name(1834, 3), tag: 1, ty: 54, flags: OPTIONAL | SET_FLAG, default: None }, // 157: Std-seg.ids
+    Member { name: Name(1911, 3), tag: 2, ty: 77, flags: SET_FLAG, default: None }, // 158: Std-seg.loc
+    Member { name: Name(1853, 6), tag: 3, ty: 52, flags: OPTIONAL | SET_FLAG, default: None }, // 159: Std-seg.scores
     Member { name: Name(1921, 4), tag: 0, ty: 64, flags: 0, default: None }, // 160: Seq-loc.null
     Member { name: Name(1925, 5), tag: 1, ty: 9, flags: 0, default: None }, // 161: Seq-loc.empty
     Member { name: Name(1930, 5), tag: 2, ty: 9, flags: 0, default: None }, // 162: Seq-loc.whole
@@ -1239,9 +1239,9 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(1961, 5), tag: 8, ty: 74, flags: 0, default: None }, // 168: Seq-loc.equiv
     Member { name: Name(1966, 4), tag: 9, ty: 75, flags: 0, default: None }, // 169: Seq-loc.bond
     Member { name: Name(1970, 4), tag: 10, ty: 76, flags: 0, default: None }, // 170: Seq-loc.feat
-    Member { name: Name(1986, 4), tag: 0, ty: 44, flags: 0, default: None }, // 171: Seq-interval.from
-    Member { name: Name(1990, 2), tag: 1, ty: 44, flags: 0, default: None }, // 172: Seq-interval.to
-    Member { name: Name(1992, 6), tag: 2, ty: 56, flags: OPTIONAL, default: None }, // 173: Seq-interval.strand
+    Member { name: Name(1986, 4), tag: 0, ty: 44, flags: SET_FLAG, default: None }, // 171: Seq-interval.from
+    Member { name: Name(1990, 2), tag: 1, ty: 44, flags: SET_FLAG, default: None }, // 172: Seq-interval.to
+    Member { name: Name(1992, 6), tag: 2, ty: 56, flags: OPTIONAL | SET_FLAG, default: None }, // 173: Seq-interval.strand
     Member { name: Name(155, 2), tag: 3, ty: 9, flags: 0, default: None }, // 174: Seq-interval.id
     Member { name: Name(1998, 9), tag: 4, ty: 66, flags: OPTIONAL, default: None }, // 175: Seq-interval.fuzz-from
     Member { name: Name(2007, 7), tag: 5, ty: 66, flags: OPTIONAL, default: None }, // 176: Seq-interval.fuzz-to
@@ -1250,68 +1250,68 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(2030, 3), tag: 2, ty: 4, flags: 0, default: None }, // 179: Int-fuzz.pct
     Member { name: Name(2033, 3), tag: 3, ty: 68, flags: 0, default: None }, // 180: Int-fuzz.lim
     Member { name: Name(2036, 3), tag: 4, ty: 69, flags: 0, default: None }, // 181: Int-fuzz.alt
-    Member { name: Name(2039, 3), tag: 0, ty: 44, flags: 0, default: None }, // 182: Int-fuzz.range.max
-    Member { name: Name(2042, 3), tag: 1, ty: 44, flags: 0, default: None }, // 183: Int-fuzz.range.min
-    Member { name: Name(2084, 5), tag: 0, ty: 44, flags: 0, default: None }, // 184: Seq-point.point
-    Member { name: Name(1992, 6), tag: 1, ty: 56, flags: OPTIONAL, default: None }, // 185: Seq-point.strand
+    Member { name: Name(2039, 3), tag: 0, ty: 44, flags: SET_FLAG, default: None }, // 182: Int-fuzz.range.max
+    Member { name: Name(2042, 3), tag: 1, ty: 44, flags: SET_FLAG, default: None }, // 183: Int-fuzz.range.min
+    Member { name: Name(2084, 5), tag: 0, ty: 44, flags: SET_FLAG, default: None }, // 184: Seq-point.point
+    Member { name: Name(1992, 6), tag: 1, ty: 56, flags: OPTIONAL | SET_FLAG, default: None }, // 185: Seq-point.strand
     Member { name: Name(155, 2), tag: 2, ty: 9, flags: 0, default: None }, // 186: Seq-point.id
     Member { name: Name(2089, 4), tag: 3, ty: 66, flags: OPTIONAL, default: None }, // 187: Seq-point.fuzz
-    Member { name: Name(1992, 6), tag: 0, ty: 56, flags: OPTIONAL, default: None }, // 188: Packed-seqpnt.strand
+    Member { name: Name(1992, 6), tag: 0, ty: 56, flags: OPTIONAL | SET_FLAG, default: None }, // 188: Packed-seqpnt.strand
     Member { name: Name(155, 2), tag: 1, ty: 9, flags: 0, default: None }, // 189: Packed-seqpnt.id
     Member { name: Name(2089, 4), tag: 2, ty: 66, flags: OPTIONAL, default: None }, // 190: Packed-seqpnt.fuzz
-    Member { name: Name(2106, 6), tag: 3, ty: 55, flags: 0, default: None }, // 191: Packed-seqpnt.points
+    Member { name: Name(2106, 6), tag: 3, ty: 55, flags: SET_FLAG, default: None }, // 191: Packed-seqpnt.points
     Member { name: Name(2144, 1), tag: 0, ty: 71, flags: 0, default: None }, // 192: Seq-bond.a
     Member { name: Name(2145, 1), tag: 1, ty: 71, flags: OPTIONAL, default: None }, // 193: Seq-bond.b
     Member { name: Name(2165, 4), tag: 0, ty: 4, flags: 0, default: None }, // 194: Feat-id.gibb
     Member { name: Name(253, 4), tag: 1, ty: 10, flags: 0, default: None }, // 195: Feat-id.giim
     Member { name: Name(236, 5), tag: 2, ty: 3, flags: 0, default: None }, // 196: Feat-id.local
     Member { name: Name(291, 7), tag: 3, ty: 15, flags: 0, default: None }, // 197: Feat-id.general
-    Member { name: Name(1774, 3), tag: 0, ty: 4, flags: DEFAULT, default: Some(Name(1833, 1)) }, // 198: Packed-seg.dim
-    Member { name: Name(1894, 6), tag: 1, ty: 4, flags: 0, default: None }, // 199: Packed-seg.numseg
-    Member { name: Name(1834, 3), tag: 2, ty: 54, flags: 0, default: None }, // 200: Packed-seg.ids
-    Member { name: Name(1837, 6), tag: 3, ty: 55, flags: 0, default: None }, // 201: Packed-seg.starts
-    Member { name: Name(2179, 7), tag: 4, ty: 80, flags: 0, default: None }, // 202: Packed-seg.present
-    Member { name: Name(1900, 4), tag: 5, ty: 55, flags: 0, default: None }, // 203: Packed-seg.lens
-    Member { name: Name(1846, 7), tag: 6, ty: 57, flags: OPTIONAL, default: None }, // 204: Packed-seg.strands
-    Member { name: Name(1853, 6), tag: 7, ty: 61, flags: OPTIONAL, default: None }, // 205: Packed-seg.scores
+    Member { name: Name(1774, 3), tag: 0, ty: 4, flags: DEFAULT | SET_FLAG, default: Some(Name(1833, 1)) }, // 198: Packed-seg.dim
+    Member { name: Name(1894, 6), tag: 1, ty: 4, flags: SET_FLAG, default: None }, // 199: Packed-seg.numseg
+    Member { name: Name(1834, 3), tag: 2, ty: 54, flags: SET_FLAG, default: None }, // 200: Packed-seg.ids
+    Member { name: Name(1837, 6), tag: 3, ty: 55, flags: SET_FLAG, default: None }, // 201: Packed-seg.starts
+    Member { name: Name(2179, 7), tag: 4, ty: 80, flags: SET_FLAG, default: None }, // 202: Packed-seg.present
+    Member { name: Name(1900, 4), tag: 5, ty: 55, flags: SET_FLAG, default: None }, // 203: Packed-seg.lens
+    Member { name: Name(1846, 7), tag: 6, ty: 57, flags: OPTIONAL | SET_FLAG, default: None }, // 204: Packed-seg.strands
+    Member { name: Name(1853, 6), tag: 7, ty: 61, flags: OPTIONAL | SET_FLAG, default: None }, // 205: Packed-seg.scores
     Member { name: Name(2210, 10), tag: 0, ty: 9, flags: OPTIONAL, default: None }, // 206: Spliced-seg.product-id
     Member { name: Name(2220, 10), tag: 1, ty: 9, flags: OPTIONAL, default: None }, // 207: Spliced-seg.genomic-id
-    Member { name: Name(2230, 14), tag: 2, ty: 56, flags: OPTIONAL, default: None }, // 208: Spliced-seg.product-strand
-    Member { name: Name(2244, 14), tag: 3, ty: 56, flags: OPTIONAL, default: None }, // 209: Spliced-seg.genomic-strand
-    Member { name: Name(2258, 12), tag: 4, ty: 83, flags: 0, default: None }, // 210: Spliced-seg.product-type
-    Member { name: Name(2270, 5), tag: 5, ty: 100, flags: 0, default: None }, // 211: Spliced-seg.exons
-    Member { name: Name(2275, 6), tag: 6, ty: 44, flags: OPTIONAL, default: None }, // 212: Spliced-seg.poly-a
-    Member { name: Name(2281, 14), tag: 7, ty: 44, flags: OPTIONAL, default: None }, // 213: Spliced-seg.product-length
-    Member { name: Name(2295, 9), tag: 8, ty: 102, flags: OPTIONAL, default: None }, // 214: Spliced-seg.modifiers
+    Member { name: Name(2230, 14), tag: 2, ty: 56, flags: OPTIONAL | SET_FLAG, default: None }, // 208: Spliced-seg.product-strand
+    Member { name: Name(2244, 14), tag: 3, ty: 56, flags: OPTIONAL | SET_FLAG, default: None }, // 209: Spliced-seg.genomic-strand
+    Member { name: Name(2258, 12), tag: 4, ty: 83, flags: SET_FLAG, default: None }, // 210: Spliced-seg.product-type
+    Member { name: Name(2270, 5), tag: 5, ty: 100, flags: SET_FLAG, default: None }, // 211: Spliced-seg.exons
+    Member { name: Name(2275, 6), tag: 6, ty: 44, flags: OPTIONAL | SET_FLAG, default: None }, // 212: Spliced-seg.poly-a
+    Member { name: Name(2281, 14), tag: 7, ty: 44, flags: OPTIONAL | SET_FLAG, default: None }, // 213: Spliced-seg.product-length
+    Member { name: Name(2295, 9), tag: 8, ty: 102, flags: OPTIONAL | SET_FLAG, default: None }, // 214: Spliced-seg.modifiers
     Member { name: Name(2333, 13), tag: 0, ty: 85, flags: 0, default: None }, // 215: Spliced-exon.product-start
     Member { name: Name(2346, 11), tag: 1, ty: 85, flags: 0, default: None }, // 216: Spliced-exon.product-end
-    Member { name: Name(2357, 13), tag: 2, ty: 44, flags: 0, default: None }, // 217: Spliced-exon.genomic-start
-    Member { name: Name(2370, 11), tag: 3, ty: 44, flags: 0, default: None }, // 218: Spliced-exon.genomic-end
+    Member { name: Name(2357, 13), tag: 2, ty: 44, flags: SET_FLAG, default: None }, // 217: Spliced-exon.genomic-start
+    Member { name: Name(2370, 11), tag: 3, ty: 44, flags: SET_FLAG, default: None }, // 218: Spliced-exon.genomic-end
     Member { name: Name(2210, 10), tag: 4, ty: 9, flags: OPTIONAL, default: None }, // 219: Spliced-exon.product-id
     Member { name: Name(2220, 10), tag: 5, ty: 9, flags: OPTIONAL, default: None }, // 220: Spliced-exon.genomic-id
-    Member { name: Name(2230, 14), tag: 6, ty: 56, flags: OPTIONAL, default: None }, // 221: Spliced-exon.product-strand
-    Member { name: Name(2244, 14), tag: 7, ty: 56, flags: OPTIONAL, default: None }, // 222: Spliced-exon.genomic-strand
-    Member { name: Name(2381, 5), tag: 8, ty: 88, flags: OPTIONAL, default: None }, // 223: Spliced-exon.parts
+    Member { name: Name(2230, 14), tag: 6, ty: 56, flags: OPTIONAL | SET_FLAG, default: None }, // 221: Spliced-exon.product-strand
+    Member { name: Name(2244, 14), tag: 7, ty: 56, flags: OPTIONAL | SET_FLAG, default: None }, // 222: Spliced-exon.genomic-strand
+    Member { name: Name(2381, 5), tag: 8, ty: 88, flags: OPTIONAL | SET_FLAG, default: None }, // 223: Spliced-exon.parts
     Member { name: Name(1853, 6), tag: 9, ty: 89, flags: OPTIONAL, default: None }, // 224: Spliced-exon.scores
     Member { name: Name(2386, 20), tag: 10, ty: 90, flags: OPTIONAL, default: None }, // 225: Spliced-exon.acceptor-before-exon
     Member { name: Name(2406, 16), tag: 11, ty: 90, flags: OPTIONAL, default: None }, // 226: Spliced-exon.donor-after-exon
-    Member { name: Name(861, 7), tag: 12, ty: 2, flags: OPTIONAL, default: None }, // 227: Spliced-exon.partial
-    Member { name: Name(1792, 3), tag: 13, ty: 98, flags: OPTIONAL, default: None }, // 228: Spliced-exon.ext
+    Member { name: Name(861, 7), tag: 12, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 227: Spliced-exon.partial
+    Member { name: Name(1792, 3), tag: 13, ty: 98, flags: OPTIONAL | SET_FLAG, default: None }, // 228: Spliced-exon.ext
     Member { name: Name(2433, 6), tag: 0, ty: 44, flags: 0, default: None }, // 229: Product-pos.nucpos
     Member { name: Name(2439, 7), tag: 1, ty: 86, flags: 0, default: None }, // 230: Product-pos.protpos
-    Member { name: Name(2454, 4), tag: 0, ty: 44, flags: 0, default: None }, // 231: Prot-pos.amin
-    Member { name: Name(2459, 5), tag: 1, ty: 44, flags: DEFAULT, default: Some(Name(2458, 1)) }, // 232: Prot-pos.frame
+    Member { name: Name(2454, 4), tag: 0, ty: 44, flags: SET_FLAG, default: None }, // 231: Prot-pos.amin
+    Member { name: Name(2459, 5), tag: 1, ty: 44, flags: DEFAULT | SET_FLAG, default: Some(Name(2458, 1)) }, // 232: Prot-pos.frame
     Member { name: Name(2482, 5), tag: 0, ty: 44, flags: 0, default: None }, // 233: Spliced-exon-chunk.match
     Member { name: Name(2487, 8), tag: 1, ty: 44, flags: 0, default: None }, // 234: Spliced-exon-chunk.mismatch
     Member { name: Name(2495, 4), tag: 2, ty: 44, flags: 0, default: None }, // 235: Spliced-exon-chunk.diag
     Member { name: Name(2499, 11), tag: 3, ty: 44, flags: 0, default: None }, // 236: Spliced-exon-chunk.product-ins
     Member { name: Name(2510, 11), tag: 4, ty: 44, flags: 0, default: None }, // 237: Spliced-exon-chunk.genomic-ins
-    Member { name: Name(2541, 5), tag: 0, ty: 5, flags: 0, default: None }, // 238: Splice-site.bases
-    Member { name: Name(1258, 5), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 239: User-object.class
+    Member { name: Name(2541, 5), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 238: Splice-site.bases
+    Member { name: Name(1258, 5), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 239: User-object.class
     Member { name: Name(1328, 4), tag: 1, ty: 3, flags: 0, default: None }, // 240: User-object.type
-    Member { name: Name(2557, 4), tag: 2, ty: 97, flags: 0, default: None }, // 241: User-object.data
+    Member { name: Name(2557, 4), tag: 2, ty: 97, flags: SET_FLAG, default: None }, // 241: User-object.data
     Member { name: Name(2571, 5), tag: 0, ty: 3, flags: 0, default: None }, // 242: User-field.label
-    Member { name: Name(608, 3), tag: 1, ty: 4, flags: OPTIONAL, default: None }, // 243: User-field.num
+    Member { name: Name(608, 3), tag: 1, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 243: User-field.num
     Member { name: Name(2557, 4), tag: 2, ty: 99, flags: 0, default: None }, // 244: User-field.data
     Member { name: Name(157, 3), tag: 0, ty: 93, flags: 0, default: None }, // 245: User-field.data.str
     Member { name: Name(1820, 3), tag: 1, ty: 4, flags: 0, default: None }, // 246: User-field.data.int
@@ -1328,18 +1328,18 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(2637, 17), tag: 0, ty: 2, flags: 0, default: None }, // 257: Spliced-seg-modifier.start-codon-found
     Member { name: Name(2654, 16), tag: 1, ty: 2, flags: 0, default: None }, // 258: Spliced-seg-modifier.stop-codon-found
     Member { name: Name(2680, 9), tag: 0, ty: 9, flags: OPTIONAL, default: None }, // 259: Sparse-seg.master-id
-    Member { name: Name(2689, 4), tag: 1, ty: 105, flags: 0, default: None }, // 260: Sparse-seg.rows
-    Member { name: Name(2693, 10), tag: 2, ty: 52, flags: OPTIONAL, default: None }, // 261: Sparse-seg.row-scores
-    Member { name: Name(1792, 3), tag: 3, ty: 107, flags: OPTIONAL, default: None }, // 262: Sparse-seg.ext
+    Member { name: Name(2689, 4), tag: 1, ty: 105, flags: SET_FLAG, default: None }, // 260: Sparse-seg.rows
+    Member { name: Name(2693, 10), tag: 2, ty: 52, flags: OPTIONAL | SET_FLAG, default: None }, // 261: Sparse-seg.row-scores
+    Member { name: Name(1792, 3), tag: 3, ty: 107, flags: OPTIONAL | SET_FLAG, default: None }, // 262: Sparse-seg.ext
     Member { name: Name(2715, 8), tag: 0, ty: 9, flags: 0, default: None }, // 263: Sparse-align.first-id
     Member { name: Name(2723, 9), tag: 1, ty: 9, flags: 0, default: None }, // 264: Sparse-align.second-id
-    Member { name: Name(1894, 6), tag: 2, ty: 4, flags: 0, default: None }, // 265: Sparse-align.numseg
-    Member { name: Name(2732, 12), tag: 3, ty: 60, flags: 0, default: None }, // 266: Sparse-align.first-starts
-    Member { name: Name(2744, 13), tag: 4, ty: 60, flags: 0, default: None }, // 267: Sparse-align.second-starts
-    Member { name: Name(1900, 4), tag: 5, ty: 55, flags: 0, default: None }, // 268: Sparse-align.lens
-    Member { name: Name(2757, 14), tag: 6, ty: 57, flags: OPTIONAL, default: None }, // 269: Sparse-align.second-strands
-    Member { name: Name(2771, 10), tag: 7, ty: 52, flags: OPTIONAL, default: None }, // 270: Sparse-align.seg-scores
-    Member { name: Name(2795, 5), tag: 0, ty: 4, flags: 0, default: None }, // 271: Sparse-seg-ext.index
+    Member { name: Name(1894, 6), tag: 2, ty: 4, flags: SET_FLAG, default: None }, // 265: Sparse-align.numseg
+    Member { name: Name(2732, 12), tag: 3, ty: 60, flags: SET_FLAG, default: None }, // 266: Sparse-align.first-starts
+    Member { name: Name(2744, 13), tag: 4, ty: 60, flags: SET_FLAG, default: None }, // 267: Sparse-align.second-starts
+    Member { name: Name(1900, 4), tag: 5, ty: 55, flags: SET_FLAG, default: None }, // 268: Sparse-align.lens
+    Member { name: Name(2757, 14), tag: 6, ty: 57, flags: OPTIONAL | SET_FLAG, default: None }, // 269: Sparse-align.second-strands
+    Member { name: Name(2771, 10), tag: 7, ty: 52, flags: OPTIONAL | SET_FLAG, default: None }, // 270: Sparse-align.seg-scores
+    Member { name: Name(2795, 5), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 271: Sparse-seg-ext.index
     Member { name: Name(2800, 7), tag: 0, ty: 58, flags: 0, default: None }, // 272: Seq-align.segs.dendiag
     Member { name: Name(2807, 6), tag: 1, ty: 59, flags: 0, default: None }, // 273: Seq-align.segs.denseg
     Member { name: Name(513, 3), tag: 2, ty: 78, flags: 0, default: None }, // 274: Seq-align.segs.std
@@ -1347,41 +1347,41 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(1806, 4), tag: 4, ty: 81, flags: 0, default: None }, // 276: Seq-align.segs.disc
     Member { name: Name(2819, 7), tag: 5, ty: 82, flags: 0, default: None }, // 277: Seq-align.segs.spliced
     Member { name: Name(2826, 6), tag: 6, ty: 103, flags: 0, default: None }, // 278: Seq-align.segs.sparse
-    Member { name: Name(2144, 1), tag: 0, ty: 50, flags: 0, default: None }, // 279: Num-real.a
-    Member { name: Name(2145, 1), tag: 1, ty: 50, flags: 0, default: None }, // 280: Num-real.b
-    Member { name: Name(2840, 5), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 281: Num-real.units
-    Member { name: Name(2865, 9), tag: 0, ty: 2, flags: OPTIONAL, default: None }, // 282: PIR-block.had-punct
-    Member { name: Name(2874, 4), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 283: PIR-block.host
-    Member { name: Name(663, 6), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 284: PIR-block.source
-    Member { name: Name(2878, 7), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 285: PIR-block.summary
-    Member { name: Name(2885, 7), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 286: PIR-block.genetic
-    Member { name: Name(2892, 8), tag: 5, ty: 5, flags: OPTIONAL, default: None }, // 287: PIR-block.includes
-    Member { name: Name(2900, 9), tag: 6, ty: 5, flags: OPTIONAL, default: None }, // 288: PIR-block.placement
-    Member { name: Name(2909, 11), tag: 7, ty: 5, flags: OPTIONAL, default: None }, // 289: PIR-block.superfamily
-    Member { name: Name(2920, 8), tag: 8, ty: 6, flags: OPTIONAL, default: None }, // 290: PIR-block.keywords
-    Member { name: Name(2928, 15), tag: 9, ty: 5, flags: OPTIONAL, default: None }, // 291: PIR-block.cross-reference
-    Member { name: Name(2943, 4), tag: 10, ty: 5, flags: OPTIONAL, default: None }, // 292: PIR-block.date
-    Member { name: Name(2947, 7), tag: 11, ty: 5, flags: OPTIONAL, default: None }, // 293: PIR-block.seq-raw
-    Member { name: Name(2954, 6), tag: 12, ty: 21, flags: OPTIONAL, default: None }, // 294: PIR-block.seqref
-    Member { name: Name(2983, 16), tag: 0, ty: 6, flags: OPTIONAL, default: None }, // 295: GB-block.extra-accessions
-    Member { name: Name(663, 6), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 296: GB-block.source
-    Member { name: Name(2920, 8), tag: 2, ty: 6, flags: OPTIONAL, default: None }, // 297: GB-block.keywords
-    Member { name: Name(2999, 6), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 298: GB-block.origin
-    Member { name: Name(2943, 4), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 299: GB-block.date
+    Member { name: Name(2144, 1), tag: 0, ty: 50, flags: SET_FLAG, default: None }, // 279: Num-real.a
+    Member { name: Name(2145, 1), tag: 1, ty: 50, flags: SET_FLAG, default: None }, // 280: Num-real.b
+    Member { name: Name(2840, 5), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 281: Num-real.units
+    Member { name: Name(2865, 9), tag: 0, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 282: PIR-block.had-punct
+    Member { name: Name(2874, 4), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 283: PIR-block.host
+    Member { name: Name(663, 6), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 284: PIR-block.source
+    Member { name: Name(2878, 7), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 285: PIR-block.summary
+    Member { name: Name(2885, 7), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 286: PIR-block.genetic
+    Member { name: Name(2892, 8), tag: 5, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 287: PIR-block.includes
+    Member { name: Name(2900, 9), tag: 6, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 288: PIR-block.placement
+    Member { name: Name(2909, 11), tag: 7, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 289: PIR-block.superfamily
+    Member { name: Name(2920, 8), tag: 8, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 290: PIR-block.keywords
+    Member { name: Name(2928, 15), tag: 9, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 291: PIR-block.cross-reference
+    Member { name: Name(2943, 4), tag: 10, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 292: PIR-block.date
+    Member { name: Name(2947, 7), tag: 11, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 293: PIR-block.seq-raw
+    Member { name: Name(2954, 6), tag: 12, ty: 21, flags: OPTIONAL | SET_FLAG, default: None }, // 294: PIR-block.seqref
+    Member { name: Name(2983, 16), tag: 0, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 295: GB-block.extra-accessions
+    Member { name: Name(663, 6), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 296: GB-block.source
+    Member { name: Name(2920, 8), tag: 2, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 297: GB-block.keywords
+    Member { name: Name(2999, 6), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 298: GB-block.origin
+    Member { name: Name(2943, 4), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 299: GB-block.date
     Member { name: Name(3005, 10), tag: 5, ty: 19, flags: OPTIONAL, default: None }, // 300: GB-block.entry-date
-    Member { name: Name(1149, 3), tag: 6, ty: 5, flags: OPTIONAL, default: None }, // 301: GB-block.div
-    Member { name: Name(3015, 8), tag: 7, ty: 5, flags: OPTIONAL, default: None }, // 302: GB-block.taxonomy
+    Member { name: Name(1149, 3), tag: 6, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 301: GB-block.div
+    Member { name: Name(3015, 8), tag: 7, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 302: GB-block.taxonomy
     Member { name: Name(617, 3), tag: 0, ty: 115, flags: 0, default: None }, // 303: Pubdesc.pub
-    Member { name: Name(371, 4), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 304: Pubdesc.name
-    Member { name: Name(3030, 3), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 305: Pubdesc.fig
+    Member { name: Name(371, 4), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 304: Pubdesc.name
+    Member { name: Name(3030, 3), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 305: Pubdesc.fig
     Member { name: Name(608, 3), tag: 3, ty: 41, flags: OPTIONAL, default: None }, // 306: Pubdesc.num
-    Member { name: Name(3033, 6), tag: 4, ty: 2, flags: OPTIONAL, default: None }, // 307: Pubdesc.numexc
-    Member { name: Name(2275, 6), tag: 5, ty: 2, flags: OPTIONAL, default: None }, // 308: Pubdesc.poly-a
-    Member { name: Name(611, 6), tag: 6, ty: 5, flags: OPTIONAL, default: None }, // 309: Pubdesc.maploc
-    Member { name: Name(2947, 7), tag: 7, ty: 177, flags: OPTIONAL, default: None }, // 310: Pubdesc.seq-raw
-    Member { name: Name(3039, 11), tag: 8, ty: 4, flags: OPTIONAL, default: None }, // 311: Pubdesc.align-group
-    Member { name: Name(601, 7), tag: 9, ty: 5, flags: OPTIONAL, default: None }, // 312: Pubdesc.comment
-    Member { name: Name(3050, 7), tag: 10, ty: 178, flags: DEFAULT, default: Some(Name(180, 3)) }, // 313: Pubdesc.reftype
+    Member { name: Name(3033, 6), tag: 4, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 307: Pubdesc.numexc
+    Member { name: Name(2275, 6), tag: 5, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 308: Pubdesc.poly-a
+    Member { name: Name(611, 6), tag: 6, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 309: Pubdesc.maploc
+    Member { name: Name(2947, 7), tag: 7, ty: 177, flags: OPTIONAL | SET_FLAG, default: None }, // 310: Pubdesc.seq-raw
+    Member { name: Name(3039, 11), tag: 8, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 311: Pubdesc.align-group
+    Member { name: Name(601, 7), tag: 9, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 312: Pubdesc.comment
+    Member { name: Name(3050, 7), tag: 10, ty: 178, flags: DEFAULT | SET_FLAG, default: Some(Name(180, 3)) }, // 313: Pubdesc.reftype
     Member { name: Name(3077, 3), tag: 0, ty: 117, flags: 0, default: None }, // 314: Pub.gen
     Member { name: Name(3080, 3), tag: 1, ty: 131, flags: 0, default: None }, // 315: Pub.sub
     Member { name: Name(3083, 7), tag: 2, ty: 140, flags: 0, default: None }, // 316: Pub.medline
@@ -1395,48 +1395,48 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(3122, 3), tag: 10, ty: 175, flags: 0, default: None }, // 324: Pub.man
     Member { name: Name(1961, 5), tag: 11, ty: 115, flags: 0, default: None }, // 325: Pub.equiv
     Member { name: Name(3125, 4), tag: 12, ty: 130, flags: 0, default: None }, // 326: Pub.pmid
-    Member { name: Name(409, 3), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 327: Cit-gen.cit
+    Member { name: Name(409, 3), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 327: Cit-gen.cit
     Member { name: Name(3136, 7), tag: 1, ty: 118, flags: OPTIONAL, default: None }, // 328: Cit-gen.authors
-    Member { name: Name(3090, 4), tag: 2, ty: 16, flags: OPTIONAL, default: None }, // 329: Cit-gen.muid
+    Member { name: Name(3090, 4), tag: 2, ty: 16, flags: OPTIONAL | SET_FLAG, default: None }, // 329: Cit-gen.muid
     Member { name: Name(3101, 7), tag: 3, ty: 128, flags: OPTIONAL, default: None }, // 330: Cit-gen.journal
-    Member { name: Name(3143, 6), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 331: Cit-gen.volume
-    Member { name: Name(3149, 5), tag: 5, ty: 5, flags: OPTIONAL, default: None }, // 332: Cit-gen.issue
-    Member { name: Name(3154, 5), tag: 6, ty: 5, flags: OPTIONAL, default: None }, // 333: Cit-gen.pages
+    Member { name: Name(3143, 6), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 331: Cit-gen.volume
+    Member { name: Name(3149, 5), tag: 5, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 332: Cit-gen.issue
+    Member { name: Name(3154, 5), tag: 6, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 333: Cit-gen.pages
     Member { name: Name(2943, 4), tag: 7, ty: 19, flags: OPTIONAL, default: None }, // 334: Cit-gen.date
-    Member { name: Name(3159, 13), tag: 8, ty: 4, flags: OPTIONAL, default: None }, // 335: Cit-gen.serial-number
-    Member { name: Name(593, 5), tag: 9, ty: 5, flags: OPTIONAL, default: None }, // 336: Cit-gen.title
-    Member { name: Name(3125, 4), tag: 10, ty: 130, flags: OPTIONAL, default: None }, // 337: Cit-gen.pmid
+    Member { name: Name(3159, 13), tag: 8, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 335: Cit-gen.serial-number
+    Member { name: Name(593, 5), tag: 9, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 336: Cit-gen.title
+    Member { name: Name(3125, 4), tag: 10, ty: 130, flags: OPTIONAL | SET_FLAG, default: None }, // 337: Cit-gen.pmid
     Member { name: Name(1720, 5), tag: 0, ty: 127, flags: DELAYED, default: None }, // 338: Auth-list.names
     Member { name: Name(3181, 5), tag: 1, ty: 124, flags: OPTIONAL, default: None }, // 339: Auth-list.affil
     Member { name: Name(371, 4), tag: 0, ty: 120, flags: 0, default: None }, // 340: Author.name
-    Member { name: Name(1242, 5), tag: 1, ty: 122, flags: OPTIONAL, default: None }, // 341: Author.level
-    Member { name: Name(3192, 4), tag: 2, ty: 123, flags: OPTIONAL, default: None }, // 342: Author.role
+    Member { name: Name(1242, 5), tag: 1, ty: 122, flags: OPTIONAL | SET_FLAG, default: None }, // 341: Author.level
+    Member { name: Name(3192, 4), tag: 2, ty: 123, flags: OPTIONAL | SET_FLAG, default: None }, // 342: Author.role
     Member { name: Name(3181, 5), tag: 3, ty: 124, flags: OPTIONAL, default: None }, // 343: Author.affil
-    Member { name: Name(3196, 7), tag: 4, ty: 2, flags: OPTIONAL, default: None }, // 344: Author.is-corr
+    Member { name: Name(3196, 7), tag: 4, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 344: Author.is-corr
     Member { name: Name(3212, 5), tag: 0, ty: 15, flags: 0, default: None }, // 345: Person-id.dbtag
     Member { name: Name(371, 4), tag: 1, ty: 121, flags: 0, default: None }, // 346: Person-id.name
     Member { name: Name(3217, 2), tag: 2, ty: 5, flags: 0, default: None }, // 347: Person-id.ml
     Member { name: Name(157, 3), tag: 3, ty: 5, flags: 0, default: None }, // 348: Person-id.str
     Member { name: Name(3219, 10), tag: 4, ty: 5, flags: 0, default: None }, // 349: Person-id.consortium
-    Member { name: Name(3237, 4), tag: 0, ty: 5, flags: 0, default: None }, // 350: Name-std.last
-    Member { name: Name(3241, 5), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 351: Name-std.first
-    Member { name: Name(3246, 6), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 352: Name-std.middle
-    Member { name: Name(3252, 4), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 353: Name-std.full
-    Member { name: Name(3256, 8), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 354: Name-std.initials
-    Member { name: Name(3264, 6), tag: 5, ty: 5, flags: OPTIONAL, default: None }, // 355: Name-std.suffix
-    Member { name: Name(593, 5), tag: 6, ty: 5, flags: OPTIONAL, default: None }, // 356: Name-std.title
+    Member { name: Name(3237, 4), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 350: Name-std.last
+    Member { name: Name(3241, 5), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 351: Name-std.first
+    Member { name: Name(3246, 6), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 352: Name-std.middle
+    Member { name: Name(3252, 4), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 353: Name-std.full
+    Member { name: Name(3256, 8), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 354: Name-std.initials
+    Member { name: Name(3264, 6), tag: 5, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 355: Name-std.suffix
+    Member { name: Name(593, 5), tag: 6, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 356: Name-std.title
     Member { name: Name(157, 3), tag: 0, ty: 5, flags: 0, default: None }, // 357: Affil.str
     Member { name: Name(513, 3), tag: 1, ty: 125, flags: 0, default: None }, // 358: Affil.std
-    Member { name: Name(3181, 5), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 359: Affil.std.affil
-    Member { name: Name(1149, 3), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 360: Affil.std.div
-    Member { name: Name(3330, 4), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 361: Affil.std.city
-    Member { name: Name(3080, 3), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 362: Affil.std.sub
-    Member { name: Name(429, 7), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 363: Affil.std.country
-    Member { name: Name(3334, 6), tag: 5, ty: 5, flags: OPTIONAL, default: None }, // 364: Affil.std.street
-    Member { name: Name(3340, 5), tag: 6, ty: 5, flags: OPTIONAL, default: None }, // 365: Affil.std.email
-    Member { name: Name(3345, 3), tag: 7, ty: 5, flags: OPTIONAL, default: None }, // 366: Affil.std.fax
-    Member { name: Name(3348, 5), tag: 8, ty: 5, flags: OPTIONAL, default: None }, // 367: Affil.std.phone
-    Member { name: Name(3353, 11), tag: 9, ty: 5, flags: OPTIONAL, default: None }, // 368: Affil.std.postal-code
+    Member { name: Name(3181, 5), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 359: Affil.std.affil
+    Member { name: Name(1149, 3), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 360: Affil.std.div
+    Member { name: Name(3330, 4), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 361: Affil.std.city
+    Member { name: Name(3080, 3), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 362: Affil.std.sub
+    Member { name: Name(429, 7), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 363: Affil.std.country
+    Member { name: Name(3334, 6), tag: 5, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 364: Affil.std.street
+    Member { name: Name(3340, 5), tag: 6, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 365: Affil.std.email
+    Member { name: Name(3345, 3), tag: 7, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 366: Affil.std.fax
+    Member { name: Name(3348, 5), tag: 8, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 367: Affil.std.phone
+    Member { name: Name(3353, 11), tag: 9, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 368: Affil.std.postal-code
     Member { name: Name(513, 3), tag: 0, ty: 126, flags: 0, default: None }, // 369: Auth-list.names.std
     Member { name: Name(3217, 2), tag: 1, ty: 6, flags: 0, default: None }, // 370: Auth-list.names.ml
     Member { name: Name(157, 3), tag: 2, ty: 6, flags: 0, default: None }, // 371: Auth-list.names.str
@@ -1452,40 +1452,40 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(3406, 4), tag: 9, ty: 5, flags: 0, default: None }, // 381: Title.E.isbn
     Member { name: Name(3136, 7), tag: 0, ty: 118, flags: 0, default: None }, // 382: Cit-sub.authors
     Member { name: Name(3425, 3), tag: 1, ty: 132, flags: OPTIONAL, default: None }, // 383: Cit-sub.imp
-    Member { name: Name(3428, 6), tag: 2, ty: 139, flags: OPTIONAL, default: None }, // 384: Cit-sub.medium
+    Member { name: Name(3428, 6), tag: 2, ty: 139, flags: OPTIONAL | SET_FLAG, default: None }, // 384: Cit-sub.medium
     Member { name: Name(2943, 4), tag: 3, ty: 19, flags: OPTIONAL, default: None }, // 385: Cit-sub.date
-    Member { name: Name(205, 5), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 386: Cit-sub.descr
+    Member { name: Name(205, 5), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 386: Cit-sub.descr
     Member { name: Name(2943, 4), tag: 0, ty: 19, flags: 0, default: None }, // 387: Imprint.date
-    Member { name: Name(3143, 6), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 388: Imprint.volume
-    Member { name: Name(3149, 5), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 389: Imprint.issue
-    Member { name: Name(3154, 5), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 390: Imprint.pages
-    Member { name: Name(3441, 7), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 391: Imprint.section
+    Member { name: Name(3143, 6), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 388: Imprint.volume
+    Member { name: Name(3149, 5), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 389: Imprint.issue
+    Member { name: Name(3154, 5), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 390: Imprint.pages
+    Member { name: Name(3441, 7), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 391: Imprint.section
     Member { name: Name(617, 3), tag: 5, ty: 124, flags: OPTIONAL, default: None }, // 392: Imprint.pub
     Member { name: Name(3448, 4), tag: 6, ty: 19, flags: OPTIONAL, default: None }, // 393: Imprint.cprt
-    Member { name: Name(3452, 8), tag: 7, ty: 5, flags: OPTIONAL, default: None }, // 394: Imprint.part-sup
-    Member { name: Name(3465, 8), tag: 8, ty: 5, flags: DEFAULT, default: Some(Name(3460, 5)) }, // 395: Imprint.language
-    Member { name: Name(3473, 6), tag: 9, ty: 133, flags: OPTIONAL, default: None }, // 396: Imprint.prepub
-    Member { name: Name(3479, 9), tag: 10, ty: 5, flags: OPTIONAL, default: None }, // 397: Imprint.part-supi
+    Member { name: Name(3452, 8), tag: 7, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 394: Imprint.part-sup
+    Member { name: Name(3465, 8), tag: 8, ty: 5, flags: DEFAULT | SET_FLAG, default: Some(Name(3460, 5)) }, // 395: Imprint.language
+    Member { name: Name(3473, 6), tag: 9, ty: 133, flags: OPTIONAL | SET_FLAG, default: None }, // 396: Imprint.prepub
+    Member { name: Name(3479, 9), tag: 10, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 397: Imprint.part-supi
     Member { name: Name(3488, 7), tag: 11, ty: 134, flags: OPTIONAL, default: None }, // 398: Imprint.retract
-    Member { name: Name(3495, 9), tag: 12, ty: 136, flags: OPTIONAL, default: None }, // 399: Imprint.pubstatus
+    Member { name: Name(3495, 9), tag: 12, ty: 136, flags: OPTIONAL | SET_FLAG, default: None }, // 399: Imprint.pubstatus
     Member { name: Name(3504, 7), tag: 13, ty: 137, flags: OPTIONAL, default: None }, // 400: Imprint.history
-    Member { name: Name(1328, 4), tag: 0, ty: 135, flags: 0, default: None }, // 401: CitRetract.type
-    Member { name: Name(3538, 3), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 402: CitRetract.exp
-    Member { name: Name(3495, 9), tag: 0, ty: 136, flags: 0, default: None }, // 403: PubStatusDate.pubstatus
+    Member { name: Name(1328, 4), tag: 0, ty: 135, flags: SET_FLAG, default: None }, // 401: CitRetract.type
+    Member { name: Name(3538, 3), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 402: CitRetract.exp
+    Member { name: Name(3495, 9), tag: 0, ty: 136, flags: SET_FLAG, default: None }, // 403: PubStatusDate.pubstatus
     Member { name: Name(2943, 4), tag: 1, ty: 19, flags: 0, default: None }, // 404: PubStatusDate.date
-    Member { name: Name(3730, 3), tag: 0, ty: 16, flags: OPTIONAL, default: None }, // 405: Medline-entry.uid
+    Member { name: Name(3730, 3), tag: 0, ty: 16, flags: OPTIONAL | SET_FLAG, default: None }, // 405: Medline-entry.uid
     Member { name: Name(3733, 2), tag: 1, ty: 19, flags: 0, default: None }, // 406: Medline-entry.em
     Member { name: Name(409, 3), tag: 2, ty: 141, flags: 0, default: None }, // 407: Medline-entry.cit
-    Member { name: Name(3735, 8), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 408: Medline-entry.abstract
-    Member { name: Name(3743, 4), tag: 4, ty: 158, flags: OPTIONAL, default: None }, // 409: Medline-entry.mesh
-    Member { name: Name(3747, 9), tag: 5, ty: 161, flags: OPTIONAL, default: None }, // 410: Medline-entry.substance
-    Member { name: Name(3756, 4), tag: 6, ty: 164, flags: OPTIONAL, default: None }, // 411: Medline-entry.xref
-    Member { name: Name(3760, 5), tag: 7, ty: 29, flags: OPTIONAL, default: None }, // 412: Medline-entry.idnum
-    Member { name: Name(3765, 4), tag: 8, ty: 29, flags: OPTIONAL, default: None }, // 413: Medline-entry.gene
-    Member { name: Name(3125, 4), tag: 9, ty: 130, flags: OPTIONAL, default: None }, // 414: Medline-entry.pmid
-    Member { name: Name(3769, 8), tag: 10, ty: 29, flags: OPTIONAL, default: None }, // 415: Medline-entry.pub-type
-    Member { name: Name(3777, 7), tag: 11, ty: 170, flags: OPTIONAL, default: None }, // 416: Medline-entry.mlfield
-    Member { name: Name(3784, 6), tag: 12, ty: 171, flags: DEFAULT, default: Some(Name(3083, 7)) }, // 417: Medline-entry.status
+    Member { name: Name(3735, 8), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 408: Medline-entry.abstract
+    Member { name: Name(3743, 4), tag: 4, ty: 158, flags: OPTIONAL | SET_FLAG, default: None }, // 409: Medline-entry.mesh
+    Member { name: Name(3747, 9), tag: 5, ty: 161, flags: OPTIONAL | SET_FLAG, default: None }, // 410: Medline-entry.substance
+    Member { name: Name(3756, 4), tag: 6, ty: 164, flags: OPTIONAL | SET_FLAG, default: None }, // 411: Medline-entry.xref
+    Member { name: Name(3760, 5), tag: 7, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 412: Medline-entry.idnum
+    Member { name: Name(3765, 4), tag: 8, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 413: Medline-entry.gene
+    Member { name: Name(3125, 4), tag: 9, ty: 130, flags: OPTIONAL | SET_FLAG, default: None }, // 414: Medline-entry.pmid
+    Member { name: Name(3769, 8), tag: 10, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 415: Medline-entry.pub-type
+    Member { name: Name(3777, 7), tag: 11, ty: 170, flags: OPTIONAL | SET_FLAG, default: None }, // 416: Medline-entry.mlfield
+    Member { name: Name(3784, 6), tag: 12, ty: 171, flags: DEFAULT | SET_FLAG, default: Some(Name(3083, 7)) }, // 417: Medline-entry.status
     Member { name: Name(593, 5), tag: 0, ty: 128, flags: OPTIONAL, default: None }, // 418: Cit-art.title
     Member { name: Name(3136, 7), tag: 1, ty: 118, flags: OPTIONAL, default: None }, // 419: Cit-art.authors
     Member { name: Name(1986, 4), tag: 2, ty: 146, flags: 0, default: None }, // 420: Cit-art.from
@@ -1498,7 +1498,7 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(3425, 3), tag: 3, ty: 132, flags: 0, default: None }, // 427: Cit-book.imp
     Member { name: Name(3108, 4), tag: 0, ty: 143, flags: 0, default: None }, // 428: Cit-proc.book
     Member { name: Name(3825, 4), tag: 1, ty: 145, flags: 0, default: None }, // 429: Cit-proc.meet
-    Member { name: Name(444, 6), tag: 0, ty: 5, flags: 0, default: None }, // 430: Meeting.number
+    Member { name: Name(444, 6), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 430: Meeting.number
     Member { name: Name(2943, 4), tag: 1, ty: 19, flags: 0, default: None }, // 431: Meeting.date
     Member { name: Name(3836, 5), tag: 2, ty: 124, flags: OPTIONAL, default: None }, // 432: Meeting.place
     Member { name: Name(3101, 7), tag: 0, ty: 142, flags: 0, default: None }, // 433: Cit-art.from.journal
@@ -1512,115 +1512,115 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(3873, 6), tag: 5, ty: 153, flags: 0, default: None }, // 441: ArticleId.pmcpid
     Member { name: Name(3879, 5), tag: 6, ty: 154, flags: 0, default: None }, // 442: ArticleId.pmpid
     Member { name: Name(286, 5), tag: 7, ty: 15, flags: 0, default: None }, // 443: ArticleId.other
-    Member { name: Name(3928, 2), tag: 0, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 444: Medline-mesh.mp
-    Member { name: Name(3930, 4), tag: 1, ty: 5, flags: 0, default: None }, // 445: Medline-mesh.term
-    Member { name: Name(3934, 4), tag: 2, ty: 157, flags: OPTIONAL, default: None }, // 446: Medline-mesh.qual
-    Member { name: Name(3928, 2), tag: 0, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 447: Medline-qual.mp
-    Member { name: Name(3950, 4), tag: 1, ty: 5, flags: 0, default: None }, // 448: Medline-qual.subh
-    Member { name: Name(1328, 4), tag: 0, ty: 160, flags: 0, default: None }, // 449: Medline-rn.type
-    Member { name: Name(409, 3), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 450: Medline-rn.cit
-    Member { name: Name(371, 4), tag: 2, ty: 5, flags: 0, default: None }, // 451: Medline-rn.name
-    Member { name: Name(1328, 4), tag: 0, ty: 163, flags: 0, default: None }, // 452: Medline-si.type
-    Member { name: Name(409, 3), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 453: Medline-si.cit
-    Member { name: Name(1328, 4), tag: 0, ty: 166, flags: 0, default: None }, // 454: Medline-field.type
-    Member { name: Name(157, 3), tag: 1, ty: 5, flags: 0, default: None }, // 455: Medline-field.str
-    Member { name: Name(1834, 3), tag: 2, ty: 169, flags: OPTIONAL, default: None }, // 456: Medline-field.ids
-    Member { name: Name(1328, 4), tag: 0, ty: 168, flags: 0, default: None }, // 457: DocRef.type
-    Member { name: Name(3730, 3), tag: 1, ty: 16, flags: 0, default: None }, // 458: DocRef.uid
-    Member { name: Name(593, 5), tag: 0, ty: 5, flags: 0, default: None }, // 459: Cit-pat.title
+    Member { name: Name(3928, 2), tag: 0, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 444: Medline-mesh.mp
+    Member { name: Name(3930, 4), tag: 1, ty: 5, flags: SET_FLAG, default: None }, // 445: Medline-mesh.term
+    Member { name: Name(3934, 4), tag: 2, ty: 157, flags: OPTIONAL | SET_FLAG, default: None }, // 446: Medline-mesh.qual
+    Member { name: Name(3928, 2), tag: 0, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 447: Medline-qual.mp
+    Member { name: Name(3950, 4), tag: 1, ty: 5, flags: SET_FLAG, default: None }, // 448: Medline-qual.subh
+    Member { name: Name(1328, 4), tag: 0, ty: 160, flags: SET_FLAG, default: None }, // 449: Medline-rn.type
+    Member { name: Name(409, 3), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 450: Medline-rn.cit
+    Member { name: Name(371, 4), tag: 2, ty: 5, flags: SET_FLAG, default: None }, // 451: Medline-rn.name
+    Member { name: Name(1328, 4), tag: 0, ty: 163, flags: SET_FLAG, default: None }, // 452: Medline-si.type
+    Member { name: Name(409, 3), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 453: Medline-si.cit
+    Member { name: Name(1328, 4), tag: 0, ty: 166, flags: SET_FLAG, default: None }, // 454: Medline-field.type
+    Member { name: Name(157, 3), tag: 1, ty: 5, flags: SET_FLAG, default: None }, // 455: Medline-field.str
+    Member { name: Name(1834, 3), tag: 2, ty: 169, flags: OPTIONAL | SET_FLAG, default: None }, // 456: Medline-field.ids
+    Member { name: Name(1328, 4), tag: 0, ty: 168, flags: SET_FLAG, default: None }, // 457: DocRef.type
+    Member { name: Name(3730, 3), tag: 1, ty: 16, flags: SET_FLAG, default: None }, // 458: DocRef.uid
+    Member { name: Name(593, 5), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 459: Cit-pat.title
     Member { name: Name(3136, 7), tag: 1, ty: 118, flags: 0, default: None }, // 460: Cit-pat.authors
-    Member { name: Name(429, 7), tag: 2, ty: 5, flags: 0, default: None }, // 461: Cit-pat.country
-    Member { name: Name(436, 8), tag: 3, ty: 5, flags: 0, default: None }, // 462: Cit-pat.doc-type
-    Member { name: Name(444, 6), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 463: Cit-pat.number
+    Member { name: Name(429, 7), tag: 2, ty: 5, flags: SET_FLAG, default: None }, // 461: Cit-pat.country
+    Member { name: Name(436, 8), tag: 3, ty: 5, flags: SET_FLAG, default: None }, // 462: Cit-pat.doc-type
+    Member { name: Name(444, 6), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 463: Cit-pat.number
     Member { name: Name(4063, 10), tag: 5, ty: 19, flags: OPTIONAL, default: None }, // 464: Cit-pat.date-issue
-    Member { name: Name(1258, 5), tag: 6, ty: 6, flags: OPTIONAL, default: None }, // 465: Cit-pat.class
-    Member { name: Name(450, 10), tag: 7, ty: 5, flags: OPTIONAL, default: None }, // 466: Cit-pat.app-number
+    Member { name: Name(1258, 5), tag: 6, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 465: Cit-pat.class
+    Member { name: Name(450, 10), tag: 7, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 466: Cit-pat.app-number
     Member { name: Name(4073, 8), tag: 8, ty: 19, flags: OPTIONAL, default: None }, // 467: Cit-pat.app-date
     Member { name: Name(4081, 10), tag: 9, ty: 118, flags: OPTIONAL, default: None }, // 468: Cit-pat.applicants
     Member { name: Name(4091, 9), tag: 10, ty: 118, flags: OPTIONAL, default: None }, // 469: Cit-pat.assignees
-    Member { name: Name(4100, 8), tag: 11, ty: 174, flags: OPTIONAL, default: None }, // 470: Cit-pat.priority
-    Member { name: Name(3735, 8), tag: 12, ty: 5, flags: OPTIONAL, default: None }, // 471: Cit-pat.abstract
-    Member { name: Name(429, 7), tag: 0, ty: 5, flags: 0, default: None }, // 472: Patent-priority.country
-    Member { name: Name(444, 6), tag: 1, ty: 5, flags: 0, default: None }, // 473: Patent-priority.number
+    Member { name: Name(4100, 8), tag: 11, ty: 174, flags: OPTIONAL | SET_FLAG, default: None }, // 470: Cit-pat.priority
+    Member { name: Name(3735, 8), tag: 12, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 471: Cit-pat.abstract
+    Member { name: Name(429, 7), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 472: Patent-priority.country
+    Member { name: Name(444, 6), tag: 1, ty: 5, flags: SET_FLAG, default: None }, // 473: Patent-priority.number
     Member { name: Name(2943, 4), tag: 2, ty: 19, flags: 0, default: None }, // 474: Patent-priority.date
     Member { name: Name(409, 3), tag: 0, ty: 143, flags: 0, default: None }, // 475: Cit-let.cit
-    Member { name: Name(4130, 6), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 476: Cit-let.man-id
-    Member { name: Name(1328, 4), tag: 2, ty: 176, flags: OPTIONAL, default: None }, // 477: Cit-let.type
-    Member { name: Name(1258, 5), tag: 0, ty: 180, flags: 0, default: None }, // 478: SP-block.class
-    Member { name: Name(4195, 9), tag: 1, ty: 29, flags: OPTIONAL, default: None }, // 479: SP-block.extra-acc
-    Member { name: Name(4204, 5), tag: 2, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 480: SP-block.imeth
-    Member { name: Name(4209, 6), tag: 3, ty: 29, flags: OPTIONAL, default: None }, // 481: SP-block.plasnm
-    Member { name: Name(2954, 6), tag: 4, ty: 21, flags: OPTIONAL, default: None }, // 482: SP-block.seqref
-    Member { name: Name(4215, 5), tag: 5, ty: 30, flags: OPTIONAL, default: None }, // 483: SP-block.dbref
-    Member { name: Name(2920, 8), tag: 6, ty: 29, flags: OPTIONAL, default: None }, // 484: SP-block.keywords
+    Member { name: Name(4130, 6), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 476: Cit-let.man-id
+    Member { name: Name(1328, 4), tag: 2, ty: 176, flags: OPTIONAL | SET_FLAG, default: None }, // 477: Cit-let.type
+    Member { name: Name(1258, 5), tag: 0, ty: 180, flags: SET_FLAG, default: None }, // 478: SP-block.class
+    Member { name: Name(4195, 9), tag: 1, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 479: SP-block.extra-acc
+    Member { name: Name(4204, 5), tag: 2, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 480: SP-block.imeth
+    Member { name: Name(4209, 6), tag: 3, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 481: SP-block.plasnm
+    Member { name: Name(2954, 6), tag: 4, ty: 21, flags: OPTIONAL | SET_FLAG, default: None }, // 482: SP-block.seqref
+    Member { name: Name(4215, 5), tag: 5, ty: 30, flags: OPTIONAL | SET_FLAG, default: None }, // 483: SP-block.dbref
+    Member { name: Name(2920, 8), tag: 6, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 484: SP-block.keywords
     Member { name: Name(4220, 7), tag: 7, ty: 19, flags: OPTIONAL, default: None }, // 485: SP-block.created
     Member { name: Name(4227, 6), tag: 8, ty: 19, flags: OPTIONAL, default: None }, // 486: SP-block.sequpd
     Member { name: Name(4233, 8), tag: 9, ty: 19, flags: OPTIONAL, default: None }, // 487: SP-block.annotupd
-    Member { name: Name(1258, 5), tag: 0, ty: 182, flags: DEFAULT, default: Some(Name(4241, 8)) }, // 488: EMBL-block.class
-    Member { name: Name(1149, 3), tag: 1, ty: 183, flags: OPTIONAL, default: None }, // 489: EMBL-block.div
+    Member { name: Name(1258, 5), tag: 0, ty: 182, flags: DEFAULT | SET_FLAG, default: Some(Name(4241, 8)) }, // 488: EMBL-block.class
+    Member { name: Name(1149, 3), tag: 1, ty: 183, flags: OPTIONAL | SET_FLAG, default: None }, // 489: EMBL-block.div
     Member { name: Name(4277, 13), tag: 2, ty: 19, flags: 0, default: None }, // 490: EMBL-block.creation-date
     Member { name: Name(649, 11), tag: 3, ty: 19, flags: 0, default: None }, // 491: EMBL-block.update-date
-    Member { name: Name(4195, 9), tag: 4, ty: 6, flags: OPTIONAL, default: None }, // 492: EMBL-block.extra-acc
-    Member { name: Name(2920, 8), tag: 5, ty: 6, flags: OPTIONAL, default: None }, // 493: EMBL-block.keywords
-    Member { name: Name(3756, 4), tag: 6, ty: 187, flags: OPTIONAL, default: None }, // 494: EMBL-block.xref
+    Member { name: Name(4195, 9), tag: 4, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 492: EMBL-block.extra-acc
+    Member { name: Name(2920, 8), tag: 5, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 493: EMBL-block.keywords
+    Member { name: Name(3756, 4), tag: 6, ty: 187, flags: OPTIONAL | SET_FLAG, default: None }, // 494: EMBL-block.xref
     Member { name: Name(4346, 6), tag: 0, ty: 185, flags: 0, default: None }, // 495: EMBL-xref.dbname
-    Member { name: Name(155, 2), tag: 1, ty: 110, flags: 0, default: None }, // 496: EMBL-xref.id
+    Member { name: Name(155, 2), tag: 1, ty: 110, flags: SET_FLAG, default: None }, // 496: EMBL-xref.id
     Member { name: Name(4363, 4), tag: 0, ty: 186, flags: 0, default: None }, // 497: EMBL-dbname.code
     Member { name: Name(371, 4), tag: 1, ty: 5, flags: 0, default: None }, // 498: EMBL-dbname.name
     Member { name: Name(4432, 9), tag: 0, ty: 189, flags: OPTIONAL, default: None }, // 499: PRF-block.extra-src
-    Member { name: Name(2920, 8), tag: 1, ty: 6, flags: OPTIONAL, default: None }, // 500: PRF-block.keywords
-    Member { name: Name(2874, 4), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 501: PRF-ExtraSrc.host
-    Member { name: Name(4453, 4), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 502: PRF-ExtraSrc.part
-    Member { name: Name(4457, 5), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 503: PRF-ExtraSrc.state
-    Member { name: Name(1313, 6), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 504: PRF-ExtraSrc.strain
-    Member { name: Name(4462, 5), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 505: PRF-ExtraSrc.taxon
+    Member { name: Name(2920, 8), tag: 1, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 500: PRF-block.keywords
+    Member { name: Name(2874, 4), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 501: PRF-ExtraSrc.host
+    Member { name: Name(4453, 4), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 502: PRF-ExtraSrc.part
+    Member { name: Name(4457, 5), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 503: PRF-ExtraSrc.state
+    Member { name: Name(1313, 6), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 504: PRF-ExtraSrc.strain
+    Member { name: Name(4462, 5), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 505: PRF-ExtraSrc.taxon
     Member { name: Name(4487, 10), tag: 0, ty: 19, flags: 0, default: None }, // 506: PDB-block.deposition
-    Member { name: Name(1258, 5), tag: 1, ty: 5, flags: 0, default: None }, // 507: PDB-block.class
-    Member { name: Name(4497, 8), tag: 2, ty: 6, flags: 0, default: None }, // 508: PDB-block.compound
-    Member { name: Name(663, 6), tag: 3, ty: 6, flags: 0, default: None }, // 509: PDB-block.source
-    Member { name: Name(4505, 10), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 510: PDB-block.exp-method
+    Member { name: Name(1258, 5), tag: 1, ty: 5, flags: SET_FLAG, default: None }, // 507: PDB-block.class
+    Member { name: Name(4497, 8), tag: 2, ty: 6, flags: SET_FLAG, default: None }, // 508: PDB-block.compound
+    Member { name: Name(663, 6), tag: 3, ty: 6, flags: SET_FLAG, default: None }, // 509: PDB-block.source
+    Member { name: Name(4505, 10), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 510: PDB-block.exp-method
     Member { name: Name(4515, 7), tag: 5, ty: 191, flags: OPTIONAL, default: None }, // 511: PDB-block.replace
     Member { name: Name(2943, 4), tag: 0, ty: 19, flags: 0, default: None }, // 512: PDB-replace.date
-    Member { name: Name(1834, 3), tag: 1, ty: 6, flags: 0, default: None }, // 513: PDB-replace.ids
-    Member { name: Name(4565, 6), tag: 0, ty: 194, flags: DEFAULT, default: Some(Name(691, 7)) }, // 514: BioSource.genome
-    Member { name: Name(2999, 6), tag: 1, ty: 195, flags: DEFAULT, default: Some(Name(691, 7)) }, // 515: BioSource.origin
+    Member { name: Name(1834, 3), tag: 1, ty: 6, flags: SET_FLAG, default: None }, // 513: PDB-replace.ids
+    Member { name: Name(4565, 6), tag: 0, ty: 194, flags: DEFAULT | SET_FLAG, default: Some(Name(691, 7)) }, // 514: BioSource.genome
+    Member { name: Name(2999, 6), tag: 1, ty: 195, flags: DEFAULT | SET_FLAG, default: Some(Name(691, 7)) }, // 515: BioSource.origin
     Member { name: Name(598, 3), tag: 2, ty: 28, flags: 0, default: None }, // 516: BioSource.org
-    Member { name: Name(1299, 7), tag: 3, ty: 198, flags: OPTIONAL, default: None }, // 517: BioSource.subtype
-    Member { name: Name(4571, 8), tag: 4, ty: 64, flags: OPTIONAL, default: None }, // 518: BioSource.is-focus
+    Member { name: Name(1299, 7), tag: 3, ty: 198, flags: OPTIONAL | SET_FLAG, default: None }, // 517: BioSource.subtype
+    Member { name: Name(4571, 8), tag: 4, ty: 64, flags: OPTIONAL | SET_FLAG, default: None }, // 518: BioSource.is-focus
     Member { name: Name(4579, 11), tag: 5, ty: 199, flags: OPTIONAL, default: None }, // 519: BioSource.pcr-primers
-    Member { name: Name(1299, 7), tag: 0, ty: 197, flags: 0, default: None }, // 520: SubSource.subtype
-    Member { name: Name(371, 4), tag: 1, ty: 5, flags: 0, default: None }, // 521: SubSource.name
-    Member { name: Name(1125, 6), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 522: SubSource.attrib
+    Member { name: Name(1299, 7), tag: 0, ty: 197, flags: SET_FLAG, default: None }, // 520: SubSource.subtype
+    Member { name: Name(371, 4), tag: 1, ty: 5, flags: SET_FLAG, default: None }, // 521: SubSource.name
+    Member { name: Name(1125, 6), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 522: SubSource.attrib
     Member { name: Name(5256, 7), tag: 0, ty: 201, flags: OPTIONAL, default: None }, // 523: PCRReaction.forward
     Member { name: Name(5263, 7), tag: 1, ty: 201, flags: OPTIONAL, default: None }, // 524: PCRReaction.reverse
-    Member { name: Name(180, 3), tag: 0, ty: 203, flags: OPTIONAL, default: None }, // 525: PCRPrimer.seq
-    Member { name: Name(371, 4), tag: 1, ty: 204, flags: OPTIONAL, default: None }, // 526: PCRPrimer.name
-    Member { name: Name(5323, 6), tag: 0, ty: 206, flags: DEFAULT, default: Some(Name(691, 7)) }, // 527: MolInfo.biomol
-    Member { name: Name(5329, 4), tag: 1, ty: 207, flags: DEFAULT, default: Some(Name(691, 7)) }, // 528: MolInfo.tech
-    Member { name: Name(5333, 7), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 529: MolInfo.techexp
-    Member { name: Name(5340, 12), tag: 3, ty: 208, flags: DEFAULT, default: Some(Name(691, 7)) }, // 530: MolInfo.completeness
-    Member { name: Name(5352, 9), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 531: MolInfo.gbmoltype
-    Member { name: Name(587, 6), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 532: ModelEvidenceSupport.method
-    Member { name: Name(5528, 4), tag: 1, ty: 211, flags: OPTIONAL, default: None }, // 533: ModelEvidenceSupport.mrna
-    Member { name: Name(947, 3), tag: 2, ty: 211, flags: OPTIONAL, default: None }, // 534: ModelEvidenceSupport.est
-    Member { name: Name(2314, 7), tag: 3, ty: 211, flags: OPTIONAL, default: None }, // 535: ModelEvidenceSupport.protein
+    Member { name: Name(180, 3), tag: 0, ty: 203, flags: OPTIONAL | SET_FLAG, default: None }, // 525: PCRPrimer.seq
+    Member { name: Name(371, 4), tag: 1, ty: 204, flags: OPTIONAL | SET_FLAG, default: None }, // 526: PCRPrimer.name
+    Member { name: Name(5323, 6), tag: 0, ty: 206, flags: DEFAULT | SET_FLAG, default: Some(Name(691, 7)) }, // 527: MolInfo.biomol
+    Member { name: Name(5329, 4), tag: 1, ty: 207, flags: DEFAULT | SET_FLAG, default: Some(Name(691, 7)) }, // 528: MolInfo.tech
+    Member { name: Name(5333, 7), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 529: MolInfo.techexp
+    Member { name: Name(5340, 12), tag: 3, ty: 208, flags: DEFAULT | SET_FLAG, default: Some(Name(691, 7)) }, // 530: MolInfo.completeness
+    Member { name: Name(5352, 9), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 531: MolInfo.gbmoltype
+    Member { name: Name(587, 6), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 532: ModelEvidenceSupport.method
+    Member { name: Name(5528, 4), tag: 1, ty: 211, flags: OPTIONAL | SET_FLAG, default: None }, // 533: ModelEvidenceSupport.mrna
+    Member { name: Name(947, 3), tag: 2, ty: 211, flags: OPTIONAL | SET_FLAG, default: None }, // 534: ModelEvidenceSupport.est
+    Member { name: Name(2314, 7), tag: 3, ty: 211, flags: OPTIONAL | SET_FLAG, default: None }, // 535: ModelEvidenceSupport.protein
     Member { name: Name(5532, 14), tag: 4, ty: 9, flags: OPTIONAL, default: None }, // 536: ModelEvidenceSupport.identification
-    Member { name: Name(632, 6), tag: 5, ty: 30, flags: OPTIONAL, default: None }, // 537: ModelEvidenceSupport.dbxref
-    Member { name: Name(5546, 10), tag: 6, ty: 4, flags: OPTIONAL, default: None }, // 538: ModelEvidenceSupport.exon-count
-    Member { name: Name(5556, 11), tag: 7, ty: 4, flags: OPTIONAL, default: None }, // 539: ModelEvidenceSupport.exon-length
-    Member { name: Name(5567, 11), tag: 8, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 540: ModelEvidenceSupport.full-length
-    Member { name: Name(5578, 23), tag: 9, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 541: ModelEvidenceSupport.supports-all-exon-combo
+    Member { name: Name(632, 6), tag: 5, ty: 30, flags: OPTIONAL | SET_FLAG, default: None }, // 537: ModelEvidenceSupport.dbxref
+    Member { name: Name(5546, 10), tag: 6, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 538: ModelEvidenceSupport.exon-count
+    Member { name: Name(5556, 11), tag: 7, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 539: ModelEvidenceSupport.exon-length
+    Member { name: Name(5567, 11), tag: 8, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 540: ModelEvidenceSupport.full-length
+    Member { name: Name(5578, 23), tag: 9, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 541: ModelEvidenceSupport.supports-all-exon-combo
     Member { name: Name(155, 2), tag: 0, ty: 9, flags: 0, default: None }, // 542: ModelEvidenceItem.id
-    Member { name: Name(5546, 10), tag: 1, ty: 4, flags: OPTIONAL, default: None }, // 543: ModelEvidenceItem.exon-count
-    Member { name: Name(5556, 11), tag: 2, ty: 4, flags: OPTIONAL, default: None }, // 544: ModelEvidenceItem.exon-length
-    Member { name: Name(5567, 11), tag: 3, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 545: ModelEvidenceItem.full-length
-    Member { name: Name(5578, 23), tag: 4, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 546: ModelEvidenceItem.supports-all-exon-combo
-    Member { name: Name(5626, 4), tag: 0, ty: 213, flags: 0, default: None }, // 547: Seq-inst.repr
-    Member { name: Name(478, 3), tag: 1, ty: 214, flags: 0, default: None }, // 548: Seq-inst.mol
-    Member { name: Name(5630, 6), tag: 2, ty: 44, flags: OPTIONAL, default: None }, // 549: Seq-inst.length
+    Member { name: Name(5546, 10), tag: 1, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 543: ModelEvidenceItem.exon-count
+    Member { name: Name(5556, 11), tag: 2, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 544: ModelEvidenceItem.exon-length
+    Member { name: Name(5567, 11), tag: 3, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 545: ModelEvidenceItem.full-length
+    Member { name: Name(5578, 23), tag: 4, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 546: ModelEvidenceItem.supports-all-exon-combo
+    Member { name: Name(5626, 4), tag: 0, ty: 213, flags: SET_FLAG, default: None }, // 547: Seq-inst.repr
+    Member { name: Name(478, 3), tag: 1, ty: 214, flags: SET_FLAG, default: None }, // 548: Seq-inst.mol
+    Member { name: Name(5630, 6), tag: 2, ty: 44, flags: OPTIONAL | SET_FLAG, default: None }, // 549: Seq-inst.length
     Member { name: Name(2089, 4), tag: 3, ty: 66, flags: OPTIONAL, default: None }, // 550: Seq-inst.fuzz
-    Member { name: Name(5642, 8), tag: 4, ty: 215, flags: DEFAULT, default: Some(Name(5636, 6)) }, // 551: Seq-inst.topology
-    Member { name: Name(1992, 6), tag: 5, ty: 216, flags: OPTIONAL, default: None }, // 552: Seq-inst.strand
+    Member { name: Name(5642, 8), tag: 4, ty: 215, flags: DEFAULT | SET_FLAG, default: Some(Name(5636, 6)) }, // 551: Seq-inst.topology
+    Member { name: Name(1992, 6), tag: 5, ty: 216, flags: OPTIONAL | SET_FLAG, default: None }, // 552: Seq-inst.strand
     Member { name: Name(5650, 8), tag: 6, ty: 217, flags: OPTIONAL, default: None }, // 553: Seq-inst.seq-data
     Member { name: Name(1792, 3), tag: 7, ty: 234, flags: OPTIONAL, default: None }, // 554: Seq-inst.ext
     Member { name: Name(5658, 4), tag: 8, ty: 357, flags: OPTIONAL, default: None }, // 555: Seq-inst.hist
@@ -1635,32 +1635,32 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(5782, 7), tag: 8, ty: 226, flags: 0, default: None }, // 564: Seq-data.ncbipaa
     Member { name: Name(5789, 9), tag: 9, ty: 227, flags: 0, default: None }, // 565: Seq-data.ncbistdaa
     Member { name: Name(5798, 3), tag: 10, ty: 228, flags: 0, default: None }, // 566: Seq-data.gap
-    Member { name: Name(1328, 4), tag: 0, ty: 229, flags: 0, default: None }, // 567: Seq-gap.type
-    Member { name: Name(5880, 7), tag: 1, ty: 230, flags: OPTIONAL, default: None }, // 568: Seq-gap.linkage
-    Member { name: Name(5887, 16), tag: 2, ty: 233, flags: OPTIONAL, default: None }, // 569: Seq-gap.linkage-evidence
-    Member { name: Name(1328, 4), tag: 0, ty: 232, flags: 0, default: None }, // 570: Linkage-evidence.type
+    Member { name: Name(1328, 4), tag: 0, ty: 229, flags: SET_FLAG, default: None }, // 567: Seq-gap.type
+    Member { name: Name(5880, 7), tag: 1, ty: 230, flags: OPTIONAL | SET_FLAG, default: None }, // 568: Seq-gap.linkage
+    Member { name: Name(5887, 16), tag: 2, ty: 233, flags: OPTIONAL | SET_FLAG, default: None }, // 569: Seq-gap.linkage-evidence
+    Member { name: Name(1328, 4), tag: 0, ty: 232, flags: SET_FLAG, default: None }, // 570: Linkage-evidence.type
     Member { name: Name(5672, 3), tag: 0, ty: 235, flags: 0, default: None }, // 571: Seq-ext.seg
     Member { name: Name(1673, 3), tag: 1, ty: 236, flags: 0, default: None }, // 572: Seq-ext.ref
     Member { name: Name(4780, 3), tag: 2, ty: 237, flags: 0, default: None }, // 573: Seq-ext.map
     Member { name: Name(5686, 5), tag: 3, ty: 355, flags: 0, default: None }, // 574: Seq-ext.delta
     Member { name: Name(155, 2), tag: 0, ty: 76, flags: OPTIONAL, default: None }, // 575: Seq-feat.id
     Member { name: Name(2557, 4), tag: 1, ty: 239, flags: 0, default: None }, // 576: Seq-feat.data
-    Member { name: Name(861, 7), tag: 2, ty: 2, flags: OPTIONAL, default: None }, // 577: Seq-feat.partial
-    Member { name: Name(6161, 6), tag: 3, ty: 2, flags: OPTIONAL, default: None }, // 578: Seq-feat.except
-    Member { name: Name(601, 7), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 579: Seq-feat.comment
+    Member { name: Name(861, 7), tag: 2, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 577: Seq-feat.partial
+    Member { name: Name(6161, 6), tag: 3, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 578: Seq-feat.except
+    Member { name: Name(601, 7), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 579: Seq-feat.comment
     Member { name: Name(6167, 7), tag: 5, ty: 63, flags: OPTIONAL, default: None }, // 580: Seq-feat.product
     Member { name: Name(6174, 8), tag: 6, ty: 63, flags: 0, default: None }, // 581: Seq-feat.location
-    Member { name: Name(3934, 4), tag: 7, ty: 328, flags: OPTIONAL, default: None }, // 582: Seq-feat.qual
-    Member { name: Name(593, 5), tag: 8, ty: 5, flags: OPTIONAL, default: None }, // 583: Seq-feat.title
+    Member { name: Name(3934, 4), tag: 7, ty: 328, flags: OPTIONAL | SET_FLAG, default: None }, // 582: Seq-feat.qual
+    Member { name: Name(593, 5), tag: 8, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 583: Seq-feat.title
     Member { name: Name(1792, 3), tag: 9, ty: 91, flags: OPTIONAL, default: None }, // 584: Seq-feat.ext
     Member { name: Name(409, 3), tag: 10, ty: 329, flags: OPTIONAL, default: None }, // 585: Seq-feat.cit
-    Member { name: Name(6182, 6), tag: 11, ty: 337, flags: OPTIONAL, default: None }, // 586: Seq-feat.exp-ev
-    Member { name: Name(3756, 4), tag: 12, ty: 339, flags: OPTIONAL, default: None }, // 587: Seq-feat.xref
-    Member { name: Name(632, 6), tag: 13, ty: 30, flags: OPTIONAL, default: None }, // 588: Seq-feat.dbxref
-    Member { name: Name(6188, 6), tag: 14, ty: 2, flags: OPTIONAL, default: None }, // 589: Seq-feat.pseudo
-    Member { name: Name(6194, 11), tag: 15, ty: 5, flags: OPTIONAL, default: None }, // 590: Seq-feat.except-text
-    Member { name: Name(1834, 3), tag: 16, ty: 340, flags: OPTIONAL, default: None }, // 591: Seq-feat.ids
-    Member { name: Name(6205, 4), tag: 17, ty: 341, flags: OPTIONAL, default: None }, // 592: Seq-feat.exts
+    Member { name: Name(6182, 6), tag: 11, ty: 337, flags: OPTIONAL | SET_FLAG, default: None }, // 586: Seq-feat.exp-ev
+    Member { name: Name(3756, 4), tag: 12, ty: 339, flags: OPTIONAL | SET_FLAG, default: None }, // 587: Seq-feat.xref
+    Member { name: Name(632, 6), tag: 13, ty: 30, flags: OPTIONAL | SET_FLAG, default: None }, // 588: Seq-feat.dbxref
+    Member { name: Name(6188, 6), tag: 14, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 589: Seq-feat.pseudo
+    Member { name: Name(6194, 11), tag: 15, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 590: Seq-feat.except-text
+    Member { name: Name(1834, 3), tag: 16, ty: 340, flags: OPTIONAL | SET_FLAG, default: None }, // 591: Seq-feat.ids
+    Member { name: Name(6205, 4), tag: 17, ty: 341, flags: OPTIONAL | SET_FLAG, default: None }, // 592: Seq-feat.exts
     Member { name: Name(6209, 7), tag: 18, ty: 342, flags: OPTIONAL, default: None }, // 593: Seq-feat.support
     Member { name: Name(3765, 4), tag: 0, ty: 240, flags: 0, default: None }, // 594: SeqFeatData.gene
     Member { name: Name(598, 3), tag: 1, ty: 28, flags: 0, default: None }, // 595: SeqFeatData.org
@@ -1684,27 +1684,27 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(6277, 6), tag: 19, ty: 193, flags: 0, default: None }, // 613: SeqFeatData.biosrc
     Member { name: Name(4783, 5), tag: 20, ty: 275, flags: 0, default: None }, // 614: SeqFeatData.clone
     Member { name: Name(6283, 9), tag: 21, ty: 282, flags: 0, default: None }, // 615: SeqFeatData.variation
-    Member { name: Name(6309, 5), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 616: Gene-ref.locus
-    Member { name: Name(6314, 6), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 617: Gene-ref.allele
-    Member { name: Name(6320, 4), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 618: Gene-ref.desc
-    Member { name: Name(611, 6), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 619: Gene-ref.maploc
-    Member { name: Name(6188, 6), tag: 4, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 620: Gene-ref.pseudo
-    Member { name: Name(352, 2), tag: 5, ty: 30, flags: OPTIONAL, default: None }, // 621: Gene-ref.db
-    Member { name: Name(1108, 3), tag: 6, ty: 29, flags: OPTIONAL, default: None }, // 622: Gene-ref.syn
-    Member { name: Name(6324, 9), tag: 7, ty: 5, flags: OPTIONAL, default: None }, // 623: Gene-ref.locus-tag
+    Member { name: Name(6309, 5), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 616: Gene-ref.locus
+    Member { name: Name(6314, 6), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 617: Gene-ref.allele
+    Member { name: Name(6320, 4), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 618: Gene-ref.desc
+    Member { name: Name(611, 6), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 619: Gene-ref.maploc
+    Member { name: Name(6188, 6), tag: 4, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 620: Gene-ref.pseudo
+    Member { name: Name(352, 2), tag: 5, ty: 30, flags: OPTIONAL | SET_FLAG, default: None }, // 621: Gene-ref.db
+    Member { name: Name(1108, 3), tag: 6, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 622: Gene-ref.syn
+    Member { name: Name(6324, 9), tag: 7, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 623: Gene-ref.locus-tag
     Member { name: Name(6333, 11), tag: 8, ty: 241, flags: OPTIONAL, default: None }, // 624: Gene-ref.formal-name
-    Member { name: Name(3784, 6), tag: 0, ty: 242, flags: 0, default: None }, // 625: Gene-nomenclature.status
-    Member { name: Name(6361, 6), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 626: Gene-nomenclature.symbol
-    Member { name: Name(371, 4), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 627: Gene-nomenclature.name
+    Member { name: Name(3784, 6), tag: 0, ty: 242, flags: SET_FLAG, default: None }, // 625: Gene-nomenclature.status
+    Member { name: Name(6361, 6), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 626: Gene-nomenclature.symbol
+    Member { name: Name(371, 4), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 627: Gene-nomenclature.name
     Member { name: Name(663, 6), tag: 3, ty: 15, flags: OPTIONAL, default: None }, // 628: Gene-nomenclature.source
-    Member { name: Name(6390, 3), tag: 0, ty: 2, flags: OPTIONAL, default: None }, // 629: Cdregion.orf
-    Member { name: Name(2459, 5), tag: 1, ty: 244, flags: DEFAULT, default: Some(Name(1738, 7)) }, // 630: Cdregion.frame
-    Member { name: Name(6393, 8), tag: 2, ty: 2, flags: OPTIONAL, default: None }, // 631: Cdregion.conflict
-    Member { name: Name(6401, 4), tag: 3, ty: 44, flags: OPTIONAL, default: None }, // 632: Cdregion.gaps
-    Member { name: Name(2487, 8), tag: 4, ty: 44, flags: OPTIONAL, default: None }, // 633: Cdregion.mismatch
+    Member { name: Name(6390, 3), tag: 0, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 629: Cdregion.orf
+    Member { name: Name(2459, 5), tag: 1, ty: 244, flags: DEFAULT | SET_FLAG, default: Some(Name(1738, 7)) }, // 630: Cdregion.frame
+    Member { name: Name(6393, 8), tag: 2, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 631: Cdregion.conflict
+    Member { name: Name(6401, 4), tag: 3, ty: 44, flags: OPTIONAL | SET_FLAG, default: None }, // 632: Cdregion.gaps
+    Member { name: Name(2487, 8), tag: 4, ty: 44, flags: OPTIONAL | SET_FLAG, default: None }, // 633: Cdregion.mismatch
     Member { name: Name(4363, 4), tag: 5, ty: 245, flags: OPTIONAL, default: None }, // 634: Cdregion.code
-    Member { name: Name(6405, 10), tag: 6, ty: 249, flags: OPTIONAL, default: None }, // 635: Cdregion.code-break
-    Member { name: Name(6415, 5), tag: 7, ty: 44, flags: OPTIONAL, default: None }, // 636: Cdregion.stops
+    Member { name: Name(6405, 10), tag: 6, ty: 249, flags: OPTIONAL | SET_FLAG, default: None }, // 635: Cdregion.code-break
+    Member { name: Name(6415, 5), tag: 7, ty: 44, flags: OPTIONAL | SET_FLAG, default: None }, // 636: Cdregion.stops
     Member { name: Name(371, 4), tag: 0, ty: 5, flags: 0, default: None }, // 637: Genetic-code.E.name
     Member { name: Name(155, 2), tag: 1, ty: 4, flags: 0, default: None }, // 638: Genetic-code.E.id
     Member { name: Name(5775, 7), tag: 2, ty: 5, flags: 0, default: None }, // 639: Genetic-code.E.ncbieaa
@@ -1718,140 +1718,140 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(5775, 7), tag: 0, ty: 4, flags: 0, default: None }, // 647: Code-break.aa.ncbieaa
     Member { name: Name(5768, 7), tag: 1, ty: 4, flags: 0, default: None }, // 648: Code-break.aa.ncbi8aa
     Member { name: Name(5789, 9), tag: 2, ty: 4, flags: 0, default: None }, // 649: Code-break.aa.ncbistdaa
-    Member { name: Name(371, 4), tag: 0, ty: 29, flags: OPTIONAL, default: None }, // 650: Prot-ref.name
-    Member { name: Name(6320, 4), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 651: Prot-ref.desc
-    Member { name: Name(3975, 2), tag: 2, ty: 29, flags: OPTIONAL, default: None }, // 652: Prot-ref.ec
-    Member { name: Name(6499, 8), tag: 3, ty: 29, flags: OPTIONAL, default: None }, // 653: Prot-ref.activity
-    Member { name: Name(352, 2), tag: 4, ty: 30, flags: OPTIONAL, default: None }, // 654: Prot-ref.db
-    Member { name: Name(6507, 9), tag: 5, ty: 251, flags: DEFAULT, default: Some(Name(1738, 7)) }, // 655: Prot-ref.processed
-    Member { name: Name(1328, 4), tag: 0, ty: 253, flags: 0, default: None }, // 656: RNA-ref.type
-    Member { name: Name(6188, 6), tag: 1, ty: 2, flags: OPTIONAL, default: None }, // 657: RNA-ref.pseudo
+    Member { name: Name(371, 4), tag: 0, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 650: Prot-ref.name
+    Member { name: Name(6320, 4), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 651: Prot-ref.desc
+    Member { name: Name(3975, 2), tag: 2, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 652: Prot-ref.ec
+    Member { name: Name(6499, 8), tag: 3, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 653: Prot-ref.activity
+    Member { name: Name(352, 2), tag: 4, ty: 30, flags: OPTIONAL | SET_FLAG, default: None }, // 654: Prot-ref.db
+    Member { name: Name(6507, 9), tag: 5, ty: 251, flags: DEFAULT | SET_FLAG, default: Some(Name(1738, 7)) }, // 655: Prot-ref.processed
+    Member { name: Name(1328, 4), tag: 0, ty: 253, flags: SET_FLAG, default: None }, // 656: RNA-ref.type
+    Member { name: Name(6188, 6), tag: 1, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 657: RNA-ref.pseudo
     Member { name: Name(1792, 3), tag: 2, ty: 260, flags: OPTIONAL, default: None }, // 658: RNA-ref.ext
     Member { name: Name(5691, 2), tag: 0, ty: 255, flags: OPTIONAL, default: None }, // 659: Trna-ext.aa
-    Member { name: Name(6607, 5), tag: 1, ty: 256, flags: OPTIONAL, default: None }, // 660: Trna-ext.codon
+    Member { name: Name(6607, 5), tag: 1, ty: 256, flags: OPTIONAL | SET_FLAG, default: None }, // 660: Trna-ext.codon
     Member { name: Name(6612, 9), tag: 2, ty: 63, flags: OPTIONAL, default: None }, // 661: Trna-ext.anticodon
     Member { name: Name(5733, 7), tag: 0, ty: 4, flags: 0, default: None }, // 662: Trna-ext.aa.iupacaa
     Member { name: Name(5775, 7), tag: 1, ty: 4, flags: 0, default: None }, // 663: Trna-ext.aa.ncbieaa
     Member { name: Name(5768, 7), tag: 2, ty: 4, flags: 0, default: None }, // 664: Trna-ext.aa.ncbi8aa
     Member { name: Name(5789, 9), tag: 3, ty: 4, flags: 0, default: None }, // 665: Trna-ext.aa.ncbistdaa
-    Member { name: Name(1258, 5), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 666: RNA-gen.class
-    Member { name: Name(6167, 7), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 667: RNA-gen.product
+    Member { name: Name(1258, 5), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 666: RNA-gen.class
+    Member { name: Name(6167, 7), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 667: RNA-gen.product
     Member { name: Name(6628, 5), tag: 2, ty: 258, flags: OPTIONAL, default: None }, // 668: RNA-gen.quals
-    Member { name: Name(3934, 4), tag: 0, ty: 5, flags: 0, default: None }, // 669: RNA-qual.qual
-    Member { name: Name(6653, 3), tag: 1, ty: 5, flags: 0, default: None }, // 670: RNA-qual.val
+    Member { name: Name(3934, 4), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 669: RNA-qual.qual
+    Member { name: Name(6653, 3), tag: 1, ty: 5, flags: SET_FLAG, default: None }, // 670: RNA-qual.val
     Member { name: Name(371, 4), tag: 0, ty: 5, flags: 0, default: None }, // 671: RNA-ref.ext.name
     Member { name: Name(721, 4), tag: 1, ty: 254, flags: 0, default: None }, // 672: RNA-ref.ext.tRNA
     Member { name: Name(3077, 3), tag: 2, ty: 257, flags: 0, default: None }, // 673: RNA-ref.ext.gen
-    Member { name: Name(6664, 3), tag: 0, ty: 5, flags: 0, default: None }, // 674: Imp-feat.key
-    Member { name: Name(1911, 3), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 675: Imp-feat.loc
-    Member { name: Name(205, 5), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 676: Imp-feat.descr
+    Member { name: Name(6664, 3), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 674: Imp-feat.key
+    Member { name: Name(1911, 3), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 675: Imp-feat.loc
+    Member { name: Name(205, 5), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 676: Imp-feat.descr
     Member { name: Name(157, 3), tag: 0, ty: 5, flags: 0, default: None }, // 677: Rsite-ref.str
     Member { name: Name(352, 2), tag: 1, ty: 15, flags: 0, default: None }, // 678: Rsite-ref.db
-    Member { name: Name(371, 4), tag: 0, ty: 5, flags: 0, default: None }, // 679: Txinit.name
-    Member { name: Name(1108, 3), tag: 1, ty: 6, flags: OPTIONAL, default: None }, // 680: Txinit.syn
-    Member { name: Name(3765, 4), tag: 2, ty: 266, flags: OPTIONAL, default: None }, // 681: Txinit.gene
-    Member { name: Name(2314, 7), tag: 3, ty: 267, flags: OPTIONAL, default: None }, // 682: Txinit.protein
-    Member { name: Name(778, 3), tag: 4, ty: 6, flags: OPTIONAL, default: None }, // 683: Txinit.rna
-    Member { name: Name(7041, 10), tag: 5, ty: 5, flags: OPTIONAL, default: None }, // 684: Txinit.expression
-    Member { name: Name(7051, 8), tag: 6, ty: 268, flags: 0, default: None }, // 685: Txinit.txsystem
-    Member { name: Name(7059, 7), tag: 7, ty: 5, flags: OPTIONAL, default: None }, // 686: Txinit.txdescr
+    Member { name: Name(371, 4), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 679: Txinit.name
+    Member { name: Name(1108, 3), tag: 1, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 680: Txinit.syn
+    Member { name: Name(3765, 4), tag: 2, ty: 266, flags: OPTIONAL | SET_FLAG, default: None }, // 681: Txinit.gene
+    Member { name: Name(2314, 7), tag: 3, ty: 267, flags: OPTIONAL | SET_FLAG, default: None }, // 682: Txinit.protein
+    Member { name: Name(778, 3), tag: 4, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 683: Txinit.rna
+    Member { name: Name(7041, 10), tag: 5, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 684: Txinit.expression
+    Member { name: Name(7051, 8), tag: 6, ty: 268, flags: SET_FLAG, default: None }, // 685: Txinit.txsystem
+    Member { name: Name(7059, 7), tag: 7, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 686: Txinit.txdescr
     Member { name: Name(7066, 5), tag: 8, ty: 28, flags: OPTIONAL, default: None }, // 687: Txinit.txorg
-    Member { name: Name(7071, 15), tag: 9, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 688: Txinit.mapping-precise
-    Member { name: Name(7086, 17), tag: 10, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 689: Txinit.location-accurate
-    Member { name: Name(7103, 8), tag: 11, ty: 269, flags: OPTIONAL, default: None }, // 690: Txinit.inittype
-    Member { name: Name(7111, 8), tag: 12, ty: 273, flags: OPTIONAL, default: None }, // 691: Txinit.evidence
-    Member { name: Name(7179, 8), tag: 0, ty: 271, flags: 0, default: None }, // 692: Tx-evidence.exp-code
-    Member { name: Name(7200, 17), tag: 1, ty: 272, flags: DEFAULT, default: Some(Name(7187, 13)) }, // 693: Tx-evidence.expression-system
-    Member { name: Name(7217, 13), tag: 2, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 694: Tx-evidence.low-prec-data
-    Member { name: Name(7230, 12), tag: 3, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 695: Tx-evidence.from-homolog
-    Member { name: Name(371, 4), tag: 0, ty: 5, flags: 0, default: None }, // 696: Clone-ref.name
-    Member { name: Name(7366, 7), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 697: Clone-ref.library
-    Member { name: Name(7373, 10), tag: 2, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 698: Clone-ref.concordant
-    Member { name: Name(7383, 6), tag: 3, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 699: Clone-ref.unique
-    Member { name: Name(7389, 16), tag: 4, ty: 276, flags: OPTIONAL, default: None }, // 700: Clone-ref.placement-method
+    Member { name: Name(7071, 15), tag: 9, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 688: Txinit.mapping-precise
+    Member { name: Name(7086, 17), tag: 10, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 689: Txinit.location-accurate
+    Member { name: Name(7103, 8), tag: 11, ty: 269, flags: OPTIONAL | SET_FLAG, default: None }, // 690: Txinit.inittype
+    Member { name: Name(7111, 8), tag: 12, ty: 273, flags: OPTIONAL | SET_FLAG, default: None }, // 691: Txinit.evidence
+    Member { name: Name(7179, 8), tag: 0, ty: 271, flags: SET_FLAG, default: None }, // 692: Tx-evidence.exp-code
+    Member { name: Name(7200, 17), tag: 1, ty: 272, flags: DEFAULT | SET_FLAG, default: Some(Name(7187, 13)) }, // 693: Tx-evidence.expression-system
+    Member { name: Name(7217, 13), tag: 2, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 694: Tx-evidence.low-prec-data
+    Member { name: Name(7230, 12), tag: 3, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 695: Tx-evidence.from-homolog
+    Member { name: Name(371, 4), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 696: Clone-ref.name
+    Member { name: Name(7366, 7), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 697: Clone-ref.library
+    Member { name: Name(7373, 10), tag: 2, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 698: Clone-ref.concordant
+    Member { name: Name(7383, 6), tag: 3, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 699: Clone-ref.unique
+    Member { name: Name(7389, 16), tag: 4, ty: 276, flags: OPTIONAL | SET_FLAG, default: None }, // 700: Clone-ref.placement-method
     Member { name: Name(7405, 9), tag: 5, ty: 277, flags: OPTIONAL, default: None }, // 701: Clone-ref.clone-seq
-    Member { name: Name(1328, 4), tag: 0, ty: 279, flags: 0, default: None }, // 702: Clone-seq.type
-    Member { name: Name(7513, 10), tag: 1, ty: 280, flags: OPTIONAL, default: None }, // 703: Clone-seq.confidence
+    Member { name: Name(1328, 4), tag: 0, ty: 279, flags: SET_FLAG, default: None }, // 702: Clone-seq.type
+    Member { name: Name(7513, 10), tag: 1, ty: 280, flags: OPTIONAL | SET_FLAG, default: None }, // 703: Clone-seq.confidence
     Member { name: Name(6174, 8), tag: 2, ty: 63, flags: 0, default: None }, // 704: Clone-seq.location
     Member { name: Name(180, 3), tag: 3, ty: 63, flags: OPTIONAL, default: None }, // 705: Clone-seq.seq
     Member { name: Name(7523, 8), tag: 4, ty: 15, flags: OPTIONAL, default: None }, // 706: Clone-seq.align-id
-    Member { name: Name(6209, 7), tag: 5, ty: 281, flags: OPTIONAL, default: None }, // 707: Clone-seq.support
+    Member { name: Name(6209, 7), tag: 5, ty: 281, flags: OPTIONAL | SET_FLAG, default: None }, // 707: Clone-seq.support
     Member { name: Name(155, 2), tag: 0, ty: 15, flags: OPTIONAL, default: None }, // 708: Variation-ref.id
     Member { name: Name(7674, 9), tag: 1, ty: 15, flags: OPTIONAL, default: None }, // 709: Variation-ref.parent-id
     Member { name: Name(7683, 9), tag: 2, ty: 3, flags: OPTIONAL, default: None }, // 710: Variation-ref.sample-id
-    Member { name: Name(7692, 9), tag: 3, ty: 30, flags: OPTIONAL, default: None }, // 711: Variation-ref.other-ids
-    Member { name: Name(371, 4), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 712: Variation-ref.name
-    Member { name: Name(7701, 8), tag: 5, ty: 29, flags: OPTIONAL, default: None }, // 713: Variation-ref.synonyms
-    Member { name: Name(7709, 11), tag: 6, ty: 5, flags: OPTIONAL, default: None }, // 714: Variation-ref.description
-    Member { name: Name(5214, 9), tag: 7, ty: 285, flags: OPTIONAL, default: None }, // 715: Variation-ref.phenotype
-    Member { name: Name(587, 6), tag: 8, ty: 287, flags: OPTIONAL, default: None }, // 716: Variation-ref.method
-    Member { name: Name(7720, 15), tag: 9, ty: 291, flags: OPTIONAL, default: None }, // 717: Variation-ref.population-data
+    Member { name: Name(7692, 9), tag: 3, ty: 30, flags: OPTIONAL | SET_FLAG, default: None }, // 711: Variation-ref.other-ids
+    Member { name: Name(371, 4), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 712: Variation-ref.name
+    Member { name: Name(7701, 8), tag: 5, ty: 29, flags: OPTIONAL | SET_FLAG, default: None }, // 713: Variation-ref.synonyms
+    Member { name: Name(7709, 11), tag: 6, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 714: Variation-ref.description
+    Member { name: Name(5214, 9), tag: 7, ty: 285, flags: OPTIONAL | SET_FLAG, default: None }, // 715: Variation-ref.phenotype
+    Member { name: Name(587, 6), tag: 8, ty: 287, flags: OPTIONAL | SET_FLAG, default: None }, // 716: Variation-ref.method
+    Member { name: Name(7720, 15), tag: 9, ty: 291, flags: OPTIONAL | SET_FLAG, default: None }, // 717: Variation-ref.population-data
     Member { name: Name(7735, 12), tag: 10, ty: 292, flags: OPTIONAL, default: None }, // 718: Variation-ref.variant-prop
-    Member { name: Name(7747, 9), tag: 11, ty: 2, flags: OPTIONAL, default: None }, // 719: Variation-ref.validated
-    Member { name: Name(7756, 13), tag: 12, ty: 30, flags: OPTIONAL, default: None }, // 720: Variation-ref.clinical-test
-    Member { name: Name(7769, 13), tag: 13, ty: 304, flags: OPTIONAL, default: None }, // 721: Variation-ref.allele-origin
-    Member { name: Name(7782, 12), tag: 14, ty: 305, flags: OPTIONAL, default: None }, // 722: Variation-ref.allele-state
-    Member { name: Name(7794, 16), tag: 15, ty: 50, flags: OPTIONAL, default: None }, // 723: Variation-ref.allele-frequency
-    Member { name: Name(7810, 19), tag: 16, ty: 2, flags: OPTIONAL, default: None }, // 724: Variation-ref.is-ancestral-allele
+    Member { name: Name(7747, 9), tag: 11, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 719: Variation-ref.validated
+    Member { name: Name(7756, 13), tag: 12, ty: 30, flags: OPTIONAL | SET_FLAG, default: None }, // 720: Variation-ref.clinical-test
+    Member { name: Name(7769, 13), tag: 13, ty: 304, flags: OPTIONAL | SET_FLAG, default: None }, // 721: Variation-ref.allele-origin
+    Member { name: Name(7782, 12), tag: 14, ty: 305, flags: OPTIONAL | SET_FLAG, default: None }, // 722: Variation-ref.allele-state
+    Member { name: Name(7794, 16), tag: 15, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 723: Variation-ref.allele-frequency
+    Member { name: Name(7810, 19), tag: 16, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 724: Variation-ref.is-ancestral-allele
     Member { name: Name(617, 3), tag: 17, ty: 116, flags: OPTIONAL, default: None }, // 725: Variation-ref.pub
     Member { name: Name(2557, 4), tag: 18, ty: 317, flags: 0, default: None }, // 726: Variation-ref.data
-    Member { name: Name(7829, 11), tag: 19, ty: 321, flags: OPTIONAL, default: None }, // 727: Variation-ref.consequence
+    Member { name: Name(7829, 11), tag: 19, ty: 321, flags: OPTIONAL | SET_FLAG, default: None }, // 727: Variation-ref.consequence
     Member { name: Name(6174, 8), tag: 20, ty: 63, flags: OPTIONAL, default: None }, // 728: Variation-ref.location
-    Member { name: Name(7840, 8), tag: 21, ty: 323, flags: OPTIONAL, default: None }, // 729: Variation-ref.ext-locs
+    Member { name: Name(7840, 8), tag: 21, ty: 323, flags: OPTIONAL | SET_FLAG, default: None }, // 729: Variation-ref.ext-locs
     Member { name: Name(1792, 3), tag: 22, ty: 91, flags: OPTIONAL, default: None }, // 730: Variation-ref.ext
-    Member { name: Name(7848, 14), tag: 23, ty: 326, flags: OPTIONAL, default: None }, // 731: Variation-ref.somatic-origin
-    Member { name: Name(663, 6), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 732: Phenotype.source
-    Member { name: Name(3930, 4), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 733: Phenotype.term
-    Member { name: Name(3756, 4), tag: 2, ty: 30, flags: OPTIONAL, default: None }, // 734: Phenotype.xref
-    Member { name: Name(7871, 21), tag: 3, ty: 284, flags: OPTIONAL, default: None }, // 735: Phenotype.clinical-significance
-    Member { name: Name(8241, 10), tag: 0, ty: 5, flags: 0, default: None }, // 736: Population-data.population
-    Member { name: Name(8251, 18), tag: 1, ty: 50, flags: OPTIONAL, default: None }, // 737: Population-data.genotype-frequency
-    Member { name: Name(8269, 18), tag: 2, ty: 4, flags: OPTIONAL, default: None }, // 738: Population-data.chromosomes-tested
-    Member { name: Name(8287, 10), tag: 3, ty: 289, flags: OPTIONAL, default: None }, // 739: Population-data.sample-ids
-    Member { name: Name(7794, 16), tag: 4, ty: 50, flags: OPTIONAL, default: None }, // 740: Population-data.allele-frequency
-    Member { name: Name(8297, 5), tag: 5, ty: 290, flags: OPTIONAL, default: None }, // 741: Population-data.flags
-    Member { name: Name(384, 7), tag: 0, ty: 4, flags: 0, default: None }, // 742: VariantProperties.version
-    Member { name: Name(8369, 13), tag: 1, ty: 293, flags: OPTIONAL, default: None }, // 743: VariantProperties.resource-link
-    Member { name: Name(8382, 13), tag: 2, ty: 294, flags: OPTIONAL, default: None }, // 744: VariantProperties.gene-location
-    Member { name: Name(8395, 6), tag: 3, ty: 295, flags: OPTIONAL, default: None }, // 745: VariantProperties.effect
-    Member { name: Name(8401, 7), tag: 4, ty: 296, flags: OPTIONAL, default: None }, // 746: VariantProperties.mapping
-    Member { name: Name(8408, 10), tag: 5, ty: 297, flags: OPTIONAL, default: None }, // 747: VariantProperties.map-weight
-    Member { name: Name(8418, 26), tag: 6, ty: 298, flags: OPTIONAL, default: None }, // 748: VariantProperties.frequency-based-validation
-    Member { name: Name(4805, 8), tag: 7, ty: 299, flags: OPTIONAL, default: None }, // 749: VariantProperties.genotype
-    Member { name: Name(8444, 12), tag: 8, ty: 256, flags: OPTIONAL, default: None }, // 750: VariantProperties.project-data
-    Member { name: Name(8456, 13), tag: 9, ty: 300, flags: OPTIONAL, default: None }, // 751: VariantProperties.quality-check
-    Member { name: Name(7513, 10), tag: 10, ty: 301, flags: OPTIONAL, default: None }, // 752: VariantProperties.confidence
-    Member { name: Name(8469, 16), tag: 11, ty: 2, flags: OPTIONAL, default: None }, // 753: VariantProperties.other-validation
-    Member { name: Name(7769, 13), tag: 12, ty: 302, flags: OPTIONAL, default: None }, // 754: VariantProperties.allele-origin
-    Member { name: Name(7782, 12), tag: 13, ty: 303, flags: OPTIONAL, default: None }, // 755: VariantProperties.allele-state
-    Member { name: Name(7794, 16), tag: 14, ty: 50, flags: OPTIONAL, default: None }, // 756: VariantProperties.allele-frequency
-    Member { name: Name(7810, 19), tag: 15, ty: 2, flags: OPTIONAL, default: None }, // 757: VariantProperties.is-ancestral-allele
-    Member { name: Name(1328, 4), tag: 0, ty: 307, flags: 0, default: None }, // 758: Variation-inst.type
-    Member { name: Name(5686, 5), tag: 1, ty: 312, flags: 0, default: None }, // 759: Variation-inst.delta
-    Member { name: Name(9258, 11), tag: 2, ty: 313, flags: OPTIONAL, default: None }, // 760: Variation-inst.observation
+    Member { name: Name(7848, 14), tag: 23, ty: 326, flags: OPTIONAL | SET_FLAG, default: None }, // 731: Variation-ref.somatic-origin
+    Member { name: Name(663, 6), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 732: Phenotype.source
+    Member { name: Name(3930, 4), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 733: Phenotype.term
+    Member { name: Name(3756, 4), tag: 2, ty: 30, flags: OPTIONAL | SET_FLAG, default: None }, // 734: Phenotype.xref
+    Member { name: Name(7871, 21), tag: 3, ty: 284, flags: OPTIONAL | SET_FLAG, default: None }, // 735: Phenotype.clinical-significance
+    Member { name: Name(8241, 10), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 736: Population-data.population
+    Member { name: Name(8251, 18), tag: 1, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 737: Population-data.genotype-frequency
+    Member { name: Name(8269, 18), tag: 2, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 738: Population-data.chromosomes-tested
+    Member { name: Name(8287, 10), tag: 3, ty: 289, flags: OPTIONAL | SET_FLAG, default: None }, // 739: Population-data.sample-ids
+    Member { name: Name(7794, 16), tag: 4, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 740: Population-data.allele-frequency
+    Member { name: Name(8297, 5), tag: 5, ty: 290, flags: OPTIONAL | SET_FLAG, default: None }, // 741: Population-data.flags
+    Member { name: Name(384, 7), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 742: VariantProperties.version
+    Member { name: Name(8369, 13), tag: 1, ty: 293, flags: OPTIONAL | SET_FLAG, default: None }, // 743: VariantProperties.resource-link
+    Member { name: Name(8382, 13), tag: 2, ty: 294, flags: OPTIONAL | SET_FLAG, default: None }, // 744: VariantProperties.gene-location
+    Member { name: Name(8395, 6), tag: 3, ty: 295, flags: OPTIONAL | SET_FLAG, default: None }, // 745: VariantProperties.effect
+    Member { name: Name(8401, 7), tag: 4, ty: 296, flags: OPTIONAL | SET_FLAG, default: None }, // 746: VariantProperties.mapping
+    Member { name: Name(8408, 10), tag: 5, ty: 297, flags: OPTIONAL | SET_FLAG, default: None }, // 747: VariantProperties.map-weight
+    Member { name: Name(8418, 26), tag: 6, ty: 298, flags: OPTIONAL | SET_FLAG, default: None }, // 748: VariantProperties.frequency-based-validation
+    Member { name: Name(4805, 8), tag: 7, ty: 299, flags: OPTIONAL | SET_FLAG, default: None }, // 749: VariantProperties.genotype
+    Member { name: Name(8444, 12), tag: 8, ty: 256, flags: OPTIONAL | SET_FLAG, default: None }, // 750: VariantProperties.project-data
+    Member { name: Name(8456, 13), tag: 9, ty: 300, flags: OPTIONAL | SET_FLAG, default: None }, // 751: VariantProperties.quality-check
+    Member { name: Name(7513, 10), tag: 10, ty: 301, flags: OPTIONAL | SET_FLAG, default: None }, // 752: VariantProperties.confidence
+    Member { name: Name(8469, 16), tag: 11, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 753: VariantProperties.other-validation
+    Member { name: Name(7769, 13), tag: 12, ty: 302, flags: OPTIONAL | SET_FLAG, default: None }, // 754: VariantProperties.allele-origin
+    Member { name: Name(7782, 12), tag: 13, ty: 303, flags: OPTIONAL | SET_FLAG, default: None }, // 755: VariantProperties.allele-state
+    Member { name: Name(7794, 16), tag: 14, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 756: VariantProperties.allele-frequency
+    Member { name: Name(7810, 19), tag: 15, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 757: VariantProperties.is-ancestral-allele
+    Member { name: Name(1328, 4), tag: 0, ty: 307, flags: SET_FLAG, default: None }, // 758: Variation-inst.type
+    Member { name: Name(5686, 5), tag: 1, ty: 312, flags: SET_FLAG, default: None }, // 759: Variation-inst.delta
+    Member { name: Name(9258, 11), tag: 2, ty: 313, flags: OPTIONAL | SET_FLAG, default: None }, // 760: Variation-inst.observation
     Member { name: Name(180, 3), tag: 0, ty: 310, flags: OPTIONAL, default: None }, // 761: Delta-item.seq
-    Member { name: Name(9445, 10), tag: 1, ty: 4, flags: OPTIONAL, default: None }, // 762: Delta-item.multiplier
+    Member { name: Name(9445, 10), tag: 1, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 762: Delta-item.multiplier
     Member { name: Name(9455, 15), tag: 2, ty: 66, flags: OPTIONAL, default: None }, // 763: Delta-item.multiplier-fuzz
-    Member { name: Name(9475, 6), tag: 3, ty: 311, flags: DEFAULT, default: Some(Name(9470, 5)) }, // 764: Delta-item.action
-    Member { name: Name(5630, 6), tag: 0, ty: 44, flags: 0, default: None }, // 765: Seq-literal.length
+    Member { name: Name(9475, 6), tag: 3, ty: 311, flags: DEFAULT | SET_FLAG, default: Some(Name(9470, 5)) }, // 764: Delta-item.action
+    Member { name: Name(5630, 6), tag: 0, ty: 44, flags: SET_FLAG, default: None }, // 765: Seq-literal.length
     Member { name: Name(2089, 4), tag: 1, ty: 66, flags: OPTIONAL, default: None }, // 766: Seq-literal.fuzz
     Member { name: Name(5650, 8), tag: 2, ty: 217, flags: OPTIONAL, default: None }, // 767: Seq-literal.seq-data
     Member { name: Name(9492, 7), tag: 0, ty: 309, flags: 0, default: None }, // 768: Delta-item.seq.literal
     Member { name: Name(1911, 3), tag: 1, ty: 63, flags: 0, default: None }, // 769: Delta-item.seq.loc
     Member { name: Name(9499, 4), tag: 2, ty: 64, flags: 0, default: None }, // 770: Delta-item.seq.this
-    Member { name: Name(1328, 4), tag: 0, ty: 314, flags: 0, default: None }, // 771: Variation-ref.data.set.type
-    Member { name: Name(9587, 10), tag: 1, ty: 315, flags: 0, default: None }, // 772: Variation-ref.data.set.variations
-    Member { name: Name(371, 4), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 773: Variation-ref.data.set.name
+    Member { name: Name(1328, 4), tag: 0, ty: 314, flags: SET_FLAG, default: None }, // 771: Variation-ref.data.set.type
+    Member { name: Name(9587, 10), tag: 1, ty: 315, flags: SET_FLAG, default: None }, // 772: Variation-ref.data.set.variations
+    Member { name: Name(371, 4), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 773: Variation-ref.data.set.name
     Member { name: Name(691, 7), tag: 0, ty: 64, flags: 0, default: None }, // 774: Variation-ref.data.unknown
     Member { name: Name(9597, 4), tag: 1, ty: 5, flags: 0, default: None }, // 775: Variation-ref.data.note
     Member { name: Name(9601, 18), tag: 2, ty: 64, flags: 0, default: None }, // 776: Variation-ref.data.uniparental-disomy
     Member { name: Name(9619, 8), tag: 3, ty: 306, flags: 0, default: None }, // 777: Variation-ref.data.instance
     Member { name: Name(183, 3), tag: 4, ty: 316, flags: 0, default: None }, // 778: Variation-ref.data.set
     Member { name: Name(9627, 7), tag: 5, ty: 64, flags: 0, default: None }, // 779: Variation-ref.data.complex
-    Member { name: Name(9634, 5), tag: 0, ty: 4, flags: OPTIONAL, default: None }, // 780: Variation-ref.consequence.E.frameshift.phase
-    Member { name: Name(9639, 8), tag: 1, ty: 4, flags: OPTIONAL, default: None }, // 781: Variation-ref.consequence.E.frameshift.x-length
-    Member { name: Name(9533, 9), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 782: Variation-ref.consequence.E.loss-of-heterozygosity.reference
-    Member { name: Name(9647, 4), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 783: Variation-ref.consequence.E.loss-of-heterozygosity.test
+    Member { name: Name(9634, 5), tag: 0, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 780: Variation-ref.consequence.E.frameshift.phase
+    Member { name: Name(9639, 8), tag: 1, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 781: Variation-ref.consequence.E.frameshift.x-length
+    Member { name: Name(9533, 9), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 782: Variation-ref.consequence.E.loss-of-heterozygosity.reference
+    Member { name: Name(9647, 4), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 783: Variation-ref.consequence.E.loss-of-heterozygosity.test
     Member { name: Name(691, 7), tag: 0, ty: 64, flags: 0, default: None }, // 784: Variation-ref.consequence.E.unknown
     Member { name: Name(9651, 8), tag: 1, ty: 64, flags: 0, default: None }, // 785: Variation-ref.consequence.E.splicing
     Member { name: Name(9597, 4), tag: 2, ty: 5, flags: 0, default: None }, // 786: Variation-ref.consequence.E.note
@@ -1860,12 +1860,12 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(9659, 22), tag: 5, ty: 319, flags: 0, default: None }, // 789: Variation-ref.consequence.E.loss-of-heterozygosity
     Member { name: Name(155, 2), tag: 0, ty: 3, flags: 0, default: None }, // 790: Ext-loc.id
     Member { name: Name(6174, 8), tag: 1, ty: 63, flags: 0, default: None }, // 791: Ext-loc.location
-    Member { name: Name(7709, 11), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 792: Variation-ref.somatic-origin.E.condition.description
-    Member { name: Name(9688, 9), tag: 1, ty: 30, flags: OPTIONAL, default: None }, // 793: Variation-ref.somatic-origin.E.condition.object-id
+    Member { name: Name(7709, 11), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 792: Variation-ref.somatic-origin.E.condition.description
+    Member { name: Name(9688, 9), tag: 1, ty: 30, flags: OPTIONAL | SET_FLAG, default: None }, // 793: Variation-ref.somatic-origin.E.condition.object-id
     Member { name: Name(663, 6), tag: 0, ty: 196, flags: OPTIONAL, default: None }, // 794: Variation-ref.somatic-origin.E.source
     Member { name: Name(9697, 9), tag: 1, ty: 324, flags: OPTIONAL, default: None }, // 795: Variation-ref.somatic-origin.E.condition
-    Member { name: Name(3934, 4), tag: 0, ty: 5, flags: 0, default: None }, // 796: Gb-qual.qual
-    Member { name: Name(6653, 3), tag: 1, ty: 5, flags: 0, default: None }, // 797: Gb-qual.val
+    Member { name: Name(3934, 4), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 796: Gb-qual.qual
+    Member { name: Name(6653, 3), tag: 1, ty: 5, flags: SET_FLAG, default: None }, // 797: Gb-qual.val
     Member { name: Name(617, 3), tag: 0, ty: 330, flags: 0, default: None }, // 798: Pub-set.pub
     Member { name: Name(3083, 7), tag: 1, ty: 331, flags: 0, default: None }, // 799: Pub-set.medline
     Member { name: Name(3094, 7), tag: 2, ty: 332, flags: 0, default: None }, // 800: Pub-set.article
@@ -1875,47 +1875,47 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(280, 6), tag: 6, ty: 336, flags: 0, default: None }, // 804: Pub-set.patent
     Member { name: Name(155, 2), tag: 0, ty: 76, flags: OPTIONAL, default: None }, // 805: SeqFeatXref.id
     Member { name: Name(2557, 4), tag: 1, ty: 239, flags: OPTIONAL, default: None }, // 806: SeqFeatXref.data
-    Member { name: Name(9773, 10), tag: 0, ty: 347, flags: OPTIONAL, default: None }, // 807: SeqFeatSupport.experiment
-    Member { name: Name(9783, 9), tag: 1, ty: 353, flags: OPTIONAL, default: None }, // 808: SeqFeatSupport.inference
-    Member { name: Name(9792, 14), tag: 2, ty: 354, flags: OPTIONAL, default: None }, // 809: SeqFeatSupport.model-evidence
-    Member { name: Name(9823, 8), tag: 0, ty: 344, flags: OPTIONAL, default: None }, // 810: ExperimentSupport.category
-    Member { name: Name(9831, 11), tag: 1, ty: 5, flags: 0, default: None }, // 811: ExperimentSupport.explanation
-    Member { name: Name(9842, 5), tag: 2, ty: 345, flags: OPTIONAL, default: None }, // 812: ExperimentSupport.pmids
-    Member { name: Name(9847, 4), tag: 3, ty: 346, flags: OPTIONAL, default: None }, // 813: ExperimentSupport.dois
-    Member { name: Name(9823, 8), tag: 0, ty: 344, flags: OPTIONAL, default: None }, // 814: InferenceSupport.category
-    Member { name: Name(1328, 4), tag: 1, ty: 349, flags: DEFAULT, default: Some(Name(1738, 7)) }, // 815: InferenceSupport.type
-    Member { name: Name(9903, 10), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 816: InferenceSupport.other-type
-    Member { name: Name(9913, 12), tag: 3, ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 817: InferenceSupport.same-species
+    Member { name: Name(9773, 10), tag: 0, ty: 347, flags: OPTIONAL | SET_FLAG, default: None }, // 807: SeqFeatSupport.experiment
+    Member { name: Name(9783, 9), tag: 1, ty: 353, flags: OPTIONAL | SET_FLAG, default: None }, // 808: SeqFeatSupport.inference
+    Member { name: Name(9792, 14), tag: 2, ty: 354, flags: OPTIONAL | SET_FLAG, default: None }, // 809: SeqFeatSupport.model-evidence
+    Member { name: Name(9823, 8), tag: 0, ty: 344, flags: OPTIONAL | SET_FLAG, default: None }, // 810: ExperimentSupport.category
+    Member { name: Name(9831, 11), tag: 1, ty: 5, flags: SET_FLAG, default: None }, // 811: ExperimentSupport.explanation
+    Member { name: Name(9842, 5), tag: 2, ty: 345, flags: OPTIONAL | SET_FLAG, default: None }, // 812: ExperimentSupport.pmids
+    Member { name: Name(9847, 4), tag: 3, ty: 346, flags: OPTIONAL | SET_FLAG, default: None }, // 813: ExperimentSupport.dois
+    Member { name: Name(9823, 8), tag: 0, ty: 344, flags: OPTIONAL | SET_FLAG, default: None }, // 814: InferenceSupport.category
+    Member { name: Name(1328, 4), tag: 1, ty: 349, flags: DEFAULT | SET_FLAG, default: Some(Name(1738, 7)) }, // 815: InferenceSupport.type
+    Member { name: Name(9903, 10), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 816: InferenceSupport.other-type
+    Member { name: Name(9913, 12), tag: 3, ty: 2, flags: DEFAULT | SET_FLAG, default: Some(Name(94, 5)) }, // 817: InferenceSupport.same-species
     Member { name: Name(9925, 5), tag: 4, ty: 350, flags: 0, default: None }, // 818: InferenceSupport.basis
-    Member { name: Name(9842, 5), tag: 5, ty: 345, flags: OPTIONAL, default: None }, // 819: InferenceSupport.pmids
-    Member { name: Name(9847, 4), tag: 6, ty: 346, flags: OPTIONAL, default: None }, // 820: InferenceSupport.dois
-    Member { name: Name(10118, 8), tag: 0, ty: 352, flags: OPTIONAL, default: None }, // 821: EvidenceBasis.programs
-    Member { name: Name(10126, 10), tag: 1, ty: 21, flags: OPTIONAL, default: None }, // 822: EvidenceBasis.accessions
-    Member { name: Name(371, 4), tag: 0, ty: 5, flags: 0, default: None }, // 823: Program-id.name
-    Member { name: Name(384, 7), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 824: Program-id.version
+    Member { name: Name(9842, 5), tag: 5, ty: 345, flags: OPTIONAL | SET_FLAG, default: None }, // 819: InferenceSupport.pmids
+    Member { name: Name(9847, 4), tag: 6, ty: 346, flags: OPTIONAL | SET_FLAG, default: None }, // 820: InferenceSupport.dois
+    Member { name: Name(10118, 8), tag: 0, ty: 352, flags: OPTIONAL | SET_FLAG, default: None }, // 821: EvidenceBasis.programs
+    Member { name: Name(10126, 10), tag: 1, ty: 21, flags: OPTIONAL | SET_FLAG, default: None }, // 822: EvidenceBasis.accessions
+    Member { name: Name(371, 4), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 823: Program-id.name
+    Member { name: Name(384, 7), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 824: Program-id.version
     Member { name: Name(1911, 3), tag: 0, ty: 63, flags: 0, default: None }, // 825: Delta-seq.loc
     Member { name: Name(9492, 7), tag: 1, ty: 309, flags: 0, default: None }, // 826: Delta-seq.literal
-    Member { name: Name(10172, 8), tag: 0, ty: 358, flags: OPTIONAL, default: None }, // 827: Seq-hist.assembly
+    Member { name: Name(10172, 8), tag: 0, ty: 358, flags: OPTIONAL | SET_FLAG, default: None }, // 827: Seq-hist.assembly
     Member { name: Name(10180, 8), tag: 1, ty: 359, flags: OPTIONAL, default: None }, // 828: Seq-hist.replaces
     Member { name: Name(10188, 11), tag: 2, ty: 359, flags: OPTIONAL, default: None }, // 829: Seq-hist.replaced-by
     Member { name: Name(10199, 7), tag: 3, ty: 360, flags: OPTIONAL, default: None }, // 830: Seq-hist.deleted
     Member { name: Name(2943, 4), tag: 0, ty: 19, flags: OPTIONAL, default: None }, // 831: Seq-hist-rec.date
-    Member { name: Name(1834, 3), tag: 1, ty: 21, flags: 0, default: None }, // 832: Seq-hist-rec.ids
+    Member { name: Name(1834, 3), tag: 1, ty: 21, flags: SET_FLAG, default: None }, // 832: Seq-hist-rec.ids
     Member { name: Name(2576, 4), tag: 0, ty: 2, flags: 0, default: None }, // 833: Seq-hist.deleted.bool
     Member { name: Name(2943, 4), tag: 1, ty: 19, flags: 0, default: None }, // 834: Seq-hist.deleted.date
-    Member { name: Name(155, 2), tag: 0, ty: 364, flags: OPTIONAL, default: None }, // 835: Seq-annot.id
-    Member { name: Name(352, 2), tag: 1, ty: 365, flags: OPTIONAL, default: None }, // 836: Seq-annot.db
-    Member { name: Name(371, 4), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 837: Seq-annot.name
+    Member { name: Name(155, 2), tag: 0, ty: 364, flags: OPTIONAL | SET_FLAG, default: None }, // 835: Seq-annot.id
+    Member { name: Name(352, 2), tag: 1, ty: 365, flags: OPTIONAL | SET_FLAG, default: None }, // 836: Seq-annot.db
+    Member { name: Name(371, 4), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 837: Seq-annot.name
     Member { name: Name(6320, 4), tag: 3, ty: 366, flags: OPTIONAL, default: None }, // 838: Seq-annot.desc
     Member { name: Name(2557, 4), tag: 4, ty: 394, flags: 0, default: None }, // 839: Seq-annot.data
     Member { name: Name(236, 5), tag: 0, ty: 3, flags: 0, default: None }, // 840: Annot-id.local
     Member { name: Name(10235, 4), tag: 1, ty: 16, flags: 0, default: None }, // 841: Annot-id.ncbi
     Member { name: Name(291, 7), tag: 2, ty: 15, flags: 0, default: None }, // 842: Annot-id.general
     Member { name: Name(286, 5), tag: 3, ty: 363, flags: 0, default: None }, // 843: Annot-id.other
-    Member { name: Name(371, 4), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 844: Textannot-id.name
-    Member { name: Name(375, 9), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 845: Textannot-id.accession
-    Member { name: Name(354, 7), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 846: Textannot-id.release
-    Member { name: Name(384, 7), tag: 3, ty: 4, flags: OPTIONAL, default: None }, // 847: Textannot-id.version
+    Member { name: Name(371, 4), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 844: Textannot-id.name
+    Member { name: Name(375, 9), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 845: Textannot-id.accession
+    Member { name: Name(354, 7), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 846: Textannot-id.release
+    Member { name: Name(384, 7), tag: 3, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 847: Textannot-id.version
     Member { name: Name(371, 4), tag: 0, ty: 5, flags: 0, default: None }, // 848: Annotdesc.name
     Member { name: Name(593, 5), tag: 1, ty: 5, flags: 0, default: None }, // 849: Annotdesc.title
     Member { name: Name(601, 7), tag: 2, ty: 5, flags: 0, default: None }, // 850: Annotdesc.comment
@@ -1926,45 +1926,45 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(10276, 3), tag: 7, ty: 9, flags: 0, default: None }, // 855: Annotdesc.src
     Member { name: Name(10279, 5), tag: 8, ty: 368, flags: 0, default: None }, // 856: Annotdesc.align
     Member { name: Name(620, 6), tag: 9, ty: 63, flags: 0, default: None }, // 857: Annotdesc.region
-    Member { name: Name(10293, 10), tag: 0, ty: 369, flags: 0, default: None }, // 858: Align-def.align-type
-    Member { name: Name(1834, 3), tag: 1, ty: 21, flags: OPTIONAL, default: None }, // 859: Align-def.ids
-    Member { name: Name(593, 5), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 860: Seq-graph.title
-    Member { name: Name(601, 7), tag: 1, ty: 5, flags: OPTIONAL, default: None }, // 861: Seq-graph.comment
+    Member { name: Name(10293, 10), tag: 0, ty: 369, flags: SET_FLAG, default: None }, // 858: Align-def.align-type
+    Member { name: Name(1834, 3), tag: 1, ty: 21, flags: OPTIONAL | SET_FLAG, default: None }, // 859: Align-def.ids
+    Member { name: Name(593, 5), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 860: Seq-graph.title
+    Member { name: Name(601, 7), tag: 1, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 861: Seq-graph.comment
     Member { name: Name(1911, 3), tag: 2, ty: 63, flags: 0, default: None }, // 862: Seq-graph.loc
-    Member { name: Name(10329, 7), tag: 3, ty: 5, flags: OPTIONAL, default: None }, // 863: Seq-graph.title-x
-    Member { name: Name(10336, 7), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 864: Seq-graph.title-y
-    Member { name: Name(10343, 4), tag: 5, ty: 44, flags: OPTIONAL, default: None }, // 865: Seq-graph.comp
-    Member { name: Name(2144, 1), tag: 6, ty: 50, flags: OPTIONAL, default: None }, // 866: Seq-graph.a
-    Member { name: Name(2145, 1), tag: 7, ty: 50, flags: OPTIONAL, default: None }, // 867: Seq-graph.b
-    Member { name: Name(10347, 6), tag: 8, ty: 44, flags: 0, default: None }, // 868: Seq-graph.numval
+    Member { name: Name(10329, 7), tag: 3, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 863: Seq-graph.title-x
+    Member { name: Name(10336, 7), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 864: Seq-graph.title-y
+    Member { name: Name(10343, 4), tag: 5, ty: 44, flags: OPTIONAL | SET_FLAG, default: None }, // 865: Seq-graph.comp
+    Member { name: Name(2144, 1), tag: 6, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 866: Seq-graph.a
+    Member { name: Name(2145, 1), tag: 7, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 867: Seq-graph.b
+    Member { name: Name(10347, 6), tag: 8, ty: 44, flags: SET_FLAG, default: None }, // 868: Seq-graph.numval
     Member { name: Name(10353, 5), tag: 9, ty: 375, flags: 0, default: None }, // 869: Seq-graph.graph
-    Member { name: Name(2039, 3), tag: 0, ty: 50, flags: 0, default: None }, // 870: Real-graph.max
-    Member { name: Name(2042, 3), tag: 1, ty: 50, flags: 0, default: None }, // 871: Real-graph.min
-    Member { name: Name(10368, 4), tag: 2, ty: 50, flags: 0, default: None }, // 872: Real-graph.axis
-    Member { name: Name(10372, 6), tag: 3, ty: 95, flags: 0, default: None }, // 873: Real-graph.values
-    Member { name: Name(2039, 3), tag: 0, ty: 4, flags: 0, default: None }, // 874: Int-graph.max
-    Member { name: Name(2042, 3), tag: 1, ty: 4, flags: 0, default: None }, // 875: Int-graph.min
-    Member { name: Name(10368, 4), tag: 2, ty: 4, flags: 0, default: None }, // 876: Int-graph.axis
-    Member { name: Name(10372, 6), tag: 3, ty: 60, flags: 0, default: None }, // 877: Int-graph.values
-    Member { name: Name(2039, 3), tag: 0, ty: 4, flags: 0, default: None }, // 878: Byte-graph.max
-    Member { name: Name(2042, 3), tag: 1, ty: 4, flags: 0, default: None }, // 879: Byte-graph.min
-    Member { name: Name(10368, 4), tag: 2, ty: 4, flags: 0, default: None }, // 880: Byte-graph.axis
-    Member { name: Name(10372, 6), tag: 3, ty: 80, flags: 0, default: None }, // 881: Byte-graph.values
+    Member { name: Name(2039, 3), tag: 0, ty: 50, flags: SET_FLAG, default: None }, // 870: Real-graph.max
+    Member { name: Name(2042, 3), tag: 1, ty: 50, flags: SET_FLAG, default: None }, // 871: Real-graph.min
+    Member { name: Name(10368, 4), tag: 2, ty: 50, flags: SET_FLAG, default: None }, // 872: Real-graph.axis
+    Member { name: Name(10372, 6), tag: 3, ty: 95, flags: SET_FLAG, default: None }, // 873: Real-graph.values
+    Member { name: Name(2039, 3), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 874: Int-graph.max
+    Member { name: Name(2042, 3), tag: 1, ty: 4, flags: SET_FLAG, default: None }, // 875: Int-graph.min
+    Member { name: Name(10368, 4), tag: 2, ty: 4, flags: SET_FLAG, default: None }, // 876: Int-graph.axis
+    Member { name: Name(10372, 6), tag: 3, ty: 60, flags: SET_FLAG, default: None }, // 877: Int-graph.values
+    Member { name: Name(2039, 3), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 878: Byte-graph.max
+    Member { name: Name(2042, 3), tag: 1, ty: 4, flags: SET_FLAG, default: None }, // 879: Byte-graph.min
+    Member { name: Name(10368, 4), tag: 2, ty: 4, flags: SET_FLAG, default: None }, // 880: Byte-graph.axis
+    Member { name: Name(10372, 6), tag: 3, ty: 80, flags: SET_FLAG, default: None }, // 881: Byte-graph.values
     Member { name: Name(1676, 4), tag: 0, ty: 372, flags: 0, default: None }, // 882: Seq-graph.graph.real
     Member { name: Name(1820, 3), tag: 1, ty: 373, flags: 0, default: None }, // 883: Seq-graph.graph.int
     Member { name: Name(10397, 4), tag: 2, ty: 374, flags: 0, default: None }, // 884: Seq-graph.graph.byte
-    Member { name: Name(10423, 9), tag: 0, ty: 4, flags: 0, default: None }, // 885: Seq-table.feat-type
-    Member { name: Name(10432, 12), tag: 1, ty: 4, flags: OPTIONAL, default: None }, // 886: Seq-table.feat-subtype
-    Member { name: Name(10444, 8), tag: 2, ty: 4, flags: 0, default: None }, // 887: Seq-table.num-rows
-    Member { name: Name(10452, 7), tag: 3, ty: 393, flags: 0, default: None }, // 888: Seq-table.columns
+    Member { name: Name(10423, 9), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 885: Seq-table.feat-type
+    Member { name: Name(10432, 12), tag: 1, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 886: Seq-table.feat-subtype
+    Member { name: Name(10444, 8), tag: 2, ty: 4, flags: SET_FLAG, default: None }, // 887: Seq-table.num-rows
+    Member { name: Name(10452, 7), tag: 3, ty: 393, flags: SET_FLAG, default: None }, // 888: Seq-table.columns
     Member { name: Name(10474, 6), tag: 0, ty: 379, flags: 0, default: None }, // 889: SeqTable-column.header
     Member { name: Name(2557, 4), tag: 1, ty: 381, flags: OPTIONAL, default: None }, // 890: SeqTable-column.data
     Member { name: Name(2826, 6), tag: 2, ty: 391, flags: OPTIONAL, default: None }, // 891: SeqTable-column.sparse
     Member { name: Name(10480, 7), tag: 3, ty: 392, flags: OPTIONAL, default: None }, // 892: SeqTable-column.default
     Member { name: Name(10487, 12), tag: 4, ty: 392, flags: OPTIONAL, default: None }, // 893: SeqTable-column.sparse-other
-    Member { name: Name(593, 5), tag: 0, ty: 5, flags: OPTIONAL, default: None }, // 894: SeqTable-column-info.title
-    Member { name: Name(10519, 8), tag: 1, ty: 380, flags: OPTIONAL, default: None }, // 895: SeqTable-column-info.field-id
-    Member { name: Name(10527, 10), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 896: SeqTable-column-info.field-name
+    Member { name: Name(593, 5), tag: 0, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 894: SeqTable-column-info.title
+    Member { name: Name(10519, 8), tag: 1, ty: 380, flags: OPTIONAL | SET_FLAG, default: None }, // 895: SeqTable-column-info.field-id
+    Member { name: Name(10527, 10), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 896: SeqTable-column-info.field-name
     Member { name: Name(1820, 3), tag: 0, ty: 60, flags: 0, default: None }, // 897: SeqTable-multi-data.int
     Member { name: Name(1676, 4), tag: 1, ty: 95, flags: 0, default: None }, // 898: SeqTable-multi-data.real
     Member { name: Name(10838, 6), tag: 2, ty: 94, flags: 0, default: None }, // 899: SeqTable-multi-data.string
@@ -1982,20 +1982,20 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(10926, 4), tag: 14, ty: 80, flags: 0, default: None }, // 911: SeqTable-multi-data.int1
     Member { name: Name(10930, 4), tag: 15, ty: 389, flags: 0, default: None }, // 912: SeqTable-multi-data.int2
     Member { name: Name(10934, 4), tag: 16, ty: 390, flags: 0, default: None }, // 913: SeqTable-multi-data.int8
-    Member { name: Name(10956, 7), tag: 0, ty: 94, flags: 0, default: None }, // 914: CommonString-table.strings
-    Member { name: Name(10963, 7), tag: 1, ty: 60, flags: 0, default: None }, // 915: CommonString-table.indexes
-    Member { name: Name(10844, 5), tag: 0, ty: 96, flags: 0, default: None }, // 916: CommonBytes-table.bytes
-    Member { name: Name(10963, 7), tag: 1, ty: 60, flags: 0, default: None }, // 917: CommonBytes-table.indexes
-    Member { name: Name(11008, 3), tag: 0, ty: 4, flags: 0, default: None }, // 918: Scaled-int-multi-data.mul
-    Member { name: Name(11011, 3), tag: 1, ty: 4, flags: 0, default: None }, // 919: Scaled-int-multi-data.add
+    Member { name: Name(10956, 7), tag: 0, ty: 94, flags: SET_FLAG, default: None }, // 914: CommonString-table.strings
+    Member { name: Name(10963, 7), tag: 1, ty: 60, flags: SET_FLAG, default: None }, // 915: CommonString-table.indexes
+    Member { name: Name(10844, 5), tag: 0, ty: 96, flags: SET_FLAG, default: None }, // 916: CommonBytes-table.bytes
+    Member { name: Name(10963, 7), tag: 1, ty: 60, flags: SET_FLAG, default: None }, // 917: CommonBytes-table.indexes
+    Member { name: Name(11008, 3), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 918: Scaled-int-multi-data.mul
+    Member { name: Name(11011, 3), tag: 1, ty: 4, flags: SET_FLAG, default: None }, // 919: Scaled-int-multi-data.add
     Member { name: Name(2557, 4), tag: 2, ty: 381, flags: 0, default: None }, // 920: Scaled-int-multi-data.data
-    Member { name: Name(2042, 3), tag: 3, ty: 16, flags: OPTIONAL, default: None }, // 921: Scaled-int-multi-data.min
-    Member { name: Name(2039, 3), tag: 4, ty: 16, flags: OPTIONAL, default: None }, // 922: Scaled-int-multi-data.max
-    Member { name: Name(11008, 3), tag: 0, ty: 50, flags: 0, default: None }, // 923: Scaled-real-multi-data.mul
-    Member { name: Name(11011, 3), tag: 1, ty: 50, flags: 0, default: None }, // 924: Scaled-real-multi-data.add
+    Member { name: Name(2042, 3), tag: 3, ty: 16, flags: OPTIONAL | SET_FLAG, default: None }, // 921: Scaled-int-multi-data.min
+    Member { name: Name(2039, 3), tag: 4, ty: 16, flags: OPTIONAL | SET_FLAG, default: None }, // 922: Scaled-int-multi-data.max
+    Member { name: Name(11008, 3), tag: 0, ty: 50, flags: SET_FLAG, default: None }, // 923: Scaled-real-multi-data.mul
+    Member { name: Name(11011, 3), tag: 1, ty: 50, flags: SET_FLAG, default: None }, // 924: Scaled-real-multi-data.add
     Member { name: Name(2557, 4), tag: 2, ty: 381, flags: 0, default: None }, // 925: Scaled-real-multi-data.data
-    Member { name: Name(11048, 4), tag: 0, ty: 44, flags: 0, default: None }, // 926: BVector-data.size
-    Member { name: Name(2557, 4), tag: 1, ty: 80, flags: 0, default: None }, // 927: BVector-data.data
+    Member { name: Name(11048, 4), tag: 0, ty: 44, flags: SET_FLAG, default: None }, // 926: BVector-data.size
+    Member { name: Name(2557, 4), tag: 1, ty: 80, flags: SET_FLAG, default: None }, // 927: BVector-data.data
     Member { name: Name(10963, 7), tag: 0, ty: 55, flags: 0, default: None }, // 928: SeqTable-sparse-index.indexes
     Member { name: Name(11073, 7), tag: 1, ty: 80, flags: 0, default: None }, // 929: SeqTable-sparse-index.bit-set
     Member { name: Name(11080, 13), tag: 2, ty: 55, flags: 0, default: None }, // 930: SeqTable-sparse-index.indexes-delta
@@ -2017,62 +2017,62 @@ pub(crate) static MEMBERS: [Member; 1005] = [
     Member { name: Name(11138, 9), tag: 5, ty: 377, flags: 0, default: None }, // 946: Seq-annot.data.seq-table
     Member { name: Name(155, 2), tag: 0, ty: 3, flags: OPTIONAL, default: None }, // 947: Bioseq-set.id
     Member { name: Name(3813, 4), tag: 1, ty: 15, flags: OPTIONAL, default: None }, // 948: Bioseq-set.coll
-    Member { name: Name(1242, 5), tag: 2, ty: 4, flags: OPTIONAL, default: None }, // 949: Bioseq-set.level
-    Member { name: Name(1258, 5), tag: 3, ty: 397, flags: DEFAULT, default: Some(Name(1738, 7)) }, // 950: Bioseq-set.class
-    Member { name: Name(354, 7), tag: 4, ty: 5, flags: OPTIONAL, default: None }, // 951: Bioseq-set.release
+    Member { name: Name(1242, 5), tag: 2, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 949: Bioseq-set.level
+    Member { name: Name(1258, 5), tag: 3, ty: 397, flags: DEFAULT | SET_FLAG, default: Some(Name(1738, 7)) }, // 950: Bioseq-set.class
+    Member { name: Name(354, 7), tag: 4, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 951: Bioseq-set.release
     Member { name: Name(2943, 4), tag: 5, ty: 19, flags: OPTIONAL, default: None }, // 952: Bioseq-set.date
     Member { name: Name(205, 5), tag: 6, ty: 22, flags: OPTIONAL, default: None }, // 953: Bioseq-set.descr
-    Member { name: Name(11157, 7), tag: 7, ty: 398, flags: 0, default: None }, // 954: Bioseq-set.seq-set
-    Member { name: Name(214, 5), tag: 8, ty: 395, flags: OPTIONAL, default: None }, // 955: Bioseq-set.annot
-    Member { name: Name(11334, 14), tag: 0, ty: 60, flags: OPTIONAL, default: None }, // 956: PssmIntermediateData.resFreqsPerPos
-    Member { name: Name(11348, 22), tag: 1, ty: 95, flags: OPTIONAL, default: None }, // 957: PssmIntermediateData.weightedResFreqsPerPos
-    Member { name: Name(11370, 10), tag: 2, ty: 95, flags: 0, default: None }, // 958: PssmIntermediateData.freqRatios
-    Member { name: Name(11380, 18), tag: 3, ty: 95, flags: OPTIONAL, default: None }, // 959: PssmIntermediateData.informationContent
-    Member { name: Name(11398, 20), tag: 4, ty: 95, flags: OPTIONAL, default: None }, // 960: PssmIntermediateData.gaplessColumnWeights
-    Member { name: Name(11418, 5), tag: 5, ty: 95, flags: OPTIONAL, default: None }, // 961: PssmIntermediateData.sigma
-    Member { name: Name(11423, 13), tag: 6, ty: 60, flags: OPTIONAL, default: None }, // 962: PssmIntermediateData.intervalSizes
-    Member { name: Name(11436, 15), tag: 7, ty: 60, flags: OPTIONAL, default: None }, // 963: PssmIntermediateData.numMatchingSeqs
-    Member { name: Name(11451, 13), tag: 8, ty: 95, flags: OPTIONAL, default: None }, // 964: PssmIntermediateData.numIndeptObsr
-    Member { name: Name(1853, 6), tag: 0, ty: 60, flags: 0, default: None }, // 965: PssmFinalData.scores
-    Member { name: Name(11477, 6), tag: 1, ty: 50, flags: 0, default: None }, // 966: PssmFinalData.lambda
-    Member { name: Name(11483, 5), tag: 2, ty: 50, flags: 0, default: None }, // 967: PssmFinalData.kappa
-    Member { name: Name(11488, 1), tag: 3, ty: 50, flags: 0, default: None }, // 968: PssmFinalData.h
-    Member { name: Name(11489, 13), tag: 4, ty: 4, flags: DEFAULT, default: Some(Name(1688, 1)) }, // 969: PssmFinalData.scalingFactor
-    Member { name: Name(11502, 14), tag: 5, ty: 50, flags: OPTIONAL, default: None }, // 970: PssmFinalData.lambdaUngapped
-    Member { name: Name(11516, 13), tag: 6, ty: 50, flags: OPTIONAL, default: None }, // 971: PssmFinalData.kappaUngapped
-    Member { name: Name(11529, 9), tag: 7, ty: 50, flags: OPTIONAL, default: None }, // 972: PssmFinalData.hUngapped
-    Member { name: Name(11538, 18), tag: 8, ty: 50, flags: OPTIONAL, default: None }, // 973: PssmFinalData.wordScoreThreshold
-    Member { name: Name(11570, 11), tag: 0, ty: 4, flags: OPTIONAL, default: None }, // 974: PssmParameters.pseudocount
+    Member { name: Name(11157, 7), tag: 7, ty: 398, flags: SET_FLAG, default: None }, // 954: Bioseq-set.seq-set
+    Member { name: Name(214, 5), tag: 8, ty: 395, flags: OPTIONAL | SET_FLAG, default: None }, // 955: Bioseq-set.annot
+    Member { name: Name(11334, 14), tag: 0, ty: 60, flags: OPTIONAL | SET_FLAG, default: None }, // 956: PssmIntermediateData.resFreqsPerPos
+    Member { name: Name(11348, 22), tag: 1, ty: 95, flags: OPTIONAL | SET_FLAG, default: None }, // 957: PssmIntermediateData.weightedResFreqsPerPos
+    Member { name: Name(11370, 10), tag: 2, ty: 95, flags: SET_FLAG, default: None }, // 958: PssmIntermediateData.freqRatios
+    Member { name: Name(11380, 18), tag: 3, ty: 95, flags: OPTIONAL | SET_FLAG, default: None }, // 959: PssmIntermediateData.informationContent
+    Member { name: Name(11398, 20), tag: 4, ty: 95, flags: OPTIONAL | SET_FLAG, default: None }, // 960: PssmIntermediateData.gaplessColumnWeights
+    Member { name: Name(11418, 5), tag: 5, ty: 95, flags: OPTIONAL | SET_FLAG, default: None }, // 961: PssmIntermediateData.sigma
+    Member { name: Name(11423, 13), tag: 6, ty: 60, flags: OPTIONAL | SET_FLAG, default: None }, // 962: PssmIntermediateData.intervalSizes
+    Member { name: Name(11436, 15), tag: 7, ty: 60, flags: OPTIONAL | SET_FLAG, default: None }, // 963: PssmIntermediateData.numMatchingSeqs
+    Member { name: Name(11451, 13), tag: 8, ty: 95, flags: OPTIONAL | SET_FLAG, default: None }, // 964: PssmIntermediateData.numIndeptObsr
+    Member { name: Name(1853, 6), tag: 0, ty: 60, flags: SET_FLAG, default: None }, // 965: PssmFinalData.scores
+    Member { name: Name(11477, 6), tag: 1, ty: 50, flags: SET_FLAG, default: None }, // 966: PssmFinalData.lambda
+    Member { name: Name(11483, 5), tag: 2, ty: 50, flags: SET_FLAG, default: None }, // 967: PssmFinalData.kappa
+    Member { name: Name(11488, 1), tag: 3, ty: 50, flags: SET_FLAG, default: None }, // 968: PssmFinalData.h
+    Member { name: Name(11489, 13), tag: 4, ty: 4, flags: DEFAULT | SET_FLAG, default: Some(Name(1688, 1)) }, // 969: PssmFinalData.scalingFactor
+    Member { name: Name(11502, 14), tag: 5, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 970: PssmFinalData.lambdaUngapped
+    Member { name: Name(11516, 13), tag: 6, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 971: PssmFinalData.kappaUngapped
+    Member { name: Name(11529, 9), tag: 7, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 972: PssmFinalData.hUngapped
+    Member { name: Name(11538, 18), tag: 8, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 973: PssmFinalData.wordScoreThreshold
+    Member { name: Name(11570, 11), tag: 0, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 974: PssmParameters.pseudocount
     Member { name: Name(11581, 11), tag: 1, ty: 402, flags: OPTIONAL, default: None }, // 975: PssmParameters.rpsdbparams
     Member { name: Name(11592, 11), tag: 2, ty: 403, flags: OPTIONAL, default: None }, // 976: PssmParameters.constraints
-    Member { name: Name(11603, 14), tag: 3, ty: 50, flags: OPTIONAL, default: None }, // 977: PssmParameters.bitScoreThresh
-    Member { name: Name(11617, 23), tag: 4, ty: 50, flags: OPTIONAL, default: None }, // 978: PssmParameters.bitScoreReportingThresh
+    Member { name: Name(11603, 14), tag: 3, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 977: PssmParameters.bitScoreThresh
+    Member { name: Name(11617, 23), tag: 4, ty: 50, flags: OPTIONAL | SET_FLAG, default: None }, // 978: PssmParameters.bitScoreReportingThresh
     Member { name: Name(11640, 14), tag: 5, ty: 411, flags: OPTIONAL, default: None }, // 979: PssmParameters.annotatedSites
-    Member { name: Name(11675, 10), tag: 0, ty: 5, flags: 0, default: None }, // 980: FormatRpsDbParameters.matrixName
-    Member { name: Name(11685, 7), tag: 1, ty: 4, flags: OPTIONAL, default: None }, // 981: FormatRpsDbParameters.gapOpen
-    Member { name: Name(11692, 9), tag: 2, ty: 4, flags: OPTIONAL, default: None }, // 982: FormatRpsDbParameters.gapExtend
-    Member { name: Name(11708, 7), tag: 0, ty: 4, flags: 0, default: None }, // 983: CoreDef.nblocks
-    Member { name: Name(10303, 6), tag: 1, ty: 408, flags: 0, default: None }, // 984: CoreDef.blocks
-    Member { name: Name(11715, 5), tag: 2, ty: 410, flags: 0, default: None }, // 985: CoreDef.loops
-    Member { name: Name(11720, 15), tag: 3, ty: 2, flags: OPTIONAL, default: None }, // 986: CoreDef.isDiscontinuous
-    Member { name: Name(11735, 10), tag: 4, ty: 60, flags: OPTIONAL, default: None }, // 987: CoreDef.insertions
-    Member { name: Name(11754, 5), tag: 0, ty: 4, flags: 0, default: None }, // 988: CoreBlock.start
-    Member { name: Name(11759, 4), tag: 1, ty: 4, flags: 0, default: None }, // 989: CoreBlock.stop
-    Member { name: Name(11763, 8), tag: 2, ty: 4, flags: OPTIONAL, default: None }, // 990: CoreBlock.minstart
-    Member { name: Name(11771, 7), tag: 3, ty: 4, flags: OPTIONAL, default: None }, // 991: CoreBlock.maxstop
-    Member { name: Name(11778, 8), tag: 4, ty: 407, flags: OPTIONAL, default: None }, // 992: CoreBlock.property
-    Member { name: Name(1328, 4), tag: 0, ty: 406, flags: 0, default: None }, // 993: BlockProperty.type
-    Member { name: Name(11799, 8), tag: 1, ty: 4, flags: OPTIONAL, default: None }, // 994: BlockProperty.intvalue
-    Member { name: Name(11807, 9), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 995: BlockProperty.textvalue
-    Member { name: Name(11893, 9), tag: 0, ty: 4, flags: DEFAULT, default: Some(Name(2458, 1)) }, // 996: LoopConstraint.minlength
-    Member { name: Name(11908, 9), tag: 1, ty: 4, flags: DEFAULT, default: Some(Name(11902, 6)) }, // 997: LoopConstraint.maxlength
-    Member { name: Name(11941, 13), tag: 0, ty: 4, flags: 0, default: None }, // 998: Site-annot.startPosition
-    Member { name: Name(11954, 12), tag: 1, ty: 4, flags: 0, default: None }, // 999: Site-annot.stopPosition
-    Member { name: Name(7709, 11), tag: 2, ty: 5, flags: OPTIONAL, default: None }, // 1000: Site-annot.description
-    Member { name: Name(1328, 4), tag: 3, ty: 4, flags: OPTIONAL, default: None }, // 1001: Site-annot.type
-    Member { name: Name(11966, 7), tag: 4, ty: 6, flags: OPTIONAL, default: None }, // 1002: Site-annot.aliases
-    Member { name: Name(11973, 5), tag: 5, ty: 5, flags: OPTIONAL, default: None }, // 1003: Site-annot.motif
-    Member { name: Name(11978, 8), tag: 6, ty: 4, flags: OPTIONAL, default: None }, // 1004: Site-annot.motifuse
+    Member { name: Name(11675, 10), tag: 0, ty: 5, flags: SET_FLAG, default: None }, // 980: FormatRpsDbParameters.matrixName
+    Member { name: Name(11685, 7), tag: 1, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 981: FormatRpsDbParameters.gapOpen
+    Member { name: Name(11692, 9), tag: 2, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 982: FormatRpsDbParameters.gapExtend
+    Member { name: Name(11708, 7), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 983: CoreDef.nblocks
+    Member { name: Name(10303, 6), tag: 1, ty: 408, flags: SET_FLAG, default: None }, // 984: CoreDef.blocks
+    Member { name: Name(11715, 5), tag: 2, ty: 410, flags: SET_FLAG, default: None }, // 985: CoreDef.loops
+    Member { name: Name(11720, 15), tag: 3, ty: 2, flags: OPTIONAL | SET_FLAG, default: None }, // 986: CoreDef.isDiscontinuous
+    Member { name: Name(11735, 10), tag: 4, ty: 60, flags: OPTIONAL | SET_FLAG, default: None }, // 987: CoreDef.insertions
+    Member { name: Name(11754, 5), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 988: CoreBlock.start
+    Member { name: Name(11759, 4), tag: 1, ty: 4, flags: SET_FLAG, default: None }, // 989: CoreBlock.stop
+    Member { name: Name(11763, 8), tag: 2, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 990: CoreBlock.minstart
+    Member { name: Name(11771, 7), tag: 3, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 991: CoreBlock.maxstop
+    Member { name: Name(11778, 8), tag: 4, ty: 407, flags: OPTIONAL | SET_FLAG, default: None }, // 992: CoreBlock.property
+    Member { name: Name(1328, 4), tag: 0, ty: 406, flags: SET_FLAG, default: None }, // 993: BlockProperty.type
+    Member { name: Name(11799, 8), tag: 1, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 994: BlockProperty.intvalue
+    Member { name: Name(11807, 9), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 995: BlockProperty.textvalue
+    Member { name: Name(11893, 9), tag: 0, ty: 4, flags: DEFAULT | SET_FLAG, default: Some(Name(2458, 1)) }, // 996: LoopConstraint.minlength
+    Member { name: Name(11908, 9), tag: 1, ty: 4, flags: DEFAULT | SET_FLAG, default: Some(Name(11902, 6)) }, // 997: LoopConstraint.maxlength
+    Member { name: Name(11941, 13), tag: 0, ty: 4, flags: SET_FLAG, default: None }, // 998: Site-annot.startPosition
+    Member { name: Name(11954, 12), tag: 1, ty: 4, flags: SET_FLAG, default: None }, // 999: Site-annot.stopPosition
+    Member { name: Name(7709, 11), tag: 2, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 1000: Site-annot.description
+    Member { name: Name(1328, 4), tag: 3, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 1001: Site-annot.type
+    Member { name: Name(11966, 7), tag: 4, ty: 6, flags: OPTIONAL | SET_FLAG, default: None }, // 1002: Site-annot.aliases
+    Member { name: Name(11973, 5), tag: 5, ty: 5, flags: OPTIONAL | SET_FLAG, default: None }, // 1003: Site-annot.motif
+    Member { name: Name(11978, 8), tag: 6, ty: 4, flags: OPTIONAL | SET_FLAG, default: None }, // 1004: Site-annot.motifuse
 ];
 
 pub(crate) static VALUES: [EnumValue; 789] = [

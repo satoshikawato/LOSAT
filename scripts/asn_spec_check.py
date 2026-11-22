@@ -6,8 +6,8 @@ The companion of `asn_spec_gen.py` (a maintainer tool; LOSAT's build runs neithe
      writes from the same NCBI source;
   2. every SEQUENCE and CHOICE of the table, named or anonymous, against its
      `BEGIN_NAMED_*_INFO` block in NCBI's generated `*_.cpp`: the member or variant names in
-     order, the `->SetOptional()` and `->SetDefault(` marks, and the delayed member
-     (`->SetDelayBuffer(`);
+     order, the `->SetOptional()` and `->SetDefault(` marks, the delayed member
+     (`->SetDelayBuffer(`), and the set flag of each SEQUENCE member (`->SetSetFlag(`);
   3. every value list (ENUMERATED and INTEGER with named values) against its
      `BEGIN_NAMED_ENUM_*INFO` block: the names and numbers in order, and whether it is an INTEGER;
   4. the C++ storage of every INTEGER member and list element against the `typedef` of the
@@ -238,13 +238,16 @@ def main(argv: Optional[list[str]] = None) -> int:
                 if names != want:
                     continue
                 marks: list[str] = []
-                for (spec, _, delayed), ln in zip(e.members, lines):
+                for (spec, ty_index, delayed), ln in zip(e.members, lines):
                     if e.kind == "Sequence":
                         optional = "->SetOptional()" in ln or "->SetDefault(" in ln
                         if (spec.optional or spec.default is not None) != optional:
                             marks.append(f"{spec.name}: OPTIONAL/DEFAULT")
                         if (spec.default is not None) != ("->SetDefault(" in ln):
                             marks.append(f"{spec.name}: DEFAULT")
+                        set_flag = gen.has_set_flag(table, e, spec.name, ty_index)
+                        if set_flag != ("->SetSetFlag(" in ln):
+                            marks.append(f"{spec.name}: set flag")
                     if delayed != ("->SetDelayBuffer(" in ln):
                         marks.append(f"{spec.name}: delayed")
                 if "SetRandomOrder(true)" in body:

@@ -13,8 +13,9 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   protein cuts (scores and frequency ratios, scale 1); `c1.smp`-`c3.smp` are CDD v3.22 cd00001-cd00003 cut to their
   first 22/18/20 columns (scale 100, word thresholds); `fc.smp`, `fe.smp` are frequency-ratio-only forms of the
   psiblast PSSMs (the IMPALA path); `t_source.smp`, `t_orgnotax.smp` are `pc.smp` with a `source` taxid and an
-  organism without a taxid. Lists (`*.lst`) name the PSSMs relative to the working directory.
-- Then `freeze_fixtures.py` (same place) kept the 41 rows of `cases.tsv` and, per row, NCBI's standard output,
+  organism without a taxid; `e_trunc.smp` and `e_unknownfield.smp` are `pc.smp` cut in its frequency ratios and with
+  an unknown member, `e_notpssm.smp` a `Seq-entry`, `e_empty.smp` empty (the reader's errors). Lists (`*.lst`) name the PSSMs relative to the working directory.
+- Then `freeze_fixtures.py` (same place) kept the 45 rows of `cases.tsv` and, per row, NCBI's standard output,
   standard error and exit status as written (`ncbi/<row>.{out,err,rc}`; the test maps NCBI's words to LOSAT's with
   `losat::wording`) and `ncbi/<row>.files`: for each file the run wrote (outside `in/`), its path, size and FNV-1a 64
   digest; in a `.pin` or `.pal` the build's date (its 4-byte length and padding in a `.pin`) is replaced by `<DATE>`
@@ -24,4 +25,4 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   (frequency-ratio-only PSSMs).
 
 The whole oracle (206 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
-repository (about 470 KB).
+repository (about 545 KB).

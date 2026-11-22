@@ -65,7 +65,7 @@ None in the files or the messages of a normal run. A profile with scores near th
 - `-in` naming a directory, on which NCBI's `makeprofiledb` never ends.
 - An empty `-out`, on which NCBI's `makeprofiledb` stops with an unknown exception or aborts.
 - A profile stored by row (`byRow TRUE`) with more than 28 positions, whose frequency ratios NCBI's `makeprofiledb` reads from outside its data.
-- A frequency ratio too large for NCBI's integers (such as `1e300`), and a word score threshold that is not a number.
+- A frequency ratio too large for NCBI's integers (such as `1e300`), a list of frequency ratios shorter than the profile (NCBI's `makeprofiledb` reads past it), and a word score threshold that is not a number.
 - A sequence that has only a GI id between sequences with other ids, in a version 5 database with `-index true`: NCBI's `makeprofiledb` aborts there; `-blastdb_version 4` builds it.
 
 See [What LOSAT refuses](../refusals.md).

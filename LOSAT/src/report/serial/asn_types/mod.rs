@@ -37,6 +37,11 @@ pub(crate) const DEFAULT: u8 = 2;
 /// `Member::flags`: a member that NCBI reads into a delay buffer (`->SetDelayBuffer(...)`):
 /// skipped with the skip functions and kept as the text read (`Value::Delayed`).
 pub(crate) const DELAYED: u8 = 4;
+/// `Member::flags`: a SEQUENCE member that the generated class keeps a set flag for
+/// (`->SetSetFlag(...)`): every member but a class held by reference (`ADD_NAMED_REF_MEMBER`).
+/// NCBI reads it with `ReadWithSetFlagMember`, which rethrows a `CSerialException` with the
+/// member's name (`read::member_error`).
+pub(crate) const SET_FLAG: u8 = 8;
 
 /// A name of the table: its offset and length in `table::NAMES` (the table holds no pointer, so
 /// the dynamic loader has nothing of it to relocate when the program starts).
@@ -156,6 +161,11 @@ impl Member {
     /// The member's or variant's name.
     pub(crate) fn name(&self) -> &'static str {
         self.name.get()
+    }
+
+    /// Whether the generated class keeps a set flag for the member (`SET_FLAG`).
+    pub(crate) fn has_set_flag(&self) -> bool {
+        self.flags & SET_FLAG != 0
     }
 
     /// Whether NCBI's reader takes the member as optional (OPTIONAL or DEFAULT).

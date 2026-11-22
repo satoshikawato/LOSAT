@@ -40,3 +40,7 @@ O03	-title 'My title' -in in/l_p3.lst -out db
 O13	-in in/l_p3.lst -out outdir/
 O08n	-max_smp_vol 2 -in in/l_dup.lst -out db
 I05s	-in in/l_taxnoorg.lst -out db
+S_notpssm	-in in/l_e_notpssm.lst -out db
+S_empty	-in in/l_e_empty.lst -out db
+S_trunc	-in in/l_e_trunc.lst -out db
+S_unknownfield	-in in/l_e_unknownfield.lst -out db

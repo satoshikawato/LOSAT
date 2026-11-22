@@ -556,12 +556,10 @@ fn read_profile(
     filename: &[u8],
     diag: &mut Diag,
 ) -> Result<PssmWithParameters, RunError> {
-    let text = std::fs::read(path).map_err(|error| {
-        RunError::Refused(format!(
-            "the profile {} cannot be read ({error})",
-            String::from_utf8_lossy(filename)
-        ))
-    })?;
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1390-1394
+    // The file is read through a `CNcbiIfstream` whose open is not checked: a file that does not
+    // open (no permission) reads as an empty stream, whose reader stops at once.
+    let text = std::fs::read(path).unwrap_or_default();
     let read = crate::blastinput::pssm_text::read_pssm(&text);
     for post in &read.posts {
         match post {

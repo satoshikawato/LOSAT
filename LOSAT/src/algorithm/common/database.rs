@@ -289,6 +289,20 @@ fn unopenable_sequence_file(db: &SeqDb) -> Option<SeqDbError> {
         .find_map(|volume| volume.open_sequence_file().err())
 }
 
+/// The error of the first read of the sequences of `db` in the preliminary search of a query batch
+/// with a valid context, through `CLocalBlast` (a FASTA query of blastp, blastx, blastn,
+/// tblastn and tblastx), after the batch's set-up checks: a sequence file that cannot be opened
+/// (`unopenable_sequence_file`, the open of a volume's sequence file that the search's first read
+/// of the volume makes, `seqdb::Volume::open_sequence_file`), as the search's read reports it
+/// (`search_read_error`: `PreliminaryReadError`, NCBI's `Database memory map file error`; LOSAT's
+/// refusal of an error that is not NCBI's). The set-up of a query batch that LOSAT refuses asks it
+/// where the search would read (`query_batch::refused_batch_error`; line WQA D10 round 6,
+/// 2026-11-20, review 4 M2: `-db` of a database without its `.psq` or `.nsq` file, NCBI BLAST+
+/// 2.17.0 exits 3 with that error, and at outfmt 11 writes its archive first).
+pub(crate) fn sequence_file_read_error(db: &SeqDb, program: &str) -> Option<anyhow::Error> {
+    unopenable_sequence_file(db).map(|error| search_read_error(error, program))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:425
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-251 (the catch that a PSSM
 // search's preliminary stage has not)
@@ -1103,6 +1117,11 @@ impl<'a> FetchExcluded<'a> {
     pub(crate) fn refusal((ordinal, error): (u32, SeqDbError), program: &str) -> anyhow::Error {
         if error.is_unreadable() {
             return FetchRefusal(losat_reader_error(&error, program)).into();
+        }
+        // A header that LOSAT refuses where it is read (`seqdb::Volume::filtered_mask`) keeps
+        // that refusal's words.
+        if matches!(error, SeqDbError::Unsupported { .. }) {
+            return FetchRefusal(database_error(error, program).to_string()).into();
         }
         FetchRefusal(
             refusal(
@@ -2499,8 +2518,10 @@ pub(crate) fn refuse_display_id_of_a_query(
 /// subject there: its reports show the query's title and letters in the subject's place, and the
 /// query-anchored merge of the query's own Bioseq can abort (`double free or corruption`). NCBI's
 /// display of such a sequence in outfmt 0, 6 and 7 is line RG item X7's. `effect` says what NCBI
-/// does with it: `QUERY_ANCHORED_EFFECT`, or `XML_EFFECT` for the RPS programs' BLAST XML (`-outfmt 5`: RPSBLAST gets the query's title for the entry, RPSTBLASTN
-/// an exception from its Seq-align conversion and half a document; PS15a-1).
+/// does with it: `QUERY_ANCHORED_EFFECT`, `XML_EFFECT` for the RPS programs' BLAST XML, XML2
+/// and JSON (`-outfmt 5`, 13 to 16: RPSBLAST gets the query's title for the entry, RPSTBLASTN an
+/// exception from its Seq-align conversion and half a document or none; PS15a-1, PS15a-2), or
+/// `TABLE_EFFECT` for their outfmt 18 and 20 (PS15a-2).
 pub(crate) fn refuse_generated_query_id(
     subject: &crate::report::db_subject::ParsedSubject,
     oid: crate::seqdb::Oid,
@@ -2526,8 +2547,18 @@ pub(crate) fn refuse_generated_query_id(
 pub(crate) const QUERY_ANCHORED_EFFECT: &str =
     "shows that query in its place in the query-anchored formats (outfmt 1 to 4)";
 
-/// What NCBI does with it in the BLAST XML of the RPS programs (`refuse_generated_query_id`).
-pub(crate) const XML_EFFECT: &str = "takes that query for it in BLAST XML (outfmt 5)";
+/// What NCBI does with it in the BLAST XML, XML2 and JSON documents of the RPS programs
+/// (`refuse_generated_query_id`).
+pub(crate) const XML_EFFECT: &str =
+    "takes that query for it in BLAST XML, XML2 and JSON (outfmt 5, 13 to 16)";
+
+/// What NCBI does with it in the organism report and in the comma-separated values with a header
+/// line of the RPS programs where they differ for it (`report::tabular::TabularSpec::
+/// refuses_generated_id`, `refuse_generated_query_id`).
+pub(crate) const TABLE_EFFECT: &str = "takes that query for it in the organism report (outfmt \
+     18) of a profile with a taxid and in comma-separated values with a header line (outfmt 20) \
+     whose fields show what it finds by that id (RPSTBLASTN's outfmt 20 can stop with an \
+     exception)";
 
 /// The query-anchored formats (outfmt 1 to 4) of a program whose reports name a database's
 /// sequences by rank (BLASTN, TBLASTN: line RG T3b; BLASTP's `ListedTitles` asks the same
@@ -2764,6 +2795,10 @@ fn joined_apart(
     }
 }
 
+/// The refusal of a description id that NCBI's cut of the description line leaves no room for
+/// (`check_shown_parsed_subject`).
+const LONG_DESCRIPTION_ID: &str = "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ 2.17.0 pads the description line without end)";
+
 /// LOSAT's refusals of the outfmt 0 description and alignment heading of the subject with
 /// parsed Seq-ids `subject` (`oid` gives its OID, which a refusal names; `protein` for a protein
 /// database)
@@ -2804,11 +2839,7 @@ pub(crate) fn check_shown_parsed_subject(
     // The unsigned length wraps for an id longer than 65 bytes: NCBI 2.17.0 then pads the
     // line with spaces without end (probe of the ID2a review, `tests/db_search/ids/refuse.faa`).
     if subject.description_start().len() > 65 {
-        return Err(parsed_refusal(
-            oid(),
-            "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ 2.17.0 pads the description line without end)",
-            program,
-        ));
+        return Err(parsed_refusal(oid(), LONG_DESCRIPTION_ID, program));
     }
     if subject.pairwise_title_reads_source(protein, taxdb_found) {
         subject
@@ -2817,6 +2848,27 @@ pub(crate) fn check_shown_parsed_subject(
     }
     if let Err(reason) = subject.source().name() {
         return Err(parsed_refusal(oid(), &format!("has {reason}"), program));
+    }
+    Ok(())
+}
+
+/// [`check_shown_parsed_subject`] of a subject whose load in the pairwise reports is `load`
+/// (`HitLoads::load`): the description line of one whose load throws shows its Seq-align id and
+/// `Unknown` (`ParsedSubject::thrown_description`), with no heading, so that only that id's
+/// length is refused there.
+pub(crate) fn check_pairwise_parsed(
+    subject: &crate::report::db_subject::ParsedSubject,
+    load: crate::report::db_subject::HitLoad,
+    protein: bool,
+    taxdb_found: bool,
+    oid: impl Fn() -> crate::seqdb::Oid,
+    program: &str,
+) -> Result<()> {
+    if load != crate::report::db_subject::HitLoad::Throws {
+        return check_shown_parsed_subject(subject, protein, taxdb_found, oid, program);
+    }
+    if subject.thrown_description().0.len() > 65 {
+        return Err(parsed_refusal(oid(), LONG_DESCRIPTION_ID, program));
     }
     Ok(())
 }
@@ -2935,7 +2987,14 @@ pub(crate) fn check_reported_parsed(
         check_prefetched_parsed(db, subject, ordinal, program)?;
     }
     if shown.pairwise {
-        check_shown_parsed_subject(subject, protein, taxdb_found, || db.oid(ordinal), program)?;
+        check_pairwise_parsed(
+            subject,
+            load,
+            protein,
+            taxdb_found,
+            || db.oid(ordinal),
+            program,
+        )?;
     }
     if shown.tabular {
         subject
@@ -3147,11 +3206,17 @@ pub(crate) fn reports_may_refuse(
             Ok(self)
         }
     }
+    let lineless_dropped = db.drops_lineless_hits();
     let check = |kept: &mut Kept,
                  headers: &HeaderReader<'_>,
                  ordinal: u32,
                  header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
      -> std::result::Result<(), ReportRefusal> {
+        // A sequence left without a line gets no Seq-align (`SeqAligned`): none of its hits is
+        // reported, so it cannot make a report refuse (an error of its header comes below).
+        if lineless_dropped && matches!(db.keeps_line(ordinal), Ok(false)) {
+            return Ok(());
+        }
         match reported_header(headers, header, ordinal, 0, program) {
             Ok(ReportedHeader::Stored(stored)) => {
                 check_reported_title(stored.replaced_bytes, || db.oid(ordinal), program)

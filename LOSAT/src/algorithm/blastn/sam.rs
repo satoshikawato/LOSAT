@@ -45,6 +45,7 @@ pub(crate) fn add_blastn_sam(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
+        rps: false,
         db_title: subjects.db_title(),
         gapped: !ungapped,
     };

@@ -15,7 +15,7 @@
 //! `if two_stage_lookup_ref.is_none()` ("Original lookup method") when this module declines the
 //! chunk: one call of `scan_subject_kmers_with_ranges` with `word_length == lut_word_length`, and
 //! per pair of a lookup hit the context of the query offset, the diagonal, the `last_hit` test,
-//! `s_TypeOfWord`, the ungapped extension on the context's own query slice, the cutoff,
+//! the ungapped extension on the context's own query slice, the cutoff,
 //! `x_push_ungapped` and the diagonal-hash insert. Phase 1, on any thread
 //! (`scan_strip_na`): the same scan kernel on one strip of a scan range with the `s_range` of
 //! the whole range; every lookup hit of a word in the table's order; for each pair the context
@@ -44,9 +44,8 @@
 
 use super::super::x_diag_lv;
 use super::super::{
-    extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, mask_lookup_index,
-    packed_kmer_at_seed_mask, type_of_word, BlastnTiming, DiagHashTable, QueryContext,
-    QueryContextIndex, UngappedHit,
+    extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, BlastnTiming, DiagHashTable,
+    QueryContext, QueryContextIndex, UngappedHit,
 };
 use super::{
     part, plan_strips, pool_threads, run_strips, scan_kernel, Cut, FoldCounts, PartScratch, Resume,
@@ -268,9 +267,8 @@ fn scan_strip_na_from<O: SeedOut, const PIECE: bool>(
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-839,887-895,923-933,939-941
 /// Phase 2 for the seeds of one strip, in order: the reference's statements after the context
 /// for one-hit mode with the diagonal hash (`two_hits` false, so `off_found` stays false and
-/// `hit_ready` true until the cutoff test), with the reference's coordinates (the query offset
-/// within its context for `s_TypeOfWord` and the extension, which runs on the context's own
-/// query slice); the debug, trace and diagonal-array branches are outside the scope and left
+/// `hit_ready` true until the cutoff test), with the reference's coordinates (the extension runs
+/// from the seed's offset in the concatenated query, on the context's own query slice); the debug, trace and diagonal-array branches are outside the scope and left
 /// out.
 ///
 /// With `PT` (LOSAT_X_PAIRPARFOLD) the seeds are one partition's seeds of one strip,
@@ -335,12 +333,9 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         let x_key = if PT { out.key(pos, x_k) } else { 0 };
         let q_off0 = seed.q as usize;
         let kmer_start = seed.s as usize;
-        let s_range = seed.s_range as usize;
         let context_idx = seed.context as usize;
         let ctx = &x.query_contexts[context_idx];
         let q_idx = context_idx as u32;
-
-        let q_pos_usize = q_off0 - ctx.query_offset as usize;
 
         // Use pre-computed cutoff score (computed once per query-subject pair)
         let cutoff_score = x.cutoff_scores[context_idx];
@@ -376,58 +371,22 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
             continue;
         }
 
-        let mut q_off = q_pos_usize;
-        let mut s_off = kmer_start;
-        let mut s_end = kmer_start + safe_k;
-        let mut s_end_pos = s_end + diag_offset as usize;
-        let off_found = false;
-        let query_mask = ctx.masks.as_slice();
-
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:459-489
-        #[expect(
-            clippy::manual_contains,
-            reason = "a linear scan of the cell's hits with an early exit, as NCBI's loop (na_ungapped.c:131-133); slice::contains would switch this per-seed check to std's chunked search"
-        )]
-        let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
-            if s_pos + safe_k > s_len {
-                return true;
-            }
-            let kmer = mask_lookup_index(
-                packed_kmer_at_seed_mask(search_seq_packed, s_pos, safe_k),
-                safe_k,
-            );
-            let hits = x.hits(kmer);
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1027-1034
-            let q_off_1 = (ctx.query_offset as usize + q_pos + 1) as u32;
-            !hits.iter().any(|&hit_q_off| hit_q_off == q_off_1)
-        };
-
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:718-722,887-895
-        let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
-            q_off,
-            s_off,
-            !query_mask.is_empty(),
-            ctx.len,
-            s_range,
-            safe_k, // word_length
-            safe_k, // lut_word_length (same for non-two-stage)
-            false,  // check_double = FALSE (not in two-hit block)
-            &mut is_seed_masked,
-        );
-        if wt == 0 {
-            continue;
-        }
-        q_off = q_off_adj;
-        s_off = s_off_adj;
-        s_end += ext;
-        s_end_pos += ext;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531
+        // `s_TypeOfWord` returns a single word with nothing extended (the word length is the
+        // lookup word length, `scan_na_lookup`): the word keeps the seed's offsets.
+        let s_off = kmer_start;
+        let s_end = kmer_start + safe_k;
+        let s_end_pos = s_end + diag_offset as usize;
+        let off_found = false;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:908-919
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:268-269
         // NCBI's `query` is the concatenated query and `q_off` an offset in it
         // (na_ungapped.c:164-206 too): a walk that does not stop at the context's sentinel (a
-        // raw X-drop of 2^30 or more) reads the contexts before it.
-        let q_off_concat = ctx.query_offset as usize + q_off;
+        // raw X-drop of 2^30 or more) reads the contexts before it. The word keeps the seed's
+        // offsets, so `q_off` is the seed's `q_off0`.
+        let q_off_concat = q_off0;
         let x_dropoff = x.x_dropoff_scores[context_idx];
         let reduced_cutoff = x.reduced_cutoff_scores[context_idx];
         let ungapped_start = if timing_enabled {

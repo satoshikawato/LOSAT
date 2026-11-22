@@ -14,7 +14,7 @@
 pub mod blastn;
 pub mod blastp;
 pub mod common;
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:388-680
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:388-688
 // PHI-BLAST (psiblast `-phi_pattern`): the pattern, its scans, statistics, alignments and engine.
 pub mod phi_search;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51

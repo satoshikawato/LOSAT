@@ -16,6 +16,7 @@ blastx	blastn	code
 blastx	blastp	code
 blastx	common	code
 blastx	tblastx	code
+phi_search	pssm_search	code
 psiblast	blastp	code
 psiblast	pssm_search	code
 pssm_search	blastn	code

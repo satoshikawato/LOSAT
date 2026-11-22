@@ -19,6 +19,7 @@
 //! reproduce is refused ([`RenderError::Unsupported`]).
 
 use std::collections::{HashMap, HashSet};
+use std::io::{Seek, Write};
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::db_subject::bioseq_facts;
@@ -28,6 +29,7 @@ use crate::seqid::label::{bioseq_fasta, fasta};
 use crate::seqid::mask_handle::{handle_fasta_is_own, mask_handle_key};
 use crate::seqid::model::ParsedSeqId;
 use crate::sequence::stdaa_letters::protein_fasta_letters;
+use crate::sequence::FastaLines;
 
 use super::request::{self, Bioseq};
 
@@ -40,16 +42,102 @@ pub enum RenderError {
     /// What LOSAT does not reproduce: the part of the queries, for a message
     /// `"<part> is not supported by LOSAT's <program>"`.
     Unsupported(String),
+    /// The text could not be written to its file ([`Text::file`]).
+    Write(std::io::Error),
+}
+
+/// Where the FASTA text goes as it is written: held whole, for a caller that reads records from
+/// the bytes (the library API and LOSAT Web), or written on to a file a block at a time (the
+/// command line's temporary file), so that the import holds no copy of the sequences beside the
+/// file, as the command line's `-query` holds none beside its own.
+pub struct Text {
+    /// The bytes not written to the file yet: all of them when there is none.
+    bytes: Vec<u8>,
+    file: Option<std::fs::File>,
+}
+
+/// The FASTA text written ([`Text::finish`]).
+#[derive(Debug)]
+pub enum Rendered {
+    /// The text held whole.
+    Bytes(Vec<u8>),
+    /// The file of [`Text::file`], positioned at its start.
+    File(std::fs::File),
+}
+
+/// The bytes that a text written to a file holds before it writes them on: with the letters
+/// written [`LETTER_BLOCK`] at a time, its buffer stays below glibc's least threshold for a
+/// mapping of its own (128 KiB), so that the import frees no block that would raise the
+/// threshold and keep the search's later blocks on the heap.
+const FILE_BLOCK: usize = 32 * 1024;
+
+/// The letters converted or copied at a time.
+const LETTER_BLOCK: usize = 16 * 1024;
+
+impl Text {
+    /// A text held whole.
+    pub fn held() -> Self {
+        Self {
+            bytes: Vec::new(),
+            file: None,
+        }
+    }
+
+    /// A text written on to `file`, an empty file, a block at a time.
+    pub fn file(file: std::fs::File) -> Self {
+        Self {
+            bytes: Vec::with_capacity(
+                FILE_BLOCK + LETTER_BLOCK + LETTER_BLOCK / WIDTH as usize + 2,
+            ),
+            file: Some(file),
+        }
+    }
+
+    fn extend(&mut self, bytes: &[u8]) -> Result<(), RenderError> {
+        self.bytes.extend_from_slice(bytes);
+        self.spill()
+    }
+
+    /// Room for `additional` bytes in a text held whole.
+    fn reserve(&mut self, additional: usize) {
+        if self.file.is_none() {
+            self.bytes.reserve(additional);
+        }
+    }
+
+    /// The bytes written on to the file once they fill a block.
+    fn spill(&mut self) -> Result<(), RenderError> {
+        if let Some(file) = &mut self.file {
+            if self.bytes.len() >= FILE_BLOCK {
+                file.write_all(&self.bytes).map_err(RenderError::Write)?;
+                self.bytes.clear();
+            }
+        }
+        Ok(())
+    }
+
+    /// The text written: the bytes held, or the file with the rest written to it.
+    fn finish(self) -> Result<Rendered, RenderError> {
+        match self.file {
+            None => Ok(Rendered::Bytes(self.bytes)),
+            Some(mut file) => {
+                file.write_all(&self.bytes)
+                    .and_then(|()| file.seek(std::io::SeekFrom::Start(0)))
+                    .map_err(RenderError::Write)?;
+                Ok(Rendered::File(file))
+            }
+        }
+    }
 }
 
 /// `s_ImportQueries` of a `bioseq-set` (`set`, of type `Bioseq-set`): the FASTA text NCBI writes,
-/// each entry of the set in turn.
-pub fn render_queries(set: V<'_>) -> Result<Vec<u8>, RenderError> {
+/// each entry of the set in turn, into `text`.
+pub fn render_queries(set: V<'_>, mut text: Text) -> Result<Rendered, RenderError> {
     let mut stream = FastaOstream::default();
     for entry in set.field("seq-set").items() {
-        stream.write_entry(entry)?;
+        stream.write_entry(entry, &mut text)?;
     }
-    Ok(stream.text)
+    text.finish()
 }
 
 /// The width of the sequence lines (70, which `CFastaOstream`'s constructor gives `SetWidth`).
@@ -62,36 +150,49 @@ const WIDTH: u32 = 70;
 /// reader gives a subject without `-parse_deflines` (NCBI's own exports); without
 /// `parse_deflines` its definition line is its title alone (the reader numbers it again), with
 /// it `lcl|Subject_<i + 1>` and its title (the reader parses the id). Other ids are not modelled.
-pub fn render_subjects(bioseqs: &[V<'_>], parse_deflines: bool) -> Result<Vec<u8>, RenderError> {
-    let mut text = Vec::new();
+/// The text goes into `text`.
+pub fn render_subjects(
+    bioseqs: &[V<'_>],
+    parse_deflines: bool,
+    mut text: Text,
+) -> Result<Rendered, RenderError> {
     for (index, value) in bioseqs.iter().enumerate() {
         let mut stream = FastaOstream::default();
-        stream.write_bioseq(Bioseq::of(*value))?;
+        let sequence = stream.write_title(Bioseq::of(*value))?;
         let id = format!(">lcl|Subject_{}", index + 1);
-        let rest = stream
-            .text
+        let line = stream
+            .line
             .strip_prefix(id.as_bytes())
             .filter(|rest| matches!(rest.first(), Some(b' ' | b'\n')))
-            .ok_or_else(|| {
-                RenderError::Unsupported(
-                    "a subject Bioseq whose id is not the local id that NCBI's reader gives the subject in its place".into(),
-                )
-            })?;
-        if parse_deflines {
-            text.extend_from_slice(&stream.text);
-        } else {
-            text.push(b'>');
-            text.extend_from_slice(rest.strip_prefix(b" ").unwrap_or(rest));
+            .map(|rest| {
+                if parse_deflines {
+                    (&b""[..], &stream.line[..])
+                } else {
+                    (&b">"[..], rest.strip_prefix(b" ").unwrap_or(rest))
+                }
+            });
+        if let Some((start, rest)) = line {
+            text.extend(start)?;
+            text.extend(rest)?;
+        }
+        // The letters' errors come before the refusal of the id, as when the id was read from
+        // the whole record.
+        sequence.write(&mut text)?;
+        if line.is_none() {
+            return Err(RenderError::Unsupported(
+                "a subject Bioseq whose id is not the local id that NCBI's reader gives the subject in its place".into(),
+            ));
         }
     }
-    Ok(text)
+    text.finish()
 }
 
-/// `CFastaOstream` with the constructor's flags: the text written, and `m_PreviousWholeIds`, the
-/// handles of the ids written so far.
+/// `CFastaOstream` with the constructor's flags: the definition line being written, and
+/// `m_PreviousWholeIds`, the handles of the ids written so far.
 #[derive(Default)]
 struct FastaOstream {
-    text: Vec<u8>,
+    /// The definition line of the Bioseq being written ([`FastaOstream::write_title`]).
+    line: Vec<u8>,
     /// The keys of the `CSeq_id_Handle`s of the ids written ([`mask_handle_key`]).
     previous_whole_ids: HashSet<Vec<u8>>,
 }
@@ -138,17 +239,21 @@ const OUT_OF_RANGE: ThrowSite = ThrowSite {
 
 impl FastaOstream {
     /// `Write(entry)`: the entry's Bioseqs in the order of `CBioseq_CI`.
-    fn write_entry(&mut self, entry: V<'_>) -> Result<(), RenderError> {
+    fn write_entry(&mut self, entry: V<'_>, text: &mut Text) -> Result<(), RenderError> {
         let bioseqs = entry_bioseqs(entry)?;
         check_entry_ids(&bioseqs)?;
         for bioseq in bioseqs {
-            self.write_bioseq(bioseq)?;
+            let sequence = self.write_title(bioseq)?;
+            text.extend(&self.line)?;
+            sequence.write(text)?;
         }
         Ok(())
     }
 
-    /// `Write(handle)`: `WriteTitle` (the ids, the title), then `WriteSequence`.
-    fn write_bioseq(&mut self, bioseq: Bioseq<'_>) -> Result<(), RenderError> {
+    /// `Write(handle)` up to `WriteSequence`: `WriteTitle` (the ids, the title) as the
+    /// definition line (`line`), and the sequence to write after it.
+    fn write_title<'a>(&mut self, bioseq: Bioseq<'a>) -> Result<Sequence<'a>, RenderError> {
+        self.line.clear();
         let ids: Vec<ParsedSeqId> = bioseq.ids().cloned().collect();
         let inst = bioseq.value().field("inst");
         let protein = bioseq.molecule() == MOL_AA;
@@ -171,15 +276,11 @@ impl FastaOstream {
         self.write_seq_title(title, &ids, protein)?;
         // The reader reads a `TSeqPos` without a sign.
         let length = u32::try_from(length).expect("a Seq-inst length of 32 bits");
-        // The letters go straight into the text and are broken into lines there: the text is the
-        // one copy of the sequence that the import holds.
-        let letters = length as usize;
-        self.text
-            .reserve(letters + letters.div_ceil(WIDTH as usize));
-        let start = self.text.len();
-        append_letters(inst, length, protein, &mut self.text)?;
-        break_into_lines(&mut self.text, start, WIDTH as usize);
-        Ok(())
+        Ok(Sequence {
+            inst,
+            length,
+            protein,
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2946-2957
@@ -209,13 +310,13 @@ impl FastaOstream {
                 }
             }
         }
-        self.text.push(b'>');
+        self.line.push(b'>');
         match original_id(bioseq, ids) {
             Some(id) => {
-                self.text.extend_from_slice(b"lcl|");
-                self.text.extend_from_slice(id);
+                self.line.extend_from_slice(b"lcl|");
+                self.line.extend_from_slice(id);
             }
-            None => bioseq_fasta(ids, protein, &mut self.text),
+            None => bioseq_fasta(ids, protein, &mut self.line),
         }
         Ok(())
     }
@@ -252,11 +353,11 @@ impl FastaOstream {
         }
         if let Some(&first) = safe_title.first() {
             if first != b' ' {
-                self.text.push(b' ');
+                self.line.push(b' ');
             }
-            self.text.extend_from_slice(&safe_title);
+            self.line.extend_from_slice(&safe_title);
         }
-        self.text.push(b'\n');
+        self.line.push(b'\n');
         Ok(())
     }
 }
@@ -455,6 +556,42 @@ fn title_descriptor(bioseq: Bioseq<'_>) -> Result<Option<&[u8]>, RenderError> {
     Ok(bioseq.title())
 }
 
+/// What `WriteSequence` writes of a Bioseq: the letters of its `inst` up to its length.
+struct Sequence<'a> {
+    inst: V<'a>,
+    length: u32,
+    protein: bool,
+}
+
+impl Sequence<'_> {
+    /// The letters in lines of [`WIDTH`] into `text`, a block at a time.
+    fn write(&self, text: &mut Text) -> Result<(), RenderError> {
+        let letters = self.length as usize;
+        text.reserve(letters + letters.div_ceil(WIDTH as usize));
+        let mut lines = Lines {
+            text,
+            lines: FastaLines::new(WIDTH),
+        };
+        append_letters(self.inst, self.length, self.protein, &mut lines)?;
+        lines.lines.end(&mut lines.text.bytes);
+        lines.text.spill()
+    }
+}
+
+/// The letters of a sequence going into a text in lines.
+struct Lines<'t> {
+    text: &'t mut Text,
+    lines: FastaLines,
+}
+
+impl Lines<'_> {
+    /// The next letters, at most [`LETTER_BLOCK`] of them.
+    fn write(&mut self, letters: &[u8]) -> Result<(), RenderError> {
+        self.lines.write(letters, &mut self.text.bytes);
+        self.text.spill()
+    }
+}
+
 /// A segment of the sequence map: a Seq-data and its length, or a gap.
 enum Piece<'a> {
     Data(V<'a>, u32),
@@ -491,7 +628,7 @@ fn append_letters(
     inst: V<'_>,
     length: u32,
     protein: bool,
-    out: &mut Vec<u8>,
+    out: &mut Lines<'_>,
 ) -> Result<(), RenderError> {
     let pieces = sequence_map(inst, length)?;
     let target = if protein { NCBIEAA } else { IUPACNA };
@@ -507,10 +644,16 @@ fn append_letters(
         };
         let needed = end.min(length) - position;
         match piece {
-            Piece::Gap(_) => out.resize(
-                out.len() + needed as usize,
-                if protein { b'X' } else { b'N' },
-            ),
+            Piece::Gap(_) => {
+                let gap =
+                    vec![if protein { b'X' } else { b'N' }; LETTER_BLOCK.min(needed as usize)];
+                let mut left = needed as usize;
+                while left > 0 {
+                    let part = left.min(gap.len());
+                    out.write(&gap[..part])?;
+                    left -= part;
+                }
+            }
             Piece::Data(data, _) => data_letters(data, needed, target, out)?,
         }
         position = end;
@@ -522,25 +665,6 @@ fn append_letters(
         )));
     }
     Ok(())
-}
-
-/// The letters from `start` to the end of `text` broken into lines of `width` letters, each ending
-/// with a newline (the last one shorter), in place: what `sequence::write_fasta_lines` writes for
-/// them, without a second buffer.
-fn break_into_lines(text: &mut Vec<u8>, start: usize, width: usize) {
-    let count = text.len() - start;
-    let lines = count.div_ceil(width);
-    text.resize(text.len() + lines, 0);
-    // From the last line back: each line moves right by the newlines of the lines before it.
-    let mut write = text.len();
-    for line in (0..lines).rev() {
-        let from = start + line * width;
-        let to = (from + width).min(start + count);
-        write -= 1;
-        text[write] = b'\n';
-        write -= to - from;
-        text.copy_within(from..to, write);
-    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:219-291
@@ -680,7 +804,7 @@ fn data_letters(
     data: V<'_>,
     length: u32,
     target: u32,
-    out: &mut Vec<u8>,
+    out: &mut Lines<'_>,
 ) -> Result<(), RenderError> {
     if length == 0 {
         return Ok(());
@@ -723,18 +847,34 @@ fn data_letters(
         ));
     }
     let length = length as usize;
-    match source {
-        IUPACNA | IUPACAA | NCBIEAA => out.extend_from_slice(&bytes[..length]),
-        NCBISTDAA => out.extend(protein_fasta_letters(&bytes[..length])),
-        NCBI4NA => out.extend((0..length).map(|i| {
-            let byte = bytes[i / 2];
-            NA4_TO_IUPACNA[usize::from(if i % 2 == 0 { byte >> 4 } else { byte & 15 })]
-        })),
-        NCBI2NA => out.extend((0..length).map(|i| {
-            let shift = 6 - 2 * (i % 4);
-            NA2_TO_IUPACNA[usize::from((bytes[i / 4] >> shift) & 3)]
-        })),
-        _ => unreachable!("a convertible coding"),
+    let mut block = Vec::new();
+    for start in (0..length).step_by(LETTER_BLOCK) {
+        let end = (start + LETTER_BLOCK).min(length);
+        let letters = match source {
+            IUPACNA | IUPACAA | NCBIEAA => &bytes[start..end],
+            NCBISTDAA => {
+                block = protein_fasta_letters(&bytes[start..end]);
+                &block[..]
+            }
+            NCBI4NA => {
+                block.clear();
+                block.extend((start..end).map(|i| {
+                    let byte = bytes[i / 2];
+                    NA4_TO_IUPACNA[usize::from(if i % 2 == 0 { byte >> 4 } else { byte & 15 })]
+                }));
+                &block[..]
+            }
+            NCBI2NA => {
+                block.clear();
+                block.extend((start..end).map(|i| {
+                    let shift = 6 - 2 * (i % 4);
+                    NA2_TO_IUPACNA[usize::from((bytes[i / 4] >> shift) & 3)]
+                }));
+                &block[..]
+            }
+            _ => unreachable!("a convertible coding"),
+        };
+        out.write(letters)?;
     }
     Ok(())
 }

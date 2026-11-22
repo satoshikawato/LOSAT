@@ -6,7 +6,10 @@
 //! whose LOSAT result equals NCBI's: imports with `-db` and `-subject` strategies, the command
 //! line's overrides (`-query`, `-db`, `-subject`, the formatting options), the warnings of the
 //! options a strategy ignores, the strategies' query ranges and filters, the archive (outfmt 11)
-//! of an imported run, and the reader's errors.
+//! of an imported run, the reader's errors, another program's strategy with options of the
+//! command line (`C.*.from.*`), the parameters that the setters take (`S1.*`: best hits, database
+//! masks, the repeat filter, the MegaBLAST index) and the command line's index and database mask
+//! over a strategy's (`B.*`).
 //!
 //! A strategy's subjects are searched once whatever `-num_threads` says (Owner 2026-11-20 F2-Q1
 //! "Q1=C"; NCBI prints every alignment once per thread or aborts): the runs at 2, 4 and 8 threads

@@ -549,3 +549,25 @@ I.blastx.gencode.f11	blastx	-import_search_strategy {ss}/blastx.gencode.ss -outf
 I.tblastn.task_fast.f11	tblastn	-import_search_strategy {ss}/tblastn.task_fast.ss -outfmt 11	0	cc0882e148f9671e	ce435f6509352102
 I.blastp.hits.f11mts3	blastp	-import_search_strategy {ss}/blastp.hits.ss -outfmt 11 -max_target_seqs 3	0	0e66171a7293f16f	c35a236749db9a62
 E.blastn.dupparam.f11	blastn	-import_search_strategy {ss}/craft/blastn.dupparam -outfmt 11	0	8b4eae644302513a	c7d9e175b47ef7bc
+C.blastn.from.tblastx.db.evalue	blastn	-import_search_strategy {ss}/tblastx.db.ss -evalue 1e-5	0	f153bc90307b54d1	01cfd7db172dc251
+C.blastx.from.tblastx.db.word	blastx	-import_search_strategy {ss}/tblastx.db.ss -word_size 4	0	f153bc90307b54d1	3ab81ccb7884018c
+C.tblastx.from.blastx.db.matrix	tblastx	-import_search_strategy {ss}/blastx.db.ss -matrix PAM30	0	9df0120fd047fcb6	97337dc6ea0e6c31
+C.tblastx.from.blastn.db.evalue	tblastx	-import_search_strategy {ss}/blastn.db.ss -evalue 1e-5	0	7d416daf860e5ef5	117b81a75e1421a9
+C.tblastx.from.blastn.db.strand	tblastx	-import_search_strategy {ss}/blastn.db.ss -strand plus	0	0a2b3a5340df4f6f	d6dbca01209bf9a6
+C.blastx.from.tblastx.db.strand	blastx	-import_search_strategy {ss}/tblastx.db.ss -strand minus	0	306969cdd9b3c9cc	aadd0ca47f19a2cc
+C.blastn.from.tblastx.sub	blastn	-import_search_strategy {ss}/tblastx.sub.ss	0	3bcd5eb1b7e906e0	c7d9e175b47ef7bc
+S1.tblastn.sbh	tblastn	-import_search_strategy {ss}/tbn_sbh.ss	0	ecf92b1f992303de	ce435f6509352102
+S1.tblastx.sbh	tblastx	-import_search_strategy {ss}/tbx_sbh.ss	0	16206fa9bf439f26	d6dbca01209bf9a6
+S1.blastp.dbmask	blastp	-import_search_strategy {ss}/bp_dbmask.ss	0	797180fc592d0a9f	1fc42b53917c7075
+S1.blastx.dbmask	blastx	-import_search_strategy {ss}/bx_dbmask.ss	0	d97872a0ccbb43e6	570c01346c395517
+S1.tblastn.dbmask	tblastn	-import_search_strategy {ss}/tbn_dbmask.ss	0	c753dd0911d3b943	ce435f6509352102
+S1.tblastx.dbmask	tblastx	-import_search_strategy {ss}/tbx_dbmask.ss	0	8d4ea831a3817b11	d6dbca01209bf9a6
+S1.blastn.rpt	blastn	-import_search_strategy {ss}/bn_rpt.ss	0	e9899662bdc87b19	c7d9e175b47ef7bc
+S1.blastn.useidx_force	blastn	-import_search_strategy {ss}/blastn.useidx_force.ss	0	18d4dad5d024ef63	357132bd2d29548a
+S1.blastn.useidx_force.f11	blastn	-import_search_strategy {ss}/blastn.useidx_force.ss -outfmt 11	0	3c671f93c751c0db	357132bd2d29548a
+S1.blastn.useidx_force.cli	blastn	-import_search_strategy {ss}/blastn.useidx_force.ss -use_index true -db tests/db_search/arch_snucl	0	18d4dad5d024ef63	3d949a27583264c6
+B.blastn.db.useidx_name	blastn	-import_search_strategy {ss}/blastn.db.ss -use_index true -index_name nosuch	0	18d4dad5d024ef63	31cca11922388d41
+B.blastp.db.cli_dbmask	blastp	-import_search_strategy {ss}/blastp.db.ss -db tests/db_search/dbmaskp/ps5 -db_soft_mask 21	0	c48a393595394333	05c29d792843c8f2
+S1.blastx.bh	blastx	-import_search_strategy {ss}/bx_bh.ss	0	61271d0e2b07e36c	570c01346c395517
+S1.tblastn.bh	tblastn	-import_search_strategy {ss}/tbn_bh.ss	0	d691cd63b427a3fe	ce435f6509352102
+S1.tblastx.bh	tblastx	-import_search_strategy {ss}/tbx_bh.ss	0	85c39ab5c4286824	d6dbca01209bf9a6

@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use super::options::{import_request, EProgram, SeqRange, Setter};
-use super::queries::render_queries;
+use super::queries::{render_queries, Text};
 use super::request::{ParamSet, Queries, Request};
 use crate::report::archive::fields;
 use crate::report::serial::asn_types::table::named;
@@ -156,7 +156,7 @@ fn every_ncbi_strategy_file_builds_the_setters_it_records() {
         // The queries NCBI's FASTA reader made (`CFastaReader` titles and user objects, local
         // ids, every coding it stores) are each written again.
         if let Queries::BioseqSet(set) = &request.queries {
-            render_queries(V::new(named::BIOSEQ_SET, set))
+            render_queries(V::new(named::BIOSEQ_SET, set), Text::held())
                 .unwrap_or_else(|error| panic!("{case}: {error:?}"));
             rendered += 1;
         }

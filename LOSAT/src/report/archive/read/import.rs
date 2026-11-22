@@ -25,7 +25,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::options::{import_request, EProgram, ImportedOptions, SeqRange, Setter};
-use super::queries::{render_queries, RenderError};
+use super::queries::{render_queries, RenderError, Rendered, Text};
 use super::request::{Queries, Request, Subject};
 use crate::cli::{Commands, NativeError};
 use crate::ncbi_exception::NcbiException;
@@ -67,11 +67,15 @@ pub(crate) struct Imported {
     /// range and PSI-BLAST's iteration count).
     pub(crate) options: ImportedOptions,
     /// The queries as NCBI's temporary FASTA file, `None` when `-query` overrides them.
-    pub(crate) queries: Option<Vec<u8>>,
+    pub(crate) queries: Option<Rendered>,
     /// The subject, `None` when `-db` or `-subject` overrides it.
     pub(crate) subject: Option<ImportedSubject>,
     /// The warnings posted so far, in order (the text after `Warning: [<program>] `).
     pub(crate) warnings: Vec<String>,
+    /// Whether the FASTA texts of the queries and subjects go to temporary files as they are
+    /// written (a command line, which names the strategy's file), or are held whole for a caller
+    /// that gave the strategy's bytes ([`strategy_text`]).
+    pub(crate) to_files: bool,
 }
 
 impl Imported {
@@ -251,6 +255,7 @@ pub(crate) fn recover(command: &Command<'_>) -> std::result::Result<Imported, Im
         warnings.push("Overriding megablast BLAST DB indexed options in saved strategy".into());
     }
     let program = command.program;
+    let to_files = command.bytes.is_none();
     let value = match command.bytes {
         Some(bytes) => extract_request(std::io::Cursor::new(bytes), program),
         None => {
@@ -271,14 +276,39 @@ pub(crate) fn recover(command: &Command<'_>) -> std::result::Result<Imported, Im
         warnings.push("Overriding query in saved strategy".into());
         None
     } else {
-        Some(import_queries(&request.queries, &options, program).map_err(|e| fail(&warnings, e))?)
+        Some(
+            import_queries(&request.queries, &options, program, to_files)
+                .map_err(|e| fail(&warnings, e))?,
+        )
     };
     Ok(Imported {
         options,
         queries,
         subject,
         warnings,
+        to_files,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:395-439
+/// Where the FASTA text of the strategy's queries or subjects (`role`: `query`, `subject`) is
+/// written: a command line's unnamed temporary file (`to_files`; NCBI writes the queries to a
+/// temporary file at the import), else memory.
+fn strategy_text(to_files: bool, role: &str) -> Result<Text> {
+    Ok(if to_files {
+        Text::file(crate::blastinput::input_files::temporary_output(role)?)
+    } else {
+        Text::held()
+    })
+}
+
+/// The error of a rendering of the strategy's queries or subjects for `program`.
+fn render_error(error: RenderError, program: &str) -> anyhow::Error {
+    match error {
+        RenderError::Exception(exception) => caught(&exception),
+        RenderError::Unsupported(part) => unported(&part, program),
+        RenderError::Write(error) => error.into(),
+    }
 }
 
 /// An import that failed, after the warnings it posted.
@@ -321,7 +351,12 @@ fn import_subject(
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:372-392
 /// `s_ImportPssm` and `s_ImportQueries`: the queries as the text of NCBI's temporary FASTA file
 /// (`ImportRun::queries_input` makes the file where a run reads one).
-fn import_queries(queries: &Queries, options: &ImportedOptions, program: &str) -> Result<Vec<u8>> {
+fn import_queries(
+    queries: &Queries,
+    options: &ImportedOptions,
+    program: &str,
+    to_files: bool,
+) -> Result<Rendered> {
     match queries {
         Queries::Pssm => {
             if matches!(program, "BLASTN" | "BLASTP" | "BLASTX" | "TBLASTX") {
@@ -337,14 +372,11 @@ fn import_queries(queries: &Queries, options: &ImportedOptions, program: &str) -
             "a search strategy whose queries are a list of sequence locations",
             program,
         )),
-        Queries::BioseqSet(set) => {
-            let text =
-                render_queries(V::new(named::BIOSEQ_SET, set)).map_err(|error| match error {
-                    RenderError::Exception(exception) => caught(&exception),
-                    RenderError::Unsupported(part) => unported(&part, program),
-                })?;
-            Ok(text)
-        }
+        Queries::BioseqSet(set) => render_queries(
+            V::new(named::BIOSEQ_SET, set),
+            strategy_text(to_files, "query")?,
+        )
+        .map_err(|error| render_error(error, program)),
     }
 }
 
@@ -575,12 +607,12 @@ impl ImportRun {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:395-439
-/// The strategy's queries or subjects as FASTA text, held once: in memory until a run first
-/// opens it as an input, then only as the unnamed temporary file that the open wrote (NCBI writes
-/// the queries to a temporary file at the import and reads the queries from it), whose handle
-/// each later open reads from its start. A run holds no copy of the text beside the file, as the
-/// command line's `-query` holds none beside its file. A caller that reads records from bytes
-/// (the library API and LOSAT Web) takes the text itself (`take`).
+/// The strategy's queries or subjects as FASTA text, held once: the unnamed temporary file that
+/// the import wrote them to (a command line, [`strategy_text`]; NCBI writes the queries to a
+/// temporary file at the import and reads the queries from it), whose handle each open reads from
+/// its start, or the bytes, which a caller that reads records from bytes (the library API and
+/// LOSAT Web) takes (`take`), and which a first open writes to such a file. A run holds no copy of
+/// the text beside the file, as the command line's `-query` holds none beside its file.
 #[derive(Debug)]
 pub(crate) struct StrategyText(std::sync::Mutex<Held>);
 
@@ -594,8 +626,11 @@ enum Held {
 }
 
 impl StrategyText {
-    pub(crate) fn new(text: Vec<u8>) -> Self {
-        Self(std::sync::Mutex::new(Held::Text(text)))
+    pub(crate) fn new(text: Rendered) -> Self {
+        Self(std::sync::Mutex::new(match text {
+            Rendered::Bytes(bytes) => Held::Text(bytes),
+            Rendered::File(file) => Held::File(file),
+        }))
     }
 
     /// The text as an input file of the run (`role`: `query` or `subject`), positioned at its
@@ -694,13 +729,12 @@ impl Start {
                     .iter()
                     .map(|bioseq| V::new(named::BIOSEQ, bioseq))
                     .collect();
-                let text =
-                    super::queries::render_subjects(&values, parse_deflines).map_err(|error| {
-                        match error {
-                            RenderError::Exception(exception) => caught(&exception),
-                            RenderError::Unsupported(part) => unported(&part, program),
-                        }
-                    })?;
+                let text = super::queries::render_subjects(
+                    &values,
+                    parse_deflines,
+                    strategy_text(self.imported.to_files, "subject")?,
+                )
+                .map_err(|error| render_error(error, program))?;
                 Some(std::sync::Arc::new(StrategyText::new(text)))
             }
             _ => None,

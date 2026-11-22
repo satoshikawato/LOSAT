@@ -142,14 +142,13 @@ pub(crate) fn write_tblastx_seqalign(
     warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Tblastx,
-        rps: false,
         db_title: match subjects {
             SeqalignSubjects::Records { .. } => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: false,
+        program_type: None,
     };
     let mut subject_records: Vec<SubjectRecord<'_>> = Vec::new();
     let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();

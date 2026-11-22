@@ -40,8 +40,8 @@ use crate::report::serial::{write_query_to, SerialFormat};
 /// Writes the documents of every query of `hitlists` (indexed by query) to `writer`, each
 /// query's warnings before it and NCBI's posts of the bytes that its stream replaces in the
 /// query's document after them (on the warnings' sink, `write_query_to`). `subject_records` and `subject_letters` are indexed by the hit
-/// lists' subject index (a `-db` search's reported sequences by rank, `shown`). `pssm_type` is
-/// PSI-TBLASTN's "Blast Type" (`RunRecord::pssm_type`), `None` for TBLASTN's.
+/// lists' subject index (a `-db` search's reported sequences by rank, `shown`). `program_type`
+/// is PSI-TBLASTN's (`RunRecord::program_type`), `None` for TBLASTN's.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_tblastn_seqalign(
     format: SerialFormat,
@@ -52,15 +52,14 @@ pub(super) fn write_tblastn_seqalign(
     shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     ranges: &ReportRanges<'_>,
-    pssm_type: Option<crate::report::record::PssmBlastType>,
+    program_type: Option<crate::report::record::ProgramType>,
     warnings: &mut QueryWarnings<'_>,
 ) -> Result<()> {
     let run = RunRecord {
-        pssm_type,
         program: Program::Tblastn,
-        rps: false,
         db_title: shown.db_title(),
         gapped: true,
+        program_type,
     };
     let mut subjects: Vec<SubjectRecord<'_>> = Vec::new();
     let mut hsps: Vec<HspRecord<'_>> = Vec::new();

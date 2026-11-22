@@ -474,11 +474,10 @@ pub(crate) fn write_blastn_archives(
     writer: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastn,
-        rps: false,
         db_title: call.subjects.db_title(),
         gapped: call.batches.gapped,
+        program_type: None,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {
         for index in span.clone() {

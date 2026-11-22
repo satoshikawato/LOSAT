@@ -120,33 +120,34 @@ pub struct SubjectRecord<'a> {
 pub struct RunRecord<'a> {
     /// The program, which names the "Blast Type" and selects the segment form.
     pub program: Program,
-    /// Whether the search is the RPS search of `program` (rpsblast: BLASTP's, rpstblastn:
-    /// BLASTX's), whose subjects are the profiles of an RPS database: the Seq-annot's "Blast
-    /// Type" (outfmt 8, 9, 12) names the RPS program. Nothing else reads it (the archive's
-    /// Seq-aligns carry no Blast Type).
-    pub rps: bool,
     /// The database title (`-db`), or `None` for a `-subject` search.
     pub db_title: Option<&'a [u8]>,
     /// Whether the search is gapped (`BLASTHspListToSeqAlign`) or ungapped
     /// (`BLASTUngappedHspListToSeqAlign`).
     pub gapped: bool,
-    /// The program type of a PSSM search, which `program` does not name (`None`: `program`'s):
-    /// the Seq-annot's "Blast Type", and psiblast's rule for a `num_ident` of 0.
-    pub pssm_type: Option<PssmBlastType>,
+    /// The program type of a search that `program` does not name (`ProgramType`; `None`:
+    /// `program`'s): the Seq-annots' "Blast Type", and psiblast's rule for a `num_ident` of 0.
+    pub program_type: Option<ProgramType>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:666-673
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-694
-/// The program type of a PSSM search's options, which the formatter's program name is
-/// (`Blast_ProgramNameFromType`): the Seq-annots' "Blast Type" is `ProgramNameToEnum` of it, so
-/// psiblast's (also of a FASTA query's first round) and PSI-TBLASTN's (tblastn `-in_pssm`) are
-/// their own, not BLASTP's and TBLASTN's.
+/// The program type (`EBlastProgramType`) of a search that its `Program` does not name, which
+/// the formatter's program name is (`Blast_ProgramNameFromType`): the Seq-annots' "Blast Type"
+/// (outfmt 8, 9, 12) is `ProgramNameToEnum` of it. A PSSM search's options are their own
+/// (psiblast's, also of a FASTA query's first round, and PSI-TBLASTN's of tblastn `-in_pssm`), and
+/// so are an RPS search's, whose subjects are the profiles of an RPS database (rpsblast of
+/// BLASTP, rpstblastn of BLASTX). The archive's Seq-aligns carry no Blast Type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PssmBlastType {
+pub enum ProgramType {
     /// `psiblast`, `ePSIBlast`.
-    Psiblast,
+    PsiBlast,
     /// `psitblastn`, `ePSITblastn`.
     PsiTblastn,
+    /// `rpsblast`, `eRPSBlast`.
+    RpsBlast,
+    /// `rpstblastn`, `eRPSTblastn`.
+    RpsTblastn,
 }
 
 impl RunRecord<'_> {

@@ -182,10 +182,9 @@ pub(super) fn write_seqalign(
     };
     seqalign::write_blastp_seqalign(
         serial,
-        args.app == BlastpApp::Rpsblast,
+        // psiblast's own "Blast Type" in every round, and rpsblast's.
+        args.app.program_type(),
         !args.ungapped,
-        // psiblast's own "Blast Type", in every round.
-        (args.app == BlastpApp::Psiblast).then_some(crate::report::record::PssmBlastType::Psiblast),
         hit_lists,
         &crate::report::record::QueryNames {
             records: query_records,
@@ -285,7 +284,7 @@ pub(super) fn write_archive(
         handle,
         psi: psi.as_ref(),
         gapped: !args.ungapped,
-        rps: args.app == BlastpApp::Rpsblast,
+        program_type: args.app.program_type(),
         batches: archive::CallBatches {
             masks: &masks,
             spans: &spans,

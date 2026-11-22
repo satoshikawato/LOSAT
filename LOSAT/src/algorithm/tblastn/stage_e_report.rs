@@ -867,7 +867,7 @@ pub(super) fn render(
                     hitlists,
                     ranges,
                     // PSI-TBLASTN's own "Blast Type" (`psitblastn`).
-                    pssm.map(|_| crate::report::record::PssmBlastType::PsiTblastn),
+                    pssm.map(|_| crate::report::record::ProgramType::PsiTblastn),
                     warnings
                         .as_mut()
                         .expect("a Seq-annot writes its posts to the diagnostics"),

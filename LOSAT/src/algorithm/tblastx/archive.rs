@@ -345,14 +345,13 @@ pub(super) fn write_tblastx_archives(
     writer: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Tblastx,
-        rps: false,
         db_title: match data.subjects {
             SeqalignSubjects::Records { .. } => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: false,
+        program_type: None,
     };
     for_each_batch(data, |span, batch| {
         for index in span.clone() {
@@ -360,11 +359,10 @@ pub(super) fn write_tblastx_archives(
         }
         let mut aligns = TblastxAligns {
             run: RunRecord {
-                pssm_type: None,
                 program: run.program,
-                rps: run.rps,
                 db_title: run.db_title,
                 gapped: run.gapped,
+                program_type: run.program_type,
             },
             data,
             span,

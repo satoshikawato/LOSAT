@@ -372,11 +372,10 @@ pub(super) fn write_tblastn_archives(
     writer: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Tblastn,
-        rps: false,
         db_title: data.shown.db_title(),
         gapped: true,
+        program_type: None,
     };
     for_each_batch(data, render.spans, |span, batch| {
         for index in span.clone() {
@@ -385,11 +384,10 @@ pub(super) fn write_tblastn_archives(
         let first = span.start;
         let mut aligns = TblastnAligns {
             run: RunRecord {
-                pssm_type: None,
                 program: run.program,
-                rps: run.rps,
                 db_title: run.db_title,
                 gapped: run.gapped,
+                program_type: run.program_type,
             },
             queries: data.queries,
             first,

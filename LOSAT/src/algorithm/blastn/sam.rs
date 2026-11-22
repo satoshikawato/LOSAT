@@ -44,11 +44,10 @@ pub(crate) fn add_blastn_sam(
     letters: &mut dyn SamLetters,
 ) -> Result<()> {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastn,
-        rps: false,
         db_title: subjects.db_title(),
         gapped: !ungapped,
+        program_type: None,
     };
     let mut sam_subjects: Vec<SamSequence<'_>> = Vec::new();
     let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();

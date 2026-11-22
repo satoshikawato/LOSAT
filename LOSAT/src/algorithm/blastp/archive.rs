@@ -170,8 +170,8 @@ pub(crate) struct ArchiveCall<'a> {
     pub psi: Option<&'a PsiArchive>,
     /// `!args.ungapped`: the archive's Seq-aligns are those of outfmt 8 (`write_blastp_seqalign`).
     pub gapped: bool,
-    /// The search is rpsblast's (`RunRecord::rps`).
-    pub rps: bool,
+    /// The app's program type (`BlastpApp::program_type`, `RunRecord::program_type`).
+    pub program_type: Option<crate::report::record::ProgramType>,
     pub batches: CallBatches<'a>,
     pub query_lengths: &'a [usize],
     /// The subject names of the Seq-aligns.
@@ -342,15 +342,11 @@ pub(crate) fn write_blastp_archives(
     writer: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
-        // psiblast's Seq-aligns (`PssmBlastType::Psiblast`, every round).
-        pssm_type: call
-            .psi
-            .map(|_| crate::report::record::PssmBlastType::Psiblast),
         program: Program::Blastp,
-        rps: call.rps,
         db_title: call.subjects.db_title(),
         // An ungapped search's Seq-aligns are Dense-diags, as in outfmt 8 (`seqalign.rs`).
         gapped: call.gapped,
+        program_type: call.program_type,
     };
     for_each_batch(&call.batches, call.psi, first_context, |span, batch| {
         for index in span.clone() {

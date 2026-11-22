@@ -44,6 +44,17 @@ impl BlastpApp {
         self.request_kind().application()
     }
 
+    /// The program type of the app's Seq-aligns where BLASTP does not name it
+    /// (`RunRecord::program_type`): psiblast's (every round) and rpsblast's.
+    pub fn program_type(self) -> Option<crate::report::record::ProgramType> {
+        use crate::report::record::ProgramType;
+        match self {
+            BlastpApp::Blastp => None,
+            BlastpApp::Psiblast => Some(ProgramType::PsiBlast),
+            BlastpApp::Rpsblast => Some(ProgramType::RpsBlast),
+        }
+    }
+
     /// The app's NCBI application (`options::RequestKind`).
     pub fn request_kind(self) -> crate::report::archive::options::RequestKind {
         use crate::report::archive::options::RequestKind;

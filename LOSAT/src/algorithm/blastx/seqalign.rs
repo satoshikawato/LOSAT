@@ -68,14 +68,16 @@ pub(super) fn write_blastx_seqalign(
     batches: &[BatchResults],
 ) -> Result<()> {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastx,
-        rps: options.rpstblastn.is_some(),
         db_title: match names {
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: options.gapped,
+        program_type: options
+            .rpstblastn
+            .is_some()
+            .then_some(crate::report::record::ProgramType::RpsTblastn),
     };
     let mut subject_records: Vec<SubjectRecord<'_>> = Vec::new();
     let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();

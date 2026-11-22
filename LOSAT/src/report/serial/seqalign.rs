@@ -581,27 +581,27 @@ pub fn query_coverage(q_offset: i32, q_end: i32, query_length: i32) -> f64 {
 }
 
 /// The "Blast Type" of the run's program: `EProgramToTaskName` of `ProgramNameToEnum` of the
-/// program name and the `EProgram` value (a PSSM search's own, `RunRecord::pssm_type`). The
-/// program name of every BLASTN task is "blastn" (`Blast_ProgramNameFromType`,
-/// blast_format.cpp:94), and of every BLASTP task "blastp"; the RPS search of BLASTP is
-/// "rpsblast" (`eRPSBlast`), of BLASTX "rpstblastn" (`eRPSTblastn`).
+/// program name and the `EProgram` value (`RunRecord::program_type` where the program does not
+/// name it: psiblast, PSI-TBLASTN, rpsblast, rpstblastn). The program name of every BLASTN task
+/// is "blastn" (`Blast_ProgramNameFromType`, blast_format.cpp:94), and of every BLASTP task
+/// "blastp".
 ///
-/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-64
+/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-68
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-694
 fn blast_type(run: &RunRecord<'_>) -> (&'static str, i32) {
-    match run.pssm_type {
-        Some(crate::report::record::PssmBlastType::Psiblast) => return ("psiblast", 10),
-        Some(crate::report::record::PssmBlastType::PsiTblastn) => return ("psitblastn", 11),
-        None => {}
-    }
-    match (run.program, run.rps) {
-        (Program::Blastp, true) => ("rpsblast", 6),
-        (Program::Blastx, true) => ("rpstblastn", 7),
-        (Program::Blastn, _) => ("blastn", 1),
-        (Program::Blastp, _) => ("blastp", 2),
-        (Program::Blastx, _) => ("blastx", 3),
-        (Program::Tblastn, _) => ("tblastn", 4),
-        (Program::Tblastx, _) => ("tblastx", 5),
+    use crate::report::record::ProgramType;
+    match run.program_type {
+        Some(ProgramType::RpsBlast) => ("rpsblast", 6),
+        Some(ProgramType::RpsTblastn) => ("rpstblastn", 7),
+        Some(ProgramType::PsiBlast) => ("psiblast", 10),
+        Some(ProgramType::PsiTblastn) => ("psitblastn", 11),
+        None => match run.program {
+            Program::Blastn => ("blastn", 1),
+            Program::Blastp => ("blastp", 2),
+            Program::Blastx => ("blastx", 3),
+            Program::Tblastn => ("tblastn", 4),
+            Program::Tblastx => ("tblastx", 5),
+        },
     }
 }
 
@@ -1499,8 +1499,8 @@ fn write_seq_align_gapped<E: Encoder>(
         num_ident: -1,
         ..*hsp
     };
-    let hsp = match run.pssm_type {
-        Some(crate::report::record::PssmBlastType::Psiblast) if hsp.num_ident == 0 => {
+    let hsp = match run.program_type {
+        Some(crate::report::record::ProgramType::PsiBlast) if hsp.num_ident == 0 => {
             &psiblast_no_identity
         }
         _ => hsp,

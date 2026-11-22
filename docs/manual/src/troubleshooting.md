@@ -10,7 +10,7 @@ Questions and answers for the problems people meet most. Each answer is based on
 error: the NCBI BLAST+ option -html is not supported by LOSAT's BLASTN
 ```
 
-The command exits with status 2 and runs nothing. For an output format that NCBI writes and LOSAT does not (for example `psiblast -outfmt 5`), the message is `Error: output format 5 is not supported by LOSAT's PSIBLAST`, and it comes before any input is read.
+The command exits with status 2 and runs nothing. For an output format that NCBI writes and LOSAT does not (for example `psiblast -outfmt 1`), the message is `Error: output format 1 is not supported by LOSAT's PSIBLAST yet`, and it comes before any input is read.
 
 **Why?** LOSAT stops with an error for each option and value it does not implement. It never ignores an option and never runs something else in its place, so a result you get is the result you asked for.
 

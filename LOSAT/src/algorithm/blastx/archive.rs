@@ -436,14 +436,18 @@ pub(crate) fn write_blastx_archive(
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastx,
-        rps: call.batch.options.rpstblastn.is_some(),
         db_title: match &call.names {
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: call.batch.options.gapped,
+        program_type: call
+            .batch
+            .options
+            .rpstblastn
+            .is_some()
+            .then_some(crate::report::record::ProgramType::RpsTblastn),
     };
     // `-subject`'s Seq-loc mapper cuts an HSP of length 0 at the first letter of the searched part
     // of a subject with HSPs of letters in two, and makes alignments without scores of a subject

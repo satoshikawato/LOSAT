@@ -115,11 +115,10 @@ const MB_HSP2: [GapEditOp; 9] = [
 /// complement (its first query start is 480 - 30 - 164 = 286).
 fn megablast_documents(format: SerialFormat) -> Vec<u8> {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: true,
+        program_type: None,
     };
     let subjects = [
         subject(SeqId::Local("Subject_1"), 500),
@@ -188,11 +187,10 @@ fn blastp_db_documents(format: SerialFormat, db_title: &[u8]) -> Vec<u8> {
 /// with the strands of the subject remap).
 fn blastp_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastp,
-        rps: false,
         db_title,
         gapped: true,
+        program_type: None,
     };
     let subjects = match db_title {
         Some(_) => [
@@ -376,11 +374,10 @@ fn long_database_title_without_spaces_breaks_at_column_78() {
 #[test]
 fn score_list_follows_ncbi_conditions() {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastp,
-        rps: false,
         db_title: None,
         gapped: true,
+        program_type: None,
     };
     let subjects = [subject(SeqId::Local("Subject_1"), 100)];
     let ops = [Sub(10)];
@@ -425,11 +422,10 @@ fn score_list_follows_ncbi_conditions() {
 #[test]
 fn score_zero_hsps_write_nothing() {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: true,
+        program_type: None,
     };
     let subjects = [subject(SeqId::Local("Subject_1"), 100)];
     let ops = [Sub(10)];
@@ -547,11 +543,10 @@ const BP_UNGAPPED_SUBJECTS: [u32; 6] = [4, 83, 24, 22, 82, 11];
 /// remap of the strands (BLASTP `-subject` writes `unknown`, unlike its gapped Dense-segs).
 fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastp,
-        rps: false,
         db_title,
         gapped: false,
+        program_type: None,
     };
     let subjects: Vec<SubjectRecord<'_>> = BP_UNGAPPED_SUBJECTS
         .iter()
@@ -724,11 +719,10 @@ const BN_UNGAPPED_HSPS: [(u32, i32, i32, i32, bool, i32, f64, f64, i32); 6] = [
 #[test]
 fn blastn_ungapped_dendiag_documents_equal_ncbi() {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: false,
+        program_type: None,
     };
     let subjects = [
         subject(SeqId::Local("Subject_1"), 1848),
@@ -790,11 +784,10 @@ fn blastn_ungapped_dendiag_documents_equal_ncbi() {
 #[test]
 fn an_ungapped_query_without_hsps_writes_nothing() {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: false,
+        program_type: None,
     };
     let mut buf = Vec::new();
     assert_eq!(
@@ -965,11 +958,10 @@ impl std::io::Write for Combined {
 /// `title`: the report alone, the posts alone, and both in one stream.
 fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Blastp,
-        rps: false,
         db_title: Some(title),
         gapped: true,
+        program_type: None,
     };
     let subjects = [
         subject(SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(0)), 137),
@@ -1084,11 +1076,10 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
     let one = hsp(0, (0, 0), (1, 0), 30, 1.0, 1.0, (10, 12, 0), &ops);
     let segments = |db_title: Option<&'static [u8]>| {
         let run = RunRecord {
-            pssm_type: None,
             program: Program::Blastx,
-            rps: false,
             db_title,
             gapped: true,
+            program_type: None,
         };
         let subjects = [subject(SeqId::Local("Subject_1"), 100)];
         let mut buf = Vec::new();
@@ -1120,11 +1111,10 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
 #[test]
 fn ungapped_translated_hsps_are_diags_seq_aligns() {
     let run = RunRecord {
-        pssm_type: None,
         program: Program::Tblastx,
-        rps: false,
         db_title: None,
         gapped: false,
+        program_type: None,
     };
     let subjects = [
         SubjectRecord {
@@ -1188,15 +1178,14 @@ fn a_subject_with_strings_writes_the_use_this_seqid_ext() {
     let ops = [Sub(30)];
     for gapped in [true, false] {
         let run = RunRecord {
-            pssm_type: None,
             program: if gapped {
                 Program::Blastp
             } else {
                 Program::Tblastx
             },
-            rps: false,
             db_title: Some(b"db"),
             gapped,
+            program_type: None,
         };
         let subjects = [
             SubjectRecord {
@@ -1277,16 +1266,15 @@ fn replaced_bytes_of_a_long_string_share_it() {
 /// (blast_seqalign.cpp:1490-1496); blastp's write it (`score_list_follows_ncbi_conditions`).
 #[test]
 fn pssm_searches_name_their_type_and_psiblast_omits_zero_identities() {
-    use crate::report::record::PssmBlastType;
+    use crate::report::record::ProgramType;
     let subjects = [subject(SeqId::Local("Subject_1"), 100)];
     let ops = [Sub(10)];
-    let write = |pssm_type: Option<PssmBlastType>, program: Program, num_ident: i32| {
+    let write = |program_type: Option<ProgramType>, program: Program, num_ident: i32| {
         let run = RunRecord {
-            pssm_type,
             program,
-            rps: false,
             db_title: None,
             gapped: true,
+            program_type,
         };
         let frames = if program == Program::Tblastn {
             (0, 1)
@@ -1306,16 +1294,16 @@ fn pssm_searches_name_their_type_and_psiblast_omits_zero_identities() {
         .unwrap();
         String::from_utf8(buf).unwrap()
     };
-    let psiblast = write(Some(PssmBlastType::Psiblast), Program::Blastp, 0);
+    let psiblast = write(Some(ProgramType::PsiBlast), Program::Blastp, 0);
     assert!(psiblast.contains("str \"psiblast\""), "{psiblast}");
     assert!(psiblast.contains("int 10"), "{psiblast}");
     assert!(!psiblast.contains("num_ident"), "{psiblast}");
-    let psiblast_ident = write(Some(PssmBlastType::Psiblast), Program::Blastp, 7);
+    let psiblast_ident = write(Some(ProgramType::PsiBlast), Program::Blastp, 7);
     assert!(psiblast_ident.contains("num_ident"), "{psiblast_ident}");
     let blastp = write(None, Program::Blastp, 0);
     assert!(blastp.contains("str \"blastp\""), "{blastp}");
     assert!(blastp.contains("num_ident"), "{blastp}");
-    let tblastn = write(Some(PssmBlastType::PsiTblastn), Program::Tblastn, 0);
+    let tblastn = write(Some(ProgramType::PsiTblastn), Program::Tblastn, 0);
     assert!(tblastn.contains("str \"psitblastn\""), "{tblastn}");
     assert!(tblastn.contains("int 11"), "{tblastn}");
     assert!(tblastn.contains("num_ident"), "{tblastn}");

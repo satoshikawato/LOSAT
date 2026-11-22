@@ -1507,7 +1507,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "negative_ipglist",
     "import_search_strategy",
     "remote",
-    "use_sw_tback",
 ];
 
 fn is_unported_blastx_arg(name: &str) -> bool {

@@ -869,6 +869,44 @@ pub(super) fn build(
     unsafe { *ob.add(cells) = total };
     let mut qs: Vec<u32> = Vec::with_capacity(n_words);
     let qb = qs.as_mut_ptr();
+    // PROBE (line FD s1, probe2, LOSAT_X_FDSPF): the place pass through a ring of AHEAD words.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if super::x_disc_lookup_par::x_fd_spf() {
+        const QD: usize = 8;
+        let mut ring = [(0usize, 0u32); AHEAD];
+        let mut seen = 0usize;
+        // SAFETY (the closure and the flush): as the place pass below; every cell entered the ring
+        // after `assert!(cell < cells)` of the count pass's same words.
+        let place = |(cell, index): (usize, u32)| unsafe {
+            let e = *ob.add(cell) - 1;
+            *ob.add(cell) = e;
+            *qb.add(e as usize) = index;
+        };
+        each_word(words, |cell, index| {
+            prefetch(ob.wrapping_add(cell));
+            if seen >= QD {
+                let (c, _) = ring[(seen - QD) % AHEAD];
+                // SAFETY: `c < cells`.
+                let p = unsafe { *ob.add(c) } as usize;
+                prefetch(qb.wrapping_add(p.wrapping_sub(1)));
+            }
+            let slot = seen % AHEAD;
+            if seen >= AHEAD {
+                place(ring[slot]);
+            }
+            ring[slot] = (cell, index);
+            seen += 1;
+        });
+        for i in seen.saturating_sub(AHEAD)..seen {
+            place(ring[i % AHEAD]);
+        }
+        debug_assert_eq!(seen, n_words);
+        // SAFETY: as below.
+        return unsafe { assemble(offsets, qs, cells, n_words) };
+    }
     each_word(words, |cell, index| {
         // SAFETY: `cell < cells` (the same words as the count pass), `offsets[cell]` is the end
         // of the cell's non-empty run (>= 1), so the place `e < n_words` is in the capacity.

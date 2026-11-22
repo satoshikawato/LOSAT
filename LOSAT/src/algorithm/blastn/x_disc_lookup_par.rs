@@ -249,6 +249,24 @@ pub(super) fn x_fd_qpf() -> bool {
     *ON.get_or_init(|| x_fd_digit("LOSAT_X_FDQPF") == 1)
 }
 
+/// PROBE (line FD s1, probe2): LOSAT_X_FDQD=d (default 8) the `qs` distance and LOSAT_X_FDOD=d
+/// (default 16) the `offsets` distance of the pool's place pass with LOSAT_X_FDQPF.
+pub(super) fn x_fd_dist() -> (usize, usize) {
+    static ON: OnceLock<(usize, usize)> = OnceLock::new();
+    *ON.get_or_init(|| {
+        let q = x_fd_digit("LOSAT_X_FDQD") as usize;
+        let o = x_fd_digit("LOSAT_X_FDOD") as usize;
+        (if q == 0 { 8 } else { q }, if o == 0 { 16 } else { o })
+    })
+}
+
+/// PROBE (line FD s1, probe2): LOSAT_X_FDSPF=1 prefetches the serial build's place pass
+/// (`x_dc_csr::build`) through a ring of 16 words: `offsets` as a word enters, `qs` 8 words later.
+pub(super) fn x_fd_spf() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| x_fd_digit("LOSAT_X_FDSPF") == 1)
+}
+
 /// PROBE (line FD s1): LOSAT_X_FDSPLIT=b (b > 0) builds a CSR off the pool by `x_build_split`
 /// with `2^b` cell ranges.
 pub(super) fn x_fd_split() -> u32 {
@@ -1901,6 +1919,7 @@ fn csr_on_pool_steps(
     let mut x_block_words = vec![0u32; if rr { blocks } else { 0 }];
     let x_bw = Shared::new(&mut x_block_words);
     let qpf = x_fd_qpf();
+    let (x_qd, x_od) = x_fd_dist();
     // `sum_cells` (x_dc_csr.rs) writes the helper word of every 2048 cells.
     assert!(pv_array_bts >= 5 && cells.is_multiple_of(2048) && helper_array.len() == cells >> 11);
     let (segments, total) = segments(words);
@@ -2028,11 +2047,11 @@ fn csr_on_pool_steps(
                 }
             }
             steps_pass(&c, &span, |es, j| {
-                if let Some(a) = es.get(j + 16) {
+                if let Some(a) = es.get(j + if qpf { x_od } else { 16 }) {
                     prefetch(ob.ptr.wrapping_add(a.value as usize));
                 }
                 if qpf {
-                    if let Some(a) = es.get(j + 8) {
+                    if let Some(a) = es.get(j + x_qd) {
                         let p = ob.get(a.value as usize);
                         prefetch(qb.ptr.wrapping_add((p as usize).wrapping_sub(1)));
                     }

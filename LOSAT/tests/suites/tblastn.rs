@@ -38,6 +38,8 @@ mod tblastn_scan_bf;
 mod tblastn_scan_byte;
 #[path = "../tblastn_subject_store.rs"]
 mod tblastn_subject_store;
+#[path = "../tblastn_sw_tback.rs"]
+mod tblastn_sw_tback;
 #[path = "../tblastn_ungap.rs"]
 mod tblastn_ungap;
 #[path = "../tblastn_unit_xlate.rs"]

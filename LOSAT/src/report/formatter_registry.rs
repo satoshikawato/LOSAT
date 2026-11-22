@@ -168,11 +168,14 @@ fn init_config_path(
     is_file(path.as_ref()).then_some(path)
 }
 
-/// What `InitConfig` found (`CAlignFormatUtil::m_Reg`, static in NCBI: one per run).
-#[derive(Debug)]
+/// What a read of a registry file of NCBI's formatter found: `InitConfig`'s file
+/// (`CAlignFormatUtil::m_Reg`, static in NCBI: one per run) or the `./.ncbirc` of the `-html`
+/// references (`ReferenceRegistry`).
+#[derive(Debug, Default)]
 enum ConfigFile {
     /// No file: `m_Reg` stays null and NCBI looks again at each call (a run's files and
     /// environment do not change, so each look finds none again).
+    #[default]
     Absent,
     /// The file `path` and its read (`m_Reg`), with the posts of the read (`registry_posts`).
     Read {
@@ -186,6 +189,93 @@ enum ConfigFile {
         posts: Vec<u8>,
         exception: crate::ncbi_exception::NcbiException,
     },
+}
+
+impl ConfigFile {
+    /// The read of the file `path` of `bytes` while `program` (in lower case) runs, into a file
+    /// layer as `CNcbiRegistry`'s constructor reads a stream (`read_cwd_ncbirc`). `Err(what)`
+    /// for a file that LOSAT refuses (completing "the registry file <path> ..."): one that
+    /// `read_registry` does not read as NCBI does, and one with `[NCBI] .Inherits` (NCBI then reads
+    /// the files it names, which LOSAT's registry reads refuse elsewhere too).
+    fn of(program: &str, path: std::ffi::OsString, bytes: &[u8]) -> Result<Self, String> {
+        use crate::blastinput::ncbi_registry::{read_registry, Layer};
+        let mut registry = read_registry(bytes, Layer::SystemWide)?;
+        if registry.last_value("NCBI", ".Inherits").is_some() {
+            return Err("sets [NCBI] .Inherits".to_string());
+        }
+        let posts = registry_posts(&registry, program);
+        Ok(match registry.error.take() {
+            Some(exception) => ConfigFile::Throws { posts, exception },
+            None => ConfigFile::Read {
+                path,
+                registry,
+                posts,
+            },
+        })
+    }
+}
+
+/// `./.ncbirc` as NCBI's `-html` references read it: `CBlastFormatUtil::BlastPrintReference`
+/// makes a registry of the file for each reference it writes and takes `[BLASTFMTUTIL] PROTOCOL`
+/// from it (`protocol`). Read once at the program's setup, with the run's other `-html` data
+/// (`html_ids::HtmlLinks`, `blastinput::app::html_links`), so that LOSAT's refusals of the file come
+/// before the first byte; each reference then has the effects of its own read: the posts of the
+/// read, and for a file whose read throws the exception, which ends the prolog after the version
+/// line (line RG T4 probes `bp.di.f0.rc_bad.h`, `rc_bad_dontuse.h`: exit status 255). The
+/// default is the run without the file.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:96-105
+#[derive(Debug, Default)]
+pub(crate) struct ReferenceRegistry(ConfigFile);
+
+impl ReferenceRegistry {
+    /// The read of `./.ncbirc` of the current directory for a run of `program` (in lower case, as
+    /// NCBI's posts name it); no file is the default (a file that does not open: the stream
+    /// fails, and the registry is empty, as `read_cwd_ncbirc` takes it). `Err(what)` for a file
+    /// that LOSAT refuses (`ConfigFile::of`): the message of the refusal, which the caller ends
+    /// with the program's name.
+    pub(crate) fn read(program: &str) -> Result<Self, String> {
+        Self::of(program, std::fs::read(".ncbirc").ok())
+    }
+
+    /// `read` of the file's bytes `bytes` (`None`: no file).
+    pub(crate) fn of(program: &str, bytes: Option<Vec<u8>>) -> Result<Self, String> {
+        let Some(bytes) = bytes else {
+            return Ok(Self::default());
+        };
+        ConfigFile::of(program, ".ncbirc".into(), &bytes)
+            .map(ReferenceRegistry)
+            .map_err(|what| {
+                format!(
+                    "the registry file ./.ncbirc {what}, which NCBI BLAST+'s -html references read; this is not supported by LOSAT"
+                )
+            })
+    }
+
+    /// The scheme of one reference's PubMed link (`httpProt`): the file's `[BLASTFMTUTIL]
+    /// PROTOCOL` (`protocol`: an empty value counts as set), `https:` without the file. The read
+    /// of each reference writes the posts of the read to `diagnostics` (standard error); a file
+    /// whose read throws throws at each reference (the exception as the report's I/O error,
+    /// `NcbiException::into_io_error`: NCBI's application ends with it, exit status 255).
+    pub(crate) fn protocol(&self, diagnostics: &mut dyn Write) -> std::io::Result<&[u8]> {
+        match &self.0 {
+            ConfigFile::Absent => Ok(super::reference::DEFAULT_PROTOCOL),
+            ConfigFile::Read {
+                registry, posts, ..
+            } => {
+                if !posts.is_empty() {
+                    diagnostics.write_all(posts)?;
+                    diagnostics.flush()?;
+                }
+                Ok(protocol(Some(registry)))
+            }
+            ConfigFile::Throws { posts, exception } => {
+                diagnostics.write_all(posts)?;
+                diagnostics.flush()?;
+                Err(exception.clone().into_io_error())
+            }
+        }
+    }
 }
 
 /// The registry of NCBI's id links with `-html` (`CAlignFormatUtil::InitConfig`, `m_Reg`,
@@ -238,30 +328,15 @@ impl InitConfig {
         file: Option<(std::ffi::OsString, Vec<u8>)>,
         debug: bool,
     ) -> Result<Self, String> {
-        use crate::blastinput::ncbi_registry::{read_registry, Layer};
-        let refused = |path: &std::ffi::OsStr, what: &str| {
-            format!(
-                "the registry file {} {what}, which NCBI BLAST+'s -html links read (FMTCFG, NCBI); this is not supported by LOSAT",
-                std::path::Path::new(path).display()
-            )
-        };
         let file = match file {
             None => ConfigFile::Absent,
             Some((path, bytes)) => {
-                let mut registry = read_registry(&bytes, Layer::SystemWide)
-                    .map_err(|reason| refused(&path, &reason))?;
-                if registry.last_value("NCBI", ".Inherits").is_some() {
-                    return Err(refused(&path, "sets [NCBI] .Inherits"));
-                }
-                let posts = registry_posts(&registry, program);
-                match registry.error.take() {
-                    Some(exception) => ConfigFile::Throws { posts, exception },
-                    None => ConfigFile::Read {
-                        path,
-                        registry,
-                        posts,
-                    },
-                }
+                let shown = std::path::Path::new(&path).display().to_string();
+                ConfigFile::of(program, path, &bytes).map_err(|what| {
+                    format!(
+                        "the registry file {shown} {what}, which NCBI BLAST+'s -html links read (FMTCFG, NCBI); this is not supported by LOSAT"
+                    )
+                })?
             }
         };
         Ok(InitConfig {

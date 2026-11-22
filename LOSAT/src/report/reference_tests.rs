@@ -1,4 +1,5 @@
 use super::*;
+use crate::report::formatter_registry::ReferenceRegistry;
 
 /// The references of `kPublication` hold `keyword` and its PubMed URL holds `pubmed_id`
 /// (`s_DoTestReference`).
@@ -104,9 +105,20 @@ fn the_html_free_text_writes_the_entity_as_a() {
     }
 }
 
-fn prolog_references(html: bool, protocol: &[u8], program: &str, megablast: bool) -> String {
+/// The references of `program`'s prolog, under `html` as a run without `./.ncbirc` writes them.
+fn prolog_references(html: bool, program: &str, megablast: bool) -> String {
+    let registry = ReferenceRegistry::default();
     let mut out = Vec::new();
-    write_prolog_references(&mut out, html, protocol, program, megablast).unwrap();
+    let mut err = Vec::new();
+    write_prolog_references(
+        &mut out,
+        html.then_some(&registry),
+        &mut err,
+        program,
+        megablast,
+    )
+    .unwrap();
+    assert!(err.is_empty());
     String::from_utf8(out).unwrap()
 }
 
@@ -127,10 +139,7 @@ I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),\n\
 composition-based statistics and other refinements\", Nucleic Acids\n\
 Res. 29:2994-3005.\n\n\n\n"
     );
-    assert_eq!(
-        prolog_references(false, DEFAULT_PROTOCOL, "blastp", false),
-        blastp
-    );
+    assert_eq!(prolog_references(false, "blastp", false), blastp);
     let psiblast = format!(
         "{GAPPED}\n\
 Reference for compositional score matrix adjustment: Stephen F.\n\
@@ -145,10 +154,7 @@ Stephen F. Altschul (2001), \"Improving the accuracy of PSI-BLAST\n\
 protein database searches with composition-based statistics and\n\
 other refinements\", Nucleic Acids Res. 29:2994-3005.\n\n\n\n"
     );
-    assert_eq!(
-        prolog_references(false, DEFAULT_PROTOCOL, "psiblast", false),
-        psiblast
-    );
+    assert_eq!(prolog_references(false, "psiblast", false), psiblast);
     let gapped_only = format!("{GAPPED}\n\n");
     for program in [
         "rpsblast",
@@ -160,13 +166,13 @@ other refinements\", Nucleic Acids Res. 29:2994-3005.\n\n\n\n"
         "RPSTBLASTN",
     ] {
         assert_eq!(
-            prolog_references(false, DEFAULT_PROTOCOL, program, false),
+            prolog_references(false, program, false),
             gapped_only,
             "{program}"
         );
     }
     assert_eq!(
-        prolog_references(false, DEFAULT_PROTOCOL, "blastn", true),
+        prolog_references(false, "blastn", true),
         "Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb\n\
 Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J\n\
 Comput Biol 2000; 7(1-2):203-14.\n\n\n\n"
@@ -178,7 +184,7 @@ Comput Biol 2000; 7(1-2):203-14.\n\n\n\n"
 #[test]
 fn the_html_references_are_ncbis_lines() {
     assert_eq!(
-        prolog_references(true, DEFAULT_PROTOCOL, "blastp", false),
+        prolog_references(true, "blastp", false),
         "<b><a\n\
 href=\"https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R\n\
 etrieve&list_uids=9254694&dopt=Citation\">Reference</a>:</b>\n\
@@ -202,7 +208,7 @@ other refinements\", Nucleic Acids Res. 29:2994-3005.\n\
 \n"
     );
     assert_eq!(
-        prolog_references(true, DEFAULT_PROTOCOL, "blastn", true),
+        prolog_references(true, "blastn", true),
         "<b><a\n\
 href=\"https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R\n\
 etrieve&list_uids=10890397&dopt=Citation\">Reference</a>:</b>\n\
@@ -214,7 +220,7 @@ Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),\n\
 \n"
     );
     assert_eq!(
-        prolog_references(true, DEFAULT_PROTOCOL, "BLASTN", false),
+        prolog_references(true, "BLASTN", false),
         "<b><a\n\
 href=\"https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R\n\
 etrieve&list_uids=9254694&dopt=Citation\">Reference</a>:</b>\n\
@@ -254,6 +260,75 @@ trieve&list_uids=9254694&dopt=Citation\">Reference</a>:</b>"
 href=\"//www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=Retriev\n\
 e&list_uids=9254694&dopt=Citation\">Reference</a>:</b>"
     );
+}
+
+/// Each `-html` reference reads `./.ncbirc` again (`BlastPrintReference` makes a registry of the
+/// file for each one): its scheme, and the posts of each read (two references of blastp: the
+/// posts twice).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:96-105
+#[test]
+fn each_html_reference_reads_ncbirc_again() {
+    let file = b"[BLASTFMTUTIL]\nPROTOCOL=ftp:\nPROTOCOL=http:\n";
+    let registry = ReferenceRegistry::of("blastp", Some(file.to_vec())).unwrap();
+    let read = crate::blastinput::ncbi_registry::read_registry(
+        file,
+        crate::blastinput::ncbi_registry::Layer::SystemWide,
+    )
+    .unwrap();
+    let posts = crate::report::formatter_registry::registry_posts(&read, "blastp");
+    assert!(!posts.is_empty());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    write_prolog_references(&mut out, Some(&registry), &mut err, "blastp", false).unwrap();
+    assert_eq!(err, posts.repeat(2));
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(
+        out.matches("href=\"http://www.ncbi.nlm.nih.gov/").count(),
+        2
+    );
+    // The plain references read no file.
+    let mut plain = Vec::new();
+    let mut err = Vec::new();
+    write_prolog_references(&mut plain, None, &mut err, "blastp", false).unwrap();
+    assert!(err.is_empty());
+    assert_eq!(
+        String::from_utf8(plain).unwrap(),
+        prolog_references(false, "blastp", false)
+    );
+}
+
+/// A malformed `./.ncbirc` throws at the first `-html` reference, before any of its bytes (NCBI
+/// BLAST+ 2.17.0, line RG T4 probe `bp.di.f0.rc_bad.h`: the prolog ends after the version line
+/// and its two newlines, exit status 255, NCBI's report in LOSAT's words); LOSAT refuses a file
+/// that it does not read as NCBI does.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:96-99
+#[test]
+fn a_malformed_ncbirc_throws_at_the_first_html_reference() {
+    let registry = ReferenceRegistry::of(
+        "blastp",
+        Some(b"this line has no equals sign\n[BLASTFMTUTIL]\nPROTOCOL=http:\n".to_vec()),
+    )
+    .unwrap();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let error =
+        write_prolog_references(&mut out, Some(&registry), &mut err, "blastp", false).unwrap_err();
+    assert!(out.is_empty());
+    assert!(err.is_empty());
+    let exception = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();
+    assert_eq!(
+        format!("Error: {}\n", String::from_utf8(exception.what()).unwrap()),
+        crate::wording::losat_text(&format!(
+            "Error: NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'this line has no equals sign' (m_Pos = 1)\n\n",
+            crate::ncbi_exception::NCBI_BUILD_ROOT
+        ))
+    );
+    // The plain references do not read the file.
+    let mut plain = Vec::new();
+    write_prolog_references(&mut plain, None, &mut err, "blastp", false).unwrap();
+    assert!(!plain.is_empty());
+    assert!(ReferenceRegistry::of("blastp", Some(b"[NCBI]\n.Inherits=g\n".to_vec())).is_err());
+    assert!(ReferenceRegistry::of("blastp", None).is_ok());
 }
 
 #[test]

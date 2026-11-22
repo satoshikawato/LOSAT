@@ -1983,6 +1983,7 @@ fn write_pairwise_prologs(
                             None => records.iter().map(|r| r.seq().len() as i64).sum(),
                         },
                         None,
+                        args.html_links.as_deref(),
                     )?
                 }
                 ShownSubjects::Database { pairwise, .. } => {
@@ -1993,6 +1994,7 @@ fn write_pairwise_prologs(
                         0,
                         0,
                         Some(pairwise),
+                        args.html_links.as_deref(),
                     )?
                 }
             }

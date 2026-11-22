@@ -29,6 +29,7 @@ fn subject_set_database_lines_print_totals_of_2_to_the_32_letters_or_more() {
         2,
         6_000_000_000,
         None,
+        None,
     )
     .unwrap();
     let prolog = String::from_utf8(prolog).unwrap();
@@ -87,7 +88,7 @@ fn the_prologs_that_flush_after_their_two_newlines() {
     };
     let blastp = |program: &'static str| -> Prolog<'_> {
         Box::new(move |out: &mut Flushes| {
-            write_blastp_pairwise_prolog(out, version, program, b"d", 1, 10, None)
+            write_blastp_pairwise_prolog(out, version, program, b"d", 1, 10, None, None)
         })
     };
     let blastn = |megablast: bool| -> Prolog<'_> {
@@ -96,17 +97,17 @@ fn the_prologs_that_flush_after_their_two_newlines() {
                 megablast,
                 matrix_only: false,
             };
-            write_blastn_pairwise_prolog(out, version, intro, b"d", 1, 10, None)
+            write_blastn_pairwise_prolog(out, version, intro, b"d", 1, 10, None, None)
         })
     };
     let tblastn = |program: &'static str| -> Prolog<'_> {
         Box::new(move |out: &mut Flushes| {
-            write_tblastn_pairwise_prolog(out, program, version, b"d", 1, 10, None)
+            write_tblastn_pairwise_prolog(out, program, version, b"d", 1, 10, None, None)
         })
     };
     let blastx = |program: &'static str| -> Prolog<'_> {
         let report = &report;
-        Box::new(move |out: &mut Flushes| write_blastx_prolog(out, program, report, None))
+        Box::new(move |out: &mut Flushes| write_blastx_prolog(out, program, report, None, None))
     };
     let prologs: [(&str, Prolog<'_>, bool); 10] = [
         ("blastp", blastp("blastp"), false),
@@ -117,7 +118,7 @@ fn the_prologs_that_flush_after_their_two_newlines() {
         (
             "tblastx",
             Box::new(|out: &mut Flushes| {
-                write_tblastx_pairwise_prolog(out, version, b"d", 1, 10, None)
+                write_tblastx_pairwise_prolog(out, version, b"d", 1, 10, None, None)
             }),
             true,
         ),
@@ -1117,6 +1118,7 @@ fn matrix_only_prolog_is_rmblastns() {
             1,
             100_000,
             None,
+            None,
         )
         .unwrap();
         String::from_utf8(prolog).unwrap()
@@ -1287,5 +1289,168 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         }
         Ok(())
     })
+    .unwrap();
+}
+
+/// The run's `-html` data with `./.ncbirc` `ncbirc` (`None`: no file) for the references and
+/// no file for the id links.
+fn html_links_with(ncbirc: Option<&[u8]>) -> crate::report::html_ids::HtmlLinks {
+    crate::report::html_ids::HtmlLinks {
+        registry: crate::report::formatter_registry::InitConfig::of("blastp", None, false).unwrap(),
+        db_name: Vec::new(),
+        nucleotide: false,
+        references: crate::report::formatter_registry::ReferenceRegistry::of(
+            "blastp",
+            ncbirc.map(<[u8]>::to_vec),
+        )
+        .unwrap(),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:371-373 (cited at
+// `HTML_PREFIX`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2290-2292 (cited at
+// `HTML_SUFFIX`)
+/// The `-html` prolog and epilog end of formats 0-4 are NCBI BLAST+ 2.17.0's in LOSAT's words
+/// (line RG T4 probe `bp.s.f0.h`, `T/t4/out`: its bytes before `Database:` and its last five
+/// lines): the HTML head and `<PRE>`, the version line in bold, the linked references, and after
+/// the epilog's last line the end of `<PRE>`, body and document. The plain forms are unchanged.
+#[test]
+fn the_html_prolog_and_epilog_end_are_ncbis() {
+    const NCBI_PROLOG: &str = "<HTML>\n\
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>\n\
+<BODY BGCOLOR=\"#FFFFFF\" LINK=\"#0000FF\" VLINK=\"#660099\" ALINK=\"#660099\">\n\
+<PRE>\n\
+\n\
+<b>BLASTP 2.17.0+</b>\n\
+\n\
+\n\
+<b><a\n\
+href=\"https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R\n\
+etrieve&list_uids=9254694&dopt=Citation\">Reference</a>:</b>\n\
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,\n\
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),\n\
+\"Gapped BLAST and PSI-BLAST: a new generation of protein database\n\
+search programs\", Nucleic Acids Res. 25:3389-3402.\n\
+\n\
+\n\
+<b><a\n\
+href=\"https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R\n\
+etrieve&list_uids=11452024&dopt=Citation\">Reference for\n\
+composition-based statistics</a>:</b>\n\
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei\n\
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and\n\
+Stephen F. Altschul (2001), \"Improving the accuracy of PSI-BLAST\n\
+protein database searches with composition-based statistics and\n\
+other refinements\", Nucleic Acids Res. 29:2994-3005.\n\
+\n\
+\n\
+\n\
+";
+    const NCBI_EPILOG_END: &str = "Neighboring words threshold: 11\n\
+Window for multiple hits: 40\n\
+</PRE>\n\
+</BODY>\n\
+</HTML>\n\
+";
+    let links = html_links_with(None);
+    let mut out = Vec::new();
+    write_prolog(
+        &mut out,
+        "blastp",
+        crate::wording::REPORT_VERSION,
+        false,
+        false,
+        false,
+        Some(&links),
+    )
+    .unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        crate::wording::losat_text(NCBI_PROLOG)
+    );
+    let mut plain = Vec::new();
+    write_prolog(
+        &mut plain,
+        "blastp",
+        crate::wording::REPORT_VERSION,
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+    assert!(plain.starts_with(
+        format!("BLASTP {}\n\n\nReference: ", crate::wording::REPORT_VERSION).as_bytes()
+    ));
+    let mut end = Vec::new();
+    write_epilog_end(&mut end, 11.0, 40, true).unwrap();
+    assert_eq!(String::from_utf8(end).unwrap(), NCBI_EPILOG_END);
+    let mut end = Vec::new();
+    write_epilog_end(&mut end, 11.0, 40, false).unwrap();
+    assert_eq!(
+        end,
+        b"Neighboring words threshold: 11\nWindow for multiple hits: 40\n"
+    );
+    // Matrix-only scoring names `rmblastn` in the same bold version line
+    // (`BlastPrintVersionInfo` with `m_IsHTML`, blast_format.cpp:376-381).
+    let mut rmblastn = Vec::new();
+    write_prolog(
+        &mut rmblastn,
+        "blastn",
+        crate::wording::REPORT_VERSION,
+        false,
+        true,
+        true,
+        Some(&links),
+    )
+    .unwrap();
+    let head = format!(
+        "{}<b>RMBLASTN {}</b>\n\n\nReference: Robert M. Hubley",
+        std::str::from_utf8(HTML_PREFIX).unwrap(),
+        crate::wording::REPORT_VERSION
+    );
+    assert!(rmblastn.starts_with(head.as_bytes()));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:96-99 (cited at
+// `formatter_registry::ReferenceRegistry`)
+/// A malformed `./.ncbirc` ends the `-html` prolog after the version line and its two newlines
+/// with NCBI's exception (NCBI BLAST+ 2.17.0, line RG T4 probe `bp.di.f0.rc_bad.h`: the first 159
+/// bytes of `bp.s.f0.h`'s prolog, exit status 255); the plain prolog does not read the file.
+#[test]
+fn a_malformed_ncbirc_ends_the_html_prolog_after_the_version_line() {
+    let links = html_links_with(Some(b"this line has no equals sign\n"));
+    let mut out = Vec::new();
+    let error = write_prolog(
+        &mut out,
+        "blastp",
+        crate::wording::REPORT_VERSION,
+        false,
+        false,
+        false,
+        Some(&links),
+    )
+    .unwrap_err();
+    assert!(crate::ncbi_exception::NcbiException::of_io_error(&error).is_some());
+    let mut expected = HTML_PREFIX.to_vec();
+    expected.extend_from_slice(
+        format!("<b>BLASTP {}</b>\n\n\n", crate::wording::REPORT_VERSION).as_bytes(),
+    );
+    assert_eq!(out, expected);
+    assert_eq!(
+        expected.len() - crate::wording::REPORT_VERSION.len() + crate::wording::NCBI_VERSION.len(),
+        159
+    );
+    let mut plain = Vec::new();
+    write_prolog(
+        &mut plain,
+        "blastp",
+        crate::wording::REPORT_VERSION,
+        false,
+        false,
+        false,
+        None,
+    )
     .unwrap();
 }

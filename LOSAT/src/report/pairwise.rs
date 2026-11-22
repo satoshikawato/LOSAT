@@ -204,6 +204,11 @@ impl PairwiseView {
 }
 
 impl PairwiseConfig {
+    /// The run's `-html` data of the report's prolog (`write_prolog`), `None` for the plain report.
+    pub(crate) fn html_links(&self) -> Option<&super::html_ids::HtmlLinks> {
+        self.html.as_ref().map(|report| &*report.links)
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1525-1528
     /// Whether the report is TBLASTX's (`m_Program == "tblastx"`): the sorts and the description
     /// table's identities read its alignment lengths in nucleotides (`HspScores::alignment_length`).
@@ -1929,6 +1934,11 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
 /// scoring) flush there, blastp's driver (blastp, psiblast, rpsblast) and megablast do not and
 /// flush later. A flush moves the point where these bytes reach the output and where a write
 /// failure shows, so the difference stays data here, not a change of this groundwork.
+/// `html`: the run's `-html` data (`html_ids::HtmlLinks`; `None`: the plain report): the HTML
+/// head and `<PRE>` (`HTML_PREFIX`) first, the version line in bold, and the references with
+/// their links, each with its own read of `./.ncbirc` (`HtmlLinks::references`); a malformed file
+/// ends the prolog after the version line and its two newlines with NCBI's exception (line RG T4
+/// probes `bp.di.f0.rc_bad.h`, `rc_bad_dontuse.h`: exit status 255).
 pub(crate) fn write_prolog<W: Write + ?Sized>(
     writer: &mut W,
     program: &str,
@@ -1936,14 +1946,18 @@ pub(crate) fn write_prolog<W: Write + ?Sized>(
     megablast: bool,
     endl_flushes: bool,
     disable_ka_stats: bool,
+    html: Option<&super::html_ids::HtmlLinks>,
 ) -> io::Result<()> {
+    if html.is_some() {
+        writer.write_all(HTML_PREFIX)?;
+    }
     if disable_ka_stats && program.eq_ignore_ascii_case("blastn") {
-        super::reference::write_version_line(writer, false, "rmblastn", version)?;
+        super::reference::write_version_line(writer, html.is_some(), "rmblastn", version)?;
         writer.write_all(
             b"\n\nReference: Robert M. Hubley, Arian Smit\nRMBlast - RepeatMasker Search Engine\n2010 <http://www.repeatmasker.org>",
         )?;
     } else {
-        super::reference::write_version_line(writer, false, program, version)?;
+        super::reference::write_version_line(writer, html.is_some(), program, version)?;
     }
     for _ in 0..2 {
         writeln!(writer)?;
@@ -1953,12 +1967,26 @@ pub(crate) fn write_prolog<W: Write + ?Sized>(
     }
     super::reference::write_prolog_references(
         writer,
-        false,
-        super::reference::DEFAULT_PROTOCOL,
+        html.map(|links| &links.references),
+        &mut io::stderr(),
         program,
         megablast,
     )
 }
+
+/// The start of an HTML report of formats 0-4 (`kHTML_Prefix`, its four lines, and the newline
+/// that `PrintProlog` writes after it), before the version line.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:326-330
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:371-373
+const HTML_PREFIX: &[u8] = b"<HTML>\n<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>\n<BODY BGCOLOR=\"#FFFFFF\" LINK=\"#0000FF\" VLINK=\"#660099\" ALINK=\"#660099\">\n<PRE>\n\n";
+
+/// The end of an HTML report of formats 0-4 (`kHTML_Suffix`, its three lines, and the newline that
+/// `PrintEpilog` writes after it), after the epilog's last line.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:332-335
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2290-2292
+const HTML_SUFFIX: &[u8] = b"</PRE>\n</BODY>\n</HTML>\n";
 
 /// NCBI's `m_Program` of a report of blastp's driver: `psiblast`, `rpsblast`, or `blastp` for
 /// any other name (its tasks).
@@ -2144,6 +2172,7 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
+    html: Option<&super::html_ids::HtmlLinks>,
 ) -> io::Result<()> {
     write_prolog(
         writer,
@@ -2152,6 +2181,7 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
         false,
         false,
         false,
+        html,
     )?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
@@ -2421,6 +2451,7 @@ fn write_blastp_final_footer<W: Write>(
     writer: &mut W,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
+    html: bool,
 ) -> io::Result<()> {
     match database {
         Some(database) => write_final_database_block(writer, database)?,
@@ -2441,7 +2472,12 @@ fn write_blastp_final_footer<W: Write>(
             report.gap_open, report.gap_extend
         )?;
     }
-    write_epilog_end(writer, report.word_threshold, report.window_size as i64)
+    write_epilog_end(
+        writer,
+        report.word_threshold,
+        report.window_size as i64,
+        html,
+    )
 }
 
 /// The end of `CBlastFormat::PrintEpilog` of formats 0-4, the one place of the end of their output
@@ -2451,11 +2487,13 @@ fn write_blastp_final_footer<W: Write>(
 /// with the stream's default format (`cpp_default_double`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2281-2292
-/// The two lines, then an HTML report's suffix line.
+/// The two lines, then, for an HTML report (`html`, `-html`), the end of its `<PRE>`, body and
+/// document (`HTML_SUFFIX`).
 fn write_epilog_end<W: Write + ?Sized>(
     writer: &mut W,
     word_threshold: f64,
     window_size: i64,
+    html: bool,
 ) -> io::Result<()> {
     if word_threshold != 0.0 {
         writeln!(
@@ -2466,6 +2504,9 @@ fn write_epilog_end<W: Write + ?Sized>(
     }
     if window_size != 0 {
         writeln!(writer, "Window for multiple hits: {window_size}")?;
+    }
+    if html {
+        writer.write_all(HTML_SUFFIX)?;
     }
     Ok(())
 }
@@ -2583,6 +2624,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
             false,
             false,
             false,
+            config.html_links(),
         )?;
         // The prolog ends with one blank line; each query's preamble starts with two
         // (blast_format.cpp:1491), after the query's warnings.
@@ -2650,7 +2692,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
 
     writeln!(writer)?;
 
-    write_blastp_final_footer(writer, report, database)?;
+    write_blastp_final_footer(writer, report, database, config.html.is_some())?;
     writer.flush()
 }
 
@@ -3839,6 +3881,7 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
 fn write_blastn_final_footer<W: Write>(
     writer: &mut W,
     report: &BlastnPairwiseReport,
+    html: bool,
 ) -> io::Result<()> {
     match report.database.as_ref() {
         Some(database) => write_final_database_block(writer, database)?,
@@ -3867,7 +3910,7 @@ fn write_blastn_final_footer<W: Write>(
             report.gap_open, gap_extension
         )?;
     }
-    write_epilog_end(writer, 0.0, report.window_size as i64)
+    write_epilog_end(writer, 0.0, report.window_size as i64, html)
 }
 
 /// The start of the BLASTN report, which NCBI writes before it searches: the program
@@ -3883,13 +3926,14 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
+    html: Option<&super::html_ids::HtmlLinks>,
 ) -> io::Result<()> {
     if intro.matrix_only {
-        write_prolog(writer, "blastn", version, intro.megablast, true, true)?;
+        write_prolog(writer, "blastn", version, intro.megablast, true, true, html)?;
     } else if intro.megablast {
-        write_prolog(writer, "blastn", version, true, false, false)?;
+        write_prolog(writer, "blastn", version, true, false, false, html)?;
     } else {
-        write_prolog(writer, "blastn", version, false, true, false)?;
+        write_prolog(writer, "blastn", version, false, true, false, html)?;
     }
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
@@ -3943,6 +3987,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             report.database_num_sequences,
             report.database_total_letters,
             report.database.as_ref(),
+            config.html_links(),
         )?;
     }
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
@@ -3976,7 +4021,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
     // query's footer. The epilog starts with two blank lines (blast_format.cpp:2249).
     if report.epilog && query_range.end == queries.len() {
         writer.write_all(b"\n\n")?;
-        write_blastn_final_footer(writer, report)?;
+        write_blastn_final_footer(writer, report, config.html.is_some())?;
     }
     writer.flush()
 }
@@ -4234,8 +4279,9 @@ pub fn write_tblastx_pairwise_prolog<W: Write>(
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
+    html: Option<&super::html_ids::HtmlLinks>,
 ) -> io::Result<()> {
-    write_prolog(writer, "tblastx", version, false, true, false)?;
+    write_prolog(writer, "tblastx", version, false, true, false, html)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -4383,6 +4429,7 @@ fn write_tblastx_epilog<W: Write>(
     writer: &mut W,
     report: &TblastxPairwiseReport,
     database: Option<&PairwiseDatabase>,
+    html: bool,
 ) -> io::Result<()> {
     writer.write_all(b"\n\n")?;
     match database {
@@ -4395,7 +4442,12 @@ fn write_tblastx_epilog<W: Write>(
         )?,
     }
     write_matrix_line(writer, Some(&report.matrix_name))?;
-    write_epilog_end(writer, report.word_threshold, report.window_size as i64)
+    write_epilog_end(
+        writer,
+        report.word_threshold,
+        report.window_size as i64,
+        html,
+    )
 }
 
 /// A `double` written to a C++ stream with the default flags: `%g` with precision 6
@@ -4476,6 +4528,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             report.database_num_sequences,
             report.database_total_letters,
             database,
+            config.html_links(),
         )?;
     }
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
@@ -4509,7 +4562,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     // An error in a later query batch skips the epilog, and nothing follows the last
     // query's footer.
     if report.epilog && query_range.end == queries.len() {
-        write_tblastx_epilog(writer, report, database)?;
+        write_tblastx_epilog(writer, report, database, config.html.is_some())?;
     }
     writer.flush()
 }
@@ -4690,8 +4743,9 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     database_num_sequences: i64,
     database_total_letters: i64,
     database: Option<&PairwiseDatabase>,
+    html: Option<&super::html_ids::HtmlLinks>,
 ) -> io::Result<()> {
-    write_prolog(writer, program, version, false, true, false)?;
+    write_prolog(writer, program, version, false, true, false, html)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -4742,7 +4796,15 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     }
     let mut writer = io::BufWriter::new(writer);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424:
-    write_prolog(&mut writer, program, &report.version, false, true, false)?;
+    write_prolog(
+        &mut writer,
+        program,
+        &report.version,
+        false,
+        true,
+        false,
+        config.html_links(),
+    )?;
     // The prolog ends with one blank line; each query's preamble starts with two
     // (blast_format.cpp:1491), after the query's warnings.
     match database {
@@ -4797,7 +4859,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     // The blank lines before the epilog (blast_format.cpp:2249).
     writeln!(&mut writer)?;
     writeln!(&mut writer)?;
-    write_blastp_final_footer(&mut writer, report, database)?;
+    write_blastp_final_footer(&mut writer, report, database, config.html.is_some())?;
     writer.flush()
 }
 
@@ -5458,8 +5520,9 @@ pub fn write_blastx_prolog(
     program: &str,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
+    html: Option<&super::html_ids::HtmlLinks>,
 ) -> io::Result<()> {
-    write_prolog(writer, program, &report.version, false, true, false)?;
+    write_prolog(writer, program, &report.version, false, true, false, html)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -5477,6 +5540,7 @@ pub fn write_blastx_epilog(
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
     database: Option<&PairwiseDatabase>,
+    html: bool,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2264-2288
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2249-2249
@@ -5510,7 +5574,12 @@ pub fn write_blastx_epilog(
             report.gap_open, report.gap_extend
         )?;
     }
-    write_epilog_end(writer, options.word_threshold, report.window_size as i64)
+    write_epilog_end(
+        writer,
+        options.word_threshold,
+        report.window_size as i64,
+        html,
+    )
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:583-613

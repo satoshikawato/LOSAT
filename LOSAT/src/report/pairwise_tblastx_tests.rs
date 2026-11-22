@@ -391,6 +391,7 @@ fn html_description_rows_are_ncbis() {
             registry,
             db_name: Vec::new(),
             nucleotide: false,
+            references: Default::default(),
         });
         let report = crate::report::html_ids::HtmlReport::new(&links, []);
         let mut out = Vec::new();

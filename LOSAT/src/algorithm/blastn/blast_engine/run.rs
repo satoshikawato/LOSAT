@@ -7758,6 +7758,9 @@ struct ShownSubjects {
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
     /// (`BlastnArgs::tabular_taxdb`; not found where it was not asked).
     tabular_taxdb_found: bool,
+    /// The run's `-html` data for the outfmt 0 prolog (`BlastnArgs::html_links`,
+    /// `write_blastn_pairwise_prolog`); `None`: the plain prolog.
+    html_links: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
 }
 
 impl ShownSubjects {
@@ -7773,6 +7776,7 @@ impl ShownSubjects {
                 total_letters: metadata.db_len_total,
                 database: None,
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
+                html_links: args.html_links.clone(),
             },
             SubjectSource::Database(database) => ShownSubjects {
                 name: database.name().to_string(),
@@ -7780,6 +7784,7 @@ impl ShownSubjects {
                 total_letters: metadata.db_len_total,
                 database: Some(database.pairwise_database_masked(args.db_mask_resolved.as_ref())),
                 tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
+                html_links: args.html_links.clone(),
             },
         }
     }
@@ -9463,6 +9468,7 @@ fn write_format_prolog(
             i64::from(shown.num_seqs),
             shown.total_letters,
             shown.database.as_ref(),
+            shown.html_links.as_deref(),
         )?;
         writer.flush()?;
     } else if let Some(kind) = output_format.xml2_kind() {

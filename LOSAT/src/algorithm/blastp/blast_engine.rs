@@ -7371,6 +7371,7 @@ fn write_pairwise_prologs(
                 num_sequences,
                 total_letters,
                 pairwise_database.as_ref(),
+                args.html.as_deref(),
             )?;
             writer.flush()?;
         } else if let Some(kind) = blastp_xml2_kind(format.outfmt) {

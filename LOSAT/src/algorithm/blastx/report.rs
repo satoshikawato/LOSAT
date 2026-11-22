@@ -1328,6 +1328,7 @@ pub(crate) fn write_prolog(
             options.program().upper,
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
+            options.html.as_deref(),
         )?;
     }
     // Outfmt 20's line of the field names, after its formatter's warning
@@ -1385,6 +1386,7 @@ pub(crate) fn write_epilog(
                 num_alignments: options.num_alignments as usize,
             },
             shown.pairwise_database(),
+            options.html.is_some(),
         )?;
     } else if options.outfmt == 5 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243

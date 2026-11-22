@@ -56,6 +56,7 @@ fn links(file: Option<&[u8]>, db: &[u8]) -> HtmlLinks {
         .unwrap(),
         db_name: db.to_vec(),
         nucleotide: false,
+        references: Default::default(),
     }
 }
 
@@ -364,6 +365,7 @@ fn a_registry_that_throws_skips_the_heading() {
         .unwrap(),
         db_name: Vec::new(),
         nucleotide: false,
+        references: Default::default(),
     };
     let report = HtmlReport::new(&Arc::new(bad), []);
     let html = HtmlHeading {

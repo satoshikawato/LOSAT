@@ -276,6 +276,9 @@ pub(crate) fn write_reference<W: Write + ?Sized>(
 /// matrices, and the composition-based statistics of psiblast (`starting in round 2`) and blastp,
 /// each after a newline. `program` is NCBI's `m_Program` (`blastp`, `psiblast`, `rpsblast`,
 /// `blastn`, ...; compared without case, so the callers may pass the version line's name).
+/// `html`: the `-html` form, each reference with the scheme of its own read of `./.ncbirc`
+/// (`formatter_registry::ReferenceRegistry::protocol`, whose posts go to `diagnostics`; a file
+/// whose read throws ends the references before the first one); `None`: the plain form.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-437
 /// (The `NcbiEndl` pair is `pairwise::write_prolog`'s, with its flushes. LOSAT has no
@@ -283,8 +286,8 @@ pub(crate) fn write_reference<W: Write + ?Sized>(
 /// database: their branches are not taken.)
 pub(crate) fn write_prolog_references<W: Write + ?Sized>(
     out: &mut W,
-    html: bool,
-    protocol: &[u8],
+    html: Option<&super::formatter_registry::ReferenceRegistry>,
+    diagnostics: &mut dyn Write,
     program: &str,
     megablast: bool,
 ) -> io::Result<()> {
@@ -294,20 +297,23 @@ pub(crate) fn write_prolog_references<W: Write + ?Sized>(
     } else {
         Publication::GappedBlast
     };
-    write_reference(out, html, protocol, primary, false)?;
+    let mut write = |out: &mut W, publication: Publication, is_psiblast: bool| -> io::Result<()> {
+        match html {
+            Some(registry) => {
+                let protocol = registry.protocol(&mut *diagnostics)?;
+                write_reference(out, true, protocol, publication, is_psiblast)
+            }
+            None => write_reference(out, false, DEFAULT_PROTOCOL, publication, is_psiblast),
+        }
+    };
+    write(&mut *out, primary, false)?;
     if psiblast {
         crate::cli::insert(out, b"\n")?;
-        write_reference(
-            out,
-            html,
-            protocol,
-            Publication::CompAdjustedMatrices,
-            false,
-        )?;
+        write(&mut *out, Publication::CompAdjustedMatrices, false)?;
     }
     if psiblast || program.eq_ignore_ascii_case("blastp") {
         crate::cli::insert(out, b"\n")?;
-        write_reference(out, html, protocol, Publication::CompBasedStats, psiblast)?;
+        write(&mut *out, Publication::CompBasedStats, psiblast)?;
     }
     crate::cli::insert(out, b"\n\n")
 }

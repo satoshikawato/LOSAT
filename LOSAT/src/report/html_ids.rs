@@ -6,7 +6,7 @@
 use std::io::{self, Write};
 use std::sync::Arc;
 
-use super::formatter_registry::{map_template, InitConfig};
+use super::formatter_registry::{map_template, InitConfig, ReferenceRegistry};
 use crate::report::db_subject::ParsedSubject;
 use crate::seqdb::Oid;
 use crate::seqid::label;
@@ -19,12 +19,15 @@ use crate::seqid::rank::{find_best, text_score};
 /// (`blastinput::app::html_links`, so that LOSAT's refusal of the file comes before the first
 /// byte; outfmt 18 takes no links); the `-db` text as NCBI keeps
 /// it (`CBlastFormat::m_DbName`, `NStr::TruncateSpaces` of `-db`; empty for `-subject`), the
-/// `<@db_name@>` of a local id's link; and whether the database holds nucleotides (`m_IsDbNa`).
+/// `<@db_name@>` of a local id's link; whether the database holds nucleotides (`m_IsDbNa`); and
+/// the `./.ncbirc` of the prolog's reference links (`ReferenceRegistry`, read at the same setup;
+/// `pairwise::write_prolog`).
 #[derive(Debug)]
 pub struct HtmlLinks {
     pub(crate) registry: InitConfig,
     pub(crate) db_name: Vec<u8>,
     pub(crate) nucleotide: bool,
+    pub(crate) references: ReferenceRegistry,
 }
 
 /// The `-html` data of one pairwise report (`PairwiseConfig::html`; `None` is the plain report):

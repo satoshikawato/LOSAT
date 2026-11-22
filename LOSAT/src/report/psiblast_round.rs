@@ -85,6 +85,7 @@ pub(crate) fn write_psiblast_round_report(
             false,
             false,
             false,
+            config.html_links(),
         )?;
         match database {
             Some(database) => write_blast_database_header(writer, database)?,
@@ -463,6 +464,7 @@ pub(crate) fn write_psiblast_epilog(
     let writer = &mut buffered;
     writeln!(writer)?;
     writeln!(writer)?;
-    super::write_blastp_final_footer(writer, report, database)?;
+    // psiblast refuses `-html` (`cli::UNPORTED_PSIBLAST_OWN_ARGS`): the plain epilog.
+    super::write_blastp_final_footer(writer, report, database, false)?;
     writer.flush()
 }

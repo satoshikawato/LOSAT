@@ -11,6 +11,7 @@ pub mod redo_alignment;
 // NCBI's c++/src/algo/blast/composition_adjustment/smith_waterman.c: the kernels of the Smith-Waterman redo (`-use_sw_tback`; series PR,
 // item PS11c-3).
 pub(crate) mod smith_waterman;
+pub(crate) mod smith_waterman_match;
 // No NCBI counterpart: `LOSAT_X_REDOCONTAINIDX`, the redo's kept alignments with an index by
 // subject start (`s_IsContained` / `s_WithDistinctEnds` answer from the alignments that can meet).
 pub(crate) mod x_align_index;

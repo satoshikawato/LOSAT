@@ -171,11 +171,38 @@ fn formats_share_a_run_only_with_one_hit_list_size() {
     assert!(run_report_counts("blastn", &[], None, None, None).is_err());
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908 (cited at
-// `kept_hitlist_counts`): the hit list size that the
-// options held before the handler (an archive's in blast_formatter) is the start of the
-// counts, and one above 500 is kept for the formats up to 4 when neither
-// -num_descriptions nor -num_alignments is given.
+/// A hit list size above 500 in the options is kept by the pairwise formats when the command line
+/// gives neither `-num_descriptions` nor `-num_alignments` (the descriptions the size, the
+/// alignments half of it), whatever `-max_target_seqs` says; otherwise the counts go on as for
+/// the default start (probes `Y.*.imp.*`).
+#[test]
+fn a_hit_list_above_500_in_the_options_is_kept_by_the_pairwise_formats() {
+    let kept = ReportCounts {
+        hitlist_size: 600,
+        num_descriptions: 600,
+        num_alignments: 300,
+    };
+    for outfmt in 0..=4 {
+        assert_eq!(kept_hitlist_counts(600, outfmt, false, false), Some(kept));
+        assert_eq!(report_counts_from(600, outfmt, Some(501), None, None), kept);
+    }
+    assert_eq!(kept_hitlist_counts(500, 0, false, false), None);
+    assert_eq!(kept_hitlist_counts(600, 5, false, false), None);
+    assert_eq!(kept_hitlist_counts(600, 0, true, false), None);
+    assert_eq!(kept_hitlist_counts(600, 0, false, true), None);
+    assert_eq!(
+        report_counts_from(600, 0, None, None, Some(300)),
+        ReportCounts {
+            hitlist_size: 500,
+            num_descriptions: 500,
+            num_alignments: 300,
+        }
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908: the hit list
+// size that the options held before the handler (an archive's in blast_formatter) is the start
+// of the counts at or below 500.
 #[test]
 fn the_hit_list_size_of_the_options_is_the_start() {
     let from = |start, outfmt, mts, nd, na| {
@@ -188,16 +215,6 @@ fn the_hit_list_size_of_the_options_is_the_start() {
     assert_eq!(from(100, 0, Some(7), None, None), (7, 7, 7));
     assert_eq!(from(100, 6, None, None, Some(2)), (2, 2, 2));
     assert_eq!(from(100, 0, None, Some(3), None), (250, 3, 250));
-    let kept = |start, outfmt, nd, na| {
-        kept_hitlist_counts(start, outfmt, nd, na)
-            .map(|c| (c.hitlist_size, c.num_descriptions, c.num_alignments))
-    };
-    assert_eq!(kept(1001, 0, false, false), Some((1001, 1001, 500)));
-    assert_eq!(kept(600, 4, false, false), Some((600, 600, 300)));
-    assert_eq!(kept(500, 0, false, false), None);
-    assert_eq!(kept(600, 5, false, false), None);
-    assert_eq!(kept(600, 0, true, false), None);
-    assert_eq!(kept(600, 0, false, true), None);
     // blast_formatter's posts have no prefix.
     let c = report_counts_from(3, 6, None, None, None);
     assert_eq!(

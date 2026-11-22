@@ -1,5 +1,5 @@
 //! `-db_soft_mask` and `-db_hard_mask`: the masks of a BLAST database's sequences that a search
-//! applies (NCBI's `CBlastDatabaseArgs` with `SetDatabaseMaskingSupport(true)` and the filtering
+//! applies (NCBI's `CBlastDatabaseArgs` with `SetDatabaseMaskingSupport` set to true and the filtering
 //! algorithm of `CSearchDatabase`), from the option to the algorithm the search and its reports
 //! use. One resolver for NCBI's whole sequence (decision D2 of M4a-2), in NCBI's order:
 //!
@@ -63,7 +63,7 @@ pub enum MaskKind {
     Hard = 2,
 }
 
-/// What the option's text names (`CSearchDatabase::SetFilteringAlgorithm(string, type)`).
+/// What the option's text names (`CSearchDatabase::SetFilteringAlgorithm` with the string and the type).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FilteringAlgorithm {
     /// `m_FilteringAlgorithmId`: a text that is an `Int4` in NCBI's form (`s_IsNumericId`).
@@ -279,7 +279,8 @@ impl ResolvedMask {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-516
     /// The program options of the BLAST archive and of the search strategy (after the list's).
-    /// An empty name is no key (`algo_key != kEmptyStr`): the id it was translated to is written.
+    /// An empty name is no key (only an `algo_key` other than `kEmptyStr` is one): the id it was
+    /// translated to is written.
     pub fn archive_params(&self) -> Vec<Param> {
         let algorithm = match self.key.as_deref() {
             Some(key) if !key.is_empty() => Param::new(

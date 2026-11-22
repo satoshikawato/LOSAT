@@ -316,6 +316,14 @@ def test_a_tool_reads_its_input_as_the_command_line_reads_standard_input(losat):
         output = pylosat.windowmasker(*words, input=data)
         assert output.bytes == stdout
         assert output.diagnostics == stderr.decode()
+    # The making and the conversion of counts files read files only.
+    optimized = engine_file("winmask/counts/dm_u2.obinary")
+    for words in (("-mk_counts", "-in", fasta, "-unit", "5", "-sformat", "binary"),
+                  ("-convert", "-in", optimized, "-sformat", "ascii")):
+        stdout, stderr = losat("windowmasker", *words)
+        output = pylosat.windowmasker(*words)
+        assert output.bytes == stdout
+        assert output.diagnostics == stderr.decode()
     words = ("-masking_algorithm", "dust", "-masking_options", "o", "-outfmt", "interval")
     output = pylosat.convert2blastmask(*words, input=">a\nACGTacgt\n")
     assert output.bytes == b"4 - 7\n"

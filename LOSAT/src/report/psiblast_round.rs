@@ -68,6 +68,7 @@ pub(crate) fn write_psiblast_round_report(
     subject_titles: &[Arc<[u8]>],
     parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     subject_sources: &[crate::report::defline::SourceTaxname],
+    loads: &crate::report::db_subject::HitLoads,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -107,6 +108,7 @@ pub(crate) fn write_psiblast_round_report(
         database,
         parsed_subjects,
         subject_sources,
+        loads,
         round,
     };
     let mut warnings = warnings;
@@ -130,10 +132,24 @@ pub(crate) fn write_psiblast_round_report(
         };
         sections.head(writer, q_idx, group.as_ref(), &mut read)?;
         if let Some(group) = &group {
-            let aligned = group.subject_order.len().min(report.num_alignments);
-            for &s_idx in &group.subject_order[..aligned] {
+            // An aligned subject's load may end the run where the view's answer says
+            // (`PairwiseView::after_throw`, as `x_pairwise_par::alignment_end` asks it).
+            let aligned = group.aligned(report.num_alignments);
+            let end = crate::report::x_pairwise_par::aligned_end(
+                config.view.after_throw(),
+                aligned,
+                |s_idx| sections.thrown(s_idx),
+            );
+            for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
                 read(s_idx, &mut *writer)?;
                 sections.subject(writer, probe.as_deref_mut(), group, s_idx)?;
+            }
+            if let Some((_, exception)) = end {
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    warnings.end_run();
+                }
+                writer.flush()?;
+                return Err(exception.clone().into_io_error());
             }
             sections.foot(writer, q_idx)?;
         }
@@ -151,6 +167,8 @@ struct RoundSections<'a> {
     parsed_subjects: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
     /// The sources of the others' Bioseqs (`pairwise::stored_source`).
     subject_sources: &'a [crate::report::defline::SourceTaxname],
+    /// The loads of the report's subjects, by subject index (`BlastpSections::loads`).
+    loads: &'a crate::report::db_subject::HitLoads,
     round: ReportRound<'a>,
 }
 
@@ -163,6 +181,11 @@ impl RoundSections<'_> {
                 previous as usize,
                 s_idx as usize,
             )
+    }
+
+    /// `BlastpSections::thrown`.
+    fn thrown(&self, s_idx: u32) -> Option<(&crate::ncbi_exception::NcbiException, bool)> {
+        super::thrown_load(self.loads, self.parsed_subjects, s_idx)
     }
 
     /// The subject of `s_idx` among the parsed subjects (`pairwise::parsed_subject`).
@@ -184,6 +207,7 @@ impl RoundSections<'_> {
             super::stored_source(self.subject_sources, s_idx),
             self.parsed(s_idx),
             true,
+            self.thrown(s_idx).is_some(),
         )
     }
 
@@ -252,11 +276,11 @@ impl RoundSections<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:613
     /// The two-part table: the Seq-aligns (HSPs) in the report's order, each in the part of its
     /// subject, counted after it is put there, up to `-num_descriptions` (so the bound counts
-    /// HSPs, and `-num_descriptions 0` keeps the first: `QueryGroup::first_hsps`, which also
-    /// gives the subjects whose description lines the table shows,
-    /// `pairwise::blastp_described_subjects`); each part is a table of its own over its HSPs (its
-    /// own column widths), whose rows are its subjects; then the blank line of
-    /// `x_DisplayDeflines`. `x_ConfigCShowBlastDefline` is called without the number of
+    /// HSPs, and `-num_descriptions 0` keeps the first: `x_pairwise_par::two_part_lines`, which
+    /// also gives the subjects whose description lines the table shows to the refusals and the
+    /// loads decided before it, `x_pairwise_par::described_subjects`); each part is a table of its
+    /// own over its HSPs (its own column widths), whose rows are its subjects; then the blank line
+    /// of `x_DisplayDeflines`. `x_ConfigCShowBlastDefline` is called without the number of
     /// descriptions, so neither part leaves its header out.
     fn write_two_part_table<W: Write>(
         &self,
@@ -265,23 +289,16 @@ impl RoundSections<'_> {
         found_before: &[bool],
         read: SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
-        let mut repeated: Vec<(u32, Vec<&PairwiseHit>)> = Vec::new();
-        let mut new: Vec<(u32, Vec<&PairwiseHit>)> = Vec::new();
-        for (shown, hit) in group.first_hsps(self.report.num_descriptions) {
-            let part = if found_before
-                .get(hit.hit.s_idx as usize)
-                .copied()
-                .unwrap_or(false)
-            {
-                &mut repeated
-            } else {
-                &mut new
-            };
-            match part.last_mut() {
-                Some((last, hits)) if *last == shown => hits.push(hit),
-                _ => part.push((shown, vec![hit])),
-            }
-        }
+        let [repeated, new] = crate::report::x_pairwise_par::two_part_lines(
+            group.hsps(),
+            self.report.num_descriptions,
+            |hit: &&PairwiseHit| {
+                found_before
+                    .get(hit.hit.s_idx as usize)
+                    .copied()
+                    .unwrap_or(false)
+            },
+        );
         self.write_part(writer, group, &repeated, true, &mut *read)?;
         writeln!(writer)?;
         self.write_part(writer, group, &new, false, read)?;
@@ -386,7 +403,12 @@ impl RoundSections<'_> {
         let parsed = self.parsed(s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => DatabaseHeading::parsed(subject, true, group.own_hsps(s_idx)),
+                Some(subject) => DatabaseHeading::loaded(
+                    subject,
+                    true,
+                    group.own_hsps(s_idx),
+                    self.thrown(s_idx).is_some(),
+                ),
                 None => DatabaseHeading::Title(
                     &group.subject_titles[&s_idx],
                     super::stored_source(self.subject_sources, s_idx),

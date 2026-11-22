@@ -8,7 +8,7 @@ use anyhow::Result;
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:862-866
 /// `in >> c` skips the characters of C's `isspace`: the test is `NStr::IsBlank`'s
-/// (`ncbi_str::is_blank`), public for the Web adapter (`web_adapter::is_blank`).
+/// (`ncbi_str::is_blank`); the library API's `read_query_records` reads it too.
 pub fn is_blank(bytes: &[u8]) -> bool {
     crate::ncbi_str::is_blank(bytes)
 }
@@ -108,7 +108,7 @@ impl InputFile {
     }
 
     /// Whether this is the standard input that `-` names, which NCBI reads through `cin`
-    /// (`m_Ios = &cin`, cited at `InputFile`), not through a `CNcbiIfstream` of a path (a path
+    /// (`m_Ios` points to `cin`, cited at `InputFile`), not through a `CNcbiIfstream` of a path (a path
     /// such as `/dev/stdin` is a file of its own). The FASTA readers read the two as NCBI's two
     /// streams answer a refill (`fasta_reader::stream::InputBackend::of`).
     pub(crate) fn is_standard_input(&self) -> bool {
@@ -182,6 +182,20 @@ impl std::io::Seek for &InputFile {
     fn stream_position(&mut self) -> std::io::Result<u64> {
         self.file().stream_position()
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
+/// The bytes of an opened `-query` or `-subject` input (`open_input`, `open_file_input`) from its
+/// position to its end, as the FASTA readers read it (`fasta_reader::stream`): a read that fails
+/// ends the input as its end does, with the bytes read before it (NCBI's line reader is at its end
+/// once the stream has failed). A directory opens and fails its first read: no byte, so the
+/// command line's query of a directory is empty (`Query is Empty!`) and its subject set has no
+/// record. The library's `api::read_input_file` reads its files here.
+pub(crate) fn read_to_failure(input: &mut impl std::io::Read) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    // `read_to_end` keeps the bytes before a failed read; the failure itself is the end.
+    let _ = input.read_to_end(&mut bytes);
+    bytes
 }
 
 /// Opens the file of a `-query` or `-subject` argument (`path` is not `-`): a file that does not
@@ -311,11 +325,17 @@ fn inflate_to_temporary_file(
 /// file the run reads as its query), or the current directory where there is none (WASI).
 pub(crate) fn temporary_input(role: &str, text: &[u8]) -> std::io::Result<std::fs::File> {
     use std::io::{Seek, Write};
-    let directory = temporary_directory().unwrap_or_else(|| std::path::PathBuf::from("."));
-    let mut temporary = unnamed_temporary_file(&directory, role)?;
+    let mut temporary = temporary_output(role)?;
     temporary.write_all(text)?;
     temporary.seek(std::io::SeekFrom::Start(0))?;
     Ok(temporary)
+}
+
+/// An empty unnamed temporary file in the directory of [`temporary_input`], for a text that is
+/// written to it a part at a time.
+pub(crate) fn temporary_output(role: &str) -> std::io::Result<std::fs::File> {
+    let directory = temporary_directory().unwrap_or_else(|| std::path::PathBuf::from("."));
+    unnamed_temporary_file(&directory, role)
 }
 
 /// A new, empty file in `directory` that no name reaches: on Unix and WASI its name is removed

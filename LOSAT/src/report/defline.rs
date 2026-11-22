@@ -18,6 +18,8 @@
 //! wrap and reads past the end of the string (and crashes); `clean_and_compress` stops at
 //! the end of the string there (approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
 
+use crate::ncbi_str::replace_in_place;
+
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3431-3446
 const TPA_PREFIXES: [&str; 14] = [
     "MAG ",
@@ -305,8 +307,8 @@ fn pdb_or_patent_title(ids: &BioseqFacts) -> Vec<u8> {
         if !chain_id.is_empty() {
             title.extend_from_slice(chain_id);
         } else if (0x20..0x7f).contains(&(*chain as u8)) {
-            // `isprint ((unsigned char) m_PDBChain)` and `string chain(1, (char) m_PDBChain)`: the
-            // low byte of the integer (`chain 321` is `A`).
+            // `isprint` of `m_PDBChain` cast to `unsigned char`, and the one-character string of it cast
+            // to `char`: the low byte of the integer (`chain 321` is `A`).
             title.push(*chain as u8);
         } else {
             return Vec::new();
@@ -431,7 +433,7 @@ pub enum SubjectWord {
     Unknown,
 }
 
-/// `NStr::Split(text, " ", tokens)[0]`: the bytes before the first space.
+/// The first token that `NStr::Split` makes of `text` at a space: the bytes before the first space.
 fn first_word(text: &[u8]) -> &[u8] {
     let end = text
         .iter()
@@ -487,11 +489,12 @@ fn title_before_decoding_of(
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3090-3110
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2933-2977 (`NStr::Find`, `eNocase`)
-// The reverse search gives the last place at or before `slen - plen` where the pattern matches
-// without case (ASCII: the C locale): an empty pattern has no first letter, so `find_last_of`
-// finds nothing (an empty name never matches), and a stop at 0 without a match is never
-// `idx + 2` (at least 2). So the place is `idx + 2` (`slen - plen - 1`) exactly where the name
-// is there and not at `slen - plen`: only those two places are compared.
+// The reverse search gives the last place at or before the title's length less the name's (`slen`
+// less `plen`) where the pattern matches without case (ASCII: the C locale): an empty pattern has
+// no first letter, so `find_last_of` finds nothing (an empty name never matches), and a stop at 0
+// without a match is never `idx + 2` (at least 2). So the place is `idx + 2` (one less than `slen`
+// less `plen`) exactly where the name is there and not at `slen` less `plen`: only those two places
+// are compared.
 /// `s_TitleEndsInOrganism`: the position of `[` where `title` ends in ` [<taxname>]` (the name in
 /// any ASCII case).
 fn title_ends_in_organism(title: &[u8], taxname: &[u8]) -> Option<usize> {
@@ -508,8 +511,8 @@ fn title_ends_in_organism(title: &[u8], taxname: &[u8]) -> Option<usize> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2123-2147
-// The commented-out names are not used: `(virus)` stays (probe of line RG T5c, `nu (x)(virus)
-// [Bacillus sp.]` unchanged).
+// The commented-out names are not used: `(virus)` stays (probe of line RG T5c, the title "nu (x)(virus)
+// [Bacillus sp.]" unchanged).
 /// `s_proteinOrganellePrefix` from `chloroplast` (2) to `chromatophore` (22), the non-empty ones.
 const PROTEIN_ORGANELLE_PREFIXES: [&[u8]; 15] = [
     b"chloroplast",
@@ -560,7 +563,7 @@ pub(crate) fn adjust_protein_title_suffix(title: &mut Vec<u8>, taxname: &[u8]) {
     let mut opos = None;
     if title.len() > 2 && title[title.len() - 1] == b')' {
         if let Some(pos) = title.iter().rposition(|&c| c == b'(') {
-            // `NStr::EndsWith(m_MainTitle, "(" + str + ")")`; the title ends in `)`.
+            // `NStr::EndsWith` of `m_MainTitle` and `str` in parentheses; the title ends in `)`.
             let len = title.len();
             let ends_in_paren = |prefix: &[u8]| {
                 len >= prefix.len() + 2
@@ -776,7 +779,7 @@ const NCBI_HTML_ENTITIES: [(u32, &str); 280] = [
     (9829, "hearts"), (9830, "diams"),
 ];
 
-/// `NStr::HtmlDecode(text)` with its default `eEncoding_Unknown`: the decoded bytes and
+/// `NStr::HtmlDecode` of `text` with its default `eEncoding_Unknown`: the decoded bytes and
 /// whether a character reference was decoded (`fHtmlDec_CharRef_Entity` or
 /// `fHtmlDec_CharRef_Numeric`). The text is read as `char`s under the C locale
 /// (`isalpha` and the others are ASCII only). A numeric reference wraps modulo 2^32 and is
@@ -786,7 +789,7 @@ const NCBI_HTML_ENTITIES: [(u32, &str); 280] = [
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4523-4618
 /// NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:5729-5759 (`CUtf8::x_Append` of a
 /// `TUnicodeSymbol` buffer: `x_TCharToUnicodeSymbol` takes the symbol as it is for a
-/// 4-byte character, then `x_AppendChar( u8str, ch )`).
+/// 4-byte character, then `x_AppendChar` of `ch` to `u8str`).
 fn html_decode(text: &[u8]) -> Result<(Vec<u8>, bool), UnknownEncoding> {
     let encoding = guess_encoding(text);
     if encoding == Encoding::Unknown {
@@ -981,7 +984,7 @@ fn eval_next(ch: u8) -> bool {
     ch & 0xC0 == 0x80
 }
 
-/// `CUtf8::AsUTF8(CTempString(&ch,1), encoding)` of one byte of a title that
+/// `CUtf8::AsUTF8` of a one-byte `CTempString` and `encoding`, for a byte of a title that
 /// `GuessEncoding` did not find to be ASCII or UTF-8: a CESU-8 title keeps the byte (a
 /// one-byte string has no six-byte pair), an ISO-8859-1 or Windows-1252 title converts it
 /// (`CharToSymbol`, then `x_AppendChar`).
@@ -1015,7 +1018,7 @@ fn append_char(out: &mut Vec<u8>, ch: u32) {
         out.push((((ch >> 6) & 0x3F) | 0x80) as u8);
         out.push(((ch & 0x3F) | 0x80) as u8);
     } else {
-        // `Uint1(...)` keeps the low byte of a symbol above 0x1FFFFF, as `as u8` does.
+        // A cast to `Uint1` keeps the low byte of a symbol above 0x1FFFFF, as `as u8` does.
         out.push(((ch >> 18) | 0xF0) as u8);
         out.push((((ch >> 12) & 0x3F) | 0x80) as u8);
         out.push((((ch >> 6) & 0x3F) | 0x80) as u8);
@@ -1116,34 +1119,10 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> (Vec<u8>, bool) {
         out.push(curr);
     }
     if is_protein {
-        out = replace_in_place(&out, b". [", b" [");
-        out = replace_in_place(&out, b", [", b" [");
+        replace_in_place(&mut out, b". [", b" [");
+        replace_in_place(&mut out, b", [", b" [");
     }
     (out, wrapped)
-}
-
-/// `NStr::ReplaceInPlace(src, search, replace)` with its defaults (from the start, every
-/// occurrence): each search resumes after the text just put in.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3401-3428
-fn replace_in_place(src: &[u8], search: &[u8], replace: &[u8]) -> Vec<u8> {
-    let mut src = src.to_vec();
-    let mut start_pos = 0;
-    if start_pos + search.len() > src.len() || search == replace {
-        return src;
-    }
-    while let Some(found) = src[start_pos..]
-        .windows(search.len())
-        .position(|window| window == search)
-    {
-        let at = start_pos + found;
-        src.splice(at..at + search.len(), replace.iter().copied());
-        start_pos = at + replace.len();
-        if start_pos > src.len() {
-            break;
-        }
-    }
-    src
 }
 
 #[cfg(test)]

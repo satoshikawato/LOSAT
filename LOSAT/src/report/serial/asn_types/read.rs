@@ -10,7 +10,7 @@
 //!   `ReadInt2`); ENUMERATED by name or by a number that has a name, INTEGER with named values by
 //!   name or any number;
 //! - a VisibleString (and StringStore) byte outside 0x20..0x7E as `#`, with NCBI's
-//!   `ERR_POST_X(7)` (`Post::BadChar`), a UTF8String as it is;
+//!   `ERR_POST_X` with subcode 7 (`Post::BadChar`), a UTF8String as it is;
 //! - the delayed member (`Auth-list.names`) with the skip functions, kept as its text;
 //! - the hooks of NCBI's hand-written classes that change what is read (`super::hooks` of this
 //!   file: `CSeq_descr::PostRead`, `CVariation_ref::PostRead`), and the Seq-id into LOSAT's
@@ -35,9 +35,10 @@ use crate::report::serial::object_frame::{frame_info, text_frame_site, FrameKind
 /// A message that NCBI's reader posts while it reads, in the order posted.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Post {
-    /// `ReplaceVisibleChar`'s `ERR_POST_X(7, message)` of a byte read as `#`.
+    /// `ReplaceVisibleChar`'s `ERR_POST_X` of subcode 7 with a message, for a byte read as `#`.
     BadChar(ReplacedChar),
-    /// `ERR_POST(Error << text)` of a class's `PostRead` (`CVariation_ref::PostRead`).
+    /// `ERR_POST` of an `Error` with a text, from a class's `PostRead`
+    /// (`CVariation_ref::PostRead`).
     Error(&'static str),
 }
 
@@ -413,8 +414,8 @@ impl<S: AsnSource> TypedReader<'_, S> {
     }
 
     /// `ReadClassSequential` / `SkipClassSequential` (`start`: the class frame, `{`, the member
-    /// frame): the next member in module order (`BeginClassMember(classType, pos)`) with the
-    /// mandatory members before it checked, and a read's (not a skip's) member hooks before its
+    /// frame): the next member in module order (`BeginClassMember` of `classType` at `pos`) with
+    /// the mandatory members before it checked, and a read's (not a skip's) member hooks before its
     /// value (`hooks::pre_read_member`); after the last, the member frame left, the mandatory
     /// members after it checked, `}`, the class frame left.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:86-111
@@ -466,8 +467,9 @@ impl<S: AsnSource> TypedReader<'_, S> {
         Ok(Step::Done(Value::Sequence(values)))
     }
 
-    /// `ReadMemberId(SkipWhiteSpace())` and `GetMemberIndex(classType, id, pos)` (from `pos`,
-    /// `in_class`) or `GetChoiceIndex(choiceType, id)`: the member or variant named or tagged.
+    /// `ReadMemberId` after `SkipWhiteSpace` and `GetMemberIndex` of `classType`, `id` and `pos`
+    /// (from `pos`, `in_class`) or `GetChoiceIndex` of `choiceType` and `id`: the member or variant
+    /// named or tagged.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:407-424
     // `GetAltItemIndex` (366-387) tries the name with its first letter in upper case and takes it
     // only for an item without a prefix, which no member of an ASN.1 module is (its names start

@@ -74,8 +74,8 @@ impl FormattingArgs {
     }
 }
 
-/// A `-sorthits` or `-sorthsps` value: an integer from 0 to 4 (`CArgAllowValuesBetween(0, 4,
-/// true)`, cited at `FormattingArgs`).
+/// A `-sorthits` or `-sorthsps` value: an integer from 0 to 4 (`CArgAllowValuesBetween` from 0 to 4,
+/// with `true`, cited at `FormattingArgs`).
 fn formatting_sort_option(value: &str) -> Result<u8, String> {
     let option = crate::blastinput::value_parsers::ncbi_integer_at_least(value, 0)?;
     u8::try_from(option)
@@ -84,7 +84,7 @@ fn formatting_sort_option(value: &str) -> Result<u8, String> {
         .ok_or_else(|| "Illegal value: expected an integer from 0 to 4".to_string())
 }
 
-/// A `-line_length` value: an integer of 1 or more (`CArgAllowValuesGreaterThanOrEqual(1)`,
+/// A `-line_length` value: an integer of 1 or more (`CArgAllowValuesGreaterThanOrEqual` of 1,
 /// cited at `FormattingArgs`).
 fn formatting_line_length(value: &str) -> Result<usize, String> {
     let length = crate::blastinput::value_parsers::ncbi_integer_at_least(value, 1)?;
@@ -100,6 +100,17 @@ pub struct ReportCounts {
     pub num_descriptions: usize,
     /// The number of alignments of the pairwise format (`m_NumAlignments`).
     pub num_alignments: usize,
+}
+
+impl ReportCounts {
+    /// The counts of what the pairwise reports show of each query (`db_subject::Shown`):
+    /// `num_descriptions` description lines, the alignments of the first `num_alignments` hits.
+    pub fn shown(self) -> crate::report::db_subject::Shown {
+        crate::report::db_subject::Shown {
+            descriptions: self.num_descriptions,
+            alignments: self.num_alignments,
+        }
+    }
 }
 
 impl Default for ReportCounts {
@@ -119,7 +130,8 @@ impl Default for ReportCounts {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
 /// (`BLAST_HITLIST_SIZE` is 500, `m_DfltNumDescriptions` 500, `m_DfltNumAlignments` 250; the
-/// import search strategy branch at 2900-2908 does not exist in LOSAT)
+/// branch at 2900-2908 of a hit list size above 500 in the options is [`kept_hitlist_counts`],
+/// which the default start never reaches)
 /// Note that `args[kArgNumDescriptions]` is false for an absent option, not for the value 0.
 pub fn report_counts(
     outfmt: i32,
@@ -137,11 +149,33 @@ pub fn report_counts(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
-/// [`report_counts`] from the hit list size `start` of the options before the formatting handler
-/// reads the command line (`opt.GetHitlistSize()`: an imported search strategy's or an archive's
-/// `HitlistSize`, `BLAST_HITLIST_SIZE` otherwise): above 500, with neither `-num_descriptions`
-/// nor `-num_alignments` and a pairwise format, the handler keeps it and returns early
-/// ([`kept_hitlist_counts`]; `-max_target_seqs` is then not read).
+/// The counts of options whose hit list size `hitlist_size` is above `BLAST_HITLIST_SIZE` before
+/// the formatting handler reads the command line (an imported search strategy's `HitlistSize`, or
+/// an archive's in blast_formatter), when NCBI keeps it: output format `outfmt` up to 4 and neither
+/// `-num_descriptions` nor `-num_alignments` given: the numbers of descriptions and alignments
+/// become the size and half of it. The handler then returns at once: `-max_target_seqs`,
+/// `-line_length`, `-sorthits` and `-sorthsps` are not read and no warning is written (probes
+/// `Y.*.imp.*`). `None` otherwise ([`report_counts_from`] goes on). The one rule of that return:
+/// the counts here, the formatting options in the import (`import::formatting_early_return`).
+pub fn kept_hitlist_counts(
+    hitlist_size: usize,
+    outfmt: i32,
+    num_descriptions_given: bool,
+    num_alignments_given: bool,
+) -> Option<ReportCounts> {
+    (hitlist_size > BLAST_HITLIST_SIZE
+        && !num_descriptions_given
+        && !num_alignments_given
+        && outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES)
+        .then_some(ReportCounts {
+            hitlist_size,
+            num_descriptions: hitlist_size,
+            num_alignments: hitlist_size / 2,
+        })
+}
+
+/// [`report_counts`] from the hit list size `start` of the options (an imported search
+/// strategy's or an archive's `HitlistSize`), which the handler may keep ([`kept_hitlist_counts`]).
 pub fn report_counts_from(
     start: usize,
     outfmt: i32,
@@ -188,30 +222,6 @@ pub fn report_counts_from(
             num_alignments: hitlist_size,
         }
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
-/// The counts of options whose hit list size `hitlist_size` is above `BLAST_HITLIST_SIZE` before
-/// the formatting handler reads the command line (an archive's in blast_formatter), when NCBI
-/// keeps it: output format `outfmt` up to 4 and neither `-num_descriptions` nor `-num_alignments`
-/// given: the numbers of descriptions and alignments become the size and half of it. The handler
-/// then returns at once: `-max_target_seqs`, `-line_length`, `-sorthits` and `-sorthsps` are not
-/// read and no warning is written. `None` otherwise (`report_counts_from` goes on).
-pub fn kept_hitlist_counts(
-    hitlist_size: usize,
-    outfmt: i32,
-    num_descriptions_given: bool,
-    num_alignments_given: bool,
-) -> Option<ReportCounts> {
-    (hitlist_size > BLAST_HITLIST_SIZE
-        && !num_descriptions_given
-        && !num_alignments_given
-        && outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES)
-        .then_some(ReportCounts {
-            hitlist_size,
-            num_descriptions: hitlist_size,
-            num_alignments: hitlist_size / 2,
-        })
 }
 
 impl ReportCounts {

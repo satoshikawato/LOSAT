@@ -1,6 +1,6 @@
 //! The objects of a serial stream read one after another (`CObjectIStreamAsn` over an `istream`),
 //! and the choice of the stream's encoding that NCBI's readers of a stream make before they read
-//! (`CFormatGuess().Format(in)`): blast_formatter's `-archive` (Blast4-archive objects until the
+//! (`CFormatGuess`'s `Format` of the stream): blast_formatter's `-archive` (Blast4-archive objects until the
 //! end of the data, `CRemoteBlast::LoadFromArchive`) and the search strategy of
 //! `-import_search_strategy` (one Blast4-get-search-strategy-reply, or else one Blast4-request,
 //! `ExtractBlast4Request`).
@@ -56,7 +56,7 @@ pub(crate) struct Guessed<R> {
     input: R,
 }
 
-/// `CFormatGuess().Format(input)` (the whole order of `sm_CheckOrder`, no hints), its answer
+/// `CFormatGuess`'s `Format` of the input (the whole order of `sm_CheckOrder`, no hints), its answer
 /// taken as [`Encoding`]. `TestFormatFasta`, which comes before `eTextASN` and `eBinaryASN` in
 /// the order, may search past its buffer (`Guessed::fasta_undecided`): its answer would be
 /// `eFasta`, an invalid input, so a text or binary answer after it is not decided.
@@ -91,7 +91,7 @@ pub(crate) fn guess_encoding<R: IoRead>(input: R) -> Guessed<R> {
 }
 
 impl<R: IoRead> Guessed<R> {
-    /// The text reader of the stream (`new CObjectIStreamAsn(f)`), from where the guess left it.
+    /// The text reader of the stream (a new `CObjectIStreamAsn` of the file), from where the guess left it.
     pub(crate) fn into_text(self) -> ObjectStream<R> {
         ObjectStream::new(self.input, &self.taken[self.start..])
     }
@@ -168,9 +168,10 @@ impl<R: IoRead> ObjectStream<R> {
 }
 
 impl<R: IoRead + Seek> ObjectStream<R> {
-    /// `in.seekg(0)` (remote_blast.cpp:2302, after a failed read of a strategy reply): the input
-    /// from its start, for a new guess and read; the error of an input that cannot seek (a
-    /// pipe), whose stream NCBI's `seekg` leaves failed.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2302
+    /// The seek to the start that follows a failed read of a strategy reply: the input from its
+    /// start, for a new guess and read; the error of an input that cannot seek (a pipe), whose
+    /// stream NCBI's `seekg` leaves failed.
     pub(crate) fn rewind(self) -> std::io::Result<R> {
         let (_, mut input) = self.into_rest();
         input.seek(SeekFrom::Start(0))?;

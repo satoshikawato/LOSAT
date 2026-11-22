@@ -87,7 +87,7 @@ pub fn calculate_num_chunks(
         return 1;
     }
     *chunk_size -= *chunk_size % 3;
-    // `Uint4 num_chunks` (split_query_aux_priv.cpp:112).
+    // `num_chunks` is a `Uint4` (split_query_aux_priv.cpp:112).
     let n = if *chunk_size > overlap {
         (length as u64 / (*chunk_size - overlap)) as u32
     } else {

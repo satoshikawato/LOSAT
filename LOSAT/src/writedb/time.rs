@@ -1,6 +1,7 @@
-//! The local time of a build (`CTime(CTime::eCurrent)`) and its two text
+//! The local time of a build (`CTime` with `CTime::eCurrent`) and its two text
 //! forms: the creation date of an index file and the time of the log; and the
-//! same instant as `time(nullptr)` gives it (the seed of makeblastdb's `-randomize`).
+//! same instant as `time` gives it when called with a null pointer (the seed of makeblastdb's
+//! `-randomize`).
 
 use super::local_offset::local_utc_offset;
 
@@ -16,7 +17,8 @@ pub struct LocalTime {
     pub hour: u32,
     pub minute: u32,
     pub second: u32,
-    /// `time(nullptr)`: the instant, in seconds since 1970-01-01 00:00:00 UTC.
+    /// What `time` gives with a null pointer: the instant, in seconds since 1970-01-01 00:00:00
+    /// UTC.
     pub unix_seconds: i64,
 }
 
@@ -27,7 +29,7 @@ const MONTH_ABBR: [&str; 12] = [
 
 impl LocalTime {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1722-1734
-    // `CTime(CTime::eCurrent)` is the local time of the C library. LOSAT
+    // `CTime` with `CTime::eCurrent` is the local time of the C library. LOSAT
     // calls no C library: the zone's offset from UTC comes from
     // `local_offset`, which finds the zone where the C library finds it
     // (glibc on Unix and on WASI, from the environment and the directories

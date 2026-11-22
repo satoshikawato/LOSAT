@@ -15,7 +15,7 @@ use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
-use crate::ncbi_app::args::{flag, key, Args, Constraint, Dep, Desc, Kind};
+use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{self, Cin};
 use crate::ncbi_app::{Diag, Tool};
 
@@ -30,78 +30,17 @@ const PROGRAM: &str = "BLAST_FORMATTER";
 /// `OPTIONAL ARGUMENTS` is the usage that `-h` and the argument errors print (probe P2.202).
 const HELP: &str = include_str!("help.txt");
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:122-141
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2656-2737
-// `CDebugArgs::SetArgumentDescriptions` (blast_formatter.cpp:143-144) adds nothing to a release
-// build (its `-help` lists no debug option).
-/// The arguments of `CBlastFormatterApp::Init` in the order it describes them: `-sorthits` and
-/// `-sorthsps` take 0 to 4 (`CAlignFormatUtil::eEvalue` to `eQueryCoverage`, `eHspEvalue` to
-/// `eSubjectStart`).
-const DESCS: &[Desc] = &[
-    key("rid", Kind::Text, None, None),
-    key("archive", Kind::InputFile, None, None),
-    key("outfmt", Kind::Text, Some("0"), None),
-    flag("show_gis"),
-    key(
-        "num_descriptions",
-        Kind::Integer,
-        None,
-        Some(Constraint::AtLeast(0)),
-    ),
-    key(
-        "num_alignments",
-        Kind::Integer,
-        None,
-        Some(Constraint::AtLeast(0)),
-    ),
-    key(
-        "line_length",
-        Kind::Integer,
-        None,
-        Some(Constraint::AtLeast(1)),
-    ),
-    flag("html"),
-    key(
-        "sorthits",
-        Kind::Integer,
-        None,
-        Some(Constraint::Between(0, 4)),
-    ),
-    key(
-        "sorthsps",
-        Kind::Integer,
-        None,
-        Some(Constraint::Between(0, 4)),
-    ),
-    key(
-        "max_target_seqs",
-        Kind::Integer,
-        None,
-        Some(Constraint::AtLeast(1)),
-    ),
-    key("out", Kind::OutputFile, Some("-"), None),
-    flag("parse_deflines"),
-];
-
-/// The `SetDependency` calls of `Init` (quoted at `DESCS`), in their order.
-fn dependencies() -> Vec<(&'static str, Dep, &'static str)> {
-    vec![
-        ("rid", Dep::Excludes, "archive"),
-        ("max_target_seqs", Dep::Excludes, "num_descriptions"),
-        ("max_target_seqs", Dep::Excludes, "num_alignments"),
-    ]
-}
-
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:57-69
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:122-144
 /// blast_formatter as NCBI's application runs it (`ncbi_app`): BLAST's version, BLAST's usage
-/// report (`ncbi_environment`), its dependencies and no prefix on its diagnostics (its `Run` sets
-/// none: `Warning: ...`, line RG item F3 probe P2.002).
+/// report (`ncbi_environment`), the arguments and dependencies of its `Init` (the table made of
+/// its `-xmlhelp` XML, `ncbi_xmlhelp/blast_formatter.xml`; `CDebugArgs` adds nothing to a release
+/// build) and no prefix on its diagnostics (its `Run` sets none: `Warning: ...`, line RG item F3
+/// probe P2.002).
 static TOOL: Tool = Tool {
     program: "blast_formatter",
     refusal_name: PROGRAM,
     help: HELP,
-    descs: DESCS,
-    dependencies,
     post_prefix: None,
     components: &[],
 };
@@ -204,13 +143,14 @@ fn run_body(
         };
         return archive::format_archive(&Options::of(args), settings, &mut archive, out, diag);
     }
-    let Some(rid) = args.value("rid") else {
-        return catch_all(
-            diag,
-            crate::cli::command_line_argument_error(&crate::ncbi_app::args::no_value_message(
-                "rid",
-            )),
-        );
+    let rid = match args.as_string("rid") {
+        Ok(rid) => rid,
+        Err(error) => {
+            return catch_all(
+                diag,
+                crate::cli::command_line_argument_error(error.message()),
+            )
+        }
     };
     if rid.is_empty() {
         return catch_all(

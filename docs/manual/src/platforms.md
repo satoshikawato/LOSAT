@@ -86,7 +86,7 @@ When the host is Node.js (`node:wasi`), the host program opens the files, and No
 
 ## Web GUI (Preview)
 
-LOSAT also runs in a web browser. The Web GUI is a preview. It is not part of the release files; its source is in the repository (`web/app`). It follows the page layout of NCBI BLAST: a search form with a **Run LOSAT** button, then a Graphic Summary and Descriptions on one page.
+LOSAT also runs in a web browser; see the dedicated [LOSAT Web (Browser GUI)](web.md) page for capabilities, build instructions, and browser isolation details. The Web GUI is a preview outside the release files (`web/app`), following the NCBI Web BLAST search layout (Graphic Summary and Descriptions on one page).
 
 **Status: Preview.** It is outside the release's NCBI parity claim.
 

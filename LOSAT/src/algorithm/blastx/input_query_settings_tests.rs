@@ -45,6 +45,7 @@ fn a_read_before_the_search_reads_as_the_search_and_keeps_the_search_ids() {
         id_scope: Some(Default::default()),
         strand: crate::report::archive::bioseq::SeqLocStrand::Both,
         data_loaders: false,
+        batch_count: None,
     };
     let error = read(
         &mut settings.stream_before_search(file("nodef", b"ACGT\n>q1 x\nACGT\n")),

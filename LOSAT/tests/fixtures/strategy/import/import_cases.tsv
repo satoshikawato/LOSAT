@@ -549,3 +549,58 @@ I.blastx.gencode.f11	blastx	-import_search_strategy {ss}/blastx.gencode.ss -outf
 I.tblastn.task_fast.f11	tblastn	-import_search_strategy {ss}/tblastn.task_fast.ss -outfmt 11	0	cc0882e148f9671e	ce435f6509352102
 I.blastp.hits.f11mts3	blastp	-import_search_strategy {ss}/blastp.hits.ss -outfmt 11 -max_target_seqs 3	0	0e66171a7293f16f	c35a236749db9a62
 E.blastn.dupparam.f11	blastn	-import_search_strategy {ss}/craft/blastn.dupparam -outfmt 11	0	8b4eae644302513a	c7d9e175b47ef7bc
+C.blastn.from.tblastx.db.evalue	blastn	-import_search_strategy {ss}/tblastx.db.ss -evalue 1e-5	0	f153bc90307b54d1	01cfd7db172dc251
+C.blastx.from.tblastx.db.word	blastx	-import_search_strategy {ss}/tblastx.db.ss -word_size 4	0	f153bc90307b54d1	3ab81ccb7884018c
+C.tblastx.from.blastx.db.matrix	tblastx	-import_search_strategy {ss}/blastx.db.ss -matrix PAM30	0	9df0120fd047fcb6	97337dc6ea0e6c31
+C.tblastx.from.blastn.db.evalue	tblastx	-import_search_strategy {ss}/blastn.db.ss -evalue 1e-5	0	7d416daf860e5ef5	117b81a75e1421a9
+C.tblastx.from.blastn.db.strand	tblastx	-import_search_strategy {ss}/blastn.db.ss -strand plus	0	0a2b3a5340df4f6f	d6dbca01209bf9a6
+C.blastx.from.tblastx.db.strand	blastx	-import_search_strategy {ss}/tblastx.db.ss -strand minus	0	306969cdd9b3c9cc	aadd0ca47f19a2cc
+C.blastn.from.tblastx.sub	blastn	-import_search_strategy {ss}/tblastx.sub.ss	0	3bcd5eb1b7e906e0	c7d9e175b47ef7bc
+S1.tblastn.sbh	tblastn	-import_search_strategy {ss}/tbn_sbh.ss	0	ecf92b1f992303de	ce435f6509352102
+S1.tblastx.sbh	tblastx	-import_search_strategy {ss}/tbx_sbh.ss	0	16206fa9bf439f26	d6dbca01209bf9a6
+S1.blastp.dbmask	blastp	-import_search_strategy {ss}/bp_dbmask.ss	0	797180fc592d0a9f	1fc42b53917c7075
+S1.blastx.dbmask	blastx	-import_search_strategy {ss}/bx_dbmask.ss	0	d97872a0ccbb43e6	570c01346c395517
+S1.tblastn.dbmask	tblastn	-import_search_strategy {ss}/tbn_dbmask.ss	0	c753dd0911d3b943	ce435f6509352102
+S1.tblastx.dbmask	tblastx	-import_search_strategy {ss}/tbx_dbmask.ss	0	8d4ea831a3817b11	d6dbca01209bf9a6
+S1.blastn.rpt	blastn	-import_search_strategy {ss}/bn_rpt.ss	0	e9899662bdc87b19	c7d9e175b47ef7bc
+S1.blastn.useidx_force	blastn	-import_search_strategy {ss}/blastn.useidx_force.ss	0	18d4dad5d024ef63	357132bd2d29548a
+S1.blastn.useidx_force.f11	blastn	-import_search_strategy {ss}/blastn.useidx_force.ss -outfmt 11	0	3c671f93c751c0db	357132bd2d29548a
+S1.blastn.useidx_force.cli	blastn	-import_search_strategy {ss}/blastn.useidx_force.ss -use_index true -db tests/db_search/arch_snucl	0	18d4dad5d024ef63	3d949a27583264c6
+B.blastn.db.useidx_name	blastn	-import_search_strategy {ss}/blastn.db.ss -use_index true -index_name nosuch	0	18d4dad5d024ef63	31cca11922388d41
+B.blastp.db.cli_dbmask	blastp	-import_search_strategy {ss}/blastp.db.ss -db tests/db_search/dbmaskp/ps5 -db_soft_mask 21	0	c48a393595394333	05c29d792843c8f2
+S1.blastx.bh	blastx	-import_search_strategy {ss}/bx_bh.ss	0	61271d0e2b07e36c	570c01346c395517
+S1.tblastn.bh	tblastn	-import_search_strategy {ss}/tbn_bh.ss	0	d691cd63b427a3fe	ce435f6509352102
+S1.tblastx.bh	tblastx	-import_search_strategy {ss}/tbx_bh.ss	0	85c39ab5c4286824	d6dbca01209bf9a6
+Y.blastn.imp.f0.sorthits1	blastn	-import_search_strategy {ss}/blastn.mts600.ss -sorthits 1	0	18d4dad5d024ef63	d26a43bb4e5419e7
+Y.blastn.imp.f0.sorthits3	blastn	-import_search_strategy {ss}/blastn.mts600.ss -sorthits 3	0	18d4dad5d024ef63	d26a43bb4e5419e7
+Y.blastn.imp.f0.sorthits4	blastn	-import_search_strategy {ss}/blastn.mts600.ss -sorthits 4	0	18d4dad5d024ef63	d26a43bb4e5419e7
+Y.blastn.imp.f0.sorthsps1	blastn	-import_search_strategy {ss}/blastn.mts600.ss -sorthsps 1	0	18d4dad5d024ef63	8511f29ad6912e70
+Y.blastn.imp.f0.sorthsps2	blastn	-import_search_strategy {ss}/blastn.mts600.ss -sorthsps 2	0	18d4dad5d024ef63	8511f29ad6912e70
+Y.blastn.imp.f0.ll	blastn	-import_search_strategy {ss}/blastn.mts600.ss -line_length 30	0	18d4dad5d024ef63	d41a8c85c121df3e
+Y.blastn.imp.f2	blastn	-import_search_strategy {ss}/blastn.mts600.ss -outfmt 2	0	1afd482168cc2a47	c7d9e175b47ef7bc
+Y.blastn.imp.f2.ll	blastn	-import_search_strategy {ss}/blastn.mts600.ss -outfmt 2 -line_length 30	0	1afd482168cc2a47	d41a8c85c121df3e
+Y.blastn.imp.f2.sorthits3	blastn	-import_search_strategy {ss}/blastn.mts600.ss -outfmt 2 -sorthits 3	0	1afd482168cc2a47	d26a43bb4e5419e7
+Y.blastn.imp.f2.sorthsps1	blastn	-import_search_strategy {ss}/blastn.mts600.ss -outfmt 2 -sorthsps 1	0	1afd482168cc2a47	8511f29ad6912e70
+Y.blastn.imp.f6.sorthsps1	blastn	-import_search_strategy {ss}/blastn.mts600.ss -outfmt 6 -sorthsps 1	0	0b1c9dbcc4a2e903	318457044d5776d0
+Y.blastn.imp.f6.ll	blastn	-import_search_strategy {ss}/blastn.mts600.ss -outfmt 6 -line_length 30	0	0b1c9dbcc4a2e903	8f87c573f7935faf
+Y.blastn.imp.nd.f2.sorthsps1	blastn	-import_search_strategy {ss}/blastn.mts600.ss -num_descriptions 600 -outfmt 2 -sorthsps 1	0	1afd482168cc2a47	318457044d5776d0
+Y.blastn.imp.na.ll	blastn	-import_search_strategy {ss}/blastn.mts600.ss -num_alignments 300 -line_length 30	0	5edda8b13a5c956b	d41a8c85c121df3e
+Y.blastn.imp.mts501.ll	blastn	-import_search_strategy {ss}/blastn.mts600.ss -max_target_seqs 501 -line_length 30	0	18d4dad5d024ef63	d41a8c85c121df3e
+Y.blastn.imp.mts501.f2.sorthsps1	blastn	-import_search_strategy {ss}/blastn.mts600.ss -max_target_seqs 501 -outfmt 2 -sorthsps 1	0	1afd482168cc2a47	8511f29ad6912e70
+Y.blastp.imp.f0	blastp	-import_search_strategy {ss}/bp_hl600.ss	0	39de21324836dfef	1fc42b53917c7075
+Y.blastp.imp.f0.sorthits1	blastp	-import_search_strategy {ss}/bp_hl600.ss -sorthits 1	0	39de21324836dfef	1102e9e953c4e4c1
+Y.blastp.imp.f0.sorthits3	blastp	-import_search_strategy {ss}/bp_hl600.ss -sorthits 3	0	39de21324836dfef	1102e9e953c4e4c1
+Y.blastp.imp.f0.sorthits4	blastp	-import_search_strategy {ss}/bp_hl600.ss -sorthits 4	0	39de21324836dfef	1102e9e953c4e4c1
+Y.blastp.imp.f0.sorthsps1	blastp	-import_search_strategy {ss}/bp_hl600.ss -sorthsps 1	0	39de21324836dfef	2a238be296f16dd1
+Y.blastp.imp.f0.sorthsps2	blastp	-import_search_strategy {ss}/bp_hl600.ss -sorthsps 2	0	39de21324836dfef	2a238be296f16dd1
+Y.blastp.imp.f0.ll	blastp	-import_search_strategy {ss}/bp_hl600.ss -line_length 30	0	39de21324836dfef	7be9fb54a2a019f0
+Y.blastp.imp.f2	blastp	-import_search_strategy {ss}/bp_hl600.ss -outfmt 2	0	0134fccac78bd190	1fc42b53917c7075
+Y.blastp.imp.f2.ll	blastp	-import_search_strategy {ss}/bp_hl600.ss -outfmt 2 -line_length 30	0	0134fccac78bd190	7be9fb54a2a019f0
+Y.blastp.imp.f2.sorthits3	blastp	-import_search_strategy {ss}/bp_hl600.ss -outfmt 2 -sorthits 3	0	0134fccac78bd190	1102e9e953c4e4c1
+Y.blastp.imp.f2.sorthsps1	blastp	-import_search_strategy {ss}/bp_hl600.ss -outfmt 2 -sorthsps 1	0	0134fccac78bd190	2a238be296f16dd1
+Y.blastp.imp.f6.sorthsps1	blastp	-import_search_strategy {ss}/bp_hl600.ss -outfmt 6 -sorthsps 1	0	8cf2c91b7e13cdbb	9f8f5717743bcffd
+Y.blastp.imp.f6.ll	blastp	-import_search_strategy {ss}/bp_hl600.ss -outfmt 6 -line_length 30	0	8cf2c91b7e13cdbb	8c758e4512c142d0
+Y.blastp.imp.nd.f2.sorthsps1	blastp	-import_search_strategy {ss}/bp_hl600.ss -num_descriptions 600 -outfmt 2 -sorthsps 1	0	0134fccac78bd190	9f8f5717743bcffd
+Y.blastp.imp.na.ll	blastp	-import_search_strategy {ss}/bp_hl600.ss -num_alignments 300 -line_length 30	0	7b5484983946a4c5	7be9fb54a2a019f0
+Y.blastp.imp.mts501.ll	blastp	-import_search_strategy {ss}/bp_hl600.ss -max_target_seqs 501 -line_length 30	0	39de21324836dfef	7be9fb54a2a019f0
+Y.blastp.imp.mts501.f2.sorthsps1	blastp	-import_search_strategy {ss}/bp_hl600.ss -max_target_seqs 501 -outfmt 2 -sorthsps 1	0	0134fccac78bd190	2a238be296f16dd1

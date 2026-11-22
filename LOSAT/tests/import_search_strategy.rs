@@ -6,7 +6,11 @@
 //! whose LOSAT result equals NCBI's: imports with `-db` and `-subject` strategies, the command
 //! line's overrides (`-query`, `-db`, `-subject`, the formatting options), the warnings of the
 //! options a strategy ignores, the strategies' query ranges and filters, the archive (outfmt 11)
-//! of an imported run, and the reader's errors.
+//! of an imported run, the reader's errors, another program's strategy with options of the
+//! command line (`C.*.from.*`), the parameters that the setters take (`S1.*`: best hits, database
+//! masks, the repeat filter, the MegaBLAST index), the command line's index and database mask
+//! over a strategy's (`B.*`), and the formatting options that a strategy's hit list size above
+//! 500 leaves unread in the pairwise formats (`Y.*`).
 //!
 //! A strategy's subjects are searched once whatever `-num_threads` says (Owner 2026-11-20 F2-Q1
 //! "Q1=C"; NCBI prints every alignment once per thread or aborts): the runs at 2, 4 and 8 threads
@@ -134,12 +138,17 @@ fn imports_equal_ncbis() {
 
 /// F2-Q1 (Owner 2026-11-20 "Q1=C"): with the strategy's subjects, `-num_threads` 2, 4 and 8
 /// write NCBI's `-num_threads 1` bytes in each program (NCBI prints each alignment once per
-/// thread, or aborts).
+/// thread, or aborts), also where blastn runs a TBLASTX strategy.
 #[test]
 fn a_strategys_subjects_are_searched_once_at_any_thread_count() {
     let cases = cases();
-    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
-        let name = format!("I.{program}.sub.alone");
+    let names = ["blastn", "blastp", "blastx", "tblastn", "tblastx"]
+        .map(|program| format!("I.{program}.sub.alone"));
+    for name in names
+        .iter()
+        .map(String::as_str)
+        .chain(["C.blastn.from.tblastx.sub"])
+    {
         let case = cases
             .iter()
             .find(|case| case.name == name)

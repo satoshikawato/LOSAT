@@ -325,6 +325,7 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
         let mut diagnostics: Vec<u8> = Vec::new();
         {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt: "0",
                     refusal: FormatRefusal::FailsCall,
@@ -519,6 +520,7 @@ fn make_blastp_args() -> BlastpArgs {
         export_search_strategy: None,
         import_search_strategy: None,
         import: None,
+        given: Default::default(),
         strategy: None,
         request_inputs: None,
         app: BlastpApp::Blastp,
@@ -528,6 +530,7 @@ fn make_blastp_args() -> BlastpArgs {
         gap_trigger: None,
         sum_stats: false,
         first_query_ordinal: 0,
+        scope_refusal: None,
         psiblast_pssm: None,
         formatting: Default::default(),
         rps: None,

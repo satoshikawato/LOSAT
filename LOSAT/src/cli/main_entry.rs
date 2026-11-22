@@ -7,7 +7,6 @@ use anyhow::Result;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
 use crate::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
 use crate::cli::{Cli, Commands};
-use crate::report::archive::read::import::RunAs;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:407-410
 // NCBI builds one executable per application, each a `main` that runs its application's
@@ -265,7 +264,8 @@ fn run_main_entry() -> Result<()> {
     // `CATCH_ALL` posts it (`cli::post_native_error`).
     crate::cli::post_errors_in_run();
 
-    match cli.command {
+    let command = import_strategy(cli.command, &start)?;
+    match command {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-281
         // Native serial search passes actual final results to the BLASTX formatter.
         Commands::Blastx(args) => {
@@ -280,10 +280,6 @@ fn run_main_entry() -> Result<()> {
                 .map_err(anyhow::Error::msg)
                 .and_then(|settings| blastx::BlastxArgs::run(args, settings));
             if let Err(error) = run {
-                let error = match error.downcast::<RunAs>() {
-                    Ok(run_as) => return run_as_program(run_as, &start),
-                    Err(error) => error,
-                };
                 blastx::native::exit_on_native_error(&error);
                 return Err(error);
             }
@@ -297,10 +293,6 @@ fn run_main_entry() -> Result<()> {
             // blastn's own code runs; LOSAT rejects the settings that change the output.
             let settings = start.settings().map_err(anyhow::Error::msg)?;
             if let Err(error) = blastn::run(args, settings) {
-                let error = match error.downcast::<RunAs>() {
-                    Ok(run_as) => return run_as_program(run_as, &start),
-                    Err(error) => error,
-                };
                 crate::cli::exit_on_native_error(&error);
                 return Err(error);
             }
@@ -322,10 +314,6 @@ fn run_main_entry() -> Result<()> {
             // the output.
             let settings = start.settings().map_err(anyhow::Error::msg)?;
             if let Err(error) = tblastx::run(args, settings) {
-                let error = match error.downcast::<RunAs>() {
-                    Ok(run_as) => return run_as_program(run_as, &start),
-                    Err(error) => error,
-                };
                 crate::cli::exit_on_native_error(&error);
                 return Err(error);
             }
@@ -464,37 +452,42 @@ fn run_main_entry() -> Result<()> {
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
+/// `RecoverSearchStrategy` at the start of a search program's run, after the application's
+/// settings: the arguments of an `-import_search_strategy` become the import's
+/// (`import::apply`, the one import of the command line, the library API and LOSAT Web), which
+/// are another program's where the running program runs another's strategy. Its warnings go to
+/// the standard error; an error ends the run as the running program's errors end it. Other
+/// arguments are returned as they are.
+fn import_strategy(
+    command: Commands,
+    start: &crate::blastinput::ncbi_environment::ApplicationStart,
+) -> Result<Commands> {
+    let blastx = matches!(command, Commands::Blastx(_));
+    let end = |error: anyhow::Error| {
+        if blastx {
+            blastx::native::exit_on_native_error(&error);
+        } else {
+            crate::cli::exit_on_native_error(&error);
+        }
+        error
+    };
+    if !crate::report::archive::read::import::imports(&command) {
+        return Ok(command);
+    }
+    // The application's settings come first, as for any run of the program.
+    let settings = start.settings().map_err(anyhow::Error::msg);
+    if let Err(error) = settings {
+        return Err(if blastx { end(error) } else { error });
+    }
+    crate::report::archive::read::import::apply(command, None, &mut std::io::stderr()).map_err(end)
+}
+
 /// Ends `losat rpsbproc` as its `outcome` says: its own status (`Run`'s or `DryRun`'s
 /// `m_app_status`, or the application layer's for an exception; exit status 0 returns), or
 /// LOSAT's refusal, an error (exit 1) written as `main` writes an error, through
 /// `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the message may quote data
 /// bytes).
-/// The run of another program's strategy that blastn, blastx or tblastx imported
-/// (`import::RunAs`): the strategy's program runs with the arguments the command line keeps,
-/// and ends as that program's own run ends. Nothing was written before it.
-fn run_as_program(
-    run_as: RunAs,
-    start: &crate::blastinput::ncbi_environment::ApplicationStart,
-) -> Result<()> {
-    let settings = start.settings().map_err(anyhow::Error::msg)?;
-    let run = match *run_as.0 {
-        Commands::Blastn(args) => blastn::run(args, settings),
-        Commands::Tblastx(args) => tblastx::run(args, settings),
-        Commands::Blastx(args) => {
-            let run = blastx::BlastxArgs::run(args, settings);
-            if let Err(error) = &run {
-                blastx::native::exit_on_native_error(error);
-            }
-            return run;
-        }
-        _ => unreachable!("a strategy runs as blastn, blastx or tblastx"),
-    };
-    if let Err(error) = &run {
-        crate::cli::exit_on_native_error(error);
-    }
-    run
-}
-
 fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
     match outcome {
         crate::rpsbproc::Outcome::Exit(0) => {}

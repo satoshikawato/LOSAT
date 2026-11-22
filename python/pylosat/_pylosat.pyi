@@ -8,8 +8,11 @@ ENGINE_VERSION: str
 class LosatError(Exception):
     """A failure that LOSAT reports. `str(error)` is the command line's message for the same
     failure as text, with one U+FFFD per maximal ill-formed subpart of its bytes, as
-    `bytes.decode("utf-8", "replace")` gives; `message_bytes` holds the bytes, what the command
-    line writes. Every exception that pylosat raises has `message_bytes`."""
+    `bytes.decode("utf-8", "replace")` gives; `message_bytes` holds the bytes. A search's
+    message of NCBI's keeps its newlines; LOSAT's own refusals have no `Error: ` and no last
+    newline; an input's error, a tool's and that of a start that ends the program are the
+    command line's text without its last newlines. Every exception that pylosat raises has
+    `message_bytes`."""
 
     message_bytes: bytes
 

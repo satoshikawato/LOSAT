@@ -10,6 +10,10 @@ use crate::seqid::label::{bare, fasta};
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{BlastDefline, DeflineSet, ParsedSeqId};
 
+use crate::report::serial::blastdb::{write_defline_document, write_defline_set_document};
+use crate::report::serial::encoder::Encoder;
+
+use super::bioseq::AsnTextDocument;
 use super::letters::{hash_text, sequence_hash};
 use super::retrieve::{numeric_target, parse_target, Config, Output, Source, Stop};
 
@@ -30,7 +34,11 @@ pub(super) struct FormatSpec {
     separators: Vec<Vec<u8>>,
     /// `m_GetDefline`: a specifier reads the definition lines.
     get_defline: bool,
-    /// `m_OtherFields & (1 << e_seq)`, `(1 << e_hash)`.
+    /// `m_DeflineFields.asn_defline`: `%d`, the ASN.1 text of the definition lines (which the
+    /// request makes the whole format, `retrieve::init_search_request`).
+    asn_defline: bool,
+    /// Whether `m_OtherFields` has the bit of `e_seq` (`need_seq`) and the bit of `e_hash`
+    /// (`need_hash`).
     need_seq: bool,
     need_hash: bool,
 }
@@ -70,6 +78,7 @@ impl FormatSpec {
         Ok(FormatSpec {
             need_seq: types.contains(&b's'),
             need_hash: types.contains(&b'h'),
+            asn_defline: types.contains(&b'd'),
             types,
             mask_algos,
             separators,
@@ -86,12 +95,6 @@ impl FormatSpec {
     /// Whether a specifier writes the letters of the sequence (`%s`).
     pub fn writes_letters(&self) -> bool {
         self.need_seq
-    }
-
-    /// Whether a specifier asks for the ASN.1 text of a definition line (`%d`), which LOSAT
-    /// does not write (line BDC DECISIONS 9).
-    pub fn asks_asn_text(&self) -> bool {
-        self.types.contains(&b'd')
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:315-358
@@ -139,9 +142,14 @@ impl FormatSpec {
         if !self.get_defline {
             return print(None, &mut line);
         }
-        let set = source.deflines(oid)?;
-        if set.deflines.is_empty() {
+        // A null set writes nothing; a set of no lines (stored so, or emptied by the alias files'
+        // `OID_MASK_TYPE`, line RG D1b-2) writes `%d`'s empty document, no line of the others,
+        // and throws for a target (probes e1-e8, z1-z9 of line RG-Dbc).
+        let Some(set) = source.deflines(oid)? else {
             return Ok(());
+        };
+        if self.asn_defline {
+            return write_asn_deflines(&set, target, out);
         }
         match target {
             None => {
@@ -177,12 +185,6 @@ impl FormatSpec {
                 b'l' => {
                     out.write_all(&line).map_err(Stop::write)?;
                     return Err(missing());
-                }
-                b'd' => {
-                    return Err(Stop::Refused(format!(
-                        "the -outfmt specifier %d is not supported by LOSAT's {}",
-                        super::PROGRAM
-                    )));
                 }
                 other => {
                     out.write_all(&line).map_err(Stop::write)?;
@@ -246,13 +248,6 @@ impl FormatSpec {
                     if let Some(mask) = masks.next() {
                         line.extend_from_slice(mask.as_bytes());
                     }
-                }
-                // `%d` is refused before the first line.
-                b'd' => {
-                    return Err(Stop::Refused(format!(
-                        "the -outfmt specifier %d is not supported by LOSAT's {}",
-                        super::PROGRAM
-                    )));
                 }
                 other => {
                     let mut message = b"Unrecognized format specification: '%".to_vec();
@@ -318,6 +313,43 @@ fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop
         super::letters::reverse_complement(&mut seq);
     }
     Ok(seq)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:331-356
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:952-956
+/// `%d`: the definition lines of `GetHdr` as an ASN.1 text document, or with `-target_only` the
+/// target's line (`ExtractDataFromBlastDeflineSet`) as the one field of a line, the document then
+/// the line's end.
+fn write_asn_deflines(
+    set: &DeflineSet,
+    target: Option<&str>,
+    out: &mut Output<'_, '_>,
+) -> Result<(), Stop> {
+    match target {
+        None => out.asn_text(&DeflineSetDocument(set)),
+        Some(target) => {
+            let defline = extract_target_defline(set, target)?;
+            out.asn_text_line(&DeflineDocument(defline))
+        }
+    }
+}
+
+/// The document that `MSerial_AsnText` writes for the set `df_set`.
+struct DeflineSetDocument<'a>(&'a DeflineSet);
+
+impl AsnTextDocument for DeflineSetDocument<'_> {
+    fn write<E: Encoder>(&self, enc: &mut E) {
+        write_defline_set_document(enc, self.0);
+    }
+}
+
+/// The document that `MSerial_AsnText` writes for the line `dl`.
+struct DeflineDocument<'a>(&'a BlastDefline);
+
+impl AsnTextDocument for DeflineDocument<'_> {
+    fn write<E: Encoder>(&self, enc: &mut E) {
+        write_defline_document(enc, self.0);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:800-819

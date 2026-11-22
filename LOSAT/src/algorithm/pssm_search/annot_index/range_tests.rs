@@ -471,7 +471,8 @@ fn seq_ids_are_one_handle_as_ncbi_trees_take_them() {
 }
 
 // NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207 (cited at
-// `HandleRangeMap::ncbi_order`): `m_Packed - 1` as an unsigned number, then the info's address.
+// `HandleRangeMap::ncbi_order`): one less than `m_Packed`, as an unsigned number, then the info's
+// address.
 #[test]
 fn a_map_iterates_its_seq_ids_by_packed_number() {
     let m = map(

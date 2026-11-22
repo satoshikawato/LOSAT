@@ -145,8 +145,8 @@ impl RedoMatch<'_> {
             return Ok(Some(Vec::new()));
         }
         // The subject's letters after one sentinel and before another (NCBI's
-        // `seqData->buffer`, `seqData->data = buffer + 1`, blast_kappa.c:1601-1606 and 1640-1643):
-        // `ALIGN_EX` reads `subject->data - 1`.
+        // `seqData->buffer`, with `seqData->data` set one past it, blast_kappa.c:1601-1606 and
+        // 1640-1643): `ALIGN_EX` reads from one byte before `subject->data`.
         let subject_buffer = &mut sw.window;
         subject_buffer.clear();
         subject_buffer.push(0);
@@ -178,9 +178,11 @@ impl RedoMatch<'_> {
         };
         let (matrix, gap, x_dropoff) = (&run.matrix, &mut run.scratch, run.x_dropoff);
         let (gap_open, gap_extend) = (run.gap_open, run.gap_extend);
+        // One window per profile: the query (the profile) has no alignment at its start.
         let redone = smith_waterman_redo_window(
             &window,
             significance,
+            true,
             |evalue, score| heap.would_insert(evalue, score, oid),
             |query, subject_span, score| {
                 pssm_sw_xdrop_traceback(

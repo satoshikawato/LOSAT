@@ -126,33 +126,6 @@ fn xml_line_value(line: &str) -> Option<(&str, &str)> {
     Some((tag, text))
 }
 
-/// The arguments of NCBI's XML of `program` that have a default (`<default>`, written for a key
-/// added by `AddDefaultKey`), with the default's text: the arguments that NCBI's `CArgs` holds
-/// when the command line does not give them (`-import_search_strategy`'s warnings,
-/// `report::archive::read::import`).
-pub(crate) fn ncbi_argument_defaults(program: &str) -> Vec<(&'static str, String)> {
-    let mut defaults = Vec::new();
-    let mut current = None;
-    for line in ncbi_xml(program)
-        .into_iter()
-        .flat_map(|xml| xml.split_inclusive('\n'))
-    {
-        if let Some((_, name)) = argument_start(line) {
-            current = Some(name);
-        } else if let (Some(name), Some(("default", text))) = (current, xml_line_value(line)) {
-            // `s_WriteXmlLine` escapes the text (`NStr::XmlEncode`).
-            let text = text
-                .replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace("&quot;", "\"")
-                .replace("&apos;", "'")
-                .replace("&amp;", "&");
-            defaults.push((name, text));
-        }
-    }
-    defaults
-}
-
 /// The names of the arguments of NCBI's XML of `program` (its keys and flags, in NCBI's order).
 #[cfg(test)]
 pub(crate) fn ncbi_argument_names(program: &str) -> Vec<(&'static str, bool)> {

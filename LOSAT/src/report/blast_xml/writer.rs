@@ -108,7 +108,7 @@ pub(crate) fn run_ending_exception(
 /// `document`): `Ok(None)` where the report is written; where it raised an exception that NCBI's
 /// report function catches (`CaughtException`: the stream forms of the XML2 and JSON documents,
 /// outfmt 16 and 15, leave the report out, `blast_xml2::Xml2Document::report`), `Ok(Some)` with
-/// the program's post of it (`ERR_POST(Error << ...)` after the prefix `[program] `,
+/// the program's post of it (`ERR_POST` at the Error level after the prefix `[program] `,
 /// `StructuredXml::caught_message`), which comes after the posts of the loads that the report made
 /// before it (`query_warnings::HitPosts::caught`); any other error is returned, and the caller
 /// drops what the failed report left in its buffer.
@@ -231,7 +231,7 @@ fn write_statistics<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, stats: &XmlStats)
     enc.big_int(run.db_len);
     enc.end_member();
     int_member(enc, "hsp-len", 2, stats.hsp_len);
-    // `stat->SetEff_space((double)data->GetEffectiveSearchSpace(index))`
+    // `stat->SetEff_space` takes `GetEffectiveSearchSpace` of `index`, cast to a double
     real_member(enc, "eff-space", 3, stats.eff_space as f64);
     real_member(enc, "kappa", 4, stats.kappa);
     real_member(enc, "lambda", 5, stats.lambda);
@@ -283,7 +283,7 @@ pub trait StructuredXml {
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()>;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:757-763
-    /// The message that NCBI posts (`ERR_POST(Error << ...)`, after the program's `Error: [name] `
+    /// The message that NCBI posts (`ERR_POST` at the Error level, after the program's `Error: [name] `
     /// prefix) for a query whose report raised `exception` (`CaughtException`): the XML2 and JSON
     /// documents' `GetMsg()` and `what()`.
     fn caught_message(&self, exception: &crate::ncbi_exception::NcbiException) -> Vec<u8> {

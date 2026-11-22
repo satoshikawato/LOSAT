@@ -36,6 +36,7 @@
   - [Python (`pylosat`)](libraries/python.md)
   - [Rust (`losat`)](libraries/rust.md)
   - [WebAssembly and Browser](libraries/webassembly.md)
+  - [LOSAT Web (Browser GUI)](web.md)
 
 # Reference
 
@@ -46,5 +47,6 @@
 - [Platforms and WebAssembly](platforms.md)
 - [Differences from NCBI BLAST+](differences.md)
 - [What LOSAT refuses](refusals.md)
+  - [Rare and pathological inputs](refusals-edge-cases.md)
 - [Troubleshooting](troubleshooting.md)
 - [Third-party notices](third-party-notices.md)

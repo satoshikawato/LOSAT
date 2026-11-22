@@ -29,7 +29,7 @@ fn the_short_usage_is_the_head_of_the_help() {
 // `-xmlhelp` (probe P2.226), which decides which conflict is reported (P2.085, P2.220).
 #[test]
 fn the_dependencies_are_in_ncbi_s_order() {
-    let deps: Vec<(&str, &str)> = crate::ncbi_app::args::dependencies(&TOOL)
+    let deps: Vec<(&str, &str)> = crate::ncbi_app::args::dependencies(TOOL.program)
         .into_iter()
         .map(|(first, _, second)| (first, second))
         .collect();

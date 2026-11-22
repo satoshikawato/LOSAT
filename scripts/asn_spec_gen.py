@@ -492,10 +492,12 @@ class Table:
             return self.named_type(target, typ.name)
         if isinstance(typ, Prim):
             if typ.name == "BigInt":
-                # datatool's 64-bit INTEGER (`SERIAL_TYPE_BigInt()` is `Int8`, serial/serialimpl.hpp:
-                # 114-116): its type information reads it as the INTEGER of an Int8 (`CParent::Read`,
-                # serial/stdtypes.cpp:1276-1288); only the binary writer may tag it otherwise, and
-                # not by default (`m_CStyleBigInt(false)`, objostrasnb.cpp:75).
+                # NCBI reference (598d8ae6): c++/include/serial/serialimpl.hpp:114-116
+                # NCBI reference (598d8ae6): c++/src/serial/stdtypes.cpp:1281-1289
+                # NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:73-77
+                # datatool's 64-bit INTEGER (an `Int8`): its type information reads it as the
+                # INTEGER of an Int8; only the binary writer may tag it otherwise, and not by
+                # default (the C-style big-integer flag starts false).
                 return Entry(-1, "Integer", storage=storage or "Int8")
             kinds = {
                 "INTEGER": ("Integer", ""), "BOOLEAN": ("Boolean", ""), "NULL": ("Null", ""),

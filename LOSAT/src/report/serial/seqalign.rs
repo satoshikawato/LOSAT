@@ -580,19 +580,22 @@ pub fn query_coverage(q_offset: i32, q_end: i32, query_length: i32) -> f64 {
     pct
 }
 
-/// The "Blast Type" of the program: `EProgramToTaskName(ProgramNameToEnum(program name))`
-/// and the `EProgram` value. The program name of every BLASTN task is "blastn"
-/// (`Blast_ProgramNameFromType`, blast_format.cpp:94), and of every BLASTP task "blastp".
+/// The "Blast Type" of the run's program: `EProgramToTaskName` of `ProgramNameToEnum` of the
+/// program name and the `EProgram` value. The program name of every BLASTN task is "blastn"
+/// (`Blast_ProgramNameFromType`, blast_format.cpp:94), and of every BLASTP task "blastp"; the RPS
+/// search of BLASTP is "rpsblast" (`eRPSBlast`), of BLASTX "rpstblastn" (`eRPSTblastn`).
 ///
-/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-62
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-686
-fn blast_type(program: Program) -> (&'static str, i32) {
-    match program {
-        Program::Blastn => ("blastn", 1),
-        Program::Blastp => ("blastp", 2),
-        Program::Blastx => ("blastx", 3),
-        Program::Tblastn => ("tblastn", 4),
-        Program::Tblastx => ("tblastx", 5),
+/// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-64
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-688
+fn blast_type(run: &RunRecord<'_>) -> (&'static str, i32) {
+    match (run.program, run.rps) {
+        (Program::Blastp, true) => ("rpsblast", 6),
+        (Program::Blastx, true) => ("rpstblastn", 7),
+        (Program::Blastn, _) => ("blastn", 1),
+        (Program::Blastp, _) => ("blastp", 2),
+        (Program::Blastx, _) => ("blastx", 3),
+        (Program::Tblastn, _) => ("tblastn", 4),
+        (Program::Tblastx, _) => ("tblastx", 5),
     }
 }
 
@@ -697,7 +700,7 @@ fn write_desc<E: Encoder>(enc: &mut E, desc: &AnnotDesc<'_>) {
 }
 
 /// What the Seq-annot's `desc` says of a search: `CreateSeqAnnotFromSeqAlignSet`'s `program`
-/// and its database (quoted at `write_desc`).
+/// and its database (cited at `write_desc`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AnnotDesc<'a> {
     /// The task name of `program` (`EProgramToTaskName`) and its number (`EProgram`): the label and
@@ -712,7 +715,7 @@ impl<'a> AnnotDesc<'a> {
     /// The `desc` of a search program's run `run`: its program's type, and its database's title
     /// (`RunRecord::db_title`), or `n/a` for `-subject`.
     pub(crate) fn of_run(run: &RunRecord<'a>) -> Self {
-        let (task, program) = blast_type(run.program);
+        let (task, program) = blast_type(run);
         AnnotDesc {
             task,
             program,
@@ -727,7 +730,7 @@ impl<'a> AnnotDesc<'a> {
     }
 }
 
-/// The value of the "Blast Database Title" user object (`CreateSeqAnnotFromSeqAlignSet`, quoted
+/// The value of the "Blast Database Title" user object (`CreateSeqAnnotFromSeqAlignSet`, cited
 /// at `write_desc`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DatabaseDesc<'a> {
@@ -784,7 +787,7 @@ fn write_score_int<E: Encoder>(enc: &mut E, name: &str, value: i32) {
     enc.end_sequence();
 }
 
-/// A Score with a real value (`s_MakeScore(..., false)`, see `write_score_int`).
+/// A Score with a real value (`s_MakeScore` with `false`, see `write_score_int`).
 fn write_score_real<E: Encoder>(enc: &mut E, name: &str, value: f64) {
     write_score_id(enc, name);
     enc.member("value", 1);
@@ -971,7 +974,7 @@ fn write_seq_interval<E: Encoder>(enc: &mut E, id: &SeqId<'_>, from: i32, to: i3
     enc.end_variant();
 }
 
-/// A Seq-loc `empty`: the gap row of a Std-seg (`master_loc->SetEmpty(*master)`, see
+/// A Seq-loc `empty`: the gap row of a Std-seg (`master_loc`'s `SetEmpty` of `master`, see
 /// `write_std_segs`).
 fn write_seq_loc_empty<E: Encoder>(enc: &mut E, id: &SeqId<'_>) {
     enc.variant("Seq-loc", "empty", 1);
@@ -1101,8 +1104,8 @@ pub(crate) fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-230
 /// Whether the Std-seg rows of an ungapped HSP from `offset` to `end` (exclusive, in its frame's
 /// letters) are empty: an HSP of length 0, whose rows `ungapped_interval` ends one before they
-/// start (`CRange(from, from - 1)` is empty, so `CSeq_align::GetSeqRange` throws on them).
-/// BLASTX's one-hit word finder with `-window_size 0` reports such HSPs
+/// start (a `CRange` from `from` to one less than `from` is empty, so `CSeq_align::GetSeqRange`
+/// throws on them). BLASTX's one-hit word finder with `-window_size 0` reports such HSPs
 /// (`algorithm::blastx::empty_rows`); every other reported HSP has rows of its letters. The one
 /// predicate of every writer (`HspRecord::rows_empty`, `PairwiseHit::rows_empty`,
 /// `empty_rows::rows_empty`).
@@ -1889,10 +1892,10 @@ impl SeqAnnotDocument for QueryDocument<'_, '_> {
 /// `prefix`) on `diagnostics` where NCBI posts it: after the bytes of the document
 /// that NCBI's buffer (`COStreamBuffer`, `out_buffer`) had written to its output by then, the
 /// output flushed (`cerr` is tied to `cout`; `Traced::flush_to`). NCBI writes each query's
-/// Seq-annot with an object stream of its own (`m_Outfile << MSerial_AsnText << *annot`, cited at
-/// the module), so the positions (`line N`, `byte N`) and the buffer start again with each query's
-/// document. The JSON stream escapes such a byte (objostrjson.cpp:731-760), so its encoder never
-/// stops on one.
+/// Seq-annot with an object stream of its own (`m_Outfile` takes `MSerial_AsnText` and then
+/// `annot`, cited at the module), so the positions (`line N`, `byte N`) and the buffer start again
+/// with each query's document. The JSON stream escapes such a byte (objostrjson.cpp:731-760), so
+/// its encoder never stops on one.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444
 /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:843-861

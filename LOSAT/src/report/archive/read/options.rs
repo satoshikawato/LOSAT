@@ -1,11 +1,11 @@
 //! The options of a stored request (a search strategy, `-import_search_strategy`, or the request
-//! of a BLAST archive, `blast_formatter`): NCBI's `CBlastOptionsBuilder`
-//! (`algo/blast/api/blast_options_builder.cpp`) and the options part of `CImportStrategy::FetchData`
-//! (`algo/blast/api/search_strategy.cpp:79-129`).
+//! of a BLAST archive, `blast_formatter`): NCBI's `CBlastOptionsBuilder` and the options part of
+//! `CImportStrategy::FetchData`.
 //!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:79-129
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:667-695
 //! [`build`] is that function: the program, its task, and the `Set*` calls that the builder makes
-//! on the program's factory options (`CBlastOptionsFactory::Create(program)`), in NCBI's order
+//! on the program's factory options (`CBlastOptionsFactory::Create` of the program), in NCBI's order
 //! ([`Setter`]); with what the builder keeps for the database and the query
 //! ([`BuiltOptions`]). The caller applies the calls in order to the program's own options, over
 //! the defaults of the task: the last call of an option wins, as NCBI's do. [`import_options`] is
@@ -67,8 +67,9 @@ impl EProgram {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:43-44
-    /// `Blast_QueryIsNucleotide` of the options' program type (`EProgramToEBlastProgramType`,
-    /// blast_aux.cpp:707-751): the nucleotide searches and the translated queries.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:708-755
+    /// `Blast_QueryIsNucleotide` of the options' program type (`EProgramToEBlastProgramType`): the
+    /// nucleotide searches and the translated queries.
     pub fn query_is_nucleotide(self) -> bool {
         matches!(
             self,
@@ -256,7 +257,7 @@ fn text(bytes: &[u8]) -> String {
 pub enum Setter {
     BestHitScoreEdge(f64),
     BestHitOverhang(f64),
-    /// `SetCompositionBasedStats((ECompoAdjustModes) v)`: the number as read.
+    /// `SetCompositionBasedStats` with the value cast to `ECompoAdjustModes`: the number as read.
     CompositionBasedStats(i32),
     CullingLimit(i32),
     DbGeneticCode(i32),
@@ -268,24 +269,24 @@ pub enum Setter {
     DomainInclusionThreshold(f64),
     EffectiveSearchSpace(i64),
     EvalueThreshold(f64),
-    /// `SetFilterString(v, true)`.
+    /// `SetFilterString` with the value, clearing the filter options first (`clear` true).
     FilterString(String),
     GapExtensionCost(i32),
     GapOpeningCost(i32),
-    /// `SetGapTracebackAlgorithm((EBlastTbackExt) v)`: the number as read.
+    /// `SetGapTracebackAlgorithm` with the value cast to `EBlastTbackExt`: the number as read.
     GapTracebackAlgorithm(i32),
     GapTrigger(f64),
     GapXDropoff(f64),
     GapXDropoffFinal(f64),
-    /// `SetGapExtnAlgorithm(static_cast<EBlastPrelimGapExt>(v))`: the number as read.
+    /// `SetGapExtnAlgorithm` with the value cast to `EBlastPrelimGapExt`: the number as read.
     GapExtnAlgorithm(i32),
     HitlistSize(i32),
     InclusionThreshold(f64),
     IgnoreMsaMaster(bool),
     LongestIntronLength(i32),
-    /// `SetMBTemplateLength(unsigned char)`: the `int` converted (modulo 256).
+    /// `SetMBTemplateLength`, whose parameter is an unsigned char: the `int` converted (modulo 256).
     MbTemplateLength(u8),
-    /// `SetMBTemplateType(unsigned char)`: the `int` converted (modulo 256).
+    /// `SetMBTemplateType`, whose parameter is an unsigned char: the `int` converted (modulo 256).
     MbTemplateType(u8),
     MatchReward(i32),
     MatrixName(String),
@@ -293,7 +294,7 @@ pub enum Setter {
     MaskAtHash(bool),
     MaxHspsPerSubject(i32),
     OutOfFrameMode(bool),
-    /// `SetPHIPattern(pattern, is_na)`, `is_na` = the options' query is nucleotide.
+    /// `SetPHIPattern` with the pattern and `is_na`, true where the options' query is nucleotide.
     PhiPattern {
         pattern: String,
         is_na: bool,
@@ -304,7 +305,7 @@ pub enum Setter {
     QueryCovHspPerc(f64),
     RepeatFiltering(bool),
     RepeatFilteringDb(String),
-    /// `SetStrandOption((ENa_strand) v)`: the `Blast4-strand-type` number (forward 1, reverse 2,
+    /// `SetStrandOption` with the value cast to `ENa_strand`: the `Blast4-strand-type` number (forward 1, reverse 2,
     /// both 3, the numbers of `ENa_strand`'s plus, minus and both).
     StrandOption(i32),
     SegFiltering(bool),
@@ -313,7 +314,7 @@ pub enum Setter {
     SegFilteringHicut(f64),
     SumStatisticsMode(bool),
     SmithWatermanMode(bool),
-    /// `SetGappedMode(!v)` of `UngappedMode v`.
+    /// `SetGappedMode` with the negation of `UngappedMode`'s value.
     GappedMode(bool),
     UnifiedP(i32),
     /// `SetSubjectBestHit()`, whatever the value.
@@ -321,17 +322,18 @@ pub enum Setter {
     WindowMaskerTaxId(i32),
     WindowSize(i32),
     WordSize(i32),
-    /// `SetWordThreshold(double)` of an `int`.
+    /// `SetWordThreshold`, whose parameter is a double, of an `int`.
     WordThreshold(i32),
-    /// `SetUseIndex(true, m_MbIndexName, m_ForceMbIndex)` (`x_ApplyInteractions`): use the
+    /// `SetUseIndex` (index on, `m_MbIndexName`, `m_ForceMbIndex`; `x_ApplyInteractions`): use the
     /// megablast index `index_name`, forced; `old_style_index` keeps its default (false).
     UseIndex {
         index_name: String,
     },
 }
 
+// NCBI reference (598d8ae6): c++/include/util/range.hpp:290-308
 /// `TSeqRange` (`CRange<TSeqPos>`): `from` and `to_open`, the empty range `GetEmpty()` both
-/// `GetPositionMax()` (util/range.hpp:290-308).
+/// `GetPositionMax()`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SeqRange {
     pub from: u32,
@@ -358,7 +360,7 @@ pub struct BuiltOptions {
     /// `FirstDbSeq`, `FinalDbSeq`.
     pub first_db_seq: Option<i32>,
     pub final_db_seq: Option<i32>,
-    /// `GiList`, `NegativeGiList`: each `int` as `(Uint4)` (`GI_FROM(Uint4, gi_v)`).
+    /// `GiList`, `NegativeGiList`: each `int` cast to `Uint4` (`GI_FROM`).
     pub gi_list: Option<Vec<i64>>,
     pub negative_gi_list: Option<Vec<i64>>,
     /// `TaxidList`, `NegativeTaxidList`.
@@ -367,7 +369,7 @@ pub struct BuiltOptions {
     /// `DbFilteringAlgorithmId`, `DbFilteringAlgorithmKey`.
     pub db_filtering_algorithm_id: Option<i32>,
     pub db_filtering_algorithm_key: Option<String>,
-    /// `SubjectMaskingType` (`(ESubjectMaskingType) v`: the number as read).
+    /// `SubjectMaskingType` (the value cast to `ESubjectMaskingType`: the number as read).
     pub subject_masking_type: Option<i32>,
     /// `LCaseMask` values (`Blast4-mask`), those of the algorithm options, else of the program
     /// options (`HaveQueryMasks`, `GetQueryMasks`).
@@ -376,9 +378,10 @@ pub struct BuiltOptions {
     pub query_range: SeqRange,
 }
 
-// The throws of the builder. NCBI's applications print only their message (`GetMsg()`, the
-// `CBlastException` clause of `CATCH_ALL`, blast_app_util.hpp:216-229, whose `eInvalidOptions`
-// none of these is), so the function of the report is not known and not given.
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-229
+// The throws of the builder. NCBI's applications print only their message (`GetMsg()`, in the
+// `CBlastException` clause of `CATCH_ALL`, whose `eInvalidOptions` none of these is), so the
+// function of the report is not known and not given.
 const COMPUTE_PROGRAM: ThrowSite = ThrowSite {
     file: "src/algo/blast/api/blast_options_builder.cpp",
     line: 134,
@@ -435,7 +438,8 @@ pub fn compute_program(program: &[u8], service: &[u8]) -> Result<EProgram, NcbiE
                 name = b"psiblast";
                 found = true;
             }
-            // "phi is just treated as a blastp here"
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:85-87
+            // The services "phi" and "indexed" keep the program BLASTP.
             b"phi" | b"indexed" => found = true,
             b"delta_blast" => {
                 name = b"deltablast";
@@ -525,8 +529,9 @@ fn program_name_to_enum(name: &[u8]) -> Result<EProgram, NcbiException> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:585-645
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:649-665
 /// `AdjustProgram` over the merged lists (algorithm, program, format options in this order,
-/// `s_MergeCBlast4_parameters`, blast_options_builder.cpp:649-665): a `PHIPattern` makes a
+/// `s_MergeCBlast4_parameters`): a `PHIPattern` makes a
 /// BLASTN or BLASTP program PHI-BLAST's, and refuses any other; then the first parameter that
 /// tells, in the lists' order: a non-zero `MBTemplateLength` makes dc-megablast, a
 /// `Web_StepNumber`, `Web_RunPsiBlast`, `PseudoCountWeight` or `IgnoreMsaMaster` psiblast, of any
@@ -581,9 +586,10 @@ struct Builder {
 
 impl Builder {
     fn new(program: EProgram) -> Builder {
-        // The constructor (blast_options_builder.cpp:47-61): `m_PerformCulling (false)`,
-        // `m_HspRangeMax (0)`, `m_QueryRange (TSeqRange::GetEmpty())`, `m_ForceMbIndex (false)`;
-        // the `SOptional` members unset, `m_MbIndexName` empty.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:47-61
+        // The constructor starts with culling off, the HSP range maximum 0, the query range
+        // empty and the forced MegaBLAST index off; the optional members are unset and the
+        // index name is empty.
         Builder {
             program,
             setters: Vec::new(),
@@ -627,7 +633,7 @@ impl Builder {
         }
         let v = Getter::of(p.value);
         let found = match p.name[0] {
-            // 170-177
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:170-178
             b'B' => {
                 if p.is(fields::BEST_HIT_SCORE_EDGE) {
                     self.set(Setter::BestHitScoreEdge(v.real()?));
@@ -638,7 +644,8 @@ impl Builder {
                 }
                 true
             }
-            // 179-192: `CutoffScore`'s field is a cutoff, read with `GetInteger()`, which throws
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:180-193
+            // `CutoffScore`'s field is a cutoff, read with `GetInteger()`, which throws
             // for every value the field matches.
             b'C' => {
                 if p.is(fields::COMPOSITION_BASED_STATS) {
@@ -654,7 +661,7 @@ impl Builder {
                 }
                 true
             }
-            // 194-215
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:195-217
             b'D' => {
                 if p.is(fields::DB_GENETIC_CODE) {
                     self.set(Setter::DbGeneticCode(v.integer()?));
@@ -679,7 +686,8 @@ impl Builder {
                 }
                 true
             }
-            // 217-237: `EvalueThreshold` is taken by its name too, as a real or a cutoff e-value.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:219-237
+            // `EvalueThreshold` is taken by its name too, as a real or a cutoff e-value.
             b'E' => {
                 if p.is(fields::EFFECTIVE_SEARCH_SPACE) {
                     self.set(Setter::EffectiveSearchSpace(v.big_integer()?));
@@ -702,7 +710,7 @@ impl Builder {
                 }
                 true
             }
-            // 239-251
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:239-251
             b'F' => {
                 if p.is(fields::FILTER_STRING) {
                     self.set(Setter::FilterString(text(v.string()?)));
@@ -717,9 +725,10 @@ impl Builder {
                 }
                 true
             }
-            // 253-296: the GI list's numbers as `(Uint4) *it` (both the `NCBI_STRICT_GI` and the
-            // `NCBI_INT8_GI` branch: the field's value is an integer list, never a big-integer
-            // list).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:253-297
+            // The GI list's numbers are each taken as an unsigned 32-bit number (in the
+            // `NCBI_STRICT_GI` and the `NCBI_INT8_GI` branch alike: the field's value is an integer
+            // list, never a big-integer list).
             b'G' => {
                 if p.is(fields::GAP_EXTENSION_COST) {
                     self.set(Setter::GapExtensionCost(v.integer()?));
@@ -742,7 +751,7 @@ impl Builder {
                 }
                 true
             }
-            // 298-306
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:299-307
             b'H' => {
                 if p.is(fields::HITLIST_SIZE) {
                     self.set(Setter::HitlistSize(v.integer()?));
@@ -753,7 +762,7 @@ impl Builder {
                 }
                 true
             }
-            // 308-316
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:309-317
             b'I' => {
                 if p.is(fields::INCLUSION_THRESHOLD) {
                     self.set(Setter::InclusionThreshold(v.real()?));
@@ -764,7 +773,8 @@ impl Builder {
                 }
                 true
             }
-            // 318-339: the masks of the program options are skipped when the algorithm options
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:319-340
+            // The masks of the program options are skipped when the algorithm options
             // had one (`m_IgnoreQueryMasks`, set by `GetSearchOptions`).
             b'L' => {
                 if p.is(fields::L_CASE_MASK) {
@@ -781,7 +791,8 @@ impl Builder {
                 }
                 true
             }
-            // 341-364: `MatrixTable` "is no longer used".
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:342-365
+            // The `MatrixTable` parameter is accepted and has no effect.
             b'M' => {
                 if p.is(fields::MB_TEMPLATE_LENGTH) {
                     self.set(Setter::MbTemplateLength(v.integer()? as u8));
@@ -805,7 +816,7 @@ impl Builder {
                 }
                 true
             }
-            // 366-372
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:367-373
             b'O' => {
                 if p.is(fields::OUT_OF_FRAME_MODE) {
                     self.set(Setter::OutOfFrameMode(v.boolean()?));
@@ -814,7 +825,8 @@ impl Builder {
                 }
                 true
             }
-            // 374-415: `TTaxId` is an `int` (`TAX_ID_FROM(int, *it)`).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:375-416
+            // `TTaxId` is an `int`: each list number is converted to the tax-id type as it is.
             b'N' => {
                 if p.is(fields::NEGATIVE_GI_LIST) {
                     self.out.negative_gi_list = Some(gis(v.integer_list()?));
@@ -825,7 +837,8 @@ impl Builder {
                 }
                 true
             }
-            // 417-430: an empty pattern sets nothing.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:418-431
+            // An empty pattern sets nothing.
             b'P' => {
                 if p.is(fields::PHI_PATTERN) {
                     let pattern = v.string()?;
@@ -844,7 +857,7 @@ impl Builder {
                 }
                 true
             }
-            // 432-440
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:433-441
             b'Q' => {
                 if p.is(fields::QUERY_GENETIC_CODE) {
                     self.set(Setter::QueryGeneticCode(v.integer()?));
@@ -855,7 +868,8 @@ impl Builder {
                 }
                 true
             }
-            // 442-454: `SetFrom` and `SetToOpen` take a `TSeqPos` (`unsigned int`).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:443-455
+            // `SetFrom` and `SetToOpen` take a `TSeqPos` (`unsigned int`).
             b'R' => {
                 if p.is(fields::REPEAT_FILTERING) {
                     self.set(Setter::RepeatFiltering(v.boolean()?));
@@ -870,7 +884,7 @@ impl Builder {
                 }
                 true
             }
-            // 456-479
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:457-479
             b'S' => {
                 if p.is(fields::STRAND_OPTION) {
                     self.set(Setter::StrandOption(v.strand_type()?));
@@ -893,7 +907,7 @@ impl Builder {
                 }
                 true
             }
-            // 481-495
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:481-496
             b'T' => {
                 if p.is(fields::TAXID_LIST) {
                     self.out.taxid_list = Some(v.integer_list()?.to_vec());
@@ -902,7 +916,9 @@ impl Builder {
                 }
                 true
             }
-            // 496-511: "this is the inverse of the corresponding blast4 concept".
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:497-511
+            // `GappedMode` is stored inverted: the request's value is the negation of the
+            // option's.
             b'U' => {
                 if p.is(fields::GAPPED_MODE) {
                     self.set(Setter::GappedMode(!v.boolean()?));
@@ -915,7 +931,8 @@ impl Builder {
                 }
                 true
             }
-            // 513-525: no arm for `WindowMaskerDatabase`, which NCBI's own export writes
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:513-525
+            // No arm for `WindowMaskerDatabase`, which NCBI's own export writes
             // (`I.blastn.wmdb.alone`: "Internal: Error processing option [WindowMaskerDatabase]
             // type [12].").
             b'W' => {
@@ -942,8 +959,10 @@ impl Builder {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:531-544
+    // NCBI reference (598d8ae6): c++/include/algo/blast/api/search_strategy.hpp:103-105
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2018-2027
     /// A parameter that no arm takes. Both NCBI callers build with `ignore_unsupported_options`
-    /// false (search_strategy.hpp:105, remote_blast.cpp:2018-2027).
+    /// false.
     fn not_found(&self, p: &RawParam<'_>) -> Result<(), NcbiException> {
         Err(NcbiException::new(
             UNKNOWN_OPTION,
@@ -975,7 +994,8 @@ impl Builder {
     }
 }
 
-/// `EvalueThreshold has unsupported type.`
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:230-232
+/// The exception for an `EvalueThreshold` parameter that is neither a real nor an e-value cutoff.
 fn evalue_type() -> NcbiException {
     NcbiException::new(EVALUE_TYPE, "EvalueThreshold has unsupported type.")
 }
@@ -994,8 +1014,8 @@ pub struct OptionLists<'a> {
     pub format: Option<&'a [RawParam<'a>]>,
 }
 
-/// `CBlastOptionsBuilder(program, service, locality, false).GetSearchOptions(algorithm,
-/// program options, format options)`: the options of a request.
+/// `GetSearchOptions` of a `CBlastOptionsBuilder` of the program, the service and the locality
+/// (no PSSM query), over the algorithm, program and format options: the options of a request.
 pub fn build(
     program: &[u8],
     service: &[u8],
@@ -1009,9 +1029,11 @@ pub fn build(
         .copied()
         .collect();
     let adjusted = adjust_program(&all, computed, program)?;
-    // `CBlastOptionsFactory::Create(program, eBoth)` (search_strategy.cpp:85-88): the options
-    // have the local and the remote part (blast_options_cxx.cpp:299-312), so the Blast4
-    // parameter list that `-outfmt 11` and `-export_search_strategy` write is kept.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:85-88
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:299-313
+    // `CBlastOptionsFactory::Create` of the program with `eBoth`: the options have the local and the remote
+    // part, so the Blast4 parameter list that `-outfmt 11` and `-export_search_strategy` write is
+    // kept.
     let mut builder = Builder::new(adjusted);
     builder.ignore_query_masks = false;
     builder.process_options(lists.algorithm.unwrap_or_default())?;
@@ -1023,7 +1045,8 @@ pub fn build(
     Ok(out)
 }
 
-/// What `CImportStrategy::FetchData` keeps (`CImportStrategyData`, search_strategy.hpp:66-102)
+// NCBI reference (598d8ae6): c++/include/algo/blast/api/search_strategy.hpp:60-95
+/// What `CImportStrategy::FetchData` keeps (`CImportStrategyData`)
 /// beside the builder's options (its `m_QueryRange` is the options' `query_range`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImportedOptions {

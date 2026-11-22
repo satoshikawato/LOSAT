@@ -58,7 +58,7 @@ pub(crate) struct ModEffects {
 pub(crate) struct ModsApplied {
     /// The title descriptor (`x_AddTitle`): none for a blank title.
     pub(crate) title: Option<Vec<u8>>,
-    /// The `ERR_POST(Warning << ..)` messages, in the order NCBI posts them.
+    /// The warning messages posted with `ERR_POST`, in the order NCBI posts them.
     pub(crate) warnings: Vec<Vec<u8>>,
     pub(crate) effects: ModEffects,
 }
@@ -384,7 +384,7 @@ pub(super) fn is_blank(text: &[u8]) -> bool {
     text.iter().all(|&c| is_space(c))
 }
 
-/// `NStr::Split(.., delims, fSplit_Tokenize)`: the non-empty runs between delimiters.
+/// `NStr::Split` with `fSplit_Tokenize`: the non-empty runs between delimiters.
 pub(super) fn tokenize<'a>(text: &'a [u8], delims: &[u8]) -> Vec<&'a [u8]> {
     text.split(|c| delims.contains(c))
         .filter(|token| !token.is_empty())
@@ -711,7 +711,7 @@ impl Adder {
             }
             b"secondary-accession" => {
                 let ids = secondary_ids(values)?;
-                // `CModAdder::x_SetHist`: a Seq-id of each (`CSeq_id(string)`), whose failure
+                // `CModAdder::x_SetHist`: a Seq-id of each (the `CSeq_id` constructor from a string), whose failure
                 // is an exception that nothing in the reader catches. The ids are made one at a
                 // time here to be checked, and again when the descriptor is written.
                 let mut any = false;

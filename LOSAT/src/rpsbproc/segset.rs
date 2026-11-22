@@ -28,7 +28,7 @@ pub(crate) struct Seg {
 }
 
 impl Seg {
-    /// `TSeg_base(f, t)`: `ori_from` is `from`.
+    /// `TSeg_base` of `f` and `t`: `ori_from` is `from`.
     pub(crate) fn new(from: i64, to: i64) -> Self {
         Seg {
             from,
@@ -70,12 +70,12 @@ impl SegSet {
         self.segs.is_empty()
     }
 
-    /// `AddSeg(f, t)`.
+    /// `AddSeg` of a range from `f` to `t`.
     pub(crate) fn add(&mut self, from: i64, to: i64) {
         self.add_seg(Seg::new(from, to));
     }
 
-    /// `AddSeg(seg)`: inserts the range, merging it with the ranges it overlaps or touches.
+    /// `AddSeg` of a segment: inserts the range, merging it with the ranges it overlaps or touches.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:63-108
     pub(crate) fn add_seg(&mut self, seg: Seg) {
         if !seg.is_valid() {
@@ -111,7 +111,7 @@ impl SegSet {
         self.segs.drain(curr + 1..next);
     }
 
-    /// `Merge(src)`: the union, keeping this set's `ori_from` where ranges merge.
+    /// `Merge` of `src`: the union, keeping this set's `ori_from` where ranges merge.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:111-159
     pub(crate) fn merge(&mut self, src: &SegSet) {
         let mut old = std::mem::take(&mut self.segs);
@@ -153,7 +153,7 @@ impl SegSet {
         self.segs = out;
     }
 
-    /// `Cross(src)`: the intersection.
+    /// `Cross` of `src`: the intersection.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:161-208
     pub(crate) fn cross(&mut self, src: &SegSet) {
         let mut old = std::mem::take(&mut self.segs);
@@ -191,7 +191,7 @@ impl SegSet {
         self.segs = out;
     }
 
-    /// `Clip(src)`: this set less `src`.
+    /// `Clip` of `src`: this set less `src`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:210-248
     pub(crate) fn clip(&mut self, src: &SegSet) {
         let mut old = std::mem::take(&mut self.segs);
@@ -234,20 +234,23 @@ impl SegSet {
         self.segs.last().map_or(-1, |seg| seg.to)
     }
 
-    /// `GetOriTo(citer)` of a range: `ori_from + (to - from) / m_iFactor`.
+    /// `GetOriTo` of a range: `ori_from` plus the quotient of the difference `to` less `from` by
+    /// `m_iFactor`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:332-337
     pub(crate) fn ori_to(seg: &Seg) -> i64 {
         seg.ori_from + (seg.to - seg.from)
     }
 
-    /// `TSeqAlignment::MapSegSet(segset, false)` of a protein alignment: this set (positions on
-    /// the model, the slave row) turned into positions on the query (the master row) along the
-    /// aligned segments (`m_vecMStarts`, `m_vecSStarts`, `m_vecLens`), keeping `ori_from`.
+    /// `TSeqAlignment::MapSegSet` of the set with `false`, of a protein alignment: this set
+    /// (positions on the model, the slave row) turned into positions on the query (the master row)
+    /// along the aligned segments (`m_vecMStarts`, `m_vecSStarts`, `m_vecLens`), keeping
+    /// `ori_from`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1180-1250
     // (rpsbproc calls it with `doConvert` false everywhere; the conversion of a nucleotide
     // query's motifs is `domains::pr2na_ends`. NCBI changes the list in place; LOSAT writes the
-    // new ranges in order into a new list. `m_vecSStarts[idx] + m_vecLens[idx] - 1` adds an
-    // `int` and an `unsigned int`: an `unsigned int` sum, modulo 2^32, stored in the `int` `end`;
+    // new ranges in order into a new list. One less than the sum of `m_vecSStarts[idx]` (an
+    // `int`) and `m_vecLens[idx]` (an `unsigned int`) is an `unsigned int` sum, modulo 2^32,
+    // stored in the `int` `end`;
     // the other sums are `int` arithmetic, computed as their values (`Seg`).)
     pub(crate) fn map_through(&mut self, m_starts: &[i32], s_starts: &SubjectStarts, lens: &[u32]) {
         if self.segs.is_empty() {

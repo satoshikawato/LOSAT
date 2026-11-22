@@ -20,9 +20,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use losat::api::{
-    read_input_file, read_inputs, run, run_blast_formatter, run_blastdbcmd, run_convert2blastmask,
-    run_dustmasker, run_makeblastdb, run_makembindex, run_segmasker, run_to_file, run_windowmasker,
-    validate, Error, Inputs, Program, Role,
+    read_input_file, read_input_records, run, run_blast_formatter, run_blastdbcmd,
+    run_convert2blastmask, run_dustmasker, run_makeblastdb, run_makembindex, run_segmasker,
+    run_to_file, run_windowmasker, validate, Error, Inputs, Program, Role,
 };
 
 fn main() -> ExitCode {
@@ -39,11 +39,32 @@ fn main() -> ExitCode {
     }
 }
 
-/// A tool has written the failure to standard error, so `main` adds nothing; an error of its
-/// argv is the parser's.
-fn reported(result: Result<(), Error>) -> Result<(), Error> {
+/// A tool's standard error, which notes whether the tool wrote to it.
+struct Noted {
+    stderr: std::io::Stderr,
+    wrote: bool,
+}
+
+impl Write for Noted {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let written = self.stderr.write(buffer)?;
+        self.wrote |= written > 0;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.stderr.flush()
+    }
+}
+
+/// A tool has written its failure to standard error, so `main` adds nothing: the error of its
+/// run, and the parser's refusal of makeblastdb's argv, which the tool writes as the command line
+/// does (`wrote`). The parser's help (`-h`, `-help`), which the tool does not write, is the
+/// error's text, which `main` writes.
+fn reported(result: Result<(), Error>, wrote: bool) -> Result<(), Error> {
     match result {
         Err(Error::Search(_)) => Err(Error::Search(Vec::new())),
+        Err(Error::Argv(_)) if wrote => Err(Error::Argv(Vec::new())),
         other => other,
     }
 }
@@ -68,11 +89,14 @@ fn search() -> Result<(), Error> {
         "blast_formatter" => run_blast_formatter,
         _ => return search_program(program, words),
     };
-    let (mut stdin, mut stdout, mut stderr) =
-        (std::io::stdin(), std::io::stdout(), std::io::stderr());
+    let (mut stdin, mut stdout) = (std::io::stdin(), std::io::stdout());
+    let mut stderr = Noted {
+        stderr: std::io::stderr(),
+        wrote: false,
+    };
     let result = tool(&words_of_tool, &mut stdin, &mut stdout, &mut stderr);
     let _ = stdout.flush();
-    reported(result)
+    reported(result, stderr.wrote)
 }
 
 /// A search of `program` with the command line's words.
@@ -132,20 +156,20 @@ fn search_program(program: &str, words: &[String]) -> Result<(), Error> {
         Some(subject) => read(Role::Subject, subject)?,
         None => Vec::new(),
     };
-    let (query_records, subject_records) = read_inputs(&search, &query_bytes, &subject_bytes)?;
+    // The query records before a reader's error, with the error, which the search meets in its
+    // query batch as the command line does (`read_input_records`).
+    let records = read_input_records(&search, &query_bytes, &subject_bytes)?;
     let inputs = match (db, subject, query_file) {
         (Some(db), _, Some((file, true))) => Inputs::pssm_database(Path::new(file), db),
         (Some(db), _, Some((file, false))) => Inputs::msa_database(Path::new(file), db),
-        (Some(db), _, None) => Inputs::database(&query_records, db).named(query, db),
+        (Some(db), _, None) => records.database(db).named(query, db),
         (None, Some(subject), Some((file, true))) => {
-            Inputs::pssm(Path::new(file), &subject_records).named(query, subject)
+            Inputs::pssm(Path::new(file), &records.subject).named(query, subject)
         }
         (None, Some(subject), Some((file, false))) => {
-            Inputs::msa(Path::new(file), &subject_records).named(query, subject)
+            Inputs::msa(Path::new(file), &records.subject).named(query, subject)
         }
-        (None, Some(subject), None) => {
-            Inputs::new(&query_records, &subject_records).named(query, subject)
-        }
+        (None, Some(subject), None) => records.inputs().named(query, subject),
         (None, None, Some((file, true))) if dry_run => Inputs::pssm(Path::new(file), &[]),
         (None, None, Some((file, false))) if dry_run => Inputs::msa(Path::new(file), &[]),
         (None, None, None) if dry_run => Inputs::new(&[], &[]),

@@ -219,13 +219,8 @@ TIMEOUT = 600
 # when the run directory has no such file, and of `$NCBI/.ncbirc`), GETURL_DEBUG (a `REGISTRY: <file>` line on
 # stderr when the file is read) and NCBI_DONT_USE_NCBIRC (no `.ncbirc` in the application's registry).
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3383-3415
-# ```c++
-#     if( getenv("GETURL_DEBUG") ) CAlignFormatUtil::m_geturl_debug_flag = l_dbg = true;
-#         if( NULL !=  getenv("NCBI")   ) l_ncbi_env = getenv("NCBI");
-#         if( NULL !=  getenv("FMTCFG") ) l_fmtcfg_env = getenv("FMTCFG");
-#     ...
-#             if( l_dbg ) fprintf(stderr,"REGISTRY: %s\n",l_cfg_file_name.c_str());
-# ```
+# (InitConfig reads GETURL_DEBUG, NCBI and FMTCFG from the environment and, with GETURL_DEBUG, writes the path
+# of the file it reads to standard error.)
 PROCESS_SETTINGS = ("FMTCFG", "NCBI", "GETURL_DEBUG", "NCBI_DONT_USE_NCBIRC")
 ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHIVE_FORMAT", "PRE_FETCH_SEQS_LIMIT",
              "BL2SEQ_LEGACY", "OLD_FSC", "ADAPTIVE_CBS", *PROCESS_SETTINGS)

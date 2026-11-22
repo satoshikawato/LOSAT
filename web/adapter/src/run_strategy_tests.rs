@@ -40,7 +40,7 @@ fn run_files_of(
         subject,
         words,
         Some(true),
-        |queries, subjects| run(words, queries, subjects),
+        |queries, end, subjects| run(words, queries, end, subjects),
     );
     crate::store::release(query).unwrap();
     crate::store::release(subject).unwrap();

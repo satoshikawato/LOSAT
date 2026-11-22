@@ -550,7 +550,6 @@ fn scan(
     if s_range[1] > s_range[2] {
         return 0;
     }
-    x_fx_list_init();
     assert!(
         fits(lookup),
         "LOSAT_X_TBNSCANBYTE: table of word size {}",
@@ -822,23 +821,16 @@ unsafe fn candidates_avx2(
         k += 1;
     }
     // SAFETY: every index was masked with `X_MASK` (the vector loop's `mask`, the tail's `&`).
-    if X_FX_LIST.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+    if X_FX_LIST {
         return list4(&index[..words], presence, cand);
     }
     list(&index[..words], presence, cand)
 }
 
-/// PROBE (exp/fx-bxload, line FX): LOSAT_X_FXLIST (0/1, default 1) picks [`list4`] in
-/// [`candidates_avx2`]. Set once per process by [`x_fx_list_init`].
-pub(crate) static X_FX_LIST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-
-/// PROBE (exp/fx-bxload): sets [`X_FX_LIST`] from LOSAT_X_FXLIST once.
-pub(crate) fn x_fx_list_init() {
-    use std::sync::OnceLock;
-    static ONCE: OnceLock<u8> = OnceLock::new();
-    let v = *ONCE.get_or_init(|| u8::from(crate::utils::xswitch::on("LOSAT_X_FXLIST")));
-    X_FX_LIST.store(v, std::sync::atomic::Ordering::Relaxed);
-}
+/// PROBE (exp/fx-bxload, line FX): [`list4`] in [`candidates_avx2`] when the binary is built
+/// with LOSAT_FXLIST_BUILD=1.
+const X_FX_LIST: bool =
+    crate::algorithm::blastp::x_seed_fused::x_fx_digit(option_env!("LOSAT_FXLIST_BUILD")) == 1;
 
 /// PROBE (exp/fx-bxload): [`list`] four words per step: two loads, a store and an add per word,
 /// the loop's counter and test once per four.

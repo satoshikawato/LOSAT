@@ -349,8 +349,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXCROSS",
     "LOSAT_X_BXCROSS128",
     "LOSAT_X_BXCROSSDEFER",
-    "LOSAT_X_FXFORM",
-    "LOSAT_X_FXLIST",
     "LOSAT_X_BXCTXONCE",
     "LOSAT_X_BXDIAG",
     "LOSAT_X_BXDIAGKEEP",

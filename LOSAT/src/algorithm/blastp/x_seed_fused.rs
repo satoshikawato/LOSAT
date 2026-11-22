@@ -1557,7 +1557,6 @@ where
         "the cross-cell AVX2 batch needs AVX2 and POPCNT"
     );
     x_cross_check_bounds(lookup.query_length, table.mask);
-    x_fx_form_init();
     let mut counts = XCrossCounts::default();
     // SAFETY: the CPU has AVX2 and POPCNT, and every query offset of the lookup is below
     // `query_length`, so at most the mask (asserted above).
@@ -2836,30 +2835,22 @@ fn x_cross_part_end(coords: &[i32; X_DIAG_LANES], start: usize) -> usize {
         .unwrap_or(X_DIAG_LANES)
 }
 
-/// PROBE (exp/fx-bxload, line FX): LOSAT_X_FXFORM bit 1 = entries by broadcast + blend, bit 2 =
-/// new values reloaded from the stack. Read once per process ([`x_fx_form_init`]).
+/// PROBE (exp/fx-bxload, line FX): the form, fixed when the binary is built
+/// (LOSAT_FXFORM_BUILD = 0..3): bit 1 = entries by broadcast + blend, bit 2 = new values reloaded
+/// from the stack. 0 (unset) = dev's form.
 #[cfg(target_arch = "x86_64")]
-static X_FX_FORM: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+const X_FX_FORM: u8 = x_fx_digit(option_env!("LOSAT_FXFORM_BUILD"));
 
-/// PROBE (exp/fx-bxload): sets [`X_FX_FORM`] from LOSAT_X_FXFORM (0..=3, default 3) once.
-#[cfg(target_arch = "x86_64")]
-fn x_fx_form_init() {
-    use std::sync::OnceLock;
-    static ONCE: OnceLock<u8> = OnceLock::new();
-    let v = *ONCE.get_or_init(|| {
-        crate::utils::xswitch::value("LOSAT_X_FXFORM", 0..=3, 3).unwrap_or(0) as u8
-    });
-    X_FX_FORM.store(v, std::sync::atomic::Ordering::Relaxed);
+/// PROBE (exp/fx-bxload): a one-digit build variable, 0 when unset or anything else.
+pub(crate) const fn x_fx_digit(v: Option<&str>) -> u8 {
+    match v {
+        Some(s) if s.len() == 1 && s.as_bytes()[0] >= b'0' && s.as_bytes()[0] <= b'9' => {
+            s.as_bytes()[0] - b'0'
+        }
+        _ => 0,
+    }
 }
 
-/// EXPERIMENT (LOSAT_X_BXCROSS): [`x_batch_lanes`]'s test, which returns with the candidate
-/// lanes the eight entries it read. EXPERIMENT (LOSAT_X_BXCROSSDEFER, with `MARK`): it returns
-/// `None` before any store where an entry holds [`X_CROSS_MARKER`], and its candidate lanes store
-/// the marker instead of the entry they read (which they store without `MARK`).
-///
-/// # Safety
-/// As [`x_batch_lanes`].
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at `x_test_hit`)
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,popcnt")]
 #[inline]
@@ -2883,7 +2874,7 @@ unsafe fn x_batch_avx2_lanes_mark<const MARK: bool>(
             .get_unchecked(lane_coords[i] as usize)
             .raw_bits() as i32
     };
-    let fx = X_FX_FORM.load(std::sync::atomic::Ordering::Relaxed);
+    let fx = X_FX_FORM;
     let old = if fx & 1 != 0 {
         // PROBE (exp/fx-bxload): the eight entries as broadcasts from memory (load port only)
         // blended into one register (p0/p1/p5), in place of vpinsrd/vinserti128 (port 5).

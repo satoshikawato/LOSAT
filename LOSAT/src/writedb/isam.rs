@@ -161,7 +161,7 @@ const TAIL_CHUNK: usize = 1 << TAIL_CHUNK_BITS;
 /// The tail field of a key of at most 8 bytes, whose bytes are all in the prefix:
 /// `SHORT_KEY + key length` (0 to 8). Arena positions are below it.
 const SHORT_KEY: u32 = u32::MAX - 8;
-/// The longest key `x_AddStringData` copies into its `char buf[256]`.
+/// The longest key `x_AddStringData` copies into its 256-byte `char` buffer `buf`.
 pub(crate) const MAX_STRING_KEY: usize = 256;
 
 /// A string record as stored: `[prefix high, prefix low, tail position, OID]`, the prefix
@@ -197,7 +197,7 @@ fn prefix_bytes(prefix: u64) -> [u8; 8] {
     bytes
 }
 
-/// Appends `value` in decimal (`sprintf("%d")`).
+/// Appends `value` in decimal (the `%d` format of `sprintf`).
 fn push_decimal(out: &mut Vec<u8>, value: i64) {
     let mut digits = [0u8; 20];
     let mut n = value.unsigned_abs();
@@ -216,7 +216,7 @@ fn push_decimal(out: &mut Vec<u8>, value: i64) {
     out.extend_from_slice(&digits[at..]);
 }
 
-/// The decimal digits of `value` (`sprintf("%d")` of an OID) in `buf`.
+/// The decimal digits of `value` (the `%d` format of `sprintf` applied to an OID) in `buf`.
 fn decimal(value: u32, buf: &mut [u8; 10]) -> &[u8] {
     let mut n = value;
     let mut at = buf.len();
@@ -345,7 +345,7 @@ impl OidKeys {
         self.set = None;
     }
 
-    /// `m_OidStringData.insert(record).second`.
+    /// The `second` of the result of `m_OidStringData.insert` of the record.
     fn insert(&mut self, key: &[u8]) -> bool {
         if let Some(set) = &mut self.set {
             return set.insert(key.to_vec());
@@ -430,7 +430,7 @@ impl StringIsam {
         }
     }
 
-    /// `CanFit(num)`: 1024 bytes for each Seq-id and one more.
+    /// `CanFit` of `num`: 1024 bytes for each Seq-id and one more.
     pub(crate) fn can_fit(&self, num: usize) -> bool {
         can_fit(
             self.data_file_size,
@@ -523,7 +523,7 @@ impl StringIsam {
         result
     }
 
-    /// `m_StringSort.Insert(record)` and `m_DataFileSize += record size`.
+    /// `m_StringSort.Insert` of the record, and the record's size added to `m_DataFileSize`.
     fn insert_record(&mut self, oid: u32, key: &[u8]) -> Result<(), WriteDbError> {
         let mut head = Vec::with_capacity(8 + 12);
         head.extend_from_slice(&key[..key.len().min(8)]);
@@ -853,7 +853,7 @@ impl NumericIsam {
         }
     }
 
-    /// `CanFit(num)`: 8 bytes for each id and one more.
+    /// `CanFit` of `num`: 8 bytes for each id and one more.
     pub(crate) fn can_fit(&self, num: usize) -> bool {
         can_fit(
             self.data_file_size,
@@ -913,7 +913,7 @@ impl NumericIsam {
             self.files.index.write_int4(-1)?;
             self.files.index.write_int4(0)?;
         }
-        // `x_Free`: `vector<SIdOid> tmp; m_NumberTable.swap(tmp);`.
+        // `x_Free`: `m_NumberTable` is swapped with an empty `vector` of `SIdOid`.
         self.table = Vec::new();
         self.files.close();
         Ok(())

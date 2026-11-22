@@ -17,11 +17,11 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 
 use super::retrieve::{parse_target_with, Output, Source, Stop};
 
-/// What NCBI's two `GetBioseq` calls of one `Write(oid, config, target)` read of the sequence
-/// `oid` (`with`): the first `GetBioseq(oid)`, then `GetBioseq(oid, gi, seqid)` for a
-/// `-target_only` target or `GetBioseq(oid)` again.
+/// What NCBI's two `GetBioseq` calls of one `Write` of `oid`, `config` and `target` read of the
+/// sequence `oid` (`with`): the first `GetBioseq` of `oid`, then `GetBioseq` of `oid`, `gi` and
+/// `seqid` for a `-target_only` target or `GetBioseq` of `oid` again.
 pub(super) struct DbBioseq {
-    /// `GetHdr(oid)`: every definition line the database keeps.
+    /// `GetHdr` of `oid`: every definition line the database keeps.
     pub set: DeflineSet,
     /// The user object's header (`x_GetFilteredBinaryHeader`), read for `%b` alone.
     pub header: Vec<u8>,
@@ -29,7 +29,7 @@ pub(super) struct DbBioseq {
     kept: Option<DeflineSet>,
     /// The target's Seq-id.
     pub target: Option<ParsedSeqId>,
-    /// `GetSeqLength(oid)`, at least 1 (NCBI makes no Bioseq of no letters).
+    /// `GetSeqLength` of `oid`, at least 1 (NCBI makes no Bioseq of no letters).
     pub length: u32,
 }
 
@@ -86,9 +86,9 @@ impl DbBioseq {
         if made {
             source.post_bioseq_texts(oid, &set, None, out)?;
         }
-        // `GetBioseq(oid, gi, seqid)`: the target's line for the ids and the title, every line
-        // the filter keeps for the sources (`x_GetTaxonomy` of `x_GetTaxDefline`, the target's
-        // line first).
+        // `GetBioseq` of `oid`, `gi` and `seqid`: the target's line for the ids and the title,
+        // every line the filter keeps for the sources (`x_GetTaxonomy` of `x_GetTaxDefline`, the
+        // target's line first).
         let target = match target {
             Some(target) => Some(target_id(target)?),
             None => None,
@@ -148,9 +148,9 @@ pub(super) struct BioseqFormatter;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:553-580
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2264-2283
-/// The Seq-id of a `-target_only` target as `CBlastDB_BioseqFormatter` gets it: `CSeq_id(text)`
+/// The Seq-id of a `-target_only` target as `CBlastDB_BioseqFormatter` gets it: `CSeq_id` of `text`
 /// (`fParse_AnyRaw`: a number is a GI), whose GI `SeqDB_SimplifySeqid` gives as one
-/// (`GetBioseq(oid, gi)`).
+/// (`GetBioseq` of `oid` and `gi`).
 fn bioseq_target_id(text: &str) -> Result<ParsedSeqId, Stop> {
     parse_target_with(text, ANY_RAW)
 }
@@ -246,7 +246,7 @@ pub(super) enum DbSeqData {
     Ncbistdaa(Vec<u8>),
 }
 
-/// The document `MSerial_AsnText << *bioseq`.
+/// The document that `MSerial_AsnText` writes for the Bioseq.
 struct BioseqDocument<'a> {
     ids: &'a [SeqId<'a>],
     descr: &'a [Seqdesc<'a>],

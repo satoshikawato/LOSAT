@@ -14,15 +14,15 @@ use crate::seqid::parse::{parse_ids, seq_id_from_text, set_typed, SeqIdError};
 use crate::seqid::rank::{best_rank_score, find_best};
 use crate::seqid::{BlastDefline, DeflineSet};
 
-/// `GetSeqIdString(true)`.
+/// `GetSeqIdString` with the version.
 fn seq_id_string_with_version(id: &ParsedSeqId) -> Vec<u8> {
     let mut out = Vec::new();
     content(id, true, &mut out);
     out
 }
 
-/// `CSeq_id(CSeq_id::e_Local, label)`: the typed `Set` of a local id (`SetStrOrId` of the
-/// trimmed label), which does not fail.
+/// A `CSeq_id` of type `CSeq_id::e_Local` made from `label`: the typed `Set` of a local id
+/// (`SetStrOrId` of the trimmed label), which does not fail.
 fn local_from_label(label: &[u8]) -> ParsedSeqId {
     set_typed(crate::seqid::accguide::SEQID_LOCAL, label, b"", 0, b"")
         .ok()
@@ -31,7 +31,8 @@ fn local_from_label(label: &[u8]) -> ParsedSeqId {
 }
 
 /// Whether `IdentifyAccession()` of `id` names the other molecule than `is_protein`:
-/// `(info & (fAcc_prot | fAcc_nuc)) && is_protein == !!(info & fAcc_nuc)`.
+/// the accession info (`info`) has `fAcc_prot` or `fAcc_nuc` set, and `is_protein` equals whether
+/// `fAcc_nuc` is set in it.
 fn of_other_molecule(id: &ParsedSeqId, is_protein: bool, warn: Warn<'_>) -> bool {
     let info = identify_seq_id(
         id,
@@ -82,13 +83,13 @@ pub fn large_gi_to_skip(ids: &[ParsedSeqId], warn: Warn<'_>) -> Option<i64> {
     skip_this.then_some(check_gi)
 }
 
-/// The second parse of `x_GetFastaReaderDeflines(bioseq, ..., accept_gt = false,
-/// parse_ids = true, long_seqids = false, scan = true)`: one definition line per part of
+/// The second parse of `x_GetFastaReaderDeflines` of the bioseq (`accept_gt` false,
+/// `parse_ids` true, `long_seqids` false, `scan` true): one definition line per part of
 /// the raw definition line between ^A; `None` where NCBI's parse throws a
 /// `CSeqIdException` (which `x_ExtractDeflines` catches) or finds no definition line.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1766-1767,1807-1880,1896-1900
-/// `ParseFastaIds(seqids, ids)` is `ParseIDs` with `fParse_RawText | fParse_AnyLocal`
+/// `ParseFastaIds` is `ParseIDs` with the flags `fParse_RawText` and `fParse_AnyLocal`
 /// (no `fParse_PartialOK`, Seq_id.cpp:2603-2611): any exception goes up. No membership,
 /// link or PIG is given (`ExtractBioseqDeflines` passes none). The `fasta` string is the
 /// one `fasta_reader_title` describes; its escapes do not fail.
@@ -120,7 +121,8 @@ pub fn second_parse(parsed: &ParsedIds, is_aa: bool, warn: Warn<'_>) -> Option<D
         let mut pos_title = pos_title.expect("set above");
         let ids = fasta[id_start.min(pos_title)..pos_title].to_vec();
         if pos_title == pos_next {
-            // `pos_title--` of 0 wraps; the title is then from 0 (`pos_title + 1`).
+            // Decrementing `pos_title` from 0 wraps; the title then starts at 0 (one more than
+            // `pos_title`).
             pos_title = pos_title.wrapping_sub(1);
         }
         let title_start = pos_title.wrapping_add(1);
@@ -195,7 +197,7 @@ fn non_local_id(parsed: &ParsedIds) -> Option<&ParsedSeqId> {
     (generated == best && !matches!(old, ParsedSeqId::Local(_))).then_some(old)
 }
 
-/// `s_UseFastaReaderDeflines(bioseq, deflines, long_seqid = false)`.
+/// `s_UseFastaReaderDeflines` of the bioseq and its deflines (`long_seqid` false).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:736-762
 fn use_fasta_reader_deflines(parsed: &ParsedIds, deflines: &DeflineSet) -> bool {
@@ -208,8 +210,8 @@ fn use_fasta_reader_deflines(parsed: &ParsedIds, deflines: &DeflineSet) -> bool 
     }
 }
 
-/// `CWriteDB::ExtractBioseqDeflines(bioseq, parse_ids = true, long_ids = false, scan =
-/// true)` for a Bioseq of the FASTA path (after the edits of `AddSequences`), without the
+/// `CWriteDB::ExtractBioseqDeflines` of the bioseq with `parse_ids` true, `long_ids` false and
+/// `scan` true, for a Bioseq of the FASTA path (after the edits of `AddSequences`), without the
 /// serialization (the writer posts its diagnostics).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:802-836

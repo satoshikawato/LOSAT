@@ -665,7 +665,7 @@ fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
     String::from_utf8(out).unwrap()
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 and 1374-1378 (the catch of `SetFields` and `SetSubjectId(list)`):
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 and 1374-1378 (the catch of `SetFields` and `SetSubjectId` of `list`):
 // NCBI BLAST+ 2.17.0 `blastn -subject` with two titles `Subject_9 bad x\x81y title`,
 // `Subject_7 other \x8dz` (probe `remaining-gaps-20261112/T/t7`, `s.bb.blastn.f6wide`), and a
 // found subject before a failed one (`s.gb`): `sseqid` Unknown, `sgi` 0, the Seq-align ids added
@@ -735,7 +735,7 @@ fn failed_lookups_write_ncbis_catch_row() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block, `SetSubjectId(list)`, `return -1`)
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block, `SetSubjectId` of `list`, then a return of -1)
 // where the load of the subject throws (`DB contains no accession info.`, a batch whose
 // prefetch is off; probe of line DBID pfoff-2, `R/pfoff/p2`, `bp.U2.*`, DECISIONS 62 (12)):
 // the row keeps the last loaded row's ids, titles and taxonomy, `sall*` add the Seq-align id

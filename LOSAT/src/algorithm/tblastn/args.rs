@@ -230,7 +230,7 @@ pub struct TblastnArgs {
     /// (`strategy::StrategyExport::for_run`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
-    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath` of `taxdb.bti`), asked
     /// before the search where a tabular field list looks every taxid up (the plural names of the
     /// taxonomy database, the organism report; `algorithm::tblastn::tabular`), by the command line
     /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no
@@ -265,7 +265,7 @@ pub struct TblastnArgs {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:997-1056
 // Stage A product decision admits 32 from gc.prt:340-347 for TBLASTN only.
-/// `NStr::StringToInt(value)` of `CArgAllowGeneticCodeInteger` is
+/// `NStr::StringToInt` of `value` in `CArgAllowGeneticCodeInteger` is
 /// `value_parsers::genetic_code_number` (LOSAT's "invalid" message for the values outside 0..=255).
 pub fn tblastn_genetic_code(value: &str) -> std::result::Result<u8, String> {
     let id = crate::blastinput::value_parsers::genetic_code_number(value)

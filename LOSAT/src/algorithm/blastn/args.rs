@@ -75,7 +75,7 @@ impl QueryStrand {
 // arg_desc.SetConstraint(kArgMaxHSPsPerSubject, new CArgAllowValuesGreaterThanOrEqual(1));
 // arg_desc.AddDefaultKey(kArgNumThreads, "int_value", ..., NStr::IntToString(kDfltValue));
 // The single-dash lexical translation is owned by crate::cli.
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:47
@@ -343,7 +343,7 @@ pub struct BlastnArgs {
     #[arg(skip)]
     pub window_masker_registry:
         Option<Result<crate::blastinput::ncbi_environment::WindowMaskerRegistry, String>>,
-    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath` of `taxdb.bti`), asked
     /// before the search where a tabular field list looks every taxid up (the plural names of the
     /// taxonomy database, the organism report; `algorithm::blastn::tabular`), by the command line
     /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no

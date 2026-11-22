@@ -261,8 +261,8 @@ fn gap_dp_reserve_band(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-648 (ALIGN_EX dynamic realloc)
     if last_b_index + num_extra_cells + 3 >= *dp_mem_alloc {
         *dp_mem_alloc = (last_b_index + num_extra_cells + 100).max(*dp_mem_alloc * 2);
-        // `n` is fixed within one extension, so `score_array` already holds
-        // `MIN(old dp_mem_alloc, n + 1)` cells and grows only with the count.
+        // `n` is fixed within one extension, so `score_array` already holds as many cells as the
+        // smaller of the old `dp_mem_alloc` and one more than `n`, and grows only with the count.
         gap_dp_ensure_cells(score_array, *dp_mem_alloc, n);
     }
 }
@@ -270,11 +270,11 @@ fn gap_dp_reserve_band(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:637-662 (ALIGN_EX; the same
 // at 3176-3196 in s_BlastAlignPackedNucl)
 // The DP writes a cell before it reads it and never addresses a cell past `N`, so of NCBI's
-// `malloc`/`realloc` block of `dp_mem_alloc` cells only the first `MIN(dp_mem_alloc, N + 1)` are
-// ever touched. `score_array` holds those cells and grows when a later extension has a longer
-// `N`; `dp_mem_alloc` keeps NCBI's count, which decides the bounds. A large `-xdrop_gap_final`
-// (`num_extra_cells = x_dropoff / gap_extend + 3`) had filled gigabytes of cells that are never
-// read, as BLASTP's kernels did before (`blastp::gapalign::gap_dp_ensure_cells`).
+// `malloc`/`realloc` block of `dp_mem_alloc` cells only the first (the smaller of `dp_mem_alloc`
+// and one more than `N`) are ever touched. `score_array` holds those cells and grows when a later
+// extension has a longer `N`; `dp_mem_alloc` keeps NCBI's count, which decides the bounds. A large
+// `-xdrop_gap_final` (`num_extra_cells = x_dropoff / gap_extend + 3`) had filled gigabytes of cells
+// that are never read, as BLASTP's kernels did before (`blastp::gapalign::gap_dp_ensure_cells`).
 fn gap_dp_ensure_cells(score_array: &mut Vec<BlastGapDP>, dp_mem_alloc: usize, n: usize) {
     let cells = dp_mem_alloc.min(n.saturating_add(1));
     if score_array.len() < cells {

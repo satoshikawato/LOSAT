@@ -1,5 +1,5 @@
 //! Where the organism report (outfmt 18) reaches its stream (line RG T2, review 3 D1): NCBI's
-//! buffer of the stream writes at the end of an insertion of NCBI's (`out << value`), the
+//! buffer of the stream writes at the end of an insertion of NCBI's (`operator<<`), the
 //! `-out` file's `basic_filebuf` at the insertion that reaches its 8,191st byte, `cout`'s glibc
 //! buffer in whole blocks, so the insertions decide where the taxonomy database's texts on
 //! standard error come between the report's bytes, and which write fails on a full file. The

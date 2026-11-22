@@ -23,13 +23,13 @@
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:84-87
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VersionRequest {
-    /// `-version`: `Print(appname, fVersionInfo | fPackageShort)`.
+    /// `-version`: `Print` of `appname` with `fVersionInfo` and `fPackageShort`.
     Version,
-    /// `-version-full`: `Print(appname)`, every part (`fPrintAll`).
+    /// `-version-full`: `Print` of `appname`, every part (`fPrintAll`).
     Full,
-    /// `-version-full-xml`: `PrintXml(appname)`.
+    /// `-version-full-xml`: `PrintXml` of `appname`.
     FullXml,
-    /// `-version-full-json`: `PrintJson(appname)`.
+    /// `-version-full-json`: `PrintJson` of `appname`.
     FullJson,
 }
 
@@ -172,7 +172,7 @@ fn package_line() -> String {
     )
 }
 
-/// `CVersionAPI::Print(appname, fPrintAll)` with LOSAT's values: no components, an empty
+/// `CVersionAPI::Print` of `appname` with `fPrintAll`, with LOSAT's values: no components, an empty
 /// `Package-Config`, no `Build-Signature` (NCBI writes it only for a build that has one), 64-bit
 /// GIs and an empty build information (`SBuildInfo::Print` writes a line per value).
 ///
@@ -184,8 +184,9 @@ fn print_text(appname: &str, version: &str) -> String {
     )
 }
 
-/// `CVersionAPI::PrintXml(appname, fPrintAll)` with LOSAT's values (`print_text`): the program's
-/// version and the package's are LOSAT's, with an empty build information and an empty `config`.
+/// `CVersionAPI::PrintXml` of `appname` with `fPrintAll`, with LOSAT's values (`print_text`): the
+/// program's version and the package's are LOSAT's, with an empty build information and an empty
+/// `config`.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:778-820
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:567-579 (`SBuildInfo::PrintXml`,
@@ -214,8 +215,8 @@ fn print_xml(appname: &str, components: &[Component]) -> String {
     )
 }
 
-/// `CVersionAPI::PrintJson(appname, fPrintAll)` with LOSAT's values (`print_xml`): the list of
-/// components is empty, as NCBI's BLAST+ programs write it, except for windowmasker.
+/// `CVersionAPI::PrintJson` of `appname` with `fPrintAll`, with LOSAT's values (`print_xml`): the
+/// list of components is empty, as NCBI's BLAST+ programs write it, except for windowmasker.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:829-884
 fn print_json(appname: &str, components: &[Component]) -> String {

@@ -6,8 +6,9 @@
 // engine's memory after it; BLASTP's and BLASTX's rows run twice more on one thread at the end, when the browser has
 // compiled their code, for the time of a search without the compilation (line WQA D12a's measurement, P4). Two more
 // tests give the run the user's picked Files (an `<input type=file>` that Playwright sets from the disk), which the
-// Engine worker and the thread workers read from the disk with FileReaderSync, and one of them changed after its pick,
-// which the browser no longer reads (review of D12a, low 5).
+// Engine worker and the thread workers read from the disk with FileReaderSync, and one of them changed or removed after
+// its pick, which fails the run with the error of a file that cannot be read or, where the browser still reads a
+// changed File, writes the frozen output (review of D12a, low 5).
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync } from 'node:fs';
@@ -140,7 +141,7 @@ test("-db searches read the user's picked Files from the disk, in the Engine wor
   }
 });
 
-test('a database file changed or removed after its pick fails the run with the error of a file that cannot be read', async ({ context, browserName }) => {
+test('a database file changed after its pick fails the run as a file that cannot be read or gives the frozen output, and one removed fails it', async ({ context, browserName }) => {
   const page = await openHarness(context, server);
   const row = manifestRows().find((candidate) => candidate.id === 'db.d1.6')!;
   const search = searchOf(row, 1);
@@ -159,20 +160,26 @@ test('a database file changed or removed after its pick fails the run with the e
       return target;
     });
     await pick(page, paths);
-    // The sequences change after the pick, and their modification time moves to a later whole second. Chromium and
-    // WebKit then no longer read the picked File (NotReadableError, which the host gives the engine as EIO). WebKit
-    // compares the times in whole seconds: a change written within the second of the time that the pick saw is read
-    // as the file is now, up to the picked size, without an error (observed 2026-11-21: CI's WebKit appended within
-    // that second and its run completed), so the test sets the time. Firefox reads the file's bytes as they are now
-    // whatever the time (observed 2026-11-21), so its run completes.
+    // The sequences change after the pick: one byte is appended, which leaves the records and NCBI's output as they
+    // were, and the modification time moves to a later whole second. Whether a browser still reads a picked File that
+    // changed is the browser's choice:
+    // - Chromium refuses it (NotReadableError, which the host gives the engine as EIO).
+    // - Firefox reads the file's bytes as they are now (observed 2026-11-21).
+    // - WebKit refused it here once the time had moved to a later second, but CI's WebKit read it with the time 2 s
+    //   later (2026-11-22, dev Web run 45039519014) and its run wrote the frozen output.
+    // So a run either fails with the error of a file that cannot be read or writes the frozen output; it never writes
+    // other bytes.
     const picked = statSync(sequences).mtimeMs;
     appendFileSync(sequences, Buffer.from([0]));
     const later = new Date((Math.floor(picked / 1000) + 2) * 1000);
     utimesSync(sequences, later, later);
     const changed = await run();
     console.log(`${browserName} changed ${search.id}: ${changed.error ?? `ran, outfmt 6 ${changed.sha256}`}`);
-    if (browserName === 'firefox') expect(changed.error, browserName).toBeUndefined();
-    else expect(changed.error, browserName).toMatch(CHANGED_FILE_ERROR);
+    if (browserName === 'chromium') expect(changed.error, browserName).toMatch(CHANGED_FILE_ERROR);
+    else if (browserName === 'firefox' || changed.error === undefined) {
+      expect(changed.error, browserName).toBeUndefined();
+      expect(changed.sha256, browserName).toBe(frozenInLosatWords(search.id));
+    } else expect(changed.error, browserName).toMatch(CHANGED_FILE_ERROR);
     // Removed after the pick: no browser reads it.
     rmSync(sequences);
     const removed = await run();

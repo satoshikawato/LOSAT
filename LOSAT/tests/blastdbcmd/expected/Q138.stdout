@@ -1,0 +1,22 @@
+Blast-def-line ::= {
+  title "dup one b",
+  seqid {
+    other {
+      accession "XP_800001",
+      version 2
+    }
+  },
+  taxid 0
+}
+
+Blast-def-line ::= {
+  title "dup one a",
+  seqid {
+    other {
+      accession "XP_800001",
+      version 1
+    }
+  },
+  taxid 0
+}
+

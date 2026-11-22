@@ -157,6 +157,8 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A34", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%o|%a|%g|%t|%l|%P|%T|%L|%e|%n|%h|%i"], 0),
     ("A35", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%s"], 0),
     ("A36", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%m21"], 0),
+    ("A37", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%d"], 0),
+    ("A38", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%b"], 0),
     ("A39", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%f"], 0),
     ("A40", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%X|%K|%S|%B|%C|%N"], 0),
     ("A41", &["-db", "db/ak/m_r", "-ipg", "1002", "-outfmt", "%o|%a|%l"], 0),
@@ -426,29 +428,6 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A269", &["-db", "../db_search/oidmask/tover", "-entry", "all", "-outfmt", "%o"], 255),
     ("A270", &["-db", "../db_search/oidmask/tall", "-entry", "all", "-outfmt", "%o|%a|%l|%s", "-line_length", "20"], 0),
 ];
-
-/// The cases of probe p4c_c that LOSAT's BLASTDBCMD refuses: `-outfmt %d` and `%b` (the ASN.1
-/// texts, line BDC DECISIONS 9), which NCBI writes for the OID of a PIG outside the range too.
-#[rustfmt::skip]
-const REFUSALS: &[(&str, &[&str])] = &[
-    ("A37", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%d"]),
-    ("A38", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%b"]),
-];
-
-#[test]
-fn asn1_texts_of_a_pig_outside_the_range_are_refused() {
-    let config = TestDir::new("refusals");
-    for &(id, words) in REFUSALS {
-        let (stdout, stderr, code) = blastdbcmd(words, &config.0);
-        let stderr = String::from_utf8_lossy(&stderr);
-        assert_eq!(stdout, b"", "{id} {words:?}");
-        assert_eq!(code, 1, "{id} {words:?}: {stderr}");
-        assert!(
-            stderr.ends_with("is not supported by LOSAT's BLASTDBCMD\n"),
-            "{id} {words:?}: {stderr}"
-        );
-    }
-}
 
 /// A range outside the bit array of the union of the ranges below it, where NCBI clears bits
 /// outside the array where it builds its OID list (line RG D1b-1), which LOSAT refuses there:

@@ -119,6 +119,9 @@ Strategy files:
 - With `-ungapped -window_size 0` and a low `-threshold`, `-outfmt 1` to `4` is refused for a one-hit ungapped alignment of length 0 among the alignments shown, where NCBI's merge of the query-anchored alignments frees memory that it still reads. NCBI crashed in every such run we made.
 - One case is an alignment whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1. The other is an alignment followed on its query row by unaligned letters, whose segment the merge frees unless it is the last segment it made.
 - LOSAT stops before the first byte of the report, unless the report of a query before it ends with NCBI's exception.
+- With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, `-dbsize`, or a small query and subject) can reach it.
+- With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, and with LOSAT's `LOSAT engine error: Traceback failed`.
+- For these two, LOSAT writes the results of the query batches before and then stops with the error.
 
 ## tblastn
 

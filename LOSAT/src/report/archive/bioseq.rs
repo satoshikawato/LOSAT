@@ -8,6 +8,7 @@
 //! empty record is `repr virtual` with no data).
 
 use crate::report::seqid::SeqId;
+use crate::report::serial::bioseq::{SeqData, SeqInst, Seqdesc, UserData, UserObject};
 use crate::report::serial::encoder::Encoder;
 
 /// A record to write as a Bioseq.
@@ -162,118 +163,52 @@ pub fn write_seq_loc<E: Encoder>(enc: &mut E, loc: &QuerySeqLoc<'_>) {
 }
 
 /// Writes the Bioseq as the element it is in a `SEQUENCE OF` / `SET OF` (the caller has
-/// called `element()`; a Seq-entry wrapper is the caller's too).
+/// called `element()`; a Seq-entry wrapper is the caller's too): its Seq-ids, the
+/// `CFastaReader` user object and the title, and the letters (`report::serial::bioseq`).
 pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
-    enc.begin_sequence("Bioseq");
-    enc.member("id", 0);
-    enc.begin_list(true);
-    match bioseq.ids {
-        Some(ids) => {
-            for id in ids {
-                enc.element();
-                SeqId::Db(id).write(enc);
-            }
-        }
-        None => {
-            enc.element();
-            SeqId::Local(bioseq.id).write(enc);
-        }
-    }
-    enc.end_list();
-    enc.end_member();
-
-    enc.member("descr", 1);
-    enc.begin_named("Seq-descr");
-    enc.begin_list(true);
-    enc.element();
-    enc.variant("Seqdesc", "user", 13);
-    enc.begin_sequence("User-object");
-    enc.member("type", 1);
-    enc.variant("Object-id", "str", 1);
-    enc.visible_str(b"CFastaReader");
-    enc.end_variant();
-    enc.end_member();
-    enc.member("data", 2);
-    enc.begin_list(false);
-    enc.element();
-    enc.begin_sequence("User-field");
-    enc.member("label", 0);
-    enc.variant("Object-id", "str", 1);
-    enc.visible_str(b"DefLine");
-    enc.end_variant();
-    enc.end_member();
-    enc.member("data", 2);
-    enc.variant("User-field_data", "str", 0);
+    let ids: Vec<SeqId<'_>> = match bioseq.ids {
+        Some(ids) => ids.iter().map(SeqId::Db).collect(),
+        None => vec![SeqId::Local(bioseq.id)],
+    };
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:601
-    // The default mode `fNewLine_Quote` writes a line feed as `\n` (ncbistr.hpp:2730).
-    enc.visible_str(&crate::ncbi_str::printable_string(&bioseq.defline));
-    enc.end_variant();
-    enc.end_member();
-    enc.end_sequence();
-    enc.end_list();
-    enc.end_member();
-    enc.end_sequence();
-    enc.end_variant();
+    // The default mode `fNewLine_Quote` of `NStr::PrintableString` writes a line feed as `\n`
+    // (ncbistr.hpp:2730).
+    let defline = crate::ncbi_str::printable_string(&bioseq.defline);
+    let mut descr = vec![Seqdesc::User(UserObject {
+        type_str: b"CFastaReader",
+        label: b"DefLine",
+        num: None,
+        data: UserData::Str(&defline),
+    })];
     if !bioseq.title.is_empty() {
-        enc.element();
-        enc.variant("Seqdesc", "title", 4);
-        enc.visible_str(bioseq.title);
-        enc.end_variant();
+        descr.push(Seqdesc::Title(bioseq.title));
     }
-    enc.end_list();
-    enc.end_named();
-    enc.end_member();
-
-    enc.member("inst", 2);
-    enc.begin_sequence("Seq-inst");
-    enc.member("repr", 0);
-    let empty = bioseq.letters.is_empty();
-    if empty {
-        enc.enumerated("virtual", 1);
+    let upper: Vec<u8>;
+    let packed: Vec<u8>;
+    let data = if bioseq.letters.is_empty() {
+        None
+    } else if bioseq.protein {
+        upper = bioseq
+            .letters
+            .iter()
+            .map(|letter| letter.to_ascii_uppercase())
+            .collect();
+        Some(SeqData::Ncbieaa(&upper))
     } else {
-        enc.enumerated("raw", 2);
-    }
-    enc.end_member();
-    enc.member("mol", 1);
-    if bioseq.protein {
-        enc.enumerated("aa", 3);
-    } else {
-        enc.enumerated("na", 4);
-    }
-    enc.end_member();
-    enc.member("length", 2);
-    enc.int(bioseq.letters.len() as i32);
-    enc.end_member();
-    if !empty {
-        enc.member("seq-data", 6);
-        if bioseq.protein {
-            enc.variant("Seq-data", "ncbieaa", 7);
-            let upper: Vec<u8> = bioseq
-                .letters
-                .iter()
-                .map(|letter| letter.to_ascii_uppercase())
-                .collect();
-            enc.begin_named("NCBIeaa");
-            enc.string_store(&upper);
-            enc.end_named();
+        let two_bit;
+        (two_bit, packed) = pack_nucleotides(bioseq.letters);
+        Some(if two_bit {
+            SeqData::Ncbi2na(&packed)
         } else {
-            let (two_bit, packed) = pack_nucleotides(bioseq.letters);
-            let name = if two_bit { "NCBI2na" } else { "NCBI4na" };
-            if two_bit {
-                enc.variant("Seq-data", "ncbi2na", 2);
-            } else {
-                enc.variant("Seq-data", "ncbi4na", 3);
-            }
-            enc.begin_named(name);
-            enc.octets(&packed);
-            enc.end_named();
-        }
-        enc.end_variant();
-        enc.end_member();
-    }
-    enc.end_sequence();
-    enc.end_member();
-    enc.end_sequence();
+            SeqData::Ncbi4na(&packed)
+        })
+    };
+    let inst = SeqInst {
+        protein: bioseq.protein,
+        length: bioseq.letters.len() as u32,
+        data,
+    };
+    crate::report::serial::bioseq::write_bioseq(enc, &ids, &descr, &inst);
 }
 
 #[cfg(test)]

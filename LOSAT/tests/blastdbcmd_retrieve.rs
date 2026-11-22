@@ -58,12 +58,21 @@ impl Drop for TestDir {
 /// `out_dir`: stdout, stderr, exit status. No `BLASTDB`, no registry file (`NCBI_CONFIG_PATH`
 /// names `out_dir` alone), no LOSAT variable.
 fn blastdbcmd(words: &[&str], out_dir: &Path) -> (Vec<u8>, Vec<u8>, i32) {
+    blastdbcmd_in(words, out_dir, None)
+}
+
+/// `blastdbcmd` with `BLASTDB` set to the directory `blastdb` of `tests/blastdbcmd` (where the
+/// taxonomy database of the run is), or unset.
+fn blastdbcmd_in(words: &[&str], out_dir: &Path, blastdb: Option<&str>) -> (Vec<u8>, Vec<u8>, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if text.starts_with("LOSAT_") || text.starts_with("NCBI_") || text == "BLASTDB" {
             command.env_remove(&name);
         }
+    }
+    if let Some(dir) = blastdb {
+        command.env("BLASTDB", tests_dir().join("blastdbcmd").join(dir));
     }
     let out_dir = out_dir.to_str().unwrap();
     let output = command
@@ -93,7 +102,12 @@ fn expected(name: &str) -> Vec<u8> {
 }
 
 fn check(id: &str, words: &[&str], status: i32, out_dir: &Path) {
-    let (stdout, stderr, code) = blastdbcmd(words, out_dir);
+    check_in(id, words, status, out_dir, None);
+}
+
+/// `check` with `BLASTDB` set as `blastdbcmd_in` sets it.
+fn check_in(id: &str, words: &[&str], status: i32, out_dir: &Path, blastdb: Option<&str>) {
+    let (stdout, stderr, code) = blastdbcmd_in(words, out_dir, blastdb);
     assert_eq!(
         String::from_utf8_lossy(&stdout),
         String::from_utf8_lossy(&expected(&format!("{id}.stdout"))),
@@ -401,6 +415,18 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
     ("I775", &["-db", "db/p4n", "-entry", "1", "-outfmt", "%o %a"], 1),
     ("I776", &["-db", "db/p4n", "-entry", "lcl|3", "-outfmt", "%o %a"], 1),
     ("I777", &["-db", "db/p4n", "-entry", "gi|5", "-outfmt", "%o %a"], 1),
+    // Hexadecimal values of the keys with a constraint (`-line_length` `>=1`, `-ipg` `>=0`): NCBI's
+    // reader converts them and its constraint reads their text (line RG item K4i-1, 2026-11-18;
+    // G11 in `blastdbcmd_info.rs`).
+    ("G01", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x5"], 0),
+    ("G02", &["-db", "db/p5n", "-entry", "all", "-line_length", "0X10"], 0),
+    ("G03", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x"], 1),
+    ("G04", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x0"], 1),
+    ("G05", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x1p3"], 1),
+    ("G06", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x80000000"], 1),
+    ("G08", &["-db", "db/n4n", "-entry", "all", "-line_length", "0x5g"], 1),
+    ("G09", &["-db", "db/ak/m_r", "-ipg", "0x3E9"], 0),
+    ("G10", &["-db", "db/ak/m_r", "-ipg", "0x"], 1),
 ];
 
 #[test]
@@ -415,6 +441,385 @@ fn retrieval_is_ncbi_s_bytes() {
         }
         check(id, words, status, &dir.0);
     }
+}
+
+/// The probe's cases of `-outfmt %d` (the definition lines as ASN.1 text: `Q101`-`Q144`), `%b`
+/// (the Bioseq as ASN.1 text: `Q201`-`Q244`) and both (`Q301`-`Q331`) that read no taxonomy
+/// database (line RG, item Dbc): id, words, NCBI's exit status. `{O}/Q126.out` and `{O}/Q238.out`
+/// are files of `-out`, whose expected bytes are the files of the same names. The databases are
+/// those of `MATCHES`, the volumes of `j/lst` with `-taxids` and `-no_taxid_expansion`, `db/m/pmg`
+/// (PIGs), several names in `-db` (`db/n5 db/n5n`, `db/p5 db/p5n`: the ordinal ids of the second
+/// database's definition lines are database-wide, so the header in `%b` is written again) and the
+/// Seq-id module's databases (`../seqid/db`: every Seq-id form that makeblastdb writes), `db/pl4`
+/// (definition lines with memberships and other-info), and `db/pe4`, `db/pz4` and `db/pz5/pl5`:
+/// `db/pl4` and `db/pl5` with a header made by hand, which makeblastdb never writes (a set of no
+/// lines at OID 1; no bytes at OID 1, or at OID 0 of a database with taxids): NCBI's reader tells
+/// a set of no lines from no set. `db/lc/lc4` and `db/lc/lc5` (makeblastdb `-parse_seqids`, version 4
+/// and 5) hold local ids, read with `-target_only` in each format: `%b` reads the target with
+/// `fParse_AnyRaw` (a bare local id is "Malformatted ID", a number is a GI that matches the local
+/// id of its label), the other formats with the lookup's flags. `db/pzm`, `db/pzm2` and `db/pzm0` are
+/// alias files over `db/pz4` with `OID_MASK_TYPE` 1, 2 and 0: NCBI's header read filters the set
+/// under any type other than 0, and the filter of no set throws "Attempt to access NULL pointer.".
+#[rustfmt::skip]
+const ASN_TEXTS: &[(&str, &[&str], i32)] = &[
+    ("Q101", &["-db", "db/p5", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q102", &["-db", "db/p4", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q103", &["-db", "db/n5", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q104", &["-db", "db/n4", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q105", &["-db", "db/p5n", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q106", &["-db", "db/n4n", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q107", &["-db", "db/i4", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q108", &["-db", "db/dv4", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q109", &["-db", "db/pv", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q110", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-outfmt", "%d"], 0),
+    ("Q111", &["-db", "db/p5", "-entry", "AAA00018.1", "-outfmt", "%d"], 0),
+    ("Q112", &["-db", "db/p5", "-entry", "CAA00019.1", "-target_only", "-outfmt", "%d"], 0),
+    ("Q113", &["-db", "db/p5", "-entry", "AAA00018.1", "-target_only", "-outfmt", "%d"], 0),
+    ("Q114", &["-db", "db/p5", "-entry", "all", "-outfmt", "%a %d"], 0),
+    ("Q115", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "x%dy"], 0),
+    ("Q116", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%d%d"], 0),
+    ("Q117", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%%d"], 0),
+    ("Q118", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%f %d"], 1),
+    ("Q119", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%d %b"], 1),
+    ("Q120", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%d %m11"], 0),
+    ("Q121", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%d", "-range", "2-5"], 0),
+    ("Q122", &["-db", "db/n5", "-entry", "all", "-outfmt", "%d", "-strand", "minus", "-range", "3-9"], 0),
+    ("Q123", &["-db", "db/p5", "-entry_batch", "in/pids.txt", "-outfmt", "%d"], 1),
+    ("Q124", &["-db", "db/p5", "-entry_batch", "in/pids.txt", "-outfmt", "%d", "-get_dups"], 1),
+    ("Q126", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%d", "-out", "{O}/Q126.out"], 0),
+    ("Q127", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%d"], 0),
+    ("Q128", &["-db", "db/p5", "-entry", "AAA00018.1", "-outfmt", "%d", "-ctrl_a"], 0),
+    ("Q129", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%d", "-mask_sequence_with", "11"], 0),
+    ("Q132", &["-db", "db/p5", "-entry", "AAA00018.1", "-outfmt", "%d", "-long_seqids"], 0),
+    ("Q133", &["-db", "db/p5", "-entry", "nosuch", "-outfmt", "%d"], 1),
+    ("Q134", &["-db", "db/h_p5p5n", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q135", &["-db", "db/pL", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q136", &["-db", "db/nL", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q137", &["-db", "db/d5", "-entry", "XP_800001", "-outfmt", "%d"], 0),
+    ("Q138", &["-db", "db/d5", "-entry", "XP_800001", "-target_only", "-outfmt", "%d"], 0),
+    ("Q139", &["-db", "db/i4", "-entry_batch", "in/i_i_all.txt", "-target_only", "-outfmt", "%d"], 1),
+    ("Q140", &["-db", "db/p5", "-entry", "1819", "-target_only", "-outfmt", "%d"], 0),
+    ("Q141", &["-db", "db/it4", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q142", &["-db", "db/pm5", "-entry", "all", "-outfmt", "%d %m99"], 0),
+    ("Q143", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%d %Z"], 0),
+    ("Q144", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%Z %d"], 0),
+    ("Q201", &["-db", "db/p5", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q202", &["-db", "db/p4", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q203", &["-db", "db/n5", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q204", &["-db", "db/n4", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q205", &["-db", "db/p5n", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q206", &["-db", "db/n4n", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q207", &["-db", "db/n5n", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q208", &["-db", "db/i4", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q210", &["-db", "db/pv", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q211", &["-db", "db/it4", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q212", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q213", &["-db", "db/nm4", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q214", &["-db", "db/pL", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q215", &["-db", "db/nL", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q216", &["-db", "db/pm5", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q217", &["-db", "db/p5", "-entry", "AAA00018.1", "-target_only", "-outfmt", "%b"], 0),
+    ("Q218", &["-db", "db/p5", "-entry", "CAA00019.1", "-target_only", "-outfmt", "%b"], 0),
+    ("Q219", &["-db", "db/p5", "-entry", "1819", "-target_only", "-outfmt", "%b"], 0),
+    ("Q220", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%s %b"], 0),
+    ("Q221", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%%b"], 0),
+    ("Q222", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "x%by"], 0),
+    ("Q223", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%b", "-range", "2-5"], 0),
+    ("Q224", &["-db", "db/n5", "-entry", "all", "-outfmt", "%b", "-strand", "minus"], 0),
+    ("Q225", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%b", "-mask_sequence_with", "11"], 0),
+    ("Q226", &["-db", "db/p5", "-entry_batch", "in/pids.txt", "-outfmt", "%b", "-get_dups"], 1),
+    ("Q228", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%b"], 0),
+    ("Q229", &["-db", "db/p5", "-entry", "AAA00018.1", "-outfmt", "%b", "-ctrl_a"], 0),
+    ("Q230", &["-db", "db/p5", "-entry", "AAA00018.1", "-outfmt", "%b", "-long_seqids"], 0),
+    ("Q233", &["-db", "../db_search/t5/pmix", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q236", &["-db", "db/d5", "-entry", "XP_800001", "-outfmt", "%b"], 0),
+    ("Q237", &["-db", "db/d5", "-entry", "XP_800001", "-target_only", "-outfmt", "%b"], 0),
+    ("Q238", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%b", "-out", "{O}/Q238.out"], 0),
+    ("Q239", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%f %b"], 1),
+    ("Q240", &["-db", "db/h_p5p5n", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q241", &["-db", "db/i4", "-entry_batch", "in/i_i_all.txt", "-target_only", "-outfmt", "%b"], 1),
+    ("Q242", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%b %m11"], 0),
+    ("Q243", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-target_only", "-outfmt", "%b"], 0),
+    ("Q244", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-target_only", "-outfmt", "%d"], 0),
+    ("Q301", &["-db", "j/lst/p5", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%b"], 0),
+    ("Q302", &["-db", "j/lst/p5", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%d"], 0),
+    ("Q303", &["-db", "j/lst/p5 j/lst/p5n", "-taxids", "9606", "-no_taxid_expansion", "-target_only", "-outfmt", "%b"], 0),
+    ("Q304", &["-db", "j/lst/p5 j/lst/p5n", "-taxids", "9606", "-no_taxid_expansion", "-target_only", "-outfmt", "%d"], 0),
+    ("Q308", &["-db", "db/ak/or/A_lo3g_a", "-dbtype", "prot", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%b"], 0),
+    ("Q309", &["-db", "db/d5", "-entry_batch", "in/dups.txt", "-get_dups", "-outfmt", "%b"], 1),
+    ("Q310", &["-db", "db/d5", "-entry_batch", "in/dups.txt", "-get_dups", "-target_only", "-outfmt", "%d"], 1),
+    ("Q311", &["-db", "db/i4", "-entry_batch", "in/i_p_safe.txt", "-target_only", "-outfmt", "%b"], 1),
+    ("Q314", &["-db", "../seqid/db/nucl_ids", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q315", &["-db", "../seqid/db/nucl_ids", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q316", &["-db", "../seqid/db/prot_extra", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q317", &["-db", "../seqid/db/prot_extra", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q318", &["-db", "../seqid/db/variants", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q319", &["-db", "../seqid/db/variants", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q320", &["-db", "db/n5 db/n5n", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q321", &["-db", "db/p5 db/p5n", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q322", &["-db", "db/m/pmg", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q326", &["-db", "db/p5", "-entry", "all", "-outfmt", "%b", "-line_length", "10"], 0),
+    ("Q327", &["-db", "db/m/pmg", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q328", &["-db", "db/n4n db/n5", "-entry", "all", "-outfmt", "%b"], 2),
+    ("Q330", &["-db", "db/pl4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q331", &["-db", "db/pl4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q332", &["-db", "db/pe4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q333", &["-db", "db/pe4", "-dbtype", "prot", "-entry", "5003", "-outfmt", "%d"], 0),
+    ("Q334", &["-db", "db/pe4", "-dbtype", "prot", "-entry", "5003", "-target_only", "-outfmt", "%d"], 1),
+    ("Q335", &["-db", "db/pe4", "-dbtype", "prot", "-entry", "5003", "-target_only", "-outfmt", "%a"], 1),
+    ("Q336", &["-db", "db/pe4", "-dbtype", "prot", "-entry", "5003", "-target_only", "-outfmt", "%b"], 1),
+    ("Q337", &["-db", "db/pz4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q338", &["-db", "db/pz4", "-dbtype", "prot", "-entry", "5003", "-target_only", "-outfmt", "%b"], 1),
+    ("Q339", &["-db", "db/pz4", "-dbtype", "prot", "-entry", "5003", "-target_only"], 1),
+    ("Q340", &["-db", "db/pz4", "-dbtype", "prot", "-entry", "5003", "-target_only", "-outfmt", "%a"], 0),
+    ("Q341", &["-db", "db/pz5/pl5", "-dbtype", "prot", "-taxids", "9606", "-target_only", "-outfmt", "%d"], 1),
+    ("Q342", &["-db", "db/pz5/pl5", "-dbtype", "prot", "-taxids", "9606", "-target_only", "-outfmt", "%a"], 1),
+    ("Q343", &["-db", "db/pz5/pl5", "-dbtype", "prot", "-taxids", "9606", "-outfmt", "%d"], 0),
+    ("Q344", &["-db", "db/lc/lc4", "-entry", "myprot9", "-target_only", "-outfmt", "%b"], 1),
+    ("Q345", &["-db", "db/lc/lc4", "-entry", "myprot9", "-target_only", "-outfmt", "%d"], 0),
+    ("Q346", &["-db", "db/lc/lc4", "-entry", "myprot9", "-target_only", "-outfmt", "%f"], 0),
+    ("Q347", &["-db", "db/lc/lc4", "-entry", "myprot9", "-target_only", "-outfmt", "%a"], 0),
+    ("Q348", &["-db", "db/lc/lc4", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%b"], 0),
+    ("Q349", &["-db", "db/lc/lc4", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%d"], 0),
+    ("Q350", &["-db", "db/lc/lc4", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%f"], 0),
+    ("Q351", &["-db", "db/lc/lc4", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%a"], 0),
+    ("Q352", &["-db", "db/lc/lc4", "-entry", "myprot13", "-target_only", "-outfmt", "%b"], 1),
+    ("Q353", &["-db", "db/lc/lc4", "-entry", "myprot13", "-target_only", "-outfmt", "%d"], 0),
+    ("Q354", &["-db", "db/lc/lc4", "-entry", "myprot13", "-target_only", "-outfmt", "%f"], 0),
+    ("Q355", &["-db", "db/lc/lc4", "-entry", "myprot13", "-target_only", "-outfmt", "%a"], 0),
+    ("Q356", &["-db", "db/lc/lc4", "-entry", "12345", "-target_only", "-outfmt", "%b"], 0),
+    ("Q357", &["-db", "db/lc/lc4", "-entry", "12345", "-target_only", "-outfmt", "%d"], 0),
+    ("Q358", &["-db", "db/lc/lc4", "-entry", "12345", "-target_only", "-outfmt", "%f"], 0),
+    ("Q359", &["-db", "db/lc/lc4", "-entry", "12345", "-target_only", "-outfmt", "%a"], 0),
+    ("Q360", &["-db", "db/lc/lc4", "-entry", "lcl|12345", "-target_only", "-outfmt", "%b"], 0),
+    ("Q361", &["-db", "db/lc/lc4", "-entry", "lcl|12345", "-target_only", "-outfmt", "%d"], 0),
+    ("Q362", &["-db", "db/lc/lc4", "-entry", "lcl|12345", "-target_only", "-outfmt", "%f"], 0),
+    ("Q363", &["-db", "db/lc/lc4", "-entry", "lcl|12345", "-target_only", "-outfmt", "%a"], 0),
+    ("Q364", &["-db", "db/lc/lc5", "-entry", "myprot9", "-target_only", "-outfmt", "%b"], 1),
+    ("Q365", &["-db", "db/lc/lc5", "-entry", "myprot9", "-target_only", "-outfmt", "%d"], 0),
+    ("Q366", &["-db", "db/lc/lc5", "-entry", "myprot9", "-target_only", "-outfmt", "%f"], 0),
+    ("Q367", &["-db", "db/lc/lc5", "-entry", "myprot9", "-target_only", "-outfmt", "%a"], 0),
+    ("Q368", &["-db", "db/lc/lc5", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%b"], 0),
+    ("Q369", &["-db", "db/lc/lc5", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%d"], 0),
+    ("Q370", &["-db", "db/lc/lc5", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%f"], 0),
+    ("Q371", &["-db", "db/lc/lc5", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%a"], 0),
+    ("Q372", &["-db", "db/lc/lc5", "-entry", "myprot13", "-target_only", "-outfmt", "%b"], 1),
+    ("Q373", &["-db", "db/lc/lc5", "-entry", "myprot13", "-target_only", "-outfmt", "%d"], 0),
+    ("Q374", &["-db", "db/lc/lc5", "-entry", "myprot13", "-target_only", "-outfmt", "%f"], 0),
+    ("Q375", &["-db", "db/lc/lc5", "-entry", "myprot13", "-target_only", "-outfmt", "%a"], 0),
+    ("Q376", &["-db", "db/lc/lc5", "-entry", "12345", "-target_only", "-outfmt", "%b"], 0),
+    ("Q377", &["-db", "db/lc/lc5", "-entry", "12345", "-target_only", "-outfmt", "%d"], 0),
+    ("Q378", &["-db", "db/lc/lc5", "-entry", "12345", "-target_only", "-outfmt", "%f"], 0),
+    ("Q379", &["-db", "db/lc/lc5", "-entry", "12345", "-target_only", "-outfmt", "%a"], 0),
+    ("Q380", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%b"], 0),
+    ("Q381", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%d"], 0),
+    ("Q382", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%f"], 0),
+    ("Q383", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%a"], 0),
+    ("Q384", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 1),
+    ("Q385", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 1),
+    ("Q386", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "all"], 1),
+    ("Q387", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "all", "-outfmt", "%b"], 1),
+    ("Q388", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o"], 0),
+    ("Q389", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "XP_5001.1", "-outfmt", "%d"], 1),
+    ("Q390", &["-db", "db/pzm", "-dbtype", "prot", "-entry", "XP_5001.1", "-target_only", "-outfmt", "%a"], 1),
+    ("Q391", &["-db", "db/pzm2", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 1),
+    ("Q392", &["-db", "db/pzm2", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 1),
+    ("Q393", &["-db", "db/pzm2", "-dbtype", "prot", "-entry", "all", "-outfmt", "%b"], 1),
+    ("Q394", &["-db", "db/pzm2", "-dbtype", "prot", "-entry", "all"], 1),
+    ("Q395", &["-db", "db/pzm0", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 0),
+    ("Q396", &["-db", "db/pzm0", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 0),
+];
+
+/// The cases of `%d` and `%b` that read a taxonomy database (`BLASTDB`, a directory of
+/// `tests/blastdbcmd`): id, `BLASTDB`, words, NCBI's exit status. `Q235`'s names hold bytes
+/// outside ' ' ..= '~', which NCBI's text stream writes as `#` and reports on the standard error.
+#[rustfmt::skip]
+const ASN_TEXTS_TAXDB: &[(&str, &str, &[&str], i32)] = &[
+    ("Q130", "../seqdb/taxdb/t5", &["-db", "../db_search/t5/nmix", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q131", "../seqdb/taxdb/t5", &["-db", "../db_search/t5/pmix", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q231", "../seqdb/taxdb/t5", &["-db", "../db_search/t5/nmix", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q232", "../seqdb/taxdb/t5", &["-db", "../db_search/t5/pmix", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q234", "../seqdb/taxdb/t5", &["-db", "../db_search/t5/nmix", "-entry", "AB311001.1", "-target_only", "-outfmt", "%b"], 0),
+    ("Q235", "../seqdb/taxdb/k5", &["-db", "../db_search/t5/pk5", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q305", "j/jtax5", &["-db", "j/lst/p5", "-taxids", "9604", "-outfmt", "%b"], 0),
+    ("Q306", "j/jtax5", &["-db", "j/lst/p5", "-taxids", "10066", "-target_only", "-outfmt", "%b"], 0),
+    ("Q307", "j/jtax5", &["-db", "j/lst/p5", "-taxids", "10066", "-target_only", "-outfmt", "%d"], 0),
+];
+
+#[test]
+fn asn_texts_are_ncbi_s_bytes() {
+    let dir = TestDir::new("asn");
+    for &(id, words, status) in ASN_TEXTS {
+        check(id, words, status, &dir.0);
+        if let Some(out) = words.iter().find_map(|word| word.strip_prefix("{O}/")) {
+            assert_eq!(
+                fs::read(dir.0.join(out)).unwrap(),
+                expected(out),
+                "{id} -out"
+            );
+        }
+    }
+    for &(id, blastdb, words, status) in ASN_TEXTS_TAXDB {
+        check_in(id, words, status, &dir.0, Some(blastdb));
+    }
+}
+
+/// One case of NCBI's unit tests of `CSeqDB` on its databases `seqn` and `seqp` (copies in
+/// `tests/seqdb/db`): blastdbcmd's `-outfmt fmt` of the sequence `entry` is `expected`, the text
+/// that NCBI's case expects of `GetBioseq` or `GetHdr` (`MSerial_AsnText`).
+fn ncbi_unit_case(db: &str, entry: &str, fmt: &str, expected: &str) {
+    let dir = TestDir::new("unit");
+    let db = format!("../seqdb/db/{db}");
+    let words = ["-db", db.as_str(), "-entry", entry, "-outfmt", fmt];
+    let (stdout, stderr, code) = blastdbcmd(&words, &dir.0);
+    assert_eq!(String::from_utf8_lossy(&stdout), expected, "{words:?}");
+    assert_eq!(
+        (String::from_utf8_lossy(&stderr), code),
+        ("".into(), 0),
+        "{words:?}"
+    );
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:534-575 GetBioseqN
+/// `GetBioseq(2)` of `seqn`: `ncbi4na` data (the sequence has an ambiguous base).
+#[test]
+fn get_bioseq_of_ncbi_s_seqn_is_its_unit_test_s_text() {
+    ncbi_unit_case(
+        "seqn",
+        "46071107",
+        "%b",
+        r#"Bioseq ::= {
+  id {
+    gi 46071107,
+    ddbj {
+      accession "BP722514",
+      version 1
+    }
+  },
+  descr {
+    title "Xenopus laevis NBRP cDNA clone:XL452f07ex, 3' end",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A3158656E6F707573206C6165766973204E4252502063444E4120
+636C6F6E653A584C34353266303765782C20332720656E640000A1803080AB80020402BEFD4300
+00AC803080A1801A0842503732323531340000A38002010100000000000000000000A280020100
+000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 165,
+    seq-data ncbi4na '11428288218841844814141422818811214421121482118428221114
+82211121141881228484211141128842148481121112222F882124422141148188842112118488
+41114822882844214144144148281181'H
+  }
+}
+"#,
+    );
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:577-617 GetBioseqP
+/// `GetBioseq(2)` of `seqp`: `ncbistdaa` data.
+#[test]
+fn get_bioseq_of_ncbi_s_seqp_is_its_unit_test_s_text() {
+    ncbi_unit_case(
+        "seqp",
+        "44268131",
+        "%b",
+        r#"Bioseq ::= {
+  id {
+    gi 44268131,
+    genbank {
+      accession "EAI08555",
+      version 1
+    }
+  },
+  descr {
+    title "unknown [environmental sequence]",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A20756E6B6E6F776E205B656E7669726F6E6D656E74616C207365
+7175656E63655D0000A1803080AB80020402A37A630000A4803080A1801A084541493038353535
+0000A38002010100000000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 64,
+    seq-data ncbistdaa '0C0A0A0606090B0909060909060B09060909131004160F090A0A0A
+0A0B0A0B0D0D010B0D110D0606090F12090D0A0B0904050D0A160D0B0B05051009100B1005'H
+  }
+}
+"#,
+    );
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:619-639 GetHdrN
+/// `GetHdr(0)` of `seqn`.
+#[test]
+fn get_hdr_of_ncbi_s_seqn_is_its_unit_test_s_text() {
+    ncbi_unit_case(
+        "seqn",
+        "46071105",
+        "%d",
+        r#"Blast-def-line-set ::= {
+  {
+    title "Xenopus laevis NBRP cDNA clone:XL452f05ex, 3' end",
+    seqid {
+      gi 46071105,
+      ddbj {
+        accession "BP722512",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+"#,
+    );
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:641-661 GetHdrP
+/// `GetHdr(0)` of `seqp`.
+#[test]
+fn get_hdr_of_ncbi_s_seqp_is_its_unit_test_s_text() {
+    ncbi_unit_case(
+        "seqp",
+        "38083732",
+        "%d",
+        r#"Blast-def-line-set ::= {
+  {
+    title "similar to KIAA0960 protein [Mus musculus]",
+    seqid {
+      gi 38083732,
+      other {
+        accession "XP_357594",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+"#,
+    );
 }
 
 /// The approved differences (line BDC DECISIONS 12): `-long_seqids` with `-range` on the
@@ -800,13 +1205,11 @@ fn out_and_logfile_take_the_retrieval_and_its_diagnostics() {
     assert_eq!(file("D84.out"), expected("D84.out"), "D84 -out");
 }
 
-/// The probe's cases that LOSAT's BLASTDBCMD does not serve: `-range ""` (NCBI crashes), and
-/// `-outfmt %d` / `%b` (DECISIONS 9).
+/// The probe's cases that LOSAT's BLASTDBCMD does not serve: `-range ""` (NCBI crashes) and a
+/// `-mask_sequence_with` below -1.
 #[rustfmt::skip]
 const REFUSALS: &[(&str, &[&str])] = &[
     ("D61", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-range", ""]),
-    ("asn-d", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-outfmt", "%d"]),
-    ("asn-b", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-outfmt", "%b"]),
     ("mask-neg", &["-db", "db/p4n", "-entry", "all", "-mask_sequence_with", "-3"]),
 ];
 

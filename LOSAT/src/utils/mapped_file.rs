@@ -166,6 +166,13 @@ impl MappedFile {
         Some(unsafe { std::slice::from_raw_parts(ptr.cast::<i32>(), count) })
     }
 
+    /// `count` native-endian `u32`s from byte `offset` (`i32s` as unsigned words).
+    pub(crate) fn u32s(&self, offset: usize, count: usize) -> Option<&[u32]> {
+        let words = self.i32s(offset, count)?;
+        // SAFETY: `u32` has the size and the alignment of `i32`; every bit pattern is a `u32`.
+        Some(unsafe { std::slice::from_raw_parts(words.as_ptr().cast::<u32>(), words.len()) })
+    }
+
     /// `count` rows of `N` native-endian `i32`s from byte `offset` (`i32s` as rows).
     pub(crate) fn rows<const N: usize>(&self, offset: usize, count: usize) -> Option<&[[i32; N]]> {
         let flat = self.i32s(offset, count.checked_mul(N)?)?;

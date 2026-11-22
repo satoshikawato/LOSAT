@@ -548,8 +548,8 @@ impl TranslatedRpsSearch {
                         .as_deref()
                         .expect("a searching batch has its score blocks"),
                     masked,
-                    i32::from(options.outfmt)
-                        != crate::blastinput::app::output_format::ARCHIVE_FORMAT,
+                    !crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
+                        .is_some_and(crate::blastinput::app::ReportFormat::writes_seqaligns),
                 ));
                 spans.push(queries.len() - start);
             }
@@ -653,16 +653,21 @@ impl TranslatedRpsSearch {
         let db = database.x_seqdb();
         for batch in 0..states.len() {
             let state = &mut states[batch];
-            let checked =
-                report_ordinal_ids(db, &mut state.hit_lists, options.shown_lists(), PROGRAM)
-                    .and_then(|unlisted| {
-                        state.unlisted = unlisted.unwrap_or_default();
-                        if self.strategy {
-                            state.request_space(units, options, &gapped)
-                        } else {
-                            Ok(None)
-                        }
-                    });
+            let checked = report_ordinal_ids(
+                db,
+                &mut state.hit_lists,
+                options.shown_lists(),
+                PROGRAM,
+                units.searches_volumes_bare(),
+            )
+            .and_then(|unlisted| {
+                state.unlisted = unlisted.unwrap_or_default();
+                if self.strategy {
+                    state.request_space(units, options, &gapped)
+                } else {
+                    Ok(None)
+                }
+            });
             match checked {
                 Ok(request_space) => state.request_space = request_space,
                 Err(error) => {
@@ -934,9 +939,9 @@ fn unsearched_batch(
 /// `sequence_start` holds each frame with letters between two sentinels at its context's offset;
 /// `masked` holds a frame's letters where a 26-column database masks some
 /// (`mask_unsupported_letters`). `-qcov_hsp_perc` reads the batch's first query's frames.
-/// `recount_identities` is false for the BLAST archive (outfmt 11), whose Seq-aligns show the
-/// traceback's counts on the searched letters, not the formatter's counts on the letters as read
-/// (`traceback::formatter_identities`).
+/// `recount_identities` is false for the Seq-aligns as they are (outfmt 8, 9, 11, 12:
+/// `ReportFormat::writes_seqaligns`), which show the traceback's counts on the searched letters,
+/// not the formatter's counts on the letters as read (`traceback::formatter_identities`).
 pub(crate) fn frame_queries<'a>(
     prepared: &'a PreparedQueryBatch,
     parameters: &[ContextParameters],

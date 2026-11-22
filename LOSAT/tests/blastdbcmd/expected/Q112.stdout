@@ -1,0 +1,12 @@
+Blast-def-line ::= {
+  title "second defline",
+  seqid {
+    gi 1819,
+    embl {
+      accession "CAA00019",
+      version 1
+    }
+  },
+  taxid 562
+}
+

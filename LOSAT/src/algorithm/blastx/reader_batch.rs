@@ -175,6 +175,36 @@ impl ReaderBatchShape {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 (`BLAST_GapAlignSetUp`,
+// cited at `parameters::subject_parameters`)
+/// The set-up of the records `queries` of a reader batch alone (`native::add_batch_scope`): the
+/// error of the set-up of the subjects where a context of theirs is valid (a database whose
+/// sequences could not be read, `UnreadableSubjects`, as the search fails its first batch with a
+/// valid context; the average subject length, the hit-saving parameters: `subject_parameters`),
+/// then of the search's first read of the database (a sequence file that cannot be opened,
+/// `Subjects::sequence_file_read_error`; line WQA D10 round 6, review 4 M2), for the caller's
+/// `search_error`; `None` where the set-up passes or no context is valid. NCBI
+/// splits no batch of two queries or more (`split::calculate_num_chunks`), and a refused batch
+/// that is set up holds two (line WQA D10 round 5, 2026-11-20).
+pub(crate) fn set_up_error(
+    queries: &[FastaRecord],
+    options: &ResolvedOptions,
+    subjects: Subjects<'_>,
+) -> Option<anyhow::Error> {
+    let prepared = prepare_unit_queries(queries, None, options).ok()?;
+    let mut params = score_block_for(&prepared, options.scoring);
+    if !params.iter().any(|p| p.valid) {
+        return None;
+    }
+    if subjects.is_unreadable() {
+        return Some(super::subjects::UnreadableSubjects.into());
+    }
+    let numbers = subjects.numbers().ok()?;
+    subject_parameters(&prepared, &mut params, options, numbers, None)
+        .err()
+        .or_else(|| subjects.sequence_file_read_error())
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:416-416,990-990
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2450-2453
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:954-957

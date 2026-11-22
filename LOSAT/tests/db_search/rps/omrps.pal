@@ -1,0 +1,4 @@
+TITLE rps_mini model
+DBLIST rps_mini
+OIDLIST rps_mini.msk
+OID_MASK_TYPE 1

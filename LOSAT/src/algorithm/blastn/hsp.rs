@@ -127,8 +127,9 @@ impl BlastnOutputFormat {
     /// What the format does with a subject whose lookup throws where its batch's prefetch is off
     /// (`report::db_subject::FormatThrow::of`): the default tables write the row (their `saccver`
     /// is a field of the subject block), a table with a field list as its fields say
-    /// (`TabularSpec::format_throw`), the XML2 and JSON documents as their form says; the
-    /// Seq-annots and the archive read nothing of the subject; LOSAT refuses it in the others.
+    /// (`TabularSpec::format_throw`), the XML2 and JSON documents as their form says, the pairwise
+    /// reports as their view says (`PairwiseView::after_throw`); the Seq-annots and the archive
+    /// read nothing of the subject; LOSAT refuses it in the others.
     pub(crate) fn format_throw(&self) -> crate::report::db_subject::FormatThrow {
         use crate::report::db_subject::{AfterThrow, FormatThrow, RunThrow};
         match *self {
@@ -141,10 +142,13 @@ impl BlastnOutputFormat {
             BlastnOutputFormat::Xml2(kind) => {
                 FormatThrow::Writes(RunThrow::every_row(kind.after_throw()))
             }
+            BlastnOutputFormat::Pairwise(view) => {
+                FormatThrow::Writes(RunThrow::every_row(view.after_throw()))
+            }
             BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => FormatThrow::Unread,
-            BlastnOutputFormat::Pairwise(_)
-            | BlastnOutputFormat::Xml
-            | BlastnOutputFormat::Sam(_) => FormatThrow::Refused,
+            BlastnOutputFormat::Xml | BlastnOutputFormat::Sam(_) => {
+                FormatThrow::Refused(crate::report::db_subject::ThrowRefusal::Format)
+            }
         }
     }
 
@@ -807,6 +811,28 @@ impl<L: HitListEntry> HitList<L> {
             }
             self.insert_hsplist_in_heap(hsp_list);
         }
+    }
+
+    /// The hit list that the best hit filter's final step (`s_BlastHSPBestHitFinal`) makes of one
+    /// query's kept lists: the lists (with their best e-values) sorted by e-value, then saved into
+    /// a hit list of `prelim_hitlist_size` subjects, which keeps the lists of the best e-values
+    /// when there are more (`Blast_HitListUpdate`). The writer and the pipe of every program whose
+    /// lists are these hit lists (blastn, tblastx) end here.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:207-221
+    pub(crate) fn best_hit_final(mut lists: Vec<L>, prelim_hitlist_size: usize) -> Self {
+        for list in &mut lists {
+            list.update_best_evalue();
+        }
+        // `Blast_HitListSortByEvalue`: no list is empty.
+        if lists.len() > 1 {
+            lists.sort_by(compare_hsp_lists);
+        }
+        let mut hit_list = Self::new(prelim_hitlist_size);
+        for list in lists {
+            hit_list.update(list);
+        }
+        hit_list
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3172-3187

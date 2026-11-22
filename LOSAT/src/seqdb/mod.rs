@@ -1552,9 +1552,13 @@ impl SeqDb {
                 alias::AliasOids {
                     words: None,
                     all_bits_special_set: false,
+                    mask_types: Vec::new(),
                 }
             }
         };
+        for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
+            volume.set_oid_mask_type(mask_type);
+        }
         // `(int)` of the `Int8` walks.
         let nseq = totals.nseq.as_ref().map_or(0, |&value| value as i32);
         let length = totals.length.as_ref().map_or(0, |&value| value);
@@ -2335,6 +2339,19 @@ impl SeqDb {
         self.sequence_header(at.volume, oid, self.volumes[at.volume].header(at.vol_oid))
     }
 
+    /// [`SeqDb::read_header_of_oid`] with every definition line the header stores
+    /// (`Volume::stored_header`): the read of a volume that NCBI's RPS search of a database of
+    /// several volumes searches bare, where neither a list nor the alias files' `OID_MASK_TYPE`
+    /// reaches the Seq-aligns' ids.
+    pub fn read_stored_header_of_oid(&self, oid: u32) -> Result<SequenceHeader, SeqDbError> {
+        let at = self.locate_oid(oid)?;
+        self.sequence_header(
+            at.volume,
+            oid,
+            self.volumes[at.volume].stored_header(at.vol_oid),
+        )
+    }
+
     /// The `SequenceHeader` of the header `header` of the sequence `oid` (its OID, which the
     /// messages name) in `volume`.
     fn sequence_header(
@@ -2367,6 +2384,54 @@ impl SeqDb {
         self.ordinal_set(at.volume, self.location_oid(&at), set)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1995-1999
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:907-922
+    /// Whether NCBI's header read of the sequence at `at` filters the set it read
+    /// (`x_GetFilteredHeader`): the database is restricted by a list (`x_HaveIdFilter`, a list
+    /// attached even where it kept nothing) or the volume has an `OID_MASK_TYPE`. `MEMB_BIT`, the
+    /// third case, is refused (`alias::UNSUPPORTED_KEYS`). The filter needs a set: a stored header
+    /// of no bytes, no set, makes NCBI's read throw there (`Source::null_set` of blastdbcmd).
+    pub fn filters_header_sets(&self, at: SeqLocation) -> bool {
+        self.is_restricted() || self.volumes[at.volume].has_oid_mask_type()
+    }
+
+    /// [`SeqDb::defline_set_at`] as NCBI's `GetHdr` gives it: `None` where the stored header has
+    /// no bytes, which `defline_set_at` gives as a set of no lines (`Volume::header_set`).
+    pub fn header_set_at(&self, at: SeqLocation) -> Result<Option<DeflineSet>, SeqDbError> {
+        match self.volumes[at.volume].header_set(at.vol_oid)? {
+            Some(set) => self
+                .ordinal_set(at.volume, self.location_oid(&at), set)
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2319-2346
+    /// The definition lines of the sequence at `at` (`defline_set_at`) and the header that
+    /// NCBI's `GetBioseq` keeps in the Bioseq's `ASN1_BlastDefLine` user object
+    /// (`x_GetFilteredBinaryHeader`): the stored record, or the set serialized again
+    /// (`writedb::header::encode_defline_set`, NCBI's `CObjectOStreamAsnBinary`) where NCBI's read
+    /// changed it: a `general` id `BL_ORD_ID` of a volume after the first, whose tag the read made
+    /// the OID in the database (`x_GetHdrAsn1`), or a line that the definition-line rule dropped
+    /// (`x_GetFilteredHeader`). `None` where the stored header has no bytes: NCBI's `GetHdr` gives
+    /// no set there (`Volume::defline_set_with_record`).
+    pub fn defline_set_with_header_at(
+        &self,
+        at: SeqLocation,
+    ) -> Result<Option<(DeflineSet, Vec<u8>)>, SeqDbError> {
+        let volume = at.volume;
+        let Some((mut set, record)) = self.volumes[volume].defline_set_with_record(at.vol_oid)?
+        else {
+            return Ok(None);
+        };
+        let adjusted = self.adjust_ordinals(volume, self.location_oid(&at), &mut set)?;
+        let header = match record {
+            Some(record) if !adjusted => record,
+            _ => crate::writedb::header::encode_defline_set(&set, &mut Vec::new()),
+        };
+        Ok(Some((set, header)))
+    }
+
     /// `set`, the definition lines of the sequence `oid` (its OID, which the messages name) in
     /// `volume`, with the tag of a `general` id `BL_ORD_ID` made its OID in the database
     /// (`defline_set`).
@@ -2376,9 +2441,21 @@ impl SeqDb {
         oid: u32,
         mut set: DeflineSet,
     ) -> Result<DeflineSet, SeqDbError> {
-        adjust_ordinal_tags(&mut set, self.volume_starts[volume])
-            .map_err(|error| error.error(self.volumes[volume].base(), oid))?;
+        self.adjust_ordinals(volume, oid, &mut set)?;
         Ok(set)
+    }
+
+    /// Makes the tag of each `general` id `BL_ORD_ID` of `set`, the definition lines of the
+    /// sequence `oid` in `volume`, its OID in the database (`adjust_ordinal_tags`, with the
+    /// reader's error naming `oid`); whether a tag changed.
+    fn adjust_ordinals(
+        &self,
+        volume: usize,
+        oid: u32,
+        set: &mut DeflineSet,
+    ) -> Result<bool, SeqDbError> {
+        adjust_ordinal_tags(set, self.volume_starts[volume])
+            .map_err(|error| error.error(self.volumes[volume].base(), oid))
     }
 
     /// The Blast-def-line `taxid` of each definition line of `ordinal`, 0 for none: read
@@ -2692,13 +2769,15 @@ pub(super) fn has_ordinal_tag(set: &DeflineSet) -> bool {
 /// the tag of each `general` id `BL_ORD_ID` made the stored tag plus `volume_start` (`x_GetHdrAsn1`
 /// with `adjust_oids`): the OID in the database where makeblastdb stored the number in the volume.
 /// Fails where NCBI's `GetId` throws (a string tag) and where the sum passes a signed 32-bit id
-/// (`OrdinalTagError`), with `set` then partly changed.
+/// (`OrdinalTagError`), with `set` then partly changed. Ok: whether a tag was changed (NCBI's
+/// `changed`, which makes `x_GetFilteredBinaryHeader` serialize the set again).
 pub(super) fn adjust_ordinal_tags(
     set: &mut DeflineSet,
     volume_start: u32,
-) -> Result<(), OrdinalTagError> {
+) -> Result<bool, OrdinalTagError> {
+    let mut changed = false;
     if volume_start == 0 {
-        return Ok(());
+        return Ok(changed);
     }
     for id in set
         .deflines
@@ -2720,8 +2799,9 @@ pub(super) fn adjust_ordinal_tags(
             return Err(OrdinalTagError::PastSigned32);
         };
         dbtag.tag = ObjectId::Id(adjusted);
+        changed = true;
     }
-    Ok(())
+    Ok(changed)
 }
 
 /// A `BL_ORD_ID` tag that NCBI's header read of a volume after the first cannot make an OID in

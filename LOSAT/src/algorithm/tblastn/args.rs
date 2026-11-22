@@ -181,6 +181,15 @@ pub struct TblastnArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
+    // With `-culling_limit` NCBI refuses the command line, LOSAT's parser too (with its own
+    // text, as for the other exclusions).
+    /// Best Hit algorithm overhang value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_overhang: Option<f64>,
+    /// Best Hit algorithm score edge value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
     /// Return only the best HSP for each non overlapping query region
     #[arg(long)]
@@ -245,6 +254,13 @@ pub struct TblastnArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
+    /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
+    /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
+    /// stops in the command line's form (line WQA D10 round 5, 2026-11-20). `None` on the command
+    /// line. Not a public option.
+    #[arg(skip)]
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:997-1056
@@ -300,6 +316,9 @@ pub struct ResolvedTblastnArgs {
     pub query_cov_hsp_perc: f64,
     /// The -culling_limit value (0: no culling).
     pub culling_limit: i32,
+    /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge`, `None` without
+    /// them (`TblastnArgs::best_hit`).
+    pub(crate) best_hit: Option<crate::core::hspfilter_besthit::BestHitParams>,
     /// Whether -subject_besthit was given.
     pub subject_besthit: bool,
     pub composition_mode: crate::blastinput::app::CompositionMode,
@@ -320,6 +339,16 @@ impl TblastnArgs {
     /// whether it was given (`culling_limit`).
     pub fn culling_limit_value(&self) -> i32 {
         self.culling_limit.unwrap_or(0)
+    }
+
+    /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge` (the one not given
+    /// takes its default), `None` when neither is given. The BLAST archive records the options
+    /// as given.
+    pub(crate) fn best_hit(&self) -> Option<crate::core::hspfilter_besthit::BestHitParams> {
+        crate::core::hspfilter_besthit::BestHitParams::from_options(
+            self.best_hit_overhang,
+            self.best_hit_score_edge,
+        )
     }
 
     /// The `-db` value as NCBI keeps it (white space at its ends removed), `None` for a
@@ -556,6 +585,7 @@ impl TblastnArgs {
             max_hsps: self.max_hsps.unwrap_or(0),
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit_value(),
+            best_hit: self.best_hit(),
             subject_besthit: self.subject_besthit,
             composition_mode,
             comp_based_stats: self.comp_based_stats.clone(),

@@ -29,7 +29,8 @@ use super::stage_d_linking::{
     reap_by_evalue, LinkedHsp, LinkedHspList,
 };
 use super::stage_d_results::{
-    merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList, PrelimCulling,
+    merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList, PrelimBestHit,
+    PrelimCulling,
 };
 use super::stage_d_stats::{LocalParameterCall, LocalParameterOptions, LocalSubjectParameters};
 use super::x_subject_store::{SubjectLetters, XPrelimSubject, XSearchSubject};
@@ -87,6 +88,11 @@ pub(super) struct LocalStageDProfile<'a> {
     /// instead of the plain hit-list collector; the pipe after the traceback is run by the
     /// finish of the search (`tblastn_app.rs`).
     pub culling_limit: i32,
+    /// `-best_hit_overhang` / `-best_hit_score_edge` (`None`: neither). Given, the preliminary
+    /// stage keeps the HSPs of each query in NCBI's best hit writer (`besthit.rs`) instead of the
+    /// plain hit-list collector; the pipe after the traceback is run by the finish of the search
+    /// (`tblastn_app.rs`).
+    pub best_hit: Option<crate::core::hspfilter_besthit::BestHitParams>,
     /// `-subject_besthit`: the preliminary stage filters each subject frame's list after each
     /// merge of a chunk (`search_gapped`), the finish of the search each final hit list.
     pub subject_besthit: bool,
@@ -364,6 +370,7 @@ pub(super) fn run_local_for_report_threads(
             &mut setup,
             None,
             Some(pool),
+            false,
         )?;
         let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
         Ok((
@@ -399,6 +406,7 @@ pub(super) fn x_run_local_for_report_in_pool(
         &mut setup,
         None,
         Some(pool),
+        false,
     )?;
     let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
     Ok((
@@ -985,7 +993,39 @@ fn run_local_search(
         &mut None,
         observer,
         None,
+        false,
     )
+}
+
+/// The set-up of a query batch without its search (`run_local_search_with_pool` up to the batch's
+/// `LocalBatchSetup`): the validity of each query's context, or the set-up's error
+/// (`SetupEngineError`: the average subject length, the hit-saving parameters). With a database the
+/// numbers are its own, and `subjects` may hold none. `tblastn_app::refused_batch_setup_error` sets up the
+/// records of a refused batch that are first in their scope with it (line WQA D10 round 5,
+/// 2026-11-20).
+pub(super) fn set_up_batch(
+    queries: &[Vec<u8>],
+    subjects: SubjectLetters<'_>,
+    profile: LocalStageDProfile<'_>,
+    compo_adjust_mode: BlastCompoAdjustMode,
+    do_sum_stats: bool,
+    scoring: LocalStageDScoring,
+) -> Result<Vec<bool>> {
+    let mut setup = None;
+    run_local_search_with_pool(
+        queries,
+        subjects,
+        profile,
+        compo_adjust_mode,
+        do_sum_stats,
+        scoring,
+        &mut setup,
+        None,
+        None,
+        true,
+    )?;
+    let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
+    Ok(setup.query_validity)
 }
 
 /// NCBI's engine error of a query batch's setup (`BLAST_GapAlignSetUp`, c++/src/algo/blast/core/blast_setup.c:888-1000):
@@ -1075,6 +1115,7 @@ fn run_local_search_with_pool(
     setup: &mut Option<LocalBatchSetup>,
     mut observer: Option<&mut StageDBoundaryTrace>,
     pool: Option<&SearchPool<'_>>,
+    setup_only: bool,
 ) -> Result<Vec<KappaResultHitList>> {
     ensure!(
         !queries.is_empty(),
@@ -1217,6 +1258,10 @@ fn run_local_search_with_pool(
         trace.subject_nt_lengths = subjects.x_read_lengths()?;
     }
     *setup = Some(batch_setup);
+    // The set-up alone (`set_up_batch`): no search.
+    if setup_only {
+        return Ok(Vec::new());
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327:
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2815-2824:
@@ -1283,15 +1328,8 @@ fn run_local_search_with_pool(
             .map_or(gapped, |psi| psi.gapped_karlin(&gapped)),
         &cutoff_arrays,
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70;
-    // c++/src/algo/blast/core/hspfilter_collector.c:105-161:
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70:
-    // Computed without NCBI's `int` overflow (`blastn/hsp.rs` `get_prelim_hitlist_size`).
-    let prelim_size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
-        profile.max_target_seqs,
-        compo_adjust_mode.is_enabled(),
-        true,
-    );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:105-161
+    let prelim_size = preliminary_hitlist_size(profile.max_target_seqs, compo_adjust_mode);
     let query_refs: Vec<_> = queries.iter().map(Vec::as_slice).collect();
     let protein_split =
         crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
@@ -1320,6 +1358,7 @@ fn run_local_search_with_pool(
                 prelim_evalue: preliminary_parameters.prelim_evalue,
                 prelim_size,
                 culling_limit: profile.culling_limit,
+                best_hit: profile.best_hit,
                 pssm: profile.pssm.map(|psi| &psi.pssm),
                 update: per_subject.then(|| SubjectUpdate {
                     recipe: &recipe,
@@ -2276,6 +2315,7 @@ fn split_preliminary_hitlists(
                 prelim_evalue: setup.parameters.prelim_evalue,
                 prelim_size,
                 culling_limit: inputs.profile.culling_limit,
+                best_hit: inputs.profile.best_hit,
                 pssm: inputs.profile.pssm.map(|psi| &psi.pssm),
                 update: per_subject.then(|| SubjectUpdate {
                     recipe: &setup.recipe,
@@ -2639,6 +2679,24 @@ fn query_set_setup<'a>(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:105-161
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:592-607
+/// The preliminary hit list size of a search (`GetPrelimHitlistSize` of a gapped search): the
+/// size of the collector's lists, and of the best hit writer's and pipe's hit lists, which NCBI
+/// takes from the same options. Computed without NCBI's `int` overflow (`blastn/hsp.rs`
+/// `get_prelim_hitlist_size`, the approved exception for hit list sizes past `Int4`).
+pub(super) fn preliminary_hitlist_size(
+    max_target_seqs: usize,
+    compo_adjust_mode: BlastCompoAdjustMode,
+) -> usize {
+    crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+        max_target_seqs,
+        compo_adjust_mode.is_enabled(),
+        true,
+    )
+}
+
 // The inputs of the preliminary stage over the subjects for one query set (the whole batch,
 // or one query chunk of a split batch).
 struct PreliminaryInputs<'a> {
@@ -2656,6 +2714,8 @@ struct PreliminaryInputs<'a> {
     prelim_size: usize,
     /// `-culling_limit` (0: none).
     culling_limit: i32,
+    /// `-best_hit_overhang` / `-best_hit_score_edge` (`None`: neither).
+    best_hit: Option<crate::core::hspfilter_besthit::BestHitParams>,
     /// `-in_pssm`: the PSSM's rows, the scores of the one query (`score::PssmScore`) and the
     /// source of its lookup table (`in_pssm::lookup_table`); `None` for a FASTA batch.
     pssm: Option<&'a crate::algorithm::pssm_search::rows::QueryPssm>,
@@ -2679,9 +2739,10 @@ struct SubjectUpdate<'a> {
 }
 
 // Where the HSP lists of the subjects go as the owner of the search takes them in OID order:
-// the hit-list collector of the preliminary stage (`PreliminaryCollector`), or, with
-// `-culling_limit`, NCBI's culling writer (`PrelimCulling`). `run_preliminary_subjects` picks
-// one once per call, before the subject loop. The search takes the sink as a trait object, so
+// the hit-list collector of the preliminary stage (`PreliminaryCollector`), with
+// `-culling_limit` NCBI's culling writer (`PrelimCulling`), or with `-best_hit_overhang` /
+// `-best_hit_score_edge` NCBI's best hit writer (`PrelimBestHit`). `run_preliminary_subjects`
+// picks one once per call, before the subject loop. The search takes the sink as a trait object, so
 // it has one instance (one indirect call per subject), as before the culling writer.
 trait PreliminarySink {
     /// The list of subject `oid`: the linked HSPs of all queries and frames, in list order.
@@ -2736,6 +2797,12 @@ impl PreliminarySink for PrelimCulling {
     }
 }
 
+impl PreliminarySink for PrelimBestHit {
+    fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
+        PrelimBestHit::add(self, oid, &linked.hsps)
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475,1553-1555:
 // The preliminary hit list of each query context of the query set.
 fn run_preliminary_subjects(
@@ -2744,8 +2811,15 @@ fn run_preliminary_subjects(
     pool: Option<&SearchPool<'_>>,
     observer: Option<&mut StageDBoundaryTrace>,
 ) -> Result<Vec<Option<KappaResultHitList>>> {
-    // `-culling_limit` selects NCBI's culling writer in place of the collector, once per call.
-    if inputs.culling_limit > 0 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:303-342
+    // `-best_hit_overhang` / `-best_hit_score_edge` select NCBI's best hit writer, else
+    // `-culling_limit` its culling writer, in place of the collector, once per call (the options
+    // exclude each other, `args.rs`).
+    if let Some(params) = inputs.best_hit {
+        let mut sink = PrelimBestHit::new(inputs.queries.len(), inputs.prelim_size, params);
+        run_preliminary_subjects_into(inputs, subjects, pool, observer, &mut sink)?;
+        sink.finish()
+    } else if inputs.culling_limit > 0 {
         let mut sink = PrelimCulling::new(
             inputs.query_lengths,
             inputs.prelim_size,

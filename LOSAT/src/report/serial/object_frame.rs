@@ -2,8 +2,11 @@
 //! owner of a frame's texts (`GetFrameInfo`, which `NCBI_RETHROW_SAME` adds to a `CException`
 //! that leaves the frame, and `GetFrameName`, which `CSerialException::AddFrameInfo` adds to the
 //! exception's frame stack) and of the places of the `END_OBJECT_FRAME` of NCBI's ASN.1 text
-//! reader. The PSSM reader (`report::serial::asn_types::read`) and the reader of makeblastdb's
-//! mask files (`writedb::mask_info`) keep their stacks of these frames.
+//! reader, and the throws of the object stack itself. The table reader
+//! (`report::serial::asn_types::read`) and the reader of makeblastdb's mask files
+//! (`writedb::mask_info`) keep their stacks of these frames.
+
+use crate::ncbi_exception::ThrowSite;
 
 /// A frame of NCBI's object stack (`CObjectStackFrame::EFrameType`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +63,49 @@ pub(crate) fn frame_name<'a>(
         FrameKind::Class | FrameKind::Choice => "",
     }
 }
+
+/// A `ThrowError` of `CObjectIStream` (objistr.cpp) at `line` of `function`.
+const fn istr_site(line: u32, kind: &'static str, function: &'static str) -> ThrowSite {
+    ThrowSite {
+        file: "src/serial/objistr.cpp",
+        line,
+        kind,
+        function: Some(function),
+    }
+}
+
+// The throws of the object stack itself, which both encodings share.
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
+pub(crate) const HANDLE_EOF: ThrowSite = istr_site(
+    606,
+    "CSerialException::eEOF",
+    "ncbi::CObjectIStream::HandleEOF",
+);
+pub(crate) const SKIP_FILE_HEADER: ThrowSite = istr_site(
+    896,
+    "CSerialException::eFormatError",
+    "ncbi::CObjectIStream::SkipFileHeader",
+);
+pub(crate) const EXPECTED_MEMBER: ThrowSite = istr_site(
+    1037,
+    "CSerialException::eFormatError",
+    "ncbi::CObjectIStream::ExpectedMember",
+);
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:873-880
+// (makeblastdb's streams collect no objects: `m_Objects` is null, checked with makeblastdb
+// 2.17.0 on `@0` and `@1`.)
+pub(crate) const GET_REGISTERED_OBJECT: ThrowSite = istr_site(
+    877,
+    "CSerialException::eFormatError",
+    "ncbi::CObjectIStream::GetRegisteredObject",
+);
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1697-1704
+/// `ReadInt2`: an `Int4` that does not fit.
+pub(crate) const READ_INT2: ThrowSite = istr_site(
+    1702,
+    "CSerialException::eOverflow",
+    "ncbi::CObjectIStream::ReadInt2",
+);
 
 /// The source file, line and function of the `END_OBJECT_FRAME` of NCBI's ASN.1 text reader
 /// (`CObjectIStreamAsn`) that leaves a frame of `kind` (`skip`: of a skip function): the place of

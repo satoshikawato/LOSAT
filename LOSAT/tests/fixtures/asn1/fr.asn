@@ -1,0 +1,5 @@
+Seq-entry ::= seq {
+  id { local str "fr1" },
+  descr { title "ignored title", user { type str "CFastaReader", data { { label str "DefLine", data str ">gb|AB000077.1| from fasta reader\001ref|NM_000077.2| second defline" } } } },
+  inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+}

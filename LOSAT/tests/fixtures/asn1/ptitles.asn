@@ -1,0 +1,14 @@
+Bioseq-set ::= {
+  seq-set {
+    seq { id { local str "p1" }, descr { title "kinase" , source { org { taxname "Homo sapiens", db { { db "taxon", tag id 9606 } } } } },
+      inst { repr raw, mol aa, length 3, seq-data iupacaa "MKV" } },
+    seq { id { local str "p2" }, descr { source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol aa, length 3, seq-data ncbieaa "MKV" } },
+    seq { id { local str "p3" },
+      inst { repr raw, mol aa, length 3, seq-data ncbistdaa '0C0B13'H } },
+    seq { id { local str "p4" }, descr { title "kinase [Mus musculus]" , source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol aa, length 3, seq-data iupacaa "MKV" } },
+    seq { id { local str "p5" }, descr { title "kinase", molinfo { completeness no-right } , source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol aa, length 3, seq-data iupacaa "MKV" } }
+  }
+}

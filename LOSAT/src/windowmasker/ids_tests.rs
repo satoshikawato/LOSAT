@@ -19,16 +19,26 @@ fn split_gives_the_word_starts_and_the_end() {
 }
 
 #[test]
-fn ids_of_no_words_are_refused() {
+fn ids_of_no_words_are_skipped_with_ncbis_error() {
     let mut set = TextMatchIds::default();
     for id in ["", ">", "|", ">|"] {
+        let empty = set.insert(id.as_bytes()).unwrap_err();
+        assert_eq!(empty.id, id.as_bytes());
+        // NCBI BLAST+ 2.17.0 posts this error before it crashes (probes b3 ids_gt_mask and
+        // ids_pipe_mask of line NP M5, 2026-11-20; fixture rows e_* of tests/windowmasker).
         assert_eq!(
-            set.insert(id.as_bytes()),
-            Err(EmptyId {
-                id: id.as_bytes().to_vec()
-            })
+            empty.post(),
+            format!("CWinMaskConfig::CIdSet_TextMatch::insert(): bad id: {id}: ignoring")
+                .as_bytes()
         );
     }
+    assert!(set.is_empty());
+    // The other ids of the list are kept: the set is the one of the list without those lines.
+    let mut with_empty = TextMatchIds::default();
+    for id in ["rec1", "", "|", "gb|AB000001.1|", ">", "lcl|rec2"] {
+        let _ = with_empty.insert(id.as_bytes());
+    }
+    assert_eq!(with_empty, list(&["rec1", "gb|AB000001.1|", "lcl|rec2"]));
 }
 
 #[test]

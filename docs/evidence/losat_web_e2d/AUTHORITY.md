@@ -56,7 +56,7 @@ NCBI は、範囲を、その役割（query か subject）の入力元が読む*
 | `showalign.cpp:411-440`、`align_format_util.cpp:1233-1245` | frame（outfmt 0 の `Frame =`、tabular の qframe・sframe）は、レコードの座標とレコードの長さから計算し直す | `seq_range.rs` の `record_frame`（TBLASTN の subject、TBLASTX の query と subject） |
 | `blast_format.cpp:129-138` | database の合計は区間の長さの和 | 区間に切った subject から |
 | `blast_aux.cpp:825-842` `Map`、`859-958` | 表示する query の mask：区間の座標の mask を区間の始まりだけ動かし、区間の終わりで切り、区間全体を覆う mask は出さない | BLASTN `pairwise.rs` の `shown_query_masks(…, offset)`、BLASTP `masked_query_rows(…, offsets)`、TBLASTX `report.rs` の `shown_query_masks` |
-| `blast_seqalign.cpp:1588-1600`、`seqinfosrc_seqvec.cpp:110-160` | 表示する subject の lowercase：**レコードの座標**の mask を、HSP の**区間の座標**の `[offset, end]`（end を含む）と比べて残す（NCBI の振る舞いとして再現） | BLASTN `pairwise.rs` の `shown_subject_masks`（レコードの lowercase、HSP list ごと）。BLASTP・TBLASTX は `-lcase_masking` を拒否する（以前から）。tblastn の翻訳した subject は lowercase を出さない |
+| `blast_seqalign.cpp:1588-1600`、`seqinfosrc_seqvec.cpp:110-160` | 表示する subject の lowercase：**レコードの座標**の mask を、HSP の**区間の座標**の `[offset, end]`（end を含む）と比べて残す（NCBI の振る舞いとして再現） | BLASTN `pairwise.rs` の `subject_mask_regions`（レコードの lowercase、HSP list ごと）。BLASTP・TBLASTX は `-lcase_masking` を拒否する（以前から）。tblastn の翻訳した subject は lowercase を出さない |
 | `blast_aux.cpp:904-958`、`showalign.cpp:2500-2521` | tblastx の表示の mask：mask の frame の label は**区間**の frame（`BLAST_ContextToFrame`）、行の frame は**レコード**の frame。`locFrame == frame` で選ぶので、範囲の始まりが 3 の倍数でないと別の frame の mask を表示する（NCBI の振る舞いとして再現） | TBLASTX `report.rs` の `lowercase_query_row`（レコードの frame・座標）と `shown_query_masks`（区間の frame の label のまま） |
 
 ## E. NCBI の振る舞いとして再現するもの（決まった結果。`PD-LOSAT-NCBI-DEFECTS` の方針「決まった結果は再現」）

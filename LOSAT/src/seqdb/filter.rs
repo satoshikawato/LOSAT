@@ -1286,6 +1286,14 @@ impl OidMap<'_> {
             None => ordinal,
         })
     }
+
+    /// Whether an ordinal id has an OID of `from..to` (of the database's OIDs).
+    pub(crate) fn any_in(self, from: u32, to: u32) -> bool {
+        match self.0 {
+            Some(filter) => filter.rank(to) > filter.rank(from),
+            None => from < to,
+        }
+    }
 }
 
 /// A database sequence that the report of another names (one that the lookup of the other's

@@ -750,10 +750,8 @@ pub fn refuse_browser_pssm_query(args: &TblastnArgs) -> Result<()> {
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options (`TblastnArgs::check_options`) and LOSAT's limits.
 pub fn check_options(args: &TblastnArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     refuse_browser_pssm_query(args)?;
     let resolved = args.resolve()?;
     search_settings(&resolved)?;

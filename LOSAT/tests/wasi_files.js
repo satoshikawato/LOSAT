@@ -79,8 +79,10 @@ function sharedFileTable() {
 }
 
 // The file functions of one thread with the shared table in front of its own uvwasi functions
-// (`local`, which take the guest's signed i32 values themselves).
-function sharedFileImports(table, memory, local) {
+// (`local`, which take the guest's signed i32 values themselves). `directory`: the host directory
+// that descriptor 3 preopens as "/work" (a LOSAT Web reactor's run directory, wasi_thread_worker.js
+// createWasi), else "/".
+function sharedFileImports(table, memory, local, directory) {
   const { os, position, rights, kind } = sharedFileViews(table);
   const slotOf = fd => (fd >>> 0) - SHARED_FD_BASE;
   const shared = fd => slotOf(fd) >= 0 && slotOf(fd) < SHARED_FDS;
@@ -270,6 +272,7 @@ function sharedFileImports(table, memory, local) {
     }
     return -1;
   };
+  const root = Buffer.from(directory === undefined ? "/" : `${directory.replace(/\/+$/, "")}/`);
   const pathOpen = imports.path_open;
   imports.path_open = (...args) => {
     const [dirfd, dirflags, path, pathLength, oflags] = args.slice(0, 5).map(arg => arg >>> 0);
@@ -280,8 +283,11 @@ function sharedFileImports(table, memory, local) {
       : oflags !== 0 || fdflags !== 0)) return pathOpen(...args);
     let slot = -1, descriptor = -1;
     try {
-      // The guest's bytes as they are (the path may create a file).
-      const host = Buffer.concat([Buffer.from("/"), new Uint8Array(buffer(path + pathLength), path, pathLength)]);
+      // The guest's bytes as they are (the path may create a file). A path that leaves the run
+      // directory (`..`) stays with uvwasi, which refuses it as it refuses it at 1 thread.
+      const guest = Buffer.from(new Uint8Array(buffer(path + pathLength), path, pathLength));
+      if (directory !== undefined && guest.toString("latin1").split("/").includes("..")) return pathOpen(...args);
+      const host = Buffer.concat([root, guest]);
       const follow = (dirflags & LOOKUP_SYMLINK_FOLLOW) !== 0;
       const stat = (follow ? fs.statSync : fs.lstatSync)(host, { throwIfNoEntry: false });
       const kept = stat => stat.isFile() || stat.isCharacterDevice() || stat.isFIFO();

@@ -1321,6 +1321,21 @@ prints it, the same on every machine), with and without `NSEQ` and `LENGTH`, and
 `db.ol.*` (every search program; `rps/olrps.pal` and `olwrps.pal` over `rps_mini` with `olall.msk`, `olno2.msk` or
 `olonly2.msk` as `rps_mini.msk`); `segmasker` and `dustmasker` read them in their rows `db_oidlist_*`.
 
+`x4b2/`: rows `db.x4b2.fail.w.db.*`, `db.x4b2.dbsize1.w.db.*`, `db.x4b2.rej.crash.db.*`, `db.x4b2.ctx.*.db.*`,
+`db.x4b2.rej.ungapped.ac.b1.db.*`, `db.x4b2.excl.*` and `db.x4b2.past.excl.nolist.*` (line RG, item X4b-2: blastx
+`-use_sw_tback`).
+`x4b2/make_x4b2.py` (its docstring has the usage and the records) writes the queries `tests/fasta/x4b2/*.fna` (X4's
+crafted proteins back-translated with one codon per letter, and cuts of `bslice_q.fna`; the `*_pad.fna` files are
+query files whose batches are followed by queries without a hit, NCBI's runs of which are the expectations of the rows
+`db.x4b2.past.*` and `db.x4b2.bh.false.6`, approved exception 23 of PD-LOSAT-NCBI-DEFECTS; `bh3_pad.fna` pads dev's
+`tests/fasta/outfmt0/bh3_q.fna`), the subjects
+`tests/fasta/x4b2/ok_fail.faa`, and with NCBI BLAST+ 2.17.0 makeblastdb (version 5, `-parse_seqids`) the protein
+databases `x4b2/fail` (sok1 and sfail, on which tks_W's Smith-Waterman redo fails) and `x4b2/excl` (the same and, at
+OID 2, a weaker copy of sfail's first half whose only line has a ti). `x4b2/neg.txt` lists an id that no database
+holds: as a `-negative_seqidlist` it keeps OID 2 of `excl` without a line, so NCBI's redo excludes that subject at its
+fetch and sets the batch's status back to 0, which clears the failure of the match on sfail before it. The databases
+carry their creation date: the committed files, not a new run of the script, are the inputs of the frozen outputs.
+
 ## Alias files with OID_MASK_TYPE (line RG, series D, D1b-2)
 
 `oidmask/` (`make_oidmask.sh`): `om.faa`, eight proteins whose definition lines carry predicted RefSeq ids (`XP_`) alone,
@@ -1342,7 +1357,9 @@ the key, two siblings over one volume). `neg.txt` and `pos.txt` are the seqid li
 `tests/fasta/rps/q40.faa` whose first subject is another profile, rows `db.om.rps.x3vc.*` with `-max_target_seqs 1`).
 `omb` (`make_oidmask.sh`) holds the byte 0x80 in the titles of two predicted lines, patched into its `.phr` after a
 build with `#` there, behind `ombx.pal` (`OID_MASK_TYPE 1`): row `db.om.bp.rej.omb.6` and A271. `ompart.pal` (`nol.msk`:
-OIDs 0, 3, 4, 6 and 7, each left with a line under the type) is the input of makeblastdb case `B_al_om`. The rows are
+OIDs 0, 3, 4, 6 and 7, each left with a line under the type) is the input of makeblastdb case `B_al_om`; `ompartn.nal`
+(`noln.msk`: local OIDs 0 and 3 of each volume of `omn`, global 0, 3, 4 and 7), its nucleotide twin, that of `B_al_omn`;
+`t0.pal`, `t2.pal`, `j2.pal` and `j5.pal` are copied in cases `B_al_t0`, `B_al_t2`, `B_al_j2` and `B_al_j5`. The rows are
 `db.om.*` (every search program); `segmasker`, `dustmasker`, `windowmasker`, `makembindex` and `blastdbcmd` read the
 databases in their rows `db_oidmask_*`, `oidmask_*` and A242 on.
 

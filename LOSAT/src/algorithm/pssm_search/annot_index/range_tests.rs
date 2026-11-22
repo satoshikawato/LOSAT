@@ -3,6 +3,7 @@
 
 use super::super::view::V;
 use super::{Handle, HandleRange, HandleRangeMap, LiveHandles, Mode, Range, MAX, UNKNOWN};
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::{read_document, table::named, Value};
 use crate::seqid::model::ObjectId;
 use crate::seqid::ParsedSeqId;
@@ -90,7 +91,11 @@ fn a_handle_range_becomes_circular() {
 }
 
 fn location(text: &str) -> Value {
-    let (value, posts) = read_document(format!("Seq-loc ::= {text}").as_bytes(), named::SEQ_LOC);
+    let (value, posts) = read_document(
+        format!("Seq-loc ::= {text}").as_bytes(),
+        named::SEQ_LOC,
+        Names::PSSM,
+    );
     assert!(posts.is_empty());
     value.unwrap()
 }

@@ -1299,6 +1299,14 @@ def _has_c_control_statement(clean: str, parens: dict[int, int] | None) -> tuple
     n = len(clean)
     next_mark_pos: int | None = None
     no_more_semi = False
+
+    def next_cond_mark(start: int) -> int:
+        nonlocal next_mark_pos
+        if next_mark_pos is None or next_mark_pos < start:
+            found = CONTROL_COND_MARK_RE.search(clean, start)
+            next_mark_pos = n + 1 if found is None else found.start()
+        return next_mark_pos
+
     for match in CONTROL_START_RE.finditer(clean):
         if parens is None:
             parens = _paren_matches(clean)
@@ -1315,10 +1323,7 @@ def _has_c_control_statement(clean: str, parens: dict[int, int] | None) -> tuple
                         return True, parens
                 continue
             if kw in ("if", "while", "catch"):
-                if next_mark_pos is None or next_mark_pos <= open_idx:
-                    m = CONTROL_COND_MARK_RE.search(clean, open_idx + 1)
-                    next_mark_pos = n + 1 if m is None else m.start()
-                if next_mark_pos < n and RUST_SPAN_MARK_RE.search(clean, open_idx + 1) is None:
+                if next_cond_mark(open_idx + 1) < n and RUST_SPAN_MARK_RE.search(clean, open_idx + 1) is None:
                     return True, parens
             continue
         if kw == "for":
@@ -1336,10 +1341,7 @@ def _has_c_control_statement(clean: str, parens: dict[int, int] | None) -> tuple
             continue
         if CONTROL_BODY_RE.match(clean, close_idx + 1) is not None:
             return True, parens
-        if next_mark_pos is None or next_mark_pos <= open_idx:
-            m = CONTROL_COND_MARK_RE.search(clean, open_idx + 1)
-            next_mark_pos = n + 1 if m is None else m.start()
-        if next_mark_pos < close_idx:
+        if next_cond_mark(open_idx + 1) < close_idx:
             return True, parens
         inside = clean[open_idx + 1 : close_idx]
         if kw == "while" and SINGLE_IDENT_OR_TRUTHY_RE.match(inside):
@@ -1409,10 +1411,12 @@ def _has_c_call(
             name = match.group(0).rstrip("( \t")
             if match.group("ns") is not None or name not in RUST_STD_CAMEL_NAMES:
                 return True, parens
+    def is_known_camel(name: str) -> bool:
+        return name in RUST_STD_CAMEL_NAMES or name in names()
+
     if cited_context:
         for match in C_PASCAL_CALL_HEAD_RE.finditer(clean):
-            name = match.group("name")
-            if name in RUST_STD_CAMEL_NAMES or name in names():
+            if is_known_camel(match.group("name")):
                 continue
             open_idx = match.end() - 1
             if parens is None:
@@ -1432,8 +1436,7 @@ def _has_c_call(
             if has_args or cited_context:
                 return True, parens
         for match in C_CAMEL_CALL_HEAD_RE.finditer(clean):
-            name = match.group("name")
-            if name in RUST_STD_CAMEL_NAMES or name in names():
+            if is_known_camel(match.group("name")):
                 continue
             open_idx = match.end() - 1
             if parens is None:
@@ -1578,19 +1581,20 @@ def unbackticked_c_code(
         )
         if has_call:
             return True
+    def has_foreign_pair(a: str, b: str) -> bool:
+        known = names()
+        return (len(a) > 2 and a not in known) or (len(b) > 2 and b not in known)
+
     if "!" in clean and ("||" in clean or "&&" in clean):
         not_match = C_NOT_BOOL_RE.search(clean)
-        if not_match is not None:
-            known = names()
-            lhs, rhs = not_match.group("lhs"), not_match.group("rhs")
-            if (len(lhs) > 2 and lhs not in known) or (len(rhs) > 2 and rhs not in known):
-                return True
+        if not_match is not None and has_foreign_pair(not_match.group("lhs"), not_match.group("rhs")):
+            return True
     if "==" in clean or "!=" in clean:
         cmp_match = C_COMPOUND_CMP_RE.search(clean)
         if cmp_match is not None and RUST_SPAN_MARK_RE.search(cmp_match.group(0)) is None:
-            known = names()
-            lhs, rhs = cmp_match.group("lhs").split("[", 1)[0], cmp_match.group("rhs").split("[", 1)[0]
-            if (len(lhs) > 2 and lhs not in known) or (len(rhs) > 2 and rhs not in known):
+            lhs = cmp_match.group("lhs").split("[", 1)[0]
+            rhs = cmp_match.group("rhs").split("[", 1)[0]
+            if has_foreign_pair(lhs, rhs):
                 return True
         tight = TIGHT_EQ_RE.search(clean)
         if tight is not None:

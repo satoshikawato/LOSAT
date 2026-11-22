@@ -19,7 +19,7 @@
 //! index `i` (0 = newest) is `ring[head + i]` for every `i < 64` without the `& 63`, and the part
 //! of the window `find_perfect` reads is one contiguous slice. `find_perfect`'s loop keeps only
 //! the counts, the score, the triplet and its threshold: `cnt > 0` and the score test are one
-//! condition without short-circuit, `count < thresholds.len()` always holds (`count < len <=
+//! comparison (`x_gate_limit`, a conditional move), `count < thresholds.len()` always holds (`count < len <=
 //! window - 2`), and the body of the condition, which holds on few iterations, is a function of
 //! its own (`x_merge_at`) that derives `pos` and `count` from the iteration's index.
 //!
@@ -28,8 +28,9 @@
 //! changes. The ring holds the same triplet at `head + i` as `XTripletWindow` holds at
 //! `(head + i) & 63` for every `i` below `len` (each push writes both copies, `head` stays in
 //! `0..64` and `len` is at most `window - 2 <= 62`, so `head + i < 128`). The combined condition
-//! is the C condition: `&` of two `bool`s is true exactly when both are, and the third test is
-//! always true. `pos` of iteration `i` is the start value lowered `i` times with
+//! is the C condition: where `cnt` is 0 the threshold is `u32::MAX`, which ten times the score
+//! never exceeds (at most 18,910), and otherwise it is the C threshold; the third test is always
+//! true. `pos` of iteration `i` is the start value lowered `i` times with
 //! `saturating_sub(1)`, which is `saturating_sub(i)`; `count` rises by one per iteration. The loop in `x_mask_range_regs` is `DustMasker::x_mask_range` statement by
 //! statement. The unit tests compare it with `mask_range_reference` and with `x_mask_range` on
 //! random sequences of every kind the masker distinguishes.
@@ -286,7 +287,7 @@ fn find_perfect(
         let idx = (triplet & 63) as usize;
         let cnt = counts[idx];
         add_triplet(&mut score, &mut counts, triplet);
-        if (cnt > 0) & (score * 10 > limit) {
+        if score * 10 > x_gate_limit(cnt, limit) {
             x_merge_at(&mut m, i, score, merged, perfect_list);
         }
     }
@@ -294,6 +295,47 @@ fn find_perfect(
         merged.extend(perfect_list.iter().skip(m.read).copied());
         perfect_list.clear();
         perfect_list.extend(merged.drain(..));
+    }
+}
+
+/// No NCBI counterpart: the threshold of one `find_perfect` iteration whose triplet had the count
+/// `cnt` in the suffix before it was added: `limit` where `cnt > 0`, otherwise `u32::MAX`, which
+/// ten times a window's score never exceeds (the score of 62 triplets is at most 1,891). So
+/// `score * 10 > x_gate_limit(cnt, limit)` is NCBI's two tests (`cnt > 0` and the score above
+/// the threshold) as one comparison. Whether `cnt` is 0 follows the data (the first time a
+/// triplet appears in the scanned part of the window), and a branch on it is mispredicted on
+/// about every fifth iteration in cDNA queries (line FR s1, H1 §1.2: 0.19 to 0.22 per
+/// iteration). LLVM's x86 back end splits two tests joined by `&` into two branches again (ws,
+/// dx2 listing of the Ad case), as it did for `select_unpredictable` in the Smith-Waterman scan
+/// (`cmov_max`), so on x86-64 the choice is a conditional move written out. Other targets take
+/// the plain `if`, which gives the same value.
+#[inline(always)]
+fn x_gate_limit(cnt: u8, limit: u32) -> u32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let mut gated = limit;
+        // SAFETY: two instructions on the registers given (`test` of `cnt`, then `cmovz`:
+        // `gated` takes `u32::MAX` where `cnt` is 0); no memory or stack is touched, and the
+        // flags that `test` sets are clobbered as `asm!` assumes by default.
+        unsafe {
+            core::arch::asm!(
+                "test {cnt:e}, {cnt:e}",
+                "cmovz {gated:e}, {max:e}",
+                cnt = in(reg) cnt as u32,
+                gated = inout(reg) gated,
+                max = in(reg) u32::MAX,
+                options(pure, nomem, nostack),
+            );
+        }
+        gated
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        if cnt > 0 {
+            limit
+        } else {
+            u32::MAX
+        }
     }
 }
 

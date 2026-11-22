@@ -1582,6 +1582,14 @@ most 9 in BLOSUM62).
   `db.rpstbn.rej.of5col` are LOSAT's refusals of BLAST XML (NCBI's rpsblast shows the query's title for the entry,
   NCBI's rpstblastn stops with an exception after half a document). The files keep their original names
   (`rpscol`): the `.pin` and the `.aux` name them.
+- `rpscoltax` (PS15a-2, review S1): `rpscol`'s profile made again with the taxid 9606: only its
+  `.phr`, `.pin`, `.pdb`, `.pot` and `.ptf` are here (the `.pin` names the `.pdb`, so the files keep that name); a row's
+  cell `rps-gz:rpscoltax!aux=rpscol.aux.gz!...` takes `rpscol`'s other files, which are the same. Rows `*.rej.of18coltax`
+  and `*.rej.of20txcoltax`: NCBI shows the query's taxonomy (none) for the colliding entry.
+- `rpstax` (PS15a-2, review S2): `rps_mini`'s three profiles with the taxids 7777 (`gnl|CDD|101`) and 9606 (`102`) and
+  none (`103`), its `.phr`, `.pin`, `.pdb`, `.pot`, `.ptf` and `.pto` here and `rps_mini`'s other files by `!EXT=FILE`;
+  rows `*.of*.tax` run with `BLASTDB=tests/seqdb/taxdb/good` (after the inflated directory in the search path), rows
+  `*.taxn` without a taxonomy database.
 - `rps_mini3v` (version 5, PS11b): the same three profiles as three volumes of one profile each (`rps_mini3v.00` to
   `.02`, each made by makeprofiledb from one profile, and the alias file `rps_mini3v.pal`, written by `build.sh`):
   the volumes' diagonal tables have 256 entries, so the hits of a long query differ from those of `rps_mini`'s one

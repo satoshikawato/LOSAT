@@ -2499,8 +2499,10 @@ pub(crate) fn refuse_display_id_of_a_query(
 /// subject there: its reports show the query's title and letters in the subject's place, and the
 /// query-anchored merge of the query's own Bioseq can abort (`double free or corruption`). NCBI's
 /// display of such a sequence in outfmt 0, 6 and 7 is line RG item X7's. `effect` says what NCBI
-/// does with it: `QUERY_ANCHORED_EFFECT`, or `XML_EFFECT` for the RPS programs' BLAST XML (`-outfmt 5`: RPSBLAST gets the query's title for the entry, RPSTBLASTN
-/// an exception from its Seq-align conversion and half a document; PS15a-1).
+/// does with it: `QUERY_ANCHORED_EFFECT`, `XML_EFFECT` for the RPS programs' BLAST XML, XML2
+/// and JSON (`-outfmt 5`, 13 to 16: RPSBLAST gets the query's title for the entry, RPSTBLASTN an
+/// exception from its Seq-align conversion and half a document or none; PS15a-1, PS15a-2), or
+/// `TABLE_EFFECT` for their outfmt 18 and 20 (PS15a-2).
 pub(crate) fn refuse_generated_query_id(
     subject: &crate::report::db_subject::ParsedSubject,
     oid: crate::seqdb::Oid,
@@ -2526,8 +2528,18 @@ pub(crate) fn refuse_generated_query_id(
 pub(crate) const QUERY_ANCHORED_EFFECT: &str =
     "shows that query in its place in the query-anchored formats (outfmt 1 to 4)";
 
-/// What NCBI does with it in the BLAST XML of the RPS programs (`refuse_generated_query_id`).
-pub(crate) const XML_EFFECT: &str = "takes that query for it in BLAST XML (outfmt 5)";
+/// What NCBI does with it in the BLAST XML, XML2 and JSON documents of the RPS programs
+/// (`refuse_generated_query_id`).
+pub(crate) const XML_EFFECT: &str =
+    "takes that query for it in BLAST XML, XML2 and JSON (outfmt 5, 13 to 16)";
+
+/// What NCBI does with it in the organism report and in the comma-separated values with a header
+/// line of the RPS programs where they differ for it (`report::tabular::TabularSpec::
+/// refuses_generated_id`, `refuse_generated_query_id`).
+pub(crate) const TABLE_EFFECT: &str = "takes that query for it in the organism report (outfmt \
+     18) of a profile with a taxid and in comma-separated values with a header line (outfmt 20) \
+     whose fields show what it finds by that id (RPSTBLASTN's outfmt 20 can stop with an \
+     exception)";
 
 /// The query-anchored formats (outfmt 1 to 4) of a program whose reports name a database's
 /// sequences by rank (BLASTN, TBLASTN: line RG T3b; BLASTP's `ListedTitles` asks the same

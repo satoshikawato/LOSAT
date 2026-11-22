@@ -474,6 +474,7 @@ pub(crate) fn write_blastn_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
+        rps: false,
         db_title: call.subjects.db_title(),
         gapped: call.batches.gapped,
     };

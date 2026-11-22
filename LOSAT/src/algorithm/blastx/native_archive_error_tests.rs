@@ -174,6 +174,7 @@ fn the_sorthits_refusal_is_not_a_write_failure() {
             0,
             None,
             None,
+            &crate::report::db_subject::HitLoads::default(),
         )
         .map(|()| out)
     };

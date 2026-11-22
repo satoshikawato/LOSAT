@@ -353,7 +353,12 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
         self.hsps += 1;
         let program = self.run.program;
         let blastn = program == "blastn";
-        let query_translated = matches!(program, "blastx" | "tblastx");
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:159-170
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:247-259
+        // A frame is written for a nucleotide sequence of a Std-seg (translated) Seq-align: the
+        // query of blastx, tblastx and rpstblastn (whose profiles are proteins), the subject of
+        // tblastn and tblastx.
+        let query_translated = matches!(program, "blastx" | "tblastx" | "rpstblastn");
         let subject_translated = matches!(program, "tblastn" | "tblastx");
         // The query's regions are applied by the frame of a translated query, else frame 0
         // (blastxml2_format.cpp:211, :253): a nucleotide query's regions of frame 0 are

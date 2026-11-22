@@ -300,6 +300,17 @@ impl ReportFormat {
         )
     }
 
+    /// Whether the report is the search's Seq-aligns as they are (outfmt 8, 9 and 12, the
+    /// Seq-annot of each query, and 11, the archive): their `num_ident` is the traceback's count,
+    /// which the other reports' formatters do not show (they count on the sequences they read).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-706
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1067-1071
+    pub fn writes_seqaligns(self) -> bool {
+        use ReportFormat::*;
+        matches!(self, AsnText | AsnBinary | JsonSeqalign | ArchiveFormat)
+    }
+
     /// Whether the report's writer, as the first format, writes the texts of the subjects that a
     /// query's report reads one by one (where the batch's prefetch is off) where it reads each
     /// (`QueryWarnings::subject_read`): outfmt 0 (description lines and alignment headings), 1 to 4

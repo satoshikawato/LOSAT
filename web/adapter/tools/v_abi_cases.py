@@ -48,6 +48,12 @@ inputs of line WQA's D13 and D16 (`scan_d13`: gap lines, joined lines, Seq-id fi
 `-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2).
 `--group fasta_input` writes that group of the full suite alone.
 
+Both suites add the tool runs of `losat_web2_tool` and `losat_web2_validate` for `windowmasker` (`tool`; line NP
+WW3a, 2026-11-22): a search with `"tool"` is one run of the command line `losat windowmasker <argv>` (`"tool": "run"`)
+or one check of its argv (`"tool": "validate"`), in a directory that holds the files of `"files"` (published path -> source
+file). v_abi.js runs it on an instance whose `/work` is a folder of those files, and the native CLI in another folder of
+the same files, and compares exit status, standard output, standard error and every file the run wrote.
+
 Usage: v_abi_cases.py --suite quick|full [--group fasta_input] --out FILE.json
 """
 from __future__ import annotations
@@ -782,6 +788,187 @@ def quick() -> list[dict]:
     return searches
 
 
+# The files that a tool run sees in its directory, published path -> source file under LOSAT/tests (`tool`):
+# the windowmasker fixtures of line NP M5 and the counts of winmask/, small ones, and a set of the same names for every row,
+# as every file of a folder is there for the command line.
+TOOL_FILES = {
+    "fa/dm2L_3k.fa": "winmask/fasta/dm2L_3k.fa", "fa/dm2L_60k.fa": "winmask/fasta/dm2L_60k.fa",
+    "fa/dm_edge.fa": "winmask/fasta/dm_edge.fa", "fa/multi.fa": "windowmasker/in/multi.fa",
+    "fa/cd.fa": "windowmasker/in/cd.fa", "fa/gap.fa": "windowmasker/in/gap.fa", "fa/short.fa": "windowmasker/in/short.fa",
+    "fa/letters.fa": "windowmasker/in/letters.fa",
+    "counts/dm2L_u9.binary": "winmask/counts/dm2L_u9.binary", "counts/mg1655_u9.obinary": "winmask/counts/mg1655_u9.obinary",
+    "counts/mg1655_u9.ascii": "winmask/counts/mg1655_u9.ascii", "counts/mg1655_u9.oascii": "winmask/counts/mg1655_u9.oascii",
+    "counts/dm_u2.obinary": "winmask/counts/dm_u2.obinary",
+    "counts/u4.ascii": "windowmasker/counts/u4.ascii", "counts/u4.binary": "windowmasker/counts/u4.binary",
+    "counts/u4.oascii": "windowmasker/counts/u4.oascii", "counts/u4.obinary": "windowmasker/counts/u4.obinary",
+    "counts/garbage.counts": "windowmasker/in/garbage.counts", "counts/empty.counts": "windowmasker/in/empty.counts",
+    "ids/a.txt": "windowmasker/in/ids_a.txt", "ids/b.txt": "windowmasker/in/ids_b.txt", "ids/db.txt": "windowmasker/in/ids_db.txt",
+    **{f"db/{name}.{extension}": f"windowmasker/db/{name}.{extension}"
+       for name, extensions in (("wm", "ndb nhr nin njs not nsq ntf nto"), ("wm_ps", "ndb nhr nin njs nog nos not nsq ntf nto"))
+       for extension in extensions.split()},
+}
+# The bytes of a tool run's FASTA input of more than 1 MiB (the file it writes arrives in two frames at least).
+TOOL_BIG_LETTERS = 1_500_000
+
+
+def tool() -> list[dict]:
+    """The tool runs of `windowmasker` (`"tool": "run"`) and the checks of its argv (`"tool": "validate"`), compared
+    with the command line's run of the same words in a folder of the same files (line NP WW3a, 2026-11-22,
+    D-WW3-6, D-WW3-7, D-WW3-8): the modes `-mk_counts` (each `-sformat`, to the standard output and to a file),
+    `-convert` and `-ustat` (each `-outfmt`), their options, the help and version words, and the errors that the
+    command line has before and after it opens a file. `"expect"` is `"failure"` for a run whose exit status is
+    not 0 (a check of v_abi.js against the native run); `"frames"` is the least number of frames of bytes that the
+    largest file of the run arrives in. Rows are written with the words of the command line (the mode's own
+    options, the files by their published names)."""
+    tests = REPO / "LOSAT/tests"
+    directory = REPO / "LOSAT/target/v_abi_tool"
+    directory.mkdir(parents=True, exist_ok=True)
+    files = {name: str(tests / source) for name, source in TOOL_FILES.items()}
+    # A list of FASTA files (`-fa_list T`), written for the published names; and a FASTA file of 1.5 million letters
+    # (a fixed generator: the same bytes in every run), which a masked output of more than 1 MiB follows.
+    (directory / "falist.txt").write_text("fa/dm2L_3k.fa\n\nfa/multi.fa\n")
+    files["falist.txt"] = str(directory / "falist.txt")
+    state, lines = 12345, [">big generated record\n"]
+    letters = []
+    for _ in range(TOOL_BIG_LETTERS):
+        state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+        letters.append("ACGT"[(state >> 16) & 3])
+    text = "".join(letters)
+    lines += [text[at:at + 60] + "\n" for at in range(0, len(text), 60)]
+    (directory / "big.fa").write_text("".join(lines))
+    big = {**files, "big.fa": str(directory / "big.fa")}
+    rows: list[dict] = []
+
+    def add(case_id: str, words: str, failure: bool = False, kind: str = "run", frames: int | None = None,
+            published: dict | None = None) -> None:
+        row = {"program": "windowmasker", "tool": kind, "argv": shlex.split(words), "cwd": str(tests),
+               "files": published or files, "cases": [f"tool.{case_id}"], "frozen": {}}
+        if failure:
+            row["expect"] = "failure"
+        if frames is not None:
+            row["frames"] = frames
+        rows.append(row)
+
+    mask = "-ustat counts/dm2L_u9.binary"
+    # -mk_counts: each -sformat to the standard output (the default, `-out -` and without it) and to a file.
+    add("mk.default.stdout", "-mk_counts -in fa/dm2L_60k.fa -unit 5")
+    for sformat in ("ascii", "binary", "oascii", "obinary"):
+        base = f"-mk_counts -in fa/dm2L_60k.fa -unit 5 -sformat {sformat}"
+        add(f"mk.{sformat}.stdout", base)
+        add(f"mk.{sformat}.out_dash", f"{base} -out -")
+        add(f"mk.{sformat}.file", f"{base} -out out.counts")
+    add("mk.t_low_pct.file", "-mk_counts -in fa/dm2L_60k.fa -unit 5 -t_low_pct 80 -t_extend_pct 95 -t_thres_pct 97 "
+        "-t_high_pct 99.9 -sformat binary -out out.counts")
+    add("mk.t_low_pct.stdout", "-mk_counts -in fa/dm2L_60k.fa -unit 5 -t_low_pct 80 -sformat obinary")
+    add("mk.checkdup", "-mk_counts -in fa/dm2L_60k.fa,fa/cd.fa -checkdup T -unit 3 -sformat binary")
+    add("mk.checkdup.file", "-mk_counts -in fa/dm2L_60k.fa,fa/cd.fa -checkdup T -unit 3 -sformat obinary -out out.counts")
+    add("mk.fa_list", "-mk_counts -in falist.txt -fa_list T -unit 5 -sformat binary")
+    add("mk.fa_list.missing", "-mk_counts -in nonexistent.txt -fa_list T", failure=True)
+    add("mk.comma", "-mk_counts -in fa/dm2L_3k.fa,fa/multi.fa -unit 5 -sformat binary")
+    add("mk.blastdb", "-mk_counts -infmt blastdb -in db/wm -sformat binary")
+    add("mk.blastdb.file", "-mk_counts -infmt blastdb -in db/wm,db/wm_ps -unit 5 -sformat obinary -out out.counts")
+    add("mk.blastdb.missing", "-mk_counts -infmt blastdb -in db/none -unit 5", failure=True)
+    add("mk.ids", "-mk_counts -in fa/multi.fa -ids ids/a.txt -unit 5 -sformat binary")
+    add("mk.exclude_ids", "-mk_counts -in fa/multi.fa -exclude_ids ids/a.txt -unit 5 -sformat binary")
+    add("mk.parse_seqids", "-mk_counts -in fa/dm2L_3k.fa -parse_seqids -sformat binary")
+    add("mk.meta", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -meta something -sformat ascii")
+    add("mk.genome_size", "-mk_counts -in fa/dm2L_3k.fa -genome_size 1000 -unit 3 -sformat binary")
+    add("mk.logfile", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -sformat binary -logfile run.log")
+    add("mk.logfile.file", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out out.counts -logfile run.log")
+    # -convert: each target format, from each source format, to the standard output and to a file.
+    for source in ("ascii", "binary", "oascii", "obinary"):
+        for target in ("ascii", "binary", "oascii", "obinary"):
+            if source == "ascii" or target == "ascii" or source[0] == target[0]:
+                add(f"convert.{source}.{target}", f"-convert -in counts/u4.{source} -sformat {target}")
+    for target in ("ascii", "binary", "oascii", "obinary"):
+        add(f"convert.ascii.{target}.file", f"-convert -in counts/u4.ascii -sformat {target} -out out.counts")
+    add("convert.default", "-convert -in counts/u4.obinary")
+    add("convert.meta", "-convert -in counts/u4.obinary -sformat ascii -meta 'replaced note'")
+    add("convert.logfile", "-convert -in counts/u4.obinary -sformat oascii -out out.counts -logfile run.log")
+    add("convert.mg1655", "-convert -in counts/mg1655_u9.obinary -sformat ascii -out out.counts")
+    # -ustat: every -outfmt on the standard output and in a file, and with -parse_seqids.
+    outfmts = ("interval", "fasta", "seqloc_asn1_bin", "seqloc_asn1_text", "seqloc_xml", "maskinfo_asn1_bin",
+               "maskinfo_asn1_text", "maskinfo_xml")
+    for outfmt in outfmts:
+        add(f"ustat.{outfmt}.stdout", f"{mask} -in fa/multi.fa -outfmt {outfmt}")
+        add(f"ustat.{outfmt}.file", f"{mask} -in fa/multi.fa -outfmt {outfmt} -out out.res")
+        add(f"ustat.{outfmt}.parse_seqids", f"{mask} -in fa/multi.fa -outfmt {outfmt} -parse_seqids")
+    add("ustat.default", f"{mask} -in fa/dm2L_60k.fa")
+    add("ustat.default.file", f"{mask} -in fa/dm2L_60k.fa -out out.res")
+    add("ustat.dust", f"{mask} -in fa/dm2L_60k.fa -dust T")
+    add("ustat.dust.fasta.file", f"{mask} -in fa/dm2L_60k.fa -dust T -dust_level 10 -outfmt fasta -out out.fa")
+    add("ustat.ids", f"{mask} -in fa/multi.fa -ids ids/a.txt")
+    add("ustat.exclude_ids", f"{mask} -in fa/multi.fa -exclude_ids ids/b.txt -outfmt fasta")
+    add("ustat.ids_and_exclude_ids", f"{mask} -in fa/dm2L_3k.fa -ids ids/a.txt -exclude_ids ids/b.txt", failure=True)
+    add("ustat.text_match", f"{mask} -in fa/multi.fa -ids ids/a.txt -text_match F", failure=True)
+    add("ustat.seqids", f"{mask} -infmt seqids -in ids/a.txt", failure=True)
+    add("ustat.parse_seqids", f"{mask} -in fa/multi.fa -parse_seqids -exclude_ids ids/a.txt")
+    add("ustat.blastdb", f"{mask} -infmt blastdb -in db/wm -outfmt fasta")
+    add("ustat.blastdb.file", f"{mask} -infmt blastdb -in db/wm_ps -parse_seqids -outfmt maskinfo_asn1_text -out out.res")
+    add("ustat.blastdb.missing", f"{mask} -infmt blastdb -in db/none", failure=True)
+    add("ustat.comma", f"{mask} -in fa/dm2L_3k.fa,fa/multi.fa", failure=True)
+    add("ustat.thresholds", f"{mask} -in fa/dm2L_60k.fa -t_extend 60 -t_thres 90 -t_high 300 -t_low 50 -window 13")
+    add("ustat.t_low_pct.file", f"{mask} -in fa/dm2L_60k.fa -t_low_pct 90 -t_extend_pct 99 -out out.res")
+    add("ustat.window5", f"{mask} -in fa/dm2L_3k.fa -window 5 -outfmt maskinfo_xml", failure=True)
+    add("ustat.meta", f"{mask} -in fa/dm2L_3k.fa -meta something")
+    add("ustat.obinary", "-ustat counts/mg1655_u9.obinary -in fa/dm_edge.fa -outfmt fasta")
+    add("ustat.ascii", "-ustat counts/mg1655_u9.ascii -in fa/dm_edge.fa -out out.res")
+    add("ustat.oascii", "-ustat counts/mg1655_u9.oascii -in fa/dm_edge.fa -outfmt maskinfo_xml -out out.res")
+    add("ustat.u2", "-ustat counts/dm_u2.obinary -in fa/dm2L_3k.fa")
+    add("ustat.gap", f"{mask} -in fa/gap.fa -dust T -outfmt fasta")
+    add("ustat.logfile", f"{mask} -in fa/dm2L_3k.fa -logfile run.log")
+    add("ustat.logfile.file", f"{mask} -in fa/dm2L_3k.fa -outfmt fasta -out out.fa -logfile run.log")
+    add("ustat.stdin", f"{mask} -in -")
+    # The output file of more than 1 MiB arrives in more than one frame.
+    add("ustat.big.file", "-ustat counts/mg1655_u9.obinary -in big.fa -outfmt fasta -out out.fa", frames=2, published=big)
+    add("ustat.big.stdout", "-ustat counts/mg1655_u9.obinary -in big.fa -outfmt fasta", published=big)
+    add("mk.big.file", "-mk_counts -in big.fa -unit 9 -sformat obinary -out out.counts", published=big)
+    # Errors, before and after the run opens a file.
+    add("error.no_mode", "-in fa/dm2L_3k.fa", failure=True)
+    add("error.no_arguments", "", failure=True)
+    add("error.unknown_option", f"{mask} -nosuchopt", failure=True)
+    add("error.extra_positional", f"{mask} extra", failure=True)
+    add("error.duplicate_option", f"{mask} -window 20 -window 30", failure=True)
+    add("error.window_abc", f"{mask} -in fa/dm2L_3k.fa -window abc", failure=True)
+    add("error.sformat_with_ustat", f"{mask} -sformat ascii", failure=True)
+    add("error.mk_and_convert", "-mk_counts -convert", failure=True)
+    add("error.mk_and_ustat", f"-mk_counts {mask}", failure=True)
+    add("error.outfmt_bad", f"{mask} -in fa/dm2L_3k.fa -outfmt nosuch", failure=True)
+    add("error.in_missing", f"{mask} -in nonexistent.fa", failure=True)
+    add("error.in_missing.mk", "-mk_counts -in nonexistent.fa -unit 5", failure=True)
+    add("error.counts_missing", "-ustat nonexistent.counts -in fa/dm2L_3k.fa", failure=True)
+    add("error.counts_garbage", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa", failure=True)
+    add("error.counts_empty", "-ustat counts/empty.counts -in fa/dm2L_3k.fa", failure=True)
+    add("error.counts_garbage.logfile", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile run.log", failure=True)
+    add("error.convert_garbage", "-convert -in counts/garbage.counts -sformat ascii", failure=True)
+    add("error.out_missing_directory", f"{mask} -in fa/dm2L_3k.fa -out nodir/x.txt", failure=True)
+    add("mk.out_missing_directory", "-mk_counts -in fa/dm2L_60k.fa -unit 5 -out nodir/c.counts")
+    add("error.out_directory", f"{mask} -in fa/dm2L_3k.fa -out fa", failure=True)
+    add("error.unit_0", "-mk_counts -in fa/dm2L_3k.fa -unit 0", failure=True)
+    add("ustat.ids_missing", f"{mask} -in fa/multi.fa -ids nonexistent.txt")
+    # The help and the version words.
+    for word in ("-h", "-help", "-xmlhelp", "-version", "-version-full", "-version-full-xml", "-version-full-json"):
+        add(f"print{word}", word)
+    add("print.help_with_options", f"{mask} -h")
+    # losat_web2_validate of a tool's argv: valid -> 0 and nothing emitted; invalid -> -1 and the command line's
+    # standard error (then the file of -logfile) without the last line end.
+    for case_id, words, failure in (
+            ("ustat", f"{mask} -in fa/dm2L_3k.fa", False),
+            ("ustat.options", f"{mask} -in fa/multi.fa -outfmt maskinfo_xml -dust T -ids ids/a.txt -out out.res", False),
+            ("mk_counts", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -sformat obinary -out out.counts", False),
+            ("convert", "-convert -in counts/u4.ascii -sformat obinary", False),
+            ("logfile", f"{mask} -in fa/dm2L_3k.fa -logfile run.log", False),
+            ("help", "-h", False), ("xmlhelp", "-xmlhelp", False), ("version", "-version", False),
+            ("no_mode", "-in fa/dm2L_3k.fa", True), ("no_arguments", "", True),
+            ("unknown_option", f"{mask} -nosuchopt", True), ("extra_positional", f"{mask} extra", True),
+            ("duplicate_option", f"{mask} -window 20 -window 30", True), ("window_abc", f"{mask} -window abc", True),
+            ("unit_17", "-mk_counts -unit 17", True), ("mk_and_ustat", f"-mk_counts {mask}", True),
+            ("no_mode.logfile", "-in fa/dm2L_3k.fa -logfile run.log", True),
+            ("unknown_option.logfile", f"{mask} -nosuchopt -logfile run.log", True)):
+        add(f"validate.{case_id}", words, failure, kind="validate")
+    return rows
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--suite", choices=["quick", "full"], default="quick")
@@ -804,6 +991,7 @@ def main() -> int:
         searches += database()
         searches += scan_d13()
         searches += failed_outputs()
+        searches += tool()
     args.out.write_text(json.dumps(searches, indent=2) + "\n")
     print(f"{len(searches)} searches -> {args.out}")
     return 0

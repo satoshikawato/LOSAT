@@ -40,7 +40,7 @@ use crate::algorithm::blastp::hard_chunk_scan::{
 };
 use crate::algorithm::common::database::search_read_error_of;
 use crate::algorithm::common::db_mask_search::{SearchMask, SubjectPlan};
-use crate::algorithm::common::hard_chunk_walk::{ChunkWork, DiagonalWalk};
+use crate::algorithm::common::hard_chunk_walk::{ChunkWork, DiagonalWalk, TableEnd, TableStart};
 use crate::core::subject_split::HardChunk;
 use crate::seqdb::{SeqDb, SeqDbError};
 
@@ -205,13 +205,15 @@ impl Masked<'_> {
     /// one word ([`Masked::one_word`]), whose seeds go through the chunk's gapped stage, or are its
     /// HSPs in an ungapped search (LOSAT's refusal of the sequence where NCBI's interval tree
     /// splits without end or its merge joins them with another chunk's), and the one-hit search
-    /// nothing. The first searched sequence starts on NCBI's new table, and the table is cleared
-    /// after the last one where its entries lie past its end. The sequences that LOSAT refuses
-    /// before the search never come here (`blastinput::db_mask::HardMaskShape`: masks out of the
-    /// order of their start, past the end, a range longer than `MAX_DBSEQ_LEN`, a tail mask with
-    /// masks stored after it, word hits that reach other sequences' diagonal entries, a one word
-    /// past the sentinel that can change a result), so the sequence's result does not depend on
-    /// the sequences the table searched before or after it.
+    /// nothing. The sequence is searched on its own: on NCBI's new table where it is the first
+    /// searched sequence, else with the diagonal offset moved so that no entry of another sequence
+    /// reaches its hits or theirs (`common::hard_chunk_walk::DiagonalWalk::start`,
+    /// `DiagonalWalk::after`; PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's answer Q5 = B of M4b,
+    /// 2026-11-22). The sequences that LOSAT refuses before the search never come here
+    /// (`blastinput::db_mask::HardMaskShape`: masks out of the order of their start, past the end,
+    /// a range longer than `MAX_DBSEQ_LEN`, a tail mask with masks stored after it, a one word past
+    /// the sentinel that can change a result), so the sequence's result does not depend on the
+    /// sequences the table searched before or after it.
     fn compute(&self, diagonals: &mut Diagonals) -> Result<SubjectComputation> {
         let Masked {
             db,
@@ -278,13 +280,27 @@ impl Masked<'_> {
         plan.start_hard(stored, length);
         let mut chunks = Vec::new();
         plan.hard_chunks(&mut chunks);
-        let (first, last) = (oid == 0, oid + 1 == db.num_seqs() as usize);
         // The search's walk takes a one word that covers the sentinel to store entries (its lookup
-        // finds no hit: BLASTX's translation has no residue 0), so `reference` is exact or more.
-        let mut walk = DiagonalWalk::new(options.word_size, options.window_size, length, true);
-        if first {
-            diagonals.new_table();
-            walk.start_on_new_table();
+        // finds no hit: BLASTX's translation has no residue 0), so `reference` is exact or more,
+        // and its margins too (a larger margin moves the offset further past entries that no hit
+        // reaches).
+        let (mut walk, start) = DiagonalWalk::start(
+            options.word_size,
+            options.window_size,
+            length,
+            &chunks,
+            db.first_protein_searched(oid as u32),
+            diagonals.offset(),
+        );
+        match start {
+            TableStart::New => diagonals.new_table(),
+            TableStart::Keep => {}
+            TableStart::Move { clear, by } => {
+                if clear {
+                    diagonals.clear();
+                }
+                diagonals.move_offset(by)?;
+            }
         }
         let mut raw = Vec::new();
         let mut purged = Vec::new();
@@ -384,9 +400,10 @@ impl Masked<'_> {
                 subject_besthit_preliminary(&mut purged);
             }
         }
-        // Past the last searched sequence's end no sequence reads its entries.
-        if last && walk.margins().past_end > 0 {
-            diagonals.clear();
+        match walk.after(diagonals.offset()) {
+            TableEnd::Keep => {}
+            TableEnd::Move(by) => diagonals.move_offset(by)?,
+            TableEnd::Clear => diagonals.clear(),
         }
         // The merge's order: by score.
         sort_by_score(&mut purged);

@@ -358,12 +358,12 @@ pub enum HardScan {
     /// `MAX_DBSEQ_LEN`, which NCBI cuts into chunks that its merge joins across their overlap
     /// (`HardMaskShape::LongRange`, not yet ported), a mask that ends past the sequence
     /// (`HardMaskShape::PastEnd`), a mask that runs to the end after the chunk from the start with
-    /// masks stored after it (`HardMaskShape::TailMaskWithLaterMasks`), chunks whose word hits
-    /// reach the diagonal entries of other sequences (`HardMaskShape::StaleDiagonals`: not for
-    /// the hits of the first searched sequence below its start, which meet the entries of a new
-    /// table, nor for the entries past the end of the last one, which no sequence reads), and the
-    /// one word of a chunk that runs past the sequence's sentinel where it can change a result
-    /// (`HardMaskShape::WordPastEnd`).
+    /// masks stored after it (`HardMaskShape::TailMaskWithLaterMasks`), and the one word of a
+    /// chunk that runs past the sequence's sentinel where it can change a result
+    /// (`HardMaskShape::WordPastEnd`). Chunks whose word hits would reach the diagonal entries of
+    /// other sequences are searched with each sequence on its own (PD-LOSAT-NCBI-DEFECTS exception
+    /// 22, the Owner's answer Q5 = B of M4b, 2026-11-22: `algorithm::common::hard_chunk_walk::
+    /// DiagonalWalk::start`).
     Protein {
         /// The letters of a word.
         word: i32,
@@ -458,17 +458,6 @@ pub enum HardMaskShape {
     /// tool, or a damaged one, has it; where such a mask starts past the end, NCBI's chunk before
     /// it runs past the sequence's letters (blast_engine.c:254-258).
     PastEnd { start: u32, end: u32, length: usize },
-    /// Masks that overlap in a protein program (`HardScan::Protein`; series NP, M4b-3b) whose
-    /// chunks move NCBI's diagonal offset so that the sequence's word hits reach the diagonal
-    /// entries of the sequences searched before it (`below_start` positions below its offset), or
-    /// leave entries that the next sequence's hits read (`past_end` positions past the last value
-    /// that they read as cleared): NCBI's table is the thread's, so its rows of these sequences
-    /// depend on which sequences its thread searches next to them, which varies by run with
-    /// threads (probe 2 of M/m4b3b/NOTES_M4B3B.md, `lk400`). The margins of
-    /// `algorithm::common::hard_chunk_walk::DiagonalWalk::margins`, less those that no other
-    /// sequence meets: below the start of the first searched sequence (NCBI's thread searches it
-    /// first, with a new table, `BlastExtendWordNew`) and past the end of the last one.
-    StaleDiagonals { below_start: i64, past_end: i64 },
     /// A chunk at `offset` shorter than the word, of a two-hit search in a protein program
     /// (`HardScan::Protein`; series NP, M4b-3b), whose one word runs past the sequence's sentinel
     /// where its hits can change a result: NCBI reads the last letters of that word from the next
@@ -601,8 +590,7 @@ impl HardMaskShape {
     /// chunks: NCBI's chunk before a mask that starts past the end reads past the sequence), a
     /// hard range longer than `MAX_DBSEQ_LEN` is `LongRange`, a chunk that can hold alignments
     /// starting before the end of an earlier one is `PartsOutOfOrder`, and the walk of the chunks'
-    /// diagonal offsets gives `StaleDiagonals` and `WordPastEnd` (series NP, M4b-3b,
-    /// `HardMaskShape::of_protein_chunks`). Its shape is read at the sequence's length only, which
+    /// diagonal offsets gives `WordPastEnd` (series NP, M4b-3b, `HardMaskShape::of_protein_chunks`). Its shape is read at the sequence's length only, which
     /// a protein database's index gives exactly (`SeqDb::first_searched_masks`): whether the one
     /// word of a short chunk near the end covers the sentinel changes with the length.
     pub fn of_scan(
@@ -762,12 +750,11 @@ impl HardMaskShape {
     /// mask that runs to the end has masks stored after that mask (`TailMaskWithLaterMasks`),
     /// where a chunk that can hold alignments starts before the end of an earlier one
     /// (`PartsOutOfOrder`, the first such chunk), else by the walk of their diagonal offsets that
-    /// the search runs (`DiagonalWalk`), where the sequence's word hits reach beyond it
-    /// (`StaleDiagonals`: below the start of the first searched sequence they meet the entries of
-    /// a new table, so the walk starts after them, and past the end of the last one no sequence
-    /// reads them) or where the one word of a short chunk runs past its sentinel with an effect
-    /// (`WordPastEnd`). The chunks start at their range's left, so that `ShortLastMask` never
-    /// occurs.
+    /// the search runs (`DiagonalWalk`) where the one word of a short chunk runs past its sentinel
+    /// with an effect (`WordPastEnd`; below the start of the first searched sequence its hits meet
+    /// the entries of a new table, so the walk starts after them; other sequences' entries never
+    /// reach the hits of the others, `DiagonalWalk::start_after_others`). The chunks start at
+    /// their range's left, so that `ShortLastMask` never occurs.
     fn of_protein_chunks(
         masks: &[(u32, u32)],
         length: usize,
@@ -809,15 +796,6 @@ impl HardMaskShape {
                 }
             }
             walk.chunk(chunk.offset, chunk.length);
-        }
-        let margins = walk.margins();
-        let below_start = if place.first { 0 } else { margins.below_start };
-        let past_end = if place.last { 0 } else { margins.past_end };
-        if below_start > 0 || past_end > 0 {
-            return Some(HardMaskShape::StaleDiagonals {
-                below_start,
-                past_end,
-            });
         }
         walk.word_past_end()
             .map(|offset| HardMaskShape::WordPastEnd { offset })
@@ -935,25 +913,6 @@ impl HardMaskShape {
                  makeblastdb does not write (NCBI BLAST+ 2.17.0's chunk before a mask that \
                  starts past the end reads past the sequence)"
             ),
-            HardMaskShape::StaleDiagonals {
-                below_start,
-                past_end,
-            } => {
-                let reach = match (below_start > 0, past_end > 0) {
-                    (true, true) => format!(
-                        "reach {below_start} positions before its start and {past_end} past its \
-                         end"
-                    ),
-                    (true, false) => format!("reach {below_start} positions before its start"),
-                    _ => format!("reach {past_end} positions past its end"),
-                };
-                format!(
-                    "has overlapping masks after which NCBI BLAST+ 2.17.0's word hits of the \
-                     sequence {reach} on its table of diagonals, which each thread keeps for the \
-                     sequences it searches: its rows then depend on the sequences searched next \
-                     to this one, which vary by run with threads"
-                )
-            }
             HardMaskShape::WordPastEnd { offset } => format!(
                 "has a part between masks at {offset} shorter than the word, whose one word NCBI \
                  BLAST+ 2.17.0 reads past the sequence's end, from the next sequence's letters, \

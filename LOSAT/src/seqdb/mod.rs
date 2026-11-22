@@ -2198,6 +2198,16 @@ impl SeqDb {
         self.volumes[at.volume].protein_length(at.vol_oid)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
+    // A subject shorter than the minimum length (1 for protein subjects) is not searched.
+    /// Whether the protein of ordinal id `ordinal` is the first that the search reads: every
+    /// sequence before it has no letters (or cannot be read: the search meets that error first),
+    /// so NCBI's thread searches it on the table it has just made (`algorithm::common::
+    /// hard_chunk_walk::DiagonalWalk::start_on_new_table`).
+    pub fn first_protein_searched(&self, ordinal: u32) -> bool {
+        (0..ordinal).all(|before| !self.protein_length(before).is_ok_and(|length| length > 0))
+    }
+
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_block` with the bytes in the
     /// buffer that a worker keeps from one block to the next, `kept` (`Volume::x_read_block_into`;
     /// a block of 1 MiB or more that `kept` does not hold, in a buffer of `utils::x_mapped::X_BYTES`);

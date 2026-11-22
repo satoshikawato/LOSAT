@@ -22,13 +22,12 @@ use super::volume::Volume;
 use super::{BlockRange, SeqDb, SeqDbError, SeqLocation};
 
 /// A searched sequence's place among the sequences that the search reads, in the order of their
-/// ordinal ids (`SeqDb::first_searched_masks`): the first one (NCBI's search reads it first, with
-/// the diagonal table that its thread has just made) and the last one (none follows it in any
-/// thread).
+/// ordinal ids (`SeqDb::first_searched_masks`): whether it is the first one with letters (NCBI's
+/// search reads it first, with the diagonal table that its thread has just made:
+/// [`SeqDb::first_protein_searched`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SearchedPlace {
     pub first: bool,
-    pub last: bool,
 }
 
 /// A filtering algorithm of the database (`GetMaskAlgorithmDetails`).
@@ -787,8 +786,7 @@ impl SeqDb {
                     }
                 };
                 let place = SearchedPlace {
-                    first: seq_ordinal == 0,
-                    last: seq_ordinal + 1 == end_ordinal,
+                    first: protein && self.first_protein_searched(seq_ordinal),
                 };
                 match test(masks, place, length_bounds, &length) {
                     Ok(None) => {}

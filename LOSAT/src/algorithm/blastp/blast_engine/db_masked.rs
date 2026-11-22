@@ -38,9 +38,9 @@ use crate::algorithm::blastp::hard_chunk_scan::{
 };
 use crate::algorithm::common::database::search_read_error_of;
 use crate::algorithm::common::db_mask_search::{SearchMask, SubjectMasks, SubjectPlan};
-use crate::algorithm::common::hard_chunk_walk::{ChunkWork, DiagonalWalk};
+use crate::algorithm::common::hard_chunk_walk::{ChunkWork, DiagonalWalk, TableEnd, TableStart};
 use crate::core::subject_split::HardChunk;
-use crate::seqdb::{SearchedPlace, SeqDb};
+use crate::seqdb::SeqDb;
 
 /// What a worker keeps for the masked kernels: the reader of the stored masks, the stored masks
 /// of the sequence, its plan and its hard chunks, the letters of a hard chunk between two
@@ -139,16 +139,12 @@ impl BlastpDbMasking<'_> {
                 false,
             );
         } else {
-            let place = SearchedPlace {
-                first: ordinal == 0,
-                last: ordinal + 1 == self.db.num_seqs(),
-            };
             let refused = hard_chunks(
                 kernel,
                 scratch,
                 &mut masked,
                 s_idx,
-                place,
+                self.db.first_protein_searched(ordinal),
                 subject,
                 subject_result,
                 values,
@@ -220,30 +216,31 @@ enum ShortChunkRefusal {
 /// HSPs that NCBI's interval tree splits without end or that its merge joins with another chunk's
 /// (LOSAT's refusals, the caller's: `hard_chunk_scan::short_chunk_tree_refusal`,
 /// `short_chunk_merge_refusal`). Every chunk is walked in order
-/// (`common::hard_chunk_walk::DiagonalWalk`): a chunk that holds a word is searched over its own
+/// (`common::hard_chunk_walk::DiagonalWalk`), the sequence searched on its own: on NCBI's new table
+/// where it is the first searched sequence (`first`), else with the diagonal offset moved so that no
+/// entry of another sequence reaches its hits or theirs (`DiagonalWalk::start`, `DiagonalWalk::
+/// after`; PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's answer Q5 = B of M4b, 2026-11-22). A
+/// chunk that holds a word is searched over its own
 /// letters (by the reference scan where its diagonal offset went back below an entry of the
 /// table), the chunk from the start before a mask that runs to the end included, which NCBI scans
 /// past its end (its "no chunking" branch; an approved NCBI defect, PD-LOSAT-NCBI-DEFECTS
 /// exception 21, the Owner's answer Q1 = B of M4b); a shorter one gives the two-hit search its one
 /// word, whose seeds go through the chunk's gapped stage, or are its HSPs in an ungapped search,
-/// and the one-hit search nothing. The first searched sequence starts on NCBI's new table, as
-/// NCBI's thread searches it, and the table is cleared after the last one where its entries lie
-/// past its end, which no sequence reads in NCBI's search. The sequences that LOSAT refuses never
-/// come here: a mask that ends before it starts (`HardMaskShape::Inverted`), a chunk that can hold
-/// alignments starting before the end of an earlier one (`HardMaskShape::PartsOutOfOrder`), a mask
-/// past the sequence's end (`HardMaskShape::PastEnd`), a range longer than `MAX_DBSEQ_LEN`
-/// (`HardMaskShape::LongRange`), a mask that runs to the end after the chunk from the start with
-/// masks stored after it (`HardMaskShape::TailMaskWithLaterMasks`), word hits that reach other
-/// sequences' diagonal entries (`HardMaskShape::StaleDiagonals`) and a one word past the sentinel
-/// that can change a result (`HardMaskShape::WordPastEnd`), so the sequence's result does not
-/// depend on the sequences that the diagonal table searched before or after it.
+/// and the one-hit search nothing. The sequences that LOSAT refuses never come here: a mask that
+/// ends before it starts (`HardMaskShape::Inverted`), a chunk that can hold alignments starting
+/// before the end of an earlier one (`HardMaskShape::PartsOutOfOrder`), a mask past the sequence's
+/// end (`HardMaskShape::PastEnd`), a range longer than `MAX_DBSEQ_LEN` (`HardMaskShape::
+/// LongRange`), a mask that runs to the end after the chunk from the start with masks stored after
+/// it (`HardMaskShape::TailMaskWithLaterMasks`) and a one word past the sentinel that can change a
+/// result (`HardMaskShape::WordPastEnd`), so the sequence's result does not depend on the
+/// sequences that the diagonal table searched before or after it.
 #[allow(clippy::too_many_arguments)]
 fn hard_chunks(
     kernel: &BlastpPrelimKernel<'_>,
     scratch: &mut BlastpSubjectScratch,
     masked: &mut BlastpMaskScratch,
     s_idx: usize,
-    place: SearchedPlace,
+    first: bool,
     subject: BlastpSubjectRef<'_>,
     subject_result: &mut BlastpSubjectResult,
     values: &BlastpPrelimValues<'_>,
@@ -256,11 +253,25 @@ fn hard_chunks(
     let (word, window) = (kernel.word_size, kernel.window);
     // The search's walk reads only what each chunk's scan reads and whether it went back: a one
     // word that covers the sentinel is taken to store entries (its lookup finds no hit where the
-    // query holds no residue 0, `DiagonalWalk::new`), so `reference` is exact or more.
-    let mut walk = DiagonalWalk::new(word, window, subject.aa_len, true);
-    if place.first {
-        scratch.new_table(window);
-        walk.start_on_new_table();
+    // query holds no residue 0, `DiagonalWalk::new`), so `reference` is exact or more, and its
+    // margins too (a larger margin moves the offset further past entries that no hit reaches).
+    let (mut walk, start) = DiagonalWalk::start(
+        word,
+        window,
+        subject.aa_len,
+        &masked.chunks,
+        first,
+        scratch.diag_offset,
+    );
+    match start {
+        TableStart::New => scratch.new_table(window),
+        TableStart::Keep => {}
+        TableStart::Move { clear, by } => {
+            if clear {
+                scratch.clear_table(window);
+            }
+            scratch.move_offset(by);
+        }
     }
     for index in 0..masked.chunks.len() {
         let chunk = masked.chunks[index];
@@ -357,9 +368,10 @@ fn hard_chunks(
             kernel.subject_besthit(&mut masked.hits);
         }
     }
-    // Past the last searched sequence's end no sequence reads its entries.
-    if place.last && walk.margins().past_end > 0 {
-        scratch.clear_table(window);
+    match walk.after(scratch.diag_offset) {
+        TableEnd::Keep => {}
+        TableEnd::Move(by) => scratch.move_offset(by),
+        TableEnd::Clear => scratch.clear_table(window),
     }
     // The merge's order: by score, then the subject's offset and end, then the query's (a total
     // order among one query's HSPs, which are split by query below in this order).

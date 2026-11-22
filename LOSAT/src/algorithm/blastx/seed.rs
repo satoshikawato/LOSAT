@@ -260,11 +260,24 @@ impl Diagonals {
         }
         Ok(())
     }
+    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 22 (the Owner's answer Q5 = B of M4b).
+    /// The offset moved up by `by` between two sequences of a `-db_hard_mask` search
+    /// (`search_db_masked.rs`), so that no entry of one reaches the other's hits
+    /// (`common::hard_chunk_walk::DiagonalWalk::start`, `DiagonalWalk::after`: below INT4_MAX / 4
+    /// after the move, else they clear the table instead).
+    pub(crate) fn move_offset(&mut self, by: i32) -> Result<()> {
+        self.offset = self
+            .offset
+            .checked_add(by)
+            .ok_or_else(|| anyhow::anyhow!("BLASTX diagonal offset exceeds Int4"))?;
+        Ok(())
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
     /// Clears the table and sets the offset to the window (`s_BlastDiagClear`): where the offset
-    /// reached INT4_MAX / 4 (`finish_chunk`), and after the last searched sequence of a
-    /// `-db_hard_mask` search whose entries lie past its end, which no sequence reads in NCBI's
-    /// search (`search_db_masked.rs`).
+    /// reached INT4_MAX / 4 (`finish_chunk`), and in a `-db_hard_mask` search between two
+    /// sequences where moving the offset to keep them apart would take it there
+    /// (`search_db_masked.rs`, `common::hard_chunk_walk::DiagonalWalk::start`,
+    /// `DiagonalWalk::after`).
     pub(crate) fn clear(&mut self) {
         self.offset = self.window;
         self.entries.fill(DiagStruct::clear(self.window));

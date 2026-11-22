@@ -64,12 +64,11 @@ fn walks_of_overlapping_and_nested_masks() {
             past_end: 0
         }
     );
-    assert!(margins.stale());
     // big: masks [40, 120) [60, 130), an overlap longer than the window. Two-hit: D = 0, 80, 60.
     let big = [(0, 40), (120, -60), (130, 110)];
     let (works, margins, _, _) = walk(&big, 240, 3, 40);
     assert_eq!(works, [WORDS, ChunkWork::OneWord, WORDS_BACK]);
-    assert!(!margins.stale());
+    assert_eq!(margins, DiagonalMargins::default());
     // lk: masks [40, 200) [60, 238). Two-hit: D = 0, 80, -20 and the end 22: the one word at 80
     // leaves an entry 98 past the end less the window. The one word at 238 covers the sentinel:
     // without a query word that holds the residue 0 it has no hit, else it reaches 20 below the
@@ -178,10 +177,10 @@ fn words_past_the_end_that_can_change_a_result() {
         works,
         [WORDS, ChunkWork::OneWord, ChunkWork::OneWord, WORDS_BACK]
     );
-    assert!(!margins.stale());
+    assert_eq!(margins, DiagonalMargins::default());
     assert_eq!(past, Some(99));
     let (_, margins, _, past) = walk(&chunks, 100, 3, 40);
-    assert!(!margins.stale());
+    assert_eq!(margins, DiagonalMargins::default());
     assert_eq!(past, None);
     // The same word with no entry within the window behind it and no chunk after it.
     let (_, _, _, past) = walk_of(&[(0, 10), (99, -69)], 100, 3, 40, true);
@@ -238,4 +237,123 @@ fn a_new_table_holds_entries_the_window_below_the_start() {
     walk.start_on_new_table();
     assert_eq!(walk.chunk(299, -10), ChunkWork::Nothing);
     assert_eq!(walk.chunk(0, 100), WORDS_BACK);
+}
+
+/// The chunks `(offset, length)` as the search's hard chunks.
+fn hard(chunks: &[(usize, i32)]) -> Vec<crate::core::subject_split::HardChunk> {
+    chunks
+        .iter()
+        .map(|&(offset, length)| crate::core::subject_split::HardChunk {
+            offset,
+            length,
+            residual: 0,
+            full_range: false,
+            range: 0,
+            overlap: 0,
+            overlap_past_list: false,
+        })
+        .collect()
+}
+
+/// How the search keeps each sequence on its own (PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's
+/// answer Q5 = B of M4b): the first searched sequence takes NCBI's new table; another moves the
+/// offset up by its margin below the start, after a clear where a chunk before its last would
+/// reach INT4_MAX / 4; a walk that does not read back keeps NCBI's offsets; after the sequence the
+/// offset moves up by its margin past the end, or the table is cleared where that would reach
+/// INT4_MAX / 4.
+#[test]
+fn each_sequence_is_searched_on_its_own() {
+    const LIMIT: i32 = i32::MAX / 4;
+    // nest, one-hit: 10 below the start (the last chunk at -10, the one before it at 40).
+    let nest = hard(&[(0, 40), (100, -50), (60, 180)]);
+    let (_, start) = DiagonalWalk::start(3, 0, 240, &nest, true, 5000);
+    assert_eq!(start, TableStart::New);
+    let (mut walk, start) = DiagonalWalk::start(3, 0, 240, &nest, false, 5000);
+    assert_eq!(
+        start,
+        TableStart::Move {
+            clear: false,
+            by: 10
+        }
+    );
+    // The chunk at 40 lies at the offset + 10 + 40 after the move.
+    let (_, start) = DiagonalWalk::start(3, 0, 240, &nest, false, LIMIT - 51);
+    assert_eq!(
+        start,
+        TableStart::Move {
+            clear: false,
+            by: 10
+        }
+    );
+    let (_, start) = DiagonalWalk::start(3, 0, 240, &nest, false, LIMIT - 50);
+    assert_eq!(
+        start,
+        TableStart::Move {
+            clear: true,
+            by: 10
+        }
+    );
+    // Its search's walk: no margin past the end.
+    for chunk in &nest {
+        walk.chunk(chunk.offset, chunk.length);
+    }
+    assert_eq!(walk.after(5000), TableEnd::Keep);
+    // e3, two-hit: its last chunk reads the one word's entry (80) within the window (it reads
+    // back), with no margin below the start; the one word's chunk lies at 80.
+    let e3 = hard(&[(0, 40), (60, -5), (70, 170)]);
+    let (_, start) = DiagonalWalk::start(3, 40, 240, &e3, false, 5000);
+    assert_eq!(
+        start,
+        TableStart::Move {
+            clear: false,
+            by: 0
+        }
+    );
+    let (_, start) = DiagonalWalk::start(3, 40, 240, &e3, false, LIMIT - 81);
+    assert_eq!(
+        start,
+        TableStart::Move {
+            clear: false,
+            by: 0
+        }
+    );
+    let (_, start) = DiagonalWalk::start(3, 40, 240, &e3, false, LIMIT - 80);
+    assert_eq!(start, TableStart::Move { clear: true, by: 0 });
+    // Masks apart: NCBI's offsets, also near INT4_MAX / 4 (a clear inside changes nothing).
+    let apart = hard(&[(0, 40), (50, 100), (160, 80)]);
+    for offset in [5000, LIMIT - 10] {
+        let (mut walk, start) = DiagonalWalk::start(3, 40, 240, &apart, false, offset);
+        assert_eq!(start, TableStart::Keep);
+        for chunk in &apart {
+            walk.chunk(chunk.offset, chunk.length);
+        }
+        assert_eq!(walk.after(offset), TableEnd::Keep);
+    }
+    // lk, two-hit, the search's walk (the one word at 238 covers the sentinel and is taken to
+    // hit): 20 below the start and 98 past the end.
+    let lk = hard(&[(0, 40), (200, -140), (238, 2)]);
+    let (mut walk, start) = DiagonalWalk::start(3, 40, 240, &lk, false, 5000);
+    assert_eq!(
+        start,
+        TableStart::Move {
+            clear: false,
+            by: 20
+        }
+    );
+    for chunk in &lk {
+        walk.chunk(chunk.offset, chunk.length);
+    }
+    assert_eq!(walk.after(5000), TableEnd::Move(98));
+    assert_eq!(walk.after(LIMIT - 99), TableEnd::Move(98));
+    assert_eq!(walk.after(LIMIT - 98), TableEnd::Clear);
+    // A walk that goes back more than it goes on and stores nothing (one-hit, chunks shorter than
+    // the word): the earlier sequences' entries would reach the next sequence's hits, 48 past the
+    // end.
+    let back = hard(&[(0, 2), (100, -50)]);
+    let (mut walk, start) = DiagonalWalk::start(3, 0, 300, &back, false, 5000);
+    assert_eq!(start, TableStart::Keep);
+    for chunk in &back {
+        walk.chunk(chunk.offset, chunk.length);
+    }
+    assert_eq!(walk.after(5000), TableEnd::Move(48));
 }

@@ -9,8 +9,10 @@
 //! `blastx::search::db_masked`) and LOSAT's refusal before the search
 //! (`blastinput::db_mask::HardMaskShape::of_scan`) all walk the chunks of
 //! `core::subject_split::HardSplitState` with it, so they cannot disagree. It gives what the word
-//! finder reads of each chunk ([`ChunkWork`]) and the margins by which the sequence's word hits
-//! reach past it ([`DiagonalMargins`]).
+//! finder reads of each chunk ([`ChunkWork`]), the margins by which the sequence's word hits
+//! reach past it ([`DiagonalMargins`]), and from them how the search moves the diagonal offset
+//! so that each sequence is searched on its own ([`DiagonalWalk::start`], [`DiagonalWalk::after`]:
+//! PD-LOSAT-NCBI-DEFECTS exception 22, the Owner's answer Q5 = B of M4b, 2026-11-22).
 
 /// What the word finder reads of one hard chunk ([`DiagonalWalk::chunk`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +38,8 @@ pub(crate) enum ChunkWork {
 /// ([`DiagonalWalk::margins`]), in positions of the diagonal offset. Where both are 0 the table
 /// entries that the sequence's chunks store read as cleared entries to every hit of a later
 /// sequence, and its own hits read the entries of earlier sequences as cleared ones: the sequence's
-/// result does not depend on the sequences that the same table searched before or after it.
+/// result does not depend on the sequences that the same table searched before or after it. The
+/// search moves the offset by them ([`DiagonalWalk::start`], [`DiagonalWalk::after`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct DiagonalMargins {
     /// How far the lowest diagonal offset of a chunk whose scan reads a word that can hit lies
@@ -51,14 +54,29 @@ pub(crate) struct DiagonalMargins {
     pub(crate) past_end: i64,
 }
 
-impl DiagonalMargins {
-    /// Whether the sequence's hits reach entries of another sequence, or leave entries that
-    /// another sequence's hits read (either margin above 0; the search's check takes the
-    /// sequence's place into account, `blastinput::db_mask::HardMaskShape::of_scan`).
-    #[cfg(test)]
-    pub(crate) fn stale(self) -> bool {
-        self.below_start > 0 || self.past_end > 0
-    }
+/// How the search of a sequence starts on the diagonal table ([`DiagonalWalk::start`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TableStart {
+    /// NCBI's new table (`blastp::blast_engine::BlastpSubjectScratch::new_table`,
+    /// `blastx::seed::Diagonals::new_table`): the first searched sequence.
+    New,
+    /// The table and its offset as they are: NCBI's offsets.
+    Keep,
+    /// The offset moved up by `by` before the sequence's first chunk, after the table is cleared
+    /// (its offset the window) where `clear`.
+    Move { clear: bool, by: i32 },
+}
+
+/// How the search moves the diagonal offset after a sequence's last chunk
+/// ([`DiagonalWalk::after`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TableEnd {
+    /// The offset as the last chunk's exit left it: NCBI's.
+    Keep,
+    /// The offset moved up by this.
+    Move(i32),
+    /// The table cleared, where the move would take the offset to INT4_MAX / 4 or past it.
+    Clear,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276
@@ -109,6 +127,15 @@ pub(crate) struct DiagonalWalk {
     /// offset of each, its chunk's offset in the sequence, and whether its hits can change a
     /// result ([`DiagonalWalk::word_past_end`]; empty but in rare sequences).
     past_end_words: Vec<(i64, usize, bool)>,
+    /// Whether a chunk whose scan reads a word that can hit lies within reach of an entry that an
+    /// earlier chunk can store (one without the flag less than the window behind it, one with the
+    /// flag ahead of it): where a clear of the table falls between the two, it changes the
+    /// sequence's rows.
+    reads_back: bool,
+    /// The diagonal offset of the last chunk walked, and the highest of the chunks before it
+    /// (after whose exit a clear falls inside the sequence).
+    latest: Option<i64>,
+    inner: Option<i64>,
 }
 
 impl DiagonalWalk {
@@ -135,6 +162,9 @@ impl DiagonalWalk {
             flagged: None,
             lowest_scan: None,
             past_end_words: Vec::new(),
+            reads_back: false,
+            latest: None,
+            inner: None,
         }
     }
 
@@ -143,6 +173,8 @@ impl DiagonalWalk {
     pub(crate) fn chunk(&mut self, offset: usize, length: i32) -> ChunkWork {
         let (d, l, w, window) = (self.at, i64::from(length), self.word, self.window);
         let start = i64::try_from(offset).unwrap_or(i64::MAX);
+        self.inner = self.inner.max(self.latest);
+        self.latest = Some(d);
         let work = if l >= w {
             let stored = self.unflagged.max(self.flagged);
             ChunkWork::Words {
@@ -161,6 +193,11 @@ impl DiagonalWalk {
             ChunkWork::Words { .. } => true,
         };
         if hits {
+            if self.unflagged.is_some_and(|stored| stored > d - window)
+                || self.flagged.is_some_and(|stored| stored > d)
+            {
+                self.reads_back = true;
+            }
             self.lowest_scan = Some(self.lowest_scan.map_or(d, |lowest| lowest.min(d)));
             self.past_words(offset, d, work == ChunkWork::OneWord);
             let (unflagged, flagged) = if window > 0 {
@@ -222,10 +259,104 @@ impl DiagonalWalk {
     /// extended, one in the one-hit search below them is skipped). The search of that sequence
     /// makes its table so first (`blastp::blast_engine::BlastpSubjectScratch::new_table`,
     /// `blastx::seed::Diagonals::new_table`), and the walk of the refusal before the search starts
-    /// so for the first searched sequence (`HardMaskShape::of_scan`), whose margin below the start
-    /// is then no refusal.
+    /// so for the first searched sequence (`HardMaskShape::of_scan`).
     pub(crate) fn start_on_new_table(&mut self) {
         self.unflagged = Some(-self.window);
+    }
+
+    /// The sequence is not the first that the table searches, and the search moved the offset up
+    /// by `before` ([`DiagonalWalk::start`]): every entry of the earlier sequences lies at least
+    /// the window below the offset before the move without the flag, and not above it with the
+    /// flag (each sequence's search leaves the table so, [`DiagonalWalk::after`]), so at most the
+    /// window plus `before`, or `before`, below the sequence's start. No chunk that reads a word
+    /// that can hit lies below `-before`, so none of its hits is within reach of them; the walk
+    /// keeps them for its margin past the end, which they set where the chunks end below
+    /// `-before` (a walk that goes back more than it goes on).
+    pub(crate) fn start_after_others(&mut self, before: i64) {
+        self.unflagged = Some(-self.window - before);
+        self.flagged = Some(-before);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-551, 771-802
+    // A hit reads the entry of its diagonal: a two-hit hit at least the window past an entry
+    // without the flag, or not behind one with it, stores itself as on a cleared entry, and so
+    // does a one-hit hit not behind its entry; a hit within reach of an entry is extended with it
+    // or skipped. The exit of a chunk clears the table where the offset has reached INT4_MAX / 4.
+    /// How the search of a sequence of `length` letters whose hard chunks are `chunks` (in walk
+    /// order) starts on a table at the diagonal offset `offset`, in a search with the word `word`
+    /// and the window `window`, and the walk of its search (the margin of [`DiagonalWalk::after`]
+    /// comes from it). PD-LOSAT-NCBI-DEFECTS exception 22 (the Owner's answer Q5 = B of M4b,
+    /// 2026-11-22 22:34 JST): each sequence is searched on its own, so that no entry of another
+    /// sequence reaches its hits, and its rows are the same at every thread count.
+    /// - `first`, the first sequence that the search reads (the first with letters): NCBI's new
+    ///   table, which NCBI's thread makes for it at every thread count (a chunk below its start
+    ///   meets the new table's entries, [`DiagonalWalk::start_on_new_table`]).
+    /// - Any other: the offset moves up by the margin below its start (the walk of its chunks,
+    ///   [`DiagonalMargins::below_start`]), so that every entry of the earlier sequences lies out of
+    ///   reach of its hits ([`DiagonalWalk::start_after_others`]): NCBI's search of it where no
+    ///   entry of another sequence reaches it. The bytes differ from NCBI's one-thread run only
+    ///   where one does, and there NCBI's own rows depend on which sequences its thread searched
+    ///   before, which varies by run with threads (probe `lk400` of M/m4b3b/NOTES_M4B3B.md).
+    /// - A sequence whose walk reads back (a margin below its start, or a chunk within reach of an
+    ///   entry of an earlier chunk of it) is also kept apart from the clears of the thread: where
+    ///   a chunk before its last would lie at INT4_MAX / 4 or past it after the move, the table is
+    ///   cleared first (NCBI clears it after that chunk, at a place that the sequences searched
+    ///   before set, and the chunks after it can read the entries that the clear removes). From
+    ///   the cleared offset its chunks lie within the walk's extent of the window, which reaches
+    ///   INT4_MAX / 4 (536,870,911 positions) only for a protein whose chunks move the offset that
+    ///   far: each chunk moves it by its letters plus the window, and the chunks with words are
+    ///   disjoint parts of the sequence (else `HardMaskShape::PartsOutOfOrder`), so it takes more
+    ///   than 536 million letters or about 12 million masks (at the window 40 and the word 3).
+    /// - A sequence with no margin below its start whose walk does not read back keeps NCBI's
+    ///   offsets ([`TableStart::Keep`]).
+    pub(crate) fn start(
+        word: i32,
+        window: i32,
+        length: usize,
+        chunks: &[crate::core::subject_split::HardChunk],
+        first: bool,
+        offset: i32,
+    ) -> (Self, TableStart) {
+        let mut walk = Self::new(word, window, length, true);
+        if first {
+            walk.start_on_new_table();
+            return (walk, TableStart::New);
+        }
+        let mut ahead = Self::new(word, window, length, true);
+        for chunk in chunks {
+            ahead.chunk(chunk.offset, chunk.length);
+        }
+        let before = ahead.margins().below_start;
+        walk.start_after_others(before);
+        if before == 0 && !ahead.reads_back {
+            return (walk, TableStart::Keep);
+        }
+        let clear = ahead
+            .inner
+            .is_some_and(|inner| i64::from(offset) + before + inner >= i64::from(i32::MAX / 4));
+        // Below INT4_MAX / 4 as long as the extent is (above).
+        let by = i32::try_from(before).unwrap_or(i32::MAX);
+        (walk, TableStart::Move { clear, by })
+    }
+
+    /// How the search moves the offset after the sequence's last chunk (`self`, the walk of its
+    /// search from [`DiagonalWalk::start`]), from the offset `offset` that the last chunk's exit
+    /// left: up by the margin past its end, so that no entry of it or of the sequences before it
+    /// reaches the next sequence's hits (every entry then lies at least the window below the
+    /// offset without the flag, and not above it with the flag, as
+    /// [`DiagonalWalk::start_after_others`] takes them for the next sequence), or a clear of the
+    /// table where that move would take the offset to INT4_MAX / 4 or past it (a cleared table
+    /// holds no entry within reach either). Where the margin is 0 the offset stays NCBI's.
+    pub(crate) fn after(&self, offset: i32) -> TableEnd {
+        let past_end = self.margins().past_end;
+        if past_end == 0 {
+            TableEnd::Keep
+        } else if i64::from(offset) + past_end >= i64::from(i32::MAX / 4) {
+            TableEnd::Clear
+        } else {
+            TableEnd::Move(i32::try_from(past_end).unwrap_or(i32::MAX))
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107, 162-173
@@ -246,11 +377,9 @@ impl DiagonalWalk {
     /// the lowest diagonal offset of a chunk that reads a word that can hit lies below the
     /// sequence's start, and how far its highest entry lies past what every hit of the next
     /// sequence reads as cleared (the offset after the last chunk, less the window for an entry
-    /// without the flag). Where either is above 0, NCBI's rows of the sequence depend on the
-    /// sequences that its thread searches before and after it, and LOSAT refuses it before the
-    /// search (`HardMaskShape::StaleDiagonals`). A search that started the sequence's offset higher
-    /// by the first margin and the next sequence's higher by the second would isolate it instead
-    /// (the alternative of question Q5 of M/m4b/OWNER_QUESTIONS.md, not taken).
+    /// without the flag). Where either is above 0, NCBI's rows of the sequence, or of the next
+    /// one, depend on the sequences that its thread searches before and after it; LOSAT's search
+    /// moves the offset by them ([`DiagonalWalk::start`], [`DiagonalWalk::after`]).
     pub(crate) fn margins(&self) -> DiagonalMargins {
         let end = self.at;
         let unflagged = self

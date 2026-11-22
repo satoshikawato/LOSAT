@@ -955,9 +955,10 @@ fn protein_shapes_of_the_hard_masks() {
 
 /// `HardMaskShape::of_scan` of the protein programs on masks that overlap or nest, or are out of
 /// the order of their start (series NP, M4b-3b; the masks of probe 2 of M/m4b3b/NOTES_M4B3B.md, a
-/// sequence of 240 letters, word 3): searched where the walk of the chunks' diagonal offsets stays
-/// within the sequence, `StaleDiagonals` where it does not, `WordPastEnd` where a short chunk's one
-/// word read past the sentinel can change a result; `PartsOutOfOrder` where a chunk that can hold
+/// sequence of 240 letters, word 3): searched also where the walk of the chunks' diagonal offsets
+/// leaves the sequence (each sequence on its own, PD-LOSAT-NCBI-DEFECTS exception 22: the search's
+/// `DiagonalWalk::start`), `WordPastEnd` where a short chunk's one word read past the sentinel can
+/// change a result; `PartsOutOfOrder` where a chunk that can hold
 /// alignments starts before the end of an earlier one, `Inverted` for a mask that ends before it
 /// starts; in the other programs `Unsorted` for every overlap, as before.
 #[test]
@@ -988,42 +989,22 @@ fn protein_shapes_of_overlapping_masks() {
         )
         .unwrap()
     };
-    let stale = |below_start, past_end| {
-        Some(HardMaskShape::StaleDiagonals {
-            below_start,
-            past_end,
-        })
-    };
-    // e3, nest and big: searched in the two-hit search; in the one-hit search (no window) nest and
-    // big go back below the sequence's start.
+    // e3, nest and big: searched; in the one-hit search (no window) nest and big go back below the
+    // sequence's start.
     assert_eq!(of(&[(40, 60), (55, 70)], 240, two_hit), None);
     assert_eq!(of(&[(40, 60), (55, 70)], 240, one_hit), None);
     assert_eq!(of(&[(40, 100), (50, 60)], 240, two_hit), None);
-    assert_eq!(of(&[(40, 100), (50, 60)], 240, one_hit), stale(10, 0));
+    assert_eq!(of(&[(40, 100), (50, 60)], 240, one_hit), None);
     assert_eq!(of(&[(40, 120), (60, 130)], 240, two_hit), None);
-    assert_eq!(of(&[(40, 120), (60, 130)], 240, one_hit), stale(20, 0));
+    assert_eq!(of(&[(40, 120), (60, 130)], 240, one_hit), None);
     // Masks with the same start.
     assert_eq!(of(&[(40, 100), (40, 60)], 240, two_hit), None);
-    // lk: refused in both searches. The one word at 238 covers the sentinel: it reaches below the
-    // start only with a query that can hit a word with the residue 0 (review H2).
-    assert_eq!(of(&[(40, 200), (60, 238)], 240, two_hit), stale(0, 98));
-    let lk = of(&[(40, 200), (60, 238)], 240, gap_query);
-    assert_eq!(lk, stale(20, 98));
-    assert_eq!(
-        lk.unwrap().text(),
-        "has overlapping masks after which NCBI BLAST+ 2.17.0's word hits of the sequence reach 20 \
-         positions before its start and 98 past its end on its table of diagonals, which each \
-         thread keeps for the sequences it searches: its rows then depend on the sequences \
-         searched next to this one, which vary by run with threads"
-    );
-    // One-hit: the first chunk's entries reach 0 + 40 - 3 + 2 = 39 (a word whose letters score 0
-    // at most, review L2), 137 past the end -98.
-    let lk = of(&[(40, 200), (60, 238)], 240, one_hit);
-    assert_eq!(lk, stale(0, 137));
-    assert!(lk
-        .unwrap()
-        .text()
-        .contains("word hits of the sequence reach 137 positions past its end on its table"));
+    // lk: its entries reach 98 past its end in the two-hit search (137 in the one-hit search), and
+    // with a query that can hit a word with the residue 0 its one word at 238, which covers the
+    // sentinel, 20 below its start: searched (the walk's margins: `hard_chunk_walk` tests).
+    assert_eq!(of(&[(40, 200), (60, 238)], 240, two_hit), None);
+    assert_eq!(of(&[(40, 200), (60, 238)], 240, gap_query), None);
+    assert_eq!(of(&[(40, 200), (60, 238)], 240, one_hit), None);
     // A short chunk at the last letter, whose one word reads past the sentinel, after a chunk that
     // went back within the window of its entries.
     // Only a query that can hit a word with the residue 0, the sentinel's, finds a hit there
@@ -1035,10 +1016,7 @@ fn protein_shapes_of_overlapping_masks() {
         .text()
         .starts_with("has a part between masks at 99 shorter than the word, whose one word"));
     assert_eq!(of(&[(10, 60), (20, 99), (30, 40)], 100, two_hit), None);
-    assert_eq!(
-        of(&[(10, 60), (20, 99), (30, 40)], 100, one_hit),
-        stale(99, 48)
-    );
+    assert_eq!(of(&[(10, 60), (20, 99), (30, 40)], 100, one_hit), None);
     // Out of the order of their start: searched where the chunks that can hold alignments do not
     // meet, as the seg masks of UniRef50_A0A835SUY3 (segmasker 2.17.0), whose third mask starts a
     // letter before the second (the chunk between them is inverted, -8 letters), and a mask
@@ -1052,7 +1030,7 @@ fn protein_shapes_of_overlapping_masks() {
     // chunk's offset 101); the one-hit search goes back below the sequence's start there.
     let short = [(50, 100), (102, 200), (60, 101)];
     assert_eq!(of(&short, 300, two_hit), None);
-    assert_eq!(of(&short, 300, one_hit), stale(88, 0));
+    assert_eq!(of(&short, 300, one_hit), None);
     // A chunk that can hold alignments before the end of an earlier one: the part after
     // [100, 130) starts before the end of the part before [250, 280) (the chunk between them is
     // inverted, so the masks name both); an empty mask at 0 after a mask, whose chunk then starts
@@ -1101,53 +1079,27 @@ fn protein_shapes_of_overlapping_masks() {
 }
 
 /// The place of a sequence among the searched ones (`SearchedPlace`): the first searched
-/// sequence's hits below its start meet the entries of NCBI's new table, which every run gives,
-/// and the entries past the last one's end are read by no sequence, so neither margin refuses
-/// them (the rows db.pmask.*.ov_nest.w0 and db.pmask.*.ov_big.w0 of a database of one sequence);
-/// the other margin still does (the walk on the new table:
-/// `hard_chunk_walk::tests::a_new_table_holds_entries_the_window_below_the_start`).
+/// sequence's hits below its start meet the entries of NCBI's new table, a one word past the
+/// sentinel with them; the margins below the start and past the end refuse no sequence at any
+/// place (each sequence is searched on its own, PD-LOSAT-NCBI-DEFECTS exception 22).
 #[test]
-fn protein_shapes_at_the_first_and_last_searched_sequence() {
-    let of = |masks: &[(u32, u32)], length: usize, window: i32, place: SearchedPlace| {
+fn protein_shapes_at_every_searched_place() {
+    let of = |masks: &[(u32, u32)], length: usize, window: i32, first: bool| {
         let scan = HardScan::Protein {
             word: 3,
             window,
             zero_words: true,
         };
+        let place = SearchedPlace { first };
         HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan, place)
             .unwrap()
     };
-    let (first, last) = (
-        SearchedPlace {
-            first: true,
-            last: false,
-        },
-        SearchedPlace {
-            first: false,
-            last: true,
-        },
-    );
-    let only = SearchedPlace {
-        first: true,
-        last: true,
-    };
-    let stale = |below_start, past_end| {
-        Some(HardMaskShape::StaleDiagonals {
-            below_start,
-            past_end,
-        })
-    };
-    // nest, one-hit: 10 below the start.
-    let nest = [(40, 100), (50, 60)];
-    assert_eq!(of(&nest, 240, 0, SearchedPlace::default()), stale(10, 0));
-    assert_eq!(of(&nest, 240, 0, first), None);
-    assert_eq!(of(&nest, 240, 0, last), stale(10, 0));
-    assert_eq!(of(&nest, 240, 0, only), None);
-    // lk, two-hit with the residue 0: 20 below the start and 98 past the end.
-    let lk = [(40, 200), (60, 238)];
-    assert_eq!(of(&lk, 240, 40, first), stale(0, 98));
-    assert_eq!(of(&lk, 240, 40, last), stale(20, 0));
-    assert_eq!(of(&lk, 240, 40, only), None);
+    for first in [false, true] {
+        // nest, one-hit: 10 below the start; lk, two-hit with the residue 0: 20 below the start
+        // and 98 past the end.
+        assert_eq!(of(&[(40, 100), (50, 60)], 240, 0, first), None);
+        assert_eq!(of(&[(40, 200), (60, 238)], 240, 40, first), None);
+    }
 }
 
 /// A mask that runs to the end after the chunk from the start, with masks stored after it (review

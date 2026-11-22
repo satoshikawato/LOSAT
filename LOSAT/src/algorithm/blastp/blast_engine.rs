@@ -545,11 +545,21 @@ impl BlastpSubjectScratch {
         self.diag_array.fill(DiagStruct::default());
     }
 
+    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 22 (the Owner's answer Q5 = B of M4b).
+    /// The diagonal offset moved up by `by` between two sequences of a `-db_hard_mask` search
+    /// (`db_masked.rs`), so that no entry of one reaches the other's hits
+    /// (`common::hard_chunk_walk::DiagonalWalk::start`, `DiagonalWalk::after`: below INT4_MAX / 4
+    /// after the move, else they clear the table instead).
+    fn move_offset(&mut self, by: i32) {
+        self.diag_offset += by;
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
     /// The table cleared (`s_BlastDiagClear`: every entry the window less than 0, the offset the
     /// window): by `Blast_ExtendWordExit` where the offset reached INT4_MAX / 4 (`finish_chunk`),
-    /// and after the last searched sequence of a `-db_hard_mask` search whose entries lie past its
-    /// end, which no other sequence reads in NCBI's search (`db_masked.rs`).
+    /// and in a `-db_hard_mask` search between two sequences where moving the offset to keep them
+    /// apart would take it there (`db_masked.rs`, `common::hard_chunk_walk::DiagonalWalk::start`,
+    /// `DiagonalWalk::after`).
     #[cold]
     fn clear_table(&mut self, window: i32) {
         self.diag_offset = window;

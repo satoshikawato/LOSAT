@@ -3034,14 +3034,52 @@ mod tests {
         .is_ok());
         crate::store::release(query).unwrap();
         // With -parse_deflines the reader of the ids wants a defline, with the data loaders off
-        // too: `register_inputs` gives the CLI's error for the argv (its run of 2026-11-21).
+        // too. `register_inputs` keeps the reader's error with the query (`reader_error`, line
+        // WQA's D10), and the run meets it in its first query batch, after it opens the database,
+        // as the CLI does (2026-11-22): a database that is not there gives the CLI's database
+        // error, and the db_search database `paja` the CLI's query error.
         let parsed = [&off[..], &["-parse_deflines"]].concat();
-        assert_eq!(
-            crate::store::register_inputs(&parsed, seq_id, b"").unwrap_err(),
-            ncbi_in_losat_words(
-                "BLAST query error: CFastaReader: Input doesn't start with a defline or comment around line 1"
-            )
+        let cli = ncbi_in_losat_words(
+            "BLAST query error: CFastaReader: Input doesn't start with a defline or comment around line 1",
         );
+        let paja = losat_dir()
+            .join("tests/db_search/paja")
+            .to_string_lossy()
+            .into_owned();
+        let in_paja: Vec<&str> = parsed
+            .iter()
+            .map(|&word| if word == "d" { paja.as_str() } else { word })
+            .collect();
+        for words in [&parsed[..], &in_paja[..]] {
+            let (query, subject, response) =
+                crate::store::register_inputs(words, seq_id, b"").unwrap();
+            assert_eq!(subject, 0);
+            assert!(
+                response.ends_with(&format!(r#","reader_error":"{cli}"}},"subject":null}}"#)),
+                "{response}"
+            );
+            let error = crate::store::with_inputs(
+                Program::Blastp,
+                query,
+                0,
+                words,
+                Some(false),
+                |queries, end, _| run(words, queries, end, &[]),
+            )
+            .unwrap()
+            .unwrap_err();
+            crate::store::release(query).unwrap();
+            if words == parsed {
+                assert!(
+                    error.starts_with(&ncbi_in_losat_words(
+                        "BLAST Database error: No alias or index file found for protein database [d]"
+                    )),
+                    "{error}"
+                );
+            } else {
+                assert_eq!(error, format!("{cli}\n"));
+            }
+        }
         crate::files::release(file).unwrap();
         // BLASTN's database of repeats is refused too (line RG item D4).
         let repeats = [

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.72
+- Version: 1.73
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -335,6 +335,10 @@
   2026-09-29, restated 2026-10-07; numbered after 1.71; first 1.68, then 1.70 and 1.72 at the merges
   of dev that brought line NP items O2b's 1.68 and M4b-3's 1.69, then line RG item D1b-2's 1.70 and line
   DBID item pfoff-3's 1.71)
+  1.73 2026-11-22 (approved exception 22, the Owner's answer of 2026-11-22 「Q8=B」 to line NP item M5's
+  question Q10: `losat windowmasker` posts NCBI's `bad id` error for each line of an `-ids` or
+  `-exclude_ids` list matched as text that gives an empty id, and skips the id, where NCBI crashes; the
+  explicit rejection of 1.72 removed; line NP item M5; numbered after 1.72)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2448,8 +2452,6 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     double), with `-convert` or a `-t_*_pct` option; and a `binary` or `obinary` file whose
     `##pct:` line names 4294967295 or more as its largest count, where NCBI's table has no room for
     it and its loop reads past the table.
-  - An `-ids` or `-exclude_ids` file matched as text with an empty id: NCBI indexes its id sets at
-    -1 and crashes (SIGSEGV after its own `bad id` post).
   - An optimized ascii counts file whose hash-parameter line leaves a value unread, which NCBI then
     checks uninitialised; an `obinary` file with units of 1 or 2 letters, whose empty array NCBI
     reads past; a FASTA record or database sequence of 4,294,967,296 letters or more, whose
@@ -2641,6 +2643,53 @@ request that added it.
     both strands, so the sets and their e-values differ: with `-searchsp 1000000` in both runs, 6
     of NCBI's 9 rows, 3 of 17 and 9 of 26 are LOSAT's byte for byte. Until PR #1401 LOSAT raised an
     average of 0 to 1 and wrote the rows of other cutoffs here.
+
+## Approved exception 22 (`losat windowmasker`, an empty id in a list matched as text, version 1.73)
+
+Decided by the Owner on 2026-11-22 22:3x JST: the answer 「Q8=B」 (the whole answer 「Q1=B Q2=B Q3=A
+Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A Q10=A Q11=A Q12=A Q13=OK」) to question Q8 of that day's batch, line NP
+item M5's question Q10, whose option B read 「同じ意味の警告を LOSAT の文言で出し、その id を飛ばして続ける」
+(post a warning of the same meaning in LOSAT's words, skip that id and go on). Not taken: option A,
+the explicit rejection of such lists (rule 3) that LOSAT made from version 1.72 until this version,
+which stopped LOSAT on an input that NCBI's own error says it ignores. Owner-delegated (standing
+instruction 2026-09-29, restated 2026-10-07): the post is NCBI's line through LOSAT's one mapping of
+NCBI's words (`crate::wording`, as windowmasker's `can't understand id` post of `-text_match false`),
+at NCBI's severity `Error`; not taken: a sentence of LOSAT's own or the severity `Warning`, which
+would give the same skip two texts in one program and a line that NCBI never writes. Line NP item
+M5.
+
+22. **`losat windowmasker -ids` or `-exclude_ids`, matched as text: a line that gives an empty id.**
+    `CWinMaskConfig::FillIdList` takes from each line that is not empty the text from its start
+    (after a `>` at 0) to its first space or tab (`win_mask_config.cpp:471-484`), and
+    `CIdSet_TextMatch::insert` stores it by its number of `|`-words (`win_mask_util.cpp:75-123`). An
+    id of no words, which is the empty id (a line that starts with a space or a tab, or `>` alone or
+    before a space or a tab), `|` (a line `|` or `>|`), `>` (a line `>>`) or `>|` (a line `>>|`),
+    makes `insert` post `Error: CWinMaskConfig::CIdSet_TextMatch::insert(): bad id: <id>: ignoring`
+    and then store the id at `nword_sets_[nwords - 1]` with no words, an index of -1 (undefined
+    behaviour in C++). NCBI BLAST+ 2.17.0 then stops with SIGSEGV (exit status 139, no output), in
+    masking (`-ustat`) and in `-mk_counts`, for either list. A list matched as Seq-ids (`-text_match
+    false`, `CIdSet_SeqId`) is not concerned: NCBI's parse posts such an id as one it cannot read
+    and skips it, as LOSAT's does. LOSAT posts NCBI's error for each such id as it reads the list,
+    where NCBI posts it, and skips the id, as the error says. The resize
+    to the id's number of words that comes before NCBI's store changes nothing for 0 words, so the
+    list is the one that NCBI reads from the file without those lines, the near input, which NCBI
+    completes: LOSAT's output and exit status are NCBI's for the near input, and its standard error
+    is NCBI's for the near input after those errors, in the order of their lines
+    (`windowmasker::ids::EmptyId`).
+    Evidence (NCBI BLAST+ 2.17.0 on ws, 2026-11-22; line NP's task folder `M/m5`, `SURVEY.md` §6.4
+    and question Q10, probes b3 `ids_gt_mask` and `ids_pipe_mask` of 2026-11-20): fixture rows
+    `e_ids_<form>` of `LOSAT/tests/windowmasker/cases.tsv`, whose lists `in/ids_e_<form>.txt` are
+    `in/ids_a.txt` with one such line of each form after its second line (`>`, `> y`, a tab, a space,
+    `|`, `>|`, `>>`, `>>|`), and `e_excl_gt` and `e_k_gt` (`-exclude_ids`, `-mk_counts`): NCBI's crash
+    as frozen (exit status 139, no output, its one error). `e_ids_all`, `e_excl_all` and `e_k_all`
+    hold the eight lines between the lines of `in/ids_a.txt`, `e_ids_only` the eight lines alone;
+    their near rows `i_ids_a`, `i_excl_a`, `k_ids` and `i_ids_emptyfile` (the empty list
+    `in/ids_empty.txt`) are NCBI's runs that complete. `LOSAT/tests/masker_fixtures.rs`
+    (`EMPTY_ID_ROWS`) expects of each row the near row's bytes after the errors that NCBI posts in the
+    rows of one line, through the command line and the library; the test
+    `the_empty_id_rows_are_ncbis_crash_and_near_input` checks that each row of one line is NCBI's
+    crash and that each row's list is its near row's with those lines added. Unit test
+    `ids_of_no_words_are_skipped_with_ncbis_error` (`LOSAT/src/windowmasker/ids_tests.rs`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

@@ -20,16 +20,34 @@ use super::work::{post_seq_id_warning, Record};
 
 /// `CWinMaskUtil::CIdSet_TextMatch`: the ids of a list, by their number of `|`-words
 /// (`nword_sets_`).
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct TextMatchIds {
     nword_sets: Vec<HashSet<Vec<u8>>>,
 }
 
-/// An id of a list that NCBI cannot store: `CIdSet_TextMatch::insert` posts `bad id` and then
-/// indexes its sets at -1 (undefined behaviour in C++; NCBI BLAST+ 2.17.0 dies with SIGSEGV).
+/// An id of a list that NCBI cannot store, one of no words: `CIdSet_TextMatch::insert` posts
+/// `bad id` and then indexes its sets at -1 (undefined behaviour in C++; NCBI BLAST+ 2.17.0 dies
+/// with SIGSEGV). LOSAT posts the same error and skips the id, as the error says
+/// (`PD-LOSAT-NCBI-DEFECTS` approved exception 22).
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct EmptyId {
     pub(super) id: Vec<u8>,
+}
+
+impl EmptyId {
+    /// The error that `CIdSet_TextMatch::insert` posts for the id, in LOSAT's words (NCBI's
+    /// message through `crate::wording`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:107-111
+    pub(super) fn post(&self) -> Vec<u8> {
+        let message = [
+            b"CWinMaskConfig::CIdSet_TextMatch::insert(): bad id: ".as_slice(),
+            &self.id,
+            b": ignoring",
+        ]
+        .concat();
+        crate::wording::losat_bytes(&message).into_owned()
+    }
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:75-100
@@ -54,7 +72,8 @@ impl TextMatchIds {
     /// `CIdSet_TextMatch::insert` of `id`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:103-123
-    /// An id of no words (empty, `>`, `|`, `>|`) goes on to `nword_sets_[-1]`: `EmptyId`.
+    /// An id of no words (empty, `>`, `|`, `>|`) goes on to `nword_sets_[-1]`: `EmptyId`, the set
+    /// unchanged, as NCBI's of the list without that line (`resize` to 0 words changes nothing).
     pub(super) fn insert(&mut self, id: &[u8]) -> Result<(), EmptyId> {
         let nwords = split(id).len() - 1;
         if nwords == 0 {
@@ -124,12 +143,9 @@ impl TextMatchIds {
 /// a `\r` stays in the line, so a CRLF list matches nothing as text, as NCBI's Linux build), and
 /// the empty ones are skipped. A line that starts with a space or a tab gives an empty id; one
 /// whose first space comes at 0 after `>` (`> x`) too.
-pub(super) fn fill_id_list<E>(
-    name: &str,
-    mut insert: impl FnMut(&[u8]) -> Result<(), E>,
-) -> Result<(), E> {
+pub(super) fn fill_id_list(name: &str, mut insert: impl FnMut(&[u8])) {
     let Ok(bytes) = std::fs::read(name) else {
-        return Ok(());
+        return;
     };
     for line in input_lines(&bytes, LineEnds::HOST) {
         let stop = line
@@ -142,9 +158,8 @@ pub(super) fn fill_id_list<E>(
         } else {
             &[][..]
         };
-        insert(id)?;
+        insert(id);
     }
-    Ok(())
 }
 
 /// `CWinMaskUtil::CIdSet_SeqId`: the `CSeq_id_Handle`s of a list's ids (`idset`), as NCBI's id

@@ -225,6 +225,15 @@ fn command(binary: &Path, program: &str, case: &Case) -> Command {
 ///   `MK_COUNTS_MISSING_INPUT`; on Linux the directory opens and its first read fails;
 /// - the paths of the database messages and the search path (`ncbi_paths_on_windows`).
 fn expected(program: &str, case: &Case) -> Streams {
+    if let Some((_, near, posts)) = empty_id_row(program, &case.name) {
+        let (out, err, status) = expected_row(program, near);
+        let mut posted: Vec<u8> = posts
+            .iter()
+            .flat_map(|row| expected_row(program, row).1)
+            .collect();
+        posted.extend(err);
+        return (out, posted, status);
+    }
     if cfg!(windows) {
         if let Some(directory) = input_directory(program, case) {
             let (missing, missing_name) = missing_input(program, case);
@@ -243,6 +252,53 @@ fn expected(program: &str, case: &Case) -> Streams {
         }
     }
     expected_row(program, &case.name)
+}
+
+/// windowmasker's rows of `PD-LOSAT-NCBI-DEFECTS` approved exception 22: an `-ids` or
+/// `-exclude_ids` list matched as text with lines that give an empty id (`in/ids_e_*.txt`,
+/// make_inputs.py). NCBI BLAST+ 2.17.0 posts its `bad id` error for the first such line and then
+/// crashes (SIGSEGV, exit status 139: the row's own freeze); LOSAT posts the error for each and goes
+/// on. Each entry: the row, the row of its near input (the list without those lines, which NCBI
+/// completes), and the rows of one such line each whose errors LOSAT posts, in the order of the
+/// row's list. LOSAT's bytes are the near row's, its standard error after those errors as NCBI
+/// posts them (`expected`; `the_empty_id_rows_are_ncbis_crash_and_near_input`).
+const EMPTY_ID_ROWS: [EmptyIdRow; 14] = [
+    ("e_ids_gt", "i_ids_a", &["e_ids_gt"]),
+    ("e_ids_gtsp", "i_ids_a", &["e_ids_gtsp"]),
+    ("e_ids_tab", "i_ids_a", &["e_ids_tab"]),
+    ("e_ids_sp", "i_ids_a", &["e_ids_sp"]),
+    ("e_ids_pipe", "i_ids_a", &["e_ids_pipe"]),
+    ("e_ids_gtpipe", "i_ids_a", &["e_ids_gtpipe"]),
+    ("e_ids_gtgt", "i_ids_a", &["e_ids_gtgt"]),
+    ("e_ids_gtgtpipe", "i_ids_a", &["e_ids_gtgtpipe"]),
+    ("e_ids_all", "i_ids_a", EVERY_EMPTY_ID),
+    ("e_ids_only", "i_ids_emptyfile", EVERY_EMPTY_ID),
+    ("e_excl_gt", "i_excl_a", &["e_excl_gt"]),
+    ("e_excl_all", "i_excl_a", EVERY_EMPTY_ID),
+    ("e_k_gt", "k_ids", &["e_k_gt"]),
+    ("e_k_all", "k_ids", EVERY_EMPTY_ID),
+];
+
+/// An entry of `EMPTY_ID_ROWS`: the row, its near row, the rows of its errors.
+type EmptyIdRow = (&'static str, &'static str, &'static [&'static str]);
+
+/// The rows of one line each of `in/ids_e_all.txt` and `in/ids_e_only.txt`, in their order.
+const EVERY_EMPTY_ID: &[&str] = &[
+    "e_ids_gt",
+    "e_ids_gtsp",
+    "e_ids_tab",
+    "e_ids_sp",
+    "e_ids_pipe",
+    "e_ids_gtpipe",
+    "e_ids_gtgt",
+    "e_ids_gtgtpipe",
+];
+
+/// The entry of `EMPTY_ID_ROWS` for the row `name` of `program`.
+fn empty_id_row(program: &str, name: &str) -> Option<&'static EmptyIdRow> {
+    EMPTY_ID_ROWS
+        .iter()
+        .find(|(row, _, _)| program == "windowmasker" && *row == name)
 }
 
 /// The row of each program's table whose `-in` names a file that does not exist.
@@ -441,6 +497,76 @@ fn segmasker_gives_ncbis_bytes() {
 fn windowmasker_gives_ncbis_bytes() {
     let differ = rows_that_differ("windowmasker");
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
+}
+
+/// The rows of `EMPTY_ID_ROWS` are what the table says: each row of one line is NCBI's crash (exit
+/// status 139, no output, its one `bad id` error), and each row is its near row with only its list
+/// changed, the list of the near row with the lines of the rows whose errors it takes, in order.
+#[test]
+fn the_empty_id_rows_are_ncbis_crash_and_near_input() {
+    let rows = cases("windowmasker");
+    let row = |name: &str| rows.iter().find(|case| case.name == name).expect(name);
+    let list = |case: &Case| {
+        let at = case
+            .words
+            .iter()
+            .position(|word| word == "-ids" || word == "-exclude_ids");
+        let name = &case.words[at.expect("an id list") + 1];
+        let text = fs::read_to_string(fixtures("windowmasker").join(name)).unwrap();
+        text.lines().map(str::to_string).collect::<Vec<_>>()
+    };
+    // The lines of `case`'s list that are not those of `near`'s, which keeps them in order.
+    let added = |case: &Case, near: &Case| {
+        let (lines, kept) = (list(case), list(near));
+        let mut next = kept.iter().peekable();
+        let added: Vec<String> = lines
+            .into_iter()
+            .filter(|line| next.next_if(|kept| *kept == line).is_none())
+            .collect();
+        assert!(
+            next.peek().is_none(),
+            "{}: lines of {} missing",
+            case.name,
+            near.name
+        );
+        added
+    };
+    for (name, near, posts) in EMPTY_ID_ROWS {
+        let (case, near) = (row(name), row(near));
+        let changed: Vec<_> = case
+            .words
+            .iter()
+            .zip(&near.words)
+            .filter(|(a, b)| a != b)
+            .collect();
+        assert!(
+            case.words.len() == near.words.len() && changed.len() == 1,
+            "{name}"
+        );
+        let lines: Vec<String> = posts
+            .iter()
+            .flat_map(|&post| {
+                let post = row(post);
+                let &(_, near_of_post, _) = empty_id_row("windowmasker", &post.name).unwrap();
+                added(post, row(near_of_post))
+            })
+            .collect();
+        assert_eq!(added(case, near), lines, "{name}");
+        if *posts == [name] {
+            let (out, err, status) = expected_row("windowmasker", name);
+            let err = String::from_utf8(err).unwrap();
+            assert_eq!(
+                (out.len(), status, err.lines().count()),
+                (0, 139, 1),
+                "{name}"
+            );
+            assert!(
+                err.starts_with("Error: CWinMaskConfig::CIdSet_TextMatch::insert(): bad id: ")
+                    && err.ends_with(": ignoring\n"),
+                "{name}: {err}"
+            );
+        }
+    }
 }
 
 #[test]

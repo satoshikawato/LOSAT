@@ -1265,6 +1265,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
                     None,
                     x_pool,
                     None,
+                    &crate::report::db_subject::HitLoads::default(),
                 )
                 .unwrap();
                 written

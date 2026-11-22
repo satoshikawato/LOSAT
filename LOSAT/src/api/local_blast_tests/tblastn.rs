@@ -79,6 +79,7 @@ fn run(
         run_local_tblastn(
             tblastn_args(names.0, names.1, extra),
             &queries,
+            &crate::api::QueryEnd::Input,
             &subjects,
             outputs,
         )
@@ -108,6 +109,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
         let result = {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -123,11 +125,18 @@ fn a_task_that_is_not_tblastns_is_refused() {
                 run_local_database_tblastn(
                     args,
                     &queries(&query),
+                    &crate::api::QueryEnd::Input,
                     ApplicationSettings::default(),
                     &mut outputs,
                 )
             } else {
-                run_local_tblastn(args, &queries(&query), &subjects(&subject), &mut outputs)
+                run_local_tblastn(
+                    args,
+                    &queries(&query),
+                    &crate::api::QueryEnd::Input,
+                    &subjects(&subject),
+                    &mut outputs,
+                )
             }
         };
         let error = format!("{:#}", result.expect_err(message));
@@ -344,6 +353,7 @@ fn unsupported_formats_fail_before_searching() {
     for outfmt in ["17", "6 delim=; qseqid staxids"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -362,7 +372,13 @@ fn unsupported_formats_fail_before_searching() {
             observer: None,
         };
         let args = tblastn_args(&query_name, &subject_name, &[]);
-        let result = run_local_tblastn(args, &queries, &subjects, &mut outputs);
+        let result = run_local_tblastn(
+            args,
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         drop(outputs);
         assert!(result.is_err(), "outfmt {outfmt:?} must be rejected");
         assert!(
@@ -386,6 +402,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -403,6 +420,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let result = run_local_tblastn(
             tblastn_args(&query_name, &subject_name, extra),
             &queries,
+            &crate::api::QueryEnd::Input,
             &subjects,
             &mut outputs,
         );
@@ -486,6 +504,7 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
             let result = run_local_tblastn(
                 tblastn_args("q", "s", &[]),
                 &queries,
+                &crate::api::QueryEnd::Input,
                 &subjects,
                 &mut outputs,
             );

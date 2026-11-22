@@ -452,6 +452,12 @@ fn run_inner(
         id_scope: id_scope.clone(),
         strand: crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand),
         data_loaders: settings.data_loaders,
+        batch_count: crate::blastinput::query_batch::BatchCount::of_search(
+            args.parse_deflines,
+            database.is_none(),
+            choice.number == 5,
+            program.upper,
+        ),
     };
     // The letters of a reader batch (below, where NCBI reads `BATCH_SIZE`, after the check of
     // an empty query), which the reads before the search take too.
@@ -471,7 +477,10 @@ fn run_inner(
     let mut stops_after = None;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with outfmt 5
     // and 13 to 16 the read before the search makes them (`QueryScopes::read_ahead`), else the
-    // batches add theirs as the reader delivers them (`render_batch`).
+    // batches add theirs where the loop takes them (`take`, `add_batch_scope`). Either way LOSAT's
+    // refusal of two queries with one id comes where the loop takes the batch of the second, after
+    // the reports of the batches before (line WQA D10 round 4, 2026-11-20), before the batch's
+    // request and search (round 5, `add_batch_scope`).
     let query_scopes_of = || {
         crate::blastinput::query_batch::QueryScopes::of_search(
             args.parse_deflines,
@@ -486,8 +495,7 @@ fn run_inner(
     // Where the run's XML format fails for a matrix name that NCBI's BLAST XML report data does not
     // know (`blast_xml::xml_matrix_failure`, decided once for the run): before any report is
     // written, so NCBI writes no title. Such a run reads the queries before the search only for
-    // their scopes (`-parse_deflines`, whose refusal of two queries of one id comes before any
-    // byte), checks no title and holds nothing.
+    // their scopes (`-parse_deflines`), checks no title and holds nothing.
     let xml_matrix =
         super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), database.is_none());
     let reads_ahead = held
@@ -569,8 +577,10 @@ fn run_inner(
     // the reader added it to its scope)
     // The records that `-query_loc` skips are kept for NCBI's scope of a batch's prefetch, which
     // only a stop of the prefetch asks (`BatchScopes::of_batch`): where a prefetch of the run can
-    // stop (review 5 of line DBID loadord, L2; the gate opens the database's lookup files once).
-    query_stream.keep_skipped = query_range.is_some()
+    // stop (review 5 of line DBID loadord, L2; the gate opens the database's lookup files once);
+    // and under `-parse_deflines` for the scopes of the queries (`add_batch_scope`,
+    // `QueryStreamSettings::stream`).
+    query_stream.keep_skipped |= query_range.is_some()
         && database
             .as_ref()
             .is_some_and(|database| database.prefetch_can_stop());
@@ -735,15 +745,13 @@ fn run_inner(
     // The reports of one query batch: with `-db`, the titles of its reported sequences are
     // read first and its hit lists renamed to ranks (`ReportedSubjects::for_batch`); NCBI's
     // reader error there stops the run at this batch, with no epilog.
-    // A refusal of a title (BLAST XML) found while a batch is reported drops what the run holds.
+    // A refusal found while a batch is reported drops what the run holds
+    // (`blast_xml::drops_held_document`: a title, the database counts, a reported sequence with
+    // parsed Seq-ids such as RPSTBLASTN's profile with a query's generated id, PS15a-2).
     let refused = |error: anyhow::Error| -> anyhow::Error {
         let error = report_error(error);
-        if error.is::<super::blast_xml::XmlRefusal>()
-            || error.is::<crate::algorithm::common::database::ReportSumRefusal>()
-        {
-            if let Some(held) = &held {
-                held.discard();
-            }
+        if let (true, Some(held)) = (super::blast_xml::drops_held_document(&error), &held) {
+            held.discard();
         }
         error
     };
@@ -771,12 +779,6 @@ fn run_inner(
             strategy.note_searched(
                 queries_before..queries_before + queries.len(),
                 archive::batch_searched_space(results, &options),
-            )?;
-        }
-        if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
-            scopes.add_batch_ids(
-                queries.iter().filter_map(|record| record.believed()),
-                queries_before,
             )?;
         }
         if let (Some(handle), Some(archive_requests)) = (&archive, &archive_requests) {
@@ -923,10 +925,22 @@ fn run_inner(
     // NCBI's posts of the bytes that its stream replaced in the request go to the run's
     // diagnostics (`diagnostics`, where the loop takes the batch: after the batch's reader
     // messages, before its search) and are messages of the archive (`StrategyExport::take_posts`).
+    // The batch that the loop takes joins the scopes of the queries first (`add_batch_scope`).
+    let scope_taken = std::cell::Cell::new(None);
     let mut take = |diagnostics: &mut dyn Write,
                     queries: &[FastaRecord],
                     queries_before: usize|
      -> Result<()> {
+        add_batch_scope(
+            &query_scopes,
+            &scope_taken,
+            queries,
+            queries_before,
+            strategy.is_some(),
+            &options,
+            search_subjects,
+            &search_error,
+        )?;
         let (Some(strategy), Some(requests)) = (&strategy, &requests) else {
             return Ok(());
         };
@@ -1051,13 +1065,18 @@ impl ReportedAsks {
             })) || matches!(options.outfmt, 13..=16))
                 && !crate::algorithm::common::database::prefetch_always_off(),
             throw: crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
-                .map_or(crate::report::db_subject::FormatThrow::Refused, |format| {
-                    crate::report::db_subject::FormatThrow::of(
-                        format,
-                        options.tabular,
-                        crate::blastinput::app::Program::Blastx,
-                    )
-                }),
+                .map_or(
+                    crate::report::db_subject::FormatThrow::Refused(
+                        crate::report::db_subject::ThrowRefusal::Format,
+                    ),
+                    |format| {
+                        crate::report::db_subject::FormatThrow::of(
+                            format,
+                            options.tabular,
+                            crate::blastinput::app::Program::Blastx,
+                        )
+                    },
+                ),
             changed_by_load_throws: !crate::blastinput::app::ReportFormat::from_number(i32::from(
                 options.outfmt,
             ))
@@ -1073,11 +1092,18 @@ impl ReportedAsks {
 
     /// What the reports `options` of one call ask: each of them, with the batches' prefetch of
     /// the first, which NCBI's app runs for its one format
-    /// (`BlastFormatter_PreFetchSequenceData(..., GetFormattedOutputChoice())`).
-    pub(super) fn of_all(options: &[super::args::ResolvedOptions]) -> Self {
+    /// (`BlastFormatter_PreFetchSequenceData(..., GetFormattedOutputChoice())`), and the call's
+    /// refusal of a subject whose lookup throws over the `-outfmt` values of its other searches,
+    /// `others`, too (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
+    pub(super) fn of_all(options: &[super::args::ResolvedOptions], others: &[&str]) -> Self {
         let mut asks = options
             .iter()
             .fold(Self::default(), |asks, options| asks.or(Self::of(options)));
+        asks.throw = asks.throw.of_search(
+            others,
+            crate::blastinput::app::Program::Blastx,
+            crate::report::archive::options::RequestKind::Blastx,
+        );
         asks.prefetched = options
             .first()
             .is_some_and(|options| Self::of(options).prefetched);
@@ -1334,7 +1360,11 @@ pub(super) fn reported_batch(
         asks.prefetch_runs && !unfetched,
         unfetched,
         options.shown_lists(),
-        crate::report::db_subject::FormatThrow::of_run([asks.throw]),
+        (
+            asks.throw,
+            // The pairwise report reads the subjects that it shows as its writer reads them.
+            options.pairwise_reading(),
+        ),
     );
     super::x_timing::run(XRun::Titles, x_t);
     let mut reported = reported.map_err(reported_error)?;
@@ -1401,11 +1431,9 @@ pub(super) fn reported_batch(
             let rows_open = options
                 .tabular
                 .is_some_and(|spec| spec.looks_up_every_taxid());
-            // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its
-            // `-sorthits`.
-            let pairwise = first_report
-                .and_then(crate::report::pairwise::PairwiseView::of)
-                .map(|view| view.report_sort(options.report_sort()));
+            // The pairwise report (outfmt 0 to 4) reads the subjects that it shows as its writer
+            // reads them.
+            let pairwise = options.pairwise_reading();
             reported.fetch_by_query(
                 database,
                 results,
@@ -1585,6 +1613,62 @@ pub(crate) type BatchRender<'r> = dyn FnMut(
         Option<&crate::utils::threading::SearchPool<'_>>,
     ) -> Result<()>
     + 'r;
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264 (cited at `run_inner`'s
+// `take`: the batch's query factory, then its request, before its search)
+/// The add of the reader batch `queries` (its first query `queries_before` of the run) to the
+/// scopes of the queries (`query_scopes`), where the loop takes the batch: once per batch
+/// (`taken`: the batch taken last, whose units the loop takes one by one), after the batch's reader
+/// messages and the reports of the batches before, before the batch's request and search. LOSAT's
+/// refusal of two queries of one scope with one id stops the run there, in the one form of every
+/// program (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
+/// `-export_search_strategy` (`export`) no request of the batch is written; else NCBI's error of
+/// the set-up of the batch's records that NCBI's set-up reads with their own letters
+/// (`reader_batch::set_up_error`, as `search_error` makes the search's), or the refusal.
+/// RPSTBLASTN's set-up reads its database's files first: refused. (Round 4 added the batch after
+/// its search, and wrote its request.) The reader's batches are NCBI's (`input::emit_fasta_batch`
+/// counts as `query_batch::BatchCount`; line WQA D10 round 6, 2026-11-20).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn add_batch_scope(
+    query_scopes: &std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScopes>>,
+    taken: &std::cell::Cell<Option<usize>>,
+    queries: &[FastaRecord],
+    queries_before: usize,
+    export: bool,
+    options: &super::args::ResolvedOptions,
+    subjects: Subjects<'_>,
+    search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
+) -> Result<()> {
+    if taken.replace(Some(queries_before)) == Some(queries_before) {
+        return Ok(());
+    }
+    // Every record read, those that the range skipped among them (`input::scope_records`).
+    let ordered = super::input::scope_records(queries);
+    let Some(scopes) = query_scopes.borrow_mut().as_mut().map(|scopes| {
+        scopes.add_batch_ids(
+            ordered
+                .iter()
+                .map(|&(believed, length, _)| (believed, length)),
+            queries_before,
+        )
+    }) else {
+        return Ok(());
+    };
+    scopes.map_err(|refusal| {
+        crate::blastinput::query_batch::refused_batch_error(refusal, export, |first| {
+            if options.rpstblastn.is_some() {
+                return None;
+            }
+            let records: Vec<FastaRecord> = ordered
+                .iter()
+                .zip(first)
+                .filter_map(|(&(_, _, place), &first)| place.filter(|_| first))
+                .map(|place| queries[place].clone())
+                .collect();
+            super::reader_batch::set_up_error(&records, options, subjects).map(search_error)
+        })
+    })
+}
 
 /// The query batches of a run: each reader batch from `read` is searched with `options` against
 /// `search_subjects` (with 2+ threads, on one pool for the whole run) and handed to `render` with

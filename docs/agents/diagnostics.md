@@ -1958,9 +1958,12 @@ Rebuilding less:
   (`BlastCompo_HeapWouldInsert` before its first alignment) where the heap at the window's start makes the
   answer certain, and otherwise stops the match's redo at the test as on FALSE and leaves the test to the
   replay; a FALSE there keeps the job's result (NCBI's), a TRUE stops the replay and carries that match and
-  the window's matches after it to the next window, which finishes the match (a continuation, which repeats
-  the redo's first round) and every carried match whose test is TRUE for certain, and the replay keeps each
-  batch's status with the one-thread loop's own rule (core's `smith_waterman_match::SwBatchStatus`). A window with a carry
+  the window's matches after it to the next window, which finishes the match (a continuation, which resumes
+  the redo from the state its job kept at the test, so neither the composition adjustment nor the first
+  round's score-only scan runs twice) and every carried match whose test is TRUE for certain, and the replay
+  keeps each batch's status with the one-thread loop's own rule (core's `smith_waterman_match::SwBatchStatus`).
+  A kept state (about 3.2 KB, most of it the adjusted matrix) lives from the job to FALSE or to the
+  continuation's job, one per match a window holds with its carry: at most 2 x 4 x 64 x threads. A window with a carry
   takes at most a budget of new jobs, as one without, and the carried matches (in jobs of four) and the new
   jobs together are at most two budgets, so a window holds at most 2 x 4 x 64 x threads results before their
   replay, carried ones included, and a stop's serial work is linear in the carry (at most a window's; it
@@ -1982,14 +1985,12 @@ Rebuilding less:
   par_s=<s> replay_s=<s>` (on one line; `split`: windows that end inside a query; `ended`: the matches the
   early termination test ended, as many as in the one-thread loop; `skipped`: those not computed;
   `wasted`: those computed and dropped; with `-use_sw_tback` the line ends with ` turned=<t>
-  continued=<c> cont_stop=<a> cont_ahead=<b> cont_bound=<d> carried_max=<m> rerun_s=<s> rerun_max_s=<s>`:
+  continued=<c> cont_stop=<a> cont_ahead=<b> cont_bound=<d> carried_max=<m>`:
   the matches whose heap test a job could not answer (its redo stopped at the test) and the replay
   answered FALSE (the job's result stands); the carried matches that a continuation in the next window
   finishes, by the reason why their test is TRUE (the stopped match itself, the exact look-ahead in a
-  later query, the bound on the lists the heap holds); the most matches a replay carried; the seconds of
-  the continued matches' jobs, which their continuations repeat up to the test, and the sum over the
-  windows of the largest of them in a window, the repeat that a window waits for in full where its slowest
-  job is a continuation, as in a chain of stopped windows). A redo that ends in an error prints the line
+  later query, the bound on the lists the heap holds); the most matches a replay carried). A redo that
+  ends in an error prints the line
   too, with the counts of the windows replayed before the one that ended it. Diagnostics only, the output bytes do not change: the counters
   and traces of the redo count the `wasted` matches as well (`[TIMING] x_bpredofit: lists= hsps=`, the
   kappa range counters, `LOSAT_DEBUG_BLASTP_TRACE_HSP` lines), and `[X_STATS] NEWTONLANES` counts the

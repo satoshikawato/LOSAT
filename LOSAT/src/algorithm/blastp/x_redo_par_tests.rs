@@ -469,7 +469,7 @@ fn drive_expanding(
         false,
         expand,
         &[],
-        &mut |lists, _, window| {
+        &mut |lists, _, window, _| {
             window_seen(lists, window);
             window
                 .matches
@@ -1591,7 +1591,7 @@ fn sw_job_match(test: XSwTest<'_>, oid: u32, case: SwCase) -> XComputed {
     XComputed {
         result,
         deferred,
-        first_round_s: 0.0,
+        resume: None,
     }
 }
 
@@ -1653,7 +1653,7 @@ fn sw_drive_expanding(
         false,
         expand,
         excluded,
-        &mut |lists, heaps, window| {
+        &mut |lists, heaps, window, _| {
             window_seen(lists, window);
             window
                 .jobs
@@ -2669,7 +2669,8 @@ fn a_stopped_replay_drops_at_most_a_cap_of_results_at_risk_per_stopped_window() 
 /// and without the jobs largest first, each computed match equals the one-thread loop's call
 /// (`postprocess_preliminary_hits_smith_waterman` with fresh scratch) whose heap test the
 /// query's heap at the window's start answers, and the job defers exactly the tests that this
-/// heap cannot answer for certain.
+/// heap cannot answer for certain, keeping the redo's state at each; a continuation, resumed from
+/// the state that a deferred call kept, equals the call answered TRUE.
 #[test]
 fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
     let fixture = redo_fixture();
@@ -2760,8 +2761,9 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                     sw_excluded: &[],
                 };
                 // The one-thread loop's call with fresh scratch, its heap test answered by
-                // `answer`; and the test's E-value and score, if it was asked.
-                let one_thread = |matched: XMatch, answer: &dyn Fn(f64, i32) -> bool| {
+                // `answer`; the test's E-value and score, if it was asked; the state kept where
+                // `answer` defers it.
+                let one_thread = |matched: XMatch, answer: &dyn Fn(f64, i32) -> SwHeapAnswer| {
                     let q_idx = matched.q_idx;
                     let local_match = x_local_match(&fixture.lists, matched);
                     let hits: Vec<BlastpPreliminaryHsp> = local_match
@@ -2776,6 +2778,7 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                     let mut sw_scratch = SwMatchScratch::new();
                     let subject = search.subjects.read(local_match.oid).expect("a subject");
                     let mut asked = None;
+                    let mut kept = None;
                     let result = postprocess_preliminary_hits_smith_waterman(
                         &hits,
                         &x_query_workspace(&search, q_idx),
@@ -2791,31 +2794,41 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                         &mut scratch.range_cache,
                         false,
                         &mut sw_scratch,
+                        None,
                         &mut |evalue, score| {
                             asked = Some((evalue, score));
                             answer(evalue, score)
                         },
+                        &mut kept,
                     );
-                    (result.map_err(|error| format!("{error:#}")), asked)
+                    (result.map_err(|error| format!("{error:#}")), asked, kept)
                 };
+                let known = |inserts: bool| move |_: f64, _: i32| SwHeapAnswer::Known(inserts);
                 if carried_windows.is_empty() {
                     for window in &windows {
                         let Some(index) = (0..window.matches.len()).find(|&index| {
                             !window.ended[index]
-                                && one_thread(window.matches[index], &|_: f64, _: i32| false)
-                                    .1
-                                    .is_some()
+                                && one_thread(window.matches[index], &known(false)).1.is_some()
                         }) else {
                             continue;
                         };
                         let matched = window.matches[index];
-                        let asked = one_thread(matched, &|_: f64, _: i32| false)
-                            .1
-                            .expect("asked");
+                        // The job's call that deferred the test: its FALSE result and its state.
+                        let (result, asked, kept) =
+                            one_thread(matched, &|_: f64, _: i32| SwHeapAnswer::Deferred);
+                        assert!(kept.is_some(), "a deferred test keeps the redo's state");
+                        assert_eq!(
+                            x_result_difference(
+                                &result.map_err(|error| anyhow::anyhow!(error)),
+                                &one_thread(matched, &known(false)).0
+                            ),
+                            None,
+                            "a deferred test ends the call as FALSE does"
+                        );
                         let stopped = XComputed {
                             result: no_alignment(),
-                            deferred: Some(asked),
-                            first_round_s: 0.0,
+                            deferred: Some(asked.expect("asked")),
+                            resume: kept,
                         };
                         let carry = XCarry {
                             matches: window.matches[index..].to_vec(),
@@ -2825,19 +2838,27 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                                 }))
                                 .collect(),
                         };
-                        carried_windows.push(x_window::<true>(
-                            &fixture.lists,
-                            heaps,
-                            &fixture.batches,
-                            &vec![None; count],
-                            &caps,
-                            Some(&carry),
-                            window.next.unwrap_or(stream_end),
-                            carry.matches.len().div_ceil(X_JOB_MATCHES) + window.jobs.len() + 2,
+                        carried_windows.push((
+                            x_window::<true>(
+                                &fixture.lists,
+                                heaps,
+                                &fixture.batches,
+                                &vec![None; count],
+                                &caps,
+                                Some(&carry),
+                                window.next.unwrap_or(stream_end),
+                                carry.matches.len().div_ceil(X_JOB_MATCHES) + window.jobs.len() + 2,
+                            ),
+                            carry,
                         ));
                     }
                 }
-                for window in windows.iter().chain(&carried_windows) {
+                let all_windows = windows.iter().map(|window| (window, &[][..])).chain(
+                    carried_windows
+                        .iter()
+                        .map(|(window, carry)| (window, &carry.results[..])),
+                );
+                for (window, carried) in all_windows {
                     for lpt in [false, true] {
                         let shared = Arc::new(XSharedSubjectRanges::new());
                         let (computed, _) = x_compute_window::<_, true>(
@@ -2845,6 +2866,7 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                             &fixture.lists,
                             heaps,
                             window,
+                            carried,
                             &shared,
                             lpt,
                         );
@@ -2880,11 +2902,13 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                             // The one-thread call answered as the job answers: TRUE for a
                             // continuation, FALSE for a deferred test, else the heap at the
                             // window's start.
-                            let (reference, asked) =
+                            let (reference, asked, _) =
                                 one_thread(matched, &|evalue: f64, score: i32| {
-                                    continued.is_some()
-                                        || (!deferrable(evalue)
-                                            && heap.clone().would_insert(evalue, score, oid))
+                                    SwHeapAnswer::Known(
+                                        continued.is_some()
+                                            || (!deferrable(evalue)
+                                                && heap.clone().would_insert(evalue, score, oid)),
+                                    )
                                 });
                             with_list += usize::from(
                                 reference
@@ -2899,6 +2923,7 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                             if let Some(test) = continued {
                                 assert_eq!(asked, Some(test), "{at:?}");
                                 assert_eq!(computed.deferred, None, "{at:?}");
+                                assert!(computed.resume.is_none(), "{at:?}");
                                 continuations += 1;
                                 continue;
                             }
@@ -2906,6 +2931,7 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                                 deferrable(evalue) && heap.would_insert_view(evalue, score, oid)
                             });
                             assert_eq!(computed.deferred, expected, "{at:?}");
+                            assert_eq!(computed.resume.is_some(), expected.is_some(), "{at:?}");
                             deferred_tests += usize::from(expected.is_some());
                             certain_false += usize::from(asked.is_some_and(|(evalue, score)| {
                                 !heap.would_insert_view(evalue, score, oid)

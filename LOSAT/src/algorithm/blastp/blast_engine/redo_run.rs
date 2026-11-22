@@ -1272,7 +1272,13 @@ where
                     &mut kappa_subject_range_cache,
                     needs.seqalign,
                     sw_scratch,
-                    &mut |evalue, score| redone_match.would_insert(evalue, score, s_idx),
+                    None,
+                    &mut |evalue, score| {
+                        kappa::smith_waterman::SwHeapAnswer::Known(
+                            redone_match.would_insert(evalue, score, s_idx),
+                        )
+                    },
+                    &mut None,
                 );
                 let Some(postprocessed) = sw_status.redone(redone, || sw_endless(batch.start))?
                 else {

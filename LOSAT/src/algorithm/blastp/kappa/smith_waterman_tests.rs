@@ -1,7 +1,7 @@
 //! Hand-made matches for BLASTP's Smith-Waterman redo (`redo_one_match_smith_waterman`): the
 //! window's alignments in NCBI's list order, the forbidden ranges between them, the heap's test
 //! before the first alignment, the cutoff score of sum statistics and the regime of a significant
-//! score of 0.
+//! score of 0; and random matches for the redo resumed at a heap test left open.
 
 use super::*;
 use crate::config::ScoringMatrix;
@@ -24,6 +24,19 @@ fn encode(text: &str) -> Vec<u8> {
 /// BLASTP's redo parameters of composition mode 1 with BLOSUM62 11/1, scaled by 32 as
 /// `RedoParamsBuilder::build` scales them.
 fn params(do_link_hsps: bool, cutoff_score: i32) -> BlastRedoAlignParams {
+    params_in(
+        BlastCompoAdjustMode::CompositionBasedStats,
+        do_link_hsps,
+        cutoff_score,
+    )
+}
+
+/// `params` in composition mode `mode`.
+fn params_in(
+    mode: BlastCompoAdjustMode,
+    do_link_hsps: bool,
+    cutoff_score: i32,
+) -> BlastRedoAlignParams {
     BlastRedoAlignParams {
         matrix_info: build_matrix_info(ScoringMatrix::Blosum62, 0.3176 / SCALE).unwrap(),
         gapping_params: BlastCompoGappingParams {
@@ -32,7 +45,7 @@ fn params(do_link_hsps: bool, cutoff_score: i32) -> BlastRedoAlignParams {
             x_dropoff: 2000,
             context: std::cell::Cell::new(None),
         },
-        compo_adjust_mode: BlastCompoAdjustMode::CompositionBasedStats,
+        compo_adjust_mode: mode,
         alphsize: crate::utils::matrix::BLASTAA_SIZE as i32,
         composition_test_index: 0,
         log_k: 0.041f64.glibc_ln(),
@@ -140,12 +153,36 @@ fn run(
     cutoff_e: f64,
     heap_answer: bool,
 ) -> Run {
+    run_from(
+        query,
+        subject,
+        hsps,
+        params,
+        (searchsp, cutoff_e),
+        None,
+        &mut || SwHeapAnswer::Known(heap_answer),
+    )
+    .0
+}
+
+/// `run` with its heap test answered by `heap`, from `resume` where given; with the state that the
+/// call keeps where `heap` leaves the test open.
+fn run_from(
+    query: &[u8],
+    subject: &[u8],
+    hsps: &[(i32, i32, i32, i32)],
+    params: &BlastRedoAlignParams,
+    (searchsp, cutoff_e): (f64, f64),
+    resume: Option<&SwMatchResume>,
+    heap: &mut dyn FnMut() -> SwHeapAnswer,
+) -> (Run, Option<Box<SwMatchResume>>) {
     let info = query_info(query, searchsp);
     let matching_seq = BlastCompoMatchingSequence::new(7, subject);
     let mut workspace = BlastCompositionWorkspace::new_blosum62();
     let mut matrix = None;
     let mut heap_asks = 0;
     let mut scratch = SwMatchScratch::new();
+    let mut kept = None;
     let result = redo_one_match_smith_waterman(
         &incoming(hsps),
         params,
@@ -156,18 +193,23 @@ fn run(
         &mut workspace,
         &mut matrix,
         cutoff_e,
+        resume,
         &mut |query_index, _evalue, _score| {
             assert_eq!(query_index, 0);
             heap_asks += 1;
-            heap_answer
+            heap()
         },
+        &mut kept,
         &mut scratch,
     );
-    Run {
-        result,
-        matrix,
-        heap_asks,
-    }
+    (
+        Run {
+            result,
+            matrix,
+            heap_asks,
+        },
+        kept,
+    )
 }
 
 /// The alignments of query 0, the list's head (the last one made) first.
@@ -354,4 +396,102 @@ fn a_significant_score_zero_is_decided_by_the_first_cell() {
     let subject = encode(&format!("W{}{}{}", &QUERY[..40], SPACER, &QUERY[8..50]));
     let run = run(&query, &subject, &hsps, &params(false, 1), 1e6, 10.0, true);
     assert_eq!(alignments(&run.result.unwrap()).len(), 2);
+}
+
+/// A deterministic generator of the random matches (xorshift64).
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 % n as u64) as usize
+    }
+}
+
+/// A call's outcome, an error by its text.
+fn outcome(run: &Run) -> std::result::Result<&BlastRedoOneMatchResult, String> {
+    run.result.as_ref().map_err(|error| format!("{error:#}"))
+}
+
+// Random matches of the query's parts: one to three copies of a part in the subject, each with
+// letters changed at random and an HSP of its own, after a first letter W or D or none; the query
+// with a first W or without; composition modes 1, 2 and 3; `-evalue` 10, or 1e6, at which a score
+// of 0 is significant, so that a match of two or more HSPs fails or never ends (by the first
+// cell). A heap test left open ends the call as its FALSE does, and the call resumed from the state
+// that it kept ends as the TRUE answer does (alignments, p-value, lambda ratio, the matrix left,
+// or the failed or endless redo), without asking the heap again.
+#[test]
+fn a_redo_resumed_at_its_open_heap_test_equals_the_redo_answered_true() {
+    const LETTERS: &[u8] = b"ARNDCQEGHILKMFPSTWYV";
+    let modes = [
+        BlastCompoAdjustMode::CompositionBasedStats,
+        BlastCompoAdjustMode::CompositionMatrixAdjust,
+        BlastCompoAdjustMode::ForceFullMatrixAdjust,
+    ];
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let (mut aligned, mut failed, mut endless, mut not_asked) = (0, 0, 0, 0);
+    for case in 0..400 {
+        let w_first = rng.below(2) == 0;
+        let query = encode(&format!("{}{QUERY}", if w_first { "W" } else { "" }));
+        let offset = i32::from(w_first);
+        let mut subject_text = match rng.below(3) {
+            0 => "W".to_string(),
+            1 => "D".to_string(),
+            _ => String::new(),
+        };
+        let mut hsps = Vec::new();
+        for _ in 0..1 + rng.below(3) {
+            let length = 12 + rng.below(30);
+            let start = rng.below(QUERY.len() - length);
+            let part: String = QUERY[start..start + length]
+                .bytes()
+                .map(|letter| {
+                    if rng.below(6) == 0 {
+                        char::from(LETTERS[rng.below(LETTERS.len())])
+                    } else {
+                        char::from(letter)
+                    }
+                })
+                .collect();
+            let at = subject_text.len() as i32;
+            subject_text.push_str(&part);
+            let (start, length) = (start as i32 + offset, length as i32);
+            hsps.push((start, start + length, at, at + length));
+            subject_text.push_str(&SPACER[..1 + rng.below(SPACER.len())]);
+        }
+        let subject = encode(&subject_text);
+        let p = params_in(modes[rng.below(modes.len())], false, 1);
+        let evalues = (1e6, if rng.below(3) == 0 { 1e6 } else { 10.0 });
+        let call = |resume: Option<&SwMatchResume>, heap: &mut dyn FnMut() -> SwHeapAnswer| {
+            run_from(&query, &subject, &hsps, &p, evalues, resume, heap)
+        };
+        let (with_true, _) = call(None, &mut || SwHeapAnswer::Known(true));
+        let (with_false, _) = call(None, &mut || SwHeapAnswer::Known(false));
+        let (open, kept) = call(None, &mut || SwHeapAnswer::Deferred);
+        assert_eq!(outcome(&open), outcome(&with_false), "case {case}");
+        assert_eq!(open.matrix, with_false.matrix, "case {case}");
+        assert_eq!(kept.is_some(), with_true.heap_asks == 1, "case {case}");
+        let Some(kept) = kept else {
+            not_asked += 1;
+            continue;
+        };
+        let (resumed, again) = call(Some(&kept), &mut || {
+            panic!("case {case}: the resumed redo asks the heap again")
+        });
+        assert!(again.is_none(), "case {case}");
+        assert_eq!(outcome(&resumed), outcome(&with_true), "case {case}");
+        assert_eq!(resumed.matrix, with_true.matrix, "case {case}");
+        match &with_true.result {
+            Ok(result) if !alignments(result).is_empty() => aligned += 1,
+            Err(error) if error.is::<SwRedoFailed>() => failed += 1,
+            Err(error) if error.is::<SwRedoEndless>() => endless += 1,
+            _ => {}
+        }
+    }
+    assert!(
+        aligned > 100 && failed > 10 && endless > 10 && not_asked > 0,
+        "aligned {aligned} failed {failed} endless {endless} not asked {not_asked}"
+    );
 }

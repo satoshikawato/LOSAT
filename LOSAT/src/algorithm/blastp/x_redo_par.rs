@@ -116,9 +116,10 @@
 //! loop asks it (before the match's insert, after every match before it). On FALSE the job's result
 //! is NCBI's (no alignment, status 0) and nothing was computed in vain. On TRUE the replay stops at
 //! the match: the match and the window's matches after it, with their results, go to the next
-//! window, which finishes the match (a continuation: the same redo with the test answered TRUE, as
-//! the replay answered it; it repeats the redo's first round, which the job computed up to the
-//! test) and, in the same way, each carried match whose deferred test is TRUE for certain on the
+//! window, which finishes the match (a continuation: the redo resumed at the test answered TRUE,
+//! as the replay answered it, from the state that the job kept there, `SwMatchResume`, so it
+//! repeats neither the composition adjustment nor the first round's score-only scan) and, in the
+//! same way, each carried match whose deferred test is TRUE for certain on the
 //! heaps where the replay stopped (`x_sw_continued`: the carried matches before it that keep no
 //! list do not count), while its other jobs compute the matches after the carried ones. The carried
 //! results stay valid: a certain answer stays certain, and a deferred one is asked at its replay.
@@ -136,13 +137,13 @@
 //! replayed before every match after it, so a batch ends after its continuations. A Smith-Waterman
 //! job is at risk only as an X-drop job is (the early termination test may end its match). With
 //! `LOSAT_TIMING=1` the `[TIMING] x_bpredopar:` line of such a search ends with `turned=<t>
-//! continued=<c> cont_stop=<a> cont_ahead=<b> cont_bound=<d> carried_max=<m> rerun_s=<s>
-//! rerun_max_s=<s>`: the deferred answers that the replay answered FALSE, and the carried matches
-//! continued, by the reason why their test is TRUE (the stopped match itself, the exact look-ahead
-//! in a later query, the bound on the lists the heap holds); the most matches a replay carried; the
-//! seconds of the continued matches' first jobs, which their continuations repeat up to the test,
-//! and the sum over the windows of the largest of them in a window (the repeat that a window whose
-//! slowest job is a continuation waits for in full, as in a chain of stopped windows).
+//! continued=<c> cont_stop=<a> cont_ahead=<b> cont_bound=<d> carried_max=<m>`: the deferred
+//! answers that the replay answered FALSE, and the carried matches continued, by the reason why
+//! their test is TRUE (the stopped match itself, the exact look-ahead in a later query, the bound
+//! on the lists the heap holds); the most matches a replay carried. A job keeps the state of each
+//! test it defers (about 3.2 KB, its matrix) with the match's result until the replay answers the
+//! test: one state per match that a window holds with its carry at most (2 x 4 x 64 x threads),
+//! freed by a FALSE at the replay or by the continuation's job.
 //!
 //! `LOSAT_X_BPREDOPAR` is a switch of the strict set (on by default since 2026-10-17): on unless it
 //! is `0`. With `LOSAT_TIMING=1` each search the path runs
@@ -207,7 +208,7 @@ use super::hsp::{
 };
 #[cfg(test)]
 use super::hsp::{fill_results_from_compo_heaps, BlastpHsp};
-use super::kappa::smith_waterman::SwMatchScratch;
+use super::kappa::smith_waterman::{SwHeapAnswer, SwMatchResume, SwMatchScratch};
 use super::kappa::{
     build_query_workspace, postprocess_preliminary_hits,
     postprocess_preliminary_hits_smith_waterman, x_newton_lanes_prefetch_matches,
@@ -358,11 +359,6 @@ struct XCounts {
     continued_by: XContinuedBy,
     /// The most matches that a replay carried to the next window.
     carried_max: usize,
-    /// The seconds of the continued matches' jobs, which their continuations repeat up to the
-    /// heap test (`XComputed::first_round_s`).
-    rerun_s: f64,
-    /// The sum over the windows of the largest of those seconds among the window's continuations.
-    rerun_max_s: f64,
 }
 
 /// The carried matches that a window continues (`x_sw_continued`), by the reason why their heap
@@ -612,14 +608,15 @@ fn x_sw_continued(
 
 /// A match computed by its job: the result of its redo and, for a Smith-Waterman match whose heap
 /// test the job deferred (`x_sw_heap_test`: the redo stopped at the test as on FALSE), that test's
-/// E-value and score, which the replay asks the query's heap with.
+/// E-value and score, which the replay asks the query's heap with, and the state of the redo at
+/// the test (`resume`), from which a continuation finishes the match where the replay answers
+/// TRUE. A FALSE at the replay frees the state with the result; a TRUE carries it to the
+/// continuation's job.
 #[derive(Debug)]
 struct XComputed {
     result: Result<BlastpPostprocessResult>,
     deferred: Option<(f64, i32)>,
-    /// With `LOSAT_TIMING=1` and `deferred`: the seconds of the job's redo of the match, which
-    /// stopped at the test (what a continuation of the match does again); else 0.
-    first_round_s: f64,
+    resume: Option<Box<SwMatchResume>>,
 }
 
 impl From<Result<BlastpPostprocessResult>> for XComputed {
@@ -627,7 +624,7 @@ impl From<Result<BlastpPostprocessResult>> for XComputed {
         Self {
             result,
             deferred: None,
-            first_round_s: 0.0,
+            resume: None,
         }
     }
 }
@@ -970,7 +967,8 @@ fn x_redo_match<P>(
 /// when the answer at the replay is TRUE for certain, FALSE when it is FALSE for certain, else
 /// FALSE with `deferred` set to the E-value and score that the replay asks the heap with: the redo
 /// stops at the test as NCBI's does on FALSE, which is the match's result if the replay answers
-/// FALSE; on TRUE a continuation in the next window finishes it (`XCarry`).
+/// FALSE; on TRUE a continuation in the next window finishes it (`XCarry`), resumed from the
+/// state that the job keeps at the test (`x_redo_match_sw`).
 ///
 /// Certain TRUE: the E-value is within the heap's cutoff (the test's second condition), or `n +
 /// before` is below the threshold (the first condition at the replay: only this query's matches
@@ -1011,13 +1009,17 @@ enum XSwTest<'h> {
     /// before this one (`x_sw_heap_test`).
     Heap(&'h BlastCompoHeap, usize),
     /// A continuation (`XCarry`): TRUE, as the replay answered the test with this E-value and
-    /// score.
+    /// score; the redo resumes past the test (`x_redo_match_sw`), so it is not asked again.
     Continued((f64, i32)),
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3621
 /// The Smith-Waterman redo of one match (`-use_sw_tback`): the call of the one-thread loop, with its
-/// heap test answered as `test` says.
+/// heap test answered as `test` says. A test that the job defers keeps the redo's state there
+/// (`XComputed::resume`); a continuation resumes from that state (`resume`, the state that the
+/// match's job kept), past its test, without the composition adjustment and the first round's
+/// score-only scan that the job made.
+#[allow(clippy::too_many_arguments)]
 fn x_redo_match_sw<P>(
     search: &XRedoParSearch<'_, P>,
     q_idx: usize,
@@ -1026,6 +1028,7 @@ fn x_redo_match_sw<P>(
     redo_align_params: &BlastRedoAlignParams,
     scratch: &mut XScratch,
     test: XSwTest<'_>,
+    resume: Option<&SwMatchResume>,
 ) -> XComputed {
     scratch.hits.clear();
     scratch.hits.extend(
@@ -1040,13 +1043,19 @@ fn x_redo_match_sw<P>(
             return XComputed {
                 result: Err(error),
                 deferred: None,
-                first_round_s: 0.0,
+                resume: None,
             }
         }
     };
     let subject_raw = subject.residues();
     let mut deferred = None;
-    let started = search.timing.then(Instant::now);
+    let mut kept = None;
+    let resume = match test {
+        XSwTest::Heap(..) => None,
+        XSwTest::Continued(_) => {
+            Some(resume.expect("a continuation resumes from the state that its job kept"))
+        }
+    };
     let result = postprocess_preliminary_hits_smith_waterman(
         &scratch.hits,
         query_workspace,
@@ -1062,31 +1071,35 @@ fn x_redo_match_sw<P>(
         &mut scratch.range_cache,
         search.engine_positives,
         scratch.sw.get_or_insert_with(SwMatchScratch::new),
+        resume,
         &mut |evalue, score| match test {
-            XSwTest::Heap(heap, before) => x_sw_heap_test(
-                heap,
-                before,
-                (evalue, score, local_match.oid),
-                &mut deferred,
-            ),
-            XSwTest::Continued(asked) => {
-                // The same inputs give the replay's test the same E-value and score.
-                debug_assert!(
-                    asked.0.to_bits() == evalue.to_bits() && asked.1 == score,
-                    "a continuation's heap test differs from the deferred one"
+            XSwTest::Heap(heap, before) => {
+                let inserts = x_sw_heap_test(
+                    heap,
+                    before,
+                    (evalue, score, local_match.oid),
+                    &mut deferred,
                 );
-                true
+                if deferred.is_some() {
+                    SwHeapAnswer::Deferred
+                } else {
+                    SwHeapAnswer::Known(inserts)
+                }
             }
+            // BLASTP's match has one window, whose one test the continuation resumes past.
+            XSwTest::Continued(_) => unreachable!("a continuation's heap test is asked again"),
         },
+        &mut kept,
     );
-    let first_round_s = match (started, deferred) {
-        (Some(started), Some(_)) => started.elapsed().as_secs_f64(),
-        _ => 0.0,
-    };
+    debug_assert_eq!(
+        deferred.is_some(),
+        kept.is_some(),
+        "a deferred test keeps the redo's state"
+    );
     XComputed {
         result,
         deferred,
-        first_round_s,
+        resume: kept,
     }
 }
 
@@ -1099,12 +1112,14 @@ fn x_redo_match_sw<P>(
 /// (`LOSAT_X_BPREDOLPT`), more than one thread on the search's pool and two or more jobs, the
 /// jobs run as `x_compute_window_lpt` runs them; the second value says whether they did. With `SW`
 /// each match runs the Smith-Waterman redo (`x_redo_match_sw`), its heap test answered from
-/// `heaps`, or TRUE for a continuation (a match in `window.continued`).
+/// `heaps`, or TRUE for a continuation (a match in `window.continued`), which resumes from the
+/// state that its job kept (in `carried`, the carry's results: the window's carried matches').
 fn x_compute_window<P, const SW: bool>(
     search: &XRedoParSearch<'_, P>,
     lists: &[Option<BlastpHitList>],
     heaps: &[BlastCompoHeap],
     window: &XWindow,
+    carried: &[Option<XComputed>],
     shared: &Arc<XSharedSubjectRanges>,
     lpt: bool,
 ) -> (XWindowResults, bool)
@@ -1144,7 +1159,7 @@ where
                         (!ended).then(|| XComputed {
                             result: Err(anyhow::anyhow!("{error:#}")),
                             deferred: None,
-                            first_round_s: 0.0,
+                            resume: None,
                         })
                     })
                     .collect();
@@ -1156,8 +1171,9 @@ where
         // only by a call on this thread with the same input bits. It does not change any value
         // NCBI computes. Given the heaps of the batch as the window's start left them, as the
         // one-thread loop gives its heaps, it leaves out the matches the test ends on them: those
-        // not computed here.
-        {
+        // not computed here. A continuation's job (a carried match) resumes past the composition
+        // adjustment, which reads none.
+        if !SW || job.start >= window.carried {
             let list = lists[q_idx]
                 .as_ref()
                 .expect("a match's query has its preliminary hit list");
@@ -1189,13 +1205,17 @@ where
             .map(|(index, (&matched, &ended))| {
                 (!ended).then(|| {
                     if SW {
-                        let test = match window
-                            .continued
-                            .binary_search_by_key(&(job.start + index), |&(at, _)| at)
-                        {
-                            Ok(found) => XSwTest::Continued(window.continued[found].1),
-                            Err(_) => XSwTest::Heap(&heaps[q_idx], before_job + index),
-                        };
+                        let at = job.start + index;
+                        let (test, resume) =
+                            match window.continued.binary_search_by_key(&at, |&(at, _)| at) {
+                                Ok(found) => (
+                                    XSwTest::Continued(window.continued[found].1),
+                                    carried[at]
+                                        .as_ref()
+                                        .and_then(|stopped| stopped.resume.as_deref()),
+                                ),
+                                Err(_) => (XSwTest::Heap(&heaps[q_idx], before_job + index), None),
+                            };
                         x_redo_match_sw(
                             search,
                             q_idx,
@@ -1204,6 +1224,7 @@ where
                             &redo_align_params,
                             scratch,
                             test,
+                            resume,
                         )
                     } else {
                         x_redo_match(
@@ -1502,7 +1523,7 @@ fn x_replay<const SW: bool>(
         let Some(XComputed {
             result,
             deferred,
-            first_round_s,
+            resume,
         }) = computed
         else {
             unreachable!(
@@ -1514,14 +1535,15 @@ fn x_replay<const SW: bool>(
         // The heap test that the job left to the replay, on the heap as the matches before this
         // one left it. On FALSE NCBI's redo of the match ends at its first round with no
         // alignment and status 0: the job's result, a redo that stopped there. On TRUE the
-        // match's redo goes on past the test: a continuation in the next window, and the replay
-        // of the matches after it waits for it.
+        // match's redo goes on past the test: a continuation in the next window, resumed from the
+        // job's state at the test, and the replay of the matches after it waits for it. A FALSE
+        // frees that state.
         if let (true, Some(test)) = (SW, deferred) {
             if heaps[matched.q_idx].would_insert(test.0, test.1, local_match.oid) {
                 let stopped = XComputed {
                     result,
                     deferred,
-                    first_round_s,
+                    resume,
                 };
                 *carry = Some(XCarry {
                     matches: matches[index..].to_vec(),
@@ -1574,6 +1596,7 @@ fn x_redo_windows<const SW: bool>(
         &[Option<BlastpHitList>],
         &[BlastCompoHeap],
         &XWindow,
+        &[Option<XComputed>],
     ) -> XWindowResults,
 ) -> Result<XCounts> {
     let matches = x_query_matches(
@@ -1654,31 +1677,28 @@ fn x_redo_windows<const SW: bool>(
                 counts.split += 1;
             }
             let par_start = timing.then(Instant::now);
-            let mut results = compute(lists, heaps, &window);
+            // The carried results hold the states that the continuations resume from.
+            let carried = carry.as_ref().map_or(&[][..], |carry| &carry.results[..]);
+            let mut results = compute(lists, heaps, &window, carried);
             if let Some(par_start) = par_start {
                 counts.par_s += par_start.elapsed().as_secs_f64();
             }
-            // The carried results, the continued ones replaced by their continuations', then the
-            // results of the jobs after them.
+            // The carried results, the continued ones replaced by their continuations' (which frees
+            // the states they resumed from), then the results of the jobs after them.
             if let Some(carry) = carry.take() {
                 counts.carried_max = counts.carried_max.max(window.carried);
                 counts.continued_by.add(window.continued_by);
-                let mut rerun_max_s = 0.0f64;
                 let mut computed = results.into_iter();
                 results = carry.results;
                 for index in window.jobs.iter().flat_map(|job| job.clone()) {
                     let result = computed.next().expect("one result per match of a job");
                     if index < window.carried {
-                        let stopped = std::mem::replace(&mut results[index], result);
-                        let first_round_s = stopped.map_or(0.0, |stopped| stopped.first_round_s);
+                        results[index] = result;
                         counts.continued += 1;
-                        counts.rerun_s += first_round_s;
-                        rerun_max_s = rerun_max_s.max(first_round_s);
                     } else {
                         results.push(result);
                     }
                 }
-                counts.rerun_max_s += rerun_max_s;
             }
             let replay_start = timing.then(Instant::now);
             let replayed = match x_replay::<SW>(
@@ -1816,9 +1836,9 @@ where
         search.timing,
         expand,
         search.sw_excluded,
-        &mut |lists, heaps, window| {
+        &mut |lists, heaps, window, carried| {
             let (results, lpt_ran) =
-                x_compute_window::<P, SW>(search, lists, heaps, window, &shared, lpt);
+                x_compute_window::<P, SW>(search, lists, heaps, window, carried, &shared, lpt);
             if seg_win.is_some_and(|min| shared.x_len() >= min) {
                 shared.x_clear();
                 seg_emptied = true;
@@ -1858,15 +1878,12 @@ fn x_print_timing(counts: &XCounts) {
             .lpt_windows
             .map_or(String::new(), |windows| format!(" lpt_windows={windows}")),
         counts.turned.map_or(String::new(), |turned| format!(
-            " turned={turned} continued={} cont_stop={} cont_ahead={} cont_bound={} carried_max={} \
-             rerun_s={:.6} rerun_max_s={:.6}",
+            " turned={turned} continued={} cont_stop={} cont_ahead={} cont_bound={} carried_max={}",
             counts.continued,
             counts.continued_by.stop,
             counts.continued_by.ahead,
             counts.continued_by.bound,
-            counts.carried_max,
-            counts.rerun_s,
-            counts.rerun_max_s
+            counts.carried_max
         ))
     );
 }

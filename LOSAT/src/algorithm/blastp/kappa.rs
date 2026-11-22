@@ -1510,9 +1510,12 @@ pub(crate) fn postprocess_preliminary_hits(
 
 /// The redo of one match with `-use_sw_tback` (item X4): `postprocess_preliminary_hits` with
 /// NCBI's Smith-Waterman redo (`smith_waterman::redo_one_match_smith_waterman`) in place of the
-/// X-drop redo; the steps after it are the same. `would_insert(evalue, score)` asks the query's
-/// heap of redone matches (`BlastCompo_HeapWouldInsert` with the match's subject index). The
-/// errors `SwRedoFailed` and `SwRedoEndless` are NCBI's failed and endless redos.
+/// X-drop redo; the steps after it are the same. `would_insert(evalue, score)` answers the test of
+/// the query's heap of redone matches (`BlastCompo_HeapWouldInsert` with the match's subject
+/// index): the one-thread loop asks the heap (`SwHeapAnswer::Known`); a job of the parallel redo
+/// may leave it open (`Deferred`: the match ends as on FALSE, and `kept` gets the test's state),
+/// and the continuation of such a match resumes from that state (`resume`; item X4-mt). The errors
+/// `SwRedoFailed` and `SwRedoEndless` are NCBI's failed and endless redos.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3605
 // Out of line: the one-thread loop calls it where `-use_sw_tback` asks for it, and the X-drop
@@ -1533,7 +1536,9 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
     subject_range_cache: &mut BlastpKappaSubjectRangeCache,
     engine_positives: bool,
     sw_scratch: &mut smith_waterman::SwMatchScratch,
-    would_insert: &mut dyn FnMut(f64, i32) -> bool,
+    resume: Option<&smith_waterman::SwMatchResume>,
+    would_insert: &mut dyn FnMut(f64, i32) -> smith_waterman::SwHeapAnswer,
+    kept: &mut Option<Box<smith_waterman::SwMatchResume>>,
 ) -> Result<BlastpPostprocessResult> {
     postprocess_with(
         preliminary_hits,
@@ -1562,7 +1567,9 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
                 composition_workspace,
                 matrix_state,
                 expect_value,
+                resume,
                 &mut |_query_index, evalue, score| would_insert(evalue, score),
+                kept,
                 sw_scratch,
             )
         },

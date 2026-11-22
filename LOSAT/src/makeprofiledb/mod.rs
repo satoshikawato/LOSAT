@@ -13,7 +13,6 @@ mod work;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 
-use crate::ncbi_app::args::{flag, key, mandatory_key, Constraint, Dep, Desc, Kind};
 use crate::ncbi_app::Tool;
 
 /// makeprofiledb's name in LOSAT's refusals (`<what> is not supported by LOSAT's
@@ -25,62 +24,12 @@ const PROGRAM: &str = "MAKEPROFILEDB";
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:379-484
 const HELP: &str = include_str!("help.txt");
 
-/// The arguments of `CMakeProfileDBApp::Init` in the order it describes them, each with the
-/// constraint its `SetConstraint` gives; the values of `CArgAllow_Strings` in the order of its
-/// `std::set`.
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:379-484
-const DESCS: &[Desc] = &[
-    mandatory_key("in", Kind::InputFile),
-    flag("binary"),
-    key("title", Kind::Text, None, None),
-    key("threshold", Kind::Double, Some("9.82"), None),
-    flag("force"),
-    key("out", Kind::Text, None, None),
-    key(
-        "blastdb_version",
-        Kind::Integer,
-        Some("5"),
-        Some(Constraint::Integers(4, 5)),
-    ),
-    key("max_smp_vol", Kind::Integer, Some("2500"), None),
-    key(
-        "dbtype",
-        Kind::Text,
-        Some("rps"),
-        Some(Constraint::Strings(&["cobalt", "delta", "rps"])),
-    ),
-    key("index", Kind::Boolean, Some("true"), None),
-    key("gapopen", Kind::Integer, None, None),
-    key("gapextend", Kind::Integer, None, None),
-    key("scale", Kind::Double, Some("100"), None),
-    key(
-        "matrix",
-        Kind::Text,
-        Some("BLOSUM62"),
-        Some(Constraint::Strings(&[
-            "BLOSUM45", "BLOSUM50", "BLOSUM62", "BLOSUM80", "BLOSUM90", "PAM250", "PAM30", "PAM70",
-        ])),
-    ),
-    key("obsr_threshold", Kind::Double, Some("6"), None),
-    key("exclude_invalid", Kind::Boolean, Some("true"), None),
-    key("taxid", Kind::Integer, None, Some(Constraint::AtLeast(0))),
-    key("taxid_map", Kind::InputFile, None, None),
-];
-
-/// The `SetDependency` calls of `Init`.
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:476
-fn dependencies() -> Vec<(&'static str, Dep, &'static str)> {
-    vec![("taxid", Dep::Excludes, "taxid_map")]
-}
-
 /// makeprofiledb as NCBI's application runs it (`ncbi_app`): no prefix on its diagnostics; its
 /// `Init` reads its parameters (`work::dry_run` with `-dryrun`).
 static TOOL: Tool = Tool {
     program: "makeprofiledb",
     refusal_name: PROGRAM,
     help: HELP,
-    descs: DESCS,
-    dependencies,
     post_prefix: None,
     components: &[],
     dry_run: Some(work::dry_run),

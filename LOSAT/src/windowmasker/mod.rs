@@ -14,7 +14,6 @@ mod work;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 
-use crate::ncbi_app::args::{flag, key, Constraint, Dep, Desc, Kind};
 use crate::ncbi_app::Tool;
 use crate::ncbi_version::Component;
 
@@ -23,201 +22,20 @@ const PROGRAM: &str = "WINDOWMASKER";
 
 // NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:76,99-110
 /// The text of `windowmasker -help` (NCBI 2.17.0's, `CArgDescriptions::PrintUsage` of the
-/// descriptions in `DESCS` after `HideStdArgs`), frozen. Its part before `OPTIONAL ARGUMENTS` is
-/// the usage that `-h` and the argument errors print.
+/// descriptions of `CWinMaskConfig::AddWinMaskArgs` after `HideStdArgs`), frozen. Its part before
+/// `OPTIONAL ARGUMENTS` is the usage that `-h` and the argument errors print.
 const HELP: &str = include_str!("help.txt");
 
-const INT_MAX: i64 = i32::MAX as i64;
-
-// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:50-213
-// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_cmdline_args.cpp:40-51
-/// The arguments of `CWinMaskConfig::AddWinMaskArgs(arg_desc)` (`eAny`, the input determined)
-/// in the order it describes them; NCBI's reader adds the help flags before them and `-logfile`
-/// and `-conffile` after them (`ncbi_app::args`). The values that a `CArgAllow_Strings` allows
-/// are listed in the order of their `std::set`.
-const DESCS: &[Desc] = &[
-    key("ustat", Kind::Text, None, None),
-    key("in", Kind::InputFile, Some("-"), None),
-    key("out", Kind::OutputFile, Some("-"), None),
-    key("checkdup", Kind::Boolean, Some("false"), None),
-    key("fa_list", Kind::Boolean, Some("false"), None),
-    key(
-        "mem",
-        Kind::Integer,
-        Some("1536"),
-        Some(Constraint::Integers(1, INT_MAX)),
-    ),
-    key("meta", Kind::Text, Some(""), None),
-    key(
-        "unit",
-        Kind::Integer,
-        None,
-        Some(Constraint::Integers(1, 16)),
-    ),
-    key("genome_size", Kind::Integer, None, None),
-    key(
-        "window",
-        Kind::Integer,
-        None,
-        Some(Constraint::Integers(1, INT_MAX)),
-    ),
-    key(
-        "t_extend",
-        Kind::Integer,
-        None,
-        Some(Constraint::Integers(0, INT_MAX)),
-    ),
-    key(
-        "t_thres",
-        Kind::Integer,
-        None,
-        Some(Constraint::Integers(1, INT_MAX)),
-    ),
-    key(
-        "set_t_high",
-        Kind::Integer,
-        None,
-        Some(Constraint::Integers(1, INT_MAX)),
-    ),
-    key(
-        "set_t_low",
-        Kind::Integer,
-        None,
-        Some(Constraint::Integers(1, INT_MAX)),
-    ),
-    flag("parse_seqids"),
-    key(
-        "outfmt",
-        Kind::Text,
-        Some("interval"),
-        Some(Constraint::Strings(&[
-            "fasta",
-            "interval",
-            "maskinfo_asn1_bin",
-            "maskinfo_asn1_text",
-            "maskinfo_xml",
-            "seqloc_asn1_bin",
-            "seqloc_asn1_text",
-            "seqloc_xml",
-        ])),
-    ),
-    key(
-        "t_high",
-        Kind::Integer,
-        None,
-        Some(Constraint::Integers(1, INT_MAX)),
-    ),
-    key("t_high_pct", Kind::Double, None, Some(PCT)),
-    key("t_thres_pct", Kind::Double, None, Some(PCT)),
-    key("t_extend_pct", Kind::Double, None, Some(PCT)),
-    key(
-        "t_low",
-        Kind::Integer,
-        None,
-        Some(Constraint::Integers(1, INT_MAX)),
-    ),
-    key("t_low_pct", Kind::Double, None, Some(PCT)),
-    key(
-        "infmt",
-        Kind::Text,
-        Some("fasta"),
-        Some(Constraint::Strings(&["blastdb", "fasta", "seqids"])),
-    ),
-    key("exclude_ids", Kind::Text, Some(""), None),
-    key("ids", Kind::Text, Some(""), None),
-    key("text_match", Kind::Boolean, Some("T"), None),
-    key(
-        "sformat",
-        Kind::Text,
-        Some("ascii"),
-        Some(Constraint::Strings(&[
-            "ascii", "binary", "oascii", "obinary",
-        ])),
-    ),
-    key("smem", Kind::Integer, Some("512"), None),
-    key("dust", Kind::Boolean, Some("F"), None),
-    key("dust_level", Kind::Integer, Some("20"), None),
-    flag("mk_counts"),
-    flag("convert"),
-];
-
-/// `CArgAllow_Doubles( 0.0, 100.0 )` of the `-t_*_pct` keys.
-const PCT: Constraint = Constraint::Doubles(0.0, 100.0, "0..100");
-
-// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:212-254
-/// The `SetDependency` calls of `AddWinMaskArgs`, in their order.
-fn dependencies() -> Vec<(&'static str, Dep, &'static str)> {
-    let excludes = |of: &'static str, names: &[&'static str]| {
-        names
-            .iter()
-            .map(move |&name| (of, Dep::Excludes, name))
-            .collect::<Vec<_>>()
-    };
-    let mut list = excludes(
-        "mk_counts",
-        &[
-            "outfmt",
-            "ustat",
-            "window",
-            "t_thres",
-            "t_extend",
-            "set_t_low",
-            "set_t_high",
-            "dust",
-            "dust_level",
-            "convert",
-        ],
-    );
-    list.extend(excludes(
-        "ustat",
-        &[
-            "checkdup",
-            "fa_list",
-            "mem",
-            "unit",
-            "genome_size",
-            "sformat",
-            "smem",
-            "convert",
-        ],
-    ));
-    list.extend(excludes(
-        "convert",
-        &[
-            "checkdup",
-            "window",
-            "t_extend",
-            "t_thres",
-            "t_high",
-            "t_low",
-            "set_t_low",
-            "set_t_high",
-            "infmt",
-            "outfmt",
-            "parse_seqids",
-            "fa_list",
-            "mem",
-            "unit",
-            "genome_size",
-            "dust",
-            "dust_level",
-            "exclude_ids",
-            "ids",
-            "text_match",
-        ],
-    ));
-    list
-}
-
 // NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:79-84
+// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:50-254
 /// windowmasker as NCBI's application runs it (`ncbi_app`): LOSAT's version where NCBI's states its
-/// own (`ncbi_version::print`) and no prefix on its diagnostics.
+/// own (`ncbi_version::print`), the arguments of its XML (`ncbi_xmlhelp/windowmasker.xml`: those
+/// of `CWinMaskConfig::AddWinMaskArgs` for `eAny`, the input determined, and its `SetDependency`
+/// calls) and no prefix on its diagnostics.
 static TOOL: Tool = Tool {
     program: "windowmasker",
     refusal_name: PROGRAM,
     help: HELP,
-    descs: DESCS,
-    dependencies,
     post_prefix: None,
     components: COMPONENTS,
     dry_run: None,

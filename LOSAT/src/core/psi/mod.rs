@@ -108,7 +108,7 @@ pub(crate) struct PsiDiagnosticsRequest {
 }
 
 impl PsiDiagnosticsRequest {
-    /// `PSIDiagnosticsRequestNewEx(save_ascii_pssm)`.
+    /// `PSIDiagnosticsRequestNewEx` with `save_ascii_pssm`.
     pub(crate) fn new_ex(save_ascii_pssm: bool) -> Self {
         Self {
             information_content: save_ascii_pssm,

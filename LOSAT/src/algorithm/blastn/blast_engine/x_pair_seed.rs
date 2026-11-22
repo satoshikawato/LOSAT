@@ -135,8 +135,8 @@ pub(super) struct DiagArray<'a> {
 }
 
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:135-149
-/// A pair after the word extension of `s_BlastNaExtend` (`q_offset -= ext_left`,
-/// `s_offset -= ext_left`), with its context and the `s_range` of its scan range.
+/// A pair after the word extension of `s_BlastNaExtend` (`q_offset` and `s_offset` each moved left
+/// by `ext_left`), with its context and the `s_range` of its scan range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Seed {
     context: u32,

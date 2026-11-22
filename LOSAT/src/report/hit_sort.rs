@@ -120,10 +120,10 @@ impl HspScores {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1462-1489
-    /// `GetAlignmentLength(aln, translation)`: the HSP's columns, except TBLASTX's (`tblastx`),
-    /// whose Std-seg of two nucleotide rows becomes a Dense-seg of nucleotide lengths, three per
-    /// amino acid, unless `translation` (`CreateTranslatedDensegFromNADenseg`, the lengths in
-    /// amino acids).
+    /// `GetAlignmentLength` of `aln` and `translation`: the HSP's columns, except TBLASTX's
+    /// (`tblastx`), whose Std-seg of two nucleotide rows becomes a Dense-seg of nucleotide lengths,
+    /// three per amino acid, unless `translation` (`CreateTranslatedDensegFromNADenseg`, the
+    /// lengths in amino acids).
     pub(crate) fn alignment_length(&self, tblastx: bool, translation: bool) -> i64 {
         if tblastx && !translation {
             3 * self.length
@@ -270,7 +270,7 @@ pub(crate) fn hsp_by_percent_identity_descending(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3163-3171
-/// `GetPercentIdentity(numerator, denominator)`.
+/// `GetPercentIdentity` of `numerator` and `denominator`.
 pub(crate) fn percent_identity(numerator: i64, denominator: i64) -> f64 {
     if numerator == denominator {
         100.0
@@ -344,13 +344,15 @@ pub(crate) struct SortedHits {
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3102-3118
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3065-3100
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1249-1257
-/// `SortSeqalignForSortableFormat(aln_set, tblastx, hit_sort, hsp_sort)` of one query whose
-/// hits (`HspListToHitList`: one per subject, as the report groups them) are `hits`, each with its
-/// HSPs in the report's order; `None` when `sort` sorts nothing (no work, the order stays).
+/// `SortSeqalignForSortableFormat` of `aln_set` with `tblastx`, `hit_sort` and `hsp_sort`, for one
+/// query whose hits (`HspListToHitList`: one per subject, as the report groups them) are `hits`,
+/// each with its HSPs in the report's order; `None` when `sort` sorts nothing (no work, the order
+/// stays).
 ///
 /// NCBI's `kTranslation` is a static that only the hit sort by percent identity sets, to
-/// `m_Program == "tblastx"`, before it sorts each query's hits; it is zero-initialised, so it is
-/// `tblastx && -sorthits 3` for the whole run, and the HSP sort by percent identity reads it too.
+/// whether `m_Program` is "tblastx", before it sorts each query's hits; it is zero-initialised, so
+/// it is true for the whole run exactly when the program is `tblastx` and `-sorthits 3` is given,
+/// and the HSP sort by percent identity reads it too.
 pub(crate) fn sort_query_hits(
     sort: ReportSort,
     tblastx: bool,

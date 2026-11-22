@@ -19,7 +19,7 @@ use crate::utils::glibc_fma_libm::GlibcLibm;
 
 /// Result of length adjustment computation
 ///
-/// NCBI's `BLAST_ComputeLengthAdjustment` returns `converged ? 0 : 1`
+/// NCBI's `BLAST_ComputeLengthAdjustment` returns 0 when `converged`, else 1
 /// (blast_stat.c:5125) and its only caller, `BLAST_CalcEffLengths`
 /// (blast_setup.c:821), drops it; no LOSAT caller read it either.
 #[derive(Debug, Clone, Copy)]

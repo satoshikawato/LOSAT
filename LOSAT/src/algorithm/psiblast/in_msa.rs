@@ -44,7 +44,7 @@ pub(crate) struct MsaScoring<'a> {
     pub(crate) matrix_name: &'a str,
     pub(crate) gap_open: i32,
     pub(crate) gap_extend: i32,
-    /// `-out_ascii_pssm` is given (`PSIDiagnosticsRequestNewEx(SaveAsciiPssm())`).
+    /// `-out_ascii_pssm` is given (`PSIDiagnosticsRequestNewEx` with `SaveAsciiPssm`).
     pub(crate) save_ascii_pssm: bool,
 }
 
@@ -98,7 +98,7 @@ fn refused_cause(cause: &str) -> anyhow::Error {
     anyhow::anyhow!("-in_msa with this alignment is not supported by LOSAT's PSIBLAST: {cause}")
 }
 
-/// Posts the warnings of the reader (`ERR_POST(Warning << ..)`, prefix `psiblast`) to the
+/// Posts the warnings of the reader (`ERR_POST` at warning severity, prefix `psiblast`) to the
 /// diagnostics stream.
 fn post_warnings(diagnostics: &mut dyn std::io::Write, warnings: &[Vec<u8>]) -> Result<()> {
     for message in warnings {
@@ -169,7 +169,7 @@ fn query_bioseq<'a>(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:276-300
 fn extract_query(rows: &[Vec<u8>], master_index: Option<i32>) -> Result<Vec<u8>> {
-    // `AsInteger() - 1` of a value of 1 or more.
+    // One less than `AsInteger()`, for a value of 1 or more.
     let index = master_index.map_or(0, |index| (index - 1) as usize);
     if index >= rows.len() {
         return Err(blast_options_error(&format!(

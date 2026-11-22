@@ -52,7 +52,6 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | Option or value | What happens |
 | :--- | :--- |
 | `-html` | Refused: not yet supported. |
-| `-best_hit_overhang`, `-best_hit_score_edge` with `blastx`, `tblastn` or `tblastx` | Refused: not yet supported. `blastn`, `blastp` and `psiblast` run them. |
 | `-import_search_strategy` | Refused. `psiblast`, `rpsblast` and `rpstblastn` refuse it too. |
 | `-export_search_strategy -` (standard output) | Refused where NCBI writes its request into the report: LOSAT holds the report's bytes from NCBI's formatter until NCBI's first request (after its prolog and the first batch of queries is read, before the search), refuses there and writes none of them. A file name works. A run that NCBI ends before that point (an empty query, a database error, an error of an option or of `-outfmt`, a first query record it cannot read, a `-query_loc` past the end, `BATCH_SIZE=abc`, a PSSM run with `-subject`) ends as in NCBI: the held bytes (its prolog) are written, then its error and exit status. NCBI's warnings from before its formatter come before the refusal. |
 | `-export_search_strategy` into the file of `-out`, or into standard output | Refused where NCBI writes its request into the report or over it, at the same point as the row above, with no byte written to the stream. A run that NCBI ends before its first request ends as in NCBI, including the held prolog. |
@@ -149,8 +148,9 @@ Strategy files:
 | `-reward 0 -penalty 0` with `-task megablast` and its greedy extension (without `-no_greedy`; also with `-ungapped` when the gap costs are 0 and 0) | Refused. NCBI divides by zero (exit status 136) or does not finish. |
 | `-gapopen` or `-gapextend` above 32767 with `-task megablast` | Refused. |
 | `-filtering_db` in LOSAT Web | Refused. LOSAT Web does not read BLAST databases yet. |
-| `-use_index true` with a megablast search that NCBI runs with a MegaBLAST index (made by `makembindex`): a new-style index of a volume of `-db`, an old-style index of `-index_name` or of the `-db` name, at a `-word_size` the index supports | Refused. When NCBI finds no index, cannot read the header of the first index volume, or the word size is below the index's minimum, LOSAT writes NCBI's error lines and warning and searches without the index, as NCBI does. |
+| `-use_index true` with a MegaBLAST index (made by `makembindex`) that NCBI searches with, when the index covers only some volumes of `-db`, the search is two-hit (`-window_size` above 0), or `-db_hard_mask` is given | Refused. Other searches with an index give NCBI's output. When NCBI finds no index, cannot read the header of the first index volume, or the word size is below the index's minimum, LOSAT writes NCBI's error lines and warning and searches without the index, as NCBI does. |
 | `-use_index true` with a new-style index volume of 36 to 39 bytes or one without read access, an empty first index volume, or an `-index_name` volume range whose loop NCBI never ends (a first volume of 0 or more with a negative last one, such as `oidx,,0,-1`, or a last one of -1) | Refused. NCBI reads such a header undefined, crashes on the empty volume, or never finishes the loop. |
+| `-use_index true` with an index volume whose parts do not fit together (a list, offset or local id outside its sections, an Nmer length of 0, a stride of 32,768 or more), an index not made from the database (a sequence with more chunks than the index has), a seed of the index that starts at or past the last letter of its sequence, or an old-style index (`-index_name`) of fewer sequences than the database when the search runs more than one query batch or query chunk | Refused. NCBI reads past such an index's sections or past the sequence, crashes, or gives a result that depends on the order of its threads. With the old-style index NCBI stops with an error in its second search of the index (a later query batch or query chunk); LOSAT writes the same output of the batches before and refuses there. |
 | `-xdrop_gap` or `-xdrop_gap_final` so large that NCBI's 32-bit arithmetic overflows | Refused. See Rare inputs for the limits. |
 | A very large `-xdrop_ungap` (such as `1e10`) that leads to an alignment outside its query context | Refused. See Rare inputs. |
 | `-db_hard_mask` on a database whose sequences are masked to their end, with `-task blastn-short` | Refused. NCBI can crash. |
@@ -549,7 +549,6 @@ error: the NCBI BLAST+ option -gi_mask is not supported by LOSAT's makeblastdb (
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-outfmt` with `%d` or `%b` (the ASN.1 texts) | Refused. |
 | A `-db` list in which an alias and another name give the same volume | Refused. |
 | FASTA output of a sequence with a tax id, or `-outfmt` with `%S`, `%L`, `%B`, `%K`, `%C` or `%N`, or `-tax_info` with a name field, when `taxdb.btd` is empty | Refused. NCBI maps the file as a null pointer and crashes. `-outfmt "%a %T"`, other formats that look nothing up, and `-info` work. |
 | A failed write of the `-metadata` output | Refused. NCBI's serial stream reports it. |

@@ -165,9 +165,9 @@ pub struct HspRecord {
     pub gap_open: usize,
     /// The gap columns (`gaps`).
     pub gaps: usize,
-    /// How many HSPs NCBI's sum statistics linked with this one (`Expect(n)` of the pairwise
-    /// format), where the program links HSPs; `None` otherwise. 0 and 1 both mean an HSP on its
-    /// own (`BlastHSP::num`).
+    /// How many HSPs NCBI's sum statistics linked with this one (the `n` of `Expect` in the
+    /// pairwise format), where the program links HSPs; `None` otherwise. 0 and 1 both mean an HSP
+    /// on its own (`BlastHSP::num`).
     pub sum_n: Option<i32>,
     /// The composition-based statistics method that scored the HSP, where the program has one:
     /// 0 none, 1 `Composition-based stats`, 2 `Compositional matrix adjust`.
@@ -575,6 +575,19 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
     groups.into_iter().map(|(_, group)| group).collect()
 }
 
+/// The `-outfmt` values of `formats` that the search of the positions `group` (a group of
+/// `search_groups`) does not write, in the call's order: those of the call's other searches, over
+/// which, with its own, a search decides the call's refusals (`ReportOutputs::other_outfmts`).
+/// Empty where the call is one search.
+fn other_formats<'f>(formats: &[&'f str], group: &[usize]) -> Vec<&'f str> {
+    formats
+        .iter()
+        .enumerate()
+        .filter(|(position, _)| !group.contains(position))
+        .map(|(_, outfmt)| *outfmt)
+        .collect()
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
@@ -908,8 +921,12 @@ pub fn run(
             } else {
                 log.sink(&mut repeated, false)
             };
+            // The formats of the other searches, of which the call's refusals are decided
+            // (`ReportOutputs::other_outfmts`).
+            let others = other_formats(&formats, group);
             let result = {
                 let mut outputs = ReportOutputs {
+                    other_outfmts: &others,
                     formats: group
                         .iter()
                         .map(|&position| FormatOutput {
@@ -979,6 +996,7 @@ pub fn run_to_file(
         let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt,
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -1038,9 +1056,11 @@ fn collect_one(
         positions.iter().map(|_| CountingWriter::new()).collect();
     let mut recorder = RangeRecorder::new(writers.iter().map(|w| w.position.clone()).collect());
     let mut collected: Vec<Arc<Vec<PairwiseHit>>> = Vec::new();
+    let others = other_formats(formats, positions);
     let result = {
         let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
+            other_outfmts: &others,
             formats: positions
                 .iter()
                 .zip(writers.iter_mut())

@@ -7,10 +7,10 @@
 //! # API
 //!
 //! - [`MaskFastaReader::new`]`(input: R, protein: bool, parse_seqids: bool) ->
-//!   Result<MaskFastaReader<R>, std::io::Error>`: `CMaskFastaReader(stream, is_nucl =
-//!   !protein, parse_seqids)`. NCBI's line reader reads its first buffer here; a failed read
-//!   is the error (NCBI throws the stream's `std::ios_base::failure` from the constructor,
-//!   after the program has opened its output).
+//!   Result<MaskFastaReader<R>, std::io::Error>`: `CMaskFastaReader` of the stream,
+//!   with `is_nucl` the opposite of `protein`, and `parse_seqids`. NCBI's line reader reads its
+//!   first buffer here; a failed read is the error (NCBI throws the stream's
+//!   `std::ios_base::failure` from the constructor, after the program has opened its output).
 //! - [`MaskFastaReader::next`]`(&mut self, warn: ReaderWarn<'_>) ->
 //!   Result<Option<MaskRecord>, MaskReadError>`: `GetNextSequence`. `Ok(None)` at the end of
 //!   the input, also for input of blank and comment lines only (`eEOF`, which `ReadSet`
@@ -33,7 +33,7 @@
 //!   (`LOG_POST`), and `SeqId(warning)`, which it writes as `Warning: (1306.<subcode>)
 //!   <message>` with the application's prefix. Both are of severity Warning: dustmasker and
 //!   segmasker (NCBI's release post level, Error) write none, windowmasker
-//!   (`SetDiagPostLevel(eDiag_Warning)`) writes them. The texts are those of dustmasker
+//!   (`SetDiagPostLevel` to `eDiag_Warning`) writes them. The texts are those of dustmasker
 //!   2.17.0 with `DIAG_POST_LEVEL=Warning` (`tests/dustmasker/reader`, `*_warn*` cases).
 
 use std::io::Read;
@@ -75,7 +75,7 @@ pub(crate) struct MaskRecord {
     /// The title descriptor (`CSeqdesc::e_Title`): the title of the definition line without
     /// white space at its ends, `None` for none.
     pub(crate) title: Option<Vec<u8>>,
-    /// `bsh.GetSeqVector(CBioseq_Handle::eCoding_Iupac)`.
+    /// `GetSeqVector` of the Bioseq handle `bsh`, with `CBioseq_Handle::eCoding_Iupac`.
     pub(crate) letters: Vec<u8>,
 }
 
@@ -101,9 +101,9 @@ pub(crate) struct MaskFastaReader<R: Read> {
 }
 
 impl<R: Read> MaskFastaReader<R> {
-    /// `CMaskFastaReader(newInputStream, is_nucl, parse_seqids)` (its flags are cited at
-    /// `ReaderFlags::mask_fasta_reader`). The `CFastaReader` constructor over a stream makes
-    /// the line reader of `ILineReader::New`, the `CBufferedLineReader` of makeblastdb:
+    /// `CMaskFastaReader` of the new input stream, `is_nucl` and `parse_seqids` (its flags are
+    /// cited at `ReaderFlags::mask_fasta_reader`). The `CFastaReader` constructor over a stream
+    /// makes the line reader of `ILineReader::New`, the `CBufferedLineReader` of makeblastdb:
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:269-270
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:69-74
@@ -212,7 +212,7 @@ fn mask_record<R: Read>(record: Record, reader: &mut FastaReader<R>) -> MaskReco
     }
 }
 
-/// The letters of `CSeqVector(eCoding_Iupac)` over the sequence that `AssembleSeq` made: a
+/// The letters of a `CSeqVector` with `eCoding_Iupac` over the sequence that `AssembleSeq` made: a
 /// raw sequence of one literal's data, or a delta of literals (the reader without
 /// `fParseGaps` keeps no gaps: `>?` gaps became `N` or `X`, and a hyphen is a residue). Each
 /// literal of a nucleotide sequence reads back from the NCBI2na or NCBI4na data that

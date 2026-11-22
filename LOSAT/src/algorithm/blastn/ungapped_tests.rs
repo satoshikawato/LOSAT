@@ -11,7 +11,7 @@ const NCBI_SUBJECT: [u8; 22] = [
 
 /// `testReevaluateWithAmbiguitiesUngappedNucl` (blasthits_unit_test.cpp:500-600): the HSP
 /// 0..20 on 0..20 (score 20) of a 1/-2 search is cut to 6..20 on 6..20 with score 11, and not
-/// deleted. NCBI's test sets `word_params->cutoff_score_min = 3`; the re-evaluation reads
+/// deleted. NCBI's test sets `word_params->cutoff_score_min` to 3; the re-evaluation reads
 /// `word_params->cutoffs[context].cutoff_score` (blast_hits.c:687), not that one, so the 3
 /// below is only the test's argument: the expected values are the same for a cutoff of 4 to 11.
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:500-585 testReevaluateWithAmbiguitiesUngappedNucl
@@ -124,7 +124,8 @@ fn identities_count_blastna_codes_equal() {
     assert_eq!(count_identities_ungapped(&q, &s, 2, 2, 0), 0);
 }
 
-/// The word cutoff of NCBI's `BLAST_Cutoffs(.., MIN(avg, 2q) * avg, TRUE, 0)`: worked by hand
+/// The word cutoff of NCBI's `BLAST_Cutoffs` for a search space of `avg` times the smaller of
+/// `avg` and twice `q`, with `TRUE` and 0 as its last two arguments: worked by hand
 /// as `ceil(ln(K * searchsp / 0.05) / Lambda)` (values from the formula, computed outside).
 #[test]
 fn word_cutoff_is_ceil_of_etos_with_min_of_avg_and_two_q() {

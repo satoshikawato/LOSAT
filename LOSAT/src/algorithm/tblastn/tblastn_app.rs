@@ -19,6 +19,7 @@ use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::api::QueryEnd;
 use crate::blastinput::fasta_reader::FastaRecord;
+use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
 use crate::report::tabular::SubjectFetch;
 
 /// Whether `error` may fail one batch, after the reports of the batches before, rather than the
@@ -157,6 +158,7 @@ fn refused_batch_setup_error(
         subject_set,
         engine_positives,
         culling_limit: resolved.culling_limit,
+        best_hit: resolved.best_hit,
         subject_besthit: resolved.subject_besthit,
         pssm: None,
         fetch_excluded: None,
@@ -420,7 +422,7 @@ impl TblastnArgs {
                 }
             };
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-            // `m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects))` (blast_args.cpp:2557)
+            // `Reset` of `m_Subjects` with a new `blast::CObjMgr_QueryFactory` of `subjects` (blast_args.cpp:2557)
             // fails for a subject input without records.
             if subjects.is_empty() {
                 return Err(app::empty_subjects_error());
@@ -1429,21 +1431,38 @@ fn write_first_batch_prologs(
 // `-culling_limit` runs NCBI's culling pipe first on each query's hit list
 // (`BlastHSPStreamTBackClose`, before the filters of `s_FilterBlastResults`;
 // hspfilter_culling.c:699-733); its lists leave in the order of the tree, and the
-// sort by e-value here is NCBI's after the pipes, where it sorts.
+// sort by e-value here is NCBI's after the pipes, where it sorts. `-best_hit_overhang` /
+// `-best_hit_score_edge` run NCBI's best hit pipe there instead (hspfilter_besthit.c:520-539),
+// with the preliminary hit list size of the search (`compo_adjust_mode`: the batch's composition
+// mode, as the preliminary stage's).
 fn filter_final_hitlists(
     batch_results: &mut [super::stage_d_results::KappaResultHitList],
     queries: &[Vec<u8>],
     resolved: &ResolvedTblastnArgs,
+    compo_adjust_mode: BlastCompoAdjustMode,
     sorts_results: bool,
 ) -> Result<()> {
     if resolved.max_hsps > 0
         || resolved.query_cov_hsp_perc > 0.0
         || resolved.culling_limit > 0
+        || resolved.best_hit.is_some()
         || resolved.subject_besthit
     {
+        let best_hit = resolved.best_hit.map(|params| {
+            (
+                params,
+                super::stage_d_pipeline::preliminary_hitlist_size(
+                    resolved.hitlist_size,
+                    compo_adjust_mode,
+                ),
+            )
+        });
         for (hitlist, query) in batch_results.iter_mut().zip(queries) {
             if resolved.culling_limit > 0 {
                 hitlist.cull(resolved.culling_limit, query.len())?;
+            }
+            if let Some((params, prelim_size)) = best_hit {
+                hitlist.best_hit(params, prelim_size)?;
             }
             if resolved.max_hsps > 0 || resolved.query_cov_hsp_perc > 0.0 {
                 hitlist.filter_results(resolved.max_hsps, resolved.query_cov_hsp_perc, query.len());
@@ -1464,6 +1483,29 @@ fn filter_final_hitlists(
 /// limits and the environment, then the query batches (`read_query_batches`), the search of
 /// the batches that NCBI searches and their reports.
 #[allow(clippy::too_many_arguments)]
+/// How the pairwise reports of `formats` read each query's subjects, as the first pairwise
+/// format's writer reads them (`PairwiseView::reading` of `-sorthits`, `-sorthsps`,
+/// `-num_descriptions` and `-num_alignments`; the formats of a run whose loads they make share
+/// one view's order, `FormatThrow::and`), for the loads of a subject whose lookup throws and the
+/// texts of its reads (line DBID item pfoff-3); `None` without one.
+fn pairwise_reading(
+    resolved: &ResolvedTblastnArgs,
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+) -> Option<crate::report::pairwise::PairwiseReading> {
+    let view = formats.iter().find_map(|format| {
+        format
+            .report_format()
+            .and_then(crate::report::pairwise::PairwiseView::of)
+    })?;
+    Some(view.reading(
+        resolved.formatting.report_sort(),
+        crate::report::db_subject::Shown {
+            descriptions: resolved.num_descriptions,
+            alignments: resolved.num_alignments,
+        },
+    ))
+}
+
 fn search(
     args: &TblastnArgs,
     resolved: ResolvedTblastnArgs,
@@ -1773,7 +1815,7 @@ fn search(
             (None, _) => subject_letters,
         };
         // The batches before the stop are searched and reported; a reader at the end of its
-        // input reads no batch (`!input->End()`), and the reports have no query (an empty
+        // input reads no batch (its `End()` is true), and the reports have no query (an empty
         // pipe, or `-query -` after `-subject -`).
         let searched_done = batches.searched_done;
         let queries = &searched_queries[..searched_done];
@@ -1866,6 +1908,7 @@ fn search(
                 subject_set,
                 engine_positives,
                 culling_limit: resolved.culling_limit,
+                best_hit: resolved.best_hit,
                 subject_besthit: resolved.subject_besthit,
                 pssm: pssm.as_deref(),
                 fetch_excluded: fetch_excluded.as_ref(),
@@ -1924,6 +1967,7 @@ fn search(
                             subject_set,
                             engine_positives,
                             culling_limit: resolved.culling_limit,
+                            best_hit: resolved.best_hit,
                             subject_besthit: resolved.subject_besthit,
                             pssm: pssm.as_deref(),
                             fetch_excluded: fetch_excluded.as_ref(),
@@ -1997,6 +2041,7 @@ fn search(
                 &mut batch_results,
                 &query_seqs[range.clone()],
                 &resolved,
+                compo_adjust_mode,
                 subject_set.sorts_results(),
             )?;
             // `-db`: the definition lines of the batch's final hit lists are read where NCBI
@@ -2269,6 +2314,8 @@ fn search(
                         hard_masked,
                     ),
                     &outputs.formats,
+                    outputs.other_outfmts,
+                    pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                 )
                 // A read of a reported sequence that
@@ -2287,6 +2334,18 @@ fn search(
             observer.database_subjects(reported.library_subjects(database));
         }
         drop(database_stores);
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (cited at
+        // `db_subject::RunLoads`)
+        // A report whose load ends the run ends NCBI's application there: no batch after it is
+        // prefetched, so a stop of a later batch's prefetch is never reached
+        // (`HitLoads::reaches`; review 3 of line DBID pfoff-3, N1). The writer ends the run at
+        // that report with its error, before `failed` (the stop's, above) is asked.
+        let reaches = |query: usize| {
+            reported
+                .as_ref()
+                .is_none_or(|reported| reported.loads.reaches(query))
+        };
+        let prefetch_stop = prefetch_stop.filter(|(span, _)| reaches(span.start));
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:298-302
         // Before the reports of a batch NCBI fetches every subject that the batch reports, and
         // with `taxdb.bti` on the search path the taxonomy database writes its messages there
@@ -2341,7 +2400,7 @@ fn search(
                 // `-sorthits`.
                 let pairwise = first_report
                     .and_then(crate::report::pairwise::PairwiseView::of)
-                    .map(|view| view.report_sort(resolved.formatting.report_sort()));
+                    .and(pairwise_reading(&resolved, &outputs.formats));
                 let plural_names = taxdb_found
                     && first_spec
                         .as_ref()
@@ -2353,6 +2412,10 @@ fn search(
                     Ok::<(), anyhow::Error>(())
                 };
                 for span in &batch_spans {
+                    // No batch after the run's end is prefetched, nor read one by one.
+                    if !reaches(span.start) {
+                        break;
+                    }
                     let hitlists = &results[span.clone()];
                     // The batch's Seq-aligns, one for each HSP (`database::seq_aligns_of`).
                     let seq_aligns = super::database::seq_aligns_of(hitlists);
@@ -2373,6 +2436,9 @@ fn search(
                         }
                         let rows = first_rows;
                         for (query, hitlist) in span.clone().zip(hitlists) {
+                            if !reaches(query) {
+                                break;
+                            }
                             let shown = std::slice::from_ref(hitlist);
                             if hitlist
                                 .lists()

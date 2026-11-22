@@ -759,7 +759,7 @@ pub(crate) fn query_frame_masks(
 
 /// The masked regions of a query as NCBI hands them to the BLAST XML writer
 /// (`Blast_GetSeqLocInfoVector`, blast_aux.cpp:930-959): the SEG intervals of each frame in
-/// nucleotides, joined as `BlastSeqLocCombine(filter_out, 0)` joins them (only overlapping ones,
+/// nucleotides, joined as `BlastSeqLocCombine` of `filter_out` with 0 joins them (only overlapping ones,
 /// `query_dna_masks`), moved into the query's record and without the whole interval
 /// (`shown_query_masks`), in context order, each with the frame of its context. `out` is cleared
 /// first.
@@ -787,8 +787,8 @@ pub(crate) fn xml_query_masks(
 /// the 0-based nucleotide range of the row on the plus strand of the record, and `frame`
 /// the row's frame in the record (`s_GetStdsegMasterFrame`). With `-query_loc` a mask's
 /// label is the frame of the searched letters, which can differ from the frame the record
-/// gives the same letters: NCBI then shows a mask of another frame on the row (`locFrame ==
-/// frame`), and so does LOSAT.
+/// gives the same letters: NCBI then shows a mask of another frame on the row (`locFrame` equal to
+/// `frame`), and so does LOSAT.
 ///
 /// The scan of a frame's ranges (graduated 2026-10-27, the switch was `LOSAT_X_TBXMASKSEEK`)
 /// starts at the first range whose end, or the end of a range before it, reaches `low`, and stops
@@ -1608,7 +1608,9 @@ pub(crate) fn final_hit_order(
     }
     let mut lists = QueryLists::new(hitlist_size);
     for ((q_idx, oid), hsps) in pairs {
-        lists.add(q_idx, oid, hsps, filters);
+        if let Some(hsps) = super::hit_collector::subject_list(q_idx, hsps, filters) {
+            lists.add(q_idx, oid, hsps);
+        }
     }
     lists.finish(filters, true)
 }

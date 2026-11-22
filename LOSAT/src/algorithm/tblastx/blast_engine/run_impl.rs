@@ -1966,8 +1966,8 @@ fn write_pairwise_prologs(
                         crate::wording::REPORT_VERSION,
                         tblastx_database_name(args).as_bytes(),
                         records.len() as i64,
-                        // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
-                        // (Int8) (*iter)->length`).
+                        // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181: `m_iTotalLength` grows by
+                        // the `length` of each element, cast to `Int8`).
                         match x_stored {
                             Some((stores, _)) => {
                                 stores.iter().map(|store| store.len() as i64).sum()
@@ -2448,6 +2448,8 @@ fn write_tblastx_outputs(
                     // An exception of NCBI's merge in a query-anchored section ends the report after
                     // what it wrote before (`query_anchored::write_section`) with `CATCH_ALL`'s report
                     // (`NativeError::of_writer`), without the epilog or the later batches.
+                    // A subject set's subjects are all loaded.
+                    let every_loaded = crate::report::db_subject::HitLoads::default();
                     let mut write = |rows: &[crate::report::pairwise::PairwiseHit],
                                      range: std::ops::Range<usize>|
                      -> Result<()> {
@@ -2466,6 +2468,8 @@ fn write_tblastx_outputs(
                             anchored.as_ref().map(|sequences| {
                                 sequences as &dyn crate::report::query_anchored::ReportSequences
                             }),
+                            run.database
+                                .map_or(&every_loaded, |database| &database.reported.loads),
                         )
                         .map_err(crate::cli::NativeError::of_writer)
                     };
@@ -2947,7 +2951,7 @@ fn run_in_pool(
         reads: std::cell::RefCell::default(),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-178
-    // A reader at the end of its input reads no batch (`!input.End()`): the report of no
+    // A reader at the end of its input reads no batch (its `End()` is true): the report of no
     // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
     let no_batch = query_runs.input_records.is_empty() && matches!(reading, QueryReading::End);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3103-3105, 3136 (the length
@@ -3322,15 +3326,22 @@ fn run_batch_loop(
         .and_then(crate::api::local_blast::FormatOutput::report_format);
     let places_reads =
         first_report.is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads);
-    // The pairwise report (outfmt 0 to 4) reads its subjects in the order of its `-sorthits`.
-    let pairwise = first_report
+    // The pairwise reports (outfmt 0 to 4) read the subjects that they show as their writers read
+    // them (for the loads); the first format places the texts in the order of its reads.
+    let pairwise = super::super::database::pairwise_reading(
+        &outputs.formats,
+        args.formatting.report_sort(),
+        args.report_counts,
+    );
+    let pairwise_first = first_report
         .and_then(crate::report::pairwise::PairwiseView::of)
-        .map(|view| view.report_sort(args.formatting.report_sort()));
+        .is_some();
     // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
     // load throws, no report and no batch's prefetch after it loads anything
     // (`database::report_loads`).
     let run_loads = crate::report::db_subject::RunLoads::new(super::super::database::after_throw(
         outputs.formats.iter().map(|format| format.outfmt),
+        outputs.other_outfmts,
     ));
     // Whether the reports write the same where every load of a subject with a positive taxid throws
     // (`db_subject::unchanged_by_load_throws`).
@@ -3781,7 +3792,7 @@ fn run_batch_loop(
                     &done.hits,
                     done.searched.len(),
                     &done.spans,
-                    run_loads.run(),
+                    run_loads.answer(),
                     &|hsp| {
                         super::super::database::hit_identities(
                             &reports.stores.borrow(),
@@ -3843,6 +3854,7 @@ fn run_batch_loop(
                                 &run_loads,
                                 &ordered[from..to],
                                 &reports.titles.borrow(),
+                                pairwise,
                                 identities,
                             );
                             let shown: Vec<&TblastxHsp> = match rows {
@@ -3870,13 +3882,21 @@ fn run_batch_loop(
                             query_fetches.push(if shown.is_empty() {
                                 Vec::new()
                             } else if places_reads {
+                                let titles = reports.titles.borrow();
+                                let ordinals = super::super::database::read_ordinals(
+                                    &shown,
+                                    &ordered[from..to],
+                                    &titles,
+                                    pairwise.filter(|_| pairwise_first),
+                                    &loads,
+                                );
                                 let texts = super::super::database::subject_read_texts(
                                     database,
-                                    shown,
-                                    &reports.titles.borrow(),
+                                    ordinals,
+                                    &titles,
                                     plural_names,
-                                    pairwise,
                                 )?;
+                                drop(titles);
                                 let mut reads = reports.reads.borrow_mut();
                                 let index = start + query as usize;
                                 if reads.len() <= index {
@@ -4226,8 +4246,17 @@ impl BatchReports<'_> {
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
                     shown,
-                    super::super::database::after_throw(
-                        outputs.formats.iter().map(|format| format.outfmt),
+                    (
+                        super::super::database::after_throw(
+                            outputs.formats.iter().map(|format| format.outfmt),
+                            outputs.other_outfmts,
+                        ),
+                        // The pairwise reports' reads (as `run_batch_loop`'s).
+                        super::super::database::pairwise_reading(
+                            &outputs.formats,
+                            self.args.formatting.report_sort(),
+                            self.args.report_counts,
+                        ),
                     ),
                     &|hsp| {
                         super::super::database::hit_identities(

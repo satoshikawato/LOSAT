@@ -1,9 +1,9 @@
-//! The BlastOutput XML documents of rpsblast and rpstblastn `-outfmt 5`, which rpsbproc reads
-//! one after another from its input (`ObjStreamIn<CBlastOutput>(..., eSerial_Xml)`): the module
-//! `NCBI-BlastOutput` read with `report::serial::xml_reader`, keeping what the output prints
-//! (the program's version, the database, the matrix and E-value threshold of the parameters)
-//! and, for each `Iteration`, the query that `ParseBlastOutput` makes of it (`offline`), built
-//! HSP by HSP as the text is read: no document is held as text.
+//! The BlastOutput XML documents of rpsblast and rpstblastn `-outfmt 5`, which rpsbproc reads one
+//! after another from its input (`ObjStreamIn` of a `CBlastOutput`, in the format `eSerial_Xml`):
+//! the module `NCBI-BlastOutput` read with `report::serial::xml_reader`, keeping what the output
+//! prints (the program's version, the database, the matrix and E-value threshold of the parameters)
+//! and, for each `Iteration`, the query that `ParseBlastOutput` makes of it (`offline`), built HSP
+//! by HSP as the text is read: no document is held as text.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/blastxml/blastxml.asn:3-81
 //! (The classes that datatool generates from this module read each member as its type:
@@ -259,7 +259,7 @@ fn read_hit<S: AsnSource>(
         0 | 4 => reader.int4().map(drop),
         3 => {
             reader.string(scratch)?;
-            // `(unsigned int)atoi((*iterHit)->GetAccession().c_str())`
+            // The hit's `GetAccession` text goes through `atoi` and is cast to `unsigned int`
             // (offl_cd_align_proc.cpp:155, cited at `OfflineQuery::parse_hsp`).
             pssm_id = c_atoi(scratch) as u32;
             Ok(())

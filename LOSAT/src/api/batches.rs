@@ -464,6 +464,7 @@ impl Batches<'_> {
             let mut on_hits = |hits| collected.push(hits);
             let mut sink = self.log.sink(&mut diagnostics, false);
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,

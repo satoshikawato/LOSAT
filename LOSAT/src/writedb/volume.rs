@@ -27,7 +27,7 @@ pub struct Indices {
 }
 
 impl Indices {
-    /// `m_Indices != CWriteDB::eNoIndex`.
+    /// `m_Indices` is not `CWriteDB::eNoIndex`.
     pub fn any(self) -> bool {
         self.full || self.hash || self.trace
     }
@@ -43,7 +43,7 @@ pub(crate) struct IndexScratch {
 }
 
 /// The ISAM indices, the OID to GI file and the duplicate check of a volume built with
-/// indices (`m_Indices != eNoIndex`).
+/// indices (`m_Indices` is not `eNoIndex`).
 #[derive(Debug)]
 struct VolumeIndices {
     /// `m_PigIsam` (protein only).
@@ -74,7 +74,7 @@ pub(crate) struct Volume {
     idx: IndexFile,
     hdr: HeaderFile,
     seq: SequenceFile,
-    /// The indices of `m_Indices != eNoIndex`.
+    /// The indices when `m_Indices` is not `eNoIndex`.
     indices: Option<VolumeIndices>,
     /// `m_OID`: the number of sequences written to this volume.
     oid: u32,
@@ -91,7 +91,7 @@ impl Volume {
     // makeblastdb never sets `eAddTrace` or `eSparseIndex`; makeprofiledb sets `eAddTrace`.
     /// `arrays`: the offset arrays of the previous volume
     /// (`take_offset_arrays`), or new ones for the first; `sizeof_long` the
-    /// platform's `sizeof(long)` (`Platform::sizeof_long`); `indices` makeblastdb's index
+    /// platform's `sizeof` of `long` (`Platform::sizeof_long`); `indices` makeblastdb's index
     /// type, `scratch` the index memory of the previous volume (`take_index_scratch`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn create(
@@ -170,7 +170,8 @@ impl Volume {
     // `date` is the creation date of the column's index file. The column files are the same in
     // version 4 and version 5: the LMDB files of version 5 belong to the database, not to a
     // volume. Columns are made only with a new volume, before its first sequence.
-    /// `CreateColumn(title, meta, max_sz)`: the next column of the volume, with both byte orders.
+    /// `CreateColumn` of a title, the metadata and `max_sz`: the next column of the volume, with
+    /// both byte orders.
     pub(crate) fn create_column(
         &mut self,
         title: &[u8],

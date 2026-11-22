@@ -12,8 +12,7 @@ mod work;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 
-use crate::ncbi_app::args::{flag, key, mandatory_key, Constraint, Desc, Kind};
-use crate::ncbi_app::{no_dependencies, Tool};
+use crate::ncbi_app::Tool;
 
 /// The name in LOSAT's refusals.
 const PROGRAM: &str = "CONVERT2BLASTMASK";
@@ -24,38 +23,14 @@ const PROGRAM: &str = "CONVERT2BLASTMASK";
 /// is the usage that `-h` and the argument errors print.
 const HELP: &str = include_str!("help.txt");
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:154-186
-/// The arguments of `CConvert2BlastMaskApplication::Init` in the order it describes them; the
-/// values that `-outfmt` allows are listed in the order of their `std::set`.
-const DESCS: &[Desc] = &[
-    key("in", Kind::InputFile, Some("-"), None),
-    key("out", Kind::OutputFile, Some("-"), None),
-    key(
-        "outfmt",
-        Kind::Text,
-        Some("maskinfo_asn1_text"),
-        Some(Constraint::Strings(&[
-            "interval",
-            "maskinfo_asn1_bin",
-            "maskinfo_asn1_text",
-            "maskinfo_xml",
-        ])),
-    ),
-    flag("parse_seqids"),
-    mandatory_key("masking_algorithm", Kind::Text),
-    mandatory_key("masking_options", Kind::Text),
-];
-
 // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:111-120
 /// convert2blastmask as NCBI's application runs it (`ncbi_app`): LOSAT's version where NCBI's
-/// states BLAST's (`ncbi_version::print`), BLAST's usage report (`ncbi_environment`), no
-/// dependencies between its arguments and no prefix on its diagnostics.
+/// states BLAST's (`ncbi_version::print`), BLAST's usage report (`ncbi_environment`), the
+/// arguments of its XML (`ncbi_xmlhelp/convert2blastmask.xml`) and no prefix on its diagnostics.
 static TOOL: Tool = Tool {
     program: "convert2blastmask",
     refusal_name: PROGRAM,
     help: HELP,
-    descs: DESCS,
-    dependencies: no_dependencies,
     post_prefix: None,
     components: &[],
     dry_run: None,

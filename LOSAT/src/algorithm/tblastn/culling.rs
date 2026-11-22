@@ -5,7 +5,7 @@
 //!
 //! This module is a child of `stage_d_results` for the private fields of
 //! `KappaResultHitList`. Nothing here runs without `-culling_limit` (a limit of 0 is NCBI's
-//! `SetCullingLimit(0)`, which is ignored): the choice is made once per call of
+//! `SetCullingLimit` of 0, which is ignored): the choice is made once per call of
 //! `run_preliminary_subjects`, where it picks the sink of the preliminary hit lists, and once
 //! per query batch where the search finishes the final hit lists.
 //!
@@ -25,7 +25,7 @@ use crate::core::hspfilter_culling::{CullKey, CullingForest};
 
 /// The key of an HSP for the tree: the protein range of the query and the frame-local offset
 /// of the subject. NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:612-633 (the
-/// non-blastn branch: `begin = query.offset`, `end = query.end`, no strand fold) and
+/// non-blastn branch: `begin` is `query.offset`, `end` is `query.end`, no strand fold) and
 /// c++/src/algo/blast/core/hspfilter_culling.c:79-120 (`hsp->score`, `hsp->subject.offset`).
 fn cull_key(linked: &LinkedHsp) -> CullKey {
     CullKey {

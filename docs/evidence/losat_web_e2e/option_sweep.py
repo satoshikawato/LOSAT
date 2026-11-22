@@ -38,6 +38,11 @@ Usage: option_sweep.py --program blastp|tblastn|tblastx|blastx --bin-dir DIR --l
 With `--lock FILE` (the machine-wide `$BUILD_ROOT/oracle.lock`) each NCBI run takes the lock for
 itself, so other sessions' runs wait seconds, not the whole sweep (skill losat-oracle-runs);
 do not run the sweep under `flock`.
+
+NCBI's stdout and stderr are read in LOSAT's words before every comparison (AGENTS.md: LOSAT writes
+its own version line and `LOSAT ... error:` prefixes, #1449; `LOSAT/tests/losat_wording.py`), so a
+case differs only where the bytes other than those words differ. The CArgException test of an
+argument error reads NCBI's own standard error.
 """
 from __future__ import annotations
 
@@ -53,6 +58,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "losat_web_e2a"))
 from check_losat import normalize_database_lines  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "LOSAT" / "tests"))
+from losat_wording import losat_bytes, losat_output_bytes  # noqa: E402
 from run_oracle import ENGINE  # noqa: E402
 
 F = "tests/fasta/outfmt0"
@@ -271,8 +278,15 @@ class Sweep:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
     def ncbi(self, argv: list[str], **kwargs) -> subprocess.CompletedProcess:
+        """One NCBI run; with `capture_output` its streams in LOSAT's words (NCBI's own standard
+        error stays in `ncbi_stderr`)."""
         with self.oracle_lock():
-            return subprocess.run(argv, **kwargs)
+            run = subprocess.run(argv, **kwargs)
+        if kwargs.get("capture_output"):
+            run.ncbi_stderr = run.stderr
+            run.stdout = bytes(losat_output_bytes(run.stdout))
+            run.stderr = bytes(losat_bytes(run.stderr))
+        return run
 
     def database(self, subject: str) -> str:
         """The subject as a BLAST database (made once; NCBI's oracle of a non-default
@@ -314,7 +328,7 @@ class Sweep:
             return "same-error"
         if ours.returncode and any(marker in ours.stderr for marker in REJECTION_MARKERS):
             return "losat-rejects"
-        if (ncbi.returncode == 1 and b"CArgException" in ncbi.stderr and ours.returncode == 2
+        if (ncbi.returncode == 1 and b"CArgException" in ncbi.ncbi_stderr and ours.returncode == 2
                 and ours.stderr.startswith(b"error: ") and ncbi.stdout == ours.stdout):
             return "arg-error"
         code = db_gencode(argv)
@@ -331,7 +345,7 @@ class Sweep:
             if program == "tblastn" and self.args.api and ncbi.returncode == 0 and ncbi.stderr == ours.stderr:
                 from gencode_api_check import api_output, ncbi_integer  # noqa: PLC0415
                 fmt = argv[argv.index("-outfmt") + 1]
-                if fmt in ("0", "6", "7") and api_output(self.args.api, argv, ncbi_integer(code), fmt) == ours.stdout:
+                if fmt in ("0", "6", "7") and losat_output_bytes(api_output(self.args.api, argv, ncbi_integer(code), fmt)) == ours.stdout:
                     return "exception-gencode"
         if ncbi.returncode == 0 and ours.returncode == 0:
             return "DIFF " + ("stdout " + first_difference(ncbi.stdout, ours.stdout) if ncbi.stdout != ours.stdout

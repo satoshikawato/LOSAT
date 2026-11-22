@@ -379,7 +379,7 @@ fn convert_1_to_1(src: &[u8], table: &[u8; 256]) -> Vec<u8> {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1709-1712
 // `eCoding_Ncbi` gives a protein's NCBIstdaa codes (the bytes of the sequence file) and a
 // nucleotide's NCBI4na code per base (after `s_FixBioseqDeltas`, whose gaps are 0x0f).
-/// `SeqDB_SequenceHash(bioseq)`: the hash of `-hash_index` over `length` residues of
+/// `SeqDB_SequenceHash` of a bioseq: the hash of `-hash_index` over `length` residues of
 /// `seq_data`, `None` for a coding the writer cannot write (it stops before the hash is used).
 pub(crate) fn sequence_hash(seq_data: &SeqData, length: u64) -> Option<u32> {
     let length = length as usize;
@@ -404,7 +404,7 @@ pub(crate) fn sequence_hash(seq_data: &SeqData, length: u64) -> Option<u32> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbobj.cpp:47-60
-/// `SeqDB_SequenceHash(sequence, length)` of the codes of a sequence.
+/// `SeqDB_SequenceHash` of a sequence and its length, over the codes of a sequence.
 fn hash(codes: impl Iterator<Item = u8>) -> u32 {
     codes.fold(0u32, |h, code| {
         h.wrapping_mul(1_103_515_245)
@@ -413,10 +413,10 @@ fn hash(codes: impl Iterator<Item = u8>) -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1690-1700
-/// `x_ComputeHash(sequence, ambiguities)`: the hash of `-hash_index` of a sequence given in the
-/// form of the sequence file (`AddSequence(seq, ambig)`): a protein's NCBIstdaa bytes, a
-/// nucleotide's bases as NCBI4na codes (`SeqDB_UnpackAmbiguities`). The error is the message of
-/// a malformed nucleotide.
+/// `x_ComputeHash` of a sequence and its ambiguities: the hash of `-hash_index` of a sequence given
+/// in the form of the sequence file (the arguments of `AddSequence`, `seq` and `ambig`): a
+/// protein's NCBIstdaa bytes, a nucleotide's bases as NCBI4na codes (`SeqDB_UnpackAmbiguities`).
+/// The error is the message of a malformed nucleotide.
 pub(crate) fn raw_sequence_hash(
     protein: bool,
     seq: &[u8],

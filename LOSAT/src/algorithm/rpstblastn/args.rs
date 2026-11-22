@@ -239,6 +239,9 @@ impl RpstblastnArgs {
             threshold: None,
             window_size: self.window_size,
             culling_limit: None,
+            // rpstblastn has no best hit options (NCBI's unknown arguments).
+            best_hit_overhang: None,
+            best_hit_score_edge: None,
             subject_besthit: false,
             ungapped: self.ungapped,
             lcase_masking: self.lcase_masking,

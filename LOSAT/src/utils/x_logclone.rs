@@ -17,7 +17,7 @@ pub fn print_shadow_stats() {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:636,679
 // Same libm call as the C `log` above, one element at a time.
-/// `out[k] = ln(src[k])`.
+/// Each `out[k]` is the `ln` of `src[k]`.
 #[inline]
 pub(crate) fn log_slice(src: &[f64], out: &mut [f64]) {
     debug_assert_eq!(src.len(), out.len());

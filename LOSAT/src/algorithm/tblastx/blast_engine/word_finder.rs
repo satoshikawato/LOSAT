@@ -31,6 +31,7 @@ use super::{
     InitHSP, Instant, OffsetPair, QueryBatch, QueryContext, QueryFrame, SubjectChunk,
     TblastxChunkScanResult, TblastxChunkScanStats, TbxScore, TranslatedChunk, UngappedHit,
 };
+use crate::algorithm::tblastx::blast_aascan::ScanOrder;
 use crate::algorithm::tblastx::extension::OneHitAlone;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::algorithm::tblastx::subjects::XReadFailure;
@@ -803,7 +804,11 @@ fn scan_chunk_plain<S: TbxScore>(
             scan_chunk_size
         },
     );
-    let mut previous_seed_s_off: Option<u32> = None;
+    // The order check (debug builds, `ScanOrder`): the chunk's hits come in the order of NCBI's
+    // scan of its ranges, across the scan calls and the interiors, which cut the chunk's one range
+    // without soft masks.
+    let order_ranges: &[(i32, i32)] = x_soft.unwrap_or(&base_seq_ranges);
+    let mut scan_order = ScanOrder::default();
     // What a hit reads of this chunk (`ChunkCx`), once per chunk: the
     // diagonal offset does not change during the chunk's scan.
     let chunk_cx = ChunkCx {
@@ -870,12 +875,10 @@ fn scan_chunk_plain<S: TbxScore>(
                 let query_offset = pair.q_off;
                 let subject_offset = pair.s_off;
                 debug_assert!(
-                    previous_seed_s_off
-                        .map(|prev| subject_offset >= prev)
-                        .unwrap_or(true),
-                    "TBLASTX scan chunks must replay seeds in nondecreasing subject offset order"
+                    scan_order.takes(order_ranges, wordsize, subject_offset as i32),
+                    "TBLASTX scan chunks must replay seeds in the scan's order: the ranges in \
+                     list order, the subject offsets rising within each"
                 );
-                previous_seed_s_off = Some(subject_offset);
 
                 // Debug: dump scan output around a target subject offset.
                 // The scan output is produced by s_BlastAaScanSubject.

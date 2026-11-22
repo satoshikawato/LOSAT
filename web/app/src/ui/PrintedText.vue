@@ -9,6 +9,7 @@
 import { computed } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputSaver } from '../application/outputs';
+import { shownArgv } from '../domain/argv';
 import CommandText from './CommandText.vue';
 import OutputText from './OutputText.vue';
 import { useStore } from './useStore';
@@ -23,7 +24,7 @@ const problem = useStore(saver.problem);
 <template>
   <div class="printed-text" data-testid="printed-text" :data-kind="kind">
     <p class="command">
-      Command: <code data-testid="result-command"><CommandText :words="['losat', ...run.snapshot.argv]" /></code>
+      Command: <code data-testid="result-command"><CommandText :words="['losat', ...shownArgv(run.snapshot)]" /></code>
     </p>
     <p class="muted" data-testid="printed-note">The command above prints this text and runs no search.</p>
     <OutputText :text="text" :label="`The command line's ${kind}`" data-testid="printed-output" />

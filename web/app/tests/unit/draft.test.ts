@@ -1228,6 +1228,66 @@ describe('SearchDraft submit', () => {
     expect(draft.inputName('subject')).toBe('x.fa');
   });
 
+  // Line WQA's D20, S3-3, 2026-11-23: a compressed file is inflated under its plain name, which the engine's argv names; the
+  // run keeps the user's file name, which the commands shown name.
+  it("gives a run of a compressed file the user's file name beside the plain name that the argv has", async () => {
+    const { draft, requests } = setup();
+    draft.addFiles('query', [new File([gzipSync('>q\nACGT\n')], 'q.fa.gz')]);
+    draft.addFiles('subject', [new File([zstdCompressSync('>s\nACGT\n')], 's.fa.zst')]);
+    await draft.idle();
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    const [request] = requests[0]!;
+    expect(datasetOf(request!, 'query')).toMatchObject({ name: 'q.fa', fileName: 'q.fa.gz' });
+    expect(datasetOf(request!, 'subject')).toMatchObject({ name: 's.fa', fileName: 's.fa.zst' });
+    // A plain file, pasted text and several files searched together need no other name.
+    draft.removeSource('query', sourceOf(draft, 'query').key);
+    draft.removeSource('subject', sourceOf(draft, 'subject').key);
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.addFiles('subject', [file('a.fa', '>a\nACGT\n'), new File([gzipSync('>b\nACGT\n')], 'b.fa.gz')]);
+    await draft.idle();
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    const [next] = requests[1]!;
+    expect('fileName' in datasetOf(next!, 'query')).toBe(false);
+    expect(datasetOf(next!, 'subject').name).toBe('combined_subject.fa');
+    expect('fileName' in datasetOf(next!, 'subject')).toBe(false);
+  });
+
+  // Line WQA's D20, S3-2, 2026-11-23: the button's count is the number of runs that Run LOSAT starts (one `inputGroups`).
+  it("counts one run for a help or version word whatever the inputs, as Run LOSAT starts one", async () => {
+    const { draft, requests } = setup({
+      useCoordinator: true,
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    draft.setMode('query', 'separate');
+    expect(draft.runCount()).toBe(2);
+    draft.setExtra('-version');
+    await draft.idle();
+    expect(draft.runCount()).toBe(1);
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    expect(requests.at(-1)).toHaveLength(1);
+  });
+
+  it('counts the runs that Run LOSAT starts when a query file has no record left in separate mode', async () => {
+    const { draft, requests } = setup();
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    draft.setMode('query', 'separate');
+    expect(draft.runCount()).toBe(2);
+    const second = sourceOf(draft, 'query', 1);
+    draft.setIncluded('query', second.key, [0], false);
+    expect(draft.runCount()).toBe(1);
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    expect(requests.at(-1)).toHaveLength(1);
+    expect(datasetOf(requests.at(-1)![0]!, 'query').name).toBe('a.fa');
+  });
+
   it('runs an empty query, also from an empty .gz or .zst file, as the command line does', async () => {
     for (const empty of [file('e.fa', ''), new File([gzipSync('')], 'e.fa.gz'), new File([zstdCompressSync('')], 'e.fa.zst')]) {
       const { draft, requests } = setup();

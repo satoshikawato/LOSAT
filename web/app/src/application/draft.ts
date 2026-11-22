@@ -893,8 +893,13 @@ export class SearchDraft {
     return sources.length === 0 ? PASTED_NAMES[role] : COMBINED_NAMES[role];
   }
 
-  /** The runs that "Run LOSAT" would make now. */
+  /**
+   * The runs that "Run LOSAT" would make now: the runs that `submit` starts (one `inputGroups` for both). A draft whose argv
+   * prints the command line's help or version starts the one run that prints it, whatever the inputs (line WQA's D20, S3-2,
+   * 2026-11-23).
+   */
   runCount(): number {
+    if (this.printsText()) return 1;
     return ROLES.map((role) => this.inputGroups(role).length).reduce((a, b) => a * Math.max(1, b), 1);
   }
 
@@ -1188,7 +1193,10 @@ export class SearchDraft {
 
   private async resolveGroup(group: { readonly name: string; readonly sources: readonly DraftSource[] }) {
     const revisionIds = await Promise.all(group.sources.map((source) => this.revisionFor(source)));
-    return { name: group.name, revisionIds };
+    // One file of the user's: its own name, which a compressed file's plain name hides (line WQA's D20, S3-3, 2026-11-23).
+    const only = group.sources.length === 1 ? group.sources[0]! : undefined;
+    const fileName = only?.origin === 'file' && only.file.name !== group.name ? only.file.name : undefined;
+    return { name: group.name, revisionIds, ...(fileName === undefined ? {} : { fileName }) };
   }
 
   // --- asynchronous work ------------------------------------------------------------------

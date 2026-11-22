@@ -3,7 +3,7 @@
 //! the bit score. NCBI computes them in `double` in the order written here.
 
 use super::scan::Occurrence;
-use crate::utils::glibc_fma_libm as libm;
+use crate::utils::glibc_fma_libm;
 
 /// The Karlin block of a PHI search (`s_PHIScoreBlkFill`): `H` is 1, `logK` is not set.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -153,7 +153,7 @@ pub(crate) fn cutoff_score(
             * (1.0 + karlin.lambda * f64::from(score))
             * f64::from(effective_occurrences)
             * probability
-            * libm::exp(-karlin.lambda * f64::from(score))
+            * glibc_fma_libm::exp(-karlin.lambda * f64::from(score))
     };
     let mut low = 1;
     let mut high = 100;
@@ -183,14 +183,14 @@ pub(crate) fn evalue(
         * (1.0 + karlin.lambda * f64::from(score))
         * f64::from(effective_occurrences)
         * f64::from(num_patterns_db)
-        * libm::exp(-karlin.lambda * f64::from(score))
+        * glibc_fma_libm::exp(-karlin.lambda * f64::from(score))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1934-1953
 /// `Blast_HSPListPHIGetBitScores`.
 pub(crate) fn bit_score(score: i32, karlin: &PhiKarlin) -> f64 {
     let score_lambda = f64::from(score) * karlin.lambda;
-    (score_lambda - libm::ln(karlin.param_c) - libm::ln(1.0 + score_lambda))
+    (score_lambda - glibc_fma_libm::ln(karlin.param_c) - glibc_fma_libm::ln(1.0 + score_lambda))
         / std::f64::consts::LN_2
 }
 

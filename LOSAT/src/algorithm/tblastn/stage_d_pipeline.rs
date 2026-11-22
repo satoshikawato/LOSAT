@@ -1938,16 +1938,15 @@ fn x_subject_file_size(subjects: SubjectLetters<'_>) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697-707
-// A chunk takes its first subject and then the next ones while the bases taken stay within
-// the budget (NCBI tests `tot_length` against `res.length`: the bases taken plus the length
-// are at most the budget). NCBI's last condition
-// compares the OID after the next one with the end, so the last subject of a database always
-// starts a chunk of its own, and a chunk never crosses a volume; LOSAT does not copy these, as
-// `-subject` has one volume and the rest is scheduling only. NCBI reads the exact length of each
-// sequence of a database from its mapped files; a `-db` stream's chunks are cut from the index's
-// approximate lengths (`XDbStream::x_approx_lengths`, at most a few bases off), without a
-// read of the sequence file or a table of lengths. Scheduling only.
-/// The ends of the chunks of subjects, cut from their lengths given one after the other in OID
+// A chunk takes its first subject and then the next ones while the bases taken stay within the
+// budget (NCBI's test that `tot_length` is at least `res.length` says that the bases taken plus the
+// length are at most the budget). NCBI's last condition compares the OID after the next one with
+// the end, so the last subject of a database always starts a chunk of its own, and a chunk never
+// crosses a volume; LOSAT does not copy these, as `-subject` has one volume and the rest is
+// scheduling only. NCBI reads the exact length of each sequence of a database from its mapped
+// files; a `-db` stream's chunks are cut from the index's approximate lengths
+// (`XDbStream::x_approx_lengths`, at most a few bases off), without a read of the sequence file or
+// a table of lengths. Scheduling only.
 /// order (`push`).
 #[cfg(feature = "parallel")]
 struct XChunkCut {

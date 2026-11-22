@@ -174,9 +174,8 @@ impl DustMasker {
         }
     }
 
-    /// `CSymDustMasker::operator()(seq)`: the masked intervals of the whole sequence, with a
-    /// new masker's random numbers (blastn's `Blast_FindDustFilterLoc` makes one masker per
-    /// query).
+    /// `CSymDustMasker::operator()` of `seq`: the masked intervals of the whole sequence, with a
+    /// new masker's random numbers (blastn's `Blast_FindDustFilterLoc` makes one masker per query).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:286-290
     pub fn mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
@@ -186,10 +185,10 @@ impl DustMasker {
         self.mask_range(seq, 0, seq.len() - 1, &mut NcbiLfgRandom::new())
     }
 
-    /// `CSymDustMasker::operator()(seq, start, stop)`: the masked intervals of the positions
-    /// `start..=stop` (NCBI's `stop` is the last position), drawing the random numbers of
-    /// `N` from `rng`, the masker's converter (dustmasker calls one masker over the pieces of
-    /// a sequence between runs of `N`).
+    /// `CSymDustMasker::operator()` of `seq`, `start` and `stop`: the masked intervals of the
+    /// positions `start..=stop` (NCBI's `stop` is the last position), drawing the random numbers of
+    /// `N` from `rng`, the masker's converter (dustmasker calls one masker over the pieces of a
+    /// sequence between runs of `N`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:214-229
     /// `mask_range_reference` ports this function. The ring-buffer version (was
@@ -583,9 +582,9 @@ impl<'a> XTripletWindow<'a> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:76-114
-    /// The same steps in the same order on the same integers. The two `if`s that depend on
-    /// the sequence (whether `c_w[s]` is 0 and whether `L` is `start_`) are written as arithmetic on the 0/1
-    /// value of the condition, which gives the same values.
+    /// The same steps in the same order on the same integers. The two `if`s that depend on the
+    /// sequence (whether `c_w[s]` is 0 and whether `L` is `start_`) are written as arithmetic on
+    /// the 0/1 value of the condition, which gives the same values.
     #[inline(always)]
     fn shift_window(&mut self, triplet: u8, perfect_list: &mut VecDeque<PerfectInterval>) -> bool {
         if self.len >= self.max_size {

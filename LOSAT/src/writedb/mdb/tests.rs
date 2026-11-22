@@ -83,7 +83,7 @@ fn keys_over_511_bytes_fail_as_in_makeblastdb() {
         .is_err());
 }
 
-// `mdb_page_alloc` fails with MDB_MAP_FULL when the page number plus `num` reaches `me_maxpg`
+// `mdb_page_alloc` fails with MDB_MAP_FULL when the page number plus `num` is at least `me_maxpg`
 // (mdb.c:2290-2294).
 #[test]
 fn a_full_map_fails_where_lmdb_fails() {

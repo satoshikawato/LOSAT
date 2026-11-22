@@ -365,8 +365,8 @@ fn translated_residue(frame: &Frame, curr: i64) -> Result<u8, PrintError> {
 /// `print_site`): `xres` plus `COORDSBASE` in `int`, `xres` plus `codonEnd` plus `COORDSBASE`
 /// (minus strand: `xres` minus `codonEnd`, plus `COORDSBASE`) in `unsigned int`. The `int`
 /// arithmetic that overflows (one less than `pr` in `MinusPr2PlusNA` at `INT_MIN`, one more than
-/// `xres` at `INT_MAX`; undefined) is computed as its
-/// value (`frames::minus_pr_to_plus_na`, `printed_position`; PD-LOSAT-NCBI-DEFECTS exception 12).
+/// `xres` at `INT_MAX`; undefined) is computed as its value (`frames::minus_pr_to_plus_na`,
+/// `printed_position`; PD-LOSAT-NCBI-DEFECTS exception 12).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:949,1456-1457,1631-1633
 fn codon(frame: &Frame, curr: i64, query_len: u32) -> (i64, u32) {
     let (xres, last) = if frame.rfidx < RF_SIZE {

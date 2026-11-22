@@ -1029,9 +1029,9 @@ fn unescape_line(text: &str) -> Vec<u8> {
     out
 }
 
-/// The hash parameters are read as NCBI's `istringstream` reads `M`, `k`, `roff` and `bc` in turn: every
-/// line of the table observed with NCBI 2.17.0's C++ library gives the same values and the same
-/// number of stored ones (for four values, and for each prefix of them).
+/// The hash parameters are read as NCBI's `istringstream` reads `M`, `k`, `roff` and `bc` in turn:
+/// every line of the table observed with NCBI 2.17.0's C++ library gives the same values and the
+/// same number of stored ones (for four values, and for each prefix of them).
 #[test]
 fn hash_parameters_are_read_as_cxx_stream_reads_unsigned_ints() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))

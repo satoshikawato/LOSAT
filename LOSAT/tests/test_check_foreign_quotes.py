@@ -459,7 +459,7 @@ class StatementTest(unittest.TestCase):
 
     def test_expressions_with_names_losats_code_never_uses_are_quoted(self) -> None:
         code = "fn f(text: &str, buf: &mut [u8]) {}\n"
-        losat = frozenset("x y n from time text flags p i MDB_VALID std".split())
+        losat = frozenset("x y n from time text flags p i MDB_VALID std CSymDustMasker seq to start len min".split())
         for span in (
             # no mark: a name that LOSAT's code nowhere uses, cited or not
             "*fff != '\\0'",
@@ -481,6 +481,8 @@ class StatementTest(unittest.TestCase):
             "flags^fGenerateLocalIDs",
             "NODEPTR(p, i)",
             "(0xffff & ~(MDB_VALID))",
+            "CSymDustMasker::operator()(seq)",
+            "i == min<int>(to, start+len)",
         ):
             for text in (self.CITE + f"// NCBI: `{span}` first.\n" + code, f"// So `{span}` first.\n" + code):
                 self.assertEqual(self.expressions(text, losat=losat), [f"`{span}`"], span)

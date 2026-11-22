@@ -36,8 +36,8 @@ impl Range {
         to_open: MAX,
     };
 
-    /// `CRange<TSeqPos>` of `from` and `to`: the open end `to + 1`, wrapping (`to` 4294967295 makes an
-    /// empty range).
+    /// `CRange<TSeqPos>` of `from` and `to`: the open end is `to` plus 1, wrapping (`to` 4294967295
+    /// makes an empty range).
     pub(super) fn new(from: u32, to: u32) -> Range {
         Range {
             from,

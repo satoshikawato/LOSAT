@@ -1235,10 +1235,11 @@ const LOCK_FILE_SIZE: usize = 8192;
 /// and then aborted holds more (`0x44` = 1 once a write transaction began, `0x30` = 1 after
 /// a commit); LOSAT ends an aborting build with an error and removes the file instead, so it
 /// never leaves those. The bytes are `mti_magic` and `mti_format` (`MDB_LOCK_VERSION` 1 in the
-/// low half, `MDB_PIDLOCK` in bit 16), and the `__kind` of the read mutex (offset 0x18) and of the write mutex (0x50), which is
-/// `PTHREAD_MUTEX_ROBUST_NORMAL_NP` (0x10) together with `PTHREAD_PROCESS_SHARED` (0x80). Every other byte is 0.
-/// Other platforms keep other things in the file (a macOS semaphore name, a Windows mutex
-/// name): their bytes are not compared (PD-LOSAT-DATABASE-SEARCH).
+/// low half, `MDB_PIDLOCK` in bit 16), and the `__kind` of the read mutex (offset 0x18) and of the
+/// write mutex (0x50), which is `PTHREAD_MUTEX_ROBUST_NORMAL_NP` (0x10) together with
+/// `PTHREAD_PROCESS_SHARED` (0x80). Every other byte is 0. Other platforms keep other things in the
+/// file (a macOS semaphore name, a Windows mutex name): their bytes are not compared
+/// (PD-LOSAT-DATABASE-SEARCH).
 fn lock_file_bytes() -> [u8; LOCK_FILE_SIZE] {
     let mut bytes = [0u8; LOCK_FILE_SIZE];
     bytes[0..4].copy_from_slice(&0xBEEF_C0DEu32.to_le_bytes());
@@ -1248,8 +1249,8 @@ fn lock_file_bytes() -> [u8; LOCK_FILE_SIZE] {
     bytes
 }
 
-/// `mdb_fopen` of the lock file (`MDB_O_LOCKS`, mode 0664) and the initialisation of the lock region:
-/// the file is created (or an existing one opened) and holds the bytes of a new lock file.
+/// `mdb_fopen` of the lock file (`MDB_O_LOCKS`, mode 0664) and the initialisation of the lock
+/// region: the file is created (or an existing one opened) and holds the bytes of a new lock file.
 fn write_lock_file(lock: &Path) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true).write(true).create(true);

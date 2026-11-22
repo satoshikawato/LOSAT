@@ -257,8 +257,8 @@ fn x_scan_cells<V>(
                 skip -= 1;
                 s += 1;
             }
-            // NCBI's decrement of `s` is balanced by the outer `for` increment; `s` already holds the
-            // offset the scan resumes at.
+            // NCBI's decrement of `s` is balanced by the outer `for` increment; `s` already holds
+            // the offset the scan resumes at.
             continue;
         }
 

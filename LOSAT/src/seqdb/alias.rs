@@ -84,10 +84,10 @@ pub(super) struct OidRange {
 impl OidRange {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1975-1998
     // `NStr::StringToUInt` gives a `Uint4` that NCBI stores in an `int`: GCC wraps a value of 2^31
-    // or more to a negative number (defined since C++20, implementation-defined before). The
-    // decrement of `first_oid` for `FIRST_OID 2147483648` is one of `INT_MIN`, which is undefined;
-    // NCBI BLAST+ 2.17.0 gives `INT_MAX` (probe p4a_r2_ao_fo2147483648 of line RG D1a-2), the value
-    // of `wrapping_sub(1)` here, which is also 2^31 - 1 without the wrap.
+    // or more to a negative number (defined since C++20, implementation-defined before). For
+    // `FIRST_OID 2147483648`, `first_oid` holds `INT_MIN` when NCBI decrements it, which is
+    // undefined; NCBI BLAST+ 2.17.0 gives `INT_MAX` (probe p4a_r2_ao_fo2147483648 of line RG
+    // D1a-2), the value of `wrapping_sub(1)` here, which is also 2^31 - 1 without the wrap.
     /// `(begin, end)` as NCBI's `CSeqDB_AliasMask` holds them (`int`): `begin` the 0-based
     /// first OID (0 without `FIRST_OID`), `end` the `LAST_OID` (`INT_MAX` without it), in the
     /// OIDs of the whole volume set. A value of 2^31 or more is negative, as NCBI reads it.

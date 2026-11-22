@@ -865,7 +865,7 @@ impl<S: AsnSource> XmlReader<S> {
     /// (`UndoClassMember`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:582-670
     // (The namespace prefix of the type name is refused by `read_name`; without one,
-    // `m_CurrNsPrefix` is empty and a colon before `typeName` never gives a type's name.)
+    // `m_CurrNsPrefix` is empty and a colon followed by `typeName` never equals a type's name.)
     fn read_file_header(&mut self) -> Result<Vec<u8>> {
         if self.peek(0)? == 0xEF && self.peek(1)? == 0xBB && self.peek(2)? == 0xBF {
             self.skip(3);

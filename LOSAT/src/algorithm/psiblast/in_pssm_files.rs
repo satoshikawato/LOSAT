@@ -129,7 +129,7 @@ fn ascii_letters_defined(object: &PssmWithParameters) -> bool {
 
 /// The refusal of the long ASCII form of a PSSM file that NCBI cannot print (`rounds_input`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:186-188, 278-301 (quoted
-// at `pssm::print_ascii_pssm`: the long form reads `(*weighted_res_freqs)(r, i)`,
+// at `pssm::print_ascii_pssm`: the long form reads `weighted_res_freqs` at row `r` and column `i`,
 // `info_content[i]`, `num_matching_seqs[i]` and, where that is above 1 and the letter is not X,
 // `gapless_col_weights[i]`; `GetWeightedResidueFrequencies` gives NULL without the member)
 fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {

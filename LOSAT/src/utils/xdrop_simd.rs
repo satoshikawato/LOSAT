@@ -1142,10 +1142,10 @@ impl XTrace {
         self.wp
     }
 
-    /// The row just written at `x_row`: `cells` cells from column `start` (NCBI adds to `used`
-    /// and sets `edit_start_offset` of `a_index` to `first_b_index`), `trace_bytes(nib, cells)` bytes, then its
-    /// record (`cells`, then the step of `start` from the row above: one byte each below 255, else
-    /// the long form). Returns the end of the record (`x_best`).
+    /// The row just written at `x_row`: `cells` cells from column `start` (NCBI adds to `used` and
+    /// sets `edit_start_offset` of `a_index` to `first_b_index`), `trace_bytes(nib, cells)` bytes,
+    /// then its record (`cells`, then the step of `start` from the row above: one byte each below
+    /// 255, else the long form). Returns the end of the record (`x_best`).
     #[inline(always)]
     pub(crate) fn x_row_done(&mut self, nib: bool, start: usize, cells: usize) -> *const u8 {
         let step = start.wrapping_sub(self.last);
@@ -1201,8 +1201,8 @@ impl XTrace {
     }
 
     /// The record that ends at `end` (`x_row_done`): the step of the row's first column from the
-    /// row above (NCBI's `edit_start_offset` of this row less the one of the row above), its cells, and the
-    /// record's first byte (the row's bytes end there).
+    /// row above (NCBI's `edit_start_offset` of this row less the one of the row above), its cells,
+    /// and the record's first byte (the row's bytes end there).
     ///
     /// # Safety
     /// `end` is the end of a record written by `x_row_done` in a chunk of this call.

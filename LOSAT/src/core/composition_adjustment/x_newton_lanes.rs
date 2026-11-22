@@ -444,10 +444,11 @@ fn move_lane<A: LaneVec, B: LaneVec>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:193-208
 // `Nlm_EuclideanNorm` per lane. The branch taken by each lane is chosen by a select: when no lane
-// has a new maximum, only the `else` branch is evaluated (lanes with `v[i] == 0.0` keep `sum`);
-// otherwise both branches are evaluated and selected per lane. The new `sum` is `sum` times the
-// ratio of `scale` to `absvi`, times that ratio again (multiplied one factor at a time, in that
-// order); `v[i] != 0.0` is true for NaN, and `scale < NaN` is false, as in C.
+// has a new maximum, only the `else` branch is evaluated (lanes whose `v[i]` is 0.0 keep `sum`);
+// otherwise both branches are evaluated and selected per lane. In the branch of a new maximum,
+// `sum` is multiplied by the ratio of `scale` to `absvi` and then by that ratio again (one factor
+// at a time, in that order) before 1 is added; a NaN `v[i]` passes the test that it is not 0.0, and
+// `scale` is never below a NaN, as in C.
 /// `Nlm_EuclideanNorm` of `V::L` vectors.
 #[inline(always)]
 fn euclidean_norm<V: LaneVec>(v: &[V]) -> V {

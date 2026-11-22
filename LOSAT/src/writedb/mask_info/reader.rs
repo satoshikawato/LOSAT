@@ -1468,8 +1468,8 @@ impl<I: Input> Rd<I> {
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:882-901
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:971-975
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:959-969
-    /// The read of `file` into the object through `MSerial_Asn...`, of the type `def`: `SkipFileHeader`, then `Read` with
-    /// `read`, each in a frame of its own.
+    /// The read of `file` into the object through `MSerial_Asn...`, of the type `def`:
+    /// `SkipFileHeader`, then `Read` with `read`, each in a frame of its own.
     fn read_top(&mut self, def: &'static ClassDef, read: impl FnOnce(&mut Self) -> R<()>) -> R<()> {
         // Every frame entered was left (`exit`), and with it every stack trace completed.
         debug_assert!(self.depth == 0 && self.traces.is_empty());

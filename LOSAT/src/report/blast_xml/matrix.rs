@@ -164,7 +164,7 @@ impl FormattingMatrix {
         Some(Self { scores })
     }
 
-    /// `(*matrix)(query, subject)`.
+    /// The element of NCBI's `matrix` at row `query` and column `subject` (its `operator()`).
     pub fn score(&self, query: u8, subject: u8) -> i32 {
         self.scores[usize::from(query) * 256 + usize::from(subject)]
     }

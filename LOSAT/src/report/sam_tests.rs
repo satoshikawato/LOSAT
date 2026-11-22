@@ -477,8 +477,8 @@ fn an_ungapped_subject_is_one_record_of_its_joined_hsps() {
 // c++/src/objtools/format/cigar_formatter.cpp:164, :324-346: the aligned length that PI divides
 // by is `len`, an `int`, from `GetAlignLength` with false (a `TSeqPos` sum) and the CIGAR count a
 // `TSeqPos` sum. NCBI BLAST+ 2.17.0 on a 16-letter unit repeated 11,600 and 16,400 times against
-// itself (`-ungapped -dust no`): `2152959968M` with `PI:f:-0.01`, and `8392672M` (4303359968 -
-// 2^32) with `PI:f:3.13`.
+// itself (`-ungapped -dust no`): `2152959968M` with `PI:f:-0.01`, and `8392672M`
+// (4303359968 - 2^32) with `PI:f:3.13`.
 #[test]
 fn an_ungapped_record_sums_its_lengths_in_32_bits() {
     let run = RunRecord {

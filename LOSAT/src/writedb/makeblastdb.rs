@@ -813,11 +813,11 @@ fn build_database_with_log(
     let user_path = metadata_user_path(args.metadata_output_prefix.as_deref());
     if blastdb_input {
         // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:665-668
-        // The seed of `-randomize` is the seconds of the clock (`time` with a null
-        // pointer), which `mt19937` takes modulo 2^32. NCBI reads the clock again when the copy
-        // starts, after the input's headers are read; LOSAT
-        // reads it once for the build (`now`), so that a build whose clock is fixed (the tests)
-        // has one instant. Under a clock that runs, the two may take different seconds.
+        // The seed of `-randomize` is the seconds of the clock (`time` with a null pointer), which
+        // `mt19937` takes modulo 2^32. NCBI reads the clock again when the copy starts, after the
+        // input's headers are read; LOSAT reads it once for the build (`now`), so that a build
+        // whose clock is fixed (the tests) has one instant. Under a clock that runs, the two may
+        // take different seconds.
         let randomize = args.randomize.then_some(now.unix_seconds as u32);
         let result = copy_input_databases(
             &mut db,

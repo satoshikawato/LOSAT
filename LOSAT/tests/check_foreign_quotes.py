@@ -552,7 +552,7 @@ RUST_ATTRIBUTE_RE = re.compile(
 EXPRESSION_RE = re.compile(
     r"(?<![=!<>+\-*/%&|^])=(?![=>])|[-+*/%&|^]=|<<=|>>=|==|!=|<=|>=|\s[<>]\s|<<|>>|&&|\|\|"
     r"|\s\?\s.*\s:\s|\s[-+*/%]\s|\s[&|^]\s|(?:^|[\s(])[!~]\s?[\w(]"
-    r"|[\w>]\s*\(\s*[^)\s]"  # a call with arguments
+    r"|[\w>]\s*\(\s*[^)\s]|\)\(\s*[^)\s]"  # a call with arguments
     r"|(?<=\w)(?<!\b[Cc])(?:\+\+|--)(?!\w)|(?<![\w+-])(?:\+\+|--)(?=[A-Za-z_])"
     r"|\((?:const\s+)?(?:unsigned\s+|signed\s+)?[A-Za-z_]\w*\s*\**\s*\)\s*[\w(&*-]"  # a cast
     r"|(?:^|[\s(&|^=])~\s*[\w(]|(?<=[\w)\]])[<>](?=-?\d)"
@@ -601,6 +601,9 @@ C_EXPRESSION_MARK_RE = re.compile(
     r"|(?<=[\w)\]])\s+\?\s+\S.*?\s:\s+\S"  # a ternary
     r"|(?<![\w.])(?:0[xX][0-9A-Fa-f]+|\d+)(?:[uU](?:ll|LL|l|L)?|(?:ll|LL|l|L)[uU]?)\b"  # 1U, 8191L
     r"|(?<=\w)--(?![\w-])"  # a decrement
+    # a call of `operator()`, and the call of a template given a type of C (`min` of `int`)
+    r"|\boperator\s*\(\)\s*\(|<\s*(?:unsigned\s+)?(?:int|long|short|char|double|float|size_t"
+    r"|Int[1248]|Uint[1248]|TSeqPos)\b[^<>]*>\s*\("
 )
 # Rust has `!` for a bitwise not, so `~` there is C's (Python has `~` too).
 BITWISE_NOT_RE = re.compile(r"(?:^|[\s(&|^=])~\s*(?:\(|\w+\b(?!:))")

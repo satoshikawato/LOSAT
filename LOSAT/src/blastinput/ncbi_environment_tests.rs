@@ -1296,9 +1296,8 @@ fn a_log_name_is_read_on_windows_as_ncbi_reads_it() {
 }
 
 /// `CDir::GetCwd` reads a working directory of up to 4094 characters (`getcwd` with a buffer of
-/// 4095 bytes),
-/// and NCBI's free space is its `Uint8` product, modulo 2^64: 2^64 bytes free is none (line
-/// WQA's D11 round 3, 2026-11-20).
+/// 4095 bytes), and NCBI's free space is its `Uint8` product, modulo 2^64: 2^64 bytes free is none
+/// (line WQA's D11 round 3, 2026-11-20).
 #[test]
 fn the_working_directory_and_the_free_space_are_ncbi_s() {
     let directory = |length: usize| {

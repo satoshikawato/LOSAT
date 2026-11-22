@@ -29,8 +29,8 @@ impl SDustMasker {
         }
     }
 
-    /// `(*duster)( data, *mask_info )`: the DUST intervals of `data` (IUPACna) outside the
-    /// WindowMasker intervals `exclude` longer than the window, both ends included.
+    /// `duster` called on `data` and the mask info: the DUST intervals of `data` (IUPACna) outside
+    /// the WindowMasker intervals `exclude` longer than the window, both ends included.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_sdust_masker.cpp:76-116
     /// `CSeqVector_CI::operator+` sets the position through `SetPos`, which stops at the

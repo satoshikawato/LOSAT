@@ -488,11 +488,11 @@ fn title_before_decoding_of(
 // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3090-3110
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2933-2977 (`NStr::Find`, `eNocase`)
 // The reverse search gives the last place at or before the title's length less the name's (`slen`
-// less `plen`) where the pattern matches
-// without case (ASCII: the C locale): an empty pattern has no first letter, so `find_last_of`
-// finds nothing (an empty name never matches), and a stop at 0 without a match is never
-// `idx + 2` (at least 2). So the place is `idx + 2` (one less than `slen` less `plen`) exactly
-// where the name is there and not at `slen` less `plen`: only those two places are compared.
+// less `plen`) where the pattern matches without case (ASCII: the C locale): an empty pattern has
+// no first letter, so `find_last_of` finds nothing (an empty name never matches), and a stop at 0
+// without a match is never `idx + 2` (at least 2). So the place is `idx + 2` (one less than `slen`
+// less `plen`) exactly where the name is there and not at `slen` less `plen`: only those two places
+// are compared.
 /// `s_TitleEndsInOrganism`: the position of `[` where `title` ends in ` [<taxname>]` (the name in
 /// any ASCII case).
 fn title_ends_in_organism(title: &[u8], taxname: &[u8]) -> Option<usize> {

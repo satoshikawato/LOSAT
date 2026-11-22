@@ -341,7 +341,7 @@ struct Helper {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:276-318
 /// `s_RevCompareHSPsTbn` (the subject frames are all 0), with the query frame (`frame1`, `frame2`:
 /// the context divided by `strand_factor`) in place of `context`: `s_RevCompareHSPsTbx`
-/// (link_hsps.c:331-375) for a translated query, whose `NUM_FRAMES / 2` is the `strand_factor` 3.
+/// (link_hsps.c:331-375) for a translated query, whose `strand_factor` 3 is half of `NUM_FRAMES`.
 fn rev_compare_tbn(h1: &LinkHsp, frame1: usize, h2: &LinkHsp, frame2: usize) -> Ordering {
     frame1
         .cmp(&frame2)

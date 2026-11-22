@@ -1158,8 +1158,8 @@ fn mask_span(from: i64, to: i64, start: i64, len: i64) -> Option<(i64, i64)> {
     if lo > hi {
         return None;
     }
-    // `i == min<int>(to, start+len)`: only the mask's own last column, `to`, when it lies on the
-    // line (`hi` is below `start + len`).
+    // NCBI's test that `i` equals the smaller (as `int`) of `to` and `start` plus `len`: only the
+    // mask's own last column, `to`, when it lies on the line (`hi` is below `start + len`).
     let last = if to <= hi { to } else { 0 };
     (!(lo == 0 && last == 0)).then_some((lo, last))
 }

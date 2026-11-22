@@ -1165,7 +1165,8 @@ fn is_line_phrap_id(line: &[u8]) -> Result<bool, Stop> {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:777-798
-/// `s_LooksLikeNucSeqData` of `line`: `nucCount` divided by the line's size is an integer division, so every byte is a letter of ACGNTU.
+/// `s_LooksLikeNucSeqData` of `line`: `nucCount` divided by the line's size is an integer division,
+/// so every byte is a letter of ACGNTU.
 fn looks_like_nuc_seq_data(line: &[u8]) -> bool {
     if line.len() < 10 {
         return false;

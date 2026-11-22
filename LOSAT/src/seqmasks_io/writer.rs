@@ -114,8 +114,8 @@ impl MaskWriter {
         MaskWriter::MaskInfo(MaskInfoWriter::new(serial, algo_id, program, options))
     }
 
-    /// `Print` of the writer, given `bsh`, the mask and `parsed_id`; `diag` takes the posts of the serial
-    /// stream (`write_document`).
+    /// `Print` of the writer, given `bsh`, the mask and `parsed_id`; `diag` takes the posts of the
+    /// serial stream (`write_document`).
     pub(crate) fn print(
         &mut self,
         seq: &MaskedBioseq<'_>,

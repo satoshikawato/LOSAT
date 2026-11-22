@@ -612,12 +612,12 @@ pub(crate) fn map_seg_set(set: &mut SegSet, align: &DomAlign) {
 /// original position; `Err` with the text of NCBI's exception when a minus-strand hit reaches
 /// past the query's length.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1252-1294
-// (`qLen` less `rfidx` and `c` plus `offset` are `unsigned int` arithmetic, which wraps; the sum
-// of `c` and `offset` is stored in an `int`. The increment of `c` and the sum of `ori_from` and
-// `inc` are `int` arithmetic, which overflows past `INT_MAX` (undefined; a mapped range at the limit, made by
-// hand): computed as their values, which the plus strand stores as they are (PD-LOSAT-NCBI-DEFECTS
-// exception 12); a position outside the translation is then read by the out-of-range rules of its
-// reader.)
+// (`qLen` less `rfidx` and `c` plus `offset` are `unsigned int` arithmetic, which wraps; the sum of
+// `c` and `offset` is stored in an `int`. The increment of `c` and the sum of `ori_from` and `inc`
+// are `int` arithmetic, which overflows past `INT_MAX` (undefined; a mapped range at the limit,
+// made by hand): computed as their values, which the plus strand stores as they are
+// (PD-LOSAT-NCBI-DEFECTS exception 12); a position outside the translation is then read by the
+// out-of-range rules of its reader.)
 pub(crate) fn translated_pos_map(
     set: &SegSet,
     align: &DomAlign,

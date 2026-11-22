@@ -264,10 +264,11 @@ impl<'a> BerIn<'a> {
             // says. makeblastdb 2.17.0 fails with "EndOfContentsByte expected" on such an item
             // (checked on the `long_len_*` cases of the fixtures).
             //
-            // The sum is an `Int8` added to a `size_t`: computed in 64 unsigned bits, it wraps, and is stored in
-            // the `Int8` `m_CurrentDataLimit` (objistrasnb.hpp:267). A limit of 0 is then an
-            // indefinite length (`HaveMoreElements`, `ExpectEndOfContent`), a negative one ends the
-            // members at once (checked with makeblastdb 2.17.0, the b_length_long_wrap_* fixtures).
+            // The sum is an `Int8` added to a `size_t`: computed in 64 unsigned bits, it wraps, and
+            // is stored in the `Int8` `m_CurrentDataLimit` (objistrasnb.hpp:267). A limit of 0 is
+            // then an indefinite length (`HaveMoreElements`, `ExpectEndOfContent`), a negative one
+            // ends the members at once (checked with makeblastdb 2.17.0, the b_length_long_wrap_*
+            // fixtures).
             let base = self.pos as i64;
             let long_length = self.read_length_long(len)?;
             (base as u64).wrapping_add(long_length) as i64

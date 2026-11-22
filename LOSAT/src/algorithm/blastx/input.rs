@@ -1017,9 +1017,9 @@ struct ReaderBatch<'r> {
 
 impl ReaderBatch<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
-    /// The index of the next record (its id is `Query_` and that index plus 1): the reader's one
-    /// id generator counts every record read before it, kept, dropped once delivered, or skipped
-    /// by the range.
+    /// The index of the next record (its id is `Query_` followed by that index plus 1): the
+    /// reader's one id generator counts every record read before it, kept, dropped once delivered,
+    /// or skipped by the range.
     fn number(&self, records: &[FastaRecord]) -> usize {
         self.released + records.len() + self.skipped
     }

@@ -70,8 +70,8 @@ const RUNS_MAX: usize = 2048;
 /// Why the data is not decoded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Fail {
-    /// NCBI's `std::logic_error` with the text "BM::Invalid serialization format" (bmserial.h:620): the header
-    /// flag of a 64-bit vector, the tokens 25 and 26, a sync mark that does not match, a
+    /// NCBI's `std::logic_error` with the text "BM::Invalid serialization format" (bmserial.h:620):
+    /// the header flag of a 64-bit vector, the tokens 25 and 26, a sync mark that does not match, a
     /// super-block of length 0, an unknown token.
     Invalid,
     /// An event that LOSAT does not port (`Rule`).
@@ -228,8 +228,8 @@ impl BitVector {
         }
     }
 
-    /// `bvector<>::count_range` from 0 to `n` (BitMagic 8.0.1: bm.h:3244-3254) of NCBI's three builds:
-    /// the set bits of `[0, n]`.
+    /// `bvector<>::count_range` from 0 to `n` (BitMagic 8.0.1: bm.h:3244-3254) of NCBI's three
+    /// builds: the set bits of `[0, n]`.
     pub(crate) fn count_to(&self, n: u32) -> Result<u64, Fail> {
         match &self.builds {
             Builds::One(one) => one.count_to(n, &BUILDS),
@@ -393,8 +393,8 @@ impl Seg {
     }
 }
 
-/// `bm::deserialize` of a vector and its data (bmserial.h:4085-4125) of a `bm::bvector<>(size)`
-/// (BVector_data.cpp:77-78).
+/// `bm::deserialize` of `data` into a vector (bmserial.h:4085-4125), a `bm::bvector<>` made with
+/// the size `size` (BVector_data.cpp:77-78).
 pub(crate) fn decode(size: u32, data: &[u8]) -> Result<BitVector, Fail> {
     decode_to_end(size, data).map(|(vector, _)| vector)
 }
@@ -1310,7 +1310,8 @@ fn gap_add_to_bitset(gap: &[u16], len: usize, block: &mut Block) -> Result<(), F
     Ok(())
 }
 
-/// `gap_convert_to_bitset` of a block and a GAP block: the bits of the GAP block by its header's length.
+/// `gap_convert_to_bitset` of a block and a GAP block: the bits of the GAP block by its header's
+/// length.
 fn gap_bitmap(gap: &[u16]) -> Result<Box<Block>, Fail> {
     let mut block = Box::new([0; 1024]);
     gap_add_to_bitset(gap, gap_last(gap)?, &mut block)?;
@@ -2386,9 +2387,8 @@ impl Store {
     // bmblocks.h:1076-1118 (`check_allocate_block`: a null block becomes the empty GAP block of
     // `gap_set_all`), bm.h:2119-2132 (`gap_block_set_no_ret`: `gap_set_value`, then above the
     // level's limit `extend_gap_block`, bmblocks.h:1810-1836)
-    /// `bvector<>::set_bit_no_check` of bit `p` of block `nb` (bit number `nb` times 65536 plus `p`) as
-    /// the build `build` runs it, or all three
-    /// (`None`, `gap_set_value`).
+    /// `bvector<>::set_bit_no_check` of bit `p` of block `nb` (bit number `nb` times 65536 plus
+    /// `p`) as the build `build` runs it, or all three (`None`, `gap_set_value`).
     fn set_bit(&mut self, nb: u32, p: u16, build: Option<Build>) -> Result<(), Fail> {
         if self.is_full(nb) {
             return Ok(());

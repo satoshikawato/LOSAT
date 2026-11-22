@@ -896,8 +896,8 @@ impl UsetHash {
 }
 
 impl UsetArray {
-    /// `CSeqMaskerUsetArray::get_info` of a unit: the count of the unit or of its reverse complement,
-    /// whichever is smaller, 0 when the array has no entry for it.
+    /// `CSeqMaskerUsetArray::get_info` of a unit: the count of the unit or of its reverse
+    /// complement, whichever is smaller, 0 when the array has no entry for it.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_array.cpp:64-82
     /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_uset_array.hpp:151-153

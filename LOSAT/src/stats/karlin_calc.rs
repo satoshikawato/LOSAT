@@ -636,13 +636,13 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
             // eight of them are accumulated side by side.  Each lane performs
             // NCBI's additions and multiplications in NCBI's order.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2357-2364
-            // When `first == 0` and `last == range`, `ptr1` is `range` places from `ptr1e` and each
-            // new value at `ptrP` is the sum over the terms (the value `t` places below `ptrP`)
-            // times `probArrayStartLow[t]`, t = 0..range, added in increasing t starting from 0.0.
-            // The lanes compute eight adjacent `ptrP` that
-            // way. A sum reads only positions at or below its own `ptrP`. NCBI writes downwards,
-            // so it has not overwritten any of them yet, and reading all eight from the array
-            // before the writes gives the same values.
+            // When `first == 0` and `last == range`, `ptr1` is `range` places above `ptr1e` and
+            // each new value at `ptrP` is the sum over the terms (the value `t` places below
+            // `ptrP`) times `probArrayStartLow[t]`, t = 0..range, added in increasing t starting
+            // from 0.0. The lanes compute eight adjacent `ptrP` that way. A sum reads only
+            // positions at or below its own `ptrP`. NCBI writes downwards, so it has not
+            // overwritten any of them yet, and reading all eight from the array before the writes
+            // gives the same values.
             if first == 0 {
                 const LANES: isize = 8;
                 let width = range as isize;

@@ -1129,8 +1129,8 @@ impl<S: Source> FormatGuess<S> {
                         self.stream.clear(); // in case we reached eof
                         return true;
                     }
-                    // `strncpy` of `check_size` bytes, from `num_read` bytes into `test_buf` to its start: up to a NUL,
-                    // the rest NUL.
+                    // `strncpy` of `check_size` bytes from offset `num_read` of `test_buf` to its
+                    // start: up to a NUL, the rest NUL.
                     let carried = c_string(&test_buf[num_read..num_read + CHECK_SIZE]).len();
                     test_buf.copy_within(num_read..num_read + carried, 0);
                     test_buf[carried..CHECK_SIZE].fill(0);

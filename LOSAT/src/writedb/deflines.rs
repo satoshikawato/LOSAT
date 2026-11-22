@@ -121,7 +121,8 @@ pub fn second_parse(parsed: &ParsedIds, is_aa: bool, warn: Warn<'_>) -> Option<D
         let mut pos_title = pos_title.expect("set above");
         let ids = fasta[id_start.min(pos_title)..pos_title].to_vec();
         if pos_title == pos_next {
-            // Decrementing `pos_title` from 0 wraps; the title then starts at 0 (one more than `pos_title`).
+            // Decrementing `pos_title` from 0 wraps; the title then starts at 0 (one more than
+            // `pos_title`).
             pos_title = pos_title.wrapping_sub(1);
         }
         let title_start = pos_title.wrapping_add(1);

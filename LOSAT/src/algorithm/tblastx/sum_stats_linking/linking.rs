@@ -1720,8 +1720,8 @@ fn link_hsp_group_ncbi(
                     let new_sum = h_sum + (i64::from(i_score) - i64::from(cutoff_small));
                     let ctx_idx = pool_hsp_links[i].ctx_idx;
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:750-752
-                    // Preserve C's left-associative evaluation order; pre-adding
-                    // the group `score` times `Lambda` less `logK` changes 1-ULP chain E-value ties.
+                    // Preserve C's left-associative evaluation order; adding `score` times `Lambda`
+                    // less `logK` as one group changes 1-ULP chain E-value ties.
                     let new_xsum = h_xsum
                         + (i_score as f64) * query_contexts[ctx_idx].karlin_params.lambda
                         - log_k_by_ctx[ctx_idx];
@@ -1893,8 +1893,8 @@ fn link_hsp_group_ncbi(
                 let new_sum = h_sum + (i64::from(i_score) - i64::from(cutoff_big));
                 let ctx_idx = pool_hsp_links[i].ctx_idx;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:866-867
-                // Preserve C's left-associative evaluation order; pre-adding
-                // the group `score` times `Lambda` less `logK` changes 1-ULP chain E-value ties.
+                // Preserve C's left-associative evaluation order; adding `score` times `Lambda`
+                // less `logK` as one group changes 1-ULP chain E-value ties.
                 let new_xsum = h_xsum
                     + (i_score as f64) * query_contexts[ctx_idx].karlin_params.lambda
                     - log_k_by_ctx[ctx_idx];

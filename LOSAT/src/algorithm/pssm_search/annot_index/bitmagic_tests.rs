@@ -51,7 +51,8 @@ fn fail(size: u32, data: &[u8]) -> Fail {
     }
 }
 
-/// A stream with neither byte order nor GAP levels in the header (the flags `BM_HM_NO_BO` and `BM_HM_NO_GAPL`).
+/// A stream with neither byte order nor GAP levels in the header (the flags `BM_HM_NO_BO` and
+/// `BM_HM_NO_GAPL`).
 fn stream(tokens: &[u8]) -> Vec<u8> {
     let mut data = vec![0x18];
     data.extend_from_slice(tokens);
@@ -1077,8 +1078,8 @@ fn big_endian_streams() {
     let vector = ok(0, &[0x10, 0x00, 18, 0, 1, 0, 5, 0]);
     assert_eq!(vector.ranges(), [(5, 5)]);
     // a GAP block of length 1 into a null block reads nothing; into a block that exists the
-    // big-endian `get_16` at offset 0 of `p` reads two bytes (the little-endian one none), and the GAP of all
-    // ones ORed into a GAP block makes it the full block
+    // big-endian `get_16` at offset 0 of `p` reads two bytes (the little-endian one none), and the
+    // GAP of all ones ORed into a GAP block makes it the full block
     let vector = ok(0, &[0x10, 0x00, 14, 0x00, 0x09, 0]);
     assert_eq!(vector.ranges(), [(0, 65535)]);
     let vector = ok(

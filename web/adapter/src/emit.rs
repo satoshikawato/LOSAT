@@ -1,7 +1,7 @@
-//! Output streams to the host (docs/web/abi_v2.md §3, §5): the `losat_host.emit` import
-//! takes a stream, a pointer and a length. The engine formats on the thread that called the export (the caller
-//! runs the search pool's slot zero, `LOSAT/src/utils/threading.rs`), so every call
-//! reaches the host's own thread.
+//! Output streams to the host (docs/web/abi_v2.md §3, §5): the `losat_host.emit` import takes a
+//! stream, a pointer and a length. The engine formats on the thread that called the export (the
+//! caller runs the search pool's slot zero, `LOSAT/src/utils/threading.rs`), so every call reaches
+//! the host's own thread.
 
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU64, Ordering};

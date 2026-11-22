@@ -61,8 +61,7 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
 }
 
 /// `value` as one document of its type (an object written to a stream after `MSerial_AsnText`:
-/// `WriteFileHeader`, the
-/// object, `EndOfWrite` and the separator), for the named type `ty`.
+/// `WriteFileHeader`, the object, `EndOfWrite` and the separator), for the named type `ty`.
 #[cfg(test)]
 pub(crate) fn write_document<E: Encoder>(enc: &mut E, ty: u16, value: &Value) {
     write_document_until(enc, ty, value, |_| false);

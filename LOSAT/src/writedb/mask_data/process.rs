@@ -157,9 +157,9 @@ fn split_commas(text: &str) -> Vec<&str> {
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:897-909
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:3611-3616,3663-3668
-/// `NStr::StringToNumeric` of `text` to an `Int4` (`nid`, with `fConvErr_NoThrow`, base 10): whether `text` converts
-/// (`StringToInt` with no flag, `ncbi_str::string_to_int`; with `fConvErr_NoThrow` a failed
-/// conversion gives 0 and sets errno).
+/// `NStr::StringToNumeric` of `text` to an `Int4` (`nid`, with `fConvErr_NoThrow`, base 10):
+/// whether `text` converts (`StringToInt` with no flag, `ncbi_str::string_to_int`; with
+/// `fConvErr_NoThrow` a failed conversion gives 0 and sets errno).
 fn is_numeric_int4(text: &str) -> bool {
     string_to_int(text.as_bytes(), 0).is_ok()
 }

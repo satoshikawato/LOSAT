@@ -34,8 +34,8 @@
 //!   of distance `d - 1` a diagonal reads are kept in a window that moves by one cell per
 //!   diagonal; distance `d` never writes the row of `d - 1`, which is the same as reading the
 //!   cells again.
-//! - The same slide. `s_FindFirstMismatch` with a `rem` of 4 continues while
-//!   `seq1[i] < 4 && seq1[i] == seq2[i]`; per byte that is `(b1 ^ b2) | (b1 & 0xFC) == 0`, so the
+//! - The same slide. `s_FindFirstMismatch` with a `rem` of 4 continues while `seq1[i]` is below 4
+//!   and equals `seq2[i]`; per byte that is `(b1 ^ b2) | (b1 & 0xFC) == 0`, so the
 //!   first non-zero byte of `(w1 ^ w2) | (w1 & 0xFC..FC)` over eight positions (lowest byte first
 //!   to the right, highest byte first to the left) is the first mismatch. The eight-byte
 //!   comparison runs when both sequences have at least eight positions left; a slide that stops

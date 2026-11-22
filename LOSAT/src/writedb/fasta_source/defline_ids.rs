@@ -106,14 +106,12 @@ fn error(code: ErrCode, message: String, line_number: u64) -> ParseError {
 }
 
 /// `CFastaDeflineReader::x_ProcessIDs` of `id_string`, with `info`, `ids`, a listener and
-/// `CSeqIdCheck`: the
-/// ids of the token, checked. `protein` is `fAssumeProt` (the excessive data check of the
-/// nucleotides is made without it, also for convert2blastmask's reader, which sets neither;
-/// NCBI's reader without `fAssumeNuc` also makes the check of the proteins, which only posts
-/// a warning, and convert2blastmask writes no warning, so LOSAT does not make it there),
-/// `quick_id_check` `fQuickIDCheck` (makeblastdb, the BLAST programs' `-parse_deflines`;
-/// not the mask readers), `parse_raw_id` `fParseRawID` (set by every caller but
-/// convert2blastmask's).
+/// `CSeqIdCheck`: the ids of the token, checked. `protein` is `fAssumeProt` (the excessive data
+/// check of the nucleotides is made without it, also for convert2blastmask's reader, which sets
+/// neither; NCBI's reader without `fAssumeNuc` also makes the check of the proteins, which only
+/// posts a warning, and convert2blastmask writes no warning, so LOSAT does not make it there),
+/// `quick_id_check` `fQuickIDCheck` (makeblastdb, the BLAST programs' `-parse_deflines`; not the
+/// mask readers), `parse_raw_id` `fParseRawID` (set by every caller but convert2blastmask's).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:333-404
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:85,101-104

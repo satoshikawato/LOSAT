@@ -122,7 +122,8 @@ impl RpsTraceback<'_> {
         // (`BlastCompo_HeapWouldInsert`). NCBI's redo of each profile makes its own
         // (`BlastCompo_HeapInitialize` with the hit list size and the inclusion threshold) and
         // never inserts into it: RPS-BLAST's redo has no sequence source and leaves the match
-        // before the insertion, so the heap stays empty and asks only whether `n` is below `heapThreshold`.
+        // before the insertion, so the heap stays empty and asks only whether `n` is below
+        // `heapThreshold`.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3288-3292
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3702-3709

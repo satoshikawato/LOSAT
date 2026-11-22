@@ -316,8 +316,9 @@ impl<S: AsnSource> Input for TextIn<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1643-1646
-    /// `ReadOtherPointer` (`Reader::type_id`). The name of `[]` is the `std::string` of
-    /// -1 cast to `size_t` bytes that `CTempString::operator string` asks for: `std::length_error`.
+    /// `ReadOtherPointer` (`Reader::type_id`). The name of `[]` is the `std::string` of the largest
+    /// `size_t` count of bytes (-1 cast to `size_t`) that `CTempString::operator string` asks for:
+    /// `std::length_error`.
     fn read_other_pointer(&mut self) -> R<Vec<u8>> {
         let id = self.r.type_id();
         match id.map_err(|e| self.fail(e))? {

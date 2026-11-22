@@ -143,7 +143,7 @@ fn x_draw_base(mask: u8, random: &mut NcbiRandom) -> u8 {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-445
 // The subject in ncbi2na, one value per byte, in one pass over its letters. The generator is
-// seeded with the length of the subject, as `CRandom random(base_length)`, and is made when the
+// seeded with the length of the subject (a `CRandom` named `random`, from `base_length`), and is made when the
 // first gap or ambiguous letter asks for a draw: its values depend on the seed and on the
 // number of draws before, not on when it is made. The length check and the error of a byte
 // that is no subject letter are those of `resolve_local_subject_ncbi2na`. That function checks
@@ -247,7 +247,7 @@ fn x_codon_index(codon: &[u8]) -> usize {
 // codon out of the packed bytes; here the three values are separate bytes. The frames, their
 // order and every field are those of `tblastx::translation::generate_frames` on the resolved
 // subject and its reverse complement: frame `i + 1` holds the codons of `seq[i..]`, frame
-// `-(i + 1)` those of `revcomp(seq)[i..]`, which are the plus-strand triplets of
+// `-(i + 1)` those of the reverse complement of `seq` from index `i`, which are the plus-strand triplets of
 // `seq[..len - i]` counted from its end.
 /// The frames `generate_frames` gives, made from ncbi2na values and the codon tables.
 fn x_generate_frames(ncbi2na: &[u8], tables: &XCodonTables) -> Vec<QueryFrame> {

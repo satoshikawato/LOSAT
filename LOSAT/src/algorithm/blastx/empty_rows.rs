@@ -235,7 +235,7 @@ pub(crate) struct MappedAlignment {
 
 impl MappedAlignment {
     /// The alignment's length, also the query row's span in nucleotides, `qcovs`' and
-    /// `qcovhsp`'s count (`x_SetQueryCovSeqalign` reads `GetSeqStop(0) - GetSeqStart(0)`), past
+    /// `qcovhsp`'s count (`x_SetQueryCovSeqalign` reads `GetSeqStop` of row 0 less `GetSeqStart` of row 0), past
     /// the record's end too.
     pub(crate) fn length(&self) -> usize {
         self.srow.len()
@@ -376,7 +376,7 @@ impl std::fmt::Display for EmptyRowsRefusal {
 impl std::error::Error for EmptyRowsRefusal {}
 
 /// The query's fields of a row that NCBI's formatter makes from the Seq-align's query id
-/// (`align.GetSeq_id(0)`, after the query's Bioseq failed it): the record's local id (`Query_N`)
+/// (`GetSeq_id` of row 0 of the alignment, after the query's Bioseq failed it): the record's local id (`Query_N`)
 /// without `-parse_deflines`, else the id of its Seq-aligns (`BelievedIds::best`), as
 /// `s_GetSeqIdListString` shows a list of that one id.
 ///
@@ -491,7 +491,7 @@ pub(crate) fn prefetch_reads_empty_row(
 /// (at most the longest subject's, `L`). Its empty row starts in the interval, or just past its
 /// last nucleotide for an HSP at the end of a plus frame (`from` above). A plus row runs up from
 /// that start: at most `L` letters past the interval. A minus row ends two below it, as the mapper moves its start
-/// `n + 1` down (`seg.m_Len - mseg.m_Len`, the unknown length -1 as `TSeqPos`:
+/// `n + 1` down (`seg.m_Len` less `mseg.m_Len`, the unknown length -1 as `TSeqPos`:
 /// seq_align_mapper_base.cpp:1175-1183, in `MappedRows::of`): at most `L + 1` letters before the
 /// interval, for an HSP at the end of its minus frame (its `from` is the interval's first
 /// nucleotide) and the first letter of the longest subject. NCBI's scope holds the whole record.

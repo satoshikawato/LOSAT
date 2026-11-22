@@ -29,12 +29,12 @@
 //!
 //! # Observed rules
 //!
-//! The file buffer holds data; its put area is `BUFSIZ - 1` = 8191 bytes (`BUFSIZ` is 8192).
-//! With `b` bytes held:
+//! The file buffer holds data; its put area is one byte less than `BUFSIZ`, 8191 bytes (`BUFSIZ` is
+//! 8192). With `b` bytes held:
 //!
-//! * `write`/`insert` of `n` bytes: held when `n < 8191 - b` (nothing is written). Otherwise the
-//!   held bytes and the `n` bytes go out together in one `writev` (two segments, the held
-//!   bytes first, even when none are held); a short count is followed by more calls for the
+//! * `write`/`insert` of `n` bytes: held when `n` is below 8191 less `b` (nothing is written).
+//!   Otherwise the held bytes and the `n` bytes go out together in one `writev` (two segments, the
+//!   held bytes first, even when none are held); a short count is followed by more calls for the
 //!   rest, a `writev` while two segments remain and a `write` once the held bytes are done.
 //!   When everything went out the buffer is empty. When the calls fail the held bytes stay
 //!   held (the `n` bytes are dropped) and the stream sets `badbit`, except that a call of
@@ -46,8 +46,8 @@
 //!   failed leaves in the buffer).
 //! * `flush`: the held bytes go out in one `write` (nothing when none are held, and no
 //!   `fsync`); on failure they stay held and the stream sets `badbit`.
-//! * `seekp(pos)`: the held bytes go out as in `flush`, then `lseek(pos, SEEK_SET)`; either failing
-//!   sets `failbit` (a stream with no file fails).
+//! * `seekp` to `pos`: the held bytes go out as in `flush`, then `lseek` to `pos` from the start of
+//!   the file (`SEEK_SET`); either failing sets `failbit` (a stream with no file fails).
 //! * `close`: the held bytes go out as in `flush`, then `close(2)` is called whatever happened
 //!   (the held bytes are ignored from then on); a failure of the write, a failure of
 //!   `close(2)` (observed with `EIO`, `ENOSPC` and `EDQUOT`, `ENOSPC` also on a full
@@ -76,7 +76,7 @@ use std::path::Path;
 /// `BUFSIZ` of the Linux x64 build: the file buffer's size. Its put area is one byte shorter.
 pub(crate) const BUFSIZ: usize = 8192;
 
-/// The bytes the put area holds: `BUFSIZ - 1`.
+/// The bytes the put area holds: `BUFSIZ` less one.
 const PUT_AREA: usize = BUFSIZ - 1;
 
 /// The stream state (`std::ios_base::iostate`): `goodbit`, `badbit` and `failbit`.
@@ -106,7 +106,7 @@ pub(crate) trait RawFile: Sized {
     fn open(path: &Path) -> io::Result<Self>;
     /// One `write` (one segment) or `writev` (several): the number of bytes the call took.
     fn write(&mut self, segments: &[&[u8]]) -> io::Result<usize>;
-    /// `lseek(pos, SEEK_SET)`.
+    /// `lseek` to `pos` from the start of the file (`SEEK_SET`).
     fn seek(&mut self, pos: u64) -> io::Result<()>;
     /// `close(2)`: the descriptor is released whether or not it reports an error.
     fn close(self) -> io::Result<()>;
@@ -292,7 +292,7 @@ impl<F: RawFile> Stream<F> {
         stream
     }
 
-    /// `open(path, ios::out | ios::binary)`.
+    /// `open` of `path` for binary output.
     pub(crate) fn open(&mut self, path: &Path) {
         self.open_with(|| F::open(path));
     }
@@ -386,13 +386,13 @@ impl<F: RawFile> Stream<F> {
         }
     }
 
-    /// `<< endl`: a newline, then `flush()`.
+    /// The stream insertion of `endl`: a newline, then `flush()`.
     pub(crate) fn endl(&mut self) {
         self.put(b'\n');
         self.flush();
     }
 
-    /// `seekp(pos)`.
+    /// `seekp` to `pos`.
     pub(crate) fn seekp(&mut self, pos: u64) {
         if self.bad() {
             self.setstate(IoState::FAIL);

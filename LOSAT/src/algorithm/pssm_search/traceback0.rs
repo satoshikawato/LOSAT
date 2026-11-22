@@ -40,7 +40,7 @@ pub(crate) struct PssmTraceback0<'a, R: PssmRows> {
     pub(crate) rows: &'a R,
     /// The query's context (its letters for the identities, its length).
     pub(crate) context: &'a QueryContext,
-    /// `query_blk->length + 1`, the query bound of NCBI's containment tree.
+    /// One more than `query_blk->length`, the query bound of NCBI's containment tree.
     pub(crate) total_query_span: i32,
     pub(crate) subjects: XRedoSubjects<'a>,
     pub(crate) gap_open: i32,
@@ -266,7 +266,7 @@ pub(crate) struct TraceHsps<'a, R: PssmRows> {
     pub(crate) query_nomask: &'a [u8],
     /// `query_info->contexts[hsp->context].query_length`.
     pub(crate) query_length: usize,
-    /// `query_blk->length + 1`, the query bound of NCBI's containment tree.
+    /// One more than `query_blk->length`, the query bound of NCBI's containment tree.
     pub(crate) tree_query_bound: i32,
     /// The subject's letters, or a translated subject's frames.
     pub(crate) subject: TraceSubject<'a>,
@@ -389,8 +389,8 @@ pub(crate) fn trace_hsps<R: PssmRows>(
         });
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:634-692
-    // The purge deletes (`purge |= (program != eBlastTypeBlastn)`, blast_hits.c:2464) and
-    // returns the HSP count, so the re-evaluation loop from `extra_start`
+    // The purge deletes (`purge` is also set when `program` is not `eBlastTypeBlastn`,
+    // blast_hits.c:2464) and returns the HSP count, so the re-evaluation loop from `extra_start`
     // (blast_traceback.c:647-665) has nothing to do.
     purge_hsps_with_common_endpoints(&mut traced, |traced| &traced.hsp);
     traced.sort_by(|a, b| score_compare(&a.hsp, &b.hsp));

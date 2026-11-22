@@ -308,8 +308,8 @@ impl Lines {
                 self.release(records);
             }
         }
-        // A CR at the end ends the line (in the LF and CRLF styles too: `pos ==
-        // m_Line.size()`, nothing is pushed back).
+        // A CR at the end ends the line (in the LF and CRLF styles too: `pos` is the size of
+        // `m_Line`, nothing is pushed back).
         self.cr_end = false;
         self.lf_cr = false;
         records.line_end();

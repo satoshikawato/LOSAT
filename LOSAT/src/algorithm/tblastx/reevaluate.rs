@@ -111,7 +111,7 @@ unsafe fn gather_scores8_reevaluate_avx2(
 ///
 /// This is a direct port of NCBI:
 /// - `Blast_HSPReevaluateWithAmbiguitiesUngapped` (blast_hits.c:675-733), for the
-///   **translated** case (`translated == TRUE`), where `kResidueMask = 0xff`.
+///   **translated** case (`translated` true), where `kResidueMask` is `0xff`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:675-733
 ///

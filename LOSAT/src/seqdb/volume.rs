@@ -22,7 +22,7 @@ pub struct Volume {
     /// `restrict_seqids`), none without one.
     defline_rule: Option<LineRule>,
     /// Whether the alias files' `OID_MASK_TYPE` of the volume erases the definition lines of
-    /// model sequences after `defline_rule` (`m_OidMaskType & fExcludeModel`,
+    /// model sequences after `defline_rule` (the `fExcludeModel` bit of `m_OidMaskType`,
     /// `oid_mask::excludes_models`; `SeqDb::read_alias_tree`).
     exclude_model: bool,
     /// The volume's `OID_MASK_TYPE` itself, 0 without one (`m_OidMaskType`): any type makes the

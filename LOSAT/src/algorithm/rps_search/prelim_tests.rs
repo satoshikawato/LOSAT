@@ -75,12 +75,12 @@ fn kept_oids(lists: &[(u32, i32, f64)]) -> Vec<u32> {
 // 1 to 5 (blast_hits.c:68), and a list past that capacity goes through
 // `Blast_HitListUpdate` (blast_hits.c:3243-3297) into the heap whose root is the worst list:
 // with `s_EvalueCompareHSPLists` (blast_hits.c:3078-3106) ordering by best E-value (up), then
-// the first HSP's score (down), then `BLAST_CMP(h2->oid, h1->oid)`: of two lists equal in
-// E-value and score the one of the higher ordinal id is the better, so the root is the lowest
-// id of the worst tie and a new list of a higher id replaces it ("newer hits with score and
-// e-value both equal to the current worst will be saved"), one of a lower id is discarded.
-// The kept lists are therefore the best 10 of the total order whatever the insertion order,
-// and sorted they read best first.
+// the first HSP's score (down), then `BLAST_CMP` of `h2->oid` against `h1->oid`, in that order: of
+// two lists equal in E-value and score the one of the higher ordinal id is the better, so the root
+// is the lowest id of the worst tie and a new list of a higher id replaces it ("newer hits with
+// score and e-value both equal to the current worst will be saved"), one of a lower id is
+// discarded. The kept lists are therefore the best 10 of the total order whatever the insertion
+// order, and sorted they read best first.
 #[test]
 fn a_full_prelim_list_of_equal_e_values_keeps_the_best_ten_of_the_total_order() {
     let ascending: Vec<u32> = (0..18).collect();

@@ -37,7 +37,7 @@ fn exact_match_counts_are_ncbi_tables() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:473-499 (the loops,
-// with `Int4 curr_letter` stored into `Uint1` bytes).
+// with `curr_letter`, an `Int4`, stored into `Uint1` bytes).
 fn ncbi_compress(old: &[u8]) -> Vec<u8> {
     let len = old.len() as isize;
     let at = |index: isize| (index + 3) as usize;

@@ -435,7 +435,7 @@ pub(super) fn render(
             xml_is_xml2,
             xml_only_xml2,
             xml_taxa,
-            pssm.and_then(|psi| psi.bioseq_letters.clone()),
+            pssm,
         )?)
     } else {
         None
@@ -665,7 +665,7 @@ pub(super) fn render(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
     // The statistics of each query for the observer, the values of the XML reports.
     if let Some(observer) = observer.as_deref_mut() {
-        let stats = super::blast_xml::query_stats(parameters, query_validity, scoring);
+        let stats = super::blast_xml::query_stats(parameters, query_validity, scoring, pssm);
         for (q_idx, stats) in stats.into_iter().enumerate() {
             observer.query_stats(q_idx, stats);
         }
@@ -866,6 +866,8 @@ pub(super) fn render(
                     shown,
                     hitlists,
                     ranges,
+                    // PSI-TBLASTN's own "Blast Type" (`psitblastn`).
+                    pssm.map(|_| crate::report::record::PssmBlastType::PsiTblastn),
                     warnings
                         .as_mut()
                         .expect("a Seq-annot writes its posts to the diagnostics"),

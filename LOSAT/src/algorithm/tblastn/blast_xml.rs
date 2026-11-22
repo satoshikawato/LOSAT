@@ -75,6 +75,9 @@ pub(super) struct XmlValues {
     /// A list kept no sequence of the database: the messages of the queries of the searched
     /// batches have `EMPTY_DATABASE_MESSAGE`.
     pub filtered_empty: bool,
+    /// `-in_pssm` (PSI-TBLASTN): `BlastOutput_program` and `_version` name `psitblastn`
+    /// (`Blast_ProgramNameFromType` of the PSSM search's program type).
+    pub pssm: bool,
 }
 
 /// The document's texts, made (and refused) before the first byte of any format is written:
@@ -123,19 +126,25 @@ pub(super) struct PreparedXml {
     query_bioseq: Option<std::sync::Arc<[u8]>>,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89
-/// The `Statistics` of every query, with the gapped Karlin block of the scoring; the unsearched
-/// values for a query without a valid context.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89,101-103
+/// The `Statistics` of every query, with the gapped Karlin block of the scoring (a PSSM query's
+/// `kbp_gap_psi`, `PsiSearch::gapped_karlin`, as its pairwise report); the unsearched values for
+/// a query without a valid context.
 pub(super) fn query_stats(
     parameters: &LocalSubjectParameters,
     query_validity: &[bool],
     scoring: LocalStageDScoring,
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
 ) -> Vec<XmlStats> {
-    let gapped = lookup_protein_params(&ProteinScoringSpec {
+    let matrix = lookup_protein_params(&ProteinScoringSpec {
         matrix: scoring.matrix,
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
     });
+    let gapped = match pssm {
+        Some(psi) => psi.gapped_karlin(&matrix),
+        None => matrix,
+    };
     query_validity
         .iter()
         .enumerate()
@@ -170,7 +179,7 @@ pub(super) fn prepare(
     xml2: bool,
     only_xml2: bool,
     taxa: XmlTaxa,
-    query_bioseq: Option<std::sync::Arc<[u8]>>,
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
 ) -> Result<PreparedXml> {
     ensure!(
         query_validity.len() == query_records.len()
@@ -180,7 +189,7 @@ pub(super) fn prepare(
     // A matrix name that the formatting table does not know stops a run with queries before its
     // reports (`stage_e_report::xml_matrix_failure`, `render`): here only a run without a query.
     let positives = FormattingMatrix::new(matrix_name);
-    let stats = query_stats(parameters, query_validity, scoring);
+    let stats = query_stats(parameters, query_validity, scoring, pssm);
     let has_hits = |hitlist: &KappaResultHitList| {
         hitlist
             .lists()
@@ -328,7 +337,7 @@ pub(super) fn prepare(
         all_masks: xml2,
         xml2: xml2_run,
         taxa_notes: taxa.notes,
-        query_bioseq,
+        query_bioseq: pssm.and_then(|psi| psi.bioseq_letters.clone()),
     })
 }
 
@@ -384,9 +393,21 @@ impl PreparedXml {
         ranges: &ReportRanges<'_>,
         mut warnings: Option<&mut QueryWarnings<'_>>,
     ) -> Result<()> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:682-684
+        let (program, version) = if self.values.pssm {
+            (
+                "psitblastn",
+                concat!("PSITBLASTN ", crate::wording::report_version!()),
+            )
+        } else {
+            (
+                "tblastn",
+                concat!("TBLASTN ", crate::wording::report_version!()),
+            )
+        };
         let run = self.positives.as_ref().map(|positives| XmlRun {
-            program: "tblastn",
-            version: concat!("TBLASTN ", crate::wording::report_version!()),
+            program,
+            version,
             reference: REFERENCE_GAPPED_BLAST,
             db_name: &self.db_name,
             matrix: Some(&self.matrix_name),
@@ -454,7 +475,10 @@ impl PreparedXml {
             // A query of a batch NCBI did not search has no masks (its result is made
             // without the search, probe `BATCH_SIZE=10` with `-lcase_masking`); XML2 and JSON
             // list the masks of every other query, also one without hits.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:120-168
+            // A PSSM query's results have no masks (`CPsiBlastImpl::Run` sets none on them).
             if self.searched[q_idx]
+                && !self.values.pssm
                 && (self.all_masks
                     || hitlist
                         .lists()

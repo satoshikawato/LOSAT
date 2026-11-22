@@ -473,6 +473,7 @@ pub(crate) fn write_blastn_archives(
     writer: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastn,
         db_title: call.subjects.db_title(),
         gapped: call.batches.gapped,

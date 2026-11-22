@@ -31,7 +31,7 @@ Error: -use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's 
 An output format the program does not write (exit status 1):
 
 ```text
-Error: output format 5 is not supported by LOSAT's PSIBLAST
+Error: output format 1 is not supported by LOSAT's PSIBLAST yet
 ```
 
 For example, NCBI BLAST+ runs `psiblast` with the Smith-Waterman traceback, and LOSAT stops with the second message above:
@@ -349,7 +349,7 @@ These refusals apply to every search program that reads databases.
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-html` | Refused: not yet supported. |
 | `-use_sw_tback` | Refused. |
-| `-outfmt` other than 0, 6, 7, 10 and 20 | Refused: not yet supported. With `-in_pssm` or `-in_msa`, only 0, 6 and 7 work. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 1 to 4, 12 to 16 and 18 | Refused: not yet supported, with a FASTA query, `-in_pssm` or `-in_msa`. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
 | A `-subject` set whose sequences all have no letters | Refused. NCBI's `psiblast` crashes; `blastp` runs it. |
@@ -400,10 +400,10 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 | :--- | :--- |
 | `-ungapped` | Refused. |
 | `-use_sw_tback` | Refused. |
-| `-outfmt 11` | Refused. NCBI searches with it. |
+| `-outfmt 11` | Refused. NCBI searches, then stops with a C++ exception whose report (in its error archive too) changes from run to run. |
 | `-mt_mode 1` with more than one thread and `-db` | Refused. |
 | A PSSM query that `-seg` masks completely | Refused. |
-| `-outfmt` other than 0 to 4, 6, 7 and 10 | Refused. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 12 to 16 and 18 | Refused: not yet supported. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-db_gencode 32` | Refused. It is not one of NCBI's codes; LOSAT's `tblastn` takes it for its own translations. |
 | `-in_pssm` in LOSAT Web | Refused. The library API and pylosat take it as an input. |
 
@@ -664,7 +664,7 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 - The programs `deltablast`, `makeprofiledb` and `blast_formatter`.
 - `windowmasker -mk_counts` and `-convert`, which make and convert counts files.
 - `psiblast -phi_pattern`.
-- The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
+- The `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`.
 - The `rpsblast` output formats other than `0`, `5`, `6`, `7`, `10` and `11`, and the `rpstblastn` ones other than `0` to `7`, `10` and `11`.
 - `-html`.
 

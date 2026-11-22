@@ -580,14 +580,20 @@ pub fn query_coverage(q_offset: i32, q_end: i32, query_length: i32) -> f64 {
     pct
 }
 
-/// The "Blast Type" of the program: `EProgramToTaskName(ProgramNameToEnum(program name))`
-/// and the `EProgram` value. The program name of every BLASTN task is "blastn"
-/// (`Blast_ProgramNameFromType`, blast_format.cpp:94), and of every BLASTP task "blastp".
+/// The "Blast Type" of the run: `EProgramToTaskName(ProgramNameToEnum(program name))`
+/// and the `EProgram` value (a PSSM search's own, `RunRecord::pssm_type`). The program name of
+/// every BLASTN task is "blastn" (`Blast_ProgramNameFromType`, blast_format.cpp:94), and of every
+/// BLASTP task "blastp".
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:56-62
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-686
-fn blast_type(program: Program) -> (&'static str, i32) {
-    match program {
+fn blast_type(run: &RunRecord<'_>) -> (&'static str, i32) {
+    match run.pssm_type {
+        Some(crate::report::record::PssmBlastType::Psiblast) => return ("psiblast", 10),
+        Some(crate::report::record::PssmBlastType::PsiTblastn) => return ("psitblastn", 11),
+        None => {}
+    }
+    match run.program {
         Program::Blastn => ("blastn", 1),
         Program::Blastp => ("blastp", 2),
         Program::Blastx => ("blastx", 3),
@@ -669,7 +675,7 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
         b"Hist Seqalign",
         UserData::Bool(true),
     );
-    let (task, program) = blast_type(run.program);
+    let (task, program) = blast_type(run);
     enc.element();
     write_user_object(enc, b"Blast Type", task.as_bytes(), UserData::Int(program));
     enc.element();
@@ -1484,6 +1490,18 @@ fn write_seq_align_gapped<E: Encoder>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1252-1260
     enc.member("score", 2);
     enc.begin_list(true);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1490-1496
+    // psiblast's Seq-aligns (`eBlastTypePsiBlast`, every round) leave out a `num_ident` of 0.
+    let psiblast_no_identity = HspRecord {
+        num_ident: -1,
+        ..*hsp
+    };
+    let hsp = match run.pssm_type {
+        Some(crate::report::record::PssmBlastType::Psiblast) if hsp.num_ident == 0 => {
+            &psiblast_no_identity
+        }
+        _ => hsp,
+    };
     write_score_list(enc, hsp, coverage_query_length(run, query.searched_length));
     enc.end_list();
     enc.end_member();

@@ -437,3 +437,72 @@ fn an_archive_of_a_dbsize_of_minus_two_to_the_63_writes_its_digits() {
         assert!(!text.contains("-0\n") && !text.contains(">-0<"), "{text}");
     }
 }
+
+/// psiblast's archive of a round (`ArchiveRound`, psiblast_app.cpp:259-271): `Web_StepNumber` is
+/// the round's number with `-db` (none with `-subject`), and a PSSM round records the
+/// composition-based statistics of its set-up in place of the handle's.
+#[test]
+fn a_psiblast_round_writes_its_step_and_composition_mode() {
+    struct NoAligns;
+    impl AlignSource for NoAligns {
+        fn write<E: crate::report::serial::encoder::Encoder>(
+            &mut self,
+            _out: &mut ArchiveOut<'_, E>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+    let mut inputs = options::OptionInputs::new(options::RequestKind::Psiblast, "psiblast");
+    inputs.num_iterations = Some(3);
+    let archive = |database: Option<&str>, round: Option<writer::ArchiveRound>| {
+        let handle = ArchiveHandle::new(
+            ArchiveEncoding::Text,
+            ArchiveRequest::for_inputs(&inputs, database),
+            OptionsHandle::default(),
+        );
+        let batch = BatchArchive {
+            request: writer::RequestInputs {
+                queries: writer::RequestQueries::Bioseqs(&[]),
+                subjects: &[],
+                required: None,
+                lcase_masks: &[],
+            },
+            masks: &[],
+            ka_blocks: [KaBlock::missing(false), KaBlock::missing(true)],
+            search_space: 0,
+            length_adjustment: 0,
+            searched_space: None,
+            round,
+        };
+        let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+        write_archive(&handle, &batch, &mut NoAligns, &mut sink, &mut diagnostics).unwrap();
+        String::from_utf8(sink).unwrap()
+    };
+    let step =
+        |number: i32| format!("name \"Web_StepNumber\",\n          value integer {number}\n");
+    let cbs =
+        |mode: i32| format!("name \"CompositionBasedStats\",\n          value integer {mode}\n");
+    let fasta_round = writer::ArchiveRound {
+        number: 1,
+        comp_based_stats: None,
+    };
+    let pssm_round = writer::ArchiveRound {
+        number: 2,
+        comp_based_stats: Some(1),
+    };
+    let whole = archive(Some("in/db"), None);
+    assert!(whole.contains(&step(3)), "{whole}");
+    let first = archive(Some("in/db"), Some(fasta_round));
+    assert!(
+        first.contains(&step(1)) && !first.contains(&step(3)),
+        "{first}"
+    );
+    let second = archive(Some("in/db"), Some(pssm_round));
+    assert!(second.contains(&step(2)), "{second}");
+    assert!(
+        second.contains(&cbs(1)) && !second.contains(&cbs(2)),
+        "{second}"
+    );
+    let subject = archive(None, Some(pssm_round));
+    assert!(!subject.contains("Web_StepNumber"), "{subject}");
+}

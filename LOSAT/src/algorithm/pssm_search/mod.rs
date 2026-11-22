@@ -90,6 +90,14 @@ pub struct PsiSearch {
     /// run that writes one (`in_pssm::PssmReader::strategy`, `pssm_request_written`) of a PSSM that
     /// NCBI's check passes; `None` otherwise and for a FASTA query's later rounds.
     pub(crate) request: Option<PssmQueryRequest>,
+    /// The PSSM that psiblast's archive (outfmt 11) of a round of this search holds in its request
+    /// before the round's K/A write-back (`algorithm::blastp::archive::PsiArchive`): `-in_pssm`'s
+    /// object after `CPsiBlastImpl`'s constructor (the scores of a PSSM of frequency ratios only
+    /// computed, `in_pssm::InPssmFile::object`), or the engine's PSSM of a later round
+    /// (`algorithm::psiblast::pssm::QueryPssm::object`). Kept only for a run that writes the
+    /// archive; `None` otherwise and for tblastn.
+    pub(crate) archive_pssm:
+        Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>>,
     /// What NCBI's object manager makes of the annotations of the PSSM's query when the query
     /// joins the scope (`annot_index::index_entry`): its messages, the diagnostic stream it
     /// leaves failed and its exception, which the run writes where NCBI posts them
@@ -426,6 +434,7 @@ impl PsiSearch {
             setup_messages,
             warning_title: None,
             request: None,
+            archive_pssm: None,
             annot: annot_index::AnnotOutcome::default(),
             defline_reads_annot: false,
             round_query: None,

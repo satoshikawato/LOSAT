@@ -2902,6 +2902,8 @@ fn psiblast_pssms(
             &|s_idx| keys.key(s_idx),
             ancillary,
             &mut unread,
+            // The PSSM after the last round, which no archive holds.
+            false,
         );
         let mut warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
         keys.unread_warnings(args.app.ncbi_name(), &unread, &mut warnings);
@@ -4350,7 +4352,9 @@ pub fn run(
     if let Some(handle) = &archive {
         match &result {
             Err(error) => {
-                if let Some(lines) = super::archive::error_lines(error, false) {
+                // psiblast's `-in_pssm` file, which NCBI opens inside `Run` too.
+                let in_run = crate::algorithm::pssm_search::in_pssm::file_error_in_run(error);
+                if let Some(lines) = super::archive::error_lines(error, in_run) {
                     let _ = crate::report::archive::write_error_archive_after_post(
                         handle,
                         error,
@@ -4363,7 +4367,8 @@ pub fn run(
                     // A run that `CATCH_ALL` ended without a post (`cli::NativeError::silent_end`:
                     // psiblast's `-in_pssm` reader, NCBI's object manager): the archive of the
                     // messages saved before it, with no text before it, as tblastn's end writes.
-                    let _ = crate::report::archive::write_error_archive(handle, &lines, &mut stream);
+                    let _ =
+                        crate::report::archive::write_error_archive(handle, &lines, &mut stream);
                 }
             }
             Ok(()) => {
@@ -4944,6 +4949,16 @@ fn search_pssm_query(
     // prolog, where a FASTA query's batch has its reader's messages: they are the PSSM query's
     // (`psiblast_stop_at_pssm_query` marks the stream they fail).
     record.warnings = psi.annot.posts.text();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
+    // With the archive as the first format (no prolog before them) each of these posts is saved
+    // as one message of its severity, as tblastn's (`PsiSearch::write_annot_posts`), where the
+    // diagnostics stream would save each of its lines as a warning: they are written here.
+    if let (Some(11), Some(handle)) = (outfmts.first(), resolved.archive.as_ref()) {
+        psi.annot
+            .posts
+            .write(&mut *outputs.diagnostics, Some(handle))?;
+        record.warnings.clear();
+    }
     let records = vec![record];
     // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's
     // (`check_psiblast_pssm_files`: not where NCBI's error of the format comes first).
@@ -6217,7 +6232,7 @@ fn search(
                     super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 };
-                // Outfmt 0, 5, 6 and 7 (psiblast's 0, 6 and 7) prefetch the subjects of each
+                // Outfmt 0, 5, 6 and 7 (psiblast's too) prefetch the subjects of each
                 // batch, which with `taxdb.bti` on the search path reads their taxids and looks
                 // them up in the taxonomy database (`ListedTitles::prefetch_messages`); a refusal
                 // there would come in a later block, so their checks then also read every
@@ -8111,8 +8126,8 @@ struct BlastpReports<'a> {
     x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
     /// Whether this call is the run's last report call, so that without the epilog the run stops
     /// after it (`blast_xml::BlastpXml::stops`). Not a block of the block search before the last
-    /// (LOSAT_X_BPQBLOCK), a chunk's search (which reports nothing) or a psiblast round (which
-    /// writes no XML document, `psiblast::args::PsiblastArgs::check_outfmt`).
+    /// (LOSAT_X_BPQBLOCK), a chunk's search (which reports nothing) or a psiblast round (whose
+    /// XML document the rounds end, `psi_round::write_round_epilogs`).
     last_call: bool,
     /// psiblast's round of a FASTA query (`psi_round`): the round's number and previous
     /// inclusion set for its reports, and where its outcome goes; `None` outside the rounds.

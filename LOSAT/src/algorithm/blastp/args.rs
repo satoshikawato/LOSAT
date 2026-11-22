@@ -895,6 +895,14 @@ impl BlastpArgs {
         };
         let psi_search = match pssm_read {
             Some((mut search, file)) => {
+                // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:265-270
+                // psiblast's archive of each round of the PSSM holds the object that the search
+                // holds (`CPsiBlast(pssm, ...)` keeps the application's `CRef`): after the
+                // constructor's scores, with the round's K/A written back
+                // (`blastp::archive::PsiArchive`).
+                if self.app == BlastpApp::Psiblast && self.archive.is_some() && file.valid {
+                    search.archive_pssm = Some(std::sync::Arc::new(file.object.clone()));
+                }
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
                     &search,

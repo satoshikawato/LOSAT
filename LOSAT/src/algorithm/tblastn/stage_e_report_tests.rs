@@ -203,6 +203,7 @@ fn initial_tabular_oracle_bytes() {
                 db_gencode: 1,
                 identity_warned: 0,
                 filtered_empty: false,
+                pssm: false,
             },
             Default::default(),
             None,

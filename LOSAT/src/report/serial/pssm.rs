@@ -763,3 +763,7 @@ pub fn asn_text_with_karlin(
     }
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "pssm_tests.rs"]
+mod tests;

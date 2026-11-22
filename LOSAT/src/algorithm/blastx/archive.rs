@@ -434,6 +434,7 @@ pub(crate) fn write_blastx_archive(
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
+        pssm_type: None,
         program: Program::Blastx,
         db_title: match &call.names {
             SeqalignSubjects::Records => None,

@@ -89,37 +89,26 @@ fn the_runs_are_the_chains_with_the_fills_presence_vector_and_counters() {
             let w = words(&refs, &offsets, &masks, template_length, template_type);
             let (hashtable, next_pos, fill_pv, fill_helper) =
                 chains(&w, cells, pv_len, pv_array_bts);
-            // EXPERIMENT (LOSAT_X_DCQSAHEAD): the place pass with and without `qs` ahead.
-            for qs_ahead in [false, true] {
-                let mut pv = vec![0 as PvArrayType; pv_len];
-                let mut helper = vec![0u32; cells >> 11];
-                let csr = build_with(
-                    &w,
-                    cells,
-                    &mut pv,
-                    pv_array_bts,
-                    &mut helper,
-                    Vec::new(),
-                    qs_ahead,
-                );
-                let longest = disc_longest_chain(&fill_helper, &[], false);
-                x_assert_runs_are_the_chains(
-                    &w,
-                    &csr,
-                    false,
-                    &pv,
-                    &helper,
-                    pv_array_bts,
-                    &hashtable,
-                    &next_pos,
-                    &fill_pv,
-                    &fill_helper,
-                    longest,
-                );
-                let chained: usize = (0..cells).map(|c| csr.run(c).len()).sum();
-                assert_eq!(chained, csr.words());
-                assert!(csr.words() > 0 || n == 1);
-            }
+            let mut pv = vec![0 as PvArrayType; pv_len];
+            let mut helper = vec![0u32; cells >> 11];
+            let csr = build(&w, cells, &mut pv, pv_array_bts, &mut helper, Vec::new());
+            let longest = disc_longest_chain(&fill_helper, &[], false);
+            x_assert_runs_are_the_chains(
+                &w,
+                &csr,
+                false,
+                &pv,
+                &helper,
+                pv_array_bts,
+                &hashtable,
+                &next_pos,
+                &fill_pv,
+                &fill_helper,
+                longest,
+            );
+            let chained: usize = (0..cells).map(|c| csr.run(c).len()).sum();
+            assert_eq!(chained, csr.words());
+            assert!(csr.words() > 0 || n == 1);
         }
     }
 }

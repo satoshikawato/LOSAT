@@ -1415,6 +1415,10 @@ pub(super) fn csr(
         // EXPERIMENT (LOSAT_X_DCSEEDLEAN): every build on a pool takes the steps.
         let csr = if seed_lean_on() {
             crate::utils::xreach::x_reach!("LOSAT_X_DCSEEDLEAN", true);
+            // EXPERIMENT (LOSAT_X_DCQSAHEAD): this build's place pass brings in `qs` ahead.
+            if super::x_dc_csr::qs_ahead_on() {
+                crate::utils::xreach::x_reach!("LOSAT_X_DCQSAHEAD", true);
+            }
             csr_on_pool_steps(
                 parts,
                 words,
@@ -1441,6 +1445,10 @@ pub(super) fn csr(
         return (csr, true);
     }
     let _ = parts;
+    // EXPERIMENT (LOSAT_X_DCQSAHEAD): the serial build places as before.
+    if super::x_dc_csr::qs_ahead_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_DCQSAHEAD", false);
+    }
     let csr = super::x_dc_csr::build(
         words,
         cells,
@@ -1782,9 +1790,9 @@ unsafe fn read_lean_row(c: &StepCtx<'_, '_>, set: SharedBuckets, s0: usize, s1: 
 
 /// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): one pass of `csr_on_pool_steps`
 /// on thread `c.t`. Step `k` (`0 ..= chunks`) reads chunk `k` (if any) into row `c.t` of set
-/// `k % 2`, then applies `op` to each entry of column `c.t` of set `(k - 1) % 2` (chunk `k - 1`,
-/// if any: bucket `(0, t)` to `(parts - 1, t)`, each in order), with the cell of the entry 16
-/// places after it in its bucket (if any); a barrier ends each step.
+/// `k % 2`, then calls `op(es, j)` for each place `j` of each bucket `es` of column `c.t` of set
+/// `(k - 1) % 2` (chunk `k - 1`, if any: bucket `(0, t)` to `(parts - 1, t)`, each in order; `op`
+/// takes the bucket so that it can read the entries after `j`); a barrier ends each step.
 ///
 /// SAFETY: row `t` of a set is written only by reader `t` and column `t` read only by owner `t`;
 /// a set read at step `k` was written at step `k - 1` and is written again at step `k + 1`, with

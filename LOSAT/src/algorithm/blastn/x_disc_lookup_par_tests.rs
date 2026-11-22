@@ -1541,6 +1541,41 @@ fn csr_on_a_pool_lists_the_chains() {
     assert!(!on_pool, "off a pool");
 }
 
+// EXPERIMENT (LOSAT_X_DCQSAHEAD): one query of 0 to 40 words, of random letters and of one letter
+// repeated (every word in one cell, so in one owner's buckets), in one chunk and in chunks of 7
+// positions: buckets of every length around `QS_AHEAD` and 16, built by `csr_on_pool` and by
+// `csr_on_pool_steps` with and without `qs` ahead (`check_csr`).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[test]
+fn csr_on_a_pool_at_every_short_length() {
+    let mut rng = Lcg(0xC5A0_0003);
+    let combo = (11, DiscWordType::Coding, 16);
+    for threads in [2usize, 3] {
+        crate::utils::threading::with_search_pool(threads, "blastn", |_pool| {
+            for n in 0..=40usize {
+                for repeated in [false, true] {
+                    let queries = vec![(0..combo.2 - 1 + n)
+                        .map(|_| if repeated { 0 } else { rng.below(4) as u8 })
+                        .collect::<Vec<u8>>()];
+                    let case = Case {
+                        queries,
+                        offsets: vec![0],
+                        masks: vec![Vec::new()],
+                    };
+                    for chunk in [7usize, 5000] {
+                        check_csr(&case, combo, threads, chunk);
+                    }
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+}
+
 // EXPERIMENT (LOSAT_X_DCCSR): a table of more positions than a quarter of its cells, built on
 // a pool, is laid out as CSR (with the switch on) and answers `count_hits`, `contains_hit`
 // and `longest_chain` as the chains of the original loop; its runs are the chains.

@@ -1,14 +1,15 @@
 //! dc-megablast's CSR table builds with `LOSAT_X_DCQSAHEAD` (`src/algorithm/blastn/x_dc_csr.rs`
-//! `build_with`, `src/algorithm/blastn/x_disc_lookup_par.rs` `csr_on_pool_steps`) on whole
+//! module comment, `src/algorithm/blastn/x_disc_lookup_par.rs` `csr_on_pool_steps`) on whole
 //! searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is `0`.
-//! It changes when the place pass of a CSR build brings in the lines of `qs`, not what it writes
-//! where, so the property under test is that the report does not depend on it, and that the
-//! default's builds took its path (`[TIMING] disc_lookup_csr: ... qs_ahead=`, which counts them).
-//! MG1655 (4.6 Mb, one table of about 9.2 million words, above the CSR's size rule) against
-//! AP027131, built by the serial build at one thread and on the pool at four. That those bytes
-//! equal NCBI's is the business of the fixture suites.
+//! It changes when the place pass of a CSR build on the pool brings in the lines of `qs`, not
+//! what it writes where, so the property under test is that the report does not depend on it,
+//! that the default's builds on the pool took its path and the serial builds did not
+//! (`[TIMING] disc_lookup_csr: ... qs_ahead=`, which counts them). MG1655 (4.6 Mb, one table of
+//! about 9.2 million words, above the CSR's size rule) against AP027131, built by the serial
+//! build at one thread and on the pool at four. That those bytes equal NCBI's is the business of
+//! the fixture suites.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -66,21 +67,27 @@ fn csr_field(stderr: &str, name: &str) -> u64 {
         .unwrap_or_else(|| panic!("no {name} in: {line}"))
 }
 
-// At one thread (the serial build) and four (the build on the pool): the default and `=0` give the
-// same report and standard error; with LOSAT_TIMING every CSR build of the default took the
-// switch's path and none of `=0`'s did.
+// At one thread (the serial build) and four (the build on the pool), with LOSAT_TIMING: the
+// default and `=0` give the same report and the same standard error but for the `[TIMING]` lines;
+// every CSR build of the default on the pool took the switch's path, and no other build did.
 #[test]
 fn dc_megablast_csr_builds_with_qs_ahead() {
+    let untimed = |stderr: &str| -> Vec<String> {
+        stderr
+            .lines()
+            .filter(|line| !line.starts_with("[TIMING]"))
+            .map(str::to_owned)
+            .collect()
+    };
     for threads in [1, 4] {
-        let (expected, expected_stderr) = search(threads, &[SWITCH_OFF]);
+        let (expected, expected_stderr) = search(threads, &[SWITCH_OFF, TIMING]);
         assert!(!expected.is_empty(), "threads {threads}: no hits");
-        let (report, stderr) = search(threads, &[]);
-        assert!(report == expected, "threads {threads}: default differs");
-        assert_eq!(stderr, expected_stderr, "threads {threads}");
         let (report, stderr) = search(threads, &[TIMING]);
-        assert!(
-            report == expected,
-            "threads {threads}: default with LOSAT_TIMING differs"
+        assert!(report == expected, "threads {threads}: default differs");
+        assert_eq!(
+            untimed(&stderr),
+            untimed(&expected_stderr),
+            "threads {threads}"
         );
         let builds = csr_field(&stderr, "builds=");
         assert!(builds > 0, "threads {threads}: no CSR build:\n{stderr}");
@@ -90,13 +97,20 @@ fn dc_megablast_csr_builds_with_qs_ahead() {
             parallel,
             "threads {threads}"
         );
-        assert_eq!(csr_field(&stderr, "qs_ahead="), builds, "threads {threads}");
-        let (report, stderr) = search(threads, &[SWITCH_OFF, TIMING]);
-        assert!(
-            report == expected,
-            "threads {threads}: =0 with LOSAT_TIMING differs"
+        assert_eq!(
+            csr_field(&stderr, "qs_ahead="),
+            parallel,
+            "threads {threads}"
         );
-        assert_eq!(csr_field(&stderr, "builds="), builds, "threads {threads}");
-        assert_eq!(csr_field(&stderr, "qs_ahead="), 0, "threads {threads}");
+        assert_eq!(
+            csr_field(&expected_stderr, "builds="),
+            builds,
+            "threads {threads}"
+        );
+        assert_eq!(
+            csr_field(&expected_stderr, "qs_ahead="),
+            0,
+            "threads {threads}"
+        );
     }
 }

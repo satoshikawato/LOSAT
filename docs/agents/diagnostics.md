@@ -4252,23 +4252,21 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
-- `LOSAT_X_DCQSAHEAD=1` (BLASTN `-task dc-megablast` and megablast given template options, wherever
-  `LOSAT_X_DCCSR` builds a table as CSR, at any thread count; in the strict set from the pull request that
-  added it, 2026-11-23: `LOSAT_X_DCQSAHEAD=0` turns it off) brings in the line of `qs` that each word of the
-  place pass will be written to before the pass writes it (`blastn/x_dc_csr.rs`, argument in its header).
-  The place pass reads `offsets[cell]`, decrements it and writes the word's query offset to `qs` there; `qs`
-  has one element per word (tens of MiB for a large query set), so each store waited for a line nothing had
-  brought in. On the pool (`x_disc_lookup_par::csr_on_pool_steps`) the owner reads the `offsets` element of
-  the entry 8 places ahead (brought in 8 entries before that) and brings in the `qs` line it points to; the
-  serial build (one thread) now places its words through a FIFO of 16 words as its count pass does: each
-  word's `offsets` element is brought in when it enters, its `qs` line 8 words later, and it is placed when it
-  leaves. The words are placed in the same order at the same places; the value read ahead only chooses which
-  line is brought in (x86_64 `prefetcht0`; elsewhere the FIFO only delays the words). `[TIMING]
-  disc_lookup_csr: ... qs_ahead=` counts the builds that took it. The unit tests
-  `the_runs_are_the_chains_with_the_fills_presence_vector_and_counters` (serial) and `csr_on_a_pool_lists_the_chains`
-  (2, 3 and 5 threads, chunks of 1 to 524,288 positions) build each table both ways and compare every cell's run
-  with its chain, the presence vector, the counters and the longest chain, and `LOSAT/tests/blastn_dc_qs_ahead.rs`
-  compares the reports with `=0`'s at 1 and 4 threads.
+- `LOSAT_X_DCQSAHEAD=1` (BLASTN `-task dc-megablast` and megablast given template options, where `LOSAT_X_DCSEEDLEAN`
+  builds a table laid out as CSR (`LOSAT_X_DCCSR`) on a pool of two threads or more; in the strict set from the pull
+  request that added it, 2026-11-23: `LOSAT_X_DCQSAHEAD=0` turns it off) brings in the line of `qs` that each entry
+  of the build's place pass will be written to before the pass writes it (`blastn/x_dc_csr.rs`, argument in its
+  header). The place pass reads `offsets[cell]`, decrements it and writes the word's query offset to `qs` there; `qs`
+  has one element per word (tens of MiB for a large query set), and the pass brought in the `offsets` element of the
+  entry 16 places ahead but not the `qs` line. Now the owner (`x_disc_lookup_par::csr_on_pool_steps`) also reads the
+  `offsets` element of the entry 8 places ahead and brings in the `qs` line it points to. The entries are placed in
+  the same order at the same places; the value read ahead only chooses which line is brought in (x86_64
+  `prefetcht0`; elsewhere nothing is brought in). Its sides are DCSEEDLEAN's pooled build's: the serial build (one
+  thread) and `csr_on_pool` (`LOSAT_X_DCSEEDLEAN=0`) place as before. `[TIMING] disc_lookup_csr: ... qs_ahead=`
+  counts the builds that took it. The unit tests `csr_on_a_pool_lists_the_chains` (2, 3 and 5 threads, chunks of 1 to
+  524,288 positions) and `csr_on_a_pool_at_every_short_length` (0 to 40 words, one letter repeated or random) build
+  each table both ways and compare every cell's run with its chain, the presence vector, the counters and the longest
+  chain, and `LOSAT/tests/blastn_dc_qs_ahead.rs` compares the reports with `=0`'s at 1 and 4 threads.
   Evidence: EVIDENCE-TODO.
 - `LOSAT_X_DCSEEDLEAN=1` (BLASTN `-task dc-megablast`, and megablast given template options, at two threads or more;
   in the strict set from the pull request that added it, 2026-10-28: `LOSAT_X_DCSEEDLEAN=0` turns it off) changes

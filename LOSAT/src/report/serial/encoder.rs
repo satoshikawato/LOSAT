@@ -268,6 +268,11 @@ pub trait Encoder {
     /// with `eFNP_Allow` (no byte is replaced or reported; in ASN.1 text a zero byte is left out, a
     /// `"` doubled and the line wrapped as a VisibleString's).
     fn utf8_str(&mut self, value: &[u8]);
+    /// `utf8_str` with `visible_str_replacing`'s replacement where the stream checks a
+    /// UTF8String's bytes (NCBI's XML stream); the default is `utf8_str`.
+    fn utf8_str_replacing(&mut self, value: &[u8]) {
+        self.utf8_str(value);
+    }
     /// `WriteClassMember` of an `id` and a `CDelayBuffer`, for a member that NCBI's reader kept in
     /// a delay buffer (`Auth-list.names`, `asn_types::DELAYED`): in ASN.1 text the bytes read,
     /// copied as they are (`COStreamBuffer::Write` from a `CByteSourceReader`, which leaves the line
@@ -735,7 +740,7 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
         self.call(Piece::Bool, |inner| inner.null());
     }
     fn utf8_str(&mut self, value: &[u8]) {
-        self.string(value, |inner| inner.utf8_str(value));
+        self.string(value, |inner| inner.utf8_str_replacing(value));
     }
     fn delayed(&mut self, text: &[u8]) {
         self.call(Piece::Raw, |inner| inner.delayed(text));

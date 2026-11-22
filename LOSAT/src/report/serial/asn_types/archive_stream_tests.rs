@@ -156,7 +156,8 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
 /// Every archive of the fixtures read as text, each object written by `write` (one encoding's
 /// writer: `Some` of what it could not write) and the whole read back by the stream `stream` makes
 /// of those bytes, written back as text: its bytes. The archives that the writer does not write
-/// (a UTF8String, a delayed member: `SerialError::Unwritten`) are counted, not compared.
+/// (the binary writer's UTF8String, a delayed member: `SerialError::Unwritten`) are counted, not
+/// compared.
 fn every_archive_reads_back(
     write: impl Fn(&Value, &mut Vec<u8>) -> Option<String>,
     stream: impl Fn(&[u8]) -> ObjectStream<&[u8]>,
@@ -196,10 +197,10 @@ fn every_archive_reads_back(
         failures.len(),
         &failures[..failures.len().min(10)]
     );
-    // The writers do not write a UTF8String (the binary writer's tag depends on NCBI's
-    // parameter `SERIAL_WRITE_UTF8STRING_TAG`; the XML documents LOSAT writes hold none): the
-    // archives that hold one are left out here, and NCBI's own binary and XML archives of them
-    // are read below (`ncbis_binary_archives_read_as_their_text`, `..._xml_...`).
+    // The binary writer does not write a UTF8String (its tag depends on NCBI's parameter
+    // `SERIAL_WRITE_UTF8STRING_TAG`): the archives that hold one are left out of its round trip,
+    // and NCBI's own binary and XML archives of them are read below
+    // (`ncbis_binary_archives_read_as_their_text`, `..._xml_...`).
     assert!(
         files >= 100,
         "{files} archives read back, {} not written: {:#?}",

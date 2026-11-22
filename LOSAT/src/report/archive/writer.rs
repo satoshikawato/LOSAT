@@ -96,8 +96,15 @@ impl RequestInputs<'_> {
             RequestQueries::Bioseqs(queries) => (queries, true),
             RequestQueries::Pssm(pssm) => (
                 &[][..],
-                encoding != ArchiveEncoding::Text
-                    || crate::report::serial::pssm::asn_text_with_karlin(pssm, None).is_ok(),
+                match encoding {
+                    ArchiveEncoding::Text => {
+                        crate::report::serial::pssm::asn_text_with_karlin(pssm, None).is_ok()
+                    }
+                    // A UTF8String's control byte (NCBI's text reader replaced those of the
+                    // VisibleStrings), which NCBI's XML stream replaces and posts.
+                    ArchiveEncoding::Xml => super::pssm_written_as_is(encoding, pssm),
+                    ArchiveEncoding::Binary | ArchiveEncoding::Nothing => true,
+                },
             ),
         };
         pssm_as_is

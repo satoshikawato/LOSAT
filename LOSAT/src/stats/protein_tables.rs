@@ -18,12 +18,7 @@ pub struct ProteinMatrixTable {
     pub prefs: &'static [i32],
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:290-301
-/// ```c
-/// static array_of_8 blosum80_values[BLOSUM80_VALUES_MAX] = {
-/// {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.3430, 0.177, 0.6568, 0.5222, -1.6, 0.564057, 1.918130, 1.918130},
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:290-301
 const BLOSUM80_VALUES: [ProteinTableRow; 10] = [
     ProteinTableRow([
         32767.0, 32767.0, 32767.0, 0.3430, 0.177, 0.6568, 0.5222, -1.6, 0.564057, 1.918130,
@@ -58,20 +53,10 @@ const BLOSUM80_VALUES: [ProteinTableRow; 10] = [
     ]),
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:303-314
-/// ```c
-/// static Int4 blosum80_prefs[BLOSUM80_VALUES_MAX] = {
-/// BLAST_MATRIX_NOMINAL,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:303-314
 const BLOSUM80_PREFS: [i32; 10] = [0, 0, 0, 0, 0, 0, 0, 0, 2, 0];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:258-271
-/// ```c
-/// static array_of_8 blosum62_values[BLOSUM62_VALUES_MAX] = {
-/// {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.3176, 0.134, 0.4012, 0.7916, -3.2, 0.623757, 4.964660, 4.964660},
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:258-271
 const BLOSUM62_VALUES: [ProteinTableRow; 12] = [
     ProteinTableRow([
         32767.0, 32767.0, 32767.0, 0.3176, 0.134, 0.4012, 0.7916, -3.2, 0.623757, 4.964660,
@@ -112,20 +97,10 @@ const BLOSUM62_VALUES: [ProteinTableRow; 12] = [
     ]),
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:273-286
-/// ```c
-/// static Int4 blosum62_prefs[BLOSUM62_VALUES_MAX] = {
-/// BLAST_MATRIX_NOMINAL,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:273-286
 const BLOSUM62_PREFS: [i32; 12] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:219-236
-/// ```c
-/// static array_of_8 blosum50_values[BLOSUM50_VALUES_MAX] = {
-/// {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.2318, 0.112, 0.3362, 0.6895, -4.0, 0.609639, 5.388310, 5.388310},
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:219-236
 const BLOSUM50_VALUES: [ProteinTableRow; 16] = [
     ProteinTableRow([
         32767.0, 32767.0, 32767.0, 0.2318, 0.112, 0.3362, 0.6895, -4.0, 0.609639, 5.388310,
@@ -178,20 +153,10 @@ const BLOSUM50_VALUES: [ProteinTableRow; 16] = [
     ]),
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:238-255
-/// ```c
-/// static Int4 blosum50_prefs[BLOSUM50_VALUES_MAX] = {
-/// BLAST_MATRIX_NOMINAL,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:238-255
 const BLOSUM50_PREFS: [i32; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:183-198
-/// ```c
-/// static array_of_8 blosum45_values[BLOSUM45_VALUES_MAX] = {
-/// {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.2291, 0.0924, 0.2514, 0.9113, -5.7, 0.641318, 9.611060, 9.611060},
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:183-198
 const BLOSUM45_VALUES: [ProteinTableRow; 14] = [
     ProteinTableRow([
         32767.0, 32767.0, 32767.0, 0.2291, 0.0924, 0.2514, 0.9113, -5.7, 0.641318, 9.611060,
@@ -238,20 +203,10 @@ const BLOSUM45_VALUES: [ProteinTableRow; 14] = [
     ]),
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:200-215
-/// ```c
-/// static Int4 blosum45_prefs[BLOSUM45_VALUES_MAX] = {
-/// BLAST_MATRIX_NOMINAL,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:200-215
 const BLOSUM45_PREFS: [i32; 14] = [0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:340-357
-/// ```c
-/// static array_of_8 pam250_values[PAM250_VALUES_MAX] = {
-/// {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.2252, 0.0868, 0.2223, 0.98, -5.0, 0.660059, 11.754300, 11.754300},
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:340-357
 const PAM250_VALUES: [ProteinTableRow; 16] = [
     ProteinTableRow([
         32767.0, 32767.0, 32767.0, 0.2252, 0.0868, 0.2223, 0.98, -5.0, 0.660059, 11.754300,
@@ -304,20 +259,10 @@ const PAM250_VALUES: [ProteinTableRow; 16] = [
     ]),
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:359-376
-/// ```c
-/// static Int4 pam250_prefs[PAM250_VALUES_MAX] = {
-/// BLAST_MATRIX_NOMINAL,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:359-376
 const PAM250_PREFS: [i32; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:317-326
-/// ```c
-/// static array_of_8 blosum90_values[BLOSUM90_VALUES_MAX] = {
-/// {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.3346, 0.190, 0.7547, 0.4434, -1.4 , 0.544178, 1.377760, 1.377760},
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:317-326
 const BLOSUM90_VALUES: [ProteinTableRow; 8] = [
     ProteinTableRow([
         32767.0, 32767.0, 32767.0, 0.3346, 0.190, 0.7547, 0.4434, -1.4, 0.544178, 1.377760,
@@ -346,20 +291,10 @@ const BLOSUM90_VALUES: [ProteinTableRow; 8] = [
     ]),
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:328-337
-/// ```c
-/// static Int4 blosum90_prefs[BLOSUM90_VALUES_MAX] = {
-/// BLAST_MATRIX_NOMINAL,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:328-337
 const BLOSUM90_PREFS: [i32; 8] = [0, 0, 0, 0, 0, 0, 2, 0];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:379-391
-/// ```c
-/// static array_of_8 pam30_values[PAM30_VALUES_MAX] = {
-/// {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.3400, 0.283, 1.754, 0.1938, -0.3, 0.436164, 0.161818, 0.161818},
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:379-391
 const PAM30_VALUES: [ProteinTableRow; 11] = [
     ProteinTableRow([
         32767.0, 32767.0, 32767.0, 0.3400, 0.283, 1.754, 0.1938, -0.3, 0.436164, 0.161818, 0.161818,
@@ -396,20 +331,10 @@ const PAM30_VALUES: [ProteinTableRow; 11] = [
     ]),
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:393-405
-/// ```c
-/// static Int4 pam30_prefs[PAM30_VALUES_MAX] = {
-/// BLAST_MATRIX_NOMINAL,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:393-405
 const PAM30_PREFS: [i32; 11] = [0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:409-419
-/// ```c
-/// static array_of_8 pam70_values[PAM70_VALUES_MAX] = {
-/// {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.3345, 0.229, 1.029, 0.3250,   -0.7, 0.511296, 0.633439, 0.633439},
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:409-419
 const PAM70_VALUES: [ProteinTableRow; 9] = [
     ProteinTableRow([
         32767.0, 32767.0, 32767.0, 0.3345, 0.229, 1.029, 0.3250, -0.7, 0.511296, 0.633439, 0.633439,
@@ -440,20 +365,10 @@ const PAM70_VALUES: [ProteinTableRow; 9] = [
     ]),
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:421-431
-/// ```c
-/// static Int4 pam70_prefs[PAM70_VALUES_MAX] = {
-/// BLAST_MATRIX_NOMINAL,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:421-431
 const PAM70_PREFS: [i32; 9] = [0, 0, 0, 0, 0, 2, 0, 0, 0];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:578-581
-/// ```c
-/// static array_of_8 prot_idenity_values[PROT_IDENTITY_VALUES_MAX] = {
-/// {(double) INT2_MAX, (double) INT2_MAX, (double) INT2_MAX, 0.28768, 0.282, 1.69, 0.1703, -0.3, 0.43828, 0.16804, 0.16804},
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:578-581
 const IDENTITY_VALUES: [ProteinTableRow; 2] = [
     ProteinTableRow([
         32767.0, 32767.0, 32767.0, 0.28768, 0.282, 1.69, 0.1703, -0.3, 0.43828, 0.16804, 0.16804,
@@ -463,27 +378,10 @@ const IDENTITY_VALUES: [ProteinTableRow; 2] = [
     ]),
 ];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:583-586
-/// ```c
-/// static Int4 prot_identity_prefs[PROT_IDENTITY_VALUES_MAX] = {
-/// BLAST_MATRIX_NOMINAL,
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:583-586
 const IDENTITY_PREFS: [i32; 2] = [0, 2];
 
-/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2952-2995
-/// ```c
-/// BlastLoadMatrixValues (Boolean standard_only)
-///
-/// {
-///    MatrixInfo* matrix_info;
-///    ListNode* retval=NULL;
-///
-///    matrix_info = MatrixInfoNew("BLOSUM80", blosum80_values, blosum80_prefs, BLOSUM80_VALUES_MAX);
-///    ListNodeAddPointer(&retval, 0, matrix_info);
-///
-/// ...
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2952-2995
 /// The last table (IDENTITY) is left out when `standard_only` is set.
 pub static PROTEIN_MATRIX_TABLES: [ProteinMatrixTable; 9] = [
     ProteinMatrixTable {

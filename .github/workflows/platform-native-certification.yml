@@ -341,8 +341,8 @@ jobs:
           if [[ -f "$CHECKPOINT_DIR/identity.json" ]]; then
             resume_args=(--resume-dir "$CHECKPOINT_DIR")
           fi
-          # NCBI reference:
-          # ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+          # NCBI reference (598d8ae6):
+          # c++/src/algo/blast/format/blast_format.cpp:770-832
           # Existing program authorities build and classify the raw outputs;
           # the platform driver only invokes them and checks the SHA-256 values of
           # the Gate A manifest (platform_native_v011_canonical.tsv; for a case
@@ -459,9 +459,9 @@ jobs:
       - name: Require all four authority-bound 61-execution certificates
         run: |
           mkdir -p "$AGGREGATE_OUTPUT"
-          # NCBI references:
-          # ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
-          # ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+          # NCBI references (598d8ae6):
+          # c++/src/algo/blast/format/blast_format.cpp:770-832
+          # c++/src/objtools/align_format/tabular.cpp:1098-1108
           # Matrix cells bind exact raw NCBI formatter bytes before this hosted
           # job checks cross-platform evidence identity and integrity.
           python LOSAT/tests/certify_platform_native_v010.py aggregate \

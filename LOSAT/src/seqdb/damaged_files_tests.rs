@@ -521,3 +521,85 @@ fn damaged_column_files_of_masks_never_panic() {
         &["mask_prot_v4.paa", "mask_prot_v4.pac"],
     );
 }
+
+/// A version 4 protein index file: the title `in.fa`, no date, 7 sequences of 1,234 letters in
+/// all, and the longest of 9.
+fn index_bytes() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend(4u32.to_be_bytes());
+    bytes.extend(1u32.to_be_bytes());
+    bytes.extend(5u32.to_be_bytes());
+    bytes.extend(b"in.fa");
+    bytes.extend(0u32.to_be_bytes());
+    bytes.extend(7u32.to_be_bytes());
+    bytes.extend(1234u64.to_le_bytes());
+    bytes.extend(9u32.to_be_bytes());
+    bytes
+}
+
+/// The header of an index file as NCBI's constructor of `CSeqDBIdxFile` reads it through the
+/// mapping (`IndexFile::read_mapped_header`): a file that ends early reads as zeros up to the end
+/// of its last page, a file of no bytes is mapped as a null pointer (NCBI crashes), and a read past the page leaves
+/// the mapping (what NCBI reads there depends on its memory).
+#[test]
+fn a_mapped_index_header_reads_zeros_to_the_end_of_the_page() {
+    use super::index::IndexFile;
+    let dir = TempDir::new("mappedheader");
+    let read = |bytes: &[u8]| {
+        let path = dir.0.join("db.pin");
+        std::fs::write(&path, bytes).unwrap();
+        IndexFile::read_mapped_header(&super::file::DbFile::open(&path).unwrap(), SeqType::Protein)
+    };
+    let whole = index_bytes();
+    let header = read(&whole).unwrap();
+    assert_eq!(
+        (
+            header.title.as_slice(),
+            header.date.as_slice(),
+            header.num_oids,
+            header.volume_length,
+            header.lmdb_file
+        ),
+        (b"in.fa".as_slice(), b"".as_slice(), 7, 1234, None)
+    );
+    // Cut inside the title's length: the title is empty and every count after it is 0.
+    let header = read(&whole[..10]).unwrap();
+    assert_eq!(
+        (header.title.len(), header.num_oids, header.volume_length),
+        (0, 0, 0)
+    );
+    // Cut before the last byte of the count of sequences: the missing byte is 0, so is the count.
+    let header = read(&whole[..24]).unwrap();
+    assert_eq!(
+        (
+            header.title.as_slice(),
+            header.num_oids,
+            header.volume_length
+        ),
+        (b"in.fa".as_slice(), 0, 0)
+    );
+    // Cut after the count: the length is 0.
+    let header = read(&whole[..25]).unwrap();
+    assert_eq!((header.num_oids, header.volume_length), (7, 0));
+    // A file that is no version of the format.
+    for cut in [1, 2, 3] {
+        assert!(matches!(
+            read(&whole[..cut]),
+            Err(SeqDbError::Format { message, .. })
+                if message == "Error: Not a valid version 4 or 5 database."
+        ));
+    }
+    // Of the wrong type: 7 bytes hold the version and 3 of the 4 bytes of the type (a protein
+    // index file is type 1: its last byte is the one that is missing).
+    assert!(matches!(
+        read(&whole[..7]),
+        Err(SeqDbError::Format { message, .. })
+            if message == "Error: requested sequence type does not match DB."
+    ));
+    // No bytes: no mapping, NCBI maps a null pointer and crashes. A title that is longer than
+    // the page leaves the mapping: what NCBI reads there depends on its memory.
+    assert!(matches!(read(&[]), Err(SeqDbError::NcbiCrashes { .. })));
+    let mut long = whole.clone();
+    long[8..12].copy_from_slice(&5000u32.to_be_bytes());
+    assert!(matches!(read(&long), Err(SeqDbError::Unsupported { .. })));
+}

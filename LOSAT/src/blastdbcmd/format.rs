@@ -37,33 +37,6 @@ pub(super) struct FormatSpec {
 
 impl FormatSpec {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:59-91
-    // ```c++
-    //     // Record where the offsets where the replacements must occur
-    // 	string sp = kEmptyStr;
-    //     for (SIZE_TYPE i = 0; i < m_FmtSpec.size(); i++) {
-    //         if (m_FmtSpec[i] == '%') {
-    //         	if ( m_FmtSpec[i+1] == '%') {
-    //         	    // remove the escape character for '%'
-    //         		i++;
-    //         		sp += m_FmtSpec[i];
-    //         	    continue;
-    //         	}
-    //         	i++;
-    //             m_ReplTypes.push_back(m_FmtSpec[i]);
-    //             m_Seperators.push_back(sp);
-    //             sp = kEmptyStr;
-    //         }
-    //         else {
-    //         	sp += m_FmtSpec[i];
-    //         }
-    //     }
-    //     m_Seperators.push_back(sp);
-    //
-    //     if (m_ReplTypes.empty() || (m_ReplTypes.size() + 1 != m_Seperators.size())) {
-    //         NCBI_THROW(CInvalidDataException, eInvalidInput,
-    //                    "Invalid format specification");
-    //     }
-    // ```
     /// Reads the format `spec` (the `-outfmt` value after blastdbcmd's handling of `%f`,
     /// `%b`, `%d` and `%m`, whose algorithms are `mask_algos`); `Err` is the message of NCBI's
     /// exception. A `%` that ends the text reads the string's terminating NUL as its
@@ -122,47 +95,6 @@ impl FormatSpec {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:315-358
-    // ```c++
-    // int CBlastDB_SeqFormatter::Write(CSeqDB::TOID oid, const CBlastDB_FormatterConfig & config, string target_id)
-    // {
-    // 	int status = -1;
-    //     vector<string> other_fields(e_max_other_fields, kEmptyStr);
-    //     string mask = kEmptyStr;
-    //     if (m_OtherFields) {
-    //     	if (m_OtherFields & (1 << e_seq)) {
-    //     		x_GetSeq(oid, config, other_fields[e_seq]);
-    //     	}
-    //     	if (m_OtherFields & (1 << e_hash)) {
-    //     		other_fields[e_hash] = x_GetSeqHash(oid);
-    //     	}
-    //     	...
-    //     }
-    //     if (m_GetDefline) {
-    //     	CRef<CBlast_def_line_set> df_set = m_BlastDb.GetHdr(oid);
-    //     	if(df_set.Empty()) {
-    //     		return status;
-    //     	}
-    //     	if (target_id == kEmptyStr) {
-    //     		...
-    //     		ITERATE(CBlast_def_line_set::Tdata, itr, df_set->Get()) {
-    //     			vector<string> defline_data(CBlastDeflineUtil::max_index, kEmptyStr);
-    //     			CBlastDeflineUtil::ExtractDataFromBlastDefline(**itr, defline_data, m_DeflineFields, false);
-    //     			x_Print(oid, defline_data, other_fields);
-    //     		}
-    //     	}
-    //     	else {
-    //    			vector<string> defline_data(CBlastDeflineUtil::max_index, kEmptyStr);
-    //     		CBlastDeflineUtil::ExtractDataFromBlastDeflineSet(*df_set, defline_data, m_DeflineFields, target_id, false);
-    //    			x_Print(oid, defline_data, other_fields);
-    //     	}
-    //     }
-    //     else {
-    // 		vector<string> defline_data(CBlastDeflineUtil::max_index, kEmptyStr);
-    // 		x_Print(oid, defline_data, other_fields);
-    //     }
-    //     return 0;
-    // }
-    // ```
     /// Writes the lines of sequence `oid` to `out`: one per definition line (the one of
     /// `target` alone with `-target_only`), or one line when no specifier reads them. The
     /// line NCBI has written up to an unknown specifier is written before its error. The texts
@@ -207,10 +139,9 @@ impl FormatSpec {
         if !self.get_defline {
             return print(None, &mut line);
         }
+        // `GetHdr` gives a set, empty where the alias files' `OID_MASK_TYPE` erased every line
+        // (line RG D1b-2): nothing is written for it, and a target is not found in it.
         let set = source.deflines(oid)?;
-        if set.deflines.is_empty() {
-            return Ok(());
-        }
         match target {
             None => {
                 for defline in &set.deflines {
@@ -226,15 +157,6 @@ impl FormatSpec {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:187-201
-    // ```c++
-    //         case 'o':
-    //             m_Out << NStr::NumericToString(oid);
-    //             break;
-    //         ...
-    //         case 'l':
-    //             m_Out << NStr::NumericToString(m_BlastDb.GetSeqLength(oid));
-    //             break;
-    // ```
     // `Write(-1, config)` (`-ipg` of a PIG no volume holds): the sequence, its hash and the
     // definition lines are read before the line (`x_GetSeq`, `x_GetSeqHash`, `GetHdr`), and
     // each read throws `OID not found`; without them the line is written up to `%l`, whose
@@ -276,28 +198,6 @@ impl FormatSpec {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:165-262
-    // ```c++
-    // void CBlastDB_SeqFormatter::x_Print(CSeqDB::TOID oid, vector<string> & defline_data, vector<string> & other_fields)
-    // {
-    //     for(unsigned int i =0; i < m_ReplTypes.size(); i++) {
-    //     	m_Out << m_Seperators[i];
-    //         switch (m_ReplTypes[i]) {
-    //
-    //         case 's':
-    //             m_Out << other_fields[e_seq];
-    //             break;
-    //         ...
-    //         default:
-    //             CNcbiOstrstream os;
-    //             os << "Unrecognized format specification: '%" << m_ReplTypes[i] << "'";
-    //             NCBI_THROW(CInvalidDataException, eInvalidInput,
-    //                        CNcbiOstrstreamToString(os));
-    //         }
-    //     }
-    //     m_Out << m_Seperators.back();
-    //     m_Out << endl;
-    // }
-    // ```
     /// One line into `line`, the texts of its taxonomy lookups into `texts`; `Err` after the
     /// part NCBI writes before an unknown specifier.
     fn x_print(
@@ -368,41 +268,7 @@ impl FormatSpec {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:282-313
-// ```c++
-// void CBlastDB_SeqFormatter::x_GetSeq(CSeqDB::TOID oid, const CBlastDB_FormatterConfig & config, string & seq)
-// {
-// 	TSeqRange r;
-// 	if(config.m_SeqRange.NotEmpty()) {
-// 		TSeqPos length = m_BlastDb.GetSeqLength(oid);
-// 	    r = config.m_SeqRange;
-// 	    if((TSeqPos)length <= config.m_SeqRange.GetTo()) {
-// 	    	r.SetTo(length-1);
-// 	    }
-// 	}
-// 	if(r.Empty()) {
-// 	   	m_BlastDb.GetSequenceAsString(oid, seq);
-// 	}
-// 	else {
-// 	   	m_BlastDb.GetSequenceAsString(oid, seq, r);
-// 	}
-// 	...
-// 	if(config.m_Strand == eNa_strand_minus) {
-// 		CBlastSeqUtil::GetReverseStrandSeq(seq);
-// 	}
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:1077-1088
-// ```c++
-// string CBlastSeqUtil::GetMasksString(const CSeqDB::TSequenceRanges & masks)
-// {
-// 	if (masks.empty()) {
-// 		return kNoMasksFound;
-// 	}
-// 	CNcbiOstrstream out;
-// 	ITERATE(CSeqDB::TSequenceRanges, range, masks) {
-// 		out << range->first << "-" << range->second << SEPARATOR;
-// 	}
-// ```
 /// The text of `%m`: the stored ranges of the sequence, or `none`.
 fn masks_string(masks: &[(u32, u32)]) -> String {
     if masks.is_empty() {
@@ -415,53 +281,7 @@ fn masks_string(masks: &[(u32, u32)]) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:282-313
-// ```c++
-// void CBlastDB_SeqFormatter::x_GetSeq(CSeqDB::TOID oid, const CBlastDB_FormatterConfig & config, string & seq)
-// {
-// 	...
-// 	if(config.m_FiltAlgoId >= 0) {
-// 	    CSeqDB::TSequenceRanges masks;
-// 	    s_GetSeqMask(m_BlastDb, oid, config.m_FiltAlgoId, masks);
-// 	    if(!masks.empty()) {
-// 	    	if(r.Empty()) {
-// 	    		CBlastSeqUtil::ApplySeqMask(seq, masks);
-// 	    	}
-// 	    	else {
-// 	    		CBlastSeqUtil::ApplySeqMask(seq, masks, r);
-// 	    	}
-// 	    }
-// 	}
-// 	if(config.m_Strand == eNa_strand_minus) {
-// 		CBlastSeqUtil::GetReverseStrandSeq(seq);
-// 	}
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:1048-1070
-// ```c++
-// void CBlastSeqUtil::ApplySeqMask(string & seq, const CSeqDB::TSequenceRanges & masks, const TSeqRange r)
-// {
-// 	if(r.Empty()) {
-// 		ITERATE(CSeqDB::TSequenceRanges, itr, masks) {
-// 			transform(&seq[itr->first], &seq[itr->second],
-// 			                      &seq[itr->first], (int (*)(int))::tolower);
-// 		}
-// 	}
-// 	else {
-// 		const TSeqPos r_from = r.GetFrom();
-// 		ITERATE(CSeqDB::TSequenceRanges, itr, masks) {
-// 			TSeqRange mask (*itr);
-// 			if(mask.GetFrom() > r.GetTo()) {
-// 				break;
-// 			}
-// 			TSeqRange  tmp = r.IntersectionWith(mask);
-// 			if(!tmp.Empty()) {
-// 				transform(&seq[tmp.GetFrom() -r_from], &seq[tmp.GetToOpen() - r_from],
-// 		                  &seq[tmp.GetFrom() -r_from], (int (*)(int))::tolower);
-// 			}
-// 		}
-// 	}
-// }
-// ```
 // Without a range the stored offsets index the string as they are: a range past the end, or
 // one that ends before it starts, runs off the string (NCBI crashed, probes M786, M886, M896
 // of line BDC). LOSAT refuses those.
@@ -500,28 +320,6 @@ fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:800-819
-// ```c++
-// void CBlastDeflineUtil::ExtractDataFromBlastDeflineSet(const CBlast_def_line_set & dl_set,
-//         											   vector<string> & results,
-//         											   BlastDeflineFields fields,
-//         											   string target_id,
-//         											   bool use_long_id)
-// {
-// 	CSeq_id target_seq_id (target_id, CSeq_id::fParse_PartialOK | CSeq_id::fParse_Default);
-// 	Int8 num_id = NStr::StringToNumeric<Int8>(target_id, NStr::fConvErr_NoThrow);
-// 	bool can_be_gi = errno ? false: true;
-// 	ITERATE(CBlast_def_line_set::Tdata, itr, dl_set.Get()) {
-// 		 ITERATE(CBlast_def_line::TSeqid, id, (*itr)->GetSeqid()) {
-// 			 if ((*id)->Match(target_seq_id) || (can_be_gi && (*id)->IsGi() && ((*id)->GetGi() == GI_FROM(TIntId, num_id)))) {
-// 				 CBlastDeflineUtil::ExtractDataFromBlastDefline( **itr, results, fields, use_long_id);
-// 				 return;
-// 			 }
-// 		 }
-// 	}
-//
-// 	NCBI_THROW(CException, eInvalid, "Failed to find target id " + target_id);
-// }
-// ```
 /// The definition line of `-target_only` for the `%` formats: the first whose Seq-id
 /// matches the target (`CSeq_id::Match`) or whose GI is the target's number.
 fn extract_target_defline<'a>(set: &'a DeflineSet, target: &str) -> Result<&'a BlastDefline, Stop> {
@@ -561,15 +359,6 @@ struct DeflineFields {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:821-827
-// ```c++
-// static string s_CheckName(const string & name)
-// {
-//         if(name == "-") return NOT_AVAILABLE;
-//         if(name == "unclassified") return NOT_AVAILABLE;
-//
-//         return name;
-// }
-// ```
 fn check_name(name: &[u8]) -> Vec<u8> {
     if name == b"-" || name == b"unclassified" {
         NOT_AVAILABLE.as_bytes().to_vec()
@@ -580,135 +369,7 @@ fn check_name(name: &[u8]) -> Vec<u8> {
 
 impl DeflineFields {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:829-957
-    // ```c++
-    // 	if (fields.gi == 1) {
-    //          results[CBlastDeflineUtil::gi] = NOT_AVAILABLE;
-    // 		 ITERATE(CBlast_def_line::TSeqid, id, dl.GetSeqid()) {
-    // 			 if ((*id)->IsGi()) {
-    // 				 TGi gi = (*id)->GetGi();
-    // 				 results[CBlastDeflineUtil::gi] = NStr::NumericToString(gi);
-    // 				 break;
-    // 			 }
-    // 	     }
-    // 	}
-    // 	if ((fields.accession == 1) || (fields.seq_id == 1)) {
-    // 		 CRef<CSeq_id> theId = FindBestChoice(dl.GetSeqid(), CSeq_id::WorstRank);
-    // 		 if(fields.seq_id == 1) {
-    //         	 results[CBlastDeflineUtil::seq_id] = theId->AsFastaString();
-    // 		 }
-    // 		 if(fields.accession == 1) {
-    // 			 results[CBlastDeflineUtil::accession] = GetBareId(*theId);
-    // 		 }
-    // 	}
-    // 	if(fields.title == 1) {
-    // 		if(dl.IsSetTitle()) {
-    //         	 results[CBlastDeflineUtil::title] = dl.GetTitle();
-    // 		}
-    // 		else {
-    //         	 results[CBlastDeflineUtil::title] = NOT_AVAILABLE;
-    // 		}
-    // 	}
-    // 	if ((fields.tax_id == 1) || (fields.tax_names == 1)) {
-    //         TTaxId tax_id = ZERO_TAX_ID;
-    // 		if (dl.IsSetTaxid()) {
-    // 			tax_id = dl.GetTaxid();
-    // 		}
-    //
-    // 		if (fields.tax_id == 1) {
-    // 			results[CBlastDeflineUtil::tax_id] = NStr::NumericToString(tax_id);
-    // 		}
-    //
-    // 		if (fields.tax_names == 1) {
-    // 			try {
-    // 				SSeqDBTaxInfo taxinfo;
-    // 			    CSeqDB::GetTaxInfo(tax_id, taxinfo);
-    // 			    results[CBlastDeflineUtil::scientific_name] = taxinfo.scientific_name;
-    // 			    results[CBlastDeflineUtil::common_name] = taxinfo.common_name;
-    // 			    results[CBlastDeflineUtil::blast_name] = s_CheckName(taxinfo.blast_name);
-    // 			    results[CBlastDeflineUtil::super_kingdom] = s_CheckName(taxinfo.s_kingdom);
-    // 	        } catch (const CException&) {
-    // 			    results[CBlastDeflineUtil::scientific_name] = NOT_AVAILABLE;
-    // 			    results[CBlastDeflineUtil::common_name] = NOT_AVAILABLE;
-    // 			    results[CBlastDeflineUtil::blast_name] = NOT_AVAILABLE;
-    // 			    results[CBlastDeflineUtil::super_kingdom] = NOT_AVAILABLE;
-    // 			}
-    // 		}
-    // 	}
-    //
-    // 	if ((fields.leaf_node_tax_ids == 1) || (fields.leaf_node_tax_names == 1)) {
-    // 		set<TTaxId>  tax_id_set = dl.GetLeafTaxIds();
-    // 		if (tax_id_set.empty()) {
-    // 			if (dl.IsSetTaxid()) {
-    // 				tax_id_set.insert(dl.GetTaxid());
-    // 			}
-    // 			else {
-    // 				tax_id_set.insert(ZERO_TAX_ID);
-    // 			}
-    // 		}
-    //
-    // 		string separator = kEmptyStr;
-    // 		ITERATE(set<TTaxId>, itr, tax_id_set) {
-    // 			if (fields.leaf_node_tax_names == 1) {
-    // 				try {
-    // 					SSeqDBTaxInfo taxinfo;
-    // 					CSeqDB::GetTaxInfo(*itr, taxinfo);
-    // 					results[CBlastDeflineUtil::leaf_node_scientific_names] += separator + taxinfo.scientific_name;
-    // 					results[CBlastDeflineUtil::leaf_node_common_names] += separator + taxinfo.common_name;
-    // 				} catch (const CException&) {
-    // 				    results[CBlastDeflineUtil::leaf_node_scientific_names] += separator + NOT_AVAILABLE;
-    // 				    results[CBlastDeflineUtil::leaf_node_common_names] += separator + NOT_AVAILABLE;
-    // 				}
-    // 			}
-    // 		    results[CBlastDeflineUtil::leaf_node_tax_ids] += separator + NStr::NumericToString(*itr);
-    // 			separator = SEPARATOR;
-    // 		}
-    // 	}
-    //
-    // 	if (fields.membership == 1) {
-    // 		int membership = 0;
-    // 		if(dl.IsSetMemberships()) {
-    // 			 ITERATE(CBlast_def_line::TMemberships, memb_int, dl.GetMemberships()) {
-    // 				 membership += *memb_int;
-    // 			 }
-    // 		}
-    // 		results[CBlastDeflineUtil::membership] = NStr::NumericToString(membership);
-    // 	}
-    //
-    // 	if (fields.pig == 1) {
-    // 		int pig = -1;
-    //         if (dl.IsSetOther_info()) {
-    //         	ITERATE(CBlast_def_line::TOther_info, itr, dl.GetOther_info()) {
-    //         		if (*itr != -1) {
-    //         			pig = *itr;
-    //         			break;
-    // 		        }
-    // 		    }
-    // 		}
-    //         results[CBlastDeflineUtil::pig] = NStr::NumericToString(pig);
-    // 	}
-    // 	if(fields.links == 1) {
-    // 		if (dl.IsSetLinks()) {
-    // 			ITERATE(CBlast_def_line::TLinks, links_int, dl.GetLinks()) {
-    // 				results[CBlastDeflineUtil::links] += NStr::NumericToString(*links_int) + SEPARATOR;
-    // 			}
-    // 		}
-    // 		else {
-    // 			results[CBlastDeflineUtil::links] = NOT_AVAILABLE;
-    // 		}
-    // 	}
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objects/blastdb/Blast_def_line.cpp:143-153
-    // ```c++
-    // CBlast_def_line::TTaxIds CBlast_def_line::GetLeafTaxIds() const
-    // {
-    //     TTaxIds retval;
-    //     if (IsSetLinks()) {
-    //         ...
-    //         retval.insert(taxids.begin(), taxids.end());
-    //     }
-    //     return retval;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objects/blastdb/Blast_def_line.cpp:143-163
     /// The fields of `defline` that the specifiers `types` read, the texts of their taxonomy
     /// lookups appended to `texts`. The sum of the memberships is taken in 64 bits (NCBI's
     /// `int` would overflow: LOSAT does not reproduce that).
@@ -851,37 +512,5 @@ impl DeflineFields {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_spec_is_split_as_ncbi_s_loop_does() {
-        let spec = FormatSpec::parse("%a%%%l|%%", Vec::new()).unwrap();
-        assert_eq!(spec.types, b"al");
-        assert_eq!(
-            spec.separators,
-            [b"".to_vec(), b"%".to_vec(), b"|%".to_vec()]
-        );
-        assert!(spec.get_defline);
-        let spec = FormatSpec::parse("%o %l %h", Vec::new()).unwrap();
-        assert!(!spec.get_defline && spec.need_hash && !spec.need_seq);
-        // A `%` at the end reads the terminating NUL.
-        assert_eq!(FormatSpec::parse("a%", Vec::new()).unwrap().types, [0]);
-        assert_eq!(
-            FormatSpec::parse("%", Vec::new()).unwrap().separators.len(),
-            2
-        );
-        assert_eq!(
-            FormatSpec::parse("no spec", Vec::new()).unwrap_err(),
-            "Invalid format specification"
-        );
-        assert_eq!(
-            FormatSpec::parse("%%", Vec::new()).unwrap_err(),
-            "Invalid format specification"
-        );
-        assert_eq!(
-            FormatSpec::parse("", Vec::new()).unwrap_err(),
-            "Invalid format specification"
-        );
-    }
-}
+#[path = "format_tests.rs"]
+mod tests;

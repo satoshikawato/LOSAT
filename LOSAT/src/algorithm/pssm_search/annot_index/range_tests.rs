@@ -38,7 +38,7 @@ fn ranges_open_at_to_plus_one() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:126-206, 338-376 (quoted at
+// NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:126-206, 338-376 (cited at
 // `HandleRange::add` and `HandleRange::overlapping`)
 #[test]
 fn a_handle_range_becomes_circular() {
@@ -105,7 +105,7 @@ fn map_in(text: &str, mode: Mode, handles: &mut LiveHandles) -> HandleRangeMap {
     HandleRangeMap::of_location(V::new(named::SEQ_LOC, &value), mode, handles)
 }
 
-// NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205, 249-281 (quoted at
+// NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205, 249-281 (cited at
 // `HandleRangeMap::add_location` and `HandleRangeMap::add`)
 #[test]
 fn a_map_marks_the_ranges_between_seq_ids() {
@@ -470,7 +470,7 @@ fn seq_ids_are_one_handle_as_ncbi_trees_take_them() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207 (quoted at
+// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207 (cited at
 // `HandleRangeMap::ncbi_order`): `m_Packed - 1` as an unsigned number, then the info's address.
 #[test]
 fn a_map_iterates_its_seq_ids_by_packed_number() {
@@ -508,7 +508,7 @@ fn a_map_iterates_its_seq_ids_by_packed_number() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2964 (quoted at `Handle`):
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2926-2964 (cited at `Handle`):
 // the `om/` cases `s_i72`, `s_i73` and review 2's `id13`, `g1`-`g5` (NCBI BLAST+ 2.17.0).
 #[test]
 fn giim_handles_follow_ncbis_inverted_tree() {
@@ -644,4 +644,78 @@ fn giim_handles_follow_ncbis_inverted_tree() {
         &mut handles,
     );
     assert_eq!(m.map.len(), 2);
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388 (F-LH: rows `db.flh.ps.*`
+// and `db.flh.tbn.*`, NCBI's "duplicate Bioseq id" message of a PSSM query)
+#[test]
+fn an_accession_is_written_by_the_seq_id_that_made_the_info_of_its_packed_key() {
+    use crate::seqid::model::TextseqId;
+    let acc = |text: &str, version: Option<i32>| TextseqId {
+        accession: Some(text.as_bytes().to_vec()),
+        version,
+        name: None,
+        release: None,
+    };
+    let embl = |text: &str, version| ParsedSeqId::Embl(acc(text, version));
+    let genbank = |text: &str, version| ParsedSeqId::Genbank(acc(text, version));
+    let written = |query: &[ParsedSeqId], id: &ParsedSeqId| {
+        let mut handles = LiveHandles::new(query);
+        let handle = Handle::of_run(id, &mut handles);
+        handles.as_string(&handle, id)
+    };
+    // Another number of the prefix, digit count and version made the info: its alternative.
+    let first = [embl("AAA00002", Some(1))];
+    assert_eq!(
+        written(&first, &genbank("AAA00001", Some(1))),
+        "emb|AAA00001.1|"
+    );
+    // The accession's own case, the info's alternative; another prefix case shares the info.
+    let first = [embl("aaa00002", Some(1))];
+    assert_eq!(
+        written(&first, &genbank("AAA00001", Some(1))),
+        "emb|AAA00001.1|"
+    );
+    // Another version, digit count or prefix, or no version: an info of its own.
+    for other in [
+        embl("AAA00002", Some(2)),
+        embl("AAA000002", Some(1)),
+        embl("AAB00002", Some(1)),
+        embl("AAA00002", None),
+    ] {
+        assert_eq!(
+            written(&[other], &genbank("AAA00001", Some(1))),
+            "gb|AAA00001.1|"
+        );
+    }
+    // More than 6 digits: the leading zeros move into the prefix, so `AAA0000012` and `AAA0000111`
+    // share the prefix `AAA0` and the digit count; `AAA1000012` has 7 real digits (prefix `AAA`).
+    assert_eq!(
+        written(
+            &[embl("AAA0000012", Some(1))],
+            &genbank("AAA0000111", Some(1))
+        ),
+        "emb|AAA0000111.1|"
+    );
+    assert_eq!(
+        written(
+            &[embl("AAA1000012", Some(1))],
+            &genbank("AAA0000111", Some(1))
+        ),
+        "gb|AAA0000111.1|"
+    );
+    // Version 0 is a version: it shares the info with version 0 (written without a version), and
+    // is another info than no version, on either side.
+    assert_eq!(
+        written(&[embl("AAA00002", Some(0))], &genbank("AAA00001", Some(0))),
+        "emb|AAA00001|"
+    );
+    assert_eq!(
+        written(&[embl("AAA00002", None)], &genbank("AAA00001", Some(0))),
+        "gb|AAA00001|"
+    );
+    assert_eq!(
+        written(&[embl("AAA00002", Some(0))], &genbank("AAA00001", None)),
+        "gb|AAA00001|"
+    );
 }

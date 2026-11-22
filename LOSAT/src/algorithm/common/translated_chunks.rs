@@ -6,24 +6,40 @@
 
 use anyhow::{bail, Result};
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:246-264:
-// if (backup->offset + MAX_DBSEQ_LEN < hard_ranges[hm_index].right) {
-//     subject->length = MAX_DBSEQ_LEN;
-//     backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
-// } else { subject->length = hard_ranges[hm_index].right - backup->offset; }
-// NCBI c++/include/algo/blast/core/blast_gapalign.h:54:
-// #define MAX_DBSEQ_LEN 5000000
-// NCBI c++/include/algo/blast/core/blast_hits.h:192:
-// #define DBSEQ_CHUNK_OVERLAP 100
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264:
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54:
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:192:
 // This schedule covers the unmasked translated frame's single hard range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TranslatedChunk {
     pub offset: usize,
     pub length: usize,
+    /// The overlap that the merge after the chunk reads (`Blast_HSPListsMerge`'s
+    /// `chunk_overlap_size`): 0 where the chunk starts the hard range at `hm_index`, else
+    /// `DBSEQ_CHUNK_OVERLAP` ([`TranslatedChunk::new`] for a frame without hard ranges;
+    /// `core::subject_split::HardChunk::overlap` for one with `-db_hard_mask`).
+    pub overlap: usize,
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:246-264:
-// backup->offset = backup->next;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-584
+// After each chunk the merge takes no overlap when the chunk's offset is the left of the hard
+// range at `hm_index`, else the chunk overlap. A frame without hard ranges has one, the frame
+// itself: its first chunk starts it, and the later chunks of a long frame do not (the last one
+// reads the range after the frame's only one, which LOSAT takes as not that chunk's offset, as
+// `core::subject_split::HardChunk::overlap_past_list` does).
+impl TranslatedChunk {
+    /// A chunk `[offset, offset + length)` of a frame without hard ranges (no `-db_hard_mask`).
+    pub(crate) const fn new(offset: usize, length: usize) -> Self {
+        use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
+        TranslatedChunk {
+            offset,
+            length,
+            overlap: if offset == 0 { 0 } else { DBSEQ_CHUNK_OVERLAP },
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264:
 // while (backup->next < backup->full_range.right) { s_GetNextSubjectChunk(...); }
 pub(crate) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedChunk> {
     use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
@@ -31,42 +47,24 @@ pub(crate) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedC
     let mut offset = 0;
     while offset < frame_length {
         if offset + MAX_DBSEQ_LEN < frame_length {
-            chunks.push(TranslatedChunk {
-                offset,
-                length: MAX_DBSEQ_LEN,
-            });
+            chunks.push(TranslatedChunk::new(offset, MAX_DBSEQ_LEN));
             offset += MAX_DBSEQ_LEN - DBSEQ_CHUNK_OVERLAP;
         } else {
-            chunks.push(TranslatedChunk {
-                offset,
-                length: frame_length - offset,
-            });
+            chunks.push(TranslatedChunk::new(offset, frame_length - offset));
             break;
         }
     }
     chunks
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
-// BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
-//                          masked_ranges.size() + 1, true, eSoftSubjMasking);
-// NCBI c++/src/algo/blast/blastinput/blast_fasta_input.cpp:489-502:
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:489-502:
 // apply_mask_to_both_strands = true; PackedSeqLocToMaskedQueryRegions(...);
-// NCBI c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
-// if (assume_both_strands) do_pos = do_neg = true;
-// if (do_pos) mqr.push_back(...); if (do_neg) mqr.push_back(...);
-// NCBI c++/src/algo/blast/api/blast_setup_cxx.cpp:689-707,825-826:
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:689-707,825-826:
 // both mask copies enter masked_ranges before BlastSeqBlkSetSeqRanges.
-// NCBI c++/src/algo/blast/core/blast_util.c:211-215:
-// tmp[0].left = 0;
-// tmp[num_seq_ranges - 1].right = seq_blk->length;
-// NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831
-// if (context == 0) { seq_ranges[i].left = backup.seq_ranges[i].left / 3;
-//                     seq_ranges[i].right = backup.seq_ranges[i].right / 3; }
-// else if (context == 3) { /* reverse ranges using subject->length */ }
-// NCBI reference: c++/src/algo/blast/core/masksubj.inl:51-71
-// range[1] = subject->seq_ranges[range[0]].left + word_length - lut_word_length;
-// range[2] = subject->seq_ranges[range[0]].right - lut_word_length;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:211-215
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:51-59
 fn translated_scan_ranges(
     subject: &[u8],
     frame: i8,
@@ -86,38 +84,54 @@ fn translated_scan_ranges(
             while index < subject.len() && subject[index].is_ascii_lowercase() {
                 index += 1;
             }
-            // NCBI c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
-            // if (assume_both_strands) do_pos = do_neg = true;
-            // if (do_pos) mqr.push_back(...); if (do_neg) mqr.push_back(...);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
             for _ in 0..2 {
-                nucleotide_ranges.push((left, start));
+                nucleotide_ranges.push((left as i32, start as i32));
                 left = index - 1;
             }
         } else {
             index += 1;
         }
     }
-    nucleotide_ranges.push((left, subject.len()));
+    nucleotide_ranges.push((left as i32, subject.len() as i32));
+    translated_frame_ranges(&nucleotide_ranges, frame, negative_first_length)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:814-830 and :79
+// The nucleotide ranges of a translated subject (`seq_ranges`, the complement of its masks) are
+// mapped to protein ranges once per strand, by integer division by the codon length and with no
+// frame offset: at the first positive context for the three positive frames, and at the first
+// negative context for the three negative ones, in reverse order and reflected by the length of
+// frame -1, which frames -2 and -3 keep even where they are one residue shorter.
+/// The protein ranges of frame `frame` (+1..+3, -1..-3) of a subject whose nucleotide ranges are
+/// `nucleotide_ranges` (in the order NCBI holds them), where `negative_first_length` is the number
+/// of residues of frame -1: `[left / 3, right / 3)` each for a positive frame, and for a negative
+/// one `[n - right / 3, n - left / 3)` with `n = negative_first_length`, last range first.
+pub(crate) fn translated_frame_ranges(
+    nucleotide_ranges: &[(i32, i32)],
+    frame: i8,
+    negative_first_length: usize,
+) -> Vec<(i32, i32)> {
     if frame > 0 {
         nucleotide_ranges
-            .into_iter()
-            .map(|(left, right)| ((left / 3) as i32, (right / 3) as i32))
+            .iter()
+            .map(|&(left, right)| (left / 3, right / 3))
             .collect()
     } else {
         let length = negative_first_length as i32;
         nucleotide_ranges
-            .into_iter()
+            .iter()
             .rev()
-            .map(|(left, right)| (length - (right / 3) as i32, length - (left / 3) as i32))
+            .map(|&(left, right)| (length - right / 3, length - left / 3))
             .collect()
     }
 }
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:259-310:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:259-310:
 // unsplit subjects keep backup.soft_ranges; split soft-masked subjects
 // advance sm_index while right < chunk start, include ranges with left < end,
 // clamp only the first left and last right, and skip SUBJECT_SPLIT_NO_RANGE.
-// NCBI c++/src/algo/blast/core/blast_engine.c:261-274:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:261-274:
 // without soft masking, each chunk has one range [0, subject->length].
 pub(crate) fn translated_chunk_scan_ranges(
     subject: &[u8],
@@ -126,6 +140,13 @@ pub(crate) fn translated_chunk_scan_ranges(
     negative_first_length: usize,
     mask_lowercase: bool,
 ) -> Result<Vec<(TranslatedChunk, Vec<(i32, i32)>)>> {
+    let soft_masked = mask_lowercase && subject.iter().any(u8::is_ascii_lowercase);
+    if !soft_masked {
+        return unmasked_translated_chunks(frame_length)
+            .into_iter()
+            .map(|chunk| Ok((chunk, vec![(0, i32::try_from(chunk.length)?)])))
+            .collect();
+    }
     let frame_ranges = translated_scan_ranges(
         subject,
         frame,
@@ -133,16 +154,22 @@ pub(crate) fn translated_chunk_scan_ranges(
         negative_first_length,
         mask_lowercase,
     );
-    let soft_masked = mask_lowercase && subject.iter().any(u8::is_ascii_lowercase);
+    soft_chunk_scan_ranges(&frame_ranges, frame_length)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:259-310 (cited at
+// `translated_chunk_scan_ranges`)
+/// The chunks of a frame of `frame_length` residues whose soft ranges are `frame_ranges`, each with
+/// the soft ranges it scans (a chunk without one, NCBI's `SUBJECT_SPLIT_NO_RANGE`, is left out).
+fn soft_chunk_scan_ranges(
+    frame_ranges: &[(i32, i32)],
+    frame_length: usize,
+) -> Result<Vec<(TranslatedChunk, Vec<(i32, i32)>)>> {
     let mut sm_index = 0usize;
     let mut calls = Vec::new();
     for chunk in unmasked_translated_chunks(frame_length) {
-        if !soft_masked {
-            calls.push((chunk, vec![(0, i32::try_from(chunk.length)?)]));
-            continue;
-        }
         if chunk.offset == 0 && chunk.length == frame_length {
-            calls.push((chunk, frame_ranges.clone()));
+            calls.push((chunk, frame_ranges.to_vec()));
             continue;
         }
         let start = i32::try_from(chunk.offset)?;
@@ -176,3 +203,71 @@ pub(crate) fn translated_chunk_scan_ranges(
     }
     Ok(calls)
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321, 398-405 and
+// c++/src/algo/blast/core/blast_engine.c:757-762, 814-830, 476-486, 221-311
+// A database sequence of a search with `-db_soft_mask` or `-db_hard_mask` comes with the complement
+// of its stored masks as its ranges (one range, the whole sequence, where it has none) and the mask
+// kind. The frames of a translated subject map those ranges (`translated_frame_ranges`) and each
+// frame is cut by them as a protein subject is: with soft masks, the ranges are the scan ranges of
+// the frame's chunks of `MAX_DBSEQ_LEN`; with hard masks, each range is a chunk of its own (cut
+// again past `MAX_DBSEQ_LEN`) that scans its letters from its start. NCBI's "no chunking" branch
+// scans the whole frame, `[0, frame_length)`, from the chunk at the frame's start
+// (blast_engine.c:150-152, 162, 264-268), so a whole frame one residue shorter than its strand's
+// first frame, whose one chunk ends on its end sentinel, scans no word there. Where that chunk ends
+// before the frame's end at a mask, LOSAT scans the chunk alone, as NCBI's normal chunks do for the
+// near input, the mask shortened by the fewest bases after which a letter follows the chunk in
+// every frame; the masked bases stay masked in the traceback and the statistics (an approved NCBI
+// defect, PD-LOSAT-NCBI-DEFECTS exception 21: the Owner's answers Q1 = B and Q2 = B of M4b,
+// 2026-11-21; NCBI's scan past the chunk gives rows that differ from the near input's, in TBLASTX
+// the same row once for each word it reads in the mask, or a crash).
+/// The chunks of frame `frame` (+1..+3, -1..-3, of `frame_length` residues) of a database sequence
+/// with the nucleotide ranges `nucleotide_ranges` (the complement of its stored masks,
+/// `core::subject_split::complement_masks`), each with its scan ranges, in a search with
+/// `-db_hard_mask` (`hard`) or `-db_soft_mask`. `negative_first_length` is the number of residues
+/// of frame -1; `split` is the chunker, whose buffer of ranges is reused. A chunk of a hard range
+/// may end one residue past a frame that is one residue shorter than its strand's first frame (the
+/// frame's end sentinel), as NCBI's does. A hard chunk scans its own letters, `[0, length)`, and
+/// the chunk of a whole frame the frame's, `[0, frame_length)`.
+pub(crate) fn translated_db_mask_chunks(
+    nucleotide_ranges: &[(i32, i32)],
+    hard: bool,
+    frame: i8,
+    frame_length: usize,
+    negative_first_length: usize,
+    split: &mut crate::core::subject_split::HardSplitState,
+) -> Result<Vec<(TranslatedChunk, Vec<(i32, i32)>)>> {
+    use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
+    let frame_ranges = translated_frame_ranges(nucleotide_ranges, frame, negative_first_length);
+    if !hard {
+        return soft_chunk_scan_ranges(&frame_ranges, frame_length);
+    }
+    let mut calls = Vec::new();
+    if frame_length == 0 {
+        return Ok(calls);
+    }
+    split.start(frame_length, frame_ranges, false);
+    while let Some(chunk) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
+        // The protein programs' chunks have no residual: the scan starts at the chunk's start. The
+        // "no chunking" chunk of a whole frame stops at the frame's end, not on its sentinel.
+        let right = if chunk.full_range {
+            chunk.length.min(frame_length)
+        } else {
+            chunk.length
+        };
+        calls.push((
+            TranslatedChunk {
+                offset: chunk.offset,
+                length: chunk.length,
+                overlap: chunk.overlap,
+            },
+            vec![(0, i32::try_from(right)?)],
+        ));
+    }
+    split.end();
+    Ok(calls)
+}
+
+#[cfg(test)]
+#[path = "translated_chunks_tests.rs"]
+mod tests;

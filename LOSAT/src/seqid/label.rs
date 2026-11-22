@@ -17,17 +17,6 @@ pub(super) fn number(out: &mut Vec<u8>, value: impl std::fmt::Display) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/general/Object_id.cpp:202-215
-// ```c++
-// ostream& CObject_id::AsString(ostream &s) const
-// {
-//     switch ( Tparent::Which() ) {
-//     case e_Id:
-//         s << Tparent::GetId();
-//         break;
-//     case e_Str:
-//         s << Tparent::GetStr(); // no Upcase() on output as per Ostell 7/2001 - Karl
-//         break;
-// ```
 fn object_id(tag: &ObjectId, out: &mut Vec<u8>) {
     match tag {
         ObjectId::Id(id) => number(out, id),
@@ -36,34 +25,6 @@ fn object_id(tag: &ObjectId, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:572-596
-// ```c++
-// static const char* const s_TextId[CSeq_id::e_MaxChoice+1] =
-// {   // FASTA_LONG formats
-//     "???" , // not-set = ???
-//     "lcl",  // local = lcl|integer or string
-//     "bbs",  // gibbsq = bbs|integer
-//     "bbm",  // gibbmt = bbm|integer
-//     "gim",  // giim = gim|integer
-//     "gb",   // genbank = gb|accession|locus
-//     "emb",  // embl = emb|accession|locus
-//     "pir",  // pir = pir|accession|name
-//     "sp",   // swissprot = sp|accession|name *OR* tr|accession|name
-//     "pat",  // patent = pat|country|patent number (string)|seq number (integer)
-//             //     *OR* pgp|country|application number|seq number
-//     "ref",  // other = ref|accession|name|release - changed from oth to ref
-//     "gnl",  // general = gnl|database(string)|id (string or number)
-//     "gi",   // gi = gi|integer
-//     "dbj",  // ddbj = dbj|accession|locus
-//     "prf",  // prf = prf|accession|name
-//     "pdb",  // pdb = pdb|entry name (string)|chain id (char)
-//     "tpg",  // tpg = tpg|accession|name
-//     "tpe",  // tpe = tpe|accession|name
-//     "tpd",  // tpd = tpd|accession|name
-//     "gpp",  // gpipe = gpp|accession|name
-//     "nat",  // named_annot_track = nat|accession|name
-//     ""  // Placeholder for end of list
-// };
-// ```
 /// The FASTA type tag of each alternative, in the order of `model::SEQ_ID_ALTERNATIVES`.
 const FASTA_TAGS: [&[u8]; 20] = [
     b"lcl", b"bbs", b"bbm", b"gim", b"gb", b"emb", b"pir", b"sp", b"pat", b"ref", b"gnl", b"gi",
@@ -71,57 +32,9 @@ const FASTA_TAGS: [&[u8]; 20] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2164-2186
-// ```c++
-// void CSeq_id::WriteAsFasta(ostream& out)
-//     const
-// {
-//     unsigned the_type = Which();
-//     if (the_type >= e_MaxChoice)  // New SeqId type
-//         the_type = e_not_set;
-//
-//     if (IsPatent()  &&  !GetPatent().GetCit().GetId().IsNumber() ) {
-//         const char pgp[] = "pat|";
-//         out.write(pgp, sizeof(pgp) - 1);
-//     } else if (IsSwissprot()  &&  GetSwissprot().IsSetRelease()
-//                &&  GetSwissprot().GetRelease() == "unreviewed") {
-//         const char tr[] = "tr|";
-//         out.write(tr, sizeof(tr) - 1);
-//     } else {
-//         out.write(s_TextId[the_type], strlen(s_TextId[the_type]));
-//         out.put('|');
-//     }
-//
-//     x_WriteContentAsFasta(out);
-// }
-// ```
 // The tag of a patent id with an application number is `pat|` too (the constant named
 // `pgp` holds "pat|").
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2347-2375
-// ```c++
-// CNcbiOstream& CSeq_id::WriteAsFasta(CNcbiOstream& ostr, const CBioseq& bioseq)
-// {
-//     bool is_na            = bioseq.GetInst().GetMol() != CSeq_inst::eMol_aa;
-//     CRef<CSeq_id> best_id = FindBestChoice(bioseq.GetId(),
-//                                            is_na ? CSeq_id::FastaNARank
-//                                            : CSeq_id::FastaAARank);
-//     ...
-//     bool found_gi = false;
-//     ITERATE (CBioseq::TId, id, bioseq.GetId()) {
-//         if ((*id)->IsGi()) {
-//             (*id)->WriteAsFasta(ostr);
-//             found_gi = true;
-//             break;
-//         }
-//     }
-//     if (best_id.NotEmpty()  &&  !best_id->IsGi() ) {
-//         if (found_gi) {
-//             ostr << '|';
-//         }
-//         best_id->WriteAsFasta(ostr);
-//     }
-//     return ostr;
-// }
-// ```
 /// `CSeq_id::WriteAsFasta(ostr, bioseq)` (`GetStringDescr(bioseq, eFormat_FastA)`): the first
 /// GI of the Bioseq's ids `ids`, then `|` and its best id for FASTA (`FastaAARank` for a
 /// protein, else `FastaNARank`) when that is not a GI: `gi|123|gb|ABC12345.1|`.
@@ -159,50 +72,6 @@ pub fn fasta(id: &ParsedSeqId, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2188-2262
-// ```c++
-//     switch (the_type) {
-//     case e_not_set:
-//         break;
-//     case e_Local:
-//         GetLocal().AsString(out);
-//         break;
-//     case e_Gibbsq:
-//         out << GetGibbsq();
-//         break;
-//     case e_Gibbmt:
-//         out << GetGibbmt();
-//         break;
-//     case e_Giim:
-//         out << (GetGiim().GetId());
-//         break;
-//     case e_Genbank:
-//         GetGenbank().AsFastaString(out);
-//         break;
-//     ...
-//     case e_Patent:
-//         GetPatent().AsFastaString(out);
-//         break;
-//     ...
-//     case e_General:
-//         {
-//             const CDbtag& dbt = GetGeneral();
-//             out << (dbt.GetDb()) << '|';  // no Upcase per Ostell - Karl 7/2001
-//             dbt.GetTag().AsString(out);
-//         }
-//         break;
-//     case e_Gi:
-//         out << GetGi();
-//         break;
-//     ...
-//     case e_Pdb:
-//         GetPdb().AsFastaString(out);
-//         break;
-//     ...
-//     case e_Gpipe:
-//         // don't suppress version after all
-//         GetGpipe().AsFastaString(out /*, false */);
-//         break;
-// ```
 /// `CSeq_id::x_WriteContentAsFasta`: the FASTA form without the type tag.
 fn fasta_content(id: &ParsedSeqId, out: &mut Vec<u8>) {
     match id {
@@ -222,27 +91,6 @@ fn fasta_content(id: &ParsedSeqId, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Textseq_id.cpp:228-247
-// ```c++
-// ostream& CTextseq_id::AsFastaString(ostream& s, bool allow_version) const
-// {
-//     if (IsSetAccession()) {
-//         s << GetAccession(); // no Upcase per Ostell - Karl 7/2001
-//         if (allow_version  &&  IsSetVersion()) {
-//             int version = GetVersion();
-//             if (version) {
-//                 s.put('.');
-//                 s << version;
-//             }
-//         }
-//     }
-//
-//     s.put('|');
-//     if ( IsSetName() ) {
-//         s << GetName();  // no Upcase per Ostell - Karl 7/2001
-//     }
-//     return s;
-// }
-// ```
 fn textseq_fasta(id: &TextseqId, out: &mut Vec<u8>) {
     if let Some(accession) = &id.accession {
         out.extend_from_slice(accession);
@@ -258,23 +106,6 @@ fn textseq_fasta(id: &TextseqId, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/PDB_seq_id.cpp:94-108
-// ```c++
-// ostream& CPDB_seq_id::AsFastaString(ostream& s) const
-// {
-//     if (IsSetChain_id()) {
-//             return s << GetMol().Get() << '|' << GetChain_id();
-//     }
-//     // no Upcase per Ostell - Karl 7/2001
-//     char chain = (char) GetChain();
-//
-//     if (chain == '|') {
-//         return s << GetMol().Get() << '|'; // historically |VB
-//     } else if ( chain == '\0' ) {
-//         return s << GetMol().Get() << "| ";
-//     }
-//     return s << GetMol().Get() << '|' << chain;
-// }
-// ```
 fn pdb_fasta(id: &PdbSeqId, out: &mut Vec<u8>) {
     out.extend_from_slice(&id.mol);
     out.push(b'|');
@@ -290,26 +121,6 @@ fn pdb_fasta(id: &PdbSeqId, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Patent_seq_id.cpp:71-88
-// ```c++
-// ostream& CPatent_seq_id::AsFastaString(ostream& s) const
-// {
-//     const CId_pat& idp = GetCit();
-//
-//     s << idp.GetCountry() << '|';  // no Upcase per Ostell - Karl 7/2001
-//
-//     const CId_pat_Base::C_Id& id = idp.GetId();
-//     if ( id.IsNumber() ) {
-//         s << id.GetNumber();
-//     } else {
-//         s << id.GetApp_number();
-//         if ( idp.IsSetDoc_type() ) {
-//             s << idp.GetDoc_type();
-//         }
-//     }
-//     s << '|' << GetSeqid();
-//     return s;
-// }
-// ```
 fn patent_fasta(id: &PatentSeqId, out: &mut Vec<u8>) {
     out.extend_from_slice(&id.cit.country);
     out.push(b'|');
@@ -327,118 +138,7 @@ fn patent_fasta(id: &PatentSeqId, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1926-2038
-// ```c++
-// static inline
-// void x_GetLabel_Content(const CSeq_id& id, string* label,
-//                         CSeq_id::TLabelFlags flags, int* version)
-// {
-//     const CTextseq_id* tsid = id.GetTextseq_Id();
-//     ...
-//     //text id
-//     if (tsid) {
-//         string str;
-//         if (tsid->IsSetAccession()) {
-//             str = tsid->GetAccession();
-//             NStr::ToUpper(str);
-//         } else if (tsid->IsSetName()) {
-//             str = tsid->GetName();
-//         }
-//         ...
-//         if ( !str.empty() ) {
-//             if ( (flags & CSeq_id::fLabel_Version)  &&  tsid->IsSetVersion()) {
-//                 str += "." + NStr::IntToString(tsid->GetVersion());
-//             }
-//         }
-//         *label += str;
-//
-//     } else { //non-text id
-//         switch (id.Which()) {
-//         ...
-//         case CSeq_id::e_Local:
-//             {{
-//                 const CObject_id& oid = id.GetLocal();
-//                 if (oid.IsId()) {
-//                     *label += NStr::IntToString(oid.GetId());
-//                 } else if (oid.IsStr()) {
-//                     *label += oid.GetStr();
-//                 }
-//             }}
-//             break;
-//
-//         case CSeq_id::e_Gibbsq:
-//             *label += NStr::IntToString(id.GetGibbsq());
-//             break;
-//
-//         case CSeq_id::e_Gibbmt:
-//             *label += NStr::IntToString(id.GetGibbmt());
-//             break;
-//
-//         case CSeq_id::e_Giim:
-//             *label += NStr::IntToString(id.GetGiim().GetId());
-//             break;
-//
-//         case CSeq_id::e_General:
-//             {{
-//                 const CDbtag& dbt = id.GetGeneral();
-//                 if ((flags & CSeq_id::fLabel_GeneralDbIsContent) == 0) {
-//                     *label += dbt.GetDb() + ':';
-//                 }
-//                 if (dbt.GetTag().IsId()) {
-//                     *label += NStr::IntToString(dbt.GetTag().GetId());
-//                 } else if (dbt.GetTag().IsStr()) {
-//                     *label += dbt.GetTag().GetStr();
-//                 }
-//             }}
-//             break;
-//
-//         case CSeq_id::e_Patent:
-//             {{
-//                 const CId_pat& idp = id.GetPatent().GetCit();
-//                 *label += idp.GetCountry();
-//                 // *label += '|';
-//                 *label += (idp.GetId().IsNumber() ?
-//                            idp.GetId().GetNumber() :
-//                            idp.GetId().GetApp_number());
-//                 *label += '_'; // |
-//                 *label += NStr::IntToString(id.GetPatent().GetSeqid());
-//             }}
-//             break;
-//
-//         case CSeq_id::e_Gi:
-//             *label += NStr::NumericToString(id.GetGi());
-//             break;
-//
-//         case CSeq_id::e_Pdb:
-//             {{
-//                 const CPDB_seq_id& pid = id.GetPdb();
-//                 *label += pid.GetMol().Get();
-//                 if (pid.IsSetChain_id()) {
-//                     *label += '_';
-//                     *label += pid.GetChain_id();
-//                 } else if (pid.IsSetChain()) {
-//                     unsigned char chain = static_cast<unsigned char>(pid.GetChain());
-//                     if (chain > ' ') {
-//                         *label += '_';
-//                         ...
-//                         *label += static_cast<char>(chain);
-//                     }
-//                 }
-//             }}
-//             break;
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2145-2154
-// ```c++
-// string CSeq_id::GetSeqIdString(bool with_version) const
-// {
-//     string label;
-//     TLabelFlags flags = 0;
-//     if (with_version) {
-//         flags |= fLabel_Version;
-//     }
-//     GetLabel(&label, eContent, flags);
-//     return label;
-// }
-// ```
 /// `CSeq_id::GetSeqIdString(with_version)` (`GetLabel(eContent)` with the flag
 /// `fLabel_Version` or none): the upper-cased accession (else the name) of a Textseq-id with
 /// `.version` when asked and stored, the number of a `gi`, `db:tag` of a `general` id,
@@ -448,12 +148,6 @@ pub fn content(id: &ParsedSeqId, with_version: bool, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/multisource_util.cpp:157-160
-// ```c++
-// void GetSeqIdKey(const objects::CSeq_id & id, string & key)
-// {
-//     id.GetLabel(& key, CSeq_id::eContent, CSeq_id::fLabel_GeneralDbIsContent);
-// }
-// ```
 /// `GetLabel(eContent, fLabel_GeneralDbIsContent)` (makeblastdb's `GetSeqIdKey`, the keys of
 /// `-taxid_map`): `content` without the version, and only the tag of a `general` id (its
 /// database is part of the type, not of the content).
@@ -524,54 +218,7 @@ fn label_content(
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1890-1920
-// ```c++
-// static inline
-// void x_GetLabel_Type(const CSeq_id& id, string* label,
-//                      CSeq_id::TLabelFlags flags)
-// {
-//     unsigned choice = id.Which();
-//     ...
-//     switch (choice) {
-//     case CSeq_id::e_General:
-//         // we may encode 'gnl' or the database name as requested
-//         if (flags & CSeq_id::fLabel_GeneralDbIsContent) {
-//             *label += id.GetGeneral().GetDb();
-//         } else {
-//             *label += "gnl";
-//         }
-//         break;
-//
-//     case CSeq_id::e_Patent:
-//         *label += "pat";
-//         break;
-//
-//     default:
-//         *label += s_TextId[choice];
-//         break;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2059-2084
-// ```c++
-//     case eBoth:
-//         x_GetLabel_Type(*this, label, flags);
-//         *label += "|";
-//         if (flags & fLabel_UpperCase) {
-//             NStr::ToUpper(*label);
-//             ...
-//             string primary_id;
-//             list<string> secondary_id_list;
-//             primary_id = ComposeOSLT(&secondary_id_list, fAllowLocalId);
-//             if (!primary_id.empty())
-//                 *label += primary_id;
-//             else if (secondary_id_list.size() > 0)
-//                 *label += *secondary_id_list.begin();
-//             if (flags & fLabel_Version) {
-//                 const CTextseq_id* tsid = GetTextseq_Id();
-//                 if (tsid && tsid->IsSetVersion())
-//                     *label += "." + NStr::IntToString(tsid->GetVersion());
-//             }
-//         } else {
-// ```
 // Without `fLabel_GeneralDbIsContent` the type of a `general` id is "gnl" and of a patent
 // "pat", which are the FASTA tags; `s_TextId` names a swissprot id "sp" whatever its release.
 /// `GetLabel(eDefault, fLabel_Default | fLabel_UpperCase)` (`eDefault` is `eBoth`,
@@ -590,7 +237,7 @@ pub fn both_upper_version(id: &ParsedSeqId, out: &mut Vec<u8>) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2059-2086 (quoted at
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2059-2086 (cited at
 // `both_upper_version`): without `fLabel_UpperCase`, `eBoth` is the type, `|` and
 // `x_GetLabel_Content` (`label_content`).
 /// `GetLabel(eDefault, fLabel_Default)` (`eBoth` with `fLabel_Version`, not upper-cased):
@@ -603,124 +250,6 @@ pub fn both_version(id: &ParsedSeqId, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:3416-3550
-// ```c++
-// string CSeq_id::ComposeOSLT(list<string>* secondary_id_list,
-//                             TComposeOSLTFlags parse_flags) const
-// {
-//     string primary_id;
-//     string secondary_id;
-//     E_Choice seqid_type = Which();
-//     bool mixed_case = false;
-//
-//     switch (seqid_type) {
-//     case e_Giim:
-//         primary_id = NStr::IntToString(GetGiim().GetId());
-//         secondary_id = primary_id;
-//         break;
-//     case e_Gibbsq:
-//         primary_id = NStr::IntToString(GetGibbsq());
-//         secondary_id = primary_id;
-//         break;
-//     case e_Gibbmt:
-//         primary_id = NStr::IntToString(GetGibbmt());
-//         secondary_id = primary_id;
-//         break;
-//     case e_Pir:
-//     case e_Prf:
-//     {
-//         ...
-//         const CTextseq_id* tsid = GetTextseq_Id();
-//         if (tsid->CanGetName())
-//             primary_id = tsid->GetName();
-//         else if (tsid->CanGetAccession())
-//             primary_id = tsid->GetAccession();
-//         break;
-//     }
-//     case e_Patent:
-//         if (secondary_id_list) {
-//             ...
-//             const CId_pat& pat = GetPatent().GetCit();
-//             secondary_id = pat.GetCountry() + "|" +
-//                 (pat.GetId().IsNumber() ?
-//                  pat.GetId().GetNumber() : pat.GetId().GetApp_number()) + "|" +
-//                 NStr::IntToString(GetPatent().GetSeqid());
-//         }
-//         break;
-//     case e_Pdb:
-//     {
-//         const CPDB_seq_id& pdb = GetPdb();
-//         primary_id = pdb.GetMol().Get();
-//         ...
-//         NStr::ToUpper(primary_id);
-//         if (pdb.IsSetChain_id()) {
-//             primary_id += "|" + pdb.GetChain_id();
-//         } else if (pdb.IsSetChain() && pdb.GetChain() != ' ') {
-//             primary_id += "|" + string(1, (char)pdb.GetChain());
-//         }
-//         mixed_case = true;
-//         break;
-//     }
-//     case e_General:
-//     {
-//         // General ids are always secondary!
-//         if (secondary_id_list) {
-//             const CObject_id& dbtag = GetGeneral().GetTag();
-//             string suffix =
-//                 (dbtag.IsId() ? NStr::IntToString(dbtag.GetId()) : dbtag.GetStr());
-//             if (!suffix.empty())
-//                 secondary_id = GetGeneral().GetDb() + "|" + suffix;
-//         }
-//         break;
-//     }
-//     case e_Gi:
-//         // GIs are always secondary
-//         if (secondary_id_list) {
-//             secondary_id = NStr::NumericToString(GetGi());
-//         }
-//         break;
-//     case CSeq_id::e_Local:
-//     {
-//         if ((parse_flags & fAllowLocalId) != 0 && secondary_id_list) {
-//             const CObject_id& oid = GetLocal();
-//             if (oid.IsId()) {
-//                 secondary_id = NStr::IntToString(oid.GetId());
-//             } else if (oid.IsStr()) {
-//                 secondary_id = oid.GetStr();
-//             }
-//         }
-//         break;
-//     }
-//     default:
-//     {
-//         ...
-//         const CTextseq_id* tsid = GetTextseq_Id();
-//         if (tsid) {
-//             if (tsid->CanGetAccession())
-//                 primary_id = tsid->GetAccession();
-//             if ( secondary_id_list ) {
-//                 if (seqid_type == e_Gpipe
-//                     &&  (parse_flags & fGpipeAddSecondary) != 0
-//                     &&  !primary_id.empty()) {
-//                     ...
-//                 }
-//                 else if (tsid->CanGetName() && !tsid->GetName().empty()) {
-//                     secondary_id = tsid->GetName();
-//                 }
-//             }
-//         }
-//         break;
-//     }
-//     }
-//
-//     if (!mixed_case)
-//         NStr::ToUpper(primary_id);
-//     if (secondary_id_list && !secondary_id.empty()) {
-//         NStr::ToUpper(secondary_id);
-//         secondary_id_list->emplace_back(secondary_id);
-//     }
-//     return primary_id;
-// }
-// ```
 // `GetLabel` asks with a secondary list and `fAllowLocalId` (no `fGpipeAddSecondary`), and
 // takes the primary id, or the secondary one when the primary is empty: so the label part is
 // the primary id when there is one, else the (only) secondary id, both upper-cased (ASCII,
@@ -791,32 +320,6 @@ fn compose_oslt_label(id: &ParsedSeqId, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:907-930
-// ```c++
-// string CAlignFormatUtil::GetGnlID(const CDbtag& dtg)
-// {
-//    string retval = NcbiEmptyString;
-//
-//    if(dtg.GetTag().IsId())
-//      retval = NStr::IntToString(dtg.GetTag().GetId());
-//    else
-//      retval = dtg.GetTag().GetStr();
-//
-//    return retval;
-// }
-//
-// string CAlignFormatUtil::GetLabel(CConstRef<CSeq_id> id,bool with_version)
-// {
-//     string retval = "";
-//     if (id->Which() == CSeq_id::e_General){
-//         const CDbtag& dtg = id->GetGeneral();
-//         retval = CAlignFormatUtil::GetGnlID(dtg);
-//     }
-//     if (retval == "")
-//       retval = id->GetSeqIdString(with_version);
-//
-//     return retval;
-// }
-// ```
 /// `CAlignFormatUtil::GetLabel(id, with_version)`: a `general` id as its tag alone, every
 /// other id (and a `general` id with an empty tag) as `content`.
 pub fn format_label(id: &ParsedSeqId, with_version: bool, out: &mut Vec<u8>) {
@@ -831,21 +334,6 @@ pub fn format_label(id: &ParsedSeqId, with_version: bool, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4944-4956
-// ```c++
-// string CAlignFormatUtil::GetBareId(const CSeq_id& id)
-// {
-//     string retval;
-//
-//     if (id.IsGi() || id.IsPrf() || id.IsPir()) {
-//         retval = id.AsFastaString();
-//     }
-//     else {
-//         retval = id.GetSeqIdString(true);
-//     }
-//
-//     return retval;
-// }
-// ```
 /// `CAlignFormatUtil::GetBareId`: the FASTA form of a `gi`, `prf` or `pir` id, the content
 /// with its version for every other id.
 pub fn bare(id: &ParsedSeqId, out: &mut Vec<u8>) {
@@ -855,43 +343,7 @@ pub fn bare(id: &ParsedSeqId, out: &mut Vec<u8>) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:156-189
-// ```c++
-// string
-// CShowBlastDefline::GetSeqIdListString(const list<CRef<objects::CSeq_id> >& id,
-//                                       bool show_gi)
-// {
-//     string id_string = NcbiEmptyString;
-//     bool found_gi = false;
-//
-//     CRef<CSeq_id> best_id = FindBestChoice(id, CSeq_id::Score);
-//
-//     if (show_gi) {
-//         ITERATE(list<CRef<CSeq_id> >, itr, id) {
-//              if ((*itr)->IsGi()) {
-//                 id_string += (*itr)->AsFastaString();
-//                 found_gi = true;
-//                 break;
-//              }
-//         }
-//     }
-//
-//     if (best_id.NotEmpty()  &&  !best_id->IsGi() ) {
-//          if (found_gi)
-//              id_string += "|";
-//
-//          if (best_id->IsLocal()) {
-//              string id_token;
-//              best_id->GetLabel(&id_token, CSeq_id::eContent, 0);
-//              id_string += id_token;
-//          }
-//          else
-//              id_string += best_id->AsFastaString();
-//     }
-//
-//     return id_string;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:155-189
 /// `CShowBlastDefline::GetSeqIdListString(ids, show_gi)`: the first GI in FASTA form (with
 /// `show_gi`), then `|` and the FASTA form of the `Score`-best id unless that is the GI (a
 /// local id as its content, without `lcl|`): `gi|123456|ref|NP_000002.1|`, `myprot9`.
@@ -917,15 +369,6 @@ pub fn seqid_list_string(ids: &[ParsedSeqId], show_gi: bool, out: &mut Vec<u8>) 
 }
 
 // NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_id.hpp:1041-1047
-// ```c++
-// /// Return gi from id list if exists, return 0 otherwise
-// template<class container>
-// TGi FindGi(const container& ids)
-// {
-//     CConstRef<CSeq_id> id = GetSeq_idByType(ids, CSeq_id::e_Gi);
-//     return id ? id->GetGi() : ZERO_GI;
-// }
-// ```
 /// `FindGi`: the first GI of `ids`, 0 for none.
 pub fn first_gi<'a>(ids: impl IntoIterator<Item = &'a ParsedSeqId>) -> i64 {
     ids.into_iter().find_map(ParsedSeqId::gi).unwrap_or(0)

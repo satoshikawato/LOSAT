@@ -1,0 +1,289 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT63085.1 hypothetical protein [Sicyonia
+ whispovirus]"
+                  }
+                }
+              },
+              title "BDT63085.1 hypothetical protein [Sicyonia whispovirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 114,
+              seq-data ncbieaa "MAFRSFGVLFVLTLFTSLAGFLLSKLSTLGSLLGGGPLAGLLGSMM
+GGGKKNPERSPVASKNKNKPAPPLRARRPTPGKQKAAGGRWSFFKAKRKGKGKNPLSVLARIPKLFRK"
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT63093.1 wsv321-like protein [Sicyonia
+ whispovirus]"
+                  }
+                }
+              },
+              title "BDT63093.1 wsv321-like protein [Sicyonia whispovirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 85,
+              seq-data ncbieaa "MSFLAFLIVALLAAYVFSLLFTLNSNYLDHKINTSLDLTSSLKLQG
+QFTDKDRAENNRILRNKISVLQKMYIISEQMEKRSKTQT"
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">allx 50 X"
+                  }
+                }
+              },
+              title "allx 50 X"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 50,
+              seq-data ncbieaa "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXX"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/paja",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 100000000
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "UnifiedP",
+          value integer 1
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 62
+          },
+          {
+            id str "blast_score",
+            value int 62
+          },
+          {
+            id str "e_value",
+            value real { 179470136699979, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 284906059869199, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 18
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 24
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 452368421052632, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 18
+            }
+          },
+          starts {
+            49,
+            156,
+            88,
+            -1,
+            90,
+            195
+          },
+          lens {
+            39,
+            2,
+            10
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 210
+          },
+          {
+            id str "blast_score",
+            value int 210
+          },
+          {
+            id str "e_value",
+            value real { 700113108618815, 10, -33 }
+          },
+          {
+            id str "bit_score",
+            value real { 855001432226882, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 43
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 58
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 934411764705882, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 45
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            79
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 319277026060236, 10, -15 },
+        k { 138365100729245, 10, -15 },
+        h { 410280858208215, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 100000000",
+      "Effective search space used: 100000000",
+      "Length adjustment: 54"
+    }
+  }
+}

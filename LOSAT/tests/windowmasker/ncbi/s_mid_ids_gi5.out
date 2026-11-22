@@ -1,0 +1,142 @@
+Blast-db-mask-info ::= {
+  algo-id 3,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 148,
+          to 163,
+          id gi 5
+        },
+        {
+          from 215,
+          to 230,
+          id gi 5
+        },
+        {
+          from 272,
+          to 289,
+          id gi 5
+        },
+        {
+          from 333,
+          to 346,
+          id gi 5
+        },
+        {
+          from 444,
+          to 458,
+          id gi 5
+        },
+        {
+          from 648,
+          to 661,
+          id gi 5
+        },
+        {
+          from 686,
+          to 703,
+          id gi 5
+        },
+        {
+          from 1312,
+          to 1326,
+          id gi 5
+        },
+        {
+          from 1346,
+          to 1362,
+          id gi 5
+        },
+        {
+          from 1381,
+          to 1422,
+          id gi 5
+        },
+        {
+          from 1446,
+          to 1464,
+          id gi 5
+        },
+        {
+          from 1473,
+          to 1492,
+          id gi 5
+        },
+        {
+          from 1505,
+          to 1525,
+          id gi 5
+        },
+        {
+          from 1651,
+          to 1675,
+          id gi 5
+        },
+        {
+          from 1803,
+          to 1827,
+          id gi 5
+        },
+        {
+          from 1834,
+          to 1847,
+          id gi 5
+        },
+        {
+          from 1851,
+          to 1864,
+          id gi 5
+        },
+        {
+          from 1946,
+          to 1967,
+          id gi 5
+        },
+        {
+          from 2041,
+          to 2061,
+          id gi 5
+        },
+        {
+          from 2118,
+          to 2137,
+          id gi 5
+        },
+        {
+          from 2293,
+          to 2308,
+          id gi 5
+        },
+        {
+          from 2319,
+          to 2331,
+          id gi 5
+        },
+        {
+          from 2375,
+          to 2387,
+          id gi 5
+        },
+        {
+          from 2699,
+          to 2719,
+          id gi 5
+        },
+        {
+          from 2889,
+          to 2903,
+          id gi 5
+        },
+        {
+          from 2980,
+          to 2995,
+          id gi 5
+        }
+      }
+    },
+    more FALSE
+  }
+}

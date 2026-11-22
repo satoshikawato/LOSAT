@@ -55,6 +55,10 @@ fn site(data: &CddData, index: usize) -> &Site {
     &data.sites(0, true)[index]
 }
 
+fn site_of(data: &CddData) -> &Site {
+    site(data, 0)
+}
+
 #[test]
 fn the_first_motif_site_sets_the_positions_for_every_later_check() {
     let data = load(&[
@@ -206,4 +210,81 @@ fn the_motif_check_of_the_review_oracles() {
         Err(MotifError::Map(MapEnd::HostDependent(1610612735)))
     );
     assert_eq!(check(7), Err(MotifError::Match(MatchError::Exhausted)));
+}
+
+// What NCBI's rpsbproc 0.5.1 allocated for edited motifs (`tests/fixtures/rpsbproc_growth/
+// binary_allocs.tsv`; README there): the allocations of its run with the motif minus those of a
+// run with a motif of the same shape and small counts, as a signed count per size in bytes. The
+// model's allocations of the string and the vector of the motif check (`growth::events`) give the
+// same difference. `cat` is the catalytic site of `mfirst.asn` (3 residues, `HKY`, of a query of
+// 185), `dim` a site of 24 mapped residues whose positions are the first motif site's.
+const BINARY_ROWS: usize = 26;
+const BINARY_ALLOCS: &str = include_str!("../../tests/fixtures/rpsbproc_growth/binary_allocs.tsv");
+
+#[test]
+fn the_motif_checks_of_the_binary_allocate_as_the_model_does() {
+    use super::super::prosite::growth_events as events;
+    use std::collections::BTreeMap;
+    let allocations = |site: &str, motif: &str| -> BTreeMap<u64, i64> {
+        let (positions, mapped, residues) = if site == "cat" {
+            let mut residues = vec![b'A'; 185];
+            residues[61..64].copy_from_slice(b"HKY");
+            (
+                "10,11,12".to_string(),
+                mapped(&[(61, 10), (62, 11), (63, 12)]),
+                residues,
+            )
+        } else {
+            let pairs: Vec<(i64, i64)> = (0..24).map(|i| (20 + i, 100 + i)).collect();
+            (
+                (100..124)
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                mapped(&pairs),
+                vec![b'A'; 185],
+            )
+        };
+        let data = load(&[("A", motif, &positions)]);
+        events::take();
+        let _ = MotifState::default().motif_check(&data, site_of(&data), &mapped, &residues);
+        let mut counts = BTreeMap::new();
+        for event in events::take() {
+            *counts
+                .entry(event[1..].parse::<u64>().unwrap())
+                .or_insert(0i64) += 1;
+        }
+        counts
+    };
+    let (mut checked, mut wrong) = (0, Vec::new());
+    for line in BINARY_ALLOCS
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+    {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let (site, motif, base) = (fields[0], fields[1], fields[2]);
+        let delta = fields.get(3).copied().unwrap_or("");
+        let (target, baseline) = (allocations(site, motif), allocations(site, base));
+        let mut difference = BTreeMap::new();
+        for size in target.keys().chain(baseline.keys()) {
+            let d =
+                target.get(size).copied().unwrap_or(0) - baseline.get(size).copied().unwrap_or(0);
+            if d != 0 {
+                difference.insert(*size, d);
+            }
+        }
+        let text = difference
+            .iter()
+            .map(|(size, d)| format!("{size}:{d:+}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if text != delta {
+            wrong.push(format!(
+                "{site} {motif} (baseline {base}): model {text:?}, binary {delta:?}"
+            ));
+        }
+        checked += 1;
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    assert_eq!(checked, BINARY_ROWS);
 }

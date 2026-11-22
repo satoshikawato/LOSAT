@@ -1,0 +1,143 @@
+use super::*;
+
+fn context(lambda: f64, k: f64) -> QueryContext {
+    QueryContext {
+        q_idx: 0,
+        frame: 1,
+        aa_seq: Vec::new(),
+        aa_seq_nomask: None,
+        aa_len: 100,
+        orig_len: 300,
+        frame_base: 0,
+        is_valid: true,
+        karlin_params: KarlinParams {
+            lambda,
+            k,
+            h: 0.4,
+            ..KarlinParams::default()
+        },
+    }
+}
+
+/// An HSP of context `ctx_idx` with `raw_score`, from `q_start` to the `Int4` end `q_end`
+/// (at or before `q_start` for an HSP of length 0 or less).
+fn hit(ctx_idx: u32, raw_score: i32, q_start: u32, q_end: i32) -> UngappedHit {
+    let mut hit = UngappedHit {
+        q_idx: 0,
+        s_idx: 0,
+        ctx_idx,
+        s_f_idx: 0,
+        q_frame: 1,
+        s_frame: 1,
+        q_aa_start: q_start,
+        q_aa_end: 0,
+        s_aa_start: q_start,
+        s_aa_end: 0,
+        q_seed_off: q_start,
+        s_seed_off: q_start,
+        q_orig_len: 300,
+        s_orig_len: 300,
+        raw_score,
+        e_value: 99.0,
+        num_ident: 0,
+        hsp_list_order: 0,
+        ordering_method: 0,
+        linked_set: false,
+        start_of_chain: false,
+        link_id: 0,
+        chain_next_link_id: None,
+        hsp_link_num: 0,
+        num: 0,
+    };
+    hit.set_int4_ends(q_end, q_end);
+    hit
+}
+
+fn link_args<'a>(
+    contexts: &'a [QueryContext],
+    linking_params: Option<&'a LinkingParams>,
+    eff_searchsp_per_context: &'a [i64],
+) -> SubjectLinkArgs<'a> {
+    SubjectLinkArgs {
+        linking_params_for_cutoff: &contexts[0].karlin_params,
+        linking_params,
+        contexts_ref: contexts,
+        subject_frame_bases: &[0; 6],
+        length_adj_per_context: &[0, 0],
+        eff_searchsp_per_context,
+        x_link_on_pool: false,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:774-783 (cited at
+// `subject_linking_params`): only a search with sum statistics has linking parameters.
+#[test]
+fn only_sum_statistics_make_linking_parameters() {
+    let contexts = [context(0.3176, 0.134)];
+    let made = |sum_stats| {
+        subject_linking_params(sum_stats, 100, 3000, 3000, 20, &contexts[0].karlin_params)
+    };
+    assert!(made(false).is_none());
+    let linking = made(true).unwrap();
+    assert_eq!(linking.subject_len_nucl, 3000);
+    assert_eq!(linking.gap_decay_rate, BLAST_GAP_DECAY_RATE);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:874-890 and
+// c++/src/algo/blast/core/blast_hits.c:1887-1893 (cited at `evalues_without_linking`), with
+// c++/src/algo/blast/core/blast_stat.c:4157-4171 (`BLAST_KarlinStoE_simple`).
+#[test]
+fn hsps_without_sum_statistics_get_their_own_evalues_in_their_order() {
+    let contexts = [context(0.3176, 0.134), context(0.267, 0.041)];
+    let eff_searchsp = [1_000_000, 2_500_000];
+    let link = link_args(&contexts, None, &eff_searchsp);
+    let hits = vec![hit(1, 40, 0, 20), hit(0, 50, 5, 30), hit(0, 30, 9, 19)];
+    let evaluated = first_link_subject_hits(&link, hits, 40);
+    // The list keeps its order (nothing links or sorts it), and no HSP joins a linked set.
+    assert_eq!(
+        evaluated.iter().map(|h| h.raw_score).collect::<Vec<_>>(),
+        [40, 50, 30]
+    );
+    for h in &evaluated {
+        let ctx = h.ctx_idx as usize;
+        let expected = evalue_from_raw_score(
+            h.raw_score,
+            &contexts[ctx].karlin_params,
+            eff_searchsp[ctx] as f64,
+        );
+        assert_eq!(h.e_value.to_bits(), expected.to_bits());
+        assert_eq!((h.num, h.linked_set), (0, false));
+    }
+    // searchsp * exp(-Lambda * S + log K) of each HSP's own context and search space.
+    let close = |actual: f64, expected: f64| (actual / expected - 1.0).abs() < 1e-12;
+    assert!(close(evaluated[0].e_value, 2.3575385266626068));
+    assert!(close(evaluated[1].e_value, 0.017002329395178577));
+    assert!(first_link_subject_hits(&link, Vec::new(), 40).is_empty());
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 and :452-453
+// (cited at `drop_unread_without_linking`).
+#[test]
+fn hsps_of_length_zero_or_less_leave_before_the_reevaluation_without_sum_statistics() {
+    let contexts = [context(0.3176, 0.134), context(0.267, 0.041)];
+    let eff_searchsp = [1_000_000, 2_500_000];
+    let hits = || vec![hit(0, 30, 10, 10), hit(0, 50, 5, 30), hit(1, 25, 0, -2)];
+    assert!(hits()[0].is_int4_inverted() && hits()[2].is_int4_inverted());
+    // The E-values of the first call do not drop them: the fetch of the subject sees them.
+    let unlinked = link_args(&contexts, None, &eff_searchsp);
+    let mut kept = first_link_subject_hits(&unlinked, hits(), 0);
+    assert_eq!(kept.len(), 3);
+    drop_unread_without_linking(&unlinked, 0, &mut kept);
+    assert_eq!(kept.iter().map(|h| h.raw_score).collect::<Vec<_>>(), [50]);
+    // The two-hit word finder saves none, and with sum statistics the first linking call
+    // dropped them already: the list stays as it is.
+    let mut two_hit = hits();
+    drop_unread_without_linking(&unlinked, 40, &mut two_hit);
+    assert_eq!(two_hit.len(), 3);
+    let linking =
+        subject_linking_params(true, 100, 3000, 3000, 20, &contexts[0].karlin_params).unwrap();
+    let linked = link_args(&contexts, Some(&linking), &eff_searchsp);
+    let mut with_sum_statistics = hits();
+    drop_unread_without_linking(&linked, 0, &mut with_sum_statistics);
+    assert_eq!(with_sum_statistics.len(), 3);
+}

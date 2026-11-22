@@ -38,9 +38,7 @@ def main() -> None:
     def filler(length: int) -> str:
         return ''.join(randomizer.choice('ACGT') for _ in range(length))
     # Pinned NCBI c++/src/algo/blast/core/blast_engine.c:804-850:
-    # for (context=first_context; context<=last_context; context++) {
     #     s_BlastSearchEngineOneContext(...);
-    #     Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
     # }
     mode = sys.argv[2] if len(sys.argv) == 3 else ''
     assert mode in ('', '--six-frame', '--no-fence'), 'usage: run_multi_hsp_trace.py NEW_OUTPUT_DIR [--six-frame|--no-fence]'
@@ -63,8 +61,6 @@ def main() -> None:
                '-seg', 'no', '-sum_stats', 'false', '-outfmt',
                '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq']
     # NCBI c++/src/algo/blast/core/blast_parameters.c:455-463:
-    # gap_x_dropoff = (Int4)(options->gap_x_dropoff*NCBIMATH_LN2/min_lambda);
-    # gap_x_dropoff_final = (Int4)MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda, params->gap_x_dropoff);
     # The reduced pair yields raw 12 for preliminary and final extension,
     # exposing successful partial-window traceback without a fence.
     if mode == '--no-fence':

@@ -1,0 +1,163 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: prot_v5 (parsed Seq-ids)
+           51 sequences; 4,677 total letters
+
+Results from round 1
+
+
+Query= query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+XP_000001.1 alpha protein [Homo sapiens]                              222     1e-79
+CAA90002.1 second defline with a gi                                   219     2e-78
+NP_000002.1 gi plus ref protein                                       219     2e-78
+XP_910001.1 long title number 01 with many words so that it is lo...  214     2e-76
+Q00003 swissprot without version                                      214     2e-76
+CAA00005.1 emb protein                                                212     2e-75
+XP_920001.1 has a title                                               210     7e-75
+A0A000 trembl entry                                                   210     7e-75
+1ABC_A Chain A, test structure                                        207     6e-74
+BAA00006.1 dbj protein                                                200     6e-71
+pir||S00007 pir protein                                               197     6e-70
+prf||0008123A prf protein                                             192     1e-67
+mydb:prot10 general id protein                                        187     1e-65
+myprot9 local id protein                                              185     6e-65
+XP_000011.2 bare refseq accession                                     178     2e-62
+P00012 bare uniprot-like accession                                    174     2e-60
+myprot_13 bare non-accession word                                     172     6e-60
+AAA00017.1 gb with a locus name                                       172     7e-60
+AAA00018.1 unnamed protein product                                    164     9e-57
+P00019.3 with taxid                                                   155     4e-53
+DAA00016.1 third-party protein                                        153     2e-52
+unnamed protein product                                               105     3e-34
+5ABC_D Chain D                                                        105     3e-34
+WP_100014.1 unnamed protein product                                   105     3e-34
+NC_100013.1                                                           105     3e-34
+BK100012.1 tpe titled                                                 105     3e-34
+4ABC no chain four                                                    105     3e-34
+unnamed protein product                                               105     3e-34
+3ABC_C Chain C                                                        105     3e-34
+DAA10008.1 tpa with subject                                           105     3e-34
+subject seven title                                                   105     3e-34
+NP_100006.1 unnamed protein product                                   105     3e-34
+US7654321_3 Sequence 3 from Patent US 7654321                         105     3e-34
+2XYY unnamed protein product                                          105     3e-34
+2XYZ_B Chain B                                                        105     3e-34
+DAA10002.1 unnamed protein product                                    105     3e-34
+DAA10001.1 tpa titled protein                                         105     3e-34
+P11111.1 titled first                                                 105     3e-34
+unnamed protein product                                               105     3e-34
+subject seven                                                         105     3e-34
+EP0238993_7 pre-grant patent                                          105     3e-34
+prf|ABC|DEF prf two fields                                            105     3e-34
+EP0123456A1_7 patent with letters                                     105     3e-34
+USRE33188_1 patent reissue                                            105     3e-34
+ti:123 trace id                                                       105     3e-34
+long1 long title word long title word long title word long title ...  105     3e-34
+AAA00100.1 big gi                                                     105     3e-34
+123 gibbmt                                                            105     3e-34
+GPP123 genome pipeline                                                105     3e-34
+BK000013.1 third party ddbj                                           105     3e-34
+BK000012.1 third party embl                                           105     3e-34
+
+
+Sequence with id XP_000001 no longer exists in database...alignment skipped
+Sequence with id 9002 no longer exists in database...alignment skipped
+Sequence with id 123456 no longer exists in database...alignment skipped
+Sequence with id XP_910001 no longer exists in database...alignment skipped
+Sequence with id Q00003 no longer exists in database...alignment skipped
+Sequence with id CAA00005 no longer exists in database...alignment skipped
+Sequence with id XP_920001 no longer exists in database...alignment skipped
+Sequence with id A0A000 no longer exists in database...alignment skipped
+Sequence with id 1ABC_A no longer exists in database...alignment skipped
+Sequence with id BAA00006 no longer exists in database...alignment skipped
+Sequence with id S00007 no longer exists in database...alignment skipped
+Sequence with id 0008123A no longer exists in database...alignment skipped
+Sequence with id mydb:prot10 no longer exists in database...alignment skipped
+Sequence with id myprot9 no longer exists in database...alignment skipped
+Sequence with id XP_000011 no longer exists in database...alignment skipped
+Sequence with id P00012 no longer exists in database...alignment skipped
+Sequence with id myprot_13 no longer exists in database...alignment skipped
+Sequence with id AAA00017 no longer exists in database...alignment skipped
+Sequence with id 1818 no longer exists in database...alignment skipped
+Sequence with id P00019 no longer exists in database...alignment skipped
+Sequence with id DAA00016 no longer exists in database...alignment skipped
+Sequence with id Subject_36 no longer exists in database...alignment skipped
+Sequence with id 5ABC_D no longer exists in database...alignment skipped
+Sequence with id WP_100014 no longer exists in database...alignment skipped
+Sequence with id NC_100013 no longer exists in database...alignment skipped
+Sequence with id BK100012 no longer exists in database...alignment skipped
+Sequence with id 4ABC no longer exists in database...alignment skipped
+Sequence with id Subject_30 no longer exists in database...alignment skipped
+Sequence with id Subject_29 no longer exists in database...alignment skipped
+Sequence with id Subject_28 no longer exists in database...alignment skipped
+Sequence with id Subject_27 no longer exists in database...alignment skipped
+Sequence with id NP_100006 no longer exists in database...alignment skipped
+Sequence with id US7654321_3 no longer exists in database...alignment skipped
+Sequence with id 2XYY no longer exists in database...alignment skipped
+Sequence with id 2XYZ_B no longer exists in database...alignment skipped
+Sequence with id DAA10002 no longer exists in database...alignment skipped
+Sequence with id DAA10001 no longer exists in database...alignment skipped
+Sequence with id P11111 no longer exists in database...alignment skipped
+Sequence with id Subject_8 no longer exists in database...alignment skipped
+Sequence with id Subject_7 no longer exists in database...alignment skipped
+Sequence with id EP0238993_7 no longer exists in database...alignment skipped
+Sequence with id ABC no longer exists in database...alignment skipped
+Sequence with id EP0123456A1_7 no longer exists in database...alignment skipped
+Sequence with id USRE33188_1 no longer exists in database...alignment skipped
+Sequence with id ti:123 no longer exists in database...alignment skipped
+Sequence with id long1 no longer exists in database...alignment skipped
+Sequence with id 3000000000 no longer exists in database...alignment skipped
+Sequence with id 123 no longer exists in database...alignment skipped
+Sequence with id GPP123 no longer exists in database...alignment skipped
+Sequence with id BK000013 no longer exists in database...alignment skipped
+Sequence with id BK000012 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.319    0.140    0.552    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0428    0.140     1.90     42.6     43.6 
+
+Effective search space used: 295464
+
+
+  Database: prot_v5 (parsed Seq-ids)
+    Posted date:  Oct 26, 2026  9:07 PM
+  Number of letters in database: 4,677
+  Number of sequences in database:  51
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -31,11 +31,11 @@ function keep(index: number, element: unknown): void {
   if (element instanceof HTMLButtonElement) buttons[index] = element;
 }
 /** Moves the focus to the chosen tab. */
-defineExpose({ focus: () => focusChosen() });
+defineExpose({ focus: (options?: FocusOptions) => focusChosen(options) });
 
-function focusChosen(): void {
+function focusChosen(options?: FocusOptions): void {
   const index = props.tabs.findIndex((tab) => tab.value === chosen.value);
-  buttons[index]?.focus();
+  buttons[index]?.focus(options);
 }
 
 async function onKey(event: KeyboardEvent): Promise<void> {

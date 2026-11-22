@@ -3,86 +3,8 @@
 //! (outfmt 8, 9, 11, 12) write it through `report::seqid::SeqId::Db`.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-74
-//! ```text
-//! Seq-id ::= CHOICE {
-//!     local Object-id ,            -- local use
-//!     gibbsq INTEGER ,             -- Geninfo backbone seqid
-//!     gibbmt INTEGER ,             -- Geninfo backbone moltype
-//!     giim Giimport-id ,           -- Geninfo import id
-//!     genbank Textseq-id ,
-//!     embl Textseq-id ,
-//!     pir Textseq-id ,
-//!     swissprot Textseq-id ,
-//!     patent Patent-seq-id ,
-//!     other Textseq-id ,           -- for historical reasons, 'other' = 'refseq'
-//!     general Dbtag ,              -- for other databases
-//!     gi INTEGER ,                 -- GenInfo Integrated Database
-//!     ddbj Textseq-id ,            -- DDBJ
-//!     prf Textseq-id ,             -- PRF SEQDB
-//!     pdb PDB-seq-id ,             -- PDB sequence
-//!     tpg Textseq-id ,             -- Third Party Annot/Seq Genbank
-//!     tpe Textseq-id ,             -- Third Party Annot/Seq EMBL
-//!     tpd Textseq-id ,             -- Third Party Annot/Seq DDBJ
-//!     gpipe Textseq-id ,           -- Internal NCBI genome pipeline processing ID
-//!     named-annot-track Textseq-id -- Internal named annotation tracking ID
-//! }
-//! ...
-//! Patent-seq-id ::= SEQUENCE {
-//!     seqid INTEGER ,         -- number of sequence in patent
-//!     cit Id-pat }           -- patent citation
-//!
-//! Textseq-id ::= SEQUENCE {
-//!     name VisibleString OPTIONAL ,
-//!     accession VisibleString OPTIONAL ,
-//!     release VisibleString OPTIONAL ,
-//!     version INTEGER OPTIONAL }
-//!
-//! Giimport-id ::= SEQUENCE {
-//!     id INTEGER ,                     -- the id to use here
-//!     db VisibleString OPTIONAL ,      -- dbase used in
-//!     release VisibleString OPTIONAL } -- the release
-//!
-//! PDB-seq-id ::= SEQUENCE {            --
-//!       mol PDB-mol-id ,                    -- the molecule name
-//!       chain INTEGER DEFAULT 32 ,          -- Deprecated:  'chain' can't support multiple character
-//!       ...
-//!       rel Date OPTIONAL ,                 -- release date, month and year
-//!       chain-id VisibleString OPTIONAL }   -- chain identifier; length-independent generalization of 'chain'
-//!
-//! PDB-mol-id ::= VisibleString  -- name of mol, 4 chars
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objects/general/general.asn:54-80
-//! ```text
-//! Date ::= CHOICE {
-//!     str VisibleString ,        -- for those unparsed dates
-//!     std Date-std }             -- use this if you can
-//!
-//! Date-std ::= SEQUENCE {        -- NOTE: this is NOT a unix tm struct
-//!     year INTEGER ,             -- full year (including 1900)
-//!     month INTEGER OPTIONAL ,   -- month (1-12)
-//!     day INTEGER OPTIONAL ,     -- day of month (1-31)
-//!     season VisibleString OPTIONAL ,  -- for "spring", "may-june", etc
-//!     hour INTEGER OPTIONAL ,    -- hour of day (0-23)
-//!     minute INTEGER OPTIONAL ,  -- minute of hour (0-59)
-//!     second INTEGER OPTIONAL }  -- second of minute (0-59)
-//! ...
-//! Dbtag ::= SEQUENCE {
-//!     db VisibleString ,          -- name of database or system
-//!     tag Object-id }         -- appropriate tag
-//! ...
-//! Object-id ::= CHOICE {
-//!     id INTEGER ,
-//!     str VisibleString }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objects/biblio/biblio.asn:119-124
-//! ```text
-//! Id-pat ::= SEQUENCE {                   -- just to identify a patent
-//!     country VisibleString ,             -- Patent Document Country
-//!     id CHOICE {
-//!         number VisibleString ,          -- Patent Document Number
-//!         app-number VisibleString } ,    -- Patent Doc Appl Number
-//!     doc-type VisibleString OPTIONAL }   -- Patent Doc Type
-//! ```
 //!
 //! An OPTIONAL member is an `Option` (`None`: not set); a member with a DEFAULT (`chain`) is
 //! an `Option` too, `None` when the stored value did not hold it: NCBI keeps a set flag for
@@ -279,20 +201,6 @@ impl ParsedSeqId {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:169-199
-    // ```c++
-    // const CTextseq_id* CSeq_id::GetTextseq_Id(void) const
-    // {
-    //     switch ( Which() ) {
-    //     case e_Genbank:
-    //         return &GetGenbank();
-    //     ...
-    //     case e_Named_annot_track:
-    //         return &GetNamed_annot_track();
-    //     default:
-    //         return 0;
-    //     }
-    // }
-    // ```
     /// `CSeq_id::GetTextseq_Id`: the Textseq-id of the twelve accession-based alternatives.
     pub fn textseq(&self) -> Option<&TextseqId> {
         match self {

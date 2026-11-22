@@ -2,26 +2,6 @@
 //! (outfmt 11).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
-//! ```c++
-//! void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
-//! {
-//! 	if(m_handler != NULL) {
-//! 		m_handler->Post(mess);
-//! 	}
-//! 	if(m_save) {
-//! 		CRef<CBlast4_error> d(new CBlast4_error);
-//! 		string m;
-//! 		mess.Write(m);
-//! 		d->SetMessage(NStr::Sanitize(m));
-//! 		d->SetCode((int)mess.m_Severity);
-//! 		{
-//! 			DEFINE_STATIC_MUTEX(mx);
-//! 			CMutexGuard guard(mx);
-//! 			m_messages.push_back(d);
-//! 		}
-//! 	}
-//! }
-//! ```
 //! Every diagnostic that the application posts is printed (the handler it wraps) and, when
 //! the application writes an archive, saved with its severity (`eDiag_Warning` 1,
 //! `eDiag_Error` 2, `eDiag_Critical` 3) and its text with the white space cleaned. LOSAT prints the same lines
@@ -57,6 +37,9 @@ enum Post {
     /// The loads of a batch's prefetch (`Posts::loads`): lines whose text is made where they are
     /// written.
     Loads(Vec<crate::report::query_warnings::SubjectRead>),
+    /// Lines of the query's result warnings that the call's first format does not write and a
+    /// format after it does (`Posts::later`): they show nothing on the diagnostics.
+    Later(Vec<u8>),
 }
 
 /// Where NCBI writes the search strategy request of the batch whose first query (the run's) is
@@ -82,13 +65,6 @@ impl Posts {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-282
-    // ```c++
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    //
-    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-    // ```
     /// The place where NCBI writes the search strategy request of `export`'s batch whose first
     /// query (the run's) is `first`: writing these posts there (`write`) marks the requests through
     /// that batch as NCBI's (`StrategyExport::release_through`; those after the last place reached
@@ -118,14 +94,39 @@ impl Posts {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452
+    /// Adds `lines`, the query's result warnings, where the call's first format is a structured
+    /// one, which returns before them, and the caller takes those of the formats after it
+    /// (`ReportOutputs::later_warnings`): the command line's run of such a format posts them when
+    /// the query's report starts, so its writer writes them to the format's receiver there
+    /// (`write_later`, `QueryWarnings::with_later`). Nothing of them shows on the diagnostics
+    /// (`write`, `text`, `has_text`), which are the first format's.
+    pub fn later(&mut self, lines: &[u8]) {
+        if !lines.is_empty() {
+            self.0.push(Post::Later(lines.to_vec()));
+        }
+    }
+
+    /// `posts`, the posts before each query's report, with the later lines of each query
+    /// (`later`, with NCBI's lines above it; `lines` by query, none for a query beyond it).
+    pub fn with_later(mut posts: Vec<Posts>, lines: &[Vec<u8>]) -> Vec<Posts> {
+        for (posts, lines) in posts.iter_mut().zip(lines) {
+            posts.later(lines);
+        }
+        posts
+    }
+
+    /// Writes the lines of `later` (with NCBI's lines above it) to `receiver`, a later format's
+    /// (`ReportOutputs::later_warnings`).
+    pub fn write_later(&self, receiver: &mut Vec<u8>) {
+        for post in &self.0 {
+            if let Post::Later(lines) = post {
+                receiver.extend_from_slice(lines);
+            }
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
-    // ```c++
-    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
-    //                 		                            fmt_args->GetFormattedOutputChoice());
-    //                 ITERATE(CSearchResultSet, result, *results) {
-    //                     formatter.PrintOneResultSet(**result, query_batch);
-    //                 }
-    // ```
     /// Adds the texts of the loads of a batch's prefetch (`reads`, in the order of the loads;
     /// `common::database::batch_prefetch`), each line a warning. NCBI's prefetch loads the batch's
     /// subjects after the reports of the batches before, whose loads a BLAST XML stream that cut
@@ -163,7 +164,9 @@ impl Posts {
         for post in &other.0 {
             match post {
                 Post::Lines(lines) => self.lines(lines),
-                Post::Whole { .. } | Post::Request(_) | Post::Loads(_) => self.0.push(post.clone()),
+                Post::Whole { .. } | Post::Request(_) | Post::Loads(_) | Post::Later(_) => {
+                    self.0.push(post.clone())
+                }
             }
         }
     }
@@ -192,7 +195,9 @@ impl Posts {
                     posts.lines(&text);
                 }
                 Post::Lines(lines) => posts.lines(lines),
-                Post::Whole { .. } | Post::Request(_) => posts.0.push(post.clone()),
+                Post::Whole { .. } | Post::Request(_) | Post::Later(_) => {
+                    posts.0.push(post.clone())
+                }
             }
         }
         posts
@@ -203,12 +208,12 @@ impl Posts {
         self.0.is_empty()
     }
 
-    /// Whether a post shows text on the diagnostics (a request mark alone shows none; loads, whose
-    /// texts are made where they are written, count as text unless none of them can make one:
-    /// `placed` first where it decides).
+    /// Whether a post shows text on the diagnostics (a request mark alone shows none, nor do a
+    /// later format's lines, `later`; loads, whose texts are made where they are written, count
+    /// as text unless none of them can make one: `placed` first where it decides).
     pub fn has_text(&self) -> bool {
         self.0.iter().any(|post| match post {
-            Post::Request(_) => false,
+            Post::Request(_) | Post::Later(_) => false,
             Post::Loads(reads) => reads
                 .iter()
                 .any(|read| !read.text.is_empty() || read.load.is_some()),
@@ -225,7 +230,7 @@ impl Posts {
                     text.extend_from_slice(bytes)
                 }
                 Post::Loads(reads) => text.extend(reads.iter().flat_map(|read| read.placed())),
-                Post::Request(_) => {}
+                Post::Request(_) | Post::Later(_) => {}
             }
         }
         text
@@ -234,7 +239,8 @@ impl Posts {
     /// Writes the posts to `diagnostics`, the stream of the run's diagnostics: the lines as they
     /// are, and with the BLAST archive (`archive`, whose handle saves what that stream writes)
     /// each whole post saved as one message (`ArchiveHandle::write_post`); a request mark marks its
-    /// search strategy requests reached (`request`); the loads' texts are made here (`placed`).
+    /// search strategy requests reached (`request`); the loads' texts are made here (`placed`). A
+    /// later format's lines (`later`) are not the diagnostics': nothing of them is written.
     pub fn write(
         &self,
         diagnostics: &mut dyn std::io::Write,
@@ -243,6 +249,7 @@ impl Posts {
         for post in &self.0 {
             match (post, archive) {
                 (Post::Request(mark), _) => mark.export.release_through(mark.first)?,
+                (Post::Later(_), _) => {}
                 (Post::Loads(reads), _) => {
                     for read in reads {
                         diagnostics.write_all(&read.placed())?;
@@ -330,36 +337,5 @@ pub fn sanitize(line: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sanitize_cleans_white_space_like_ncbi() {
-        assert_eq!(sanitize(b"  a  b\t\tc \r"), b"a b c");
-        assert_eq!(sanitize(b"x\x01\x02y"), b"x y");
-        assert_eq!(sanitize(b"caf\xc3\xa9!"), b"caf !");
-        assert_eq!(sanitize(b" \t "), b"");
-        assert_eq!(
-            sanitize(b"File is not accessible:  `a b'"),
-            b"File is not accessible: `a b'"
-        );
-        assert_eq!(sanitize(b"\"quoted\""), b"\"quoted\"");
-    }
-
-    #[test]
-    fn lines_are_saved_when_complete() {
-        let mut log = DiagLog::default();
-        log.feed(b"Warning: [blastn] one\nWar");
-        log.feed(b"ning: [blastn]  two\n\n");
-        log.post(ERROR, b"BLAST query error: x\n");
-        assert_eq!(
-            log.take(),
-            vec![
-                (WARNING, b"Warning: [blastn] one".to_vec()),
-                (WARNING, b"Warning: [blastn] two".to_vec()),
-                (ERROR, b"BLAST query error: x".to_vec()),
-            ]
-        );
-        assert!(log.is_empty());
-    }
-}
+#[path = "diag_log_tests.rs"]
+mod tests;

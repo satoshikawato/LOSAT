@@ -1,0 +1,242 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "rpstblastn",
+      "version": "RPSTBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.001,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "stopq",
+          "query_len": 600,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 27,
+            "eff_space": 82388,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "rpstblastn",
+      "version": "RPSTBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.001,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "len3",
+          "query_len": 3,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 0,
+            "eff_space": 560,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "rpstblastn",
+      "version": "RPSTBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.001,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "YP_009220476.1 bt strand=+ flank=0",
+          "query_len": 637,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 28,
+            "eff_space": 87584,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "rpstblastn",
+      "version": "RPSTBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.001,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_4",
+          "query_title": "YP_009220478.1 bt strand=- flank=0",
+          "query_len": 905,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 30,
+            "eff_space": 127370,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "rpstblastn",
+      "version": "RPSTBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.001,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_5",
+          "query_title": "lower",
+          "query_len": 600,
+          "query_masking": [
+            {
+              "from": 198,
+              "to": 258
+            },
+            {
+              "from": 199,
+              "to": 259
+            },
+            {
+              "from": 200,
+              "to": 257
+            }
+          ],
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|CDD|101",
+                  "accession": "101",
+                  "title": "f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190"
+                }
+              ],
+              "len": 190,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 277.033,
+                  "score": 708,
+                  "evalue": 2.22255e-100,
+                  "identity": 190,
+                  "positive": 190,
+                  "query_from": 1,
+                  "query_to": 570,
+                  "query_frame": 1,
+                  "hit_from": 1,
+                  "hit_to": 190,
+                  "align_len": 190,
+                  "gaps": 0,
+                  "qseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAgeviegcttvssikelisvlpEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "hseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "midline": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 27,
+            "eff_space": 82867,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

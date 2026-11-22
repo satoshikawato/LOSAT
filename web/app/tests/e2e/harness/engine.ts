@@ -21,7 +21,8 @@ import {
 import { runCases, type CaseResult } from '../../contract/contract';
 import { ENGINE_INPUT_CASES } from '../../contract/engine-input.contract';
 import { RUN_OUTPUT_CASES, type RemoteWriter } from '../../contract/run-output.contract';
-import type { HighMemoryRequest, HighMemoryResult, HighMemorySearch } from './protocol';
+import { answerLink } from '../../../../packages/losat/src/infra/engine-worker/link';
+import type { HighMemoryEvent, HighMemoryRequest, HighMemoryResult, HighMemorySearch } from './protocol';
 
 export interface SearchInput {
   /** Where the harness fetches the bytes (the test serves them). */
@@ -415,7 +416,7 @@ export async function retention(
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, parser);
+        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true });
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -503,7 +504,7 @@ export async function timed(list: readonly SearchCase[], options: TimedOptions =
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, parser);
+        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true });
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -676,22 +677,27 @@ export async function highMemory(
   const bytesOf = async (input: SearchInput) => new Uint8Array(await (await fetchFile(input)).arrayBuffer());
   const searches: HighMemorySearch[] = [];
   for (const c of cases) searches.push({ program: c.program, argv: c.argv, query: await bytesOf(c.query), subject: await bytesOf(c.subject) });
-  const request: HighMemoryRequest = { threads, faultChannel: `losat-high-memory-${crypto.randomUUID()}`, cases: searches };
+  const request: HighMemoryRequest = { threads, cases: searches };
   const worker = new Worker(new URL('./high-memory-worker.ts', import.meta.url), { type: 'module' });
-  // A thread that stops leaves the worker inside the engine: the page hears of it here.
-  const faults = new BroadcastChannel(request.faultChannel);
+  // A thread that stops leaves the worker inside the engine: the page hears of it on the thread worker's link.
+  const links: MessagePort[] = [];
   try {
     return await new Promise<HighMemoryResult>((resolve, reject) => {
       worker.onerror = (event) => reject(new Error(`the high-memory worker failed: ${event.message}`));
-      faults.onmessage = (event: MessageEvent<{ message?: string }>) => reject(new Error(event.data.message ?? 'a thread stopped'));
-      worker.onmessage = (event: MessageEvent<{ type: string; result?: HighMemoryResult; message?: string }>) => {
-        if (event.data.type === 'result') resolve(event.data.result!);
-        else reject(new Error(event.data.message));
+      worker.onmessage = (event: MessageEvent<HighMemoryEvent>) => {
+        const message = event.data;
+        if (message.type === 'link') {
+          links.push(message.port);
+          answerLink(message.port, (linked) => {
+            if (linked?.type === 'fault') reject(new Error(linked.message));
+          });
+        } else if (message.type === 'result') resolve(message.result);
+        else reject(new Error(message.message));
       };
       worker.postMessage(request);
     });
   } finally {
-    faults.close();
+    for (const port of links) port.close();
     worker.terminate();
   }
 }
@@ -708,27 +714,35 @@ export async function endWaitingWorkers(url: string, rounds: number, maximumPage
   const module = await WebAssembly.compile(await (await fetch(url)).arrayBuffer());
   const answers: string[] = [];
   for (let round = 0; round < rounds; round++) {
-    const keeperChannel = `losat-test-keeper:${crypto.randomUUID()}`;
-    const keeper = new BroadcastChannel(keeperChannel);
     const worker = new Worker(new URL('./wait-worker.ts', import.meta.url), { type: 'module' });
+    // The keeper's link (link.ts), which the worker posts before it gives the keeper the other end.
+    let keeper: MessagePort | undefined;
+    let grown: () => void = () => undefined;
     try {
       const answer = await new Promise<string>((resolve) => {
-        worker.onmessage = (event: MessageEvent<string>) => resolve(event.data);
+        worker.onmessage = (event: MessageEvent<string | { readonly type: 'link'; readonly port: MessagePort }>) => {
+          if (typeof event.data === 'string') {
+            resolve(event.data);
+            return;
+          }
+          keeper = event.data.port;
+          answerLink(keeper, (message) => {
+            if (message?.type === 'grown') grown();
+          });
+        };
         worker.onerror = (event) => resolve(`the worker failed: ${event.message}`);
-        worker.postMessage({ module, maximumPages, keeperChannel });
+        worker.postMessage({ module, maximumPages });
       });
       answers.push(answer);
       if (answer !== 'waiting') break;
       // The thread is in its wait a moment after it said so.
       await new Promise((resolve) => setTimeout(resolve, 50));
       await new Promise<void>((resolve) => {
-        keeper.onmessage = (event: MessageEvent<{ type?: string }>) => {
-          if (event.data?.type === 'grown') resolve();
-        };
-        keeper.postMessage({ type: 'grow' });
+        grown = resolve;
+        keeper!.postMessage({ type: 'grow' });
       });
     } finally {
-      keeper.close();
+      keeper?.close();
       worker.terminate();
     }
   }

@@ -71,14 +71,16 @@ impl ReportSequences for AnchoredSequences<'_> {
 
     fn query_letters(&self, q_idx: usize, from: u32, to: u32, out: &mut Vec<u8>) {
         // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:304-305
-        // ```c++
-        //         if (IsPositiveStrand(row)) {
-        //             x_GetSeqVector(row).GetSeqData(seq_from, seq_to + 1, buffer);
-        // ```
         // The letters of the query's Bioseq at record positions (`QueryRecord::letters`, from
         // position 0), whose `CSeqVector` stops at the record's end.
         if let Some(record) = self.query_records.record(q_idx) {
-            query_record_letters(record.letters, 0, from, to, out);
+            query_record_letters(
+                crate::report::row_letters::QueryLetters::new(record.letters, None),
+                0,
+                from,
+                to,
+                out,
+            );
         }
     }
 

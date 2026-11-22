@@ -1,0 +1,324 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">wm_mq00 len1250"
+                  }
+                }
+              },
+              title "wm_mq00 len1250"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 1314,
+              seq-data ncbi2na '399E3EF4A33AA3DE81F8CF5B63E079194B192E610DB12C
+800982F5DDE3BE9B4648FB9E99889E4DF8D235998E45694686614F83DF8F4E991EE6E973DBB4B9
+C4FDD399012A6C99416E98F9D909B96FE13113E0218D2A9ABAFD738004DE7B63808C18D21E509D
+A6678F8E7A6C6F5F423E0A9BC408CE271B820CD1694F365239FBE50CF8206E98DE9999F4D2B6C7
+813F7FBD4D868421F945BAC9123CFFB8395B0E98CFA66F73D9603FB69796B2B82CB80BA20234DD
+8EF96F16251E903A63A5E06EF8F01B82DB6BFDA9431AD8801688034B164CCCCCCCCCCCCCCCCCCC
+CCCCCCCCCCCCEDE950E0394923F9100F6564D151C05B0DF8D307A49291E1001762606DABA6B213
+E07A9AFA4A043E3DE1DD14B822ABD24C19119E8EA4BD86094306480090E0437828EB7A401EA901
+5DCF19598EE40F0FE9AA99EFEC50521EF018BD65B8279613928E799B7E52F14990'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">wm_mq03 len1438"
+                  }
+                }
+              },
+              title "wm_mq03 len1438"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 1502,
+              seq-data ncbi2na '7D78FF93E4F796F9A63F2E73FD8903C4468AC0470EFC7F
+BE331D2592A298EE010262F486FA760DD2A6D8EC983A49053F8074AFD3A8A64BB4E59B455E6388
+702053E6C090D78041DAFE2F0D943C00AF0E1398884B603CE6F356F1DF115996829AF33AFDFFBA
+3357826F864A9807B678263A09A40239FC78593F8FFFFF8230627CD5FC5F653C0CB4E347F3E0B1
+7F89B65DC2F3E7BC0E7FFC4B480D1D2422F252983E901701088F1D973F07E4D398400D8A6B5276
+690299FA408BCD9EB8EBF0F12FC600BED3FF041E3321E5834DE44C3C63D8C3800314927E4810F1
+98923E6DAB37A415A636FC5F6F9B852BA67F7A4E27F33333333333333333333333333333333387
+B494E5CD2F9D80B4B8CCF3646164B6AF3C6F9944A420039602E52D3D4B47623824B633411F33FF
+8CE79294B6635B6B6F5BF97697F5615907FD55D4107016767A64AC2401651A6389B8F801F96528
+06481E6D29CF95B67397C4AA3453F75E380FB4D1E5A96F2293C05D2FE426B07816A63EAE32C883
+5FB0'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">wm_mq04 len1682"
+                  }
+                }
+              },
+              title "wm_mq04 len1682"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 1746,
+              seq-data ncbi2na '4E38E335A6CBA0BA4646678FED25E65124B5E6594341B4
+111640C5162453653CBEFD9E51E9001466C4D4BBA6F04E5812B958208D54039633A048F614CD14
+D59BF3624DE1F8A29994AEC795B2DB264949E58A00116D9103B1AB2336C00086F48C7834FD5175
+6478ED84CF9A66135E1C09B678CF8F09A627B4465BA6F37D0C07D17BD77D511E4D0997A6AED366
+77D9EFC7EFFB847B47E02EC7D594BE49224D01066C51AE5D9BEFF09859424A98A369906F890D7D
+FD978DB4A4B19F031D48C49AC8C36A4BD5843527929617FD31D6524AD453E5E966366A1DA4E04E
+F604924986EB9959AD011F6453DA5EFCD492699BC24AF9AB80D6C24DA64D9A68D065266D75F93D
+5104DDB5A31D4D04A58D1FE28DE4F3D95D67FB6647DAE38CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+FE3A4D8C69C7BE04AF83F9ED625B8416D140AC016494F9BDE60A4D9594FD58E9EB6A304018DF4C
+BE90E988C98C4FDF617A98E74A5C7DB63A462CD2C197D46BFB819332E9936534D6FD26564B1685
+ACD9691D04CFA6233E45A0C64A7F63A6A49197D9FF69016564DE6CA1E0DAE1268A06C5214DA4AB
+9ACF4AB926B2E52FD4B53653FEC87A6067A926D0D13FEE80'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_4"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">wm_mq02 len77"
+                  }
+                }
+              },
+              title "wm_mq02 len77"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 77,
+              seq-data ncbi2na '53B568129245149BA4E192B6DFF16652CA840500'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/wm_s60k",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "RepeatFilteringDB",
+          value string "tests/db_search/rpt_d4"
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 0
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 833,
+                  to 896,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 486,
+                  to 495,
+                  id local str "Query_2"
+                },
+                {
+                  from 486,
+                  to 495,
+                  id local str "Query_2"
+                },
+                {
+                  from 500,
+                  to 619,
+                  id local str "Query_2"
+                },
+                {
+                  from 500,
+                  to 619,
+                  id local str "Query_2"
+                },
+                {
+                  from 957,
+                  to 1023,
+                  id local str "Query_2"
+                },
+                {
+                  from 957,
+                  to 1023,
+                  id local str "Query_2"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 300,
+                  to 699,
+                  id local str "Query_3"
+                },
+                {
+                  from 300,
+                  to 699,
+                  id local str "Query_3"
+                },
+                {
+                  from 1121,
+                  to 1184,
+                  id local str "Query_3"
+                },
+                {
+                  from 1121,
+                  to 1184,
+                  id local str "Query_3"
+                }
+              }
+            },
+            frame plus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 833,
+              to 896,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 486,
+              to 495,
+              id local str "Query_2"
+            },
+            {
+              from 500,
+              to 619,
+              id local str "Query_2"
+            },
+            {
+              from 957,
+              to 1023,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 300,
+              to 699,
+              id local str "Query_3"
+            },
+            {
+              from 1121,
+              to 1184,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame plus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 77710752",
+      "Effective search space used: 77710752",
+      "Length adjustment: 18"
+    }
+  }
+}

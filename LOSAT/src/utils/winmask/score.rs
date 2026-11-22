@@ -15,16 +15,6 @@ pub(super) struct ScoreMean {
 
 impl ScoreMean {
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_score_mean.cpp:83-90
-    /// ```c
-    /// void CSeqMaskerScoreMean::Init()
-    /// {
-    ///     start = window->Start();
-    ///     num = window->NumUnits();
-    ///     scores.resize( num, 0 );
-    ///
-    ///     FillScores();
-    /// }
-    /// ```
     pub(super) fn new(window: &Window<'_>, ustat: &UnitCounts) -> Result<Self, WinMaskError> {
         let num = window.num_units() as u32;
         let mut score = Self {
@@ -39,32 +29,12 @@ impl ScoreMean {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_score_mean.cpp:48-49
-    /// ```c
-    /// Uint4 CSeqMaskerScoreMean::operator()()
-    /// { return sum/num; }
-    /// ```
     #[inline]
     pub(super) fn value(&self) -> u32 {
         self.sum / self.num
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_score_mean.cpp:62-80
-    /// ```c
-    ///     if(    step == 1
-    ///            && window->UnitStep() == 1
-    ///            && window->Start() - start == 1 )
-    ///     {
-    ///         /*!!!!NEW CODE*/ sum -= *scores_start;
-    ///         *scores_start = (*ustat)[(*window)[num - 1]];
-    /// ...
-    ///         sum += *scores_start;
-    ///         scores_start = (scores_start - &scores[0] == (int)(num - 1) )
-    /// 	             ? &scores[0]
-    ///                      : scores_start + 1;
-    ///         /*!!!!NEW CODE*/ start = window->Start();
-    ///     }
-    ///     else{ FillScores(); }
-    /// ```
     /// `Uint4` arithmetic: the sum wraps as NCBI's does (it never needs to with real counts).
     pub(super) fn post_advance(
         &mut self,
@@ -90,19 +60,6 @@ impl ScoreMean {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_score_mean.cpp:93-109
-    /// ```c
-    ///   sum = 0;
-    ///   scores_start = &scores[0];
-    ///
-    ///   for( Uint1 i = 0; i < num; ++i )
-    ///   {
-    ///     scores[i] = (*ustat)[(*window)[i]];
-    /// ...
-    ///     sum += scores[i];
-    ///   }
-    ///
-    ///   /*!!!!NEW CODE*/ start = window->Start();
-    /// ```
     fn fill_scores(&mut self, window: &Window<'_>, ustat: &UnitCounts) -> Result<(), WinMaskError> {
         self.sum = 0;
         self.scores_start = 0;

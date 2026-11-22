@@ -78,7 +78,8 @@ fn blastdbcmd(words: &[&str], config: &Path) -> (Vec<u8>, Vec<u8>, i32) {
     (output.stdout, output.stderr, output.status.code().unwrap())
 }
 
-/// The frozen file `name` of `tests/blastdbcmd/expected`, with `{R}` placed.
+/// The frozen file `name` of `tests/blastdbcmd/expected`, with `{R}` placed, in LOSAT's words
+/// (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
 fn expected(name: &str) -> Vec<u8> {
     let text = fs::read(run_dir().join("expected").join(name)).unwrap();
     let root = run_dir();
@@ -91,7 +92,7 @@ fn expected(name: &str) -> Vec<u8> {
         rest = &rest[at + 3..];
     }
     placed.extend_from_slice(rest);
-    placed
+    losat::wording::losat_output_bytes(&placed).into_owned()
 }
 
 /// The probe's cases: id, words, exit status. `db/nm5` and `db/nm4` have the dust masks 11 and
@@ -430,7 +431,7 @@ fn a_damaged_mask_column_is_ncbi_s_error() {
         );
         assert_eq!(
             String::from_utf8_lossy(&stderr),
-            format!("BLAST Database error: {message}\n"),
+            format!("LOSAT database error: {message}\n"),
             "{name}"
         );
         assert_eq!(code, 2, "{name}");
@@ -481,7 +482,7 @@ fn damaged_metadata_and_masks_are_ncbi_s_errors() {
     let (_, stderr, code) = blastdbcmd(&["-db", &db, "-info"], &config.0);
     assert_eq!(
         String::from_utf8_lossy(&stderr),
-        "BLAST Database error: CSeqDBColumn: Error; duplicate metadata key.\n"
+        "LOSAT database error: CSeqDBColumn: Error; duplicate metadata key.\n"
     );
     assert_eq!(code, 2);
 

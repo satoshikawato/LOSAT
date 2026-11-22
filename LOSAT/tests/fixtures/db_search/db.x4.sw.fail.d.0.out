@@ -1,0 +1,60 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/x4/sw_subjects.faa).
+           2 sequences; 284 total letters
+
+
+
+Query= qok1 BDT63546.1 with W first
+
+Length=124
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sok1 BDT63546.1 of PajaWSV                                            250     4e-73
+
+
+> sok1 BDT63546.1 of PajaWSV
+Length=124
+
+ Score = 250 bits (638),  Expect = 4e-73, Method: Compositional matrix adjust.
+ Identities = 123/124 (99%), Positives = 123/124 (99%), Gaps = 0/124 (0%)
+
+Query  1    WATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIGLIVVAIMNLRMG  60
+             ATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIGLIVVAIMNLRMG
+Sbjct  1    MATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIGLIVVAIMNLRMG  60
+
+Query  61   MGNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYT  120
+            MGNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYT
+Sbjct  61   MGNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYT  120
+
+Query  121  TRLK  124
+            TRLK
+Sbjct  121  TRLK  124
+
+
+
+Lambda      K        H
+   0.319    0.135    0.390 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000

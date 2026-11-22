@@ -1,14 +1,7 @@
 //! tblastn's linking candidates chosen by subject position (`src/algorithm/tblastn/stage_d_linking/x_link_window.rs`;
 //! the former switch `LOSAT_X_TBNLINKWIN` graduated on 2026-10-26) on whole searches.
 //!
-//! NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723
-//! ```c
-//!        for (index1 = hsp_index_left; index1 < hsp_index_right; ++index1) {
-//!            BlastLinkedHSPSet* lhsp = offset_hsp_array[index1];
-//!            ...
-//!            if (s_LinkedHSPSetsAdmissible(head_hsp, lhsp,
-//!                                          link_hsp_params, program)) {
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1713-1723
 //! The search tests the candidates of NCBI's window less those that cannot be admissible, in
 //! NCBI's order (the unit test `x_chosen_candidates_give_the_links_of_the_whole_window` compares
 //! the links with NCBI's whole window), so its report is that of NCBI's loop (the frozen NCBI
@@ -90,7 +83,7 @@ fn stats(stderr: &str) -> Option<[u64; 4]> {
     }))
 }
 
-// NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). The report does not
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). The report does not
 // depend on the threads; the line is there, and fewer candidates were tested than the windows held.
 #[test]
 fn the_report_is_the_same_at_every_thread_count_and_the_lookup_ran() {
@@ -107,7 +100,7 @@ fn the_report_is_the_same_at_every_thread_count_and_the_lookup_ran() {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). With the switch on, the
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1713-1723 (above). With the switch on, the
 // sets of two or more come from the subject lookup (the whole file of queries forms sets that the
 // lookup meets); with `=0` every set in the window is a candidate, as before. The reports are the
 // same at one and two threads.

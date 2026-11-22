@@ -6,7 +6,10 @@
 // failure ends the load, and a failure names the site and leaves the draft as it was. Delete
 // removes the saved copy and the subject sources made from it, in this tab and in the others.
 // "Save to folder…" (or "Download") writes the saved copy outside the browser's storage (line
-// WF-3); LOSAT does not read it back by itself: "Open FASTA files…" opens it.
+// WF-3); LOSAT does not read it back by itself: "Open FASTA files…" opens it. While a part of LOSAT
+// could not be loaded or stopped, a set is not loaded: the line says what the page says (line WQA's
+// sweep, D1; its review, M2, 2026-11-19).
+import { isUnavailable } from 'losat/ports';
 import {
   EXAMPLE_BYTE_LIMIT,
   EXAMPLE_SETS,
@@ -18,6 +21,7 @@ import {
   type ExampleSet,
 } from '../domain/examples';
 import { refusedSentence, unreachableSentence } from '../domain/download-sentences';
+import { withUnit } from '../domain/units';
 import type {
   DownloadResult,
   ExampleCopy,
@@ -27,15 +31,27 @@ import type {
   SavedExample,
 } from '../ports/example';
 import type { FileSaver } from '../ports/download';
+import { withRemedy, type Availability } from './availability';
 import type { DraftState, SearchDraft } from './draft';
 import { Store } from './store';
 
 export type ExampleLoad =
+  /**
+   * Asking LOSAT again whether it can be used (Availability.recheck), before any request: the row shows the load
+   * busy, with Cancel.
+   */
+  | { readonly state: 'asking' }
   /** Looking for the saved copy. */
   | { readonly state: 'reading' }
   | { readonly state: 'downloading'; readonly bytes: number; readonly total?: number }
+  /** The set is downloaded, and the engine's decoders inflate it (DownloadProgress.inflating). */
+  | { readonly state: 'inflating' }
   | { readonly state: 'saving' }
-  | { readonly state: 'failed'; readonly message: string };
+  /**
+   * With `unavailable`, refused as a part of LOSAT could not be loaded or stopped (an UnavailableError, with the remedy):
+   * it goes once LOSAT works (Availability).
+   */
+  | { readonly state: 'failed'; readonly message: string; readonly unavailable?: true };
 
 export interface ExamplesState {
   /** The saved copy of each set that was looked up; null when there is none. */
@@ -61,6 +77,11 @@ export interface ExamplesDeps {
   readonly deletions?: ExampleDeletions;
   /** Where a saved copy can be written; without it, "Save to folder…" and "Download" are not offered. */
   readonly saver?: FileSaver;
+  /**
+   * Whether LOSAT works: what of it could not be loaded or stopped, once the search form asked the engine again
+   * (recheck); without it, LOSAT is taken to work.
+   */
+  readonly availability?: Pick<Availability, 'state' | 'recheck'>;
 }
 
 export class ExampleLoader {
@@ -76,6 +97,12 @@ export class ExampleLoader {
       if (set === undefined) return;
       this.deps.draft.dropExample(set.id);
       this.setSaved(set.id, null);
+    });
+    // A load refused as a part of LOSAT could not be loaded said "Reload the page" also once LOSAT worked again (the
+    // fifth review of line WQA's D1 and D2, L2, 2026-11-19).
+    deps.availability?.state.subscribe(({ problem }) => {
+      const { load } = this.state.get();
+      if (problem === undefined && load?.progress.state === 'failed' && load.progress.unavailable === true) this.update({ load: undefined });
     });
   }
 
@@ -195,12 +222,41 @@ export class ExampleLoader {
       if (!signal.aborted) this.update({ load: { id: set.id, progress: next } });
     };
     const fail = (message: string) => progress({ state: 'failed', message });
+    // Not the set's fault: what the page says, with the remedy, until LOSAT works again (the constructor).
+    const refuse = (problem: string) => progress({ state: 'failed', message: withRemedy(problem), unavailable: true });
     this.update({ note: undefined });
+    // While a part of LOSAT could not be loaded or stopped, the load fails with what the page says, before any
+    // download: the set was downloaded whole (8 to 37 MB), and then the file was blamed, as the engine's decoders that
+    // inflate it, or the Data worker that keeps it, were what could not be used. The load is busy from the press: while
+    // LOSAT was asked again, it had no state, so the row showed no Cancel, and a mode change or a Delete did not end it:
+    // the set then downloaded and was saved for a mode the user had left (the fourth review of D1 and D2, M1).
+    progress({ state: 'asking' });
+    await this.deps.availability?.recheck();
+    if (signal.aborted) return;
+    // As it is now: what the page says may have changed since the answer.
+    const problem = this.deps.availability?.state.get().problem;
+    if (problem !== undefined) {
+      refuse(problem);
+      return;
+    }
+    // A mode that has no button for the set gets none of it.
+    if (!set.programs.includes(this.deps.draft.state.get().program)) {
+      this.cancel();
+      return;
+    }
     progress({ state: 'reading' });
     // A copy being deleted is gone first, so that the draft never gets a file that is about to go.
     await this.deleting.get(set.id);
-    const kept = await this.deps.store.readExample(set.id, set.url).catch(() => undefined);
+    let unavailable: Error | undefined;
+    const kept = await this.deps.store.readExample(set.id, set.url).catch((error: unknown) => {
+      if (isUnavailable(error)) unavailable = error;
+      return undefined;
+    });
     if (signal.aborted) return;
+    if (unavailable !== undefined) {
+      refuse(unavailable.message);
+      return;
+    }
     if (kept !== undefined) {
       this.finish(set, kept.file, kept.copy);
       return;
@@ -210,7 +266,8 @@ export class ExampleLoader {
     try {
       result = await this.deps.downloader.download(
         { url: set.url, maxBytes: EXAMPLE_BYTE_LIMIT, fileName: set.fileName },
-        ({ bytes, total }) => progress({ state: 'downloading', bytes, ...(total === undefined ? {} : { total }) }),
+        ({ bytes, total, inflating }) =>
+          progress(inflating === true ? { state: 'inflating' } : { state: 'downloading', bytes, ...(total === undefined ? {} : { total }) }),
         signal,
       );
     } catch (error) {
@@ -218,8 +275,10 @@ export class ExampleLoader {
       return;
     }
     if (signal.aborted) return;
+    // A set refused at its inflation kept "Reload the page" once LOSAT worked again (the sixth review, L1).
     if (!result.ok) {
-      fail(downloadProblem(result, set));
+      if (result.reason === 'unavailable') refuse(result.detail);
+      else fail(downloadProblem(result, set));
       return;
     }
     const { data, downloadedBytes, version } = result;
@@ -284,8 +343,8 @@ export class ExampleLoader {
   }
 }
 
-/** Why a download brought no set, for the Example line. */
-function downloadProblem(result: Exclude<DownloadResult, { ok: true }>, set: ExampleSet): string {
+/** Why a download brought no set, for the Example line (a part of LOSAT that is unavailable is refused as the page says it). */
+function downloadProblem(result: Exclude<DownloadResult, { ok: true } | { reason: 'unavailable' }>, set: ExampleSet): string {
   const host = exampleHost(set);
   switch (result.reason) {
     case 'unreachable':
@@ -295,7 +354,7 @@ function downloadProblem(result: Exclude<DownloadResult, { ok: true }>, set: Exa
     case 'corrupt':
       return `The file from ${host} could not be decompressed (${result.detail}).`;
     case 'too-large':
-      return `The file from ${host} is larger than ${EXAMPLE_BYTE_LIMIT / (1024 * 1024)} MiB decompressed.`;
+      return `The file from ${host} is larger than ${withUnit(EXAMPLE_BYTE_LIMIT / (1024 * 1024), 'MiB')} decompressed.`;
   }
 }
 

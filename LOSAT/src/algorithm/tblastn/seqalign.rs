@@ -21,19 +21,6 @@
 //!   length (`SubjectLetters::length`, with `-subject_loc` the interval's).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:331-342
-//! ```c
-//!             switch (align->matrix_adjust_rule) {
-//!             case eDontAdjustMatrix:
-//!                 new_hsp->comp_adjustment_method = eNoCompositionBasedStats;
-//!                 break;
-//!             case eCompoScaleOldMatrix:
-//!                 new_hsp->comp_adjustment_method = eCompositionBasedStats;
-//!                 break;
-//!             default:
-//!                 new_hsp->comp_adjustment_method = eCompositionMatrixAdjust;
-//!                 break;
-//!             }
-//! ```
 
 use std::io::Write;
 
@@ -68,6 +55,7 @@ pub(super) fn write_tblastn_seqalign(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastn,
+        rps: false,
         db_title: shown.db_title(),
         gapped: true,
     };

@@ -17,13 +17,6 @@ use crate::utils::matrix::BLASTAA_SIZE;
 
 /// One cell of the multiple sequence alignment (`PSIMsaCell`).
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_psi.h:49-53
-// ```c
-// typedef struct PSIMsaCell {
-//     Uint1   letter;             /**< Preferred letter at this position, in
-//                                   ncbistdaa encoding */
-//     Boolean is_aligned;         /**< Is this letter part of the alignment? */
-// } PSIMsaCell;
-// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct PsiMsaCell {
     pub(crate) letter: u8,
@@ -33,14 +26,6 @@ pub(crate) struct PsiMsaCell {
 /// The engine's input (`PSIMsa`): `rows[0]` is the query, `rows[1..]` the aligned sequences;
 /// every row has `query_length` cells.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:462-485
-// ```c
-// PSIMsaNew(const PSIMsaDimensions* dimensions)
-// {
-//     ...
-//     retval->data = (PSIMsaCell**) _PSIAllocateMatrix(dimensions->num_seqs + 1,
-//                                                     dimensions->query_length,
-//                                                     sizeof(PSIMsaCell));
-// ```
 #[derive(Debug, Clone)]
 pub(crate) struct PsiMsa {
     pub(crate) query_length: usize,
@@ -50,14 +35,6 @@ pub(crate) struct PsiMsa {
 impl PsiMsa {
     /// `PSIMsaNew`: `num_seqs + 1` rows of empty cells (letter 0, not aligned).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:493-498
-    // ```c
-    //         for (s = 0; s < dimensions->num_seqs + 1; s++) {
-    //             for (p = 0; p < dimensions->query_length; p++) {
-    //                 retval->data[s][p].letter = 0;
-    //                 retval->data[s][p].is_aligned = FALSE;
-    //             }
-    //         }
-    // ```
     pub(crate) fn new(query_length: usize, num_seqs: usize) -> Self {
         Self {
             query_length,
@@ -68,15 +45,6 @@ impl PsiMsa {
 
 /// A Karlin-Altschul block (`Blast_KarlinBlk`): the Lambda, K and H that the PSSM keeps.
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:66-72
-// ```c
-// typedef struct Blast_KarlinBlk {
-//       double   Lambda; /**< Lambda value used in statistics */
-//       double   K; /**< K value used in statistics */
-//       double   logK; /**< natural log of K value used in statistics */
-//       double   H; /**< H value used in statistics */
-//       double   paramC;  /**< for use in seed. */
-//    } Blast_KarlinBlk;
-// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct KarlinBlk {
     pub(crate) lambda: f64,
@@ -118,23 +86,6 @@ impl PsiScoreBlk {
     /// scaling computes again before anything reads it (`_PSIUpdateLambdaK` at every factor of
     /// `_PSIScaleMatrix`), so it is not kept.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:483-509
-    // ```c++
-    //     if (ancillary_data->GetPsiUngappedKarlinBlk()) {
-    //         _ASSERT(m_ScoreBlk->kbp_psi && m_ScoreBlk->kbp_psi[0]);
-    //         m_ScoreBlk->kbp_psi[0]->Lambda =
-    //             ancillary_data->GetPsiUngappedKarlinBlk()->Lambda;
-    //         ...
-    //     if (ancillary_data->GetPsiGappedKarlinBlk()) {
-    //         _ASSERT(m_ScoreBlk->kbp_gap_psi && m_ScoreBlk->kbp_gap_psi[0]);
-    //         m_ScoreBlk->kbp_gap_psi[0]->Lambda =
-    //             ancillary_data->GetPsiGappedKarlinBlk()->Lambda;
-    //         m_ScoreBlk->kbp_gap_psi[0]->K =
-    //             ancillary_data->GetPsiGappedKarlinBlk()->K;
-    //         m_ScoreBlk->kbp_gap_psi[0]->logK = log(m_ScoreBlk->kbp_gap_psi[0]->K);
-    //         m_ScoreBlk->kbp_gap_psi[0]->H =
-    //             ancillary_data->GetPsiGappedKarlinBlk()->H;
-    //     }
-    // ```
     pub(crate) fn set_ungapped_statistical_params(&mut self, psi_gapped: KarlinBlk) {
         self.gap_psi = psi_gapped;
     }
@@ -144,31 +95,7 @@ impl PsiScoreBlk {
 /// psiblast never asks for the residue frequencies or the independent observations, which are
 /// not modelled.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:591-608
-// ```c
-// PSIDiagnosticsRequestNewEx(Boolean save_ascii_pssm)
-// {
-//     PSIDiagnosticsRequest* retval = PSIDiagnosticsRequestNew();
-//     if ( !retval ) {
-//         return NULL;
-//     }
-//
-//     retval->frequency_ratios = TRUE;
-//     if (save_ascii_pssm) {
-//         retval->information_content = TRUE;
-//         retval->weighted_residue_frequencies = TRUE;
-//         retval->gapless_column_weights = TRUE;
-//         retval->sigma = TRUE;
-//         retval->interval_sizes = TRUE;
-//         retval->num_matching_seqs = TRUE;
-//     }
-//     return retval;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:175-176
-// ```c++
-//     CPSIDiagnosticsRequest
-//         diags(PSIDiagnosticsRequestNewEx(m_CmdLineArgs->SaveAsciiPssm()));
-// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PsiDiagnosticsRequest {
     pub(crate) information_content: bool,
@@ -217,19 +144,6 @@ pub(crate) struct PsiDiagnostics {
 
 /// The PSSM (`PSIMatrix`) and its diagnostics.
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_psi.h:150-160
-// ```c
-// typedef struct PSIMatrix {
-//     Uint4   ncols;      /**< Number of columns in PSSM (query_length) */
-//     Uint4   nrows;      /**< Number of rows in PSSM (alphabet_size) */
-//     int**   pssm;       /**< Position-specific score matrix */
-//     double  lambda;     /**< Lambda Karlin-Altschul parameter */
-//     double  kappa;      /**< Kappa Karlin-Altschul parameter */
-//     double  h;          /**< H Karlin-Altschul parameter */
-//     double  ung_lambda; /**< Ungapped Lambda Karlin-Altschul parameter */
-//     double  ung_kappa;  /**< Ungapped Kappa Karlin-Altschul parameter */
-//     double  ung_h;      /**< Ungapped H Karlin-Altschul parameter */
-// } PSIMatrix;
-// ```
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PsiPssm {
     /// `pssm[position][residue]`.
@@ -243,20 +157,6 @@ pub(crate) struct PsiPssm {
 
 /// The engine's failures that its stages can return for psiblast's input (`PSIERR_*`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.h:366-392
-// ```c
-// #define PSI_SUCCESS             (0)
-// #define PSIERR_BADPARAM         (-1)
-// #define PSIERR_OUTOFMEM         (-2)
-// #define PSIERR_BADSEQWEIGHTS    (-3)
-// #define PSIERR_NOFREQRATIOS     (-4)
-// #define PSIERR_POSITIVEAVGSCORE (-5)
-// #define PSIERR_NOALIGNEDSEQS    (-6)
-// #define PSIERR_GAPINQUERY       (-7)
-// #define PSIERR_UNALIGNEDCOLUMN  (-8)
-// #define PSIERR_COLUMNOFGAPS     (-9)
-// #define PSIERR_STARTINGGAP      (-10)
-// #define PSIERR_ENDINGGAP        (-11)
-// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PsiError {
     BadSeqWeights,
@@ -267,72 +167,39 @@ pub(crate) enum PsiError {
     ColumnOfGaps,
     StartingGap,
     EndingGap,
+    /// `PSIERR_UNKNOWN` (-255): a column without weight in the structure group's compatibility
+    /// mode (`_PSIComputeFreqRatios`).
+    Unknown,
+    /// The stage of the frequency ratios of a matrix without frequency data (IDENTITY), which
+    /// NCBI's `_PSIComputeFreqRatios` reaches with a null pointer and crashes (SIGSEGV); the
+    /// engine stops here and the caller refuses the run (`algorithm::psiblast::in_msa`).
+    NoMatrixFrequencyData,
+    /// The scaling's first `_PSIUpdateLambdaK` with a null `kbp_psi[0]` (the query's ungapped
+    /// Karlin-Altschul block could not be computed, [`PsiOptions::ungapped_block_missing`]),
+    /// where NCBI crashes (SIGSEGV) before any other error of the scaling.
+    NoUngappedKarlinBlock,
+}
+
+/// The `PSIBlastOptions` that the engine's stages read besides the pseudocount: the options of the
+/// rounds' PSSMs have neither (`PSIBlastOptionsNew`), those of `-in_msa` (`CPsiBlastInputClustalW`,
+/// `x_CreatePssmFromMsa`) set `ignore_unaligned_positions` and, with `-ignore_msa_master`,
+/// `nsg_compatibility_mode`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct PsiOptions {
+    pub(crate) ignore_unaligned_positions: bool,
+    pub(crate) nsg_compatibility_mode: bool,
+    /// The score block's `kbp_psi[0]` is null (the query's ungapped Karlin-Altschul parameters
+    /// could not be computed: `Blast_ScoreBlkKbpUngappedCalc`'s failure goes unreported,
+    /// blast_setup.c:353-370); the scaling then ends with [`PsiError::NoUngappedKarlinBlock`].
+    pub(crate) ungapped_block_missing: bool,
 }
 
 /// `PSICreatePssmWithDiagnostics` with psiblast's options (`PSIBlastOptionsNew`: no structure
 /// group compatibility mode, no IMPALA scaling, unaligned positions not ignored) and the
 /// pseudocount of `-pseudocount` (already validated, `s_Validate`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:104-221
-// ```c
-//     packed_msa = _PSIPackedMsaNew(msap);
-//     status = _PSIPurgeBiasedSegments(packed_msa);
-//     ...
-//     msa = _PSIMsaNew(packed_msa, (Uint4) sbp->alphabet_size);
-//     aligned_block = _PSIAlignedBlockNew(msa->dimensions->query_length);
-//     seq_weights = _PSISequenceWeightsNew(msa->dimensions, sbp);
-//     internal_pssm = _PSIInternalPssmDataNew(msa->dimensions->query_length,
-//                                             (Uint4) sbp->alphabet_size);
-//     ...
-//         status = _PSIValidateMSA(msa, options->ignore_unaligned_positions);
-//     ...
-//     status = _PSIComputeAlignmentBlocks(msa, aligned_block);
-//     ...
-//     status = _PSIComputeSequenceWeights(msa, aligned_block,
-//                                         options->nsg_compatibility_mode,
-//                                         seq_weights);
-//     ...
-//     status = _PSIComputeFreqRatios(msa, seq_weights, sbp, aligned_block,
-//                                    options->pseudo_count,
-//                                    options->nsg_compatibility_mode,
-//                                    internal_pssm);
-//     ...
-//     status = _PSICreateAndScalePssmFromFrequencyRatios
-//         (internal_pssm, msa->query, msa->dimensions->query_length,
-//          seq_weights->std_prob, sbp, options->impala_scaling_factor);
-//     ...
-//     s_PSISavePssm(internal_pssm, sbp, *pssm);
-//     ...
-//         status = _PSISaveDiagnostics(msa, aligned_block, seq_weights,
-//                                      internal_pssm, *diagnostics);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1566-1572
-// ```c
-//    options->inclusion_ethresh = PSI_INCLUSION_ETHRESH;
-//    options->pseudo_count = PSI_PSEUDO_COUNT_CONST;
-//    options->use_best_alignment = TRUE;
-//
-//    options->nsg_compatibility_mode = FALSE;
-//    options->impala_scaling_factor = kPSSM_NoImpalaScaling;
-//    options->ignore_unaligned_positions = FALSE;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:440-457
-// ```c
-// s_PSISavePssm(const _PSIInternalPssmData* internal_pssm,
-//              const BlastScoreBlk* sbp,
-//              PSIMatrix* pssm)
-// {
-//     ...
-//     _PSICopyMatrix_int(pssm->pssm, internal_pssm->pssm,
-//                        pssm->ncols, pssm->nrows);
-//
-//     pssm->lambda = sbp->kbp_gap_psi[0]->Lambda;
-//     pssm->kappa = sbp->kbp_gap_psi[0]->K;
-//     pssm->h = sbp->kbp_gap_psi[0]->H;
-//     pssm->ung_lambda = sbp->kbp_psi[0]->Lambda;
-//     pssm->ung_kappa = sbp->kbp_psi[0]->K;
-//     pssm->ung_h = sbp->kbp_psi[0]->H;
-// }
-// ```
 // `kbp_psi[0]` is the block of the scaling's last `_PSIUpdateLambdaK` (`stages::scale_matrix`),
 // and `kbp_gap_psi[0]` the score block's (`PsiScoreBlk::gap_psi`) with the K that the same call
 // sets (`stages::gapped_psi_k`).
@@ -342,6 +209,19 @@ pub(crate) fn create_pssm_with_diagnostics(
     sbp: &PsiScoreBlk,
     request: PsiDiagnosticsRequest,
 ) -> Result<PsiPssm, PsiError> {
+    create_pssm_with_options(msa, pseudo_count, PsiOptions::default(), Some(sbp), request)
+}
+
+/// `PSICreatePssmWithDiagnostics` with the options `options`; `sbp` is `None` for a matrix
+/// without frequency data (the engine then stops at the stage of the frequency ratios with
+/// [`PsiError::NoMatrixFrequencyData`], where NCBI crashes).
+pub(crate) fn create_pssm_with_options(
+    msa: &PsiMsa,
+    pseudo_count: i32,
+    options: PsiOptions,
+    sbp: Option<&PsiScoreBlk>,
+    request: PsiDiagnosticsRequest,
+) -> Result<PsiPssm, PsiError> {
     let mut packed = stages::PackedMsa::new(msa);
     stages::purge_biased_segments(&mut packed);
     let mut msa = stages::Msa::new(&packed);
@@ -349,25 +229,37 @@ pub(crate) fn create_pssm_with_diagnostics(
     let mut aligned_block = stages::AlignedBlock::new(query_length);
     let mut seq_weights = stages::SequenceWeights::new(msa.num_seqs, query_length);
     let mut internal = stages::InternalPssm::new(query_length);
-    stages::validate_msa(&msa)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:151-156
+    if options.nsg_compatibility_mode {
+        msa.structure_group_customization();
+        stages::validate_msa_structure_group(&msa)?;
+    } else {
+        stages::validate_msa(&msa, options.ignore_unaligned_positions)?;
+    }
     stages::compute_alignment_blocks(&mut msa, &mut aligned_block);
-    stages::compute_sequence_weights(&msa, &aligned_block, &mut seq_weights)?;
+    stages::compute_sequence_weights(
+        &msa,
+        &aligned_block,
+        options.nsg_compatibility_mode,
+        &mut seq_weights,
+    )?;
+    let Some(sbp) = sbp else {
+        return Err(PsiError::NoMatrixFrequencyData);
+    };
     stages::compute_freq_ratios(
         &msa,
         &mut seq_weights,
         sbp,
         &aligned_block,
         pseudo_count,
+        options.nsg_compatibility_mode,
         &mut internal,
-    );
+    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:385-414
-    // ```c
-    //     status = _PSIConvertFreqRatiosToPSSM(internal_pssm, query, sbp, std_prob);
-    //     ...
-    //     if (impala_scaling_factor == kPSSM_NoImpalaScaling) {
-    //         status = _PSIScaleMatrix(query, std_prob, internal_pssm, sbp);
-    // ```
     stages::convert_freq_ratios_to_pssm(&mut internal, &msa.query, sbp, &seq_weights.std_prob);
+    if options.ungapped_block_missing {
+        return Err(PsiError::NoUngappedKarlinBlock);
+    }
     let ungapped = stages::scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, sbp)?;
     let gapped = KarlinBlk {
         k: stages::gapped_psi_k(ungapped, sbp),
@@ -398,22 +290,7 @@ pub(crate) struct PosScaledMatrix {
 /// rows each) and the score block `sbp`, scaled by `scaling_factor` (`SCALING_FACTOR`, 32);
 /// `kbp_psi` is the search's `kbp_psi[0]` (`PsiBlastSetupScoreBlock`'s), which the redo's copy
 /// holds before the call.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2216-2227
-// ```c
-//     if (self->positionBased) {
-//         status = s_GetPosBasedStartFreqRatios(self->startFreqRatios,
-//                                               queryBlk->length,
-//                                               queryBlk->sequence,
-//                                               matrixName,
-//                                               sbp->psi_matrix->freq_ratios);
-//         if (status == 0) {
-//             status = s_ScalePosMatrix(self->startMatrix, matrixName,
-//                                       sbp->psi_matrix->freq_ratios,
-//                                       queryBlk->sequence,
-//                                       queryBlk->length, sbp, scale_factor);
-//             self->ungappedLambda = sbp->kbp_psi[0]->Lambda / scale_factor;
-//         }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2215-2227
 pub(crate) fn scale_pos_matrix(
     query: &[u8],
     freq_ratios: &[[f64; BLASTAA_SIZE]],
@@ -435,17 +312,7 @@ pub(crate) fn scale_pos_matrix(
 /// `stages::pssm_from_freq_ratios`): the scores and `kbp_gap_psi[0]` after the scaling (the
 /// lambda, kappa and h that `s_PSISavePssm` keeps). `PsiBlastComputePssmScores` gives a PSSM of
 /// frequency ratios only these scores and values.
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:486-498
-// ```c++
-//     pssm->SetPssm().SetFinalData().SetScores() =
-//         pssm_with_scores->GetPssm().GetFinalData().GetScores();
-//     pssm->SetPssm().SetFinalData().SetLambda() =
-//         pssm_with_scores->GetPssm().GetFinalData().GetLambda();
-//     pssm->SetPssm().SetFinalData().SetKappa() =
-//         pssm_with_scores->GetPssm().GetFinalData().GetKappa();
-//     pssm->SetPssm().SetFinalData().SetH() =
-//         pssm_with_scores->GetPssm().GetFinalData().GetH();
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:486-499
 pub(crate) fn pssm_from_freq_ratios(
     query: &[u8],
     freq_ratios: &[[f64; BLASTAA_SIZE]],

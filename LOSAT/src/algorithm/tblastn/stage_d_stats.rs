@@ -7,9 +7,8 @@ use crate::stats::setup::SearchSpaceOverflow;
 use crate::stats::spouge::{blast_spouge_etos, BlastGumbelBlk};
 use crate::stats::tables::KarlinParams;
 
-// NCBI c++/include/algo/blast/core/blast_query_info.h:60-76:
-// Int8 eff_searchsp; Int4 length_adjustment; per query context.
-// NCBI c++/src/algo/blast/core/blast_engine.c:1446-1467:
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_query_info.h:60-76:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1446-1467:
 // stat_length = seq_arg.seq->length; translated subjects use stat_length /= 3.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct LocalContextLength {
@@ -18,12 +17,8 @@ pub(super) struct LocalContextLength {
     pub subject_stat_length: i64,
 }
 
-// NCBI c++/include/algo/blast/core/blast_parameters.h:69-71;
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:69-71;
 // c++/src/algo/blast/core/blast_parameters.c:604-625,793-805:
-// #define BLAST_GAP_DECAY_RATE_GAPPED 0.1
-// #define BLAST_GAP_SIZE 40
-// #define BLAST_OVERLAP_SIZE 9
-// params->longest_intron = (DEFAULT_LONGEST_INTRON - 2) / 3;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct LocalLinkParameters {
     pub gap_decay_rate: f64,
@@ -33,9 +28,7 @@ pub(super) struct LocalLinkParameters {
     pub cutoff_small_gap: i32,
 }
 
-// NCBI c++/src/algo/blast/core/blast_parameters.c:902-999,302-383:
-// params->cutoffs[context].cutoff_score = new_cutoff;
-// params->cutoffs[context].cutoff_score_max = new_cutoff;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:902-999,302-383:
 // curr_cutoffs->cutoff_score = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct LocalContextCutoffs {
@@ -45,9 +38,7 @@ pub(super) struct LocalContextCutoffs {
     pub word_xdrop: i32,
 }
 
-// NCBI c++/src/algo/blast/core/blast_setup.c:1011-1024:
-// BLAST_CalcEffLengths(...); BlastHitSavingParametersUpdate(...);
-// BlastInitialWordParametersUpdate(...); BlastLinkHSPParametersUpdate(...);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1011-1024:
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct LocalSubjectParameters {
     pub lengths: Vec<LocalContextLength>,
@@ -58,10 +49,8 @@ pub(super) struct LocalSubjectParameters {
     pub prelim_evalue: f64,
 }
 
-// NCBI c++/src/algo/blast/core/blast_parameters.c:774-815,831-856;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:774-815,831-856;
 // c++/src/algo/blast/core/blast_setup.c:1016-1024:
-// if (params->do_sum_stats) BlastLinkHSPParametersNew(...);
-// BlastHitSavingParametersUpdate(..., subject_length, 0, hit_params);
 // The latter call passes zero compositionBasedStats even when the search uses
 // composition mode 2; the score block's Gumbel state is still consulted.
 #[derive(Clone, Copy)]
@@ -73,17 +62,12 @@ pub(super) struct LocalParameterOptions<'a> {
     pub word_xdrop_bits: f64,
     pub scale_factor: f64,
     pub gumbel: Option<&'a BlastGumbelBlk>,
-    // NCBI c++/src/algo/blast/core/blast_setup.c:676-697: the options' effective search
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:676-697: the options' effective search
     // spaces (`searchsp_eff`), which NCBI sets from the whole batch for a query chunk.
     pub eff_searchsp_override: Option<&'a [i64]>,
 }
 
-// NCBI c++/src/algo/blast/core/blast_setup.c:964-985,1001-1024:
-// min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-// if (Blast_SubjectIsTranslated(program_number)) min_subject_length/=3;
-// BlastHitSavingParametersNew(..., min_subject_length,
-//                              (*ext_params)->options->compositionBasedStats, ...);
-// BlastHitSavingParametersUpdate(..., subject_length, 0, hit_params);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:964-985,1001-1024:
 // The update is NCBI's statistics of each subject (`db_length == 0`, blast_engine.c:1433-1443):
 // the subject's length in nucleotides and a composition-based statistics of 0 (no stretch of the
 // e-value).
@@ -98,22 +82,12 @@ pub(super) enum LocalParameterCall {
     },
 }
 
-// NCBI c++/src/algo/blast/core/blast_setup.c:729-735,770-847:
-// if (Blast_SubjectIsTranslated(program_number)) db_length = db_length/3;
-// BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK, alpha/kbp->Lambda,
-//                               beta, query_length, db_length, db_num_seqs,
-//                               &length_adjustment);
-// Int8 effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
-// if (effective_db_length <= 0) effective_db_length = 1;
-// effective_search_space = effective_db_length * (query_length - length_adjustment);
-// NCBI c++/src/algo/blast/core/blast_engine.c:1434-1442,1446-1467:
-// BLAST_OneSubjectUpdateParameters(..., seq_arg.seq->length, ...);
-// stat_length = seq_arg.seq->length;
-// if (Blast_SubjectIsTranslated(program_number)) stat_length /= CODON_LENGTH;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-735,770-847:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1442,1446-1467:
 #[allow(dead_code)] // Stage D's public path remains gated until C/D/E are complete.
 pub(super) fn local_subject_effective_lengths(
     query_contexts: &[(usize, bool)],
-    subject_nt_length: usize,
+    subject_nt_length: i64,
     db_num_seqs: i32,
     gapped_params: &[KarlinParams],
 ) -> Result<Vec<LocalContextLength>, SearchSpaceOverflow> {
@@ -126,49 +100,19 @@ pub(super) fn local_subject_effective_lengths(
     )
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_setup.c:676-697
-// ```c
-// static Int8 s_GetEffectiveSearchSpaceForContext(
-//                         const BlastEffectiveLengthsOptions* eff_len_options,
-//                         int context_index, Blast_Message **blast_message)
-// {
-//     Int8 retval = 0;
-//
-//     if (eff_len_options->num_searchspaces == 0) {
-//         retval = 0;
-//     } else if (eff_len_options->num_searchspaces == 1) {
-//         if (context_index != 0) {
-//             Blast_MessageWrite(blast_message, eBlastSevWarning, context_index,
-//                     "One search space is being used for multiple sequences");
-//         }
-//         retval = eff_len_options->searchsp_eff[0];
-//     } else if (eff_len_options->num_searchspaces > 1) {
-//         ASSERT(context_index < eff_len_options->num_searchspaces);
-//         retval = eff_len_options->searchsp_eff[context_index];
-// ```
-// NCBI reference: c++/src/algo/blast/core/blast_setup.c:778-847
-// ```c
-//       Int8 effective_search_space =
-//           s_GetEffectiveSearchSpaceForContext(eff_len_options, index,
-//                                               blast_message);
-//       ...
-//       if (query_info->contexts[index].is_valid &&
-//           ((query_length = query_info->contexts[index].query_length) > 0) ) {
-//          ...
-//          if (effective_search_space == 0) {
-//          ...
-//       query_info->contexts[index].eff_searchsp = effective_search_space;
-//       query_info->contexts[index].length_adjustment = length_adjustment;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:676-697
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:778-847
 // A query chunk reads the search spaces of the whole batch by its own context index (RP-4);
 // its length adjustment is that of the chunk's part. The warning is not written: a chunk
 // with one search space has one context.
 // The lengths are `stats::setup::calc_eff_lengths` (one owner for the six programs, line RG
-// D1a-3): `db_num_seqs` is NCBI's `Int4` (negative for an alias file's negative `NSEQ`), and an
-// effective search space past NCBI's `Int8` is refused (`SearchSpaceOverflow`).
+// D1a-3): `subject_nt_length` is NCBI's `Int8` `real_db_length` (blast_parameters.h:217; a
+// database's total, which an alias file's `LENGTH` declares, `-dbsize` or a subject's length),
+// `db_num_seqs` is NCBI's `Int4` (negative for an alias file's negative `NSEQ`), and an effective
+// search space past NCBI's `Int8` is refused (`SearchSpaceOverflow`).
 pub(super) fn local_subject_effective_lengths_with_search_spaces(
     query_contexts: &[(usize, bool)],
-    subject_nt_length: usize,
+    subject_nt_length: i64,
     db_num_seqs: i32,
     gapped_params: &[KarlinParams],
     search_spaces: Option<&[i64]>,
@@ -177,7 +121,7 @@ pub(super) fn local_subject_effective_lengths_with_search_spaces(
     let search_space_set =
         search_spaces.is_some_and(|spaces| spaces.iter().any(|&space| space != 0));
     let Some((db_length, db_num_seqs)) = crate::stats::setup::eff_lengths_database(
-        subject_nt_length as i64,
+        subject_nt_length,
         db_num_seqs,
         0,
         search_space_set,
@@ -229,7 +173,7 @@ pub(super) fn local_subject_effective_lengths_with_search_spaces(
 #[allow(dead_code)] // The public TBLASTN path remains gated until C/D/E pass.
 pub(super) fn local_parameters_for_call(
     query_contexts: &[(usize, bool)],
-    subject_nt_length: usize,
+    subject_nt_length: i64,
     db_num_seqs: i32,
     gapped_params: &[KarlinParams],
     ungapped_params: &[KarlinParams],
@@ -252,33 +196,8 @@ pub(super) fn local_parameters_for_call(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2826
-// ```c
-//    sbp->kbp = Blast_QueryIsPssm(program) ? sbp->kbp_psi : sbp->kbp_std;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:120-126,766-768
-// ```c
-//     /* Set gapped Blast_KarlinBlk* alias */
-//     sbp->kbp_gap = Blast_QueryIsPssm(program) ?
-//         sbp->kbp_gap_psi : sbp->kbp_gap_std;
-// ...
-//    /* N.B.: the old code used kbp_gap_std instead of the kbp_gap alias (which
-//     * could be kbp_gap_psi), hence we duplicate that behavior here */
-//    kbp_ptr = (scoring_options->gapped_calculation ? sbp->kbp_gap_std : sbp->kbp);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:204-221,338-345
-// ```c
-//       kbp= sbp->kbp[context];
-// ...
-//             p->cutoffs[context].x_dropoff_init =
-//             (Int4)(sbp->scale_factor *
-//                    ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-// ...
-//       if (sbp->kbp_std) {     /* this may not be set for gapped blastn */
-//          kbp = sbp->kbp_std[context];
-//          if (s_BlastKarlinBlkIsValid(kbp)) {
-//             gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 +
-//                                      kbp->logK) / kbp->Lambda);
-// ```
 /// The Karlin-Altschul blocks of each context that `local_parameters_for_blocks` reads: the
 /// gapped `kbp_gap` of the cutoffs and the linking, the gapped `kbp_gap_std` of the effective
 /// lengths, the ungapped `kbp_std` of the gap trigger and the ungapped `kbp` of the word X-drop.
@@ -296,7 +215,7 @@ pub(super) struct LocalKarlinBlocks<'a> {
 /// (`LocalKarlinBlocks`).
 pub(super) fn local_parameters_for_blocks(
     query_contexts: &[(usize, bool)],
-    subject_nt_length: usize,
+    subject_nt_length: i64,
     db_num_seqs: i32,
     blocks: LocalKarlinBlocks<'_>,
     options: LocalParameterOptions<'_>,
@@ -315,7 +234,7 @@ pub(super) fn local_parameters_for_blocks(
         blocks.lengths,
         options.eff_searchsp_override,
     )?;
-    // NCBI c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024:
     // initial creation passes min_subject_length and compositionBasedStats;
     // the conditional update passes subject_length and literal zero (`LocalParameterCall`).
     let (hit_subject_length, composition_based_stats) = match call {
@@ -326,23 +245,19 @@ pub(super) fn local_parameters_for_blocks(
         LocalParameterCall::Update { subject_length } => (subject_length, 0),
     };
     let mut link = if options.do_sum_stats {
-        // NCBI c++/src/algo/blast/core/blast_parameters.c:774-815;
-        // c++/include/algo/blast/core/blast_def.h:77-78:
-        // if (options->longest_intron == 0)
-        //     longest_intron = (DEFAULT_LONGEST_INTRON - 2) / 3;
-        // else if ((options->longest_intron - 2)/3 <= 0) linking is disabled.
-        let intron = if options.max_intron_length == 0 {
-            (122 - 2) / 3
-        } else {
-            (options.max_intron_length - 2) / 3
-        };
-        (intron > 0).then_some(LocalLinkParameters {
-            gap_decay_rate: 0.1,
-            gap_size: 40,
-            overlap_size: 9,
-            longest_intron: intron,
-            cutoff_small_gap: 0,
-        })
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:774-815: the conversion of
+        // `-max_intron_length` has one owner, shared with BLASTX
+        // (`translated_longest_intron`, with NCBI's lines); TBLASTN's search is gapped
+        // (`-ungapped` is refused), so the value is positive or the linking is off.
+        crate::core::link_hsps::translated_longest_intron(options.max_intron_length, true).map(
+            |intron| LocalLinkParameters {
+                gap_decay_rate: 0.1,
+                gap_size: 40,
+                overlap_size: 9,
+                longest_intron: intron,
+                cutoff_small_gap: 0,
+            },
+        )
     } else {
         None
     };
@@ -351,14 +266,9 @@ pub(super) fn local_parameters_for_blocks(
     let mut word_cutoff_min = i32::MAX;
     let mut prelim_evalue = options.expect_value;
 
-    // NCBI c++/src/algo/blast/core/blast_parameters.c:902-999:
-    // if (sbp->gbp && sbp->gbp->filled)
-    //     new_cutoff = BLAST_SpougeEtoS(evalue, kbp, sbp->gbp,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:902-999:
     //                                   query_length, avg_subject_length);
-    // else BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-    // NCBI blast_parameters.c:931-946:
-    // cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
-    // params->prelim_evalue = cbs_stretch * evalue;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:931-946:
     let mut hit = Vec::with_capacity(query_contexts.len());
     for (context, (&(query_length, valid), params)) in
         query_contexts.iter().zip(gapped_params).enumerate()
@@ -368,9 +278,7 @@ pub(super) fn local_parameters_for_blocks(
             continue;
         }
         let max_cutoff = if let Some(gumbel) = options.gumbel {
-            // NCBI c++/src/algo/blast/core/blast_parameters.c:931-945:
-            // cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
-            // params->prelim_evalue = cbs_stretch * evalue;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:931-945:
             let cbs_stretch = if composition_based_stats > 1 {
                 5.0
             } else {
@@ -392,11 +300,8 @@ pub(super) fn local_parameters_for_blocks(
     }
 
     if let Some(link_params) = link {
-        // NCBI c++/src/algo/blast/core/blast_parameters.c:950-976:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:950-976:
         // concat_qlen = last.query_offset + last.query_length;
-        // avg_qlen = concat_qlen / (last_context + 1);
-        // searchsp = MIN(avg_qlen, avg_subject_length) * avg_subject_length;
-        // BLAST_Cutoffs(&new_cutoff, &evalue_hsp, kbp, searchsp, TRUE, gap_decay_rate);
         let concat_qlen: usize = query_contexts
             .iter()
             .map(|(length, _)| length + 1)
@@ -417,7 +322,7 @@ pub(super) fn local_parameters_for_blocks(
         }
     }
 
-    // NCBI c++/src/algo/blast/core/blast_parameters.c:983-999,302-383:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:983-999,302-383:
     // hit cutoff and maximum are scaled before the word cutoff is computed;
     // gap_trigger uses kbp_std and the word cutoff is capped by hit cutoff_max.
     for (context, ((&(query_length, valid), ungapped), x_dropoff_kbp)) in query_contexts
@@ -456,9 +361,7 @@ pub(super) fn local_parameters_for_blocks(
         });
     }
     if let Some(link_params) = &mut link {
-        // NCBI c++/src/algo/blast/core/blast_parameters.c:625-649:
-        // hit_params->link_hsp_params->cutoff_small_gap =
-        //     word_params->cutoff_score_min;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:625-649:
         link_params.cutoff_small_gap = word_cutoff_min;
     }
     Ok(LocalSubjectParameters {
@@ -472,347 +375,5 @@ pub(super) fn local_parameters_for_blocks(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::{ProteinScoringSpec, ScoringMatrix};
-    use crate::stats::spouge::lookup_protein_gumbel_params;
-    use crate::stats::tables::{lookup_protein_params_gapped, lookup_protein_params_ungapped};
-
-    // Pinned NCBI blast_setup.c:729-735,770-847 and the actual
-    // BLAST_LinkHsps/Blast_HSPListGetEvalues query contexts in
-    // docs/evidence/tlosan_stage_d/run_20260924/*.trace.
-    // NCBI c++/src/algo/blast/core/blast_setup.c:1011-1024;
-    // c++/src/algo/blast/core/blast_parameters.c:902-999,302-383,625-649:
-    // update effective lengths, hit cutoffs, word cutoffs, then link cutoff.
-    // The saved C fixture records both context cutoffs and word x-drop on every call.
-    #[test]
-    fn computed_code1_control_parameters_match_stage_c_inputs() {
-        let gapped = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
-        let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-        let subject_length = 15_000_962usize;
-        let gumbel = lookup_protein_gumbel_params(
-            &ProteinScoringSpec {
-                matrix: ScoringMatrix::Blosum62,
-                gap_open: 11,
-                gap_extend: 1,
-            },
-            (subject_length / 3) as i64,
-        )
-        .unwrap();
-        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
-        // db_num_seqs = eff_len_params->real_num_seqs;
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
-        let result = local_parameters_for_call(
-            &[(120, true), (70, true), (120, false)],
-            subject_length,
-            1,
-            &[gapped; 3],
-            &[ungapped; 3],
-            LocalParameterOptions {
-                expect_value: 10_000.0,
-                do_sum_stats: false,
-                max_intron_length: 0,
-                gap_trigger_bits: 22.0,
-                word_xdrop_bits: 7.0,
-                scale_factor: 1.0,
-                gumbel: Some(&gumbel),
-                eff_searchsp_override: None,
-            },
-            LocalParameterCall::Initial {
-                min_subject_length: (subject_length / 3) as i32,
-                composition_based_stats: 0,
-            },
-        )
-        .unwrap();
-        assert_eq!(result.link, None);
-        assert_eq!(
-            result
-                .cutoffs
-                .iter()
-                .map(|c| c.hit_cutoff)
-                .collect::<Vec<_>>(),
-            [28, 25, i32::MAX]
-        );
-        assert_eq!(
-            result
-                .cutoffs
-                .iter()
-                .map(|c| c.hit_cutoff_max)
-                .collect::<Vec<_>>(),
-            [28, 25, 0]
-        );
-        assert_eq!(
-            result
-                .cutoffs
-                .iter()
-                .map(|c| c.word_cutoff)
-                .collect::<Vec<_>>(),
-            [28, 25, i32::MAX]
-        );
-        assert_eq!(
-            result
-                .cutoffs
-                .iter()
-                .map(|c| c.word_xdrop)
-                .collect::<Vec<_>>(),
-            [16, 16, 0]
-        );
-    }
-
-    // NCBI blast_setup.c:766-768 (the effective lengths from `kbp_gap_std`), blast_parameters.c:
-    // 204-221 (the word X-drop from `kbp`), 338-345 (the gap trigger from `kbp_std`) and 902-999
-    // (the cutoffs from `kbp_gap`): each block of a PSSM query is read where NCBI reads it (tblastn
-    // `-in_pssm`, line PS item PS7).
-    #[test]
-    fn each_karlin_block_is_read_where_ncbi_reads_it() {
-        let gapped = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
-        let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-        let options = LocalParameterOptions {
-            expect_value: 10.0,
-            do_sum_stats: false,
-            max_intron_length: 0,
-            gap_trigger_bits: 22.0,
-            word_xdrop_bits: 7.0,
-            scale_factor: 1.0,
-            gumbel: None,
-            eff_searchsp_override: None,
-        };
-        let call = LocalParameterCall::Initial {
-            min_subject_length: 1000,
-            composition_based_stats: 0,
-        };
-        let run = |blocks: LocalKarlinBlocks<'_>| {
-            local_parameters_for_blocks(&[(300, true)], 3_000_000, 10, blocks, options, call)
-                .unwrap()
-        };
-        let base = local_parameters_for_call(
-            &[(300, true)],
-            3_000_000,
-            10,
-            &[gapped],
-            &[ungapped],
-            options,
-            call,
-        )
-        .unwrap();
-        let same = run(LocalKarlinBlocks {
-            gapped: &[gapped],
-            lengths: &[gapped],
-            ungapped: &[ungapped],
-            x_dropoff: &[ungapped],
-        });
-        assert_eq!(base, same);
-        // Another gapped block for the cutoffs only: the lengths stay the matrix's.
-        let psi_gapped = KarlinParams {
-            lambda: gapped.lambda * 0.8,
-            k: gapped.k * 2.0,
-            ..gapped
-        };
-        let cutoffs = run(LocalKarlinBlocks {
-            gapped: &[psi_gapped],
-            lengths: &[gapped],
-            ungapped: &[ungapped],
-            x_dropoff: &[ungapped],
-        });
-        assert_eq!(cutoffs.lengths, base.lengths);
-        assert_ne!(cutoffs.cutoffs[0].hit_cutoff, base.cutoffs[0].hit_cutoff);
-        let lengths = run(LocalKarlinBlocks {
-            gapped: &[gapped],
-            lengths: &[psi_gapped],
-            ungapped: &[ungapped],
-            x_dropoff: &[ungapped],
-        });
-        assert_ne!(lengths.lengths, base.lengths);
-        // Another ungapped block for the X-drop only: the gap trigger stays `kbp_std`'s.
-        let psi_ungapped = KarlinParams {
-            lambda: ungapped.lambda * 0.5,
-            ..ungapped
-        };
-        let xdrop = run(LocalKarlinBlocks {
-            gapped: &[gapped],
-            lengths: &[gapped],
-            ungapped: &[ungapped],
-            x_dropoff: &[psi_ungapped],
-        });
-        assert_eq!(xdrop.cutoffs[0].word_cutoff, base.cutoffs[0].word_cutoff);
-        assert_ne!(xdrop.cutoffs[0].word_xdrop, base.cutoffs[0].word_xdrop);
-        let trigger = run(LocalKarlinBlocks {
-            gapped: &[gapped],
-            lengths: &[gapped],
-            ungapped: &[psi_ungapped],
-            x_dropoff: &[ungapped],
-        });
-        assert_eq!(trigger.cutoffs[0].word_xdrop, base.cutoffs[0].word_xdrop);
-        assert_ne!(trigger.cutoffs[0].word_cutoff, base.cutoffs[0].word_cutoff);
-    }
-
-    // NCBI c++/src/algo/blast/core/link_hsps.c:1788-1802;
-    // c++/src/algo/blast/core/blast_hits.c:1811-1926:
-    // Blast_HSPListGetEvalues receives translated subject_length/3 and
-    // divides each Spouge E-value by BLAST_GapDecayDivisor(rate, 1).
-    #[test]
-    fn preliminary_individual_evalues_match_ncbi_double_bits() {
-        let trace = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../docs/evidence/tlosan_stage_d/run_20260924/multi_query_20260924_default.trace"
-        ));
-        let gapped = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
-        let gumbel = lookup_protein_gumbel_params(
-            &ProteinScoringSpec {
-                matrix: ScoringMatrix::Blosum62,
-                gap_open: 11,
-                gap_extend: 1,
-            },
-            2_125,
-        )
-        .unwrap();
-        let mut count = 0;
-        for line in trace
-            .lines()
-            .filter(|line| line.starts_with("D_HSP\t1\tevalue_after\t"))
-        {
-            let f: Vec<_> = line.split('\t').collect();
-            let context: usize = f[4].parse().unwrap();
-            let score: i32 = f[10].parse().unwrap();
-            let expected: f64 = f[13].parse().unwrap();
-            let actual = crate::stats::spouge::blast_spouge_stoe(
-                score,
-                &gapped,
-                &gumbel,
-                [120, 70][context],
-                2_125,
-            ) / 0.9;
-            assert_eq!(actual.to_bits(), expected.to_bits(), "HSP {count}: {line}");
-            count += 1;
-        }
-        assert_eq!(count, 21);
-    }
-
-    // NCBI c++/src/algo/blast/core/link_hsps.c:1117-1155;
-    // c++/src/algo/blast/core/blast_stat.c:4491-4532:
-    // sum_score = new_hsp->sum_score + head_hsp->sum_score;
-    // BLAST_UnevenGapSumE(50, 50, 2, sum_score, 105, 135,
-    //                     14175, BLAST_GapDecayDivisor(0.1, 2));
-    #[test]
-    fn positive_uneven_gap_pair_matches_ncbi_double_bits() {
-        let params = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
-        let first = params.lambda * 331.0 - params.k.ln();
-        let second = params.lambda * 329.0 - params.k.ln();
-        let divisor = crate::stats::sum_statistics::gap_decay_divisor(0.1, 2);
-        let actual = crate::stats::sum_statistics::uneven_gap_sum_e(
-            50,
-            50,
-            2,
-            second + first,
-            105,
-            135,
-            14_175,
-            divisor,
-        );
-        let expected = 3.2037962798257965e-69_f64;
-        assert_eq!(actual.to_bits(), expected.to_bits(), "actual={actual:.17e}");
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_parameters.c:774-815,950-976,625-649:
-    // default translated/gapped searches keep uneven-gap linking and set its
-    // small-gap cutoff from word_params->cutoff_score_min after the update.
-    #[test]
-    fn computed_code1_default_link_parameters_match_stage_d_call() {
-        let gapped = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
-        let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-        let subject_length = 6_377usize;
-        let gumbel = lookup_protein_gumbel_params(
-            &ProteinScoringSpec {
-                matrix: ScoringMatrix::Blosum62,
-                gap_open: 11,
-                gap_extend: 1,
-            },
-            (subject_length / 3) as i64,
-        )
-        .unwrap();
-        // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
-        // db_num_seqs = eff_len_params->real_num_seqs;
-        // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
-        let result = local_parameters_for_call(
-            &[(120, true), (70, true), (120, false)],
-            subject_length,
-            1,
-            &[gapped; 3],
-            &[ungapped; 3],
-            LocalParameterOptions {
-                expect_value: 10.0,
-                do_sum_stats: true,
-                max_intron_length: 0,
-                gap_trigger_bits: 22.0,
-                word_xdrop_bits: 7.0,
-                scale_factor: 1.0,
-                gumbel: Some(&gumbel),
-                eff_searchsp_override: None,
-            },
-            LocalParameterCall::Initial {
-                min_subject_length: (subject_length / 3) as i32,
-                composition_based_stats: 2,
-            },
-        )
-        .unwrap();
-        assert_eq!(result.link.unwrap().longest_intron, 40);
-        assert_eq!(result.link.unwrap().cutoff_small_gap, 17, "{result:?}");
-    }
-
-    // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
-    // db_num_seqs = eff_len_params->real_num_seqs;
-    // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
-    // effective_db_length = db_length - db_num_seqs * length_adjustment;
-    // The pinned natural two-subject trace records D_CONTEXT 0, 18, 22848.
-    #[test]
-    fn two_local_subjects_use_both_sequences_in_effective_search_space() {
-        let params = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
-        assert_eq!(
-            local_subject_effective_lengths(&[(120, true)], 781, 2, &[params]).unwrap(),
-            vec![LocalContextLength {
-                length_adjustment: 18,
-                eff_searchsp: 22_848,
-                subject_stat_length: 260,
-            }]
-        );
-    }
-
-    #[test]
-    fn local_code1_context_lengths_match_ncbi_function_inputs() {
-        let params = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
-        assert_eq!(
-            local_subject_effective_lengths(&[(160, true)], 362, 1, &[params]).unwrap(),
-            vec![LocalContextLength {
-                length_adjustment: 15,
-                eff_searchsp: 15225,
-                subject_stat_length: 120,
-            }]
-        );
-        assert_eq!(
-            local_subject_effective_lengths(
-                &[(120, true), (70, true), (120, false)],
-                6377,
-                1,
-                &[params; 3],
-            )
-            .unwrap(),
-            vec![
-                LocalContextLength {
-                    length_adjustment: 33,
-                    eff_searchsp: 182004,
-                    subject_stat_length: 2125,
-                },
-                LocalContextLength {
-                    length_adjustment: 28,
-                    eff_searchsp: 88074,
-                    subject_stat_length: 2125,
-                },
-                LocalContextLength {
-                    length_adjustment: 0,
-                    eff_searchsp: 0,
-                    subject_stat_length: 2125,
-                },
-            ]
-        );
-    }
-}
+#[path = "stage_d_stats_tests.rs"]
+mod tests;

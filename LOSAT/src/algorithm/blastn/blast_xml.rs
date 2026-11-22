@@ -12,18 +12,6 @@
 //! its `qseq` is masked and the `Search` lists them (`BlastnXml::masks`, kept empty for outfmt 5).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:249-257
-//! ```c++
-//!         if (!kTranslated && query_is_na && subject_is_na) {
-//!             q_frame = s_frame = 1;
-//!             // For reverse strand alignment, set subject frame to -1 and
-//!             // swap start and end coordinates.
-//!             if (eNa_strand_minus == kAlign.GetSeqStrand(0)){
-//!                 s_frame = -1;
-//!                 int tmp = s_start;
-//!                 s_start = s_end;
-//!                 s_end = tmp;
-//!             }
-//! ```
 
 use std::io::Write;
 
@@ -212,13 +200,6 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                             srow: &subject_row,
                             // NCBI reference (598d8ae6):
                             // c++/src/algo/blast/format/blastxml_format.cpp:225-235
-                            // ```c++
-                            //         unsigned int num_gaps = 0;
-                            //         ...
-                            //         if (kAlign.GetSegs().IsDendiag())
-                            //         {
-                            //         	align_length = final_aln->GetAlignLength();
-                            // ```
                             // (blastxml2_format.cpp:212-222 the same.) An HSP without an edit
                             // script (`-ungapped`) is a Dense-diag: no gaps, one segment over
                             // the row (`count_hsp` of no script), whatever `-` its query row

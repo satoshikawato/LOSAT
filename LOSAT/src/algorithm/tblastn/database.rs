@@ -69,45 +69,29 @@ impl TblastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
-    // ```c++
-    //         /*** Initialize the database/subject ***/
-    //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-    //         CRef<CLocalDbAdapter> db_adapter;
-    //         CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-    //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-    //                          db_adapter, scope);
-    //         _ASSERT(db_adapter && scope);
-    // ```
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`) with
-    /// the command line's errors. The total length is NCBI's `Int8`; one that the engine
-    /// cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
+    /// the command line's errors. The total length is NCBI's `Int8`, which the engine holds as
+    /// such (`DatabaseNumbers::total_length`) on every target.
     #[cfg(test)]
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, &mut std::io::sink())
+        Self::open_restricted(name, settings, None, None, &mut std::io::sink())
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
-    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    /// line, and with the id of the database mask `mask` checked (`-db_soft_mask`,
+    /// `-db_hard_mask`; series NP, M4b PR 2) (`shared::restrict_database`, whose warnings go to
+    /// `diagnostics`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
+        mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, PROGRAM)?;
-        // The statistics' setup total (`DbStatistics::setup_total`: not negative, below 2^63; a
-        // `LENGTH` of 2^63 or more is NCBI's negative `Int8`, read as such) as the engine holds it.
-        let total = db.statistics().setup_total;
-        usize::try_from(total)
-            .ok()
-            .with_context(|| {
-                format!(
-                    "a database of {total} letters is not supported by LOSAT's TBLASTN on this platform"
-                )
-            })?;
+            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -128,14 +112,6 @@ impl TblastnDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:182-187
-    // ```c++
-    // static Int8
-    // s_SeqDbGetTotLen(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetTotalLength();
-    // }
-    // ```
     /// The numbers of the statistics (`SeqDb::statistics`): the setup's total length and number
     /// of sequences, the Gumbel block's length and `CSeqDB::GetMinLength`; the real numbers, also
     /// with `-dbsize`.
@@ -144,7 +120,7 @@ impl TblastnDatabase {
         DatabaseNumbers {
             // The setup's total is not negative (a length of OID 0 where the total is not
             // positive).
-            total_length: statistics.setup_total as u64,
+            total_length: statistics.setup_total,
             num_seqs: statistics.setup_count,
             gumbel_db_length: statistics.gumbel_db_length,
             engine_db_length: statistics.engine_db_length,
@@ -181,16 +157,60 @@ impl TblastnDatabase {
         shared::PsiSearchReadFailure::of(&self.db)
     }
 
-    /// LOSAT's refusal of statistics of 0 sequences for a search without the Gumbel block
-    /// (`shared::check_statistics_count`).
-    pub(super) fn check_statistics_count(&self) -> Result<()> {
-        shared::check_statistics_count(&self.db, PROGRAM)
-    }
-
     /// What the `Database:` lines of the pairwise report show
     /// (`algorithm::common::database::pairwise_database`).
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db)
+    }
+
+    /// `pairwise_database` of a search masked with `mask` (`None`: not masked): each name's
+    /// algorithm, which the `Masked using:` lines show (`shared::pairwise_database_masked`).
+    pub(super) fn pairwise_database_masked(
+        &self,
+        mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
+    ) -> PairwiseDatabase {
+        shared::pairwise_database_masked(&self.db, mask.map(|mask| mask.shown.as_slice()))
+    }
+
+    /// The formatter's step of the database masking `option` (`shared::resolve_database_masking`;
+    /// series NP, M4b PR 2): its warning goes to `diagnostics` (as one message of the archive
+    /// `archive`), and the program options to `archive` and `strategy`.
+    pub(super) fn resolve_mask_option(
+        &self,
+        option: &crate::blastinput::db_mask::DbMaskOption,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Option<crate::blastinput::db_mask::ResolvedMask>> {
+        shared::resolve_database_masking(
+            &self.db,
+            &self.name,
+            option,
+            PROGRAM,
+            archive,
+            strategy,
+            &mut |text| match archive {
+                Some(handle) => handle.write_warning(diagnostics, text),
+                None => diagnostics.write_all(text),
+            },
+        )
+    }
+
+    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`)
+    /// whose words have `word_size` letters (the shortest subject searched has `word_size * 3 + 2`
+    /// bases).
+    pub(super) fn check_mask_limits(
+        &self,
+        mask: &crate::blastinput::db_mask::ResolvedMask,
+        word_size: usize,
+    ) -> Result<()> {
+        mask.check_losat_limits(
+            &self.db,
+            PROGRAM,
+            crate::blastinput::db_mask::HardScan::Translated {
+                min_length: word_size * 3 + 2,
+            },
+        )
     }
 
     /// The Blast-def-line taxid of each reported sequence by rank and what the taxonomy
@@ -302,68 +322,51 @@ impl TblastnDatabase {
     /// [`Self::prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the
     /// first read of each subject that writes one, with its rank, where a query's report reads
     /// its subjects one by one: in the order of the hit lists, or, for the pairwise report
-    /// (`pairwise`, its `-sorthits` and `-sorthsps`), in the order of its sorted groups
-    /// (`QueryGroup::read_order` of the rows' hits: each list's HSPs in the reports' order,
-    /// `stage_d_results::evalue_order`, with the values of their rows,
-    /// `stage_e_report::hsp_scores`).
+    /// (`pairwise`: how it reads them), those that it shows in the order that it reads them
+    /// (`pairwise_read_order`, `PairwiseReads::subjects`).
     pub(super) fn subject_read_texts(
         &self,
         reported: &ReportedSubjects,
         hitlists: &[KappaResultHitList],
         rows: SubjectFetch,
         rows_open: bool,
-        pairwise: Option<crate::report::hit_sort::ReportSort>,
+        pairwise: Option<crate::report::pairwise::PairwiseReading>,
     ) -> Result<crate::report::query_warnings::QueryReads> {
-        // A subject whose load throws loads nothing, nor does one that no report reaches after
-        // it (`HitLoads::loaded`).
         let lists = hitlists
             .iter()
             .flat_map(KappaResultHitList::lists)
-            .filter(|list| reads_subject(list, rows))
-            .filter(|list| reported.loads.loaded(list.oid as usize));
+            .filter(|list| reads_subject(list, rows));
         let ranks: Vec<u32> = match pairwise {
-            Some(sort) => {
-                let mut hits = Vec::new();
-                for list in lists {
-                    let rank = list.oid as usize;
-                    anyhow::ensure!(
-                        list.payloads.len() == list.hsps.hsps.len(),
-                        "TBLASTN report payload count mismatch"
-                    );
-                    for index in super::stage_d_results::evalue_order(list) {
-                        hits.push((
-                            rank as u32,
-                            super::stage_e_report::hsp_scores(
-                                &list.hsps.hsps[index],
-                                &list.payloads[index],
-                                reported.lengths[rank],
-                            )?,
-                        ));
-                    }
-                }
-                crate::report::x_pairwise_par::QueryGroup::read_order(
-                    hits,
-                    |scores| *scores,
-                    |previous, rank| {
-                        crate::report::db_subject::rank_joins_as_copy(
-                            &reported.parsed,
-                            previous as usize,
-                            rank as usize,
-                        )
-                    },
-                    sort,
-                    false,
-                )
-            }
+            Some(reading) => pairwise_read_order(
+                lists,
+                |rank| Ok(reported.lengths[rank]),
+                |previous, rank| {
+                    crate::report::db_subject::rank_joins_as_copy(
+                        &reported.parsed,
+                        previous as usize,
+                        rank as usize,
+                    )
+                },
+                reading,
+            )?
+            .subjects()
+            .into_iter()
+            .map(|rank| rank as u32)
+            .collect(),
             None => lists.map(|list| list.oid as u32).collect(),
         };
-        let subjects = ranks.into_iter().map(|rank| {
-            (
-                rank,
-                reported.ordinals[rank as usize],
-                reported.parsed_subject(rank as usize),
-            )
-        });
+        // A subject whose load throws loads nothing, nor does one that no report reaches after
+        // it (`HitLoads::loaded`).
+        let subjects = ranks
+            .into_iter()
+            .filter(|&rank| reported.loads.loaded(rank as usize))
+            .map(|rank| {
+                (
+                    rank,
+                    reported.ordinals[rank as usize],
+                    reported.parsed_subject(rank as usize),
+                )
+            });
         shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
     }
 
@@ -483,17 +486,18 @@ impl TblastnDatabase {
 
     /// The database read where it is searched by `threads` threads, after the checks of
     /// `common::database::x_check_nucleotide_stores` (`common/x_db_stream.rs`).
-    pub(super) fn x_stream(&self, threads: usize) -> Result<XDbStream<'_>> {
-        XDbStream::new(&self.db, threads, PROGRAM)
+    pub(super) fn x_stream(
+        &self,
+        threads: usize,
+        mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
+    ) -> Result<XDbStream<'_>> {
+        Ok(XDbStream::new(&self.db, threads, PROGRAM)?.with_mask(
+            crate::algorithm::common::db_mask_search::SearchMask::of(mask),
+        ))
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904
-// ```c++
-//     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
-//     ...
-//         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
-// ```
 /// Whether the rows of the hit list `list` read its subject (`rows`, by each HSP's engine
 /// identities, the Seq-align's `num_ident`): for `SubjectFetch::Every` a list with HSPs.
 pub(super) fn reads_subject(list: &KappaResultList, rows: SubjectFetch) -> bool {
@@ -540,15 +544,6 @@ pub(super) fn drop_unaligned(database: &TblastnDatabase, hitlists: &mut [KappaRe
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
-// ```c++
-//     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,
-//                                                   m_InternalData,
-//                                                   m_Opts,
-//                                                   seqinfo_src,
-//                                                   search_msgs));
-//     ...
-//     CRef<CSearchResultSet> retval = m_TbackSearch->Run();
-// ```
 /// Reads the definition lines of the sequences that the final hit lists `hitlists` of a
 /// query batch name (their subject index is the ordinal id), in NCBI's order (query by query,
 /// in hit-list order) into `titles` (`common::database::read_header`); `first_query` is the
@@ -804,7 +799,7 @@ fn parsed_shown(
                     ))
                 },
             ),
-        // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (quoted in
+        // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (cited in
         // `tblastn_app::search`).
         prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
             |&number| match number {
@@ -817,14 +812,63 @@ fn parsed_shown(
 }
 
 /// What the formats `formats` do after a subject whose lookup throws where its batch's prefetch is
-/// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads).
+/// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads), with the call's refusal over
+/// the `-outfmt` values of its other searches, `others` (`FormatThrow::of_search`,
+/// `ReportOutputs::other_outfmts`).
 fn after_throw(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-) -> Option<crate::report::db_subject::RunThrow> {
+    others: &[&str],
+) -> crate::report::db_subject::FormatThrow {
     crate::report::db_subject::FormatThrow::of_outfmts(
         formats.iter().map(|format| format.outfmt),
         crate::blastinput::app::Program::Tblastn,
+        crate::report::archive::options::RequestKind::Tblastn,
     )
+    .of_search(
+        others,
+        crate::blastinput::app::Program::Tblastn,
+        crate::report::archive::options::RequestKind::Tblastn,
+    )
+}
+
+/// What one query's pairwise report (outfmt 0 to 4) of the hit lists `lists` reads, by the key
+/// that `lists` names the subjects by, a rank or an ordinal id (`QueryGroup::read_order` of the
+/// rows' hits as the writer reads them, `reading`: each list's HSPs in the reports' order,
+/// `stage_d_results::evalue_order`, with the values of their rows, `stage_e_report::hsp_scores`,
+/// of the subject of `length(key)` nucleotides; `joins`: a copy joins the hit before).
+fn pairwise_read_order<'l>(
+    lists: impl IntoIterator<Item = &'l KappaResultList>,
+    length: impl Fn(usize) -> Result<usize>,
+    joins: impl Fn(u32, u32) -> bool,
+    reading: crate::report::pairwise::PairwiseReading,
+) -> Result<crate::report::db_subject::PairwiseReads> {
+    let mut hits = Vec::new();
+    for list in lists {
+        let key = usize::try_from(list.oid).context("negative TBLASTN subject key")?;
+        anyhow::ensure!(
+            list.payloads.len() == list.hsps.hsps.len(),
+            "TBLASTN report payload count mismatch"
+        );
+        let length = length(key)?;
+        for index in super::stage_d_results::evalue_order(list) {
+            hits.push((
+                key as u32,
+                super::stage_e_report::hsp_scores(
+                    &list.hsps.hsps[index],
+                    &list.payloads[index],
+                    length,
+                )?,
+            ));
+        }
+    }
+    Ok(crate::report::x_pairwise_par::QueryGroup::read_order(
+        hits,
+        |scores| *scores,
+        joins,
+        reading,
+        false,
+        None,
+    ))
 }
 
 /// The reported database sequences of `hitlists` (the final hit lists of all query batches,
@@ -839,10 +883,12 @@ fn after_throw(
 /// not write as NCBI (what they show, `parsed_shown`: `common::database::check_reported_parsed`,
 /// and where they join hits `refuse_joined_hits`; where only the prefetch reads a subject, a batch
 /// of `batches`, the query ranges of the batches of `hitlists`, whose prefetch is on reports it;
-/// whether every format writes a `Hit` that throws as NCBI does, `writes_thrown`, for the one
-/// answer of what the reports load, `hit_loads`). The packed
+/// what the formats do after a `Hit` that throws, `after_throw`, with the call's refusal over the
+/// `-outfmt` values of its other searches, `others`, for the one answer of what the reports load,
+/// `hit_loads`, with how the pairwise reports read each query's subjects, `pairwise`). The packed
 /// subjects are read from the database (`SubjectLetters::Stream`, one read each) instead of
 /// cloned from the copy.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
     database: &TblastnDatabase,
     titles: &DatabaseTitles,
@@ -850,6 +896,8 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
+    others: &[&str],
+    pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
@@ -874,15 +922,40 @@ pub(super) fn reported_subjects(
             .map(move |list| (query, list.oid as u32))
     }));
     // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
-    let loads = hit_loads(
-        hitlists,
-        &prefetch,
-        after_throw(formats),
-        |ordinal| match titles.get(&u32::try_from(ordinal).ok()?) {
-            Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
-            _ => None,
-        },
-    );
+    let titled = |ordinal: usize| match titles.get(&u32::try_from(ordinal).ok()?) {
+        Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
+        _ => None,
+    };
+    let after = after_throw(formats, others);
+    // A pairwise report's reads, of the subjects' lengths (`pairwise_read_order`), where its
+    // batch reads them one by one.
+    let pairwise_keys = |query: usize| -> Result<Option<crate::report::db_subject::PairwiseReads>> {
+        let Some(reading) = pairwise
+            .filter(|_| after.run().is_some_and(|run| run.after.is_pairwise()))
+            .filter(|_| prefetch.reads_one_by_one(query))
+        else {
+            return Ok(None);
+        };
+        let order = pairwise_read_order(
+            hitlists[query]
+                .lists()
+                .iter()
+                .filter(|list| !list.hsps.hsps.is_empty()),
+            |ordinal| shared::x_nucleotide_length(&database.db, ordinal as u32, PROGRAM),
+            |previous, ordinal| match (titled(previous as usize), titled(ordinal as usize)) {
+                (Some(earlier), Some(later)) => {
+                    crate::report::db_subject::joins_as_copy(earlier, later)
+                }
+                _ => false,
+            },
+            reading,
+        )?;
+        Ok(Some(order))
+    };
+    let pairwise_order = (0..hitlists.len())
+        .map(pairwise_keys)
+        .collect::<Result<Vec<_>>>()?;
+    let loads = hit_loads(hitlists, &prefetch, after, pairwise_order, titled);
     ordinals.sort_unstable();
     ordinals.dedup();
     for hitlist in hitlists.iter_mut() {
@@ -1011,28 +1084,34 @@ pub(super) fn reported_subjects(
 /// reports; the subjects named by `key`, an ordinal id or a rank) do at each subject's `Hit`
 /// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch reads one by one
 /// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a key;
-/// the `Hit`s are those that `blast_xml::prepare`'s reports make (the lists with HSPs).
+/// the `Hit`s are those that `blast_xml::prepare`'s reports make (the lists with HSPs), or a
+/// pairwise report's reads (`pairwise_reads[query]`, where given).
 fn hit_loads<'p>(
     hitlists: &[KappaResultHitList],
     prefetch: &shared::BatchPrefetch,
-    after: Option<crate::report::db_subject::RunThrow>,
+    after: crate::report::db_subject::FormatThrow,
+    pairwise_reads: Vec<Option<crate::report::db_subject::PairwiseReads>>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
+    let mut pairwise_reads = pairwise_reads.into_iter();
     HitLoads::of(
         after,
         hitlists.iter().enumerate().map(|(query, hitlist)| {
-            (
-                prefetch.reads_one_by_one(query),
-                hitlist
-                    .lists()
-                    .iter()
-                    .map(|list| {
-                        (!list.hsps.hsps.is_empty())
-                            .then(|| usize::try_from(list.oid).ok())
-                            .flatten()
-                    })
-                    .collect(),
-            )
+            let keys = match pairwise_reads.next().flatten() {
+                Some(reads) => crate::report::db_subject::ReportKeys::Pairwise(reads),
+                None => crate::report::db_subject::ReportKeys::Entries(
+                    hitlist
+                        .lists()
+                        .iter()
+                        .map(|list| {
+                            (!list.hsps.hsps.is_empty())
+                                .then(|| usize::try_from(list.oid).ok())
+                                .flatten()
+                        })
+                        .collect(),
+                ),
+            };
+            (prefetch.reads_one_by_one(query), keys)
         }),
         parsed,
         // The most identities of a list's HSPs (`reads_subject`).
@@ -1071,199 +1150,5 @@ impl ReportedSubjects {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // DECISIONS 3 Q8 of line DBID: NCBI's choice of the Seq-ids of a database with parsed
-    // Seq-ids depends on SEQ_ID_PREFER_ACCESSION_OVER_GI and SEQ_ID_AVOID_GI.
-    #[test]
-    fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
-        let path = |name: &str| {
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join(name)
-                .to_str()
-                .expect("fixture path is UTF-8")
-                .to_string()
-        };
-        let settings = ApplicationSettings {
-            seq_id_rank_variable: Some("SEQ_ID_PREFER_ACCESSION_OVER_GI"),
-            ..ApplicationSettings::default()
-        };
-        let parsed = path("tests/db_search/ids/nucl_v5");
-        TblastnDatabase::open(&parsed, &ApplicationSettings::default())
-            .expect("a database with parsed Seq-ids opens");
-        let Err(error) = TblastnDatabase::open(&parsed, &settings) else {
-            panic!("a database with parsed Seq-ids opened with SEQ_ID_PREFER_ACCESSION_OVER_GI")
-        };
-        assert_eq!(
-            format!("{error:#}"),
-            "the environment variable SEQ_ID_PREFER_ACCESSION_OVER_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's TBLASTN"
-        );
-        TblastnDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
-            .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
-    }
-
-    /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant
-    /// `taxdb` of `tests/seqdb/taxdb` (`None`: none) as `BLASTDB`, from the directory `cwd`.
-    fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> TblastnDatabase {
-        use crate::seqdb::alias::SearchPath;
-        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-        let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
-        let search =
-            SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
-        let path = tests.join("db_search").join(name);
-        TblastnDatabase {
-            db: {
-                let mut db =
-                    SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
-                db.read_name_records(path.to_str().unwrap(), false).unwrap();
-                db
-            },
-            name: name.to_string(),
-            taxdb: shared::TaxdbRun::default(),
-            parsed_seqids: true,
-        }
-    }
-
-    /// The final hit list of one query whose lists name the sequences `lists` by ordinal id, each
-    /// with one HSP of the score given (0: no Seq-align, `KappaResultHitList::drop_zero_score_hsps`).
-    fn hitlist(lists: &[(i32, i32)]) -> KappaResultHitList {
-        use super::super::search_gapped::GappedHsp;
-        use super::super::stage_d_linking::{LinkedHsp, LinkedHspList};
-        use super::super::stage_d_results::KappaResultList;
-        let mut hitlist = KappaResultHitList::new(500).unwrap();
-        for &(oid, score) in lists {
-            let hsp = LinkedHsp {
-                context: 0,
-                hsp: GappedHsp {
-                    frame: 1,
-                    score,
-                    q_start: 0,
-                    q_end: 1,
-                    q_gapped_start: 0,
-                    s_start: 0,
-                    s_end: 1,
-                    s_gapped_start: 0,
-                },
-                num: 1,
-                evalue: 1e-9,
-                source_index: 0,
-            };
-            let list = KappaResultList {
-                oid,
-                hsps: LinkedHspList {
-                    hsps: vec![hsp],
-                    best_evalue: 1e-9,
-                },
-                payloads: Vec::new(),
-            };
-            assert!(hitlist.update(list).unwrap().is_none());
-        }
-        hitlist
-    }
-
-    // Reports that read no letters get the lengths of the reported sequences and no store; the
-    // others get both, by rank.
-    #[test]
-    fn the_reported_sequences_are_read_only_for_reports_of_letters() {
-        use super::super::x_subject_store::SubjectLetters;
-        let cwd = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-tblastn-db-reported-{}-{:?}",
-            crate::utils::test_dir::process_id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&cwd).unwrap();
-        let database = open_with_taxdb("x16_ntaxid", None, &cwd);
-        let stream = database.x_stream(1).unwrap();
-        let of = |letters: bool| {
-            let mut hitlists = vec![hitlist(&[(1, 50), (0, 40)])];
-            let mut titles = DatabaseTitles::new();
-            read_titles(&database, &hitlists, 0, &mut titles).unwrap();
-            reported_subjects(
-                &database,
-                &titles,
-                &mut hitlists,
-                SubjectLetters::Stream(&stream),
-                letters,
-                &[],
-                &[],
-            )
-            .unwrap()
-        };
-        let whole = [
-            stream.read_length(0).unwrap(),
-            stream.read_length(1).unwrap(),
-        ];
-        let reported = of(false);
-        assert_eq!(reported.lengths, whole);
-        assert!(reported.stores.is_empty());
-        let letters = reported.letters();
-        assert!(matches!(letters, SubjectLetters::Lengths(_)));
-        assert_eq!(letters.count(), 2);
-        assert_eq!(letters.length(1), whole[1]);
-        let reported = of(true);
-        assert_eq!(reported.lengths, whole);
-        assert_eq!(reported.stores.len(), 2);
-        assert_eq!(reported.stores[0].len(), whole[0]);
-        assert_eq!(reported.stores[1].len(), whole[1]);
-        let letters = reported.letters();
-        assert!(matches!(letters, SubjectLetters::Packed(_)));
-        assert_eq!(letters.length(1), whole[1]);
-        std::fs::remove_dir_all(&cwd).unwrap();
-    }
-
-    // DBID item T: a batch's prefetch looks up the sequences that its reports show (an HSP with a
-    // Seq-align), once per volume and taxid over the batches of a run, and opens the taxonomy
-    // database at the run's first lookup; nothing without `taxdb.bti`. `x16_ntaxid_99990` (two
-    // sequences of taxid 99990) with `offset_last_past_end` (the last entry, 99990, is past the
-    // end of `taxdb.btd`), `x16_ntaxid` (taxid 9606) with `bad_magic`.
-    #[test]
-    fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
-        use super::super::x_subject_store::SubjectLetters;
-        let cwd = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-tblastn-db-prefetch-{}-{:?}",
-            crate::utils::test_dir::process_id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&cwd).unwrap();
-        // The reports of one batch of `queries` (the lists of each query), as the run makes them:
-        // the titles, the reported sequences by rank, then the batch's prefetch.
-        let text = |database: &TblastnDatabase, queries: &[&[(i32, i32)]]| -> String {
-            let stream = database.x_stream(1).unwrap();
-            let mut hitlists: Vec<KappaResultHitList> =
-                queries.iter().map(|&lists| hitlist(lists)).collect();
-            let mut titles = DatabaseTitles::new();
-            read_titles(database, &hitlists, 0, &mut titles).unwrap();
-            let reported = reported_subjects(
-                database,
-                &titles,
-                &mut hitlists,
-                SubjectLetters::Stream(&stream),
-                true,
-                &[],
-                &[],
-            )
-            .unwrap();
-            let messages = database.prefetch_messages(&reported, &hitlists, SubjectFetch::Every);
-            String::from_utf8(messages.unwrap()).unwrap()
-        };
-        let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);
-        assert!(database.taxdb_found());
-        // A sequence whose HSPs have no Seq-align is not fetched: the taxonomy database is not
-        // opened.
-        assert_eq!(text(&database, &[&[(0, 0)]]), "");
-        let offset = "Error: [tblastn] Error: Offset error at end of taxdb file.\n";
-        assert_eq!(text(&database, &[&[(0, 0)], &[(1, 50)]]), offset);
-        // The same volume and taxid in a later batch.
-        assert_eq!(text(&database, &[&[(0, 50), (1, 50)]]), "");
-        let database = open_with_taxdb("x16_ntaxid", Some("bad_magic"), &cwd);
-        assert_eq!(
-            text(&database, &[&[(1, 50), (0, 40)]]),
-            "Error: [tblastn] Error: Tax database file has wrong magic number.\n"
-        );
-        let database = open_with_taxdb("x16_ntaxid", None, &cwd);
-        assert!(!database.taxdb_found());
-        assert_eq!(text(&database, &[&[(0, 50), (1, 40)]]), "");
-        std::fs::remove_dir_all(&cwd).unwrap();
-    }
-}
+#[path = "database_tests.rs"]
+mod tests;

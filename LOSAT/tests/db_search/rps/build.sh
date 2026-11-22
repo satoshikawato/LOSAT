@@ -26,6 +26,15 @@
 # agreed on every run (`-max_target_seqs` 1, 2, 5, 10, 11, 30, `-searchsp`, `OLD_FSC`, CBS 0/1/3); the unit test
 # `a_full_prelim_list_of_equal_e_values_keeps_the_best_ten_of_the_total_order` (rps_search/prelim.rs) holds the order.
 #
+# rps_cdd (series PR, item PS15a-1): the profiles of rps_mini under three real CDD PSSM ids, for the pipeline test (below).
+#
+# xp101.phr, .pin, .pdb and .pos (series D, item D1b-2): rps_mini made with profile 101 under the predicted RefSeq Seq-id
+#   ref|XP_000101.1| (below), which the alias key OID_MASK_TYPE 1 erases; the other files of that build are the same as
+#   rps_mini's, so the rows replace only these four (`rps-gz:rps_mini!phr=xp101.phr.gz...`, gzip -9 -n each).
+# xp3v01.phr, .pin, .pdb and .pos (series D, item D1b-2): rps_mini3v.01 made from profile 102 under ref|XP_000102.1|
+#   (below; the other files of that build are the same as rps_mini3v.01's), the second of three volumes searched bare
+#   (`rps-gz:rps_mini3v!01.phr=xp3v01.phr.gz...@om3vrps`).
+#
 # rps_wide and the .loo rps_wide_ug.loo (series PR, item PS12m): one profile of 133,000 columns (f101 tiled 700 times by
 #   build_wide.py, version 5, gnl|CDD|901) with makeprofiledb -threshold 20 -force, so that its table holds the nine words that
 #   match exactly (700 hits each, one per tile): 65 buckets of 2,048 rows, a cell's hits in all of them, in both groups of
@@ -131,6 +140,44 @@ assert struct.unpack("<i", loo[:4])[0] == 0x1e17
 loo[:4] = struct.pack("<i", 0x1e16)
 open(base + ".loo", "wb").write(bytes(loo))
 PY
+# rps_cdd (series PR, item PS15a-1; the pipeline test `tests/rps_pipeline.rs`): the three profiles of rps_mini under the
+# PSSM ids of three rows of CDD v3.22 that the data files of tests/fixtures/rpsbproc hold (177038 CHL00113, 439874 COG0104,
+# 440288 COG0522), so that NCBI's and LOSAT's rpsbproc find them in cddid.tbl.
+n=0
+: > listcdd.txt
+for tag in 177038 439874 440288; do
+  n=$((n + 1))
+  sed "s/tag id 10$n\$/tag id $tag/" f10$n.smp > c$tag.smp
+  grep -q "tag id $tag\$" c$tag.smp
+  echo c$tag.smp >> listcdd.txt
+done
+"$N/makeprofiledb" -in listcdd.txt -out "$O/rps_cdd" -title rps_cdd -dbtype rps
+# xp101: profile 101 under `other { accession "XP_000101", version 1 }` (ref|XP_000101.1|), then 102 and 103 as in rps_mini.
+python3 - f101.smp x101.smp <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+new, count = re.subn(r'id \{\s*general \{\s*db "CDD",\s*tag id 101\s*\}\s*\}',
+                     'id {\n        other {\n          accession "XP_000101",\n          version 1\n        }\n      }', text, count=1)
+assert count == 1
+open(sys.argv[2], "w").write(new)
+PY
+printf '%s\n' x101.smp f102.smp f103.smp > listxp.txt
+mkdir xp
+"$N/makeprofiledb" -in listxp.txt -out xp/rps_mini -title rps_mini -dbtype rps
+for ext in phr pin pdb pos; do cp "xp/rps_mini.$ext" "$O/xp101.$ext"; done
+# xp3v01: profile 102 alone under `other { accession "XP_000102", version 1 }`, as volume rps_mini3v.01.
+python3 - f102.smp x102.smp <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+new, count = re.subn(r'id \{\s*general \{\s*db "CDD",\s*tag id 102\s*\}\s*\}',
+                     'id {\n        other {\n          accession "XP_000102",\n          version 1\n        }\n      }', text, count=1)
+assert count == 1
+open(sys.argv[2], "w").write(new)
+PY
+echo x102.smp > listxp3v.txt
+mkdir xp3v
+"$N/makeprofiledb" -in listxp3v.txt -out xp3v/rps_mini3v.01 -title rps_mini3v -dbtype rps
+for ext in phr pin pdb pos; do cp "xp3v/rps_mini3v.01.$ext" "$O/xp3v01.$ext"; done
 # rps_wide and its table with ungrouped cells.
 python3 "$HERE/build_wide.py" tile f101.smp 700 wide.smp
 echo wide.smp > wide.txt

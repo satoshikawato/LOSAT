@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:828-832
-# ```c++
-# ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
-#     tabinfo.SetFields(**itr, *m_Scope, &m_ScoringMatrix);
-#     tabinfo.Print();
-# }
-# ```
+# NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-832
 # These tests protect the raw output and existing-authority orchestration boundary.
 
 from collections import Counter
@@ -2490,8 +2484,7 @@ class PlatformCertificationTests(unittest.TestCase):
                         catalog,
                     )
 
-    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
-    #   x_PrintField(*iter); m_Ostream << "\n";
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
     # The tests below cover frozen_mismatch_allowlist.json in Gate A: raw bytes
     # are still compared by SHA-256, and a listed case passes only with its
     # recorded actual output.

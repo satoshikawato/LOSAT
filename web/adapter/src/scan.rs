@@ -1,29 +1,19 @@
 //! The index scan of FASTA input (docs/web/abi_v2.md §9, plan TD-8). It exists only so
 //! that the application can extract original records; every search reads its input
-//! with the program's own reader, and `register` checks that the scan of the program's
-//! kind (1 or 2) agrees with it.
+//! with the program's own reader, and `register` checks that the scan agrees with it.
 //!
-//! Parser kinds 1 (nucleotide input) and 2 (protein input) give the records of NCBI
-//! BLAST+'s reader as the engine reads them (`ncbi.rs`). Kind 0, the `bio::io::fasta`
-//! 1.6.0 reader that BLASTP, TBLASTN, BLASTN and TBLASTX used before session SF, was
-//! removed after the application switched to kinds 1 and 2 (plan DW-38).
+//! The scan reads the input with the reader of a program's input (`ReaderConfig`: kind 1 for
+//! nucleotide input, kind 2 for protein input, NCBI's data loaders on or off) and gives the
+//! records of NCBI BLAST+'s reader as the engine reads them (`ncbi.rs`), with the reader's errors
+//! in the command line's words. Kind 0, the `bio::io::fasta` 1.6.0 reader that BLASTP, TBLASTN,
+//! BLASTN and TBLASTX used before session SF, was removed after the application switched to kinds
+//! 1 and 2 (plan DW-38).
 
 mod ncbi;
 
-pub use ncbi::NcbiScanner;
+use losat::web_adapter::ReaderConfig;
 
-/// Residues between two checkpoints of a record whose lines are not regular.
-pub const CHECKPOINT_EVERY: u64 = 65_536;
-
-/// How to find the byte offset of a residue of a record in the scanned input.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LineLayout {
-    /// Residue `i` is at `sequence_offset + (i / width) * (width + eol) + i % width`.
-    Uniform { width: u64, eol: u64 },
-    /// `offsets[k]` is the byte offset of residue `k * CHECKPOINT_EVERY`; the residues
-    /// in between are found by reading forward under the parser's rules.
-    Checkpoints { offsets: Vec<u64> },
-}
+pub use ncbi::{NcbiScanner, ReaderStop, Scanned};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanRecord {
@@ -36,24 +26,46 @@ pub struct ScanRecord {
     pub sequence_offset: u64,
     /// Offset of the next defline, or the end of the input.
     pub end_offset: u64,
-    /// The number of residues that the reader stores.
+    /// The number of letters that the reader stores (a gap line's too).
     pub length: u64,
-    pub layout: LineLayout,
-    /// Count of every stored residue, upper-cased.
+    /// Count of every stored letter, upper-cased.
     pub residue_counts: Box<[u64; 256]>,
 }
 
-/// A streaming scan of one input with a parser kind.
+/// Why a scan failed: the reader's refusal, which the reading of the input with the same reader
+/// gives too, as the command line's reading of the file does. The reader's error (`CheckDataLine`)
+/// does not fail the scan: it ends the records before it (`Scanned::stop`, line WQA's D10,
+/// 2026-11-19).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanError {
+    /// The reader's refusal of the input in the command line's words: a first line that NCBI's
+    /// data loaders would fetch as a Seq-id, or a record longer than LOSAT reads. `record` is the
+    /// offset where the refused record starts; the records before it are whole.
+    Refused { message: String, record: u64 },
+}
+
+impl ScanError {
+    /// The message, as `scan_end` reports it.
+    pub fn message(&self) -> &str {
+        match self {
+            ScanError::Refused { message, .. } => message,
+        }
+    }
+}
+
+impl std::fmt::Display for ScanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+/// A streaming scan of one input with the reader of a program's input.
 pub struct Scanner(NcbiScanner);
 
 impl Scanner {
-    /// A scan with parser kind `kind` (1 or 2).
-    pub fn of_kind(kind: u32) -> Option<Self> {
-        match kind {
-            1 => Some(Self(NcbiScanner::new(false))),
-            2 => Some(Self(NcbiScanner::new(true))),
-            _ => None,
-        }
+    /// A scan with the reader `config` (`store::reader_config`).
+    pub fn new(config: ReaderConfig) -> Self {
+        Self(NcbiScanner::new(config))
     }
 
     /// Scans the next chunk of the input.
@@ -61,24 +73,26 @@ impl Scanner {
         self.0.feed(chunk);
     }
 
-    /// Ends the input and returns the records, or the scan's error.
-    pub fn finish(self) -> Result<Vec<ScanRecord>, String> {
+    /// Ends the input and returns the records and the reader's error that ended them, or the
+    /// reader's refusal.
+    pub fn finish(self) -> Result<Scanned, ScanError> {
         self.0.finish()
     }
 }
 
-/// Scans a whole input at once with parser kind 1 (`protein` false) or 2.
-pub fn scan_ncbi(input: &[u8], protein: bool) -> Result<Vec<ScanRecord>, String> {
-    let mut scanner = NcbiScanner::new(protein);
+/// Scans a whole input at once with the reader `config`.
+pub fn scan_ncbi(input: &[u8], config: ReaderConfig) -> Result<Scanned, ScanError> {
+    let mut scanner = NcbiScanner::new(config);
     scanner.feed(input);
     scanner.finish()
 }
 
-/// The *scan* response (docs/web/abi_v2.md §9).
-pub fn to_json(records: &[ScanRecord]) -> String {
+/// The *scan* response (docs/web/abi_v2.md §9): the records, and the reader's error that ended
+/// them (`reader_error`, line WQA's D10, 2026-11-19).
+pub fn to_json(scanned: &Scanned) -> String {
     use std::fmt::Write as _;
     let mut out = String::from("{\"records\":[");
-    for (index, record) in records.iter().enumerate() {
+    for (index, record) in scanned.records.iter().enumerate() {
         if index > 0 {
             out.push(',');
         }
@@ -86,30 +100,9 @@ pub fn to_json(records: &[ScanRecord]) -> String {
         crate::json::string(&mut out, &record.id);
         let _ = write!(
             out,
-            ",\"header_offset\":{},\"sequence_offset\":{},\"end_offset\":{},\"length\":{},\"line_layout\":",
+            ",\"header_offset\":{},\"sequence_offset\":{},\"end_offset\":{},\"length\":{}",
             record.header_offset, record.sequence_offset, record.end_offset, record.length
         );
-        match &record.layout {
-            LineLayout::Uniform { width, eol } => {
-                let _ = write!(
-                    out,
-                    "{{\"kind\":\"uniform\",\"width\":{width},\"eol\":{eol}}}"
-                );
-            }
-            LineLayout::Checkpoints { offsets } => {
-                let _ = write!(
-                    out,
-                    "{{\"kind\":\"checkpoints\",\"every\":{CHECKPOINT_EVERY},\"offsets\":["
-                );
-                for (index, offset) in offsets.iter().enumerate() {
-                    if index > 0 {
-                        out.push(',');
-                    }
-                    let _ = write!(out, "{offset}");
-                }
-                out.push_str("]}");
-            }
-        }
         out.push_str(",\"residue_counts\":{");
         let mut first = true;
         for (byte, &count) in record.residue_counts.iter().enumerate() {
@@ -131,6 +124,16 @@ pub fn to_json(records: &[ScanRecord]) -> String {
         }
         out.push_str("}}");
     }
-    out.push_str("]}");
+    out.push(']');
+    if let Some(stop) = &scanned.stop {
+        let _ = write!(
+            out,
+            ",\"reader_error\":{{\"offset\":{},\"defline\":{},\"message\":",
+            stop.offset, stop.defline
+        );
+        crate::json::string(&mut out, &stop.message);
+        out.push('}');
+    }
+    out.push('}');
     out
 }

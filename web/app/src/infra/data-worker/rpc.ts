@@ -62,16 +62,36 @@ export function serveRpc<T extends object>(
   endpoint.start?.();
 }
 
+/** How a client learns that its worker could not start or has ended (rpcClient). */
+export interface RpcLife {
+  /** The error of every call once the endpoint reported an error before its first answer: a worker that could not start. */
+  readonly notStarted?: (detail: string) => Error;
+  /**
+   * Settles once the worker has ended without an error event (line WQA's sweep, D2, 2026-11-19): every pending and later
+   * call then rejects with its error, where they waited for good.
+   */
+  readonly ended?: Promise<Error>;
+  /** Told once, with the error of every call from then on: the worker could not start, or it ended. */
+  readonly onEnd?: (error: Error) => void;
+}
+
 /**
  * Returns an object whose `methods` call the served object behind `endpoint`. If the
- * endpoint reports an error before its first answer (a worker that failed to start),
- * every pending and later call rejects with it.
+ * endpoint reports an error before its first answer (a worker that failed to start), or
+ * `life.ended` settles, every pending and later call rejects with that error.
  */
-export function rpcClient<T extends object>(endpoint: RpcEndpoint, methods: readonly Methods<T>[]): T {
+export function rpcClient<T extends object>(endpoint: RpcEndpoint, methods: readonly Methods<T>[], life: RpcLife = {}): T {
   let nextId = 0;
   let broken: Error | undefined;
   const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
   let answered = false;
+  const end = (error: Error) => {
+    if (broken !== undefined) return;
+    broken = error;
+    for (const call of pending.values()) call.reject(error);
+    pending.clear();
+    life.onEnd?.(error);
+  };
   endpoint.addEventListener('message', (event) => {
     answered = true;
     const response = (event as MessageEvent<RpcResponse>).data;
@@ -90,11 +110,10 @@ export function rpcClient<T extends object>(endpoint: RpcEndpoint, methods: read
     // An error before the first answer means the worker failed to start. Later errors are
     // uncaught exceptions of a running worker; the served calls report their own errors.
     if (answered) return;
-    const detail = (event as ErrorEvent).message;
-    broken = new Error(`the worker stopped${detail ? `: ${detail}` : ''}`);
-    for (const call of pending.values()) call.reject(broken);
-    pending.clear();
+    const detail = (event as ErrorEvent).message ?? '';
+    end(life.notStarted?.(detail) ?? new Error(`the worker stopped${detail ? `: ${detail}` : ''}`));
   });
+  void life.ended?.then(end);
   endpoint.start?.();
   const client: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
   for (const method of methods) {

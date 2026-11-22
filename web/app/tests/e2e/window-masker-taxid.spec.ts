@@ -110,7 +110,7 @@ async function typeTaxid(page: Page, id: number | string = TAXID): Promise<void>
 
 const note = (page: Page) => page.getByTestId('counts-note');
 /** The sentence of the saved counts: kept in the browser, or (where the browser keeps nothing across sessions) in this tab. */
-const SAVED = /^(?:Saved in this browser|Kept in this tab only) \(2026-10-01, 568\.6 kB\)$/;
+const SAVED = /^(?:Saved in this browser|Kept in this tab only) \(2026-10-01, 568\.6\u00a0kB\)$/;
 
 /** The inputs of the search: the query and the subject opened as files, the task blastn. */
 async function setUpSearch(page: Page): Promise<void> {
@@ -284,7 +284,7 @@ test('a download that stopped keeps what came; Continue asks for the rest with a
   if (backend !== 'opfs') return expectNothingKept(page);
   await expect(page.getByTestId('counts-error')).toContainText('ftp.ncbi.nlm.nih.gov could not be reached');
   const partial = await note(page).textContent();
-  expect(partial).toMatch(/^Downloaded \d+\.\d kB of 568\.6 kB$/);
+  expect(partial).toMatch(/^Downloaded \d+\.\d\u00a0kB of 568\.6\u00a0kB$/);
   await expect(page.getByTestId('counts-continue')).toBeVisible();
   await expect(page.getByTestId('counts-delete')).toBeVisible();
   await shoot(section, '04-partial', browserName);
@@ -299,11 +299,11 @@ test('a download that stopped keeps what came; Continue asks for the rest with a
   expect(site.ranges).toEqual([undefined]);
 
   // Continue: held, to show the progress; then the rest comes by Range from the saved byte.
-  const saved = Number(/^Downloaded ([\d.]+) kB/.exec(partial!)![1]) * 1000;
+  const saved = Number(/^Downloaded ([\d.]+)\u00a0kB/.exec(partial!)![1]) * 1000;
   let open!: () => void;
   site.gate = new Promise<void>((resolve) => (open = resolve));
   await page.getByTestId('counts-continue').click();
-  await expect(note(page)).toHaveText(/^Downloading \d+\.\d kB of 568\.6 kB from ftp\.ncbi\.nlm\.nih\.gov…$/);
+  await expect(note(page)).toHaveText(/^Downloading \d+\.\d\u00a0kB of 568\.6\u00a0kB from ftp\.ncbi\.nlm\.nih\.gov…$/);
   await expect(page.getByTestId('counts-cancel')).toBeVisible();
   await shoot(section, '03b-downloading', browserName);
   open();
@@ -332,7 +332,7 @@ test('Cancel stops the download and keeps what came', async ({ page }) => {
   await page.getByTestId('counts-continue').click();
   await page.getByTestId('counts-cancel').click();
   open();
-  await expect(note(page)).toHaveText(/^Downloaded \d+\.\d kB of 568\.6 kB$/);
+  await expect(note(page)).toHaveText(/^Downloaded \d+\.\d\u00a0kB of 568\.6\u00a0kB$/);
   await expect(page.getByTestId('counts-continue')).toBeVisible();
   await page.getByTestId('counts-delete').click();
   await expect(note(page)).toHaveText('Downloads wmasker.obinary for 562 from ftp.ncbi.nlm.nih.gov');

@@ -46,6 +46,7 @@ from pathlib import Path
 TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS))
 from db_search_fixtures import clean_env, ncbi_env  # noqa: E402
+import losat_wording  # noqa: E402  (LOSAT's words in NCBI's frozen bytes, AGENTS.md rule 8)
 
 MANIFEST = TESTS / "dropin_corpus_manifest.tsv"
 INPUTS = TESTS / "dropin_corpus"
@@ -202,6 +203,7 @@ def compare(row: dict[str, str], run: Run) -> str:
     want = (FROZEN / f"{row['row_id']}.out").read_bytes()
     if sha256(want) != row["stdout_sha256"]:
         return "the frozen stdout does not match the manifest"
+    want = losat_wording.losat_output_bytes(want)  # LOSAT's words (AGENTS.md rule 8)
     if check == "line1":
         lines = run.stdout.split(b"\n")
         if lines[0] != want.split(b"\n")[0] or len(lines) != 3 or b"LOSAT" not in lines[1] or lines[2]:
@@ -209,18 +211,29 @@ def compare(row: dict[str, str], run: Run) -> str:
         return ""
     if run.stdout != want:
         return "stdout " + first_difference(want, run.stdout)
-    got = files_cell(row, run)
-    if got == row["files"]:
-        return ""
+    # Each written file in LOSAT's words: the frozen copy of an output file (`ROW--NAME`) mapped, or the
+    # frozen sha256 of LOSAT's file read back to NCBI's words (`losat_wording.ncbi_hash_form`); a database
+    # file through `database_bytes`, whose bytes state no version.
+    database = is_database_row(shlex.split(row["command"]))
     want_cells, got_cells = dict(c.split(":") for c in row["files"].split(",") if c), \
-        dict(c.split(":") for c in got.split(",") if c)
+        dict(c.split(":") for c in files_cell(row, run).split(",") if c)
     if set(want_cells) != set(got_cells):
         return f"files {sorted(want_cells)} frozen, LOSAT wrote {sorted(got_cells)}"
-    name = next(n for n in want_cells if want_cells[n] != got_cells[n])
-    frozen = FROZEN / f"{row['row_id']}--{name}"
-    if frozen.exists():
-        return f"{name} " + first_difference(frozen.read_bytes(), run.files[name])
-    return f"{name}: sha256 {got_cells[name]}, frozen {want_cells[name]}"
+    for name, cell in want_cells.items():
+        data, frozen = run.files[name], FROZEN / f"{row['row_id']}--{name}"
+        if database:
+            if got_cells[name] != cell:
+                return f"{name}: sha256 {got_cells[name]}, frozen {cell}"
+        elif frozen.exists():
+            ncbi = frozen.read_bytes()
+            if sha256(ncbi) != cell:
+                return f"the frozen {name} does not match the manifest"
+            want = losat_wording.losat_output_bytes(ncbi)
+            if data != want:
+                return f"{name} " + first_difference(want, data)
+        elif sha256(losat_wording.ncbi_hash_form(data)) != cell:
+            return f"{name}: sha256 {got_cells[name]}, frozen {cell}"
+    return ""
 
 
 def freeze(args) -> int:

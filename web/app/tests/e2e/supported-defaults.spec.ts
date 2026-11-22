@@ -30,7 +30,7 @@ interface Mode {
 }
 
 const MODES: readonly Mode[] = [
-  { id: 'blastn', tasks: ['megablast', 'dc-megablast', 'blastn', 'blastn-short'], query: 'outfmt0/multi_query.fasta', subject: ['LC738870.fasta'] },
+  { id: 'blastn', tasks: ['megablast', 'dc-megablast', 'blastn', 'blastn-short', 'rmblastn'], query: 'outfmt0/multi_query.fasta', subject: ['LC738870.fasta'] },
   { id: 'blastp', tasks: ['blastp', 'blastp-fast'], query: 'outfmt0/e2e_protein_query.faa', subject: ['HtNMV.faa'] },
   { id: 'blastx', tasks: ['blastx', 'blastx-fast'], query: 'outfmt0/pd_sub_q.fna', subject: ['HtNMV.faa'] },
   { id: 'tblastn', tasks: ['tblastn', 'tblastn-fast'], query: 'outfmt0/e2e_protein_query.faa', subject: ['LC738870.fasta'] },

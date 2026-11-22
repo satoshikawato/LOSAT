@@ -1,15 +1,14 @@
-// RecordScanner contract: the ABI v2 index scan (docs/web/abi_v2.md §4, §9), parser kinds 1
-// (NCBI BLAST+'s reader with the nucleotide flags) and 2 (with the protein flags). The
-// expected values are what the adapter's scan (web/adapter/src/scan/ncbi.rs, checked against
-// the engine's reader by web/adapter/tests/scan_ncbi_properties.rs) reports; the adapter is
-// the authority (plan TD-8). The FakeScanner runs these cases in Vitest, and
-// tests/unit/engine-runtime.test.ts runs them against the adapter's serial reactor. The
-// cases are those that the FakeScanner follows too (its simplifications are listed in
-// src/infra/fake/fake-fasta.ts). The layout kind is not prescribed: the cases check that the
-// layout finds every residue.
-import type { FastaParserKind, IndexedRecord } from 'losat/domain';
+// RecordScanner contract: the ABI v2 index scan (docs/web/abi_v2.md §4, §9) with the engine's
+// readers of kinds 1 (NCBI BLAST+'s reader with the nucleotide flags) and 2 (with the protein
+// flags). The expected values are what the adapter's scan (web/adapter/src/scan/ncbi.rs, checked
+// against the engine's reader by web/adapter/tests/scan_ncbi_properties.rs) reports; the adapter
+// is the authority (plan TD-8). The FakeScanner runs these cases in Vitest, and
+// tests/unit/engine-runtime.test.ts runs them against the adapter's serial reactor. The cases are
+// those that the FakeScanner follows too (its simplifications are listed in
+// src/infra/fake/fake-fasta.ts).
+import type { FastaParserKind, FastaReader } from 'losat/domain';
 import type { RecordScanner, ScanResponse } from 'losat/ports';
-import { check, rejects, same, sameBytes, sameValue, type ContractCase } from './contract';
+import { check, same, sameValue, type ContractCase } from './contract';
 
 export interface RecordScannerEnv {
   readonly scanner: RecordScanner;
@@ -31,6 +30,11 @@ interface Corpus {
 }
 
 const KINDS: readonly FastaParserKind[] = [1, 2];
+/** A reader of each kind: BLASTN's query (kind 1) and BLASTP's subject (kind 2), with NCBI's data loaders on. */
+const READERS: Readonly<Record<FastaParserKind, FastaReader>> = {
+  1: { program: 'blastn', role: 'query', dataLoaders: true },
+  2: { program: 'blastp', role: 'subject', dataLoaders: true },
+};
 const encoder = new TextEncoder();
 const text = (value: string) => () => encoder.encode(value);
 /** The same records for both kinds. */
@@ -234,30 +238,114 @@ const CORPUS: readonly Corpus[] = [
     input: text('>a\nA$\n$$$$$$\n'),
     expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 13, residues: 'A' }),
   },
-  { name: 'a long record (4 checkpoints) with lines of 60 and 61 residues', ...longRecord(3 * 65_536 + 100, [60, 61]) },
+  { name: 'a long record with lines of 60 and 61 residues', ...longRecord(3 * 65_536 + 100, [60, 61]) },
   { name: 'a long record with regular 80-residue lines', ...longRecord(200_000, [80]) },
+  // A gap line's letters are the record's, as the CLI reads them: N for kind 1, X for kind 2 (line WQA's D13 (a),
+  // 2026-11-20; LOSAT Web refused gap lines before).
+  {
+    name: 'a gap line adds its letters to the record',
+    input: text('>a\nACGT\n>?10\nAC\n'),
+    expected: byKind(
+      [{ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 16, residues: 'ACGTNNNNNNNNNNAC' }],
+      [{ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 16, residues: 'ACGTXXXXXXXXXXAC' }],
+    ),
+  },
+  {
+    name: 'a gap line after white space, of an unknown length',
+    input: text('>a\nACGT\n >?unk3\n'),
+    expected: byKind(
+      [{ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 16, residues: 'ACGTNNN' }],
+      [{ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 16, residues: 'ACGTXXX' }],
+    ),
+  },
+  {
+    name: 'a gap line without a size at the end of the input is one letter',
+    input: text('>a\r\nAC\r\n>?'),
+    expected: byKind(
+      [{ id: 'a', header_offset: 0, sequence_offset: 4, end_offset: 10, residues: 'ACN' }],
+      [{ id: 'a', header_offset: 0, sequence_offset: 4, end_offset: 10, residues: 'ACX' }],
+    ),
+  },
+  {
+    name: 'a gap line starts a first record without a defline, and the data line after it is checked',
+    input: text('>?5\nAC\n>b\nGT\n'),
+    expected: byKind(
+      [
+        { id: '', header_offset: 0, sequence_offset: 0, end_offset: 7, residues: 'NNNNNAC' },
+        { id: 'b', header_offset: 7, sequence_offset: 10, end_offset: 13, residues: 'GT' },
+      ],
+      [
+        { id: '', header_offset: 0, sequence_offset: 0, end_offset: 7, residues: 'XXXXXAC' },
+        { id: 'b', header_offset: 7, sequence_offset: 10, end_offset: 13, residues: 'GT' },
+      ],
+    ),
+  },
 ];
 
 const NOT_PLAUSIBLE = (line: number) =>
   new RegExp(`CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment\\.$`);
-const GAP = (line: number) => new RegExp(`line ${line} is a gap line \\('>\\?'\\), .* gap lines are not supported in the browser$`);
 
-const ERRORS: ReadonlyArray<{ readonly name: string; readonly input: Uint8Array; readonly error: RegExp }> = [
-  { name: 'a gap line', input: encoder.encode('>a\nACGT\n>?10\nAC\n'), error: GAP(3) },
-  { name: 'a gap line after white space', input: encoder.encode('>a\nACGT\n >?10\n'), error: GAP(3) },
-  { name: 'a gap line at the end of the input', input: encoder.encode('>a\r\nAC\r\n>?'), error: GAP(3) },
-  { name: 'a first data line that is not plausible data', input: encoder.encode('>a\n$$$$$$\nACGT\n'), error: NOT_PLAUSIBLE(2) },
-  { name: 'a ; early in a first data line', input: encoder.encode('>a\nAC;x\nGT\n'), error: NOT_PLAUSIBLE(2) },
-  { name: 'a later record whose first data line is not plausible data', input: encoder.encode('>a\nACGT\n>b\n$$$$$$\n'), error: NOT_PLAUSIBLE(4) },
+/**
+ * The reader's own error, which ends the records (`reader_error`): the number of records before
+ * it, and the offset of the record that it fails on (line WQA's D10, 2026-11-19).
+ */
+const STOPS: ReadonlyArray<{
+  readonly name: string;
+  readonly input: Uint8Array;
+  readonly error: RegExp;
+  readonly records: number;
+  readonly offset: number;
+  /** Whether the record that the reader fails on starts with a defline (review M2, 2026-11-20). */
+  readonly defline: boolean;
+}> = [
+  {
+    name: 'a first data line that is not plausible data',
+    input: encoder.encode('>a\n$$$$$$\nACGT\n'),
+    error: NOT_PLAUSIBLE(2),
+    records: 0,
+    offset: 0,
+    defline: true,
+  },
+  {
+    name: 'a first data line after a gap line that is not plausible data',
+    input: encoder.encode('>a\n>?5\n$$$$$$\n'),
+    error: NOT_PLAUSIBLE(3),
+    records: 0,
+    offset: 0,
+    defline: true,
+  },
+  { name: 'a ; early in a first data line', input: encoder.encode('>a\nAC;x\nGT\n'), error: NOT_PLAUSIBLE(2), records: 0, offset: 0, defline: true },
+  {
+    name: 'a later record whose first data line is not plausible data',
+    input: encoder.encode('>a\nACGT\n>b\n$$$$$$\n>c\nACGT\n'),
+    error: NOT_PLAUSIBLE(4),
+    records: 1,
+    offset: 8,
+    defline: true,
+  },
   {
     name: 'a byte order mark',
     input: new Uint8Array([0xef, 0xbb, 0xbf, ...encoder.encode('>a\nAC\n')]),
     error: NOT_PLAUSIBLE(1),
+    records: 0,
+    offset: 0,
+    defline: false,
+  },
+  {
+    name: 'a first line of other text',
+    input: encoder.encode('=== list ===\n>a\nAC\n'),
+    error: NOT_PLAUSIBLE(1),
+    records: 0,
+    offset: 0,
+    defline: false,
   },
   {
     name: 'a byte that is not UTF-8 in a first data line',
     input: new Uint8Array([...encoder.encode('>a\nAC'), 0xff, ...encoder.encode('GT\n')]),
     error: NOT_PLAUSIBLE(2),
+    records: 0,
+    offset: 0,
+    defline: true,
   },
 ];
 
@@ -269,71 +357,6 @@ async function* chunked(bytes: Uint8Array, size: number): AsyncGenerator<Uint8Ar
   for (let at = 0; at < bytes.length; at += size) yield bytes.slice(at, at + size);
 }
 
-/** The residue that the kind stores for a byte (upper case; `U` as `T` in kind 1), or undefined. */
-function stored(byte: number, kind: FastaParserKind): number | undefined {
-  const upper = byte >= 0x61 && byte <= 0x7a ? byte - 0x20 : byte;
-  if (kind === 2) return (upper >= 0x41 && upper <= 0x5a) || upper === 0x2a ? upper : undefined;
-  if (!'ABCDGHKMNRSTUVWY'.includes(String.fromCharCode(upper))) return undefined;
-  return upper === 0x55 ? 0x54 : upper;
-}
-
-/**
- * Reads residues forward from a checkpoint (whose byte is a residue) under the rules of
- * kinds 1 and 2 (abi_v2.md §9): CR and LF end a line; a line whose first byte other than
- * space, tab, VT and FF is `!`, `#` or `;` is skipped; elsewhere a `;` skips the rest of the
- * line; a byte that the kind stores is the next residue; every other byte is skipped.
- */
-function readForward(bytes: Uint8Array, offset: number, end: number, count: number, kind: FastaParserKind): number[] {
-  const out: number[] = [];
-  let lineStart = false;
-  let skipLine = false;
-  for (let i = offset; i < end && out.length < count; i++) {
-    const byte = bytes[i]!;
-    if (byte === 0x0a || byte === 0x0d) {
-      lineStart = true;
-      skipLine = false;
-      continue;
-    }
-    if (skipLine) continue;
-    if (lineStart) {
-      if (byte === 0x20 || byte === 0x09 || byte === 0x0b || byte === 0x0c) continue;
-      lineStart = false;
-      if (byte === 0x21 || byte === 0x23) {
-        skipLine = true;
-        continue;
-      }
-    }
-    if (byte === 0x3b) {
-      skipLine = true;
-      continue;
-    }
-    const residue = stored(byte, kind);
-    if (residue !== undefined) out.push(residue);
-  }
-  return out;
-}
-
-/** The residues of a record, found through its line layout. */
-function locate(bytes: Uint8Array, record: IndexedRecord, kind: FastaParserKind): Uint8Array {
-  const out = new Uint8Array(record.length);
-  const layout = record.line_layout;
-  if (layout.kind === 'uniform') {
-    check(layout.width > 0 || record.length === 0, `record ${record.id}: a uniform layout needs a width`);
-    for (let i = 0; i < record.length; i++) {
-      const at = record.sequence_offset + Math.floor(i / layout.width) * (layout.width + layout.eol) + (i % layout.width);
-      check(at < record.end_offset, `record ${record.id}: residue ${i} lies outside the record`);
-      out[i] = stored(bytes[at]!, kind) ?? 0;
-    }
-    return out;
-  }
-  check(layout.every > 0, `record ${record.id}: checkpoints need a positive spacing`);
-  same(layout.offsets.length, Math.ceil(record.length / layout.every), `record ${record.id}: checkpoint count`);
-  layout.offsets.forEach((offset, k) => {
-    const first = k * layout.every;
-    out.set(readForward(bytes, offset, record.end_offset, Math.min(layout.every, record.length - first), kind), first);
-  });
-  return out;
-}
 
 function countBytes(bytes: Uint8Array): Record<string, number> {
   const counts: Record<string, number> = {};
@@ -344,7 +367,7 @@ function countBytes(bytes: Uint8Array): Record<string, number> {
   return counts;
 }
 
-function checkResponse(bytes: Uint8Array, response: ScanResponse, expected: readonly ExpectedRecord[], kind: FastaParserKind): void {
+function checkResponse(response: ScanResponse, expected: readonly ExpectedRecord[]): void {
   same(response.records.length, expected.length, 'record count');
   response.records.forEach((record, i) => {
     const want = expected[i]!;
@@ -356,7 +379,6 @@ function checkResponse(bytes: Uint8Array, response: ScanResponse, expected: read
     same(record.end_offset, want.end_offset, `record ${want.id} end_offset`);
     same(record.length, residues.length, `record ${want.id} length`);
     sameValue(record.residue_counts, countBytes(residues), `record ${want.id} residue_counts`);
-    sameBytes(locate(bytes, record, kind), residues, `record ${want.id} residues found through the line layout`);
   });
 }
 
@@ -367,22 +389,28 @@ export const RECORD_SCANNER_CASES: readonly ContractCase<RecordScannerEnv>[] = [
       async run({ scanner }) {
         const bytes = corpus.input();
         for (const kind of KINDS) {
-          const whole = await scanner.scan(kind, chunked(bytes, 0));
-          checkResponse(bytes, whole, corpus.expected(kind), kind);
+          const whole = await scanner.scan(READERS[kind], chunked(bytes, 0));
+          checkResponse(whole, corpus.expected(kind));
           for (const size of CHUNKINGS.slice(1)) {
-            sameValue(await scanner.scan(kind, chunked(bytes, size)), whole, `kind ${kind}: the response for chunks of ${size} bytes`);
+            sameValue(await scanner.scan(READERS[kind], chunked(bytes, size)), whole, `kind ${kind}: the response for chunks of ${size} bytes`);
           }
         }
       },
     }),
   ),
-  ...ERRORS.map(
-    (error): ContractCase<RecordScannerEnv> => ({
-      name: `scan: the reader's error for ${error.name}`,
+  ...STOPS.map(
+    (stop): ContractCase<RecordScannerEnv> => ({
+      name: `scan: the reader's error ends the records for ${stop.name}`,
       async run({ scanner }) {
         for (const kind of KINDS) {
           for (const size of CHUNKINGS) {
-            await rejects(scanner.scan(kind, chunked(error.input, size)), error.error, `kind ${kind}, chunks of ${size} bytes`);
+            const label = `kind ${kind}, chunks of ${size} bytes`;
+            const response = await scanner.scan(READERS[kind], chunked(stop.input, size));
+            same(response.records.length, stop.records, `${label}: records before the error`);
+            same(response.reader_error?.offset, stop.offset, `${label}: the offset of the record`);
+            same(response.reader_error?.defline, stop.defline, `${label}: whether the record starts with a defline`);
+            const message = response.reader_error?.message ?? '';
+            check(stop.error.test(message), `${label}: the reader's message, not ${JSON.stringify(message)}`);
           }
         }
       },
@@ -394,17 +422,9 @@ export const RECORD_SCANNER_CASES: readonly ContractCase<RecordScannerEnv>[] = [
       const bytes = encoder.encode('>éé x\nAC\n');
       for (const kind of KINDS) {
         for (const size of [1, 2, 3]) {
-          const response = await scanner.scan(kind, chunked(bytes, size));
+          const response = await scanner.scan(READERS[kind], chunked(bytes, size));
           same(response.records[0]?.id, 'éé', `kind ${kind}: id with chunks of ${size} bytes`);
         }
-      }
-    },
-  },
-  {
-    name: 'scan: an unknown parser kind is refused, kind 0 (bio\'s reader, removed) too',
-    async run({ scanner }) {
-      for (const kind of [0, 3]) {
-        await rejects(scanner.scan(kind as FastaParserKind, chunked(encoder.encode('>a\nAC\n'), 0)), new RegExp(`parser kind ${kind}$`), `kind ${kind}`);
       }
     },
   },

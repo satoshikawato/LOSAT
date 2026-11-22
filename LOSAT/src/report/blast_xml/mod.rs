@@ -30,7 +30,7 @@ pub struct CaughtException(pub crate::ncbi_exception::NcbiException);
 
 impl std::fmt::Display for CaughtException {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0.get_msg())
+        f.write_str(&String::from_utf8_lossy(self.0.get_msg()))
     }
 }
 

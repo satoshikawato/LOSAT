@@ -76,12 +76,13 @@ fn blastdbcmd(words: &[&str], out_dir: &Path) -> (Vec<u8>, Vec<u8>, i32) {
     (output.stdout, output.stderr, output.status.code().unwrap())
 }
 
-/// The frozen NCBI file `name` of `tests/blastdbcmd/expected`, with `{R}` and `{T}` placed.
+/// The frozen NCBI file `name` of `tests/blastdbcmd/expected`, with `{R}` and `{T}` placed, in
+/// LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
 fn expected(name: &str) -> Vec<u8> {
     let tests = tests_dir();
     let text = fs::read(tests.join("blastdbcmd/expected").join(name)).unwrap();
     let text = String::from_utf8(text).unwrap();
-    native_paths(text, &tests)
+    losat::wording::losat_output_bytes(&native_paths(text, &tests)).into_owned()
 }
 
 /// The frozen text with `{R}` and `{T}` placed, its paths written as on the platform of the run
@@ -152,6 +153,8 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
         1,
     ),
     ("B52", &["-db", "db/p5", "-info", "-line_length", "60"], 0),
+    // A hexadecimal value of a key with a constraint (line RG item K4i-1, 2026-11-18).
+    ("G11", &["-db", "db/p5", "-info", "-line_length", "0x10"], 0),
     ("B57", &["-db", "\"db/p5\"", "-info"], 0),
     ("B58", &["-db", "db/p5", "-info", "-out", ""], 1),
     (
@@ -281,10 +284,10 @@ fn out_and_logfile_take_what_ncbi_writes_there() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (cited at
 // `ncbi_version::print`). NCBI BLAST+ 2.17.0 (probe B20, line RG `E/e3/ncbi/blastdbcmd.vf_args`):
 // `-version-full` prints the full version and exits 0 before the arguments are read; LOSAT's has
-// NCBI's form with LOSAT's values (line RG item E3).
+// NCBI's form with LOSAT's values, the first line too (line RG item E3).
 #[test]
 fn a_full_version_is_printed_before_the_arguments() {
     let dir = TestDir::new("vfull");
@@ -292,15 +295,18 @@ fn a_full_version_is_printed_before_the_arguments() {
     let stdout = String::from_utf8(stdout).unwrap();
     assert_eq!((stderr, code), (Vec::new(), 0), "{stdout}");
     assert!(
-        stdout.starts_with("blastdbcmd: 2.17.0+\n Package: LOSAT ")
-            && stdout.ends_with(
-                ", output compatible with blast 2.17.0\n Package-Config:  \n GI-64bit:  TRUE\n"
-            ),
+        stdout.starts_with(concat!(
+            "blastdbcmd: LOSAT ",
+            env!("CARGO_PKG_VERSION"),
+            "\n Package: LOSAT "
+        )) && stdout.ends_with(
+            ", output compatible with blast 2.17.0\n Package-Config:  \n GI-64bit:  TRUE\n"
+        ),
         "{stdout}"
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (quoted at `ncbi_xmlhelp`).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (cited at `ncbi_xmlhelp`).
 // NCBI BLAST+ 2.17.0 (probe C06, and line RG `E/e2/ncbi/blastdbcmd.xml_args`): `-xmlhelp` after
 // the arguments prints the XML of blastdbcmd's arguments and exits 0. The toolkit words that the
 // probe's LOSAT refused all run now (`-dryrun`, probe B22, since line RG item E1b:
@@ -312,10 +318,12 @@ fn xmlhelp_prints_ncbis_xml() {
     let dir = TestDir::new("xmlhelp");
     let (stdout, stderr, code) = blastdbcmd(&["-db", "db/p5", "-info", "-xmlhelp"], &dir.0);
     assert_eq!((stderr, code), (Vec::new(), 0));
-    assert!(stdout == include_bytes!("../src/ncbi_xmlhelp/blastdbcmd.xml"));
+    // NCBI's XML in LOSAT's words (the version after the description, `losat::wording`).
+    let ncbi: &[u8] = include_bytes!("../src/ncbi_xmlhelp/blastdbcmd.xml");
+    assert!(stdout == *losat::wording::losat_output_bytes(ncbi));
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1015-1022 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1015-1022 (cited at
 // `ncbi_environment::conf_file_path`). NCBI BLAST+ 2.17.0 (probe B21, and line RG
 // `E/SURVEY_E1.md` `blastdbcmd.conf_missing`): a `-conffile` that is not a file is NCBI's
 // critical post, then its abort with exit status 255, before the arguments are read.
@@ -340,13 +348,13 @@ fn a_conffile_that_is_not_a_file_aborts_as_ncbi_aborts() {
     }
 }
 
-// line CLI DECISIONS 4: NCBI's first line, then LOSAT's package line; `-version` is read
+// line CLI DECISIONS 4: LOSAT's first line (`blastdbcmd: LOSAT 0.2.0`; NCBI's is `blastdbcmd: 2.17.0+`), then LOSAT's package line; `-version` is read
 // anywhere before `--`, also in the place of a value and before an argument error.
 #[test]
 fn version_is_read_before_the_arguments() {
     let dir = TestDir::new("version");
     let version = format!(
-        "blastdbcmd: 2.17.0+\n Package: LOSAT {}, output compatible with blast 2.17.0\n",
+        "blastdbcmd: LOSAT {0}\n Package: LOSAT {0}, output compatible with blast 2.17.0\n",
         env!("CARGO_PKG_VERSION")
     );
     for words in [

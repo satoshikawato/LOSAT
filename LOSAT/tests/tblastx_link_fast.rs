@@ -6,14 +6,6 @@
 //! that the branch it is about was taken, not only that the output is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-861
-//! ```c
-//! b0 = sum <= H_hsp_sum;
-//! ...
-//! b1 = q_off_t <= H_query_etrim;
-//! b2 = s_off_t <= H_sub_etrim;
-//! ...
-//! if (!(b0|b1|b2) )
-//! ```
 //! The expected outputs in `tests/fixtures/tblastx_link_fast` were produced by NCBI BLAST+ 2.17.0,
 //! which runs s_BlastEvenGapLinkHSPs (link_hsps.c:414-1091). The tests compare with them the output
 //! of the default kernel and of the literal port (`LOSAT_LINKING_LEGACY`).
@@ -72,9 +64,6 @@ fn counter(stderr: &str, name: &str) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419
-// ```c
-// s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
-// ```
 // The checks compare the kernel with the port of s_BlastEvenGapLinkHSPs (SHADOW) and every pass
 // with a pass computed from scratch by NCBI's scans (VERIFY).
 /// Every check of the default kernel on: each pass against a pass from
@@ -89,16 +78,6 @@ const CHECKED: [(&str, &str); 3] = [
 const LITERAL_PORT: [(&str, &str); 1] = [("LOSAT_LINKING_LEGACY", "1")];
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-861
-// ```c
-// for (H2_index=H_index-1; H2_index>1;)
-// ...
-//    b0 = sum <= H_hsp_sum;
-// ...
-//    b1 = q_off_t <= H_query_etrim;
-//    b2 = s_off_t <= H_sub_etrim;
-// ...
-//    if (!(b0|b1|b2) )
-// ```
 // NCBI scans only the HSPs before H in list order, so it does not offer the later long HSP to H.
 // The test reaches the fallback that does the same scan.
 // A 4-residue HSP whose large-gap search finds, in the tree of the sweep, a
@@ -161,18 +140,6 @@ impl Drop for TempFasta {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:781-795
-// ```c
-// H2 = H->hsp_link.link[index];
-// if ((!first_pass) && ((H2==0) || (H2->hsp_link.changed==0)))
-// ...
-//    if(H2){
-//       H_hsp_num=H2->hsp_link.num[index];
-//       H_hsp_sum=H2->hsp_link.sum[index];
-//       H_hsp_xsum=H2->hsp_link.xsum[index];
-//    }
-//    H_hsp_link=H2;
-//    H->hsp_link.changed=0;
-// ```
 // NCBI keeps a choice at index 1 when the HSP it selected kept its own; the incremental kernel
 // computes again, at both indexes, only the HSPs whose choice a removal can change, and the
 // other HSPs keep theirs. The test reaches those later passes, including searches that select

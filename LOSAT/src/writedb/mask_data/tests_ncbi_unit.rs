@@ -1,4 +1,4 @@
-//! NCBI's unit tests of the mask-data writer (`writedb_unit_test.cpp`, cases
+//! NCBI's unit tests of the mask-data writer (`c++/src/objtools/blast/seqdb_writer/unit_test/writedb_unit_test.cpp`, cases
 //! `RegisterMaskingAlgorithms` to `MaskDataBoundsError`), ported with their assertions. NCBI's
 //! cases read sequences from its test database `data/writedb_prot`; the ports write synthetic
 //! protein sequences of the lengths the cases need (`MaskDataColumn` takes sequences of at

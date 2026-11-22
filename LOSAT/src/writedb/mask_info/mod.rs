@@ -25,10 +25,25 @@
 //! `null`, `empty`, `whole`, `int`, `packed-int`, `pnt`, `packed-pnt`, `mix` and `equiv` (nested),
 //! `bond`; a `feat` has no Seq-id ("Cannot get masked range Seq-id", as `null` alone).
 //!
-//! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): strings
-//! with bytes outside 0x20-0x7e that NCBI repairs and logs (`fix_visible_chars`; a binary Seq-id
-//! has no such byte), and a `UTF8String` tag where a `VisibleString` belongs
-//! (objistrasnb.cpp:276-312): LOSAT does not write NCBI's diagnostics for them.
+//! A string's bytes outside 0x20-0x7e are read as `#` with NCBI's diagnostic, and a `UTF8String`
+//! tag where a `VisibleString` belongs with NCBI's warning (once per run): the reader hands them
+//! out (`MaskPost`, `MaskFileReader::take_posts`) and `process` posts them. A file that NCBI's
+//! serial reader cannot read ends with NCBI's exception (`MaskFileError::Ncbi`).
+//!
+//! NCBI's pointer syntax is read where NCBI reads a `CRef<>` that is empty at that moment: an
+//! `OPTIONAL` member held by `CRef<>` (`fuzz-from`, `fuzz-to`, `fuzz`, `Seq-bond.b`,
+//! `PDB-seq-id.rel`) and each element of `masks`, `mix`, `equiv` and `packed-int`. `NULL` leaves an
+//! optional member unset; `@n` is NCBI's error ("invalid object index: NO_COLLECT defined");
+//! `:Type value` naming the declared type is the value, read in a frame of its own.
+//!
+//! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): objects
+//! nested more than 400 levels deep; a string whose length passes the end of the file by an amount
+//! that makeblastdb may or may not be able to allocate on the host (1 GiB to 128 TiB); `:Type`
+//! naming a type other than the declared one, which makeblastdb reads or not by the types its
+//! process has met before; and an element of a list stated as `NULL` that makeblastdb dereferences
+//! (`NullElement`), whose `CCoreException` report holds the run's memory addresses and the path of
+//! the binary. That last one is refused where makeblastdb dereferences it (`process`), after the
+//! masks before it and after any error of the reader in the rest of its object.
 
 mod ber;
 mod guess;
@@ -40,7 +55,7 @@ mod seq_id_tests;
 mod tests;
 mod text;
 
-pub(crate) use reader::{MaskFileError, MaskFileFormat, MaskFileReader};
+pub(crate) use reader::{MaskFileError, MaskFileFormat, MaskFileReader, MaskPost};
 
 use crate::seqid::ParsedSeqId;
 
@@ -63,8 +78,38 @@ pub(crate) struct MaskInfo {
 /// `more TRUE`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MaskList {
+    /// The masks that makeblastdb's loop takes before `null_element`, all of them without one.
     pub(crate) masks: Vec<MaskLoc>,
     pub(crate) more: bool,
+    /// The element stated as `NULL` that makeblastdb dereferences after `masks`, in the `GetId` of
+    /// the next mask: that mask itself, or an element inside it that `CSeq_loc::CheckId` reaches.
+    /// LOSAT refuses it there ([`NullElement::refusal`]).
+    pub(crate) null_element: Option<NullElement>,
+}
+
+/// An element of a list of `CRef`s (`masks`, `mix`, `equiv`, `packed-int`) that the file states
+/// as `NULL` (text) or `05 00` (binary). NCBI's reader leaves the `CRef` empty
+/// (`CObjectIStream::ReadPointer`) and makeblastdb dereferences it in `x_ProcessMaskData`
+/// (`**iter`) or in `CSeq_loc::CheckId` (`**ii`, `(*li)->CheckId`): a `CCoreException`
+/// `eNullPtr`, whose report prints a stack trace with the run's library addresses and the path of
+/// the installed binary, which no other program can reproduce.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NullElement {
+    /// The list, in words ("a Seq-loc-mix (mix)").
+    pub(crate) list: &'static str,
+    /// Where the reader read it (`line N`, or `byte N` of its object).
+    pub(crate) position: String,
+}
+
+impl NullElement {
+    /// LOSAT's explicit refusal of the element, where makeblastdb dereferences it.
+    pub(crate) fn refusal(&self) -> MaskFileError {
+        MaskFileError::Unsupported(format!(
+            "an element of {} stated as NULL ({}), which makeblastdb dereferences: its report of \
+             the null pointer holds the run's memory addresses",
+            self.list, self.position
+        ))
+    }
 }
 
 /// One Seq-loc of `masks`, reduced to what makeblastdb uses: the Seq-id that

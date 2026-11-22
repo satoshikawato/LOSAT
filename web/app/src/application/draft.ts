@@ -22,12 +22,13 @@ import {
   WINDOW_MASKER_FLAG,
   WINDOW_MASKER_TAXID_FLAG,
   type FastaParserKind,
+  type FastaReader,
   type InputRole,
   type ProgramId,
   type RegistryFile,
   type SequenceKind,
 } from 'losat/domain';
-import { isFileReadError, type EngineGateway, type InputCheck, type ProgramDescription, type StartInfo } from 'losat/ports';
+import { isFileReadError, isUnavailable, type EngineGateway, type InputCheck, type ProgramDescription, type StartInfo } from 'losat/ports';
 import {
   accessionLines,
   accessionsOnALine,
@@ -51,7 +52,9 @@ import { inputLead, type InputLead } from '../domain/input-format';
 import { describedSections, formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
 import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/programs';
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
-import type { DataGateway } from '../ports/data';
+import { withUnit } from '../domain/units';
+import type { DataGateway, SourceRef } from '../ports/data';
+import { failureText, withRemedy } from './availability';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
 import { registryName, unreadableConffile } from './conffile';
 import type { EnqueueAllResult, SearchRequest } from './coordinator';
@@ -64,11 +67,19 @@ export type InputMode = 'combined' | 'separate';
 /** The engine's verdict on a source (losat/ports: input-check.ts). */
 export type SourceCheck =
   | { readonly state: 'pending' }
-  | { readonly state: 'ok'; readonly records: number }
+  /**
+   * `readerError`: the reader's error that ends the query's records, the command line's text; a run
+   * reads the records before it and ends with it, as the command line does, so it is a warning, not
+   * a refusal (line WQA's D10, 2026-11-19).
+   */
+  | { readonly state: 'ok'; readonly records: number; readonly readerError?: string }
   /** `record` is the index, in the record table, of the record that the message names. */
   | { readonly state: 'refused'; readonly message: string; readonly record?: number }
-  /** The check could not run (not a verdict on the input). */
-  | { readonly state: 'error'; readonly message: string };
+  /**
+   * The check could not run (not a verdict on the input); `unavailable` when a part of LOSAT was (UnavailableError,
+   * line WQA's sweep, D1).
+   */
+  | { readonly state: 'error'; readonly message: string; readonly unavailable?: true };
 
 /** A record table of a source and the records that runs leave out of it. */
 export interface SourceTable {
@@ -92,6 +103,11 @@ export interface DraftSource {
   readonly parser: FastaParserKind;
   /** Why the source could not be indexed (the index scan's error). */
   readonly error?: string;
+  /**
+   * The index failed because a part of LOSAT could not be loaded or stopped (UnavailableError), not because of the
+   * input: the card does not blame the input, and the page says what failed (line WQA's sweep, D1).
+   */
+  readonly unavailable?: true;
   /** The record table: the revision of the data layer that includes every record. */
   readonly base?: DatasetRevision;
   /** Indices of the records that runs leave out, ascending. */
@@ -149,7 +165,9 @@ export interface RoleDraft {
 
 export type Validation =
   | { readonly state: 'idle' | 'checking' | 'ok' }
-  | { readonly state: 'invalid'; readonly message: string };
+  | { readonly state: 'invalid'; readonly message: string }
+  /** The engine could not check the options: a part of LOSAT could not be loaded or stopped (line WQA's sweep, D1). */
+  | { readonly state: 'unavailable'; readonly message: string };
 
 /** The counts of a taxonomy ID that the draft can search with. */
 export interface SavedCountsFile {
@@ -193,8 +211,16 @@ export interface DraftState {
   /** The engine's `describe` of the program, once it has arrived. */
   readonly description?: ProgramDescription;
   readonly descriptionError?: string;
+  /** The describe failed because a part of LOSAT could not be loaded or stopped (UnavailableError): the page says so. */
+  readonly descriptionUnavailable?: true;
   /** The engine's `validate` of the argv that the draft makes now. */
   readonly validation: Validation;
+  /**
+   * Whether the run of the draft's argv reads its inputs with NCBI's data loaders on, as the latest
+   * validation that the engine answered says (`[BLAST] DATA_LOADERS` of the argv's registry; on before
+   * one): the engine's readers of the sources' index and check have them so (line WQA's D16, 2026-11-20).
+   */
+  readonly dataLoaders: boolean;
   /**
    * What the engine's start read of the argv of the latest validation (`EngineGateway.start`): the
    * name of its `-conffile`, for which the form asks for a file; undefined before it, or when the
@@ -249,6 +275,13 @@ export class SearchDraft {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly workers = new Map<string, () => void>();
   private readonly pending = new Set<Promise<unknown>>();
+  /**
+   * What askAgain asked the engine again that has not answered yet. While it is on its way, the question reads as
+   * asked (the options are described, the input indexing, the validation checking), so a later askAgain, which asks
+   * only what failed, waits for it: an Example pressed again then asked nothing and was refused with "Reload the page"
+   * also once the answers came (the fifth review of line WQA's D1 and D2, M1, 2026-11-19).
+   */
+  private readonly asking = new Set<Promise<unknown>>();
   /** The running fetch of each role's accessions. */
   private readonly fetches = new Map<InputRole, AbortController>();
   private readonly race: SourceRace;
@@ -288,9 +321,10 @@ export class SearchDraft {
       fetchSource: 'fastest',
       race: {},
       validation: { state: 'idle' },
+      dataLoaders: true,
       submitting: false,
     });
-    this.loadDescription('blastn');
+    void this.loadDescription('blastn');
     this.scheduleValidation();
   }
 
@@ -306,13 +340,14 @@ export class SearchDraft {
     }
     const description = this.described.get(program);
     // The engine's start of the other program's argv is not this program's (its -conffile row goes until the validation).
-    this.set({ program, description, descriptionError: undefined, message: undefined, start: undefined });
-    this.loadDescription(program);
+    this.set({ program, description, descriptionError: undefined, descriptionUnavailable: undefined, message: undefined, start: undefined });
+    void this.loadDescription(program);
     for (const role of ROLES) {
       const parser = fastaParser(next, role);
       for (const source of this.role(role).sources) {
-        if (source.parser !== parser) {
-          // A program that reads the role with another FASTA reader kind needs another record table (plan TD-8).
+        if (source.parser !== parser || source.status === 'failed') {
+          // A program that reads the role with another FASTA reader kind needs another record table (plan TD-8); a
+          // refusal of the reader names its program (line WQA's D13, 2026-11-20), so a source that failed is read again.
           this.reindex(role, source.key, parser);
         } else {
           this.scheduleCheck(role, source.key, 0);
@@ -754,12 +789,14 @@ export class SearchDraft {
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
     this.updateRole(role, (draft) => ({ ...draft, sources: draft.sources.filter((source) => source.key !== key) }));
     this.set({ message: undefined });
+    this.recheckReaderErrors(role);
     this.scheduleValidation();
   }
 
   setMode(role: InputRole, mode: InputMode): void {
     this.updateRole(role, (draft) => ({ ...draft, mode }));
     this.set({ message: undefined });
+    this.recheckReaderErrors(role);
   }
 
   /** Includes or leaves out records of a source (by their index in its record table). */
@@ -774,6 +811,7 @@ export class SearchDraft {
     });
     this.set({ message: undefined });
     this.scheduleCheck(role, key);
+    this.recheckReaderErrors(role, key);
     this.scheduleValidation();
   }
 
@@ -871,7 +909,7 @@ export class SearchDraft {
       try {
         result = await this.prepareAndEnqueue();
       } catch (error) {
-        result = { ok: false, message: `The search could not be started: ${messageOf(error)}` };
+        result = { ok: false, message: isUnavailable(error) ? failureText(error) : `The search could not be started: ${messageOf(error)}` };
       }
       // A started search shows itself: the page moves to the run (stop-describing-ui rule 6).
       if (!result.ok) this.set({ message: { kind: 'error', text: result.message } });
@@ -907,13 +945,25 @@ export class SearchDraft {
   }
 
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
-    // Run never fetches, nor waits for a fetch that is running (fetchAccessions).
+    // Run never fetches, nor waits for a fetch that is running (fetchAccessions). A run that prints the command line's
+    // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20).
     for (const role of ROLES) {
-      const problem = this.accessionProblem(role);
+      const problem = this.printsText() ? undefined : this.accessionProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
     }
+    // What the engine could not answer while a part of LOSAT could not be loaded is asked again first: Run LOSAT was
+    // refused with "Reload the page" and asked nothing, also once the engine file downloaded again (the third review of
+    // line WQA's D1 and D2, M1, 2026-11-19). A question still in flight at the press, which fails only after it, was not
+    // among those, and the next press then succeeded (its fourth review, L1): such a question is asked once more.
+    const failed = this.unavailableQuestions();
+    void this.askAgain();
     await this.idle();
+    if ([...this.unavailableQuestions()].some((question) => !failed.has(question))) {
+      void this.askAgain();
+      await this.idle();
+    }
     const { program, threads, title } = this.state.get();
+    if (this.printsText()) return this.enqueuePrinting();
     for (const role of ROLES) {
       const problem = this.inputProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
@@ -967,6 +1017,44 @@ export class SearchDraft {
     return this.deps.enqueueAll(requests);
   }
 
+  /**
+   * Whether the run of the draft's argv prints the command line's help or version in place of a search, as the engine's
+   * start says (`StartInfo.prints`; line WQA's D14, 2026-11-20): it needs no inputs, files or fetches, as the command
+   * line reads none for it.
+   */
+  private printsText(): boolean {
+    const { start, validation } = this.state.get();
+    return validation.state === 'ok' && (start?.prints ?? null) !== null;
+  }
+
+  /**
+   * The one run of an argv that prints the command line's help or version (`printsText`): without inputs (the
+   * coordinator gives it none), with the registry file of its -conffile, which the command line reads before the help.
+   */
+  private enqueuePrinting(): Promise<EnqueueAllResult> {
+    const { program, threads, title } = this.state.get();
+    let extra: readonly string[];
+    try {
+      extra = this.extraWords();
+    } catch (error) {
+      return Promise.resolve({ ok: false, message: messageOf(error) });
+    }
+    const state = this.state.get();
+    const conffile = registryName(state.start) === undefined ? undefined : state.conffiles[program];
+    return this.deps.enqueueAll([
+      {
+        program,
+        query: { text: '' },
+        subject: { text: '' },
+        parameters: this.parameters(),
+        ...(extra.length === 0 ? {} : { extra }),
+        requestedThreads: threads,
+        ...(conffile === undefined ? {} : { conffile }),
+        ...(title.trim() === '' ? {} : { title }),
+      },
+    ]);
+  }
+
   /** Why the role cannot be searched as it is (the full message), or undefined. */
   private inputProblem(role: InputRole): string | undefined {
     return this.problemOf(role)?.message;
@@ -977,6 +1065,7 @@ export class SearchDraft {
    * undefined when nothing does. "Run LOSAT" reports the full message.
    */
   readiness(): string | undefined {
+    if (this.printsText()) return undefined;
     for (const role of ROLES) {
       const problem = this.problemOf(role);
       if (problem !== undefined) return problem.short;
@@ -1031,6 +1120,11 @@ export class SearchDraft {
     }
     for (const source of draft.sources) {
       const where = `${label} (${describeSource(source)})`;
+      if (source.status === 'failed' && source.unavailable === true) {
+        // LOSAT's own failure, not the input's (line WQA's sweep, D1): what the page says.
+        const message = withRemedy(source.error ?? '');
+        return { message, short: message };
+      }
       if (source.status === 'failed') {
         return { message: `${where}: ${source.error ?? 'the input cannot be read'}`, short: `${where} cannot be read.` };
       }
@@ -1045,13 +1139,13 @@ export class SearchDraft {
     }
     if (draft.mode === 'combined') {
       // The sources follow one another in one input, where a sequence without a defline
-      // would join the record before it (NCBI's reader): only the first can start so.
-      const late = draft.sources
-        .filter((source) => includedOf(source).length > 0)
-        .slice(1)
-        .find((source) => includedOf(source)[0]!.sequence_offset === 0);
+      // would join the record before it (NCBI's reader): only the first can start so. So can
+      // neither a source whose reader's error is on its first line, read without a defline (a
+      // byte order mark, a line of other text): the record before it would read that line
+      // (review M2, 2026-11-20).
+      const late = draft.sources.find((source) => cannotFollow(draft.sources, source));
       if (late !== undefined) {
-        const message = `${label} (${describeSource(late)}) starts with a sequence without a defline (">"), which cannot follow another input.`;
+        const message = `${label} (${describeSource(late)}) ${cannotFollowText(late)}`;
         return { message, short: message };
       }
     }
@@ -1099,34 +1193,126 @@ export class SearchDraft {
 
   // --- asynchronous work ------------------------------------------------------------------
 
-  private loadDescription(program: ProgramId): void {
+  /** Asks the engine for the program's options (once, while it answers); settles once the form has the answer. */
+  private loadDescription(program: ProgramId): Promise<void> {
     let description = this.descriptions.get(program);
     if (description === undefined) {
       description = this.deps.engine.describe(program);
       this.descriptions.set(program, description);
       description.catch(() => this.descriptions.delete(program));
     }
-    this.track(
-      description.then(
-        (value) => {
-          this.described.set(program, value);
-          if (this.state.get().program === program) this.set({ description: value });
-          this.scheduleValidation();
-        },
-        (error: unknown) => {
-          if (this.state.get().program === program) this.set({ descriptionError: messageOf(error) });
-        },
-      ),
+    const answered = description.then(
+      (value) => {
+        this.described.set(program, value);
+        if (this.state.get().program === program) this.set({ description: value, descriptionError: undefined, descriptionUnavailable: undefined });
+        this.scheduleValidation();
+        void this.askAgain();
+      },
+      (error: unknown) => {
+        if (this.state.get().program === program) {
+          this.set({ descriptionError: messageOf(error), descriptionUnavailable: isUnavailable(error) ? true : undefined });
+        }
+      },
     );
+    this.track(answered);
+    return answered;
+  }
+
+  /**
+   * Asks the engine again what the form could not ask it while a part of LOSAT could not be loaded: the options, the
+   * inputs that could not be read or checked, the validation. An engine file that failed to download is downloaded
+   * again by the next call, so one network error at load left "Not read." on the options and the page's "Reload the
+   * page" for the whole session, also after searches completed (the second review of line WQA's D1 and D2, M1,
+   * 2026-11-19). It is asked when the engine answers the options, an index or a check, when Run LOSAT is pressed, and
+   * before an Example is loaded (Availability.recheck). A question is pending until it answers; one that fails asks
+   * nothing again. Settles once what it asked has answered (and a validation that it asked has run), and what an
+   * earlier call asked that has not answered yet (asking), not the rest of the form's work: an Example waited for all
+   * of it, a large index or a fetch too (the fourth review, M1).
+   */
+  askAgain(): Promise<void> {
+    const state = this.state.get();
+    const asked: Array<Promise<unknown>> = [];
+    const options = this.askOptionsAgain();
+    if (options !== undefined) asked.push(options);
+    for (const role of ROLES) {
+      for (const source of state[role].sources) {
+        if (source.status === 'failed' && source.unavailable === true) asked.push(this.reindex(role, source.key, this.parserOf(role)));
+        else if (source.status === 'ready' && source.check?.state === 'error' && source.check.unavailable === true) {
+          asked.push(this.checkNow(role, source.key));
+        }
+      }
+    }
+    const validation = state.validation.state === 'unavailable';
+    if (validation) this.scheduleValidation();
+    // The answers schedule a validation of their own; one that was unavailable has answered once none is left.
+    if (asked.length > 0 || validation) this.keepAsking(Promise.allSettled(asked).then(() => (validation ? this.validationSettled() : undefined)));
+    return Promise.allSettled([...this.asking]).then(() => undefined);
+  }
+
+  /** Keeps a question asked again among those on their way (asking) until it answers. */
+  private keepAsking<T>(work: Promise<T>): Promise<T> {
+    this.asking.add(work);
+    const done = () => this.asking.delete(work);
+    work.then(done, done);
+    return work;
+  }
+
+  /** What the engine could not answer because a part of LOSAT could not be loaded, by question (unavailableOf). */
+  private unavailableQuestions(): Set<string> {
+    const state = this.state.get();
+    const questions = new Set<string>();
+    if (state.descriptionUnavailable === true) questions.add('options');
+    if (state.validation.state === 'unavailable') questions.add('validation');
+    for (const role of ROLES) {
+      for (const source of state[role].sources) {
+        if (source.status === 'failed' && source.unavailable === true) questions.add(`index:${role}:${source.key}`);
+        if (source.check?.state === 'error' && source.check.unavailable === true) questions.add(`check:${role}:${source.key}`);
+      }
+    }
+    return questions;
+  }
+
+  /**
+   * Asks the engine for the options again if it could not answer them before. A validation that the engine answered
+   * asks only this: a validation follows every index, also one that failed, which would otherwise be read again after
+   * each validation; the options that answer ask the rest again (askAgain). They are on their way (asking) until they
+   * answer, also when a validation asked them.
+   */
+  private askOptionsAgain(): Promise<void> | undefined {
+    const { descriptionUnavailable, program } = this.state.get();
+    return descriptionUnavailable === true && !this.descriptions.has(program) ? this.keepAsking(this.loadDescription(program)) : undefined;
   }
 
   private parserOf(role: InputRole): FastaParserKind {
     return fastaParser(programById(this.state.get().program), role);
   }
 
-  private reindex(role: InputRole, key: string, parser: FastaParserKind): void {
+  /** The engine's reader of the role's input now: the program's, with the data loaders of the latest validation. */
+  private readerOf(role: InputRole): FastaReader {
+    const { program, dataLoaders } = this.state.get();
+    return { program, role, dataLoaders };
+  }
+
+  /**
+   * The validation says that the run reads its inputs with the data loaders on or off (`dataLoaders`), as the CLI
+   * reads them under the argv's registry (line WQA's D16, 2026-11-20): where that changes, the sources that the reader
+   * refused are read again (a first line that may be a Seq-id is data with the loaders off), and the rest checked again.
+   */
+  private setDataLoaders(dataLoaders: boolean): void {
+    if (this.state.get().dataLoaders === dataLoaders) return;
+    this.set({ dataLoaders });
+    for (const role of ROLES) {
+      for (const source of this.role(role).sources) {
+        if (source.status === 'failed') this.reindex(role, source.key, this.parserOf(role));
+        else this.scheduleCheck(role, source.key, 0);
+      }
+    }
+  }
+
+  /** Reads a source again with `parser`; settles once it is read (or once its table of that kind is back). */
+  private reindex(role: InputRole, key: string, parser: FastaParserKind): Promise<void> {
     const source = this.role(role).sources.find((s) => s.key === key);
-    if (source === undefined) return;
+    if (source === undefined) return Promise.resolve();
     // A pending index of the pasted text would read it again after this one (and drop the exclusions made since).
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
     // The table of the kind that the source leaves is kept, with its exclusions, for a program that reads it again.
@@ -1141,6 +1327,7 @@ export class SearchDraft {
       if (kept === undefined) delete (next as { base?: unknown }).base;
       delete (next as { check?: unknown }).check;
       delete (next as { error?: unknown }).error;
+      delete (next as { unavailable?: unknown }).unavailable;
       delete (next as { indexMs?: unknown }).indexMs;
       if (kept?.indexMs !== undefined) return { ...next, indexMs: kept.indexMs };
       return next;
@@ -1149,15 +1336,24 @@ export class SearchDraft {
       // An index of the kind that was left, still running, must not replace this table.
       this.nextGeneration(`${role}:${key}`);
       this.scheduleCheck(role, key, 0);
-      return;
+      return Promise.resolve();
     }
-    this.track(this.index(role, key, source.file, parser, source.sourceId));
+    const read = this.index(role, key, source.file, parser, source.sourceId);
+    this.track(read);
+    return read;
   }
 
   private async index(role: InputRole, key: string, file: File, parser: FastaParserKind, known?: string): Promise<void> {
     const task = `${role}:${key}`;
     const generation = this.nextGeneration(task);
+    // The engine's reader of the input now. What it finds (the records, or its refusal) stands only while it is the
+    // reader in force: an index that ends after the program or the data loaders changed reads the input again
+    // (`readAgain`), whatever the order of the change and the index (line WQA's D13 round 2, M1, 2026-11-20).
+    const reader = this.readerOf(role);
     const current = () => this.generations.get(task) === generation;
+    let ref: SourceRef | undefined;
+    let sourceId: string | undefined;
+    let head: string | undefined;
     // The index holds its source until the form shows it; a superseded or failed index lets it go.
     const holder = `index:${task}:${generation}`;
     const started = this.deps.now();
@@ -1165,20 +1361,23 @@ export class SearchDraft {
     let lead: InputLead | undefined;
     try {
       // The source is added once: its other kind's index reads the same data (no second inflation of a .gz).
-      const ref = known === undefined ? await this.deps.data.addSource(file) : undefined;
-      const sourceId = known ?? ref!.sourceId;
-      this.refs.set(holder, [sourceId]);
+      ref = known === undefined ? await this.deps.data.addSource(file) : undefined;
+      const id = known ?? ref!.sourceId;
+      sourceId = id;
+      this.refs.set(holder, [id]);
       const preview =
-        ref === undefined ? undefined : await this.deps.data.previewSource(sourceId, HEAD_BYTES).catch(() => undefined);
-      const head = preview === undefined ? undefined : headText(preview);
+        ref === undefined ? undefined : await this.deps.data.previewSource(id, HEAD_BYTES).catch(() => undefined);
+      head = preview === undefined ? undefined : headText(preview);
       lead = preview === undefined ? undefined : inputLead(preview, preview.length >= ref!.size);
-      const base = await this.deps.data.indexSource(sourceId, parser);
+      const base = await this.deps.data.indexSource(id, reader);
       if (!current()) return;
+      if (this.readAgain(role, key, file, parser, reader, { ref, sourceId, head, lead })) return;
+      const added = ref;
       this.updateSource(role, key, (source) => ({
         ...source,
         // A file named .gz is inflated by addSource: the card shows its plain name and inflated size.
-        ...(ref === undefined ? {} : { name: ref.name, size: ref.size }),
-        sourceId,
+        ...(added === undefined ? {} : { name: added.name, size: added.size }),
+        sourceId: id,
         status: 'ready',
         base,
         excluded: [],
@@ -1187,14 +1386,18 @@ export class SearchDraft {
         ...(head === undefined ? {} : { head }),
         ...(lead === undefined ? {} : { lead }),
       }));
-      this.noteRevision(sourceId, base.revisionId);
+      this.noteRevision(id, base.revisionId);
       this.scheduleCheck(role, key, 0);
+      this.recheckReaderErrors(role, key);
+      void this.askAgain();
     } catch (error) {
       if (!current()) return;
+      if (this.readAgain(role, key, file, parser, reader, { ref, sourceId, head, lead })) return;
       this.updateSource(role, key, (source) => ({
         ...source,
         status: 'failed',
         error: messageOf(error),
+        ...(isUnavailable(error) ? { unavailable: true } : {}),
         ...(lead === undefined ? {} : { lead }),
       }));
     } finally {
@@ -1203,9 +1406,49 @@ export class SearchDraft {
     }
   }
 
+  /**
+   * Reads the input of a source again when the reader that an index of it used (`reader`) is no longer the reader in
+   * force: the program or the data loaders changed while it was read, and what that reader found (its records or its
+   * refusal) is not what the run's reader finds. The name, the first lines and the lead of the first read stay with the
+   * source; the data layer's source (`sourceId`) is read again, or added again if the first read could not add it.
+   */
+  private readAgain(
+    role: InputRole,
+    key: string,
+    file: File,
+    parser: FastaParserKind,
+    reader: FastaReader,
+    first: { ref: SourceRef | undefined; sourceId: string | undefined; head: string | undefined; lead: InputLead | undefined },
+  ): boolean {
+    const inForce = this.readerOf(role);
+    if (inForce.program === reader.program && inForce.dataLoaders === reader.dataLoaders) return false;
+    const { ref, sourceId, head, lead } = first;
+    this.updateSource(role, key, (source) => ({
+      ...source,
+      ...(ref === undefined ? {} : { name: ref.name, size: ref.size }),
+      ...(head === undefined ? {} : { head }),
+      ...(lead === undefined ? {} : { lead }),
+    }));
+    // The new index holds the data layer's source before this one lets it go (its holder is set synchronously).
+    this.track(this.index(role, key, file, parser, sourceId));
+    return true;
+  }
+
   private scheduleCheck(role: InputRole, key: string, delay?: number): void {
     this.updateSource(role, key, (source) => (source.status === 'ready' ? { ...source, check: { state: 'pending' } } : source));
     this.debounce(`check:${role}:${key}`, () => this.track(this.check(role, key)), delay);
+  }
+
+  /** Checks a source now, instead of a check of it that waits (askAgain); settles once it is checked. */
+  private checkNow(role: InputRole, key: string): Promise<void> {
+    this.updateSource(role, key, (source) => (source.status === 'ready' ? { ...source, check: { state: 'pending' } } : source));
+    const name = `check:${role}:${key}`;
+    clearTimeout(this.timers.get(name));
+    this.timers.delete(name);
+    this.workers.delete(name);
+    const checked = this.check(role, key);
+    this.track(checked);
+    return checked;
   }
 
   private async check(role: InputRole, key: string): Promise<void> {
@@ -1213,34 +1456,74 @@ export class SearchDraft {
     const generation = this.nextGeneration(task);
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source?.status !== 'ready' || source.base === undefined) return;
-    if (includedOf(source).length === 0) {
+    // An input whose reading ends with the reader's error is checked whatever it includes: its run
+    // input keeps the error (line WQA's D10, 2026-11-19).
+    if (includedOf(source).length === 0 && source.base.readerError === undefined) {
       this.updateSource(role, key, (s) => ({ ...s, check: { state: 'ok', records: 0 } }));
       return;
     }
-    const program = this.state.get().program;
+    const reader = this.readerOf(role);
+    const { program, dataLoaders } = reader;
     const started = this.deps.now();
     let check: SourceCheck;
     try {
       const revisionId = await this.revisionFor(source);
       // A source removed meanwhile is not checked (nor cached).
       if (source.sourceId === undefined || !this.formSources.has(source.sourceId)) return;
-      const key = `${program}|${role}|${revisionId}`;
+      const key = `${program}|${role}|${dataLoaders}|${revisionId}`;
       let verdict = this.verdicts.get(key);
       if (verdict === undefined) {
-        verdict = this.deps.data.checkInput(program, role, [revisionId]);
+        verdict = this.deps.data.checkInput(reader, [revisionId]);
         this.verdicts.set(key, verdict);
         // A check that could not run is tried again next time.
         verdict.catch(() => this.verdicts.delete(key));
       }
       check = toSourceCheck(await verdict, source);
+      // A Combined input reads the sources before this one first: the run's error names its own
+      // line, which the check of the sources together gives (review L2, 2026-11-20).
+      const before = this.sourcesBefore(role, source);
+      if (check.state === 'ok' && check.readerError !== undefined && before.length > 0) {
+        const ids = [...(await Promise.all(before.map((s) => this.revisionFor(s)))), revisionId];
+        const joined = await this.deps.data.checkInput(reader, ids).catch(() => undefined);
+        if (joined?.ok === true && joined.readerError !== undefined) check = { ...check, readerError: joined.readerError };
+      }
     } catch (error) {
-      check = { state: 'error', message: messageOf(error) };
+      check = { state: 'error', message: messageOf(error), ...(isUnavailable(error) ? { unavailable: true as const } : {}) };
     }
-    if (this.generations.get(task) !== generation || this.state.get().program !== program) return;
+    if (this.generations.get(task) !== generation || this.state.get().program !== program || this.state.get().dataLoaders !== dataLoaders) return;
     const checkMs = this.deps.now() - started;
     this.updateSource(role, key, (s) =>
       s.excluded === source.excluded && s.base === source.base ? { ...s, check, checkMs } : s,
     );
+    if (check.state !== 'error') void this.askAgain();
+  }
+
+  /**
+   * The sources that a Combined run of the query reads before `source`: every source of the run's
+   * input before it, whose bytes the run passes as they are, those without records too
+   * (`DataService.runInputBytes`; review L-a, 2026-11-20). None otherwise, and none when a source
+   * before ends the input with its reader's error, or `source` cannot follow them: a run then does
+   * not read `source` after them, and its own check stands.
+   */
+  private sourcesBefore(role: InputRole, source: DraftSource): readonly DraftSource[] {
+    const draft = this.role(role);
+    if (role !== 'query' || draft.mode !== 'combined' || cannotFollow(draft.sources, source)) return [];
+    const at = draft.sources.findIndex((s) => s.key === source.key);
+    const before = draft.sources.slice(0, Math.max(0, at)).filter((s) => s.status === 'ready');
+    return before.some((s) => s.base?.readerError !== undefined) ? [] : before;
+  }
+
+  /**
+   * Checks again the query sources whose reader's error a run meets after other sources: the line
+   * that its message names follows them (`check`, review L2, 2026-11-20).
+   */
+  private recheckReaderErrors(role: InputRole, except?: string): void {
+    if (role !== 'query') return;
+    for (const source of this.role(role).sources) {
+      if (source.key !== except && source.status === 'ready' && source.base?.readerError !== undefined) {
+        this.scheduleCheck(role, source.key, 0);
+      }
+    }
   }
 
   /** The revision of a source's selection: its record table, or a revision without the excluded records. */
@@ -1273,6 +1556,20 @@ export class SearchDraft {
    * which the Data worker reads on an instance of its own, never runs beside another one that reads the
    * file again, and none starts for an argv that is already out of date.
    */
+  /** Settles once no validation waits or runs; one that waits runs now, as idle runs it (askAgain). */
+  private async validationSettled(): Promise<void> {
+    for (;;) {
+      if (this.timers.has('validate')) {
+        clearTimeout(this.timers.get('validate'));
+        this.timers.delete('validate');
+        this.runTimer('validate');
+      }
+      const turn = this.validationTurn;
+      await turn;
+      if (!this.timers.has('validate') && turn === this.validationTurn) return;
+    }
+  }
+
   private validateInTurn(): Promise<void> {
     const generation = this.generations.get('validate');
     const turn = this.validationTurn.then(() => (this.generations.get('validate') === generation ? this.validate() : undefined));
@@ -1301,11 +1598,16 @@ export class SearchDraft {
     let validation: Validation;
     let start: StartInfo | undefined;
     let registry: ChosenRegistryFile | undefined;
+    // The data loaders of the argv's run, where the engine found the argv valid.
+    let dataLoaders: boolean | undefined;
+    // Whether the engine answered (its start did), whatever the verdict.
+    let answered = false;
     try {
       // NCBI's application start first (line RG E1w-3b): the name of the registry file that the argv
-      // reads, under which the chosen file is checked. An argv that it cannot start (a version word)
-      // has the parser's message, as validate gives it.
+      // reads, under which the chosen file is checked. An argv that it cannot start (a program that
+      // ABI v2 does not run) has the engine's message, as validate gives it.
       const started = await this.deps.engine.start(argv);
+      answered = true;
       // A newer change came meanwhile: its validation follows, and this one reads no file.
       if (this.generations.get('validate') !== generation) return;
       if (!started.ok) {
@@ -1315,17 +1617,23 @@ export class SearchDraft {
         registry = this.registryFile(program, start);
         const result = await this.deps.engine.validate(argv, registry);
         validation = result.ok ? { state: 'ok' } : { state: 'invalid', message: result.message };
+        // Also from a refused argv whose registry the engine read (line WQA's D13 round 3, L1): the setting does not depend
+        // on the option that it refuses.
+        if (result.dataLoaders !== undefined) dataLoaders = result.dataLoaders;
       }
     } catch (error) {
       // The chosen file changed or went after it was chosen: the browser no longer reads it.
       const message =
         registry !== undefined && isFileReadError(error) ? unreadableConffile(registry.name, registry.file.name, error) : messageOf(error);
-      validation = { state: 'invalid', message };
+      // A part of LOSAT that could not be loaded is not a refusal of the options (line WQA's sweep, D1).
+      validation = isUnavailable(error) ? { state: 'unavailable', message } : { state: 'invalid', message };
     }
     if (this.generations.get('validate') !== generation) return;
     this.validArgv = validation.state === 'ok' ? argv : undefined;
     this.set({ validation, start });
+    if (dataLoaders !== undefined) this.setDataLoaders(dataLoaders);
     this.prepareEngine();
+    if (answered) void this.askOptionsAgain();
   }
 
   /** The registry file of the argv's `-conffile`: the chosen file under the argv's name (`registryName`); undefined without either. */
@@ -1468,7 +1776,7 @@ function fetchProblem(result: Exclude<FetchResult, { ok: true }>, source: FetchS
     case 'not-found':
       return `${label} has no ${kind} record ${accession}.`;
     case 'too-large':
-      return `${accession} makes the fetched text larger than ${FETCH_BYTE_LIMIT / 1_000_000} MB: download it from ${label} and open it with "Open FASTA files…".`;
+      return `${accession} makes the fetched text larger than ${withUnit(FETCH_BYTE_LIMIT / 1_000_000, 'MB')}: download it from ${label} and open it with "Open FASTA files…".`;
     case 'unreachable':
       return `${label} could not be reached (${result.detail}).`;
     case 'refused':
@@ -1493,6 +1801,80 @@ export function includedOf(source: DraftSource): readonly DatasetRecord[] {
   return source.base === undefined ? [] : includedRecords({ ...source.base, excluded: source.excluded });
 }
 
+/**
+ * The sources whose records a Combined run reads, in order: those with included records or the
+ * reader's error, up to the first with the error, which ends the run's input
+ * (`DataService.runInputBytes`, line WQA's D10, 2026-11-19).
+ */
+function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[] {
+  const read: DraftSource[] = [];
+  for (const source of sources) {
+    if (source.status !== 'ready') continue;
+    const stops = source.base?.readerError !== undefined;
+    if (includedOf(source).length === 0 && !stops) continue;
+    read.push(source);
+    if (stops) break;
+  }
+  return read;
+}
+
+/** Whether what a run reads of a source starts without a defline (review M2, 2026-11-20). */
+function startsWithoutDefline(source: DraftSource): boolean {
+  const first = includedOf(source)[0];
+  return first !== undefined ? first.sequence_offset === 0 : source.base?.readerError?.defline === false;
+}
+
+/**
+ * Whether `source` starts without a defline after a source whose records a Combined input of
+ * `sources` reads: the record before it would read its first line, so no run takes it
+ * (`SearchDraft`'s readiness; review M2, 2026-11-20), and its card says only that (review L-c).
+ */
+export function cannotFollow(sources: readonly DraftSource[], source: DraftSource): boolean {
+  return combinedSources(sources).findIndex((s) => s.key === source.key) > 0 && startsWithoutDefline(source);
+}
+
+/** What a source that cannot follow another input starts with (`cannotFollow`), after its name. */
+export function cannotFollowText(source: DraftSource): string {
+  return includedOf(source).length > 0
+    ? 'starts with a sequence without a defline (">"), which cannot follow another input.'
+    : 'starts with a line that is not a defline (">"), which cannot follow another input. Correct that line or remove this input.';
+}
+
+/**
+ * The source before `source` whose reader's error ends a Combined query input, after which the run
+ * reads nothing (`DataService.runInputBytes`): `source` is not searched (review L2, 2026-11-20). A
+ * source that cannot follow another input ends no run: no run starts (review L-c, 2026-11-20).
+ */
+export function queryEndBefore(sources: readonly DraftSource[], source: DraftSource): DraftSource | undefined {
+  for (const before of sources) {
+    if (before.key === source.key) return undefined;
+    if (before.status === 'ready' && before.base?.readerError !== undefined && !cannotFollow(sources, before)) return before;
+  }
+  return undefined;
+}
+
+/**
+ * Why what runs take of a source that is read holds no residue, if it holds none: `none`, the input has
+ * no residue at all (an empty file, white space only, deflines alone); `excluded`, it has records with
+ * residues, but they are left out and the records included have none. The engine reads such an input,
+ * as NCBI's reader does, and runs search it as the command line does: it adds nothing to the search,
+ * and NCBI BLAST+ 2.17.0 warns of it or ends the run with an error, by role, program and the other
+ * inputs (an empty subject alone: `Empty CBlastQueryVector`; a lone subject record without residues:
+ * `The average subject length is too short` in BLASTN and TBLASTX, a warning in the others; an empty
+ * query alone: `Query is Empty!`, a warning; a lone query record without residues: `Sequence contains
+ * no data`, an error). So its card shows no "Accepted" mark (line WQA's sweep, D4, 2026-11-19; D4
+ * review). Undefined for a source with an included record that has residues, and for one whose
+ * records are all left out: runs leave it out.
+ */
+export function noSequenceOf(source: DraftSource): 'none' | 'excluded' | undefined {
+  if (source.status !== 'ready' || source.base === undefined) return undefined;
+  const { records } = source.base;
+  if (records.length === 0) return 'none';
+  const included = includedOf(source);
+  if (included.length === 0 || included.some((record) => record.length > 0)) return undefined;
+  return records.some((record) => record.length > 0) ? 'excluded' : 'none';
+}
+
 function nameOf(source: DraftSource, role: InputRole): string {
   return source.origin === 'paste' ? PASTED_NAMES[role] : source.name;
 }
@@ -1503,7 +1885,10 @@ function describeSource(source: DraftSource): string {
 
 /** The engine's verdict, with the record its message names mapped to the record table. */
 function toSourceCheck(check: InputCheck, source: DraftSource): SourceCheck {
-  if (check.ok) return { state: 'ok', records: check.records.length };
+  if (check.ok) {
+    const { readerError } = check;
+    return { state: 'ok', records: check.records.length, ...(readerError === undefined ? {} : { readerError }) };
+  }
   const match = RECORD_IN_MESSAGE.exec(check.message);
   const record = match === null ? undefined : includedOf(source)[Number(match[1]) - 1];
   return { state: 'refused', message: check.message, ...(record === undefined ? {} : { record: record.index }) };

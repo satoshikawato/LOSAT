@@ -41,8 +41,11 @@ fn frozen() -> PathBuf {
     engine().join("tests/fixtures/outfmt13_14")
 }
 
+/// NCBI's frozen file `name`, in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md
+/// rule 8).
 fn read_frozen(name: &str) -> Vec<u8> {
-    fs::read(frozen().join(name)).unwrap_or_else(|error| panic!("{name}: {error}"))
+    let bytes = fs::read(frozen().join(name)).unwrap_or_else(|error| panic!("{name}: {error}"));
+    losat::wording::losat_output_bytes(&bytes).into_owned()
 }
 
 fn temp_dir(stem: &str) -> PathBuf {
@@ -440,7 +443,7 @@ fn outfmt_13_and_14_to_standard_output_ask_for_a_file_name() {
             assert!(output.stdout.is_empty());
             assert_eq!(
                 String::from_utf8_lossy(&output.stderr),
-                format!("BLAST query/options error: Please provide a file name for outfmt {number}.\nPlease refer to the BLAST+ user manual.\n"),
+                format!("LOSAT query/options error: Please provide a file name for outfmt {number}.\nPlease refer to the LOSAT user manual.\n"),
                 "{format} {out:?}"
             );
         }
@@ -539,7 +542,7 @@ fn a_failed_batch_keeps_the_db_files_and_loses_the_held_subject_file() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 assert_eq!(output.status.code(), Some(1), "{mode} {format}: {stderr}");
                 assert!(
-                    stderr.starts_with("BLAST query error: CFastaReader: Near line 10"),
+                    stderr.starts_with("LOSAT query error: CFastaReader: Near line 10"),
                     "{mode} {format}: {stderr}"
                 );
                 assert!(output.stdout.is_empty(), "{mode} {format}");
@@ -584,7 +587,7 @@ fn a_failed_batch_keeps_the_db_files_and_loses_the_held_subject_file() {
 //    reports (`.err`: the standard error of the run; `.rc`: its exit status).
 // ---------------------------------------------------------------------------------------------
 
-const BAD_BATCH: &str = "BLAST query error: CFastaReader: Near line";
+const BAD_BATCH: &str = "LOSAT query error: CFastaReader: Near line";
 
 /// The names of the frozen files of `case`: its master file and its side files, sorted.
 fn frozen_names(case: &str) -> Vec<String> {
@@ -808,7 +811,7 @@ fn tblastn_matrix_error_leaves_an_empty_master_and_no_side_file() {
             assert_eq!(output.status.code(), Some(3), "{label}");
             assert_eq!(
                 String::from_utf8_lossy(&output.stderr),
-                "BLAST engine error: unsupported score matrix\n",
+                "LOSAT engine error: unsupported score matrix\n",
                 "{label}"
             );
             assert!(output.stdout.is_empty(), "{label}");

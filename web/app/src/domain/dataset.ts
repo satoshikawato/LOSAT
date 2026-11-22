@@ -1,4 +1,4 @@
-import type { FastaParserKind, IndexedRecord, RecordKey } from 'losat/domain';
+import type { FastaParserKind, IndexedRecord, RecordKey, ShownIds } from 'losat/domain';
 // Datasets (plan §5.2, §5.4): the record table of one source FASTA, and immutable
 // revisions of it that say which records a run uses. The record fields are those of the
 // ABI v2 *scan* response (docs/web/abi_v2.md §9), so no mapping layer is needed.
@@ -19,6 +19,14 @@ export interface DatasetRevision {
   readonly records: readonly DatasetRecord[];
   /** Indices of the records that runs leave out, ascending and without duplicates. */
   readonly excluded: readonly number[];
+  /**
+   * The reader's error that ends the records (the *scan* response's `reader_error`): the bytes from
+   * `offset` on, the record that the reader fails on and what follows it, belong to no record, and
+   * a run of the source reads its records before them and ends with the error, as the command
+   * line's query batches do (line WQA's D10, 2026-11-19). `defline`: whether that record starts
+   * with a defline; one without cannot follow another input (review M2, 2026-11-20).
+   */
+  readonly readerError?: { readonly offset: number; readonly defline: boolean; readonly message: string };
 }
 
 export function includedRecords(revision: DatasetRevision): readonly DatasetRecord[] {
@@ -27,10 +35,14 @@ export function includedRecords(revision: DatasetRevision): readonly DatasetReco
 }
 
 /**
- * The name of a run input's record in the results: its ID, or for a record without a title the
- * name of NCBI's tabular outputs, `Query_N` or `Subject_N` (N its number in the run input).
+ * The name of a run input's record in the results: the ID that the run's outputs show for it where
+ * the engine read the IDs of the deflines (`shown`, -parse_deflines: `AB000001.1` of
+ * `>gb|AB000001.1| ...`; line WQA's sweep, D7, 2026-11-19), else its ID, or for a record without a
+ * title the name of NCBI's tabular outputs, `Query_N` or `Subject_N` (N its number in the run input).
  */
-export function recordName(id: string, role: 'query' | 'subject', index: number): string {
+export function recordName(id: string, role: 'query' | 'subject', index: number, shown?: ShownIds): string {
+  const parsed = shown?.[role][index];
+  if (parsed !== undefined) return parsed;
   return id !== '' ? id : `${role === 'query' ? 'Query' : 'Subject'}_${index + 1}`;
 }
 

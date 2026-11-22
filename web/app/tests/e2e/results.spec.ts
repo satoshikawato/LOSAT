@@ -21,6 +21,7 @@ import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
 import { TMP_DIRECTORY } from '../../src/infra/data/session';
 import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
+import { E2E_ORIGIN } from './support/origin';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { chooseRun, fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
@@ -822,7 +823,7 @@ for (const c of PROGRAM_CASES) {
     await show(page, 'dotplot');
     const canvas = page.getByTestId('dotplot-canvas');
     await expect(canvas).toHaveAttribute('data-segments', (await page.getByTestId('results-dotplot').getByTestId('hsp-list').getAttribute('data-count'))!);
-    await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+ ${c.units.query}\\) against subject .* \\([\\d,]+ ${c.units.subject}\\)\\.`));
+    await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+\\u00a0${c.units.query}\\) against subject .* \\([\\d,]+\\u00a0${c.units.subject}\\)\\.`));
     await expect(page.getByTestId('dotplot-selected')).toContainText(
       `query ${fields[6]}–${fields[7]} ${c.units.query}, subject ${fields[8]}–${fields[9]} ${c.units.subject}` +
         (c.id === 'tblastn' ? `, subject frame ${frames}.` : c.id === 'blastx' ? `, query frame ${frames}.` : translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
@@ -830,7 +831,7 @@ for (const c of PROGRAM_CASES) {
     // The same scale on both axes, a residue counting as 3 nt against nucleotides (S13b decision
     // 26: TBLASTN's query, BLASTX's subject), unless the shorter side was raised to 120 px (then the
     // note says so).
-    const [queryLength, subjectLength] = /\(([\d,]+) \w+\) against subject .* \(([\d,]+) \w+\)\./
+    const [queryLength, subjectLength] = /\(([\d,]+)\u00a0\w+\) against subject .* \(([\d,]+)\u00a0\w+\)\./
       .exec(await text(page.getByTestId('dotplot')))!
       .slice(1)
       .map((n) => Number(n.replace(/,/g, '')));
@@ -847,7 +848,7 @@ for (const c of PROGRAM_CASES) {
     await expect(canvas).toHaveAttribute('data-titles', /^\[/);
     // A protein axis against a nucleotide one says, while to scale, that it is drawn at 3 nt per aa,
     // where its room holds the note with the unit (BLASTX's short subject axis may not).
-    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '(?:; drawn at 3 nt per aa)?' : '');
+    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '(?:; drawn at 3\u00a0nt per aa)?' : '');
     // Where the room is short, the ID is cut with an ellipsis and the unit kept.
     const subjectTitle = (await titles())[1];
     const shown = new RegExp(`^Subject (.+) \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})${drawnAt(c.units.subject, c.units.query)}\\)$`).exec(subjectTitle);
@@ -859,7 +860,7 @@ for (const c of PROGRAM_CASES) {
       // says; on a phone the 120 px minimum changes the scale, and the note says so instead (W4b
       // screen review finding 4).
       await expect(page.getByTestId('dotplot-scale-note')).toHaveCount(0);
-      expect((await titles())[0]).toBe(`Query ${fields[0]} (aa; drawn at 3 nt per aa)`);
+      expect((await titles())[0]).toBe(`Query ${fields[0]} (aa; drawn at 3\u00a0nt per aa)`);
       await page.setViewportSize({ width: 390, height: 844 });
       await expect(page.getByTestId('dotplot-scale-note')).toBeVisible();
       await expect.poll(async () => (await titles())[0]).toBe(`Query ${fields[0]} (aa)`);
@@ -1023,7 +1024,7 @@ test('-num_alignments 3: the records follow the tabular list, and the texts say 
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', '3');
   // The notice counts the subjects whose alignments are linked, and says that the search has a hit list of its own.
   const partial = page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]');
-  await expect(partial).toContainText("outfmt 0's alignments are linked to 2 of this query's 3 subjects (BLAST+'s -num_alignments: 3).");
+  await expect(partial).toContainText("outfmt 0's alignments are linked to 2 of this query's 3 subjects (-num_alignments: 3).");
   await expect(partial).toContainText('Its search has a hit list of its own (500 subjects per query)');
   await expect(partial).toContainText("a subject's HSPs are linked only where outfmt 0 shows the alignments of exactly the HSPs that outfmt 6 and 7 keep for it");
   // The one-search notice reads "shows the alignments of 2 subjects"; the rule above says "shows the alignments of exactly".
@@ -1061,6 +1062,33 @@ test('-num_alignments 0: outfmt 6 and 7 have no hits, and the notice says so', a
     await show(page, 'details');
     await expect(page.getByTestId('run-diagnostics')).toContainText('No hits are being saved');
   }
+});
+
+// outfmt 6 and 7 that fail alone in the run's one search (line WQA's sweep, D7, round 3, 2026-11-19): a subject titled
+// `Subject_9 bad x\x81y title`, whose title NCBI's GenerateDefline cannot decode, stops the tabular formats (the CLI's
+// -outfmt 6 and 7 exit 1), while outfmt 0, the argv's own, shows the hit with NCBI's "alignment skipped" line
+// (web/adapter/src/run.rs, a_subject_title_ncbi_cannot_decode_fails_the_tabular_streams_the_argv_does_not_ask_for).
+// The engine reports the outputs that failed (ABI v2 §5, stream 9): the notice says that outfmt 6 and 7 could not be
+// written, not that the query has no hits.
+test('outfmt 6 and 7 that could not be written: the notice says so, not that the query has no hits', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine writes every output');
+  const coding = 'ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG';
+  const subject = Buffer.concat([Buffer.from('>Subject_9 bad x'), Buffer.from([0x81]), Buffer.from(`y title\n${coding}\n`)]);
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${coding}\n`);
+  await openFiles(page, 'subject', [{ name: 'subject.fa', text: subject }]);
+  await run(page, 1);
+  await openRun(page, 1);
+  const notice = page.locator('[data-testid="results-notice"][data-kind="no-tabular-output"]');
+  await expect(notice).toHaveText('outfmt 6 and 7 could not be written, so this run has no HSP records. Their error is under Warnings in Run details.');
+  expect(await noticeKinds(page)).toEqual(['no-tabular-output']);
+  await showOutput(page, 1, 0, false);
+  expect(await text(page.getByTestId('result-output'))).toContain('Sequence with id Subject_1 no longer exists in database...alignment skipped');
+  await expect(page.getByTestId('outputs-not-written')).toHaveCount(0);
+  await showOutput(page, 1, 6, false);
+  await expect(page.getByTestId('outputs-not-written')).toHaveText('outfmt 6 could not be written: its error is under Warnings in Run details.');
+  await show(page, 'details');
+  await expect(page.getByTestId('run-diagnostics')).toContainText('subject record 1 (Subject_9) has a title whose non-UTF-8 bytes');
 });
 
 test("BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line", async ({ page }) => {
@@ -1447,7 +1475,7 @@ test('many queries; view filters change the view, not the search; the notices te
   if (BUILD_HAS_ENGINE) {
     // A run that fails: a TBLASTX subject record without residues. `register` and `validate`
     // accept it (the engine registers every record the reader returns), and the run ends with
-    // NCBI's `BLAST engine error: The average subject length is too short`, as the CLI does
+    // `LOSAT engine error: The average subject length is too short`, as the CLI does
     // (screens.spec.ts has the same input).
     const sequence = dna(7, 300);
     // A view filter of run 1 is not carried to the next run that opens.
@@ -1467,7 +1495,7 @@ test('many queries; view filters change the view, not the search; the notices te
     await expect(status).toHaveAttribute('data-run-status', 'failed');
     await expect(status).toHaveAttribute('data-phase', 'unavailable');
     await expect(status).toContainText('Run 2 failed: ');
-    await expect(status).toContainText('A failed run keeps no results.');
+    await expect(status).toContainText('It keeps the outputs written before the error.');
     // The header block still says which run this is.
     await expect(page.getByTestId('results-program')).toHaveText('TBLASTX');
     await expect(page.getByTestId('results-download-all')).toHaveCount(0);
@@ -1726,6 +1754,102 @@ test('the dot plot: a popup taller than a short plot is under it, and stays ther
   await page.waitForTimeout(500);
   await expect(popup).toHaveAttribute('data-place', 'below');
   await expectNoSideScroll(page, 'dot plot popup under a short plot');
+});
+
+// The plot follows the window's width without a loop of its resize observer (line WQA's sweep 2, S2-2, 2026-11-20): the
+// observer of the plot's stage set the plot's width, and the square plot then changed the stage's height in the same
+// frame, so that each change of the width ended with "ResizeObserver loop completed with undelivered notifications." on
+// the window (in the three engines; an uncaught page error in WebKit).
+test('the dot plot follows changes of the window width without a ResizeObserver loop error', async ({ page }) => {
+  const uncaught: string[] = [];
+  page.on('pageerror', (error) => uncaught.push(String(error)));
+  // A record against itself: a square plot, whose height follows its width.
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${S1}\n`);
+  await paste(page, 'subject', `>s\n${S1}\n`);
+  await run(page, 1);
+  await openRun(page, 1);
+  await show(page, 'dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  await expect(canvas).toHaveAttribute('data-segments', /^[1-9]/);
+  await page.evaluate(() => {
+    const errors: string[] = [];
+    (window as unknown as { __windowErrors: string[] }).__windowErrors = errors;
+    window.addEventListener('error', (event) => errors.push(event.message));
+  });
+  const sides = new Map<number, string>();
+  for (const width of [1024, 320, 1280, 500, 1000, 900, 1100]) {
+    await page.setViewportSize({ width, height: 800 });
+    // The frame of the new width, and the next.
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    sides.set(width, (await canvas.getAttribute('data-plot'))!);
+  }
+  expect(await page.evaluate(() => (window as unknown as { __windowErrors: string[] }).__windowErrors)).toEqual([]);
+  expect(uncaught).toEqual([]);
+  // The plot took each width: narrower at 320 px than at 1280 px, and square.
+  const side = (width: number) => sides.get(width)!.split('x').map(Number);
+  expect(side(320)[0]).toBeLessThan(side(1280)[0]!);
+  for (const [w, h] of [side(320), side(1280)]) expect(w).toBe(h);
+});
+
+// Where scroll bars take space (Windows and Linux; Playwright's Chromium hides them unless it starts without
+// --hide-scrollbars), the page's width depended on whether it scrolled, and the square plot's height decided that: in a
+// window a few pixels taller than the page, the scroll bar went away, the wider plot made the page scroll again, and the
+// bar, the plot (563 and 578 px at 700 px) and "ResizeObserver loop completed with undelivered notifications." came back
+// every frame (line WQA's sweep 2, S2-2, review M1, 2026-11-20). The page now always keeps the scroll bar (styles.css).
+test('the dot plot keeps one size in a window a few pixels taller than the page, where scroll bars take space', async ({
+  playwright,
+  browserName,
+}) => {
+  test.skip(browserName !== 'chromium', "the scroll bars of Playwright's Firefox and WebKit take no space");
+  // A browser of its own: the launch options are the worker's, and one test cannot change them.
+  const browser = await playwright.chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
+  try {
+    const page = await browser.newPage({ baseURL: E2E_ORIGIN, viewport: { width: 700, height: 600 } });
+    const uncaught: string[] = [];
+    page.on('pageerror', (error) => uncaught.push(String(error)));
+    await openSearch(page);
+    await program(page, 'blastn');
+    await paste(page, 'query', `>q\n${S1}\n`);
+    await paste(page, 'subject', `>s\n${S1}\n`);
+    await run(page, 1);
+    await openRun(page, 1);
+    await show(page, 'dotplot');
+    const canvas = page.getByTestId('dotplot-canvas');
+    await expect(canvas).toHaveAttribute('data-segments', /^[1-9]/);
+    await page.evaluate(() => {
+      const errors: string[] = [];
+      (window as unknown as { __windowErrors: string[] }).__windowErrors = errors;
+      window.addEventListener('error', (event) => errors.push(event.message));
+    });
+    const frame = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    const takeErrors = () =>
+      page.evaluate(() => (window as unknown as { __windowErrors: string[] }).__windowErrors.splice(0).length);
+    const unsteady: string[] = [];
+    for (const width of [700, 500, 1000]) {
+      await page.setViewportSize({ width, height: 600 });
+      await frame();
+      await frame();
+      await takeErrors();
+      // The page scrolls here, and its scroll bar takes space: else this test could not see the loop.
+      expect(await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth)).toBeGreaterThan(0);
+      const tall = await page.evaluate(() => document.documentElement.scrollHeight);
+      for (const height of [tall + 3, tall + 8]) {
+        await page.setViewportSize({ width, height });
+        const sizes = new Set<string>();
+        for (let i = 0; i < 12; i++) {
+          await frame();
+          sizes.add((await canvas.getAttribute('data-plot'))!);
+        }
+        const errors = await takeErrors();
+        if (sizes.size !== 1 || errors !== 0) unsteady.push(`${width}x${height}: plot ${[...sizes].join(', ')}; ${errors} errors`);
+      }
+    }
+    expect(unsteady).toEqual([]);
+    expect(uncaught).toEqual([]);
+  } finally {
+    await browser.close();
+  }
 });
 
 test('the E value filter compares the values that the lists show: an E value written 0.0 passes "E value ≤ 0"', async ({ page }) => {
@@ -2118,6 +2242,96 @@ test('narrow screens: the results are no wider than the screen; "Run LOSAT" open
   await expect(heading).toBeInViewport({ ratio: 1 });
 });
 
+// Long option names (line WQA's sweep 2, S2-1, 2026-11-20): a name was one box that could not break, so that at 320 and
+// 360 px -min_raw_gapped_score made Run details' Arguments and the results' Options line wider than the window (in the
+// three engines; -max_target_seqs in Chromium). A name stays whole where its line holds it, goes whole to the next line
+// where that one does, and breaks at its line's end only where it is longer than a line, never after its hyphen. Below
+// 480 px each label of Run details and of the header block is above its value, so that at 320 and 390 px these names
+// are whole there (S2-1 round 2: beside the labels, "-min_raw_gap" "ped_score" read as wrong).
+test('long option names: from 320 to 1280 px the results are no wider than the window, and a name is whole where its line holds it', async ({
+  page,
+}) => {
+  // -export_search_strategy and -logfile are not in the FakeEngine's description. The file of -logfile is shown under its
+  // option's name, with its own (long) name.
+  const extra = `-min_raw_gapped_score 20 -off_diagonal_range 0${BUILD_HAS_ENGINE ? ' -export_search_strategy strategy.asn -logfile a_log_file_name_longer_than_a_line.log' : ''}`;
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${S1}\n`);
+  await openParameters(page);
+  await page.getByTestId('param-max_target_seqs').selectOption('10');
+  await page.getByTestId('param-extra').fill(extra);
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await run(page, 1);
+  await openRun(page, 1);
+  const longNames = ['-max_target_seqs', '-min_raw_gapped_score', '-off_diagonal_range', ...(BUILD_HAS_ENGINE ? ['-export_search_strategy', '-logfile'] : [])];
+  await expect(page.getByTestId('results-run-options').locator('.option-name')).toHaveText(longNames);
+  for (const width of [320, 360, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const tab of ['hits', 'details', 'outputs', ...(BUILD_HAS_ENGINE ? ['run files' as const] : [])] as const) {
+      if (tab === 'run files') await page.getByTestId('format-run-files').click();
+      else await show(page, tab);
+      const state = `${tab} at ${width} px`;
+      await expectNoSideScroll(page, state);
+      // Each option name shown: the width of its line (its block's content box), its own width on one line, the lines
+      // it takes, and whether its hyphen and first letter share a line.
+      const names = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('.option-name')]
+          .filter((name) => name.getClientRects().length > 0)
+          .map((name) => {
+            let block = name.parentElement!;
+            while (getComputedStyle(block).display.startsWith('inline') || getComputedStyle(block).display === 'contents') block = block.parentElement!;
+            const style = getComputedStyle(block);
+            const line = block.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+            const probe = document.createElement('span');
+            probe.textContent = name.textContent;
+            probe.style.cssText = 'position: absolute; visibility: hidden; white-space: nowrap';
+            name.parentElement!.append(probe);
+            const own = probe.getBoundingClientRect().width;
+            probe.remove();
+            // The lines of a range: the tops of its characters' boxes.
+            const linesOf = (range: Range) => new Set([...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top))).size;
+            const range = document.createRange();
+            range.selectNodeContents(name);
+            const lines = linesOf(range);
+            // The hyphen and the letter after it, wherever their text nodes are.
+            const texts: Text[] = [];
+            const walker = document.createTreeWalker(name, NodeFilter.SHOW_TEXT);
+            for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) texts.push(node as Text);
+            const at = (offset: number): [Text, number] => {
+              let rest = offset;
+              for (const text of texts) {
+                if (rest <= text.length) return [text, rest];
+                rest -= text.length;
+              }
+              return [texts.at(-1)!, texts.at(-1)!.length];
+            };
+            range.setStart(...at(0));
+            range.setEnd(...at(2));
+            const hyphen = linesOf(range);
+            const box = name.getBoundingClientRect();
+            const listed = name.closest('[data-testid="run-details"], [data-testid="results-run-options"]') !== null;
+            return { text: name.textContent ?? '', line, own, lines, hyphen, right: box.right, listed };
+          }),
+      );
+      const inner = await page.evaluate(() => window.innerWidth);
+      for (const name of names) {
+        const which = `${state}: ${name.text} (${Math.round(name.own)} px in a line of ${Math.round(name.line)} px)`;
+        expect(name.right, `${which} reaches beyond the window`).toBeLessThanOrEqual(inner + 0.5);
+        expect(name.hyphen, `${which} is broken after its hyphen`).toBe(1);
+        if (name.own <= name.line) expect(name.lines, `${which} is broken although its line holds it`).toBe(1);
+        // On a phone, Run details and the Options line give each value the whole width: no name breaks there.
+        if (width <= 390 && name.listed) expect(name.lines, `${which} is broken in Run details or the Options line`).toBe(1);
+      }
+      expect(names.map((name) => name.text)).toEqual(expect.arrayContaining(longNames));
+    }
+  }
+  // The command as text, its lines broken on a phone, keeps its words on one line (a copy of it can be pasted into a shell).
+  await page.setViewportSize({ width: 320, height: 800 });
+  await show(page, 'details');
+  const argv = page.getByTestId('run-argv');
+  expect((await argv.innerText()).trim()).toBe(((await argv.textContent()) ?? '').trim());
+});
+
 test('the Outputs view lays out blocks of lines near the view, and shows, finds and selects every line', async ({ page, browserName }) => {
   test.skip(!BUILD_HAS_ENGINE, 'an output of many lines');
   await openSearch(page);
@@ -2313,6 +2527,7 @@ test("Additional options' -outfmt with fields adds its output to the Outputs, Ex
   await program(page, 'blastn');
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
+  // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
   const protein = '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n';
   const inputs = {
     blastn: [`>q1 first query\n${A}\n`, `>s1 first subject\n${S1}\n`],

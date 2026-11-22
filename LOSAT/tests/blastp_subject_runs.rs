@@ -15,14 +15,6 @@
 //! at several thread counts and check each later subject's offset and table.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-172
-//! ```c
-//!         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-//!             ewp->diag_table->offset = ewp->diag_table->window;
-//!             s_BlastDiagClear(ewp->diag_table);
-//!         } else {
-//!             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-//!         }
-//! ```
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};

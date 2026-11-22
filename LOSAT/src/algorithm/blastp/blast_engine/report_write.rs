@@ -16,10 +16,10 @@
 //! fields at `write_text`.
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
-//! (`BlastpReports`, `BlastpRanges`, `BlastpReport`, `ShownSubjects`, `query_record_masks`,
-//! `mask_query_rows`, `blastp_scan_mode_definition`, `write_blastp_tabular_hit_lists`) and its
-//! sibling modules `anchored`, `database`, `psi_round`, `pssm_hooks`, `query_rows` and
-//! `x_soft_subject`.
+//! (`BlastpReports`, `BlastpRanges`, `BlastpReport`, `ShownSubjects`, `ShownQueries`,
+//! `query_record_masks`, `mask_query_rows`, `blastp_scan_mode_definition`,
+//! `write_blastp_tabular_hit_lists`) and its sibling modules `anchored`, `database`, `psi_round`,
+//! `pssm_hooks`, `query_rows` and `x_soft_subject`.
 
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -31,7 +31,7 @@ use anyhow::Result;
 use super::{
     anchored, blastp_scan_mode_definition, database, mask_query_rows, psi_round, pssm_hooks,
     query_record_masks, query_rows, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
-    BlastpReport, BlastpReports, ShownSubjects,
+    BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -70,17 +70,6 @@ use crate::utils::threading::SearchPool;
 /// take each of them as a parameter.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:120-128
-/// ```c++
-///     m_DbName = db_adapter.GetDatabaseName();
-///     m_IsBl2Seq = (m_DbName == kEmptyStr ? true : false);
-///     m_IsDbScan = db_adapter.IsDbScanMode();
-///     if (m_IsBl2Seq) {
-///         m_SeqInfoSrc.Reset(db_adapter.MakeSeqInfoSrc());
-///     }
-///     else {
-///     	m_SearchDb = db_adapter.GetSearchDatabase();
-///     }
-/// ```
 /// NCBI's formatter keeps the database's name, or the sequences of a subject set (bl2seq), from
 /// its construction; the results of the search reach the formatter with each call
 /// (blastp_app.cpp:281 and :287).
@@ -109,8 +98,9 @@ pub(super) struct ReportView<'a> {
     pub(super) pairwise_database: &'a Option<PairwiseDatabase>,
     pub(super) shown_database: &'a Option<PairwiseDatabase>,
     pub(super) subject_input_label: &'a str,
-    pub(super) shown_num_sequences: usize,
-    pub(super) shown_total_letters: usize,
+    /// NCBI's `Int8` (`report_prep::ReportLabels`).
+    pub(super) shown_num_sequences: i64,
+    pub(super) shown_total_letters: i64,
     pub(super) subjects: &'a [EncodedProtein],
     pub(super) subject_records: &'a [FastaRecord],
     pub(super) subject_titles: &'a [Arc<[u8]>],
@@ -127,29 +117,29 @@ pub(super) struct ReportView<'a> {
     pub(super) psiblast_hits_found: &'a Option<Vec<usize>>,
     pub(super) psi_found_before: &'a Option<psi_round::FoundBefore>,
     pub(super) rps_gapped_k: &'a Option<Vec<f64>>,
-    pub(super) tabular_unsearched: &'a [bool],
+    /// Whether NCBI's result of each query has no alignment set: a query of a batch that NCBI did
+    /// not search, but for rpsblast's search of several volumes, whose merge makes a set for every
+    /// query (`blast_engine::no_alignment_sets`). Outfmt 7's hit count, the XML2 and JSON `hits`
+    /// and message, and the organism report read it.
+    pub(super) no_alignment_set: &'a [bool],
     pub(super) context: &'a ReportContext,
     pub(super) call_batches: &'a archive::CallBatches<'a>,
     pub(super) filtered_empty: bool,
+    /// rpsblast over several volumes (`prelim_run::PrelimRun::rps_multi_volume`).
+    pub(super) rps_multi_volume: bool,
     pub(super) xml_matrix_failure: Option<XmlMatrixFailure>,
     pub(super) xml_only_xml2: bool,
     pub(super) x_rows_pool: Option<&'a SearchPool<'a>>,
     pub(super) blastp_parallel_pool: &'a SearchPool<'a>,
+    /// The call ends with an exception before any query's report: the pairwise report writes its
+    /// prolog alone (`empty_alignments::write_exception_prolog`).
+    pub(super) prolog_only: bool,
 }
 
 /// Outfmt 8, 9 and 12: the Seq-annot of each query with alignments
 /// (`seqalign::write_blastp_seqalign`), as ASN.1 text, ASN.1 binary or JSON, flushed when written.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:700-706
-/// ```c++
-///     } else if (m_FormatType == CFormattingArgs::eAsnBinary) {
-///         if (results.HasAlignments()) {
-///             CRef<CSeq_align_set> aln_set (new CSeq_align_set);
-///             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
-///             m_Outfile << MSerial_AsnBinary <<
-///                 *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
-///         }
-/// ```
 /// The ASN.1 binary branch of `CBlastFormat::x_PrintStructuredReport`; the body quotes its ASN.1
 /// text and JSON branch.
 pub(super) fn write_seqalign(
@@ -159,6 +149,7 @@ pub(super) fn write_seqalign(
     warnings: &mut Option<QueryWarnings<'_>>,
 ) -> Result<()> {
     let ReportView {
+        args,
         ranges,
         query_records,
         query_lengths,
@@ -172,17 +163,6 @@ pub(super) fn write_seqalign(
         ..
     } = *view;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
-    //         if (results.HasAlignments()) {
-    //     	    CRef<CSeq_align_set> aln_set (new CSeq_align_set);
-    //             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
-    //             if(m_FormatType == CFormattingArgs::eAsnText)
-    //             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
-    //             else
-    //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
-    //         }
-    // ```
     // The Seq-annot of each query with alignments (`seqalign`).
     let mut writer = format.sink.open()?;
     let subjects = match (
@@ -202,6 +182,8 @@ pub(super) fn write_seqalign(
     };
     seqalign::write_blastp_seqalign(
         serial,
+        args.app == BlastpApp::Rpsblast,
+        !args.ungapped,
         hit_lists,
         &crate::report::record::QueryNames {
             records: query_records,
@@ -226,13 +208,6 @@ pub(super) fn write_seqalign(
 /// with the batch's queries, their masks and the warnings of its queries, flushed when written.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1067-1071
-/// ```c++
-/// CBlastFormat::WriteArchive(blast::IQueryFactory& queries,
-///                            blast::CBlastOptionsHandle& options_handle,
-///                            const CSearchResultSet& results,
-///                            unsigned int num_iters,
-///                            const list<CRef<CBlast4_error> > & msg)
-/// ```
 pub(super) fn write_archive(
     view: &ReportView<'_>,
     format: &mut FormatOutput<'_>,
@@ -256,11 +231,6 @@ pub(super) fn write_archive(
         ..
     } = *view;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:280-282
-    // ```c++
-    //             if (fmt_args->ArchiveFormatRequested(args)) {
-    //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results,  0, m_Bah.GetMessages());
-    //                 m_Bah.ResetMessages();
-    // ```
     // One BLAST archive per query batch of the call (`archive`).
     let handle = args
         .archive
@@ -286,6 +256,8 @@ pub(super) fn write_archive(
     let spans = batch_spans();
     let call = archive::ArchiveCall {
         handle,
+        gapped: !args.ungapped,
+        rps: args.app == BlastpApp::Rpsblast,
         batches: archive::CallBatches {
             masks: &masks,
             spans: &spans,
@@ -316,19 +288,7 @@ pub(super) fn write_archive(
 /// report data and fails where NCBI's run fails (`xml_matrix_failure`). Flushed when written.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-710
-/// ```c++
-///     } else if (m_FormatType == CFormattingArgs::eXml) {
-///         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
-///         res->TrimSeqAlign(m_HitlistSize);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:745-749
-/// ```c++
-///     else if(m_FormatType == CFormattingArgs::eXml2 || m_FormatType == CFormattingArgs::eJson ||
-///             m_FormatType == CFormattingArgs::eXml2_S || m_FormatType == CFormattingArgs::eJson_S) {
-///     	x_PrintXML2Report(results, queries);
-///     	return;
-///     }
-/// ```
 /// The BLAST XML, XML2 and JSON branches of `CBlastFormat::x_PrintStructuredReport`.
 pub(super) fn write_xml(
     view: &ReportView<'_>,
@@ -348,6 +308,7 @@ pub(super) fn write_xml(
         query_lengths,
         query_valid,
         query_batch_skipped,
+        no_alignment_set,
         database,
         listed_subjects,
         listed_titles,
@@ -360,6 +321,7 @@ pub(super) fn write_xml(
         hit_loads,
         pairwise_hits,
         filtered_empty,
+        rps_multi_volume,
         xml_matrix_failure,
         xml_only_xml2,
         ..
@@ -371,29 +333,11 @@ pub(super) fn write_xml(
         _ => None,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eAsnText
-    //       || m_FormatType == CFormattingArgs::eAsnBinary
-    //       || m_FormatType == CFormattingArgs::eXml
-    //       ...
-    //     {
-    //         x_PrintStructuredReport(results, queries);
-    //         return;
-    //     }
-    // ```
     // The CBlastOutput document of the queries (`blast_xml`). NCBI makes its score
     // matrix table from the matrix name as typed, and fails for a name that is not
     // spelled as one of its own.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
-    // ```c++
-    //     else {
-    //         string prog_name = Blast_ProgramNameFromType(
-    //                                            m_Options.GetProgramType());
-    //         if (prog_name != "blastn" && prog_name != "megablast") {
-    //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-    //                         "unsupported score matrix");
-    // ```
     let positives = match crate::report::blast_xml::matrix::FormattingMatrix::new(&args.matrix_name)
     {
         Some(matrix) => matrix,
@@ -417,7 +361,7 @@ pub(super) fn write_xml(
         }
         None => {
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389
-            // (quoted at `blast_xml::matrix::XmlMatrixFailure`: the XML2 and JSON
+            // (cited at `blast_xml::matrix::XmlMatrixFailure`: the XML2 and JSON
             // report of a `-subject` or psiblast run is made when the next query's
             // results arrive, or in `PrintEpilog`)
             // The report data's constructor throws for the run's first searched query,
@@ -465,6 +409,11 @@ pub(super) fn write_xml(
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
+            // rpsblast over several volumes keeps no warning in the merged results
+            // (`query_warning_lines`).
+            if rps_multi_volume {
+                return Vec::new();
+            }
             crate::report::query_warnings::query_messages(
                 record.seq(),
                 query_valid[q_idx],
@@ -473,10 +422,18 @@ pub(super) fn write_xml(
             )
         })
         .collect();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-224
+    // The result of a batch that NCBI did not search has no masks (rpsblast's merge of several
+    // volumes takes volume 0's, rpsblast_local.cpp:174-175): XML2 and JSON list none for its
+    // queries, which have an alignment set there (`no_alignment_set`).
     let xml_masks: Vec<Vec<crate::report::blast_xml::QueryMask>> =
         query_record_masks(query_frames, &ranges.query_input.placements)
             .into_iter()
-            .map(|masks| {
+            .zip(query_batch_skipped)
+            .map(|(masks, &skipped)| {
+                if skipped {
+                    return Vec::new();
+                }
                 masks
                     .into_iter()
                     .map(|(from, to)| crate::report::blast_xml::QueryMask { from, to, frame: 0 })
@@ -531,24 +488,25 @@ pub(super) fn write_xml(
         placements: &ranges.query_input.placements,
     };
     let db_name = database.map(|database| database.name().to_string());
-    let version = format!("BLASTP {}", crate::NCBI_BLAST_VERSION);
+    // `BlastOutput_program` and `_version` name the application: `blastp`, `rpsblast`
+    // (`Blast_ProgramNameFromType` of its search's program, `RPSBLAST 2.17.0+`).
+    let version = format!(
+        "{} {}",
+        args.app.ncbi_name().to_ascii_uppercase(),
+        crate::wording::REPORT_VERSION
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
-    // ```c
-    //     if (SBlastFilterOptionsMaskAtHash(filtering_options)) {
-    //         if (strlen(retval) != 0) {
-    //             /* Add mask at hash as a modifier for other filtering options */
-    //             if (!s_SafeStrCat(&retval, &retval_size, "m;")) {
-    // ```
     // `-soft_masking true` (`mask_at_hash`) ends the filter string with `m;`.
     let filter = crate::report::blast_xml::filter::filter_string(
         None,
         args.seg.filter_options(),
         None,
+        None,
         args.soft_masking,
     );
     let xml = blast_xml::BlastpXml {
         run: crate::report::blast_xml::XmlRun {
-            program: "blastp",
+            program: args.app.ncbi_name(),
             version: &version,
             reference: crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
             db_name: db_name.as_deref().unwrap_or(""),
@@ -576,13 +534,11 @@ pub(super) fn write_xml(
         subjects: xml_subjects,
         taxdb_notes: xml_taxdb_notes,
         masks: xml_masks,
-        // NCBI did not search the batches that the search skipped (every query in
-        // them invalid): XML2 shows it.
-        searched: query_batch_skipped
-            .iter()
-            .map(|&skipped| !skipped)
-            .collect(),
-        program: "BLASTP",
+        // A query without NCBI's alignment set (`no_alignment_set`: of a batch that the search
+        // skipped, every query in it invalid, but for the merge of several volumes): XML2 and
+        // JSON write no `hits` and add to its message.
+        searched: no_alignment_set.iter().map(|&none| !none).collect(),
+        program: args.app.name(),
         epilog: reports.epilog,
         stops: !reports.epilog && reports.last_call,
         only_xml2: xml_only_xml2,
@@ -669,11 +625,6 @@ pub(super) fn write_xml(
 /// whose titles the loop has checked. `view` is the report's layout (`BlastpReport::Pairwise`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1539-1541
-/// ```c++
-///     if ( (!m_IsBl2Seq || m_IsDbScan) && !(m_DisableKAStats || kIsGlobal) ) {
-///         x_DisplayDeflines(aln_set, itr_num, prev_seqids);
-///     }
-/// ```
 /// `CBlastFormat::PrintOneResultSet`'s descriptions, then its alignments
 /// (`CDisplaySeqalign::DisplaySeqalign`, :1585) and the query's footer (`x_PrintOneQueryFooter`,
 /// :1589).
@@ -719,29 +670,14 @@ pub(super) fn write_pairwise(
         psi_found_before,
         rps_gapped_k,
         blastp_parallel_pool,
+        hit_loads,
+        prolog_only,
         ..
     } = *report_view;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68,71,90-92
-    // ```c++
-    // CBlastFormat::CBlastFormat(const blast::CBlastOptions& options,
-    // ...
-    //                  bool believe_query, CNcbiOstream& outfile,
-    // ...
-    //         : m_FormatType(format_type), m_IsHTML(is_html),
-    //           m_DbIsAA(db_adapter.IsProtein()), m_BelieveQuery(believe_query),
-    //           m_Outfile(outfile), m_NumSummary(num_summary),
-    // ```
     let mut writer = format.sink.open()?;
     // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:187
-    // ```c++
-    //         formatter.SetLineLength(fmt_args->GetLineLength());
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:246-248
-    // ```c++
-    //         formatter.SetLineLength(fmt_args->GetLineLength());
-    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
-    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
-    // ```
     // (`args.line_length`: `-line_length`, else 60; `args.sort`: blastp's
     // `-sorthits` and `-sorthsps`, none for psiblast and rpsblast.)
     // Outfmt 1 to 4 sort by `-sorthits` as outfmt 0 and read no `-sorthsps`
@@ -753,21 +689,28 @@ pub(super) fn write_pairwise(
         protein_matrix: args.scoring.matrix,
         sort: view.report_sort(args.sort),
         view,
+        // psiblast's PSSM query of the molecule `other` (`PsiSearch::query_other_coding`).
+        unreadable_query: args
+            .psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding)
+            .map(|_| crate::report::pairwise::UnreadableQuery {
+                oids: listed_subjects
+                    .as_ref()
+                    .zip(database)
+                    .map(|(listed, database)| {
+                        let oids = database.oid_map();
+                        listed
+                            .ordinals
+                            .iter()
+                            .map(|&ordinal| oids.oid(ordinal).get())
+                            .collect()
+                    }),
+            }),
     };
     // psiblast `-in_pssm`: the footer prints the PSSM's `kbp_psi` and `kbp_gap_psi`
     // (the file's values).
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:451-467
-    // ```c++
-    //     const Blast_KarlinBlk *kbp_ungap =
-    //         (m_Program == "psiblast" || m_Program == "deltablast")
-    //         ? summary.GetPsiUngappedKarlinBlk()
-    //         : summary.GetUngappedKarlinBlk();
-    //     ...
-    //     const Blast_KarlinBlk *kbp_gap =
-    //         (m_Program == "psiblast" || m_Program == "deltablast")
-    //         ? summary.GetPsiGappedKarlinBlk()
-    //         : summary.GetGappedKarlinBlk();
-    // ```
     let psi_report_karlin = args
         .psi_search
         .as_deref()
@@ -780,19 +723,9 @@ pub(super) fn write_pairwise(
         .map(|(q_idx, &query_length)| BlastpPairwiseQuery {
             query_name: Vec::new(),
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:742-744
-            // ```c++
-            //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
-            //             out << "\nLength=";
-            //             out << cbs.GetInst().GetLength() <<"\n";
-            // ```
             // The query record's length, also with `-query_loc`.
             query_length: ranges.query_input.placements.length(q_idx, query_length),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:87,100
-            // ```c++
-            //             m_SearchSpace = ctx->eff_searchsp;
-            // ...
-            //         s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
-            // ```
             ungapped_karlin: psi_report_karlin
                 .map_or(contexts[q_idx].karlin_params, |karlin| karlin.ungapped),
             // NCBI's `Int8` (`exact_search_spaces`; `None` only where the
@@ -804,11 +737,11 @@ pub(super) fn write_pairwise(
         })
         .collect();
     let pairwise_report = BlastpPairwiseReport {
-        version: crate::NCBI_BLAST_VERSION.to_string(),
-        database_name: blastp_scan_mode_definition(subject_input_label),
+        version: crate::wording::REPORT_VERSION.to_string(),
+        database_name: blastp_scan_mode_definition(subject_input_label).into(),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
-        // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267: options.GetMatrixName(), as typed.
         matrix_name: Some(args.matrix_name.clone()),
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
@@ -816,7 +749,8 @@ pub(super) fn write_pairwise(
         window_size: args.window_size as i32,
         gapped_karlin: psi_report_karlin.map_or(gapped_params, |karlin| karlin.gapped),
         gumbel: gapped_gumbel,
-        // NCBI blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
+        gapped: !args.ungapped,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
         // or the -num_descriptions / -num_alignments / -max_target_seqs values
         // (`ReportCounts`).
         num_descriptions: args.num_descriptions,
@@ -832,10 +766,6 @@ pub(super) fn write_pairwise(
         found.refuse_unsure_shown(shown.iter().copied())?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
-    // ```c++
-    //     CRef<CSearchResultSet> retval = m_TbackSearch->Run();
-    //     retval->SetFilteredQueryRegions(m_PrelimSearch->GetFilteredQueryRegions());
-    // ```
     // blastp's results carry the query masks; psiblast's `CPsiBlastImpl::Run` returns
     // the traceback's results without them (psiblast_impl.cpp:150), so its rows show
     // no lowercase masking.
@@ -847,9 +777,6 @@ pub(super) fn write_pairwise(
         BlastpApp::Psiblast => None,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
-    // ```c++
-    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-    // ```
     // The windows of queries whose rows are made and written together
     // (`query_rows::row_windows`); one window of every query when the rows were
     // made up front (`rows_up_front`). Without a query, the prolog and the epilog.
@@ -858,6 +785,7 @@ pub(super) fn write_pairwise(
     // LOSAT_X_BPLKPAHEAD the next block's lookup build may still run on it.
     let x_pool = crate::report::x_pairwise_par::pool(blastp_parallel_pool);
     let mut windows = match pairwise_hits {
+        _ if prolog_only => Vec::new(),
         Some(_) => vec![0..pairwise_queries.len()],
         None => query_rows::row_windows(
             hit_lists,
@@ -874,13 +802,44 @@ pub(super) fn write_pairwise(
             Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
             None => std::borrow::Cow::Owned(rows_of(window.clone())?),
         };
+        // `-db_soft_mask` and `-db_hard_mask`: the subjects' stored masks that meet the
+        // query's HSPs with them, by NCBI's Seq-id, shown in lower case as `-lcase_masking`
+        // shows a FASTA subject's (`db_mask_search::shown_db_subject_masks`).
+        let db_subject_masks = match (
+            args.db_mask_resolved.as_ref(),
+            database,
+            listed_subjects.as_ref(),
+        ) {
+            (Some(mask), Some(database), Some(listed)) => {
+                use crate::algorithm::common::db_mask_search as db_mask;
+                let ordinal = |rank: u32| listed.ordinals.get(rank as usize).copied();
+                let stored = db_mask::read_shown_stored(
+                    &rows,
+                    database.seqdb(),
+                    mask.id,
+                    args.app.name(),
+                    ordinal,
+                )?;
+                Some(db_mask::shown_db_subject_masks(
+                    &rows,
+                    |rank| stored.get(&rank).map(Vec::as_slice),
+                    |rank| {
+                        db_mask::subject_id_keys(
+                            listed_parsed.get(rank as usize).and_then(Option::as_deref),
+                            database.oid_map().oid(listed.ordinals[rank as usize]),
+                        )
+                    },
+                ))
+            }
+            _ => None,
+        };
         // Outfmt 1 to 4: the sections read the sequences and their masks
         // (`anchored`), not the rows' letters.
         let anchored_sequences =
             (view != crate::report::pairwise::PairwiseView::Pairwise).then(|| {
                 anchored::AnchoredSequences {
                     contexts: report_contexts,
-                    query_records,
+                    queries: ShownQueries::of(query_records, args),
                     query_placements: &ranges.query_input.placements,
                     subjects,
                     shown_subjects,
@@ -900,7 +859,7 @@ pub(super) fn write_pairwise(
                             ranges.subject_placements,
                         )
                     } else {
-                        Default::default()
+                        db_subject_masks.clone().unwrap_or_default()
                     },
                 }
             });
@@ -916,6 +875,10 @@ pub(super) fn write_pairwise(
                     ranges.subject_placements,
                 ));
             }
+            if let Some(masks) = db_subject_masks.as_ref() {
+                rows =
+                    std::borrow::Cow::Owned(x_soft_subject::lower_case_subject_rows(&rows, masks));
+            }
         }
         // psiblast's rounds: the round's report (`psiblast_round`), without the
         // epilog.
@@ -930,6 +893,7 @@ pub(super) fn write_pairwise(
                 subject_titles,
                 listed_parsed,
                 listed_sources,
+                hit_loads,
                 &pairwise_report,
                 pairwise_database.as_ref(),
                 probe.as_mut(),
@@ -941,7 +905,8 @@ pub(super) fn write_pairwise(
                         .as_ref()
                         .map(|found| found.found.as_slice()),
                 },
-            )?;
+            )
+            .map_err(crate::cli::NativeError::of_writer)?;
             continue;
         }
         write_blastp_pairwise_window(
@@ -961,12 +926,15 @@ pub(super) fn write_pairwise(
             probe.as_mut(),
             warnings.as_mut(),
             reports.x_prolog,
-            reports.epilog,
+            reports.epilog && !prolog_only,
             x_pool,
             anchored_sequences
                 .as_ref()
                 .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
-        )?;
+            hit_loads,
+        )
+        // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
+        .map_err(crate::cli::NativeError::of_writer)?;
     }
     Ok(())
 }
@@ -978,20 +946,10 @@ pub(super) fn write_pairwise(
 /// queries at a time where a field shows them (`rows_of`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:782-785
-/// ```c++
-///         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-///         if(!m_CustomDelim.empty()) {
-///             tabinfo.SetCustomDelim(m_CustomDelim);
-///         }
-/// ```
 ///
 /// The organism report of outfmt 18 is NCBI's `CBlastFormat::x_PrintTaxReport`:
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:873-874
-/// ```c++
-/// void
-/// CBlastFormat::x_PrintTaxReport(const blast::CSearchResults& results)
-/// ```
 pub(super) fn write_custom_tabular(
     view: &ReportView<'_>,
     spec: &'static TabularSpec,
@@ -1022,7 +980,7 @@ pub(super) fn write_custom_tabular(
         engine_counts,
         pairwise_hits,
         psiblast_hits_found,
-        tabular_unsearched,
+        no_alignment_set,
         context,
         x_rows_pool,
         ..
@@ -1033,12 +991,6 @@ pub(super) fn write_custom_tabular(
     let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
     let needs = spec.needs();
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
-    // ```c++
-    //        		const CBioseq_Handle& subject_bh =
-    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    //             ...
-    //             m_SubjectLength = subject_bh.GetBioseqLength();
-    // ```
     // `slen` is the length of the subject's Bioseq: the whole record with
     // `-subject_loc`, as the outfmt 0 `Length=` line.
     let subject_length = |s_idx: usize| {
@@ -1089,16 +1041,13 @@ pub(super) fn write_custom_tabular(
     let program_version = format!(
         "{} {}",
         args.app.ncbi_name().to_uppercase(),
-        crate::NCBI_BLAST_VERSION
+        crate::wording::REPORT_VERSION
     );
     let tab = tabular::BlastpTabular {
         spec,
         app: args.app,
         program_version: &program_version,
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1458
-        // ```c++
-        //         x_PrintTabularReport(results, itr_num);
-        // ```
         // psiblast's round (`psi_round`), 1 outside the rounds.
         iteration: (args.app == BlastpApp::Psiblast)
             .then(|| reports.psi_round.map_or(1, |io| io.state.number())),
@@ -1114,7 +1063,7 @@ pub(super) fn write_custom_tabular(
             .or(context.subject_name.as_deref())
             .unwrap_or_default(),
         subjects: tabular_subjects,
-        unsearched: tabular_unsearched,
+        unsearched: no_alignment_set,
         hits_found: psiblast_hits_found.as_deref(),
         prolog: reports.x_prolog,
         epilog: reports
@@ -1126,6 +1075,10 @@ pub(super) fn write_custom_tabular(
         },
         names: names.as_ref(),
         engine_counts,
+        query_other_coding: args
+            .psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding),
     };
     // Outfmt 18, the organism report: the `Query=` block shows the query record's
     // length, also with `-query_loc` (as outfmt 0's, `pairwise_queries`).
@@ -1146,12 +1099,6 @@ pub(super) fn write_custom_tabular(
         return Ok(());
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2955-2958
-    // ```c++
-    //     	if (args[kArgLineLength]) {
-    //    		 ERR_POST(Warning << "The parameter -line_length is not applicable for "
-    //    				    		 "output formats > 4 .");
-    //     	}
-    // ```
     // The rows of the queries' HSPs when a field shows them (and rpsblast's
     // identities, `tabular::needs_rows`), a window at a time (`query_rows`). A tabular
     // report has no lines: NCBI reads `-line_length` only for outfmt 0 to 4
@@ -1186,11 +1133,6 @@ pub(super) fn write_custom_tabular(
 /// comment lines of outfmt 7, flushed when written.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-/// ```c++
-/// const char* kDfltArgTabularOutputFmt =
-///     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-///     "evalue bitscore";
-/// ```
 pub(super) fn write_text(
     view: &ReportView<'_>,
     outfmt: OutputFormat,
@@ -1207,36 +1149,23 @@ pub(super) fn write_text(
         subject_accessions,
         hit_lists,
         psiblast_hits_found,
-        tabular_unsearched,
+        no_alignment_set,
         context,
         ..
     } = *view;
     let mut writer = format.sink.open()?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1102-1107
-    // ```c++
-    //     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-    //         // Add tab in front of field, except for the first field.
-    //         if (iter != m_FieldsToShow.begin())
-    //             m_Ostream << m_FieldDelimiter;
-    //         x_PrintField(*iter);
-    //     }
-    // ```
     write_blastp_tabular_hit_lists(
         hit_lists,
         outfmt,
         &mut writer,
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1306-1308
-        // ```c++
-        //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
-        //                                             m_ParseLocalIds, kHtmlFormat,
-        //                                             kTabularFormat, rid);
-        // ```
         query_ids,
         query_titles,
         subject_ids,
         subject_accessions,
         view.hit_loads,
-        tabular_unsearched,
+        no_alignment_set,
         psiblast_hits_found.as_deref(),
         context,
         probe.as_mut(),
@@ -1246,28 +1175,13 @@ pub(super) fn write_text(
         // psiblast's round (`psi_round`), 1 outside the rounds.
         (args.app == BlastpApp::Psiblast)
             .then(|| reports.psi_round.map_or(1, |io| io.state.number())),
+        args.psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding),
     )?;
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
-    // ```c++
-    //         CDiagHandler* handler = new CStreamDiagHandler(&NcbiCerr, true, kLogName_Stderr);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-146
-    // ```c++
-    // CRef<CBlastQueryVector>
-    // CBlastInput::GetNextSeqBatch(CScope& scope)
-    // {
-    //     CRef<CBlastQueryVector> retval(new CBlastQueryVector);
-    //     TSeqPos size_read = 0;
-    //
-    //     while (size_read < GetBatchSize()) {
-    //
-    //         if (End())
-    //             break;
-    //
-    //         CRef<CBlastSearchQuery> q;
-    //         try { q.Reset(m_Source->GetNextSequence(scope)); }
-    // ```
-    // NCBI reads the next query batch (blastp_app.cpp:257-259) after this
+    // NCBI reads the next query batch (c++/src/app/blast/blastp_app.cpp:257-259) after this
     // batch's report, and the reader's messages and error go to `cerr`, which
     // the C++ library ties to `cout`: the rows written so far reach standard
     // output before them. The report is flushed when it is written, as the

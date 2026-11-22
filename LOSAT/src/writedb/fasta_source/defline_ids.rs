@@ -23,10 +23,6 @@ use crate::seqid::parse::{
 /// severity).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2676-2679
-/// ```c++
-///                 if ((flags & fParse_PartialOK) != 0) {
-///                     ERR_POST_X(7, Warning << e.what());
-/// ```
 /// makeblastdb 2.17.0 printed `Warning: (1306.7) [makeblastdb] NCBI C++ Exception:` and the
 /// report for `>xyz|ABC|DEF` (survey B fixture p16_unsupported_type).
 pub(crate) fn post_seq_id_warning(warning: SeqIdWarning, warn: Warn<'_>) {
@@ -37,11 +33,11 @@ pub(crate) fn post_seq_id_warning(warning: SeqIdWarning, warn: Warn<'_>) {
 /// it (`SetDiagPostPrefix`; the BLAST programs' `-parse_deflines` name theirs).
 pub(crate) fn post_seq_id_warning_of(name: &str, warning: SeqIdWarning, warn: Warn<'_>) {
     warn(
-        format!(
-            "Warning: (1306.{}) [{name}] {}",
-            warning.subcode, warning.message
-        )
-        .as_bytes(),
+        &[
+            format!("Warning: (1306.{}) [{name}] ", warning.subcode).as_bytes(),
+            &warning.message,
+        ]
+        .concat(),
     );
 }
 
@@ -49,53 +45,6 @@ pub(crate) fn post_seq_id_warning_of(name: &str, warning: SeqIdWarning, warn: Wa
 /// the id token (`:<from>-<to>` or `:c<from>-<to>`), 0 for none, with its ends.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:229-273
-/// ```c++
-/// TSeqPos CFastaDeflineReader::ParseRange(
-///     const CTempString& s,
-///     TSeqPos& start,
-///     TSeqPos& end,
-///     ILineErrorListener * pMessageListener)
-/// {
-///
-///     if (s.empty()) {
-///         return 0;
-///     }
-///
-///     bool    on_start = false;
-///     bool    negative = false;
-///     TSeqPos mult = 1;
-///     size_t  pos;
-///     start = end = 0;
-///     for (pos = s.length() - 1;  pos > 0;  --pos) {
-///         unsigned char c = s[pos];
-///         if (c >= '0'  &&  c <= '9') {
-///             if (on_start) {
-///                 start += (c - '0') * mult;
-///             } else {
-///                 end += (c - '0') * mult;
-///             }
-///             mult *= 10;
-///         } else if (c == '-'  &&  !on_start  &&  mult > 1) {
-///             on_start = true;
-///             mult = 1;
-///         } else if (c == ':'  &&  on_start  &&  mult > 1) {
-///             break;
-///         } else if (c == 'c'  &&  pos > 0  &&  s[--pos] == ':'
-///                    &&  on_start  &&  mult > 1) {
-///             negative = true;
-///             break;
-///         } else {
-///             return 0; // syntax error
-///         }
-///     }
-///     if ((negative ? (end > start) : (start > end))  ||  s[pos] != ':') {
-///         return 0;
-///     }
-///     --start;
-///     --end;
-///     return TSeqPos(s.length() - pos);
-/// }
-/// ```
 /// `TSeqPos` is a 32-bit unsigned integer: the sums and `mult` wrap as NCBI's do.
 pub(crate) fn parse_range(s: &[u8]) -> (usize, u32, u32) {
     if s.is_empty() {
@@ -151,7 +100,7 @@ fn seq_id_string(id: &ParsedSeqId) -> Vec<u8> {
 }
 
 /// The `CObjReaderParseException` that `s_PostError(nullptr, lineNumber, ..., errMessage,
-/// problem, errCode)` throws (quoted at `reader::Thrower::PostError`).
+/// problem, errCode)` throws (cited at `reader::Thrower::PostError`).
 fn error(code: ErrCode, message: String, line_number: u64) -> ParseError {
     ParseError::new(Thrower::PostError, code, message, line_number)
 }
@@ -166,89 +115,7 @@ fn error(code: ErrCode, message: String, line_number: u64) -> ParseError {
 /// convert2blastmask's).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:333-404
-/// ```c++
-/// void CFastaDeflineReader::x_ProcessIDs(
-///     const CTempString& id_string,
-///     const SDeflineParseInfo& info,
-///     TIds& ids,
-///     ILineErrorListener* pMessageListener,
-///     FIdCheck f_id_check
-///     )
-/// {
-///     if (info.fBaseFlags & CReaderBase::fAllIdsAsLocal)
-///     {
-///         ...
-///     }
-///
-///     CSeq_id::TParseFlags flags =
-///         CSeq_id::fParse_PartialOK |
-///         CSeq_id::fParse_AnyLocal;
-///
-///     if (info.fFastaFlags & CFastaReader::fParseRawID) {
-///         flags |= CSeq_id::fParse_RawText;
-///     }
-///
-///     string local_copy;
-///     auto to_parse = id_string;
-///     if (id_string.find(',') != NPOS &&
-///         id_string.find('|') == NPOS) {
-///         const string err_message =
-///             "Near line " + NStr::NumericToString(info.lineNumber)
-///             + ", the sequence id string contains 'comma' symbol, which has been replaced with 'underscore' "
-///             + "symbol. Please correct the sequence id string.";
-///
-///         s_PostWarning(pMessageListener,
-///             info.lineNumber,
-///             id_string,
-///             err_message,
-///             ILineError::eProblem_GeneralParsingError,
-///             CObjReaderParseException::eFormat);
-///
-///         local_copy = id_string;
-///         for (auto& rit : local_copy)
-///             if (rit == ',')
-///                 rit = '_';
-///
-///         to_parse = local_copy;
-///     }
-///
-///     try {
-///         CSeq_id::ParseIDs(ids, to_parse, flags);
-///         ids.remove_if([](CRef<CSeq_id> id_ref)
-///                 { return NStr::IsBlank(id_ref->GetSeqIdString()); });
-///     }
-///     catch(...) {
-///         ids.clear();
-///     }
-///
-///     if (ids.empty()) {
-///         s_PostError(pMessageListener,
-///                 info.lineNumber,
-///                 id_string,
-///                 "Could not construct seq-id from '" + id_string + "'",
-///                 ILineError::eProblem_GeneralParsingError,
-///                 CObjReaderParseException::eNoIDs);
-///
-///         ids.push_back(Ref(new CSeq_id(CSeq_id::e_Local, id_string)));
-///         return;
-///     }
-///     // Convert anything that looks like a GI to a local id
-///     if ( info.fBaseFlags & CReaderBase::fNumericIdsAsLocal ) {
-///         x_ConvertNumericToLocal(ids);
-///     }
-///
-///     f_id_check(ids, info, pMessageListener);
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:85,101-104
-/// ```c++
-/// static void s_PostWarning(ILineErrorListener* pMessageListener,
-///     ...
-///     if (!pMessageListener) {
-///         LOG_POST_X(1, Warning << pLineExpt->Message());
-///         return;
-///     }
-/// ```
 /// Neither `fAllIdsAsLocal` nor `fNumericIdsAsLocal` is set (base flags 0), and the
 /// registry's `MAX_SEQID_LENGTH` is not read (makedb-v5 DECISIONS 12), so the default
 /// limits apply.
@@ -309,72 +176,9 @@ pub(crate) fn process_ids(
 /// `LOG_POST` line. The exception's code is the one of `CIdErrorReporter`'s map:
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:305-311
-/// ```c++
-///     static map<CFastaIdValidate::EErrCode,TCodePair> s_CodeMap = /* replace with compile-time map */
-///     {
-///      {CFastaIdValidate::eIDTooLong,{ILineError::eProblem_GeneralParsingError, CObjReaderParseException::eIDTooLong}},
-///      {CFastaIdValidate::eBadLocalID,{ILineError::eProblem_GeneralParsingError, CObjReaderParseException::eInvalidID}},
-///      {CFastaIdValidate::eUnexpectedNucResidues,{ILineError::eProblem_UnexpectedNucResidues, CObjReaderParseException::eFormat}},
-///      {CFastaIdValidate::eUnexpectedAminoAcids,{ILineError::eProblem_UnexpectedAminoAcids, CObjReaderParseException::eFormat}}
-///     };
-/// ```
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:107-133
-/// ```c++
-/// void CFastaIdValidate::operator()(const TIds& ids,
-///         int lineNum,
-///         FReportError fReportError)
-/// {
-///     if (ids.empty()) {
-///         return;
-///     }
-///
-///     if (!(m_Flags&CFastaReader::fAssumeProt)) {
-///         CheckForExcessiveNucData(*ids.back(), lineNum, fReportError);
-///     }
-///
-///     if (!(m_Flags&CFastaReader::fAssumeNuc)) {
-///         CheckForExcessiveProtData(*ids.back(), lineNum, fReportError);
-///     }
-///
-///
-///     for (const auto& pId : ids) {
-///         if (pId->IsLocal() &&
-///             !IsValidLocalID(*pId)) {
-///             const auto& idString = pId->GetSeqIdString();
-///             string msg = "'" + idString + "' is not a valid local ID";
-///             fReportError(eDiag_Error, lineNum, idString, CFastaIdValidate::eBadLocalID, msg);
-///         }
-///         CheckIDLength(*pId, lineNum, fReportError);
-///     }
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:215-237
-/// ```c++
-/// bool CFastaIdValidate::IsValidLocalID(const CSeq_id& id) const
-/// {
-///     if (id.IsLocal()) {
-///         if (id.GetLocal().IsId()) {
-///             return true;
-///         }
-///         if (id.GetLocal().IsStr()) {
-///             return IsValidLocalString(id.GetLocal().GetStr());
-///         }
-///     }
-///     return false;
-/// }
-///
-///
-/// bool CFastaIdValidate::IsValidLocalString(const CTempString& idString) const
-/// {
-///     const CTempString& checkString =
-///         (m_Flags & CFastaReader::fQuickIDCheck) ?
-///         idString.substr(0,1) :
-///         idString;
-///
-///     return !(CSeq_id::CheckLocalID(checkString)&CSeq_id::fInvalidChar);
-/// }
-/// ```
 /// The ids come from the first-parse token, which ends at the first byte of 0x20 or below
 /// or of 0x80 or more (decision 28), so no byte of a local id is one that
 /// `CSeq_id_find_pred` rejects for being a control or non-ASCII byte; only ` >[]|"` can
@@ -420,21 +224,6 @@ fn validate_ids(
 /// `s_GetIDLengthErrorString(length, idType, maxAllowedLength, lineNum)`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:154-166
-/// ```c++
-/// static string s_GetIDLengthErrorString(size_t length,
-///         const string& idType,
-///         size_t maxAllowedLength,
-///         int lineNum)
-/// {
-///     string err_message =
-///         "Near line " + NStr::NumericToString(lineNum) +
-///         + ", the " + idType + " is too long.  Its length is " + NStr::NumericToString(length)
-///         + " but the maximum allowed " + idType + " length is "+  NStr::NumericToString(maxAllowedLength)
-///         + ".  Please find and correct all " + idType + "s that are too long.";
-///
-///     return err_message;
-/// }
-/// ```
 fn id_length_error(length: usize, id_type: &str, max: usize, line_number: u64) -> ParseError {
     error(
         ErrCode::IdTooLong,
@@ -450,52 +239,6 @@ fn id_length_error(length: usize, id_type: &str, max: usize, line_number: u64) -
 /// `CFastaIdValidate::CheckIDLength(id, lineNum, fReportError)`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:169-213
-/// ```c++
-/// void CFastaIdValidate::CheckIDLength(const CSeq_id& id, int lineNum, FReportError fReportError) const
-/// {
-///     if (id.IsLocal()) {
-///         if (id.GetLocal().IsStr() &&
-///             id.GetLocal().GetStr().length() > kMaxLocalIDLength) {
-///             const auto& msg =
-///                 s_GetIDLengthErrorString(id.GetLocal().GetStr().length(),
-///                         "local id",
-///                         kMaxLocalIDLength,
-///                         lineNum);
-///             fReportError(eDiag_Error, lineNum, id.GetSeqIdString(), CFastaIdValidate::eIDTooLong, msg);
-///         }
-///         return;
-///     }
-///
-///     if (id.IsGeneral()) {
-///         if (id.GetGeneral().IsSetTag() &&
-///             id.GetGeneral().GetTag().IsStr()) {
-///             const auto length = id.GetGeneral().GetTag().GetStr().length();
-///             if (length > kMaxGeneralTagLength) {
-///                 const auto& msg =
-///                     s_GetIDLengthErrorString(id.GetGeneral().GetTag().GetStr().length(),
-///                             "general id string",
-///                             kMaxGeneralTagLength,
-///                             lineNum);
-///                 fReportError(eDiag_Error, lineNum, id.GetSeqIdString(), CFastaIdValidate::eIDTooLong, msg);
-///             }
-///         }
-///         return;
-///     }
-///
-///     auto pTextId = id.GetTextseq_Id();
-///     if (pTextId && pTextId->IsSetAccession()) {
-///         const auto length = pTextId->GetAccession().length();
-///         if (length > kMaxAccessionLength) {
-///             const auto& msg =
-///                 s_GetIDLengthErrorString(length,
-///                                 "accession",
-///                                 kMaxAccessionLength,
-///                                 lineNum);
-///             fReportError(eDiag_Error, lineNum, id.GetSeqIdString(), CFastaIdValidate::eIDTooLong, msg);
-///         }
-///     }
-/// }
-/// ```
 fn check_id_length(id: &ParsedSeqId, line_number: u64) -> Result<(), ParseError> {
     match id {
         ParsedSeqId::Local(tag) => {
@@ -541,11 +284,6 @@ fn check_id_length(id: &ParsedSeqId, line_number: u64) -> Result<(), ParseError>
 /// `kWarnNumNucCharsAtEnd`, `kErrNumNucCharsAtEnd`, `kWarnNumAminoAcidCharsAtEnd`.
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/readers/seqid_validate.hpp:122-124
-/// ```c++
-///     size_t  kWarnNumNucCharsAtEnd = 20;
-///     size_t  kErrNumNucCharsAtEnd = 25;
-///     size_t  kWarnNumAminoAcidCharsAtEnd = 50;
-/// ```
 const WARN_NUM_NUC_CHARS_AT_END: usize = 20;
 const ERR_NUM_NUC_CHARS_AT_END: usize = 25;
 const WARN_NUM_AMINO_ACID_CHARS_AT_END: usize = 50;
@@ -553,62 +291,6 @@ const WARN_NUM_AMINO_ACID_CHARS_AT_END: usize = 50;
 /// `CFastaIdValidate::CheckForExcessiveNucData(id, lineNum, fReportError)`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:240-292
-/// ```c++
-/// void CFastaIdValidate::CheckForExcessiveNucData(
-///     const CSeq_id& id,
-///     int lineNum,
-///     FReportError fReportError
-/// ) const
-/// {
-///     const auto& idString = id.GetSeqIdString();
-///     if (idString.length() > kWarnNumNucCharsAtEnd) {
-///         auto numNucChars = CountPossibleNucResidues(idString);
-///         if (numNucChars > kWarnNumNucCharsAtEnd) {
-///             const string err_message =
-///             "Fasta Reader: sequence id ends with " +
-///             NStr::NumericToString(numNucChars) +
-///             " valid nucleotide characters. " +
-///             " Was the sequence accidentally placed in the definition line?";
-///
-///             auto severity = (numNucChars > kErrNumNucCharsAtEnd) ?
-///                             eDiag_Error :
-///                             eDiag_Warning;
-///
-///             fReportError(severity, lineNum, idString, eUnexpectedNucResidues, err_message);
-///             return;
-///         }
-///     }
-/// }
-///
-///
-/// static bool s_IsPossibleNuc(unsigned char c)
-/// {
-///     switch( c ) {
-///     case 'N':
-///     case 'A':
-///     case 'C':
-///     case 'G':
-///     case 'T':
-///     case 'a':
-///     case 'c':
-///     case 'g':
-///     case 't':
-///         return true;
-///     default:
-///         return false;
-///     }
-/// }
-///
-///
-/// size_t CFastaIdValidate::CountPossibleNucResidues(
-///         const string& idString)
-/// {
-///     const auto first_it = rbegin(idString);
-///     const auto it = find_if_not(first_it, rend(idString), s_IsPossibleNuc);
-///
-///     return static_cast<size_t>(distance(first_it, it));
-/// }
-/// ```
 fn check_for_excessive_nuc_data(
     id: &ParsedSeqId,
     line_number: u64,
@@ -638,40 +320,6 @@ fn check_for_excessive_nuc_data(
 /// `CFastaIdValidate::CheckForExcessiveProtData(id, lineNum, fReportError)`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:295-326
-/// ```c++
-/// void CFastaIdValidate::CheckForExcessiveProtData(
-///         const CSeq_id& id,
-///         int lineNum,
-///         FReportError fReportError) const
-/// {
-///     const auto& idString = id.GetSeqIdString();
-///
-///     // Check for Aa sequence
-///     if (idString.length() > kWarnNumAminoAcidCharsAtEnd) {
-///         const auto numAaChars = CountPossibleAminoAcids(idString);
-///         if (numAaChars > kWarnNumAminoAcidCharsAtEnd) {
-///             const string err_message =
-///             "Fasta Reader: sequence id ends with " +
-///             NStr::NumericToString(numAaChars) +
-///             " valid amino-acid characters. " +
-///             " Was the sequence accidentally placed in the definition line?";
-///             fReportError(eDiag_Warning, lineNum, idString, eUnexpectedAminoAcids, err_message);
-///         }
-///     }
-/// }
-///
-///
-/// size_t CFastaIdValidate::CountPossibleAminoAcids(
-///         const string& idString)
-/// {
-///     const auto first_it = rbegin(idString);
-///     const auto it = find_if_not(first_it, rend(idString),
-///             [](char c) { return (c >= 'A' && c <= 'Z') ||
-///                                 (c >= 'a' && c <= 'z'); });
-///
-///     return static_cast<size_t>(distance(first_it, it));
-/// }
-/// ```
 fn check_for_excessive_prot_data(id: &ParsedSeqId, warn: ReaderWarn<'_>) {
     let id_string = seq_id_string(id);
     if id_string.len() > WARN_NUM_AMINO_ACID_CHARS_AT_END {
@@ -692,132 +340,24 @@ fn check_for_excessive_prot_data(id: &ParsedSeqId, warn: ReaderWarn<'_>) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ranges_of_the_id_token() {
-        assert_eq!(parse_range(b"seqA:1-10"), (5, 0, 9));
-        assert_eq!(parse_range(b"seqB:c10-1"), (6, 9, 0));
-        assert_eq!(parse_range(b":1-10"), (5, 0, 9));
-        assert_eq!(parse_range(b"x:10-1"), (0, 0, 0));
-        assert_eq!(parse_range(b"x:c1-10"), (0, 0, 0));
-        assert_eq!(parse_range(b"x:1-"), (0, 0, 0));
-        assert_eq!(parse_range(b"x:-1"), (0, 0, 0));
-        assert_eq!(parse_range(b"1-10"), (0, 0, 0));
-        assert_eq!(parse_range(b"NC_000914.1:1-50"), (5, 0, 49));
-        assert_eq!(parse_range(b"a:5-5"), (4, 4, 4));
-        assert_eq!(parse_range(b""), (0, 0, 0));
-    }
-
-    fn check_with(
-        id: &str,
-        protein: bool,
-        quick_id_check: bool,
-    ) -> (Result<Vec<ParsedSeqId>, ParseError>, Vec<String>) {
-        let mut warnings = Vec::new();
-        let result = process_ids(
-            id.as_bytes(),
-            protein,
-            quick_id_check,
-            true,
-            7,
-            &mut |w| match w {
-                ReaderWarning::Line(line) => {
-                    warnings.push(String::from_utf8_lossy(line).into_owned())
-                }
-                ReaderWarning::SeqId(w) => {
-                    warnings.push(format!("(1306.{}) {}", w.subcode, w.message))
-                }
-            },
-        );
-        (result, warnings)
-    }
-
-    fn check(id: &str, protein: bool) -> (Result<Vec<ParsedSeqId>, String>, Vec<String>) {
-        let (result, warnings) = check_with(id, protein, true);
-        (result.map_err(|e| e.message), warnings)
-    }
-
-    // Messages of makeblastdb 2.17.0 (survey B fixtures p05_raw, p06*, p07, p08, n03, n04).
-    #[test]
-    fn checks_and_messages_of_the_first_parse() {
-        let (ids, warnings) = check("a,b", true);
-        assert_eq!(
-            ids.unwrap(),
-            [ParsedSeqId::Local(ObjectId::Str(b"a_b".to_vec()))]
-        );
-        assert_eq!(
-            warnings,
-            ["Near line 7, the sequence id string contains 'comma' symbol, which has been replaced with 'underscore' symbol. Please correct the sequence id string."]
-        );
-        let acc31 = format!("ref|NP_{}|", "1".repeat(28));
-        assert_eq!(
-            check(&acc31, true).0.unwrap_err(),
-            "Near line 7, the accession is too long.  Its length is 31 but the maximum allowed accession length is 30.  Please find and correct all accessions that are too long."
-        );
-        assert!(check(&format!("ref|NP_{}|", "1".repeat(27)), true)
-            .0
-            .is_ok());
-        let local51 = format!("lcl|{}", "a".repeat(51));
-        let (result, warnings) = check(&local51, true);
-        assert_eq!(
-            result.unwrap_err(),
-            "Near line 7, the local id is too long.  Its length is 51 but the maximum allowed local id length is 50.  Please find and correct all local ids that are too long."
-        );
-        assert_eq!(
-            warnings,
-            ["Fasta Reader: sequence id ends with 51 valid amino-acid characters.  Was the sequence accidentally placed in the definition line?"]
-        );
-        assert_eq!(
-            check("lcl|[abc]", true).0.unwrap_err(),
-            "'[abc]' is not a valid local ID"
-        );
-        assert!(check("lcl|a[bc]", true).0.is_ok());
-        let nuc21 = format!("lcl|x{}", "ACGT".repeat(5) + "A");
-        let (result, warnings) = check(&nuc21, false);
-        assert!(result.is_ok());
-        assert_eq!(
-            warnings,
-            ["Fasta Reader: sequence id ends with 21 valid nucleotide characters.  Was the sequence accidentally placed in the definition line?"]
-        );
-        let nuc26 = format!("lcl|x{}", "acgt".repeat(6) + "AC");
-        assert_eq!(
-            check(&nuc26, false).0.unwrap_err(),
-            "Fasta Reader: sequence id ends with 26 valid nucleotide characters.  Was the sequence accidentally placed in the definition line?"
-        );
-        assert_eq!(
-            check("gi|abc|", true).0.unwrap_err(),
-            "Could not construct seq-id from 'gi|abc|'"
-        );
-    }
-
-    // dustmasker 2.17.0 -parse_seqids (`tests/dustmasker/reader`, cases ps_badlocal*,
-    // ps_nucid_err, ps_seqidwarn) and segmasker (seg_longid_ps): without `fQuickIDCheck`
-    // every byte of a local id is checked; the codes and positions of the exceptions.
-    #[test]
-    fn the_full_id_check_and_the_codes_of_the_errors() {
-        assert!(check_with("a]b", false, true).0.is_ok());
-        let error = check_with("a]b", false, false).0.unwrap_err();
-        assert_eq!(error.message, "'a]b' is not a valid local ID");
-        assert_eq!(
-            (error.code, error.pos, error.thrower),
-            (ErrCode::InvalidId, 7, Thrower::PostError)
-        );
-        assert!(check_with("x[y]", true, false).0.is_err());
-        assert!(check_with("lcl|a\"b", true, false).0.is_err());
-        let error = check_with(&"a".repeat(51), true, false).0.unwrap_err();
-        assert_eq!(error.code, ErrCode::IdTooLong);
-        let error = check_with(&"a".repeat(51), false, false).0.unwrap_err();
-        assert_eq!(error.code, ErrCode::Format);
-        let (result, warnings) = check_with("xyz|ABC|DEF", false, false);
-        let error = result.unwrap_err();
-        assert_eq!(
-            error.message,
-            "Could not construct seq-id from 'xyz|ABC|DEF'"
-        );
-        assert_eq!(error.code, ErrCode::NoIds);
-        assert_eq!(warnings.len(), 2, "{warnings:?}");
-    }
+/// Whether `CFastaIdValidate(0)` (the alignment reader's `CDefaultIdValidate`, flags 0: neither
+/// `fAssumeProt` nor `fAssumeNuc`, no `fQuickIDCheck`) reports anything for `ids`: an id that ends
+/// in more than 20 nucleotide letters or more than 50 letters (warnings, or an error from 25
+/// nucleotide letters), a local id with a byte that `CheckLocalID` rejects, an id over the length
+/// limits. The alignment reader has no message listener, so every report, a warning too,
+/// throws (`CAlnErrorReporter::Report`, cited at `blastinput::aln_reader`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:162-168
+pub(crate) fn alignment_ids_are_reported(ids: &[ParsedSeqId]) -> bool {
+    let mut reported = false;
+    let mut warn = |_: ReaderWarning<'_>| reported = true;
+    // The nucleotide check and the protein check of `CFastaIdValidate::operator()` are the two
+    // `validate_ids` calls (the checks of the local ids and of the lengths are the same in both).
+    let nuc = validate_ids(ids, false, false, 0, &mut warn);
+    let prot = validate_ids(ids, true, false, 0, &mut warn);
+    nuc.is_err() || prot.is_err() || reported
 }
+
+#[cfg(test)]
+#[path = "defline_ids_tests.rs"]
+mod tests;

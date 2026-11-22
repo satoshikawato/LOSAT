@@ -111,7 +111,7 @@ class SummaryTests(unittest.TestCase):
         self.assertLess(text.index("| `core` | 1 | 0.0 | 3 | 0.0 |"),
                         text.index("| `seqdb` | 1 | 50.0 | 1 | 100.0 |"))
         self.assertNotIn("did not pass", text)
-        self.assertIn("inline `#[cfg(test)]` modules of `src` files are counted", text)
+        self.assertIn("the unit tests of `src` files (sibling `*_tests.rs` files) among them", text)
 
     def test_a_shard_that_failed_or_is_missing_is_named(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

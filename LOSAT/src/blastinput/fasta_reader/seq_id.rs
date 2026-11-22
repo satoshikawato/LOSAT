@@ -36,37 +36,6 @@ pub(super) enum SeqIdLine {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:526-568
-// ```c++
-// static const TChoiceMapEntry sc_ChoiceArray[] = {
-//     { "???",          CSeq_id::e_not_set },
-//     { "bbm",          CSeq_id::e_Gibbmt },
-//     { "bbs",          CSeq_id::e_Gibbsq },
-//     { "dbj",          CSeq_id::e_Ddbj },
-//     { "emb",          CSeq_id::e_Embl },
-//     { "gb",           CSeq_id::e_Genbank },
-//     { "gi",           CSeq_id::e_Gi },
-//     { "gibbsq",       CSeq_id::e_Gibbsq },
-//     { "gim",          CSeq_id::e_Giim },
-//     { "gnl",          CSeq_id::e_General },
-//     { "gpp",          CSeq_id::e_Gpipe },
-//     { "lcl",          CSeq_id::e_Local },
-//     { "nat",          CSeq_id::e_Named_annot_track },
-//     { "not_set",      CSeq_id::e_not_set },
-//     { "pat",          CSeq_id::e_Patent },
-//     { "pdb",          CSeq_id::e_Pdb },
-//     { "pgp",          CSeq_id::e_Patent },
-//     { "pir",          CSeq_id::e_Pir },
-//     { "prf",          CSeq_id::e_Prf },
-//     { "ref",          CSeq_id::e_Other },
-//     { "sp",           CSeq_id::e_Swissprot },
-//     { "tpd",          CSeq_id::e_Tpd },
-//     { "tpe",          CSeq_id::e_Tpe },
-//     { "tpg",          CSeq_id::e_Tpg },
-//     { "tr",           CSeq_id::e_Swissprot }
-// };
-// typedef CStaticPairArrayMap<CTempString, CSeq_id::E_Choice,
-//                             PNocase_Generic<CTempString> > TChoiceMap;
-// ```
 // (commented-out aliases omitted). The tags that give a type other than `e_not_set` and
 // that a 2- or 3-byte prefix can match; `gibbsq` is six bytes.
 const FASTA_TAGS: [&[u8]; 22] = [
@@ -75,37 +44,6 @@ const FASTA_TAGS: [&[u8]; 22] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:96-124
-// ```c++
-// static const char* sc_SupportedRawDbtags[] = {
-//     "ATGC",
-//     "BCMHGSC",
-//     "BERKELEY",
-//     "CELERA",
-//     "GSDB",
-//     "HOOD",
-//     "LANLCHGS",
-//     "LRG",
-//     "MIPS",
-//     "NCBI_EXT_ACC",
-//     "NCBI_GENOMES",
-//     "NCBI_MITO",
-//     "PGEC",
-//     "PID",
-//     "SGD",
-//     "SHGC",
-//     "SRA",
-//     "TIGR",
-//     "UOKNOR",
-//     "UWGC",
-//     "WASHU",
-//     "WIBR",
-//     "WUGSC",
-//     "dbGSS",
-//     "dbSTS"
-// };
-// DEFINE_STATIC_ARRAY_MAP_WITH_COPY(CStaticArraySet<string>, kSupportedRawDbtags,
-//                                   sc_SupportedRawDbtags);
-// ```
 // A `CStaticArraySet<string>` compares case-sensitively, and the key is upper-cased
 // before the lookup, so `dbGSS` and `dbSTS` never match.
 const RAW_DBTAGS: [&[u8]; 25] = [
@@ -137,22 +75,6 @@ const RAW_DBTAGS: [&[u8]; 25] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/accguide2.inc:36-49
-// ```c++
-// static const char* const kBuiltInGuide[] = {
-//     "# $Id: accguide2.inc 696906 2025-04-28 18:48:20Z ivanov $",
-//     "version  2 # of file format",
-//     "",
-//     "# three-letter-prefix protein accessions (traditionally with five digits)",
-//     "3+5  AAE  gb_patent_prot",
-//     "3+5  ??_  unknown # Longer variants (6-9 digits as of June 2018) are RefSeq",
-//     "3+5  A??  gb_prot",
-//     "3+7  A??  gb_prot",
-//     "3+9  A??  gb_prot",
-//     "3+11 A??  gb_prot",
-//     "3+5  B??  ddbj_prot",
-//     "3+7  B??  ddbj_prot",
-//     "3+9  B??  ddbj_prot",
-// ```
 // The formats (`<letters>+<digits>`) of the 1458 prefix rules of `kBuiltInGuide`
 // (lines 36-25779; for example 1+5 from line 319, 2+6 from 348, 3+6 from 277, 4+5 from
 // 290); `SAccGuide::Find` returns `eAcc_unknown` for any other format
@@ -203,19 +125,6 @@ fn digit(byte: u8) -> bool {
 /// The type of a FASTA tag at the start of the line, if it is one of `FASTA_TAGS`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:632-642
-/// ```c++
-/// static CSeq_id::E_Choice s_CheckForFastaTag(const CTempString& s)
-/// {
-///     // > rather than >= because there should be content after the bar.
-///     if (s.size() > 3  &&  s[2] == '|') {
-///         return CSeq_id::WhichInverseSeqId(s.substr(0, 2));
-///     } else if (s.size() > 4  &&  s[3] == '|') {
-///         return CSeq_id::WhichInverseSeqId(s.substr(0, 3));
-///     } else {
-///         return CSeq_id::e_not_set;
-///     }
-/// }
-/// ```
 fn has_fasta_tag(s: &[u8]) -> bool {
     let tag = if s.len() > 3 && s[2] == b'|' {
         &s[..2]
@@ -233,38 +142,6 @@ fn has_fasta_tag(s: &[u8]) -> bool {
 /// the types that `GetAccType` maps to `e_not_set`; `GuideFormat` for every guide format).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1634-1663
-/// ```c++
-/// CSeq_id::EAccessionInfo CSeq_id::IdentifyAccession(const CTempString& acc,
-///                                                    TParseFlags flags)
-/// {
-///     SIZE_TYPE main_size = acc.find('.');
-///     bool has_version = true;
-///     if (main_size == NPOS) {
-///         has_version = false;
-///         main_size = acc.size();
-///     } else if (main_size >= acc.size() - 1
-///                ||  acc.find_first_not_of(kDigits, main_size + 1) != NPOS) {
-///         return eAcc_unknown; // non-numeric "version"
-///     }
-///
-///     static const SIZE_TYPE kMainAccBufSize = 32;
-///     if (main_size <= kMainAccBufSize) {
-///         const unsigned char* ucdata = (const unsigned char*)acc.data();
-///         char main_acc_buf[kMainAccBufSize];
-///         for (SIZE_TYPE i = 0;  i < main_size;  ++i) {
-///             main_acc_buf[i] = toupper(ucdata[i]);
-///         }
-///         CTempString main_acc(main_acc_buf, main_size);
-///         return x_IdentifyAccession(main_acc, flags, has_version);
-///     } else {
-///         // Unlikely to prove recognizable (far too long for any standard
-///         // format as of January 2016), but try anyway.
-///         string main_acc(acc, 0, main_size);
-///         NStr::ToUpper(main_acc);
-///         return x_IdentifyAccession(main_acc, flags, has_version);
-///     }
-/// }
-/// ```
 fn identify_accession(acc: &[u8]) -> Option<SeqIdLine> {
     let (main, has_version) = match acc.iter().position(|&byte| byte == b'.') {
         None => (acc, false),
@@ -279,21 +156,6 @@ fn identify_accession(acc: &[u8]) -> Option<SeqIdLine> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1665-1677
-/// ```c++
-/// CSeq_id::EAccessionInfo
-/// CSeq_id::x_IdentifyAccession(const CTempString& main_acc, TParseFlags flags,
-///                              bool has_version)
-/// {
-///     SIZE_TYPE digit_pos = main_acc.find_first_of(kDigits),
-///         main_size = main_acc.size();
-///     char flag_char = '\0';
-///     if (digit_pos == NPOS) {
-///         return eAcc_unknown;
-///     } else {
-///         SIZE_TYPE non_dig_pos = main_acc.find_first_not_of(kDigits, digit_pos);
-///         const unsigned char* ucdata = (const unsigned char*)main_acc.data();
-///         if (non_dig_pos != NPOS  &&  (flags & fParse_RawText) != 0) {
-/// ```
 /// The flags are `fParse_AnyRaw | fParse_ValidLocal | fParse_FallbackOK`
 /// (`fParse_RawText` and `fParse_RawGI` set).
 fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
@@ -306,24 +168,6 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
         .map(|offset| digit_pos + offset);
     if let Some(non_dig_pos) = non_dig_pos {
         // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1678-1711
-        // ```c++
-        //             if ( !has_version  &&  digit_pos == 0  &&  main_size >= 4
-        //                 &&  non_dig_pos < 5  &&  isalnum(ucdata[1])
-        //                 &&  isalnum(ucdata[2])  &&  isalnum(ucdata[3])) {
-        //                 // Possible PDB (always unversioned); examine further
-        //                 // to avoid false positives.
-        //                 if (main_size > 4  &&  main_size <= 17
-        //                     &&  strchr("|-_", main_acc[4])
-        //                     &&  (main_size <= 6  ||  isalnum(ucdata[5]))) {
-        //                     // Conventionally delimited
-        //                     return eAcc_pdb;
-        //                 } else switch (main_size) {
-        //                 ...
-        //                 case 4:
-        //                     return eAcc_pdb;
-        //                 }
-        //             }
-        // ```
         // (NCBI has the cases 7, 6 and 5 inside a `/* */` comment; the elided lines are that comment.)
         // `strchr` also finds the terminating NUL, so a NUL byte at index 4 counts as a
         // delimiter.
@@ -350,46 +194,6 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
             }
         }
         // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1713-1750
-        // ```c++
-        //             if (digit_pos == 1  &&  main_size == 6
-        //                 &&  (main_acc[0] == 'O'  ||  main_acc[0] == 'P'
-        //                      ||  main_acc[0] == 'Q' ||  isalpha(ucdata[2]))
-        //                 &&  isdigit(ucdata[1])  &&  isalnum(ucdata[2])
-        //                 &&  isalnum(ucdata[3])  &&  isalnum(ucdata[4])
-        //                 &&  isdigit(ucdata[5])) {
-        //                 return eAcc_swissprot;
-        //             } else if (digit_pos == 1  &&  main_size == 10
-        //                        &&  main_acc[0] != 'O'  &&  main_acc[0] != 'P'
-        //                        &&  main_acc[0] != 'Q'
-        //                        &&  isalpha(ucdata[2])  &&  isalnum(ucdata[3])
-        //                        &&  isalnum(ucdata[4])  &&  isdigit(ucdata[5])
-        //                        &&  isalpha(ucdata[6])  &&  isalnum(ucdata[7])
-        //                        &&  isalnum(ucdata[8])  &&  isdigit(ucdata[9])) {
-        //                 return eAcc_swissprot;
-        //             } else if ( !has_version  &&  digit_pos == 0
-        //                        &&  (non_dig_pos == 6  ||  non_dig_pos == 7)
-        //                        &&  (main_size == non_dig_pos + 1
-        //                             ||  main_acc[non_dig_pos + 1] == ':'
-        //                             ||  (isalpha(ucdata[non_dig_pos + 1])
-        //                                  &&  (main_size == non_dig_pos + 2
-        //                                       ||  main_acc[non_dig_pos + 2] == ':')))) {
-        //                 // A formal spec appears to be elusive, but all examples in ID
-        //                 // contain six or seven digits followed by one or two letters,
-        //                 // followed in some rare cases by a tag such as :PDB=...
-        //                 return eAcc_prf;
-        //             } else if (digit_pos >= 4  &&  non_dig_pos == digit_pos + 2
-        //                        &&  main_size - non_dig_pos >= 6  &&  main_acc[3] != '_'
-        //                        &&  (main_acc[non_dig_pos] == 'S'
-        //                             ||  main_acc[non_dig_pos] == 'P')
-        //                        &&  (main_acc.find_first_not_of
-        //                             (kDigits, non_dig_pos + 1) == NPOS)) {
-        //                 flag_char = main_acc[non_dig_pos];
-        //             } else {
-        //                 return eAcc_unknown;
-        //             }
-        //         }
-        //     }
-        // ```
         let oqp = matches!(main[0], b'O' | b'P' | b'Q');
         #[expect(
             clippy::if_same_then_else,
@@ -440,63 +244,12 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
         }
     }
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1752-1769
-    // ```c++
-    //     if (digit_pos == 0) {
-    //         if ((flags & fParse_RawGI) != 0  &&  !has_version
-    //             &&  main_acc[0] != '0'
-    //             &&  main_acc.find_first_not_of(kDigits) == NPOS) {
-    //             return eAcc_gi; // just digits
-    //         } else {
-    //             return eAcc_unknown; // PDB already handled
-    //         }
-    //     } else if ((flags & fParse_RawText) == 0) {
-    //         return eAcc_unknown;
-    //     }
-    //
-    //     SIZE_TYPE flag_len = (flag_char == '\0') ? 0 : 1;
-    //     SIZE_TYPE digit_count = main_size - digit_pos - flag_len;
-    //     auto& guide = *s_Guide;
-    //     const EAccessionInfo& found_ai
-    //         = guide->Find(SAccGuide::s_Key(digit_pos, digit_count), main_acc);
-    //     EAccessionInfo ai = found_ai;
-    // ```
     if digit_pos == 0 {
         return (!has_version && main[0] != b'0' && main.iter().all(|&byte| digit(byte)))
             .then_some(SeqIdLine::Gi);
     }
     let digit_count = main_size - digit_pos - usize::from(flag_char);
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1370-1398
-    // ```c++
-    // const SAccGuide::TAccInfo& SAccGuide::Find(TFormatCode fmt,
-    //                                            const CTempString& acc_or_pfx,
-    //                                            string* key_used) const
-    // {
-    //     static const TAccInfo kUnknown = CSeq_id::eAcc_unknown;
-    //     TMainMap::const_iterator it = rules.find(fmt);
-    //     if (it == rules.end()) {
-    //         return kUnknown;
-    //     }
-    //
-    //     const SSubMap&            submap = it->second;
-    //     const TAccInfo*           result = &kUnknown;
-    //     CTempString               pfx     (acc_or_pfx, 0, fmt >> 16);
-    //     TPrefixes::const_iterator pit    = submap.prefixes.find(pfx);
-    //     if (pit != submap.prefixes.end()) {
-    //         result = &pit->second;
-    //     } else {
-    //         ITERATE (TPairs, wit, submap.wildcards) {
-    //             if (NStr::MatchesMask(pfx, wit->first)) {
-    //                 bool bad_match = false; // Limit ? to matching letters
-    //                 SIZE_TYPE pos = wit->first.find('?');
-    //                 while (pos != NPOS) {
-    //                     if ( !isalnum(pfx[pos])  &&  pfx[pos] != '?' ) {
-    //                         bad_match = true;
-    //                         break;
-    //                     } else {
-    //                         pos = wit->first.find('?', pos + 1);
-    //                     }
-    //                 }
-    // ```
     // A format without rules, or a prefix with a byte that no rule can match (rules are
     // made of `A`-`Z`, `_` and `?`; the prefix has no digit), gives `eAcc_unknown`. LOSAT
     // stops there: the rules and specials themselves are not ported.
@@ -510,56 +263,6 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
 /// What `CSeq_id` makes of the trimmed first line of a record.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2457-2503
-/// ```c++
-/// CSeq_id& CSeq_id::Set(const CTempString& the_id_in, TParseFlags flags)
-/// {
-///     CTempString the_id = NStr::TruncateSpaces_Unsafe(the_id_in,
-///                                                      NStr::eTrunc_Both);
-///     E_Choice    type   = e_not_set;
-///
-///     if ((flags & fParse_NoFASTA) == 0) {
-///         type = s_CheckForFastaTag(the_id);
-///     }
-///     if (type == e_not_set) {
-///         if (the_id.empty()) {
-///             NCBI_THROW(CSeqIdException, eFormat,
-///                        "Empty bare accession supplied");
-///         }
-///         // If no (attempt at a) valid tag, tries to interpret the string
-///         // as a pure accession.
-///         if ((flags & fParse_AnyRaw) != 0) {
-///             type = GetAccType(IdentifyAccession(the_id,
-///                                                 flags | fParse_FallbackOK));
-///         }
-///         switch (type) {
-///         case e_Gi:
-///             return Set(type, the_id);
-///         case e_not_set:
-///         {
-///             // Check for general IDs, albeit only with well-known
-///             // database names like SRA.
-///             SIZE_TYPE colon_pos = the_id.find(':');
-///             if (colon_pos != NPOS) {
-///                 string db = the_id.substr(0, colon_pos);
-///                 NStr::ToUpper(db);
-///                 // const auto& whitelist = (*s_Guide)->general;
-///                 const auto& whitelist = kSupportedRawDbtags;
-///                 if (whitelist.find(db) != whitelist.end()) {
-///                     // Reextract prefix to preserve case.
-///                     return Set(e_General, the_id.substr(0, colon_pos),
-///                                the_id.substr(colon_pos + 1));
-///                 }
-///             }
-///             if ((flags & fParse_ValidLocal) != 0
-///                 &&  ((flags & fParse_AnyLocal) == fParse_AnyLocal
-///                      ||  IsValidLocalID(the_id))) {
-///                 return Set(e_Local, the_id);
-///             } else {
-///                 NCBI_THROW(CSeqIdException, eFormat,
-///                            "Malformatted ID " + string(the_id));
-///             }
-///         }
-/// ```
 /// A tagged line never reaches the only `Malformatted ID` throw (Seq_id.cpp:2501-2502;
 /// `x_Init` throws other texts, such as `Malformatted PDB ID`). A valid local ID is
 /// parsed again without `fParse_ValidLocal` (blast_fasta_input.cpp:137-140), which ends
@@ -591,28 +294,6 @@ pub(super) fn classify(line: &[u8]) -> SeqIdLine {
 /// reads it as FASTA (`CSeq_id` throws "Malformatted ID").
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:132-151
-/// ```c++
-///         const string line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
-///         if ( !line.empty() && isalnum(line.data()[0]&0xff) ) {
-///             try {
-///                 CRef<CSeq_id> id(new CSeq_id(line, (CSeq_id::fParse_AnyRaw |
-/// 							CSeq_id::fParse_ValidLocal)));
-/// 		if (id->IsLocal()  &&  !NStr::StartsWith(line, "lcl|") ) {
-///                     // Expected to throw an exception.
-///                     id.Reset(new CSeq_id(line));
-/// 		}
-///                 CRef<CBioseq> bioseq(x_CreateBioseq(id));
-///                 CRef<CSeq_entry> retval(new CSeq_entry());
-///                 retval->SetSeq(*bioseq);
-///                 return retval;
-///             } catch (const CSeqIdException& e) {
-///                 if (NStr::Find(e.GetMsg(), "Malformatted ID") != NPOS) {
-///                     // This is probably just plain fasta, so just
-///                     // defer to CFastaReader
-///                 } else {
-///                     throw;
-///                 }
-/// ```
 /// Every line that `classify` does not call FASTA is rejected: NCBI fetches it, skips it
 /// (a query whose ID is not found, or another rethrown exception) or fails (a subject).
 /// `line` is the line as read (`classify` trims it); `program` and `role` name the reader in

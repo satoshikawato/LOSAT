@@ -1,4 +1,5 @@
 // Loading and instantiating the engine modules (docs/web/abi_v2.md §2-§3).
+import { UnavailableError } from '../../ports/engine.js';
 import { sha256Hex } from '../digest.js';
 import { ABI_VERSION, ReactorAbi, type AbiExports } from './abi.js';
 import { inspectReactor, type ReactorArtifact } from './artifact.js';
@@ -28,7 +29,11 @@ export async function compileReactor(bytes: Uint8Array): Promise<CompiledReactor
  * response with the cached response, and a later visit then starts from that code (Chromium
  * does once V8 hands it the module's optimized code). The engine URLs carry their digest and
  * are served `immutable` (public/_headers), so the cached response stays valid until a build
- * changes the module.
+ * changes the module. A file that cannot be downloaded or is not this release's is an
+ * UnavailableError that names the file and why: the browser's own words for a network error
+ * ("Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed") named no
+ * file and read as a fault of the inputs that the module was loaded to read (line WQA's sweep, D1,
+ * 2026-11-19).
  */
 export async function loadReactor(asset: ReactorAsset): Promise<CompiledReactor> {
   const response = await fetchAsset(asset);
@@ -42,18 +47,28 @@ export async function loadReactor(asset: ReactorAsset): Promise<CompiledReactor>
 }
 
 async function fetchAsset(asset: ReactorAsset): Promise<Response> {
-  const response = await fetch(asset.url);
-  if (!response.ok) throw new Error(`the engine file ${asset.url} could not be loaded (HTTP ${response.status})`);
+  const response = await fetch(asset.url).catch((error: unknown) => {
+    throw notDownloaded(asset, 'network error', error);
+  });
+  if (!response.ok) throw notDownloaded(asset, `HTTP ${response.status}`);
   return response;
 }
 
 async function checkedBytes(asset: ReactorAsset, response: Response): Promise<Uint8Array> {
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  // A connection that ends before the body has, also after the headers came.
+  const body = await response.arrayBuffer().catch((error: unknown) => {
+    throw notDownloaded(asset, 'network error', error);
+  });
+  const bytes = new Uint8Array(body);
   const digest = await sha256Hex(bytes);
   if (digest !== asset.sha256) {
-    throw new Error(`the engine file ${asset.url} is not the one of this release (SHA-256 ${digest})`);
+    throw new UnavailableError(`LOSAT could not load its engine file ${asset.url}: it is not the one of this release (SHA-256 ${digest})`);
   }
   return bytes;
+}
+
+function notDownloaded(asset: ReactorAsset, why: string, cause?: unknown): UnavailableError {
+  return new UnavailableError(`LOSAT could not download its engine file ${asset.url} (${why})`, cause === undefined ? undefined : { cause });
 }
 
 /** compileStreaming needs the Wasm media type; other responses compile from their bytes. */

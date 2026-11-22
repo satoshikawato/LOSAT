@@ -1,0 +1,1 @@
+- CI: zig links pylosat's Linux wheels (x86_64, aarch64) against glibc 2.17, so they carry the manylinux2014 tags and install on glibc 2.17 and later instead of 2.34; each Linux wheel is also installed and searched in the manylinux2014 image. `THIRD_PARTY_LICENSES` lists what zig links into them (LLVM's libunwind, zig's compiler_rt).

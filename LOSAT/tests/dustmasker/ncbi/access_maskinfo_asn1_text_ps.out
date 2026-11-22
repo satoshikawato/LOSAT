@@ -1,0 +1,122 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=20; linker=1",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id gi 7
+        },
+        {
+          from 430,
+          to 480,
+          id gi 7
+        },
+        {
+          from 578,
+          to 670,
+          id gi 7
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id other {
+            accession "NC_000001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 430,
+          to 480,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        },
+        {
+          from 578,
+          to 670,
+          id embl {
+            accession "AJ000009",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id gi 9
+        },
+        {
+          from 430,
+          to 480,
+          id gi 9
+        },
+        {
+          from 578,
+          to 670,
+          id gi 9
+        }
+      }
+    },
+    more FALSE
+  }
+}

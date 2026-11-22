@@ -5,24 +5,7 @@
 //! requested output; LOSAT's `run_local` entries do the same for records in memory, and this
 //! module hands them the caller's inputs and outputs.
 //!
-//! NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:195-295
-//! ```c
-//! CRef<CLocalDbAdapter> db_adapter;
-//! CRef<CScope> scope;
-//! InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//!                  db_adapter, scope);
-//! CBlastFormat formatter(opt, *db_adapter,
-//!                        fmt_args->GetFormattedOutputChoice(), ...);
-//! formatter.PrintProlog();
-//! for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!         CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//!         results = lcl_blast.Run();
-//!         ITERATE(CSearchResultSet, result, *results) {
-//!             formatter.PrintOneResultSet(**result, query_batch);
-//!         }
-//! }
-//! formatter.PrintEpilog(opt);
-//! ```
+//! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:195-295
 #![warn(missing_docs, unused)]
 
 use std::io::{self, Write};
@@ -32,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::error::Error;
+use super::id::Id;
 use super::input::{check_archive_inputs, is_protein, Inputs, Role};
 use super::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
@@ -48,6 +32,7 @@ use crate::blastinput::seq_range::{
     parse_optional_range, record_interval, RangeRole, RecordInterval, SequenceRange,
 };
 use crate::cli::Commands;
+use crate::report::archive::options::RequestKind;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
@@ -82,15 +67,6 @@ pub enum Strand {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1061-1067
-// ```c++
-//         if(x_IsFieldRequested(eSubjectStrand))
-//         {
-//         	if(!subject_is_na)
-//         		m_SubjectStrand = NA;
-//         	else
-//         		m_SubjectStrand = ((s_start - s_end) > 0 )? "minus":"plus";
-//         }
-// ```
 /// The strand that NCBI's `sstrand` column gives a row of a nucleotide sequence, and no strand
 /// for a protein: an end before the start is the minus strand.
 fn strand(protein: bool, start: usize, end: usize) -> Option<Strand> {
@@ -101,22 +77,10 @@ fn strand(protein: bool, start: usize, end: usize) -> Option<Strand> {
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
-// ```c
-// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
 // Every output format prints from the same final result set, so a position in that result
 // identifies an HSP in every format (`HspIndex`).
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:126-132
-// ```c
-// typedef struct BlastHSP {
-//    Int4 score;           /**< This HSP's raw score */
-//    Int4 num_ident;       /**< Number of identical base pairs in this HSP */
-//    double bit_score;     /**< Bit score, calculated from score */
-//    double evalue;        /**< This HSP's e-value */
-//    BlastSeg query;       /**< Query sequence info. */
-//    BlastSeg subject;     /**< Subject sequence info. */
-// ```
 /// One HSP of the final, sorted hit list of a search, with the engine's values. Each field that
 /// names a column of `-outfmt 6` holds the number that the column prints for the HSP's row, not
 /// rounded (`tests/library_api.rs` holds them to the columns); the text of a report is its
@@ -142,11 +106,16 @@ pub struct HspRecord {
     /// those of the round before, each round's in the order of its own hit list.
     pub round: u32,
     /// The query's id (`qaccver`): the first word of its title, its generated `Query_N` without a
-    /// title, and with `-parse_deflines` the accession and version of its id. A byte that is not
-    /// UTF-8 shows as U+FFFD here and as itself in the reports. The HSPs of a query share it.
-    pub query_id: Arc<str>,
-    /// The subject's id (`saccver`), by the same rules. The HSPs of a subject share it.
-    pub subject_id: Arc<str>,
+    /// title, and with `-parse_deflines` the accession and version of its id; the bytes of the
+    /// reports, also those that are not UTF-8 ([`Id`]). Cloning is cheap; it does not copy the
+    /// bytes.
+    pub query_id: Id,
+    /// The subject's id (`saccver`), by the same rules; for a database, the `saccver` of the
+    /// sequence. Where NCBI writes no `saccver` for the subject (its lookup fails: a title whose
+    /// encoding it cannot tell, or `-parse_deflines` ids that LOSAT refuses), the id by the
+    /// query's rules; for a database sequence, the first word of its title. Cloning is cheap; it
+    /// does not copy the bytes.
+    pub subject_id: Id,
     /// The raw alignment score (`score`).
     pub raw_score: i32,
     /// The bit score (`bitscore`), not rounded.
@@ -211,34 +180,12 @@ pub struct HspRecord {
 
 impl HspRecord {
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-442
-    // ```c++
-    // inline void CBlastTabularInfo::x_PrintPercentIdentical(void)
-    // {
-    //     double perc_ident =
-    //         (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
-    //     m_Ostream << NStr::DoubleToString(perc_ident, 3);
-    // }
-    // ```
     /// The percentage of identical columns (`pident`), not rounded.
     pub fn percent_identity(&self) -> f64 {
         crate::report::outfmt6::percent_identity_ncbi(self.num_ident, self.length)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1109-1120
-    // ```c
-    // Blast_HSPGetAdjustedOffsets(EBlastProgramType program, BlastHSP* hsp,
-    //                             Int4 query_length, Int4 subject_length,
-    //                             Int4* q_start, Int4* q_end,
-    //                             Int4* s_start, Int4* s_end)
-    // {
-    //    if (!hsp->gap_info) {
-    //       *q_start = hsp->query.offset + 1;
-    //       *q_end = hsp->query.end;
-    //       *s_start = hsp->subject.offset + 1;
-    //       *s_end = hsp->subject.end;
-    //       return;
-    //    }
-    // ```
     // The reports' coordinates are 1-based offsets of a `BlastSeg`, whose `offset` and `end` are
     // a 0-based half-open interval; the methods below give that form, on the plus strand.
     /// The query interval as a 0-based half-open range on the record's plus strand, whichever
@@ -255,16 +202,6 @@ impl HspRecord {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_results.hpp:115-122
-// ```c++
-//     /// Retrieve the search space for this query sequence. If the
-//     /// results correspond to a blastx search, the search space will
-//     /// refer to protein letters
-//     Int8 GetSearchSpace() const {
-//         return m_SearchSpace;
-//     }
-//     /// Retrieve the length adjustment for boundary conditions
-//     Int8 GetLengthAdjustment() const {
-// ```
 /// The statistics of one query of a search (NCBI's `CBlastAncillaryData`): the values that the
 /// `Statistics` of the query's `Iteration` in outfmt 5 shows. The E-values of the query's HSPs
 /// follow from them and the raw scores, so they say what an E-value of this search means.
@@ -298,31 +235,7 @@ impl QueryStats {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_iteration.cpp:76-91
-// ```c++
-//     // if the most current list of ids is empty, that means that no new
-//     // sequences were found and therefore we have converged.
-//     if ( !m_PreviousData.empty() && m_CurrentData.empty() ) {
-//         return true;
-//     }
-//
-//     // Element by element comparison: has every element in the current Seq-id
-//     // list been found in the previous iterations?
-//     bool retval = true;
-//     ITERATE(TSeqIds, current_id, m_CurrentData) {
-//         if (m_PreviousData.find(*current_id) == m_PreviousData.end()) {
-//             retval = false;
-//             break;
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_results.hpp:211-215
-// ```c++
-//     /// Accessor for the query's search ancillary
-//     CRef<CBlastAncillaryData> GetAncillaryData() const
-//     {
-//         return m_AncillaryData;
-//     }
-// ```
 // Each round of psiblast is a result set of its own, with its own ancillary data: a PSSM round's
 // Karlin-Altschul values are the PSSM's.
 /// The rounds of one query of a search: psiblast's rounds (`-num_iterations` other than 1),
@@ -389,30 +302,8 @@ impl Write for CountingWriter {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3613-3632
-// ```c++
-// void CDisplaySeqalign::x_ShowAlnvecInfo(CNcbiOstream& out,
-//                                            SAlnInfo* aln_vec_info,
-//                                            bool show_defline)
-// {
-// 	bool showSortControls = false;
-//     if(show_defline) {
-// 		...
-// 				string deflines = x_PrintDefLine(bsp_handle, aln_vec_info);
-// 				out<< deflines;
-// 		...
-// 			out << "\n";
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3613-3632
 /// Records, for every report of one search, the byte range of each HSP's row or section and
 /// of the heading of each HSP's subject, from the formatter's observer events; and the parts of
 /// the search's results (`Parts`: with psiblast's rounds, each round's call numbers its HSPs
@@ -559,18 +450,6 @@ impl FormatObserver for RangeRecorder {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155
-// ```c++
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-//         catch (const exception&) {
-//             continue; //SB-2307. ignore well formed, not found accession
-//         }
-// ```
 /// The index in the inputs of each query that the engine searches: NCBI's batch reader skips a
 /// query whose `-query_loc` interval starts more than one letter past its end
 /// (`seq_range::cut_queries`), so the engine's `q_idx` counts the searched queries, and the
@@ -607,15 +486,7 @@ fn query_loc(command: &Commands) -> Option<&str> {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// ```c
-// int num_threads = args[kArgNumThreads].AsInteger();
-// if (num_threads > kMaxValue) {
-//     m_NumThreads = kMaxValue;
-// } else {
-//     m_NumThreads = num_threads;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 /// The `-query_loc` interval of the program's arguments. A value that the search will refuse
 /// has no interval here.
 pub(super) fn query_range_of(command: &Commands) -> Option<SequenceRange> {
@@ -661,19 +532,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973
-// ```c
-//     int hitlist_size = opt.GetHitlistSize();
-//     if(m_OutputFormat <= eFlatQueryAnchoredNoIdentities) {
-//     	 m_NumDescriptions = m_DfltNumDescriptions;
-//     	 m_NumAlignments = m_DfltNumAlignments;
-//     	 if (args.Exist(kArgNumDescriptions) && args[kArgNumDescriptions]) {
-//     	    m_NumDescriptions = args[kArgNumDescriptions].AsInteger();
-//     	 }
-//          if (args.Exist(kArgNumAlignments) && args[kArgNumAlignments]) {
-//     		m_NumAlignments = args[kArgNumAlignments].AsInteger();
-//     	}
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973
 /// The hit list size that the command line derives for the output format `number` from the
 /// options of `command` (`report_counts`).
 fn hit_list_size(command: &Commands, number: i32) -> usize {
@@ -716,51 +575,42 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
     groups.into_iter().map(|(_, group)| group).collect()
 }
 
+/// The `-outfmt` values of `formats` that the search of the positions `group` (a group of
+/// `search_groups`) does not write, in the call's order: those of the call's other searches, over
+/// which, with its own, a search decides the call's refusals (`ReportOutputs::other_outfmts`).
+/// Empty where the call is one search.
+fn other_formats<'f>(formats: &[&'f str], group: &[usize]) -> Vec<&'f str> {
+    formats
+        .iter()
+        .enumerate()
+        .filter(|(position, _)| !group.contains(position))
+        .map(|(_, outfmt)| *outfmt)
+        .collect()
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-// ```c++
-//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
-// ```c
-//     // Setup some debugging features from environment variables.
-//     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
-//         SetDiagTrace(eDT_Enable, eDT_Enable);
-//     }
-//     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
-// ```c++
-// bool CSeqDBTaxInfo::GetTaxNames(TTaxId           tax_id,
-//                                 SSeqDBTaxInfo  & info  )
-// {
-// 	static CTaxDBFileInfo t;
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
-// ```c++
-// void CBlastTabularInfo::x_CheckTaxDB()
-// {
-//    	if( x_IsFieldRequested(eSubjectSciNames) ||
-//     ...
-//    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-133
 // The formatters of the plural names (`x_CheckTaxDB`) and the organism report (outfmt 18) look
 // the taxonomy database up themselves, through the search path of NCBI's databases: a search of
 // records reads the application settings for them, as the command line does, and the search asks
 // where the command line asks (`common::database::subject_taxonomy`).
-/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` looks every
-/// taxid up (the plural names of the taxonomy database, the organism report); `None` otherwise,
-/// without reading the settings.
+/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` (as `app`'s
+/// formatter writes it, `TabularSpec::of_app`) looks every taxid up (the plural names of the
+/// taxonomy database, the organism report); `None` otherwise, without reading the settings.
 fn taxdb_setting(
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
+    app: RequestKind,
 ) -> anyhow::Result<Option<crate::algorithm::common::database::TaxdbSetting>> {
     use crate::blastinput::app::{parse_formatting_string, ReportFormat};
     let looks_up = outputs.formats.iter().any(|format| {
         parse_formatting_string(format.outfmt).is_ok_and(|choice| {
             ReportFormat::from_number(choice.number)
-                .and_then(|report| crate::report::tabular::TabularSpec::of(report, &choice))
+                .and_then(|report| {
+                    crate::report::tabular::TabularSpec::of_app(report, &choice, app)
+                })
                 .is_some_and(|spec| spec.looks_up_every_taxid())
         })
     });
@@ -801,14 +651,6 @@ pub(super) fn run_local(
         return Err(error);
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
-    // ```c++
-    //     catch (const CIOException& e) {                                         \
-    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
-    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
-    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
-    //         }                                                                   \
-    //     }                                                                       \
-    // ```
     // `CATCH_ALL`'s silent end (`cli::NativeError::silent_end`: the `-in_pssm` reader's
     // `CEofException`, the object manager's failed write after its diagnostic stream failed): NCBI's
     // run returns 0 without a word, so the call succeeds with what it wrote (tblastn's error
@@ -820,7 +662,7 @@ pub(super) fn run_local(
     // call's run, `CallStart::new`), `CATCH_ALL` writes its line feeds alone
     // (`cli::catch_all_text`), as the command line writes the error.
     if crate::ncbi_exception::main_diag_failbit() {
-        let message = crate::cli::catch_all_text(&native.message).into_owned();
+        let message = crate::cli::catch_all_text(&native.message).to_vec();
         return Err(crate::cli::NativeError {
             exit: native.exit,
             message,
@@ -838,17 +680,30 @@ fn run_local_entry(
     start: &mut CallStart,
 ) -> anyhow::Result<()> {
     let (query, subject) = (inputs.query, inputs.subject);
+    // How the reading of the query records ended, which the search meets in its batch
+    // (`Inputs::query_end`).
+    let end = inputs.end();
     if inputs.database {
         let settings = start.settings(&mut *outputs.diagnostics)?;
         return match command {
-            Commands::Blastp(args) => run_local_database_blastp(args, query, settings, outputs),
-            Commands::Tblastn(args) => run_local_database_tblastn(args, query, settings, outputs),
-            Commands::Blastn(args) => run_local_database_blastn(args, query, settings, outputs),
-            Commands::Tblastx(args) => run_local_database_tblastx(args, query, settings, outputs),
-            Commands::Blastx(args) => run_local_database_blastx(args, query, settings, outputs),
+            Commands::Blastp(args) => {
+                run_local_database_blastp(args, query, end, settings, outputs)
+            }
+            Commands::Tblastn(args) => {
+                run_local_database_tblastn(args, query, end, settings, outputs)
+            }
+            Commands::Blastn(args) => {
+                run_local_database_blastn(args, query, end, settings, outputs)
+            }
+            Commands::Tblastx(args) => {
+                run_local_database_tblastx(args, query, end, settings, outputs)
+            }
+            Commands::Blastx(args) => {
+                run_local_database_blastx(args, query, end, settings, outputs)
+            }
             Commands::Psiblast(args) => {
                 let args = psiblast_args(args, outputs)?;
-                run_local_database_blastp(args, query, settings, outputs)
+                run_local_database_blastp(args, query, end, settings, outputs)
             }
             Commands::Rpsblast(_)
             | Commands::Rpstblastn(_)
@@ -860,34 +715,27 @@ fn run_local_entry(
     }
     match command {
         Commands::Blastp(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
-            run_local_blastp(args, query, subject, "", "", outputs)
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastp)?;
+            // The file of an ungapped search's `-matrix` that NCBI's tables do not have, looked up
+            // where the options are resolved, as on the command line (`BlastpArgs::matrix_search`).
+            if args.unknown_matrix_name() {
+                args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
+            }
+            run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
-            run_local_tblastn(args, query, subject, outputs)
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn)?;
+            run_local_tblastn(args, query, end, subject, outputs)
         }
         Commands::Blastn(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastn)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
-            // ```c++
-            //     if (args.Exist(kArgWindowMaskerDatabase) &&
-            //         args[kArgWindowMaskerDatabase]) {
-            //         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
-            // ```
             // The counts file of `-window_masker_db` is read from the file system, as on the
             // command line (LOSAT Web's host gives its own source).
             if args.window_masker_db.is_some() {
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:381-388
-            // ```c++
-            //     CRef<CNcbiRegistry> reg(new CNcbiRegistry(empty_stream,
-            //                                               IRegistry::fWithNcbirc));
-            //     ...
-            //     reg->Add(*env_reg, CNcbiRegistry::ePriority_MaxUser);
-            //     retval = reg->Get(kSection, kEnvVar);
-            // ```
             // The directory of `-window_masker_taxid` is looked for by NCBI's library itself, in
             // the environment and `.ncbirc`; LOSAT reads it with the application settings, as
             // a database search of the library does.
@@ -896,7 +744,14 @@ fn run_local_entry(
                 args.window_masker_registry = Some(settings.window_masker_registry);
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
-            run_local_blastn(args, query, subject, outputs)
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:368-372
+            // The database of `-filtering_db` is looked up as the database of `-db` (the call's
+            // settings), by the repeat search of each query batch.
+            if args.filtering_db.is_some() {
+                let settings = start.settings(&mut *outputs.diagnostics)?;
+                args.resolve_repeat_filter(&settings);
+            }
+            run_local_blastn(args, query, end, subject, outputs)
         }
         Commands::Tblastx(mut args) => {
             // The file of a `-matrix` that NCBI's tables do not have, first, as the command
@@ -905,22 +760,22 @@ fn run_local_entry(
                 let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.find_matrix_file(&settings.matrix_search)?;
             }
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
-            run_local_tblastx(args, query, subject, outputs)
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastx)?;
+            run_local_tblastx(args, query, end, subject, outputs)
         }
         Commands::Blastx(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastx)?;
             // The file of a `-matrix` that NCBI's tables do not have, looked up after the options
             // are resolved, as on the command line (`ResolvedOptions::find_matrix_file`).
             if args.unknown_matrix_name() {
                 args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
             }
-            run_local_blastx(args, query, subject, outputs)
+            run_local_blastx(args, query, end, subject, outputs)
         }
         Commands::Psiblast(args) => {
             let mut args = psiblast_args(args, outputs)?;
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
-            run_local_blastp(args, query, subject, "", "", outputs)
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast)?;
+            run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
@@ -932,17 +787,6 @@ fn run_local_entry(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:233-241
-// ```c++
-//     CRef<IQueryFactory> query_factory(s_MakeQueryFactory(pssm, query));
-//             CRef<CPsiBlast> psiblast;
-//             if (run_token & 2)
-//             {
-//                 _ASSERT(psi_opts.NotEmpty());
-//                 if (pssm.NotEmpty()) {
-//                     psiblast.Reset(new CPsiBlast(pssm, db_adapter, psi_opts));
-//                 } else {
-//                     psiblast.Reset(new CPsiBlast(query_factory, db_adapter, psi_opts));
-// ```
 /// blastp's arguments for psiblast's search and its rounds (`algorithm::psiblast`,
 /// `PsiblastArgs::into_blastp_args`), after LOSAT's refusals of each requested format.
 fn psiblast_args(
@@ -950,17 +794,17 @@ fn psiblast_args(
     outputs: &ReportOutputs<'_>,
 ) -> anyhow::Result<crate::algorithm::blastp::args::BlastpArgs> {
     for format in &outputs.formats {
-        crate::algorithm::psiblast::PsiblastArgs::check_outfmt(format.outfmt)?;
+        // The library writes no search strategy file (`search::validate`).
+        crate::algorithm::psiblast::PsiblastArgs::check_outfmt(
+            format.outfmt,
+            format.side_out(args.out.as_deref()),
+            false,
+        )?;
     }
     args.into_blastp_args()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-// ```c
-// if (args[kArgOutputFormat]) {
-//     string fmt_choice =
-//         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 // No NCBI counterpart: NCBI's application reads its records itself, with the option.
 /// The refusal of records read without their ids for a search with `-parse_deflines`: the
 /// reports would show the local ids of a search without the option.
@@ -971,7 +815,7 @@ pub(super) fn check_inputs(search: &Search, inputs: Inputs<'_>) -> Result<(), Er
         && records().all(|record| record.believed().is_none())
     {
         return Err(Error::Argv(
-            "-parse_deflines needs the records of read_inputs, which reads the ids".to_string(),
+            "-parse_deflines needs the records of read_inputs, which reads the ids".into(),
         ));
     }
     Ok(())
@@ -990,7 +834,7 @@ fn searches(
     use crate::blastinput::app::output_format::ARCHIVE_FORMAT;
     use crate::blastinput::app::parse_formatting_string;
     if formats.is_empty() {
-        return Err(Error::Argv("no output format was requested".to_string()));
+        return Err(Error::Argv("no output format was requested".into()));
     }
     check_inputs(search, inputs)?;
     let numbers: Vec<i32> = formats
@@ -1000,7 +844,7 @@ fn searches(
                 .map(|choice| choice.number)
                 .map_err(|error| {
                     log.post(&error);
-                    Error::Argv(format!("{error:#}"))
+                    Error::Argv(super::error::chain_bytes(&error))
                 })
         })
         .collect::<Result<_, _>>()?;
@@ -1013,7 +857,7 @@ fn searches(
         if let Some(option) = pssm_file_option(&command) {
             return Err(Error::Argv(format!(
                 "{option} is not accepted by the library API with formats of two hit list sizes, which take two searches: the PSSM files are one search's; search those formats in calls of their own"
-            )));
+            ).into()));
         }
     }
     Ok((groups, num_threads(&command)))
@@ -1038,11 +882,6 @@ fn pssm_file_option(command: &Commands) -> Option<&'static str> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:286-288
-// ```c++
-//                 ITERATE(CSearchResultSet, result, *results) {
-//                     formatter.PrintOneResultSet(**result, query_batch);
-//                 }
-// ```
 // The formatters print to their streams as each result comes; here the streams are the caller's.
 /// Runs the search and writes each report to its writer as the search makes it, and the command
 /// line's warnings to `diagnostics`. `reports` holds an `-outfmt` value and a writer per report.
@@ -1082,8 +921,12 @@ pub fn run(
             } else {
                 log.sink(&mut repeated, false)
             };
+            // The formats of the other searches, of which the call's refusals are decided
+            // (`ReportOutputs::other_outfmts`).
+            let others = other_formats(&formats, group);
             let result = {
                 let mut outputs = ReportOutputs {
+                    other_outfmts: &others,
                     formats: group
                         .iter()
                         .map(|&position| FormatOutput {
@@ -1095,6 +938,7 @@ pub fn run(
                         })
                         .collect(),
                     diagnostics: &mut sink,
+                    later_warnings: None,
                     hits: None,
                     observer: None,
                 };
@@ -1107,17 +951,7 @@ pub fn run(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
-// ```c++
-//     else {
-//         m_OutputStream = &args[kArgOutput].AsOutputFile();
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:255-257
-// ```c++
-//         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
-//         	formatter.SetBaseFile(args[kArgOutput].AsString());
-//         }
-// ```
 /// Runs the search and writes the report of one `-outfmt` to the file `path`, as the command
 /// line's `-out path` does, and the command line's warnings to `diagnostics`. Outfmt 13 and 14
 /// come through here: the file is the master file, which names the side files that the search
@@ -1140,7 +974,7 @@ pub fn run_to_file(
     // `-` is the command line's standard output, which the library does not write.
     if path.as_os_str() == "-" {
         return Err(Error::Argv(
-            "run_to_file writes a file: `run` gives a report to a writer".to_string(),
+            "run_to_file writes a file: `run` gives a report to a writer".into(),
         ));
     }
     let search = &search.writing_to(path);
@@ -1162,12 +996,14 @@ pub fn run_to_file(
         let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt,
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Out(&mut file),
                 }],
                 diagnostics: &mut sink,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -1220,9 +1056,11 @@ fn collect_one(
         positions.iter().map(|_| CountingWriter::new()).collect();
     let mut recorder = RangeRecorder::new(writers.iter().map(|w| w.position.clone()).collect());
     let mut collected: Vec<Arc<Vec<PairwiseHit>>> = Vec::new();
+    let others = other_formats(formats, positions);
     let result = {
         let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
+            other_outfmts: &others,
             formats: positions
                 .iter()
                 .zip(writers.iter_mut())
@@ -1233,6 +1071,7 @@ fn collect_one(
                 })
                 .collect(),
             diagnostics: &mut sink,
+            later_warnings: None,
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };
@@ -1243,9 +1082,9 @@ fn collect_one(
         recorder.fault(format!("HSP {hsp} started but did not end"));
     }
     if let Some(fault) = recorder.fault.take() {
-        return Err(Error::Search(format!(
-            "internal error in the output ranges: {fault}"
-        )));
+        return Err(Error::Search(
+            format!("internal error in the output ranges: {fault}").into(),
+        ));
     }
     Ok(Searched {
         writers,
@@ -1264,43 +1103,16 @@ pub(super) fn query_ordinal(ordinals: Option<&[usize]>, q_idx: usize) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1071-1077
-// ```c++
-//     int query_frame = 1, subject_frame = 1;
-//     if (kTranslated) {
-//         if (x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eFrames)) {
-//             query_frame = CAlignFormatUtil::
-//                 GetFrame (q_start - 1, ds.GetSeqStrand(kQueryRow),
-//                           scope.GetBioseqHandle(align.GetSeq_id(0)));
-//         }
-// ```
 // The `-outfmt` columns print a frame for every row (1 for an untranslated row of BLASTP and
 // BLASTN, the row's strand for BLASTN's subject, 0 for the protein row of BLASTX and TBLASTN); a
 // translation frame exists where the program translates, the rest is the strand.
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:880-887
-// ```c++
-//     if (x_IsFieldRequested(eQueryLength) && m_QueryLength == 0) {
-//         ...
-//     	if(m_QueryRange.NotEmpty())
-//     		m_QueryLength = m_QueryRange.GetLength();
-//     	else
-//     		m_QueryLength = sequence::GetLength(align.GetSeq_id(0), &scope);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-// ```c++
-// const char* kDfltArgTabularOutputFmt =
-//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-//     "evalue bitscore";
-// ```
-// `shown_id` and `subject_tabular_id` are the first two columns of the default report.
+// `shown_id` and `subject_tabular_id` are the first two columns of the default report, whose
+// bytes `Id` keeps (`api::id`).
 /// The id of a record, read once: many HSPs show it.
-fn shared_id(
-    ids: &mut [Option<Arc<str>>],
-    index: usize,
-    read: impl FnOnce() -> Vec<u8>,
-) -> Arc<str> {
-    ids[index]
-        .get_or_insert_with(|| Arc::from(String::from_utf8_lossy(&read())))
-        .clone()
+fn shared_id(ids: &mut [Option<Id>], index: usize, read: impl FnOnce() -> Vec<u8>) -> Id {
+    ids[index].get_or_insert_with(|| Id::new(&read())).clone()
 }
 
 /// The HSP records of the final hit list of a search of `inputs`. `qlen` is the record's length
@@ -1481,7 +1293,7 @@ pub fn run_collect(
                 0,
             )
             .map_err(|fault| {
-                Error::Search(format!("internal error in the search's parts: {fault}"))
+                Error::Search(format!("internal error in the search's parts: {fault}").into())
             })?,
         None => Parts::new()
             .finish(search.program(), inputs, &[], None, None, 0)
@@ -1523,146 +1335,5 @@ pub fn run_collect(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::api::{validate, Program};
-
-    const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
-
-    fn one_protein() -> (Vec<FastaRecord>, Vec<FastaRecord>) {
-        (
-            vec![FastaRecord::new("Query_1", b"q", PROTEIN)],
-            vec![FastaRecord::new("Subject_1", b"s", PROTEIN)],
-        )
-    }
-
-    #[test]
-    fn the_strand_is_ncbis_rule_and_the_ranges_are_half_open_on_the_plus_strand() {
-        assert_eq!(strand(true, 9, 1), None);
-        assert_eq!(strand(false, 1, 9), Some(Strand::Plus));
-        assert_eq!(strand(false, 9, 1), Some(Strand::Minus));
-        // A row of one letter: `(s_start - s_end) > 0` is false.
-        assert_eq!(strand(false, 5, 5), Some(Strand::Plus));
-        let (query, subject) = one_protein();
-        let search = validate(Program::Blastp, &[]).unwrap();
-        let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6"]).unwrap();
-        let mut hsp = outcome.hsps[0].clone();
-        (hsp.q_start, hsp.q_end, hsp.s_start, hsp.s_end) = (3, 9, 9, 3);
-        assert_eq!(hsp.query_range(), 2..9);
-        assert_eq!(hsp.subject_range(), 2..9);
-        (hsp.s_start, hsp.s_end) = (5, 5);
-        assert_eq!(hsp.subject_range(), 4..5);
-    }
-
-    #[test]
-    fn groups_follow_the_hit_list_sizes() {
-        let inputs = Inputs::new(&[], &[]);
-        let plain = validate(Program::Blastp, &[])
-            .unwrap()
-            .command(inputs)
-            .unwrap();
-        assert_eq!(search_groups(&plain, &[6, 0, 7]), vec![vec![0, 1, 2]]);
-        // -num_alignments changes the pairwise formats' hit list size only: two searches, the
-        // tabular formats first.
-        let split = validate(Program::Blastp, &["-num_alignments", "1"])
-            .unwrap()
-            .command(inputs)
-            .unwrap();
-        assert_eq!(search_groups(&split, &[0, 6, 7]), vec![vec![1, 2], vec![0]]);
-        // -max_target_seqs sets every format's size.
-        let same = validate(Program::Blastp, &["-max_target_seqs", "5"])
-            .unwrap()
-            .command(inputs)
-            .unwrap();
-        assert_eq!(search_groups(&same, &[0, 6]), vec![vec![0, 1]]);
-    }
-
-    #[test]
-    fn a_self_search_gives_one_hsp_with_its_rows_and_sections() {
-        let (query, subject) = one_protein();
-        let search = validate(Program::Blastp, &[]).unwrap();
-        let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"]).unwrap();
-        assert_eq!(outcome.reports.len(), 2);
-        assert_eq!(outcome.reports[0].outfmt, "6");
-        assert_eq!(outcome.reports[1].outfmt, "0");
-        assert!(
-            outcome.diagnostics.is_empty(),
-            "{:?}",
-            String::from_utf8_lossy(&outcome.diagnostics)
-        );
-        assert_eq!(outcome.hsps.len(), 1);
-        let hsp = &outcome.hsps[0];
-        assert_eq!((hsp.index, hsp.q_idx, hsp.s_idx, hsp.rank), (0, 0, 0, 0));
-        assert_eq!(
-            (hsp.q_start, hsp.q_end, hsp.s_start, hsp.s_end),
-            (1, 66, 1, 66)
-        );
-        assert!(hsp.bit_score > 100.0);
-        assert!(hsp.e_value < 1e-30);
-        assert_eq!(
-            hsp.query_aligned.as_deref(),
-            Some(std::str::from_utf8(PROTEIN).unwrap())
-        );
-        // The row in outfmt 6 is the report's one line; the section in outfmt 0 starts at
-        // the score line and the heading at the defline.
-        let row = outcome.reports[0].spans[0].clone().unwrap();
-        let tabular = &outcome.reports[0].bytes;
-        assert_eq!(&tabular[row.clone()], tabular.as_slice());
-        assert!(tabular.ends_with(b"\n"));
-        assert_eq!(tabular.iter().filter(|&&b| b == b'\n').count(), 1);
-        let section = outcome.reports[1].spans[0].clone().unwrap();
-        let pairwise = &outcome.reports[1].bytes;
-        assert!(pairwise[section].starts_with(b" Score ="));
-        let heading = outcome.reports[1].subject_headings[0].clone().unwrap();
-        assert!(pairwise[heading].starts_with(b">"));
-        assert!(outcome.reports[0].subject_headings[0].is_none());
-    }
-
-    #[test]
-    fn two_searches_give_each_format_its_own_report_and_records_from_the_first() {
-        let (query, subject) = one_protein();
-        let search = validate(Program::Blastp, &["-num_alignments", "1"]).unwrap();
-        let outcome = run_collect(&search, Inputs::new(&query, &subject), &["0", "6"]).unwrap();
-        assert_eq!(outcome.reports[0].outfmt, "0");
-        assert_eq!(outcome.reports[1].outfmt, "6");
-        assert_eq!(outcome.hsps.len(), 1);
-        // The records come from the tabular search: a row in report 1, no section in report
-        // 0 (another search).
-        assert!(outcome.reports[1].spans[0].is_some());
-        assert_eq!(outcome.reports[0].spans, [None]);
-        // The same bytes as the formats searched alone.
-        let alone = run_collect(&search, Inputs::new(&query, &subject), &["0"]).unwrap();
-        assert_eq!(alone.reports[0].bytes, outcome.reports[0].bytes);
-    }
-
-    #[test]
-    fn the_run_writes_to_the_callers_outputs_and_the_errors_are_the_command_lines() {
-        let (query, subject) = one_protein();
-        let search = validate(Program::Blastp, &[]).unwrap();
-        let mut report = Vec::new();
-        let mut diagnostics = Vec::new();
-        run(
-            &search,
-            Inputs::new(&query, &subject),
-            &mut [("6", &mut report)],
-            &mut diagnostics,
-        )
-        .unwrap();
-        let collected = run_collect(&search, Inputs::new(&query, &subject), &["6"]).unwrap();
-        assert_eq!(report, collected.reports[0].bytes);
-        assert!(diagnostics.is_empty());
-        // A format the command line rejects fails before any search, as does a call without one.
-        let error = run_collect(&search, Inputs::new(&query, &subject), &["99"]).unwrap_err();
-        assert!(matches!(error, Error::Argv(_)), "{error}");
-        let error = run_collect(&search, Inputs::new(&query, &subject), &[]).unwrap_err();
-        assert!(matches!(error, Error::Argv(_)), "{error}");
-        // An engine error is the command line's message.
-        let empty: Vec<FastaRecord> = Vec::new();
-        let error = run_collect(&search, Inputs::new(&query, &empty), &["6"]).unwrap_err();
-        assert!(matches!(error, Error::Search(_)), "{error}");
-        assert!(
-            error.message().contains("Empty CBlastQueryVector"),
-            "{error}"
-        );
-    }
-}
+#[path = "run_tests.rs"]
+mod tests;

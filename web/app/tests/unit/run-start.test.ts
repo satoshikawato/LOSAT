@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { instantiateSerial, reactorControl, reopening, WasmEngine } from 'losat';
 import { readStoredZip, type RegistryFile, type RunFile } from 'losat/domain';
-import { FileReadError, isFileReadError, runFilesOf, withRunFiles, type EngineRunRequest } from 'losat/ports';
+import { FileReadError, isFileReadError, runFilesOf, runOutputFailedOf, withRunFiles, type EngineRunRequest } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
 import { outputFileName, runFileName } from '../../src/domain/output-format';
 import { EngineRuntime } from '../../../packages/losat/src/infra/engine-worker/runtime';
@@ -19,12 +19,18 @@ import type { EngineCommand, EngineEvent, WorkerRun } from '../../../packages/lo
 import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
 import {
   discardedStream,
+  discardSignal,
   DISCARD_STREAM,
   EngineCallError,
   EngineStoppedError,
   FILE_CHUNK_BYTES,
   FILE_REGISTRY,
   loadFile,
+  MESSAGES_STREAM,
+  messagesSignal,
+  PLACE_NOWHERE,
+  PLACE_RUN,
+  PRINTED_STREAM,
   ReactorAbi,
   ROLE_QUERY,
   ROLE_SUBJECT,
@@ -32,6 +38,15 @@ import {
   type AbiExports,
   type FileLoader,
 } from '../../../packages/losat/src/infra/reactor/abi';
+import type { MainLinks } from '../../../packages/losat/src/infra/engine-worker/link';
+
+/** The runtime's links to the main thread (link.ts): these tests start no threaded instance. */
+const NO_LINKS: MainLinks = {
+  link: () => {
+    throw new Error('unused');
+  },
+  fault: () => undefined,
+};
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
@@ -128,7 +143,9 @@ describe("the reader of the engine's archive of a run's files", () => {
 // --- the ABI binding -------------------------------------------------------------------------------
 
 /** Exports of a fake engine for `start`, `validate` and the file calls, which log what they are given. */
-function fakeExports(options: { start?: string | 'fail'; validate?: string; trapValidate?: boolean; failEnd?: boolean } = {}) {
+function fakeExports(
+  options: { start?: string | 'fail'; validate?: string; validation?: string; trapValidate?: boolean; failEnd?: boolean } = {},
+) {
   const memory = new WebAssembly.Memory({ initial: 4 });
   const log: string[] = [];
   let next = 4096;
@@ -157,16 +174,21 @@ function fakeExports(options: { start?: string | 'fail'; validate?: string; trap
     losat_web2_start: (ptr: number, len: number) => {
       log.push(`start ${text(ptr, len).split('\0').join(' ')}`);
       if (options.start === 'fail') {
-        error = "error: unexpected argument '-version' found";
+        error = 'psiblast is not available in the browser (ABI v2)';
         return -1;
       }
-      respond(options.start ?? '{"conffile":"c.ini","log_file":"run.log","dry_run":true}');
+      respond(options.start ?? '{"conffile":"c.ini","log_file":"run.log","dry_run":true,"register_inputs":false,"prints":null}');
       return 0;
     },
     losat_web2_validate: (ptr: number, len: number) => {
       log.push(`validate ${text(ptr, len).split('\0').join(' ')}`);
       if (options.trapValidate) throw new WebAssembly.RuntimeError('unreachable');
-      if (options.validate === undefined) return 0;
+      if (options.validate === undefined) {
+        respond('{"data_loaders":true}');
+        return 0;
+      }
+      // The *validation* that the engine sends before an option check refuses the argv (line WQA's D13 round 3, L1).
+      if (options.validation !== undefined) respond(options.validation);
       error = options.validate;
       return -1;
     },
@@ -198,12 +220,13 @@ function fakeExports(options: { start?: string | 'fail'; validate?: string; trap
 
 describe('the ABI binding of the start and of a registry file', () => {
   it('reads the start JSON of an argv, or the CLI message of one that the engine cannot start', () => {
-    expect(fakeExports().abi.start(['tblastx', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true } });
-    expect(fakeExports({ start: '{"conffile":null,"log_file":null,"dry_run":false}' }).abi.start(['blastn'])).toEqual({
+    expect(fakeExports().abi.start(['tblastx', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false, prints: null } });
+    // -parse_deflines: the run's inputs are read together (line WQA's sweep, D7, 2026-11-19).
+    expect(fakeExports({ start: '{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":true,"prints":null}' }).abi.start(['blastn', '-parse_deflines'])).toEqual({
       ok: true,
-      start: { conffile: null, logFile: null, dryRun: false },
+      start: { conffile: null, logFile: null, dryRun: false, registerInputs: true, prints: null },
     });
-    expect(fakeExports({ start: 'fail' }).abi.start(['blastn', '-version'])).toEqual({ ok: false, message: "error: unexpected argument '-version' found" });
+    expect(fakeExports({ start: 'fail' }).abi.start(['psiblast'])).toEqual({ ok: false, message: 'psiblast is not available in the browser (ABI v2)' });
   });
 
   it('loads a file as kind 2: begin with its size, its bytes, end; a file that the engine refuses is released', async () => {
@@ -305,7 +328,10 @@ function fakeInstance(label: string, log: string[]): ReactorAbi {
     },
     fileRelease: (file: number) => void held.delete(loading.get(file)!),
     freeChunkBuffer: () => undefined,
-    validate: (argv: readonly string[]) => void log.push(`${label} validate ${argv.join(' ')} held=[${[...held].join(',')}]`),
+    validate: (argv: readonly string[]) => {
+      log.push(`${label} validate ${argv.join(' ')} held=[${[...held].join(',')}]`);
+      return { ok: true, dataLoaders: true };
+    },
     describe: () => {
       log.push(`${label} describe held=[${[...held].join(',')}]`);
       return { program: 'blastn', formats: [0, 6, 7], parameters: [] };
@@ -323,8 +349,8 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
     const shared = fakeInstance('shared', log);
     let opened = 0;
     const control = reactorControl(async () => shared, async () => fakeInstance(`own${++opened}`, log));
-    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
-    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
+    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true, dataLoaders: true });
+    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true, dataLoaders: true });
     // Without a file, the shared instance validates.
     await control.validate(['blastp']);
     expect(log).toEqual([
@@ -336,13 +362,27 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
     ]);
     expect(opened).toBe(2);
     // The verdict and start are the engine's.
-    const { abi } = fakeExports({ validate: 'BLAST query/options error: bad' });
-    const engine = reactorControl(async () => abi, async () => fakeExports({ validate: 'BLAST query/options error: bad' }).abi);
+    const { abi } = fakeExports({ validate: 'LOSAT query/options error: bad' });
+    const engine = reactorControl(async () => abi, async () => fakeExports({ validate: 'LOSAT query/options error: bad' }).abi);
     expect(await engine.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({
+      ok: false,
+      message: 'LOSAT query/options error: bad',
+    });
+    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false, prints: null } });
+  });
+
+  // line WQA's D13 round 3, L1, 2026-11-20: the engine sends the data loaders of the argv's registry before its option
+  // checks; a refused argv gives them with its message, which the host reads after them.
+  it("gives the data loaders of a refused argv's registry with its message", async () => {
+    const refused = fakeExports({ validate: 'Unexpected extra argument: -x', validation: '{"data_loaders":false}' });
+    const engine = reactorControl(async () => refused.abi, async () => refused.abi);
+    expect(await engine.validate(['blastp', '-x'])).toEqual({ ok: false, message: 'Unexpected extra argument: -x', dataLoaders: false });
+    // An argv whose start failed before the registry has none.
+    const failed = fakeExports({ validate: 'BLAST query/options error: bad' });
+    expect(await reactorControl(async () => failed.abi, async () => failed.abi).validate(['blastp'])).toEqual({
       ok: false,
       message: 'BLAST query/options error: bad',
     });
-    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true } });
   });
 
   it('keeps the file away from every call of the shared instance, also from calls that wait with it for one opening of that instance', async () => {
@@ -368,7 +408,7 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
       control.validate(['blastn', '-conffile', '.ncbirc'], { name: '.ncbirc', file }),
       control.validate(['blastn']),
     ]);
-    expect(results.filter((result) => 'ok' in result)).toEqual([{ ok: true }, { ok: true }, { ok: true }, { ok: true }, { ok: true }]);
+    expect(results.filter((result) => 'ok' in result)).toEqual(Array(5).fill({ ok: true, dataLoaders: true }));
     const of = (label: string) => log.filter((line) => line.startsWith(`${label} `)).sort();
     expect(of('shared')).toEqual(['shared describe held=[]', 'shared validate blastn held=[]', 'shared validate blastn held=[]']);
     expect([of('own1'), of('own2'), of('own3')].flat().sort()).toEqual(
@@ -430,7 +470,28 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
  * refuses it, as the adapter does. `discard`: after outfmt 6, the signal of stream 9 that discards
  * it (its bytes), then outfmt 7 (ABI v2 §5).
  */
-function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean; heldName?: string; discard?: Uint8Array } = {}) {
+/** The signal of stream 10 (ABI v2 §5): the place of the run's messages, 4 bytes (line WQA's sweep, D7, 2026-11-20). */
+function placeSignal(place: number): Uint8Array {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, place, true);
+  return bytes;
+}
+
+function fakeAbi(
+  options: {
+    runFiles?: Uint8Array;
+    fail?: string;
+    stop?: boolean;
+    heldName?: string;
+    discard?: Uint8Array;
+    warnings?: readonly Uint8Array[];
+    messages?: Uint8Array | 'none';
+    /** The run prints this text in place of a search (its start says `prints: 'help'`). */
+    printed?: Uint8Array;
+    /** The data loaders that `validate` finds in the argv's registry (on when not given). */
+    dataLoaders?: () => boolean;
+  } = {},
+) {
   const calls: string[] = [];
   let handle = 100;
   let stopped: EngineStoppedError | undefined;
@@ -449,18 +510,40 @@ function fakeAbi(options: { runFiles?: Uint8Array; fail?: string; stop?: boolean
     freeChunkBuffer: () => void calls.push('free buffer'),
     validate: (argv: readonly string[]) => {
       calls.push(`validate ${argv.join(' ')}`);
-      return undefined;
+      return { ok: true, dataLoaders: options.dataLoaders?.() ?? true };
     },
+    // The start of an argv: -parse_deflines reads the inputs of the run together (line WQA's sweep, D7, 2026-11-19).
+    start: (argv: readonly string[]) => ({
+      ok: true,
+      start: { conffile: null, logFile: null, dryRun: false, registerInputs: argv.includes('-parse_deflines'), prints: options.printed === undefined ? null : 'help' },
+    }),
     memoryBytes: () => 1,
-    register: (_program: string, role: number, bytes: Uint8Array) => {
+    register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);
       return { handle: ++handle, records: [{ id: role === ROLE_SUBJECT ? 's' : 'q', length: bytes.length }] };
     },
+    registerInputs: (argv: readonly string[], query: Uint8Array, subject: Uint8Array) => {
+      calls.push(`register inputs ${argv.join(' ')}`);
+      return {
+        query: { handle: ++handle, records: [{ id: 'q', length: query.length }] },
+        subject: { handle: ++handle, records: [{ id: 's', length: subject.length }] },
+        shownIds: { query: ['Q.1'], subject: ['S.1'] },
+      };
+    },
     release: (h: number) => void calls.push(`release ${h}`),
     fileRelease: (file: number) => void calls.push(`file release ${file}`),
-    run: (_argv: readonly string[], _query: number, _subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
+    run: (_argv: readonly string[], query: number, subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
       calls.push('run');
+      if (options.messages !== 'none') sink(MESSAGES_STREAM, options.messages ?? placeSignal(3));
+      if (options.printed !== undefined) {
+        calls.push(`run handles ${query} ${subject}`);
+        const half = options.printed.length >> 1;
+        sink(PRINTED_STREAM, options.printed.subarray(0, half));
+        sink(PRINTED_STREAM, options.printed.subarray(half));
+        return;
+      }
       sink(6, encode('q\ts\n'));
+      for (const chunk of options.warnings ?? []) sink(3, chunk);
       if (options.discard !== undefined) {
         sink(DISCARD_STREAM, options.discard);
         sink(7, encode('# 0 hits found\n'));
@@ -490,8 +573,7 @@ function runtimeWith(abi: ReactorAbi) {
     },
     builds: { serial: 'serial', threads: 'threads' },
     use: undefined,
-    faultChannel: 'faults',
-    keeperChannel: 'keeper',
+    main: NO_LINKS,
   });
   // The runtime holds this instance as one that a search loaded.
   (runtime as unknown as { loaded: unknown }).loaded = {
@@ -539,7 +621,7 @@ function workerRun(words: readonly string[], conffile?: RegistryFile) {
   return { run, delivered, close };
 }
 
-const LOG: RunFile = { name: 'run.log', bytes: encode('BLAST engine error: The average subject length is too short\n') };
+const LOG: RunFile = { name: 'run.log', bytes: encode('LOSAT engine error: The average subject length is too short\n') };
 const CONFFILE = { name: 'c.ini', file: new Blob(['[BLAST]\n']) };
 
 describe("the Engine worker's runtime and the files of a run", () => {
@@ -573,40 +655,223 @@ describe("the Engine worker's runtime and the files of a run", () => {
     next.close();
   });
 
-  it("forwards the engine's discard of an output (stream 9) to the Data worker, between the chunks in their order", async () => {
-    const { abi } = fakeAbi({ discard: new Uint8Array([6, 0, 0, 0]) });
-    const { run, delivered, close } = workerRun([]);
-    await runtimeWith(abi).run(run, () => undefined);
-    expect(await delivered()).toEqual([
-      { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
-      { type: 'discard', stream: 6 },
-      { type: 'chunk', stream: 7, bytes: encode('# 0 hits found\n') },
-      { type: 'end', chunks: 2, bytes: 19 },
+  // line WQA's sweep, D7, 2026-11-19: a run of -parse_deflines reads its inputs together for its argv, releases the
+  // subject that the instance retained, and releases both handles after the run.
+  it('reads the inputs of a -parse_deflines run together for its argv, and keeps no subject', async () => {
+    const { abi, calls } = fakeAbi();
+    const runtime = runtimeWith(abi);
+    const first = workerRun([]);
+    expect((await runtime.run(first.run, () => undefined)).subjectRetained).toBe(false);
+    first.close();
+    const parsed = workerRun(['-parse_deflines']);
+    const result = await runtime.run(parsed.run, () => undefined);
+    expect(result.subjectRetained).toBe(false);
+    expect(result.shownIds).toEqual({ query: ['Q.1'], subject: ['S.1'] });
+    parsed.close();
+    expect(calls).toEqual([
+      'validate tblastx -query q.fa -subject s.fa -num_threads 1',
+      'register query',
+      'register subject',
+      'run',
+      'release 101',
+      'validate tblastx -query q.fa -subject s.fa -parse_deflines -num_threads 1',
+      'release 102',
+      'register inputs tblastx -query q.fa -subject s.fa -parse_deflines -num_threads 1',
+      'run',
+      'release 103',
+      'release 104',
     ]);
-    close();
-    expect(discardedStream(new Uint8Array([7, 0, 0, 0]))).toBe(7);
-    expect(() => discardedStream(new Uint8Array([6, 0]))).toThrow('a signal of stream 9 has 2 bytes, not 4');
-    // A signal that names a stream which is not an output of a run breaks the ABI: the run fails.
-    for (const signal of [new Uint8Array([1, 0, 0, 0]), new Uint8Array([6, 0, 0, 1])]) {
+    // The next run without the option registers its subject again.
+    const again = workerRun([]);
+    expect((await runtime.run(again.run, () => undefined)).subjectRetained).toBe(false);
+    again.close();
+    expect(calls.slice(-5)).toEqual(['validate tblastx -query q.fa -subject s.fa -num_threads 1', 'register query', 'register subject', 'run', 'release 105']);
+  });
+
+  // line WQA's D13 round 2, L1, 2026-11-20: the instance keeps a subject for the next run of the same subject only when
+  // it was read as that run reads it. Read with the data loaders off, it is not what a run with them on reads (that
+  // reader refuses a first line that is not a definition line), so the run registers it again; read with them on, it
+  // serves a run without them.
+  it('serves a retained subject read with the data loaders off only to runs without them', async () => {
+    let loaders = false;
+    const { abi, calls } = fakeAbi({ dataLoaders: () => loaders });
+    const runtime = runtimeWith(abi);
+    const once = async () => {
+      const one = workerRun([]);
+      const { subjectRetained } = await runtime.run(one.run, () => undefined);
+      one.close();
+      return subjectRetained;
+    };
+    const subjects = () => calls.filter((call) => call === 'register subject').length;
+    expect(await once()).toBe(false);
+    expect(await once()).toBe(true);
+    expect(subjects()).toBe(1);
+    expect(calls).not.toContain('release 102');
+    loaders = true;
+    expect(await once()).toBe(false);
+    expect(subjects()).toBe(2);
+    // The subject read with the loaders off (handle 102) was let go before the new one was read.
+    expect(calls.slice(calls.lastIndexOf('register query'))).toEqual(['register query', 'release 102', 'register subject', 'run', 'release 104']);
+    loaders = false;
+    expect(await once()).toBe(true);
+    expect(subjects()).toBe(2);
+  });
+
+  it("forwards the engine's discard of an output (stream 9) to the Data worker with where its error is, between the chunks in their order", async () => {
+    // The signal of 8 bytes: the stream, then the place of its error (stream 3, stream 8 for the file of -logfile, or
+    // 0xffffffff for nowhere; line WQA's sweep, D7, 2026-11-20).
+    const signal = (stream: number, place: number) => {
+      const bytes = new Uint8Array(8);
+      new DataView(bytes.buffer).setUint32(0, stream, true);
+      new DataView(bytes.buffer).setUint32(4, place, true);
+      return bytes;
+    };
+    for (const [place, error] of [
+      [3, 'diagnostics'],
+      [8, 'logfile'],
+      [PLACE_NOWHERE, 'nowhere'],
+      // The error that ended the run: an output that a failed run does not keep (ABI version 7; line WQA's sweep, D15, 2026-11-20).
+      [PLACE_RUN, 'run'],
+    ] as const) {
+      const { abi } = fakeAbi({ discard: signal(6, place) });
+      const { run, delivered, close } = workerRun([]);
+      await runtimeWith(abi).run(run, () => undefined);
+      expect(await delivered()).toEqual([
+        { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
+        { type: 'discard', stream: 6, error },
+        { type: 'chunk', stream: 7, bytes: encode('# 0 hits found\n') },
+        { type: 'end', chunks: 2, bytes: 19 },
+      ]);
+      close();
+    }
+    expect(discardedStream(signal(7, 3))).toBe(7);
+    expect(discardSignal(signal(7, 8))).toEqual({ stream: 7, errorStream: 8, ended: false });
+    expect(discardSignal(signal(0, PLACE_NOWHERE))).toEqual({ stream: 0, errorStream: undefined, ended: false });
+    expect(discardSignal(signal(6, PLACE_RUN))).toEqual({ stream: 6, errorStream: undefined, ended: true });
+    expect(() => discardedStream(new Uint8Array([6, 0, 0, 0]))).toThrow('a signal of stream 9 has 4 bytes, not 8');
+    // A signal that names a stream which is not an output of a run, or a place that holds no error, breaks the ABI:
+    // the run fails.
+    for (const [bytes, error] of [
+      [signal(1, 3), 'which is not an output of a run'],
+      [signal(0x1000006, 3), 'which is not an output of a run'],
+      [signal(6, 6), 'on stream 6, which holds no error'],
+    ] as const) {
       const broken = workerRun([]);
-      await expect(runtimeWith(fakeAbi({ discard: signal }).abi).run(broken.run, () => undefined)).rejects.toThrow('which is not an output of a run');
+      await expect(runtimeWith(fakeAbi({ discard: bytes }).abi).run(broken.run, () => undefined)).rejects.toThrow(error);
       broken.close();
     }
   });
 
-  it("gives a failed run's files with its error, releases what it registered, and sends no end", async () => {
-    const { abi, calls } = fakeAbi({ runFiles: storedZip([[LOG.name, LOG.bytes]]), fail: 'BLAST engine error: The average subject length is too short' });
+  // Line WQA's D14, 2026-11-20: a run whose start says that it prints the command line's help or version reads no input
+  // (handles 0) and gives the text of stream 11 with its result, joined, and no chunk to the Data worker.
+  it("runs an argv that prints the command line's text without inputs, and gives the text with its result", async () => {
+    const help = encode('USAGE\n  losat tblastx [OPTIONS]\n');
+    const { abi, calls } = fakeAbi({ printed: help });
+    const { run, delivered, close } = workerRun(['-help']);
+    const result = await runtimeWith(abi).run(run, () => undefined);
+    expect(result.printed).toEqual(help);
+    expect(result.messages).toBe('diagnostics');
+    expect(calls).toEqual(['validate tblastx -query q.fa -subject s.fa -help -num_threads 1', 'run', 'run handles 0 0']);
+    expect(await delivered()).toEqual([{ type: 'end', chunks: 0, bytes: 0 }]);
+    close();
+    // A search gives no printed text.
+    const search = workerRun([]);
+    expect('printed' in (await runtimeWith(fakeAbi().abi).run(search.run, () => undefined))).toBe(false);
+    search.close();
+  });
+
+  // line WQA's sweep, D7, 2026-11-20: where the run's messages went is the engine's word (its signal of stream 10), which
+  // the run gives with its result, not a stream for the Data worker; a run without it, or with a place that holds no
+  // messages, breaks the ABI.
+  it("gives where the run's messages went (stream 10) with its result, and nothing of it to the Data worker", async () => {
+    for (const [place, messages] of [
+      [3, 'diagnostics'],
+      [8, 'logfile'],
+      [PLACE_NOWHERE, 'nowhere'],
+    ] as const) {
+      const { abi } = fakeAbi({ messages: placeSignal(place) });
+      const { run, delivered, close } = workerRun([]);
+      expect((await runtimeWith(abi).run(run, () => undefined)).messages).toBe(messages);
+      expect(await delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }, { type: 'end', chunks: 1, bytes: 4 }]);
+      close();
+    }
+    expect(messagesSignal(placeSignal(3))).toBe(3);
+    expect(messagesSignal(placeSignal(8))).toBe(8);
+    expect(messagesSignal(placeSignal(PLACE_NOWHERE))).toBeUndefined();
+    expect(() => messagesSignal(new Uint8Array(8))).toThrow('a signal of stream 10 has 8 bytes, not 4');
+    for (const [messages, error] of [
+      ['none', 'the engine did not say where the messages of the run go (stream 10)'],
+      [placeSignal(6), 'the engine put the messages of the run on stream 6, which holds no messages'],
+      [new Uint8Array(3), 'a signal of stream 10 has 3 bytes, not 4'],
+    ] as const) {
+      const broken = workerRun([]);
+      await expect(runtimeWith(fakeAbi({ messages }).abi).run(broken.run, () => undefined)).rejects.toThrow(error);
+      broken.close();
+    }
+  });
+
+  it("gives a failed run's files with its error, releases what it registered, and sends fail, not end", async () => {
+    const { abi, calls } = fakeAbi({ runFiles: storedZip([[LOG.name, LOG.bytes]]), fail: 'LOSAT engine error: The average subject length is too short' });
     const { run, delivered, close } = workerRun(['-logfile', 'run.log'], CONFFILE);
     const error = await runtimeWith(abi)
       .run(run, () => undefined)
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(EngineCallError);
-    expect((error as Error).message).toBe('BLAST engine error: The average subject length is too short');
+    expect((error as Error).message).toBe('LOSAT engine error: The average subject length is too short');
     expect(runFilesOf(error)).toEqual([LOG]);
     expect(calls.slice(-2)).toEqual(['release 102', 'file release 101']);
-    // The chunk written before the failure, and no end.
-    expect(await delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }]);
+    // The chunk written before the failure, then fail, and no end.
+    expect(await delivered()).toEqual([
+      { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
+      { type: 'fail', chunks: 1, bytes: 4 },
+    ]);
     close();
+  });
+
+  // Line WQA's sweep, D3 (2026-11-19): the warnings that the command line writes before its error
+  // (stream 3) reach the Data worker, once, and the output of the failed run ends with `fail` before
+  // the run's rejection, which says so; the Data worker reads them from what arrived. The runtime keeps
+  // no copy of them. A stop sends no `fail`, and its rejection does not say so.
+  it("ends a failed run's output with fail after its warnings (stream 3), and says so with the error", async () => {
+    const text = encode('Warning: [blastn] Subject_1 \u00e9 empty: Subject sequence contains no data\n');
+    // Two chunks that split the two bytes of é.
+    const cut = text.indexOf(0xc3) + 1;
+    const warnings = [text.subarray(0, cut), text.subarray(cut)];
+    const { abi } = fakeAbi({ warnings, fail: 'LOSAT engine error: The average subject length is too short' });
+    const { run, delivered, close } = workerRun([]);
+    const error = await runtimeWith(abi)
+      .run(run, () => undefined)
+      .catch((e: unknown) => e);
+    expect((error as Error).message).toBe('LOSAT engine error: The average subject length is too short');
+    expect(runOutputFailedOf(error)).toBe(true);
+    expect('diagnostics' in (error as Error)).toBe(false);
+    expect(runFilesOf(error)).toBeUndefined();
+    expect(await delivered()).toEqual([
+      { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
+      { type: 'chunk', stream: 3, bytes: warnings[0] },
+      { type: 'chunk', stream: 3, bytes: warnings[1] },
+      { type: 'fail', chunks: 3, bytes: 4 + text.length },
+    ]);
+    close();
+    // A failed run without warnings ends with `fail` too; a stop sends nothing after its chunks.
+    const silent = workerRun([]);
+    const failed = await runtimeWith(fakeAbi({ fail: 'LOSAT engine error: Empty CBlastQueryVector' }).abi)
+      .run(silent.run, () => undefined)
+      .catch((e: unknown) => e);
+    expect(runOutputFailedOf(failed)).toBe(true);
+    expect(await silent.delivered()).toEqual([
+      { type: 'chunk', stream: 6, bytes: encode('q\ts\n') },
+      { type: 'fail', chunks: 1, bytes: 4 },
+    ]);
+    silent.close();
+    const stopped = workerRun([]);
+    const stop = await runtimeWith(fakeAbi({ warnings, stop: true }).abi)
+      .run(stopped.run, () => undefined)
+      .catch((e: unknown) => e);
+    expect(stop).toBeInstanceOf(Error);
+    expect(runOutputFailedOf(stop)).toBe(false);
+    expect((await stopped.delivered()).some((message) => message.type === 'fail' || message.type === 'end')).toBe(false);
+    stopped.close();
   });
 
   it('fails a run whose file of -conffile the engine refuses, with nothing registered and nothing searched', async () => {
@@ -639,12 +904,12 @@ describe("the Engine worker's runtime and the files of a run", () => {
     await expect(runtimeWith(completed.abi).run(first.run, () => undefined)).rejects.toThrow('entry 1 is not stored (method 8)');
     expect(await first.delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }]);
     first.close();
-    const failed = fakeAbi({ runFiles: broken, fail: 'BLAST engine error: x' });
+    const failed = fakeAbi({ runFiles: broken, fail: 'LOSAT engine error: x' });
     const second = workerRun(['-logfile', 'run.log']);
     const error = await runtimeWith(failed.abi)
       .run(second.run, () => undefined)
       .catch((e: unknown) => e);
-    expect((error as Error).message).toMatch(/^BLAST engine error: x \(the engine's archive of the run's files \(ABI v2 stream 8\) cannot be read: entry 1 is not stored/);
+    expect((error as Error).message).toMatch(/^LOSAT engine error: x \(the engine's archive of the run's files \(ABI v2 stream 8\) cannot be read: entry 1 is not stored/);
     expect(runFilesOf(error)).toBeUndefined();
     second.close();
   });
@@ -698,15 +963,15 @@ describe('the gateway and the files of a run', () => {
     const posted = (await runPosted(1)).conffile!;
     expect(posted.name).toBe('c.ini');
     expect(posted.file).toBe(CONFFILE.file);
-    const result = { path: 'serial' as const, threads: 1, engineBuild: 'b', memory: { linearBytesBefore: 1, linearBytesAfter: 2, instanceRuns: 1 }, subjectRetained: false };
+    const result = { path: 'serial' as const, threads: 1, engineBuild: 'b', memory: { linearBytesBefore: 1, linearBytesAfter: 2, instanceRuns: 1 }, subjectRetained: false, messages: 'diagnostics' as const };
     send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: { ...result, runFiles: [LOG] } });
     expect((await completed).runFiles).toEqual([LOG]);
 
     const failed = engine.run(request('r2'), channel.port1, () => undefined);
     await runPosted(2);
-    send({ type: 'done', generation: 1, runId: 'r2', ok: false, error: { name: 'EngineCallError', message: 'BLAST engine error: x', runFiles: [LOG] } });
+    send({ type: 'done', generation: 1, runId: 'r2', ok: false, error: { name: 'EngineCallError', message: 'LOSAT engine error: x', runFiles: [LOG] } });
     const error = await failed.catch((e: unknown) => e);
-    expect(error).toMatchObject({ name: 'EngineCallError', message: 'BLAST engine error: x' });
+    expect(error).toMatchObject({ name: 'EngineCallError', message: 'LOSAT engine error: x' });
     expect(runFilesOf(error)).toEqual([LOG]);
 
     const plain = engine.run(request('r3'), channel.port1, () => undefined);
@@ -735,6 +1000,12 @@ describe('the name of a downloaded file of a run', () => {
     // A file named as an output's file (-logfile outfmt6.txt) is not saved under that output's name.
     expect(runFileName(run, 'outfmt6.txt')).not.toBe(outputFileName(run, 6));
     expect(runFileName(run, 'outfmt6.txt')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.outfmt6.txt');
+    // A name with a directory is saved as a name: each `/` is `_` (line WQA's sweep, D11, 2026-11-20).
+    expect(runFileName(run, 'logs/run.log')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.logs_run.log');
+    expect(runFileName(run, '/tmp/run.log')).toBe('losat-run3-tblastx-20261104T111530Z.logfile._tmp_run.log');
+    expect(runFileName(run, '/dev/stdout')).toBe('losat-run3-tblastx-20261104T111530Z.logfile._dev_stdout');
+    expect(runFileName(run, 'logs/')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.logs');
+    expect(runFileName(run, 'a/b//')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.a_b');
   });
 });
 
@@ -749,8 +1020,8 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
 
   /** The streams of a TBLASTX run of `words` on the inputs of the adapter's tests (run_start_tests.rs). */
   function run(abi: ReactorAbi, words: readonly string[], subject = fasta('arch_tbx_s.fna')) {
-    const q = abi.register('tblastx', ROLE_QUERY, fasta('arch_tbx_q.fna'));
-    const s = abi.register('tblastx', ROLE_SUBJECT, subject);
+    const q = abi.register('tblastx', ROLE_QUERY, true, fasta('arch_tbx_q.fna'));
+    const s = abi.register('tblastx', ROLE_SUBJECT, true, subject);
     const streams = new Map<number, Uint8Array[]>();
     let error: unknown;
     try {
@@ -780,9 +1051,15 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const { abi } = await instantiateSerial(module!);
     expect(abi.start(['tblastx', '-conffile', 'a.ini', '-conffile=c.ini', '-logfile', 'x.log', '-dryrun'])).toEqual({
       ok: true,
-      start: { conffile: 'c.ini', logFile: 'x.log', dryRun: true },
+      start: { conffile: 'c.ini', logFile: 'x.log', dryRun: true, registerInputs: false, prints: null },
     });
-    expect(abi.start(['blastn', '-version'])).toMatchObject({ ok: false });
+    expect(abi.start(['psiblast'])).toMatchObject({ ok: false });
+    // The command line's help and version are printed in place of a search (line WQA's D14, 2026-11-20).
+    expect(abi.start(['blastn', '-version', '-dryrun'])).toEqual({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: 'version' } });
+    expect(abi.start(['tblastx', '-dryrun', '-h'])).toMatchObject({ ok: true, start: { dryRun: false, prints: 'help' } });
+    // -parse_deflines reads the inputs of a run together, but not those of a dry run (line WQA's sweep, D7, 2026-11-19).
+    expect(abi.start(['blastn', '-query', 'q', '-subject', 's', '-parse_deflines'])).toMatchObject({ ok: true, start: { registerInputs: true } });
+    expect(abi.start(['blastn', '-query', 'q', '-subject', 's', '-parse_deflines', '-dryrun'])).toMatchObject({ ok: true, start: { registerInputs: false } });
 
     const warned = run(abi, ['-outfmt', '6', '-max_target_seqs', '1', '-logfile', 'run.log']);
     expect(warned.error).toBeUndefined();
@@ -794,7 +1071,15 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     expect(failed.error).toBeInstanceOf(EngineCallError);
     const [file] = readStoredZip(failed.joined(RUN_FILES_STREAM));
     expect(file!.name).toBe('run.log');
-    expect(new TextDecoder().decode(file!.bytes)).toContain('The average subject length is too short');
+    expect(new TextDecoder().decode(file!.bytes)).toBe(
+      'Warning: [tblastx] Subject_1 s1 alpha: Subject sequence contains no data\nLOSAT engine error: The average subject length is too short\n',
+    );
+    expect(failed.streams.has(3)).toBe(false);
+    // Without -logfile the warning before the error is on stream 3, where the command line writes it
+    // (NCBI BLAST+ 2.17.0; line WQA's sweep, D3, 2026-11-19), and the error is the run's.
+    const plain = run(abi, [], encode('>s1 alpha\n'));
+    expect((plain.error as Error).message).toBe('LOSAT engine error: The average subject length is too short\n');
+    expect(new TextDecoder().decode(plain.joined(3))).toBe('Warning: [tblastx] Subject_1 s1 alpha: Subject sequence contains no data\n');
   }, 120_000);
 
   // DECISIONS E1w3b-4: the file goes to an instance of the validation's own; the shared instance neither
@@ -806,12 +1091,14 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const missing = { ok: false, message: 'Critical: (106.23) Registry file "settings.ini" not found, aborting.' };
     expect(await control.validate(argv)).toEqual(missing);
     const before = shared.memoryBytes();
-    expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
+    expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true, dataLoaders: true });
+    // The registry's `[BLAST] DATA_LOADERS=none` turns the data loaders off, as the CLI reads it (line WQA's D16, 2026-11-20).
+    expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\nDATA_LOADERS=none\n']) })).toEqual({ ok: true, dataLoaders: false });
     expect((await control.validate(argv, { name: 'settings.ini', file: new Blob(['[x\n']) })).ok).toBe(false);
     // A file of 24 MiB and 26 bytes (four chunks, the last of 26 bytes): a section and comment lines.
     const large = new Blob(['[BLAST]\n', '; a comment line of the registry file\n'.repeat(Math.ceil((24 * 1024 * 1024) / 38))]);
     expect(large.size).toBe(3 * FILE_CHUNK_BYTES + 26);
-    expect(await control.validate(argv, { name: 'settings.ini', file: large })).toEqual({ ok: true });
+    expect(await control.validate(argv, { name: 'settings.ini', file: large })).toEqual({ ok: true, dataLoaders: true });
     expect(shared.memoryBytes()).toBe(before);
     expect(await control.validate(argv)).toEqual(missing);
   }, 120_000);

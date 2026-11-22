@@ -128,11 +128,13 @@ fn first_database_read<'d>(
 /// NCBI's error of the set-up of the records of a refused batch that are first in their scope
 /// (`first`, by input record from `input_done`; the batch's searched queries start at
 /// `searched_done`), where NCBI's set-up of the batch fails for the subjects
-/// (`stage_d_pipeline::set_up_batch`, then the first read of the database, as the search of a
-/// batch fails in `search`), in the one form of every program (`query_batch::refused_batch_error`;
-/// line WQA D10 round 5, 2026-11-20); `None` where it succeeds, so that the refusal comes. NCBI's
-/// errors of the batches before come first: their searches fail before the stop is acted on.
-/// `queries`: the input records, the searched ones and how they map (`QueryInput`).
+/// (`stage_d_pipeline::set_up_batch`, then the first read of the database where the batch's search
+/// gets to it, as the search of a batch fails in `search`), in the one form of every program
+/// (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20); `None` where it
+/// succeeds, so that the refusal comes. The batch that NCBI splits holds the repeated ids too, by
+/// the lengths of their own records (line RG item X-short-bat, review 4 M1). NCBI's errors of the
+/// batches before come first: their searches fail before the stop is acted on. `queries`: the
+/// input records, the searched ones and how they map (`QueryInput`).
 fn refused_batch_setup_error(
     first: &[bool],
     (input_done, searched_done): (usize, usize),
@@ -152,10 +154,22 @@ fn refused_batch_setup_error(
     ),
 ) -> Option<anyhow::Error> {
     let (input_records, searched_queries, query_input) = queries;
-    let queries: Vec<usize> = (searched_done..searched_queries.len())
+    // NCBI's batch (`stage_d_pipeline::BatchRecord`): each searched query by its own length, with
+    // the index of its letters among those set up where it is first in its scope.
+    let mut queries: Vec<usize> = Vec::new();
+    let mut records: Vec<super::stage_d_pipeline::BatchRecord> = Vec::new();
+    for query in (searched_done..searched_queries.len())
         .take_while(|&query| query_input.ordinal(query) < input_done + first.len())
-        .filter(|&query| first[query_input.ordinal(query) - input_done])
-        .collect();
+    {
+        let own = first[query_input.ordinal(query) - input_done];
+        records.push((
+            searched_queries[query].seq().len(),
+            own.then_some(queries.len()),
+        ));
+        if own {
+            queries.push(query);
+        }
+    }
     let letters: Vec<Vec<u8>> = queries
         .iter()
         .map(|&query| searched_queries[query].seq().to_vec())
@@ -169,6 +183,16 @@ fn refused_batch_setup_error(
             )
         })
         .collect();
+    // NCBI's first read of the database: where the batch's search gets to it (`set_up_batch`, whose
+    // chunks meet a read that fails where NCBI's do), its error.
+    let read = database.map(|database| first_database_read(database, resolved, &subject_set).0);
+    let subject_set = SubjectSetNumbers {
+        read_fails: match &read {
+            Some(Err((_, class))) => Some(*class),
+            _ => None,
+        },
+        ..subject_set
+    };
     let seg = resolved.seg.params();
     let profile = LocalStageDProfile {
         seg: seg.as_ref(),
@@ -189,6 +213,7 @@ fn refused_batch_setup_error(
     };
     let setup = super::stage_d_pipeline::set_up_batch(
         &letters,
+        &records,
         match database {
             Some(_) => SubjectLetters::Packed(&[]),
             None => subject_letters,
@@ -200,8 +225,8 @@ fn refused_batch_setup_error(
     );
     match setup {
         Err(error) => batch_failure(error).ok(),
-        Ok(validity) if !validity.iter().any(|&valid| valid) => None,
-        Ok(_) => match first_database_read(database?, resolved, &subject_set).0 {
+        Ok(false) => None,
+        Ok(true) => match read? {
             Ok(_) => None,
             Err((error, _)) => database_read_failure(error).ok(),
         },

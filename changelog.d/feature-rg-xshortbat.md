@@ -13,5 +13,10 @@
   or one whose sequence file is missing, the database's error and the query chunk stops now come in NCBI BLAST+'s
   order.
 - A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` whose pieces leave gaps between them, which NCBI
-  BLAST+ searches with the hits there lost and LOSAT refuses, now stops `tblastn` where that batch's search would
-  start, after the results of the query batches before, as `blastp` does; before, it stopped before any output.
+  BLAST+ searches with the hits there lost and LOSAT refuses, now stops `tblastn` where the search of that batch's
+  first piece with a valid query would read the subjects, after the results of the query batches before and after
+  NCBI BLAST+'s own errors of that piece; with no subject to search nothing is lost, and the batch is reported. Before,
+  it stopped before any output.
+- A `tblastn` batch that LOSAT refuses for two queries with one ID (`-parse_deflines`) and that NCBI BLAST+ splits
+  into pieces gives NCBI BLAST+'s error of the batch's setup (subjects too short for `-searchsp`, for example) only
+  where NCBI BLAST+'s pieces reach that setup, and the refusal where they stop first.

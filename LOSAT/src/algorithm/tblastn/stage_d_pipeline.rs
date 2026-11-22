@@ -36,7 +36,7 @@ use super::stage_d_results::{
 };
 use super::stage_d_stats::{LocalParameterCall, LocalParameterOptions, LocalSubjectParameters};
 use super::x_subject_store::{SubjectLetters, XPrelimSubject, XSearchSubject};
-use crate::algorithm::blastn::query_split::SplitSizes;
+use crate::algorithm::blastn::query_split::{ChunkQuery, SplitSizes};
 use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
 };
@@ -152,7 +152,7 @@ pub(super) struct SubjectSetNumbers {
     /// Where NCBI's first read of a `-db` database whose sequences LOSAT could not read fails
     /// (`None`: they were read). `tblastn_app::search` fails the first batch with a valid context
     /// with that read's error; a split batch reads the database in the preliminary search of a
-    /// chunk, after the chunk stops before it (`split_preliminary_hitlists`).
+    /// chunk, after the chunk stops before it (`SplitBatchSteps`).
     pub read_fails: Option<ReadFails>,
 }
 
@@ -399,7 +399,7 @@ pub(super) fn run_local_for_report_threads(
             &mut setup,
             None,
             Some(pool),
-            false,
+            None,
         )?;
         let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
         Ok((
@@ -435,7 +435,7 @@ pub(super) fn x_run_local_for_report_in_pool(
         &mut setup,
         None,
         Some(pool),
-        false,
+        None,
     )?;
     let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
     Ok((
@@ -1022,25 +1022,47 @@ fn run_local_search(
         &mut None,
         observer,
         None,
-        false,
+        None,
     )
 }
 
-/// The set-up of a query batch without its search (`run_local_search_with_pool` up to the batch's
-/// `LocalBatchSetup`): the validity of each query's context, or the set-up's error
-/// (`SetupEngineError`: the average subject length, the hit-saving parameters). With a database the
-/// numbers are its own, and `subjects` may hold none. `tblastn_app::refused_batch_setup_error` sets up the
-/// records of a refused batch that are first in their scope with it (line WQA D10 round 5,
-/// 2026-11-20).
+/// A record of NCBI's query batch in the set-up of a batch without its search (`set_up_batch`): its
+/// length, by which NCBI's query splitter counts it (the interval of its own record, also for a
+/// repeated id), and the index among the set-up's queries of the letters that NCBI's set-up reads
+/// for it, where LOSAT has them (`None`: a repeated id, which NCBI reads in its earlier record's
+/// letters).
+pub(super) type BatchRecord = (usize, Option<usize>);
+
+/// The set-up of a query batch without its search (`set_up_batch`): NCBI's batch (`records`), and
+/// whether NCBI's search of it reads the subjects (`reads`), which the set-up decides.
+struct SetUpOnly<'a> {
+    records: &'a [BatchRecord],
+    reads: bool,
+}
+
+/// The set-up of a query batch without its search (`run_local_search_with_pool` up to where NCBI's
+/// search of the batch reads its subjects): whether it gets there (with a database whose read fails,
+/// `SubjectSetNumbers::read_fails`, where that read fails), or the set-up's error
+/// (`SetupEngineError`: the average subject length, the hit-saving parameters; a stop of a chunk of
+/// a split batch). With a database the numbers are its own, and `subjects` may hold none.
+/// `tblastn_app::refused_batch_setup_error` sets up the records of a refused batch that are first in
+/// their scope with it (`queries`; line WQA D10 round 5, 2026-11-20), and the batch is NCBI's
+/// (`records`, which also hold the repeated ids): NCBI splits it by all its records, and its chunks
+/// meet their stops and the setup checks in the chunk loop's order (`SplitBatchSteps`) where a part
+/// of a record with its own letters has a valid context (line RG item X-short-bat, review 4 M1).
 pub(super) fn set_up_batch(
     queries: &[Vec<u8>],
+    records: &[BatchRecord],
     subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
     compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
-) -> Result<Vec<bool>> {
-    let mut setup = None;
+) -> Result<bool> {
+    let mut set_up = SetUpOnly {
+        records,
+        reads: false,
+    };
     run_local_search_with_pool(
         queries,
         subjects,
@@ -1048,13 +1070,12 @@ pub(super) fn set_up_batch(
         compo_adjust_mode,
         do_sum_stats,
         scoring,
-        &mut setup,
+        &mut None,
         None,
         None,
-        true,
+        Some(&mut set_up),
     )?;
-    let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
-    Ok(setup.query_validity)
+    Ok(set_up.reads)
 }
 
 /// NCBI's engine error of a query batch's setup (`BLAST_GapAlignSetUp`, c++/src/algo/blast/core/blast_setup.c:888-1000):
@@ -1173,7 +1194,7 @@ fn run_local_search_with_pool(
     setup: &mut Option<LocalBatchSetup>,
     observer: Option<&mut StageDBoundaryTrace>,
     pool: Option<&SearchPool<'_>>,
-    setup_only: bool,
+    setup_only: Option<&mut SetUpOnly<'_>>,
 ) -> Result<Vec<KappaResultHitList>> {
     if scoring.smith_waterman {
         return run_local_search_with_redo(
@@ -1217,7 +1238,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
     setup: &mut Option<LocalBatchSetup>,
     mut observer: Option<&mut StageDBoundaryTrace>,
     pool: Option<&SearchPool<'_>>,
-    setup_only: bool,
+    mut setup_only: Option<&mut SetUpOnly<'_>>,
     match_redo: &R,
 ) -> Result<Vec<KappaResultHitList>> {
     ensure!(
@@ -1318,7 +1339,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // (`common::database::check_setup_count`, D1a-5 of line RG), after the same reports; a run
     // whose batches have no valid context does not reach it and is reported as NCBI's. A batch
     // that NCBI splits meets these checks in the setup of its first chunk with a valid context,
-    // after the chunk stops before it (`split_preliminary_hitlists`). `query_set_setup` above
+    // after the chunk stops before it (`SplitBatchSteps`). `query_set_setup` above
     // (NCBI's `BLAST_CalcEffLengths`, blast_setup.c:946-951, before the division at :975) refuses
     // first where NCBI's search space overflows: with a count of 0 as well, that LOSAT refusal
     // takes the place of this one for a run that NCBI does not finish. It is not a batch failure,
@@ -1326,7 +1347,11 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // (line RG D1a-6, review A F2).
     let protein_split =
         crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
-    let batch_lengths: Vec<usize> = queries.iter().map(Vec::len).collect();
+    // The batch that NCBI splits: the queries, or for the set-up alone NCBI's batch (`SetUpOnly`).
+    let batch_lengths: Vec<usize> = match setup_only.as_ref().map(|set_up| set_up.records) {
+        Some(records) => records.iter().map(|&(length, _)| length).collect(),
+        None => queries.iter().map(Vec::len).collect(),
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (cited at
     // `blastp::blast_engine::psi_round::run_queries`)
     // A PSSM query (`-in_pssm`: `CPsiBlast` searches the PSSM's query through a
@@ -1366,8 +1391,36 @@ fn run_local_search_with_redo<R: MatchRedo>(
         trace.subject_nt_lengths = subjects.x_read_lengths()?;
     }
     *setup = Some(batch_setup);
-    // The set-up alone (`set_up_batch`): no search.
-    if setup_only {
+    let chunk_inputs = QuerySetInputs {
+        profile,
+        scoring,
+        gapped,
+        ungapped: &ungapped,
+        gumbel: gumbel.as_ref(),
+        total_nt: stats_nt,
+        num_subjects,
+        min_subject_length: min_subject_length.unwrap_or(0),
+        compo_adjust_mode,
+        do_sum_stats,
+    };
+    // The set-up alone (`set_up_batch`): no search. A batch with a valid context reads its
+    // subjects, one searched whole after the checks above, a split one where its chunks first get
+    // to that read (`split_batch_reads`).
+    if let Some(set_up) = setup_only.as_deref_mut() {
+        set_up.reads = valid_contexts.iter().any(|&valid| valid)
+            && match &split {
+                None => true,
+                Some(chunks) => split_batch_reads(
+                    queries,
+                    set_up.records,
+                    chunks,
+                    protein_split,
+                    &parameters,
+                    chunk_inputs,
+                    setup_checks(),
+                    pool,
+                )?,
+            };
         return Ok(Vec::new());
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
@@ -1378,7 +1431,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // A batch searched whole with no subject in hand (a list that kept no sequence, or a database
     // whose sequences could not be read, whose first batch with a valid context
     // `tblastn_app::search` fails with the read's error) finds nothing; a split batch meets its
-    // chunk stops first (`split_preliminary_hitlists`).
+    // chunk stops first (`SplitBatchSteps`).
     let no_hits = || {
         (0..queries.len())
             .map(|_| KappaResultHitList::new(profile.max_target_seqs))
@@ -1481,18 +1534,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
                 protein_split,
                 &parameters,
                 option_spaces.as_deref(),
-                QuerySetInputs {
-                    profile,
-                    scoring,
-                    gapped,
-                    ungapped: &ungapped,
-                    gumbel: gumbel.as_ref(),
-                    total_nt: stats_nt,
-                    num_subjects,
-                    min_subject_length: min_subject_length.unwrap_or(0),
-                    compo_adjust_mode,
-                    do_sum_stats,
-                },
+                chunk_inputs,
                 setup_checks(),
                 subjects,
                 prelim_size,
@@ -2430,30 +2472,187 @@ fn preliminary_profile<'a>(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-262
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:234-249,876-880
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_search_runner.hpp:71-77
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-982
+/// What NCBI's search of a split query batch meets before the search of each chunk reads the
+/// subjects, in NCBI's order (2.17.0 probes of line RG item X-short-bat, fix round 3): one owner for
+/// the chunk loop of the search (`split_preliminary_hitlists`) and for the set-up of a batch without
+/// its search (`split_batch_reads`; review 4 of the item, M1). Each stop is LOSAT's refusal after
+/// the reports of the batches before (`blastinput::app::ErrorAfterBatchReports`), each error of
+/// NCBI's setup its engine error there.
+/// - `new`: `CQuerySplitter::Split` makes the query factory of every chunk first and dereferences
+///   the missing query vector of a chunk that no query reaches (`x_ComputeQueryIndicesForChunks`;
+///   `CCoreException` `eNullPtr`), before any chunk is set up. This is where a negative CHUNK_SIZE
+///   above a negative OVERLAP_CHUNK_SIZE (NCBI's `size_t` chunk ranges wrap, split_query_cxx.cpp:
+///   145-171) whose first range covers the batch stops, and a positive pair whose evened chunk size
+///   falls below the overlap (the start wraps after chunk 0).
+/// - `before_read`, chunk by chunk after the chunk's setup: the setup of a chunk that would be split
+///   again makes no lookup table (blast_aux_priv.cpp:206-216), which the chunk's search
+///   dereferences whether or not its contexts are valid, after the chunks before it were searched;
+///   then the setup of the chunk's preliminary search (`BLAST_GapAlignSetUp`) reads the length of
+///   OID 0 where the statistics' total is not positive (`ReadFails::Setup`), checks the
+///   Karlin-Altschul blocks (a chunk without a valid context ends there: NCBI ignores its error,
+///   prelim_stage.cpp:273-284), then the subject length and the hit-saving parameters (the batch's
+///   `preliminary_setup_checks`, once: they are the same for every chunk); then the chunk's search
+///   reads the subjects, where a read of the database that fails ends the stage
+///   (`ReadFails::Search`).
+struct SplitBatchSteps {
+    sizes: SplitSizes,
+    read_fails: Option<ReadFails>,
+    /// The batch's setup checks, until the first chunk with a valid context meets them.
+    setup_checks: Option<Result<()>>,
+}
+
+/// Where a chunk of a split batch goes after `SplitBatchSteps::before_read`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChunkStep {
+    /// The chunk's search reads the subjects.
+    Read,
+    /// The chunk finds nothing: none of its contexts is valid.
+    Skip,
+    /// The stage ends: NCBI's read of the database fails here (`SubjectSetNumbers::read_fails`).
+    End,
+}
+
+impl SplitBatchSteps {
+    /// The steps of the batch split into `chunks` by `sizes`, with the database's read failure
+    /// `read_fails` and the batch's setup checks `setup_checks`; a chunk without a query stops the
+    /// batch here.
+    fn new(
+        chunks: &[ProteinQueryChunk],
+        sizes: SplitSizes,
+        read_fails: Option<ReadFails>,
+        setup_checks: Result<()>,
+    ) -> Result<Self> {
+        // `split_protein_batch` makes no part for a chunk that no query reaches.
+        if chunks.iter().any(|chunk| chunk.queries.is_empty()) {
+            return Err(anyhow::Error::new(
+                crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+                    "a query chunk without a query is not supported by LOSAT's TBLASTN"
+                )),
+            ));
+        }
+        Ok(Self {
+            sizes,
+            read_fails,
+            setup_checks: Some(setup_checks),
+        })
+    }
+
+    /// The steps of `chunk` after its setup (`valid`: whether a context of it is valid) and before
+    /// its search reads the subjects.
+    fn before_read(&mut self, chunk: &ProteinQueryChunk, valid: bool) -> Result<ChunkStep> {
+        if protein_chunk_would_be_split(std::slice::from_ref(chunk), self.sizes) {
+            return Err(anyhow::Error::new(
+                crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+                    "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's TBLASTN"
+                )),
+            ));
+        }
+        if self.read_fails == Some(ReadFails::Setup) {
+            return Ok(ChunkStep::End);
+        }
+        if !valid {
+            return Ok(ChunkStep::Skip);
+        }
+        if let Some(checks) = self.setup_checks.take() {
+            checks?;
+        }
+        if self.read_fails.is_some() {
+            return Ok(ChunkStep::End);
+        }
+        Ok(ChunkStep::Read)
+    }
+}
+
+/// The letters of the part `part` of the query `query` (of `queries`) as a chunk of a split batch
+/// reads them: with lower-case masking, the masks of its whole record restricted to the part
+/// (`protein_chunk_part_in_record`).
+fn chunk_part_letters(
+    queries: &[Vec<u8>],
+    profile: &LocalStageDProfile<'_>,
+    query: usize,
+    part: &ChunkQuery,
+) -> Vec<u8> {
+    let letters = &queries[query];
+    if !profile.mask_lowercase {
+        return letters[part.from..part.to].to_vec();
+    }
+    let (record, offset) = profile
+        .query_records
+        .get(query)
+        .copied()
+        .unwrap_or((letters, 0));
+    protein_chunk_part_in_record(record, offset, part)
+}
+
+/// Whether NCBI's search of a split batch gets to a read of the subjects (`SplitBatchSteps`), for
+/// the set-up of a batch without its search (`set_up_batch`): NCBI's batch is `records` (each
+/// part of a chunk is of one of them), split into `chunks`; its stops and the setup checks
+/// (`setup_checks`) are its errors. A chunk is valid where a part of a record whose letters LOSAT
+/// has (`queries`, the records with their own letters) has a valid context; the parts of a repeated
+/// id, which NCBI reads in its earlier record's letters, are left out. A chunk valid only through
+/// such a part is passed over: where LOSAT then gives NCBI's error, at a later chunk, it is the
+/// same error (the setup checks and the reads are the same for every chunk), and elsewhere the
+/// caller's refusal stands. The setups of the chunks take the batch's effective search spaces.
+#[allow(clippy::too_many_arguments)]
+fn split_batch_reads(
+    queries: &[Vec<u8>],
+    records: &[BatchRecord],
+    chunks: &[ProteinQueryChunk],
+    sizes: SplitSizes,
+    batch_parameters: &LocalSubjectParameters,
+    inputs: QuerySetInputs<'_>,
+    setup_checks: Result<()>,
+    pool: Option<&SearchPool<'_>>,
+) -> Result<bool> {
+    let mut steps = SplitBatchSteps::new(
+        chunks,
+        sizes,
+        inputs.profile.subject_set.read_fails,
+        setup_checks,
+    )?;
+    let batch_eff_searchsp: Vec<i64> = batch_parameters
+        .lengths
+        .iter()
+        .map(|length| length.eff_searchsp)
+        .collect();
+    for chunk in chunks {
+        let parts: Vec<Vec<u8>> = chunk
+            .queries
+            .iter()
+            .filter_map(|part| {
+                records[part.query]
+                    .1
+                    .map(|query| chunk_part_letters(queries, &inputs.profile, query, part))
+            })
+            .collect();
+        let valid = !parts.is_empty()
+            && query_set_setup(&parts, inputs, Some(&batch_eff_searchsp), false, pool)?
+                .valid_contexts
+                .iter()
+                .any(|&valid| valid);
+        match steps.before_read(chunk, valid)? {
+            ChunkStep::Skip => continue,
+            ChunkStep::Read | ChunkStep::End => return Ok(true),
+        }
+    }
+    Ok(false)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-290
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:171-182
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:234,876-880
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_search_runner.hpp:71-77
 // The preliminary stage of a split batch (RP-4): each chunk is a query set of its parts
 // (the chunk's query factory, with the lower-case masks restricted to each part), with the
-// batch's effective search spaces, and its hit lists merge into the batch's. A chunk whose
-// contexts all fail the Karlin-Altschul setup finds nothing (NCBI ignores its error). NCBI's
-// stops in the batch's search come in its order (2.17.0 probes of line RG item X-short-bat, fix
-// round 3), each after the reports of the batches before (`blastinput::app::ErrorAfterBatchReports`):
-// `CQuerySplitter::Split` makes the query factory of every chunk first (`Split`,
-// prelim_stage.cpp:235) and dereferences the missing query vector of a chunk that no query
-// reaches (`x_ComputeQueryIndicesForChunks`, split_query_cxx.cpp:234-249; `CCoreException`
-// `eNullPtr`); then, chunk by chunk, the setup of a chunk that would be split again makes no
-// lookup table (blast_aux_priv.cpp:206-216, which split_query_aux_priv.cpp:190-194 calls),
-// which the chunk's search dereferences
-// whether or not its contexts are valid, after the chunks before it were searched. The setup of
-// the preliminary search of each chunk (`BLAST_GapAlignSetUp`, blast_setup.c:925-982) reads the
-// length of OID 0 where the statistics' total is not positive, checks the Karlin-Altschul blocks
-// (a chunk without a valid context ends there), then the subject length and the hit-saving
-// parameters (`setup_checks`, the batch's `preliminary_setup_checks`), and its search reads the
-// subjects: with no subject in hand (`subjects` empty: a list that kept none, or a database
-// whose read fails, `SubjectSetNumbers::read_fails`) the chunks find nothing, the stops still
-// come where NCBI meets them, and a read that fails ends the stage where NCBI meets it.
+// batch's effective search spaces, and its hit lists merge into the batch's. NCBI's stops in the
+// batch's search and the setup of each chunk come in its order (`SplitBatchSteps`); a chunk whose
+// contexts all fail the Karlin-Altschul setup finds nothing (NCBI ignores its error). With no
+// subject in hand (`subjects` empty: a list that kept none, or a database whose read fails,
+// `SubjectSetNumbers::read_fails`) the chunks find nothing, the stops still come where NCBI meets
+// them, and a read that fails ends the stage where NCBI meets it.
 #[allow(clippy::too_many_arguments)]
 fn split_preliminary_hitlists(
     queries: &[Vec<u8>],
@@ -2467,17 +2666,12 @@ fn split_preliminary_hitlists(
     prelim_size: usize,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<Vec<Option<KappaResultHitList>>> {
-    // A chunk without a query: `split_protein_batch` makes no part for it. This is where a
-    // negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE (NCBI's `size_t` chunk ranges wrap,
-    // split_query_cxx.cpp:145-171) whose first range covers the batch stops, and a positive pair
-    // whose evened chunk size falls below the overlap (the start wraps after chunk 0).
-    if chunks.iter().any(|chunk| chunk.queries.is_empty()) {
-        return Err(anyhow::Error::new(
-            crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
-                "a query chunk without a query is not supported by LOSAT's TBLASTN"
-            )),
-        ));
-    }
+    let mut steps = SplitBatchSteps::new(
+        chunks,
+        sizes,
+        inputs.profile.subject_set.read_fails,
+        setup_checks,
+    )?;
     // The options' spaces of the chunks (`SplitQuery_SetEffectiveSearchSpace`): the batch's own,
     // or the preliminary stage's where they differ (`run_local_search_with_pool`).
     let batch_eff_searchsp: Vec<i64> = match option_spaces {
@@ -2489,47 +2683,19 @@ fn split_preliminary_hitlists(
             .collect(),
     };
     let per_subject = inputs.profile.subject_set.per_subject();
-    let read_fails = inputs.profile.subject_set.read_fails;
-    let mut setup_checks = Some(setup_checks);
     let mut merged: Vec<Option<KappaResultHitList>> = (0..queries.len()).map(|_| None).collect();
     for chunk in chunks {
         let parts: Vec<Vec<u8>> = chunk
             .queries
             .iter()
-            .map(|part| {
-                let query = &queries[part.query];
-                if !inputs.profile.mask_lowercase {
-                    return query[part.from..part.to].to_vec();
-                }
-                let (record, offset) = inputs
-                    .profile
-                    .query_records
-                    .get(part.query)
-                    .copied()
-                    .unwrap_or((query, 0));
-                protein_chunk_part_in_record(record, offset, part)
-            })
+            .map(|part| chunk_part_letters(queries, &inputs.profile, part.query, part))
             .collect();
         // A chunk's setup is inside `search` (the common line marks only the batch's own).
         let setup = query_set_setup(&parts, inputs, Some(&batch_eff_searchsp), false, pool)?;
-        if protein_chunk_would_be_split(std::slice::from_ref(chunk), sizes) {
-            return Err(anyhow::Error::new(
-                crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
-                    "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's TBLASTN"
-                )),
-            ));
-        }
-        if read_fails == Some(ReadFails::Setup) {
-            break;
-        }
-        if !setup.valid_contexts.iter().any(|&valid| valid) {
-            continue;
-        }
-        if let Some(checks) = setup_checks.take() {
-            checks?;
-        }
-        if read_fails.is_some() {
-            break;
+        match steps.before_read(chunk, setup.valid_contexts.iter().any(|&valid| valid))? {
+            ChunkStep::Read => {}
+            ChunkStep::Skip => continue,
+            ChunkStep::End => break,
         }
         if subjects.count() == 0 {
             continue;
@@ -2537,10 +2703,10 @@ fn split_preliminary_hitlists(
         // The wrapped ranges of a negative CHUNK_SIZE that leave no chunk without a query leave
         // gaps between them (a chunk is then never split again), which NCBI searches on with the
         // hits in the gaps lost, a setting the maintainer kept refused (PD-LOSAT-NCBI-DEFECTS
-        // version 1.1, D13): refused at the first chunk that NCBI searches (with no subject in
-        // hand nothing is lost, and the batch is reported), after the reports of the batches
-        // before (the form of 1.40 for a refusal in the middle of a run, as BLASTP's: review 3 of
-        // line RG item X4).
+        // version 1.1, D13): refused where the search of the first chunk with a valid context
+        // reads the subjects, after its setup checks and the reads of the database that fail before
+        // it, with subjects in hand (without one nothing is lost, and the batch is reported), after
+        // the reports of the batches before (the form of 1.40 for a refusal in the middle of a run).
         if sizes.negative_chunk_size() {
             return Err(anyhow::Error::new(
                 crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(

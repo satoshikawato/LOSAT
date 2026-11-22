@@ -448,9 +448,10 @@ fn a_database_search_writes_the_reports_before_the_refusal() {
 ///   chunk size, 85, is below the overlap) and 5 chunks without a query.
 ///
 /// A query of 248 residues is 2 chunks of 25 and 23 residues with 200 between them, which NCBI
-/// searches on with the hits there lost: refused where its search would start, after the report of
-/// the query before (PD-LOSAT-NCBI-DEFECTS D13, the form of 1.40, as BLASTP's; row
-/// `db.xs.tblastn.bat.gap.6`).
+/// searches on with the hits there lost: refused where the search of its first chunk with a valid
+/// context would read the subjects (after that chunk's setup checks and the reads of the database
+/// that fail before it), after the report of the query before (PD-LOSAT-NCBI-DEFECTS D13, the form
+/// of 1.40; row `db.xs.tblastn.bat.gap.6`).
 #[test]
 fn the_query_chunk_stops_are_refused_after_the_reports_before() {
     let temp = TempDir::new("chunk");
@@ -694,6 +695,73 @@ fn a_split_batch_meets_a_failing_read_of_the_database_where_ncbi_does() {
                     let stderr = String::from_utf8_lossy(&run.stderr);
                     assert_eq!(run.status.code(), Some(3), "{case}: {stderr}");
                     assert_eq!(stderr, format!("{error}\n"), "{case}");
+                }
+            }
+        }
+    }
+}
+
+/// A batch that LOSAT refuses for two queries of one id under `-parse_deflines` (`q1`, `q2`, `q1`
+/// of 300 residues each, `tests/db_search/q1c/avgdup_bp.faa`; line WQA D10) gives NCBI's error of
+/// the batch's set-up where NCBI's search of the batch meets it, also where NCBI splits the batch
+/// (review 4 of line RG item X-short-bat, M1; rows `db.pd.q1c.tn.avgdup.split*.subj.6` and
+/// `db.pd.q1c.tn.nsm1.split.6`). NCBI splits the batch by all three records, and its chunks meet
+/// their stops and the setup's checks in the order of the chunk loop:
+/// - `CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=10`: 3 chunks of 307 residues, none split again; chunk 0's
+///   setup fails for subjects too short for `-searchsp 1000` (`tests/db_search/q1c/avg_s.fna`),
+///   and for the hit-saving parameters of `dbcounts/nsm1` (`NSEQ 4294967295`) with `-searchsp`;
+/// - `403` and `202`: 4 chunks, none split again, where `q1` and `q2` alone would make a chunk
+///   that NCBI splits again: the error;
+/// - `453` and `227`: NCBI's chunk 0 would be split again (NCBI stops there, exit status 3), where
+///   `q1` and `q2` alone would make 2 chunks that are not: LOSAT's refusal of the repeated id,
+///   which stands for a stop of NCBI's chunks;
+/// - unsplit: the error, as before.
+#[test]
+fn a_refused_batch_that_ncbi_splits_meets_the_set_up_errors_where_ncbi_does() {
+    let temp = TempDir::new("refusedsplit");
+    let dir = temp.0.as_path();
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
+    let query = tests.join("q1c/avgdup_bp.faa");
+    let subject = tests.join("q1c/avg_s.fna");
+    let nsm1 = tests.join("dbcounts/nsm1");
+    let short = "LOSAT engine error: The average subject length is too short";
+    let hit_saving = "LOSAT engine error: Unknown error code 1";
+    let repeated = "two query records have the Seq-id lcl|q1";
+    let subjects = ["-subject", subject.to_str().unwrap(), "-searchsp", "1000"];
+    let database = ["-db", nsm1.to_str().unwrap(), "-searchsp", "1000000"];
+    // (subjects, CHUNK_SIZE and OVERLAP_CHUNK_SIZE, NCBI's error (exit status 3) or the refusal)
+    let cases: [(&[&str], Option<(&str, &str)>, Result<&str, &str>); 5] = [
+        (&subjects, Some(("300", "10")), Err(short)),
+        (&subjects, Some(("403", "202")), Err(short)),
+        (&subjects, Some(("453", "227")), Ok(repeated)),
+        (&subjects, None, Err(short)),
+        (&database, Some(("300", "10")), Err(hit_saving)),
+    ];
+    for (searched, split, expected) in cases {
+        let env: Vec<(&str, &str)> = split
+            .map(|(chunk, overlap)| vec![("CHUNK_SIZE", chunk), ("OVERLAP_CHUNK_SIZE", overlap)])
+            .unwrap_or_default();
+        for threads in ["1", "4"] {
+            let case = format!("{searched:?} {split:?} threads {threads}");
+            let mut args = vec!["tblastn", "-query", query.to_str().unwrap()];
+            args.extend(searched);
+            args.extend(["-parse_deflines", "-outfmt", "6", "-num_threads", threads]);
+            let run = losat(dir, &env, &args);
+            let stderr = String::from_utf8_lossy(&run.stderr);
+            assert!(run.stdout.is_empty(), "{case}: {stderr}");
+            match expected {
+                Ok(refusal) => {
+                    assert_eq!(run.status.code(), Some(1), "{case}: {stderr}");
+                    assert!(stderr.contains(refusal), "{case}: {stderr}");
+                }
+                Err(error) => {
+                    // After the warnings of the subjects without letters (`s2`, `s3`).
+                    assert_eq!(run.status.code(), Some(3), "{case}: {stderr}");
+                    assert!(
+                        stderr.ends_with(&format!("{error}\n"))
+                            && stderr.matches(error).count() == 1,
+                        "{case}: {stderr}"
+                    );
                 }
             }
         }

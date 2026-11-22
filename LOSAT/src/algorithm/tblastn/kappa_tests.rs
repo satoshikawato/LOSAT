@@ -2088,20 +2088,14 @@ fn report_counts_compare_an_ambiguous_codon_as_the_rows_show_it() {
             matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
         };
         let mut target = TargetTranslation::new(subject, &code);
-        let (ident, positives, length, mismatches, _, _) = postredo_converted_stats_with_matrix(
-            &converted,
-            &query,
-            &mut target,
-            ScoringMatrix::Blosum62,
-        )
-        .unwrap();
+        let ((ident, positives, length, mismatches, _, _), shown) =
+            report_converted_stats(&converted, &query, &mut target, ScoringMatrix::Blosum62)
+                .unwrap();
         assert_eq!(
             (ident, positives, length, mismatches),
             (4, 4, 5, 1),
             "frame {frame}"
         );
-        let shown =
-            shown_report_counts(&converted, &query, &mut target, (ident, mismatches)).unwrap();
         assert_eq!(shown, (3, 2), "frame {frame}");
     }
 }

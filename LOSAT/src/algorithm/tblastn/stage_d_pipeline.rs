@@ -13,7 +13,7 @@ use rayon::prelude::*;
 
 use super::kappa::{
     convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats_with_matrix,
-    postredo_engine_positives, reap_contained_postredo_hsps, shown_report_counts,
+    postredo_engine_positives, reap_contained_postredo_hsps, report_converted_stats,
     ConvertedKappaHsp,
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
@@ -1890,18 +1890,11 @@ fn run_local_search_with_redo<R: MatchRedo>(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:515-526 uses the masked working query;
                 // objtools/align_format/tabular.cpp:983-1021 recomputes the
                 // report counts from the original aligned query sequence.
-                let (report_ident, _, _, report_mismatches, _, _) =
-                    postredo_converted_stats_with_matrix(
-                        &converted,
-                        &report_queries[context],
-                        &mut target,
-                        scoring.matrix,
-                    )?;
-                let (report_ident, report_mismatches) = shown_report_counts(
+                let (_, (report_ident, report_mismatches)) = report_converted_stats(
                     &converted,
                     &report_queries[context],
                     &mut target,
-                    (report_ident, report_mismatches),
+                    scoring.matrix,
                 )?;
                 Ok(KappaHspPayload {
                     bit_score: bits[index],
@@ -3888,18 +3881,14 @@ fn finish_local_ungapped(
                     )?)],
                     matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
                 };
-                let (ident, positives, length, mismatches, gap_opens, gap_letters) =
-                    postredo_converted_stats_with_matrix(
-                        &converted,
-                        &steps.query_nomask[context],
-                        &mut target,
-                        steps.matrix,
-                    )?;
-                let (report_ident, report_mismatches) = shown_report_counts(
+                let (
+                    (ident, positives, length, mismatches, gap_opens, gap_letters),
+                    (report_ident, report_mismatches),
+                ) = report_converted_stats(
                     &converted,
                     &steps.query_nomask[context],
                     &mut target,
-                    (ident, mismatches),
+                    steps.matrix,
                 )?;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1918-1928
                 // The bit score of the context's ungapped block: (score * Lambda - ln K) / ln 2.
@@ -4087,18 +4076,14 @@ fn finish_local_mode0_no_sum_stats(
                     edit_script: original.edit_script,
                     matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
                 };
-                let (ident, positives, length, mismatches, gap_opens, gap_letters) =
-                    postredo_converted_stats_with_matrix(
-                        &converted,
-                        &query_nomask[context],
-                        &mut target,
-                        scoring.matrix,
-                    )?;
-                let (report_ident, report_mismatches) = shown_report_counts(
+                let (
+                    (ident, positives, length, mismatches, gap_opens, gap_letters),
+                    (report_ident, report_mismatches),
+                ) = report_converted_stats(
                     &converted,
                     &query_nomask[context],
                     &mut target,
-                    (ident, mismatches),
+                    scoring.matrix,
                 )?;
                 Ok(KappaHspPayload {
                     bit_score: (hsp.hsp.score as f64 * gapped_params[context].lambda

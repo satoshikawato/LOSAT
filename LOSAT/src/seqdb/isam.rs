@@ -22,18 +22,18 @@
 //! # NCBI functions and what they became
 //!
 //! - `CSeqDBIsam` constructor, `x_InitSearch`, `x_FindIndexBounds`: [`StringIsam::open`] and
-//!   [`StringIsam::from_files`]; `x_OutOfBounds(string)`: the private `out_of_bounds`;
-//!   `GetIdBounds(string)`: `StringIsam::id_bounds`, which only the tests call.
+//!   [`StringIsam::from_files`]; `x_OutOfBounds` of a string: the private `out_of_bounds`;
+//!   `GetIdBounds` of a string: `StringIsam::id_bounds`, which only the tests call.
 //! - `x_StringSearch` with `x_DiffSample`, `x_DiffCharLease`, `x_DiffChar`, `x_LoadPage`,
 //!   `x_ExtractAllData`, `x_ExtractPageData`, `x_ExtractData`: [`StringIsam::string_search_into`]
 //!   (every line of the volume that matches a term, as `(key, data)` strings).
 //! - `StringToOids`: [`StringIsam::string_to_oids`]; `CSeqDBVol::x_CheckVersions`:
 //!   [`check_versions`]; the string case of `CSeqDBVol::x_StringToOids`:
 //!   [`StringIsam::string_id_to_oids`].
-//! - `IdsToOids(CSeqDBGiList&)` (`x_TranslateGiList<string>`): [`StringIsam::ids_to_oids`];
+//! - `IdsToOids` of a `CSeqDBGiList` (`x_TranslateGiList<string>`): [`StringIsam::ids_to_oids`];
 //!   `CSeqDBGiList::InsureOrder` for the string list: [`insure_order`].
-//! - `IdsToOids(CSeqDBNegativeList&)` (`x_SearchNegativeMultiSeq`): [`StringIsam::negative_scan`];
-//!   `CSeqDBNegativeList` and `CSeqDBBitVector`: [`NegativeOids`].
+//! - `IdsToOids` of a `CSeqDBNegativeList` (`x_SearchNegativeMultiSeq`):
+//!   [`StringIsam::negative_scan`]; `CSeqDBNegativeList` and `CSeqDBBitVector`: [`NegativeOids`].
 //! - `SeqDB_SimplifyAccession`, `SeqDB_SimplifySeqid`, `PreprocessIdsForISAMSiLookup`:
 //!   [`seqdb_simplify_accession`], [`simplify_accession_for_isam`].
 //!
@@ -47,14 +47,14 @@
 //!
 //! A negative id list is applied to a volume by [`StringIsam::negative_scan`]. Every line of the
 //! ISAM is read. A line whose key is in the sorted id list marks its OID *visible*
-//! (`AddVisibleOid`); any other line marks it *included* (`AddIncludedOid`). `GetOidStatus(oid)` is
-//! `included(oid) || !visible(oid)`: an OID is kept unless it was seen only through listed keys,
-//! so a sequence with one listed key and one unlisted key (an accession and its `.version`
-//! are two lines of one OID) stays. `GetNumOids()` is the larger of the two vectors' sizes (the
-//! highest OID set plus one); `CSeqDBOIDList::x_ApplyNegativeList` (`seqdboidlist.cpp:376-404`)
-//! clears every OID of the volume from `GetNumOids()` on and every OID below it whose status is
-//! false. Both vectors are `CSeqDBBitVector`s: `SetBit` grows `Size` to `oid + 1`, `GetBit` is
-//! false past `Size`.
+//! (`AddVisibleOid`); any other line marks it *included* (`AddIncludedOid`). `GetOidStatus` of
+//! `oid` is true when the OID is included or is not visible: an OID is kept unless it was seen only
+//! through listed keys, so a sequence with one listed key and one unlisted key (an accession and
+//! its `.version` are two lines of one OID) stays. `GetNumOids()` is the larger of the two vectors'
+//! sizes (the highest OID set plus one); `CSeqDBOIDList::x_ApplyNegativeList`
+//! (`seqdboidlist.cpp:376-404`) clears every OID of the volume from `GetNumOids()` on and every OID
+//! below it whose status is false. Both vectors are `CSeqDBBitVector`s: `SetBit` grows `Size` to
+//! one more than `oid`, `GetBit` is false past `Size`.
 //!
 //! # Quirks of NCBI that are kept
 //!
@@ -72,16 +72,16 @@
 //!   kept.
 //! - `StringToOids` looks for `gb|acc|` and `gb||acc` before `acc` (unless the id was simplified),
 //!   strips a numeric `.version` of 1 to 3 digits only when nothing matched, and last tries
-//!   `CSeq_id(acc, fParse_RawText | fParse_AnyLocal).AsFastaString()`; the `OID`s come from
-//!   `atoi` of the data strings. [`check_versions`] then keeps only OIDs whose Seq-ids hold the
-//!   accession (the text after the last `|` of `acc` before its first `.`) with the version the
-//!   text after that `.` starts with.
+//!   `AsFastaString()` of a `CSeq_id` made from `acc` with the flags `fParse_RawText` and
+//!   `fParse_AnyLocal`; the `OID`s come from `atoi` of the data strings. [`check_versions`] then
+//!   keeps only OIDs whose Seq-ids hold the accession (the text after the last `|` of `acc` before
+//!   its first `.`) with the version the text after that `.` starts with.
 //! - The positive batch (`x_TranslateGiList<string>`) is not "first ISAM line wins". For a key
 //!   that has several lines in one page, which line sets the OID of the equal list entries
 //!   depends on the path: an entry reached by `s_AdvanceKeyList`, which stops at the *last* line
 //!   with a key `<=` the id, takes that last line; an entry reached right after the previous
-//!   line was used (`++index`, `s_AdvanceGiList`, `s_SetTranslation` with `keys[index]`) takes
-//!   the line at `index`, the *first* line of the key when the previous list entry was a
+//!   line was used (the step of `index`, `s_AdvanceGiList`, `s_SetTranslation` with `keys[index]`)
+//!   takes the line at `index`, the *first* line of the key when the previous list entry was a
 //!   smaller key. Entries equal to a translated key later in the list are translated with it
 //!   (`s_SetTranslation`, which overwrites an OID that was set), and entries that have an OID
 //!   before the call are skipped by `s_AdvanceGiList` when it passes them.
@@ -506,8 +506,8 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1646-1665
-    /// `GetIdBounds(string&, string&, int&)`: the lower-cased first and last key and the number
-    /// of lines; count 0 and empty keys for an uninitialised index.
+    /// `GetIdBounds` with two strings and an int, all by reference: the lower-cased first and last
+    /// key and the number of lines; count 0 and empty keys for an uninitialised index.
     #[cfg(test)]
     pub fn id_bounds(&self) -> (Vec<u8>, Vec<u8>, i32) {
         if !self.initialized {
@@ -554,8 +554,8 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:899-923
-    /// `x_LoadPage(SampleNum1, SampleNum2)`: the data file's bytes from the first record of page
-    /// `s1` to the first of page `s2`.
+    /// `x_LoadPage` with `SampleNum1` and `SampleNum2`: the data file's bytes from the first record
+    /// of page `s1` to the first of page `s2`.
     fn load_page(&self, s1: i64, s2: i64) -> Result<Vec<u8>, SeqDbError> {
         let begin_offset = KEY_SAMPLE_OFFSET + 4 * s1 as u64;
         let key_off1 = self.index_u32(begin_offset)?;
@@ -611,7 +611,7 @@ impl StringIsam {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1604-1623
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:1142-1148
-    /// `x_OutOfBounds(string)`: the lower-cased `key` is before the first key or after the last
+    /// `x_OutOfBounds` of a string: the lower-cased `key` is before the first key or after the last
     /// one.
     fn out_of_bounds(&self, key: &[u8]) -> bool {
         let (Some(first), Some(last)) = (&self.first_key, &self.last_key) else {
@@ -909,7 +909,7 @@ impl StringIsam {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2724-2733
     /// The string case of `CSeqDBVol::x_StringToOids`: `StringToOids` of the simplified id with
     /// `version_check` asked for, then `x_CheckVersions` of the user's `acc` when the lookup
-    /// stripped a version. `seq_ids` is `GetSeqIDs(oid)` of the volume.
+    /// stripped a version. `seq_ids` is `GetSeqIDs` of `oid` of the volume.
     pub fn string_id_to_oids(
         &self,
         acc: &[u8],
@@ -1020,7 +1020,7 @@ impl StringIsam {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2540-2550
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1388-1419
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:548-623
-    /// `IdsToOids(vol_start, vol_end, CSeqDBGiList&)` for the string list
+    /// `IdsToOids` with `vol_start`, `vol_end` and a `CSeqDBGiList` for the string list
     /// (`x_TranslateGiList<string>`): sets `oid` of every entry of `ids` whose `si` (lower-cased,
     /// simplified: [`simplify_accession_for_isam`]) is a key of the volume, to the OID of the
     /// line plus `vol_start`. An entry that has an `oid` already is left as it is.
@@ -1099,11 +1099,11 @@ impl StringIsam {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2582-2591
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1421-1459
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:333-418
-    /// `x_SearchNegativeMultiSeq` (through `IdsToOids(vol_start, vol_end, CSeqDBNegativeList&)`):
-    /// reads every line of the volume and marks its OID (plus `vol_start`) in `out`: visible if
-    /// its key is in `ids`, included if not. `ids` are the lower-cased simplified ids; they are
-    /// sorted here (`CSeqDBNegativeList::InsureOrder`). `vol_end` is the global end OID of the
-    /// volume (see the quirks above).
+    /// `x_SearchNegativeMultiSeq` (through `IdsToOids` with `vol_start`, `vol_end` and a
+    /// `CSeqDBNegativeList`): reads every line of the volume and marks its OID (plus `vol_start`)
+    /// in `out`: visible if its key is in `ids`, included if not. `ids` are the lower-cased
+    /// simplified ids; they are sorted here (`CSeqDBNegativeList::InsureOrder`). `vol_end` is the
+    /// global end OID of the volume (see the quirks above).
     pub fn negative_scan(
         &self,
         vol_start: u32,
@@ -1209,7 +1209,8 @@ impl ScanChunk {
     }
 }
 
-/// NCBI's `CSeqDBException(eArgErr, "Error: Unable to use ISAM index in batch mode.")`.
+/// NCBI's `CSeqDBException` of kind `eArgErr` with the message
+/// `"Error: Unable to use ISAM index in batch mode."`.
 pub(super) fn batch_mode_error() -> SeqDbError {
     SeqDbError::NotFound(
         "Error: Unable to use ISAM index in batch mode."
@@ -1227,7 +1228,7 @@ pub struct SiOid {
 }
 
 impl SiOid {
-    /// `SSiOid(si, -1)`.
+    /// `SSiOid` of `si` with the OID -1.
     pub fn new(si: impl Into<Vec<u8>>) -> Self {
         Self {
             si: si.into(),
@@ -1239,7 +1240,7 @@ impl SiOid {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:574-586
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:589-606
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:616-651
-/// `CSeqDBGiList::InsureOrder(eGi)` for the string list: sorts by `si` (`std::string` order:
+/// `CSeqDBGiList::InsureOrder` with `eGi` for the string list: sorts by `si` (`std::string` order:
 /// unsigned bytes, then length) unless it is sorted already.
 pub fn insure_order(ids: &mut [SiOid]) {
     let already = ids.windows(2).all(|w| w[1].si >= w[0].si);
@@ -1316,8 +1317,8 @@ fn find_in_negative_list(ids: &[Vec<u8>], index: &mut usize, key: &[u8]) -> bool
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:304-319
-/// `s_IsSameAccession(acc1, acc2)`: `acc2` has no `.`, `acc1` has one and holds `acc2`, and
-/// `acc2` is what `acc1` has before its first `.`.
+/// `s_IsSameAccession` with `acc1` and `acc2`: `acc2` has no `.`, `acc1` has one and holds `acc2`,
+/// and `acc2` is what `acc1` has before its first `.`.
 fn is_same_accession(acc1: &[u8], acc2: &[u8]) -> bool {
     if !acc2.contains(&b'.') {
         // no version in acc2
@@ -1333,8 +1334,8 @@ fn is_same_accession(acc1: &[u8], acc2: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:321-330
-/// `s_IsSameAccession(keys, num_keys, currIndex)`: whether line `curr_index + 1` of the page is
-/// line `curr_index` with a version.
+/// `s_IsSameAccession` with `keys`, `num_keys` and `currIndex`: whether line `curr_index + 1` of
+/// the page is line `curr_index` with a version.
 fn is_same_accession_next(keys: &[&[u8]], num_keys: usize, curr_index: usize) -> bool {
     curr_index + 1 < num_keys && is_same_accession(keys[curr_index + 1], keys[curr_index])
 }
@@ -1410,13 +1411,13 @@ impl NegativeOids {
         self.visible.size.max(self.included.size)
     }
 
-    /// `m_Included.GetBit(oid)`.
+    /// `GetBit` of `oid` in `m_Included`.
     #[cfg(test)]
     pub fn is_included(&self, oid: u32) -> bool {
         self.included.get_bit(oid)
     }
 
-    /// `m_Visible.GetBit(oid)`.
+    /// `GetBit` of `oid` in `m_Visible`.
     #[cfg(test)]
     pub fn is_visible(&self, oid: u32) -> bool {
         self.visible.get_bit(oid)
@@ -1424,7 +1425,7 @@ impl NegativeOids {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2735-2789
-/// `CSeqDBVol::x_CheckVersions`: removes the OIDs whose Seq-ids (`seq_ids` is `GetSeqIDs(oid)`
+/// `CSeqDBVol::x_CheckVersions`: removes the OIDs whose Seq-ids (`seq_ids` is `GetSeqIDs` of `oid`
 /// of the volume) hold no Textseq-id with the accession and version of the user's `acc`.
 pub fn check_versions(
     acc: &[u8],
@@ -1434,7 +1435,8 @@ pub fn check_versions(
     // If we resolved a string id by stripping the version off of the string, we need to check
     // (for each OID) if the real ID had a matching version.
     let pos = acc.iter().position(|&c| c == b'.');
-    // `acc.find(".")` is asserted to exist; without it `pos + 1` wraps to 0 and `nover` is `acc`.
+    // The `find` of a "." in `acc` is asserted to succeed; without it `pos + 1` wraps to 0 and
+    // `nover` is `acc`.
     let ver_str = &acc[pos.map_or(0, |p| p + 1)..];
     // `fConvErr_NoThrow`: 0 for a text NCBI cannot convert.
     let vernum = string_to_int(ver_str, ALLOW_TRAILING_SYMBOLS).unwrap_or(0);
@@ -1469,12 +1471,12 @@ pub enum SeqDbIdType {
     Oid,
 }
 
-/// The results of `SeqDB_SimplifyAccession(acc, num_id, str_id, simpler)`.
+/// The results of `SeqDB_SimplifyAccession` with `acc`, `num_id`, `str_id` and `simpler`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SimplifiedAccession {
     /// The returned `ESeqDBIdType`.
     pub id_type: SeqDbIdType,
-    /// `num_id`: the GI, TI, PIG or OID (`(Uint4)-1` when none was set).
+    /// `num_id`: the GI, TI, PIG or OID (-1 cast to `Uint4` when none was set).
     pub num_id: i64,
     /// `str_id`: the key for the string index (not yet lower-cased: see
     /// [`simplify_accession_for_isam`]).
@@ -1486,7 +1488,7 @@ pub struct SimplifiedAccession {
 /// An exception of `SeqDB_SimplifyAccession`: NCBI lets it out of the call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SimplifyError {
-    /// A `CSeqIdException` of `CSeq_id(element)` or of the `db:tag` id.
+    /// A `CSeqIdException` that `CSeq_id` throws for `element` or for the `db:tag` id.
     SeqId(SeqIdError),
     /// Another exception, with its message: a string tag read as a number, an integer read from
     /// a string tag.
@@ -1522,8 +1524,8 @@ fn fasta_string(id: &ParsedSeqId) -> Vec<u8> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2264-2427
-/// `SeqDB_SimplifySeqid(bestid, &acc, num_id, str_id, simpler)` (the call with `acc == NULL` is
-/// [`seqdb_simplify_seqid`]).
+/// `SeqDB_SimplifySeqid` with `bestid`, the address of `acc`, `num_id`, `str_id` and `simpler` (the
+/// call with no `acc` is [`seqdb_simplify_seqid`]).
 fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccession, SimplifyError> {
     let mut out = SimplifiedAccession {
         id_type: SeqDbIdType::String,
@@ -1636,14 +1638,15 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2805-2817
-/// `SeqDB_SimplifySeqid(seqid, 0, num_id, str_id, simpler)` of `CSeqDBVol::SeqidToOids`: what a
-/// volume looks up for the Seq-id `seqid`. Without `acc`, NCBI's default case labels the Seq-id
-/// itself (`GetLabel` with `eFasta`), which is its FASTA string, the `acc` given here.
+/// `SeqDB_SimplifySeqid` with `seqid`, no accession, `num_id`, `str_id` and `simpler` of
+/// `CSeqDBVol::SeqidToOids`: what a volume looks up for the Seq-id `seqid`. Without `acc`, NCBI's
+/// default case labels the Seq-id itself (`GetLabel` with `eFasta`), which is its FASTA string, the
+/// `acc` given here.
 pub fn seqdb_simplify_seqid(seqid: &ParsedSeqId) -> Result<SimplifiedAccession, SimplifyError> {
     simplify_seqid(seqid, &fasta_string(seqid))
 }
 
-/// `WhichInverseSeqId(portion.c_str())`: the text up to its first NUL.
+/// `WhichInverseSeqId` of `portion.c_str()`: the text up to its first NUL.
 fn which_inverse(text: &[u8]) -> u32 {
     let end = text.iter().position(|&c| c == 0).unwrap_or(text.len());
     which_inverse_seq_id(&text[..end])
@@ -1679,9 +1682,9 @@ fn end_of_fasta_id(s: &[u8], pos: usize) -> Option<usize> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2496-2531
-/// `s_SeqDB_ParseSeqIDs`: the Seq-ids at the start of `line` (`CSeq_id(element)` of every
+/// `s_SeqDB_ParseSeqIDs`: the Seq-ids at the start of `line` (`CSeq_id` of `element` of every
 /// element up to the first text that is not one). A `CSeqIdException` is not caught by NCBI's
-/// `catch(invalid_argument &)`.
+/// handler of `invalid_argument`.
 fn parse_seq_ids(line: &[u8]) -> Result<Vec<ParsedSeqId>, SimplifyError> {
     let mut seqids = Vec::new();
     let mut pos = 0;
@@ -1701,8 +1704,8 @@ fn parse_seq_ids(line: &[u8]) -> Result<Vec<ParsedSeqId>, SimplifyError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2535-2608
-/// `SeqDB_SimplifyAccession(acc, num_id, str_id, simpler)`: what the volume looks up for the
-/// user's id `acc`.
+/// `SeqDB_SimplifyAccession` with `acc`, `num_id`, `str_id` and `simpler`: what the volume looks up
+/// for the user's id `acc`.
 pub fn seqdb_simplify_accession(acc: &[u8]) -> Result<SimplifiedAccession, SimplifyError> {
     let seqid_set = parse_seq_ids(acc)?;
     if let Some(bestid) = find_best(seqid_set.iter(), best_rank_score) {
@@ -1760,7 +1763,7 @@ pub fn seqdb_simplify_accession(acc: &[u8]) -> Result<SimplifiedAccession, Simpl
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2610-2618
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:608-614
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1612-1618
-/// `SeqDB_SimplifyAccession(acc)` followed by `NStr::ToLower`
+/// `SeqDB_SimplifyAccession` of `acc` followed by `NStr::ToLower`
 /// (`PreprocessIdsForISAMSiLookup`): the key of the string index for a user's id; empty for an id
 /// that devolves to a number (a GI, TI, PIG or OID).
 pub fn simplify_accession_for_isam(id: &[u8]) -> Result<Vec<u8>, SimplifyError> {

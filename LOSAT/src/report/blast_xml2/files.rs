@@ -2,9 +2,10 @@
 //! file, and the side files on the file system (DESIGN_OF5 1.7).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2316-2330
-//! The side file of the n-th report is `s_GetBaseName(-out, is_xml, true) + "_" + n + ".xml" |
-//! ".json"`; the master file lists `s_GetBaseName(-out, true, false) + "_" + n + ext` for both
-//! formats (blast_format.cpp:2432, :2449: the XML rule, no directory). So the master of an
+//! The side file of the n-th report is named by `s_GetBaseName` of `-out` (for the report's
+//! format, with the directory), then `_`, n, and ".xml" or ".json"; the master file lists
+//! `s_GetBaseName` of `-out` (the XML rule, no directory), then `_`, n, and the extension, for both
+//! formats (blast_format.cpp:2432, :2449). So the master of an
 //! outfmt 13 run lists `Y.Json_1.json` for `-out d/Y.Json` (the side file is `d/Y_1.json`) and
 //! `k_1.json` for `-out d/k.xml` (the side file is `d/k.xml_1.json`): names of files that do not
 //! exist. DECISIONS 8 keeps this as NCBI's defined behaviour.
@@ -64,9 +65,11 @@ fn base_name_of(path: &[u8], xml: bool, with_dir: bool, windows: bool) -> Vec<u8
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-775
 pub struct FsSideFiles {
-    /// `s_GetBaseName(out, xml, true)`: the side files' path up to the `_<n>`.
+    /// `s_GetBaseName` of `out` for the format, with the directory: the side files' path up to the
+    /// `_<n>`.
     path_base: Vec<u8>,
-    /// `s_GetBaseName(out, true, false)`: the name the master lists, up to the `_<n>`.
+    /// `s_GetBaseName` of `out` by the XML rule, without the directory: the name the master lists,
+    /// up to the `_<n>`.
     listed_base: Vec<u8>,
     extension: &'static str,
 }

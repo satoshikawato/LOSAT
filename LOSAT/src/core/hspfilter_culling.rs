@@ -394,7 +394,7 @@ impl<H> CullingForest<H> {
         self.nodes[node].hsplist = list;
     }
 
-    /// Returns whether the node is freed (NCBI sets `*node = NULL`).
+    /// Returns whether the node is freed (NCBI sets the pointer `*node` to null).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:319-330
     fn mark_down_ctree(&mut self, node: usize) -> bool {
@@ -415,7 +415,7 @@ impl<H> CullingForest<H> {
             && self.nodes[node].right.is_none()
     }
 
-    /// Returns whether the node is freed (NCBI sets `*node = NULL`).
+    /// Returns whether the node is freed (NCBI sets the pointer `*node` to null).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:334-370
     fn process_ctree(&mut self, node: usize, x: usize) -> bool {

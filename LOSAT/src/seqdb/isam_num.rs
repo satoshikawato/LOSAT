@@ -20,7 +20,7 @@ const NUMERIC: i32 = 0;
 const NUMERIC_LONG_ID: i32 = 5;
 /// `MEMORY_ONLY_PAGE_SIZE`: an index without a data file, which makeblastdb does not write.
 const MEMORY_ONLY_PAGE_SIZE: i32 = 1;
-/// `10 * sizeof(Int4)`: the header `x_InitSearch` needs.
+/// Ten times the size of an `Int4`: the header `x_InitSearch` needs.
 const HEADER_BYTES: u64 = 40;
 /// `m_KeySampleOffset`.
 const KEY_SAMPLE_OFFSET: u64 = 9 * 4;
@@ -286,7 +286,7 @@ impl NumericIsam {
     // a key and past the ids translated already, and every id equal to a key takes that row's
     // OID. So an id that an earlier volume translated keeps its OID, and of rows with the same
     // key the walk reaches the first.
-    /// `IdsToOids(vol_start, vol_end, CSeqDBGiList&)` of a numeric list (`x_TranslateGiList`):
+    /// `IdsToOids` of a numeric list over the volume's OIDs (`x_TranslateGiList`):
     /// sets `oid` of every entry of `ids` (sorted by key) without one whose key is a key of the
     /// volume, to the OID of its row plus `vol_start`.
     pub(crate) fn ids_to_oids(&self, vol_start: u32, ids: &mut [NumOid]) -> Result<(), SeqDbError> {

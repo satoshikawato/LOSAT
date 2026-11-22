@@ -422,7 +422,7 @@ impl TblastnArgs {
                 }
             };
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-            // `m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects))` (blast_args.cpp:2557)
+            // `Reset` of `m_Subjects` with a new `blast::CObjMgr_QueryFactory` of `subjects` (blast_args.cpp:2557)
             // fails for a subject input without records.
             if subjects.is_empty() {
                 return Err(app::empty_subjects_error());
@@ -1815,7 +1815,7 @@ fn search(
             (None, _) => subject_letters,
         };
         // The batches before the stop are searched and reported; a reader at the end of its
-        // input reads no batch (`!input->End()`), and the reports have no query (an empty
+        // input reads no batch (its `End()` is true), and the reports have no query (an empty
         // pipe, or `-query -` after `-subject -`).
         let searched_done = batches.searched_done;
         let queries = &searched_queries[..searched_done];

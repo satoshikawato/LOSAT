@@ -1,0 +1,4 @@
+TITLE omall
+DBLIST omdb/omn
+OIDLIST om.msk
+OID_MASK_TYPE 1

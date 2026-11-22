@@ -193,6 +193,7 @@ pub(super) fn run_formats_with(
     let mut diagnostics = Vec::new();
     {
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())

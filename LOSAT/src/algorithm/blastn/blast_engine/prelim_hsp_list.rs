@@ -42,8 +42,8 @@ use std::sync::atomic::AtomicU64;
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503,522-526,560-563
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4719,4742,4760-4772
 /// An ungapped (`-ungapped`) search sorts the initial hits by score first, as a gapped
-/// search does (`BlastNaWordFinder` ends with `if (word_params->ungapped_extension)
-/// Blast_InitHitListSortByScore(init_hitlist)`, na_ungapped.c:1691-1692, and
+/// search does (`BlastNaWordFinder` ends with `Blast_InitHitListSortByScore` of `init_hitlist`
+/// when `word_params->ungapped_extension` is set, na_ungapped.c:1691-1692, and
 /// `ungapped_extension` is TRUE for every program but PHI: blast_parameters.c:189-192),
 /// with the same comparator (`score_compare_ungapped_hits` = `score_compare_match`:
 /// score descending, s_start, length descending, the concatenated query's q_start;
@@ -458,7 +458,7 @@ pub(super) fn gapped_score_list(
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
             // The dynamic-programming score-only call below reads the packed subject
             // (`s_seq_score`); the greedy one runs on the bases one per byte
-            // (`x_prelim_subject`), NCBI's `compressed_subject = FALSE` form.
+            // (`x_prelim_subject`), NCBI's form with `compressed_subject` false.
             let s_seq_score = s_seq_packed;
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3908-3914

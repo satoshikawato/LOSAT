@@ -22,7 +22,7 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 | Databases and masks | [`makeblastdb`](programs/makeblastdb.md) | Builds a BLAST database (version 5 by default, or 4) from FASTA, also from a `.gz`, `.bz2` or `.zst` file. |
 | Databases and masks | [`blastdbcmd`](programs/blastdbcmd.md) | Reads a BLAST database: information, sequences, masks. |
 | Databases and masks | [`dustmasker`](programs/dustmasker.md) | Finds low-complexity regions in nucleotide sequences. |
-| Databases and masks | [`windowmasker`](programs/windowmasker.md) | Masks the repeats of nucleotide sequences from a file of unit counts. |
+| Databases and masks | [`windowmasker`](programs/windowmasker.md) | Makes the unit counts file of a genome, and masks the repeats of nucleotide sequences with it. |
 | Databases and masks | [`segmasker`](programs/segmasker.md) | Finds low-complexity regions in protein sequences. |
 | Databases and masks | [`convert2blastmask`](programs/convert2blastmask.md) | Turns lower-case masking in FASTA into masking information for `makeblastdb`. |
 | Databases and masks | [`makembindex`](programs/makembindex.md) | Builds the MegaBLAST index of a nucleotide database. |
@@ -42,10 +42,9 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 
 These are on the list for a later release:
 
-- the programs `deltablast`, `makeprofiledb` and `blast_formatter`, and the making and the conversion of counts files by `windowmasker` (`-mk_counts`, `-convert`);
+- the programs `deltablast`, `makeprofiledb` and `blast_formatter`;
 - `psiblast -phi_pattern`;
 - the `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`);
-- the `rpsblast` output formats other than `0`, `5`, `6`, `7`, `10` and `11`, and the `rpstblastn` ones other than `0` to `7`, `10` and `11`;
 - `-html`.
 
 LOSAT does not provide these NCBI programs: `blastdb_aliastool`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.

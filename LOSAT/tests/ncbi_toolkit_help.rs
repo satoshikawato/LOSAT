@@ -2,9 +2,9 @@
 //! 2.17.0, the official Linux x64 release and bioconda's build for rpstblastn, dustmasker and
 //! segmasker, and NCBI's rpsbproc 0.5.1 (probes of 2026-11-13, `remaining-gaps-20261112/E/SURVEY_E2.md`,
 //! run with `env -i` in a fresh directory): `-help-full` writes the bytes of `-help` in every place
-//! but makeblastdb's, whose hidden `-randomize` LOSAT does not run, and the reader stops at a help
-//! flag. LOSAT's help texts are its own (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1), so the
-//! test holds `-help-full` to LOSAT's `-help` in the same place.
+//! but makeblastdb's, which lists its hidden `-randomize`, and the reader stops at a help flag.
+//! LOSAT's help texts are its own (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1) and do not list
+//! `-randomize`, so the test holds `-help-full` to LOSAT's `-help` in the same place.
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (cited at
 //! `cli::try_parse_from`) and c++/src/corelib/ncbiapp.cpp:685-697
@@ -191,7 +191,8 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             // `-comp_based_stats 0`; rpstblastn's `-ungapped`, which needs a database, is in
             // `cli::RUN_REFUSALS` with them). The arguments left in are read
             // (`ncbi_xmlhelp_tests`; blastp's `-use_sw_tback` runs with composition-based
-            // statistics, line RG item X4; blastp's `-ungapped` runs, line NP item O4b).
+            // statistics, line RG item X4, tblastn's in every mode, item X4b; blastp's
+            // `-ungapped` runs, line NP item O4b).
             let kept = argument_names(&xml.stdout);
             for name in argument_names(&ncbi) {
                 if kept.contains(&name) {

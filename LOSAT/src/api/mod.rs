@@ -72,47 +72,54 @@
 //!   `-searchsp` fix it across searches.
 //! - A search writes nothing to the process's standard output or error and never ends the
 //!   process; the command line's warnings come back as `Outcome::diagnostics`, its errors as
-//!   [`Error`] with the command line's message.
+//!   [`Error`], whose message is made from the command line's text for the same failure by the
+//!   rules that [`Error`] states (a search's NCBI message keeps its newlines, and an input's, a
+//!   tool's and that of a start that ends the program lose their last ones; LOSAT's own refusals
+//!   have no `Error: `; text that a search writes before the failure is not in it).
 //! - `-num_threads` is an option like any other, checked as on the command line. A search of
 //!   two or more threads builds its own thread pool for the call and cannot start from inside
 //!   a Rayon worker; one of one thread can. Searches may run on several threads of a process at
 //!   once; each has its own pool and its own outputs.
 //! - The environment variables that the command line reads (`LOSAT_X_*` performance switches,
 //!   which change no output; the diagnostic variables of `docs/agents/diagnostics.md`) are read
-//!   here too. A database search reads what the command line reads to find a database (`BLASTDB`,
-//!   `.ncbirc`) and the query batch and archive settings (`BATCH_SIZE`, `ARCHIVE_FORMAT`, ...);
-//!   a search of records reads no NCBI setting, unless its argv has one of the NCBI C++ Toolkit's
-//!   words below, but where NCBI's library looks one up itself: blastn's `-window_masker_taxid`,
-//!   the taxonomy database of the organism report of outfmt 18 and of the plural taxonomy names
-//!   (`sscinames`, `scomnames`, `sblastnames`, `sskingdoms`), and the file of a `-matrix` that
-//!   NCBI's tables do not have (tblastx, blastx `-ungapped`).
-//! - `-logfile`, `-conffile` and `-dryrun` work as on the command line: a call whose argv has one
-//!   runs NCBI's application start first (as does a call that reads NCBI's settings, when it
-//!   first reads them). The start's messages about the registry files go where the command line
-//!   writes them (the call's diagnostics stand for its standard error), the `-logfile` file gets
-//!   what the command line writes there (with tblastx, the messages and the errors of its run
-//!   too), and a start that ends the command line's program is an [`Error::Search`] with its
-//!   text. The registry and environment settings that the command line refuses after its start
-//!   are the call's [`Error::Search`] then, with the command line's text after `Error: `. With
-//!   `-dryrun` ([`Search::dry_run`]) a call ends after the start, the settings and the parse of
-//!   the argv with the call's kind of subject (`-subject_loc` with a database fails as without
-//!   `-dryrun`): no record or `-outfmt` value is read, no report is written. The versions and
-//!   `-xmlhelp`, whose texts only the command line writes, are refused ([`validate`]); the tools
-//!   print the versions. [`validate`] parses the argv without the start, which runs with each
-//!   search: an argv that the parser refuses makes no `-logfile` file (the command line's start
-//!   has made it before its parser's error), and one whose start ends the command line's program
-//!   before its arguments are read (a missing `-conffile` file) and that the parser refuses too
-//!   (two `-conffile`) gets the parser's error there. As any error of [`run_collect`] and
-//!   [`run_batches`], one of the start carries its message alone: the start's messages before it
-//!   (a usage report's) were in the call's diagnostics, which an error does not return; [`run()`]
-//!   has written them to its writer.
+//!   here too. Each search call runs NCBI's application start at its beginning, as the command
+//!   line runs it at its own: it reads the registry files (`.ncbirc`, the program's `.ini` or the
+//!   file of `-conffile`) and NCBI's environment settings, which the search reads where the
+//!   command line reads them: to find a database (`BLASTDB`), and where NCBI's library looks one
+//!   up itself (blastn's `-window_masker_taxid`, the taxonomy database of the organism report of
+//!   outfmt 18 and of the plural taxonomy names (`sscinames`, `scomnames`, `sblastnames`,
+//!   `sskingdoms`), and the file of a `-matrix` that NCBI's tables do not have: tblastx, blastx
+//!   `-ungapped`). Every search reads the query batch and archive settings (`BATCH_SIZE`,
+//!   `ARCHIVE_FORMAT`, ...) as the command line does, of a database or of records.
+//! - The start's messages about the registry files go where the command line writes them (the
+//!   call's diagnostics stand for its standard error), `-logfile`'s file gets what the command line
+//!   writes there (with tblastx, the messages and the errors of its run too), and a start that ends
+//!   the command line's program is an [`Error::Search`] with its text. The registry and environment
+//!   settings that the command line refuses after its start (a usage report setting that NCBI
+//!   aborts on, an entry or a variable that LOSAT does not take) are the call's [`Error::Search`]
+//!   then, with the command line's text after `Error: `, whatever the call's inputs. With `-dryrun`
+//!   ([`Search::dry_run`]) a call ends after the start, the settings and the parse of the argv with
+//!   the call's kind of subject (`-subject_loc` with a database fails as without `-dryrun`): no
+//!   record or `-outfmt` value is read, no report is written. The versions and `-xmlhelp`, whose
+//!   texts only the command line writes, are refused ([`validate`]); the tools print the versions.
+//!   [`validate`] parses the argv without the start, which runs with each search: an argv that the
+//!   parser refuses makes no `-logfile` file (the command line's start has made it before its
+//!   parser's error), and one whose start ends the command line's program before its arguments are
+//!   read (a missing `-conffile` file) and that the parser refuses too (two `-conffile`) gets the
+//!   parser's error there. As any error of [`run_collect`] and [`run_batches`], one of the start
+//!   carries its message alone: the start's messages before it (a usage report's) were in the
+//!   call's diagnostics, which an error does not return; [`run()`] has written them to its writer.
 //! - [`run_batches`] searches one of NCBI's query batches at a time: the host reports progress
 //!   between batches and stops the search by not asking for the next one. Inside a batch only
 //!   the host can stop it, by ending the thread or the process.
-//! - The records are read before the search, so a reader error is an [`Error::Input`] before
-//!   any report, where the command line has reported the batches before the error (and, with
-//!   `-out`, made the file: [`run_to_file`] makes it where the command line makes `-out`, after
-//!   the subjects are read, so an error of the query records leaves no file there).
+//! - The records are read before the search. [`read_inputs`] reads every query record or fails
+//!   with the reader's error ([`Error::Input`]) before any report. [`read_input_records`] keeps
+//!   the query records read before a reader error and the error ([`QueryEnd`]), and a search of
+//!   them ([`InputRecords::inputs`], [`Inputs::query_end`]) ends with that error where the
+//!   command line does: in the query batch that reads the record, after the reports of the
+//!   batches before (and, with `-out`, after making the file, as [`run_to_file`] makes it where
+//!   the command line makes `-out`). A subject's reader error fails the reading, as the command
+//!   line reads every subject before the first query.
 //! - Outfmt 13 and 14 write side files next to their report, so they come through
 //!   [`run_to_file`] only; a report in memory has no place for them (the in-memory search under
 //!   the API, `local_blast`, takes a receiver of them, `OutputSink::Files`, which LOSAT Web gives).
@@ -147,8 +154,8 @@
 //!
 //! - The program: [`Program`], [`describe`](describe()), [`Description`], [`Parameter`],
 //!   [`ValueKind`]
-//! - The inputs: [`read_input_file`], [`read_fasta`], [`read_inputs`], [`Role`], [`FastaRecord`],
-//!   [`Inputs`]
+//! - The inputs: [`read_input_file`], [`read_fasta`], [`read_inputs`], [`read_input_records`],
+//!   [`Role`], [`FastaRecord`], [`Inputs`], [`InputRecords`], [`QueryEnd`], [`QueryError`]
 //! - The options: [`validate`], [`Search`], [`API_OWNED`]
 //! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`Id`],
@@ -179,7 +186,10 @@ pub use batches::{run_batches, Batch, Batches};
 pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;
 pub use id::Id;
-pub use input::{read_fasta, read_input_file, read_inputs, Inputs, Role};
+pub use input::{
+    read_fasta, read_input_file, read_input_records, read_inputs, InputRecords, Inputs, QueryEnd,
+    QueryError, Role,
+};
 pub use program::Program;
 pub use run::{
     run, run_collect, run_to_file, HspRecord, Outcome, QueryRounds, QueryStats, Report, Strand,

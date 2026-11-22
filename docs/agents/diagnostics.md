@@ -1960,7 +1960,7 @@ Rebuilding less:
   replay; a FALSE there keeps the job's result (NCBI's), a TRUE stops the replay and carries that match and
   the window's matches after it to the next window, which finishes the match (a continuation, which repeats
   the redo's first round) and every carried match whose test is TRUE for certain, and the replay keeps each
-  batch's status with the one-thread loop's own rule (`redo_run::SwBatchStatus`). A window with a carry
+  batch's status with the one-thread loop's own rule (core's `smith_waterman_match::SwBatchStatus`). A window with a carry
   takes at most a budget of new jobs, as one without, and the carried matches (in jobs of four) and the new
   jobs together are at most two budgets, so a window holds at most 2 x 4 x 64 x threads results before their
   replay, carried ones included, and a stop's serial work is linear in the carry (at most a window's; it

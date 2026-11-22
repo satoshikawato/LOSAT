@@ -925,6 +925,20 @@ impl<'a> Queries<'a> {
         matches!(self, Queries::Streamed(_) | Queries::Taken(_))
     }
 
+    /// The Seq-ids that `-parse_deflines` read of the input record `ordinal`, not yet taken by the
+    /// loop (`query_batch::BatchCount`). A streamed reading has none: `-parse_deflines` reads the
+    /// records before the search.
+    pub(super) fn believed(
+        &self,
+        ordinal: usize,
+    ) -> Option<std::sync::Arc<crate::blastinput::fasta_reader::believed::BelievedIds>> {
+        match self {
+            Queries::Records { input, .. } => input.get(ordinal)?.believed_shared(),
+            Queries::Taken(store) => store.believed(ordinal),
+            Queries::Streamed(_) => None,
+        }
+    }
+
     /// The number of input records.
     pub(super) fn input_count(&self) -> usize {
         match self {

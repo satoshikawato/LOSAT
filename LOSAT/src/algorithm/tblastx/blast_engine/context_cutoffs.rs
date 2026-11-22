@@ -101,8 +101,8 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         )
     };
     // A count of 0 (of a positive total) is LOSAT's refusal before (`search_query_batch`). Else
-    // `stats::setup::setup_subject_length`: `(Uint4)(Int4)(total / num_seqs) == 0` (a negative
-    // `NSEQ` passes; one of 2^31 fails).
+    // `stats::setup::setup_subject_length`: the total divided by `num_seqs`, cast to `Int4` and
+    // then to `Uint4`, is 0 (a negative `NSEQ` passes; one of 2^31 fails).
     if crate::stats::setup::setup_subject_length(total_length, num_seqs as i32, None).is_none() {
         return Err(ErrorAfterBatchReports(
             crate::cli::NativeError {
@@ -130,10 +130,10 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     // score exceeds gap_trigger whatever the lengths (above 2,000 against about 40), so step 4
     // never takes it and no output depends on this average; it is computed as NCBI computes it.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1372-1374
-    // The word cutoffs read the sequence source's average (`Uint4 subj_length`,
-    // blast_parameters.c:283): a database's `GetTotalLength / MAX(1, GetNumSeqs)` as NCBI's
-    // `Int4` (`SubjectSetNumbers::average`, without the `STATS_*` keys and with a negative
-    // `NSEQ` read as 1), a FASTA set's total over its records.
+    // The word cutoffs read the sequence source's average (`subj_length`, a `Uint4`,
+    // blast_parameters.c:283): a database's `GetTotalLength` divided by the larger of 1 and
+    // `GetNumSeqs` as NCBI's `Int4` (`SubjectSetNumbers::average`, without the `STATS_*` keys and
+    // with a negative `NSEQ` read as 1), a FASTA set's total over its records.
     let subject_len_nucl = match numbers.average {
         Some(average) => i64::from(average as u32),
         None => db_length_nucl / db_num_seqs,

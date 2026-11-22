@@ -1,0 +1,135 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: multidb pa; multidb put
+           15 sequences; 1,920 total letters
+
+
+
+Query= mix2_u qp1 of ids/noacc_v5 back-translated
+
+Length=420
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qp1 query protein one                                                 293     7e-108
+
+
+>qp1 query protein one
+Length=140
+
+ Score = 293 bits (749),  Expect = 7e-108, Method: Compositional matrix adjust.
+ Identities = 140/140 (100%), Positives = 140/140 (100%), Gaps = 0/140 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+            CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN
+Sbjct  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKIFHYMVGHGRTASEG
+Sbjct  121  FEKLKIFHYMVGHGRTASEG  140
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 155520
+
+
+Query= mix2_c the letters of taxfilter/q.fna, then qp1 back-translated
+
+Length=997
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qp1 query protein one                                                 293     1e-104
+P69905.2 Unknown                                                      286     4e-102
+P01923.1 Unknown                                                      282     1e-100
+Q9TS35.2 Unknown                                                      281     3e-100
+P63107.2 Unknown                                                      278     5e-99 
+P67818.1 Unknown                                                      275     1e-97 
+P01935.1 Unknown                                                      265     5e-94 
+P01942.2 Unknown                                                      253     5e-89 
+P01966.2 Unknown                                                      252     9e-89 
+P07405.1 Unknown                                                      250     4e-88 
+P60529.1 Unknown                                                      242     7e-85 
+P01946.3 Unknown                                                      209     1e-71 
+P01994.2 Unknown                                                      208     2e-71 
+
+
+>qp1 query protein one
+Length=140
+
+ Score = 293 bits (749),  Expect = 1e-104, Method: Compositional matrix adjust.
+ Identities = 140/140 (100%), Positives = 140/140 (100%), Gaps = 0/140 (0%)
+ Frame = +2
+
+Query  578  MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  757
+            MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  758  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  937
+            CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN
+Sbjct  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+
+Query  938  FEKLKIFHYMVGHGRTASEG  997
+            FEKLKIFHYMVGHGRTASEG
+Sbjct  121  FEKLKIFHYMVGHGRTASEG  140
+
+
+Sequence with id P69905 no longer exists in database...alignment skipped
+Sequence with id P01923 no longer exists in database...alignment skipped
+Sequence with id Q9TS35 no longer exists in database...alignment skipped
+Sequence with id P63107 no longer exists in database...alignment skipped
+Sequence with id P67818 no longer exists in database...alignment skipped
+Sequence with id P01935 no longer exists in database...alignment skipped
+Sequence with id P01942 no longer exists in database...alignment skipped
+Sequence with id P01966 no longer exists in database...alignment skipped
+Sequence with id P07405 no longer exists in database...alignment skipped
+Sequence with id P60529 no longer exists in database...alignment skipped
+Sequence with id P01946 no longer exists in database...alignment skipped
+Sequence with id P01994 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 396900
+
+
+  Database: multidb pa
+    Posted date:  Nov 1, 2026  11:22 AM
+  Number of letters in database: 1,699
+  Number of sequences in database:  12
+
+  Database: multidb put
+    Posted date:  Nov 15, 2026  3:24 PM
+  Number of letters in database: 221
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

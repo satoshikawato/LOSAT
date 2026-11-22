@@ -1,7 +1,8 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.25 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.27 (pending: the Owner's review of exception 2's sentence on memory with more than 64 threads, line EB's pull
+  request, and of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -50,7 +51,13 @@
   NP, item M5a; Owner-delegated, the same standing instruction); 1.25 2026-11-21 (exception 14:
   LOSAT's name and version where LOSAT states the running program's version, in the search outputs
   too, and LOSAT's error prefixes; the Owner's 「Q1=B Q2=B」 of 2026-11-21, line NW2, NW2
-  DECISIONS 1; the forms, NW2 DECISIONS 2-4, Owner-delegated, the same standing instruction)
+  DECISIONS 1; the forms, NW2 DECISIONS 2-4, Owner-delegated, the same standing instruction);
+  1.26 2026-11-21 (every search call of the library API runs the application start at its
+  beginning, as its tool calls and the command line do; line LIB item E1; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07); 1.27 2026-11-22 (exception 2: the memory
+  LOSAT uses with more than 64 threads where NCBI's does not grow with `-num_threads`, recorded
+  as a known difference for the v0.2.0 release on the Owner's choice of 2026-11-22, line EB,
+  EB DECISIONS 55; the text is pending the Owner's review)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -64,7 +71,7 @@ BLASTX, since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report
 place of a search result, since version 1.13 `losat blastdbcmd` and `losat dustmasker`, and
 since version 1.16 `losat segmasker`, since version 1.18 `losat convert2blastmask` and since
 version 1.24 `losat windowmasker`, whose outputs do) that is not part of a search result: argument parsing, help text, thread
-warnings, output-write failures, memory exhaustion and, since version 1.22, BLASTN's progress
+warnings, since version 1.27 the memory used with more than 64 threads, output-write failures, memory exhaustion and, since version 1.22, BLASTN's progress
 bar on a terminal, and since version 1.25 the statement of the running program's version in every
 output, search results included (exception 14). Search results, their outfmt
 0/6/7 bytes, warnings and errors raised after argument parsing, and exit codes of
@@ -93,6 +100,14 @@ BLAST+.
    count `Number of threads was reduced to N to match the number of available CPUs`
    (`blast_args.cpp:3203-3236`). LOSAT prints neither warning. Every other byte of stdout
    and stderr must equal NCBI's (BLASTN's progress bar on a terminal: exception 11).
+   Since version 1.27: with more than 64 threads, LOSAT can use more memory than NCBI in the
+   searches where NCBI's memory does not grow with `-num_threads`, such as those with
+   `-subject`, which NCBI runs on one thread: measured for v0.2.0 (development build
+   `ff07c6a7d` against NCBI BLAST+ 2.17.0 on 64 logical CPUs), LOSAT's median peak resident
+   memory was up to 1.21 times NCBI's at 96 threads and up to 1.44 times at 128 threads
+   (TBLASTN with `-subject`; also BLASTX, BLASTN and BLASTP with `-subject` and TBLASTN with a
+   database of one sequence, but not TBLASTX or `blastn-short` with `-subject`), while LOSAT
+   finished 8 to 69 times sooner; the Owner accepted this difference for v0.2.0 on 2026-11-22.
 3. **Write failure in tabular output.** When writing outfmt 6 or 7 fails (for example
    `-out /dev/full` or a closed pipe), NCBI aborts; LOSAT reports the write error and
    exits with a non-zero code. For outfmt 0 LOSAT must follow NCBI
@@ -406,8 +421,9 @@ BLAST+.
   file comes back as a file of the run, and a `-dryrun` run reads no record and writes no output (a
   `-logfile` name with a directory, refused until line WQA's sweep D11 of 2026-11-20, is read as the command line on Linux reads it where the name's directories exist). Since version 1.21 the library API (and
   pylosat) runs `-logfile`, `-conffile` and `-dryrun` as the command line does (line RG item
-  E1w-2): a call whose arguments have one of them, or that reads NCBI's settings, runs the
-  application start; the `-logfile` file gets what the command line writes there, the registry
+  E1w-2): every search or tool call runs the application start at its beginning (since version
+  1.26, line LIB item E1; until then a search call ran it when its arguments had one of them or
+  where it read NCBI's settings); the `-logfile` file gets what the command line writes there, the registry
   and environment settings that the command line refuses are the call's error, and a `-dryrun`
   call reads no record and searches nothing (an empty report per format, no `-out` file). The
   library's tools print the versions to their output. Since version 1.15 `losat rpsbproc` runs the three on the command
@@ -420,8 +436,8 @@ BLAST+.
   only the run reads (the XML input, the archive) do not apply, as NCBI's `DryRun` reads no
   archive (line RG DECISIONS E1c-2). Since version 1.17 `-help-full` is no longer refused: every
   program writes its `-help` text (exception 1), as NCBI's programs write the bytes of `-help`
-  (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`, which LOSAT refuses, so
-  LOSAT's text has no hidden option to add). The reader stops at `-h`, `-help` and `-help-full` as
+  (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`, which LOSAT's text, its
+  own, does not list). The reader stops at `-h`, `-help` and `-help-full` as
   NCBI's (`ncbiargs.cpp:2840-2852`): an argument after one is not read. `-xmlhelp` (in an option's
   place) and the full versions stay refused, in makeblastdb too (line RG item E2); since version
   1.20 `-xmlhelp` is not refused on the command line (exception 1): it stops the reader as `-help`

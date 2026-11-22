@@ -342,8 +342,9 @@ fn print_site(
     Ok(())
 }
 
-/// `(char)toupper(dimTranslated[rfidx][curr])`: the terminating 0 at the translation's end;
-/// elsewhere outside it NCBI reads outside the string (undefined), which LOSAT refuses.
+/// `toupper` of `dimTranslated[rfidx][curr]`, cast to `char`: the terminating 0 at the
+/// translation's end; elsewhere outside it NCBI reads outside the string (undefined), which LOSAT
+/// refuses.
 fn translated_residue(frame: &Frame, curr: i64) -> Result<u8, PrintError> {
     let len = frame.translation.len();
     match usize::try_from(curr) {
@@ -361,10 +362,11 @@ fn translated_residue(frame: &Frame, curr: i64) -> Result<u8, PrintError> {
 }
 
 /// The two numbers of the codon of residue `curr` of the frame's translation (cited at
-/// `print_site`): `xres + COORDSBASE` in `int`, `xres + codonEnd + COORDSBASE` (minus strand
-/// `xres - codonEnd + COORDSBASE`) in `unsigned int`. The `int` arithmetic that overflows (`pr -
-/// 1` of `MinusPr2PlusNA` at `INT_MIN`, `xres + 1` at `INT_MAX`; undefined) is computed as its
-/// value (`frames::minus_pr_to_plus_na`, `printed_position`; PD-LOSAT-NCBI-DEFECTS exception 12).
+/// `print_site`): `xres` plus `COORDSBASE` in `int`, `xres` plus `codonEnd` plus `COORDSBASE`
+/// (minus strand: `xres` minus `codonEnd`, plus `COORDSBASE`) in `unsigned int`. The `int`
+/// arithmetic that overflows (one less than `pr` in `MinusPr2PlusNA` at `INT_MIN`, one more than
+/// `xres` at `INT_MAX`; undefined) is computed as its value (`frames::minus_pr_to_plus_na`,
+/// `printed_position`; PD-LOSAT-NCBI-DEFECTS exception 12).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:949,1456-1457,1631-1633
 fn codon(frame: &Frame, curr: i64, query_len: u32) -> (i64, u32) {
     let (xres, last) = if frame.rfidx < RF_SIZE {
@@ -380,11 +382,11 @@ fn codon(frame: &Frame, curr: i64, query_len: u32) -> (i64, u32) {
 /// The MOTIFS part of a nucleotide query: each motif as the range of bases of its mapped
 /// residues.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1709-1795
-// No residue letter and no clipping of the structural domains' motifs (unlike a protein
-// query's); the source is the PSSM-ID as it is. The minus-strand loop reads `alnLen` from the
-// first record of a frame that may have none (survey 8.7): unused, so dead (no motif of that
-// frame exists then), and not read here. `GetRight() +/- codonEnd + COORDSBASE` is an
-// `unsigned int`; `GetLeft() + COORDSBASE` an `int` (`printed_position`).
+// No residue letter and no clipping of the structural domains' motifs (unlike a protein query's);
+// the source is the PSSM-ID as it is. The minus-strand loop reads `alnLen` from the first record of
+// a frame that may have none (survey 8.7): unused, so dead (no motif of that frame exists then),
+// and not read here. `GetRight()` plus or minus `codonEnd`, plus `COORDSBASE`, is an `unsigned
+// int`; `GetLeft()` plus `COORDSBASE` is an `int` (`printed_position`).
 fn print_motifs(
     report: &mut Report,
     query: &DomQuery,
@@ -418,11 +420,11 @@ fn print_motifs(
     Ok(())
 }
 
-/// The two numbers of a motif line of frame `rfidx` (cited at `print_motifs`):
-/// `GetLeft() + COORDSBASE` in `int`, `GetRight() + codonEnd + COORDSBASE` (minus strand
-/// `- codonEnd`) in `unsigned int`, after `Pr2NaConvert` of the set (not empty: `mostly_mapped`).
-/// The `int` arithmetic that overflows (`domains::pr2na_ends`,
-/// and `+ 1` at `INT_MAX`; undefined) is computed as its value (PD-LOSAT-NCBI-DEFECTS exception 12).
+/// The two numbers of a motif line of frame `rfidx` (cited at `print_motifs`): `GetLeft()` plus
+/// `COORDSBASE` in `int`, `GetRight()` plus `codonEnd` plus `COORDSBASE` (minus strand: minus
+/// `codonEnd`) in `unsigned int`, after `Pr2NaConvert` of the set (not empty: `mostly_mapped`). The
+/// `int` arithmetic that overflows (`domains::pr2na_ends`, and `+ 1` at `INT_MAX`; undefined) is
+/// computed as its value (PD-LOSAT-NCBI-DEFECTS exception 12).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1746-1747,1788-1789
 fn motif_ends(featsegs: &SegSet, align: &DomAlign, rfidx: usize) -> (i64, u32) {
     let (left, right) = pr2na_ends(featsegs, align).expect("a mapped motif is not empty");

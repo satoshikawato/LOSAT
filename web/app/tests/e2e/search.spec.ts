@@ -978,19 +978,25 @@ test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line d
 
 test('"Add the line" keeps the focus on the card, not the page\'s body (WA2-AX-04)', async ({ page }) => {
   await program(page, 'blastn');
-  // Not a defline, and a later line that NCBI's reader refuses fails it again after the defline: the card stays, with
-  // the button. (Until line WQA's D13, 2026-11-20, a `>?` gap line did this; LOSAT Web now reads it as the CLI does.)
-  await paste(page, 'query', 'ACGTACGTACGT\n>x\nNM_000518.5 1234 5678\n');
-  await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
+  // Not a defline, and a first line that is not plausible data: the reader's error comes before the first record, so the
+  // card offers the defline. After it, the same line ends the records in the record that the defline starts: the card
+  // stays, with the reader's error, and keeps the focus. (Until line WQA's D13, 2026-11-20, a `>?` gap line did this,
+  // and until D10 merged with D13, 2026-11-21, a line that is not plausible data after a defline failed the input; a run
+  // now ends at the reader's error, as the CLI's does.)
+  await paste(page, 'query', 'AB000001.1 MH011443.1 ACGT-1\n');
+  await expect(page.getByTestId('query-source-0-check')).toContainText("doesn't look like plausible data");
   await page.getByTestId('query-source-0-add-defline').click();
-  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGT\n>x\nNM_000518.5 1234 5678\n');
+  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nAB000001.1 MH011443.1 ACGT-1\n');
   await expect(page.getByTestId('query-source-0')).toBeFocused();
+  await expect(page.getByTestId('query-source-0-check')).toContainText("doesn't look like plausible data");
 });
 
 test('an input that starts with a byte order mark says why it cannot be read (WA-IN-05)', async ({ page }) => {
   await program(page, 'blastn');
   await paste(page, 'query', '\uFEFF>q1\nACGTACGTACGTACGTACGTACGT\n');
-  await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
+  // The reader's error before the first record: a run ends with it, as the command line does, so the
+  // check warns (line WQA's D10, 2026-11-19).
+  await expect(page.getByTestId('query-source-0-check')).toContainText("doesn't look like plausible data");
   await expect(page.getByTestId('query-source-0-mark')).toContainText('The text starts with a byte order mark (U+FEFF).');
   await page.getByTestId('query-source-0-remove-mark').click();
   // The button goes with the old reading: the focus stays on the card (WA2-AX-04).

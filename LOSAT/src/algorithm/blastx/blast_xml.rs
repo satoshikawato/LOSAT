@@ -129,7 +129,7 @@ fn refuse(refusal: names::Refusal, what: &str) -> anyhow::Error {
 /// (`Blast_GetSeqLocInfoVector`, blast_aux.cpp:930-959): per context, in context order, the
 /// context's nucleotide intervals moved into the record (`seq_range::record_mask`: other than an
 /// empty one and the whole interval), with the context's frame, which counts from the ends of the
-/// searched letters (`-query_loc`).
+/// searched letters (`-query_loc`); none for a batch that NCBI did not search.
 pub(super) fn query_masks(
     batch: &BatchResults,
     qidx: usize,
@@ -137,6 +137,12 @@ pub(super) fn query_masks(
 ) -> Vec<QueryMask> {
     let (length, offset) = (query.sequence.len(), query.placement().offset);
     let mut masks = Vec::new();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-224
+    // The result of a batch that NCBI did not search has no masks (RPSTBLASTN's merge of several
+    // volumes takes volume 0's, rpsblast_local.cpp:174-175).
+    if batch.search_skipped {
+        return masks;
+    }
     for context in &batch.prepared.contexts[qidx * 6..qidx * 6 + 6] {
         for &(from, to) in &context.dna_masks {
             let Some((from, to)) =
@@ -919,9 +925,8 @@ pub(super) struct QueryScan {
 /// after the reports of the batches before it), and so does a record it refuses for every format
 /// (a title that is not UTF-8). A batch size of 0 reads no query (NCBI's first batch is empty and
 /// the search stops at it): nothing is checked. Under `-parse_deflines` (`query_scopes`, without a
-/// batch yet) the read adds each batch to the scopes of the queries (`QueryScopes::add_batch_ids`),
-/// so that LOSAT's refusal of two queries of one scope with one id comes before the first byte; the
-/// search then reads them from `QueryScan::query_scopes`. `checks_titles`: as `scan_queries`.
+/// batch yet) the read adds the batches to the scopes of the queries, `checks_titles` as
+/// `scan_queries` does.
 ///
 /// `file` is the query file the search reads (`-query`, a regular file, named `query` in NCBI's
 /// error when its position cannot be read or set): the read takes it and gives it back with the
@@ -981,42 +986,26 @@ fn scan_query_stream<R: std::io::Read>(
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
     holds_back: bool,
     checks_titles: bool,
-    mut query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
 ) -> Result<QueryScan> {
-    let mut delivered = 0usize;
-    let mut refusal = None;
-    let mut scan = scan_queries(options, holds_back, checks_titles, &mut |deliver| {
-        super::input::read_fasta_stream_batches(
-            stream,
-            false,
-            lowercase,
-            batch_size,
-            false,
-            range,
-            &mut |batch| {
-                // A batch that NCBI fails (`deliver`'s error) reports nothing of its scope.
-                deliver(batch)?;
-                if let Some(scopes) = query_scopes.as_mut() {
-                    let added = scopes.add_batch_ids(
-                        batch.iter().filter_map(|record| record.believed()),
-                        delivered,
-                    );
-                    if let Err(error) = added {
-                        refusal = Some(error);
-                        anyhow::bail!("LOSAT refuses this batch");
-                    }
-                }
-                delivered += batch.len();
-                Ok(())
-            },
-            &mut |_| Ok(()),
-        )
-    })?;
-    if let Some(refusal) = refusal {
-        return Err(refusal);
-    }
-    scan.query_scopes = query_scopes.map(crate::blastinput::query_batch::QueryScopes::read_ahead);
-    Ok(scan)
+    scan_queries(
+        options,
+        holds_back,
+        checks_titles,
+        query_scopes,
+        &mut |deliver| {
+            super::input::read_fasta_stream_batches(
+                stream,
+                false,
+                lowercase,
+                batch_size,
+                false,
+                range,
+                deliver,
+                &mut |_| Ok(()),
+            )
+        },
+    )
 }
 
 /// Refuses the first query the writer would refuse (a title NCBI crashes on, `names::Refusal`)
@@ -1032,10 +1021,20 @@ fn scan_query_stream<R: std::io::Read>(
 /// the last query of the batches before such a stop: that query is checked only when the next
 /// batch is written or `read` ends without an error. Without `checks_titles` (a run whose XML
 /// format fails for its matrix name before any report, `xml_matrix_failure`) no title is checked.
+///
+/// Under `-parse_deflines` (`query_scopes`, without a batch yet) the read adds each batch that NCBI
+/// does not fail to the scopes of the queries (`QueryScopes::add_batch_ids`; a batch that NCBI fails
+/// reports nothing of its scope, review M3, 2026-11-20), which the search reads from
+/// `QueryScan::query_scopes`. LOSAT's refusal of two queries of one scope with one id stops the run
+/// at its batch, after the reports of the batches before, as a batch that NCBI fails does: the read
+/// ends there, and the search gives the refusal where it adds that batch (`QueryScopes::read_ahead`;
+/// line WQA D10 round 4, 2026-11-20). The batches are the reader's (`read`), as NCBI counts them
+/// (`query_batch::BatchCount`).
 pub(super) fn scan_queries(
     options: &ResolvedOptions,
     holds_back: bool,
     checks_titles: bool,
+    mut query_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
     read: &mut dyn FnMut(&mut dyn FnMut(&[FastaRecord]) -> Result<()>) -> Result<()>,
 ) -> Result<QueryScan> {
     let mut scan = QueryScan::default();
@@ -1043,9 +1042,25 @@ pub(super) fn scan_queries(
     // the document holds its report back.
     let mut written = 0usize;
     let mut held: Option<Result<()>> = None;
+    // The batches added to the scopes, and the refusal of the batch after them.
+    let mut batches = 0usize;
+    let mut refusal = None;
     let scanned = read(&mut |batch| {
         if !super::archive::written_batch(batch, options) {
             anyhow::bail!("NCBI stops the run at this batch");
+        }
+        if let Some(scopes) = query_scopes.as_mut() {
+            let added = scopes.add_batch_ids(
+                super::input::scope_records(batch)
+                    .into_iter()
+                    .map(|(believed, length, _)| (believed, length)),
+                written,
+            );
+            if let Err(error) = added {
+                refusal = Some((batches, error));
+                anyhow::bail!("LOSAT refuses this batch");
+            }
+            batches += 1;
         }
         // A run whose XML format fails for its matrix name writes no report, and no title
         // (`xml_matrix_failure`): its batches are read for their scopes alone.
@@ -1076,6 +1091,7 @@ pub(super) fn scan_queries(
         written += batch.len();
         Ok(())
     });
+    scan.query_scopes = query_scopes.map(|scopes| scopes.read_ahead(refusal));
     match scanned {
         Err(error) if error.is::<XmlRefusal>() => Err(error),
         // The end of the queries: the epilog writes the held report.
@@ -1318,27 +1334,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     // (`lcl|Query_N`) of a query of the batch that reports it is that query for NCBI's scope: its
     // Seq-align conversion raises an exception after half a document. Refused before the reports
     // (PS15a-1, followup `rps_lcl_query_title.md`), as rpsblast's XML is
-    // (`common::database::refuse_generated_query_id`).
-    let generated_scopes = match shown {
-        ShownSubjects::Database { .. } if options.rpstblastn.is_some() => {
-            let ids: Vec<(
-                &str,
-                Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
-            )> = queries
-                .iter()
-                .map(|query| (query.internal_id.as_str(), query.believed()))
-                .collect();
-            let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
-                &ids,
-                batches
-                    .iter()
-                    .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
-                    .collect(),
-            );
-            scopes.generated().then_some(scopes)
-        }
-        _ => None,
-    };
+    // (`report::rps_generated_scopes`, `common::database::refuse_generated_query_id`).
+    let generated_scopes = super::report::rps_generated_scopes(options, queries, shown, batches);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-711
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2358-2362
     // Every document writes the lists of each query that the cut to the hit list size keeps
@@ -1351,24 +1348,16 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 break;
             }
             let lists = batch.shown_lists(qidx, options);
-            if let (
-                Some(scopes),
-                ShownSubjects::Database {
-                    reported: names, ..
-                },
-            ) = (&generated_scopes, shown)
-            {
-                for list in lists.iter().filter(|list| reported(list, options.gapped)) {
-                    if let Some(subject) = names.parsed_subject(list.oid) {
-                        crate::algorithm::common::database::refuse_generated_query_id(
-                            subject,
-                            names.oid(list.oid),
-                            scopes.of_query(batch.query_ordinal + qidx),
-                            options.program().upper,
-                            crate::algorithm::common::database::XML_EFFECT,
-                        )?;
-                    }
-                }
+            if let Some(scopes) = &generated_scopes {
+                super::report::refuse_rps_generated_ids(
+                    scopes,
+                    shown,
+                    lists,
+                    batch.query_ordinal + qidx,
+                    options,
+                    |_, _| true,
+                    crate::algorithm::common::database::XML_EFFECT,
+                )?;
             }
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
@@ -1442,8 +1431,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 len: i32::try_from(length)?,
                 stats: query_stats(batch, qidx, options.gapped, &gapped_karlin),
                 message: text.message.as_deref(),
-                // Read by XML2 and JSON alone: the query of a batch NCBI did not search.
-                searched: !batch.search_skipped,
+                // Read by XML2 and JSON alone: a query without NCBI's alignment set
+                // (`BatchResults::has_alignment_set`).
+                searched: batch.has_alignment_set(options),
                 masks: &masks,
             };
             // The texts of the subjects that the query's report reads one by one, written where
@@ -1653,7 +1643,7 @@ fn write_with_posts(
     crate::report::query_warnings::write_posts_to(buf, &hits, 0, writer, diagnostics, None)
 }
 
-/// NCBI's post (`ERR_POST(Error << message)`) of a structured report's caught exception
+/// NCBI's post (`ERR_POST` at the error level with `message`) of a structured report's caught exception
 /// (`CaughtException`, `StructuredXml::caught_message`), as BLASTX writes it: `Error: [blastx] `,
 /// the message (which ends with the `what()` text's end of line) and the post's end of line.
 fn caught_post(message: &[u8]) -> Vec<u8> {

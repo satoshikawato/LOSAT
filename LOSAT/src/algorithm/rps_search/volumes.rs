@@ -89,7 +89,7 @@ pub(crate) struct RpsUnit {
     pub(crate) request_count: i32,
     /// `GetMinLength`: the subject length of the hit cutoff with the Gumbel block.
     pub(crate) min_length: i32,
-    /// The RPS engine's `dbsize`, `BlastSeqSrcGetTotLen + BlastSeqSrcGetNumSeqs`, widened from
+    /// The RPS engine's `dbsize`, `BlastSeqSrcGetTotLen` plus `BlastSeqSrcGetNumSeqs`, widened from
     /// NCBI's `Int8` (rule P2: NCBI's sum overflows for an alias file's `LENGTH` of 2^63 - 1 and
     /// an `NSEQ` of 1 or more, undefined behaviour; widened it is above `INT4_MAX`, NCBI's -3 and
     /// LOSAT's refusal of the double free, `RpsUnit::check_engine_length`), whose `Int4` is the
@@ -102,13 +102,13 @@ pub(crate) struct RpsUnit {
 }
 
 impl RpsUnit {
-    /// The concatenated length `Lc` of the unit's search, `concat_db.length = (Int4) dbsize`
-    /// (blast_engine.c:1143, cited above): the low 32 bits of `engine_size`. A bare volume's is
-    /// the letters of its index and one delimiter row per profile, the rows of its `.rps` file; an
-    /// alias file's `LENGTH` and `NSEQ` over one volume move it below the rows or above them, also
-    /// to a negative value. The RPS engine reads it in three places (`RpsRun::concat_length`): the
-    /// size of the diagonal table, the bound of the ungapped extensions to the right and the root
-    /// of the gapped stage's interval tree.
+    /// The concatenated length `Lc` of the unit's search, `concat_db.length` set from `dbsize` cast
+    /// to `Int4` (blast_engine.c:1143, cited above): the low 32 bits of `engine_size`. A bare
+    /// volume's is the letters of its index and one delimiter row per profile, the rows of its
+    /// `.rps` file; an alias file's `LENGTH` and `NSEQ` over one volume move it below the rows or
+    /// above them, also to a negative value. The RPS engine reads it in three places
+    /// (`RpsRun::concat_length`): the size of the diagonal table, the bound of the ungapped
+    /// extensions to the right and the root of the gapped stage's interval tree.
     pub(crate) fn concat_length(&self) -> i32 {
         self.engine_size as i32
     }
@@ -230,6 +230,13 @@ impl RpsUnits {
     /// The units in the order of their search.
     pub(crate) fn units(&self) -> &[RpsUnit] {
         &self.units
+    }
+
+    /// Whether the units are the volumes searched bare (a database of several volumes): no alias
+    /// key reaches the search's Seq-aligns, which name each profile by its stored header
+    /// (`report_ordinal_ids`).
+    pub(crate) fn searches_volumes_bare(&self) -> bool {
+        self.units.len() > 1
     }
 
     /// The first unit, whose statistics the merged result keeps and the reports print.
@@ -482,7 +489,7 @@ pub(crate) fn search_sets(
     use crate::report::archive::options::{Param, ParamValue};
     let mut sets = Vec::new();
     if let Some(db_length) = db_length {
-        // `SetDbLength(Int8)` of `D`, whatever its sign (0 too; probes p6_3v_l0#3,
+        // `SetDbLength` of `D` as an `Int8`, whatever its sign (0 too; probes p6_3v_l0#3,
         // p6_3v_l2p63p1#3 of line RG D1a-4).
         sets.push(Param {
             name: "DbLength",
@@ -534,13 +541,50 @@ pub(crate) fn search_sets(
 /// is the batch's error, as NCBI's), and its HSPs, which outfmt 7's count and the prefetch's
 /// limit still count: the returned counts (by list; `None` where no list lost a profile). Nothing
 /// changes where the ordinal ids are the OIDs (`SeqDb::ordinal_ids_are_oids`: no range).
+///
+/// The alias files' `OID_MASK_TYPE` (line RG D1b-2) reaches the Seq-aligns of a database of one
+/// volume, searched by the `-db` name: a profile it leaves without a line gets none. The volumes
+/// of several are searched bare (`bare`, `RpsUnits::searches_volumes_bare`): their Seq-aligns
+/// name every profile by its stored header, and the formatter, which reads the profiles over the
+/// `-db` name, does not find a reported one whose lines the type removes (probe xp3v of D1b-2:
+/// `Unknown`, "no longer exists in database", or a null pointer exception), LOSAT's refusal of
+/// the batch in the same classes; one past the cut leaves its list as a profile out of the
+/// ranges does.
 pub(crate) fn report_ordinal_ids(
     db: &SeqDb,
     lists: &mut [Option<BlastpHitList>],
     cut: usize,
     program: &str,
+    bare: bool,
 ) -> Result<Option<Vec<usize>>> {
-    if db.ordinal_ids_are_oids() {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1580-1586 (cited at
+    // `SeqDb::drops_lineless_hits`)
+    // In a database of one volume, searched by the `-db` name, a profile whose every definition
+    // line the alias files' `OID_MASK_TYPE` erased gets no Seq-align (its header is read by OID,
+    // whatever the ranges include): its lists leave the reports, outfmt 7's count and the
+    // prefetch, before the formatter's cut (probes rps_* of line RG D1b-2: the hits of profile
+    // `ref|XP_000101.1|` are gone, exit 0). NCBI reads the header of every listed profile there,
+    // past the formatter's cut too: the first that cannot be read or that LOSAT refuses, in the
+    // lists' order, is the batch's error. The volumes of several are searched bare (below; probe
+    // xp3v of D1b-2: NCBI's Seq-aligns keep profile `ref|XP_000102.1|`).
+    let erasing = db.drops_lineless_hits();
+    if erasing && !bare {
+        for list in lists.iter_mut().flatten() {
+            list.hsplist_array.truncate(list.hsplist_count);
+            let keep = list
+                .hsplist_array
+                .iter()
+                .map(|hsp_list| db.keeps_line_of_oid(hsp_list.oid))
+                .collect::<Result<Vec<bool>, _>>()
+                .map_err(|error| {
+                    crate::algorithm::common::database::database_error(error, program)
+                })?;
+            let mut keep = keep.into_iter();
+            list.hsplist_array.retain(|_| keep.next().unwrap_or(true));
+            list.hsplist_count = list.hsplist_array.len();
+        }
+    }
+    if db.ordinal_ids_are_oids() && !(erasing && bare) {
         return Ok(None);
     }
     let queries = lists.len();
@@ -550,7 +594,7 @@ pub(crate) fn report_ordinal_ids(
             continue;
         };
         list.hsplist_array.truncate(list.hsplist_count);
-        let cut = formatter_kept(db, list, cut)
+        let cut = formatter_kept(db, list, cut, bare)
             .map_err(|error| crate::algorithm::common::database::database_error(error, program))?;
         let mut position = 0usize;
         let mut dropped_hsps = 0usize;
@@ -561,6 +605,32 @@ pub(crate) fn report_ordinal_ids(
             }
             let reported = position < cut;
             position += 1;
+            // A profile of the bare volumes whose lines the alias files' `OID_MASK_TYPE` removes:
+            // the formatter does not find it among those it reports, and nothing reads it past
+            // the cut but its stored header (the Seq-align's read; `erases_a_line_of_oid` reads
+            // the same bytes).
+            if erasing && bare {
+                match db.erases_a_line_of_oid(hsp_list.oid) {
+                    Err(error) => {
+                        failed = Some(crate::algorithm::common::database::database_error(
+                            error, program,
+                        ));
+                        return true;
+                    }
+                    Ok(true) if reported => {
+                        failed = Some(anyhow::anyhow!(
+                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files' OID_MASK_TYPE removes, in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
+                            hsp_list.oid
+                        ));
+                        return true;
+                    }
+                    Ok(true) => {
+                        dropped_hsps += hsp_list.hsps.len();
+                        return false;
+                    }
+                    Ok(false) => {}
+                }
+            }
             // A reported profile out of the range is found where an included copy of its record
             // holds its Seq-align id (`found_as_copy`).
             let ordinal = match db.included_ordinal(hsp_list.oid) {
@@ -598,7 +668,12 @@ pub(crate) fn report_ordinal_ids(
                     true
                 }
                 None => {
-                    if let Err(error) = db.read_header_of_oid(hsp_list.oid) {
+                    let header = if bare {
+                        db.read_stored_header_of_oid(hsp_list.oid)
+                    } else {
+                        db.read_header_of_oid(hsp_list.oid)
+                    };
+                    if let Err(error) = header {
                         failed = Some(crate::algorithm::common::database::database_error(
                             error, program,
                         ));
@@ -692,11 +767,13 @@ fn found_as_copy(db: &SeqDb, oid: u32) -> Result<Found, crate::seqdb::SeqDbError
 /// OID, `SeqDb::read_header_of_oid`). Two volumes that hold one profile (a volume given twice
 /// under two paths) give such lists; the reports keep the same number
 /// (`common::database::joined_cut`): both take the one count, `common::database::pruned_kept`.
-/// A list of `cut` lists or fewer is kept whole, unread.
+/// A list of `cut` lists or fewer is kept whole, unread. The volumes searched bare (`bare`) name
+/// their profiles by the stored headers (`SeqDb::read_stored_header_of_oid`).
 fn formatter_kept(
     db: &SeqDb,
     list: &BlastpHitList,
     cut: usize,
+    bare: bool,
 ) -> Result<usize, crate::seqdb::SeqDbError> {
     use crate::seqid::defline_set::{compare, Sic};
     let lists = &list.hsplist_array[..list.hsplist_count.min(list.hsplist_array.len())];
@@ -706,7 +783,12 @@ fn formatter_kept(
     crate::algorithm::common::database::pruned_kept(
         cut,
         lists.iter().map(|hsp_list| {
-            Ok(match db.read_header_of_oid(hsp_list.oid)? {
+            let header = if bare {
+                db.read_stored_header_of_oid(hsp_list.oid)?
+            } else {
+                db.read_header_of_oid(hsp_list.oid)?
+            };
+            Ok(match header {
                 crate::seqdb::SequenceHeader::Parsed(set) => set.alignment_id().cloned(),
                 crate::seqdb::SequenceHeader::Ordinal(_) => None,
             })
@@ -934,9 +1016,9 @@ impl RpsVolumeSetup {
                 self.program
             );
         }
-        // NCBI's scaled values: `(Int4)scale` multiplies the costs and cutoffs (a whole scale of
-        // 1 or more here; `RpsRun::search_volume` refuses one whose products leave `Int4` and one
-        // that changes Lambda).
+        // NCBI's scaled values: `scale` cast to `Int4` multiplies the costs and cutoffs (a whole
+        // scale of 1 or more here; `RpsRun::search_volume` refuses one whose products leave `Int4`
+        // and one that changes Lambda).
         let scale = aux.scale;
         if !(scale >= 1.0 && scale.fract() == 0.0) {
             bail!(

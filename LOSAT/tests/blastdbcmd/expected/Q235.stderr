@@ -1,0 +1,54 @@
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.taxname
+Bad char [0xC3] in string at line 26
+Café sp.
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.taxname
+Bad char [0xA9] in string at line 26
+Café sp.
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.common
+Bad char [0xC3] in string at line 27
+café common
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.common
+Bad char [0xA9] in string at line 27
+café common
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.taxname
+Bad char [0xC3] in string at line 26
+Café sp.
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.taxname
+Bad char [0xA9] in string at line 26
+Café sp.
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.common
+Bad char [0xC3] in string at line 27
+café common
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.common
+Bad char [0xA9] in string at line 27
+café common
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.taxname
+Bad char [0xC3] in string at line 26
+Café sp.
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.taxname
+Bad char [0xA9] in string at line 26
+Café sp.
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.common
+Bad char [0xC3] in string at line 27
+café common
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.common
+Bad char [0xA9] in string at line 27
+café common
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.taxname
+Bad char [0x7] in string at line 26
+Ctl name
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.common
+Bad char [0x1B] in string at line 27
+ccommon
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.taxname
+Bad char [0x7] in string at line 26
+Ctl name
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.common
+Bad char [0x1B] in string at line 27
+ccommon
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.taxname
+Bad char [0x7] in string at line 26
+Ctl name
+Error: (803.7) [blastdbcmd] Bioseq.descr.E.source.org.common
+Bad char [0x1B] in string at line 27
+ccommon

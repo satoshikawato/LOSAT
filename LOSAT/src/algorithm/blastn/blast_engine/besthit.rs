@@ -11,61 +11,13 @@
 
 use super::{score_compare_prelim_hits, PrelimHit, PrelimHitLists, PrelimHspList};
 use crate::algorithm::blastn::hsp::{
-    compare_hsp_lists, score_compare_hsps, update_best_evalue, BlastnHitList, BlastnHspList,
-    HitList, HitListEntry,
+    score_compare_hsps, update_best_evalue, BlastnHitList, BlastnHspList, HitList,
 };
 use crate::core::hspfilter_besthit::{BestHitKey, BestHitLists, BestHitParams, BestHitQuery};
 
 /// An `Int4` length as NCBI's `query_length` holds it (the lengths of LOSAT's queries fit).
 fn int4(length: usize) -> i32 {
     i32::try_from(length).unwrap_or(i32::MAX)
-}
-
-/// The key of an HSP for the lists: its start on the plus strand of the query (a minus context
-/// folds its range over the query length) and its query extent.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-243
-/// `qlen` is `BlastQueryInfoGetQueryLength` (the length of the query's searched context);
-/// `query_offset` and `query_end` are the HSP's offsets within its context.
-fn best_hit_key(
-    minus: bool,
-    qlen: i32,
-    query_offset: i32,
-    query_end: i32,
-    score: i32,
-    evalue: f64,
-) -> BestHitKey {
-    BestHitKey {
-        begin: if minus {
-            qlen - query_end
-        } else {
-            query_offset
-        },
-        len: query_end - query_offset,
-        score,
-        evalue,
-    }
-}
-
-/// The hit list that `s_BlastHSPBestHitFinal` makes of one query's kept lists: the lists (with
-/// their best e-values) sorted by e-value, then saved into a hit list of
-/// `prelim_hitlist_size` subjects, which keeps the lists of the best e-values when there are
-/// more (`Blast_HitListUpdate`).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:200-214
-fn final_hit_list<L: HitListEntry>(mut lists: Vec<L>, prelim_hitlist_size: usize) -> HitList<L> {
-    for list in &mut lists {
-        list.update_best_evalue();
-    }
-    // `Blast_HitListSortByEvalue`: no list is empty.
-    if lists.len() > 1 {
-        lists.sort_by(compare_hsp_lists);
-    }
-    let mut hit_list = HitList::new(prelim_hitlist_size);
-    for list in lists {
-        hit_list.update(list);
-    }
-    hit_list
 }
 
 /// NCBI's best hit writer in place of the HSP collector (`PrelimHitCollector`): each subject's
@@ -96,11 +48,11 @@ impl PrelimBestHit {
 
     /// `s_BlastHSPBestHitRun` for the HSPs of subject `oid` (all queries, both strands).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:228-333
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-352
     pub(super) fn add(&mut self, oid: usize, hits: Vec<PrelimHit>) {
         for hit in hits {
             let query = hit.query_idx as usize;
-            let key = best_hit_key(
+            let key = BestHitKey::new(
                 hit.context_idx % 2 == 1,
                 self.query_lengths[query],
                 hit.prelim_qs,
@@ -114,7 +66,7 @@ impl PrelimBestHit {
 
     /// `s_BlastHSPBestHitFinal`: the hit list of each query with kept HSPs.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231
     pub(super) fn finish(self) -> PrelimHitLists {
         let mut hit_lists: PrelimHitLists = Vec::with_capacity(self.query_lengths.len());
         hit_lists.resize_with(self.query_lengths.len(), || None);
@@ -128,7 +80,7 @@ impl PrelimBestHit {
                     best_evalue: 0.0,
                 })
                 .collect();
-            hit_lists[query] = Some(final_hit_list(lists, self.prelim_hitlist_size));
+            hit_lists[query] = Some(HitList::best_hit_final(lists, self.prelim_hitlist_size));
         }
         hit_lists
     }
@@ -140,7 +92,7 @@ impl PrelimBestHit {
 /// their order), every HSP in that order put into a new list with the overhang and the score
 /// edge of the options, and the kept HSPs made into the query's hit list again.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:463-484
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:520-539
 /// The lists are per query, so the pipe of a batch is this function for each of its queries.
 /// `query_len` is the length of each context of the query (`finish_query_hit_list`). The HSP
 /// offsets are those within the HSP's context and the context is minus for a negative frame.
@@ -162,13 +114,13 @@ pub(super) fn best_hit_traceback(
         .first()
         .map_or(0, |list| list.query_index);
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:470-480
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:525-532
     let qlen = int4(query_len);
     let mut lists = BestHitLists::pipe(params, prelim_hitlist_size);
     for list in std::mem::take(&mut hit_list.hsplist_array) {
         let oid = list.oid;
         for hsp in list.hsps {
-            let key = best_hit_key(
+            let key = BestHitKey::new(
                 hsp.query_frame < 0,
                 qlen,
                 hsp.internal_q_offset_0,
@@ -196,7 +148,7 @@ pub(super) fn best_hit_traceback(
             best_evalue: 0.0,
         })
         .collect();
-    *hit_list = final_hit_list(lists, prelim_hitlist_size);
+    *hit_list = HitList::best_hit_final(lists, prelim_hitlist_size);
 }
 
 #[cfg(test)]

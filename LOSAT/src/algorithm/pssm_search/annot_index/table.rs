@@ -123,7 +123,7 @@ impl Want {
         }
     }
 
-    /// `DstInt(value)`: the value in the type (a bool is `value != 0`).
+    /// `DstInt` of `value`: the value in the type (a bool is true when `value` is not 0).
     fn cast(self, value: i64) -> i64 {
         match self {
             Want::Bool => i64::from(value != 0),
@@ -244,8 +244,8 @@ impl<'a> LocColumns<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:371-454
-    // `GetField_id() - m_BaseValue` is `int` arithmetic: below `INT_MIN + 10` the product's
-    // overflows (undefined behaviour), refused.
+    // `GetField_id()` minus `m_BaseValue` is `int` arithmetic: below 10 more than `INT_MIN` the
+    // product's overflows (undefined behaviour), refused.
     fn add_column(&mut self, column: Column<'a>) -> Result<bool, Stop> {
         if let Some(id) = column.field_id() {
             let Some(field) = id.checked_sub(self.base) else {
@@ -391,9 +391,9 @@ impl Indexer<'_> {
     // message (the setters' constructors only keep the name: `CSeqTableSetExt` and the others
     // cut it with `CTempString::substr`, `CSeqTableSetAnyFeatField` throws only the
     // `CAnnotException`s caught here, seq_table_setters.cpp:180-188, 344-430).
-    /// `new CSeqTableInfo(table)` (`x_InitFeatTable`, seq_annot_info.cpp:474-500): the checks of
-    /// the columns, with their messages, then LOSAT's bound of the rows that NCBI makes an object
-    /// for.
+    /// The making of a `CSeqTableInfo` from `table` (`x_InitFeatTable`,
+    /// seq_annot_info.cpp:474-500): the checks of the columns, with their messages, then LOSAT's
+    /// bound of the rows that NCBI makes an object for.
     pub(super) fn table_info<'a>(&mut self, table: V<'a>) -> Result<TableInfo<'a>, Stop> {
         let is_feat = is_good_feat_table(table);
         let mut info = TableInfo {
@@ -542,7 +542,7 @@ impl Indexer<'_> {
         Ok(info)
     }
 
-    /// `NCBI_CATCH(title)` of `e` (`NcbiException::report_default`): one error post per line.
+    /// `NCBI_CATCH` with `title` of `e` (`NcbiException::report_default`): one error post per line.
     fn ncbi_catch(&mut self, e: &NcbiException, title: &str) {
         let lines = e.report_default(self.program, title);
         for line in lines.split_inclusive(|&byte| byte == b'\n') {
@@ -551,7 +551,7 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:560-565, 580-584
-    /// `NCBI_CATCH(title)` of a `std::exception` whose `what()` is `what`: `Error: [<program>]
+    /// `NCBI_CATCH` with `title` of a `std::exception` whose `what()` is `what`: `Error: [<program>]
     /// [<title>] Exception: <what>` (line RG D3-1 `bm/` cases m12, m13: BitMagic's
     /// `BM::Invalid serialization format`).
     fn std_catch(&mut self, what: &str, title: &str) {
@@ -603,7 +603,7 @@ impl Indexer<'_> {
                 }
                 if cols.real_loc {
                     let column = cols.loc.expect("a real location");
-                    // `*loc.GetLoc(row)` of a row without a location dereferences a null
+                    // NCBI dereferences `GetLoc` of a row without a location: a null
                     // `CConstRef` (`CCoreException::eNullPtr`, a report of memory addresses).
                     let Some(loc) = self.column_seq_loc(column, row)? else {
                         return Err(self.null_pointer());
@@ -716,7 +716,7 @@ impl TableInfo<'_> {
 // The values of a column at a row.
 impl Indexer<'_> {
     // NCBI reference (598d8ae6): c++/include/objects/seqtable/SeqTable_column.hpp:75-96
-    /// `CSeqTable_column::TryGetValue(row, v)` of the type `want` (a bool as 0 or 1).
+    /// `CSeqTable_column::TryGetValue` of the type `want` (a bool as 0 or 1).
     pub(super) fn column_try_get(
         &mut self,
         column: Column<'_>,
@@ -765,12 +765,12 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_column.cpp:126-174
-    /// `CSeqTable_column::GetSeq_loc(row)`.
+    /// `CSeqTable_column::GetSeq_loc` of `row`.
     fn column_seq_loc<'a>(&mut self, column: Column<'a>, row: u64) -> Result<Option<V<'a>>, Stop> {
         self.column_object(column, row, "loc", "Loc")
     }
 
-    /// `CSeqTable_column::GetSeq_id(row)`.
+    /// `CSeqTable_column::GetSeq_id` of `row`.
     fn column_seq_id<'a>(&mut self, column: Column<'a>, row: u64) -> Result<Option<V<'a>>, Stop> {
         self.column_object(column, row, "id", "Id")
     }
@@ -823,7 +823,7 @@ impl Indexer<'_> {
     // A bit-bvector is BitMagic's serialized vector, which `GetBitVector()` decodes at its first
     // value (`Indexer::bit_vector`); its row is cast to BitMagic's 32-bit `size_type` first. An
     // `int-scaled` value that leaves `Int8` is a signed overflow: refused.
-    /// `x_TryGetInt8(row, v, type_name)` of the multi-data `data`, one level: its value, or the
+    /// `x_TryGetInt8` of the multi-data `data`, one level: its value, or the
     /// multi-data inside it to read first (`Get`).
     fn x_try_get_int8<'v>(
         &mut self,
@@ -881,7 +881,7 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_multi_data.cpp:435-516
-    /// `CSeqTable_multi_data::TryGetValue(row, v)` of the type `want`.
+    /// `CSeqTable_multi_data::TryGetValue` of the type `want`.
     fn multi_try_get(&mut self, data: V<'_>, row: u64, want: Want) -> Result<Option<i64>, Stop> {
         // The multi-data values waiting for one inside them, from a list on the heap (to any depth
         // the reader read), and the one to read next.
@@ -1048,15 +1048,15 @@ impl Indexer<'_> {
     // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_sparse_index.cpp:377-405
     // (`CIndexDeltaSumCache::FindDeltaSum`), 306-360 (`x_FindDeltaSum2`; `USE_DELTA_CACHE` is not
     // defined, line 232), 180-225 (`x_GetBitSetCache`); include/objects/seqtable/
-    // SeqTable_sparse_index.hpp:96-97 (`kSkipped` and `kInvalidRow` are both `size_t(0)-1`).
-    // `x_FindDeltaSum(row)` is the first index whose sum of the deltas up to it reaches `row`, when
-    // that sum is `row`, else `kInvalidRow`. The deltas are `unsigned` (`TIndexes_delta`), so the
-    // sums never decrease, and the blocks that NCBI's cache fills give that index whatever rows
-    // were asked before. `x_GetBitSetCache(b)` is the number of set bits in the bytes before byte
-    // `b`. The `indexes` are `unsigned` in the order of the data, which nothing checks: the index
-    // found is the one NCBI's `lower_bound` finds (`utils::lower_bound`).
+    // SeqTable_sparse_index.hpp:96-97 (`kSkipped` and `kInvalidRow` are both the largest `size_t`).
+    // `x_FindDeltaSum` of `row` is the first index whose sum of the deltas up to it reaches `row`,
+    // when that sum is `row`, else `kInvalidRow`. The deltas are `unsigned` (`TIndexes_delta`), so
+    // the sums never decrease, and the blocks that NCBI's cache fills give that index whatever rows
+    // were asked before. `x_GetBitSetCache` of `b` is the number of set bits in the bytes before
+    // byte `b`. The `indexes` are `unsigned` in the order of the data, which nothing checks: the
+    // index found is the one NCBI's `lower_bound` finds (`utils::lower_bound`).
     // A `bit-set-bvector` is BitMagic data, decoded at its first index (`Indexer::bit_vector`).
-    /// `CSeqTable_sparse_index::GetIndexAt(row)`: the index in the column's data of the row's
+    /// `CSeqTable_sparse_index::GetIndexAt` of `row`: the index in the column's data of the row's
     /// value, `None` for a row without one (`kSkipped`).
     fn sparse_index_at(&mut self, sparse: V<'_>, row: u64) -> Result<Option<u64>, Stop> {
         let (variant, value) = sparse.choice();
@@ -1212,9 +1212,9 @@ fn int_size_step(data: V<'_>) -> Result<u64, V<'_>> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqtable/SeqTable_single_data.cpp:85-180
-// (`sx_DownCast` throws `ThrowOverflowError(value, type_name)` when the value does not fit, quoted
-// at `SINGLE_TOO_BIG`.)
-/// `CSeqTable_single_data::GetValue(v)` of the type `want` (a bool as 0 or 1).
+// (`sx_DownCast` throws `ThrowOverflowError`, with the value and the type's name, when the value
+// does not fit, quoted at `SINGLE_TOO_BIG`.)
+/// `CSeqTable_single_data::GetValue` of the type `want` (a bool as 0 or 1).
 fn single_get(single: V<'_>, want: Want) -> Result<i64, Stop> {
     let (variant, value) = single.choice();
     let number = match variant {
@@ -1250,7 +1250,7 @@ fn single_get(single: V<'_>, want: Want) -> Result<i64, Stop> {
 }
 
 // NCBI reference (598d8ae6): src/objects/seqtable/SeqTable_single_data_.cpp (datatool's
-// `GetLoc()` and `GetId()`: `CheckSelected(e_Loc)` throws `ThrowInvalidSelection`; the place is
+// `GetLoc()` and `GetId()`: `CheckSelected` for `e_Loc` throws `ThrowInvalidSelection`; the place is
 // `SINGLE_SELECTION`'s)
 /// `CSeqTable_single_data::Get<getter>()`: the value of the variant `variant`.
 fn single_object<'a>(single: V<'a>, variant: &str, getter: &str) -> Result<V<'a>, Stop> {
@@ -1278,7 +1278,7 @@ mod table_tests;
 /// What `x_try_get_int8` gives for one multi-data value.
 enum Get<'v> {
     Value(Option<i64>),
-    /// `int-scaled`: its `data`, then `v*GetMul()+GetAdd()`.
+    /// `int-scaled`: its `data`, then the value times `GetMul()` plus `GetAdd()`.
     Scaled {
         data: V<'v>,
         mul: i32,
@@ -1290,8 +1290,8 @@ enum Get<'v> {
 
 /// A multi-data value waiting for one inside it (`multi_try_get`).
 enum Pending<'v> {
-    /// `int-scaled`'s `v*GetMul()+GetAdd()`; a value that leaves `Int8` is a signed overflow
-    /// (refused).
+    /// `int-scaled`'s value times `GetMul()` plus `GetAdd()`; a value that leaves `Int8` is a
+    /// signed overflow (refused).
     Scale { mul: i32, add: i32 },
     /// `TryGetValue`'s check that the value fits the type asked for.
     Cast(Want),

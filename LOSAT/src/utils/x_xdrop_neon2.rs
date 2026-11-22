@@ -355,7 +355,7 @@ unsafe fn pmax_s8w(w: W) -> W {
 unsafe fn any(v: V) -> bool {
     vmaxvq_u32(vreinterpretq_u32_u8(v)) != 0
 }
-/// Any bit set in the pair (`movemask != 0` of the AVX2 file).
+/// Any bit set in the pair (the nonzero test of `movemask` in the AVX2 file).
 #[inline(always)]
 unsafe fn anyw(v: W) -> bool {
     any(vorrq_u8(v.0, v.1))

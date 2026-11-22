@@ -1,6 +1,6 @@
 use super::*;
 use crate::algorithm::blastp::encoding::EncodedProtein;
-use crate::algorithm::blastp::kappa::smith_waterman::SwRedoEndless;
+use crate::core::composition_adjustment::smith_waterman_match::SwRedoEndless;
 use crate::utils::glibc_fma_libm::GlibcLibm;
 
 const ECUTOFF: f64 = 0.002;

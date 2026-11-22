@@ -51,7 +51,13 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.
 - The report formats are 0 to 4, 6, 7 and 10. Other formats are refused.
-- Also refused with `-in_pssm`: `-ungapped`, `-use_sw_tback`, `-db_gencode 32`, `-outfmt 11`, `-mt_mode 1` with more than one thread and `-db`, and a PSSM whose query `-seg` masks completely.
+- Also refused with `-in_pssm`:
+  - `-ungapped`;
+  - `-use_sw_tback` on a search that finds an alignment, where NCBI fails, crashes, never finishes or writes rows that change from one run to the next (a search that finds nothing runs);
+  - `-db_gencode 32`;
+  - `-outfmt 11`;
+  - `-mt_mode 1` with more than one thread and `-db`;
+  - a PSSM whose query `-seg` masks completely.
 
 ## Common options
 
@@ -69,11 +75,13 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-matrix` | `BLOSUM62` | Scoring matrix: BLOSUM45, 50, 62, 80, 90 or PAM30, 70, 250 |
 | `-gapopen`, `-gapextend` | 11, 1 | Gap costs |
 | `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3 |
+| `-use_sw_tback` | off | Align the final results again with Smith-Waterman |
 | `-seg` | `12 2.2 2.5` | Low-complexity filter |
 | `-sum_stats` | `true` | Use sum statistics for groups of alignments |
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
 | `-window_size` | 40 | Two-hit window; 0 selects the one-hit method |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+| `-best_hit_overhang`, `-best_hit_score_edge` | off (0.1 for the one not given) | Keep only the best alignments for each region of the query (the Best Hit algorithm). Values above 0 and below 0.5; not with `-culling_limit` |
 | `-subject_besthit` | off | Keep only the best alignment of each subject for each part of the query |
 
 For every option: `losat tblastn -help`.
@@ -103,6 +111,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 ## Differences from NCBI BLAST+
 
+- With `-db_hard_mask`, a reading frame whose first part, from its first letter, ends at a mask with no other part of the frame after it (masks at or near either end of a sequence) is searched over that part alone. NCBI BLAST+ 2.17.0 reads the masked letters of the frame there and can crash or report other alignments. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - With `-subject` and a `-db_gencode` other than 1, LOSAT translates the subject with that code (see [Genetic code of the subject](#genetic-code-of-the-subject)). See [the decision record on genetic code 32 for local tblastn subjects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-TLOSAN-LOCAL-GENCODE-32.md).
 - `-db_gencode 32` is accepted (without `-in_pssm`). NCBI BLAST+ 2.17.0 rejects it.
 - With `-window_size 0` and a low `-threshold`, NCBI BLAST+ can read memory past its buffers and crash. LOSAT reads the letters past the end as the end marker. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
@@ -112,13 +121,13 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `tblastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-ungapped` and `-use_sw_tback`.
-- `-best_hit_overhang` and `-best_hit_score_edge`.
+- `-ungapped`.
+- With `-use_sw_tback`, the rare query and subject pairs on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
 - An `-evalue` of 1.7976931348623157e308 or more.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
-- `-db_hard_mask` on a database with a sequence whose masks leave NCBI a part of a reading frame, from its first letter, that NCBI searches as the whole frame while the part stops before the frame's end or follows an empty part (masks at or near either end of a sequence, for example).
+- `-db_hard_mask` on a database with a sequence whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example).
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback.
 - The `-in_pssm` settings listed [above](#searching-with-a-pssm).
 

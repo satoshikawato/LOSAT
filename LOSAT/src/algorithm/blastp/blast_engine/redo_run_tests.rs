@@ -1,6 +1,6 @@
 use super::*;
 use crate::algorithm::blastp::hsp::BlastpHspList;
-use crate::algorithm::blastp::kappa::smith_waterman::SwRedoFailed;
+use crate::core::composition_adjustment::smith_waterman_match::SwRedoFailed;
 
 /// A batch status, failed (`failed`, a failed Smith-Waterman redo before) or not.
 fn status(failed: bool) -> SwBatchStatus {
@@ -116,49 +116,4 @@ fn only_excluded_lists_after_the_last_status_count() {
             );
         }
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3644-3646
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
-/// The status of a query batch (`SwBatchStatus`, the one rule of both loops of the
-/// Smith-Waterman redo): a redo that ends sets it to 0 and keeps its result, a failed one sets it
-/// and keeps nothing, one that does not end gives the caller's error, another error passes as it
-/// is; the early termination test leaves it, an excluded fetch after the test sets it to 0; a batch
-/// starts at 0.
-#[test]
-fn the_batch_status_follows_the_last_match_that_the_redo_reaches() {
-    let endless = || anyhow::anyhow!("endless here");
-    for failed_before in [true, false] {
-        let fresh = status(failed_before);
-        let mut status = fresh;
-        assert_eq!(status.redone(Ok(7), endless).ok(), Some(Some(7)));
-        assert!(!status.failed());
-        let mut status = fresh;
-        let failed = status.redone::<u8>(Err(SwRedoFailed.into()), endless);
-        assert_eq!(failed.ok(), Some(None));
-        assert!(status.failed());
-        let mut status = fresh;
-        let error = status
-            .redone::<u8>(Err(kappa::smith_waterman::SwRedoEndless.into()), endless)
-            .expect_err("a redo that does not end");
-        assert_eq!(format!("{error:#}"), "endless here");
-        let error = status
-            .redone::<u8>(Err(anyhow::anyhow!("a read error")), endless)
-            .expect_err("another error");
-        assert_eq!(format!("{error:#}"), "a read error");
-        // NCBI's test, then its fetch: the test ends a match whether or not the fetch would
-        // exclude it, and leaves the status; an excluded fetch clears it; else the redo runs.
-        for (terminates_early, excluded, redone, failed_after) in [
-            (true, true, false, failed_before),
-            (true, false, false, failed_before),
-            (false, true, false, false),
-            (false, false, true, failed_before),
-        ] {
-            let mut status = fresh;
-            assert_eq!(status.reaches_redo(terminates_early, excluded), redone);
-            assert_eq!(status.failed(), failed_after);
-        }
-    }
-    assert!(!SwBatchStatus::default().failed());
 }

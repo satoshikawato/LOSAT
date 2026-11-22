@@ -9,13 +9,15 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:316-361
 #![warn(missing_docs, unused)]
 
-use std::io::Read;
-
 use super::error::Error;
 use super::program::Program;
 use super::search::Search;
-use crate::blastinput::fasta_reader::{read_all, FastaInputSource, FastaRecord, ReaderConfig};
-use crate::blastinput::input_files::open_file_input;
+use crate::blastinput::fasta_reader::{
+    read_all, read_queries, FastaInputSource, FastaRecord, ParseErrorCode, QueryRecords, ReadError,
+    ReaderConfig,
+};
+use crate::blastinput::input_files::{open_file_input, read_to_failure};
+use crate::blastinput::query_batch::QueryReading;
 use crate::cli::Commands;
 
 /// Which input of a search a FASTA holds. The reader's flags and the generated local IDs
@@ -155,21 +157,19 @@ fn read_source<R: std::io::Read>(
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
-/// The bytes of the file `path`, as the command line opens its `-query` or `-subject` argument:
-/// the same message for a file that does not open (`Error::Input`), and a file named `.gz`,
-/// `.bz2` or `.zst` is inflated (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8). `read_fasta`
-/// and `read_inputs` read the bytes.
+/// The bytes of the file `path`, as the command line opens and reads its `-query` or `-subject`
+/// argument: the same message for a file that does not open (`Error::Input`), a file named `.gz`,
+/// `.bz2` or `.zst` is inflated (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8), and a read
+/// that fails ends the bytes, as it ends the command line's input: a directory gives no byte (the
+/// command line's query of a directory is empty). `read_fasta` and `read_inputs` read the bytes.
 pub fn read_input_file(role: Role, path: &std::path::Path) -> Result<Vec<u8>, Error> {
-    let input_error = |error: anyhow::Error| Error::Input(super::error::input_bytes(&error));
     let name = match role {
         Role::Query => "query",
         Role::Subject => "subject",
     };
-    let mut file = open_file_input(path, name).map_err(input_error)?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|error| input_error(error.into()))?;
-    Ok(bytes)
+    let mut file = open_file_input(path, name)
+        .map_err(|error| Error::Input(super::error::input_bytes(&error)))?;
+    Ok(read_to_failure(&mut file))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:188-213
@@ -179,12 +179,35 @@ pub fn read_input_file(role: Role, path: &std::path::Path) -> Result<Vec<u8>, Er
 /// queries, as NCBI reads them: a query and a subject with one id are one sequence to the reports.
 ///
 /// A search with `-parse_deflines` takes its records from here; a search of a database gives no
-/// subject bytes. Returns `(query, subject)`.
+/// subject bytes. Returns `(query, subject)`: every query record, or the reader's error
+/// (`Error::Input`) where a query record does not read, before any search. [`read_input_records`]
+/// keeps the query records read before that error, and the error, which a search of them meets
+/// where the command line meets it: after the reports of the query batches before.
 pub fn read_inputs(
     search: &Search,
     query: &[u8],
     subject: &[u8],
 ) -> Result<(Vec<FastaRecord>, Vec<FastaRecord>), Error> {
+    let records = read_input_records(search, query, subject)?;
+    match records.query_end {
+        QueryEnd::Error(error) => Err(Error::Input(error.message)),
+        QueryEnd::Input | QueryEnd::BlankLines => Ok((records.query, records.subject)),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
+/// Reads the query and subject FASTA bytes of `search` as [`read_inputs`] does, and keeps how the
+/// reading of the query ended ([`QueryEnd`]): the command line reads its queries one batch at a
+/// time, so a query record that its reader cannot read ends the run in the batch that reads it,
+/// after the reports of the batches before (line WQA's D10, 2026-11-19). The records are those
+/// read before the end; a search of [`InputRecords::inputs`] (or of [`Inputs::query_end`]) meets
+/// the end where the command line meets it. A subject's error fails here, as the command line
+/// reads every subject before the first query.
+pub fn read_input_records(
+    search: &Search,
+    query: &[u8],
+    subject: &[u8],
+) -> Result<InputRecords, Error> {
     read_search_inputs(
         search.program(),
         &search.any_subject(),
@@ -193,6 +216,218 @@ pub fn read_inputs(
         query,
         subject,
     )
+}
+
+/// The records of a search's inputs as the command line reads its `-query` and `-subject` files
+/// ([`read_input_records`]).
+#[derive(Debug, Clone, Default)]
+pub struct InputRecords {
+    /// The query records read before the end of the query input (`query_end`).
+    pub query: Vec<FastaRecord>,
+    /// How the reading of the query ended after `query`.
+    pub query_end: QueryEnd,
+    /// The subject records.
+    pub subject: Vec<FastaRecord>,
+}
+
+impl InputRecords {
+    /// The query records against the subject records ([`Inputs::new`]), with the query's end.
+    pub fn inputs(&self) -> Inputs<'_> {
+        Inputs::new(&self.query, &self.subject).query_end(&self.query_end)
+    }
+
+    /// The query records against the BLAST database `name` ([`Inputs::database`]), with the
+    /// query's end.
+    pub fn database<'a>(&'a self, name: &'a str) -> Inputs<'a> {
+        Inputs::database(&self.query, name).query_end(&self.query_end)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-152
+/// How the reading of a query input ended after its records ([`InputRecords::query_end`]): what
+/// the command line's query batches meet after the last record read. A search meets it in the
+/// batch being read when the records run out before the batch reaches its size, and else in a
+/// batch of its own.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum QueryEnd {
+    /// The end of the input (`CBlastInput::End()`); an input of white space only has no record
+    /// and is NCBI's `Query is Empty!` (`IsIStreamEmpty`).
+    #[default]
+    Input,
+    /// Blank and comment lines where the reader expected a record (`eEOF`): the batch being read
+    /// ends there. An input that has nothing else gives a first batch without a query, NCBI's
+    /// `Empty CBlastQueryVector` (`LOSAT engine error: Empty CBlastQueryVector`).
+    BlankLines,
+    /// The reader's error on the record after the records read: the run ends with it in that
+    /// record's batch.
+    Error(QueryError),
+}
+
+/// The reader's error on a query record ([`QueryEnd::Error`]): the command line's message, and
+/// the reader's messages about the record that it wrote before the error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryError {
+    /// The command line's message without its last newline (`Error::Input`'s bytes).
+    message: Vec<u8>,
+    /// The reader's messages about the record, before the error.
+    warnings: Vec<u8>,
+    failure: ReadFailure,
+}
+
+/// A reader error as data, so that each search of the records meets the same error
+/// (`QueryError::read_error`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReadFailure {
+    /// `ReadError::Parse`.
+    Parse {
+        code: ParseErrorCode,
+        message: String,
+        line: u64,
+    },
+    /// `ReadError::Unsupported`, LOSAT's refusal: its text (a `NativeError`'s bytes), and its
+    /// exit status where it is a `NativeError`.
+    Refused { exit: Option<i32>, text: Vec<u8> },
+}
+
+impl QueryError {
+    fn new(error: ReadError, warnings: Vec<u8>) -> Self {
+        let failure = match &error {
+            ReadError::Parse {
+                code,
+                message,
+                line,
+            } => ReadFailure::Parse {
+                code: *code,
+                message: message.clone(),
+                line: *line,
+            },
+            ReadError::Unsupported(refusal) => {
+                match refusal.downcast_ref::<crate::cli::NativeError>() {
+                    Some(native) => ReadFailure::Refused {
+                        exit: Some(native.exit),
+                        text: native.message.clone(),
+                    },
+                    None => ReadFailure::Refused {
+                        exit: None,
+                        text: format!("{refusal:#}").into_bytes(),
+                    },
+                }
+            }
+            // The messages of the records are kept, not written: no write fails here.
+            ReadError::Write(error) => ReadFailure::Refused {
+                exit: None,
+                text: error.to_string().into_bytes(),
+            },
+        };
+        let message = super::error::input_bytes(&error.into_app_error());
+        Self {
+            message,
+            warnings,
+            failure,
+        }
+    }
+
+    /// The command line's message, without its last newline: what [`read_inputs`] fails with
+    /// (`Error::Input`).
+    pub fn message(&self) -> &[u8] {
+        &self.message
+    }
+
+    /// The reader's error, as the reader gave it.
+    fn read_error(&self) -> ReadError {
+        match &self.failure {
+            ReadFailure::Parse {
+                code,
+                message,
+                line,
+            } => ReadError::Parse {
+                code: *code,
+                message: message.clone(),
+                line: *line,
+            },
+            ReadFailure::Refused {
+                exit: Some(exit),
+                text,
+            } => ReadError::Unsupported(
+                crate::cli::NativeError {
+                    exit: *exit,
+                    message: text.clone(),
+                }
+                .into(),
+            ),
+            ReadFailure::Refused { exit: None, text } => {
+                ReadError::Unsupported(anyhow::anyhow!("{}", String::from_utf8_lossy(text)))
+            }
+        }
+    }
+
+    /// The reader's messages about the record before the error, which the search writes before
+    /// the error.
+    pub(crate) fn warnings(&self) -> &[u8] {
+        &self.warnings
+    }
+
+    /// The error as the programs end with it (`ReadError::into_app_error`).
+    pub(crate) fn app_error(&self) -> anyhow::Error {
+        self.read_error().into_app_error()
+    }
+}
+
+impl std::fmt::Display for QueryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&String::from_utf8_lossy(&self.message))
+    }
+}
+
+impl QueryEnd {
+    /// The end of the command line's reading of the queries (`fasta_reader::read_queries`).
+    fn of(end: crate::blastinput::fasta_reader::QueryEnd) -> Self {
+        use crate::blastinput::fasta_reader::QueryEnd as Read;
+        match end {
+            Read::Input => QueryEnd::Input,
+            Read::EofError => QueryEnd::BlankLines,
+            Read::Error { error, warnings } => QueryEnd::Error(QueryError::new(error, warnings)),
+        }
+    }
+
+    /// The reading that a program's search meets after the records (`QueryReading`): the records
+    /// of an input read to its end are `QueryReading::Records` (no record: `Query is Empty!`).
+    pub(crate) fn reading(&self) -> QueryReading {
+        match self {
+            QueryEnd::Input => QueryReading::Records,
+            QueryEnd::BlankLines => QueryReading::BlankLines,
+            QueryEnd::Error(error) => QueryReading::Error {
+                error: error.read_error(),
+                warnings: error.warnings.clone(),
+            },
+        }
+    }
+
+    /// Whether the end is the end of the input: records without one are NCBI's `Query is Empty!`
+    /// where a program checks it before its batches (`run_local` of TBLASTN and BLASTX).
+    pub(crate) fn is_input(&self) -> bool {
+        matches!(self, QueryEnd::Input)
+    }
+}
+
+/// The query records of `bytes` as the command line reads its `-query` file with `config`, and
+/// how the reading ended: NCBI's `IsIStreamEmpty` first (white space only: no record, the end of
+/// the input), then the batches' reading (`fasta_reader::read_queries`), which stops at the
+/// reader's first error. LOSAT Web's `register` reads a query so (`web_adapter`).
+pub fn read_query_records(bytes: &[u8], config: ReaderConfig) -> (Vec<FastaRecord>, QueryEnd) {
+    read_query_source(FastaInputSource::from_bytes(bytes, config), bytes)
+}
+
+/// `read_query_records` of a source made of `bytes`.
+fn read_query_source<R: std::io::Read>(
+    mut source: FastaInputSource<R>,
+    bytes: &[u8],
+) -> (Vec<FastaRecord>, QueryEnd) {
+    if crate::blastinput::input_files::is_blank(bytes) {
+        return (Vec::new(), QueryEnd::Input);
+    }
+    let QueryRecords { records, end } = read_queries(&mut source);
+    (records, QueryEnd::of(end))
 }
 
 /// Whether the arguments `command` have `-parse_deflines`: a search that reads the ids of the
@@ -234,9 +469,11 @@ fn strand_of(command: &Commands) -> Option<&str> {
 /// archive (`check_archive_inputs`). `data_loaders` is whether NCBI's data loaders are on
 /// (`ApplicationSettings::data_loaders` of the search's start; the library reads with them on,
 /// `CallStart::settings`), under which the reader refuses a first line that NCBI would fetch as a
-/// Seq-id and without which it reads that line as data. A reader error is the command line's
-/// message (`read_source`). The one reading of `read_inputs` and LOSAT Web's `register_inputs`
-/// (`web/adapter`, docs/web/abi_v2.md §4). Returns `(query, subject)`.
+/// Seq-id and without which it reads that line as data. A subject's reader error is the command
+/// line's message (`read_source`); the query keeps the records read before its reader's error and
+/// the error (`QueryEnd`), which the search meets in its batch, as the command line's batches read
+/// the queries (`read_query_records`). The one reading of `read_input_records` and LOSAT Web's
+/// `register_inputs` (`web/adapter`, docs/web/abi_v2.md §4).
 pub fn read_search_inputs(
     program: Program,
     command: &Commands,
@@ -244,10 +481,10 @@ pub fn read_search_inputs(
     data_loaders: bool,
     query: &[u8],
     subject: &[u8],
-) -> Result<(Vec<FastaRecord>, Vec<FastaRecord>), Error> {
+) -> Result<InputRecords, Error> {
     let parse_deflines = parse_deflines_of(command);
     let scope = parse_deflines.then(Default::default);
-    let read = |role: Role, bytes: &[u8]| {
+    let source = |role: Role, bytes| {
         let config = reader_config(program, role, writes_archive, data_loaders)
             .with_parse_deflines(parse_deflines);
         let config = match strand_of(command) {
@@ -256,11 +493,15 @@ pub fn read_search_inputs(
         };
         let mut source = FastaInputSource::from_bytes(bytes, config);
         source.set_id_scope(scope.clone());
-        read_source(source, role)
+        source
     };
-    let subject = read(Role::Subject, subject)?;
-    let query = read(Role::Query, query)?;
-    Ok((query, subject))
+    let subject = read_source(source(Role::Subject, subject), Role::Subject)?;
+    let (query, query_end) = read_query_source(source(Role::Query, query), query);
+    Ok(InputRecords {
+        query,
+        query_end,
+        subject,
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-799
@@ -291,6 +532,9 @@ pub struct Inputs<'a> {
     /// The file whose sequence is the one query (`-in_pssm`, `-in_msa`), in place of query
     /// records.
     pub(crate) query_file: Option<QueryFile<'a>>,
+    /// How the reading of the query records ended (`Inputs::query_end`); `None`: at the end of
+    /// the input.
+    pub(crate) query_end: Option<&'a QueryEnd>,
 }
 
 impl<'a> Inputs<'a> {
@@ -303,6 +547,7 @@ impl<'a> Inputs<'a> {
             subject_name: "subject",
             database: false,
             query_file: None,
+            query_end: None,
         }
     }
 
@@ -318,6 +563,7 @@ impl<'a> Inputs<'a> {
             subject_name: name,
             database: true,
             query_file: None,
+            query_end: None,
         }
     }
 
@@ -366,6 +612,23 @@ impl<'a> Inputs<'a> {
             query_file: Some(QueryFile::Alignment(path)),
             ..Self::database(&[], name)
         }
+    }
+
+    /// The same inputs, whose query records end with `end` ([`read_input_records`]): a search
+    /// meets it where the command line's query batches meet it, after the reports of the batches
+    /// before ([`QueryEnd`]). Without it the query records are those of a whole input. A PSSM or
+    /// alignment query has no records and no end.
+    pub fn query_end(self, end: &'a QueryEnd) -> Self {
+        Self {
+            query_end: Some(end),
+            ..self
+        }
+    }
+
+    /// How the reading of the query records ended (`Inputs::query_end`).
+    pub(crate) fn end(&self) -> &'a QueryEnd {
+        static INPUT: QueryEnd = QueryEnd::Input;
+        self.query_end.unwrap_or(&INPUT)
     }
 
     /// The number of queries: the records, or the one sequence of a PSSM or alignment file.

@@ -9,7 +9,7 @@
 /// kept as that sequence; `peeked` counts the lines taken by `peek_line` and `read` those of
 /// `read_line`. The line numbers (from 1) only name lines in NCBI's messages, which the
 /// alignment reader's caller never prints (every report throws and the throw is swallowed), but
-/// the Clustal scanner tests `lineCount == 1`.
+/// the Clustal scanner tests whether `lineCount` is 1.
 pub(crate) struct PeekAheadStream<'a> {
     lines: Vec<&'a [u8]>,
     /// Lines handed out by `peek_line` (they stay available to `read_line`).

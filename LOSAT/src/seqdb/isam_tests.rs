@@ -912,8 +912,8 @@ fn user_ids_that_are_numbers() {
         ti_error(b"gnl|ti|12x"),
         "Cannot convert string '12x' to Int8"
     );
-    // The digits end at a NUL (`while (char ch = str[pos])`, ncbistr.cpp:841) and the end check
-    // reads the NUL: the tag `5\0x` is the trace id 5.
+    // The digits end at a NUL (its loop runs while the character at `str[pos]` is not zero,
+    // ncbistr.cpp:841) and the end check reads the NUL: the tag `5\0x` is the trace id 5.
     let simplified = seqdb_simplify_accession(b"gnl|ti|5\0x").unwrap();
     assert_eq!(
         (simplified.id_type, simplified.num_id),
@@ -1045,7 +1045,8 @@ fn simplified_flags() {
 
 #[test]
 fn simplify_exceptions_come_out() {
-    // CSeq_id(element) throws a CSeqIdException that `catch (invalid_argument &)` does not catch.
+    // `CSeq_id` of `element` throws a CSeqIdException that the handler of `invalid_argument` does
+    // not catch.
     let error = simplify_accession_for_isam(b"sp||").unwrap_err();
     assert!(
         error.to_string().contains(
@@ -1163,7 +1164,7 @@ fn positive_batch_picks_the_first_or_the_last_line_of_a_key_and_skips_translated
         assert_eq!(ids[1].oid, Some(120), "page size {page_size}");
         assert_eq!(ids[2].oid, None);
         // Reached from the entry before it (`a`), the key is translated by the first of its
-        // lines: after `++index` the line at `index` is used as it is.
+        // lines: after `index` is stepped the line at `index` is used as it is.
         if page_size >= 4 {
             let mut ids = vec![SiOid::new("a"), SiOid::new("b")];
             isam.ids_to_oids(100, &mut ids).unwrap();

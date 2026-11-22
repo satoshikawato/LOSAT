@@ -52,6 +52,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
 | `-window_size` | 40 | Two-hit window; 0 selects the one-hit method |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+| `-best_hit_overhang`, `-best_hit_score_edge` | off (0.1 for the one not given) | Keep only the best alignments for each region of the query (the Best Hit algorithm). Values above 0 and below 0.5; not with `-culling_limit` |
 
 For every option: `losat blastx -help`.
 
@@ -78,19 +79,19 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 ## Differences from NCBI BLAST+
 
+- With `-db_hard_mask`, a database sequence whose first mask runs to its end (a masked tail, or a sequence masked entirely) is searched before its mask. NCBI BLAST+ 2.17.0 reads the masked letters there and can crash or report other alignments. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - With `-window_size 0` and a low `-threshold`, NCBI BLAST+ 2.17.0 can read memory past the end of the query batch or of a protein subject and crash. LOSAT reads the letters past the end as the end marker. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ## What LOSAT refuses
 
 LOSAT stops with an error for these `blastx` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-use_sw_tback`, `-best_hit_overhang` and `-best_hit_score_edge`.
+- `-use_sw_tback`.
 - `-query_gencode 32`; `blastx` does not accept code 32.
 - An `-evalue` that is not a finite number.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastx-fast`), and matrix names that only begin with `IDENTITY`.
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.
-- `-db_hard_mask` on a database with a sequence whose first mask runs to its end (a masked tail, for example).
 - A protein subject of more than 5,000,000 residues, from `-subject` or from a database.
 
 ## Examples

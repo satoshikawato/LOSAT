@@ -1,0 +1,217 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/x4b/ok1_fail_rc.fna).
+           2 sequences; 852 total letters
+
+
+
+Query= tks_W
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sfail_rc sfail in frame -1                                            166     2e-59
+
+
+> sfail_rc sfail in frame -1
+Length=480
+
+ Score = 166 bits (419),  Expect = 2e-59
+ Identities = 79/79 (100%), Positives = 79/79 (100%), Gaps = 0/79 (0%)
+ Frame = -1
+
+Query  2    QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  61
+            QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT
+Sbjct  477  QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  298
+
+Query  62   IVTHAGEVIEGCTTVSSIK  80
+            IVTHAGEVIEGCTTVSSIK
+Sbjct  297  IVTHAGEVIEGCTTVSSIK  241
+
+
+ Score = 166 bits (419),  Expect = 2e-59
+ Identities = 79/79 (100%), Positives = 79/79 (100%), Gaps = 0/79 (0%)
+ Frame = -1
+
+Query  2    QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  61
+            QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT
+Sbjct  237  QLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGT  58
+
+Query  62   IVTHAGEVIEGCTTVSSIK  80
+            IVTHAGEVIEGCTTVSSIK
+Sbjct  57   IVTHAGEVIEGCTTVSSIK  1
+
+
+ Score = 15.0 bits (27),  Expect(2) = 0.058
+ Identities = 8/22 (36%), Positives = 10/22 (45%), Gaps = 0/22 (0%)
+ Frame = +1
+
+Query  22   MFAGKSTYLKNIYQQENGGNKH  43
+            MF      L NI+Q     +KH
+Sbjct  112  MFITTIFLLINIFQISRFTSKH  177
+
+
+ Score = 15.0 bits (27),  Expect(2) = 0.058
+ Identities = 8/22 (36%), Positives = 10/22 (45%), Gaps = 0/22 (0%)
+ Frame = +1
+
+Query  22   MFAGKSTYLKNIYQQENGGNKH  43
+            MF      L NI+Q     +KH
+Sbjct  352  MFITTIFLLINIFQISRFTSKH  417
+
+
+ Score = 10.4 bits (15),  Expect(2) = 0.058
+ Identities = 4/17 (24%), Positives = 8/17 (47%), Gaps = 0/17 (0%)
+ Frame = +1
+
+Query  2    QLILSHHLTMAGRVELV  18
+            Q   + H  M  + +L+
+Sbjct  190  QFNTTSHSQMMRQNQLI  240
+
+
+ Score = 10.4 bits (15),  Expect(2) = 0.058
+ Identities = 6/27 (22%), Positives = 9/27 (33%), Gaps = 0/27 (0%)
+ Frame = +1
+
+Query  38   NGGNKHCLFVKHSLETRYGCGTGTIVT  64
+            N  N    F   +  +     T TI +
+Sbjct  244  NRRNSSTTFNNFTSMSNNSTSTTTITS  324
+
+
+ Score = 13.1 bits (22),  Expect(2) = 0.13
+ Identities = 6/24 (25%), Positives = 10/24 (42%), Gaps = 0/24 (0%)
+ Frame = +1
+
+Query  24   AGKSTYLKNIYQQENGGNKHCLFV  47
+            +  ST    I   +   NK  +F+
+Sbjct  49   SNNSTSTTTITSFQRMFNKQTMFI  120
+
+
+ Score = 13.1 bits (22),  Expect(2) = 0.13
+ Identities = 6/24 (25%), Positives = 10/24 (42%), Gaps = 0/24 (0%)
+ Frame = +1
+
+Query  24   AGKSTYLKNIYQQENGGNKHCLFV  47
+            +  ST    I   +   NK  +F+
+Sbjct  289  SNNSTSTTTITSFQRMFNKQTMFI  360
+
+
+ Score = 10.4 bits (15),  Expect(2) = 0.13
+ Identities = 2/8 (25%), Positives = 4/8 (50%), Gaps = 0/8 (0%)
+ Frame = +1
+
+Query  48   KHSLETRY  55
+            KH    ++
+Sbjct  172  KHRTSNQF  195
+
+
+ Score = 10.4 bits (15),  Expect(2) = 0.13
+ Identities = 2/8 (25%), Positives = 4/8 (50%), Gaps = 0/8 (0%)
+ Frame = +1
+
+Query  48   KHSLETRY  55
+            KH    ++
+Sbjct  412  KHRTSNQF  435
+
+
+ Score = 11.9 bits (19),  Expect(2) = 0.21
+ Identities = 3/7 (43%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  74  TTVSSIK  80
+           TT++S +
+Sbjct  70  TTITSFQ  90
+
+
+ Score = 10.4 bits (15),  Expect(2) = 0.21
+ Identities = 6/27 (22%), Positives = 9/27 (33%), Gaps = 0/27 (0%)
+ Frame = +1
+
+Query  38  NGGNKHCLFVKHSLETRYGCGTGTIVT  64
+           N  N    F   +  +     T TI +
+Sbjct  4   NRRNSSTTFNNFTSMSNNSTSTTTITS  84
+
+
+ Score = 11.9 bits (19),  Expect(2) = 0.31
+ Identities = 3/7 (43%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  74   TTVSSIK  80
+            TT++S +
+Sbjct  310  TTITSFQ  330
+
+
+ Score =  9.2 bits (12),  Expect(2) = 0.31
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +1
+
+Query  49   HS  50
+            HS
+Sbjct  208  HS  213
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.135    0.418    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 80
+
+
+Query= qpre20
+
+Length=20
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sok1_nt sok1 in frame +1                                              42.7    1e-12
+
+
+> sok1_nt sok1 in frame +1
+Length=372
+
+ Score = 42.7 bits (99),  Expect = 1e-12
+ Identities = 19/19 (100%), Positives = 19/19 (100%), Gaps = 0/19 (0%)
+ Frame = +1
+
+Query  2   ATAPAALPFGKANAAACGN  20
+           ATAPAALPFGKANAAACGN
+Sbjct  4   ATAPAALPFGKANAAACGN  60
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.125    0.437    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/x4b/ok1_fail_rc.fna).
+    Posted date:  Unknown
+  Number of letters in database: 852
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

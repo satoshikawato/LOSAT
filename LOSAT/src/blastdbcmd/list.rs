@@ -24,7 +24,8 @@ struct FoundDb {
 }
 
 impl FoundDb {
-    /// `NStr::Replace(m_BlastDbName, "\"", kEmptyStr)`: the name without the double quotes.
+    /// `NStr::Replace` of the double quote by `kEmptyStr` in `m_BlastDbName`: the name without the
+    /// double quotes.
     fn file_name(&self) -> Vec<u8> {
         self.quoted.iter().copied().filter(|&b| b != b'"').collect()
     }
@@ -59,8 +60,9 @@ fn reader_name(db: &FoundDb) -> Result<&str, ListStop> {
 // empty or stray `x.pin` is a database, and so is a link that leads nowhere (`IsDir` is
 // false for it). The sub-directories (`*`) are entered with `-recursive`, links to
 // directories too. The order of the directory does not matter: the list is sorted.
-/// `FindFilesInDir(CDir(dir), masks, {"*"}, finder, fFF_File | recursive)`: the databases of
-/// the files of `dir` whose names end with one of `extensions` (`.pin` ...).
+/// `FindFilesInDir` of `dir` (a `CDir`) with `masks`, the sub-directory mask `"*"`, `finder` and
+/// the flags `fFF_File` and `recursive`: the databases of the files of `dir` whose names end with
+/// one of `extensions` (`.pin` ...).
 fn find_files(dir: &[u8], extensions: &[&str], recursive: bool, found: &mut Vec<FoundDb>) {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3879
     // An empty directory is the current one, its names without a prefix (probes K36, K37).
@@ -163,7 +165,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdb.hpp:1550-1561
 // The names compare as their bytes with the quotes: `"db/a b"` before `"db/a!"` before
 // `"db/x"` before `"db/x.00"`; for one name the protein database first (`eProtein` is 0).
-/// `FindBlastDBs(dir, dbtype, recursive, true, remove_redundant)`.
+/// `FindBlastDBs` with `dir`, `dbtype`, `recursive`, true and `remove_redundant`.
 fn find_blast_dbs(
     dir: &str,
     dbtype: &str,
@@ -204,8 +206,8 @@ struct ListFormat {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_formatter.cpp:42-64
-// After the erase the loop steps over the second `%` and the byte after it (`i++` and the
-// loop's own); a `%` at the end reads the string's NUL as its letter.
+// After the erase the loop steps over the second `%` and the byte after it (a step of `i` in its
+// body and the loop's own); a `%` at the end reads the string's NUL as its letter.
 impl ListFormat {
     /// The format `fmt`; `Err` for NCBI's `Invalid format specification`.
     fn parse(fmt: &[u8]) -> Result<Self, ()> {
@@ -354,9 +356,9 @@ fn disk_usage(db: &FoundDb, version5: bool, path: &SearchPath) -> Result<u64, Li
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_formatter.cpp:68-162
-// The database opens at its first letter that reads it (`CSeqDB("\"name\"", type)`, the
-// name in its quotes: one name, looked for on the search path as written), so an unknown
-// letter after one that opens a damaged database is that database's error.
+// The database opens at its first letter that reads it (`CSeqDB` of the name in its quotes and
+// `type`: one name, looked for on the search path as written), so an unknown letter after one
+// that opens a damaged database is that database's error.
 /// `x_InitBlastDb`: the database `db`, opened at the first call.
 fn open<'a>(
     opened: &'a mut Option<SeqDb>,

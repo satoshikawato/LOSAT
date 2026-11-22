@@ -38,7 +38,7 @@
 
 /// `PAGEHDRSZ`.
 pub(super) const PAGEHDRSZ: usize = 16;
-/// `NODESIZE` (`offsetof(MDB_node, mn_data)`).
+/// `NODESIZE` (the offset of `mn_data` in `MDB_node`).
 pub(super) const NODESIZE: usize = 8;
 
 pub(super) const P_BRANCH: u16 = 0x01;
@@ -134,12 +134,12 @@ pub(super) fn pages(p: &[u8]) -> u32 {
 pub(super) fn set_pages(p: &mut [u8], v: u32) {
     put_u32(p, 12, v)
 }
-/// `NUMKEYS(p)`.
+/// `NUMKEYS` of a page.
 #[inline]
 pub(super) fn numkeys(p: &[u8]) -> usize {
     (lower(p) as usize).wrapping_sub(PAGEHDRSZ) >> 1
 }
-/// `SIZELEFT(p)`: `(indx_t)(mp_upper - mp_lower)`.
+/// `SIZELEFT` of `p`: `mp_upper` less `mp_lower`, cast to `indx_t`.
 #[inline]
 pub(super) fn sizeleft(p: &[u8]) -> u16 {
     upper(p).wrapping_sub(lower(p))
@@ -177,7 +177,7 @@ pub(super) fn set_ptr(p: &mut [u8], i: usize, v: u16) {
 // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:898-990
 // Node accessors take the offset of the node in the page (`mp_ptrs[i]`).
 
-/// Offset of node `i` (`NODEPTR(p, i)`).
+/// Offset of node `i` (`NODEPTR` of a page and `i`).
 #[inline]
 pub(super) fn nodeptr(p: &[u8], i: usize) -> usize {
     ptr(p, i) as usize
@@ -233,7 +233,7 @@ pub(super) fn leaf2key(i: usize, ks: usize) -> usize {
     PAGEHDRSZ + i * ks
 }
 
-/// `EVEN(n)`: `((n) + 1U) & -2`.
+/// `EVEN` of `n`: `n` plus one, rounded down to an even number.
 #[inline]
 pub(super) fn even(n: usize) -> usize {
     (n + 1) & !1
@@ -253,7 +253,7 @@ pub(super) struct MdbDb {
     pub root: u64,
 }
 
-/// `sizeof(MDB_db)`.
+/// The `sizeof` of `MDB_db`.
 pub(super) const MDB_DB_SIZE: usize = 48;
 
 impl MdbDb {
@@ -297,9 +297,9 @@ pub(super) struct Meta {
     pub txnid: u64,
 }
 
-/// `sizeof(MDB_meta)`.
+/// The `sizeof` of `MDB_meta`.
 pub(super) const META_SIZE: usize = 136;
-/// `offsetof(MDB_meta, mm_mapsize)`.
+/// The offset of `mm_mapsize` in `MDB_meta`.
 pub(super) const META_MAPSIZE_OFF: usize = 16;
 
 impl Meta {

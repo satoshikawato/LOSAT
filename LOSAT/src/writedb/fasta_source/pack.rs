@@ -58,7 +58,7 @@ fn bytes_needed(coding: Coding, length: u32) -> u64 {
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Delta_ext.cpp:126-129
 const OVERHEAD: u64 = 128;
 
-/// `CPacker::x_GetWideCoding(e_Iupacna)`.
+/// `CPacker::x_GetWideCoding` for `e_Iupacna`.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1292-1296
 const WIDE_CODING: Coding = Coding::Ncbi4na;
@@ -140,7 +140,7 @@ impl Packer {
     }
 }
 
-/// `CSeqConvert::Pack(src, length, e_Iupacna, dst)` into a `CDelta_ext_PackTarget`: the
+/// `CSeqConvert::Pack` of `src` and its length as `e_Iupacna` into a `CDelta_ext_PackTarget`: the
 /// segments that `CDelta_ext::AddAndSplit` appends for the residues `src` (at most
 /// 4,294,967,295 of them).
 ///

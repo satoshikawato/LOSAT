@@ -923,7 +923,7 @@ impl XPairLutQuery {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 and 283-358 (cited
     // at `x_build_group`): the exact backbone, the appends of s_AddWordHits for s ascending, then
     // BlastAaLookupFinalize's layout, for the locations of each table.
-    /// The tables `x_build_group(&tables[t], mapped)` builds, for every t (module comment), built
+    /// The tables that `x_build_group` builds from `tables[t]` and `mapped`, for every t (module comment), built
     /// together with 32-bit indices on `pool` (on this thread when it has one thread).
     pub(crate) fn x_build_tables_wide(
         &self,

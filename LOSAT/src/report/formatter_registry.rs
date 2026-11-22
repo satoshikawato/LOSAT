@@ -58,10 +58,10 @@ pub(crate) fn registry_posts(read: &RegistryRead, program: &str) -> Vec<u8> {
     posts.into_bytes()
 }
 
-/// `Get(section, name)` of the read `registry` (`None`: no file) for a caller that takes an empty
-/// value as none (`Get(...).empty()`, as `[TAX_BROWSER] BLASTFMTUTIL` is read): the last value of
-/// the entry, `None` where it is not set or empty. (A `HasEntry` of NCBI's `CNcbiRegistry` counts
-/// an empty value as set: `protocol`.)
+/// `Get` of `section` and `name` in the read `registry` (`None`: no file) for a caller that takes
+/// an empty value as none (it tests whether `Get` gives an empty string, as
+/// `[TAX_BROWSER] BLASTFMTUTIL` is read): the last value of the entry, `None` where it is not set
+/// or empty. (A `HasEntry` of NCBI's `CNcbiRegistry` counts an empty value as set: `protocol`.)
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:983-991
 pub(crate) fn value<'a>(

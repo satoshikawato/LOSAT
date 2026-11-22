@@ -1,5 +1,5 @@
-//! The format guess against NCBI's: each expected format is what NCBI BLAST+ 2.17.0's `CFormatGuess().Format(in)`
-//! answered for the same bytes (a harness of `libxutil` 2.17.0 built from the release's source, comparison only;
+//! The format guess against NCBI's: each expected format is what NCBI BLAST+ 2.17.0's `CFormatGuess` (its
+//! `Format` of an input stream) answered for the same bytes (a harness of `libxutil` 2.17.0 built from the release's source, comparison only;
 //! line RG D3-1 `F/d3a/fg/unit_harness.tsv`, cases `F/d3a/fg/unit_cases.py`), and for the `-in_pssm` cases the
 //! official psiblast and tblastn (`F/d3a/fg/out/ncbi`).
 
@@ -167,7 +167,7 @@ fn the_counts_and_splits_are_ncbis() {
             ),
             "{data:?}"
         );
-        // `NStr::Split(..., fSplit_Tokenize)`: the non-empty runs between delimiters.
+        // `NStr::Split` with `fSplit_Tokenize`: the non-empty runs between delimiters.
         let runs: Vec<&[u8]> = data
             .split(|c| b" \t".contains(c))
             .filter(|run| !run.is_empty())

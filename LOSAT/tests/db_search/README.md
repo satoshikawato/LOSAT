@@ -578,6 +578,19 @@ culled by itself). Version 4, no `-parse_seqids`; only `.pin .psq .phr` / `.nin 
     makeblastdb -in tests/fasta/outfmt0/culling_dom_s.fna -dbtype nucl -out tests/db_search/culldomn \
         -title "culling dom nucl" -blastdb_version 4
     rm tests/db_search/culldom.pjs tests/db_search/culldomn.njs
+Rows `db.{blastx,tblastn,tblastx}.bh*` (line NP, O6a-3: `-best_hit_overhang` and `-best_hit_score_edge`) search `bh3p`
+(BLASTX) and `bh3n` (TBLASTN, TBLASTX), the subjects `bh3_s.faa` / `bh3_s.fna` of `tests/fasta/outfmt0/` (40 records of
+overlapping, nested and repeated pieces of the three `bh3_q.faa` proteins; `bh3_s.fna` back-translated, every other one
+reverse-complemented; generator `o6a3_gen.py 7` of line O6), with the queries `bh3_q.fna` (BLASTX, TBLASTX) and `bh3_q.faa`
+(TBLASTN). `db.tblastn.bh_inpssm.6` reads `tests/fixtures/pssm/o6a3_q0_bh3p.asn.gz`, NCBI psiblast 2.17.0's PSSM
+(`-num_iterations 2 -out_pssm`) of the first `bh3_q.faa` query against the `bh3_s.faa` proteins. Version 4, no
+`-parse_seqids`; only `.pin .psq .phr` / `.nin .nsq .nhr` are kept. Run from `LOSAT/`:
+
+    makeblastdb -in tests/fasta/outfmt0/bh3_s.faa -dbtype prot -out tests/db_search/bh3p \
+        -title "best hit O6a-3 prot" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/bh3_s.fna -dbtype nucl -out tests/db_search/bh3n \
+        -title "best hit O6a-3 nucl" -blastdb_version 4
+    rm tests/db_search/bh3p.pjs tests/db_search/bh3n.njs
 - OF-BPQB2 (outfmt 15 and 16 in the same block search): rows `db.sa.bpqb.15` and `db.sa.bpqb.16`, the same search as
   `db.sa.bpqb.8` (65 KB at most). `paja_taxid` is `paja` built with a taxid (`make_paja_taxid.py MAKEBLASTDB OUTDIR`: `makeblastdb
   -in tests/fasta/PajaWSV.faa -dbtype prot -blastdb_version 4 -taxid 10090`, then the taxid of BDT63547.1 patched to 9606 in
@@ -1275,6 +1288,16 @@ NCBI's fetch reads it although r7 is not reported at `-max_target_seqs 3`, and t
 traceback, 3 in the ungapped re-evaluation); LOSAT refuses (the `losat-rejection` rows `db.ll2.*.bad.6`).
 Queries: `ll2/q.faa`, `q.fna` (the query and its codons), `q2.faa`, `q2.fna` (the same and its first part).
 
+`x4b/`: rows `db.x4b.dbfail.*`, `db.x4b.excl.*`, `db.x4b.cut0.db.*`, `db.x4b.sp.db.*`, `db.x4b.sp.two.db.*` and
+`db.x4b.pssm.none.db.*` (line RG, item X4b-1 fix rounds 1 and 2: tblastn `-use_sw_tback`). `x4b/make_x4b.py` (its
+docstring has the usage and the records) writes with NCBI BLAST+ 2.17.0 makeblastdb (version 5) `x4b/fail`
+(`-parse_seqids`: X4's sok1 in frame +1 and sfail in frame -1, on which tks_W's Smith-Waterman redo fails), `x4b/excl`
+(the same and, at OID 2, a weaker copy of sfail's first half whose only line has a ti) and `x4b/polycg`
+(`tests/fasta/x4b/polycg.fna`, no hit for a PSSM). `x4b/neg.txt` lists an id that no database holds: as a
+`-negative_seqidlist` it keeps OID 2 of `excl` without a line, so NCBI's redo excludes that subject at its fetch and
+sets the batch's status back to 0 (`blast_kappa.c:3560-3575`), which clears the failure of the match on sfail before it
+(exit 0 where `fail` ends with `Traceback failed`).
+
 `x4excl/`: rows `db.x4excl.*` (line RG item X4-excl, BLASTP `-use_sw_tback`). `x4excl/make_x4excl.py` (its docstring has
 the usage and the records) writes the version 5 databases `x4excl/fwd` (sexact, sfail, sok1 and sx_frag, whose only line
 has a ti) and `x4excl/rev` (sx_strong, ti only, then sfail) with `makeblastdb -parse_seqids` from
@@ -1297,6 +1320,31 @@ do not. `p_miss`, `p_missl`, `n_miss` and `n_missl` name the absolute path of a 
 prints it, the same on every machine), with and without `NSEQ` and `LENGTH`, and `p_dir` the directory `/`. The rows are
 `db.ol.*` (every search program; `rps/olrps.pal` and `olwrps.pal` over `rps_mini` with `olall.msk`, `olno2.msk` or
 `olonly2.msk` as `rps_mini.msk`); `segmasker` and `dustmasker` read them in their rows `db_oidlist_*`.
+
+## Alias files with OID_MASK_TYPE (line RG, series D, D1b-2)
+
+`oidmask/` (`make_oidmask.sh`): `om.faa`, eight proteins whose definition lines carry predicted RefSeq ids (`XP_`) alone,
+with a GenBank id, beside a normal RefSeq line (record 4, two lines) or none, and `omn.fna`, their back-translation with
+the nucleotide ids (`XM_`, `XR_`, `NM_`, `NR_`). `omp` and `omp4` (versions 5 and 4) and `omn` (two volumes of four) are
+`makeblastdb -parse_seqids -oid_masks 1` databases, `ompx`, `omp4x` and `omnx` the `blastdb_aliastool -oid_masks 1` aliases
+over them (`OIDLIST` of the `.pxm`/`.nxm` mask and `OID_MASK_TYPE 1`). `tall.pal` and `ntall.nal` keep every OID
+(`ones.msk`, `onesn.msk`) with the type 1, so that OIDs 1, 2 and 5 are left without a line; `t0` to `tfirst` write the
+key's other values (0, 2, 3, 4294967295, +1, abc, 4294967296, -1, empty, the key alone, the key without `OIDLIST`, a bad
+`FIRST_OID` before it, no `NSEQ` and `LENGTH`), `j1`, `j2`, `ompy` and `j5` its nesting (a range, a parent list without
+the key, two siblings over one volume). `neg.txt` and `pos.txt` are the seqid lists of rows `db.om.bp.tall.neg.6` and
+`.pos.6`. `rps/xp101.{phr,pin,pdb,pos}.gz` are the files of `rps_mini` built with profile 101 under the Seq-id
+`ref|XP_000101.1|` (`rps/build.sh`; its other files are the same as `rps_mini`'s), searched through `rps/omrps.pal` and
+`omwrps.pal` (`OID_MASK_TYPE 1`, the second with `NSEQ` and `LENGTH`) with `olall.msk` as `rps_mini.msk`.
+`rps/xp3v01.{phr,pin,pdb,pos}.gz` are the files of volume `rps_mini3v.01` built with profile 102 under
+`ref|XP_000102.1|`, searched through `rps/om3vrps.pal` (`DBLIST rps_mini3v`, `OIDLIST` of `olall.msk` as
+`rps_mini3v.msk`, `OID_MASK_TYPE 1`): NCBI searches the three volumes bare, so the profile reaches the reports
+(`db.om.rps.rej.x3v`, `db.om.rtbn.rej.x3v`) unless it is past the cut (`oidmask/qrps8.faa`, eight queries of
+`tests/fasta/rps/q40.faa` whose first subject is another profile, rows `db.om.rps.x3vc.*` with `-max_target_seqs 1`).
+`omb` (`make_oidmask.sh`) holds the byte 0x80 in the titles of two predicted lines, patched into its `.phr` after a
+build with `#` there, behind `ombx.pal` (`OID_MASK_TYPE 1`): row `db.om.bp.rej.omb.6` and A271. `ompart.pal` (`nol.msk`:
+OIDs 0, 3, 4, 6 and 7, each left with a line under the type) is the input of makeblastdb case `B_al_om`. The rows are
+`db.om.*` (every search program); `segmasker`, `dustmasker`, `windowmasker`, `makembindex` and `blastdbcmd` read the
+databases in their rows `db_oidmask_*`, `oidmask_*` and A242 on.
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
@@ -1582,6 +1630,14 @@ most 9 in BLOSUM62).
   `db.rpstbn.rej.of5col` are LOSAT's refusals of BLAST XML (NCBI's rpsblast shows the query's title for the entry,
   NCBI's rpstblastn stops with an exception after half a document). The files keep their original names
   (`rpscol`): the `.pin` and the `.aux` name them.
+- `rpscoltax` (PS15a-2, review S1): `rpscol`'s profile made again with the taxid 9606: only its
+  `.phr`, `.pin`, `.pdb`, `.pot` and `.ptf` are here (the `.pin` names the `.pdb`, so the files keep that name); a row's
+  cell `rps-gz:rpscoltax!aux=rpscol.aux.gz!...` takes `rpscol`'s other files, which are the same. Rows `*.rej.of18coltax`
+  and `*.rej.of20txcoltax`: NCBI shows the query's taxonomy (none) for the colliding entry.
+- `rpstax` (PS15a-2, review S2): `rps_mini`'s three profiles with the taxids 7777 (`gnl|CDD|101`) and 9606 (`102`) and
+  none (`103`), its `.phr`, `.pin`, `.pdb`, `.pot`, `.ptf` and `.pto` here and `rps_mini`'s other files by `!EXT=FILE`;
+  rows `*.of*.tax` run with `BLASTDB=tests/seqdb/taxdb/good` (after the inflated directory in the search path), rows
+  `*.taxn` without a taxonomy database.
 - `rps_mini3v` (version 5, PS11b): the same three profiles as three volumes of one profile each (`rps_mini3v.00` to
   `.02`, each made by makeprofiledb from one profile, and the alias file `rps_mini3v.pal`, written by `build.sh`):
   the volumes' diagonal tables have 256 entries, so the hits of a long query differ from those of `rps_mini`'s one
@@ -2209,6 +2265,26 @@ makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3b -title "parsed ids
 blastdb_aliastool -dblist "ph5 phmv" -dbtype prot -out pal -title "alias of ph5 and phmv"
 python3 ../make_dbmaskp_pbh.py --ncbi-only WORK $NCBI_BIN .   # pbh.faa, edge_pbh.asnt, qbh.fna, qbh.faa, pbh
 makeblastdb -in pshort.faa -dbtype prot -out pshort -title "short pieces between masks" -mask_data edge_short.asnt
+python3 - <<'PY'   # prot_p4x.faa, prot_p5x.faa: prot.faa with p4[119], p5[399] stored as X (the near inputs' freed letters)
+def put(src, dst, name, pos):
+    recs, cur = [], None
+    for line in open(src):
+        if line.startswith('>'):
+            cur = [line, '']; recs.append(cur)
+        else:
+            cur[1] += line.strip()
+    with open(dst, 'w') as f:
+        for head, seq in recs:
+            if head[1:].split()[0] == name:
+                seq = seq[:pos] + 'X' + seq[pos + 1:]
+            f.write(head + '\n'.join(seq[i:i + 60] for i in range(0, len(seq), 60)) + '\n')
+put('prot.faa', 'prot_p4x.faa', 'p4', 119)
+put('prot.faa', 'prot_p5x.faa', 'p5', 399)
+PY
+makeblastdb -in prot_p4x.faa -dbtype prot -out ps5n -title "seg masks v5, p4 one shorter" -mask_data near_ps5.asnt
+makeblastdb -in prot_p5x.faa -dbtype prot -out pe_tailn -title "edge tail, one shorter" -mask_data edge_tailn.asnt
+makeblastdb -in prot.faa -dbtype prot -out pe_e0tail -title "edge e0tail" -mask_data edge_e0tail.asnt
+makeblastdb -in prot_p5x.faa -dbtype prot -out pe_e0tailn -title "edge e0tail, one shorter" -mask_data edge_e0tailn.asnt
 rm -f *.pjs
 ```
 
@@ -2224,9 +2300,16 @@ blastp's do (round 0: blastx s1, s2, s4, s6 and blastp s4, s6 of the six differ 
 and after the fix) it keeps the first three where those two builds differ.
 
 `ps5`, `ph5` and `ph4` have the algorithms 21 (seg, defaults) and 22 (seg `-window 8 -locut 1.8 -hicut 2.1`); `phmv`
-(several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, so its `-db_hard_mask` rows are LOSAT's
-refusal of a mask that runs to the end (the Owner's question Q1 of M4b); `ph5`, `ph4` and `phmv` are the hard-mask
-databases. `pe_tail` (a masked tail) and `pe_unsorted` (masks out of order) are refused too.
+(several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, masked whole, and `pe_tail` has a masked
+tail: with `-db_hard_mask` both are searched over the part before the mask (the Owner's answer Q1 = B of M4b,
+PD-LOSAT-NCBI-DEFECTS exception 21, M4b-3), and their rows hold NCBI's run of the near input where NCBI's own run
+crashes or differs from it: `ps5n` (`near_ps5.asnt`: `ps5`'s algorithm 21 written out by `segmasker -outfmt interval`,
+with `p4`'s mask one letter shorter, [0, 119)) and `pe_tailn` (`edge_tailn.asnt`: [300, 399)). `pe_e0tail`
+(`edge_e0tail.asnt`: an empty mask at 0, `from 0, to 4294967295`, which makeblastdb stores as [0, 0), then [300, 400))
+is searched the same way, as BLASTN's `edge4`; its near input is `pe_e0tailn` ([0, 0) and [300, 399)). The near
+inputs store the letter that the shorter mask frees as `X` (`prot_p4x.faa`, `prot_p5x.faa`), so that it stays masked in
+the alignments and the composition-based statistics, as LOSAT reads the masked letters. `ph5`, `ph4` and
+`phmv` are the other hard-mask databases; `pe_unsorted` (masks out of order) is refused.
 
 `pshort` (resume 2 of PR 1, 2026-11-21; `pshort.faa`, `edge_short.asnt`, `qshort.faa`, `qshort.fna`, written by
 `ncbi-parity-20261019/M/m4b/probe3/make.py`, seed 20261121) holds four copies of one random protein without `W` but for
@@ -2271,6 +2354,9 @@ makeblastdb -in nucl.fna -dbtype nucl -out th1 -title "hand masks 1" -blastdb_ve
   -mask_data hedge_mid0.asnt,hedge_mid1.asnt,hedge_mid2.asnt,hedge_adjacent.asnt,hedge_overlap.asnt,hedge_mid.asnt
 makeblastdb -in nucl.fna -dbtype nucl -out th2 -title "hand masks 2" -blastdb_version 4 \
   -mask_data hedge_unsorted.asnt,hedge_head.asnt,hedge_tail.asnt,hedge_near.asnt
+sed '164s/....$/NNNN/' nucl.fna > nucl_t4n.fna   # t4's bases 1196-1199, which hedge_tailn frees, stored as N
+makeblastdb -in nucl_t4n.fna -dbtype nucl -out th2tn -title "hand mask tail, 4 bases shorter" -blastdb_version 4 \
+  -mask_data hedge_tailn.asnt
 rm -f *.njs
 ```
 
@@ -2278,11 +2364,15 @@ rm -f *.njs
 the second dust alone, as its 11, which the alias `tal` and the list `tm5 tb5` number 12 as `tm5` does; `tmv` (three
 volumes: `t1` and `t2`, `t3`, `t4`) and `tf4` have 11. `th1` has the hand masks `mid0`, `mid1`, `mid2`, `adjacent`,
 `overlap` and `mid` as 11 to 16, `th2` `unsorted`, `head`, `tail` and `near` as 11 to 14. A mask is mapped to the six
-reading frames by its positions divided by 3 (the minus frames from frame -1's length); with `-db_hard_mask` LOSAT
-refuses a sequence whose masks leave NCBI one part of a frame to search, from the frame's start, that stops before
-the frame's end (`tf4`'s `t5`, `head` for frame -1, `tail` for frame +1, `near` for frame +2: the Owner's questions Q1
-and Q2 of M4b) and masks out of order (`unsorted`, `overlap`),
-as for the other programs.
+reading frames by its positions divided by 3 (the minus frames from frame -1's length); with `-db_hard_mask` a
+sequence whose masks leave NCBI one part of a frame to search, from the frame's start, that stops before the frame's
+end (`tf4`'s `t5`, `head` for frame -1, `tail` for frame +1, `near` for frames +2 and +3) is searched over that part
+alone (the Owner's answers Q1 = B and Q2 = B of M4b, PD-LOSAT-NCBI-DEFECTS exception 21, M4b-3). TBLASTX's rows of
+`tail` and `near`, where NCBI writes an HSP once per seed past the part, hold NCBI's run of the near input `th2tn`
+(`hedge_tailn.asnt`: `t4` [1000, 1196), the fewest bases short of the end after which frames +1 to +3 each keep a
+letter after the mask; `nucl_t4n.fna` stores the 4 freed bases as `N`, so that they stay masked as LOSAT reads them);
+the other rows are NCBI's own, which equal its run of the near input there. Masks out of
+order (`unsorted`, `overlap`) are refused, as for the other programs.
 
 The review rows of PR 2 (2026-11-21; `db.tmask.*.te.*`, `*.tl.*`, `*.th1.*`, `*.tm5.*.w0.*`, `*.3f`, `*.1a`) read
 inputs written by `ncbi-parity-20261019/M/m4b/scripts3/gen_fix3.py` (seed 20261124): `edge.fna` (`e1`, 1,200 bases whose
@@ -2299,10 +2389,10 @@ PSSM query `pn1.faa` (the PSSM is `../fixtures/pssm/m4b2_pl1.asn.gz`) and the ha
 | 12 `n47` | `e2` [4, 7) | searched |
 | 13 `n1200` | `e2` [1200, 1202) | NCBI crashes (the minus frames start with an empty part), refused |
 | 14 `h01`, 15 `h12` | `e3` [0, 1), [1, 2) | NCBI crashes (the plus frames start with an empty part), refused |
-| 16 `h23`, 17 `h13` | `e3` [2, 3), [1, 3) | frame -1 refused |
-| 18 `h46`, 19 `h46b` | `e3` [4, 6), `e4` [4, 6) | frames -2 and -3, frame -3 refused |
+| 16 `h23`, 17 `h13` | `e3` [2, 3), [1, 3) | frame -1's part before the mask searched alone (no near input keeps it; NCBI's own rows) |
+| 18 `h46`, 19 `h46b` | `e3` [4, 6), `e4` [4, 6) | frames -2 and -3, frame -3: the part before the mask searched alone, as 16 |
 | 31 `two` | `e4` [0, 3), [1200, 1201) | NCBI crashes (frame -1), refused |
-| 32 `m10` to 35 `m17` | the last 3 bases of `e5` to `e8` | frame +1 refused where the subject is searched (from 11 bases at word size 3, 17 at TBLASTN's `-word_size 5`: row `te.34.w5`), else not searched |
+| 32 `m10` to 35 `m17` | the last 3 bases of `e5` to `e8` | the plus frames' parts before the mask searched alone where the subject is searched (from 11 bases at word size 3, 17 at TBLASTN's `-word_size 5`: row `te.34.w5`), else not searched |
 | 36 `s01`, 37 `s1200` | `e3` [0, 1), [600, 700); `e2` [300, 400), [1200, 1202) | searched (near misses of 14 and 13) |
 
 `tl` has 11 (`long`): `l1` [3270, 3330) and [5201, 5251). The two databases were made with:

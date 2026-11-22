@@ -136,8 +136,8 @@ export class DataService implements DataGateway {
   async indexSource(sourceId: string, reader: FastaReader): Promise<DatasetRevision> {
     const file = this.source(sourceId);
     const parser = fastaParser(programById(reader.program), reader.role);
-    const { records } = await this.deps.scanner.scan(reader, readChunks(file, this.chunkBytes));
-    checkRecordTable(records, file.size);
+    const { records, reader_error: stop } = await this.deps.scanner.scan(reader, readChunks(file, this.chunkBytes));
+    checkRecordTable(records, file.size, stop?.offset);
     const hashes = await this.hashRecords(file, records);
     return this.keep({
       revisionId: this.deps.newToken(),
@@ -145,6 +145,7 @@ export class DataService implements DataGateway {
       parser,
       records: Object.freeze(records.map((record, i) => Object.freeze({ ...record, sha256: hashes[i]! }))),
       excluded: Object.freeze([]),
+      ...(stop === undefined ? {} : { readerError: Object.freeze({ offset: stop.offset, defline: stop.defline, message: stop.message }) }),
     });
   }
 
@@ -162,7 +163,12 @@ export class DataService implements DataGateway {
     return { bytes, sha256: await this.deps.digest(bytes), records };
   }
 
-  /** The bytes and record keys of a run input, without its SHA-256. */
+  /**
+   * The bytes and record keys of a run input, without its SHA-256. A source whose reading ends with
+   * the reader's error (`DatasetRevision.readerError`) keeps the bytes from the error on after its
+   * included records, so that the run meets the error as the command line meets it in the file, and
+   * ends the input: the engine reads no record after it (line WQA's D10, 2026-11-19).
+   */
   private async runInputBytes(revisionIds: readonly string[]): Promise<Omit<RunInput, 'sha256'>> {
     if (revisionIds.length === 0) throw new Error('a run input needs at least one dataset revision');
     const parts: Uint8Array[] = [];
@@ -171,13 +177,14 @@ export class DataService implements DataGateway {
       const revision = this.revision(revisionId);
       const file = this.source(revision.sourceId);
       const included = includedRecords(revision);
+      const stop = revision.readerError?.offset;
       const bytes =
         revision.excluded.length === 0
           ? await readRange(file, 0, file.size)
-          : await readRanges(
-              file,
-              included.map((record) => [record.header_offset, record.end_offset] as const),
-            );
+          : await readRanges(file, [
+              ...included.map((record) => [record.header_offset, record.end_offset] as const),
+              ...(stop === undefined ? [] : [[stop, file.size] as const]),
+            ]);
       const previous = parts[parts.length - 1];
       if (bytes.length > 0 && previous !== undefined && previous[previous.length - 1] !== LF) {
         parts.push(NEWLINE);
@@ -185,6 +192,7 @@ export class DataService implements DataGateway {
       if (bytes.length > 0) parts.push(bytes);
       // One by one: spreading a large table into push() overflows the call stack.
       for (const record of included) records.push(recordKey(record));
+      if (stop !== undefined) break;
     }
     return { bytes: concatBytes(parts), records: Object.freeze(records) };
   }
@@ -532,10 +540,11 @@ function blockPath(token: string, stream: OutputStream): string {
 }
 
 /**
- * Rejects a record table whose offsets do not describe ordered records inside the source.
- * Only a first record without a defline starts its sequence at its header offset (both 0).
+ * Rejects a record table whose offsets do not describe ordered records inside the source, and the
+ * offset of a reader's error (`stop`) that is not after them inside the source. Only a first record
+ * without a defline starts its sequence at its header offset (both 0).
  */
-function checkRecordTable(records: readonly IndexedRecord[], size: number): void {
+function checkRecordTable(records: readonly IndexedRecord[], size: number, stop: number | undefined): void {
   let previousEnd = 0;
   records.forEach((record, i) => {
     const ordered =
@@ -547,6 +556,9 @@ function checkRecordTable(records: readonly IndexedRecord[], size: number): void
     if (!ordered) throw new Error(`the index scan returned an invalid record table (record ${i + 1})`);
     previousEnd = record.end_offset;
   });
+  if (stop !== undefined && !(Number.isSafeInteger(stop) && previousEnd <= stop && stop <= size)) {
+    throw new Error('the index scan returned an invalid offset of the reader\'s error');
+  }
 }
 
 async function* readChunks(file: Blob, chunkBytes: number): AsyncGenerator<Uint8Array> {

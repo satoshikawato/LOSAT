@@ -46,24 +46,24 @@
 //!    preliminary list is released as the one-thread loop releases it (`x_prelim_free.rs`), after the replay of the window that holds its last match.
 //!
 //! The matches the test ends. A heap's `ecutoff` is fixed when it is made; `n` only grows (the redo
-//! only inserts; `pop` comes after it); and a heap filled to its cutoff (`n >= heapThreshold` and
-//! `worstEvalue <= ecutoff`) stays so: an insert with an E-value within the cutoff keeps the worst
-//! one kept within it, and an insert with a larger E-value does not replace the root, whose E-value
-//! is within it (`BlastCompoHeap::insert`). So for a match's fixed `best_evalue` the test is
-//! monotone over the replay: once true, true at every later point. Hence:
+//! only inserts; `pop` comes after it); and a heap filled to its cutoff (`n` at least
+//! `heapThreshold` and `worstEvalue` at most `ecutoff`) stays so: an insert with an E-value within
+//! the cutoff keeps the worst one kept within it, and an insert with a larger E-value does not
+//! replace the root, whose E-value is within it (`BlastCompoHeap::insert`). So for a match's fixed
+//! `best_evalue` the test is monotone over the replay: once true, true at every later point. Hence:
 //! - a match whose test is already true on the heaps at a window's start is not computed (nor
 //!   prefetched): its replay finds the test true and drops it (asserted);
-//! - the test can be true for a match of query q only for `best_evalue > EVALUE_STRETCH x ecutoff`,
-//!   and only if every heap of q's batch can be filled by then: the heaps of the queries before q
-//!   and q's own hold at most their matches (`n` <= inserts <= matches), and those of the queries
-//!   after q are untouched when q's matches are tested (stream order). With the heaps as the search
-//!   makes them (`heapThreshold` = `max_target_seqs` >= 1) that is the last query of a batch whose
-//!   queries all have at least `max_target_seqs` matches. At a window's start, also: a query of
-//!   the batch whose matches are all replayed keeps its heap as it is, so if that heap is not
-//!   filled no match of the batch can be ended any more; and q's heap gains at most one list per
-//!   match of q, so q's next `heapThreshold - n` matches cannot be ended. A job with a match that
-//!   these conditions leave open, not ended at its window's start, is at risk; the other jobs are
-//!   never ended and are computed ahead freely;
+//! - the test can be true for a match of query q only for a `best_evalue` above `EVALUE_STRETCH`
+//!   times `ecutoff`, and only if every heap of q's batch can be filled by then: the heaps of the
+//!   queries before q and q's own hold at most their matches (`n` <= inserts <= matches), and those
+//!   of the queries after q are untouched when q's matches are tested (stream order). With the
+//!   heaps as the search makes them (`heapThreshold` = `max_target_seqs` >= 1) that is the last
+//!   query of a batch whose queries all have at least `max_target_seqs` matches. At a window's
+//!   start, also: a query of the batch whose matches are all replayed keeps its heap as it is, so
+//!   if that heap is not filled no match of the batch can be ended any more; and q's heap gains at
+//!   most one list per match of q, so q's next `heapThreshold` minus `n` matches cannot be ended. A
+//!   job with a match that these conditions leave open, not ended at its window's start, is at
+//!   risk; the other jobs are never ended and are computed ahead freely;
 //! - a computed result is dropped only in a job at risk, in the window during which its batch's
 //!   heaps become filled; at the start of any later window the test is already true for the
 //!   query's matches that it can end, so at most one window drops results of a query. A window
@@ -127,8 +127,8 @@
 //! at most 2 x 4 x 64 x threads results before their replay with the carried ones, and a carry
 //! fewer than that; the serial work of a stop (`x_sw_continued`, the carry's copy) is linear in
 //! the carry (it reads no heap's root), at most that of a window's replay. The replay also keeps
-//! the batch's status of NCBI's one-thread redo (`XSwBatch`, with the one-thread loop's
-//! `redo_run::SwBatchStatus`): a match that the redo reaches sets it, failed or not; a match the
+//! the batch's status of NCBI's one-thread redo (`XSwBatch`, with core's `SwBatchStatus`, the
+//! one-thread loop's too): a match that the redo reaches sets it, failed or not; a match the
 //! early termination test ends leaves it; a list whose subject the redo's fetch excludes (line RG
 //! X4-excl) sets it to 0 unless the early termination test ends that list, read when the replay
 //! passes the list's query, with the one-thread loop's reader; a batch whose status says failed at
@@ -191,13 +191,14 @@ use rayon::prelude::*;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::BlastCompositionWorkspace;
+use crate::core::composition_adjustment::smith_waterman_match::{SwBatchStatus, SwRedoFailed};
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 use crate::utils::threading::SearchPool;
 
 use super::blast_engine::{
     preliminary_hit_from_local_match_hsp, query_fetch_excluded_reached, sw_batch_failed,
-    sw_endless, FetchExcludedMatch, SwBatchStatus,
+    sw_endless, FetchExcludedMatch,
 };
 use super::gapalign::{BlastpPreliminaryHsp, GapAlignScratch};
 use super::hsp::{
@@ -206,7 +207,7 @@ use super::hsp::{
 };
 #[cfg(test)]
 use super::hsp::{fill_results_from_compo_heaps, BlastpHsp};
-use super::kappa::smith_waterman::{SwMatchScratch, SwRedoFailed};
+use super::kappa::smith_waterman::SwMatchScratch;
 use super::kappa::{
     build_query_workspace, postprocess_preliminary_hits,
     postprocess_preliminary_hits_smith_waterman, x_newton_lanes_prefetch_matches,
@@ -1358,8 +1359,8 @@ where
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
 /// The status of a query batch in NCBI's one-thread Smith-Waterman redo (`status_code_tld[0]`),
-/// replayed in stream order with the one-thread loop's own status (`redo_run::SwBatchStatus`, the
-/// one owner of its rule): a match that the redo reaches sets it (`redone`: failed, or 0 for a redo
+/// replayed in stream order with the status of every program's redo loop, the one-thread loop's
+/// too (core's `smith_waterman_match::SwBatchStatus`, the one owner of its rule): a match that the redo reaches sets it (`redone`: failed, or 0 for a redo
 /// that ends without failing, with alignments or without, as when its heap test is FALSE); a match
 /// the early termination test ends leaves it; a list whose subject the redo's fetch excludes sets it
 /// to 0 unless the early termination test ends that list (line RG X4-excl,

@@ -275,9 +275,6 @@ fn one_word_extension() {
     assert_eq!(
         test.extend(-7, 4, 16),
         OneWordSeed {
-            q_start: 4,
-            s_start: 0,
-            length: 3,
             score: 33,
             right_extend: false,
             s_last_off: 3,
@@ -286,9 +283,6 @@ fn one_word_extension() {
     assert_eq!(
         test.extend(0, 4, 16),
         OneWordSeed {
-            q_start: 4,
-            s_start: 0,
-            length: 3,
             score: 33,
             right_extend: true,
             s_last_off: 3,
@@ -296,9 +290,10 @@ fn one_word_extension() {
     );
 }
 
-/// Where the chunk holds the word, the extension is LOSAT's reference two-hit extension of the
-/// chunk's letters (`extension::extend_two_hit`) at subject offset 0, for any first hit's end,
-/// negative ones included.
+/// Where the chunk holds the word, the extension gives the score, the direction and the last
+/// offset of LOSAT's reference two-hit extension of the chunk's letters
+/// (`extension::extend_two_hit`) at subject offset 0, for any first hit's end, negative ones
+/// included.
 #[test]
 fn one_word_extension_is_the_reference_two_hit_extension() {
     let mut state = 0x9e37_79b9_7f4a_7c15_u64;
@@ -340,22 +335,8 @@ fn one_word_extension_is_the_reference_two_hit_extension() {
         )
         .expect("the word lies within both sequences");
         assert_eq!(
-            (
-                got.q_start,
-                got.s_start,
-                got.length,
-                got.score,
-                got.right_extend,
-                got.s_last_off
-            ),
-            (
-                want.ungapped_data.q_start,
-                want.ungapped_data.s_start,
-                want.ungapped_data.length,
-                want.ungapped_data.score,
-                want.right_extend,
-                want.s_last_off
-            ),
+            (got.score, got.right_extend, got.s_last_off),
+            (want.ungapped_data.score, want.right_extend, want.s_last_off),
             "{query:?} {letters:?} q={q} s_left_off={s_left_off} x_drop={x_drop}"
         );
         extended += usize::from(got.right_extend);

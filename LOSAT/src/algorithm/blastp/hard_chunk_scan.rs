@@ -224,6 +224,7 @@ impl DiagonalWalk {
     }
 
     /// The diagonal offset after the chunks walked so far, relative to the sequence's start.
+    #[cfg(test)]
     pub(crate) fn end(&self) -> i64 {
         self.at
     }
@@ -256,14 +257,12 @@ pub(crate) struct WordContext {
     pub(crate) cutoff: i32,
 }
 
-/// The result of the two-hit extension of one hit of [`OneWord`] (`s_BlastAaExtendTwoHit`): the
-/// seed's query and subject start, its length and score, whether the extension went right, and
-/// the last subject offset that its right walk read.
+/// The result of the two-hit extension of one hit of [`OneWord`] (`s_BlastAaExtendTwoHit`) that
+/// the two-hit test reads: the seed's score, whether the extension went right, and the last subject
+/// offset that its right walk read. (Where NCBI saves the seed LOSAT refuses the sequence, so the
+/// seed's start and length are not kept.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OneWordSeed {
-    pub(crate) q_start: i32,
-    pub(crate) s_start: i32,
-    pub(crate) length: i32,
     pub(crate) score: i32,
     pub(crate) right_extend: bool,
     pub(crate) s_last_off: i32,
@@ -375,29 +374,23 @@ impl OneWord<'_> {
             i -= 1;
         }
         let (left_score, left_d) = (best, n - best_i + 1);
-        let (mut right_score, mut right_d, mut s_last_off) = (0, 0, s_right_off);
+        let (mut right_score, mut s_last_off) = (0, s_right_off);
         let right_extend = left_d >= s_right_off - s_left_off;
         if right_extend {
             let n = (self.length - s_right_off).min(self.query.len() as i32 - q_right_off);
-            let (mut best_i, mut walk, mut best) = (-1, left_score, left_score);
+            let (mut walk, mut best) = (left_score, left_score);
             let mut i = 0;
             while i < n {
                 walk += score_at(q_right_off + i, s_right_off + i);
-                if walk > best {
-                    best = walk;
-                    best_i = i;
-                }
+                best = best.max(walk);
                 if walk <= 0 || best - walk >= x_drop {
                     break;
                 }
                 i += 1;
             }
-            (right_score, right_d, s_last_off) = (best, best_i + 1, s_right_off + i);
+            (right_score, s_last_off) = (best, s_right_off + i);
         }
         OneWordSeed {
-            q_start: q_right_off - left_d,
-            s_start: s_right_off - left_d,
-            length: left_d + right_d,
             score: left_score.max(right_score),
             right_extend,
             s_last_off,

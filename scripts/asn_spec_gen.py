@@ -21,7 +21,8 @@ What the table holds, per type (named, or anonymous at its place of use):
     VisibleString, UTF8String, StringStore, OCTET STRING;
   - its ASN.1 name ("" for an anonymous type, as NCBI's internal type information reports it) and
     module;
-  - per member or variant: its name, its tag (position from 0, NCBI's automatic tags), OPTIONAL,
+  - per member or variant: its name (its tag is its position from 0, NCBI's automatic tags: a
+    member with a tag of its own in the module stops the generator), OPTIONAL,
     DEFAULT (with the default value as written in the module) and the delayed flag (`_delay`).
 
 The storage of an INTEGER is NCBI's C++ type, from the `.def` files: `TSeqPos` and `unsigned` are
@@ -589,8 +590,21 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
                     flags.append("DELAYED")
                 flag_text = " | ".join(flags) if flags else "0"
                 default = "None" if spec.default is None else f"Some({names(spec.default)})"
-                tag = spec.tag if spec.tag is not None else position
-                members.append(f"    Member {{ name: {names(spec.name)}, tag: {tag}, ty: {element}, "
+                # NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1138-1145 (and the
+                # variants', 1386-1392)
+                # The readers take a member's or variant's tag for its position (`[n]` in text,
+                # `a0 | n` in binary): NCBI's automatic tags, which hold when the module gives
+                # the item no tag of its own (the binary stream's branch for another tag type is
+                # then never taken). An explicit tag stops the generator.
+                if spec.tag is not None:
+                    raise SystemExit(f"{e.name or e.path}.{spec.name}: the explicit tag "
+                                     f"[{spec.tag}] is not an automatic tag; the readers "
+                                     f"(asn_input::Items) and the writer take the tag for the "
+                                     f"position")
+                if position > 255:
+                    raise SystemExit(f"{e.name or e.path}.{spec.name}: the position {position} "
+                                     f"is no tag of one byte, which the writer's encoders take")
+                members.append(f"    Member {{ name: {names(spec.name)}, ty: {element}, "
                                f"flags: {flag_text}, default: {default} }}, // {len(members)}: "
                                f"{e.name or e.path}.{spec.name}")
             kind = f"Kind::{e.kind}(Span({first}, {len(e.members)}))"

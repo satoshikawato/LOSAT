@@ -45,7 +45,10 @@ the runs whose outcome and standard error are those of the argv's own `-outfmt` 
 whose files the engine opens in the run's working directory (abi_v2.md §3; line WQA D12a, 2026-11-20), with
 a query read with the data loaders on and off (`-conffile` of `DATA_LOADERS=none`), and the
 inputs of line WQA's D13 and D16 (`scan_d13`: gap lines, joined lines, Seq-id first lines, and
-`-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2).
+`-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2), and BLASTN
+`-filtering_db` (line RG item D4): with `-db` (`REPEAT_ROWS`, `REPEAT_FAILURE_ROWS`) and with `-subject`
+(`repeat_subject`, `"run_directory": true`: the subject is registered as for every search, and the run goes to
+the instance whose `/work` holds the repeat database).
 `--group fasta_input` writes that group of the full suite alone.
 
 Usage: v_abi_cases.py --suite quick|full [--group fasta_input] --out FILE.json
@@ -277,6 +280,17 @@ def direct_tblastx() -> dict:
 # BLASTP database: -seqidlist (a binary list) and -taxids (line WQA D12a, 2026-11-20).
 DATABASE_ROWS = ["db.blastn.mega.6", "db.d1.6", "db.blastx.default.6", "db.tblastn.default.6", "db.tblastx.default.6",
                  "db.sl.bp.bsl.6", "db.tf.bp.nosql.6"]
+# BLASTN `-filtering_db` with `-db` (line RG item D4, D4-web): a second database in the run's directory, whose
+# files the engine opens by `-filtering_db`'s name. Rows of db.rpt.* in LOSAT/tests/db_search_manifest/blastn.rpt.tsv
+# without an environment: four tasks and both strands in outfmt 6, outfmt 0, the archive (11) with the lower case
+# joined to the repeats, a -query_loc edge, and the XML of the filter (5).
+REPEAT_ROWS = ["db.rpt.mb.6", "db.rpt.bn.6", "db.rpt.short.6", "db.rpt.dc.6", "db.rpt.plus.6", "db.rpt.minus.6", "db.rpt.mb.0",
+               "db.rpt.edge_lo.0", "db.rpt.lc.11", "db.rpt.edge_lo.11", "db.rpt.mb.5"]
+# The repeat search's errors through the adapter (D4-web; review N4): a repeat database whose header counts are
+# wrong and a query without letters, whose NCBI messages name no path (exit 3; the native CLI's run is compared).
+REPEAT_FAILURE_ROWS = ["db.rpt.badcount.6", "db.rpt.noletters.6"]
+# The -subject run of a repeat database (D4-web): rpt.* rows of LOSAT/tests/fixtures/blastn_regression/manifest.tsv.
+REPEAT_SUBJECT_ROWS = ["rpt.megablast", "rpt.blastn_fmt0", "rpt.lc", "rpt.fmt11"]
 
 
 def database() -> list[dict]:
@@ -294,6 +308,24 @@ def database() -> list[dict]:
                          "argv": [row["program"], "-db", row["db"], "-query", row["query"], *shlex.split(row["extra_args"])],
                          "cwd": str(REPO / "LOSAT"), "cases": [row_id], "frozen": {"6": row["stdout_sha256"]},
                          "database": True})
+    for row_id in REPEAT_ROWS:
+        row = rows[row_id]
+        assert row["kind"] == "ncbi" and row["rc"] == "0" and row["program"] == "blastn", row_id
+        argv = ["blastn", "-db", row["db"], "-query", row["query"], *shlex.split(row["extra_args"])]
+        search = {"program": "blastn", "argv": argv, "cwd": str(REPO / "LOSAT"), "cases": [row_id], "frozen": {},
+                  "database": True}
+        if custom_outfmt(row["outfmt"]):
+            search["outfmt"] = row["outfmt"]
+            search["frozen"]["custom"] = row["stdout_sha256"]
+        else:
+            search["frozen"][row["outfmt"]] = row["stdout_sha256"]
+        searches.append(search)
+    for row_id in REPEAT_FAILURE_ROWS:
+        row = rows[row_id]
+        assert row["kind"] == "ncbi" and row["rc"] == "3" and row["program"] == "blastn", row_id
+        searches.append({"program": "blastn", "argv": ["blastn", "-db", row["db"], "-query", row["query"], *shlex.split(row["extra_args"])],
+                         "cwd": str(REPO / "LOSAT"), "cases": [row_id], "frozen": {}, "expect": "failure", "database": True})
+    searches += repeat_subject()
     # With -parse_deflines the run registers its query with `register_inputs` (its subject handle 0, the
     # response's subject null), and the records' `s_idx` are the database's OIDs (abi_v2.md §4, §8); the
     # native CLI's run of the argv is the reference (review of D12a, low 3).
@@ -321,6 +353,31 @@ def database() -> list[dict]:
     searches.append({"program": "blastp", "argv": ["blastp", "-db", d1["db"], "-query", str(directory / "blastp_db.q.fa")],
                      "cwd": str(REPO / "LOSAT"), "cases": ["db.d1.reader_error"], "frozen": {}, "expect": "failure",
                      "database": True})
+    return searches
+
+
+def repeat_subject() -> list[dict]:
+    """`-subject` searches with `-filtering_db` (line RG item D4, D4-web): the subject is registered as for every
+    subject run, and the repeat database is a set of files in the run's working directory (LOSAT/, as for `-db`):
+    `"run_directory"` has the harness run it on the instance whose `/work` is that directory. The rows are
+    NCBI-frozen (`rpt.*` of the blastn regression manifest)."""
+    sys.path.insert(0, str(REPO / "LOSAT/tests"))
+    import blastn_regression_fixtures as regression  # noqa: E402  (the manifest reader)
+    rows = {row["case_id"]: row for row in regression.read_manifest()}
+    searches = []
+    for case_id in REPEAT_SUBJECT_ROWS:
+        row = rows[case_id]
+        assert row["exit"] == "0" and not row["env"], case_id
+        outfmt, argv = split(["blastn", *shlex.split(row["argv"])])
+        outfmt = outfmt or "0"
+        search = {"program": "blastn", "argv": argv, "cwd": str(REPO / "LOSAT"), "cases": [case_id], "frozen": {},
+                  "run_directory": True}
+        if custom_outfmt(outfmt):
+            search["outfmt"] = outfmt
+            search["frozen"]["custom"] = row["stdout_sha256"]
+        else:
+            search["frozen"][outfmt] = row["stdout_sha256"]
+        searches.append(search)
     return searches
 
 

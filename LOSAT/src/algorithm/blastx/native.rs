@@ -1518,7 +1518,7 @@ pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
         || error.is::<super::split::QuerySplitRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
         || error.is::<super::database::LongSubjectRefusal>()
-        || error.is::<crate::algorithm::blastp::hard_chunk_scan::ShortChunkSeedRefusal>()
+        || error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>()
         || error.is::<NativeError>()
 }
 

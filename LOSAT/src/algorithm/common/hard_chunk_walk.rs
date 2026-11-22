@@ -11,8 +11,11 @@
 //! `core::subject_split::HardSplitState` with it, so they cannot disagree. It gives what the word
 //! finder reads of each chunk ([`ChunkWork`]), the margins by which the sequence's word hits
 //! reach past it ([`DiagonalMargins`]), and from them how the search moves the diagonal offset
-//! so that each sequence is searched on its own ([`DiagonalWalk::start`], [`DiagonalWalk::after`]:
-//! PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's answer Q5 = B of M4b, 2026-11-22).
+//! so that no entry of another sequence reaches a sequence's hits ([`DiagonalWalk::start`],
+//! [`DiagonalWalk::after`]: PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's answer Q5 = B of M4b,
+//! 2026-11-22). [`NcbiWalk`] follows NCBI's one-thread offsets over the searched sequences before
+//! the search and names the sequences whose hits meet entries that no sequence wrote, which the
+//! search starts on such a table at NCBI's offset ([`HardStarts`], [`TableStart::New`]).
 
 /// What the word finder reads of one hard chunk ([`DiagonalWalk::chunk`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +31,7 @@ pub(crate) enum ChunkWork {
     Words { reference: bool },
     /// A chunk of a two-hit search shorter than the word (of no letters, or of a negative length,
     /// too): the scan reads the one word at the chunk's offset, past the chunk
-    /// (`blastp::hard_chunk_scan::OneWord`).
+    /// (`common::hard_chunk_scan::OneWord`).
     OneWord,
     /// A chunk of a one-hit search shorter than the word: its scan range is empty, nothing is read.
     Nothing,
@@ -38,8 +41,8 @@ pub(crate) enum ChunkWork {
 /// ([`DiagonalWalk::margins`]), in positions of the diagonal offset. Where both are 0 the table
 /// entries that the sequence's chunks store read as cleared entries to every hit of a later
 /// sequence, and its own hits read the entries of earlier sequences as cleared ones: the sequence's
-/// result does not depend on the sequences that the same table searched before or after it. The
-/// search moves the offset by them ([`DiagonalWalk::start`], [`DiagonalWalk::after`]).
+/// result does not depend on the entries of the sequences that the same table searched before or
+/// after it. The search moves the offset by them ([`DiagonalWalk::start`], [`DiagonalWalk::after`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct DiagonalMargins {
     /// How far the lowest diagonal offset of a chunk whose scan reads a word that can hit lies
@@ -54,13 +57,16 @@ pub(crate) struct DiagonalMargins {
     pub(crate) past_end: i64,
 }
 
-/// How the search of a sequence starts on the diagonal table ([`DiagonalWalk::start`]).
+/// How the search of a sequence starts on the diagonal table ([`DiagonalWalk::start`]; the
+/// search applies it to its table with [`TableStart::apply`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TableStart {
-    /// NCBI's new table (`blastp::blast_engine::BlastpSubjectScratch::new_table`,
-    /// `blastx::seed::Diagonals::new_table`): the first searched sequence.
-    New,
-    /// The table and its offset as they are: NCBI's offsets.
+    /// A table whose every entry is the one that no sequence wrote since NCBI's thread made or
+    /// cleared its table, at NCBI's one-thread offset of the sequence ([`NcbiStart`],
+    /// [`HardTable::ncbi_table`]): a sequence whose hits meet such entries in NCBI's one-thread
+    /// search, or inside which that search clears the table ([`NcbiWalk`]).
+    New(NcbiStart),
+    /// The table and its offset as they are (NCBI's offsets until the first move).
     Keep,
     /// The offset moved up by `by` before the sequence's first chunk, after the table is cleared
     /// (its offset the window) where `clear`.
@@ -68,15 +74,68 @@ pub(crate) enum TableStart {
 }
 
 /// How the search moves the diagonal offset after a sequence's last chunk
-/// ([`DiagonalWalk::after`]).
+/// ([`DiagonalWalk::after`]; the search applies it with [`TableEnd::apply`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TableEnd {
-    /// The offset as the last chunk's exit left it: NCBI's.
+    /// The offset as the last chunk's exit left it.
     Keep,
     /// The offset moved up by this.
     Move(i32),
     /// The table cleared, where the move would take the offset to INT4_MAX / 4 or past it.
     Clear,
+}
+
+/// The diagonal table of a protein program's word finder as a `-db_hard_mask` search moves it
+/// between its sequences (BLASTP's `blastp::blast_engine::BlastpSubjectScratch`, BLASTX's
+/// `blastx::seed::Diagonals`), so that both programs' searches change their tables the one way of
+/// [`TableStart::apply`] and [`TableEnd::apply`].
+pub(crate) trait HardTable {
+    /// The error of a move that takes the offset past Int4 (none in BLASTP, whose walk keeps the
+    /// offset below INT4_MAX / 4).
+    type Error;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107, 131-144
+    /// Every entry the one that NCBI's thread made (0 without the flag: the `calloc` of
+    /// `BlastExtendWordNew`) or cleared (`s_BlastDiagClear`: the window `window` less than 0),
+    /// and the offset NCBI's one-thread offset of the sequence (`start`): only this worker's table.
+    fn ncbi_table(&mut self, start: NcbiStart, window: i32);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// The table cleared as `s_BlastDiagClear` clears it: every entry the window `window` less
+    /// than 0, the offset the window.
+    fn clear_table(&mut self, window: i32);
+    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 23 (the Owner's answer Q5 = B of M4b).
+    /// The offset moved up by `by` between two sequences, so that no entry of one reaches the
+    /// other's hits ([`DiagonalWalk::start`], [`DiagonalWalk::after`]).
+    fn move_offset(&mut self, by: i32) -> Result<(), Self::Error>;
+}
+
+impl TableStart {
+    /// The start applied to the search's table `table` (the search's window `window`): NCBI's
+    /// table at the sequence's one-thread offset, nothing, or a clear where `clear` and the move.
+    pub(crate) fn apply<T: HardTable>(self, table: &mut T, window: i32) -> Result<(), T::Error> {
+        match self {
+            TableStart::New(start) => table.ncbi_table(start, window),
+            TableStart::Keep => {}
+            TableStart::Move { clear, by } => {
+                if clear {
+                    table.clear_table(window);
+                }
+                table.move_offset(by)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl TableEnd {
+    /// The end applied to the search's table `table` (the search's window `window`).
+    pub(crate) fn apply<T: HardTable>(self, table: &mut T, window: i32) -> Result<(), T::Error> {
+        match self {
+            TableEnd::Keep => {}
+            TableEnd::Move(by) => table.move_offset(by)?,
+            TableEnd::Clear => table.clear_table(window),
+        }
+        Ok(())
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276
@@ -251,21 +310,41 @@ impl DiagonalWalk {
         i32::try_from(self.word).unwrap_or(i32::MAX)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 110-155
-    /// The sequence is the first that the table searches: NCBI's thread makes its table with every
-    /// entry 0 without the flag and the offset the window (`s_BlastDiagTableNew`, the `calloc` of
-    /// `BlastExtendWordNew`), so the entries lie the window below the sequence's start, where a
-    /// chunk that goes back below the start meets them (a hit within the window of them is
-    /// extended, one in the one-hit search below them is skipped). The search of that sequence
-    /// makes its table so first (`blastp::blast_engine::BlastpSubjectScratch::new_table`,
-    /// `blastx::seed::Diagonals::new_table`), and the walk of the refusal before the search starts
-    /// so for the first searched sequence (`HardMaskShape::of_scan`).
-    pub(crate) fn start_on_new_table(&mut self) {
-        self.unflagged = Some(-self.window);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107, 110-155
+    /// The sequence starts on the table of [`TableStart::New`]: every entry is the one that no
+    /// sequence wrote since NCBI's thread made its table (0 without the flag: the `calloc` of
+    /// `BlastExtendWordNew`) or cleared it (the window less than 0, `s_BlastDiagClear`), and the
+    /// offset is NCBI's one-thread offset of the sequence (`start`), so the entries lie that offset
+    /// less their value below the sequence's start, where a chunk that goes back below the start
+    /// can meet them (a hit within the window of them is extended, one in the one-hit search below
+    /// them is skipped). The search of the sequence makes its table so first, and so does the walk
+    /// of the refusal before the search (`HardMaskShape::of_scan`).
+    pub(crate) fn start_on_ncbi_table(&mut self, start: NcbiStart) {
+        self.unflagged = Some(i64::from(start.unwritten(self.window())) - i64::from(start.offset));
     }
 
-    /// The sequence is not the first that the table searches, and the search moved the offset up
-    /// by `before` ([`DiagonalWalk::start`]): every entry of the earlier sequences lies at least
+    /// The two-hit window (0: the one-hit search).
+    fn window(&self) -> i32 {
+        i32::try_from(self.window).unwrap_or(i32::MAX)
+    }
+
+    /// The walk of the chunks `chunks` of a sequence of `length` letters from its start, as the
+    /// search's walk reads them (a one word that covers the sentinel taken to hit).
+    fn ahead(
+        word: i32,
+        window: i32,
+        length: usize,
+        chunks: &[crate::core::subject_split::HardChunk],
+    ) -> Self {
+        let mut ahead = Self::new(word, window, length, true);
+        for chunk in chunks {
+            ahead.chunk(chunk.offset, chunk.length);
+        }
+        ahead
+    }
+
+    /// The sequence does not start on a new table, and the search moved the offset up by `before`
+    /// ([`DiagonalWalk::start`]): every entry of the earlier sequences lies at least
     /// the window below the offset before the move without the flag, and not above it with the
     /// flag (each sequence's search leaves the table so, [`DiagonalWalk::after`]), so at most the
     /// window plus `before`, or `before`, below the sequence's start. No chunk that reads a word
@@ -287,54 +366,53 @@ impl DiagonalWalk {
     /// order) starts on a table at the diagonal offset `offset`, in a search with the word `word`
     /// and the window `window`, and the walk of its search (the margin of [`DiagonalWalk::after`]
     /// comes from it). PD-LOSAT-NCBI-DEFECTS exception 23 (the Owner's answer Q5 = B of M4b,
-    /// 2026-11-22 22:34 JST): each sequence is searched on its own, so that no entry of another
-    /// sequence reaches its hits, and its rows are the same at every thread count.
-    /// - `first`, the first sequence that the search reads (the first with letters): NCBI's new
-    ///   table, which NCBI's thread makes for it at every thread count (a chunk below its start
-    ///   meets the new table's entries, [`DiagonalWalk::start_on_new_table`]).
+    /// 2026-11-22 22:34 JST): the rows differ from NCBI's one-thread rows only where an entry of
+    /// another sequence reaches a hit, and are the same at every thread count.
+    /// - `ncbi`, a sequence whose hits meet the entries that no sequence wrote in NCBI's one-thread
+    ///   search, or inside which that search clears the table ([`NcbiWalk`], before the search):
+    ///   the table of [`TableStart::New`] at NCBI's one-thread offset, so that its walk meets those
+    ///   entries and those clears as NCBI's does ([`DiagonalWalk::start_on_ncbi_table`]).
     /// - Any other: the offset moves up by the margin below its start (the walk of its chunks,
     ///   [`DiagonalMargins::below_start`]), so that every entry of the earlier sequences lies out of
-    ///   reach of its hits ([`DiagonalWalk::start_after_others`]): NCBI's search of it where no
-    ///   entry of another sequence reaches it. The bytes differ from NCBI's one-thread run only
-    ///   where one does, and there NCBI's own rows depend on which sequences its thread searched
-    ///   before, which varies by run with threads (probe `lk400` of M/m4b3b/NOTES_M4B3B.md).
-    /// - A sequence whose walk reads back (a margin below its start, or a chunk within reach of an
-    ///   entry of an earlier chunk of it) is also kept apart from the clears of the thread: where
-    ///   a chunk before its last would lie at INT4_MAX / 4 or past it after the move, the table is
-    ///   cleared first (NCBI clears it after that chunk, at a place that the sequences searched
-    ///   before set, and the chunks after it can read the entries that the clear removes). From
-    ///   the cleared offset its chunks lie within the walk's extent of the window, which reaches
-    ///   INT4_MAX / 4 (536,870,911 positions) only for a protein whose chunks move the offset that
-    ///   far: each chunk moves it by its letters plus the window, and the chunks with words are
-    ///   disjoint parts of the sequence (else `HardMaskShape::PartsOutOfOrder`), so it takes more
-    ///   than 536 million letters or about 12 million masks (at the window 40 and the word 3).
-    /// - A sequence with no margin below its start whose walk does not read back keeps NCBI's
-    ///   offsets ([`TableStart::Keep`]).
+    ///   reach of its hits ([`DiagonalWalk::start_after_others`]): NCBI's one-thread search of it
+    ///   where no entry of another sequence reaches it, whose entries that no sequence wrote it
+    ///   does not meet. Where an entry of another sequence does reach it, NCBI's rows depend on
+    ///   which sequences its thread searched before, which varies by run with threads (probe
+    ///   `lk400` of M/m4b3b/NOTES_M4B3B.md).
+    /// - It is also kept apart from the clears of its own walk: where a chunk before its last
+    ///   would lie at INT4_MAX / 4 or past it after the move, the table is cleared first (a clear
+    ///   after that chunk would remove the entries that the chunks after it read, and a one-hit
+    ///   chunk below the chunk after the clear would meet the cleared entries; NCBI's one-thread
+    ///   search has no clear inside it, else it is `ncbi`). From the cleared offset its chunks
+    ///   lie within the walk's extent of the window, which reaches INT4_MAX / 4 (536,870,911
+    ///   positions) only for a protein whose chunks move the offset that far: each chunk moves it
+    ///   by its letters plus the window, and the chunks with words are disjoint parts of the
+    ///   sequence (else `HardMaskShape::PartsOutOfOrder`), so it takes more than 536 million
+    ///   letters or about 12 million masks (at the window 40 and the word 3).
+    /// - A sequence with no margin below its start whose walk does not read back and has no clear
+    ///   inside keeps its offset ([`TableStart::Keep`]).
     pub(crate) fn start(
         word: i32,
         window: i32,
         length: usize,
         chunks: &[crate::core::subject_split::HardChunk],
-        first: bool,
+        ncbi: Option<NcbiStart>,
         offset: i32,
     ) -> (Self, TableStart) {
         let mut walk = Self::new(word, window, length, true);
-        if first {
-            walk.start_on_new_table();
-            return (walk, TableStart::New);
+        if let Some(start) = ncbi {
+            walk.start_on_ncbi_table(start);
+            return (walk, TableStart::New(start));
         }
-        let mut ahead = Self::new(word, window, length, true);
-        for chunk in chunks {
-            ahead.chunk(chunk.offset, chunk.length);
-        }
+        let ahead = Self::ahead(word, window, length, chunks);
         let before = ahead.margins().below_start;
         walk.start_after_others(before);
-        if before == 0 && !ahead.reads_back {
-            return (walk, TableStart::Keep);
-        }
         let clear = ahead
             .inner
-            .is_some_and(|inner| i64::from(offset) + before + inner >= i64::from(i32::MAX / 4));
+            .is_some_and(|inner| i64::from(offset) + before + inner >= CLEAR_AT);
+        if before == 0 && !ahead.reads_back && !clear {
+            return (walk, TableStart::Keep);
+        }
         // Below INT4_MAX / 4 as long as the extent is (above).
         let by = i32::try_from(before).unwrap_or(i32::MAX);
         (walk, TableStart::Move { clear, by })
@@ -347,12 +425,13 @@ impl DiagonalWalk {
     /// offset without the flag, and not above it with the flag, as
     /// [`DiagonalWalk::start_after_others`] takes them for the next sequence), or a clear of the
     /// table where that move would take the offset to INT4_MAX / 4 or past it (a cleared table
-    /// holds no entry within reach either). Where the margin is 0 the offset stays NCBI's.
+    /// holds no entry within reach either). Where the margin is 0 the offset stays as the last
+    /// chunk's exit left it.
     pub(crate) fn after(&self, offset: i32) -> TableEnd {
         let past_end = self.margins().past_end;
         if past_end == 0 {
             TableEnd::Keep
-        } else if i64::from(offset) + past_end >= i64::from(i32::MAX / 4) {
+        } else if i64::from(offset) + past_end >= CLEAR_AT {
             TableEnd::Clear
         } else {
             TableEnd::Move(i32::try_from(past_end).unwrap_or(i32::MAX))
@@ -405,6 +484,179 @@ impl DiagonalWalk {
     #[cfg(test)]
     pub(crate) fn end(&self) -> i64 {
         self.at
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+/// The diagonal offset at which the exit of a chunk's word finder clears the table instead of
+/// moving the offset on (INT4_MAX / 4, `Blast_ExtendWordExit`).
+const CLEAR_AT: i64 = (i32::MAX / 4) as i64;
+
+/// Where NCBI's one-thread search starts a sequence on its thread's diagonal table
+/// ([`NcbiWalk`]): the offset before the sequence's first chunk, and whether the table was cleared
+/// before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NcbiStart {
+    /// The diagonal offset before the sequence's first chunk.
+    pub(crate) offset: i32,
+    /// Whether the exit of an earlier chunk cleared the table (at INT4_MAX / 4).
+    pub(crate) cleared: bool,
+}
+
+impl NcbiStart {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107, 131-144
+    /// The value of an entry (without the flag) that no sequence wrote since NCBI's thread made
+    /// its table (0: the `calloc` of `BlastExtendWordNew`) or cleared it (the window less than 0:
+    /// `s_BlastDiagClear`), in a search with the window `window` (0: the one-hit search).
+    pub(crate) fn unwritten(self, window: i32) -> i32 {
+        if self.cleared {
+            -window
+        } else {
+            0
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1432
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 476-500
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107, 162-173
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:230-270
+// Each search (a batch of queries, or a chunk of a split query) makes its tables: a thread's
+// starts with every entry 0 and the offset the window. With one thread the search reads the
+// database's sequences in the order of their ids (those that the lists and the alias files'
+// ranges include), skips one of no letters (the minimum length of a protein subject is 1), and
+// passes every chunk of the others (one per hard range, or per `MAX_DBSEQ_LEN` letters of a
+// longer range) through the word finder, whose exit clears the table where the offset has reached
+// INT4_MAX / 4 (every entry the window less than 0, the offset the window), else moves the offset
+// by the chunk's length (NCBI's `Int4`, negative for an inverted range) and the window. A hit at
+// subject offset `s` of a chunk at offset `D` on an entry `u` without the flag stores itself as on
+// a cleared entry only where `s + D - u` is at least the window (two-hit), or not below 0
+// (one-hit, whose window is 0).
+/// NCBI's one-thread walk of the diagonal offset over the searched sequences of a `-db_hard_mask`
+/// search with the word `word` and the window `window`, in the order of the search, before the
+/// search: for each sequence its [`NcbiStart`], and whether the search starts it on a table of
+/// entries that no sequence wrote at that offset ([`TableStart::New`]): where a hit of its walk
+/// can meet such an entry (its lowest chunk that reads a word lies less than the window past the
+/// entries, or below them in the one-hit search: the first searched sequence's walk below its
+/// start, a sequence searched within a few hundred letters of the start or of a clear, or one
+/// after walks that went back), or where NCBI's walk clears the table after one of its chunks
+/// before the last. Every other sequence meets such entries nowhere, and no clear falls inside
+/// it, so that its result is NCBI's wherever no entry of another sequence reaches it, at any
+/// offset ([`DiagonalWalk::start`]).
+#[derive(Debug, Clone)]
+pub(crate) struct NcbiWalk {
+    word: i32,
+    window: i32,
+    offset: i64,
+    cleared: bool,
+}
+
+impl NcbiWalk {
+    /// The walk at the start of a search: the thread's new table, its offset the window.
+    pub(crate) fn new(word: i32, window: i32) -> Self {
+        Self {
+            word,
+            window,
+            offset: i64::from(window),
+            cleared: false,
+        }
+    }
+
+    /// The exit of a chunk of `length` letters (NCBI's `Int4`).
+    fn exit(&mut self, length: i32) {
+        if self.offset >= CLEAR_AT {
+            self.offset = i64::from(self.window);
+            self.cleared = true;
+        } else {
+            self.offset += i64::from(length) + i64::from(self.window);
+        }
+    }
+
+    /// The start of the next sequence.
+    fn here(&self) -> NcbiStart {
+        NcbiStart {
+            offset: self.offset.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+            cleared: self.cleared,
+        }
+    }
+
+    /// Whether a hit of a chunk `below` positions below the start `start` can meet an entry that
+    /// no sequence wrote (a hit at the chunk's first letter is the closest).
+    fn meets_unwritten(&self, start: NcbiStart, below: i64) -> bool {
+        i64::from(start.offset) - below - i64::from(start.unwritten(self.window))
+            < i64::from(self.window)
+    }
+
+    /// A searched sequence of `length` letters without hard ranges of its own (no masks of the
+    /// algorithm): its one chunk, or the chunks of `MAX_DBSEQ_LEN` letters of a longer one, each
+    /// at or past the one before it. `Some` where the search starts it on a new table
+    /// ([`TableStart::New`]); a sequence of no letters is not searched.
+    pub(crate) fn plain(&mut self, length: usize) -> Option<NcbiStart> {
+        use crate::core::subject_split::{HardSplitState, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
+        if length == 0 {
+            return None;
+        }
+        let start = self.here();
+        let new = self.meets_unwritten(start, 0);
+        if length <= MAX_DBSEQ_LEN {
+            self.exit(length as i32);
+        } else {
+            let mut split = HardSplitState::default();
+            split.start(length, vec![(0, length as i32)], false);
+            while let Some(chunk) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
+                self.exit(chunk.length);
+            }
+        }
+        new.then_some(start)
+    }
+
+    /// A searched sequence of `length` letters whose hard chunks are `chunks` (in walk order):
+    /// `Some` where the search starts it on a new table ([`TableStart::New`]: its walk, as the
+    /// search's reads it, reaches an entry that no sequence wrote, or a chunk before its last
+    /// exits at INT4_MAX / 4 or past it).
+    pub(crate) fn masked(
+        &mut self,
+        length: usize,
+        chunks: &[crate::core::subject_split::HardChunk],
+    ) -> Option<NcbiStart> {
+        if length == 0 {
+            return None;
+        }
+        let start = self.here();
+        let ahead = DiagonalWalk::ahead(self.word, self.window, length, chunks);
+        let clears_inside = ahead
+            .inner
+            .is_some_and(|inner| self.offset + inner >= CLEAR_AT);
+        let new = self.meets_unwritten(start, ahead.margins().below_start) || clears_inside;
+        for chunk in chunks {
+            self.exit(chunk.length);
+        }
+        new.then_some(start)
+    }
+}
+
+/// The searched sequences of a `-db_hard_mask` search that start on a new table
+/// ([`TableStart::New`]), by ordinal id, with their [`NcbiStart`]: what [`NcbiWalk`] gives, before
+/// the search (`blastinput::db_mask::ResolvedMask::check_losat_limits`). Few: sequences near the
+/// start of the database or of a clear, or after walks that went back.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct HardStarts {
+    starts: Vec<(u32, NcbiStart)>,
+}
+
+impl HardStarts {
+    /// Sequence `ordinal`, after every sequence already added, starts at `start`.
+    pub(crate) fn push(&mut self, ordinal: u32, start: NcbiStart) {
+        debug_assert!(self.starts.last().is_none_or(|&(last, _)| last < ordinal));
+        self.starts.push((ordinal, start));
+    }
+
+    /// Where the search starts sequence `ordinal` on a new table (`None`: it does not).
+    pub(crate) fn of(&self, ordinal: u32) -> Option<NcbiStart> {
+        self.starts
+            .binary_search_by_key(&ordinal, |&(at, _)| at)
+            .ok()
+            .map(|index| self.starts[index].1)
     }
 }
 

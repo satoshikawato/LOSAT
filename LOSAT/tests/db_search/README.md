@@ -2353,16 +2353,28 @@ for `qov2.faa` and for `qwpe.faa`, `qov2.faa`'s protein with `W-W`, whose `-` th
 subjects, A with masks [40,200) [60,238): diagonal entries that outlive A reach B, 98 positions past A's end, 137 in the
 one-hit scan (`-window_size 0`); NCBI's rows of B depend on the thread order). LOSAT searches B with A's entries out of reach
 (PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's answer Q5 = B of M4b, 2026-11-22; it refused `ov_lk` before). At the default
-NCBI's rows are those of the near input `ov_lkn`; the rows at `-evalue 1000`, `-window_size 0` and `-ungapped` expect NCBI's run
-of `ov_lkn` (`ncbi-near:`, rows `.hard.near.ov_lkn.*`): `make_dbmaskp_ov.py` (`near_db`) writes `ov_lkn.faa` (A, a spacer of 240
-`X`, which no query word hits, then B) and `ov_lkn.asnt` (A's and B's masks, `local id` renumbered), and the alias `ov_lkn.pal`
-over the volume `ov_lknv` keeps `ov_lk`'s NSEQ, LENGTH, STATS_NSEQ and STATS_TOTLEN, so that NCBI's statistics are
-`ov_lk`'s:
+NCBI's rows are those of the near input `ov_lkn`; the rows at `-evalue 1000` and `-ungapped` expect NCBI's run of `ov_lkn`
+(`ncbi-near:`, rows `.hard.near.ov_lkn.*`): `make_dbmaskp_ov.py` (`near_db`) writes `ov_lkn.faa` (A, a spacer of 240 `X`, which
+no query word hits, then B; at least as long as the walk's margin less the window, `spacer_length`, here the database's average
+length) and `ov_lkn.asnt` (A's and B's masks, `local id` renumbered), and the alias `ov_lkn.pal` over the volume `ov_lknv` keeps
+`ov_lk`'s NSEQ, LENGTH, STATS_NSEQ and STATS_TOTLEN, so that NCBI's statistics are `ov_lk`'s. At `-window_size 0` NCBI's
+one-thread search starts B 98 below 0, on the entries that no sequence wrote, as LOSAT's does (fix round 2 of M4b-3b,
+DECISIONS 55 of series M), so those rows expect NCBI's own bytes; the near input `ov_lkx` (`blank_db`: A's letters all `X`, the
+lengths and masks the same, so NCBI's offsets too) gives B's rows the same (rows `.hard.near.ov_lkx.21.w0.6`):
 
 ```
 makeblastdb -in ov_lkn.faa -dbtype prot -out ov_lknv -title "overlapping masks lk" -mask_data ov_lkn.asnt && rm -f ov_lknv.pjs
 printf 'TITLE overlapping masks lk\nDBLIST ov_lknv\nNSEQ 2\nLENGTH 480\nSTATS_NSEQ 2\nSTATS_TOTLEN 480\n' > ov_lkn.pal
+makeblastdb -in ov_lkx.faa -dbtype prot -out ov_lkx -title "overlapping masks lk" -mask_data ov_lkx.asnt && rm -f ov_lkx.pjs
 ```
+
+`ov_zt` and `ov_ztl` (fix round 2 of M4b-3b, review 2's probe `M/m4b3b/review/probe_zt`, seed 20261123; rows
+`db.pmask.{bp,bx}.hard.ov_zt*`): A (`ov_zt`: 5 `X`; `ov_ztl`: 100), which stores no entry, then B (240 letters, masks [10,100)
+[20,110): chunks 10, -80 and 130, a one-hit walk 70 below its start); the query `qzt.faa` (`qzt.fna` its back-translation)
+holds B's letters 110-121 at 18. NCBI's one-thread search starts B at 5 in `ov_zt`, where its walk meets the entries that no
+sequence wrote, and at 100 in `ov_ztl`, where it does not; `ov_zto.pal` is an alias over `ov_zt` of its OID 2 alone (FIRST_OID 2,
+LAST_OID 2), where B is the first searched sequence. Made as the other shapes (`make_dbmaskp_ov.py`, the alias by its
+`main`).
 
 6 of `ov_atha`'s 40 proteins (AT1G02550.1, AT1G02800.1, AT1G04080.2, AT1G04080.5, AT1G06760.1, AT1G09460.1) scan below
 their starts or leave diagonal entries past the next subject's start in the one-hit scan, which LOSAT refused before

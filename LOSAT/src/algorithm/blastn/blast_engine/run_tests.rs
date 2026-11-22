@@ -1792,13 +1792,7 @@ fn hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list() {
         let scan = HardScan::Nucleotide {
             scanned_word: word as usize,
         };
-        let shape = HardMaskShape::of_scan(
-            &stored,
-            None,
-            &|| Some(length as usize),
-            scan,
-            crate::seqdb::SearchedPlace::default(),
-        );
+        let shape = HardMaskShape::of_scan(&stored, None, &|| Some(length as usize), scan, None);
         // The same shape from the bounds of the length that the index gives (the packed bytes
         // and 0 to 3 letters in the last one; review 2 S4).
         let low = (length - length % 4) as usize;
@@ -1808,7 +1802,7 @@ fn hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list() {
                 Some((low, low + 3)),
                 &|| Some(length as usize),
                 scan,
-                crate::seqdb::SearchedPlace::default(),
+                None,
             ),
             shape,
             "{length} {masks:?} word {word}: bounds"

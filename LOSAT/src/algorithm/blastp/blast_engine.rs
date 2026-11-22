@@ -20,6 +20,7 @@ use std::time::Instant;
 use crate::algorithm::blastn::blast_engine::QueryReading;
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, TreeHsp};
 use crate::algorithm::common::db_mask_search::SearchMask;
+use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart};
 use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
@@ -535,25 +536,6 @@ impl BlastpSubjectScratch {
         self.preliminary_interval_tree.reset();
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 135-150
-    /// The diagonal table as NCBI's thread makes it (`BlastExtendWordNew`: every entry 0 without
-    /// the flag, the offset the window), for the first searched sequence of a `-db_hard_mask`
-    /// search (`db_masked.rs`), whose chunks can go back below its start onto those entries
-    /// (`common::hard_chunk_walk::DiagonalWalk::start_on_new_table`).
-    fn new_table(&mut self, window: i32) {
-        self.diag_offset = window;
-        self.diag_array.fill(DiagStruct::default());
-    }
-
-    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 23 (the Owner's answer Q5 = B of M4b).
-    /// The diagonal offset moved up by `by` between two sequences of a `-db_hard_mask` search
-    /// (`db_masked.rs`), so that no entry of one reaches the other's hits
-    /// (`common::hard_chunk_walk::DiagonalWalk::start`, `DiagonalWalk::after`: below INT4_MAX / 4
-    /// after the move, else they clear the table instead).
-    fn move_offset(&mut self, by: i32) {
-        self.diag_offset += by;
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
     /// The table cleared (`s_BlastDiagClear`: every entry the window less than 0, the offset the
     /// window): by `Blast_ExtendWordExit` where the offset reached INT4_MAX / 4 (`finish_chunk`),
@@ -583,6 +565,33 @@ impl BlastpSubjectScratch {
         } else {
             self.diag_offset += length + window;
         }
+    }
+}
+
+// The search with `-db_hard_mask` moves the table between its sequences
+// (`common::hard_chunk_walk::TableStart::apply`, `TableEnd::apply`; `db_masked.rs`).
+impl HardTable for BlastpSubjectScratch {
+    type Error = std::convert::Infallible;
+
+    fn ncbi_table(&mut self, start: NcbiStart, window: i32) {
+        self.diag_offset = start.offset;
+        let entry = if start.cleared {
+            DiagStruct::clear(window)
+        } else {
+            DiagStruct::default()
+        };
+        self.diag_array.fill(entry);
+    }
+
+    fn clear_table(&mut self, window: i32) {
+        BlastpSubjectScratch::clear_table(self, window);
+    }
+
+    // Below INT4_MAX / 4 after the move (`DiagonalWalk::start`, `DiagonalWalk::after` clear the
+    // table instead), so it never passes Int4.
+    fn move_offset(&mut self, by: i32) -> Result<(), Self::Error> {
+        self.diag_offset += by;
+        Ok(())
     }
 }
 
@@ -9693,6 +9702,7 @@ fn run_call(
     // ungapped extensions and gapped half) with what it reads of the call; the preliminary stage
     // calls it with the subject's preliminary statistics `values` (`prelim_run::
     // run_preliminary_with`), alone or inside the masked kernels (`db_masked.rs`).
+    let tree_without_end = std::sync::atomic::AtomicBool::new(false);
     let kernel = prelim_kernel::BlastpPrelimKernel {
         args: &args,
         query_ids: &query_ids,
@@ -9714,21 +9724,35 @@ fn run_call(
         x_trace_query_base,
         timing_enabled,
         timing: &timing,
+        tree_without_end: &tree_without_end,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1498
     // The preliminary stage (`blast_engine/prelim_run.rs`): the choice of the pool and the call's
     // branch, into the hit lists and the culling writer; RPS-BLAST's gapped K and its volumes'
     // merge are read below.
     // `-db_soft_mask` and `-db_hard_mask` (`db_masked.rs`): a database search with either searches
-    // its sequences with the masked kernels below, chosen once here.
-    let db_masking = database
-        .zip(SearchMask::of(args.db_mask_resolved.as_ref()))
-        .map(|(database, mask)| db_masked::BlastpDbMasking {
-            db: database.seqdb(),
-            mask,
-            program: args.app.name(),
-            error: std::sync::Mutex::new(None),
-        });
+    // its sequences with the masked kernels below, chosen once here; with `-db_hard_mask` they
+    // start the sequences that NCBI's one-thread search reaches below their start on a new table
+    // (`ResolvedMask::hard_starts`, the walk that `check_losat_limits` ran).
+    let db_masking =
+        database
+            .zip(args.db_mask_resolved.as_ref())
+            .and_then(|(database, resolved)| {
+                let mask = SearchMask::of(Some(resolved))?;
+                Some(db_masked::BlastpDbMasking {
+                    db: database.seqdb(),
+                    mask,
+                    starts: mask.hard().then(|| {
+                        resolved.hard_starts(
+                            database.seqdb(),
+                            args.word_size as i32,
+                            args.window_size as i32,
+                        )
+                    }),
+                    program: args.app.name(),
+                    error: std::sync::Mutex::new(None),
+                })
+            });
     let prelim_stage = prelim_run::PrelimRun {
         args: &args,
         query_records,
@@ -9814,6 +9838,9 @@ fn run_call(
             outputs,
         )?,
     };
+    if tree_without_end.load(std::sync::atomic::Ordering::Relaxed) {
+        anyhow::bail!("BLASTP: an interval tree insertion of a whole subject never ends");
+    }
     let no_alignment_set = no_alignment_sets(&query_batch_skipped, rps_multi_volume);
 
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the

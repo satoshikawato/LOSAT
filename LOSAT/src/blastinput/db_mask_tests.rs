@@ -8,7 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use super::*;
-use crate::seqdb::{SearchedPlace, SeqType};
+use crate::algorithm::common::hard_chunk_walk::NcbiStart;
+use crate::seqdb::SeqType;
 
 fn dbmask(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -309,6 +310,7 @@ fn the_archive_writes_the_key_of_a_name_or_the_id() {
         id: 11,
         key: None,
         shown: Vec::new(),
+        starts: Default::default(),
     };
     let params = |mask: &ResolvedMask| {
         mask.archive_params()
@@ -354,6 +356,7 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
         id,
         key: None,
         shown: Vec::new(),
+        starts: Default::default(),
     };
     let refusal = |db: &SeqDb, id, word| {
         mask(MaskKind::Hard, id)
@@ -583,6 +586,7 @@ fn the_strategy_keeps_a_name_the_database_does_not_know() {
         id: 11,
         key: None,
         shown: Vec::new(),
+        starts: Default::default(),
     };
     assert_eq!(
         names(soft("+11").strategy_params(Some(&mask))),
@@ -723,7 +727,7 @@ fn shape_of(
         bounds,
         length,
         HardScan::Nucleotide { scanned_word },
-        SearchedPlace::default(),
+        None,
     )
 }
 
@@ -752,14 +756,7 @@ fn translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start() {
     use std::cell::Cell;
     let scan = HardScan::Translated { min_length: 17 };
     let shape = |masks: &[(u32, u32)], length: usize| {
-        HardMaskShape::of_scan(
-            masks,
-            None,
-            &|| Some(length),
-            scan,
-            SearchedPlace::default(),
-        )
-        .unwrap()
+        HardMaskShape::of_scan(masks, None, &|| Some(length), scan, None).unwrap()
     };
     let crash = |frame, start, end| Some(HardMaskShape::FrameStartMask { frame, start, end });
     assert_eq!(shape(&[(300, 390)], 1200), None);
@@ -824,7 +821,7 @@ fn translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start() {
         Some(1200)
     };
     let of = |masks: &[(u32, u32)], bounds| {
-        HardMaskShape::of_scan(masks, Some(bounds), &read, scan, SearchedPlace::default())
+        HardMaskShape::of_scan(masks, Some(bounds), &read, scan, None)
     };
     assert_eq!(of(&[(300, 390)], (1197, 1200)), Ok(None));
     assert_eq!(reads.get(), 0);
@@ -880,14 +877,7 @@ fn protein_shapes_of_the_hard_masks() {
         zero_words: false,
     };
     let of = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
-        HardMaskShape::of_scan(
-            masks,
-            Some((length, length)),
-            &|| Some(length),
-            scan,
-            SearchedPlace::default(),
-        )
-        .unwrap()
+        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan, None).unwrap()
     };
     // Masks within the sequence: searched, also where a chunk is shorter than the word (NCBI's
     // one-hit scan reads no word of it, its two-hit scan one word that extends nothing).
@@ -980,14 +970,7 @@ fn protein_shapes_of_overlapping_masks() {
         zero_words: true,
     };
     let of = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
-        HardMaskShape::of_scan(
-            masks,
-            Some((length, length)),
-            &|| Some(length),
-            scan,
-            SearchedPlace::default(),
-        )
-        .unwrap()
+        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan, None).unwrap()
     };
     // e3, nest and big: searched; in the one-hit search (no window) nest and big go back below the
     // sequence's start.
@@ -1078,27 +1061,45 @@ fn protein_shapes_of_overlapping_masks() {
     }
 }
 
-/// The place of a sequence among the searched ones (`SearchedPlace`): the first searched
-/// sequence's hits below its start meet the entries of NCBI's new table, a one word past the
-/// sentinel with them; the margins below the start and past the end refuse no sequence at any
-/// place (each sequence is searched on its own, PD-LOSAT-NCBI-DEFECTS exception 23).
+/// The start of a sequence among the searched ones (`NcbiStart`, `None`: after the others): a
+/// sequence on a new table at NCBI's one-thread offset (the start of the search, a small offset, a
+/// cleared table) has hits below its start that meet the entries that no sequence wrote, a one
+/// word past the sentinel with them; the margins below the start and past the end refuse no
+/// sequence at any start (each sequence is searched on its own, PD-LOSAT-NCBI-DEFECTS exception
+/// 23).
 #[test]
 fn protein_shapes_at_every_searched_place() {
-    let of = |masks: &[(u32, u32)], length: usize, window: i32, first: bool| {
+    let of = |masks: &[(u32, u32)], length: usize, window: i32, ncbi: Option<NcbiStart>| {
         let scan = HardScan::Protein {
             word: 3,
             window,
             zero_words: true,
         };
-        let place = SearchedPlace { first };
-        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan, place)
-            .unwrap()
+        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan, ncbi).unwrap()
     };
-    for first in [false, true] {
+    for (masks, window) in [
         // nest, one-hit: 10 below the start; lk, two-hit with the residue 0: 20 below the start
         // and 98 past the end.
-        assert_eq!(of(&[(40, 100), (50, 60)], 240, 0, first), None);
-        assert_eq!(of(&[(40, 200), (60, 238)], 240, 40, first), None);
+        (&[(40, 100), (50, 60)][..], 0),
+        (&[(40, 200), (60, 238)][..], 40),
+    ] {
+        for ncbi in [
+            None,
+            Some(NcbiStart {
+                offset: window,
+                cleared: false,
+            }),
+            Some(NcbiStart {
+                offset: 5,
+                cleared: false,
+            }),
+            Some(NcbiStart {
+                offset: window,
+                cleared: true,
+            }),
+        ] {
+            assert_eq!(of(masks, 240, window, ncbi), None, "{masks:?} {ncbi:?}");
+        }
     }
 }
 
@@ -1114,14 +1115,7 @@ fn tail_masks_with_masks_stored_after_them() {
             window,
             zero_words: false,
         };
-        HardMaskShape::of_scan(
-            masks,
-            Some((240, 240)),
-            &|| Some(240),
-            scan,
-            SearchedPlace::default(),
-        )
-        .unwrap()
+        HardMaskShape::of_scan(masks, Some((240, 240)), &|| Some(240), scan, None).unwrap()
     };
     let shape = HardMaskShape::TailMaskWithLaterMasks {
         start: 65,
@@ -1156,14 +1150,7 @@ fn protein_shapes_of_random_masks() {
         state % below
     };
     let shape = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
-        HardMaskShape::of_scan(
-            masks,
-            Some((length, length)),
-            &|| None,
-            scan,
-            SearchedPlace::default(),
-        )
-        .unwrap()
+        HardMaskShape::of_scan(masks, Some((length, length)), &|| None, scan, None).unwrap()
     };
     let (mut cases, mut refused) = (0, 0);
     let (mut out_of_order, mut searched, mut parts) = (0, 0, 0);
@@ -1199,23 +1186,11 @@ fn protein_shapes_of_random_masks() {
         }
         // Bounds of more than one length read the length.
         assert_eq!(
-            HardMaskShape::of_scan(
-                &masks,
-                Some((length, high)),
-                &|| None,
-                scan,
-                SearchedPlace::default()
-            ),
+            HardMaskShape::of_scan(&masks, Some((length, high)), &|| None, scan, None),
             Err(())
         );
         assert_eq!(
-            HardMaskShape::of_scan(
-                &masks,
-                Some((length, high)),
-                &|| Some(length),
-                scan,
-                SearchedPlace::default()
-            ),
+            HardMaskShape::of_scan(&masks, Some((length, high)), &|| Some(length), scan, None),
             Ok(found)
         );
         cases += 1;

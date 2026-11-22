@@ -95,6 +95,10 @@ pub(super) struct BlastpPrelimKernel<'a> {
     pub(super) x_trace_query_base: u32,
     pub(super) timing_enabled: bool,
     pub(super) timing: &'a Option<Arc<BlastpTiming>>,
+    /// Set where the interval tree insertion of an HSP of a whole subject never ends (its HSPs lie
+    /// inside the tree's bounds and are in order, so never): the call then stops with an error, as
+    /// BLASTX's search does (`blastx::search::subject_hits_with`).
+    pub(super) tree_without_end: &'a std::sync::atomic::AtomicBool,
 }
 
 /// One subject with letters as `search_subject` hands it to its gapped half (`gapped_subject`): the
@@ -757,10 +761,10 @@ impl BlastpPrelimKernel<'_> {
             let ends =
                 self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
             // The HSPs of a subject's letters lie inside the tree's bounds and are in order.
-            debug_assert!(
-                ends,
-                "an interval tree insertion of a whole subject never ends"
-            );
+            if !ends {
+                self.tree_without_end
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
         }
     }
 
@@ -770,7 +774,8 @@ impl BlastpPrelimKernel<'_> {
     // become its HSP list, as for any chunk.
     /// The HSPs of a hard chunk shorter than the word in an ungapped search (`-ungapped`,
     /// `db_masked.rs`): the seeds `init_hsps` that its one word saved
-    /// (`hard_chunk_scan::OneWord`) become the chunk's HSPs as in `ungapped_subject`, left in the
+    /// (`common::hard_chunk_scan::OneWord`) become the chunk's HSPs as in `ungapped_subject`, left
+    /// in the
     /// scratch's HSP list, sorted by score, for the merge of the sequence's chunks (`values` and
     /// `subject_result` as `search_subject_in`'s; the list of hits goes back to the scratch).
     #[cold]
@@ -803,13 +808,14 @@ impl BlastpPrelimKernel<'_> {
     // tree ends one past the chunk's length (`Int4`, negative between overlapping masks) and its
     // extensions take that length, over the stored letters of its one word.
     /// The HSPs of a hard chunk shorter than the word in a gapped search (`db_masked.rs`): the
-    /// seeds `init_hsps` that its one word saved (`hard_chunk_scan::OneWord`) through the gapped
+    /// seeds `init_hsps` that its one word saved (`common::hard_chunk_scan::OneWord`) through the
+    /// gapped
     /// stage (`gapped_subject`) on the subject of the stored letters `letters` (the word's and the
     /// sentinel after them) and of the chunk's length `length`, left in the scratch's HSP list,
     /// sorted by score, for the merge of the sequence's chunks (`values` and `subject_result` as
     /// `search_subject_in`'s). `false` where NCBI's insertion of an HSP into the tree never ends
     /// (`BlastIntervalTree::try_add_hsp`; LOSAT's refusal,
-    /// `hard_chunk_scan::short_chunk_tree_refusal`).
+    /// `common::hard_chunk_scan::short_chunk_tree_refusal`).
     #[cold]
     #[inline(never)]
     #[allow(clippy::too_many_arguments)]

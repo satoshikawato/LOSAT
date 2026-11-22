@@ -82,9 +82,7 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 pub use alias::SearchPath;
 pub use column::ColumnBlock;
 pub use header::Defline;
-pub use mask::{
-    BlockMasks, MaskAlgorithm, MaskAlgorithms, MaskBlock, MaskRanges, NameMaskError, SearchedPlace,
-};
+pub use mask::{BlockMasks, MaskAlgorithm, MaskAlgorithms, MaskBlock, MaskRanges, NameMaskError};
 pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader};
 #[cfg(test)]
 pub use volume::{BLASTNA_SENTINEL, FENCE_SENTRY};
@@ -2196,16 +2194,6 @@ impl SeqDb {
     /// [`SeqDb::protein_length`] of the protein at `at`.
     pub fn protein_length_at(&self, at: SeqLocation) -> Result<u32, SeqDbError> {
         self.volumes[at.volume].protein_length(at.vol_oid)
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
-    // A subject shorter than the minimum length (1 for protein subjects) is not searched.
-    /// Whether the protein of ordinal id `ordinal` is the first that the search reads: every
-    /// sequence before it has no letters (or cannot be read: the search meets that error first),
-    /// so NCBI's thread searches it on the table it has just made (`algorithm::common::
-    /// hard_chunk_walk::DiagonalWalk::start_on_new_table`).
-    pub fn first_protein_searched(&self, ordinal: u32) -> bool {
-        (0..ordinal).all(|before| !self.protein_length(before).is_ok_and(|length| length > 0))
     }
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_block` with the bytes in the

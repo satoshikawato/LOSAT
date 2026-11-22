@@ -21,15 +21,6 @@ use super::column::{Blob, MASK_DATA_TITLE};
 use super::volume::Volume;
 use super::{BlockRange, SeqDb, SeqDbError, SeqLocation};
 
-/// A searched sequence's place among the sequences that the search reads, in the order of their
-/// ordinal ids (`SeqDb::first_searched_masks`): whether it is the first one with letters (NCBI's
-/// search reads it first, with the diagonal table that its thread has just made:
-/// [`SeqDb::first_protein_searched`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SearchedPlace {
-    pub first: bool,
-}
-
 /// A filtering algorithm of the database (`GetMaskAlgorithmDetails`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaskAlgorithm {
@@ -706,8 +697,7 @@ impl SeqDb {
     /// The first sequence that the search reads (by ordinal id: those the list and the alias
     /// files' ranges include) whose masks of the filtering algorithm `algo_id`, as stored, `test`
     /// finds a refusal in, with its NCBI OID (as `blastdbcmd`'s `%o`) and its volume's path.
-    /// `test` gets the masks (never empty), the sequence's place in the search ([`SearchedPlace`]),
-    /// the bounds of the sequence's length that the index
+    /// `test` gets the masks (never empty), the bounds of the sequence's length that the index
     /// gives (`Volume::nucleotide_length_bounds`, or a protein's exact length,
     /// `Volume::x_protein_lengths`, read once per block at its first sequence with
     /// masks; `None` where they give none or cannot be read) and a function that reads the
@@ -724,7 +714,6 @@ impl SeqDb {
         algo_id: i32,
         mut test: impl FnMut(
             &[(u32, u32)],
-            SearchedPlace,
             Option<(usize, usize)>,
             &dyn Fn() -> Option<usize>,
         ) -> Result<Option<T>, ()>,
@@ -785,10 +774,7 @@ impl SeqDb {
                         self.nucleotide_length(seq_ordinal).ok()
                     }
                 };
-                let place = SearchedPlace {
-                    first: protein && self.first_protein_searched(seq_ordinal),
-                };
-                match test(masks, place, length_bounds, &length) {
+                match test(masks, length_bounds, &length) {
                     Ok(None) => {}
                     Ok(Some(found)) => {
                         return Some((
@@ -798,6 +784,66 @@ impl SeqDb {
                         ))
                     }
                     Err(()) => return None,
+                }
+            }
+            ordinal = run.end_ordinal();
+        }
+        None
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1432 (cited at
+    // `algorithm::common::hard_chunk_walk::NcbiWalk`): with one thread the search reads every
+    // included sequence in the order of its id.
+    /// Every sequence that a search of this protein database reads (by ordinal id: those the list
+    /// and the alias files' ranges include), in that order, with its exact length (the index's,
+    /// `Volume::x_protein_lengths` once per block of 4,096 sequences, or read alone where the
+    /// block's cannot be read) and its masks of the filtering algorithm `algo_id` as stored (empty
+    /// for a sequence without them), until `visit` returns a finding: that finding with the
+    /// sequence's NCBI OID (as `blastdbcmd`'s `%o`) and its volume's path. A sequence whose masks
+    /// or length cannot be read ends the walk without a finding (the search meets that read error
+    /// first, as in [`SeqDb::first_searched_masks`]). No NCBI counterpart: LOSAT's walk before a
+    /// BLASTP or BLASTX search with `-db_hard_mask` (`blastinput::db_mask::ResolvedMask::
+    /// check_losat_limits`; series NP, M4b-3b).
+    pub fn searched_protein_masks<T>(
+        &self,
+        algo_id: i32,
+        mut visit: impl FnMut(u32, usize, &[(u32, u32)]) -> Option<T>,
+    ) -> Option<(u32, PathBuf, T)> {
+        const WALK_BLOCK: u32 = 4096;
+        let mut block = MaskBlock::default();
+        let mut ordinal = 0u32;
+        let end_ordinal = self.num_seqs();
+        while let Some(run) =
+            self.x_block_range(ordinal, end_ordinal.min(ordinal.saturating_add(WALK_BLOCK)))
+        {
+            self.read_mask_block(run, algo_id, &mut block);
+            let volume = &self.volumes[run.volume];
+            let lengths = volume.x_protein_lengths(run.first, run.end).ok();
+            for vol_oid in run.first..run.end {
+                let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
+                let masks = match block.ranges(vol_oid) {
+                    Ok(BlockMasks::Ranges(masks)) => masks,
+                    // No masks; an algorithm not in the volume is refused before
+                    // (`check_search_masks`).
+                    Ok(BlockMasks::NoMaskData | BlockMasks::AlgorithmNotInVolume) => &[],
+                    Err(_) => return None,
+                };
+                let indexed = lengths
+                    .as_ref()
+                    .and_then(|lengths| lengths.get((vol_oid - run.first) as usize));
+                let length = match indexed {
+                    Some(&length) => length as usize,
+                    None => match self.protein_length(seq_ordinal) {
+                        Ok(length) => length as usize,
+                        Err(_) => return None,
+                    },
+                };
+                if let Some(found) = visit(seq_ordinal, length, masks) {
+                    return Some((
+                        self.volume_starts[run.volume] + vol_oid,
+                        volume.base().to_path_buf(),
+                        found,
+                    ));
                 }
             }
             ordinal = run.end_ordinal();

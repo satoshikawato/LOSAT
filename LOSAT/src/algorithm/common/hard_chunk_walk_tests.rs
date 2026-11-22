@@ -213,30 +213,47 @@ fn a_clear_inside_the_sequence_keeps_only_cleared_entries() {
     assert_eq!(walk.chunk(199, 100), WORDS_BACK);
 }
 
-/// The first sequence that a table searches meets NCBI's new table, whose entries lie the window
-/// below the sequence's start (`DiagonalWalk::start_on_new_table`): a chunk that goes back below
-/// them is read by the reference scan, as a chunk below an earlier chunk's entries is.
+/// A sequence on a new table at NCBI's one-thread offset (`DiagonalWalk::start_on_ncbi_table`):
+/// the entries that no sequence wrote lie that offset less their value below the sequence's start
+/// (the window below it at the start of the search, two windows after a clear), and a chunk that
+/// goes back below them is read by the reference scan, as a chunk below an earlier chunk's entries
+/// is.
 #[test]
-fn a_new_table_holds_entries_the_window_below_the_start() {
-    for (new_table, work) in [(false, WORDS), (true, WORDS_BACK)] {
+fn a_new_table_holds_entries_below_the_start() {
+    let at = |offset, cleared| NcbiStart { offset, cleared };
+    for (ncbi, work) in [
+        (None, WORDS),
+        // Entries at -40: D = -60 below them.
+        (Some(at(40, false)), WORDS_BACK),
+        // Entries at -80 after a clear: D = -60 above them.
+        (Some(at(40, true)), WORDS),
+        // Entries at -5 (NCBI's offset 5): below them.
+        (Some(at(5, false)), WORDS_BACK),
+        // Entries at -100: above them.
+        (Some(at(100, false)), WORDS),
+    ] {
         let mut walk = DiagonalWalk::new(3, 40, 300, false);
-        if new_table {
-            walk.start_on_new_table();
+        if let Some(start) = ncbi {
+            walk.start_on_ncbi_table(start);
         }
         // The one word at 299 covers the sentinel and has no hit: it stores nothing.
         assert_eq!(walk.chunk(299, -100), ChunkWork::OneWord);
-        // D = -60, below the new table's entries at -40.
-        assert_eq!(walk.chunk(0, 100), work, "{new_table}");
+        // D = -60.
+        assert_eq!(walk.chunk(0, 100), work, "{ncbi:?}");
     }
-    // One-hit: the entries lie at the start; a chunk at the start reads them as cleared, one below
-    // it does not.
+    // One-hit: the entries lie at the start at the start of the search; a chunk at the start
+    // reads them as cleared, one below it does not.
     let mut walk = DiagonalWalk::new(3, 0, 300, false);
-    walk.start_on_new_table();
+    walk.start_on_ncbi_table(at(0, false));
     assert_eq!(walk.chunk(0, 10), WORDS);
     let mut walk = DiagonalWalk::new(3, 0, 300, false);
-    walk.start_on_new_table();
+    walk.start_on_ncbi_table(at(0, false));
     assert_eq!(walk.chunk(299, -10), ChunkWork::Nothing);
     assert_eq!(walk.chunk(0, 100), WORDS_BACK);
+    // At NCBI's offset -98 (after a walk that went back) they lie 98 above the start.
+    let mut walk = DiagonalWalk::new(3, 0, 300, false);
+    walk.start_on_ncbi_table(at(-98, false));
+    assert_eq!(walk.chunk(0, 230), WORDS_BACK);
 }
 
 /// The chunks `(offset, length)` as the search's hard chunks.
@@ -256,19 +273,23 @@ fn hard(chunks: &[(usize, i32)]) -> Vec<crate::core::subject_split::HardChunk> {
 }
 
 /// How the search keeps each sequence on its own (PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's
-/// answer Q5 = B of M4b): the first searched sequence takes NCBI's new table; another moves the
-/// offset up by its margin below the start, after a clear where a chunk before its last would
-/// reach INT4_MAX / 4; a walk that does not read back keeps NCBI's offsets; after the sequence the
-/// offset moves up by its margin past the end, or the table is cleared where that would reach
-/// INT4_MAX / 4.
+/// answer Q5 = B of M4b): a sequence that NCBI's one-thread walk starts within reach of the entries
+/// that no sequence wrote takes NCBI's table at that offset; another moves the offset up by its
+/// margin below the start, after a clear where a chunk before its last would reach INT4_MAX / 4; a
+/// walk that does not read back keeps its offset; after the sequence the offset moves up by its
+/// margin past the end, or the table is cleared where that would reach INT4_MAX / 4.
 #[test]
 fn each_sequence_is_searched_on_its_own() {
     const LIMIT: i32 = i32::MAX / 4;
     // nest, one-hit: 10 below the start (the last chunk at -10, the one before it at 40).
     let nest = hard(&[(0, 40), (100, -50), (60, 180)]);
-    let (_, start) = DiagonalWalk::start(3, 0, 240, &nest, true, 5000);
-    assert_eq!(start, TableStart::New);
-    let (mut walk, start) = DiagonalWalk::start(3, 0, 240, &nest, false, 5000);
+    let first = NcbiStart {
+        offset: 0,
+        cleared: false,
+    };
+    let (_, start) = DiagonalWalk::start(3, 0, 240, &nest, Some(first), 5000);
+    assert_eq!(start, TableStart::New(first));
+    let (mut walk, start) = DiagonalWalk::start(3, 0, 240, &nest, None, 5000);
     assert_eq!(
         start,
         TableStart::Move {
@@ -277,7 +298,7 @@ fn each_sequence_is_searched_on_its_own() {
         }
     );
     // The chunk at 40 lies at the offset + 10 + 40 after the move.
-    let (_, start) = DiagonalWalk::start(3, 0, 240, &nest, false, LIMIT - 51);
+    let (_, start) = DiagonalWalk::start(3, 0, 240, &nest, None, LIMIT - 51);
     assert_eq!(
         start,
         TableStart::Move {
@@ -285,7 +306,7 @@ fn each_sequence_is_searched_on_its_own() {
             by: 10
         }
     );
-    let (_, start) = DiagonalWalk::start(3, 0, 240, &nest, false, LIMIT - 50);
+    let (_, start) = DiagonalWalk::start(3, 0, 240, &nest, None, LIMIT - 50);
     assert_eq!(
         start,
         TableStart::Move {
@@ -301,7 +322,7 @@ fn each_sequence_is_searched_on_its_own() {
     // e3, two-hit: its last chunk reads the one word's entry (80) within the window (it reads
     // back), with no margin below the start; the one word's chunk lies at 80.
     let e3 = hard(&[(0, 40), (60, -5), (70, 170)]);
-    let (_, start) = DiagonalWalk::start(3, 40, 240, &e3, false, 5000);
+    let (_, start) = DiagonalWalk::start(3, 40, 240, &e3, None, 5000);
     assert_eq!(
         start,
         TableStart::Move {
@@ -309,7 +330,7 @@ fn each_sequence_is_searched_on_its_own() {
             by: 0
         }
     );
-    let (_, start) = DiagonalWalk::start(3, 40, 240, &e3, false, LIMIT - 81);
+    let (_, start) = DiagonalWalk::start(3, 40, 240, &e3, None, LIMIT - 81);
     assert_eq!(
         start,
         TableStart::Move {
@@ -317,22 +338,35 @@ fn each_sequence_is_searched_on_its_own() {
             by: 0
         }
     );
-    let (_, start) = DiagonalWalk::start(3, 40, 240, &e3, false, LIMIT - 80);
+    let (_, start) = DiagonalWalk::start(3, 40, 240, &e3, None, LIMIT - 80);
     assert_eq!(start, TableStart::Move { clear: true, by: 0 });
-    // Masks apart: NCBI's offsets, also near INT4_MAX / 4 (a clear inside changes nothing).
+    // Masks apart: NCBI's offsets; near INT4_MAX / 4 (the chunk at 80 would exit there) a clear
+    // first, which keeps the walk's chunks together.
     let apart = hard(&[(0, 40), (50, 100), (160, 80)]);
-    for offset in [5000, LIMIT - 10] {
-        let (mut walk, start) = DiagonalWalk::start(3, 40, 240, &apart, false, offset);
-        assert_eq!(start, TableStart::Keep);
+    for (offset, want) in [
+        (5000, TableStart::Keep),
+        (LIMIT - 81, TableStart::Keep),
+        (LIMIT - 80, TableStart::Move { clear: true, by: 0 }),
+        (LIMIT - 10, TableStart::Move { clear: true, by: 0 }),
+    ] {
+        let (mut walk, start) = DiagonalWalk::start(3, 40, 240, &apart, None, offset);
+        assert_eq!(start, want, "{offset}");
         for chunk in &apart {
             walk.chunk(chunk.offset, chunk.length);
         }
-        assert_eq!(walk.after(offset), TableEnd::Keep);
+        assert_eq!(walk.after(5000), TableEnd::Keep);
     }
+    // One-hit chunks 10, 2, -1, 10 (the third below the second's start): without the clear first,
+    // a clear after the second chunk would put the third below the cleared entries.
+    let below = hard(&[(0, 10), (12, 2), (15, -1), (20, 10)]);
+    let (_, start) = DiagonalWalk::start(3, 0, 40, &below, None, 5000);
+    assert_eq!(start, TableStart::Keep);
+    let (_, start) = DiagonalWalk::start(3, 0, 40, &below, None, LIMIT - 12);
+    assert_eq!(start, TableStart::Move { clear: true, by: 0 });
     // lk, two-hit, the search's walk (the one word at 238 covers the sentinel and is taken to
     // hit): 20 below the start and 98 past the end.
     let lk = hard(&[(0, 40), (200, -140), (238, 2)]);
-    let (mut walk, start) = DiagonalWalk::start(3, 40, 240, &lk, false, 5000);
+    let (mut walk, start) = DiagonalWalk::start(3, 40, 240, &lk, None, 5000);
     assert_eq!(
         start,
         TableStart::Move {
@@ -350,10 +384,224 @@ fn each_sequence_is_searched_on_its_own() {
     // the word): the earlier sequences' entries would reach the next sequence's hits, 48 past the
     // end.
     let back = hard(&[(0, 2), (100, -50)]);
-    let (mut walk, start) = DiagonalWalk::start(3, 0, 300, &back, false, 5000);
+    let (mut walk, start) = DiagonalWalk::start(3, 0, 300, &back, None, 5000);
     assert_eq!(start, TableStart::Keep);
     for chunk in &back {
         walk.chunk(chunk.offset, chunk.length);
     }
     assert_eq!(walk.after(5000), TableEnd::Move(48));
+}
+
+/// NCBI's one-thread walk over the searched sequences (`NcbiWalk`, DECISIONS 55 of series M): the
+/// sequences that the search starts on a new table at NCBI's offset, and the offsets after each.
+#[test]
+fn ncbi_walk_names_the_sequences_that_meet_unwritten_entries() {
+    let at = |offset, cleared| Some(NcbiStart { offset, cleared });
+    // nest, one-hit (10 below the start), and the probe zt shape of review 2 (masks [10,100)
+    // [20,110) of 240 letters: chunks 10, -80, 130, 70 below the start).
+    let nest = hard(&[(0, 40), (100, -50), (60, 180)]);
+    let zt = hard(&[(0, 10), (100, -80), (110, 130)]);
+    // Two-hit walks 10 and 50 below the start (chunks 40, then one word at 80, then a chunk at
+    // -10 or -50).
+    let shallow = hard(&[(0, 40), (100, -130), (60, 180)]);
+    let deep = hard(&[(0, 40), (100, -170), (10, 180)]);
+    // The first searched sequence: on the new table where its walk goes below its start, at the
+    // window (two-hit) or 0 (one-hit).
+    let mut walk = NcbiWalk::new(3, 0);
+    assert_eq!(walk.masked(240, &nest), at(0, false));
+    let mut walk = NcbiWalk::new(3, 40);
+    assert_eq!(walk.masked(240, &shallow), at(40, false));
+    // A first sequence without masks, or whose walk stays at or past its start, is not.
+    let mut walk = NcbiWalk::new(3, 0);
+    assert_eq!(walk.plain(240), None);
+    let apart = hard(&[(0, 40), (50, 100), (160, 80)]);
+    assert_eq!(walk.masked(240, &apart), None);
+    // Sequences of no letters are not searched: the first sequence with letters is the first.
+    let mut walk = NcbiWalk::new(3, 0);
+    assert_eq!(walk.plain(0), None);
+    assert_eq!(walk.masked(0, &nest), None);
+    assert_eq!(walk.masked(240, &nest), at(0, false));
+    // zt: a sequence of 5 letters, then the zt shape at 5 (one-hit), whose walk reaches 70 below.
+    let mut walk = NcbiWalk::new(3, 0);
+    assert_eq!(walk.plain(5), None);
+    assert_eq!(walk.masked(240, &zt), at(5, false));
+    // After it NCBI's offset is 5 + 10 - 80 + 130 = 65: a sequence without masks is not.
+    assert_eq!(walk.plain(240), None);
+    // Two-hit, after 5 letters (NCBI's offset 40 + 5 + 40 = 85): zt does not go below its start,
+    // 10 below does not reach the entries at -85 within the window, 50 below does.
+    for (shape, want) in [(&zt, None), (&shallow, None), (&deep, at(85, false))] {
+        let mut walk = NcbiWalk::new(3, 40);
+        assert_eq!(walk.plain(5), None);
+        assert_eq!(walk.masked(240, shape), want);
+    }
+    // After 70 letters (150): not.
+    let mut walk = NcbiWalk::new(3, 40);
+    assert_eq!(walk.plain(70), None);
+    assert_eq!(walk.masked(240, &deep), None);
+    // ov_lk, one-hit: A (the first, masks [40,200) [60,238)) walks back to -98, so B, without a
+    // margin below its start, meets the entries 98 above its start.
+    let lk = hard(&[(0, 40), (200, -140), (238, 2)]);
+    let mut walk = NcbiWalk::new(3, 0);
+    assert_eq!(walk.masked(240, &lk), None);
+    assert_eq!(
+        walk.masked(240, &hard(&[(0, 230), (235, 5)])),
+        at(-98, false)
+    );
+    // A sequence without masks there too.
+    let mut walk = NcbiWalk::new(3, 0);
+    walk.masked(240, &lk);
+    assert_eq!(walk.plain(240), at(-98, false));
+    // Two-hit ov_lk: A, the first, walks 20 below its start (the one word at 238 taken to hit);
+    // it ends at 40 + 40 + 40 - 140 + 40 + 2 + 40 = 62, and B is not.
+    let mut walk = NcbiWalk::new(3, 40);
+    assert_eq!(walk.masked(240, &lk), at(40, false));
+    assert_eq!(walk.plain(240), None);
+}
+
+/// NCBI's clears in its one-thread walk (`NcbiWalk`): after the clear the entries lie the window
+/// below 0 (two-hit), so a walk meets them only below its start by more than the offset; a clear
+/// inside a sequence starts it on a new table at NCBI's offset.
+#[test]
+fn ncbi_walk_follows_the_clears() {
+    const LIMIT: i64 = (i32::MAX / 4) as i64;
+    let near = |offset: i64| NcbiWalk {
+        word: 3,
+        window: 40,
+        offset,
+        cleared: false,
+    };
+    let start = |offset, cleared| Some(NcbiStart { offset, cleared });
+    // The exit of a sequence at INT4_MAX / 4 clears the table: the next sequence starts at the
+    // window on cleared entries.
+    let mut walk = near(LIMIT);
+    assert_eq!(walk.plain(240), None);
+    assert_eq!(
+        walk.here(),
+        NcbiStart {
+            offset: 40,
+            cleared: true
+        }
+    );
+    // 50 below the start: 40 - 50 + 40 = 30 < 40 meets them; 10 below does not.
+    let shallow = hard(&[(0, 40), (100, -130), (60, 180)]);
+    let deep = hard(&[(0, 40), (100, -170), (10, 180)]);
+    let mut walk = near(LIMIT);
+    walk.plain(240);
+    assert_eq!(walk.masked(240, &shallow), None);
+    let mut walk = near(LIMIT);
+    walk.plain(240);
+    assert_eq!(walk.masked(240, &deep), start(40, true));
+    // Plain sequences walk the offset to the clear.
+    let mut walk = NcbiWalk::new(3, 40);
+    while !walk.cleared {
+        assert_eq!(walk.plain(1_000_000), None);
+    }
+    assert_eq!(walk.here().offset, 40);
+    // One longer than `MAX_DBSEQ_LEN` exits once per chunk.
+    let mut walk = NcbiWalk::new(3, 40);
+    let long = crate::core::subject_split::MAX_DBSEQ_LEN + 1;
+    walk.plain(long);
+    assert!(walk.offset > (long as i64) + 80, "{}", walk.offset);
+    // A clear inside a sequence whose walk does not go below its start: the chunk at 80 exits at
+    // INT4_MAX / 4.
+    let apart = hard(&[(0, 40), (50, 100), (160, 80)]);
+    assert_eq!(near(LIMIT - 81).masked(240, &apart), None);
+    assert_eq!(
+        near(LIMIT - 80).masked(240, &apart),
+        start((LIMIT - 80) as i32, false)
+    );
+    // The last chunk's exit is after the sequence: the clear falls before the next one.
+    assert_eq!(near(LIMIT - 220).masked(240, &apart), None);
+}
+
+/// The table of the new-table starts (`HardStarts`): by ordinal id.
+#[test]
+fn hard_starts_by_ordinal() {
+    let mut starts = HardStarts::default();
+    let at = |offset| NcbiStart {
+        offset,
+        cleared: false,
+    };
+    starts.push(0, at(40));
+    starts.push(7, at(-98));
+    starts.push(4096, at(5));
+    assert_eq!(starts.of(0), Some(at(40)));
+    assert_eq!(starts.of(7), Some(at(-98)));
+    assert_eq!(starts.of(4096), Some(at(5)));
+    for ordinal in [1, 6, 8, 4095, 4097] {
+        assert_eq!(starts.of(ordinal), None);
+    }
+    assert_eq!(HardStarts::default().of(0), None);
+}
+
+/// A table that records what [`TableStart::apply`] and [`TableEnd::apply`] do to it.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Recorded {
+    ops: Vec<String>,
+}
+
+impl HardTable for Recorded {
+    type Error = ();
+    fn ncbi_table(&mut self, start: NcbiStart, window: i32) {
+        self.ops
+            .push(format!("new {} {} {window}", start.offset, start.cleared));
+    }
+    fn clear_table(&mut self, window: i32) {
+        self.ops.push(format!("clear {window}"));
+    }
+    fn move_offset(&mut self, by: i32) -> Result<(), ()> {
+        self.ops.push(format!("move {by}"));
+        if by == i32::MAX {
+            return Err(());
+        }
+        Ok(())
+    }
+}
+
+/// The starts and ends as the searches apply them to their tables: NCBI's table, nothing, the
+/// clear before the move, the move's error passed on.
+#[test]
+fn starts_and_ends_apply_to_the_table() {
+    let ops = |start: Option<TableStart>, end: Option<TableEnd>| {
+        let mut table = Recorded::default();
+        if let Some(start) = start {
+            start.apply(&mut table, 40).unwrap();
+        }
+        if let Some(end) = end {
+            end.apply(&mut table, 40).unwrap();
+        }
+        table.ops
+    };
+    let start = NcbiStart {
+        offset: -98,
+        cleared: true,
+    };
+    assert_eq!(ops(Some(TableStart::New(start)), None), ["new -98 true 40"]);
+    assert!(ops(Some(TableStart::Keep), Some(TableEnd::Keep)).is_empty());
+    assert_eq!(
+        ops(Some(TableStart::Move { clear: true, by: 7 }), None),
+        ["clear 40", "move 7"]
+    );
+    assert_eq!(
+        ops(
+            Some(TableStart::Move {
+                clear: false,
+                by: 0
+            }),
+            None
+        ),
+        ["move 0"]
+    );
+    assert_eq!(ops(None, Some(TableEnd::Move(98))), ["move 98"]);
+    assert_eq!(ops(None, Some(TableEnd::Clear)), ["clear 40"]);
+    let mut table = Recorded::default();
+    assert_eq!(
+        TableStart::Move {
+            clear: false,
+            by: i32::MAX
+        }
+        .apply(&mut table, 40),
+        Err(())
+    );
+    assert_eq!(TableEnd::Move(i32::MAX).apply(&mut table, 40), Err(()));
 }

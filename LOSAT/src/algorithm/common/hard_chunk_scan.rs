@@ -12,8 +12,7 @@
 //!   sequence where NCBI's gapped stage of such a chunk never ends, and where its merge would
 //!   join such a chunk's HSPs with another's (not yet ported).
 
-use super::x_seed_fused::x_test_hit;
-use crate::algorithm::tblastx::blast_extend::DiagStruct;
+use super::diag_entry::{x_test_hit, DiagStruct};
 use crate::utils::matrix::ScoreRows;
 
 /// The scores and the cutoffs of the context of a hit's query offset, which the two-hit test of

@@ -153,6 +153,7 @@ fn the_reader_gives_the_stored_masks_of_each_sequence() {
         id: 21,
         key: None,
         shown: Vec::new(),
+        starts: Default::default(),
     };
     let mask = SearchMask::of(Some(&resolved)).unwrap();
     assert_eq!(mask.algo_id, 21);

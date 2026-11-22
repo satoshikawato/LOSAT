@@ -260,18 +260,6 @@ impl Diagonals {
         }
         Ok(())
     }
-    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 23 (the Owner's answer Q5 = B of M4b).
-    /// The offset moved up by `by` between two sequences of a `-db_hard_mask` search
-    /// (`search_db_masked.rs`), so that no entry of one reaches the other's hits
-    /// (`common::hard_chunk_walk::DiagonalWalk::start`, `DiagonalWalk::after`: below INT4_MAX / 4
-    /// after the move, else they clear the table instead).
-    pub(crate) fn move_offset(&mut self, by: i32) -> Result<()> {
-        self.offset = self
-            .offset
-            .checked_add(by)
-            .ok_or_else(|| anyhow::anyhow!("BLASTX diagonal offset exceeds Int4"))?;
-        Ok(())
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
     /// Clears the table and sets the offset to the window (`s_BlastDiagClear`): where the offset
     /// reached INT4_MAX / 4 (`finish_chunk`), and in a `-db_hard_mask` search between two
@@ -282,24 +270,49 @@ impl Diagonals {
         self.offset = self.window;
         self.entries.fill(DiagStruct::clear(self.window));
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 135-150
-    /// The table as NCBI's thread makes it (`BlastExtendWordNew`: every entry 0 without the flag,
-    /// the offset the window), for the first searched sequence of a `-db_hard_mask` search
-    /// (`search_db_masked.rs`), whose chunks can go back below its start onto those entries
-    /// (`common::hard_chunk_walk::DiagonalWalk::start_on_new_table`).
-    pub(crate) fn new_table(&mut self) {
-        self.offset = self.window;
-        self.entries.fill(DiagStruct::default());
-    }
     /// The diagonal offset of the next subject.
     pub(crate) fn offset(&self) -> i32 {
         self.offset
     }
     /// The entries, the mask of a diagonal's index and the diagonal offset, which the two-hit test
-    /// of a hard chunk's one word reads (`blastp::hard_chunk_scan::OneWord::test`).
+    /// of a hard chunk's one word reads (`common::hard_chunk_scan::OneWord::test`).
     pub(crate) fn table(&mut self) -> (&mut [DiagStruct], i32, i32) {
         let (mask, offset) = (self.entries.len() as i32 - 1, self.offset);
         (self.entries.as_mut_slice(), mask, offset)
+    }
+}
+
+// The search with `-db_hard_mask` moves the table between its sequences
+// (`common::hard_chunk_walk::TableStart::apply`, `TableEnd::apply`; `search_db_masked.rs`).
+impl crate::algorithm::common::hard_chunk_walk::HardTable for Diagonals {
+    type Error = anyhow::Error;
+
+    fn ncbi_table(
+        &mut self,
+        start: crate::algorithm::common::hard_chunk_walk::NcbiStart,
+        window: i32,
+    ) {
+        debug_assert_eq!(window, self.window);
+        self.offset = start.offset;
+        let entry = if start.cleared {
+            DiagStruct::clear(self.window)
+        } else {
+            DiagStruct::default()
+        };
+        self.entries.fill(entry);
+    }
+
+    fn clear_table(&mut self, window: i32) {
+        debug_assert_eq!(window, self.window);
+        self.clear();
+    }
+
+    fn move_offset(&mut self, by: i32) -> Result<()> {
+        self.offset = self
+            .offset
+            .checked_add(by)
+            .ok_or_else(|| anyhow::anyhow!("BLASTX diagonal offset exceeds Int4"))?;
+        Ok(())
     }
 }
 

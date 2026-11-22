@@ -2900,3 +2900,78 @@ fn the_rows_read_each_residue_by_the_operations() {
         [1]
     );
 }
+
+/// BLASTP's table as the `-db_hard_mask` search moves it between sequences (`db_masked.rs`:
+/// `TableStart::apply`, `TableEnd::apply`): NCBI's table at its one-thread offset (entries 0, or
+/// the window less than 0 after a clear), the clear (offset the window) before the move, and the
+/// moves after a sequence.
+#[test]
+fn hard_mask_starts_and_ends_move_the_table() {
+    use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart, TableEnd, TableStart};
+    let window = 40;
+    let mut scratch = BlastpSubjectScratch::new(16, 64, window, 21);
+    let mut written = DiagStruct::default();
+    written.set_last_hit(5000);
+    written.set_flag(1);
+    scratch.diag_array.fill(written);
+    scratch.diag_offset = 5000;
+    let Ok(()) = TableStart::Keep.apply(&mut scratch, window);
+    assert_eq!(
+        (scratch.diag_offset, scratch.diag_array[3]),
+        (5000, written)
+    );
+    let Ok(()) = TableStart::Move {
+        clear: false,
+        by: 70,
+    }
+    .apply(&mut scratch, window);
+    assert_eq!(
+        (scratch.diag_offset, scratch.diag_array[3]),
+        (5070, written)
+    );
+    let Ok(()) = TableStart::Move {
+        clear: true,
+        by: 70,
+    }
+    .apply(&mut scratch, window);
+    assert_eq!(scratch.diag_offset, window + 70);
+    assert!(scratch
+        .diag_array
+        .iter()
+        .all(|&entry| entry == DiagStruct::clear(window)));
+    let Ok(()) = TableEnd::Move(98).apply(&mut scratch, window);
+    assert_eq!(scratch.diag_offset, window + 168);
+    scratch.diag_array.fill(written);
+    let Ok(()) = TableEnd::Clear.apply(&mut scratch, window);
+    assert_eq!(scratch.diag_offset, window);
+    assert!(scratch
+        .diag_array
+        .iter()
+        .all(|&entry| entry == DiagStruct::clear(window)));
+    for (start, entry) in [
+        (
+            NcbiStart {
+                offset: -98,
+                cleared: false,
+            },
+            DiagStruct::default(),
+        ),
+        (
+            NcbiStart {
+                offset: 5,
+                cleared: true,
+            },
+            DiagStruct::clear(window),
+        ),
+    ] {
+        scratch.diag_array.fill(written);
+        let Ok(()) = TableStart::New(start).apply(&mut scratch, window);
+        assert_eq!(scratch.diag_offset, start.offset);
+        assert!(scratch.diag_array.iter().all(|&e| e == entry), "{start:?}");
+        // The plain sequence's start (`db_masked::plain_on_ncbi_table`) makes the same table.
+        scratch.diag_array.fill(written);
+        scratch.ncbi_table(start, window);
+        assert_eq!(scratch.diag_offset, start.offset);
+        assert!(scratch.diag_array.iter().all(|&e| e == entry), "{start:?}");
+    }
+}

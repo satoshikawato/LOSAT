@@ -2,7 +2,9 @@
 //! `-db_hard_mask` (series NP, M4b), which `compute_subject_scored` chooses with one test of the
 //! search's options per subject; a search without the options keeps its path.
 //!
-//! - A sequence without masks of the algorithm is searched as in a search without the options.
+//! - A sequence without masks of the algorithm is searched as in a search without the options
+//!   (with `-db_hard_mask` on a new table first where its hits meet entries that no sequence wrote
+//!   in NCBI's one-thread search: `algorithm::common::hard_chunk_walk::NcbiWalk`).
 //! - `-db_soft_mask`: the complement of the sequence's masks is its scan ranges (the reference
 //!   word finder over ranges, `x_soft_subject::x_word_finder`, as for `-lcase_masking`'s
 //!   subjects); the extensions read every letter.
@@ -12,7 +14,7 @@
 //!   the whole sequence's length (`Runtime::subject`), as NCBI does after the chunks. Every chunk
 //!   is walked, whatever its length (masks may overlap or nest, or be out of the order of their
 //!   start; series NP, M4b-3b): a chunk shorter than the word gives the two-hit search its one word
-//!   (`blastp::hard_chunk_scan::OneWord`), whose seeds go through the chunk's gapped stage or are
+//!   (`common::hard_chunk_scan::OneWord`), whose seeds go through the chunk's gapped stage or are
 //!   its ungapped HSPs, and the one-hit search nothing, and the diagonal offset moves by each
 //!   chunk's length plus the window.
 //!
@@ -21,7 +23,7 @@
 //! read error is the reader's error of the search (`x_db_stream::XReadError`). LOSAT's refusals
 //! of a sequence whose short chunk's HSPs NCBI's interval tree splits without end or its merge
 //! joins with another chunk's are the search's errors of that sequence
-//! (`blastp::hard_chunk_scan::short_chunk_tree_refusal`, `short_chunk_merge_refusal`, passed on
+//! (`common::hard_chunk_scan::short_chunk_tree_refusal`, `short_chunk_merge_refusal`, passed on
 //! as they are by `native::search_error_as_is`).
 
 use anyhow::Result;
@@ -35,12 +37,12 @@ use super::super::seed::{sort_initial_hits, BxLookup, Diagonals, InitHsp};
 use super::super::subjects::Subjects;
 use super::super::x_db_stream::XReadError;
 use super::{compute_subject, compute_subject_of, one_word_hits, SubjectComputation, SubjectPiece};
-use crate::algorithm::blastp::hard_chunk_scan::{
-    merge_joins, short_chunk_merge_refusal, short_chunk_tree_refusal, OneWord, WordContext,
-};
 use crate::algorithm::common::database::search_read_error_of;
 use crate::algorithm::common::db_mask_search::{SearchMask, SubjectPlan};
-use crate::algorithm::common::hard_chunk_walk::{ChunkWork, DiagonalWalk, TableEnd, TableStart};
+use crate::algorithm::common::hard_chunk_scan::{
+    merge_joins, short_chunk_merge_refusal, short_chunk_tree_refusal, OneWord, WordContext,
+};
+use crate::algorithm::common::hard_chunk_walk::{ChunkWork, DiagonalWalk, HardTable, NcbiStart};
 use crate::core::subject_split::HardChunk;
 use crate::seqdb::{SeqDb, SeqDbError};
 
@@ -98,8 +100,53 @@ pub(super) fn compute_masked_subject(
         .map(<[(u32, u32)]>::to_vec);
     diagonals.x_db_masks = Some(reader);
     let stored = stored?;
+    // With `-db_hard_mask`: NCBI's one-thread offset where the search starts the sequence on a new
+    // table (`ResolvedMask::hard_starts`, the walk that `check_losat_limits` ran).
+    let ncbi = if mask.hard() {
+        options.db_mask.as_ref().and_then(|resolved| {
+            resolved
+                .hard_starts(db, options.word_size, options.window_size)
+                .of(oid as u32)
+        })
+    } else {
+        None
+    };
     if stored.is_empty() {
-        return plain(diagonals);
+        let Some(start) = ncbi else {
+            return plain(diagonals);
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107
+        // A sequence without masks on a new table at NCBI's one-thread offset (`NcbiWalk`),
+        // searched
+        // as in a search without the options on that table; by the reference scan of its whole
+        // range where the entries lie above the offset (the other scans take every entry to lie
+        // below it). Its entries end at least the window below the offset after it, so the next
+        // sequence starts as after any sequence without masks.
+        diagonals.ncbi_table(start, options.window_size);
+        if start.unwritten(options.window_size) <= start.offset {
+            return plain(diagonals);
+        }
+        let x_buffer = if batch.x_ungap_sent {
+            subjects.x_encoded_with_sentinels(oid)
+        } else {
+            subjects.encoded_with_sentinel(oid)
+        };
+        let whole = [(0, subjects.length(oid) as i32)];
+        return masked_piece(
+            subjects,
+            batch,
+            params,
+            options,
+            lookup,
+            diagonals,
+            xdrop,
+            oid,
+            x_containment,
+            Some(SubjectPiece {
+                buffer: &x_buffer,
+                ranges: Some(&whole),
+            }),
+        );
     }
     Masked {
         db,
@@ -113,6 +160,7 @@ pub(super) fn compute_masked_subject(
         x_containment,
         stored: &stored,
         hard: mask.hard(),
+        ncbi,
     }
     .compute(diagonals)
 }
@@ -175,6 +223,9 @@ struct Masked<'a> {
     x_containment: bool,
     stored: &'a [(u32, u32)],
     hard: bool,
+    /// With `-db_hard_mask`, NCBI's one-thread start of the sequence where it is searched on a new
+    /// table (`common::hard_chunk_walk::NcbiWalk`).
+    ncbi: Option<NcbiStart>,
 }
 
 impl Masked<'_> {
@@ -205,15 +256,17 @@ impl Masked<'_> {
     /// one word ([`Masked::one_word`]), whose seeds go through the chunk's gapped stage, or are its
     /// HSPs in an ungapped search (LOSAT's refusal of the sequence where NCBI's interval tree
     /// splits without end or its merge joins them with another chunk's), and the one-hit search
-    /// nothing. The sequence is searched on its own: on NCBI's new table where it is the first
-    /// searched sequence, else with the diagonal offset moved so that no entry of another sequence
-    /// reaches its hits or theirs (`common::hard_chunk_walk::DiagonalWalk::start`,
+    /// nothing. The sequence is searched on its own: on a new table at NCBI's one-thread offset
+    /// where its hits meet the entries that no sequence wrote in NCBI's one-thread search or that
+    /// search clears the table inside it (`ncbi`, `common::hard_chunk_walk::NcbiWalk`), else with
+    /// the diagonal offset moved so that no entry of another sequence reaches its hits or theirs
+    /// (`common::hard_chunk_walk::DiagonalWalk::start`,
     /// `DiagonalWalk::after`; PD-LOSAT-NCBI-DEFECTS exception 23, the Owner's answer Q5 = B of M4b,
     /// 2026-11-22). The sequences that LOSAT refuses before the search never come here
     /// (`blastinput::db_mask::HardMaskShape`: masks out of the order of their start, past the end,
     /// a range longer than `MAX_DBSEQ_LEN`, a tail mask with masks stored after it, a one word past
     /// the sentinel that can change a result), so the sequence's result does not depend on the
-    /// sequences the table searched before or after it.
+    /// entries of the sequences the table searched before or after it.
     fn compute(&self, diagonals: &mut Diagonals) -> Result<SubjectComputation> {
         let Masked {
             db,
@@ -227,6 +280,7 @@ impl Masked<'_> {
             x_containment,
             stored,
             hard,
+            ncbi,
         } = *self;
         let piece = |diagonals: &mut Diagonals, piece: SubjectPiece<'_>| {
             masked_piece(
@@ -289,19 +343,10 @@ impl Masked<'_> {
             options.window_size,
             length,
             &chunks,
-            db.first_protein_searched(oid as u32),
+            ncbi,
             diagonals.offset(),
         );
-        match start {
-            TableStart::New => diagonals.new_table(),
-            TableStart::Keep => {}
-            TableStart::Move { clear, by } => {
-                if clear {
-                    diagonals.clear();
-                }
-                diagonals.move_offset(by)?;
-            }
-        }
+        start.apply(diagonals, options.window_size)?;
         let mut raw = Vec::new();
         let mut purged = Vec::new();
         let mut containment = Vec::new();
@@ -400,11 +445,8 @@ impl Masked<'_> {
                 subject_besthit_preliminary(&mut purged);
             }
         }
-        match walk.after(diagonals.offset()) {
-            TableEnd::Keep => {}
-            TableEnd::Move(by) => diagonals.move_offset(by)?,
-            TableEnd::Clear => diagonals.clear(),
-        }
+        walk.after(diagonals.offset())
+            .apply(diagonals, options.window_size)?;
         // The merge's order: by score.
         sort_by_score(&mut purged);
         Ok(SubjectComputation {
@@ -419,7 +461,8 @@ impl Masked<'_> {
     // The two-hit scan of a chunk shorter than the word reads the one word at the chunk's offset,
     // from the sequence's stored letters (the preliminary stage's fetch is not masked).
     /// The one word of hard chunk `chunk`, shorter than the word, in a two-hit search
-    /// (`hard_chunk_scan::OneWord`): the stored letters from the chunk's offset (`residues`, the
+    /// (`common::hard_chunk_scan::OneWord`): the stored letters from the chunk's offset
+    /// (`residues`, the
     /// sequence's; zeros past its end, which only a word whose hits change nothing reads:
     /// `HardMaskShape::WordPastEnd`), their lookup hits by the reference scan of one word, and
     /// NCBI's two-hit test of each on the diagonal table with the contexts' X-drops and cutoffs.

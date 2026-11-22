@@ -37,12 +37,18 @@ const EDITED: [&str; 6] = [
     "fixtures/rpsbproc/arch/mfirst_delta.asn",
 ];
 
+/// The marks of the fixtures that are templates of NCBI's output: a test puts its run's directory
+/// in place of the mark (`@CWD@`, `{db_dir}`) before it compares, and NCBI broke the long strings
+/// that hold the directory into lines by the real path's length, so the template's own bytes are
+/// not a layout NCBI's writer gives.
+const TEMPLATE_MARKS: [&[u8]; 2] = [b"@CWD@", b"{db_dir}"];
+
 /// Every archive among LOSAT's fixtures: the files under `LOSAT/tests` that start with an archive
 /// header (NCBI's `-outfmt 11` output and the files that LOSAT's tests freeze as NCBI's), with
 /// their bytes. Left out: the malformed archives of rpsbproc's tests
-/// (`fixtures/rpsbproc/arch/bad`), its copies edited by hand (`EDITED`), and the `.merged` files
-/// of `archive_replaced` (a run's stdout and stderr in one file, with NCBI's messages inside the
-/// archive's text).
+/// (`fixtures/rpsbproc/arch/bad`), its copies edited by hand (`EDITED`), the `.merged` files of
+/// `archive_replaced` (a run's stdout and stderr in one file, with NCBI's messages inside the
+/// archive's text), and the templates (`TEMPLATE_MARKS`).
 fn archive_fixtures() -> Vec<(std::path::PathBuf, Vec<u8>)> {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let bad = tests.join("fixtures/rpsbproc/arch/bad");
@@ -67,7 +73,10 @@ fn archive_fixtures() -> Vec<(std::path::PathBuf, Vec<u8>)> {
                 continue;
             }
             let text = std::fs::read(&path).expect("a file");
-            if text.starts_with(b"Blast4-archive ::=") {
+            let template = TEMPLATE_MARKS
+                .iter()
+                .any(|mark| text.windows(mark.len()).any(|window| window == *mark));
+            if text.starts_with(b"Blast4-archive ::=") && !template {
                 files.push((path, text));
             }
         }

@@ -955,7 +955,7 @@ const LITERAL_NUMBERS: &[(u16, &str, &str)] = &[
     (
         named::SEQ_INST,
         "Seq-inst ::= { repr raw, mol aa, length 12",
-        "(Err(Serial(\"unexpected end of the text: Frame type= eFrameClassMember, Member name= length\")), [])",
+        "(Err(Serial(\"unexpected end of the data: Frame type= eFrameClassMember, Member name= length\")), [])",
     ),
     (named::SEQ_ID, "Seq-id ::= gi 9223372036854775807", "(Ok(SeqId(Gi(9223372036854775807))), [])"),
     (named::SEQ_ID, "Seq-id ::= gi\r\n9223372036854775808", "(Err(Exception([NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 968, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::Read\") }, message: \" Frame type= eFrameNamed, Object type= Seq-id\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1500, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoice, Object type= Seq-id\", extra: None }, NcbiException { site: ThrowSite { file: \"src/serial/objistr.cpp\", line: 1498, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CObjectIStream::ReadChoiceSimple\") }, message: \" Frame type= eFrameChoiceVariant, Member name= gi\", extra: None }, NcbiException { site: ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") }, message: \"number overflow in line 2\", extra: None }])), [])"),
@@ -973,12 +973,12 @@ const LITERAL_NUMBERS: &[(u16, &str, &str)] = &[
     (
         named::AUTH_LIST,
         "Auth-list ::= { names std { { name dbtag { db \"x\", tag id 5",
-        "(Err(Serial(\"unexpected end of the text: Frame type= eFrameChoiceVariant, Member name= id\")), [])",
+        "(Err(Serial(\"unexpected end of the data: Frame type= eFrameChoiceVariant, Member name= id\")), [])",
     ),
     (
         named::AUTH_LIST,
         "Auth-list ::= { names std { { name dbtag { db \"x\", tag id +",
-        "(Err(Serial(\"unexpected end of the text: Frame type= eFrameChoiceVariant, Member name= id\")), [])",
+        "(Err(Serial(\"unexpected end of the data: Frame type= eFrameChoiceVariant, Member name= id\")), [])",
     ),
 ];
 

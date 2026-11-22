@@ -163,7 +163,8 @@ pub(super) enum ReadFails {
     /// In its setup, before its Karlin-Altschul check: the length of OID 0, which the setup reads
     /// where the statistics' total is not positive, of volumes without an OID
     /// (`SeqDb::first_oid_read_fails`; blast_setup.c:925-937, cited there). Any chunk that NCBI
-    /// does not split again meets it.
+    /// does not split again meets it, before the setup checks of its batch, as does a batch
+    /// searched whole.
     Setup,
     /// In the search: the first chunk with a valid context that NCBI searches meets it, at the
     /// first read of a sequence (a missing sequence file: `Database memory map file error`).
@@ -1238,7 +1239,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
     setup: &mut Option<LocalBatchSetup>,
     mut observer: Option<&mut StageDBoundaryTrace>,
     pool: Option<&SearchPool<'_>>,
-    mut setup_only: Option<&mut SetUpOnly<'_>>,
+    setup_only: Option<&mut SetUpOnly<'_>>,
     match_redo: &R,
 ) -> Result<Vec<KappaResultHitList>> {
     ensure!(
@@ -1370,7 +1371,15 @@ fn run_local_search_with_redo<R: MatchRedo>(
             do_sum_stats,
         )
     };
-    if split.is_none() && valid_contexts.iter().any(|&valid| valid) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-937
+    // The setup's read of OID 0 (`ReadFails::Setup`) comes before these checks: a batch searched
+    // whole on such a database fails with that read's error (`tblastn_app::search`), with
+    // `-searchsp` or `OLD_FSC` too (NCBI 2.17.0, rows `db.ak.tbn.e0nseq.sp.6`, `.fsc.6`; line RG
+    // item X-short-bat fix 5), as a split batch's chunks meet it first (`SplitBatchSteps`).
+    if split.is_none()
+        && valid_contexts.iter().any(|&valid| valid)
+        && profile.subject_set.read_fails != Some(ReadFails::Setup)
+    {
         setup_checks()?;
     }
     let batch_setup = LocalBatchSetup {
@@ -1406,7 +1415,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // The set-up alone (`set_up_batch`): no search. A batch with a valid context reads its
     // subjects, one searched whole after the checks above, a split one where its chunks first get
     // to that read (`split_batch_reads`).
-    if let Some(set_up) = setup_only.as_deref_mut() {
+    if let Some(set_up) = setup_only {
         set_up.reads = valid_contexts.iter().any(|&valid| valid)
             && match &split {
                 None => true,

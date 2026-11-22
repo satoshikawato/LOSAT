@@ -768,6 +768,48 @@ fn a_refused_batch_that_ncbi_splits_meets_the_set_up_errors_where_ncbi_does() {
     }
 }
 
+/// The setup of a query batch reads the length of OID 0 of a database whose statistics' total is
+/// not positive (`tests/db_search/aliaskeys/e_nF`: volumes without an OID, `NSEQ 1`) before its
+/// setup checks, so that read's error comes first also where the average subject length fails
+/// them without the Gumbel block (`-searchsp`, `OLD_FSC`): for a batch searched whole, for one
+/// that NCBI splits and for one that LOSAT refuses (`q1`, `q2`, `q1` under `-parse_deflines`).
+/// NCBI 2.17.0: rows `db.ak.tbn.e0nseq.sp.6`, `db.ak.tbn.e0nseq.fsc.6`, `db.pd.q1c.tn.enf.sp.6`
+/// and `db.pd.q1c.tn.enf.split.6` (line RG item X-short-bat, fix 5).
+#[test]
+fn the_read_of_oid_0_comes_before_the_set_up_checks() {
+    let temp = TempDir::new("oid0");
+    let dir = temp.0.as_path();
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
+    let db = tests.join("aliaskeys/e_nF");
+    let one = tests.join("taxfilter/q.faa");
+    let repeated = tests.join("q1c/avgdup_bp.faa");
+    let memory = "LOSAT engine error: Database memory map file error\n";
+    let split = [("CHUNK_SIZE", "300"), ("OVERLAP_CHUNK_SIZE", "10")];
+    let searchsp = ["-searchsp", "1000"];
+    let deflines = ["-parse_deflines", "-searchsp", "1000"];
+    // (query, environment, options)
+    let cases: [(&PathBuf, &[(&str, &str)], &[&str]); 4] = [
+        (&one, &[], &searchsp),
+        (&one, &[("OLD_FSC", "1")], &[]),
+        (&repeated, &[], &deflines),
+        (&repeated, &split, &deflines),
+    ];
+    for (query, env, options) in cases {
+        for threads in ["1", "4"] {
+            let case = format!("{query:?} {env:?} {options:?} threads {threads}");
+            let mut args = vec!["tblastn", "-query", query.to_str().unwrap()];
+            args.extend(["-db", db.to_str().unwrap()]);
+            args.extend(options);
+            args.extend(["-outfmt", "6", "-num_threads", threads]);
+            let run = losat(dir, env, &args);
+            let stderr = String::from_utf8_lossy(&run.stderr);
+            assert!(run.stdout.is_empty(), "{case}: {stderr}");
+            assert_eq!(run.status.code(), Some(3), "{case}: {stderr}");
+            assert_eq!(stderr, memory, "{case}");
+        }
+    }
+}
+
 /// The refusal of a PSSM query whose letters give no Karlin-Altschul parameters (one that `-seg`
 /// masks completely), with which NCBI crashes in the setup of its preliminary search.
 const MASKED_PSSM: &str = "a PSSM query whose letters give no Karlin-Altschul parameters (one \

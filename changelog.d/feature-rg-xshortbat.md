@@ -20,3 +20,6 @@
 - A `tblastn` batch that LOSAT refuses for two queries with one ID (`-parse_deflines`) and that NCBI BLAST+ splits
   into pieces gives NCBI BLAST+'s error of the batch's setup (subjects too short for `-searchsp`, for example) only
   where NCBI BLAST+'s pieces reach that setup, and the refusal where they stop first.
+- With `-searchsp` or `OLD_FSC`, a `tblastn` search of a database of volumes without sequences (an alias over them)
+  now fails with NCBI BLAST+ 2.17.0's `Database memory map file error`; before, LOSAT gave `The average subject length
+  is too short`, an error that NCBI BLAST+ checks only after that read.

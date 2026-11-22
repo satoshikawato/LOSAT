@@ -783,6 +783,12 @@ impl BlastnDatabase {
         self.db.first_oid_read_fails()
     }
 
+    /// The error of the preliminary search's first read of the sequences after a batch's set-up
+    /// checks, where a sequence file cannot be opened (`shared::sequence_file_read_error`).
+    pub(super) fn sequence_file_read_error(&self) -> Option<anyhow::Error> {
+        shared::sequence_file_read_error(&self.db, PROGRAM)
+    }
+
     /// `BlastSeqSrcGetAvgSeqLen` (`SeqDb::average_length`).
     pub(super) fn average_length(&self) -> i32 {
         self.db.average_length()

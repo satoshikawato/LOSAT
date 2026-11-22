@@ -94,10 +94,10 @@ use crate::blastinput::fasta_reader::{
 use crate::blastinput::input_files::{
     check_utf8_file_name, open_input, write_empty_subject_warnings_by_length,
 };
-use crate::blastinput::query_batch::{BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
+use crate::blastinput::query_batch::{BatchCount, BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
-    cut_queries, cut_subjects, next_ranged_batch, parse_optional_range, subjects_read, Placements,
-    QueryInput, RangeRole, SequenceRange,
+    cut_queries, cut_subjects, parse_optional_range, subjects_read, Placements, QueryInput,
+    RangeRole, SequenceRange,
 };
 use crate::report::diag_log::Posts;
 use crate::report::pairwise::{
@@ -6855,6 +6855,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
 pub fn run_local(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -6878,17 +6879,19 @@ pub fn run_local(
         .map(|handle| outputs.with_archive_outfmt(handle));
         if let Some(handle) = args.archive.clone() {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(args, query_records, subject_records, view)
+                run_local_formats(args, query_records, query_end, subject_records, view)
             });
-            return outputs.finish_archive(&handle, query_records.is_empty(), result);
+            let no_query = query_records.is_empty() && query_end.is_input();
+            return outputs.finish_archive(&handle, no_query, result);
         }
     }
-    run_local_formats(args, query_records, subject_records, outputs)
+    run_local_formats(args, query_records, query_end, subject_records, outputs)
 }
 
 fn run_local_formats(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -6954,7 +6957,7 @@ fn run_local_formats(
     search(
         args,
         SearchQueries::Records(query_records),
-        QueryReading::Records,
+        query_end.reading(),
         Ranges {
             query: query_range,
             subjects: SubjectRanges {
@@ -6981,6 +6984,7 @@ fn run_local_formats(
 pub fn run_local_database(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -7006,11 +7010,28 @@ pub fn run_local_database(
     match args.archive.clone() {
         Some(handle) => {
             let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, output_formats, settings, view, None)
+                search_database(
+                    args,
+                    query_records,
+                    query_end,
+                    output_formats,
+                    settings,
+                    view,
+                    None,
+                )
             });
-            outputs.finish_archive(&handle, query_records.is_empty(), result)
+            let no_query = query_records.is_empty() && query_end.is_input();
+            outputs.finish_archive(&handle, no_query, result)
         }
-        None => search_database(args, query_records, output_formats, settings, outputs, None),
+        None => search_database(
+            args,
+            query_records,
+            query_end,
+            output_formats,
+            settings,
+            outputs,
+            None,
+        ),
     }
 }
 
@@ -7077,6 +7098,8 @@ pub(crate) fn repeat_search_hits(
             search_database(
                 args,
                 query_records,
+                // The repeat search's queries are the batch's records, read whole.
+                &crate::api::QueryEnd::Input,
                 output_formats,
                 filter.settings().clone(),
                 &mut outputs,
@@ -7107,6 +7130,7 @@ pub(crate) fn repeat_search_hits(
 fn search_database(
     mut args: BlastnArgs,
     query_records: &[FastaRecord],
+    query_end: &crate::api::QueryEnd,
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
@@ -7136,7 +7160,7 @@ fn search_database(
     search(
         args,
         SearchQueries::Records(query_records),
-        QueryReading::Records,
+        query_end.reading(),
         Ranges {
             query: query_range,
             subjects: SubjectRanges {
@@ -7895,12 +7919,17 @@ enum BatchStage<'a> {
     /// `last`: the batch loop reads no batch after this one (`batches_follow`), so the loop's
     /// keep of LOSAT_X_MBLUTKEEP frees its table after the batch's preliminary stage
     /// (`x_lut_drop::after_prelim`).
+    ///
+    /// `setup_only`: the set-up of the batch alone, up to its checks of the subjects
+    /// (`context_statistics`), which ends with `SetUpOnly` where they pass: the set-up of a batch
+    /// that LOSAT refuses (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20).
     Search {
         query_offsets: &'a [usize],
         query_masks: Option<&'a [Vec<MaskedInterval>]>,
         lower_case_before: &'a [bool],
         masks_outside: &'a [MasksOutside],
         last: bool,
+        setup_only: bool,
     },
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
@@ -7910,6 +7939,19 @@ enum BatchStage<'a> {
         batch_eff_searchsp: &'a [i64],
     },
 }
+
+/// The end of a batch's set-up alone (`BatchStage::Search::setup_only`) whose checks pass: no
+/// error of NCBI's. Never shown: the refusal of the batch takes its place.
+#[derive(Debug)]
+struct SetUpOnly;
+
+impl std::fmt::Display for SetUpOnly {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the set-up of the batch passes")
+    }
+}
+
+impl std::error::Error for SetUpOnly {}
 
 /// Whether `run_in_pool`'s batch loop reads a batch from input record `input_start` of
 /// `records`: records are left, or what ends the reading after them (`reading`: blank lines or
@@ -8006,7 +8048,8 @@ fn run_in_pool(
             scopes.with_whole_run_of(input)
         }
         _ => scopes,
-    });
+    })
+    .map(|scopes| scopes.with_refusal(args.scope_refusal.clone()));
     let intro = blastn_intro(&args);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258-261
     // NCBI writes the outfmt 0 prolog before it reads the first query batch, and its stream
@@ -8162,6 +8205,8 @@ fn run_in_pool(
     // Whether what ended the reading after the records (`reading`) has come.
     let mut reading_ended = false;
     let mut input_start = 0;
+    // NCBI's reader's count of the records into the batches (`BatchCount`).
+    let mut batch_count = BatchCount::of(query_scopes.as_ref());
     // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
     // load throws, no report and no batch's prefetch after it loads anything
     // (`database::QueryFetches`).
@@ -8179,7 +8224,9 @@ fn run_in_pool(
         &reading,
         reading_ended,
     ) {
-        let (input_end, reached_size) = next_ranged_batch(
+        let (input_end, reached_size) = BatchCount::next_batch(
+            batch_count.as_mut(),
+            &|record| queries.believed(record),
             &query_input.input_lengths,
             &query_input.skipped,
             input_start,
@@ -8204,18 +8251,10 @@ fn run_in_pool(
                 .flat_map(|record| record.warnings.iter().copied())
                 .collect(),
         );
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:145-152
-        // An `eEOF` ends the batch with the records read so far. A reader error (or LOSAT's
-        // rejection of a Seq-id line) stops the run while the batch is read: after the
-        // reports of the batches before (without the epilog) and the messages of the
-        // batch's records, which are neither searched nor reported.
-        if reading_ends_here {
-            reading_ended = true;
-            if let QueryReading::Error {
-                error,
-                warnings: error_warnings,
-            } = std::mem::replace(&mut reading, QueryReading::End)
-            {
+        // The reports of the batches before a batch at which the run stops (for the first batch,
+        // the prologs that come with them), before the batch's messages and its error.
+        macro_rules! write_reports_before {
+            () => {{
                 // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
                 // written when the loop took them.
                 let before = |outputs: &mut ReportOutputs<'_>| {
@@ -8251,6 +8290,21 @@ fn run_in_pool(
                 } else {
                     before(outputs)?;
                 }
+            }};
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:145-152
+        // An `eEOF` ends the batch with the records read so far. A reader error (or LOSAT's
+        // rejection of a Seq-id line) stops the run while the batch is read: after the
+        // reports of the batches before (without the epilog) and the messages of the
+        // batch's records, which are neither searched nor reported.
+        if reading_ends_here {
+            reading_ended = true;
+            if let QueryReading::Error {
+                error,
+                warnings: error_warnings,
+            } = std::mem::replace(&mut reading, QueryReading::End)
+            {
+                write_reports_before!();
                 batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
                 outputs.diagnostics.write_all(&error_warnings)?;
                 return Err(error.into_app_error());
@@ -8261,47 +8315,31 @@ fn run_in_pool(
         // ends before its first record, fails after the reports of the batches before,
         // without the epilog.
         if start == end {
-            // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were written
-            // when the loop took them.
-            let before = |outputs: &mut ReportOutputs<'_>| {
-                write_before_failed_batch(
-                    &args,
-                    queries.before(&kept, start),
-                    ReportSubjects {
-                        source,
-                        shown: &shown,
-                        titles: &titles,
-                    },
-                    &report_ranges,
-                    outputs,
-                    &output_formats,
-                    BatchResults {
-                        hit_lists,
-                        warnings: &warnings[..start],
-                        reads: &query_reads[..start],
-                        lengths: &lengths[..start],
-                        unsearched,
-                        query_masks: &query_masks,
-                        repeat_hits: &repeat_hits,
-                        context_karlin: &context_karlin,
-                        query_eff_searchsp: &query_eff_searchsp,
-                        batches: &batch_spans,
-                    },
-                )
-            };
-            // In the first batch nothing was streamed: the call of the off path writes the
-            // prologs that come with the reports (outfmt 20's line of the field names).
-            if stream.acting() && start > 0 {
-                stream.finish_sam(outputs)?;
-            } else {
-                before(outputs)?;
-            }
+            write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             return Err(crate::cli::NativeError {
                 exit: 3,
                 message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
             }
             .into());
+        }
+        // LOSAT's refusal of two queries of the batch's scope with one id, in the one form of every
+        // program (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
+        // `-export_search_strategy` before the batch's request, which NCBI writes with the earlier
+        // record's letters for the repeated id (no request of the batch is written); else after the
+        // batch's checks before its set-up, where the set-up of the batch's records that are first
+        // in the scope gives NCBI's error of the subjects or the refusal comes, before the search.
+        // (Round 4 refused after the search, and wrote the batch's request.)
+        let mut scope_refusal = None;
+        if let Some(scopes) = query_scopes.as_mut() {
+            if let Err(refusal) = scopes.add_batch(batch_records.input(), start) {
+                scope_refusal = Some(refusal);
+            }
+        }
+        if let Some(refusal) = scope_refusal.take_if(|_| args.strategy.is_some()) {
+            write_reports_before!();
+            batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
+            return Err(refusal);
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:280-282
         // The batch's search strategy request (`-export_search_strategy`): once its query factory
@@ -8424,41 +8462,7 @@ fn run_in_pool(
             }
         }
         if let Some((masker_warnings, failure)) = mask_failure {
-            // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
-            // written when the loop took them.
-            let before = |outputs: &mut ReportOutputs<'_>| {
-                write_before_failed_batch(
-                    &args,
-                    queries.before(&kept, start),
-                    ReportSubjects {
-                        source,
-                        shown: &shown,
-                        titles: &titles,
-                    },
-                    &report_ranges,
-                    outputs,
-                    &output_formats,
-                    BatchResults {
-                        hit_lists,
-                        warnings: &warnings[..start],
-                        reads: &query_reads[..start],
-                        lengths: &lengths[..start],
-                        unsearched,
-                        query_masks: &query_masks,
-                        repeat_hits: &repeat_hits,
-                        context_karlin: &context_karlin,
-                        query_eff_searchsp: &query_eff_searchsp,
-                        batches: &batch_spans,
-                    },
-                )
-            };
-            // In the first batch nothing was streamed: the call of the off path writes the
-            // prologs that come with the reports (outfmt 20's line of the field names).
-            if stream.acting() && start > 0 {
-                stream.finish_sam(outputs)?;
-            } else {
-                before(outputs)?;
-            }
+            write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             masker_warnings.write(&mut *outputs.diagnostics, archive)?;
             return Err(failure.into());
@@ -8475,41 +8479,7 @@ fn run_in_pool(
             .iter()
             .all(|record| record.seq().is_empty())
         {
-            // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were written
-            // when the loop took them.
-            let before = |outputs: &mut ReportOutputs<'_>| {
-                write_before_failed_batch(
-                    &args,
-                    queries.before(&kept, start),
-                    ReportSubjects {
-                        source,
-                        shown: &shown,
-                        titles: &titles,
-                    },
-                    &report_ranges,
-                    outputs,
-                    &output_formats,
-                    BatchResults {
-                        hit_lists,
-                        warnings: &warnings[..start],
-                        reads: &query_reads[..start],
-                        lengths: &lengths[..start],
-                        unsearched,
-                        query_masks: &query_masks,
-                        repeat_hits: &repeat_hits,
-                        context_karlin: &context_karlin,
-                        query_eff_searchsp: &query_eff_searchsp,
-                        batches: &batch_spans,
-                    },
-                )
-            };
-            // In the first batch nothing was streamed: the call of the off path writes the
-            // prologs that come with the reports (outfmt 20's line of the field names).
-            if stream.acting() && start > 0 {
-                stream.finish_sam(outputs)?;
-            } else {
-                before(outputs)?;
-            }
+            write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             let mut message = format!("{ENGINE_ERROR} ");
             for _ in start..end {
@@ -8545,6 +8515,49 @@ fn run_in_pool(
         } else {
             Vec::new()
         };
+        // NCBI fails a batch where it reads a header file that it cannot read (`read_titles`)
+        // or where its prefetch looks up a Seq-align id whose lookup fails on a file
+        // (`database::batch_prefetch`), after the prologs, the reports of the batches before
+        // (without the epilog) and the batch's reader messages: `error` is NCBI's.
+        macro_rules! fail_batch {
+            ($error:expr) => {{
+                write_reports_before!();
+                warnings[start].write(&mut *outputs.diagnostics, archive)?;
+                return Err($error);
+            }};
+        }
+        // The batch of LOSAT's refusal (`scope_refusal` above, without a request): NCBI's error of
+        // the set-up of its records that are first in the scope (`BatchStage::Search::setup_only`,
+        // which ends before the search), or the refusal (line WQA D10 round 5, 2026-11-20).
+        if let Some(refusal) = scope_refusal.take() {
+            let error =
+                crate::blastinput::query_batch::refused_batch_error(refusal, false, |first| {
+                    refused_batch_setup_error(
+                        &args,
+                        batch_records.searched(),
+                        (start..end)
+                            .filter(|&query| first[query_input.ordinal(query) - input_start]),
+                        start,
+                        &query_offsets,
+                        window_masker_masks.as_deref(),
+                        &lower_case_before,
+                        &masks_outside,
+                        source,
+                        Some((&mut *outputs, &output_formats[..])),
+                        parallel_pool,
+                        batching,
+                        input_start == 0,
+                        &mut warnings[start],
+                        &mut query_keep,
+                    )
+                });
+            // The first batch's set-up wrote the prologs before its error (`database_search_error`).
+            if input_start == 0 && error.is::<crate::cli::NativeError>() {
+                warnings[start].write(&mut *outputs.diagnostics, archive)?;
+                return Err(error);
+            }
+            fail_batch!(error);
+        }
         // Whether the loop reads no batch after this one: its keep then frees the table after the
         // batch's preliminary stage (`BatchStage::Search`'s `last`).
         let last = !batches_follow(
@@ -8572,6 +8585,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                     masks_outside: &masks_outside,
                     last,
+                    setup_only: false,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -8592,6 +8606,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                     masks_outside: &masks_outside,
                     last,
+                    setup_only: false,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -8688,63 +8703,6 @@ fn run_in_pool(
         // (`database::read_titles`), before the HSPs of score 0 are dropped. A header file
         // that NCBI cannot read fails this batch, after the reports of the batches before
         // and the messages of this batch's reading.
-        // LOSAT's refusal of two queries of the batch's scope with one id, once NCBI has searched
-        // the batch (its own errors come first): the warnings of the batches read so far, as for
-        // its refusal of a title (below).
-        if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(error) = scopes.add_batch(batch_records.input(), start) {
-                let written = if stream.acting() { start } else { 0 };
-                for query_warnings in &warnings[written..=start] {
-                    query_warnings.write(&mut *outputs.diagnostics, archive)?;
-                }
-                return Err(error);
-            }
-        }
-        // NCBI fails a batch where it reads a header file that it cannot read (`read_titles`)
-        // or where its prefetch looks up a Seq-align id whose lookup fails on a file
-        // (`database::batch_prefetch`), after the prologs, the reports of the batches before
-        // (without the epilog) and the batch's reader messages: `error` is NCBI's.
-        macro_rules! fail_batch {
-            ($error:expr) => {{
-                // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
-                // written when the loop took them.
-                let before = |outputs: &mut ReportOutputs<'_>| {
-                    write_before_failed_batch(
-                        &args,
-                        queries.before(&kept, start),
-                        ReportSubjects {
-                            source,
-                            shown: &shown,
-                            titles: &titles,
-                        },
-                        &report_ranges,
-                        outputs,
-                        &output_formats,
-                        BatchResults {
-                            hit_lists,
-                            warnings: &warnings[..start],
-                            reads: &query_reads[..start],
-                            lengths: &lengths[..start],
-                            unsearched,
-                            query_masks: &query_masks,
-                            repeat_hits: &repeat_hits,
-                            context_karlin: &context_karlin,
-                            query_eff_searchsp: &query_eff_searchsp,
-                            batches: &batch_spans,
-                        },
-                    )
-                };
-                // In the first batch nothing was streamed: the call of the off path writes the
-                // prologs that come with the reports (outfmt 20's line of the field names).
-                if stream.acting() && start > 0 {
-                    stream.finish_sam(outputs)?;
-                } else {
-                    before(outputs)?;
-                }
-                warnings[start].write(&mut *outputs.diagnostics, archive)?;
-                return Err($error);
-            }};
-        }
         // The taxonomy database's messages of each query's own fetches, where the batch's
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();
@@ -10148,6 +10106,106 @@ fn read_db_seq_ranges(
     Some(none)
 }
 
+/// NCBI's error of the set-up of the records of a refused batch that are first in their scope
+/// (`first_in_scope`, of the batch's searched records `batch`, numbered from `start` in the run),
+/// which ends before the search (`BatchStage::Search::setup_only`), or `None` where the set-up
+/// succeeds or NCBI splits the batch, whose chunks check the subjects (`ContextInputs::split`):
+/// the refusal then comes (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20).
+fn refused_batch_setup_error(
+    args: &BlastnArgs,
+    batch: &[FastaRecord],
+    first_in_scope: impl Iterator<Item = usize>,
+    start: usize,
+    query_offsets: &[usize],
+    window_masker_masks: Option<&[Vec<MaskedInterval>]>,
+    lower_case_before: &[bool],
+    masks_outside: &[MasksOutside],
+    subjects: SubjectSource<'_>,
+    outputs: BatchOutputs<'_, '_>,
+    parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    batching: QueryBatching,
+    first_batch: bool,
+    posts: &mut Posts,
+    query_keep: &mut Vec<u8>,
+) -> Option<anyhow::Error> {
+    let batch_letters: usize = batch.iter().map(|record| record.seq().len()).sum();
+    if !args.ungapped && splits(batching.split, batch_letters) {
+        return None;
+    }
+    let chosen: Vec<usize> = first_in_scope.collect();
+    let records: Vec<FastaRecord> = chosen
+        .iter()
+        .map(|&query| batch[query - start].clone())
+        .collect();
+    let offsets: Vec<usize> = chosen.iter().map(|&query| query_offsets[query]).collect();
+    let masks: Option<Vec<Vec<MaskedInterval>>> = window_masker_masks.map(|masks| {
+        chosen
+            .iter()
+            .map(|&query| masks[query - start].clone())
+            .collect()
+    });
+    let letter_before: Vec<bool> = if lower_case_before.is_empty() {
+        Vec::new()
+    } else {
+        chosen
+            .iter()
+            .map(|&query| lower_case_before[query - start])
+            .collect()
+    };
+    let outside: Vec<MasksOutside> = if masks_outside.is_empty() {
+        Vec::new()
+    } else {
+        chosen
+            .iter()
+            .map(|&query| masks_outside[query - start])
+            .collect()
+    };
+    let stage = BatchStage::Search {
+        query_offsets: &offsets,
+        query_masks: masks.as_deref(),
+        lower_case_before: &letter_before,
+        masks_outside: &outside,
+        last: true,
+        setup_only: true,
+    };
+    let queries = x_query_drop::BatchQueries::Shared(&records);
+    let set_up = if args.ungapped {
+        search_query_batch::<true>(
+            args,
+            queries,
+            subjects,
+            outputs,
+            parallel_pool,
+            batching,
+            first_batch,
+            stage,
+            posts,
+            None,
+            query_keep,
+        )
+    } else {
+        search_query_batch::<false>(
+            args,
+            queries,
+            subjects,
+            outputs,
+            parallel_pool,
+            batching,
+            first_batch,
+            stage,
+            posts,
+            None,
+            query_keep,
+        )
+    };
+    set_up
+        .err()
+        .map(|error| match error.downcast::<ErrorAfterInvalidBatches>() {
+            Ok(ErrorAfterInvalidBatches(error)) => error,
+            Err(error) => error,
+        })
+}
+
 /// Searches one query batch against the subjects, with the query block, lookup table and
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
 /// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
@@ -10419,6 +10477,25 @@ fn search_query_batch<const UNGAPPED: bool>(
         },
         reborrow_outputs(&mut outputs),
     )?;
+    if let BatchStage::Search {
+        setup_only: true, ..
+    } = stage
+    {
+        // The search's first read of the database after the set-up (`prelim_pass`): a sequence
+        // file that cannot be opened fails the batch there (line WQA D10 round 6, review 4 M2).
+        if let (true, SubjectSource::Database(database)) = (any_valid_context && !split, subjects) {
+            if let Some(error) = database.sequence_file_read_error() {
+                return Err(database_search_error(
+                    error,
+                    first_batch,
+                    reborrow_outputs(&mut outputs),
+                    intro,
+                    &shown,
+                ));
+            }
+        }
+        return Err(SetUpOnly.into());
+    }
     // The preliminary stage's option spaces and its own spaces where they differ from the setup's
     // (`batch_setup::batch_spaces`).
     let batch_setup::BatchSpaces {

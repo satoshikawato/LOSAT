@@ -527,6 +527,7 @@ fn make_blastp_args() -> BlastpArgs {
         gap_trigger: None,
         sum_stats: false,
         first_query_ordinal: 0,
+        scope_refusal: None,
         psiblast_pssm: None,
         formatting: Default::default(),
         rps: None,

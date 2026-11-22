@@ -29,7 +29,9 @@ use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::blastinput::seq_range::{next_ranged_batch_end, record_interval, RecordInterval};
+use crate::blastinput::query_batch::BatchCount;
+use crate::blastinput::query_batch::ScopeRefusal;
+use crate::blastinput::seq_range::{record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
@@ -174,7 +176,16 @@ pub struct Batches<'a> {
     lengths: Vec<usize>,
     /// The query records that NCBI's reader skips (`-query_loc`).
     skipped: Vec<bool>,
+    /// Under `-parse_deflines` with `-subject`, NCBI's scope of the run's queries (`run_scopes`).
+    run_scopes: Option<crate::blastinput::query_batch::QueryScopes>,
+    /// Under `-parse_deflines`, NCBI's count of the query records into the batches
+    /// (`query_batch::BatchCount`, `batch_count`).
+    count: Option<BatchCount>,
     next_query: usize,
+    /// Whether the end of the query records (`Inputs::query_end`: blank lines or a reader error)
+    /// is still to come: in the batch that reads past the last record, or in a batch of its own
+    /// when the last batch reached its size.
+    end_pending: bool,
     hsps_before: usize,
     searched_one: bool,
     finished: bool,
@@ -226,8 +237,11 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
             inputs,
             sizes: BatchSizes::Fixed(0),
             skipped: vec![false; lengths.len()],
+            run_scopes: None,
+            count: None,
             lengths,
             next_query: 0,
+            end_pending: false,
             hsps_before: 0,
             searched_one: false,
             finished: false,
@@ -239,25 +253,6 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         });
     }
     check_inputs(search, inputs)?;
-    // Under `-parse_deflines` with `-subject`, NCBI's scope keeps every batch's queries
-    // (`query_batch::QueryScopes`): two queries of the run with one id are refused before the
-    // first batch, as the command line refuses them; each batch's call holds its own records alone.
-    if search.parse_deflines() && !inputs.database {
-        let program = match search.program() {
-            crate::api::Program::Blastn => "BLASTN",
-            crate::api::Program::Blastp => "BLASTP",
-            crate::api::Program::Blastx => "BLASTX",
-            crate::api::Program::Tblastn => "TBLASTN",
-            crate::api::Program::Tblastx => "TBLASTX",
-            crate::api::Program::Psiblast => "PSIBLAST",
-        };
-        crate::blastinput::query_batch::QueryScopes::of_records(
-            crate::blastinput::query_batch::QueryScopeSpan::Run,
-            program,
-            inputs.query,
-        )
-        .map_err(|error| Error::search(&error))?;
-    }
     let command = search.command(inputs)?;
     // A PSSM query is one batch, whose size NCBI does not read (`BATCH_SIZE`; tblastn_app.cpp:
     // 208-221 reads it for a FASTA query only).
@@ -273,14 +268,19 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
             query_range
                 .is_some_and(|range| record_interval(&range, length) == RecordInterval::PastEnd)
         })
-        .collect();
+        .collect::<Vec<bool>>();
+    let run_scopes = run_scopes(search, inputs);
+    let count = batch_count(search, inputs);
     Ok(Batches {
         search,
         inputs,
         sizes,
         lengths,
         skipped,
+        run_scopes,
+        count,
         next_query: 0,
+        end_pending: inputs.query_file.is_none() && !inputs.end().is_input(),
         hsps_before: 0,
         searched_one: false,
         finished: false,
@@ -292,6 +292,55 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
     })
 }
 
+/// NCBI's scope of the run's queries under `-parse_deflines` with `-subject`
+/// (`query_batch::QueryScopes`, one scope for the run), while each batch's call holds its own
+/// records alone: each batch joins it before its call (`Batches::search_batch`), with every record
+/// read, those that `-query_loc` skips too (BLASTX's too since line WQA D10 round 6,
+/// `blastx::input::scope_records`). Where a record of the batch has the id of a query of an
+/// earlier batch, the call gets LOSAT's refusal (`query_batch::ScopeRefusal`, the program's
+/// `scope_refusal` argument), which the program's add of the call's batch gives where the command
+/// line's add of that batch gives it: the batch stops in the one form of every program, after its
+/// checks before the set-up, with NCBI's error of the set-up of its records that are first in the
+/// scope where that set-up fails, else with the refusal (`query_batch::refused_batch_error`; line
+/// WQA D10 round 5, 2026-11-20; round 4 read the batches ahead and refused outside the call). A
+/// batch that fails ends the batches, so the scope holds no batch after one that NCBI fails.
+fn run_scopes(
+    search: &Search,
+    inputs: Inputs<'_>,
+) -> Option<crate::blastinput::query_batch::QueryScopes> {
+    use crate::blastinput::query_batch::{QueryScopeSpan, QueryScopes};
+    if !search.parse_deflines() || inputs.database || inputs.query_file.is_some() {
+        return None;
+    }
+    Some(QueryScopes::new(QueryScopeSpan::Run, program_name(search)))
+}
+
+/// NCBI's count of the query records into the batches under `-parse_deflines`
+/// (`query_batch::BatchCount`), whose scope spans the run with `-subject` and a batch with a
+/// database (the batches' reports are tabular); `None` without the option or with a PSSM query
+/// (one batch).
+fn batch_count(search: &Search, inputs: Inputs<'_>) -> Option<BatchCount> {
+    use crate::blastinput::query_batch::QueryScopeSpan;
+    if !search.parse_deflines() || inputs.query_file.is_some() {
+        return None;
+    }
+    let span = QueryScopeSpan::of(!inputs.database, false);
+    Some(BatchCount::new(span, program_name(search)))
+}
+
+/// The program's name in NCBI's scopes of query records (`query_batch::QueryScopes`).
+fn program_name(search: &Search) -> &'static str {
+    use crate::api::Program;
+    match search.program() {
+        Program::Blastn => "BLASTN",
+        Program::Blastp => "BLASTP",
+        Program::Blastx => "BLASTX",
+        Program::Tblastn => "TBLASTN",
+        Program::Tblastx => "TBLASTX",
+        Program::Psiblast => "PSIBLAST",
+    }
+}
+
 impl Batches<'_> {
     /// How many queries the inputs hold (the records, or the one sequence of a PSSM or alignment
     /// file, `Inputs::pssm`, `Inputs::msa`): with `Batch::query_indices`, how far the search is.
@@ -299,36 +348,82 @@ impl Batches<'_> {
         self.lengths.len()
     }
 
-    /// The records of the next batch. A batch size of 0 reads no record: the rest goes to the
-    /// program, which fails as the command line fails (no batch follows either way).
-    fn next_range(&self) -> Range<usize> {
+    /// The records of the next batch, and whether the batch reached its size. A batch size of 0
+    /// reads no record: the rest goes to the program, which fails as the command line fails (no
+    /// batch follows either way).
+    fn next_range(&mut self) -> (Range<usize>, bool) {
         let start = self.next_query;
-        let end = next_ranged_batch_end(&self.lengths, &self.skipped, start, self.sizes.current());
-        start..if end > start { end } else { self.lengths.len() }
+        let query = self.inputs.query;
+        let (end, reached) = BatchCount::next_batch(
+            self.count.as_mut(),
+            &|record| query.get(record)?.believed_shared(),
+            &self.lengths,
+            &self.skipped,
+            start,
+            self.sizes.current(),
+        );
+        if end > start {
+            (start..end, reached)
+        } else {
+            (start..self.lengths.len(), false)
+        }
     }
 
-    /// Searches the batch `range`, as the command line's loop searches it.
-    fn search_batch(&mut self, range: Range<usize>) -> Result<Batch, Error> {
+    /// Searches the batch `range`, as the command line's loop searches it. The end of the query
+    /// records comes in the batch that reads past the last record before reaching its size
+    /// (`reads_on`), and only there (line WQA's D10, 2026-11-19).
+    fn search_batch(&mut self, range: Range<usize>, reads_on: bool) -> Result<Batch, Error> {
+        let ends_reading = reads_on && range.end == self.lengths.len();
         let inputs = match self.inputs.query_file {
             Some(_) => self.inputs,
             None => Inputs {
                 query: &self.inputs.query[range.clone()],
+                query_end: self.inputs.query_end.filter(|_| ends_reading),
                 ..self.inputs
             },
         };
+        if ends_reading {
+            self.end_pending = false;
+        }
         let mut command = self.search.command(inputs)?;
         let query_range = query_range_of(&command);
+        // The batch joins the run's scope of the queries before its call (`run_scopes`).
+        let scope_refusal = match self.run_scopes.as_mut().map(|scopes| {
+            scopes.add_batch_ids(
+                self.inputs.query[range.clone()]
+                    .iter()
+                    .map(|record| (record.believed(), record.seq().len())),
+                range.start,
+            )
+        }) {
+            Some(Err(error)) => match ScopeRefusal::of(&error) {
+                Some(refusal) => Some(refusal.clone()),
+                None => return Err(Error::search(&error)),
+            },
+            _ => None,
+        };
         match &mut command {
             Commands::Blastn(args) => {
                 args.one_query_batch = true;
                 args.first_query_ordinal = range.start;
+                args.scope_refusal = scope_refusal;
             }
-            Commands::Blastp(args) => args.first_query_ordinal = range.start,
-            Commands::Tblastn(args) => args.first_query_ordinal = range.start,
-            Commands::Tblastx(args) => args.first_query_ordinal = range.start,
+            Commands::Blastp(args) => {
+                args.first_query_ordinal = range.start;
+                args.scope_refusal = scope_refusal;
+            }
+            Commands::Tblastn(args) => {
+                args.first_query_ordinal = range.start;
+                args.scope_refusal = scope_refusal;
+            }
+            Commands::Tblastx(args) => {
+                args.first_query_ordinal = range.start;
+                args.scope_refusal = scope_refusal;
+            }
             Commands::Psiblast(args) => {
                 use crate::algorithm::psiblast::pssm::PssmCheckScope;
                 args.first_query_ordinal = range.start;
+                args.scope_refusal = scope_refusal;
                 args.pssm_versions = self.pssm_versions.clone();
                 // The command line checks the PSSM files of all its queries before its first
                 // byte: the first batch checks the run's, where the command line does.
@@ -342,7 +437,10 @@ impl Batches<'_> {
             }
             // BLASTX's messages show the record's own id; its prefetch's stop asks whether the
             // call comes after others (`local::DatabaseReports::unrecorded_calls`).
-            Commands::Blastx(args) => args.first_query_ordinal = range.start,
+            Commands::Blastx(args) => {
+                args.first_query_ordinal = range.start;
+                args.scope_refusal = scope_refusal;
+            }
             // rpsblast and rpstblastn are refused by `Program::parse`.
             Commands::Rpsblast(_)
             | Commands::Rpstblastn(_)
@@ -440,14 +538,15 @@ impl Iterator for Batches<'_> {
                 diagnostics: std::mem::take(&mut self.start_messages),
             }));
         }
-        // Queries without a record are one call: NCBI's `Query is Empty!`.
-        let done = self.next_query >= self.lengths.len() && self.searched_one;
+        // Queries without a record are one call: NCBI's `Query is Empty!`. An end of the records
+        // that the last batch did not meet (it reached its size) is a batch of its own.
+        let done = self.next_query >= self.lengths.len() && self.searched_one && !self.end_pending;
         if self.finished || done {
             return None;
         }
-        let range = self.next_range();
+        let (range, reached) = self.next_range();
         self.next_query = range.end;
-        let batch = self.search_batch(range);
+        let batch = self.search_batch(range, !reached);
         self.searched_one = true;
         self.finished = batch.is_err();
         Some(batch)

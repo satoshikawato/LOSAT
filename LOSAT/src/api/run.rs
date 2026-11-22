@@ -680,17 +680,30 @@ fn run_local_entry(
     start: &mut CallStart,
 ) -> anyhow::Result<()> {
     let (query, subject) = (inputs.query, inputs.subject);
+    // How the reading of the query records ended, which the search meets in its batch
+    // (`Inputs::query_end`).
+    let end = inputs.end();
     if inputs.database {
         let settings = start.settings(&mut *outputs.diagnostics)?;
         return match command {
-            Commands::Blastp(args) => run_local_database_blastp(args, query, settings, outputs),
-            Commands::Tblastn(args) => run_local_database_tblastn(args, query, settings, outputs),
-            Commands::Blastn(args) => run_local_database_blastn(args, query, settings, outputs),
-            Commands::Tblastx(args) => run_local_database_tblastx(args, query, settings, outputs),
-            Commands::Blastx(args) => run_local_database_blastx(args, query, settings, outputs),
+            Commands::Blastp(args) => {
+                run_local_database_blastp(args, query, end, settings, outputs)
+            }
+            Commands::Tblastn(args) => {
+                run_local_database_tblastn(args, query, end, settings, outputs)
+            }
+            Commands::Blastn(args) => {
+                run_local_database_blastn(args, query, end, settings, outputs)
+            }
+            Commands::Tblastx(args) => {
+                run_local_database_tblastx(args, query, end, settings, outputs)
+            }
+            Commands::Blastx(args) => {
+                run_local_database_blastx(args, query, end, settings, outputs)
+            }
             Commands::Psiblast(args) => {
                 let args = psiblast_args(args, outputs)?;
-                run_local_database_blastp(args, query, settings, outputs)
+                run_local_database_blastp(args, query, end, settings, outputs)
             }
             Commands::Rpsblast(_)
             | Commands::Rpstblastn(_)
@@ -708,11 +721,11 @@ fn run_local_entry(
             if args.unknown_matrix_name() {
                 args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
             }
-            run_local_blastp(args, query, subject, "", "", outputs)
+            run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn)?;
-            run_local_tblastn(args, query, subject, outputs)
+            run_local_tblastn(args, query, end, subject, outputs)
         }
         Commands::Blastn(mut args) => {
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastn)?;
@@ -738,7 +751,7 @@ fn run_local_entry(
                 let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.resolve_repeat_filter(&settings);
             }
-            run_local_blastn(args, query, subject, outputs)
+            run_local_blastn(args, query, end, subject, outputs)
         }
         Commands::Tblastx(mut args) => {
             // The file of a `-matrix` that NCBI's tables do not have, first, as the command
@@ -748,7 +761,7 @@ fn run_local_entry(
                 args.find_matrix_file(&settings.matrix_search)?;
             }
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastx)?;
-            run_local_tblastx(args, query, subject, outputs)
+            run_local_tblastx(args, query, end, subject, outputs)
         }
         Commands::Blastx(mut args) => {
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastx)?;
@@ -757,12 +770,12 @@ fn run_local_entry(
             if args.unknown_matrix_name() {
                 args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
             }
-            run_local_blastx(args, query, subject, outputs)
+            run_local_blastx(args, query, end, subject, outputs)
         }
         Commands::Psiblast(args) => {
             let mut args = psiblast_args(args, outputs)?;
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast)?;
-            run_local_blastp(args, query, subject, "", "", outputs)
+            run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)

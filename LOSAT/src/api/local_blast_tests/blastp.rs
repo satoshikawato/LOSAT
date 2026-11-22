@@ -98,7 +98,15 @@ fn run(inputs: &Inputs, formats: &[&str], extra: &[&str], observe: bool) -> Run 
     let subjects = subjects(&inputs.subject);
     run_formats(formats, observe, |outputs| {
         let args = blastp_args(&inputs.query, &inputs.subject, extra);
-        run_local_blastp(args, &queries, &subjects, "", "", outputs)
+        run_local_blastp(
+            args,
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            "",
+            "",
+            outputs,
+        )
     })
 }
 
@@ -167,7 +175,15 @@ fn unsupported_formats_fail_before_searching() {
             observer: None,
         };
         let args = blastp_args(&inputs.query, &inputs.subject, &[]);
-        let result = run_local_blastp(args, &queries, &subjects, "", "", &mut outputs);
+        let result = run_local_blastp(
+            args,
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            "",
+            "",
+            &mut outputs,
+        );
         drop(outputs);
         assert!(result.is_err(), "outfmt {outfmt:?} must be rejected");
         assert!(
@@ -202,7 +218,16 @@ fn the_words_after_a_pairwise_format_are_dropped() {
             observer: None,
         };
         let args = blastp_args(&inputs.query, &inputs.subject, &[]);
-        run_local_blastp(args, &queries, &subjects, "", "", &mut outputs).expect(outfmt);
+        run_local_blastp(
+            args,
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            "",
+            "",
+            &mut outputs,
+        )
+        .expect(outfmt);
         drop(outputs);
         (report, diagnostics)
     };
@@ -258,6 +283,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let result = run_local_blastp(
             blastp_args(&inputs.query, &inputs.subject, extra),
             &queries,
+            &crate::api::QueryEnd::Input,
             &subjects,
             "",
             "",
@@ -342,6 +368,7 @@ fn run_local_outputs(
         run_local_blastp(
             blastp_args(query, subject, &[]),
             &queries,
+            &crate::api::QueryEnd::Input,
             &subjects,
             "",
             "",
@@ -425,7 +452,15 @@ fn rows_made_per_window_write_the_bytes_of_rows_made_up_front() {
         };
         let run = |observe: bool, hits: bool| {
             run_formats_with(&WINDOW_FORMATS, observe, hits, |outputs| {
-                run_local_blastp(args(), &queries, &subjects, "", "", outputs)
+                run_local_blastp(
+                    args(),
+                    &queries,
+                    &crate::api::QueryEnd::Input,
+                    &subjects,
+                    "",
+                    "",
+                    outputs,
+                )
             })
         };
         let up_front = run(false, true);
@@ -487,7 +522,15 @@ fn rows_made_per_window_write_the_bytes_of_rows_made_up_front() {
         // An observer without outfmt 0: the rows of the other formats per window, the observer's
         // HSP numbers over the whole report.
         let observed = run_formats_with(&WINDOW_FORMATS[1..], true, false, |outputs| {
-            run_local_blastp(args(), &queries, &subjects, "", "", outputs)
+            run_local_blastp(
+                args(),
+                &queries,
+                &crate::api::QueryEnd::Input,
+                &subjects,
+                "",
+                "",
+                outputs,
+            )
         });
         for (index, outfmt) in WINDOW_FORMATS[1..].iter().enumerate() {
             assert!(
@@ -646,7 +689,15 @@ fn an_observer_without_hit_records_numbers_the_hsps_over_the_whole_search() {
     let call = |observe: bool| {
         run_formats_with(&formats, observe, false, |outputs| {
             let args = blastp_args(&query.0, &subject, &["-evalue", "0.001"]);
-            run_local_blastp(args, &queries, &subjects, "", "", outputs)
+            run_local_blastp(
+                args,
+                &queries,
+                &crate::api::QueryEnd::Input,
+                &subjects,
+                "",
+                "",
+                outputs,
+            )
         })
     };
     let (observed, plain) = (call(true), call(false));
@@ -685,7 +736,15 @@ fn several_file_outputs_are_written_one_after_the_other() {
     let (queries, subjects) = (queries(&query.0), subjects(&subject));
     let args = || blastp_args(&query.0, &subject, &["-evalue", "0.001"]);
     let whole = run_formats(&["6", "7"], false, |outputs| {
-        run_local_blastp(args(), &queries, &subjects, "", "", outputs)
+        run_local_blastp(
+            args(),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            "",
+            "",
+            outputs,
+        )
     });
     assert!(
         !whole.outputs[0].is_empty(),
@@ -712,7 +771,15 @@ fn several_file_outputs_are_written_one_after_the_other() {
             hits: None,
             observer: None,
         };
-        run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs)
+        run_local_blastp(
+            args(),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            "",
+            "",
+            &mut outputs,
+        )
     };
 
     // `TempFasta` removes the files when dropped, also when an assertion fails.
@@ -755,7 +822,15 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
     let (queries, subjects) = (queries(&query.0), subjects(&subject));
     let args = || blastp_args(&query.0, &subject, &["-evalue", "0.001"]);
     let blocked = run_formats_with(&["6", "7"], true, true, |outputs| {
-        run_local_blastp(args(), &queries, &subjects, "", "", outputs)
+        run_local_blastp(
+            args(),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            "",
+            "",
+            outputs,
+        )
     });
     assert!(!blocked.hits.is_empty(), "the fixture must produce hits");
 
@@ -785,7 +860,16 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
             hits: Some(&mut on_hits),
             observer: None,
         };
-        run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs).expect("run_local");
+        run_local_blastp(
+            args(),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            "",
+            "",
+            &mut outputs,
+        )
+        .expect("run_local");
     }
     let commented = std::fs::read(&file).expect("the file");
     let _ = std::fs::remove_file(&file);
@@ -822,7 +906,11 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
     let extra = ["-parse_deflines", "-lcase_masking", "-evalue", "0.001"];
     let args = || blastp_args(&query.0, &subject.0, &extra);
     let command = Commands::Blastp(args());
-    let (queries, subjects) = crate::api::input::read_search_inputs(
+    let crate::api::InputRecords {
+        query: queries,
+        subject: subjects,
+        ..
+    } = crate::api::input::read_search_inputs(
         crate::api::Program::Blastp,
         &command,
         Some(false),
@@ -837,7 +925,15 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
         .is_some_and(|ids| ids.shared.is_some()));
     let refusal = "is both a query and a subject under -parse_deflines and has masks";
     let alone = run_formats(&["6"], false, |outputs| {
-        run_local_blastp(args(), &queries, &subjects, "", "", outputs)
+        run_local_blastp(
+            args(),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            "",
+            "",
+            outputs,
+        )
     });
     assert!(
         !alone.outputs[0].is_empty(),
@@ -868,7 +964,15 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
             hits: None,
             observer: None,
         };
-        let result = run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs);
+        let result = run_local_blastp(
+            args(),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            "",
+            "",
+            &mut outputs,
+        );
         if fails_alone {
             result.expect("outfmt 0 fails alone");
             let error = outputs.formats[1]

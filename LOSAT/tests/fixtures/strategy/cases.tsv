@@ -6,6 +6,9 @@
 # (fixtures/strategy/<name>.ss, .out, .err; an absent .out or .err is empty; the run folder's path in NCBI's
 # messages is written as {ENGINE}); parser = LOSAT's argument parser refuses (rc 2, nothing on standard
 # output) and the file is as NCBI left it (.ss); refuse = LOSAT refuses (rc, standard error contains expect).
+# near:NAME = LOSAT refuses at a query batch (rc, standard error contains expect), and the strategy file and the
+# standard output are NCBI's of the ncbi row NAME, its run of a near input whose reader stops at that batch (line WQA
+# D10 round 5, 2026-11-20: two queries with one id under -parse_deflines write no request of the refused batch).
 # Cases rpsblast.3v.l2p63.q40, rpstblastn.3v.l2p63.nq.b2000 and blastp.db.dbsize.min (line RG D1a-4 fix round 2, item 7): removed. They were LOSAT's refusals of a request whose DbLength is exactly -2^63, which NCBI BLAST+ 2.17.0 writes as big-integer -0; LOSAT writes big-integer -9223372036854775808 (PD-LOSAT-NCBI-DEFECTS approved exception 17 (Int8 -2^63 written as digits), the Owner's Q1 = A of 2026-11-17). The check kinds compare NCBI's bytes or a refusal; the writer's unit tests pin the digits, and probe minus0 of fix round 2 compared the rest of each file with NCBI's.
 name	program	env	args	check	rc	pre	expect
 blastn.sub	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
@@ -329,8 +332,10 @@ tblastx.sub.order.xmlmatrix.q1.f16	tblastx	-	-query tests/fasta/strategy/order_x
 tblastx.sub.order.xmlmatrix.s1.f15	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xms.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 15 -export_search_strategy {ss}	ncbi	3	-	-
 tblastx.sub.order.xmlmatrix.prefetch	tblastx	PRE_FETCH_SEQS_LIMIT=abc	-query tests/fasta/strategy/order_xm1.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 5 -export_search_strategy {ss}	ncbi	255	-	-
 tblastx.sub.order.xmlmatrix.prefetch.b3.f16	tblastx	BATCH_SIZE=1,PRE_FETCH_SEQS_LIMIT=abc	-query tests/fasta/strategy/order_xm3.fna -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	255	-	-
-blastx.sub.order.xmlmatrix.dupid.b3.f16	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup.fna -parse_deflines -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	refuse	1	-	two query records have the Seq-id lcl|dup
-tblastx.sub.order.xmlmatrix.dupid.b3.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup.fna -parse_deflines -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	refuse	1	-	two query records have the Seq-id lcl|dup
+blastx.sub.order.xmlmatrix.dupid.b3.f16	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup.fna -parse_deflines -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	near:blastx.sub.order.xmlmatrix.dupstop.b3.f16	1	-	two query records have the Seq-id lcl|dup
+blastx.sub.order.xmlmatrix.dupstop.b3.f16	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup_stop.fna -parse_deflines -subject tests/fasta/strategy/order_s.faa -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	1	-	-
+tblastx.sub.order.xmlmatrix.dupid.b3.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup.fna -parse_deflines -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	near:tblastx.sub.order.xmlmatrix.dupstop.b3.f16	1	-	two query records have the Seq-id lcl|dup
+tblastx.sub.order.xmlmatrix.dupstop.b3.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmdup_stop.fna -parse_deflines -subject tests/fasta/strategy/order_s.fna -matrix blosum62 -outfmt 16 -export_search_strategy {ss}	ncbi	1	-	-
 psiblast.db.itdef	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.f14.stdout	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 14 -export_search_strategy -	ncbi	1	-	-
 psiblast.db.f99.ss	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 99 -export_search_strategy {ss}	ncbi	255	-	-
@@ -524,6 +529,26 @@ psiblast.pssm.db.d3.c17_locs	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c1
 tblastn.db.in_pssm.d3.c17_locs	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c17_locs.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.pssm.db.d3.m01_members	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_m01_members.asn -db tests/db_search/paja -comp_based_stats 0 -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 tblastn.db.in_pssm.d3.m01_members	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_m01_members.asn -db tests/db_search/tslice -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
+blastn.sub.pd.dup.one	blastn	-	-query tests/db_search/q1c/dup2_bn.fna -subject tests/db_search/nslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	near:blastn.sub.pd.dupstop.one	1	-	two query records have the Seq-id lcl|dup2
+blastn.sub.pd.dupstop.one	blastn	-	-query tests/db_search/q1c/dup2_bn_stop.fna -subject tests/db_search/nslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+blastn.sub.pd.dup.b1	blastn	BATCH_SIZE=1	-query tests/db_search/q1c/dup2_bn.fna -subject tests/db_search/nslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	near:blastn.sub.pd.dupstop.b1	1	-	two query records have the Seq-id lcl|dup2
+blastn.sub.pd.dupstop.b1	blastn	BATCH_SIZE=1	-query tests/db_search/q1c/dup2_bn_stop.fna -subject tests/db_search/nslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+blastx.sub.pd.dup.one	blastx	-	-query tests/db_search/q1c/dup2_bx.fna -subject tests/db_search/bslice.faa -parse_deflines -outfmt 6 -export_search_strategy {ss}	near:blastx.sub.pd.dupstop.one	1	-	two query records have the Seq-id lcl|dup2
+blastx.sub.pd.dupstop.one	blastx	-	-query tests/db_search/q1c/dup2_bx_stop.fna -subject tests/db_search/bslice.faa -parse_deflines -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+blastx.sub.pd.dup.b1	blastx	BATCH_SIZE=1	-query tests/db_search/q1c/dup2_bx.fna -subject tests/db_search/bslice.faa -parse_deflines -outfmt 6 -export_search_strategy {ss}	near:blastx.sub.pd.dupstop.b1	1	-	two query records have the Seq-id lcl|dup2
+blastx.sub.pd.dupstop.b1	blastx	BATCH_SIZE=1	-query tests/db_search/q1c/dup2_bx_stop.fna -subject tests/db_search/bslice.faa -parse_deflines -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+tblastx.sub.pd.dup.one	tblastx	-	-query tests/db_search/q1c/dup2_tx.fna -subject tests/db_search/xslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	near:tblastx.sub.pd.dupstop.one	1	-	two query records have the Seq-id lcl|dup2
+tblastx.sub.pd.dupstop.one	tblastx	-	-query tests/db_search/q1c/dup2_tx_stop.fna -subject tests/db_search/xslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+tblastx.sub.pd.dup.b1	tblastx	BATCH_SIZE=1	-query tests/db_search/q1c/dup2_tx.fna -subject tests/db_search/xslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	near:tblastx.sub.pd.dupstop.b1	1	-	two query records have the Seq-id lcl|dup2
+tblastx.sub.pd.dupstop.b1	tblastx	BATCH_SIZE=1	-query tests/db_search/q1c/dup2_tx_stop.fna -subject tests/db_search/xslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+blastp.sub.pd.dup.one	blastp	-	-query tests/db_search/q1c/dup2_bp.faa -subject tests/db_search/bslice.faa -parse_deflines -outfmt 6 -export_search_strategy {ss}	near:blastp.sub.pd.dupstop.one	1	-	two query records have the Seq-id lcl|dup2
+blastp.sub.pd.dupstop.one	blastp	-	-query tests/db_search/q1c/dup2_bp_stop.faa -subject tests/db_search/bslice.faa -parse_deflines -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+blastp.sub.pd.dup.b1	blastp	BATCH_SIZE=1	-query tests/db_search/q1c/dup2_bp.faa -subject tests/db_search/bslice.faa -parse_deflines -outfmt 6 -export_search_strategy {ss}	near:blastp.sub.pd.dupstop.b1	1	-	two query records have the Seq-id lcl|dup2
+blastp.sub.pd.dupstop.b1	blastp	BATCH_SIZE=1	-query tests/db_search/q1c/dup2_bp_stop.faa -subject tests/db_search/bslice.faa -parse_deflines -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+tblastn.sub.pd.dup.one	tblastn	-	-query tests/db_search/q1c/dup2_tn.faa -subject tests/db_search/tslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	near:tblastn.sub.pd.dupstop.one	1	-	two query records have the Seq-id lcl|dup2
+tblastn.sub.pd.dupstop.one	tblastn	-	-query tests/db_search/q1c/dup2_tn_stop.faa -subject tests/db_search/tslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
+tblastn.sub.pd.dup.b1	tblastn	BATCH_SIZE=1	-query tests/db_search/q1c/dup2_tn.faa -subject tests/db_search/tslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	near:tblastn.sub.pd.dupstop.b1	1	-	two query records have the Seq-id lcl|dup2
+tblastn.sub.pd.dupstop.b1	tblastn	BATCH_SIZE=1	-query tests/db_search/q1c/dup2_tn_stop.faa -subject tests/db_search/tslice.fna -parse_deflines -outfmt 6 -export_search_strategy {ss}	ncbi	1	-	-
 blastn.sub.emptyq.stdout	blastn	-	-query tests/fasta/outfmt11/arch_bp_empty.faa -subject tests/fasta/outfmt11/arch_s.fna -outfmt 6 -export_search_strategy -	ncbi	0	-	-
 blastp.sub.emptyq.stdout	blastp	-	-query tests/fasta/outfmt11/arch_bp_empty.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -export_search_strategy -	ncbi	0	-	-
 blastp.sub.emptyq.sameout	blastp	-	-query tests/fasta/outfmt11/arch_bp_empty.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -outfmt 6 -out {ss} -export_search_strategy {ss}	ncbi	0	-	-

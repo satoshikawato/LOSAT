@@ -74,7 +74,13 @@ impl Inputs {
         let queries = queries(&self.query.0);
         let subjects = subjects(&self.subject.0);
         run_formats(formats, observe, |outputs| {
-            run_local_tblastx(self.args(extra), &queries, &subjects, outputs)
+            run_local_tblastx(
+                self.args(extra),
+                &queries,
+                &crate::api::QueryEnd::Input,
+                &subjects,
+                outputs,
+            )
         })
     }
 }
@@ -141,7 +147,13 @@ fn unsupported_formats_fail_before_searching() {
             hits: None,
             observer: None,
         };
-        let result = run_local_tblastx(inputs.args(&[]), &queries, &subjects, &mut outputs);
+        let result = run_local_tblastx(
+            inputs.args(&[]),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         drop(outputs);
         assert!(result.is_err(), "outfmt {outfmt:?} must be rejected");
         assert!(
@@ -179,7 +191,13 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
             hits: None,
             observer: None,
         };
-        let result = run_local_tblastx(inputs.args(extra), &queries, &subjects, &mut outputs);
+        let result = run_local_tblastx(
+            inputs.args(extra),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         drop(outputs);
         (result, sinks, diagnostics)
     };
@@ -245,7 +263,13 @@ fn run_local_outputs(
             hits: None,
             observer: None,
         };
-        run_local_tblastx(inputs.args(extra), &queries, &subjects, &mut outputs)
+        run_local_tblastx(
+            inputs.args(extra),
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        )
     };
     (sinks, diagnostics, result)
 }
@@ -298,6 +322,7 @@ fn a_word_size_of_zero_is_ncbis_core_error() {
         run_local_tblastx(
             args,
             &queries(&query.0),
+            &crate::api::QueryEnd::Input,
             &subjects(&subject.0),
             &mut outputs,
         )
@@ -360,6 +385,7 @@ fn a_word_size_of_one_searches() {
             run_local_tblastx(
                 args,
                 &queries(&query.0),
+                &crate::api::QueryEnd::Input,
                 &subjects(&subject.0),
                 &mut outputs,
             )
@@ -411,7 +437,13 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
             let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
             let mut outputs =
                 ReportOutputs::single(outfmt, OutputSink::Writer(&mut report), &mut diagnostics);
-            let result = run_local_tblastx(inputs.args(&[]), &queries, &subjects, &mut outputs);
+            let result = run_local_tblastx(
+                inputs.args(&[]),
+                &queries,
+                &crate::api::QueryEnd::Input,
+                &subjects,
+                &mut outputs,
+            );
             drop(outputs);
             // BLAST XML: NCBI crashes on the punctuation-only title of a subject with hits
             // (outfmt 0, 5, 15 and 16 alike), so LOSAT refuses it and writes nothing.
@@ -574,7 +606,13 @@ fn residues_are_read_as_ncbis_reader_reads_them() {
         let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
         let mut outputs =
             ReportOutputs::single("6", OutputSink::Writer(&mut report), &mut diagnostics);
-        let result = run_local_tblastx(inputs.args(extra), queries, &subjects, &mut outputs);
+        let result = run_local_tblastx(
+            inputs.args(extra),
+            queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         drop(outputs);
         assert!(report.is_empty() && diagnostics.is_empty());
         result.expect_err("rejected").to_string()
@@ -605,7 +643,13 @@ fn run_local_reads_the_query_strand() {
             ReportOutputs::single("6", OutputSink::Writer(&mut report), &mut diagnostics);
         let mut args = inputs.args(&[]);
         args.strand = strand.to_string();
-        let result = run_local_tblastx(args, &queries, &subjects, &mut outputs);
+        let result = run_local_tblastx(
+            args,
+            &queries,
+            &crate::api::QueryEnd::Input,
+            &subjects,
+            &mut outputs,
+        );
         drop(outputs);
         assert_eq!(
             result
@@ -623,9 +667,15 @@ fn run_local_reads_the_query_strand() {
         ReportOutputs::single("99", OutputSink::Writer(&mut report), &mut diagnostics);
     let mut args = inputs.args(&[]);
     args.strand = "x".to_string();
-    let error = run_local_tblastx(args, &queries, &subjects, &mut outputs)
-        .expect_err("an unknown strand is an error")
-        .to_string();
+    let error = run_local_tblastx(
+        args,
+        &queries,
+        &crate::api::QueryEnd::Input,
+        &subjects,
+        &mut outputs,
+    )
+    .expect_err("an unknown strand is an error")
+    .to_string();
     drop(outputs);
     assert!(error.starts_with("Argument \"strand\""), "{error}");
     let plain = inputs.run(&["6 qseqid sseqid qframe"], &[], false);

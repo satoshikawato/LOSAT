@@ -374,7 +374,15 @@
   `Hit` is the Seq-align id's FASTA form, `Unknown` and length 0, each of its HSPs its number,
   scores and E-value, the coordinates 0, the Seq-align's identities (-1 where it has none) and no
   letters, and the report goes on (exit 0); the refusal of 1.31 no longer covers outfmt 5 (outfmt
-  17 alone, and in a call of LOSAT's library outfmt 5 with outfmt 0 to 4); line DBID item pfoff-4,
+  17 alone, and in a call of LOSAT's library outfmt 5 with outfmt 0 to 4); review 1 of the item:
+  such a sequence is refused, in every format that reads it (outfmt 0 to 4, 5, 6, 7, 10, 13 to 16,
+  18 and 20), where the run loaded before it, in NCBI's order, another sequence that holds an id
+  NCBI's scope takes for its Seq-align id, which NCBI writes for it without the lookup (H1, H2;
+  this changes what 1.47, 1.50 and 1.71 wrote for outfmt 13 to 16, 6, 7, 10, 18, 20 and 0 to 4
+  there: silent differences, and for outfmt 10 a wrong refusal), and a call of LOSAT's library is
+  refused where NCBI's runs of its formats stop at different places after such a sequence (M1:
+  a format that ends the run there with one whose run goes on, or two that end at different
+  rows); line DBID item pfoff-4,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.76; first
   1.75, then 1.77 at the merge of dev that brought line RG item D5b-3's 1.74, line NP item M5's 1.75
   and line RG item X4b-2's 1.76)
@@ -1637,7 +1645,24 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   `-num_descriptions` HSPs, at least the first, then the alignments theirs up to the stop, after
   which no later batch is prefetched) or outfmt 5 (since version 1.77, line DBID item pfoff-4: each
   `Hit` of such a sequence is the Seq-align id's FASTA form, `Unknown` and length 0, with HSPs of
-  its scores, coordinates 0, the Seq-align's identities and no letters, and the report goes on), a
+  its scores, coordinates 0, the Seq-align's identities and no letters, and the report goes on);
+  in each of these formats it refuses such a sequence where the run loaded before it another
+  sequence of the database that holds an id that NCBI's scope takes for its Seq-align id and
+  whose own lookup does not fail (listed in the LMDB files that have the accession table), in
+  NCBI's order: a report before (a query, a batch, a psiblast round, a call of the library's
+  batches before, of which LOSAT has no record and takes any such sequence), or before it in its
+  report (a row, a `Hit`, a description line before the alignments), with the words of another
+  sequence that holds the Seq-align id (`... which database sequence N also holds (where both
+  are reported, NCBI BLAST+ 2.17.0 can write that sequence's names and letters for it)`): NCBI's
+  scope or data loader gives that sequence for the id and writes its record, without the lookup
+  (since version 1.77, review 1 of item pfoff-4, H1 and H2: `gi|5001|ref|NP_100001.1|` loaded in
+  the first query's report for `ref|NP_100001.1|` in the second's, also in outfmt 0, 6, 7, 10
+  and 18, where versions 1.47 to 1.76 wrote `Unknown` or refused outfmt 10 for a crash that
+  NCBI does not have; a holder that loads after the throw leaves it thrown), and in a call of
+  LOSAT's library whose formats NCBI's runs of each stop at different places after such a
+  sequence (outfmt 0, outfmt 1 to 4, the formats that end the run there, at their rows, and
+  the others; since version 1.77, review 1 of item pfoff-4, M1: outfmt 5 with
+  `6 qseqid slen`), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

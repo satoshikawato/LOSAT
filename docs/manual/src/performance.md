@@ -24,9 +24,11 @@ tables and figures.
 - **Ratios.** BLAST+ ÷ LOSAT, from the medians: 3.9 means that NCBI BLAST+ took 3.9 times as long as
   LOSAT (or used 3.9 times as much memory). Above 1, LOSAT took less.
 - **Memory.** Peak resident memory of the process (max RSS). NCBI BLAST+ maps database files into
-  memory, so on a large database its max RSS includes database pages that the kernel can drop and
-  read again. "Warm" means the database files were read once before the timed runs; "cold" that
-  their pages were dropped from the file cache before each run.
+  memory (`mmap`), so on a large `-db` search its max RSS includes file-backed database pages that
+  the OS kernel can drop and reload rather than heap alone. Future release-candidate (`C5`) runs
+  are planned to record anonymous private memory (`RssAnon`) alongside `max RSS` for a heap-level
+  comparison. "Warm" means the database files were read once before the timed runs; "cold" that
+  their pages were dropped from the page cache before each run.
 - **Same output.** The same SHA-256 of the output file.
 
 ## Speed and memory by program
@@ -202,3 +204,9 @@ Node.js, development build `7f7db49c`, on the searches of the table above. The t
 the measured times of the previous development build `6a0a8719` scaled by the ratio of the two builds
 run side by side (1 thread: CPU cycles on the same core; 16 threads: wall time, 3 rounds). NCBI BLAST+
 `tblastx` was not run in this set.
+
+## When to choose LOSAT vs. heuristic aligners
+
+LOSAT is built for **exact NCBI BLAST+ 2.17.0 drop-in compatibility**: same CLI options, E-values, bit scores, coordinates, and report formats (`-outfmt 0`–`18`, `20`), across nucleotide, translated, PSI-BLAST, RPS-BLAST, and CDD workflows.
+
+Tools such as **DIAMOND**, **MMseqs2**, or **minimap2** use different indexing, k-mer, or seeding algorithms and report their own scores, E-value calibrations, and formats. When you are clustering or mapping tens of millions of metagenomic reads, huge protein catalogs, or whole-genome assemblies and do not require BLAST+ output equivalence, those specialized aligners are designed for that scale and will often be much faster. Choose **LOSAT** when pipelines, downstream parsers, or scientific protocols expect NCBI BLAST+ 2.17.0 options, semantics, or output formats with lower runtime and memory overhead than BLAST+.

@@ -31,6 +31,11 @@ const PAGE: &str = include_str!(concat!(
     "/../docs/manual/src/refusals.md"
 ));
 
+const EDGE_CASES_PAGE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../docs/manual/src/refusals-edge-cases.md"
+));
+
 /// The programs of the section `All five search programs`.
 const FIVE_PROGRAMS: [&str; 5] = ["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 
@@ -84,15 +89,18 @@ const NCBI_EXECUTABLES: [&str; 28] = [
     "windowmasker",
 ];
 
-/// The lines of the page with the heading of the section each belongs to ("" before the first).
+/// The lines of `refusals.md` and `refusals-edge-cases.md` with the heading of the section
+/// each belongs to ("" before the first heading of each page).
 fn refusal_lines() -> Vec<(&'static str, &'static str)> {
-    let mut heading = "";
     let mut lines = Vec::new();
-    for line in PAGE.lines() {
-        if let Some(rest) = line.strip_prefix("## ") {
-            heading = rest.trim();
+    for page in [PAGE, EDGE_CASES_PAGE] {
+        let mut heading = "";
+        for line in page.lines() {
+            if let Some(rest) = line.strip_prefix("## ") {
+                heading = rest.trim();
+            }
+            lines.push((heading, line));
         }
-        lines.push((heading, line));
     }
     assert!(
         lines.iter().any(|&(heading, _)| heading == FIVE_SECTION),
@@ -159,6 +167,13 @@ fn every_refused_option_is_in_the_manual_for_its_program() {
         ("psiblast", psiblast),
         ("rpsblast", UNPORTED_RPSBLAST_ARGS.to_vec()),
         (
+            "rpstblastn",
+            ["entrez_query", "html", "import_search_strategy", "remote"]
+                .into_iter()
+                .filter(|name| is_unported_rpstblastn_arg(name))
+                .collect(),
+        ),
+        (
             "makeblastdb",
             crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.to_vec(),
         ),
@@ -171,6 +186,20 @@ fn every_refused_option_is_in_the_manual_for_its_program() {
                     "{program}: the option -{name} is refused by LOSAT but the manual's refusals.md does not name it for {program}"
                 ));
             }
+        }
+    }
+    assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));
+}
+
+#[test]
+fn every_run_refusal_is_in_the_manual_for_its_program() {
+    let lines = refusal_lines();
+    let mut missing = Vec::new();
+    for &(program, name, _) in RUN_REFUSALS {
+        if !documented(&lines, program, name) {
+            missing.push(format!(
+                "{program}: the run refusal -{name} is in RUN_REFUSALS but the manual's refusals.md does not name it for {program}"
+            ));
         }
     }
     assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));

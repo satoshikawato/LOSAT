@@ -44,5 +44,5 @@ BLAST+ searches it in overlapping parts). Unsupported options and tasks fail exp
 "What LOSAT refuses"). `-query -` (or no `-query`) and `-subject -` read standard input as NCBI BLAST+
 reads it. Native threads and the serial and threaded command-WASI and Web/reactor entry points are
 implemented. BLASTX is part of v0.2.0; the results on the release candidate are in the
-[release record](release/v0.2.0.md). Ordinary native paths such as `/dev/stdin` retain the source
+[release record](../release/v0.2.0.md). Ordinary native paths such as `/dev/stdin` retain the source
 stream behavior, including pipe EOF, warnings, and format-0 header flush before query data.

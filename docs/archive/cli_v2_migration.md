@@ -70,7 +70,7 @@ resolution remains available for future implementation work. The ordinary
 E-value default remains 10 and explicit overrides are preserved.
 
 The historical dirty-worktree restriction and adopted Wasm identities are recorded in
-[`artifacts/cli-v2-v010-surface-20260911`](../artifacts/cli-v2-v010-surface-20260911/).
+[`artifacts/cli-v2-v010-surface-20260911`](../../artifacts/cli-v2-v010-surface-20260911/).
 The initial migration artifact identities in the following section are historical.
 
 Historical final restriction qualification passed: Cargo 607 passed, 0 failed (3 ignored), Clippy,
@@ -99,7 +99,7 @@ asset adoption; source and artifact hashes were rechecked at handoff.
 | serial | 2052384 | `c4ea93cb8a3ca63079ce1c95102fd4e9a6b8320855350e0564494f37ce188b5a` |
 | threaded | 2288993 | `d4cf0510f4c0588928b3ac0f1cca8a5544628a3c55558f6f4ad19586c589724d` |
 
-Machine-readable final fields: [`acceptance.json`](../artifacts/cli-v2-20260911/acceptance.json).
+Machine-readable final fields: [`acceptance.json`](../../artifacts/cli-v2-20260911/acceptance.json).
 
 ## Configuration boundary
 
@@ -147,7 +147,7 @@ accepts for v0.1.0.
 ## Qualification evidence
 
 Initial migration evidence and logs (before the public restriction) are in
-[`artifacts/cli-v2-20260911`](../artifacts/cli-v2-20260911/).
+[`artifacts/cli-v2-20260911`](../../artifacts/cli-v2-20260911/).
 The 153 production Rust files are frozen in `frozen-source.json`.
 The original checkout was commit `e2abf5848b09309c761c44a373d3bd188daafd80` plus
 pre-existing working-tree changes. This is a local qualification of that

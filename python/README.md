@@ -119,7 +119,7 @@ Every text that pylosat gives of what the command line writes (`str(error)`, `ou
 
 ## Development
 
-See [`python/AGENTS.md`](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/python/AGENTS.md). The boundary of this package is set by [`PD-LOSAT-PYTHON-BINDING-BOUNDARY`](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-PYTHON-BINDING-BOUNDARY.md).
+See [`CONTRIBUTING.md`](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/CONTRIBUTING.md). The boundary of this package is set by [`PD-LOSAT-PYTHON-BINDING-BOUNDARY`](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-PYTHON-BINDING-BOUNDARY.md).
 
 ## License
 

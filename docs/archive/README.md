@@ -31,8 +31,9 @@ old paths were left as they are.
 | [wasm_threading_remediation_results_20260913.md](wasm_threading_remediation_results_20260913.md) | Wasm threads, 2026-09-13 |
 | [wasm_total_threads_20260914.md](wasm_total_threads_20260914.md) | Wasm thread count (N includes the caller), 2026-09-14 |
 | [losat_wasm_np_plan_20260906/](losat_wasm_np_plan_20260906/README.md) | Wasm BLASTN/BLASTP speed sessions, 2026-09-06 |
+| [cli_v2_migration.md](cli_v2_migration.md) | CLI v2 migration record, 2026-09-11 |
+| [losatx_blastx_native_cli.md](losatx_blastx_native_cli.md) | BLASTX native CLI plan note, 2026-09 |
+| [losatx_blastx_v0.2.0_plan.md](losatx_blastx_v0.2.0_plan.md) | BLASTX v0.2.0 plan and sessions ([sessions](losatx_blastx_v0.2.0_sessions/README.md), [Session F checkpoint](losatx_blastx_session_f_checkpoint.md)) |
+| [tlosan_tblastn_v0.2.0_plan.md](tlosan_tblastn_v0.2.0_plan.md) | TBLASTN v0.2.0 plan and sessions ([sessions](tlosan_tblastn_v0.2.0_sessions/README.md)) |
 
-Plans that an open line still follows stay at the `docs/` root: the LOSAT Web plan and its sessions, the reactor
-memory follow-up, the LOSATX (BLASTX) and TLOSAN (TBLASTN) v0.2.0 plans with their sessions and the LOSATX
-Session F checkpoint (v0.2.0 is not released), and the user documents `cli_v2_migration.md` and `losatx_blastx_native_cli.md`. When such a line
-closes, its plan moves here the same way: `git mv`, then rewrite the links to and from it.
+Active design/policy plans still referenced by code checks and open work stay at the `docs/` root (`losat_library_surface_plan.md`, `losat_web_gui_plan.md` with `losat_web_gui_sessions/`, and `wasm_reactor_memory_followup_20260914.md`). When an open line closes, its plan moves here the same way: `git mv`, then rewrite the links to and from it.

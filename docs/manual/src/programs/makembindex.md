@@ -30,7 +30,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-legacy` | `true` | The index format that `blastn -use_index` reads. `-legacy false` writes the newer format, with `-stride` and `-ws_hint`. |
 | `-stride` | `5` | With `-legacy false`: distance between the database positions that are stored. |
 | `-ws_hint` | `28` | With `-legacy false`: the word size you expect to search with. A value below `-nmer` + `-stride` − 1 is raised to it, with a warning. |
-| `-idmap` | `false` | Also write `VOLUME.map`, the first word of each sequence's title as NCBI makes it, one per line (for a database sequence without a title and with a tax id, the first word of its organism's scientific name from the taxonomy database, or `No`). |
+| `-idmap` | `false` | Also write `VOLUME.00.idx.map` (one per index volume), the first word of each sequence's title as NCBI makes it, one per line (for a database sequence without a title and with a tax id, the first word of its organism's scientific name from the taxonomy database, or `No`). |
 | `-old_style_index` | `false` | One index for the whole input, named by `-output` (deprecated in NCBI). |
 | `-output` | none | With `-old_style_index true`: the name of the index files. Ignored otherwise, with a warning. |
 | `-iformat` | `blastdb` (`fasta` for the old style) | Input format. |

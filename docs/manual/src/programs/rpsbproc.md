@@ -1,6 +1,6 @@
 # rpsbproc
 
-`losat rpsbproc` turns the output of an RPS-BLAST search into a list of conserved domains. For each query it reports the domain hits, and optionally the functional sites and structural motifs of those domains, using NCBI's Conserved Domain Database (CDD) data files. It writes the same report as NCBI's `rpsbproc` 0.5.1.
+`losat rpsbproc` turns the output of an RPS-BLAST search into a list of conserved domains. For each query it reports the domain hits, and optionally the functional sites and structural motifs of those domains, using NCBI's Conserved Domain Database (CDD) data files. It writes the same report as NCBI's `rpsbproc` 0.5.1 (the status banner on standard error reads `Post-RPSBLAST Processing Utility (LOSAT 0.2.0)` where NCBI writes `v0.5.1`).
 
 ## Synopsis
 
@@ -63,7 +63,7 @@ For every option: `losat rpsbproc -help`.
 
 For nucleotide queries (from `rpstblastn`), each reading frame is classified separately. Its hits are shown with the frame after the query name, such as `Query_1[-2]`, at positions on the plus strand. The `DOMAINS` section is printed even when there are no hits.
 
-Messages and exit codes are NCBI's: 2 for a problem in the data files, 3 for the input file, 4 for the output file and 5 for the input data.
+Messages and exit codes are NCBI's: 2 for a problem in the data files, 3 for the input file, 4 for the output file and 5 for the input data. When writing the report fails, LOSAT stops with `rpsbproc failed to write output` and exit status 4 instead of exiting silently with 0 ([Differences from NCBI BLAST+](../differences.md#a-write-that-fails-a-closed-pipe-memory)). When writing the report fails, LOSAT stops with `rpsbproc failed to write output` and exit status 4 instead of exiting silently with 0 ([Differences from NCBI BLAST+](../differences.md#a-write-that-fails-a-closed-pipe-memory)). When writing the report fails, LOSAT stops with `rpsbproc failed to write output` and exit status 4 instead of exiting silently with 0 ([Differences from NCBI BLAST+](../differences.md#a-write-that-fails-a-closed-pipe-memory)). When writing the report fails, LOSAT stops with `rpsbproc failed to write output` and exit status 4 instead of exiting silently with 0 ([Differences from NCBI BLAST+](../differences.md#a-write-that-fails-a-closed-pipe-memory)).
 
 ## Differences from NCBI BLAST+
 

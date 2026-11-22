@@ -1,0 +1,4 @@
+DBLIST omp
+FIRST_OID abc
+OIDLIST omp.pxm
+OID_MASK_TYPE abc

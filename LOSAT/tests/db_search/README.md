@@ -1298,6 +1298,31 @@ prints it, the same on every machine), with and without `NSEQ` and `LENGTH`, and
 `db.ol.*` (every search program; `rps/olrps.pal` and `olwrps.pal` over `rps_mini` with `olall.msk`, `olno2.msk` or
 `olonly2.msk` as `rps_mini.msk`); `segmasker` and `dustmasker` read them in their rows `db_oidlist_*`.
 
+## Alias files with OID_MASK_TYPE (line RG, series D, D1b-2)
+
+`oidmask/` (`make_oidmask.sh`): `om.faa`, eight proteins whose definition lines carry predicted RefSeq ids (`XP_`) alone,
+with a GenBank id, beside a normal RefSeq line (record 4, two lines) or none, and `omn.fna`, their back-translation with
+the nucleotide ids (`XM_`, `XR_`, `NM_`, `NR_`). `omp` and `omp4` (versions 5 and 4) and `omn` (two volumes of four) are
+`makeblastdb -parse_seqids -oid_masks 1` databases, `ompx`, `omp4x` and `omnx` the `blastdb_aliastool -oid_masks 1` aliases
+over them (`OIDLIST` of the `.pxm`/`.nxm` mask and `OID_MASK_TYPE 1`). `tall.pal` and `ntall.nal` keep every OID
+(`ones.msk`, `onesn.msk`) with the type 1, so that OIDs 1, 2 and 5 are left without a line; `t0` to `tfirst` write the
+key's other values (0, 2, 3, 4294967295, +1, abc, 4294967296, -1, empty, the key alone, the key without `OIDLIST`, a bad
+`FIRST_OID` before it, no `NSEQ` and `LENGTH`), `j1`, `j2`, `ompy` and `j5` its nesting (a range, a parent list without
+the key, two siblings over one volume). `neg.txt` and `pos.txt` are the seqid lists of rows `db.om.bp.tall.neg.6` and
+`.pos.6`. `rps/xp101.{phr,pin,pdb,pos}.gz` are the files of `rps_mini` built with profile 101 under the Seq-id
+`ref|XP_000101.1|` (`rps/build.sh`; its other files are the same as `rps_mini`'s), searched through `rps/omrps.pal` and
+`omwrps.pal` (`OID_MASK_TYPE 1`, the second with `NSEQ` and `LENGTH`) with `olall.msk` as `rps_mini.msk`.
+`rps/xp3v01.{phr,pin,pdb,pos}.gz` are the files of volume `rps_mini3v.01` built with profile 102 under
+`ref|XP_000102.1|`, searched through `rps/om3vrps.pal` (`DBLIST rps_mini3v`, `OIDLIST` of `olall.msk` as
+`rps_mini3v.msk`, `OID_MASK_TYPE 1`): NCBI searches the three volumes bare, so the profile reaches the reports
+(`db.om.rps.rej.x3v`, `db.om.rtbn.rej.x3v`) unless it is past the cut (`oidmask/qrps8.faa`, eight queries of
+`tests/fasta/rps/q40.faa` whose first subject is another profile, rows `db.om.rps.x3vc.*` with `-max_target_seqs 1`).
+`omb` (`make_oidmask.sh`) holds the byte 0x80 in the titles of two predicted lines, patched into its `.phr` after a
+build with `#` there, behind `ombx.pal` (`OID_MASK_TYPE 1`): row `db.om.bp.rej.omb.6` and A271. `ompart.pal` (`nol.msk`:
+OIDs 0, 3, 4, 6 and 7, each left with a line under the type) is the input of makeblastdb case `B_al_om`. The rows are
+`db.om.*` (every search program); `segmasker`, `dustmasker`, `windowmasker`, `makembindex` and `blastdbcmd` read the
+databases in their rows `db_oidmask_*`, `oidmask_*` and A242 on.
+
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like

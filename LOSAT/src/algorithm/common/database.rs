@@ -1104,6 +1104,11 @@ impl<'a> FetchExcluded<'a> {
         if error.is_unreadable() {
             return FetchRefusal(losat_reader_error(&error, program)).into();
         }
+        // A header that LOSAT refuses where it is read (`seqdb::Volume::filtered_mask`) keeps
+        // that refusal's words.
+        if matches!(error, SeqDbError::Unsupported { .. }) {
+            return FetchRefusal(database_error(error, program).to_string()).into();
+        }
         FetchRefusal(
             refusal(
                 &format!(
@@ -3159,11 +3164,17 @@ pub(crate) fn reports_may_refuse(
             Ok(self)
         }
     }
+    let lineless_dropped = db.drops_lineless_hits();
     let check = |kept: &mut Kept,
                  headers: &HeaderReader<'_>,
                  ordinal: u32,
                  header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
      -> std::result::Result<(), ReportRefusal> {
+        // A sequence left without a line gets no Seq-align (`SeqAligned`): none of its hits is
+        // reported, so it cannot make a report refuse (an error of its header comes below).
+        if lineless_dropped && matches!(db.keeps_line(ordinal), Ok(false)) {
+            return Ok(());
+        }
         match reported_header(headers, header, ordinal, 0, program) {
             Ok(ReportedHeader::Stored(stored)) => {
                 check_reported_title(stored.replaced_bytes, || db.oid(ordinal), program)

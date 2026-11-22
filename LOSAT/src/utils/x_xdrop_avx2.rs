@@ -1250,12 +1250,14 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const G: bool>
     let mut fence_hit = false;
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize;
-    // EXPERIMENT (LOSAT_X_FNGRID, `G`): the blocks of a row start at the anchor `anc` (at most 15
-    // lanes below `first`, moved in steps of 16), so that a row reads its H and E vectors at the
-    // addresses and widths the row above stored them (the store is forwarded) and the addresses do
-    // not wait for `first`. Lanes from `anc` to `first` were dropped in the row above (H and E
-    // stored 0, `EM`), so they hold values below the threshold and change nothing (head of file).
+    // EXPERIMENT (LOSAT_X_FNGRID, `G`): the blocks of a row start at the anchor `anc`, moved in
+    // steps of 16 to at most 15 lanes below `lagf`, the `first` of the row before (`lagf <=
+    // first`), so that a row reads its H and E vectors at the addresses and widths the row above
+    // stored them (the store is forwarded) and the addresses do not wait for this row's `first`
+    // (the end of the row above). Lanes from `anc` to `first` were dropped in the row above (H and
+    // E stored 0, `EM`), so they hold values below the threshold and change nothing (head of file).
     let mut anc = 0usize;
+    let mut lagf = 0usize;
 
     // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
     let mut len2 = len2;
@@ -1267,14 +1269,18 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const G: bool>
             len2 -= d;
             wend[0] = wend[0].saturating_sub(d);
             wend[1] = wend[1].saturating_sub(d);
-            if G {
-                anc = if anc >= d { anc - d } else { first };
+            if G && d > 0 {
+                anc = first;
+                lagf = first;
             }
         }
-        if G && first >= anc + 16 {
-            anc = first - ((first - anc) & 15);
+        if G && lagf >= anc + 16 {
+            anc = lagf - ((lagf - anc) & 15);
         }
         let b_start = if G { anc } else { first };
+        if G {
+            lagf = first;
+        }
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }

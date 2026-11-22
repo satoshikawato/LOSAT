@@ -20,6 +20,7 @@ fn frozen(name: &str) -> Vec<u8> {
         "/../../LOSAT/tests/fixtures/strategy"
     );
     losat::web_adapter::losat_output_bytes(&std::fs::read(format!("{root}/{name}.ss")).unwrap())
+        .into_owned()
 }
 
 /// The result of `run` of `words` (program name first) on the FASTA files `query` and `subject`

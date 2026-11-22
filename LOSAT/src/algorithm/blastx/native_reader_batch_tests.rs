@@ -42,7 +42,8 @@ fn a_reader_batch_is_split_into_units_of_10002_letters() {
         .map(record)
         .to_vec();
     let options = super::super::stage_c_tests::options();
-    let units = XUnit::split(&batch, &options, false);
+    let subjects: Subjects<'_> = (&batch[..1]).into();
+    let units = XUnit::split(&batch, &options, subjects, false);
     let ranges: Vec<_> = units.iter().map(|unit| unit.range.clone()).collect();
     // 4000 + 4000 + 4000 reaches 10002 at the third record; 100 + 10002 at the fifth;
     // 5 + 20000 at the seventh; the rest is the last unit.
@@ -54,7 +55,7 @@ fn a_reader_batch_is_split_into_units_of_10002_letters() {
     assert_eq!(units[1].queries().len(), 2);
     // A reader batch of at most 10002 letters (the default, or a smaller `BATCH_SIZE`) is
     // one unit.
-    let small = XUnit::split(&batch[..3], &options, false);
+    let small = XUnit::split(&batch[..3], &options, subjects, false);
     assert_eq!(small.len(), 1);
     assert!(small[0].last);
 }
@@ -71,9 +72,9 @@ fn a_unit_without_its_phase_1_fails_as_its_reader_batch() {
         .map(record)
         .collect();
     let options = super::super::stage_c_tests::options();
-    let units = XUnit::split(&batch, &options, false);
-    assert_eq!(units.len(), 2);
     let subjects: Subjects<'_> = (&batch[1..2]).into();
+    let units = XUnit::split(&batch, &options, subjects, false);
+    assert_eq!(units.len(), 2);
     for unit in &units {
         let error = unit
             .take_prep(&options, subjects)

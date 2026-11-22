@@ -126,8 +126,9 @@ pub struct ResolvedMask {
     /// (`SDbInfo::filt_algorithm_name`, `filt_algorithm_options`).
     pub shown: Vec<MaskAlgorithm>,
     /// With `-db_hard_mask` in BLASTP and BLASTX: the searched sequences that the search starts on
-    /// a new table at NCBI's one-thread offset (`ResolvedMask::hard_starts`), from the walk of
-    /// `ResolvedMask::check_losat_limits` (shared by the clones of the masking).
+    /// a new table at NCBI's one-thread offset, and whether a sequence is kept apart
+    /// (`ResolvedMask::hard_starts`), from the walk of `ResolvedMask::check_losat_limits` (shared
+    /// by the clones of the masking).
     pub(crate) starts: std::sync::Arc<std::sync::OnceLock<HardStarts>>,
 }
 
@@ -352,8 +353,9 @@ impl ResolvedMask {
 /// `algo_id`, the word `word`, the window `window`; `zero_words` as in `HardScan::Protein`) over
 /// every sequence that it searches, in the order of the search (`SeqDb::searched_protein_masks`):
 /// NCBI's one-thread offsets (`NcbiWalk`) with the sequences that the search starts on a new
-/// table, and the first sequence whose masks LOSAT refuses (`HardMaskShape::of_scan`, at the place
-/// that the walk gives it), after which the table is not complete (the search does not run).
+/// table and whether a sequence is kept apart (`HardStarts::keeps_apart`), and the first sequence
+/// whose masks LOSAT refuses (`HardMaskShape::of_scan`, at the place that the walk gives it),
+/// after which the table is not complete (the search does not run).
 fn protein_walk(
     db: &SeqDb,
     algo_id: i32,
@@ -381,9 +383,11 @@ fn protein_walk(
         // read the same chunks.
         plan.start_hard(masks, length);
         plan.hard_chunks(&mut chunks);
-        let start = walk.masked(length, &chunks);
+        let (start, reads_back) = walk.masked(length, &chunks);
         if let Some(start) = start {
             starts.push(ordinal, start);
+        } else if reads_back {
+            starts.push_reads_back();
         }
         // The length is exact: never read.
         HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan, start)

@@ -62,11 +62,16 @@ Masks are `Blast-db-mask-info` ASN.1 text with `local id N` (N the 1-based order
            q, q1b, qb: three NCBI query batches at BATCH_SIZE=50, of 60, 108 and 48 letters), and `qbig10000.faa`, a
            random query of 10,000 letters without W (seed 20261125) then qzt's query: two batches at BLASTP's default
            BATCH_SIZE of 10,000.
+  qfc.fna: 10,002 `A` (its frames are SEG-masked whole: no word) then the query `cand` (75 letters; line NP item
+           M4b-3b2, `M/m4b3b2/scripts/find_fx.py` candidate 1 of seed 1, back-translated with seed 20261125), one
+           NCBI query batch at BATCH_SIZE=30000 with `cand` second: NCBI's ov_th10 rows of `cand` lack a row that it
+           has when it is first in its batch (a word of its first frame near B's start, which reads the entries of
+           B's new table at `cand`'s offset in the batch).
 
     python3 make_dbmaskp_ov.py [--out DIR] [--ncbi-bin DIR]
 
 writes DIR/ov_*.faa, DIR/ov_*.asnt, DIR/qov1.faa, DIR/qov1.fna, DIR/qov2.faa, DIR/qov2.fna, DIR/qwpe.faa, DIR/qzt.faa,
-DIR/qzt.fna, DIR/q1q.faa, DIR/q1q.fna, DIR/q4.faa, DIR/qbig10000.faa, DIR/ov_zto.pal (DIR defaults to db_search/dbmaskp
+DIR/qzt.fna, DIR/q1q.faa, DIR/q1q.fna, DIR/q4.faa, DIR/qbig10000.faa, DIR/qfc.fna, DIR/ov_zto.pal (DIR defaults to db_search/dbmaskp
 next to this script), and with --ncbi-bin runs
 `makeblastdb -dbtype prot -out DIR/ov_X -title "overlapping masks X" -mask_data ov_X.asnt` (BLAST_USAGE_REPORT=false)
 and removes the .pjs files; ov_lkn as `near_db` says, ov_lkx as `blank_db` says.
@@ -192,6 +197,8 @@ def probe4():
 
 # Review 3's query q1 (`M/m4b3b/review/probe_r3/q1q.faa`), random without W.
 Q1 = "MFPCDVENYCTHCDQQDIDVQCYEIYCYYPCICVFLQFVEYLVGEYYHNEVDYCHSVQMR"
+# Line NP item M4b-3b2's query `cand` (`M/m4b3b2/scripts/find_fx.py`, seed 1, candidate 1).
+CAND = "NQQHTQHIPSRVGQSDAIMLFEHDHTEVFAGAMCRQPTFWGTPGTAMYLFRICERINNIIQFYHCAWRYEYPQVT"
 
 
 def probe5():
@@ -359,6 +366,8 @@ def main():
     dbs6, q4, qbig = probe6()
     (out / "q4.faa").write_text(q4)
     (out / "qbig10000.faa").write_text(qbig)
+    cand = back_translate(random.Random(20261125), CAND)
+    (out / "qfc.fna").write_text(f">fill 10002 A\n{'A' * 10002}\n>cand query\n{cand}\n")
     for tag, (q, qx, dbs) in (("qov1", probe1()), ("qov2", probe2()), (None, (None, None, probe3())),
                               ("qzt", probe4()), (None, (None, None, dbs5)), (None, (None, None, dbs6))):
         if tag is not None:

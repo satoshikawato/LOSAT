@@ -663,14 +663,15 @@ impl NcbiWalk {
     /// A searched sequence of `length` letters whose hard chunks are `chunks` (in walk order):
     /// `Some` where the search starts it on a new table ([`TableStart::New`]: its walk, as the
     /// search's reads it, reaches an entry that no sequence wrote, or a chunk before its last
-    /// exits at INT4_MAX / 4 or past it).
+    /// exits at INT4_MAX / 4 or past it), and whether its walk reads back (a chunk within reach of
+    /// an entry that an earlier chunk can store: [`DiagonalWalk::apart`] without a new table).
     pub(crate) fn masked(
         &mut self,
         length: usize,
         chunks: &[crate::core::subject_split::HardChunk],
-    ) -> Option<NcbiStart> {
+    ) -> (Option<NcbiStart>, bool) {
         if length == 0 {
-            return None;
+            return (None, false);
         }
         let start = self.here();
         let ahead = DiagonalWalk::ahead(self.word, self.window, length, chunks);
@@ -681,17 +682,20 @@ impl NcbiWalk {
         for chunk in chunks {
             self.exit(chunk.length);
         }
-        new.then_some(start)
+        (new.then_some(start), ahead.reads_back)
     }
 }
 
 /// The searched sequences of a `-db_hard_mask` search that start on a new table
 /// ([`TableStart::New`]), by ordinal id, with their [`NcbiStart`]: what [`NcbiWalk`] gives, before
 /// the search (`blastinput::db_mask::ResolvedMask::check_losat_limits`). Few: sequences near the
-/// start of the database or of a clear, or after walks that went back.
+/// start of the database or of a clear, or after walks that went back. With them, whether the walk
+/// keeps any searched sequence apart ([`DiagonalWalk::apart`]: one of these, or one whose walk
+/// reads back).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct HardStarts {
     starts: Vec<(u32, NcbiStart)>,
+    apart: bool,
 }
 
 impl HardStarts {
@@ -699,6 +703,25 @@ impl HardStarts {
     pub(crate) fn push(&mut self, ordinal: u32, start: NcbiStart) {
         debug_assert!(self.starts.last().is_none_or(|&(last, _)| last < ordinal));
         self.starts.push((ordinal, start));
+        self.apart = true;
+    }
+
+    /// A searched sequence whose walk reads back ([`DiagonalWalk::apart`] without a new table).
+    pub(crate) fn push_reads_back(&mut self) {
+        self.apart = true;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
+    // A hit that meets an entry no chunk of its own scan wrote reads it through the ring of its
+    // query batch's length and through the unsigned context test of the batch's query offsets, so
+    // its outcome depends on where its query lies in the batch (cited at `DiagonalWalk::apart`).
+    /// Whether the walk keeps a searched sequence apart ([`DiagonalWalk::apart`]): a sequence whose
+    /// hits can meet entries that its chunks' own scans did not write, so that its rows depend on
+    /// its query's place in NCBI's query batch (BLASTX then searches the batch as one unit,
+    /// `blastx::query_setup::unit_ranges`).
+    pub(crate) fn keeps_apart(&self) -> bool {
+        self.apart
     }
 
     /// Where the search starts sequence `ordinal` on a new table (`None`: it does not).

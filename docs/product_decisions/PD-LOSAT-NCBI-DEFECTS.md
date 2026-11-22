@@ -1326,8 +1326,12 @@ entries that reach another sequence)". Line NP item M4b-3b.
     reference scan), the second at the window plus its margin below its start, where no entry
     reaches its hits; the thread's table stays as the sequence before it left it (review 3 of
     M4b-3b, H1). The scans of the other sequences, and every search without `-db_hard_mask`, are
-    unchanged. BLASTX searches each reader batch alone, as NCBI searches it with the default batch
-    size.
+    unchanged. BLASTX searches a query batch in units of at most 10,002 letters (BLASTX's default
+    batch), which give the batch's rows where the walk keeps no sequence apart; where it keeps one
+    apart, BLASTX searches the whole batch as one unit, as NCBI does
+    (`blastx::query_setup::unit_ranges`, `HardStarts::keeps_apart`; item M4b-3b2, decision 57 of
+    line NP's series M, 2026-11-23, Owner-delegated), since the rows of a query there depend on its
+    place in the batch.
     So the rows of each sequence are NCBI's one-thread rows of it, for the same query file and
     batches, in the same database with the letters of every other sequence replaced by letters that
     no query word hits (the lengths and masks, and so NCBI's offsets and statistics, stay the
@@ -1404,6 +1408,10 @@ entries that reach another sequence)". Line NP item M4b-3b.
       `ov_th10f` (another B): 7, 7 and 6; with A of 480 `X` (B at 60, no new table) 4, 4 and 4.
       BLASTX: q's 8 rows in one batch and in two (`BATCH_SIZE=50`). LOSAT: NCBI's one-thread
       bytes in each, with one table of all queries, LOSAT_X_BPQBLOCK's blocks and its default.
+      BLASTX with `qfc.fna` (10,002 `A`, no word, then a query of 75 letters; item M4b-3b2): one
+      batch at `BATCH_SIZE=30000` 18 rows of the query (`-ungapped` 20), where the query first in
+      its batch (the default batch) has 19 (21): LOSAT's units of 10,002 letters wrote 19 and 21
+      at 1 and 4 threads, the whole batch as one unit NCBI's bytes.
     - A. thaliana TAIR10 (48,321 proteins, segmasker's defaults, algorithm 21) for 55 queries, the
       proteins that such a protein's entries reach or that reach below their start (BLASTX: the first
       20, back-translated; ws, `M/m4b3b/q5b/tair`, `q5b/ws/q5b_threads.sh`): LOSAT wrote the same bytes at

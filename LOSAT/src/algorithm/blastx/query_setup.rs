@@ -74,8 +74,10 @@ pub const BATCH_SIZE: usize = 10002;
 /// case; DECISIONS 38 D10): its batches are read with it, never split (`rps_search::translated`).
 pub const RPSTBLASTN_BATCH_SIZE: usize = 10000;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:139-165
-/// The search units of a reader batch (`records`, NCBI's query batch): parts of at most
-/// `BATCH_SIZE` letters (`batch_ranges`), or, with `-use_sw_tback`, the whole batch. NCBI's
+/// The search units of a reader batch (`records`, NCBI's query batch, searched against
+/// `subjects`): parts of at most `BATCH_SIZE` letters (`batch_ranges`), or the whole batch where a
+/// unit cannot give NCBI's result of the batch alone: with `-use_sw_tback`, and where the
+/// `-db_hard_mask` walk keeps a database sequence apart (`keeps_sequences_apart`). NCBI's
 /// Smith-Waterman redo keeps state over the whole query batch, which a unit cannot see alone:
 /// the status of the batch's last redone match, the heap of its first query, and, in e-value
 /// mode, the heaps that a window's query context indexes among the batch's queries
@@ -84,12 +86,50 @@ pub const RPSTBLASTN_BATCH_SIZE: usize = 10000;
 pub(crate) fn unit_ranges(
     records: &[FastaRecord],
     options: &ResolvedOptions,
+    subjects: super::subjects::Subjects<'_>,
 ) -> Vec<std::ops::Range<usize>> {
-    if options.use_sw_tback && !records.is_empty() {
+    if !records.is_empty()
+        && (options.use_sw_tback || keeps_sequences_apart(options, subjects.seqdb()))
+    {
         vec![0..records.len()]
     } else {
         batch_ranges(records, BATCH_SIZE)
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-573
+// NCBI searches each query batch as one: one lookup table, and one diagonal table per thread of
+// the power of two just at least the batch's length plus the window, whose hits count their query
+// offsets from the batch's start. A unit of the batch gives the batch's rows where every entry
+// within reach of a hit was written by the same chunk's scan at a lower query offset of the hit's
+// diagonal (the context test then never wraps and the ring's size changes nothing:
+// `common::hard_chunk_walk::DiagonalWalk::apart`), which holds for every sequence of a search
+// without `-db_hard_mask`. A sequence that the walk keeps apart (one on a new table, whose
+// entries no sequence wrote, or one whose walk reads back to an earlier chunk's entries) meets
+// entries at offsets that depend on its query's place in the batch, and an earlier chunk's hits
+// of every query of the batch: such a database is searched with the batch as one unit (line NP,
+// M4b-3b2; decision 57 of series M).
+/// Whether the search of the database `db` (`None`: `-subject`) with `-db_hard_mask` holds a
+/// sequence that the walk keeps apart (`blastinput::db_mask::ResolvedMask::hard_starts`,
+/// `HardStarts::keeps_apart`: the walk that `check_losat_limits` ran, or the same walk once where
+/// it did not run).
+pub(crate) fn keeps_sequences_apart(
+    options: &ResolvedOptions,
+    db: Option<&crate::seqdb::SeqDb>,
+) -> bool {
+    let Some(mask) = options
+        .db_mask
+        .as_ref()
+        .filter(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard)
+    else {
+        return false;
+    };
+    db.is_some_and(|db| {
+        mask.hard_starts(db, options.word_size, options.window_size)
+            .keeps_apart()
+    })
 }
 
 pub fn batch_ranges(records: &[FastaRecord], batch_size: usize) -> Vec<std::ops::Range<usize>> {

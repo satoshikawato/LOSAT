@@ -2415,6 +2415,16 @@ size (q's rows 5, as in a batch of its own). All are NCBI's one-thread bytes; `b
 `.q1q.`, `.q4.` and `.qbig10000.` row with LOSAT_X_BPQBLOCK unset, 0, 1 and 120 at 1 and 4 threads and reads from
 LOSAT_X_REACH that the blocks ran exactly where an arm plans two or more.
 
+The batch rows of BLASTX (line NP item M4b-3b2, decision 57 of series M; `qfc.fna` of `make_dbmaskp_ov.py`): 10,002 `A`,
+whose frames SEG masks whole (no word), then the query `cand` (75 letters, `M/m4b3b2/scripts/find_fx.py` candidate 1 of
+seed 1, back-translated with seed 20261125), on `ov_th10`: one NCBI query batch at `BATCH_SIZE=30000` (rows
+`db.pmask.bx.hard.ov_th10.qfc.b30000.*`: 18 rows of `cand`, 20 with `-ungapped`), two at the default batch size
+(`.qfc.21.e1000.6`: 19, `cand` first in its batch; the `.err` file holds NCBI's warning for the filler), and the search
+without masks (`db.pmask.bx.none.ov_th10.qfc.b30000.*`: 5 rows). A word of `cand`'s first frame near
+B's start reads the entries of B's new table at `cand`'s offset in the batch, so BLASTX, which searches a batch in units
+of 10,002 letters, searches the whole batch as one unit where the walk keeps a sequence apart
+(`blastx::query_setup::unit_ranges`); the units wrote 19 and 21 rows at `BATCH_SIZE=30000` before.
+
 `ov_m1` (fix round 4 of M4b-3b, review 4's L1 and its database `M/m4b3b/review/probe_r4/m1`, `probe6`, no draw of its
 own; rows `db.pmask.{bp,bx}.hard.ov_m1.*`, `qzt.faa` / `qzt.fna`): 600 subjects `s0` to `s599`, each one `X` but `s62`
 (5,000 `X`, masks [10,4990) [20,4995): its walk goes about 4,955 back), `s63` (P, 50 `X` without masks, the last of the

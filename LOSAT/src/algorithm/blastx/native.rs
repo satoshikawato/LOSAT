@@ -611,7 +611,8 @@ fn run_inner(
     // search itself keeps units of at most 10002 letters (`BATCH_SIZE` the constant), however
     // large a reader batch is: a reader batch is split into units that are searched as the
     // batches of a run without `BATCH_SIZE` are, and its report is written when its last unit
-    // is searched. (`batch_size` is read above, for the reads before the search.)
+    // is searched; where a unit cannot give the batch's rows alone it is the whole reader batch
+    // (`query_setup::unit_ranges`). (`batch_size` is read above, for the reads before the search.)
     let batch_size = batch_size?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
     // `blastinput::db_mask::DbMaskOption::resolve`)
@@ -1784,7 +1785,7 @@ pub(super) fn run_query_batches(
                 // A reader batch becomes its units; a batch of several is prepared first (phase
                 // 1, `reader_batch.rs`): by the waves at once, on the pool, by the flow as tasks.
                 let x_split = |queries: &[super::input::FastaRecord]| {
-                    let units = XUnit::split(queries, options, false);
+                    let units = XUnit::split(queries, options, search_subjects, false);
                     XUnit::prepare_now(&units, &|batch, ranges| {
                         prepare_reader_batch(batch, ranges, options, search_subjects, pool)
                     });
@@ -1831,7 +1832,7 @@ pub(super) fn run_query_batches(
                     // flow a reader batch of one unit is prepared by a task of its own before
                     // its search, outside the K searched at a time (blastx/x_bx_mem.rs).
                     &|queries: &[super::input::FastaRecord]| {
-                        XUnit::split(queries, options, x_ahead)
+                        XUnit::split(queries, options, search_subjects, x_ahead)
                     },
                     &|queries: &[super::input::FastaRecord],
                       layout: Option<&std::sync::Arc<ReaderBatchShape>>| match layout {
@@ -2231,9 +2232,10 @@ fn reader_batch_skipped(results: &mut [BatchResults]) {
 
 // No NCBI counterpart: how LOSAT schedules the search of a reader batch (NCBI's query batch,
 // `BATCH_SIZE` letters). The search keeps units of at most 10002 letters (`batch_ranges` with
-// the constant), whatever `BATCH_SIZE` is (with `-use_sw_tback` the reader batch is one unit,
-// `query_setup::unit_ranges`): the flow and the waves schedule the units as they
-// scheduled the batches of a run without `BATCH_SIZE`, and the report of a reader batch is
+// the constant), whatever `BATCH_SIZE` is (the reader batch is one unit with `-use_sw_tback` and
+// where the `-db_hard_mask` walk keeps a database sequence apart, `query_setup::unit_ranges`:
+// there a unit cannot give the batch's rows alone): the flow and the waves schedule the units as
+// they scheduled the batches of a run without `BATCH_SIZE`, and the report of a reader batch is
 // written when its last unit is searched. The values that NCBI takes of the whole query batch
 // (the split decision, the ungapped link cutoffs, the sum-statistics average length, the
 // composition redo's minimum cutoff) are taken of the reader batch, not of the unit: phase 1
@@ -2321,10 +2323,11 @@ impl XUnit {
     fn split(
         queries: &[FastaRecord],
         options: &super::args::ResolvedOptions,
+        subjects: Subjects<'_>,
         ahead: bool,
     ) -> Vec<XUnit> {
         let batch = std::sync::Arc::new(queries.to_vec());
-        let ranges = super::query_setup::unit_ranges(&batch, options);
+        let ranges = super::query_setup::unit_ranges(&batch, options, subjects);
         let count = ranges.len();
         let ahead = ahead
             && count == 1

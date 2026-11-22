@@ -188,7 +188,7 @@ fn x_search_core(
             .and_then(|prep| prep.prepared.reader_shape.as_deref())
             .map_or(records.len(), |shape| shape.query_count),
     )?;
-    let ranges = unit_ranges(records, options);
+    let ranges = unit_ranges(records, options, subjects);
     // The units of a reader batch (`records`) are prepared first, together, and the values NCBI
     // takes of the whole query batch are reduced (`reader_batch.rs`); each unit is then searched
     // from its preparation. A caller that searches the units one by one has prepared them

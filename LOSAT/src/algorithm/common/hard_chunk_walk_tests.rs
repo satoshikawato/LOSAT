@@ -408,23 +408,23 @@ fn ncbi_walk_names_the_sequences_that_meet_unwritten_entries() {
     // The first searched sequence: on the new table where its walk goes below its start, at the
     // window (two-hit) or 0 (one-hit).
     let mut walk = NcbiWalk::new(3, 0);
-    assert_eq!(walk.masked(240, &nest), at(0, false));
+    assert_eq!(walk.masked(240, &nest).0, at(0, false));
     let mut walk = NcbiWalk::new(3, 40);
-    assert_eq!(walk.masked(240, &shallow), at(40, false));
+    assert_eq!(walk.masked(240, &shallow).0, at(40, false));
     // A first sequence without masks, or whose walk stays at or past its start, is not.
     let mut walk = NcbiWalk::new(3, 0);
     assert_eq!(walk.plain(240), None);
     let apart = hard(&[(0, 40), (50, 100), (160, 80)]);
-    assert_eq!(walk.masked(240, &apart), None);
+    assert_eq!(walk.masked(240, &apart).0, None);
     // Sequences of no letters are not searched: the first sequence with letters is the first.
     let mut walk = NcbiWalk::new(3, 0);
     assert_eq!(walk.plain(0), None);
-    assert_eq!(walk.masked(0, &nest), None);
-    assert_eq!(walk.masked(240, &nest), at(0, false));
+    assert_eq!(walk.masked(0, &nest).0, None);
+    assert_eq!(walk.masked(240, &nest).0, at(0, false));
     // zt: a sequence of 5 letters, then the zt shape at 5 (one-hit), whose walk reaches 70 below.
     let mut walk = NcbiWalk::new(3, 0);
     assert_eq!(walk.plain(5), None);
-    assert_eq!(walk.masked(240, &zt), at(5, false));
+    assert_eq!(walk.masked(240, &zt).0, at(5, false));
     // After it NCBI's offset is 5 + 10 - 80 + 130 = 65: a sequence without masks is not.
     assert_eq!(walk.plain(240), None);
     // Two-hit, after 5 letters (NCBI's offset 40 + 5 + 40 = 85): zt does not go below its start,
@@ -432,19 +432,19 @@ fn ncbi_walk_names_the_sequences_that_meet_unwritten_entries() {
     for (shape, want) in [(&zt, None), (&shallow, None), (&deep, at(85, false))] {
         let mut walk = NcbiWalk::new(3, 40);
         assert_eq!(walk.plain(5), None);
-        assert_eq!(walk.masked(240, shape), want);
+        assert_eq!(walk.masked(240, shape).0, want);
     }
     // After 70 letters (150): not.
     let mut walk = NcbiWalk::new(3, 40);
     assert_eq!(walk.plain(70), None);
-    assert_eq!(walk.masked(240, &deep), None);
+    assert_eq!(walk.masked(240, &deep).0, None);
     // ov_lk, one-hit: A (the first, masks [40,200) [60,238)) walks back to -98, so B, without a
     // margin below its start, meets the entries 98 above its start.
     let lk = hard(&[(0, 40), (200, -140), (238, 2)]);
     let mut walk = NcbiWalk::new(3, 0);
-    assert_eq!(walk.masked(240, &lk), None);
+    assert_eq!(walk.masked(240, &lk).0, None);
     assert_eq!(
-        walk.masked(240, &hard(&[(0, 230), (235, 5)])),
+        walk.masked(240, &hard(&[(0, 230), (235, 5)])).0,
         at(-98, false)
     );
     // A sequence without masks there too.
@@ -454,8 +454,16 @@ fn ncbi_walk_names_the_sequences_that_meet_unwritten_entries() {
     // Two-hit ov_lk: A, the first, walks 20 below its start (the one word at 238 taken to hit);
     // it ends at 40 + 40 + 40 - 140 + 40 + 2 + 40 = 62, and B is not.
     let mut walk = NcbiWalk::new(3, 40);
-    assert_eq!(walk.masked(240, &lk), at(40, false));
+    assert_eq!(walk.masked(240, &lk).0, at(40, false));
     assert_eq!(walk.plain(240), None);
+    // Whether the walk reads back (`DiagonalWalk::apart` without a new table; line NP item
+    // M4b-3b2): two-hit, ov_e3's chunk at 70 lies within the window of the entries of its one
+    // word at 60; the touching masks of ov_e3c read nothing back.
+    let e3 = hard(&[(0, 40), (60, -5), (70, 170)]);
+    let e3c = hard(&[(0, 40), (60, 0), (70, 170)]);
+    assert_eq!(NcbiWalk::new(3, 40).masked(240, &e3), (None, true));
+    assert_eq!(NcbiWalk::new(3, 40).masked(240, &e3c), (None, false));
+    assert_eq!(NcbiWalk::new(3, 0).masked(240, &apart), (None, false));
 }
 
 /// NCBI's clears in its one-thread walk (`NcbiWalk`): after the clear the entries lie the window
@@ -487,10 +495,10 @@ fn ncbi_walk_follows_the_clears() {
     let deep = hard(&[(0, 40), (100, -170), (10, 180)]);
     let mut walk = near(LIMIT);
     walk.plain(240);
-    assert_eq!(walk.masked(240, &shallow), None);
+    assert_eq!(walk.masked(240, &shallow).0, None);
     let mut walk = near(LIMIT);
     walk.plain(240);
-    assert_eq!(walk.masked(240, &deep), start(40, true));
+    assert_eq!(walk.masked(240, &deep).0, start(40, true));
     // Plain sequences walk the offset to the clear.
     let mut walk = NcbiWalk::new(3, 40);
     while !walk.cleared {
@@ -505,13 +513,13 @@ fn ncbi_walk_follows_the_clears() {
     // A clear inside a sequence whose walk does not go below its start: the chunk at 80 exits at
     // INT4_MAX / 4.
     let apart = hard(&[(0, 40), (50, 100), (160, 80)]);
-    assert_eq!(near(LIMIT - 81).masked(240, &apart), None);
+    assert_eq!(near(LIMIT - 81).masked(240, &apart).0, None);
     assert_eq!(
-        near(LIMIT - 80).masked(240, &apart),
+        near(LIMIT - 80).masked(240, &apart).0,
         start((LIMIT - 80) as i32, false)
     );
     // The last chunk's exit is after the sequence: the clear falls before the next one.
-    assert_eq!(near(LIMIT - 220).masked(240, &apart), None);
+    assert_eq!(near(LIMIT - 220).masked(240, &apart).0, None);
 }
 
 /// The table of the new-table starts (`HardStarts`): by ordinal id.
@@ -532,6 +540,26 @@ fn hard_starts_by_ordinal() {
         assert_eq!(starts.of(ordinal), None);
     }
     assert_eq!(HardStarts::default().of(0), None);
+}
+
+/// Whether the walk keeps a sequence apart (`HardStarts::keeps_apart`, line NP item M4b-3b2): a
+/// sequence on a new table or one whose walk reads back; a walk with neither keeps none apart.
+#[test]
+fn hard_starts_keep_a_sequence_apart_on_a_new_table_or_after_a_read_back() {
+    let mut starts = HardStarts::default();
+    assert!(!starts.keeps_apart());
+    starts.push_reads_back();
+    assert!(starts.keeps_apart());
+    assert_eq!(starts.of(0), None);
+    let mut starts = HardStarts::default();
+    starts.push(
+        3,
+        NcbiStart {
+            offset: 10,
+            cleared: false,
+        },
+    );
+    assert!(starts.keeps_apart());
 }
 
 /// A table that records what [`TableStart::apply`] and [`TableEnd::apply`] do to it.

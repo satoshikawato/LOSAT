@@ -93,3 +93,73 @@ fn the_batch_size_is_the_limit_of_a_batch() {
     );
     assert_eq!(batch_ranges(&records, 30000), vec![0..5]);
 }
+
+// Line NP item M4b-3b2 (decision 57 of series M): a reader batch is one search unit only where a
+// unit cannot give the batch's rows alone, with `-use_sw_tback` and where the `-db_hard_mask`
+// walk (the BLASTX word 3 and window 40) keeps a sequence of the database apart. Of the databases
+// of `tests/db_search/dbmaskp`: ov_th10's B starts on a new table (its rows of a query depend on
+// the query's place in NCBI's batch: rows `db.pmask.bx.hard.ov_th10.qfc.*`), ov_e3's chunk at 70
+// reads back to the entries of the one word at 60, and the touching masks of ov_e3c read nothing
+// back.
+#[test]
+fn a_reader_batch_is_one_unit_only_where_a_unit_cannot_give_its_rows() {
+    use crate::blastinput::db_mask::{MaskKind, ResolvedMask};
+    use crate::seqdb::{SeqDb, SeqType};
+    let open = |name: &str| {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/db_search/dbmaskp")
+            .join(name);
+        let name = path.to_str().unwrap();
+        let mut db = SeqDb::open(name, SeqType::Protein).unwrap();
+        db.read_name_records(name, true).unwrap();
+        db
+    };
+    // A new masking for each database: the walk is kept with the masking, as one search keeps it.
+    let masked = |kind: MaskKind| {
+        let mut options = super::super::stage_c_tests::options();
+        options.db_mask = Some(ResolvedMask {
+            kind,
+            id: 21,
+            key: None,
+            shown: Vec::new(),
+            starts: Default::default(),
+        });
+        options
+    };
+    for (name, apart) in [("ov_th10", true), ("ov_e3", true), ("ov_e3c", false)] {
+        let db = open(name);
+        assert_eq!(
+            keeps_sequences_apart(&masked(MaskKind::Hard), Some(&db)),
+            apart,
+            "{name}"
+        );
+        assert!(!keeps_sequences_apart(&masked(MaskKind::Soft), Some(&db)));
+    }
+    assert!(!keeps_sequences_apart(&masked(MaskKind::Hard), None));
+    assert!(!keeps_sequences_apart(
+        &super::super::stage_c_tests::options(),
+        Some(&open("ov_th10"))
+    ));
+
+    let record = |n| FastaRecord {
+        internal_id: String::new(),
+        title: Vec::new(),
+        sequence: vec![b'A'; n],
+        lowercase_masks: vec![],
+        warnings: vec![],
+        source: None,
+        around: None,
+        skipped: None,
+    };
+    let records = [record(4000), record(4000), record(4000), record(100)];
+    let subjects: super::super::subjects::Subjects<'_> = (&records[..1]).into();
+    // `-subject` (no database): the units of `batch_ranges`.
+    assert_eq!(
+        unit_ranges(&records, &masked(MaskKind::Hard), subjects),
+        vec![0..3, 3..4]
+    );
+    let mut sw = super::super::stage_c_tests::options();
+    sw.use_sw_tback = true;
+    assert_eq!(unit_ranges(&records, &sw, subjects), vec![0..4]);
+    assert!(unit_ranges(&[], &sw, subjects).is_empty());
+}

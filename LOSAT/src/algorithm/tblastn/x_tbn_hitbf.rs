@@ -161,6 +161,23 @@ pub(super) fn x_hits_bf<C: XDiagCell>(
     unsafe { p.offset_from(start) as usize }
 }
 
+/// PROBE (exp/fx-bxload, line FX): [`x_hits_bf`] as a function of its own (its loop's values in
+/// registers, not reloaded from the caller's stack) when built with LOSAT_FXPAIRS_BUILD=1.
+pub(super) const X_FX_PAIRS: bool =
+    crate::algorithm::blastp::x_seed_fused::x_fx_digit(option_env!("LOSAT_FXPAIRS_BUILD")) == 1;
+
+/// PROBE (exp/fx-bxload): [`x_hits_bf`], not inlined.
+#[inline(never)]
+pub(super) fn x_hits_bf_out<C: XDiagCell>(
+    entries: &mut [C],
+    offset: i32,
+    window: i32,
+    word_size: i32,
+    pairs: &[BlastOffsetPair],
+) -> usize {
+    x_hits_bf(entries, offset, window, word_size, pairs)
+}
+
 #[cfg(test)]
 #[path = "x_tbn_hitbf_tests.rs"]
 mod tests;

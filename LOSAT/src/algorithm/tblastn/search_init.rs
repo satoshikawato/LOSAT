@@ -720,13 +720,23 @@ impl<'a> XTwoHit<'a> {
         let word_size = self.word_size as i32;
         let mut done = 0;
         while done < pairs.len() {
-            done += super::x_tbn_hitbf::x_hits_bf(
-                cells,
-                self.diagonals.offset,
-                self.window,
-                word_size,
-                &pairs[done..],
-            );
+            done += if super::x_tbn_hitbf::X_FX_PAIRS {
+                super::x_tbn_hitbf::x_hits_bf_out(
+                    cells,
+                    self.diagonals.offset,
+                    self.window,
+                    word_size,
+                    &pairs[done..],
+                )
+            } else {
+                super::x_tbn_hitbf::x_hits_bf(
+                    cells,
+                    self.diagonals.offset,
+                    self.window,
+                    word_size,
+                    &pairs[done..],
+                )
+            };
             if let Some(pair) = pairs.get(done) {
                 self.pairs_on(
                     walks,

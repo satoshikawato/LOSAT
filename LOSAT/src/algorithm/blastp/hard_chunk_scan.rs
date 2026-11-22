@@ -270,7 +270,7 @@ pub(crate) struct OneWordSeed {
 
 /// The one word that NCBI's two-hit scan reads in a hard chunk shorter than the word
 /// ([`ChunkWork::OneWord`]), at subject offset 0 of the chunk.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub(crate) struct OneWord<'a> {
     /// The concatenated query as the program's two-hit extension reads it: its length bounds the
     /// extension's right walk.

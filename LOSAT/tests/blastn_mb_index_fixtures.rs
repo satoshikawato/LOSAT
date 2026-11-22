@@ -11,8 +11,9 @@
 //! A row with a refusal is one where NCBI searches with an index in a way that LOSAT does not
 //! (a mixed search, a two-hit search, `-db_hard_mask`), or reads the index in a way that leaves
 //! the search undefined or fails: LOSAT refuses it with that text, and NCBI's output is kept for
-//! the lines that take these searches. Where NCBI fails in a later query batch, LOSAT first
-//! writes NCBI's output of the batches before.
+//! the lines that take these searches. LOSAT writes nothing where NCBI's run succeeds; where NCBI
+//! exits with its error in a later query batch, LOSAT first writes NCBI's output of the batches
+//! before; where NCBI crashes or never ends, LOSAT writes at most a beginning of NCBI's output.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -65,12 +66,16 @@ fn cases() -> Vec<Case> {
     cases
 }
 
-/// A command of LOSAT with no LOSAT, NCBI or BLAST variable, run in `dir`.
+/// A command of LOSAT with no LOSAT, NCBI or BLAST variable, run in `dir` (the worker log of
+/// the `blastx-worker-probe` feature is kept: its threaded searches write to it).
 fn command(dir: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if text.starts_with("LOSAT_") || text.starts_with("NCBI_") || text.starts_with("BLAST") {
+        if (text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG")
+            || text.starts_with("NCBI_")
+            || text.starts_with("BLAST")
+        {
             command.env_remove(&name);
         }
     }
@@ -230,16 +235,25 @@ fn rows_that_differ() -> Vec<String> {
                     )
                     .unwrap()
                 };
-                let ncbi_failed = String::from_utf8(ncbi("rc")).unwrap().trim() != "0";
-                let want_out = if ncbi_failed {
+                let ncbi_rc: i32 = String::from_utf8(ncbi("rc"))
+                    .unwrap()
+                    .trim()
+                    .parse()
+                    .unwrap();
+                let want_out = if ncbi_rc != 0 {
                     let out = here(&String::from_utf8(ncbi("out")).unwrap(), &dir);
                     losat::wording::losat_output_bytes(out.as_bytes()).into_owned()
                 } else {
                     Vec::new()
                 };
-                output.status.code() == Some(1)
-                    && output.stdout == want_out
-                    && stderr.contains(&line)
+                // NCBI's run ended by a signal or the time limit (124): what it wrote up to its
+                // crash is no result, and LOSAT may refuse before it.
+                let out_ok = if ncbi_rc == 124 || ncbi_rc >= 128 {
+                    want_out.starts_with(&output.stdout)
+                } else {
+                    output.stdout == want_out
+                };
+                output.status.code() == Some(1) && out_ok && stderr.contains(&line)
             }
             None => {
                 let file = |extension: &str| {

@@ -59,7 +59,11 @@ LOSAT/tests/db_search (README.md there says how they were built).
   (the write past N bytes fails with EFBIG, as `prlimit --fsize`), whose bytes are frozen; `check` limits LOSAT's
   file to N plus the bytes that LOSAT's words add to those bytes (`device_growth`: LOSAT's version statement,
   `BLASTN (LOSAT 0.2.0)` where NCBI's is `BLASTN 2.17.0+`, moves the same point of the report that far). Standard
-  output must be empty in the last two (`run_on_device`). `check --library` skips these rows (`library-skip`): the library's
+  output must be empty in the last two (`run_on_device`). `stdout-fsize=N`: standard output is that limited file
+  (no `-out`); `stdout-stderr-fsize=N`: standard output and standard error are that one file (`> file 2>&1`);
+  `stderr-full`: standard error is /dev/full (standard output is the report); `stdout-closed`, `stderr-closed`: a
+  pipe whose reader closed before the start, LOSAT's only (NCBI is ended by SIGPIPE), whose expectation is the
+  `ncbi-near` row of the full device (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 5). `check --library` skips these rows (`library-skip`): the library's
   writers have no NCBI stream; outside Linux they are `device-skip`.
 - a `ncbi` row whose `covers` cell has `ncbi-copies: PATH [NAME=VALUE ...]` (up to a ` | ` or the end; a "copy row",
   `copies_cell`): the expectation is made from NCBI's run on the oracle query file PATH (relative to LOSAT/) in place
@@ -983,12 +987,36 @@ def run_on_device(row: dict[str, str], command: list[str], env: dict[str, str],
                                  env=env, preexec_fn=preexec)
         run.stdout = b""
         return run
+    if mode in ("stdout-closed", "stderr-closed"):
+        # A pipe whose reader closed before the start: every write to it fails (EPIPE; LOSAT, whose runtime ignores
+        # SIGPIPE, sees the failed write that the `ncbi-near` row's full device gives NCBI, exception 5).
+        read, write = os.pipe()
+        os.close(read)
+        try:
+            if mode == "stdout-closed":
+                run = subprocess.run(command, cwd=ENGINE, stdout=write, stderr=subprocess.PIPE, timeout=TIMEOUT,
+                                     env=env, preexec_fn=preexec)
+                run.stdout = b""
+            else:
+                run = subprocess.run(command, cwd=ENGINE, stdout=subprocess.PIPE, stderr=write, timeout=TIMEOUT,
+                                     env=env, preexec_fn=preexec)
+                run.stderr = b""
+        finally:
+            os.close(write)
+        return run
+    if mode == "stderr-full":
+        with open("/dev/full", "wb") as full:
+            run = subprocess.run(command, cwd=ENGINE, stdout=subprocess.PIPE, stderr=full, timeout=TIMEOUT,
+                                 env=env, preexec_fn=preexec)
+        run.stderr = b""
+        return run
     if mode == "out-full":
         run = subprocess.run([*command, "-out", "/dev/full"], cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
                              env=env, preexec_fn=preexec)
         landed = b""
-    elif mode is not None and mode.startswith("fsize="):
-        limit = int(mode.removeprefix("fsize=")) + growth
+    elif mode is not None and mode.split("=")[0] in ("fsize", "stdout-fsize", "stdout-stderr-fsize"):
+        kind, _, size = mode.partition("=")
+        limit = int(size) + growth
         # The limit holds for every file of the process: LOSAT_X_REACH's record (clean_env) would be cut too, and
         # LOSAT would say so on standard error, so a limited run records no switch paths.
         env = {k: v for k, v in env.items() if k != "LOSAT_X_REACH"}
@@ -1001,8 +1029,19 @@ def run_on_device(row: dict[str, str], command: list[str], env: dict[str, str],
 
         with tempfile.TemporaryDirectory(prefix="db_search_device_") as directory:
             path = Path(directory) / "device.out"
-            run = subprocess.run([*command, "-out", str(path)], cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
-                                 env=env, preexec_fn=limited, restore_signals=False)
+            if kind == "fsize":
+                run = subprocess.run([*command, "-out", str(path)], cwd=ENGINE, capture_output=True,
+                                     timeout=TIMEOUT, env=env, preexec_fn=limited, restore_signals=False)
+            else:
+                # Standard output (`stdout-fsize`), and standard error with it (`stdout-stderr-fsize`, a shell's
+                # `> file 2>&1`: one open file, one offset), is the limited file.
+                with open(path, "wb") as device:
+                    errors = device if kind == "stdout-stderr-fsize" else subprocess.PIPE
+                    run = subprocess.run(command, cwd=ENGINE, stdout=device, stderr=errors, timeout=TIMEOUT,
+                                         env=env, preexec_fn=limited, restore_signals=False)
+                run.stdout = b""
+                if run.stderr is None:
+                    run.stderr = b""
             landed = path.read_bytes() if path.exists() else b""
     else:
         raise SystemExit(f"{row['row_id']}: unknown device {mode!r}")
@@ -1020,7 +1059,8 @@ def device_growth(row: dict[str, str], landed: bytes, losat_words: Callable[[byt
     LOSAT's file to N plus them: the run fails at the same point of the report as NCBI's, and the bytes on the
     device are NCBI's in LOSAT's words. 0 for the other devices (nothing reaches them)."""
     mode = device_mode(row) or ""
-    return len(losat_words(landed)) - len(landed) if mode.startswith("fsize=") else 0
+    limited = mode.split("=")[0] in ("fsize", "stdout-fsize", "stdout-stderr-fsize")
+    return len(losat_words(landed)) - len(landed) if limited else 0
 
 
 def format_number(row: dict[str, str]) -> str:
@@ -1169,11 +1209,14 @@ def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> 
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
                                               timeout=TIMEOUT, env=run_env)
             run = written.run
+        elif device_mode(row):
+            run = run_on_device(row, command, run_env)
         else:
             run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=run_env)
     finally:
         shutil.rmtree(db_dir, ignore_errors=True)
-    refuse_signal(row, run.returncode)
+    if not device_mode(row):
+        refuse_signal(row, run.returncode)
     stdout, stderr = run.stdout, run.stderr
     if rps_dir_token(row):
         stdout = stdout.replace(str(db_dir).encode(), b"{db_dir}")

@@ -42,6 +42,18 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   with BATCH_SIZE=1; outfmt 6, 7, 10); `dev_pblk.faa` (1000 copies of p3.faa's first record, 61,000 letters) against
   `-subject dev_psubj.faa` (prot_v5 as FASTA; outfmt 0, 5, 8, 9, 12 with `fsize` 100000); and outfmt 16 with
   `-subject` (`dev_nsubj.fna`, `dev_psubj.faa`; out-full and half). Frozen files stay at or below 100 KB.
+  Fix 3 (2026-11-22) adds the modes `stdout-fsize=N` (standard output a file limited to N bytes, no `-out`),
+  `stdout-stderr-fsize=N` (standard output and standard error one such file, `> file 2>&1`), `stderr-full`
+  (standard error /dev/full), and `stdout-closed` / `stderr-closed` (a pipe whose reader closed: LOSAT only, NCBI is
+  ended by SIGPIPE; the expectation is the `ncbi-near` row of the full device, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+  exception 5), and rows (`<program>.device.tsv`, psiblast, rpsblast and rpstblastn files new): psiblast
+  `Search has CONVERGED!` limits (`paja`, `tk.faa` 2 rounds and `tk_o.faa` 3 rounds; outfmt 0, 6, 7) and its warnings
+  on a failed standard error; rpsblast and rpstblastn on each device; tblastx and rpstblastn outfmt 6 at 4,096,
+  8,191 and 8,192 bytes on a file and on standard output; the review's outfmt 0 exit transitions on standard output
+  (`dev_nm.fna` against `of18/ns_ids` with `-task blastn`, `dev_pm.faa` against `of18/ps_ids`), each boundary on
+  both sides; `dev_nw.fna`'s warning on a failed standard error and in one limited file with the report; a strategy
+  file that LOSAT refuses on a device that fails at NCBI's prolog, in every program; and closed pipes for formats 0, 5, 6, 11 (and
+  blastn's 17).
 - `kind ncbi` with `ncbi-copies: PATH [NAME=VALUE ...]` in covers (a copy row; up to a ` | ` or the end): the
   expectation is made from NCBI's run on the oracle query file PATH (relative to LOSAT/) in place of the row's query
   file. With unified P-values (`blastp -comp_based_stats 1u`, `2u`, `3u`) NCBI BLAST+ 2.17.0 adjusts a query's E-values

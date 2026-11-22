@@ -5532,6 +5532,18 @@ fn resolve_for_formats(
         })
         .collect::<Result<_>>()?;
     let shared = crate::blastinput::report_counts::common_report_counts(&numbers, &counts)?;
+    // The hit lists are cut once for every report of the search (`report_prep::report_values`),
+    // so its formats' cuts must be one (`BlastpApp::list_cut`): the library searches formats of
+    // other cuts apart (`api::run::search_groups`).
+    if numbers
+        .iter()
+        .any(|&number| args.app.list_cut(number) != args.app.list_cut(numbers[0]))
+    {
+        bail!(
+            "the requested output formats cut the {} hit lists differently (outfmt 11 keeps the search's lists, psiblast's outfmt 5 cuts them before each round's PSSM); LOSAT searches once per run, so request them in separate runs",
+            args.app.ncbi_name()
+        );
+    }
     let search_options = |resolved: &ResolvedBlastpArgs| {
         let mut options = resolved.clone();
         options.outfmt.clear();
@@ -10165,6 +10177,13 @@ fn run_call(
         query_batches: &query_batches,
         database,
         requested_formats: &requested_formats,
+        list_cut: outputs
+            .formats
+            .first()
+            .and_then(|format| crate::blastinput::app::parse_formatting_string(format.outfmt).ok())
+            .map_or(crate::algorithm::blastp::args::ListCut::Uncut, |choice| {
+                args.app.list_cut(choice.number)
+            }),
         contexts: &contexts,
         gapped_params: &gapped_params,
         subject_source,

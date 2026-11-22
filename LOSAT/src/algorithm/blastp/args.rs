@@ -18,6 +18,18 @@ pub enum BlastpCompositionMode {
     ForceFullMatrixAdjust,
 }
 
+/// How a format's formatter cuts an app's traceback hit lists to the hit list size
+/// (`BlastpApp::list_cut`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListCut {
+    /// The lists as the search made them.
+    Uncut,
+    /// A copy of the lists cut after the round's PSSM and inclusion set are made from them.
+    AfterPssm,
+    /// The round's lists cut in place before its PSSM and inclusion set are made (psiblast's XML).
+    BeforePssm,
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:877-886
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:44-56
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:418-421
@@ -70,6 +82,25 @@ impl BlastpApp {
     /// merged volumes. `# N hits found` of outfmt 7 counts before the cut.
     pub fn prunes_after_traceback(self) -> bool {
         matches!(self, BlastpApp::Psiblast | BlastpApp::Rpsblast)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:707-711
+    /// How the formatter of the output format `outfmt` cuts the app's hit lists: the one owner of
+    /// this rule for the search (`report_prep::report_values` reads it of the first format) and
+    /// for the library's grouping of formats into searches (`api::run::search_groups`), since a
+    /// search's lists are cut once for all its reports. `WriteArchive` cuts nothing; psiblast's
+    /// XML formatter cuts the round's results themselves before the round's PSSM and inclusion set
+    /// are made (`TrimSeqAlign`); the other formats of psiblast and rpsblast cut a copy after them
+    /// (`PruneSeqalign`); the lists of the other apps are never longer than the formats show.
+    pub fn list_cut(self, outfmt: i32) -> ListCut {
+        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, XML};
+        match (self, outfmt) {
+            _ if !self.prunes_after_traceback() => ListCut::Uncut,
+            (_, ARCHIVE_FORMAT) => ListCut::Uncut,
+            (BlastpApp::Psiblast, XML) => ListCut::BeforePssm,
+            _ => ListCut::AfterPssm,
+        }
     }
 
     /// The name in LOSAT's rejections ("... is not supported by LOSAT's PSIBLAST").

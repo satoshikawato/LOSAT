@@ -1077,6 +1077,9 @@ pub(super) struct ReportSetup<'a> {
     pub(super) query_batches: &'a [RangedBatch],
     pub(super) database: Option<&'a database::BlastpDatabase>,
     pub(super) requested_formats: &'a [BlastpReport],
+    /// How the formatters cut the hit lists: the first format's (`BlastpApp::list_cut`; the
+    /// library searches formats of other cuts apart, `api::run::search_groups`).
+    pub(super) list_cut: crate::algorithm::blastp::args::ListCut,
     pub(super) contexts: &'a [QueryContext],
     pub(super) gapped_params: &'a KarlinParams,
     pub(super) subject_source: BlastpSubjectSource<'a>,
@@ -1290,6 +1293,7 @@ pub(super) fn report_values(
         query_batches,
         database,
         requested_formats,
+        list_cut,
         contexts,
         gapped_params,
         ..
@@ -1308,18 +1312,14 @@ pub(super) fn report_values(
     // subject (`PruneSeqalign`, cited at `joined_cut`): a copy of one record that follows
     // another is kept with it; where it keeps another subject for others, the run is LOSAT's
     // refusal before any format is written.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
     // The archive holds the results as the search made them: no formatter cuts rpsblast's merged
     // volumes or psiblast's lists before `WriteArchive` (the other formats' formatters cut them).
-    let prunes_lists = args.app.prunes_after_traceback()
-        && !matches!(requested_formats.first(), Some(BlastpReport::Archive));
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:707-711
     // psiblast's XML formatter cuts the round's results themselves (`TrimSeqAlign`, the subjects
     // that `PruneSeqalign` keeps) before the round's PSSM and inclusion set are made from them
-    // (psiblast_app.cpp:273-309); the other formats cut a copy after them.
-    let cuts_before_pssm = prunes_lists
-        && args.app == crate::algorithm::blastp::args::BlastpApp::Psiblast
-        && matches!(requested_formats.first(), Some(BlastpReport::Xml));
+    // (psiblast_app.cpp:273-309); the other formats cut a copy after them (`BlastpApp::list_cut`).
+    use crate::algorithm::blastp::args::ListCut;
+    let prunes_lists = list_cut != ListCut::Uncut;
+    let cuts_before_pssm = list_cut == ListCut::BeforePssm;
     let psiblast_kept: Option<Vec<usize>> = match (args.app, listed_titles.as_ref()) {
         (_, Some(titles)) if prunes_lists => {
             Some(titles.joined_cut(hit_lists, args.max_target_seqs)?)

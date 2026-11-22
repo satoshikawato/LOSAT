@@ -241,9 +241,28 @@ fn makeprofiledb_gives_ncbis_bytes() {
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
+/// `text` with the date of each `Posted date:` line (outfmt 0's database footer: the build date
+/// that makeprofiledb wrote into the `.pin` file) replaced by `<DATE>`.
+fn posted_date_masked(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        match line.find("Posted date:") {
+            Some(at) => {
+                out.push_str(&line[..at]);
+                out.push_str("Posted date:  <DATE>");
+                if line.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+            None => out.push_str(line),
+        }
+    }
+    out
+}
+
 // `rps/<row>.<fmt>`: NCBI rpsblast 2.17.0 `-query q3.faa -db db/db -outfmt <fmt>` on the database
 // NCBI makeprofiledb built for the row (survey rows R01 and R05, 2026-11-21), its output in
-// LOSAT's words.
+// LOSAT's words; the database's build date (outfmt 0's `Posted date:`) is the day of the run.
 #[test]
 fn rpsblast_on_losat_databases_gives_ncbis_bytes() {
     for (row, case) in [("R01", "O00"), ("R05", "S_f2")] {
@@ -261,8 +280,10 @@ fn rpsblast_on_losat_databases_gives_ncbis_bytes() {
             assert_eq!(output.status.code(), Some(0), "{row} outfmt {fmt}");
             let ncbi = fs::read(fixtures().join(format!("rps/{row}.{fmt}"))).unwrap();
             assert_eq!(
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&losat::wording::losat_output_bytes(&ncbi)),
+                posted_date_masked(&String::from_utf8_lossy(&output.stdout)),
+                posted_date_masked(&String::from_utf8_lossy(
+                    &losat::wording::losat_output_bytes(&ncbi)
+                )),
                 "{row} outfmt {fmt}"
             );
         }

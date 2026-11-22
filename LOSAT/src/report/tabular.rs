@@ -845,8 +845,8 @@ impl TabularSpec {
             FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow))
         } else if self.reads_subject(program) {
             FormatThrow::Writes(RunThrow {
-                after: AfterThrow::EndsRun,
                 rows: self.throw_rows(program),
+                ..RunThrow::every_row(AfterThrow::EndsRun)
             })
         } else {
             FormatThrow::Unread

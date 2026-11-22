@@ -497,6 +497,12 @@ pub struct ReportOutputs<'a> {
     /// format come in that format's write order; those of different formats may interleave in
     /// any order (blastp's query blocks write every format block by block).
     pub observer: Option<&'a mut (dyn FormatObserver + Send)>,
+    /// The `-outfmt` values of the call's other searches (`api::run`'s searches, one for each
+    /// hit list size, `search_groups`), which this search does not write: the refusal of a
+    /// subject whose lookup throws where its batch's prefetch is off is the call's, decided over
+    /// all of its formats (`report::db_subject::FormatThrow::of_search`; review 3 of line DBID
+    /// pfoff-3, N2). Empty where the call is one search (the command line, every other caller).
+    pub other_outfmts: &'a [&'a str],
 }
 
 impl ReportOutputs<'_> {
@@ -624,6 +630,7 @@ impl ReportOutputs<'_> {
         f: impl FnOnce(&mut ReportOutputs<'_>) -> R,
     ) -> R {
         let ReportOutputs {
+            other_outfmts,
             formats,
             diagnostics,
             later_warnings,
@@ -632,6 +639,7 @@ impl ReportOutputs<'_> {
         } = self;
         let mut tee = crate::report::archive::DiagTee::new(&mut **diagnostics, handle);
         let mut view = ReportOutputs {
+            other_outfmts,
             formats: formats
                 .iter_mut()
                 .map(|format| FormatOutput {
@@ -680,6 +688,7 @@ impl<'a> ReportOutputs<'a> {
         diagnostics: &'a mut (dyn Write + Send),
     ) -> Self {
         Self {
+            other_outfmts: &[],
             formats: vec![FormatOutput {
                 outfmt,
                 sink,

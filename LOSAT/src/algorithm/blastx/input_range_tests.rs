@@ -229,6 +229,13 @@ fn a_range_cuts_the_records_and_skips_the_short_ones() {
         unkept(false),
         [vec!["Query_1", "Query_3"], vec!["Query_4", "Query_5"]]
     );
+    // The scopes of the queries take the records in the order read, the skipped `b` with its
+    // whole letters between `a` and `c` (`scope_records`; line WQA D10 round 6).
+    let order: Vec<(usize, Option<usize>)> = scope_records(&kept[..2])
+        .into_iter()
+        .map(|(_, length, place)| (length, place))
+        .collect();
+    assert_eq!(order, [(10, Some(0)), (3, None), (8, Some(1))]);
 }
 
 // A batch of skipped records alone is delivered empty (NCBI's query factory refuses it), also

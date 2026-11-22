@@ -419,6 +419,13 @@ pub struct BlastpArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
+    /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
+    /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
+    /// stops in the command line's form (line WQA D10 round 5, 2026-11-20). `None` on the command
+    /// line. Not a public option.
+    #[arg(skip)]
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
     /// psiblast's PSSM options (`-save_pssm_after_last_round`, `-save_each_pssm`,
     /// `-out_ascii_pssm`, `-pseudocount`); `None` for blastp.
     #[arg(skip)]
@@ -618,6 +625,8 @@ pub struct ResolvedBlastpArgs {
     pub inclusion_ethresh: f64,
     /// `BlastpArgs::first_query_ordinal`.
     pub first_query_ordinal: usize,
+    /// `BlastpArgs::scope_refusal`.
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
     /// The ASCII PSSMs that psiblast writes after its round (`algorithm::psiblast::pssm`).
     pub psi_pssm: Option<crate::algorithm::psiblast::pssm::PssmRequest>,
     /// psiblast `-in_pssm`: the query given as a PSSM, read with the options
@@ -1129,6 +1138,7 @@ impl BlastpArgs {
             archive: self.archive.clone(),
             strategy: self.strategy.clone(),
             first_query_ordinal: self.first_query_ordinal,
+            scope_refusal: self.scope_refusal.clone(),
             psi_pssm,
             psi_search,
             rps_search: self.rps.clone().map(std::sync::Arc::new),

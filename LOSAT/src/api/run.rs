@@ -578,6 +578,19 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
     groups.into_iter().map(|(_, group)| group).collect()
 }
 
+/// The `-outfmt` values of `formats` that the search of the positions `group` (a group of
+/// `search_groups`) does not write, in the call's order: those of the call's other searches, over
+/// which, with its own, a search decides the call's refusals (`ReportOutputs::other_outfmts`).
+/// Empty where the call is one search.
+fn other_formats<'f>(formats: &[&'f str], group: &[usize]) -> Vec<&'f str> {
+    formats
+        .iter()
+        .enumerate()
+        .filter(|(position, _)| !group.contains(position))
+        .map(|(_, outfmt)| *outfmt)
+        .collect()
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
@@ -676,17 +689,30 @@ fn run_local_entry(
         outputs.diagnostics.write_all(&warnings)?;
     }
     let (query, subject) = (inputs.query, inputs.subject);
+    // How the reading of the query records ended, which the search meets in its batch
+    // (`Inputs::query_end`).
+    let end = inputs.end();
     if inputs.database {
         let settings = start.settings(&mut *outputs.diagnostics)?;
         return match command {
-            Commands::Blastp(args) => run_local_database_blastp(args, query, settings, outputs),
-            Commands::Tblastn(args) => run_local_database_tblastn(args, query, settings, outputs),
-            Commands::Blastn(args) => run_local_database_blastn(args, query, settings, outputs),
-            Commands::Tblastx(args) => run_local_database_tblastx(args, query, settings, outputs),
-            Commands::Blastx(args) => run_local_database_blastx(args, query, settings, outputs),
+            Commands::Blastp(args) => {
+                run_local_database_blastp(args, query, end, settings, outputs)
+            }
+            Commands::Tblastn(args) => {
+                run_local_database_tblastn(args, query, end, settings, outputs)
+            }
+            Commands::Blastn(args) => {
+                run_local_database_blastn(args, query, end, settings, outputs)
+            }
+            Commands::Tblastx(args) => {
+                run_local_database_tblastx(args, query, end, settings, outputs)
+            }
+            Commands::Blastx(args) => {
+                run_local_database_blastx(args, query, end, settings, outputs)
+            }
             Commands::Psiblast(args) => {
                 let args = psiblast_args(args, outputs)?;
-                run_local_database_blastp(args, query, settings, outputs)
+                run_local_database_blastp(args, query, end, settings, outputs)
             }
             Commands::Rpsblast(_)
             | Commands::Rpstblastn(_)
@@ -704,11 +730,11 @@ fn run_local_entry(
             if args.unknown_matrix_name() {
                 args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
             }
-            run_local_blastp(args, query, subject, "", "", outputs)
+            run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn)?;
-            run_local_tblastn(args, query, subject, outputs)
+            run_local_tblastn(args, query, end, subject, outputs)
         }
         Commands::Blastn(mut args) => {
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastn)?;
@@ -734,7 +760,7 @@ fn run_local_entry(
                 let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.resolve_repeat_filter(&settings);
             }
-            run_local_blastn(args, query, subject, outputs)
+            run_local_blastn(args, query, end, subject, outputs)
         }
         Commands::Tblastx(mut args) => {
             // The file of a `-matrix` that NCBI's tables do not have, first, as the command
@@ -744,7 +770,7 @@ fn run_local_entry(
                 args.find_matrix_file(&settings.matrix_search)?;
             }
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastx)?;
-            run_local_tblastx(args, query, subject, outputs)
+            run_local_tblastx(args, query, end, subject, outputs)
         }
         Commands::Blastx(mut args) => {
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastx)?;
@@ -753,12 +779,12 @@ fn run_local_entry(
             if args.unknown_matrix_name() {
                 args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
             }
-            run_local_blastx(args, query, subject, outputs)
+            run_local_blastx(args, query, end, subject, outputs)
         }
         Commands::Psiblast(args) => {
             let mut args = psiblast_args(args, outputs)?;
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast)?;
-            run_local_blastp(args, query, subject, "", "", outputs)
+            run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
@@ -904,8 +930,12 @@ pub fn run(
             } else {
                 log.sink(&mut repeated, false)
             };
+            // The formats of the other searches, of which the call's refusals are decided
+            // (`ReportOutputs::other_outfmts`).
+            let others = other_formats(&formats, group);
             let result = {
                 let mut outputs = ReportOutputs {
+                    other_outfmts: &others,
                     formats: group
                         .iter()
                         .map(|&position| FormatOutput {
@@ -975,6 +1005,7 @@ pub fn run_to_file(
         let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt,
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -1034,9 +1065,11 @@ fn collect_one(
         positions.iter().map(|_| CountingWriter::new()).collect();
     let mut recorder = RangeRecorder::new(writers.iter().map(|w| w.position.clone()).collect());
     let mut collected: Vec<Arc<Vec<PairwiseHit>>> = Vec::new();
+    let others = other_formats(formats, positions);
     let result = {
         let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
+            other_outfmts: &others,
             formats: positions
                 .iter()
                 .zip(writers.iter_mut())

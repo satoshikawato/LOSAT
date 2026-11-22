@@ -32,6 +32,10 @@ alias file of a `-db` with another database) over `db/ak/or/`: the cases' alias 
 taxid 10116, NCBI BLAST+ 2.17.0 makeblastdb, `remaining-gaps-20261112/D/fixtures/build_o.sh`), batch files
 `in/or_<case>_*.txt`; `-taxids` with `-no_taxid_expansion`. `A183`-`A190` are GIs of `p5` through `db/ak/p_range` and
 `in/or_gi.txt`: `make_d1a2a_fixtures.py`.
+`G01`-`G11` (line RG item K4i-1, 2026-11-18) are NCBI BLAST+ 2.17.0 blastdbcmd (the release build on the workstation)
+run in this directory on hexadecimal values of `-line_length` and `-ipg` (`G07`, `-line_length 0x7fffffff`, is not
+frozen): `remaining-gaps-20261112/K/k4i1/tools/make_g_blastdbcmd.py`, `LOSAT/tests/blastdbcmd_retrieve.rs`
+(`G11`: `blastdbcmd_info.rs`).
 `U01`, `U03` and `U04` (line SW, SW8, 2026-11-08) are NCBI BLAST+ 2.17.0 blastdbcmd on the
 developer machine, run with the words of the tests from the `blastdbcmd` directory of a copy of
 this layout whose `seqdb/db` held the five files of `user-column-db`

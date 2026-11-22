@@ -297,6 +297,7 @@ fn parse_blastn_args(
         one_query_batch: false,
         hits_only: false,
         first_query_ordinal: 0,
+        scope_refusal: None,
     };
 
     let mut index = 0;
@@ -431,6 +432,7 @@ fn parse_tblastx_args(
         subject_taxdb: None,
         taxdb_setting: None,
         first_query_ordinal: 0,
+        scope_refusal: None,
         matrix_file: None,
     };
 
@@ -570,6 +572,7 @@ fn parse_blastp_args(
         gap_trigger: None,
         sum_stats: false,
         first_query_ordinal: 0,
+        scope_refusal: None,
         psiblast_pssm: None,
         formatting: Default::default(),
         rps: None,

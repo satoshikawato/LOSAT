@@ -109,10 +109,14 @@
 //! - [`run_batches`] searches one of NCBI's query batches at a time: the host reports progress
 //!   between batches and stops the search by not asking for the next one. Inside a batch only
 //!   the host can stop it, by ending the thread or the process.
-//! - The records are read before the search, so a reader error is an [`Error::Input`] before
-//!   any report, where the command line has reported the batches before the error (and, with
-//!   `-out`, made the file: [`run_to_file`] makes it where the command line makes `-out`, after
-//!   the subjects are read, so an error of the query records leaves no file there).
+//! - The records are read before the search. [`read_inputs`] reads every query record or fails
+//!   with the reader's error ([`Error::Input`]) before any report. [`read_input_records`] keeps
+//!   the query records read before a reader error and the error ([`QueryEnd`]), and a search of
+//!   them ([`InputRecords::inputs`], [`Inputs::query_end`]) ends with that error where the
+//!   command line does: in the query batch that reads the record, after the reports of the
+//!   batches before (and, with `-out`, after making the file, as [`run_to_file`] makes it where
+//!   the command line makes `-out`). A subject's reader error fails the reading, as the command
+//!   line reads every subject before the first query.
 //! - Outfmt 13 and 14 write side files next to their report, so they come through
 //!   [`run_to_file`] only; a report in memory has no place for them (the in-memory search under
 //!   the API, `local_blast`, takes a receiver of them, `OutputSink::Files`, which LOSAT Web gives).
@@ -151,8 +155,8 @@
 //!
 //! - The program: [`Program`], [`describe`](describe()), [`Description`], [`Parameter`],
 //!   [`ValueKind`]
-//! - The inputs: [`read_input_file`], [`read_fasta`], [`read_inputs`], [`Role`], [`FastaRecord`],
-//!   [`Inputs`]
+//! - The inputs: [`read_input_file`], [`read_fasta`], [`read_inputs`], [`read_input_records`],
+//!   [`Role`], [`FastaRecord`], [`Inputs`], [`InputRecords`], [`QueryEnd`], [`QueryError`]
 //! - The options: [`validate`], [`Search`], [`API_OWNED`], [`Strategy`]
 //! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`Id`],
@@ -184,7 +188,10 @@ pub use batches::{run_batches, Batch, Batches};
 pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;
 pub use id::Id;
-pub use input::{read_fasta, read_input_file, read_inputs, Inputs, Role};
+pub use input::{
+    read_fasta, read_input_file, read_input_records, read_inputs, InputRecords, Inputs, QueryEnd,
+    QueryError, Role,
+};
 pub use program::Program;
 pub use run::{
     run, run_collect, run_to_file, HspRecord, Outcome, QueryRounds, QueryStats, Report, Strand,

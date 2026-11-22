@@ -102,6 +102,17 @@ pub struct ReportCounts {
     pub num_alignments: usize,
 }
 
+impl ReportCounts {
+    /// The counts of what the pairwise reports show of each query (`db_subject::Shown`):
+    /// `num_descriptions` description lines, the alignments of the first `num_alignments` hits.
+    pub fn shown(self) -> crate::report::db_subject::Shown {
+        crate::report::db_subject::Shown {
+            descriptions: self.num_descriptions,
+            alignments: self.num_alignments,
+        }
+    }
+}
+
 impl Default for ReportCounts {
     /// Neither `-max_target_seqs`, `-num_descriptions` nor `-num_alignments`, outfmt 0.
     fn default() -> Self {

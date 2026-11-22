@@ -1,0 +1,83 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: multidb pa; noacc_v5 (no parsed Seq-ids)
+           15 sequences; 1,920 total letters
+
+
+
+Query= mix2_u qp1 of ids/noacc_v5 (no accession table)
+
+Length=140
+                                                                      Score   Total  Query    E      Max
+Sequences producing significant alignments:                          (Bits)   Score  cover   Value   Ident
+
+qp1 query protein one                                                 293      293    100%   6e-108  100%      
+
+
+>qp1 query protein one
+Length=140
+
+ Score = 293 bits (749),  Expect = 6e-108, Method: Compositional matrix adjust.
+ Identities = 140/140 (100%), Positives = 140/140 (100%), Gaps = 0/140 (0%)
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+            MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+            CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN
+Sbjct  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+
+Query  121  FEKLKIFHYMVGHGRTASEG  140
+            FEKLKIFHYMVGHGRTASEG
+Sbjct  121  FEKLKIFHYMVGHGRTASEG  140
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 155520
+
+
+Query= mix2_c the letters of taxfilter/q.faa, then qp1
+
+Length=282
+                                                                      Score   Total  Query    E      Max
+Sequences producing significant alignments:                          (Bits)   Score  cover   Value   Ident
+
+P69905.2 Unknown                                                      286      286    50%    4e-103  100%      
+Q9TS35.2 Unknown                                                      282      282    50%    3e-101  99%       
+P63107.2 Unknown                                                      278      278    50%    7e-100  97%       
+P01942.2 Unknown                                                      253      253    50%    6e-90   86%       
+P01966.2 Unknown                                                      253      253    50%    6e-90   88%       
+P01994.2 Unknown                                                      208      208    50%    4e-72   70%       
+P01946.3 Unknown                                                      207      207    50%    8e-72   78%       
+P01923.1 Unknown                                                      283      283    50%    2e-101  99%       
+P67818.1 Unknown                                                      275      275    50%    1e-98   96%       
+P01935.1 Unknown                                                      265      265    50%    1e-94   89%       
+P07405.1 Unknown                                                      249      249    50%    3e-88   85%       
+P60529.1 Unknown                                                      243      243    50%    9e-86   84%       
+qp1 query protein one                                                 302      302    50%    3e-109  100%      
+
+

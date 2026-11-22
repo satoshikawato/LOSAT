@@ -458,19 +458,29 @@ pub(crate) fn even_gap_link_hsps(
     let ignore_small_gaps = params.cutoff_small_gap == 0;
     // `link_hsp_array`: the input positions in the order of `s_RevCompareHSPsTbn` (`Tbx`).
     let frame = |h: &LinkHsp| params.query_frame(h.context);
-    // The groups and the order in one allocation, as many subjects of few HSPs link one by one.
-    let mut groups_and_order: Vec<usize> = Vec::with_capacity(2 * total_number_of_hsps);
-    groups_and_order.extend(hsps.iter().map(|h| link_group(frame(h), h.subject_frame)));
-    groups_and_order.extend(0..total_number_of_hsps);
-    let (groups, order) = groups_and_order.split_at_mut(total_number_of_hsps);
-    let groups: &[usize] = groups;
-    order.sort_by(|&a, &b| rev_compare_tbn(&hsps[a], groups[a], &hsps[b], groups[b]));
+    // Each entry holds an HSP's linking group (`link_group`, taken once for each HSP) in its high
+    // half and the HSP's input position in its low half: one array of the HSPs' number, as many
+    // subjects of few HSPs link one by one.
+    assert!(
+        u32::try_from(total_number_of_hsps).is_ok(),
+        "more HSPs than 32-bit positions"
+    );
+    let group = |entry: u64| (entry >> 32) as usize;
+    let position = |entry: u64| entry as u32 as usize;
+    let mut order: Vec<u64> = hsps
+        .iter()
+        .enumerate()
+        .map(|(i, h)| (link_group(frame(h), h.subject_frame) as u64) << 32 | i as u64)
+        .collect();
+    order.sort_by(|&a, &b| {
+        rev_compare_tbn(&hsps[position(a)], group(a), &hsps[position(b)], group(b))
+    });
     // Slot 0 is `hp_start`; the HSP at sorted position `i` is slot `i + 1`, read from a copy in that
     // order (one load where `hsps[order[i]]` takes two).
     let sorted: Vec<SortedHsp> = order
         .iter()
-        .map(|&i| {
-            let hsp = hsps[i];
+        .map(|&entry| {
+            let hsp = hsps[position(entry)];
             let c = contexts(hsp.context);
             SortedHsp {
                 hsp,
@@ -493,7 +503,7 @@ pub(crate) fn even_gap_link_hsps(
         frames.last_mut().expect("one frame").1 += 1;
         nodes[slot].prev = Link::from((index > 0).then_some(slot - 1));
         nodes[slot].next = Link::from((index + 1 < total_number_of_hsps).then_some(slot + 1));
-        if index > 0 && groups[order[index]] != groups[order[index - 1]] {
+        if index > 0 && group(order[index]) != group(order[index - 1]) {
             frames.last_mut().expect("one frame").1 -= 1;
             frames.push((slot, 1));
             nodes[slot - 1].next = Link::NONE;
@@ -558,7 +568,7 @@ pub(crate) fn even_gap_link_hsps(
         let method = usize::from(head.ordering_method);
         if head.link[method].get().is_none() {
             emit(LinkedHsp {
-                index: order[slot - 1],
+                index: position(order[slot - 1]),
                 evalue: head.evalue,
                 num: 1,
             });
@@ -569,7 +579,7 @@ pub(crate) fn even_gap_link_hsps(
         let mut current = Some(slot);
         while let Some(h) = current {
             emit(LinkedHsp {
-                index: order[h - 1],
+                index: position(order[h - 1]),
                 evalue: nodes[h].evalue,
                 num: num_links,
             });

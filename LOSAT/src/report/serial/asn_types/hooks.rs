@@ -1,11 +1,13 @@
-//! What NCBI's hand-written classes do when the text reader has read one of them (their
+//! What NCBI's hand-written classes do when the reader has read one of them (their
 //! `PostRead`), for the classes of the table whose `PostRead` changes the object or stops the
 //! reader (SURVEY_D3 §2.4 of line RG series F: `CSeq_descr`, `CVariation_ref`; the others keep
 //! caches only), and the Seq-id, which LOSAT keeps in its one Seq-id model (`seqid::model`).
 
-use super::read::{Frame, Post, ReadError};
+use super::read::{Frame, Post};
 use super::table::named;
 use super::{member_index, Value};
+use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::serial::asn_input::{Fail, R, VECTOR_RESERVE_LENGTH_ERROR};
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
@@ -28,11 +30,7 @@ use crate::seqid::model::{
 // here; SeqTable-multi-data's is a variant hook (`pre_read_variant`).
 /// The hook of NCBI's class `ty` before the value of its member at position `member` is read,
 /// with the members `read` so far.
-pub(super) fn pre_read_member(
-    ty: u16,
-    member: usize,
-    read: &[(u16, Value)],
-) -> Result<(), ReadError> {
+pub(super) fn pre_read_member(ty: u16, member: usize, read: &[(u16, Value)]) -> R<()> {
     if ty != named::DENSE_SEG {
         return Ok(());
     }
@@ -55,7 +53,7 @@ pub(super) fn pre_read_member(
         _ => return Ok(()),
     };
     if size > max_size {
-        return Err(ReadError::Std("vector::reserve"));
+        return Err(Fail::Std(&VECTOR_RESERVE_LENGTH_ERROR));
     }
     Ok(())
 }
@@ -76,7 +74,7 @@ pub(super) fn pre_read_member(
 // default, true: LOSAT reads no NCBI parameter.)
 /// The hook of the CHOICE `ty` before the value of its variant at position `variant` is read,
 /// with the reader's frames (the variant's on top).
-pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> Result<(), ReadError> {
+pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> R<()> {
     if ty != named::SEQTABLE_MULTI_DATA {
         return Ok(());
     }
@@ -105,7 +103,7 @@ pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> Res
         }
         if depth >= 2 && frame.ty() == Some(named::SEQ_TABLE) {
             if frame.num_rows().is_some_and(|rows| rows < 0) {
-                return Err(ReadError::Std("vector::reserve"));
+                return Err(Fail::Std(&VECTOR_RESERVE_LENGTH_ERROR));
             }
             return Ok(());
         }
@@ -118,7 +116,7 @@ pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> Res
 }
 
 /// The hook of the type `ty` after its value was read (not after a skip).
-pub(super) fn post_read(ty: u16, value: Value, posts: &mut Vec<Post>) -> Result<Value, ReadError> {
+pub(super) fn post_read(ty: u16, value: Value, posts: &mut Vec<Post>) -> R<Value> {
     match ty {
         named::SEQ_DESCR => seq_descr_post_read(value),
         named::VARIATION_REF => Ok(variation_ref_post_read(value, posts)),
@@ -131,14 +129,24 @@ pub(super) fn post_read(ty: u16, value: Value, posts: &mut Vec<Post>) -> Result<
 // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless NCBI's environment or configuration file sets
 // it, which LOSAT does not read; NCBI 2.17.0 gives the error with the variable set too, c23 of
 // SURVEY_D3.)
-fn seq_descr_post_read(value: Value) -> Result<Value, ReadError> {
+fn seq_descr_post_read(value: Value) -> R<Value> {
     match &value {
-        Value::List(items) if items.is_empty() => {
-            Err(ReadError::Serial("empty Seq-descr is not allowed".into()))
-        }
+        Value::List(items) if items.is_empty() => Err(Fail::serial(NcbiException::new(
+            SEQ_DESCR_POST_READ,
+            "empty Seq-descr is not allowed",
+        ))),
         _ => Ok(value),
     }
 }
+
+/// `NCBI_THROW` of `CSeq_descr::PostRead` (its message has no stream position; NCBI's callers of
+/// the PSSM reader print their own line for a `CSerialException`, so the site is never printed).
+const SEQ_DESCR_POST_READ: ThrowSite = ThrowSite {
+    file: "src/objects/seq/Seq_descr.cpp",
+    line: 65,
+    kind: "CSerialException::eInvalidData",
+    function: None,
+};
 
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/Variation_ref.cpp:56-151
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/VariantProperties.cpp:50-55

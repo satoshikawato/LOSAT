@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.76
+- Version: 1.77
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -370,6 +370,17 @@
   otherwise Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after
   1.73, line RG item X4b-1, after 1.74, line RG item D5b-3, and after 1.75, line NP item M5, at
   the merges of dev, and after exception 22)
+  1.77 2026-11-22 (psiblast and tblastn `-in_pssm` of a PSSM in ASN.1 binary, line RG item D3c-3a:
+  the explicit rejections, rule 3, of a binary PSSM's string or byte block whose length passes the
+  end of the file and is 1 GiB to 2^47 bytes, the class of 1.52, and of a query whose letters are
+  missing or whose number is not its Seq-inst's `length`, on which NCBI crashes or writes past its
+  buffer for most lengths and which it answers for one less than the letters, an answer LOSAT does
+  not yet give; and a refusal that is not a
+  rule-3 item, of a PSSM's Karlin-Altschul values that are not finite numbers where LOSAT does not
+  yet compute NCBI's output of them; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.76; first 1.71, then 1.72, 1.74, 1.76 and 1.77 at the merges of dev that brought line DBID item
+  pfoff-3's 1.71, line NP items M5a and M5b's 1.72 and line RG item X4b-1's 1.73, then line RG item D5b-3's 1.74 and
+  line NP item M5's 1.75, then line RG item X4b-2's 1.76)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2227,6 +2238,46 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   of eight (`tokens[8]`), `TestFormatPhrapAce`'s tokens of an `AS` line of fewer than three
   (`values[1]`, `values[2]`; NCBI 2.17.0 crashes on both, exit status 139) and `TestFormatFasta`'s
   search for `|` past a test buffer of 10 bytes or fewer.
+
+  Since version 1.77 (line RG item D3c-3a, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07) LOSAT also reads a PSSM in ASN.1 binary as NCBI's reader does
+  (`CObjectIStreamAsnBinary`, through the same type table and frames as the text), and refuses
+  (exit 1) two more cases there. A string or a byte block (OCTET STRING or BIT STRING) whose length
+  passes the end of the file and is 1 GiB to 2^47 bytes: NCBI's reader reserves the length before
+  it reads the bytes (a string's in `CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`,
+  when the bytes are not in its buffer; a byte block's, whose length the binary stream knows, in
+  its `vector<char>` reader, `serial/stdtypes.cpp:1538-1548`), which succeeds or fails by the
+  host's memory and overcommit (NCBI's probe host: `Unrecognized format for PSSM`, exit status 1);
+  below 1 GiB LOSAT writes NCBI's end-of-file answer, from 2^47 bytes `BLAST ran out of memory`
+  (exit status 4), the bounds of 1.52, and over 2^63 - 1 bytes NCBI's `std::length_error`
+  (`Error: basic_string::_M_create` or `Error: vector::reserve`, exit status 255); a byte block's
+  reserve that throws is posted first (`Error: (803.4) [psiblast] unended byte block`), as in
+  NCBI (rows `db.ber.ps.block_*`). A query whose letters are missing or whose number is not the
+  `length` of its Seq-inst ("a PSSM query whose letters are missing or of another length than its
+  Seq-inst is not supported by LOSAT's PSIBLAST", or TBLASTN; refused in the text form before):
+  for a query of 30 letters NCBI 2.17.0's psiblast ends by a signal with the lengths 31, 60 and
+  255 (SIGSEGV), 0, 1, 2, 10 and 4,294,967,295 (SIGABRT), and writes past its buffer with 28
+  (valgrind: an invalid write) though it exits 0. With 29, one less than the letters, NCBI answers
+  (exit 0, clean under valgrind) in ASN.1 text and binary alike: it searches the 29 letters with
+  the PSSM, and its E-values are those of a query of 29 letters. LOSAT does not yet give that
+  answer (the PSSM of 30 columns over a query of 29 letters belongs to line PS: hand-off
+  `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md` of line RG), so it is refused too. Not a rule-3 item but
+  a refusal: with `-out_pssm`, author names (`Auth-list` `names`) of a binary PSSM, which NCBI keeps
+  in a delay buffer and reads again only while it writes them, where that read posts a message or
+  fails (NCBI reports it in the middle of the file it writes; not ported). The warning of a
+  UTF8String tag (803.10) is not one of them: NCBI posts it once per process, when it first reads
+  the file, so the second read posts nothing and the names are written. Also not a rule-3 item
+  but a refusal, of the text form too: a gapped `lambda` of `PLUS-INFINITY`, a gapped `lambda`,
+  `kappa` or `h` of `NOT-A-NUMBER`, and psiblast's `lambdaUngapped` of `PLUS-INFINITY` ("a PSSM
+  whose gapped Karlin-Altschul parameter lambda is infinite (LOSAT does not yet compute the hits,
+  E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it) ..."). NCBI goes on with them
+  (E-values 0.0, bit scores `inf` or -1.0); LOSAT's search wrote NaN or found other hits, and its
+  arithmetic of these values belongs to line PS (hand-off `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md`
+  of line RG), which lifts the refusal when it computes NCBI's output. `MINUS-INFINITY` stays in the
+  refusal of a negative gapped value above. Tests:
+  `LOSAT/src/algorithm/pssm_search/in_pssm_tests.rs`,
+  `LOSAT/src/report/serial/asn_types/read_ber_tests.rs` and `write_tests.rs`; fixture rows
+  `db.ber.ps.*` and `db.ber.tbn.*`.
 
   None of these is a rule-1 exception: D3-1's questions to the Owner, Q1 (the Dense-seg division by
   zero), Q2 (the memory bounds), Q3 (the signed overflows) and Q-BM, were decided

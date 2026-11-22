@@ -393,9 +393,11 @@ fn kept_members_are_written_back_and_an_empty_descr_is_an_error() {
         .unwrap()
         .has_molinfo());
     let empty = SMALL_PSSM.replace("        title \"a \"\"quoted\"\" title\"\n", "");
-    assert_eq!(
-        read_pssm_with_parameters(empty.as_bytes()).unwrap_err(),
-        PssmReadError::Ncbi(ReadError::Serial("empty Seq-descr is not allowed".into()))
+    let error = read_pssm_with_parameters(empty.as_bytes()).unwrap_err();
+    assert!(
+        matches!(&error, PssmReadError::Ncbi(ReadError::Serial(e))
+            if e.get_msg() == b"empty Seq-descr is not allowed"),
+        "{error:?}"
     );
 }
 
@@ -542,4 +544,145 @@ fn pssm_files_of_a_directory_read_and_write_back() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
     assert!(!paths.is_empty());
+}
+
+/// Each post's text apart from where it was posted (`line N` in text, `byte N` in binary).
+fn post_texts(posts: &[Post]) -> Vec<String> {
+    posts
+        .iter()
+        .map(|post| match post {
+            Post::BadChar(replaced) => {
+                format!("BadChar({}, {:#x})", replaced.trace, replaced.byte)
+            }
+            other => format!("{other:?}"),
+        })
+        .collect()
+}
+
+/// `debug` (a value's `{:?}`) with each REAL in it written to 15 significant digits, the digits
+/// that datatool writes of a REAL in ASN.1 binary (`DBL_DIG`).
+fn reals_to_15_digits(debug: &str) -> String {
+    let mut out = String::with_capacity(debug.len());
+    let mut rest = debug;
+    while let Some(start) = rest.find(|c: char| c.is_ascii_digit() || c == '-') {
+        out.push_str(&rest[..start]);
+        let token_end = rest[start..]
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')))
+            .map_or(rest.len(), |end| start + end);
+        let token = &rest[start..token_end];
+        match token.parse::<f64>() {
+            Ok(real) if token.contains(['.', 'e']) => out.push_str(&format!("{real:.14e}")),
+            _ => out.push_str(token),
+        }
+        rest = &rest[token_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A fixture, inflated when its name ends with `.gz`.
+fn bytes_of(name: &str) -> Vec<u8> {
+    if name.ends_with(".gz") {
+        gunzip(name)
+    } else {
+        std::fs::read(fixture(name)).unwrap()
+    }
+}
+
+// Line RG D3c-3a: every PSSM file in ASN.1 text that has a binary twin (`ps9_<name>.asnb`, written
+// by NCBI's datatool; `tests/fixtures/pssm/README.md` names each source) is read from its twin as
+// from its text: the same PSSM, the same posts. NCBI's two readers make two differences. A REAL
+// of the text, `{ mantissa, 10, exponent }`, is the mantissa times a power of ten
+// (`asn_text_reader::real_of_parts`); one of the binary stream is its decimal text converted as
+// strtod converts it (`NStr::StringToDoublePosix`, objistrasnb.cpp:641), and datatool writes 15
+// significant digits: the two can be one unit in the last place apart (`tk_paja`:
+// 0.012178206669185499 from the text, 0.0121782066691855 from the twin), so REALs are compared to
+// those 15 digits here (the frozen rows `db.ps.inpssm.bin.*` hold NCBI's own results of the
+// twins). And a StringStore is read by the text reader as a VisibleString (`#` and a post for a
+// byte outside 0x20..0x7E), by the binary reader as its bytes (`bad_iupacaa`: the letter E9).
+#[test]
+fn every_binary_twin_reads_as_its_text() {
+    let ps4 = |name: &str| format!("pssm/ps4_{name}.asn.gz");
+    let ps7 = |name: &str| format!("pssm/ps7_{name}.asn.gz");
+    let mut twins: Vec<(&str, String)> = [
+        "tk_paja",
+        "tkxbz_paja",
+        "rnd26",
+        "two",
+        "rnd_scaled",
+        "rnd_notprot",
+        "rnd_noscores",
+        "rnd_idO",
+        "rnd_localidO",
+        "rnd_noungap",
+        "rnd_byrow",
+        "rnd_gi",
+        "rnd_ctrl",
+        "tk_ratios",
+        "tk_zr",
+    ]
+    .into_iter()
+    .map(|name| (name, ps4(name)))
+    .collect();
+    twins.extend(
+        ["ts1_tslice", "ts4_tslice", "tf1_hba", "idq", "one"]
+            .into_iter()
+            .map(|name| (name, ps7(name))),
+    );
+    twins.extend([
+        ("rnd", "db_search/db.ps.asn.rnd.6.asn".to_string()),
+        ("tkrnd", "db_search/db.ps.asn.tkrnd.6.asn".to_string()),
+        (
+            "rnd_ident_utf8",
+            "pssm/ps5_rnd_ident_utf8.asn.gz".to_string(),
+        ),
+        ("rnd_kungneg", "pssm/ps5c_rnd_kungneg.asn.gz".to_string()),
+        ("lower_iupacaa", "pssm/ps_lower_iupacaa.asn.gz".to_string()),
+    ]);
+    let gzipped = [
+        "tk_paja",
+        "tkxbz_paja",
+        "tk_ratios",
+        "tk_zr",
+        "ts1_tslice",
+        "ts4_tslice",
+        "tf1_hba",
+        "idq",
+    ];
+    let binary_of = |name: &str| {
+        let gz = if gzipped.contains(&name) { ".gz" } else { "" };
+        bytes_of(&format!("pssm/ps9_{name}.asnb{gz}"))
+    };
+    assert_eq!(twins.len(), 25);
+    for (name, source) in &twins {
+        let text = read_pssm(&bytes_of(source));
+        let binary = read_pssm_binary(&binary_of(name));
+        assert!(text.result.is_ok(), "{name}: {:?}", text.result);
+        assert!(binary.result.is_ok(), "{name}: {:?}", binary.result);
+        assert_eq!(
+            reals_to_15_digits(&format!("{:?}", text.result)),
+            reals_to_15_digits(&format!("{:?}", binary.result)),
+            "{name}"
+        );
+        assert_eq!(post_texts(&text.posts), post_texts(&binary.posts), "{name}");
+    }
+    let text = read_pssm(&gunzip("pssm/ps_bad_iupacaa.asn.gz"));
+    let binary = read_pssm_binary(&binary_of("bad_iupacaa"));
+    assert_eq!(post_texts(&text.posts).len(), 1);
+    assert!(binary.posts.is_empty(), "{:?}", binary.posts);
+    let letters = |read: PssmRead| {
+        let query = read.result.unwrap().pssm.query.and_then(SeqEntry::into_seq);
+        match query.unwrap().inst.seq_data {
+            Some(SeqData::Iupacaa(letters)) => letters,
+            other => panic!("{other:?}"),
+        }
+    };
+    let (text, binary) = (letters(text), letters(binary));
+    let differ: Vec<(u8, u8)> = text
+        .iter()
+        .zip(&binary)
+        .filter(|(a, b)| a != b)
+        .map(|(&a, &b)| (a, b))
+        .collect();
+    assert_eq!((text.len(), differ), (binary.len(), vec![(b'#', 0xe9)]));
 }

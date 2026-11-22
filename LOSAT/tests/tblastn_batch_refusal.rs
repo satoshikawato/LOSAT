@@ -773,8 +773,8 @@ fn a_refused_batch_that_ncbi_splits_meets_the_set_up_errors_where_ncbi_does() {
 /// setup checks, so that read's error comes first also where the average subject length fails
 /// them without the Gumbel block (`-searchsp`, `OLD_FSC`): for a batch searched whole, for one
 /// that NCBI splits and for one that LOSAT refuses (`q1`, `q2`, `q1` under `-parse_deflines`).
-/// NCBI 2.17.0: rows `db.ak.tbn.e0nseq.sp.6`, `db.ak.tbn.e0nseq.fsc.6`, `db.pd.q1c.tn.enf.sp.6`
-/// and `db.pd.q1c.tn.enf.split.6` (line RG item X-short-bat, fix 5).
+/// NCBI 2.17.0: rows `db.ak.tbn.e0nseq.sp.6` and `db.ak.tbn.e0nseq.fsc.6` (line RG item
+/// X-short-bat, fix 5).
 #[test]
 fn the_read_of_oid_0_comes_before_the_set_up_checks() {
     let temp = TempDir::new("oid0");

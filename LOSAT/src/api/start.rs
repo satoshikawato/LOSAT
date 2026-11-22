@@ -130,7 +130,11 @@ pub(crate) struct CallStart {
     /// The call's argv as the command line's parser read it with the call's kind of inputs
     /// (`Search::command`), once per call as the command line parses once per run: the call's
     /// steps take it from here (`CallStart::command`) instead of parsing the argv again.
-    command: Commands,
+    /// `AssertUnwindSafe` keeps `Batches`, which holds the start, unwind safe as it was before
+    /// the start kept the parse: the only fields of `Commands` that are not are LOSAT Web's
+    /// hooks (`BlastnArgs::window_masker_counts`, `BlastxArgs::rpstblastn`), which the parser
+    /// skips, so a parse holds `None` there, and the start only reads its parse or clones it.
+    command: std::panic::AssertUnwindSafe<Commands>,
     /// The diagnostic stream of NCBI's main thread of the call's run (`ncbi_exception::MainDiag`),
     /// which the call's code reads where it runs (`CallStart::enter`).
     diag: std::sync::Arc<crate::ncbi_exception::MainDiag>,
@@ -173,7 +177,7 @@ impl CallStart {
                 .then_some(started.target)
                 .filter(|target| !matches!(target, DiagTarget::Stderr)),
             dry_run: search.dry_run(),
-            command,
+            command: std::panic::AssertUnwindSafe(command),
             diag,
         })
     }
@@ -185,12 +189,12 @@ impl CallStart {
     /// The call's parsed argv (`Search::command` with the call's inputs, read at the call's
     /// start), for a step that reads it.
     pub(super) fn command_ref(&self) -> &Commands {
-        &self.command
+        &self.command.0
     }
 
     /// The call's parsed argv, for a step that takes its own (each group of `run`, each batch).
     pub(super) fn command(&self) -> Commands {
-        self.command.clone()
+        self.command.0.clone()
     }
 
     /// Whether the call is a dry run, which ends here: the start, the parse with the call's kind

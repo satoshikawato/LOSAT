@@ -54,6 +54,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI uses two lengths for one subject there. In `blastn` LOSAT gives NCBI's result wherever its scan past the piece finds nothing more. In the other programs LOSAT searches the piece as NCBI searches it in the same database with the mask shortened until a letter follows the piece (one letter in `blastp` and `blastx`, a few bases in `tblastn` and `tblastx`). The masked letters stay masked in the alignments and the statistics, so LOSAT's result is NCBI's result for that database with the freed letters masked (`X`, or `N` in nucleotides). Where no such shorter mask exists (a mask of one or two bases at the end of a very short sequence), LOSAT's result is NCBI's own.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### `-db_hard_mask` with a short mask at an end of a sequence (`tblastn`, `tblastx`)
+
+- **What you see.** LOSAT searches the sequence and writes its alignments. NCBI crashes.
+- **When.** `tblastn` or `tblastx` with `-db_hard_mask` on a sequence with a mask within its first two bases, or within the one or two bases after its last whole codon (for example [1200, 1202) of 1,202 bases), or with an empty mask at its start. Such a mask leaves a reading frame an empty part at its start.
+- **Why.** NCBI then searches the rest of that frame as the whole frame and frees memory that it did not allocate, in every run. LOSAT searches the frame as outside the mask, and the masked bases stay masked in every frame, as for every other mask. So LOSAT's result is NCBI's result for the same database without that short mask and with its bases stored as `N`, which is also what NCBI gives where another mask of the sequence avoids the crash.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### Titles made only of punctuation
 
 - **What you see.** LOSAT writes the report. NCBI crashes.

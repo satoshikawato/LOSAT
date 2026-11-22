@@ -1330,6 +1330,7 @@ fn windows_computed_with_jobs_largest_first_equal_the_par_iter_windows() {
                         &fixture.lists,
                         &heaps,
                         window,
+                        &[],
                         &shared(),
                         false,
                     );
@@ -1339,6 +1340,7 @@ fn windows_computed_with_jobs_largest_first_equal_the_par_iter_windows() {
                         &fixture.lists,
                         &heaps,
                         window,
+                        &[],
                         &shared(),
                         true,
                     );
@@ -1462,6 +1464,7 @@ fn windows_with_the_seg_store_emptied_after_each_equal_windows_with_one_store() 
                         &fixture.lists,
                         &heaps,
                         window,
+                        &[],
                         &kept,
                         false,
                     );
@@ -1470,6 +1473,7 @@ fn windows_with_the_seg_store_emptied_after_each_equal_windows_with_one_store() 
                         &fixture.lists,
                         &heaps,
                         window,
+                        &[],
                         &emptied,
                         false,
                     );
@@ -2737,7 +2741,7 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
             .collect();
         // Windows after a replay that stopped at a match of each window above whose test is
         // asked (built at the first thread count, with the test's E-value and score).
-        let mut carried_windows: Vec<XWindow> = Vec::new();
+        let mut carried_windows: Vec<(XWindow, XCarry)> = Vec::new();
         for threads in [1, 2, 3, 7] {
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 let search = XRedoParSearch {

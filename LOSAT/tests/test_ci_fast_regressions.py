@@ -375,13 +375,41 @@ class DbSearchFixtureTests(unittest.TestCase):
 
     def test_ncbi_runs_have_the_usage_report_off(self):
         # NCBI BLAST+ 2.17.0 sends a run's parameters to NCBI at exit unless BLAST_USAGE_REPORT is false
-        # (blast_usage_report.cpp:195-220): every NCBI run of the harness has it, LOSAT's runs do not.
+        # (blast_usage_report.cpp:195-220): every NCBI run of the harness has it, and so has every LOSAT run
+        # (`test_check_runs_losat_in_the_environment_of_the_freeze`).
         clean = db_fixtures.clean_env({"PATH": "/bin", "BLAST_USAGE_REPORT": "true"}, "/empty/home")
         self.assertNotIn("BLAST_USAGE_REPORT", clean)
         self.assertEqual(db_fixtures.ncbi_env(clean)["BLAST_USAGE_REPORT"], "false")
         self.assertEqual(db_fixtures.ncbi_env(clean), {**clean, "BLAST_USAGE_REPORT": "false"})
         # a row's tokens cannot turn it back on
         self.assertFalse(db_fixtures.is_env_token("BLAST_USAGE_REPORT=true"))
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in LOSAT is a shell script")
+    def test_check_runs_losat_in_the_environment_of_the_freeze(self):
+        # The variable decides what the programs read (without it, a second read of a malformed `.ncbirc` for
+        # the usage report posts its Critical a second time: db.html.bp.di.f0.rc_bad.use, cfg.ncbibad.D.h/.p),
+        # so `check` runs LOSAT, for every row, in the environment the row was frozen in (`ncbi_env`). The
+        # stand-in prints the variable; the frozen file says `false`.
+        rows = db_fixtures.read_manifest()[1]
+        row = dict(next(r for r in rows if r["kind"] == "ncbi" and not xinclude.wants_files(r)
+                        and not xinclude.wants_pssm(r) and db_fixtures.rps_cell(r["db"]) is None
+                        and not db_fixtures.copies_cell(r) and r["outfmt"] == "0"))
+        with tempfile.TemporaryDirectory() as tmp:
+            frozen, losat = Path(tmp) / "frozen", Path(tmp) / "losat"
+            frozen.mkdir()
+            (frozen / f"{row['row_id']}.out").write_bytes(b"false")
+            row.update(rc="0", stdout_sha256=db_fixtures.sha256(b"false"), stdout_bytes="5", stderr_sha256="")
+            losat.write_text('#!/bin/sh\nprintf "%s" "${BLAST_USAGE_REPORT-unset}"\n')
+            losat.chmod(0o755)
+            out = io.StringIO()
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
+                    unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                    unittest.mock.patch.dict(os.environ, {"BLAST_USAGE_REPORT": "true"}), \
+                    contextlib.redirect_stdout(out):
+                args = argparse.Namespace(losat=losat, threads=1, program="", only="", outfmts="", out=None,
+                                          library=False)
+                self.assertEqual(db_fixtures.check(args), 0, out.getvalue())
+            self.assertIn(f"{row['row_id']}\tsame\t", out.getvalue())
 
     @unittest.skipUnless(os.name == "posix", "the stand-in NCBI programs are shell scripts")
     def test_freeze_runs_ncbi_with_the_usage_report_off(self):
@@ -1213,7 +1241,8 @@ def stand_in_bin(directory: Path, programs) -> Path:
 class NcbiUsageReportOffTests(unittest.TestCase):
     """NCBI BLAST+ 2.17.0 sends a run's parameters to NCBI at exit unless BLAST_USAGE_REPORT is false
     (blast_usage_report.cpp:195-220): the harnesses' NCBI runs have it (db_search_fixtures.ncbi_env), the
-    runs of LOSAT keep their environment."""
+    runs of LOSAT of these harnesses keep their environment (db_search_fixtures.py's `check` gives LOSAT the
+    freeze's)."""
 
     def caller_env(self, home: str) -> dict[str, str]:
         # the freeze commands refuse to run with these set or with a ~/.ncbirc

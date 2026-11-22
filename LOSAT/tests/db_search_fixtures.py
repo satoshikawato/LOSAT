@@ -139,14 +139,16 @@ that row's files or the manifest (`refuse_signal`). It runs NCBI in a cleaned en
 variable and file that is cleaned changes NCBI's result: BLASTDB, NCBI*, BLAST*, BATCH_SIZE, CHUNK_SIZE,
 ARCHIVE_FORMAT, PRE_FETCH_SEQS_LIMIT, OLD_FSC, BL2SEQ_LEGACY, ADAPTIVE_CBS, CTOOLKIT_COMPATIBLE, FMTCFG, GETURL_DEBUG, and `~/.ncbirc`
 (HOME is an empty directory); every NCBI run then gets BLAST_USAGE_REPORT=false (`ncbi_env`: NCBI BLAST+
-sends no usage report with the run's parameters to NCBI). LOSAT's runs (`check`) keep the cleaned
-environment as it is.
+sends no usage report with the run's parameters to NCBI). LOSAT's runs (`check`) get the same environment:
+the variable also decides what the program reads (with a false value NCBI BLAST+ does not read `.ncbirc` a
+second time for the usage report, so a malformed one is reported once, not twice), and a row compares the runs
+of one environment.
 
 `check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--outfmts N,...] [--out TSV]` runs LOSAT with `-num_threads N`
-(default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, PRE_FETCH_SEQS_LIMIT, OLD_FSC,
-BL2SEQ_LEGACY, ADAPTIVE_CBS, CTOOLKIT_COMPATIBLE, FMTCFG or GETURL_DEBUG variable; HOME and USERPROFILE are an empty directory, so that no `~/.ncbirc` names a
-taxonomy database or a BLASTDB), compares stdout,
-stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
+(default 1) in the environment of `freeze` (`ncbi_env`: BLAST_USAGE_REPORT=false and no other NCBI*, BLAST*, LOSAT_*,
+BATCH_SIZE, CHUNK_SIZE, PRE_FETCH_SEQS_LIMIT, OLD_FSC, BL2SEQ_LEGACY, ADAPTIVE_CBS, CTOOLKIT_COMPATIBLE, FMTCFG or GETURL_DEBUG
+variable; HOME and USERPROFILE are an empty directory, so that no `~/.ncbirc` names a taxonomy database or a BLASTDB), compares
+stdout, stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
 `--outfmts 5,13` keeps only the rows whose output format (the number that starts the `outfmt` cell) is one of
@@ -557,9 +559,11 @@ NCBI_RUN_ENV = {"BLAST_USAGE_REPORT": "false"}
 
 
 def ncbi_env(base: dict[str, str]) -> dict[str, str]:
-    """The environment of every NCBI run of the harness (`freeze`): `base`, the cleaned environment, with
-    BLAST_USAGE_REPORT=false, so that NCBI BLAST+ 2.17.0 does not send the run's parameters to NCBI at exit.
-    A row cannot set it (it is not one of `ENV_NAMES`). LOSAT's runs keep `base`."""
+    """The environment of every run of the harness, NCBI's (`freeze`) and LOSAT's (`check`): `base`, the
+    cleaned environment, with BLAST_USAGE_REPORT=false, so that NCBI BLAST+ 2.17.0 does not send the run's
+    parameters to NCBI at exit. The variable changes what NCBI BLAST+ reads (no second read of `.ncbirc` for the
+    report), and LOSAT reads as NCBI does, so LOSAT runs with it too: a row compares two runs of one environment.
+    A row cannot set it (it is not one of `ENV_NAMES`)."""
     return {**base, **NCBI_RUN_ENV}
 
 
@@ -1331,7 +1335,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
 def check(args: argparse.Namespace) -> int:
     refuse_engine_ncbirc()
     home = tempfile.TemporaryDirectory(prefix="db_search_home_")
-    env = clean_env(dict(os.environ), home.name)
+    # The environment the rows were frozen in (`freeze`), for every row.
+    env = ncbi_env(clean_env(dict(os.environ), home.name))
     # Absolute, as a `cwd=` row runs in another directory (`row_cwd`).
     losat = args.losat.resolve()
     lines, bad = [], 0

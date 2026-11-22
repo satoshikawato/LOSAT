@@ -625,11 +625,14 @@ fn program_args_are_the_arguments_that_commands_defers() {
 // the derive's where clap defers the arguments too.
 #[test]
 fn every_program_keeps_its_description_and_help_template() {
-    let programs = Commands::augment_subcommands(clap::Command::new("losat"));
+    // One empty command with the help template "T": the parent of the variants here, and the
+    // command that each program's `Args` alone is added to.
+    let blank = clap::Command::new("alone").help_template("T");
+    let programs = Commands::augment_subcommands(blank.clone());
     assert_eq!(programs.get_subcommands().count(), PROGRAM_ARGS.len());
     for (program, args) in programs.get_subcommands().zip(PROGRAM_ARGS) {
         assert!(program.get_about().is_some(), "{}", program.get_name());
-        let mut alone = args(clap::Command::new("alone").help_template("T"));
+        let mut alone = args(blank.clone());
         assert_eq!(
             alone.render_help().to_string().trim_end(),
             "T",

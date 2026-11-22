@@ -103,11 +103,14 @@ pub(crate) fn pairwise_hits(
         let rows_of_lists: Vec<Result<Vec<PairwiseHit>>> = pool.install(|| {
             lists
                 .par_iter()
-                .map(|hsp_list| {
-                    let mut hits = Vec::with_capacity(hsp_list.hsps.len());
-                    rows.list(hsp_list, &mut hits)?;
-                    Ok(hits)
-                })
+                .map_init(
+                    crate::report::query_anchored::HspMasks::default,
+                    |masks, hsp_list| {
+                        let mut hits = Vec::with_capacity(hsp_list.hsps.len());
+                        rows.list(hsp_list, &mut hits, masks)?;
+                        Ok(hits)
+                    },
+                )
                 .collect()
         });
         let mut hits = Vec::with_capacity(lists.iter().map(|list| list.hsps.len()).sum());
@@ -122,8 +125,9 @@ pub(crate) fn pairwise_hits(
     )))]
     let _ = x_pool;
     let mut hits = Vec::new();
+    let mut masks = crate::report::query_anchored::HspMasks::default();
     for hsp_list in hsp_lists {
-        rows.list(hsp_list, &mut hits)?;
+        rows.list(hsp_list, &mut hits, &mut masks)?;
     }
     Ok(hits)
 }
@@ -219,8 +223,14 @@ impl Rows<'_> {
         }
     }
 
-    /// The rows of every HSP of one subject's list, appended to `hits` in the list's order.
-    fn list(&self, hsp_list: &BlastnHspList, hits: &mut Vec<PairwiseHit>) -> Result<()> {
+    /// The rows of every HSP of one subject's list, appended to `hits` in the list's order;
+    /// `masks` holds the masks of each HSP's rows while they are made (kept from row to row).
+    fn list(
+        &self,
+        hsp_list: &BlastnHspList,
+        hits: &mut Vec<PairwiseHit>,
+        masks: &mut crate::report::query_anchored::HspMasks,
+    ) -> Result<()> {
         let (queries, subjects) = (self.queries, self.subjects);
         let list_subject_masks = self.subject_masks.as_deref().and_then(|subject_masks| {
             let s_idx = hsp_list.hsps.first()?.s_idx as usize;
@@ -256,17 +266,18 @@ impl Rows<'_> {
                 .count();
             // The masks of the rows (`x_FillLocList`), whose letters the rows hold in lower
             // case as outfmt 0 shows them (`x_OutputSeq`), and so the hit records of the library
-            // API and the Web adapter; the lists are dropped (`query_anchored::output_seq`).
-            let mut masks = crate::report::query_anchored::HspMasks::default();
+            // API and the Web adapter; the lists are left to the next HSP
+            // (`query_anchored::output_seq`).
+            masks.clear();
             set_query_row_masks(
-                &mut masks,
+                masks,
                 &query_row,
                 hsp.q_start,
                 &self.query_masks[hsp.q_idx as usize],
             );
             if let Some(subject_masks) = &list_subject_masks {
                 let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
-                set_subject_row_masks(&mut masks, &subject_row, hsp.s_start, step, subject_masks);
+                set_subject_row_masks(masks, &subject_row, hsp.s_start, step, subject_masks);
             }
             masks.lower_row(0, &mut query_row);
             masks.lower_row(1, &mut subject_row);
@@ -573,15 +584,8 @@ fn set_subject_row_masks(
     let Some((low, high)) = row_range(letters, first, step) else {
         return;
     };
-    let mut met: Vec<(u32, crate::report::query_anchored::Mask)> = Vec::new();
-    shown.for_each_meeting(low, high, |from, to, index| {
-        met.push((index, (from as u32, to as u32, 0)));
-    });
-    if met.is_empty() {
-        return;
-    }
-    met.sort_unstable_by_key(|&(index, _)| index);
-    masks.set_row(
+    masks.add_meeting(shown, low, high, |from, to| (from as u32, to as u32, 0));
+    masks.set_row_met(
         1,
         0,
         letters,
@@ -589,7 +593,6 @@ fn set_subject_row_masks(
         (low as u32, high as u32),
         step > 0,
         1,
-        met.into_iter().map(|(_, mask)| mask),
     );
 }
 

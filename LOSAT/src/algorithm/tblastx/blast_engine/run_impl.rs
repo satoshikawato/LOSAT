@@ -2544,6 +2544,8 @@ fn write_tblastx_outputs(
                                     }
                                     None => {
                                         let mut buffer = Vec::new();
+                                        let mut row_masks =
+                                            crate::report::query_anchored::HspMasks::default();
                                         window
                                             .iter()
                                             .enumerate()
@@ -2552,6 +2554,7 @@ fn write_tblastx_outputs(
                                                     hsp,
                                                     identities.map(|identities| identities[index]),
                                                     &mut buffer,
+                                                    &mut row_masks,
                                                 )
                                             })
                                             .collect()

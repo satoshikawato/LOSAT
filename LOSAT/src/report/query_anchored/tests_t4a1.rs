@@ -77,6 +77,8 @@ fn random_denseg(rng: &mut Rng) -> Denseg {
 fn row_loc_list_matches_fill_loc_list() {
     let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
     let mut buffers = MapBuffers::default();
+    // One buffer of gap runs and one list for every row, as a reused `HspMasks` keeps them.
+    let (mut gaps, mut list) = (Vec::new(), Vec::new());
     for case in 0..20_000 {
         let ds = random_denseg(&mut rng);
         let map = AlnMap::new_in(&ds, &mut buffers).unwrap();
@@ -104,7 +106,7 @@ fn row_loc_list_matches_fill_loc_list() {
                     std::iter::repeat_n(letter, ds.lens[s] as usize)
                 })
                 .collect();
-            let mut list = Vec::new();
+            list.clear();
             fill_row_loc_list(
                 &letters,
                 |column| letters[column] != b'-',
@@ -112,6 +114,7 @@ fn row_loc_list_matches_fill_loc_list() {
                 map.is_positive_strand(row),
                 map.width(row),
                 masks.iter().copied(),
+                &mut gaps,
                 &mut list,
             );
             let expected = fill_loc_list(&map, map.seq_key(row), None, &masks);

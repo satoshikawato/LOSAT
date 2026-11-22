@@ -268,7 +268,7 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         let rows = &*rows;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3261-3264
         // The round loop (`smith_waterman_redo_window`, redo_alignment.c:1438-1529) on the
-        // subject's range from NCBI's `subject->data - 1`, which `ALIGN_EX` reads from
+        // subject's range from one letter before NCBI's `subject->data`, which `ALIGN_EX` reads from
         // (`s_SWFindFinalEndsUsingXdrop`): the sentinel before the window's letters
         // (`s_SequenceGetProteinRange`, `s_SequenceGetTranslatedRange`). `Lambda` and `logK` are the
         // redo's scaled block (`kbp_gap` of NCBI's copy), `searchsp` the query's

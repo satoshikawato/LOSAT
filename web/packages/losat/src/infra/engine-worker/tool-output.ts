@@ -5,27 +5,73 @@
 // and a stream with one keeps nothing.
 //
 // The calls come in order and one at a time: every chunk and frame is queued behind the one before, and a sink's call is
-// awaited before the next call of the router. The worker does not wait for a slow sink (the engine's call is synchronous),
-// so the events queue here until the sink has taken them.
+// awaited before the next call of the router. The engine does not wait for the router: the worker stops it while more
+// than the credit's limit of the bytes that it posted wait for the sinks (tool-credit.ts, D-WW3-11), where the page can
+// share memory with the worker; without that, the events queue here until the sink has taken them.
+//
+// A file has POSIX semantics (D-WW3-9): a frame of bytes carries the offset at which they are written, and a truncate
+// frame sets the file's length. The default collection keeps the file's exact bytes for writes at any offset.
 import type { ToolFrame } from '../../domain/tool-frames.js';
 import type { ToolFile, ToolFileSink, ToolSinks } from '../../ports/engine.js';
+import { postedBytes } from './tool-credit.js';
 
 /** Bytes that a collected stream holds as chunks before they are folded into its Blob. */
 export const BLOB_FOLD_BYTES = 32 * 1024 * 1024;
+/** The most zero bytes that a hole of a collected file puts in one piece. */
+const ZEROS_PIECE = 1024 * 1024;
+const ZEROS = new Uint8Array(ZEROS_PIECE);
+
+/** What the router tells the page's side of the run's credit (tool-credit.ts, `ToolCreditPage`). */
+export interface ToolCredit {
+  /** `bytes` that the worker posted have been handled. */
+  take(bytes: number): void;
+}
 
 /**
- * The chunks of a collected stream as a Blob. Chunks wait in a list and are folded into the Blob at `BLOB_FOLD_BYTES`
- * (`new Blob([blob, ...chunks])` shares the earlier Blob's data), so that a large output is not held as thousands of arrays.
+ * The bytes of a collected stream or file as a Blob. Appended chunks wait in a list and are folded into the Blob at
+ * `BLOB_FOLD_BYTES` (`new Blob([blob, ...chunks])` shares the earlier Blob's data), so that a large output is not held as
+ * thousands of arrays and is never joined into one array. A write before the end, a truncate and a write past the end
+ * (zero bytes between) rebuild the Blob from slices of itself (`Blob.slice`), without reading its bytes into the page.
  */
-class BlobBuilder {
+class CollectedBlob {
   private blob = new Blob([]);
-  private chunks: Uint8Array[] = [];
+  private chunks: BlobPart[] = [];
   private pending = 0;
+  private length = 0;
 
-  add(chunk: Uint8Array): void {
-    this.chunks.push(chunk);
+  /** The bytes at the end. */
+  append(chunk: Uint8Array): void {
+    this.chunks.push(chunk as BlobPart);
     this.pending += chunk.length;
+    this.length += chunk.length;
     if (this.pending >= BLOB_FOLD_BYTES) this.fold();
+  }
+
+  /** `chunk` at `offset`: an append at the end, a hole of zero bytes before a write past the end, an overwrite before it. */
+  write(chunk: Uint8Array, offset: number): void {
+    if (offset > this.length) this.zeros(offset - this.length);
+    if (offset >= this.length) {
+      this.append(chunk);
+      return;
+    }
+    this.fold();
+    const end = offset + chunk.length;
+    const parts: BlobPart[] = [this.blob.slice(0, offset), chunk as BlobPart];
+    if (end < this.length) parts.push(this.blob.slice(end));
+    this.blob = new Blob(parts);
+    this.length = Math.max(this.length, end);
+  }
+
+  /** The length becomes `length`: cut, or with zero bytes added. */
+  truncate(length: number): void {
+    if (length > this.length) {
+      this.zeros(length - this.length);
+      return;
+    }
+    if (length === this.length) return;
+    this.fold();
+    this.blob = this.blob.slice(0, length);
+    this.length = length;
   }
 
   finish(): Blob {
@@ -33,9 +79,14 @@ class BlobBuilder {
     return this.blob;
   }
 
+  /** `count` zero bytes at the end, in pieces of a megabyte that share one array. */
+  private zeros(count: number): void {
+    for (let left = count; left > 0; left -= ZEROS_PIECE) this.append(ZEROS.subarray(0, Math.min(left, ZEROS_PIECE)));
+  }
+
   private fold(): void {
     if (this.chunks.length === 0) return;
-    this.blob = new Blob([this.blob, ...(this.chunks as BlobPart[])]);
+    this.blob = new Blob([this.blob, ...this.chunks]);
     this.chunks = [];
     this.pending = 0;
   }
@@ -44,7 +95,7 @@ class BlobBuilder {
 interface OpenFile {
   readonly name: string;
   readonly sink: ToolFileSink | undefined;
-  readonly collected: BlobBuilder | undefined;
+  readonly collected: CollectedBlob | undefined;
   ended: boolean;
 }
 
@@ -58,31 +109,36 @@ export interface ToolCollected {
 export class ToolOutputRouter {
   private tail: Promise<void> = Promise.resolve();
   private failure: { readonly error: unknown } | undefined;
-  private readonly stdoutBlob = new BlobBuilder();
-  private readonly stderrBlob = new BlobBuilder();
+  private readonly stdoutBlob = new CollectedBlob();
+  private readonly stderrBlob = new CollectedBlob();
   private readonly files = new Map<number, OpenFile>();
 
-  /** `failed` is told once, with the first error of a sink or of the frames (the Gateway cancels the run). */
+  /**
+   * `failed` is told once, with the first error of a sink or of the frames (the Gateway cancels the run). `credit` takes the
+   * bytes of each chunk and frame once the router has handled it: its sink call settled, it went into a Blob, or it was
+   * dropped after a failure.
+   */
   constructor(
     private readonly sinks: ToolSinks | undefined,
     private readonly failed: (error: unknown) => void,
+    private readonly credit?: ToolCredit,
   ) {}
 
   /** A chunk of the tool's standard output; the router owns it from here. */
   stdout(chunk: Uint8Array): void {
     const sink = this.sinks?.onStdout;
-    this.queue(() => (sink === undefined ? this.stdoutBlob.add(chunk) : sink(chunk)));
+    this.queue(() => (sink === undefined ? this.stdoutBlob.append(chunk) : sink(chunk)), chunk.length);
   }
 
   /** A chunk of the tool's standard error. */
   stderr(chunk: Uint8Array): void {
     const sink = this.sinks?.onStderr;
-    this.queue(() => (sink === undefined ? this.stderrBlob.add(chunk) : sink(chunk)));
+    this.queue(() => (sink === undefined ? this.stderrBlob.append(chunk) : sink(chunk)), chunk.length);
   }
 
-  /** A frame of stream 12: the beginning, bytes or end of a file. */
+  /** A frame of stream 12: the beginning, bytes, truncation or end of a file. */
   frame(frame: ToolFrame): void {
-    this.queue(() => this.apply(frame));
+    this.queue(() => this.apply(frame), postedBytes(frame));
   }
 
   /**
@@ -110,15 +166,20 @@ export class ToolOutputRouter {
     return this.tail;
   }
 
-  private queue(work: () => void | Promise<void>): void {
+  /** Queues `work` for `size` posted bytes, which the credit takes when the work is done or dropped. */
+  private queue(work: () => void | Promise<void>, size: number): void {
     this.tail = this.tail.then(async () => {
-      if (this.failure !== undefined) return;
       try {
-        await work();
-      } catch (error) {
-        this.failure = { error };
-        this.failed(error);
-        await this.abortOpen(error);
+        if (this.failure !== undefined) return;
+        try {
+          await work();
+        } catch (error) {
+          this.failure = { error };
+          this.failed(error);
+          await this.abortOpen(error);
+        }
+      } finally {
+        this.credit?.take(size);
       }
     });
   }
@@ -143,7 +204,7 @@ export class ToolOutputRouter {
       this.files.set(frame.number, {
         name: frame.name,
         sink,
-        collected: sink === undefined ? new BlobBuilder() : undefined,
+        collected: sink === undefined ? new CollectedBlob() : undefined,
         ended: false,
       });
       return;
@@ -152,8 +213,13 @@ export class ToolOutputRouter {
     if (file === undefined) throw new Error(`the tool run sent a frame of its file ${frame.number}, which it did not begin`);
     if (file.ended) throw new Error(`the tool run sent a frame of its file ${frame.number} (${file.name}) after its end`);
     if (frame.kind === 'bytes') {
-      if (file.sink === undefined) file.collected!.add(frame.bytes);
-      else await file.sink.write(frame.bytes);
+      if (file.sink === undefined) file.collected!.write(frame.bytes, frame.offset);
+      else await file.sink.write(frame.bytes, frame.offset);
+      return;
+    }
+    if (frame.kind === 'truncate') {
+      if (file.sink === undefined) file.collected!.truncate(frame.length);
+      else await file.sink.truncate(frame.length);
       return;
     }
     file.ended = true;

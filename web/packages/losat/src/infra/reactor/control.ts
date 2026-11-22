@@ -13,13 +13,10 @@
 import { OUTPUT_FORMATS, type OutputFormat } from '../../domain/output-format.js';
 import type { ResolvedDefault } from '../../domain/parameters.js';
 import type { ProgramId } from '../../domain/programs.js';
-import type { EngineGateway, ParameterDescription, ProgramDescription, StartResult, ToolEngine, ValidationResult } from '../../ports/engine.js';
+import type { EngineGateway, ParameterDescription, ProgramDescription, StartResult, ValidationResult } from '../../ports/engine.js';
 import { FILE_REGISTRY, loadFile, type ReactorAbi } from './abi.js';
 
 export type EngineControl = Pick<EngineGateway, 'describe' | 'start' | 'validate'>;
-
-/** The check of a tool's words (`validateTool`, ABI v2 version 13), which `reactorControl` answers on the shared instance. */
-export type ToolControl = Pick<ToolEngine, 'validateTool'>;
 
 interface DescribeJson {
   readonly program: ProgramId;
@@ -104,11 +101,8 @@ export function toProgramDescription(json: unknown): ProgramDescription {
  * instance; `instantiate` opens a new instance of the serial module, which a validation with a
  * registry file takes for itself.
  */
-export function reactorControl(reactor: () => Promise<ReactorAbi>, instantiate: () => Promise<ReactorAbi>): EngineControl & ToolControl {
+export function reactorControl(reactor: () => Promise<ReactorAbi>, instantiate: () => Promise<ReactorAbi>): EngineControl {
   return {
-    async validateTool(argv) {
-      return (await reactor()).validateTool(argv);
-    },
     async describe(program) {
       return toProgramDescription((await reactor()).describe(program));
     },

@@ -7,16 +7,16 @@ import { closeSync, openAsBlob, openSync, readFileSync, readSync } from 'node:fs
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { FRAME_BEGIN, FRAME_BYTES, FRAME_END, ownedFrame, parseToolFrame, type ToolFrame } from '../src/domain/tool-frames.ts';
+import { FRAME_BEGIN, FRAME_BYTES, FRAME_END, FRAME_TRUNCATE, ownedFrame, parseToolFrame, type ToolFrame } from '../src/domain/tool-frames.ts';
 import { RunCancelledError, type EngineGateway, type ToolFileSink } from '../src/ports/engine.ts';
 import { ABI_VERSION, EngineCallError, ReactorAbi, type AbiExports } from '../src/infra/reactor/abi.ts';
 import { ABI_EXPORTS } from '../src/infra/reactor/artifact.ts';
 import { compileReactor, instantiateSerial } from '../src/infra/reactor/instance.ts';
 import { RunDirectory } from '../src/infra/reactor/run-directory.ts';
-import { reactorControl } from '../src/infra/reactor/control.ts';
 import { WasmEngine } from '../src/infra/engine-worker/gateway.ts';
 import { BLOB_FOLD_BYTES, ToolOutputRouter } from '../src/infra/engine-worker/tool-output.ts';
-import type { EngineCommand, EngineEvent, WorkerTool } from '../src/infra/engine-worker/protocol.ts';
+import type { EngineCommand, EngineEvent, WorkerTool, WorkerToolValidate } from '../src/infra/engine-worker/protocol.ts';
+import { ENGINE_NOT_STARTED } from '../src/infra/engine-worker/gateway.ts';
 
 const encode = (text: string) => new TextEncoder().encode(text);
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
@@ -31,32 +31,62 @@ function frame(number: number, kind: number, payload: Uint8Array = new Uint8Arra
   return bytes;
 }
 
+/** The u64 LE of a value. */
+function u64(value: bigint | number): Uint8Array {
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true);
+  return bytes;
+}
+
+/** A frame of bytes as the engine emits it: the offset, then the bytes. */
+function bytesFrame(number: number, offset: bigint | number, data: Uint8Array | string): Uint8Array {
+  const payload = typeof data === 'string' ? encode(data) : data;
+  const joined = new Uint8Array(8 + payload.length);
+  joined.set(u64(offset), 0);
+  joined.set(payload, 8);
+  return frame(number, FRAME_BYTES, joined);
+}
+
 describe('the frames of stream 12', () => {
-  it('reads the beginning, the bytes and the end of a file', () => {
+  it('reads the beginning, the bytes (with their offset), the truncation and the end of a file', () => {
     expect(parseToolFrame(frame(0, FRAME_BEGIN, encode('c.counts')))).toEqual({ number: 0, kind: 'begin', name: 'c.counts' });
-    expect(parseToolFrame(frame(7, FRAME_BYTES, new Uint8Array([1, 2, 3])))).toEqual({ number: 7, kind: 'bytes', bytes: new Uint8Array([1, 2, 3]) });
+    expect(parseToolFrame(bytesFrame(7, 0, new Uint8Array([1, 2, 3])))).toEqual({ number: 7, kind: 'bytes', offset: 0, bytes: new Uint8Array([1, 2, 3]) });
+    expect(parseToolFrame(bytesFrame(7, 4096, new Uint8Array([4])))).toEqual({ number: 7, kind: 'bytes', offset: 4096, bytes: new Uint8Array([4]) });
+    expect(parseToolFrame(frame(3, FRAME_TRUNCATE, u64(0)))).toEqual({ number: 3, kind: 'truncate', length: 0 });
+    expect(parseToolFrame(frame(3, FRAME_TRUNCATE, u64(2 ** 40)))).toEqual({ number: 3, kind: 'truncate', length: 2 ** 40 });
     expect(parseToolFrame(frame(0xffff_ffff, FRAME_END))).toEqual({ number: 0xffff_ffff, kind: 'end' });
-    // A name may be any UTF-8, and a file of no bytes has a frame of no bytes.
+    // A name may be any UTF-8 and may hold `/`, and a write of no bytes has a frame of the offset only.
     expect(parseToolFrame(frame(1, FRAME_BEGIN, encode('dir/名前.txt')))).toEqual({ number: 1, kind: 'begin', name: 'dir/名前.txt' });
-    expect(parseToolFrame(frame(1, FRAME_BYTES))).toEqual({ number: 1, kind: 'bytes', bytes: new Uint8Array(0) });
+    expect(parseToolFrame(frame(1, FRAME_BYTES, u64(5)))).toEqual({ number: 1, kind: 'bytes', offset: 5, bytes: new Uint8Array(0) });
   });
 
   it('reads a frame that is a view into larger memory, and owns a copy of its bytes', () => {
     const memory = new Uint8Array(64);
-    memory.set(frame(2, FRAME_BYTES, new Uint8Array([9, 8])), 20);
-    const parsed = parseToolFrame(memory.subarray(20, 30));
-    expect(parsed).toEqual({ number: 2, kind: 'bytes', bytes: new Uint8Array([9, 8]) });
+    memory.set(bytesFrame(2, 12, new Uint8Array([9, 8])), 20);
+    const parsed = parseToolFrame(memory.subarray(20, 38));
+    expect(parsed).toEqual({ number: 2, kind: 'bytes', offset: 12, bytes: new Uint8Array([9, 8]) });
     const owned = ownedFrame(parsed);
     memory.fill(0);
-    expect(owned).toEqual({ number: 2, kind: 'bytes', bytes: new Uint8Array([9, 8]) });
-    expect(parsed).toEqual({ number: 2, kind: 'bytes', bytes: new Uint8Array([0, 0]) });
+    expect(owned).toEqual({ number: 2, kind: 'bytes', offset: 12, bytes: new Uint8Array([9, 8]) });
+    expect(parsed).toEqual({ number: 2, kind: 'bytes', offset: 12, bytes: new Uint8Array([0, 0]) });
   });
 
   it('refuses a frame that breaks the ABI', () => {
     expect(() => parseToolFrame(new Uint8Array(7))).toThrow(/7 bytes, fewer than its 8/);
-    expect(() => parseToolFrame(frame(0, 3))).toThrow(/kind 3/);
+    expect(() => parseToolFrame(frame(0, 4))).toThrow(/kind 4/);
     expect(() => parseToolFrame(frame(0, FRAME_END, new Uint8Array(1)))).toThrow(/end of file 0 .* 1 bytes of payload/);
     expect(() => parseToolFrame(frame(4, FRAME_BEGIN, new Uint8Array([0xff, 0xfe])))).toThrow(/name of file 4 .* not UTF-8/);
+    // A frame of bytes holds at least its offset: a frame of 8 or 15 bytes in all has none.
+    expect(() => parseToolFrame(frame(1, FRAME_BYTES))).toThrow(/file 1 .* 0 bytes of payload, fewer than their 8 of offset/);
+    expect(() => parseToolFrame(frame(1, FRAME_BYTES, new Uint8Array(7)))).toThrow(/7 bytes of payload, fewer than their 8 of offset/);
+    // A truncate holds its length and nothing else.
+    expect(() => parseToolFrame(frame(1, FRAME_TRUNCATE))).toThrow(/truncate of file 1 .* 0 bytes of payload, not 8/);
+    expect(() => parseToolFrame(frame(1, FRAME_TRUNCATE, new Uint8Array(9)))).toThrow(/9 bytes of payload, not 8/);
+    // An offset or a length that a number cannot hold exactly.
+    const safe = BigInt(Number.MAX_SAFE_INTEGER);
+    expect(parseToolFrame(bytesFrame(1, safe, ''))).toMatchObject({ offset: Number.MAX_SAFE_INTEGER });
+    expect(() => parseToolFrame(bytesFrame(1, safe + 1n, 'x'))).toThrow(/offset of the bytes of file 1 .* more than 9007199254740991/);
+    expect(() => parseToolFrame(frame(2, FRAME_TRUNCATE, u64(2n ** 64n - 1n)))).toThrow(/length of the truncate of file 2 .* more than/);
   });
 });
 
@@ -68,6 +98,9 @@ function loggingSink(log: string[], slow = false): ToolFileSink {
       log.push(`write ${text(chunk)} begin`);
       await pause();
       log.push(`write ${text(chunk)} end`);
+    },
+    truncate: (length) => {
+      log.push(`truncate ${length}`);
     },
     close: async () => {
       log.push('close begin');
@@ -88,9 +121,9 @@ describe('the output router of a tool run', () => {
     router.stdout(encode('out2'));
     router.frame({ number: 0, kind: 'begin', name: 'log.txt' });
     router.frame({ number: 1, kind: 'begin', name: 'c.counts' });
-    router.frame({ number: 1, kind: 'bytes', bytes: encode('ab') });
-    router.frame({ number: 0, kind: 'bytes', bytes: encode('log') });
-    router.frame({ number: 1, kind: 'bytes', bytes: encode('cd') });
+    router.frame({ number: 1, kind: 'bytes', offset: 0, bytes: encode('ab') });
+    router.frame({ number: 0, kind: 'bytes', offset: 0, bytes: encode('log') });
+    router.frame({ number: 1, kind: 'bytes', offset: 2, bytes: encode('cd') });
     // The files end in the other order; two openings of one name are two files.
     router.frame({ number: 1, kind: 'end' });
     router.frame({ number: 2, kind: 'begin', name: 'log.txt' });
@@ -113,6 +146,94 @@ describe('the output router of a tool run', () => {
     expect(await stdout.slice(3 * chunk.length).text()).toBe('end');
   });
 
+  it('collects a file that is written at any offset as its exact bytes: append, overwrite before the end, a hole, truncate', async () => {
+    const router = new ToolOutputRouter(undefined, () => undefined);
+    const at = (number: number, offset: number, data: string): ToolFrame => ({ number, kind: 'bytes', offset, bytes: encode(data) });
+    for (const number of [0, 1, 2, 3]) router.frame({ number, kind: 'begin', name: `f${number}` });
+    // 0: appends, then an overwrite in the middle and one that runs past the end.
+    router.frame(at(0, 0, 'abcdef'));
+    router.frame(at(0, 6, 'gh'));
+    router.frame(at(0, 2, 'CD'));
+    router.frame(at(0, 7, 'HIJ'));
+    // 1: a write past the end leaves zero bytes between.
+    router.frame(at(1, 0, 'ab'));
+    router.frame(at(1, 5, 'f'));
+    // 2: a hole at the start of an empty file, and a truncate that cuts, then one that adds zero bytes.
+    router.frame(at(2, 3, 'x'));
+    router.frame({ number: 2, kind: 'truncate', length: 2 });
+    router.frame({ number: 2, kind: 'truncate', length: 4 });
+    // 3: a truncate to 0 empties the file; the bytes after it start again from 0.
+    router.frame(at(3, 0, 'old bytes'));
+    router.frame({ number: 3, kind: 'truncate', length: 0 });
+    router.frame(at(3, 0, 'new'));
+    router.frame(at(3, 3, ''));
+    for (const number of [0, 1, 2, 3]) router.frame({ number, kind: 'end' });
+    const { files } = await router.finish();
+    const bytes = await Promise.all(files.map(async (file) => new Uint8Array(await file.file.arrayBuffer())));
+    expect(Array.from(bytes[0]!)).toEqual([...encode('abCDefgHIJ')]);
+    expect(Array.from(bytes[1]!)).toEqual([97, 98, 0, 0, 0, 102]);
+    expect(Array.from(bytes[2]!)).toEqual([0, 0, 0, 0]);
+    expect(Array.from(bytes[3]!)).toEqual([...encode('new')]);
+  });
+
+  it('collects a hole larger than a piece without one array of its size', async () => {
+    const router = new ToolOutputRouter(undefined, () => undefined);
+    router.frame({ number: 0, kind: 'begin', name: 'sparse' });
+    router.frame({ number: 0, kind: 'bytes', offset: 3 * 1024 * 1024 + 5, bytes: encode('end') });
+    router.frame({ number: 0, kind: 'end' });
+    const { files } = await router.finish();
+    const blob = files[0]!.file;
+    expect(blob.size).toBe(3 * 1024 * 1024 + 8);
+    expect(await blob.slice(3 * 1024 * 1024).text()).toBe('\0\0\0\0\0end');
+    expect(new Uint8Array(await blob.slice(0, 1000).arrayBuffer()).every((byte) => byte === 0)).toBe(true);
+  });
+
+  it('gives the sink the offsets and the truncations as they come', async () => {
+    const calls: string[] = [];
+    const router = new ToolOutputRouter(
+      {
+        onFile: () => ({
+          write: (chunk, offset) => void calls.push(`write ${text(chunk)}@${offset}`),
+          truncate: (length) => void calls.push(`truncate ${length}`),
+          close: () => void calls.push('close'),
+        }),
+      },
+      () => undefined,
+    );
+    router.frame({ number: 0, kind: 'begin', name: 'x' });
+    router.frame({ number: 0, kind: 'bytes', offset: 0, bytes: encode('log') });
+    router.frame({ number: 0, kind: 'truncate', length: 0 });
+    router.frame({ number: 0, kind: 'bytes', offset: 0, bytes: encode('counts') });
+    router.frame({ number: 0, kind: 'bytes', offset: 9, bytes: encode('after a hole') });
+    router.frame({ number: 0, kind: 'end' });
+    await router.finish();
+    expect(calls).toEqual(['write log@0', 'truncate 0', 'write counts@0', 'write after a hole@9', 'close']);
+  });
+
+  it('takes the credit of each chunk and frame once it is handled, also those dropped after a failure', async () => {
+    const taken: number[] = [];
+    const router = new ToolOutputRouter(
+      {
+        onFile: () => ({
+          write: (chunk) => {
+            if (text(chunk) === 'bad') throw new Error('disk full');
+          },
+          truncate: () => undefined,
+          close: () => undefined,
+        }),
+      },
+      () => undefined,
+      { take: (bytes) => void taken.push(bytes) },
+    );
+    router.stdout(encode('abcd'));
+    router.frame({ number: 0, kind: 'begin', name: 'f' });
+    router.frame({ number: 0, kind: 'bytes', offset: 0, bytes: encode('bad') });
+    router.frame({ number: 0, kind: 'bytes', offset: 3, bytes: encode('later!') });
+    router.stderr(encode('xy'));
+    await expect(router.finish()).rejects.toThrow('disk full');
+    expect(taken.filter((bytes) => bytes !== 0)).toEqual([4, 3, 6, 2]);
+  });
+
   it('gives a stream with a sink to the sink, in order and one call at a time, and keeps nothing of it', async () => {
     const log: string[] = [];
     const router = new ToolOutputRouter(
@@ -132,9 +253,9 @@ describe('the output router of a tool run', () => {
     router.stdout(encode('a'));
     router.stderr(encode('b'));
     router.frame({ number: 0, kind: 'begin', name: 'f' });
-    router.frame({ number: 0, kind: 'bytes', bytes: encode('x') });
+    router.frame({ number: 0, kind: 'bytes', offset: 0, bytes: encode('x') });
     router.stdout(encode('c'));
-    router.frame({ number: 0, kind: 'bytes', bytes: encode('y') });
+    router.frame({ number: 0, kind: 'bytes', offset: 1, bytes: encode('y') });
     router.frame({ number: 0, kind: 'end' });
     const collected = await router.finish();
     expect(log).toEqual([
@@ -150,8 +271,8 @@ describe('the output router of a tool run', () => {
     const router = new ToolOutputRouter({ onFile: (name) => (name === 'big' ? loggingSink(log) : undefined) }, () => undefined);
     router.frame({ number: 0, kind: 'begin', name: 'big' });
     router.frame({ number: 1, kind: 'begin', name: 'small' });
-    router.frame({ number: 1, kind: 'bytes', bytes: encode('s') });
-    router.frame({ number: 0, kind: 'bytes', bytes: encode('B') });
+    router.frame({ number: 1, kind: 'bytes', offset: 0, bytes: encode('s') });
+    router.frame({ number: 0, kind: 'bytes', offset: 0, bytes: encode('B') });
     router.frame({ number: 0, kind: 'end' });
     router.frame({ number: 1, kind: 'end' });
     const { files } = await router.finish();
@@ -174,8 +295,8 @@ describe('the output router of a tool run', () => {
       failed,
     );
     router.frame({ number: 0, kind: 'begin', name: 'f' });
-    router.frame({ number: 0, kind: 'bytes', bytes: encode('bad') });
-    router.frame({ number: 0, kind: 'bytes', bytes: encode('later') });
+    router.frame({ number: 0, kind: 'bytes', offset: 0, bytes: encode('bad') });
+    router.frame({ number: 0, kind: 'bytes', offset: 3, bytes: encode('later') });
     router.frame({ number: 0, kind: 'end' });
     await expect(router.finish()).rejects.toThrow('disk full');
     expect(failed).toHaveBeenCalledTimes(1);
@@ -191,7 +312,7 @@ describe('the output router of a tool run', () => {
     const begin = (number: number): ToolFrame => ({ number, kind: 'begin', name: 'f' });
     await expect(run([begin(0), begin(0)])).rejects.toThrow(/began its file 0 twice/);
     await expect(run([{ number: 3, kind: 'end' }])).rejects.toThrow(/file 3, which it did not begin/);
-    await expect(run([begin(0), { number: 0, kind: 'end' }, { number: 0, kind: 'bytes', bytes: encode('x') }])).rejects.toThrow(/after its end/);
+    await expect(run([begin(0), { number: 0, kind: 'end' }, { number: 0, kind: 'bytes', offset: 0, bytes: encode('x') }])).rejects.toThrow(/after its end/);
     await expect(run([begin(0)])).rejects.toThrow(/file 0 \(f\) still open/);
   });
 
@@ -199,10 +320,10 @@ describe('the output router of a tool run', () => {
     const log: string[] = [];
     const router = new ToolOutputRouter({ onFile: () => loggingSink(log, true) }, () => undefined);
     router.frame({ number: 0, kind: 'begin', name: 'f' });
-    router.frame({ number: 0, kind: 'bytes', bytes: encode('x') });
+    router.frame({ number: 0, kind: 'bytes', offset: 0, bytes: encode('x') });
     await vi.waitFor(() => expect(log).toEqual(['write x begin', 'write x end']));
     const aborted = router.abort('cancelled');
-    router.frame({ number: 0, kind: 'bytes', bytes: encode('y') });
+    router.frame({ number: 0, kind: 'bytes', offset: 1, bytes: encode('y') });
     await aborted;
     expect(log).toEqual(['write x begin', 'write x end', 'abort cancelled']);
     await expect(router.finish()).rejects.toBe('cancelled');
@@ -269,8 +390,8 @@ describe('ReactorAbi.tool and validateTool', () => {
         emit(12, frame(0, FRAME_BEGIN, encode('log.txt')));
         emit(3, encode('err'));
         emit(12, frame(1, FRAME_BEGIN, encode('c.counts')));
-        emit(12, frame(1, FRAME_BYTES, encode('abc')));
-        emit(12, frame(0, FRAME_BYTES, encode('L')));
+        emit(12, bytesFrame(1, 0, 'abc'));
+        emit(12, bytesFrame(0, 0, 'L'));
         emit(12, frame(1, FRAME_END));
         emit(12, frame(0, FRAME_END));
         emit(2, encode('{"status":3}'));
@@ -283,7 +404,7 @@ describe('ReactorAbi.tool and validateTool', () => {
       stderr: (bytes) => calls.push(`stderr ${text(bytes)}`),
       file: (parsed) => {
         if (parsed.kind === 'bytes') kept.push(parsed.bytes);
-        calls.push(`file ${parsed.number} ${parsed.kind}${parsed.kind === 'begin' ? ` ${parsed.name}` : parsed.kind === 'bytes' ? ` ${text(parsed.bytes)}` : ''}`);
+        calls.push(`file ${parsed.number} ${parsed.kind}${parsed.kind === 'begin' ? ` ${parsed.name}` : parsed.kind === 'bytes' ? `@${parsed.offset} ${text(parsed.bytes)}` : ''}`);
       },
     });
     expect(status).toBe(3);
@@ -294,8 +415,8 @@ describe('ReactorAbi.tool and validateTool', () => {
       'file 0 begin log.txt',
       'stderr err',
       'file 1 begin c.counts',
-      'file 1 bytes abc',
-      'file 0 bytes L',
+      'file 1 bytes@0 abc',
+      'file 0 bytes@0 L',
       'file 1 end',
       'file 0 end',
     ]);
@@ -341,13 +462,6 @@ describe('ReactorAbi.tool and validateTool', () => {
       message: "USAGE\n====\nError: one of '-mk_counts', '-convert' or '-ustat <stat_file>' must be specified",
     });
   });
-
-  it("answers validateTool through reactorControl's shared instance", async () => {
-    const { abi } = fakeEngine({ validate: (_emit, argv) => (argv.includes('-bad') ? -1 : 0), error: 'bad argument' });
-    const control = reactorControl(async () => abi, async () => abi);
-    expect(await control.validateTool(['windowmasker', '-mk_counts'])).toEqual({ ok: true });
-    expect(await control.validateTool(['windowmasker', '-bad'])).toEqual({ ok: false, message: 'bad argument' });
-  });
 });
 
 // --- the Gateway with a fake Engine worker ----------------------------------------------------------------------------
@@ -371,6 +485,10 @@ class FakeWorker {
     return this.posted.filter((command): command is WorkerTool => command.type === 'tool');
   }
 
+  get validations(): WorkerToolValidate[] {
+    return this.posted.filter((command): command is WorkerToolValidate => command.type === 'tool-validate');
+  }
+
   get generation(): number {
     return this.posted.find((command) => command.type === 'init')!.generation;
   }
@@ -385,7 +503,7 @@ const ASSETS = {
   threads: { url: '/threads.wasm', sha256: 'b'.repeat(64), size: 1, artifactSha256: 'c'.repeat(64), transform: 'shared-memory guard' },
 };
 
-function setup(validateTool?: (argv: readonly string[]) => Promise<{ ok: true } | { ok: false; message: string }>) {
+function setup() {
   const workers: FakeWorker[] = [];
   const engine = new WasmEngine({
     assets: ASSETS,
@@ -393,7 +511,6 @@ function setup(validateTool?: (argv: readonly string[]) => Promise<{ ok: true } 
       describe: () => Promise.reject(new Error('unused')),
       start: () => Promise.reject(new Error('unused')),
       validate: () => Promise.reject(new Error('unused')),
-      ...(validateTool === undefined ? {} : { validateTool }),
     },
     hardwareConcurrency: 8,
     createWorker: () => {
@@ -434,9 +551,9 @@ describe('WasmEngine.runTool', () => {
     run.chunk('stdout', 'hello ');
     run.chunk('stderr', 'warn');
     run.file({ number: 0, kind: 'begin', name: 'c.counts' });
-    run.file({ number: 0, kind: 'bytes', bytes: encode('12') });
+    run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('12') });
     run.chunk('stdout', 'world');
-    run.file({ number: 0, kind: 'bytes', bytes: encode('34') });
+    run.file({ number: 0, kind: 'bytes', offset: 2, bytes: encode('34') });
     run.file({ number: 0, kind: 'end' });
     run.done(0);
     const result = await run.promise;
@@ -458,6 +575,7 @@ describe('WasmEngine.runTool', () => {
         onFile: (name) => {
           log.push(`open ${name}`);
           return {
+            truncate: () => undefined,
             write: async (chunk) => {
               // The first write is slow: the next frames wait for it, and the result for them all.
               if (log.filter((entry) => entry.startsWith('write')).length === 0) await gate;
@@ -471,9 +589,9 @@ describe('WasmEngine.runTool', () => {
     let resolved = false;
     void run.promise.then(() => (resolved = true));
     run.file({ number: 0, kind: 'begin', name: 'c.counts' });
-    run.file({ number: 0, kind: 'bytes', bytes: encode('ab') });
+    run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('ab') });
     run.chunk('stdout', 'o');
-    run.file({ number: 0, kind: 'bytes', bytes: encode('cd') });
+    run.file({ number: 0, kind: 'bytes', offset: 2, bytes: encode('cd') });
     run.file({ number: 0, kind: 'end' });
     run.done(0);
     await vi.waitFor(() => expect(log).toEqual(['open c.counts']));
@@ -491,13 +609,13 @@ describe('WasmEngine.runTool', () => {
     const { engine, workers } = setup();
     const writes: string[] = [];
     const run = await started(engine, workers, ['windowmasker', '-mk_counts'], {
-      sinks: { onFile: () => ({ write: (chunk) => void writes.push(text(chunk)), close: () => undefined }) },
+      sinks: { onFile: () => ({ write: (chunk) => void writes.push(text(chunk)), truncate: () => undefined, close: () => undefined }) },
     });
     let resolved = false;
     void run.promise.then(() => (resolved = true));
     run.file({ number: 0, kind: 'begin', name: 'f' });
-    run.file({ number: 0, kind: 'bytes', bytes: encode('one') });
-    run.file({ number: 0, kind: 'bytes', bytes: encode('two') });
+    run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('one') });
+    run.file({ number: 0, kind: 'bytes', offset: 3, bytes: encode('two') });
     run.file({ number: 0, kind: 'end' });
     await vi.waitFor(() => expect(writes).toEqual(['one', 'two']));
     expect(resolved).toBe(false);
@@ -549,7 +667,7 @@ describe('WasmEngine.runTool', () => {
       sinks: { onFile: () => loggingSink(log) },
     });
     run.file({ number: 0, kind: 'begin', name: 'f' });
-    run.file({ number: 0, kind: 'bytes', bytes: encode('x') });
+    run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('x') });
     await vi.waitFor(() => expect(log).toEqual(['write x begin', 'write x end']));
     controller.abort();
     await expect(run.promise).rejects.toBeInstanceOf(RunCancelledError);
@@ -577,7 +695,7 @@ describe('WasmEngine.runTool', () => {
       },
     });
     run.file({ number: 0, kind: 'begin', name: 'f' });
-    run.file({ number: 0, kind: 'bytes', bytes: encode('x') });
+    run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('x') });
     await expect(run.promise).rejects.toThrow('the file cannot be written');
     expect(run.worker.terminated).toBe(true);
     expect(log).toEqual(['abort Error: the file cannot be written']);
@@ -612,18 +730,194 @@ describe('WasmEngine.runTool', () => {
     expect(workers[0]!.terminated).toBe(true);
   });
 
-  it('is an EngineGateway that also validates tools through its control', async () => {
-    const validated: string[][] = [];
-    const { engine } = setup(async (argv) => {
-      validated.push([...argv]);
-      return argv.includes('-bad') ? { ok: false, message: 'Error: bad' } : { ok: true };
-    });
+  it('is an EngineGateway that also runs tools', () => {
+    const { engine } = setup();
     const gateway: EngineGateway = engine;
     expect(gateway).toBe(engine);
-    expect(await engine.validateTool(['windowmasker', '-mk_counts'])).toEqual({ ok: true });
-    expect(await engine.validateTool(['windowmasker', '-bad'])).toEqual({ ok: false, message: 'Error: bad' });
-    expect(validated).toEqual([['windowmasker', '-mk_counts'], ['windowmasker', '-bad']]);
-    await expect(setup().engine.validateTool(['windowmasker'])).rejects.toThrow(/does not validate tools/);
+  });
+
+  it('gives the sink a write before the file ends and before the result arrives (the worker is driven step by step)', async () => {
+    const { engine, workers } = setup();
+    const log: string[] = [];
+    const run = await started(engine, workers, ['windowmasker', '-mk_counts'], {
+      sinks: {
+        onFile: (name) => {
+          log.push(`open ${name}`);
+          return {
+            write: (chunk, offset) => void log.push(`write ${text(chunk)} at ${offset}`),
+            truncate: (length) => void log.push(`truncate ${length}`),
+            close: () => void log.push('close'),
+          };
+        },
+      },
+    });
+    let resolved = false;
+    void run.promise.then(() => (resolved = true));
+    run.file({ number: 0, kind: 'begin', name: 'sub/out' });
+    run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('one') });
+    // The first bytes are at the sink while the file is open: no end frame and no result has come.
+    await vi.waitFor(() => expect(log).toEqual(['open sub/out', 'write one at 0']));
+    run.file({ number: 0, kind: 'truncate', length: 1 });
+    run.file({ number: 0, kind: 'bytes', offset: 1, bytes: encode('two') });
+    await vi.waitFor(() => expect(log).toEqual(['open sub/out', 'write one at 0', 'truncate 1', 'write two at 1']));
+    expect(resolved).toBe(false);
+    run.file({ number: 0, kind: 'end' });
+    await vi.waitFor(() => expect(log.at(-1)).toBe('close'));
+    // The file is closed, and the result still waits for the engine's status.
+    expect(resolved).toBe(false);
+    run.done(0);
+    expect((await run.promise).status).toBe(0);
+  });
+
+  it('collects one file that the run opened twice as one Blob with the POSIX bytes: the append of the log, the truncate of -out, an overwrite', async () => {
+    const { engine, workers } = setup();
+    const run = await started(engine, workers, ['windowmasker', '-mk_counts', '-out', 'x', '-logfile', 'x']);
+    run.file({ number: 0, kind: 'begin', name: 'x' });
+    run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('log1\n') });
+    run.file({ number: 0, kind: 'truncate', length: 0 });
+    run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('COUNTS') });
+    run.file({ number: 0, kind: 'bytes', offset: 6, bytes: encode('-log2') });
+    run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('co') });
+    run.file({ number: 0, kind: 'end' });
+    run.done(0);
+    const { files } = await run.promise;
+    expect(files.map((file) => file.name)).toEqual(['x']);
+    expect(await files[0]!.file.text()).toBe('coUNTS-log2');
+  });
+
+  it('gives the run a credit counter where the page can share memory, and closes it when the run ends', async () => {
+    const { engine, workers } = setup();
+    const run = await started(engine, workers, ['windowmasker']);
+    const { credit } = run.worker.tools[0]!;
+    expect(credit).toBeInstanceOf(SharedArrayBuffer);
+    const cells = new Int32Array(credit!);
+    // The page takes what it handled: a chunk with no sink goes into a Blob at once.
+    cells[0] = 5;
+    run.chunk('stdout', 'hello');
+    await vi.waitFor(() => expect(cells[0]).toBe(0));
+    expect(cells[1]).toBe(0);
+    run.done(0);
+    await run.promise;
+    // The run is over: the worker that waits goes on.
+    expect(cells[1]).toBe(1);
+  });
+
+  it('closes the credit of a run that is cancelled, so that a waiting worker never hangs', async () => {
+    const { engine, workers } = setup();
+    const controller = new AbortController();
+    const run = await started(engine, workers, ['windowmasker'], { signal: controller.signal });
+    const cells = new Int32Array(run.worker.tools[0]!.credit!);
+    controller.abort();
+    await expect(run.promise).rejects.toBeInstanceOf(RunCancelledError);
+    expect(cells[1]).toBe(1);
+  });
+
+  it('takes the credit of the bytes that a sink took, after its call settled, and of those it dropped after a failure', async () => {
+    const { engine, workers } = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const run = await started(engine, workers, ['windowmasker', '-mk_counts'], {
+      sinks: { onFile: () => ({ write: () => gate, truncate: () => undefined, close: () => undefined }) },
+    });
+    const cells = new Int32Array(run.worker.tools[0]!.credit!);
+    cells[0] = 7;
+    run.file({ number: 0, kind: 'begin', name: 'f' });
+    run.file({ number: 0, kind: 'bytes', offset: 0, bytes: encode('abc') });
+    run.file({ number: 0, kind: 'bytes', offset: 3, bytes: encode('defg') });
+    // The sink holds the first write: nothing is taken yet.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(cells[0]).toBe(7);
+    release();
+    await vi.waitFor(() => expect(cells[0]).toBe(0));
+    run.file({ number: 0, kind: 'end' });
+    run.done(0);
+    await run.promise;
+  });
+
+  describe('validateTool', () => {
+    it('posts the check with its directory to the worker and answers with the verdict, without making the engine busy', async () => {
+      const { engine, workers } = setup();
+      const wm = new Blob(['[X]\n']);
+      const pending = engine.validateTool(['windowmasker', '-conffile', 'wm.ini', '-mk_counts'], { directory: [{ name: 'wm.ini', file: wm }] });
+      await vi.waitFor(() => expect(workers[0]?.validations).toHaveLength(1));
+      const worker = workers[0]!;
+      const command = worker.validations[0]!;
+      expect(command).toMatchObject({ type: 'tool-validate', argv: ['windowmasker', '-conffile', 'wm.ini', '-mk_counts'], files: [{ name: 'wm.ini', file: wm }] });
+      // A run may start while the check is pending.
+      const run = engine.runTool(['windowmasker', '-mk_counts']);
+      await vi.waitFor(() => expect(worker.tools).toHaveLength(1));
+      worker.send({ type: 'tool-validated', generation: command.generation, id: command.id, verdict: { ok: false, message: 'Error: bad' } });
+      expect(await pending).toEqual({ ok: false, message: 'Error: bad' });
+      // And a check may be asked while the run is in progress.
+      const during = engine.validateTool(['windowmasker', '-mk_counts']);
+      await vi.waitFor(() => expect(worker.validations).toHaveLength(2));
+      const second = worker.validations[1]!;
+      worker.send({ type: 'tool-validated', generation: second.generation, id: second.id, verdict: { ok: true } });
+      expect(await during).toEqual({ ok: true });
+      const { runId, generation } = worker.tools[0]!;
+      worker.send({ type: 'tool-done', generation, runId, result: { status: 0, memory: MEMORY } });
+      expect((await run).status).toBe(0);
+    });
+
+    it('rejects with the error of the check, and posts the other checks to the next worker when the instance stopped', async () => {
+      const { engine, workers } = setup();
+      const first = engine.validateTool(['windowmasker', '-a']);
+      const second = engine.validateTool(['windowmasker', '-b']);
+      await vi.waitFor(() => expect(workers[0]?.validations).toHaveLength(2));
+      const [one, two] = workers[0]!.validations as [WorkerToolValidate, WorkerToolValidate];
+      workers[0]!.send({ type: 'tool-validate-failed', generation: one.generation, id: one.id, error: { name: 'EngineStoppedError', message: 'the engine stopped', stopped: true } });
+      await expect(first).rejects.toThrow('the engine stopped');
+      expect(workers[0]!.terminated).toBe(true);
+      await vi.waitFor(() => expect(workers[1]?.validations).toHaveLength(1));
+      const again = workers[1]!.validations[0]!;
+      expect(again).toMatchObject({ id: two.id, argv: ['windowmasker', '-b'] });
+      workers[1]!.send({ type: 'tool-validated', generation: again.generation, id: again.id, verdict: { ok: true } });
+      expect(await second).toEqual({ ok: true });
+    });
+
+    it('posts a pending check again to the next worker when a cancel ends the worker', async () => {
+      const { engine, workers } = setup();
+      const controller = new AbortController();
+      const run = await started(engine, workers, ['windowmasker', '-mk_counts'], { signal: controller.signal });
+      const pending = engine.validateTool(['windowmasker', '-mk_counts', '-in', 'g.fa'], { directory: [{ name: 'g.fa', file: new Blob(['>x\nA\n']) }] });
+      await vi.waitFor(() => expect(run.worker.validations).toHaveLength(1));
+      controller.abort();
+      await expect(run.promise).rejects.toBeInstanceOf(RunCancelledError);
+      expect(run.worker.terminated).toBe(true);
+      await vi.waitFor(() => expect(workers[1]?.validations).toHaveLength(1));
+      const again = workers[1]!.validations[0]!;
+      expect(again.files?.map((file) => file.name)).toEqual(['g.fa']);
+      // The answer of the ended worker is not heard; the new worker's is.
+      run.worker.send({ type: 'tool-validated', generation: run.worker.generation, id: again.id, verdict: { ok: false, message: 'old' } });
+      workers[1]!.send({ type: 'tool-validated', generation: again.generation, id: again.id, verdict: { ok: true } });
+      expect(await pending).toEqual({ ok: true });
+    });
+
+    it('fails with the reason when the worker never started, and does not start workers for good', async () => {
+      const { engine, workers } = setup();
+      const pending = engine.validateTool(['windowmasker']);
+      await vi.waitFor(() => expect(workers[0]?.validations).toHaveLength(1));
+      workers[0]!.onerror?.({ preventDefault: () => undefined, message: '' } as unknown as ErrorEvent);
+      await expect(pending).rejects.toThrow(ENGINE_NOT_STARTED);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(workers).toHaveLength(1);
+    });
+
+    it('gives up a check that three workers ended', async () => {
+      const { engine, workers } = setup();
+      const pending = engine.validateTool(['windowmasker']);
+      const settled = pending.then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      );
+      for (let n = 0; n < 3; n++) {
+        await vi.waitFor(() => expect(workers[n]?.validations).toHaveLength(1));
+        workers[n]!.send({ type: 'started', generation: workers[n]!.generation });
+        workers[n]!.onerror?.({ preventDefault: () => undefined, message: 'boom' } as unknown as ErrorEvent);
+      }
+      expect(await settled).toMatch(/stopped/);
+      expect(workers).toHaveLength(3);
+    });
   });
 });
 
@@ -673,6 +967,12 @@ describe.skipIf(REACTORS === undefined)('windowmasker through the host', () => {
     for (const name of ['c.counts', 'log.txt']) {
       expect(Buffer.from(await again.files.find((file) => file.name === name)!.file.arrayBuffer()).equals(Buffer.from(await made.files.find((file) => file.name === name)!.file.arrayBuffer())), name).toBe(true);
     }
+    // One file opened twice is one file (D-WW3-9, M2): the log and `-out` share it, the run empties it when `-out` opens it, and
+    // the counts are at least there. The host's Blob is that file's bytes at any offset.
+    const same = await run(['windowmasker', '-mk_counts', '-in', 'dm2L_3k.fa', '-unit', '5', '-out', 'out.counts', '-logfile', 'out.counts']);
+    expect(same.status).toBe(0);
+    expect(same.files.map((file) => file.name)).toEqual(['out.counts']);
+    expect(same.files[0]!.file.size).toBeGreaterThanOrEqual(made.files.find((file) => file.name === 'c.counts')!.file.size);
     // The command line's refusal of a command line that names no mode: exit status 3, its text on the standard error.
     const mode = "one of '-mk_counts', '-convert' or '-ustat <stat_file>' must be specified";
     const refused = await run(['windowmasker', '-in', 'x.fa']);

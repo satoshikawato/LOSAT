@@ -21,8 +21,10 @@ import {
   type WorkerRun,
   type WorkerTestCommand,
   type WorkerTool,
+  type WorkerToolValidate,
 } from './protocol.js';
 import { EngineRuntime } from './runtime.js';
+import { toolPosts } from './tool-posts.js';
 
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<EngineCommand>) => void) | null;
@@ -184,13 +186,26 @@ async function tool(command: WorkerTool): Promise<void> {
   const { runId } = command;
   try {
     if (runtime === undefined) throw new Error('the Engine worker was not initialized');
-    const result = await runtime.tool(command, {
-      chunk: (stream, bytes) => scope.postMessage({ type: 'tool-chunk', generation, runId, stream, bytes }, [bytes.buffer as ArrayBuffer]),
-      file: (frame) => scope.postMessage({ type: 'tool-file', generation, runId, frame }, frame.kind === 'bytes' ? [frame.bytes.buffer as ArrayBuffer] : []),
-    });
+    // Each post counts its bytes in the run's credit and waits while the page has not taken enough (tool-credit.ts).
+    const result = await runtime.tool(command, toolPosts(command, generation, (event, transfer) => scope.postMessage(event, transfer)));
     scope.postMessage({ type: 'tool-done', generation, runId, result });
   } catch (error) {
     scope.postMessage({ type: 'done', generation, runId, ok: false, error: toWorkerError(error) });
+  }
+}
+
+/**
+ * The check of a tool's words (`ToolEngine.validateTool`): on the serial instance that runs tools, in its turn after the run
+ * in progress, with the run's files opened for it. The answer is the verdict, or the error of an engine that stopped.
+ */
+async function validateTool(command: WorkerToolValidate): Promise<void> {
+  const { id } = command;
+  try {
+    if (runtime === undefined) throw new Error('the Engine worker was not initialized');
+    const verdict = await runtime.validateTool(command);
+    scope.postMessage({ type: 'tool-validated', generation, id, verdict });
+  } catch (error) {
+    scope.postMessage({ type: 'tool-validate-failed', generation, id, error: toWorkerError(error) });
   }
 }
 
@@ -226,6 +241,7 @@ scope.onmessage = (event) => {
   } else if (command.type === 'tool') {
     pending = undefined;
     inTurn(() => tool(command));
-  } else if (command.type === 'prepare') queuePrepare(command);
+  } else if (command.type === 'tool-validate') inTurn(() => validateTool(command));
+  else if (command.type === 'prepare') queuePrepare(command);
   else if (__LOSAT_TEST_HOOKS__) test(command);
 };

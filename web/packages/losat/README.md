@@ -208,10 +208,14 @@ its outfmt 6 is byte for byte what NCBI BLAST+ 2.17.0 writes for the same search
 user's files, as the command line runs it in a folder that holds them. `argv[0]` is `windowmasker`, then the command
 line's words. `options.directory` holds the files that the words name (`-in`, `-ustat`, `-fa_list` and the files it
 lists, `-ids`, `-exclude_ids`, a BLAST database of `-infmt blastdb`, `-conffile`), each a `DirectoryFile` that the engine
-reads in place, as for a search of `-db` (above). The promise resolves with the command line's exit status
-(`status`, whatever it is: a refusal of the words is status 3, its text on `stderr`) and what the tool wrote: `stdout`,
-`stderr` and `files` (`-out FILE`, `-logfile FILE`, in the order the run opened them, named as the argv writes them;
-two openings of one name are two files). A name that is not a tool rejects. The run is one at a time with the searches;
+reads in place, as for a search of `-db` (above). A folder of the directory opens as it does on Linux, and a read of it
+fails: `-in <folder>` ends as the command line does, with "Is a directory". The promise resolves with the command line's
+exit status (`status`, whatever it is) and what the tool wrote: `stdout`, `stderr` and `files` (`-out FILE`, `-logfile FILE`,
+in the order the run opened them, named as the argv spells them: a name may hold `/`, as `sub/x` does for a folder of the
+directory). The status is the command line's: an argument error and a refusal by LOSAT are status 1, and NCBI's exceptions
+(a missing file, a bad counts file) are status 3; their text is on `stderr`, but with `-logfile FILE` NCBI's report is in that
+file, as it is on the command line. `stderr` arrives as the tool writes it, not when the run ends, so `onStderr` can show a
+warning while the run goes on. A name that is not a tool rejects. The run is one at a time with the searches;
 `options.signal` cancels it.
 
 ```ts
@@ -221,11 +225,14 @@ declare const engine: WasmEngine; // as in "Use"
 declare const fasta: File; // the genome, from a file picker
 
 const argv = ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-unit', '15', '-out', 'genome.counts', '-logfile', 'genome.log'];
-const verdict = await engine.validateTool(argv); // the command line's check of the words, before any file is opened
+const directory = [{ name: 'genome.fa', file: fasta }];
+// The command line's check of the words, before any file is opened. It reads the files that the run reads
+// (`-conffile`, `.ncbirc`, `windowmasker.ini`), so give it the run's directory.
+const verdict = await engine.validateTool(argv, { directory });
 if (!verdict.ok) throw new Error(verdict.message);
 
 // Without sinks, each output is collected as a Blob (a list of the engine's chunks, never one joined array).
-const { status, stderr, files } = await engine.runTool(argv, { directory: [{ name: 'genome.fa', file: fasta }] });
+const { status, stderr, files } = await engine.runTool(argv, { directory });
 const counts = files.find((file) => file.name === 'genome.counts')?.file; // a Blob
 if (status !== 0) throw new Error(await stderr.text());
 ```
@@ -236,6 +243,8 @@ A tool's output may be larger than the browser's memory (human unit counts are 7
 ```ts
 declare const folder: FileSystemDirectoryHandle; // the user's choice, from showDirectoryPicker()
 
+// One TextDecoder for the whole stream, with `stream: true`, so that a character that two chunks split is not garbled.
+const decoder = new TextDecoder();
 const result = await engine.runTool(
   ['windowmasker', '-ustat', 'genome.counts', '-in', 'genome.fa', '-outfmt', 'fasta', '-out', 'masked.fa'],
   {
@@ -244,24 +253,52 @@ const result = await engine.runTool(
       { name: 'genome.fa', file: fasta },
     ],
     sinks: {
-      onStderr: (chunk) => console.warn(new TextDecoder().decode(chunk, { stream: true })),
-      // One sink for each file that the run opens; the host calls `write` for each chunk, in order, then `close`.
+      onStderr: (chunk) => console.warn(decoder.decode(chunk, { stream: true })),
+      // One sink for each file that the run opens (one call for a file that it opens twice, as `-out X -logfile X` does).
+      // The host calls `write` for each chunk, in order, then `close`.
       onFile: async (name) => {
-        const writable = await (await folder.getFileHandle(name, { create: true })).createWritable();
-        return { write: (chunk) => writable.write(chunk), close: () => writable.close(), abort: (reason) => writable.abort(reason) };
+        // A name may hold `/`: `sub/x` is the file `x` of the folder `sub`.
+        let parent = folder;
+        const parts = name.split('/');
+        for (const part of parts.slice(0, -1)) parent = await parent.getDirectoryHandle(part, { create: true });
+        const writable = await (await parent.getFileHandle(parts.at(-1)!, { create: true })).createWritable();
+        return {
+          // The bytes go at `offset` of the file: an append in the usual case, but not always (see below).
+          write: (chunk, offset) => writable.write({ type: 'write', position: offset, data: chunk }),
+          // The file's length becomes `length`: the run empties a file when it opens it again for writing.
+          truncate: (length) => writable.truncate(length),
+          close: () => writable.close(),
+          abort: (reason) => writable.abort(reason),
+        };
       },
     },
   },
 );
+decoder.decode(); // the end of the standard error: the decoder flushes a character that was left incomplete
 // The files and the standard error went to the sinks, so `result.files` is empty and `result.stderr` is an empty Blob;
 // `result.status` is the exit status. A sink that returns undefined for a name has that file collected in `files`.
 ```
 
-The host awaits each call of a sink before the next one (`write` and `close` may return a promise), and the chunks are the
-sink's own. The engine does not wait for a slow sink: its call is synchronous, so the chunks queue on the page until the sink
-takes them. A cancel, a failure of the engine or an error of a sink ends the run and calls `abort` of each sink whose file is
-still open, and the promise rejects. `engine.validateTool(argv)` needs the engine's `control` to have `validateTool`, as the
-`reactorControl` of "Use" does; a Data worker that serves `describe`, `start` and `validate` has to serve it too.
+The host awaits each call of a sink before the next one (`write`, `truncate` and `close` may return a promise), and the chunks
+are the sink's own. A run that opens one file twice (`-out X -logfile X`, or `-out ./X -logfile X`: the same file) writes
+one file, as the command line does: each handle has its own position, so a write may come at an offset before the end of
+the file, and one past the end leaves zero bytes between. A sink that writes at `offset` and cuts at `truncate` is exact for
+that; the default collection, a Blob, is too. `onFile` is called once for each file that the run opens, also then. A cancel, a
+failure of the engine or an error of a sink ends the run and calls `abort` of each sink whose file is still open, and the
+promise rejects.
+
+A sink slower than the engine does not make the page hold the output. Where the page can share memory with the Engine worker
+(a cross-origin isolated page, which the threaded module needs too; Node), the worker stops the engine while more than 64 MiB
+of the bytes that it posted wait for the sinks, and goes on as they take them. Where the page is not cross-origin isolated
+(no `SharedArrayBuffer`), nothing can wait: the chunks queue on the page until the sink takes them, so a sink that is slower
+than the engine holds what the engine has written and the sink has not taken. Serve the page isolated to bound it, or take the
+output with a sink that keeps up. A file that no sink takes is collected as a Blob, and does not queue.
+
+`engine.validateTool(argv, { directory })` checks the words as the command line does before the tool opens a file, and reads
+the run's registry files (`-conffile`, `.ncbirc`, `windowmasker.ini`) as the command line does, so it takes the same
+`directory` as `runTool`: it opens the files on the engine's instance that runs tools. It takes its turn there like a run: it
+waits behind a run in progress. It does not make the engine busy: a run may start while a check is pending, and a check may be
+asked during a run. When the worker that has it ends (a cancel, a renewal, a stop), the check goes to the next worker.
 
 ## License
 

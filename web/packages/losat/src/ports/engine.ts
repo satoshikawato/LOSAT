@@ -330,12 +330,23 @@ export interface EnginePrepareHint {
 /**
  * Where a file that a tool run writes goes, as it is written (D-WW3-6): a tool's output may be larger than the
  * browser's memory (human counts are 724 MB, a genome masked as FASTA 3.1 GB), so the engine hands it over in
- * chunks and the host never holds it whole. The calls come in order, each after the promise of the one before has
- * settled: the chunks of the file in the order that the run wrote them, then `close`. A `chunk` is the sink's own
- * (it is not used again by the host).
+ * chunks. The calls come in order, each after the promise of the one before has settled: the file's writes and
+ * truncations in the order that the run made them, then `close`. A `chunk` is the sink's own (it is not used again by
+ * the host).
+ *
+ * A file has POSIX semantics: most writes are appends (`offset` is the length so far), but a run that opens one file
+ * twice (`-out X -logfile X`) writes one file through two handles, each with its own position, so a write may come at
+ * an offset before the end, and one past the end leaves zero bytes between (a hole). A `FileSystemWritableFileStream`
+ * does both: `write({ type: 'write', position: offset, data: chunk })` and `truncate(length)`.
  */
 export interface ToolFileSink {
-  write(chunk: Uint8Array): void | Promise<void>;
+  /** Writes `chunk` at `offset` of the file (bytes from 0); a write past the end leaves zero bytes between. */
+  write(chunk: Uint8Array, offset: number): void | Promise<void>;
+  /**
+   * The file's length becomes `length`: the file is cut, or, when it is shorter, zero bytes are added. The run asks it
+   * when it opens a file again for writing, which empties it (`length` 0).
+   */
+  truncate(length: number): void | Promise<void>;
   /** The run closed the file: all its bytes were written. */
   close(): void | Promise<void>;
   /**
@@ -348,17 +359,25 @@ export interface ToolFileSink {
 /**
  * Where the output of a tool run goes as the run writes it. A stream without a sink is collected: its chunks are kept
  * as a Blob, never joined into one array (`ToolRunResult`). With a sink, that output is not kept: its Blob is empty,
- * and the file is not in `files`. Each call of a sink waits for the promise of the one before (a slow sink slows the
- * host's handling of the engine's chunks, not the engine, which runs on).
+ * and the file is not in `files`. Each call of a sink waits for the promise of the one before.
+ *
+ * A sink slower than the engine does not make the page hold the whole output: where the page can share memory with
+ * the Engine worker (`SharedArrayBuffer`, which a cross-origin isolated page and Node have), the worker stops the engine
+ * while more than 64 MiB of the bytes that it posted wait for the sinks, and goes on as the sinks
+ * take them. Where there is no `SharedArrayBuffer` (a page that is not cross-origin isolated), nothing can wait: the
+ * chunks queue on the page until the sink takes them, so a sink slower than the engine holds what the engine has
+ * written and the sink has not taken (a platform-condition path; the output of a run to a fast sink, or one that a
+ * Blob collects, is unaffected).
  */
 export interface ToolSinks {
   /** A chunk of the tool's standard output (ABI v2 stream 11); the chunk is the sink's own. */
   readonly onStdout?: (chunk: Uint8Array) => void | Promise<void>;
-  /** A chunk of the tool's standard error (stream 3). */
+  /** A chunk of the tool's standard error (stream 3), as the tool writes it. */
   readonly onStderr?: (chunk: Uint8Array) => void | Promise<void>;
   /**
-   * The run opens a file named `name` (as the argv writes it; two openings of one name are two files): returns the sink of
-   * its bytes, or undefined to have the file collected as a Blob in `files`.
+   * The run opens a file named `name`: returns the sink of its bytes, or undefined to have the file collected as a Blob
+   * in `files`. Called once for each file that the run opens, also when it opens one file twice (`-out X -logfile X` is
+   * one file). The name is the argv's spelling and may hold `/` (`sub/x`, for a folder of the run's directory).
    */
   readonly onFile?: (name: string) => ToolFileSink | undefined | Promise<ToolFileSink | undefined>;
 }
@@ -372,7 +391,7 @@ export interface ToolFile {
 export interface ToolRunOptions {
   /**
    * The files of the run's working directory that the words of the tool name (`-in`, `-ustat`, `-fa_list` and the files it
-   * lists, `-ids`, `-conffile`, a BLAST database of `-infmt blastdb`), as `EngineRunRequest.files` gives them to a search:
+   * lists, `-ids`, `-exclude_ids`, `-conffile`, a BLAST database of `-infmt blastdb`), as `EngineRunRequest.files` gives them to a search:
    * the engine reads each in place, never copied whole. A `ToolFile` of an earlier run may be given here.
    */
   readonly directory?: readonly DirectoryFile[];
@@ -396,6 +415,11 @@ export interface ToolRunResult {
 /** The verdict of `validateTool`: the command line's error text (its standard error, the usage and the error line) for an argv that it refuses. */
 export type ToolValidation = { readonly ok: true } | { readonly ok: false; readonly message: string };
 
+/** The files that a check of a tool's words may read (`ToolRunOptions.directory`). */
+export interface ToolValidateOptions {
+  readonly directory?: readonly DirectoryFile[];
+}
+
 /** What an engine offers for the command line's tools besides the searches (`windowmasker`). */
 export interface ToolEngine {
   /**
@@ -406,6 +430,12 @@ export interface ToolEngine {
    * cancel and for a failure of the engine or of a sink. One run at a time, a search's included.
    */
   runTool(argv: readonly string[], options?: ToolRunOptions): Promise<ToolRunResult>;
-  /** Checks the words of a tool as the command line checks them before the tool opens a file; reads no file. */
-  validateTool(argv: readonly string[]): Promise<ToolValidation>;
+  /**
+   * Checks the words of a tool as the command line checks them before the tool opens a file. It reads the run's registry
+   * files (`-conffile`, `.ncbirc`, `windowmasker.ini`) as the command line does, so give it the same `directory` as
+   * `runTool`: it opens them on the engine's instance that runs tools, and takes its turn there like a run (it waits
+   * behind a run in progress). It does not make the engine busy: a run may start while a check is pending, and a check
+   * may be asked while a run is in progress.
+   */
+  validateTool(argv: readonly string[], options?: ToolValidateOptions): Promise<ToolValidation>;
 }

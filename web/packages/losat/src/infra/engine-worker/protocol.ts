@@ -6,7 +6,7 @@ import type { RecordKey, ShownIds } from '../../domain/dataset.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { DirectoryFile, MessagePlace, RegistryFile, RunFile } from '../../domain/run-files.js';
 import type { ToolFrame } from '../../domain/tool-frames.js';
-import type { EnginePhase } from '../../ports/engine.js';
+import type { EnginePhase, ToolValidation } from '../../ports/engine.js';
 import type { OutputStream } from '../../ports/run-output.js';
 import type { ReactorArtifact } from '../reactor/artifact.js';
 import type { ReactorAsset } from '../reactor/assets.js';
@@ -98,6 +98,25 @@ export interface WorkerTool {
   readonly runId: string;
   readonly argv: readonly string[];
   readonly files?: readonly DirectoryFile[];
+  /**
+   * The counter of the bytes that the worker has posted and the page has not taken (tool-credit.ts): the worker waits in the
+   * engine's call while it is above the limit. Absent where the page cannot share memory with the worker: nothing waits then.
+   */
+  readonly credit?: SharedArrayBuffer;
+}
+
+/**
+ * The check of a tool's words (`ToolEngine.validateTool`, ABI v2 `losat_web2_validate` with a tool's name as `argv[0]`): it
+ * runs on the serial instance that runs tools, in the worker's turn like a run (behind a run in progress), with the files of
+ * the run's directory opened there as for a run, because the check reads the run's registry files. The answer is
+ * `tool-validated` with the same `id`.
+ */
+export interface WorkerToolValidate {
+  readonly type: 'tool-validate';
+  readonly generation: number;
+  readonly id: string;
+  readonly argv: readonly string[];
+  readonly files?: readonly DirectoryFile[];
 }
 
 /**
@@ -136,7 +155,7 @@ export type WorkerTestCommand =
   | { readonly type: 'test-end'; readonly id: number; readonly writer: number }
   | { readonly type: 'test-post'; readonly id: number; readonly writer: number; readonly message: unknown };
 
-export type EngineCommand = EngineInit | WorkerRun | WorkerTool | WorkerPrepare | WorkerTestCommand;
+export type EngineCommand = EngineInit | WorkerRun | WorkerTool | WorkerToolValidate | WorkerPrepare | WorkerTestCommand;
 
 export interface MemoryRecord {
   /** Linear memory of the instance before and after the search, in bytes. */
@@ -222,6 +241,12 @@ export type EngineEvent =
     }
   /** A frame of a file that a tool writes (stream 12), posted as it arrives, with its bytes transferred. */
   | { readonly type: 'tool-file'; readonly generation: number; readonly runId: string; readonly frame: ToolFrame }
+  /**
+   * The answer to a `tool-validate`: the verdict, or the error that stopped the check (a stopped instance sets `stopped`: the
+   * Gateway ends the worker and posts the checks that are still pending to the next one).
+   */
+  | { readonly type: 'tool-validated'; readonly generation: number; readonly id: string; readonly verdict: ToolValidation }
+  | { readonly type: 'tool-validate-failed'; readonly generation: number; readonly id: string; readonly error: WorkerError }
   | { readonly type: 'tool-done'; readonly generation: number; readonly runId: string; readonly result: WorkerToolResult }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: false; readonly error: WorkerError }
   | { readonly type: 'test-reply'; readonly id: number; readonly ok: boolean; readonly value?: number; readonly error?: WorkerError };

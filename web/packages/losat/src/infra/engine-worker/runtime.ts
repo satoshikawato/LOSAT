@@ -22,7 +22,7 @@
 // engine opens by name and reads in place; a run of -db takes no subject (line WQA D12a, 2026-11-20).
 import { recordMismatch, type RecordKey } from '../../domain/dataset.js';
 import { readStoredZip, type MessagePlace, type OutputPlace, type RunFile } from '../../domain/run-files.js';
-import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase } from '../../ports/engine.js';
+import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase, type ToolValidation } from '../../ports/engine.js';
 import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RunOutput } from '../../domain/output-format.js';
@@ -50,7 +50,16 @@ import { createSharedMemory } from '../reactor/shared-memory.js';
 import { RunOutputWriter } from '../run-output/writer.js';
 import type { InstanceUse } from './instance-use.js';
 import type { MainLinks } from './link.js';
-import type { RuntimePath, WorkerCounts, WorkerInput, WorkerRun, WorkerRunResult, WorkerTool, WorkerToolResult } from './protocol.js';
+import type {
+  RuntimePath,
+  WorkerCounts,
+  WorkerInput,
+  WorkerRun,
+  WorkerRunResult,
+  WorkerTool,
+  WorkerToolResult,
+  WorkerToolValidate,
+} from './protocol.js';
 import { ThreadHost } from './thread-host.js';
 import { warmUp } from './warm-up.js';
 
@@ -220,6 +229,25 @@ export class EngineRuntime {
       };
     } finally {
       // The run's files are let go (as after a search); a stopped instance is loaded again by the next run.
+      if (abi.stoppedBy === undefined) loaded.directory.open([]);
+      else this.dispose();
+    }
+  }
+
+  /**
+   * The check of a tool's words (`losat_web2_validate` with a tool's name as `argv[0]`) on the serial instance that runs
+   * tools, with the files of the run's directory opened as `tool` opens them: the check reads the run's registry files
+   * (`-conffile`, `.ncbirc`, `windowmasker.ini`) as the command line does. It releases nothing that the instance holds (it needs
+   * no memory of its own), and lets the files go afterwards. A stopped instance is loaded again by the next call.
+   */
+  async validateTool(request: WorkerToolValidate): Promise<ToolValidation> {
+    const loaded = await this.load('serial');
+    const abi = loaded.instance.abi;
+    try {
+      loaded.directory.open(request.files ?? []);
+      loaded.instance.wasi.clear();
+      return abi.validateTool(request.argv);
+    } finally {
       if (abi.stoppedBy === undefined) loaded.directory.open([]);
       else this.dispose();
     }

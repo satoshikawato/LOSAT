@@ -925,11 +925,11 @@ fn is_unported_rpsblast_arg(name: &str) -> bool {
 /// rpstblastn's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote options
 /// and `-import_search_strategy` of every program. The composition-based statistics of a later
 /// item are refused once per run (`rpstblastn::search::TranslatedRpsSearch::check_options`).
+const UNPORTED_RPSTBLASTN_ARGS: &[&str] =
+    &["entrez_query", "html", "import_search_strategy", "remote"];
+
 fn is_unported_rpstblastn_arg(name: &str) -> bool {
-    matches!(
-        name,
-        "entrez_query" | "html" | "import_search_strategy" | "remote"
-    )
+    UNPORTED_RPSTBLASTN_ARGS.contains(&name)
 }
 
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {

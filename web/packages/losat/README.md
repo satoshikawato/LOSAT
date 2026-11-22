@@ -18,7 +18,7 @@ drops the output that the engine tells it to discard (stream 9, in "Use").
 The package is not published on npm. Build it from the [LOSAT repository](https://github.com/satoshikawato/LOSAT):
 make the two modules with `web/adapter/tools/build_reactors.py`, then run
 `LOSAT_WEB_REACTORS=<modules directory> npm run build` in `web/packages/losat`; `npm pack` there makes a
-file to install ([web/AGENTS.md](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/web/AGENTS.md)).
+file to install (see the [WebAssembly manual page](https://satoshikawato.github.io/LOSAT/libraries/webassembly.html) and [CONTRIBUTING.md](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/CONTRIBUTING.md)).
 
 ## Versions
 

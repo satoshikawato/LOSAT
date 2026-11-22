@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "omb",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "omb.faa",
+  "number-of-letters": 426,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-21T18:52:00",
+  "number-of-volumes": 1,
+  "bytes-total": 1020,
+  "bytes-to-cache": 526,
+  "files": [
+    "omb.phr",
+    "omb.pin",
+    "omb.pog",
+    "omb.psd",
+    "omb.psi",
+    "omb.psq",
+    "omb.pxm"
+  ]
+}

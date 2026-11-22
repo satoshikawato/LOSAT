@@ -184,9 +184,21 @@ test("the engine's check of an input, its warnings and a refusal to read it are 
   await expect
     .poll(() => told(page, 'status'))
     .toContainEqual(expect.stringContaining('1 record looks like protein sequences, but BLASTN reads the query as nucleotide.'));
+  // The reader's error before the first record: a run ends with it, as the command line does, so the
+  // card warns (line WQA's D10, 2026-11-19; review M-a, 2026-11-20).
   await page.getByTestId('query-input').fill(`\uFEFF>q1\n${dna(3, 60)}\n`);
-  await expect(page.getByTestId('query-source-0')).toHaveAttribute('data-status', 'failed');
-  await expect.poll(() => told(page, 'status')).toContainEqual(expect.stringContaining('This input cannot be read: '));
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-reader-error', '');
+  await expect
+    .poll(() => told(page, 'status'))
+    .toContainEqual(expect.stringContaining('A run of this input ends with this error, as the command line does, and gives no results: '));
+  // A subject that the engine refuses for that error: its card's hint of the byte order mark is told too
+  // (review L1, 2026-11-20).
+  await paste(page, 'subject', `\uFEFF>s1\n${dna(5, 60)}\n`);
+  await expect(page.getByTestId('subject-source-0-check')).toHaveAttribute('data-check', 'refused');
+  await expect(page.getByTestId('subject-source-0-mark')).toBeVisible();
+  await expect
+    .poll(() => told(page, 'status'))
+    .toContainEqual(expect.stringMatching(/refuses this input: .*The text starts with a byte order mark \(U\+FEFF\)\./));
 });
 
 const SIXTEEN_S = exampleById('refseq-16s-bacteria');

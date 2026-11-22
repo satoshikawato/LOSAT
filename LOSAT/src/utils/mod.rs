@@ -23,6 +23,10 @@ pub(crate) mod process_id;
 pub(crate) mod same_file;
 pub mod seg;
 mod seg_lnfact;
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:665-674 (`-randomize`, cited
+// at `writedb::raw_source::RawSeqDbSource::new`): `std::shuffle` with a `std::mt19937`, in the
+// order observed of NCBI's Linux builds.
+pub(crate) mod std_shuffle;
 // No NCBI counterpart: test plumbing; the tests' temporary directory and process id
 // (`std::env::temp_dir()` and `std::process::id()` panic on WASI).
 #[cfg(test)]

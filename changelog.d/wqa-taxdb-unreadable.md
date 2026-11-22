@@ -15,5 +15,5 @@
   to make the file readable or to move it off the BLASTDB path, where LOSAT said the taxonomy database is not
   supported.
 - A `taxonomy4blast.sqlite3` whose pages stop being readable while `-taxids` or `-negative_taxids` is expanded gives
-  NCBI BLAST+'s messages: its SQLite error (`disk I/O error`), then `BLAST query/options error: Invalid taxidlist
+  NCBI BLAST+'s messages in LOSAT's words: its SQLite error (`disk I/O error`), then `LOSAT query/options error: Invalid taxidlist
   file` (exit status 1), or in blastdbcmd the exception (exit status 255).

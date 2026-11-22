@@ -63,7 +63,8 @@ pub struct HardChunk {
     /// end after a chunk from the start, SURVEY §7.1 of M4a-2). LOSAT's search scans every chunk
     /// from its residual (`[0, length)` here): where the chunk is shorter than the subject that
     /// is the approved NCBI defect of `blastinput::db_mask::TAIL_MASK_SEARCHED_WORD`, below whose
-    /// word `HardMaskShape::TailMask` refuses the sequence (series NP, M4a-2c).
+    /// word `HardMaskShape::TailMask` refuses the sequence in BLASTN (series NP, M4a-2c; the
+    /// protein and translated programs at every word, M4b-3).
     pub full_range: bool,
     /// The hard range the chunk is cut from (`hm_index` when it is cut).
     pub range: usize,

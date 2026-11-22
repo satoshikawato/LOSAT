@@ -10,10 +10,10 @@
 //! loads, the first volume's header does not read, or the word size is below the index's, it
 //! warns that the index will not be used and searches as without `-use_index` (it installs the
 //! indexed search only while `-use_index` still holds), which LOSAT does with NCBI's bytes. When
-//! an index loads, NCBI searches with it, as LOSAT does (`mb_index_seeds`, line RG item D5b-2)
-//! except where an index leaves some database volumes unindexed, with a two-hit search or with
-//! `-db_hard_mask` ([`MegablastIndex::check`]; items D5b-3 and D5b-5), and LOSAT refuses the
-//! index files whose reading NCBI leaves undefined or crashes on.
+//! an index loads, NCBI searches with it, as LOSAT does (`mb_index_seeds`, line RG items D5b-2
+//! and D5b-3: also an index of only some database volumes, whose other volumes the search scans,
+//! and the two-hit search), except with `-db_hard_mask` ([`MegablastIndex::check`]; item D5b-5),
+//! and LOSAT refuses the index files whose reading NCBI leaves undefined or crashes on.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -72,8 +72,7 @@ pub(super) fn refusal(what: &str) -> anyhow::Error {
 
 impl MegablastIndex {
     /// The index that the search uses, or LOSAT's refusal of a search that NCBI runs with an
-    /// index LOSAT does not search with: the loader's refusals, and a used index with a two-hit
-    /// search (`-window_size` above 0: NCBI's two-hit seed search, item D5b-3) or with the
+    /// index LOSAT does not search with: the loader's refusals, and a used index with the
     /// database's hard masking (`-db_hard_mask` as the formatter resolved it: NCBI places the
     /// index's seeds by its unmasked chunks, item D5b-5, the Owner's question Q-HARDIDX).
     pub(super) fn check(&self, args: &BlastnArgs) -> Result<Option<Arc<LoadedIndex>>> {
@@ -89,12 +88,6 @@ impl MegablastIndex {
                 if hard {
                     return Err(refusal(&format!(
                         "a MegaBLAST database index ({first}) and -db_hard_mask"
-                    )));
-                }
-                let window = crate::algorithm::blastn::coordination::determine_window_size(args);
-                if window > 0 {
-                    return Err(refusal(&format!(
-                        "a MegaBLAST database index ({first}) and a two-hit search (-window_size {window})"
                     )));
                 }
                 Ok(Some(Arc::clone(index)))
@@ -238,42 +231,37 @@ impl Loaded {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1036-1066
     /// The index the search uses: its volumes with their first OIDs (`GetNextUnusedOID`; an
     /// old-style one's `seqmap_`, of the span from `StartSeq()` to `StopSeq()` of each header),
-    /// each volume read as the search reads it (`CDbIndex::Load`, which NCBI runs when the search
-    /// reaches the volume). `Err`: LOSAT's refusal of an index that leaves a database volume
-    /// unindexed (a mixed search, item D5b-3) or of a volume that does not read as an index.
+    /// each index volume read as the search reads it (`CDbIndex::Load`, which NCBI runs when the
+    /// search reaches the volume), each database volume without an index kept for the scan (a
+    /// mixed search). `Err`: LOSAT's refusal of a volume that does not read as an index.
     fn into_index(self) -> Result<LoadedIndex, String> {
-        let first = &self.first;
-        if self.volumes.iter().any(|entry| !entry.has_index) {
-            return Err(format!(
-                "a MegaBLAST database index of only some database volumes ({first})"
-            ));
-        }
         let mut volumes: Vec<IndexedVolume> = Vec::with_capacity(self.volumes.len());
         let mut next_oid: u32 = 0;
         for entry in self.volumes {
-            let volume = IndexVolume::open(Path::new(&entry.path)).map_err(|why| {
-                format!(
-                    "a MegaBLAST index volume that LOSAT does not read ({}: {why})",
-                    entry.path
-                )
-            })?;
-            let n_oids = if self.old_style {
-                volume.stop.wrapping_sub(volume.start)
-            } else {
+            let n_oids = if !entry.has_index {
                 entry.n_oids
+            } else {
+                let volume = IndexVolume::open(Path::new(&entry.path)).map_err(|why| {
+                    format!(
+                        "a MegaBLAST index volume that LOSAT does not read ({}: {why})",
+                        entry.path
+                    )
+                })?;
+                if self.old_style {
+                    volume.stop.wrapping_sub(volume.start)
+                } else {
+                    entry.n_oids
+                }
             };
             volumes.push(IndexedVolume {
                 path: entry.path,
                 start_oid: next_oid,
                 n_oids,
+                has_index: entry.has_index,
             });
             next_oid = next_oid.wrapping_add(n_oids);
         }
-        Ok(LoadedIndex {
-            old_style: self.old_style,
-            volumes,
-            searches: std::sync::atomic::AtomicU32::new(0),
-        })
+        Ok(LoadedIndex::new(self.old_style, volumes))
     }
 }
 

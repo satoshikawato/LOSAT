@@ -69,6 +69,8 @@ COMMAND_RE = re.compile(
     r"\b(?:[A-Za-z_]\w*\s*::\s*)*Command\s*::\s*new\s*\(",
     re.IGNORECASE,
 )
+# A `Command::new` path through the clap crate builds a command-line parser, not a process.
+CLAP_COMMAND_RE = re.compile(r"clap\s*::\s*(?:builder\s*::\s*)?Command\s*::", re.IGNORECASE)
 COMMAND_ALIAS_RE = re.compile(
     r"\buse\s+std\s*::\s*process\s*::\s*(?:"
     r"Command\s+as\s+(?P<direct_alias>[A-Za-z_]\w*)|"
@@ -365,6 +367,9 @@ def _scan_rust_file(path: Path, root: Path) -> tuple[list[Finding], list[Observa
             re.finditer(rf"\b{re.escape(alias)}\s*::\s*new\s*\(", text)
         )
     for match in sorted(command_matches, key=lambda item: item.start()):
+        if CLAP_COMMAND_RE.match(match.group(0)):
+            # clap's command builder (`clap::Command::new`), not a subprocess.
+            continue
         owner = _enclosing_function(text, match.start())
         findings.append(
             Finding(

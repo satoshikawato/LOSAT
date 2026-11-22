@@ -1243,10 +1243,8 @@ fn output_choices(outputs: &ReportOutputs<'_>) -> Result<Vec<crate::blastinput::
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
 /// NCBI's processing of the options and LOSAT's limits.
 pub fn check_options(args: &TblastxArgs) -> Result<()> {
-    // The host has no database files (`run_local`).
-    if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
-    }
+    // `-db` is checked as the command line checks it: the database is opened by the run
+    // (`run_local_database`, which LOSAT Web's host gives the run's files; line WQA D12a).
     check_ncbi_options(args, &cli_outfmts(args)?, &mut std::io::sink())?;
     // The host validates the argv it runs, with its `-num_threads` (docs/web/abi_v2.md).
     crate::utils::threading::validate_threads(args.num_threads)
@@ -2526,6 +2524,8 @@ fn write_tblastx_outputs(
                                     }
                                     None => {
                                         let mut buffer = Vec::new();
+                                        let mut row_masks =
+                                            crate::report::query_anchored::HspMasks::default();
                                         window
                                             .iter()
                                             .enumerate()
@@ -2534,6 +2534,7 @@ fn write_tblastx_outputs(
                                                     hsp,
                                                     identities.map(|identities| identities[index]),
                                                     &mut buffer,
+                                                    &mut row_masks,
                                                 )
                                             })
                                             .collect()

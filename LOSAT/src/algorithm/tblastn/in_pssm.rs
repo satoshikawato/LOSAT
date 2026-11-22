@@ -117,6 +117,8 @@ pub(super) fn check_limits(
             "-mt_mode 1 with -num_threads above 1, -db and -in_pssm, with which NCBI BLAST+ 2.17.0's tblastn aborts, is not supported by LOSAT's TBLASTN"
         );
     }
+    // `-use_sw_tback` is refused where the Smith-Waterman redo of the PSSM query reaches a match
+    // (`match_redo::sw_pssm_refusal`), after the prolog: a search without hits ends as NCBI's.
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:791-796 (the tabular
     // formats of tblastn; the pairwise report, `PrintOneResultSet`)
     // The pairwise report and the tabular formats 6, 7 and 10 (their field lists too). A run that

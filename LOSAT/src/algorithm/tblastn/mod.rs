@@ -41,6 +41,10 @@ mod stage_d_linking;
 mod stage_d_kappa_params;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1896-1957 redoes translated-subject alignments.
 mod kappa;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3641
+// The redo of one match, X-drop (`Blast_RedoOneMatch`) or Smith-Waterman (`-use_sw_tback`,
+// `Blast_RedoOneMatchSmithWaterman`), chosen once per batch.
+mod match_redo;
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275,330-391,439-466:
 // Kappa result records enter the NCBI comparator heap and pop in its order.
 mod kappa_heap;

@@ -986,8 +986,7 @@ fn translated_subject_window_sequence(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938:
-#[allow(dead_code)] // TBLASTN enters this after its translated-range callback is connected.
-fn translated_subject_composition(
+pub(crate) fn translated_subject_composition(
     translation: &[u8],
     range: &BlastCompoSequenceRange,
     align: &BlastCompoAlignment,

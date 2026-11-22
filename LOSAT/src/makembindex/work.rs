@@ -197,7 +197,7 @@ fn no_defined_index(options: &Options) -> String {
     }
 }
 
-/// `CSequenceIStreamFasta(name)`: the file, or `failed to open input stream`.
+/// `CSequenceIStreamFasta` of `name`: the file, or `failed to open input stream`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:55-71
 fn fasta_file(name: &str, titles: bool) -> Result<FastaStream<'static>, Failure> {
     match open_text_file(name) {
@@ -214,7 +214,7 @@ fn fasta_file(name: &str, titles: bool) -> Result<FastaStream<'static>, Failure>
     }
 }
 
-/// `Run` itself; `Ok` holds its exit status (an `exit(1)` after an error post included).
+/// `Run` itself; `Ok` holds its exit status (an `exit` of 1 after an error post included).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/mkindex_app.cpp:151-378
 fn run_index<'a>(
     args: &Args,

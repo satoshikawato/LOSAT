@@ -90,9 +90,9 @@ pub fn encode_protein_query_frame_lcase(
     timed: bool,
 ) -> QueryFrame {
     let mut frame = encode_query_frame::<true>(seq, seg, timed);
-    // SEG's intervals first, as `BlastSeqLocAppend(filter_out, lcase_mask_slp)`: the sort of
-    // `BlastSeqLocCombine` compares only the left ends, and a one-letter run on the first letter of
-    // a SEG interval is merged only in this order (the results' masks).
+    // SEG's intervals first, as `BlastSeqLocAppend` of `lcase_mask_slp` to `filter_out`: the sort
+    // of `BlastSeqLocCombine` compares only the left ends, and a one-letter run on the first letter
+    // of a SEG interval is merged only in this order (the results' masks).
     let mut masks: Vec<(i32, i32)> = frame
         .seg_masks
         .iter()

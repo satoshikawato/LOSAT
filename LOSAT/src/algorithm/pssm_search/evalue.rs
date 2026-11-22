@@ -80,8 +80,8 @@ impl<'a> EvalueStats<'a> {
 /// block without valid values.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4156-4171
-/// `kbp->logK` is `log(kbp->K)` in every block a PSSM search reads (psiblast_aux_priv.cpp:121,
-/// blast_kappa.c:2127).
+/// `kbp->logK` is the natural log of `kbp->K` in every block a PSSM search reads
+/// (psiblast_aux_priv.cpp:121, blast_kappa.c:2127).
 fn karlin_stoe_simple(score: i32, kbp: &KarlinParams, searchsp: i64) -> f64 {
     if kbp.lambda < 0.0 || kbp.k < 0.0 || kbp.h < 0.0 {
         return -1.0;

@@ -175,11 +175,11 @@ impl LineEnds {
     };
 }
 
-/// The message of the post `ERR_POST_X(4, ...)` after a read whose stream failed before its
+/// The message of the post (`ERR_POST_X`, subcode 4) after a read whose stream failed before its
 /// end; LOSAT's reads fail so only before the first line, with an empty line read.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:813-816
-/// `in_path` is empty: `CMetaRegistry` reads a file with `Read(ifs, flags)`, without a path
+/// `in_path` is empty: `CMetaRegistry` reads a file with `Read` of the stream and the flags, without a path
 /// (metareg.cpp:90). The post is an `Error` of `Corelib_Reg` (110, error_codes.hpp:53), which the
 /// old post format writes as `Error: (110.4) ` before the text (`SDiagMessage::x_OldWrite`,
 /// ncbidiag.cpp:5612-5700).
@@ -194,7 +194,7 @@ pub(crate) fn running_error_reading_post(program: &str) -> String {
     error_reading_post().replacen("(110.4) ", &format!("(110.4) [{program}] "), 1)
 }
 
-/// What one `GetTextEncodingForm(is, eBOM_Discard)` leaves of the stream.
+/// What one `GetTextEncodingForm` with `eBOM_Discard` leaves of the stream.
 #[derive(Debug, PartialEq, Eq)]
 enum Encoding<'a> {
     /// The bytes that the next read starts at (a UTF-8 byte order mark dropped).
@@ -207,14 +207,14 @@ enum Encoding<'a> {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:782-826
 // `us[0]` is 0xFEFF or 0xFFFE for the bytes FF FE and FE FF on either byte order. The second
-// `get` of a one-byte file fails at the end (`eofbit | failbit`), and `unget` of that stream
+// `get` of a one-byte file fails at the end (`eofbit` and `failbit`), and `unget` of that stream
 // clears `eofbit` and fails again: the stream has failed and is not at its end. NCBI 2.17.0 reads
 // such a `.ncbirc` with the post "Error reading the registry after line 1" (g_reg probe, files
 // `\xEF` and `\xFE`) and a `blastn.ini` of the byte `\xFF` with none (its second `Read` returns at
 // the failed stream); a file of the two bytes EF BB is read as a line of them (the push-back
 // leaves a stream that reads them). Any first byte followed by BB BF is taken for the UTF-8 mark,
-// as the code reads (`uc[1] == 0xBB` alone).
-/// One `GetTextEncodingForm(is, eBOM_Discard)` at the start of `data`.
+// as the code reads (it tests the second byte for 0xBB, not the first for 0xEF).
+/// One `GetTextEncodingForm` with `eBOM_Discard` at the start of `data`.
 fn text_encoding_form(data: &[u8]) -> Encoding<'_> {
     let [first, rest @ ..] = data else {
         return Encoding::Text(data);
@@ -294,10 +294,10 @@ fn is_name(name: &[u8]) -> bool {
             .all(|&c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'.' | b'/'))
 }
 
-/// `s_Backslashed(s, pos)`: an odd number of backslashes ends just before `pos`.
+/// `s_Backslashed` of `s` at `pos`: an odd number of backslashes ends just before `pos`.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:140-148
-/// (With backslashes only before `pos`, `last_non_bs` is `NPOS`, and `pos - NPOS` is `pos + 1`.)
+/// (With backslashes only before `pos`, `last_non_bs` is `NPOS`, and `pos` less `NPOS` is `pos` plus 1.)
 fn backslashed(s: &[u8], pos: usize) -> bool {
     s[..pos].iter().rev().take_while(|&&c| c == b'\\').count() % 2 == 1
 }

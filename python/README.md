@@ -113,7 +113,7 @@ print(pylosat.convert2blastmask("-masking_algorithm", "other", "-masking_options
 
 ## Errors
 
-`ArgumentError` (the options), `InputError` (a FASTA input) and `SearchError` (the search or a tool) derive from `LosatError`, each with the command line's message for the same failure: `message_bytes` holds its bytes, and `str(error)` is the text.
+`ArgumentError` (the options), `InputError` (a FASTA input that does not open, or a subject record that the reader refuses) and `SearchError` (the search, a query record that the reader refuses, in its query batch as on the command line, or a tool) derive from `LosatError`, each with the command line's message for the same failure: `message_bytes` holds its bytes, and `str(error)` is the text.
 
 Every text that pylosat gives of what the command line writes (`str(error)`, `outcome.diagnostics`, `batch.diagnostics`, `ToolOutput.diagnostics` and `.text`, `FileOutcome.diagnostics` from `run_to_file`) has one U+FFFD per maximal ill-formed subpart of its bytes, as `bytes.decode("utf-8", "replace")` gives; the bytes are `message_bytes`, `diagnostics_bytes` and `ToolOutput.bytes`.
 

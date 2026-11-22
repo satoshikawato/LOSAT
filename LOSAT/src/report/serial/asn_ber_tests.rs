@@ -96,7 +96,7 @@ fn visible_strings_have_short_and_long_lengths() {
         bytes(|enc| enc.visible_str(&string)),
         [&[0x1a, 0x83, 0x01, 0x11, 0x70][..], &string].concat()
     );
-    // Above 0xffffff NCBI writes all `sizeof(size_t)` = 8 bytes of the length.
+    // Above 0xffffff NCBI writes all 8 bytes (the `sizeof` of `size_t`) of the length.
     let string = vec![b'w'; 0x100_0000];
     assert_eq!(
         bytes(|enc| enc.visible_str(&string))[..10],
@@ -186,9 +186,9 @@ fn with_frames_a_non_visible_byte_is_replaced_at_its_offset() {
     );
 }
 
-/// `WriteDouble2(data, DBL_DIG)`: `09`, the length (digits + 1), the decimal form byte 0 and
-/// `DoubleToStringPosix` (zero is `09 02 00 30`; the sample's e-value is `09 16 00
-/// "2.60916226603389e-178"`; a whole number has no decimal point).
+/// `WriteDouble2` of `data` with `DBL_DIG`: `09`, the length (digits + 1), the decimal form byte 0
+/// and `DoubleToStringPosix` (zero is `09 02 00 30`; the sample's e-value is
+/// `09 16 00 "2.60916226603389e-178"`; a whole number has no decimal point).
 #[test]
 fn reals_are_a_decimal_form_byte_and_posix_digits() {
     assert_eq!(bytes(|enc| enc.real(0.0)), [0x09, 0x02, 0x00, b'0']);

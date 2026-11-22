@@ -143,7 +143,7 @@ impl ChunkedBytes {
 
 /// A rendered record of one query, before the sort of the default mode.
 struct Rendered {
-    /// `min(GetSeqStart(0), GetSeqStop(0))` of the query row, then the Seq-align's e-value: its
+    /// The lesser of `GetSeqStart` and `GetSeqStop` of the query row (row 0), then the Seq-align's e-value: its
     /// last HSP's (`SortHspByMasterStartAscending`).
     start: i32,
     evalue: f64,
@@ -329,16 +329,16 @@ impl SamDocument {
                 start
             }
         };
-        // The reference row and the target row (`FormatByTargetRow(m_refRow)`).
+        // The reference row and the target row (`FormatByTargetRow` with `m_refRow`).
         let subject_ref = self.spec.subject_as_reference;
         let (tgt_row, ref_row) = if subject_ref { (0, 1) } else { (1, 0) };
-        // `StrandSign(row)`: the row's strand in the first segment.
+        // `StrandSign` of `row`: the row's strand in the first segment.
         let reverse = (strands[tgt_row] == Strand::Minus) != (strands[ref_row] == Strand::Minus);
         let ref_minus = strands[ref_row] == Strand::Minus;
         let numseg = lens.len();
         // The CIGAR (`CCIGAR_Formatter::x_FormatLine`, widths 1), merging neighbours of the
         // same type; the ranges of the rows are the unions of their segments. The counts and the
-        // aligned length (`GetAlignLength(false)`, the lengths of the segments without a gap) are
+        // aligned length (`GetAlignLength` with false, the lengths of the segments without a gap) are
         // `TSeqPos` sums, which wrap at 2^32: an ungapped subject's record adds up all its HSPs,
         // whose diagonals may cover the same letters many times (a long tandem repeat).
         // NCBI reference (598d8ae6): c++/src/objtools/format/cigar_formatter.cpp:164, :324-346
@@ -379,7 +379,7 @@ impl SamDocument {
                 _ => ops.push((kind, count)),
             }
         }
-        // NM: `int m_NumDif` adds the count of each operation other than M (`AddSegment`).
+        // NM: `m_NumDif`, an `int`, adds the count of each operation other than M (`AddSegment`).
         // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:150-157
         let num_dif = ops
             .iter()
@@ -466,7 +466,7 @@ impl SamDocument {
         buf.extend_from_slice(b"\tNM:i:");
         push_int(buf, i64::from(num_dif));
         buf.extend_from_slice(b"\tPI:f:");
-        // `int len = aln.GetAlignLength(false)`: from 2^31 on the length is negative, and so is PI
+        // `len`, an `int`, is `GetAlignLength` of `aln` with false: from 2^31 on the length is negative, and so is PI
         // (NCBI BLAST+ 2.17.0 writes `PI:f:-0.01` for a subject whose HSPs add up to 2152959968).
         // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:267-276
         let len = aligned as i32;
@@ -524,7 +524,7 @@ impl SamDocument {
     }
 }
 
-/// `min(GetSeqStart(0), GetSeqStop(0))` of the Seq-align's query row, in record coordinates
+/// The lesser of `GetSeqStart` and `GetSeqStop` of the Seq-align's query row (row 0), in record coordinates
 /// (`offset` added to the starts). Both read the row's strand in the first segment: on the plus
 /// strand the start is the first segment's that is not a gap and the stop the end of the last
 /// one, on the minus strand the other way round. A gapped HSP's row runs one way, so this is its
@@ -579,12 +579,12 @@ pub fn reverse_complement(letters: &mut [u8]) {
     }
 }
 
-/// `%.2f` (`NStr::DoubleToString(value, 2)`).
+/// `%.2f` (`NStr::DoubleToString` of `value` with 2 digits).
 fn push_fixed2(out: &mut Vec<u8>, value: f64) {
     out.extend_from_slice(format!("{value:.2}").as_bytes());
 }
 
-/// C's `%g` (precision 6), which `NStr::DoubleToString(value)` prints.
+/// C's `%g` (precision 6), which `NStr::DoubleToString` of `value` prints.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2316-2340
 pub fn push_g(out: &mut Vec<u8>, value: f64) {

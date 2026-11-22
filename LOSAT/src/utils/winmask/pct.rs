@@ -114,7 +114,7 @@ fn pct_line_refusal(line: &[u8]) -> WinMaskError {
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:239-276
 /// A line of the six letters alone has failed before (`check_pct_lines`). The words that the
 /// stream reads must be the numbers NCBI's writer prints (`unsigned_word`, `double_word`), and a
-/// binary line must hold its `max_map_count + 1` values: else LOSAT refuses the line
+/// binary line must hold one more value than `max_map_count`: else LOSAT refuses the line
 /// (`WinMaskError::PctLine`), as NCBI's reads of other words follow the C++ runtime's number
 /// parser. Words after those the stream reads are not read.
 fn count_map(metadata: &[Vec<u8>], stat_type: StatType) -> Result<Vec<f64>, WinMaskError> {

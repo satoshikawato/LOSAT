@@ -533,7 +533,7 @@ pub struct ResolvedBlastpArgs {
     pub max_hsps_per_subject: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
-    /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit(0)`).
+    /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit` of 0).
     pub culling_limit: i32,
     /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge`, `None` without
     /// them (`BlastpArgs::best_hit`).
@@ -677,7 +677,7 @@ impl ResolvedBlastpArgs {
     fn compute_traceback_hitlist_size(&self) -> usize {
         match self.app {
             // RPS-BLAST's traceback keeps `hitlist_size` lists per volume (`s_RPSComputeTraceback`,
-            // `Blast_HSPResultsInsertHSPList(results, hsp_list, hitlist_size)`).
+            // `Blast_HSPResultsInsertHSPList` of `hsp_list` into `results` with `hitlist_size`).
             BlastpApp::Blastp | BlastpApp::Rpsblast => self.max_target_seqs,
             BlastpApp::Psiblast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
                 self.max_target_seqs,
@@ -838,7 +838,7 @@ impl BlastpArgs {
         diagnostics.write_all(&warnings)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
         // composition-based statistics handler; `blastinput/app.rs`)
-        // The unified P-values are blastp's only (`program == eBlastp`, blast_args.cpp:880-883).
+        // The unified P-values are blastp's only (`program` is `eBlastp`, blast_args.cpp:880-883).
         let (mode, unified_p) = crate::blastinput::app::parse_comp_based_stats(
             &self.comp_based_stats,
             self.app == BlastpApp::Blastp,
@@ -1026,7 +1026,7 @@ impl BlastpArgs {
             db_mask_resolved: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
             // The options start with a database length of 0
-            // (blast_prot_options.cpp:150-156, `SetDbLength(0)`).
+            // (blast_prot_options.cpp:150-156, `SetDbLength` of 0).
             dbsize: self.dbsize.unwrap_or(0),
             searchsp: self.searchsp,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923

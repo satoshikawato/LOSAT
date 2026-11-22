@@ -81,7 +81,7 @@ impl From<SeqDbError> for Stop {
 pub(super) struct Config {
     /// `m_SeqRange`.
     pub range: SeqRange,
-    /// `m_Strand == eNa_strand_minus` (never for a protein database).
+    /// `m_Strand` is `eNa_strand_minus` (never for a protein database).
     pub strand_minus: bool,
     /// `m_UseCtrlA`.
     pub ctrl_a: bool,
@@ -138,7 +138,7 @@ impl<'a> Source<'a> {
             .map_err(|_| Stop::Ncbi(OID_NOT_FOUND.to_string()))
     }
 
-    /// `GetSeqLength(oid)`.
+    /// `GetSeqLength` of `oid`.
     pub fn length(&self, oid: u32) -> Result<u32, Stop> {
         let at = self.at(oid)?;
         if self.protein {
@@ -150,7 +150,7 @@ impl<'a> Source<'a> {
         }
     }
 
-    /// `GetHdr(oid)`: the definition lines with their Seq-ids; `None`, NCBI's null set, for a
+    /// `GetHdr` of `oid`: the definition lines with their Seq-ids; `None`, NCBI's null set, for a
     /// stored header of no bytes ([`Source::null_set`]).
     pub fn deflines(&self, oid: u32) -> Result<Option<DeflineSet>, Stop> {
         let at = self.at(oid)?;
@@ -161,7 +161,7 @@ impl<'a> Source<'a> {
         Ok(Some(set))
     }
 
-    /// `GetHdr(oid)` and the header that `GetBioseq` keeps in the Bioseq's user object
+    /// `GetHdr` of `oid` and the header that `GetBioseq` keeps in the Bioseq's user object
     /// (`SeqDb::defline_set_with_header_at`); `None` as for [`Source::deflines`].
     pub fn deflines_with_header(&self, oid: u32) -> Result<Option<(DeflineSet, Vec<u8>)>, Stop> {
         let at = self.at(oid)?;
@@ -189,7 +189,7 @@ impl<'a> Source<'a> {
         Ok(None)
     }
 
-    /// The `Seq-data` of `GetBioseq(oid)`: the stored NCBIstdaa of a protein, the stored 2-bit
+    /// The `Seq-data` of `GetBioseq` of `oid`: the stored NCBIstdaa of a protein, the stored 2-bit
     /// bytes or NCBI4na of a nucleotide (`SequenceBlock::nucleotide_seq_data`).
     pub fn seq_data(&self, oid: u32) -> Result<DbSeqData, Stop> {
         let block = self.db.read_sequence_at(self.at(oid)?)?;
@@ -202,8 +202,8 @@ impl<'a> Source<'a> {
         })
     }
 
-    /// The letters of `GetSequenceAsString(oid[, range])` (`-outfmt %s`, `%h`): iupacaa
-    /// with the byte 255 for a gap or stop, or the IUPAC letters of a nucleotide.
+    /// The letters of `GetSequenceAsString` of `oid`, with `range` when one is given (`-outfmt %s`,
+    /// `%h`): iupacaa with the byte 255 for a gap or stop, or the IUPAC letters of a nucleotide.
     pub fn string_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
         if self.protein {
             let block = self.db.read_sequence_at(self.at(oid)?)?;
@@ -238,8 +238,8 @@ impl<'a> Source<'a> {
     // `RealToVol` throws for an algorithm the volume does not know, after the cache's key was
     // written, and `GetMaskData` catches it: that sequence has no masks, and the next one of
     // the volume reads the masks of the id cached before, or of an uninitialised one.
-    /// `GetMaskData(oid, algo)`: the stored ranges of the sequence, or the refusal of a volume
-    /// that has masks but not this algorithm (line NP's M/DECISIONS 9).
+    /// `GetMaskData` with `oid` and `algo`: the stored ranges of the sequence, or the refusal of a
+    /// volume that has masks but not this algorithm (line NP's M/DECISIONS 9).
     pub fn masks(&self, oid: u32, algo: i32) -> Result<Vec<(u32, u32)>, Stop> {
         match self.db.mask_ranges_at(self.at(oid)?, algo)? {
             MaskRanges::Ranges(ranges) => Ok(ranges),
@@ -252,16 +252,16 @@ impl<'a> Source<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1614-1621
-    /// `CSeqDB::GetTaxInfo(taxid)` (and `GetBioseq`'s lookup of a source, [`Source::tax_names`]):
-    /// the names of the taxonomy database on the search path, none where NCBI's lookup throws (no
-    /// database, no such taxid), and the `ERR_POST` texts of the lookup (of opening the database,
-    /// when it is the run's first lookup, and the offset error), which NCBI writes where it looks
-    /// the taxid up. The lookups are kept as NCBI's volume keeps them (`source_names`), which keeps
-    /// no lookup that writes a text: a kept answer is that of a lookup that writes none. Err:
-    /// LOSAT's refusal of a lookup that reads a record of an empty `taxdb.btd` (NCBI faults) or
-    /// whose names NCBI reads past its mapping of `taxdb.btd` without a defined result
-    /// (`TaxLookup::into_names`); a super kingdom past the mapping is refused where the format
-    /// writes it (`format::DeflineFields`).
+    /// `CSeqDB::GetTaxInfo` of `taxid` (and `GetBioseq`'s lookup of a source,
+    /// [`Source::tax_names`]): the names of the taxonomy database on the search path, none where
+    /// NCBI's lookup throws (no database, no such taxid), and the `ERR_POST` texts of the lookup
+    /// (of opening the database, when it is the run's first lookup, and the offset error), which
+    /// NCBI writes where it looks the taxid up. The lookups are kept as NCBI's volume keeps them
+    /// (`source_names`), which keeps no lookup that writes a text: a kept answer is that of a
+    /// lookup that writes none. Err: LOSAT's refusal of a lookup that reads a record of an empty
+    /// `taxdb.btd` (NCBI faults) or whose names NCBI reads past its mapping of `taxdb.btd` without
+    /// a defined result (`TaxLookup::into_names`); a super kingdom past the mapping is refused
+    /// where the format writes it (`format::DeflineFields`).
     pub fn tax_info(&self, taxid: i32) -> Result<(std::sync::Arc<SourceNames>, Vec<String>), Stop> {
         let mut texts = Vec::new();
         let names = self.source_names.names(taxid, &mut texts, |messages| {
@@ -331,16 +331,18 @@ pub(super) struct Output<'a, 'b> {
 // diagnostics NCBI's stream flushes the output, so the two come out in the order they were
 // written, and on a closed pipe SIGPIPE ends NCBI's process before the line is written.
 impl Output<'_, '_> {
-    /// `ERR_POST(Error << message)` of the retrieval: the output is flushed first (to the file
-    /// or the pipe, `cerr`'s tie), and a closed pipe ends the retrieval without the line.
+    /// The error that the retrieval posts (`ERR_POST` at severity `Error`, with `message`): the
+    /// output is flushed first (to the file or the pipe, `cerr`'s tie), and a closed pipe ends the
+    /// retrieval without the line.
     pub fn post(&mut self, message: &str) -> Result<(), Stop> {
         self.out.flush().map_err(Stop::write)?;
         self.diag.err_post(message);
         Ok(())
     }
 
-    /// `m_Out << MSerial_AsnText << object`: the ASN.1 text document `document`, with NCBI's post
-    /// of each byte its text stream replaces (`bioseq::write_asn_text`).
+    /// The write of `object` to `m_Out` through `MSerial_AsnText`: the ASN.1 text document
+    /// `document`, with NCBI's post of each byte its text stream replaces
+    /// (`bioseq::write_asn_text`).
     pub fn asn_text<D: AsnTextDocument>(&mut self, document: &D) -> Result<(), Stop> {
         let diag = &mut *self.diag;
         write_asn_text(document, &mut *self.out, |replaced| {
@@ -455,19 +457,20 @@ pub(super) fn null_pointer() -> Stop {
     Stop::Ncbi("Attempt to access NULL pointer.".to_string())
 }
 
-/// `NStr::StringToNumeric<Int8>(text, fConvErr_NoThrow)` with `errno` clear: the number of
+/// `NStr::StringToNumeric<Int8>` of `text` with `fConvErr_NoThrow` and `errno` clear: the number of
 /// a text that is one (an optional sign and digits that fit 64 bits).
 pub(super) fn numeric_target(text: &str) -> Option<i64> {
     args::string_to_int8_message(text).ok()
 }
 
-/// `CSeq_id(text, fParse_PartialOK | fParse_Default)`: the Seq-id of a `-target_only`
-/// target that is not a number; the message of NCBI's exception as the request reports it.
+/// `CSeq_id` of `text` with the flags `fParse_PartialOK` and `fParse_Default`: the Seq-id of a
+/// `-target_only` target that is not a number; the message of NCBI's exception as the request
+/// reports it.
 pub(super) fn parse_target(text: &str) -> Result<ParsedSeqId, Stop> {
     parse_target_with(text, PARTIAL_OK | DEFAULT)
 }
 
-/// `CSeq_id(text, flags)` of a `-target_only` target (`parse_target`).
+/// `CSeq_id` of `text` with `flags`, for a `-target_only` target (`parse_target`).
 pub(super) fn parse_target_with(text: &str, flags: u32) -> Result<ParsedSeqId, Stop> {
     seq_id_from_text(text.as_bytes(), flags, &mut |_| {})
         .map_err(|error| Stop::NcbiBytes(error.message))
@@ -774,7 +777,7 @@ fn init_search_request(
 /// refuses do not stop `-entry all`).
 struct DbIds<'a> {
     lookup: Option<IdLookup<'a>>,
-    /// `GetBlastDbVersion() == eBDB_Version5`.
+    /// `GetBlastDbVersion()` is `eBDB_Version5`.
     version5: bool,
 }
 
@@ -828,7 +831,7 @@ fn preprocess_accession_for_v5(id: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:183-210
-/// `x_GetOids(id)`: the tables of the database (none for `-entry all`, which looks nothing up).
+/// `x_GetOids` of `id`: the tables of the database (none for `-entry all`, which looks nothing up).
 fn get_oids(ids: &DbIds, id: &str) -> Lookup {
     match &ids.lookup {
         Some(lookup) if ids.version5 => get_oids_v5(lookup, id),
@@ -837,7 +840,7 @@ fn get_oids(ids: &DbIds, id: &str) -> Lookup {
     }
 }
 
-/// `x_GetOids(id)` of a version 5 database: a GI first when the key is a number, then the
+/// `x_GetOids` of `id` of a version 5 database: a GI first when the key is a number, then the
 /// accession table.
 fn get_oids_v5(lookup: &IdLookup, id: &str) -> Lookup {
     let acc = preprocess_accession_for_v5(id);
@@ -856,7 +859,7 @@ fn get_oids_v5(lookup: &IdLookup, id: &str) -> Lookup {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:870-893
-/// `x_GetOids(id)` of a version 4 database: a GI first when the id is a number, then the ISAMs
+/// `x_GetOids` of `id` of a version 4 database: a GI first when the id is a number, then the ISAMs
 /// of the volumes. (The GI that `CSeqDB::AccessionToOids` tries when they find nothing is the
 /// lookup `x_GetOids` has made before for a number, and finds nothing for any other text.)
 fn get_oids_v4(lookup: &IdLookup, id: &str) -> Lookup {
@@ -874,7 +877,7 @@ fn get_oids_v4(lookup: &IdLookup, id: &str) -> Lookup {
     }
 }
 
-/// `CSeqDBImpl::AccessionToOids(id)` of a version 4 database, with the exceptions of
+/// `CSeqDBImpl::AccessionToOids` of `id` of a version 4 database, with the exceptions of
 /// `SeqDB_SimplifyAccession` and of the volumes as the request reports them.
 fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
     let simplified = seqdb_simplify_accession(id.as_bytes()).map_err(|error| {
@@ -890,9 +893,10 @@ fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:382-386
 /// The lines of an `-entry_batch` (`-ipg_batch`) file (`args::input_lines`): the id and the
-/// rest of the line (`NStr::SplitInTwo(line, " \t", id, format, fSplit_MergeDelimiters |
-/// fSplit_Truncate)`), lines without an id left out. A `\r` that the platform's reading leaves
-/// in a line stays (Linux: every `\r`), as in NCBI's reading.
+/// rest of the line (`NStr::SplitInTwo` of `line` at a space or a tab, giving `id` and `format`,
+/// with the flags `fSplit_MergeDelimiters` and `fSplit_Truncate`), lines without an id left out.
+/// A `\r` that the platform's reading leaves in a line stays (Linux: every `\r`), as in NCBI's
+/// reading.
 fn read_batch(
     argument: &str,
     file: &str,
@@ -929,7 +933,8 @@ struct Run<'a, 'b, 'c> {
 }
 
 impl Run<'_, '_, '_> {
-    /// `ERR_POST(Error << message)` of the retrieval ([`Output::post`]).
+    /// The error that the retrieval posts (`ERR_POST` at severity `Error`, with `message`)
+    /// ([`Output::post`]).
     fn post(&mut self, message: &str) -> Result<(), Stop> {
         self.output.post(message)
     }

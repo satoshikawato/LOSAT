@@ -1,5 +1,5 @@
-//! dustmasker's FASTA input: `CMaskFastaReader(input_stream, true, args["parse_seqids"])`
-//! (`seqmasks_io::fasta_reader`).
+//! dustmasker's FASTA input: a `CMaskFastaReader` over the input stream, with `true` and the
+//! `parse_seqids` argument (`seqmasks_io::fasta_reader`).
 
 use std::io::Read;
 

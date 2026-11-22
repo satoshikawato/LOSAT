@@ -69,7 +69,7 @@ pub(crate) struct RowString {
 }
 
 impl<'d> AlnMap<'d> {
-    /// `CAlnMap(ds)` in the vectors `b`: no anchor (`x_CreateAlnStarts`).
+    /// `CAlnMap` of `ds` in the vectors `b`: no anchor (`x_CreateAlnStarts`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:49-60
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-755 (`x_GetSeqLeftSeg`,
@@ -268,7 +268,7 @@ impl<'d> AlnMap<'d> {
         }
     }
 
-    /// `GetRawSeg(row, seq_pos, eBackwards, true)`: on a minus-strand row the segments are searched
+    /// `GetRawSeg` of `row` and `seq_pos` with `eBackwards` and true: on a minus-strand row the segments are searched
     /// from the last (`last - cur`), whose positions are the lowest.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:400-524
@@ -347,7 +347,7 @@ impl<'d> AlnMap<'d> {
         index(cur_btm) as usize
     }
 
-    /// `GetAlnPosFromSeqPos(row, seq_pos, eBackwards, true)`. Within an insertion a plus-strand
+    /// `GetAlnPosFromSeqPos` of `row` and `seq_pos` with `eBackwards` and true. Within an insertion a plus-strand
     /// row takes the column on its left, a minus-strand row (`eBackwards` is its `eForward`) the
     /// column on its right.
     ///
@@ -405,8 +405,8 @@ impl<'d> AlnMap<'d> {
         self.b.aln_starts[seg.aln_seg as usize].wrapping_add(delta) as i32
     }
 
-    /// `GetWholeAlnSeqString(row, buffer, &insert_aln_starts, &insert_starts, &insert_lens,
-    /// scrn_width, &scrn_lefts, &scrn_rights)` (`whole_aln_seq_string`, outfmt 1 to 4), the
+    /// `GetWholeAlnSeqString` of `row` and `buffer`, with the insert alignment starts, starts and
+    /// lengths, `scrn_width`, and the screen lefts and rights (`whole_aln_seq_string`, outfmt 1-4), the
     /// letters read by `seq_string` (`GetSeqString`), or, without `letters`, its per-line
     /// coordinates alone (`screen_coords`, outfmt 0): the one owner of the coordinates of a
     /// row's lines. The gap character is `-` and the end character a space (`x_PrepareRowData`,
@@ -416,7 +416,7 @@ impl<'d> AlnMap<'d> {
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:199-405
     /// (The arithmetic is that of NCBI's types: `TSeqPos` (`u32`) wraps, `TSignedSeqPos` and
     /// `int` are `i32`, and a quotient stored in an `int` is cut to 32 bits.) A row of width 3 counts
-    /// its alignment positions and screens in its nucleotides (`scrn_width *= width`). Without
+    /// its alignment positions and screens in its nucleotides (`scrn_width` multiplied by `width`). Without
     /// `letters` the insert pointers are null (`record_inserts` is false) and no letter is read:
     /// the coordinates do not depend on them. Inlined into its two callers, so that the one without
     /// letters (`screen_coords`) has no code of theirs.
@@ -604,7 +604,7 @@ impl<'d> AlnMap<'d> {
     /// The per-line coordinates of row `row` alone (`aln_seq_string` without the letters): each
     /// screen's `scrn_lefts` and `scrn_rights` entries of `GetWholeAlnSeqString`, given in order to
     /// `emit(left, right)`. Outfmt 0 reads them (`x_PrepareRowData` calls `GetWholeAlnSeqString`
-    /// with the same `(int)m_LineLen`, showalign.cpp:1281-1283; `super::HspAlnVec`).
+    /// with the same `m_LineLen` cast to `int`, showalign.cpp:1281-1283; `super::HspAlnVec`).
     pub(crate) fn screen_coords(
         &self,
         row: usize,
@@ -614,7 +614,7 @@ impl<'d> AlnMap<'d> {
         self.aln_seq_string(row, scrn_width, None, emit)
     }
 
-    /// `GetSeqString(buffer, row, seq_from, seq_to)`: the letters `seq_from..=seq_to` of the row's
+    /// `GetSeqString` of `buffer`, `row`, `seq_from` and `seq_to`: the letters `seq_from..=seq_to` of the row's
     /// sequence (`Sequences::letters`, its plus strand), reverse-complemented on a minus-strand row
     /// (the `eStrand_Minus` sequence vector, `x_GetSeqVector`), translated on a row of width 3
     /// with the row's genetic code (`Sequences::genetic_code`; `SetGenCode`, showalign.cpp:

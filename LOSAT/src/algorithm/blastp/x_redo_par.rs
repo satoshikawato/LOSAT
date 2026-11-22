@@ -45,24 +45,24 @@
 //!    preliminary list is released as the one-thread loop releases it (`x_prelim_free.rs`), after the replay of the window that holds its last match.
 //!
 //! The matches the test ends. A heap's `ecutoff` is fixed when it is made; `n` only grows (the redo
-//! only inserts; `pop` comes after it); and a heap filled to its cutoff (`n >= heapThreshold` and
-//! `worstEvalue <= ecutoff`) stays so: an insert with an E-value within the cutoff keeps the worst
-//! one kept within it, and an insert with a larger E-value does not replace the root, whose E-value
-//! is within it (`BlastCompoHeap::insert`). So for a match's fixed `best_evalue` the test is
-//! monotone over the replay: once true, true at every later point. Hence:
+//! only inserts; `pop` comes after it); and a heap filled to its cutoff (`n` at least
+//! `heapThreshold` and `worstEvalue` at most `ecutoff`) stays so: an insert with an E-value within
+//! the cutoff keeps the worst one kept within it, and an insert with a larger E-value does not
+//! replace the root, whose E-value is within it (`BlastCompoHeap::insert`). So for a match's fixed
+//! `best_evalue` the test is monotone over the replay: once true, true at every later point. Hence:
 //! - a match whose test is already true on the heaps at a window's start is not computed (nor
 //!   prefetched): its replay finds the test true and drops it (asserted);
-//! - the test can be true for a match of query q only for `best_evalue > EVALUE_STRETCH x ecutoff`,
-//!   and only if every heap of q's batch can be filled by then: the heaps of the queries before q
-//!   and q's own hold at most their matches (`n` <= inserts <= matches), and those of the queries
-//!   after q are untouched when q's matches are tested (stream order). With the heaps as the search
-//!   makes them (`heapThreshold` = `max_target_seqs` >= 1) that is the last query of a batch whose
-//!   queries all have at least `max_target_seqs` matches. At a window's start, also: a query of
-//!   the batch whose matches are all replayed keeps its heap as it is, so if that heap is not
-//!   filled no match of the batch can be ended any more; and q's heap gains at most one list per
-//!   match of q, so q's next `heapThreshold - n` matches cannot be ended. A job with a match that
-//!   these conditions leave open, not ended at its window's start, is at risk; the other jobs are
-//!   never ended and are computed ahead freely;
+//! - the test can be true for a match of query q only for a `best_evalue` above `EVALUE_STRETCH`
+//!   times `ecutoff`, and only if every heap of q's batch can be filled by then: the heaps of the
+//!   queries before q and q's own hold at most their matches (`n` <= inserts <= matches), and those
+//!   of the queries after q are untouched when q's matches are tested (stream order). With the
+//!   heaps as the search makes them (`heapThreshold` = `max_target_seqs` >= 1) that is the last
+//!   query of a batch whose queries all have at least `max_target_seqs` matches. At a window's
+//!   start, also: a query of the batch whose matches are all replayed keeps its heap as it is, so
+//!   if that heap is not filled no match of the batch can be ended any more; and q's heap gains at
+//!   most one list per match of q, so q's next `heapThreshold` minus `n` matches cannot be ended. A
+//!   job with a match that these conditions leave open, not ended at its window's start, is at
+//!   risk; the other jobs are never ended and are computed ahead freely;
 //! - a computed result is dropped only in a job at risk, in the window during which its batch's
 //!   heaps become filled; at the start of any later window the test is already true for the
 //!   query's matches that it can end, so at most one window drops results of a query. A window
@@ -422,7 +422,7 @@ fn x_next_job(lists: &[Option<BlastpHitList>], cursor: &mut XMatch, job: &mut Ve
 ///   has a heap that is not filled to its cutoff: such a heap receives no insert any more;
 /// - its query's heap can be filled by then: it holds `n` now and gains at most one list per match
 ///   of the query that the replay redoes before this one, so the query's next
-///   `heapThreshold - n` matches of the window cannot be ended.
+///   `heapThreshold` minus `n` matches of the window cannot be ended.
 fn x_window(
     lists: &[Option<BlastpHitList>],
     heaps: &[BlastCompoHeap],

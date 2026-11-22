@@ -218,12 +218,13 @@ impl Volume {
             "protein length of a nucleotide volume"
         );
         self.check_range(oid, oid.saturating_add(1))?;
-        // One read of the two offsets, as `read_block` reads them; the residues end before the
-        // sentinel byte at the start of the next sequence's offset.
-        let offsets = self.index.sequence_offsets(oid, oid + 1)?;
-        offsets[1]
-            .checked_sub(offsets[0])
+        // One read of the two offsets, as `read_block` reads them, into a pair rather than a
+        // vector (no allocation for each sequence); the residues end before the sentinel byte at
+        // the start of the next sequence's offset.
+        let (start, end) = self.index.sequence_range(oid)?;
+        end.checked_sub(start)
             .and_then(|bytes| bytes.checked_sub(1))
+            .and_then(|residues| u32::try_from(residues).ok())
             .ok_or_else(|| self.index.sequence_changed(oid, 2))
     }
 

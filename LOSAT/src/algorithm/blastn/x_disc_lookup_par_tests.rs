@@ -1444,25 +1444,35 @@ fn check_csr(case: &Case, combo: (usize, DiscWordType, usize), parts: usize, chu
     let cells = reference.hashtable.len();
     let approx: usize = case.queries.iter().map(Vec::len).sum();
     let (_, pv_array_bts) = compute_mb_pv_params(cells, approx, false, combo.0);
-    // EXPERIMENT (LOSAT_X_DCSEEDLEAN): `csr_on_pool` and `csr_on_pool_steps`.
-    for steps in [false, true] {
+    // EXPERIMENT (LOSAT_X_DCSEEDLEAN): `csr_on_pool` and `csr_on_pool_steps`, the latter with and
+    // without LOSAT_X_DCQSAHEAD's `qs` ahead.
+    for (steps, qs_ahead) in [(false, false), (true, false), (true, true)] {
         let mut pv = vec![0; reference.pv_array.len()];
         let mut helper = vec![0; reference.helper_array.len()];
-        let build = if steps {
-            csr_on_pool_steps
+        let csr = if steps {
+            csr_on_pool_steps(
+                parts,
+                &words,
+                cells,
+                &mut pv,
+                pv_array_bts,
+                &mut helper,
+                chunk,
+                Vec::new(),
+                qs_ahead,
+            )
         } else {
-            csr_on_pool
+            csr_on_pool(
+                parts,
+                &words,
+                cells,
+                &mut pv,
+                pv_array_bts,
+                &mut helper,
+                chunk,
+                Vec::new(),
+            )
         };
-        let csr = build(
-            parts,
-            &words,
-            cells,
-            &mut pv,
-            pv_array_bts,
-            &mut helper,
-            chunk,
-            Vec::new(),
-        );
         super::super::x_dc_csr::x_assert_runs_are_the_chains(
             &words,
             &csr,

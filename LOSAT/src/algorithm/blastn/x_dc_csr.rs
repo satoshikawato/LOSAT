@@ -45,6 +45,22 @@
 //! stays as it was), and
 //! `TwoStageLookup::contains_hit` and `count_hits` where the table has no chains.
 //!
+//! EXPERIMENT (LOSAT_X_DCQSAHEAD, in the strict set: on unless `LOSAT_X_DCQSAHEAD=0`): the place
+//! passes bring in the line of `qs` each word will be written to before they write it. The place
+//! pass reads `offsets[cell]` and writes `qs` at the decremented value, so where `qs` is larger
+//! than the caches (a table of millions of words) every word's store waited for a line of `qs`
+//! that nothing had brought in. Now the place pass of a table built on the pool
+//! (`x_disc_lookup_par::csr_on_pool_steps`), which already brings in the `offsets` element of the
+//! entry 16 places ahead, reads that element `QS_AHEAD` (8) entries ahead and brings in the `qs`
+//! line it points to, and the serial place pass (`build_with`) reads its words through a FIFO of
+//! `AHEAD` (16) words as the count pass does: a word's `offsets` element is brought in when it
+//! enters, the `qs` line it points to `QS_AHEAD` words later, and the word is placed when it
+//! leaves. The words are placed in the same order at the same places (a FIFO keeps their order,
+//! and the value read ahead only chooses which line is brought in), so the CSR is the same; only
+//! the bringing in is new (`prefetch`, nothing on targets without one). Both place passes take
+//! it, so it has no rule of its own; at one thread it changed no time (line FD s1 probe 2), on the
+//! pool the owners' stores no longer wait.
+//!
 //! The scans of a CSR table read their words through `Ring`: each word enters a FIFO of `RING`
 //! words and leaves it, unchanged and in order, `RING` words later. Every `GROUP` words, the
 //! group that just entered gets its `offsets[cell]` brought in, and the group `RING / 2` places
@@ -57,8 +73,8 @@
 //! chunk): a slot is read only after a word was written to it (`Ring::push`).
 //!
 //! With LOSAT_TIMING `main` prints `[TIMING] disc_lookup_csr: builds=<CSR tables> parallel=<on a
-//! pool> words=<their words>` (the build times are in `[TIMING] disc_lookup_build`, the CSR's in
-//! its `loop` or `pool_fill`).
+//! pool> words=<their words> qs_ahead=<tables whose place pass brought in qs ahead>` (the build
+//! times are in `[TIMING] disc_lookup_build`, the CSR's in its `loop` or `pool_fill`).
 
 use super::{build_unmasked_ranges, x_range_words, DiscWords, PvArrayType, PV_ARRAY_MASK};
 #[cfg(test)]
@@ -82,10 +98,31 @@ pub(super) fn on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCCSR"))
 }
 
+/// No NCBI counterpart: reads LOSAT_X_DCQSAHEAD once (a switch of the strict set: on unless
+/// `LOSAT_X_DCQSAHEAD=0`): the place passes of the builds bring in `qs` ahead (module comment). It
+/// changes when lines are brought in, not what is written where, so it changes no value NCBI
+/// computes.
+pub(super) fn qs_ahead_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCQSAHEAD"))
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCQSAHEAD): how many words (entries) before its
+/// place a word's `qs` line is brought in; its `offsets` element was brought in `AHEAD - QS_AHEAD`
+/// words before that (`AHEAD` = 16 in both place passes).
+pub(super) const QS_AHEAD: usize = 8;
+
 // No NCBI counterpart: counters of the summary lines.
 static BUILDS: AtomicU64 = AtomicU64::new(0);
 static BUILDS_ON_POOL: AtomicU64 = AtomicU64::new(0);
 static BUILT_WORDS: AtomicU64 = AtomicU64::new(0);
+static BUILDS_QS_AHEAD: AtomicU64 = AtomicU64::new(0);
+
+/// No NCBI counterpart (counters only, LOSAT_X_DCQSAHEAD): a build whose place pass brought in
+/// `qs` ahead.
+pub(super) fn count_qs_ahead() {
+    BUILDS_QS_AHEAD.fetch_add(1, Ordering::Relaxed);
+}
 
 /// The `[TIMING]` line (with LOSAT_TIMING, when a CSR was built), printed by `main` at exit.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
@@ -93,10 +130,11 @@ pub fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     if std::env::var_os("LOSAT_TIMING").is_some() && load(&BUILDS) > 0 {
         eprintln!(
-            "[TIMING] disc_lookup_csr: builds={} parallel={} words={}",
+            "[TIMING] disc_lookup_csr: builds={} parallel={} words={} qs_ahead={}",
             load(&BUILDS),
             load(&BUILDS_ON_POOL),
-            load(&BUILT_WORDS)
+            load(&BUILT_WORDS),
+            load(&BUILDS_QS_AHEAD)
         );
     }
 }
@@ -791,7 +829,8 @@ pub(super) fn count_build(csr: &Csr, on_pool: bool) {
 
 /// The serial build (module comment): the count pass (each word's `offsets` element prefetched
 /// and counted 16 words later), the sum pass with the presence bits and helper counters into
-/// `pv_array` and `helper_array` (zeroed, of the fill's lengths), and the place pass.
+/// `pv_array` and `helper_array` (zeroed, of the fill's lengths), and the place pass
+/// (EXPERIMENT LOSAT_X_DCQSAHEAD: through a FIFO of 16 words, `build_with`).
 pub(super) fn build(
     words: &DiscWords<'_>,
     cells: usize,
@@ -799,6 +838,29 @@ pub(super) fn build(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
+) -> Csr {
+    build_with(
+        words,
+        cells,
+        pv_array,
+        pv_array_bts,
+        helper_array,
+        x_offsets,
+        qs_ahead_on(),
+    )
+}
+
+/// `build`; EXPERIMENT (LOSAT_X_DCQSAHEAD): with `qs_ahead` the place pass reads the words
+/// through a FIFO of `AHEAD` words (module comment), without it each word is placed as it is read
+/// (the build before the switch). The tests build both in one process.
+pub(super) fn build_with(
+    words: &DiscWords<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
+    qs_ahead: bool,
 ) -> Csr {
     // Once per table: the bounds the unchecked writes below rely on.
     assert!(!words.two_templates && cells.is_multiple_of(2048) && pv_array_bts >= 5);
@@ -850,6 +912,45 @@ pub(super) fn build(
     unsafe { *ob.add(cells) = total };
     let mut qs: Vec<u32> = Vec::with_capacity(n_words);
     let qb = qs.as_mut_ptr();
+    if qs_ahead {
+        count_qs_ahead();
+        // EXPERIMENT (LOSAT_X_DCQSAHEAD): the words in the count pass's order through a FIFO of
+        // `AHEAD`: slot `m % AHEAD` holds word `m` from its entry until word `m + AHEAD` enters.
+        let mut ring = [(0usize, 0u32); AHEAD];
+        let mut seen = 0usize;
+        // SAFETY (each call): `cell < cells` (the count pass asserted it for the same words), and
+        // `offsets[cell]` is the end of the cell's part of the run not yet placed (>= 1), so the
+        // place `e < n_words` is in the capacity: the place pass below, one word at a time in the
+        // same order.
+        let place = |(cell, index): (usize, u32)| unsafe {
+            let e = *ob.add(cell) - 1;
+            *ob.add(cell) = e;
+            *qb.add(e as usize) = index;
+        };
+        each_word(words, |cell, index| {
+            prefetch(ob.wrapping_add(cell));
+            if seen >= QS_AHEAD {
+                let (ahead, _) = ring[(seen - QS_AHEAD) % AHEAD];
+                // SAFETY: `ahead < cells` (a word of the count pass); the value only chooses the
+                // line brought in (the place of a word between may lower it).
+                let e = unsafe { *ob.add(ahead) } as usize;
+                prefetch(qb.wrapping_add(e.wrapping_sub(1)));
+            }
+            let slot = seen % AHEAD;
+            if seen >= AHEAD {
+                place(ring[slot]);
+            }
+            ring[slot] = (cell, index);
+            seen += 1;
+        });
+        for i in seen.saturating_sub(AHEAD)..seen {
+            place(ring[i % AHEAD]);
+        }
+        debug_assert_eq!(seen, n_words);
+        // SAFETY: `offsets` was written in full; the runs partition `0 .. n_words`, and the place
+        // pass wrote each place once.
+        return unsafe { assemble(offsets, qs, cells, n_words) };
+    }
     each_word(words, |cell, index| {
         // SAFETY: `cell < cells` (the same words as the count pass), `offsets[cell]` is the end
         // of the cell's non-empty run (>= 1), so the place `e < n_words` is in the capacity.

@@ -21,7 +21,8 @@ import wasm_performance as perf
 def series_result(rows, measurement):
     """Require every ordered raw-output gate, including the diagnostic output.
 
-    NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108: x_PrintField(*iter); ... m_Ostream << "\n";
+    NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
+    Each tabular record prints fields via `x_PrintField` followed by a newline.
     A successful earlier output cannot stand in for a later failed command.
     """
     failed = next((s for s in rows if s["status"] != "PASS"), None)

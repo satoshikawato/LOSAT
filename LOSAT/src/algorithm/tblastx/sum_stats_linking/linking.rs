@@ -424,7 +424,8 @@ struct HspLink {
 }
 
 /// Thread-local buffer pools for memory reuse across frame groups
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:452-454 allocates lh_helper once with size MAX(1024, hspcnt+5)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:452-454
+/// Allocates `lh_helper` once with size `max(1024, hspcnt + 5)`
 /// and reuses it across all frame groups (lines 553-983)
 struct BufferPools {
     lh_helpers: Vec<LhHelper>,
@@ -555,8 +556,8 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     // NCBI processes groups in frame_index order (0, 1, 2, ...), which matches
     // the order of frame_groups in LOSAT (created from sorted HSP list).
     //
-    // NCBI memory pooling: c++/src/algo/blast/core/link_hsps.c:452-454 allocates lh_helper once with
-    // MAX(1024, hspcnt+5) and reuses it across all frame groups.
+    // NCBI memory pooling: c++/src/algo/blast/core/link_hsps.c:452-454 allocates `lh_helper` once with
+    // size `max(1024, hspcnt + 5)` and reuses it across all frame groups.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
     crate::utils::threading::report_stage(
         "tblastx",
@@ -569,7 +570,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
             )),
     );
-    let initial_lh_size = (total_hits + 5).max(1024); // NCBI: MAX(1024, hspcnt+5)
+    let initial_lh_size = (total_hits + 5).max(1024); // NCBI: at least 1024 or `hspcnt + 5`
 
     // The incremental kernel of linking_incr.rs links every group with the same result as the
     // literal port `link_hsp_group_ncbi`, which stays for LOSAT_LINKING_LEGACY, the linking traces
@@ -1178,7 +1179,7 @@ fn link_hsp_group_incremental_slice(
 ///   (NCBI: `query_info->contexts[ctx].eff_searchsp`)
 /// * `log_k_by_ctx` - Pre-computed log(K) per context (NCBI: `kbp[ctx]->logK`)
 /// * `pool_lh_helpers` - Thread-local pool for lh_helper buffer reuse
-///   (NCBI: link_hsps.c:452-454 allocates once with MAX(1024, hspcnt+5))
+///   (NCBI: link_hsps.c:452-454 allocates once with size `max(1024, hspcnt + 5)`)
 /// * `pool_hsp_links` - Thread-local pool for hsp_link buffer reuse
 fn link_hsp_group_ncbi(
     mut group_hits: Vec<UngappedHit>,
@@ -1475,10 +1476,10 @@ fn link_hsp_group_ncbi(
     let mut selection_round = 0usize;
     let mut first_pass = true;
     // NCBI: path_changed tracks whether any removed HSP had linked_to > 0
-    // If path_changed == 0, we can skip chain validation entirely
+    // When `path_changed` is zero, we can skip chain validation entirely.
     let mut path_changed = true;
     // NCBI `c++/src/algo/blast/core/link_hsps.c` takes `gap_prob` from the link parameters (:468)
-    // regardless of `ignore_small_gaps` (cutoff[0]==0, :495). With small gaps the E-values of
+    // regardless of `ignore_small_gaps` (small-gap cutoff 0, :495). With small gaps the E-values of
     // sets of more than one HSP are divided by `gap_prob` and `1-gap_prob` (:918-935); with
     // large gaps only they are not divided (:939-952). gap_prob is 0 for small search spaces
     // (blast_parameters.c:1076).
@@ -1517,7 +1518,7 @@ fn link_hsp_group_ncbi(
                 use_current_max = true;
             } else {
                 // NCBI lines 639-650: If max path hasn't changed, we can use it
-                // Walk down best, give up if we find a removed item (linked_to==-1000) in path
+                // Walk down `best`, giving up if a removed item (`linked_to` equal to -1000) is encountered.
                 use_current_max = true;
                 if !ignore_small_gaps {
                     if let Some(bi) = best[0] {
@@ -1685,7 +1686,7 @@ fn link_hsp_group_ncbi(
                                 continue;
                             }
 
-                            // NCBI line 727: if (sum>H_hsp_sum)
+                            // NCBI line 727: update when `sum` strictly exceeds `H_hsp_sum`.
                             if sum > h_sum {
                                 let j = helper.hsp_idx; // Use stored hsp_idx (NCBI: ptr)
                                 if is_target_hsp {
@@ -1867,7 +1868,7 @@ fn link_hsp_group_ncbi(
                             );
                         }
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-863
-                        // Scan predecessor helper entries backward from `h_lh_idx - 1` down past sentinel 1.
+                        // Scan predecessor helper entries backward from `h_lh_idx - 1` while the index stays above sentinel 1.
                         // Keep the indexed scan in the caller without a function/tuple boundary.
                         #[cfg(not(all(losat_wasi_threads, feature = "wasm-threads")))]
                         {
@@ -2056,7 +2057,7 @@ fn link_hsp_group_ncbi(
         } else {
             1
         };
-        // NCBI never has "best==NULL" here as long as `number_of_hsps > 0`:
+        // NCBI never has a null `best` here as long as `number_of_hsps > 0`:
         // the DP loops always assign `best[index]` while scanning the list.
         let best_i = if let Some(i) = best[ordering] {
             i
@@ -2064,7 +2065,7 @@ fn link_hsp_group_ncbi(
             i
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:589-982
-            // In NCBI, the while (number_of_hsps > 0) loop processes ALL HSPs.
+            // In NCBI, the outer loop over remaining HSPs (`number_of_hsps > 0`) processes ALL HSPs.
             // If active_head becomes SENTINEL_IDX but remaining > 0, this indicates
             // a bug in the linking logic. NCBI would never reach this state.
             // However, we must handle this gracefully to avoid panic.
@@ -2390,7 +2391,7 @@ fn link_hsp_group_ncbi(
     // properly set for downstream use.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:589-982
-    // In NCBI, the while (number_of_hsps > 0) loop processes ALL HSPs.
+    // In NCBI, the outer loop over remaining HSPs (`number_of_hsps > 0`) processes ALL HSPs.
     // HSPs that are not selected as best in one iteration are still processed
     // in subsequent iterations. Therefore, there are NO unprocessed HSPs in NCBI.
     // If active_head becomes SENTINEL_IDX but remaining > 0, this indicates

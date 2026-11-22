@@ -18,10 +18,8 @@ use crate::utils::matrix::BLASTAA_SIZE;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2352-2384,2445,
 // 2433-2479,3099-3110; composition_adjustment/redo_alignment.c:1014-1050:
-// near_identical_cutoff = (1.74 * NCBIMATH_LN2)
-// cutoff_s = do_link_hsps ?
-// localScalingFactor = (compo_adjust_mode != eNoCompositionBasedStats)
-//                      ? SCALING_FACTOR : 1.0;
+// Sets `near_identical_cutoff` from `1.74 * NCBIMATH_LN2`, `cutoff_s` according to `do_link_hsps`,
+// and `localScalingFactor` to `SCALING_FACTOR` when composition-based statistics are enabled or 1.0 otherwise.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-463:
 pub(super) fn local_extension_final_xdrop(
     prelim_bits: f64,

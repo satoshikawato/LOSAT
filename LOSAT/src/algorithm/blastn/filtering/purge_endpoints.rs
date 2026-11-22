@@ -4,13 +4,13 @@
 //! Function: Blast_HSPListPurgeHSPsWithCommonEndpoints
 //!
 //! NCBI's endpoint purging has two modes:
-//! - purge=FALSE: Trim overlapping HSPs using gap_info (edit script)
-//! - purge=TRUE: Delete HSPs with common endpoints entirely
+//! - `purge` disabled: Trim overlapping HSPs using gap_info (edit script)
+//! - `purge` enabled: Delete HSPs with common endpoints entirely
 //!
 //! The blastn traceback flow is:
-//! 1. Call with purge=FALSE first (trim overlapping HSPs)
+//! 1. Call with `purge` disabled first (trim overlapping HSPs)
 //! 2. Re-evaluate trimmed fragments
-//! 3. Call with purge=TRUE for final cleanup
+//! 3. Call with `purge` enabled for final cleanup
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:637-669
 
@@ -1053,7 +1053,7 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
                                     let s = i8x16_extract_lane::<$lane>($sv) as u8;
                                     let q_code = (q & 0x0f) as usize;
                                     let s_code = (s & 0x0f) as usize;
-                                    // NCBI kResidueMask = 0x0f -> indices 0..15
+                                    // NCBI `kResidueMask` is `0x0f`, giving indices 0..15.
                                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:510-511
                                     // SAFETY: `q_code` and `s_code` are `& 0x0f`, so the index
                                     // `q_code * 16 + s_code` is at most 255, inside `matrix`

@@ -452,7 +452,8 @@ fn mask_seek_lowercases_the_letters_of_the_full_scan() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:993 (BlastSeqLocCombine(filter_out, 0)) joins
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:993
+// `BlastSeqLocCombine` (with `link_value` 0) joins
 // only intervals that overlap (adjacent ones stay apart), per frame, before the conversion
 // to nucleotides; the XML writer reads that list (blast_aux.cpp:930-959), in context order,
 // each mask with its context's frame, moved into the record by the interval's start.

@@ -539,7 +539,7 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
                     s_range,
                     word_length,
                     lut_word_length,
-                    true, // check_double = TRUE
+                    true, // check for double-word extension
                     &mut is_seed_masked,
                 )
             };
@@ -609,7 +609,7 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
                     s_range,
                     word_length,
                     lut_word_length,
-                    false, // check_double = FALSE (not in two-hit block)
+                    false, // skip double-word check (not in two-hit block)
                     &mut is_seed_masked,
                 )
             };
@@ -1144,7 +1144,7 @@ fn fold_two_hit_array<const LEAN: bool>(
                     s_range,
                     word_length,
                     lut_word_length,
-                    true, // check_double = TRUE
+                    true, // check for double-word extension
                     &mut is_seed_masked,
                 )
             };
@@ -1230,7 +1230,7 @@ fn fold_two_hit_array<const LEAN: bool>(
                     s_range,
                     word_length,
                     lut_word_length,
-                    false, // check_double = FALSE (not in two-hit block)
+                    false, // skip double-word check (not in two-hit block)
                     &mut is_seed_masked,
                 )
             };

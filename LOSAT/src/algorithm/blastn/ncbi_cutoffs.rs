@@ -59,7 +59,7 @@ pub fn cutoff_score_max_from_evalue(
 
     // Default the raw cutoff to 1, then replace it with the E-value-derived score when larger.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4108-4129
-    let mut s = 1; // Initial value (matches NCBI: es = 1)
+    let mut s = 1; // Initial value (matches NCBI's default `es` of 1)
 
     // Only compute an E-value-derived cutoff when `evalue` is positive.
     if evalue > 0.0 {
@@ -107,14 +107,14 @@ pub fn cutoff_score_for_ungapped_extension(
     // Start from `gap_trigger` in gapped mode.
     let mut new_cutoff = gap_trigger;
 
-    // Scale the cutoff by `sbp->scale_factor`.
+    // Multiply the cutoff by `sbp->scale_factor` truncated to `Int4` (NCBI truncates the factor first; this code truncates the product).
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
     // Cap the cutoff at `cutoff_score_max`.
     new_cutoff.min(cutoff_score_max)
 }
 
-/// Calculate cutoff_score for ungapped extension when !gapped_calculation || matrix_only_scoring.
+/// Calculate cutoff_score for ungapped extension when gapped calculation is disabled or matrix-only scoring is active.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-367
 ///
@@ -156,14 +156,14 @@ pub fn compute_blastn_cutoff_score_ungapped(
     // Compute the cutoff via `BLAST_Cutoffs` with gap decay enabled, defaulting to 1 and
     // taking the larger of the initial cutoff and the E-value-derived score.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4108-4129
-    let mut new_cutoff = 1; // Initial value (matches NCBI: es = 1, s = *S = 1)
+    let mut new_cutoff = 1; // Initial value (matches NCBI's initial cutoff of 1)
 
     // Only compute an E-value-derived cutoff when `cutoff_e` is positive.
     if cutoff_e > 0.0 {
         // Floor `cutoff_e` at `kSmallFloat` to prevent underflow.
         let e = cutoff_e.max(K_SMALL_FLOAT);
 
-        // NCBI: When dodecay=TRUE, apply gap decay divisor to E-value before conversion
+        // When gap decay is enabled (`dodecay`), apply gap decay divisor to E-value before conversion.
         let e_adjusted = if gap_decay_rate > 0.0 && gap_decay_rate < 1.0 {
             // Multiply the E-value by the single-HSP `BLAST_GapDecayDivisor` factor, one minus `gap_decay_rate`.
             let divisor = 1.0 - gap_decay_rate;
@@ -188,7 +188,7 @@ pub fn compute_blastn_cutoff_score_ungapped(
 
     // Non-blastn programs cap the cutoff at `gap_trigger` here; blastn skips that cap.
 
-    // Scale the cutoff by `sbp->scale_factor`.
+    // Multiply the cutoff by `sbp->scale_factor` truncated to `Int4` (NCBI truncates the factor first; this code truncates the product).
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
     // Cap the cutoff at each context's `cutoff_score_max` from `hit_params->cutoffs`.

@@ -835,7 +835,7 @@ fn effective_observations(
         i as f64 - (expno[i] - ave_distinct_aa) / (expno[i] - expno[i - 1])
     };
     let participating = seq_weights.pos_num_participating[column] as f64;
-    // MIN(a, b) and MAX(a, b) as NCBI's macros compare.
+    // Minimum and maximum comparison order matching NCBI's `MIN` and `MAX` macros.
     indep = if indep < participating {
         indep
     } else {

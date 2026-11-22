@@ -1718,7 +1718,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:411-427,364-368:
         // Without HSP linking, recomputes E-values via `Blast_HSPListGetEvalues` using
-        // `s_GetSubjectLength` and a unit gap-decay divisor.
+        // `s_GetSubjectLength` for the subject length and no HSP linking (each `num` stays zero).
         let mut postredo = if let Some(link) = post_link.as_ref() {
             link_preliminary_hsps(
                 &hsp_values,
@@ -2367,7 +2367,8 @@ fn preliminary_profile<'a>(
         word_size: scoring.word_size,
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-458: (Int4)(gap_x_dropoff*NCBIMATH_LN2/min_lambda),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:457-458
+        // Raw gapped X-dropoff from bits times `NCBIMATH_LN2` divided by `min_lambda`, truncated to `Int4`,
         // converted as the x86-64 build does (INT_MIN beyond Int4; `core::x_drop`).
         gap_xdrop: crate::core::x_drop::gapped_x_dropoffs(
             scoring.gap_xdrop_bits,
@@ -2581,9 +2582,9 @@ impl LocalParameterRecipe<'_> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
 // Initializes hit-saving parameters (`BlastHitSavingParametersNew`): the score block,
-// effective lengths and cutoffs of a
-// query set. `eff_searchsp_override` is the options' effective search spaces that NCBI sets
-// from the whole batch before it searches a query chunk (`SplitQuery_SetEffectiveSearchSpace`).
+// effective lengths and cutoffs of a query set. `eff_searchsp_override` is the options'
+// effective search spaces that NCBI sets from the whole batch before it searches a query
+// chunk (`SplitQuery_SetEffectiveSearchSpace`).
 fn query_set_setup<'a>(
     queries: &[Vec<u8>],
     inputs: QuerySetInputs<'a>,

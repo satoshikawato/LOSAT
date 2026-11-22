@@ -723,7 +723,7 @@ pub fn small_gap_sum_e(
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / pair_search_space);
     }
 
-    // Clamp to `INT4_MAX` when `weight_divisor` is zero or `sum_e` divided by `weight_divisor` exceeds `INT4_MAX`.
+    // Clamp to `INT4_MAX` when `weight_divisor` is zero or `sum_e` divided by `weight_divisor` exceeds `INT4_MAX`; otherwise `sum_e` keeps the divided value.
     if weight_divisor == 0.0 {
         sum_e = i32::MAX as f64;
     } else {
@@ -779,7 +779,7 @@ pub fn uneven_gap_sum_e(
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / pair_search_space);
     }
 
-    // Clamp to `INT4_MAX` when `weight_divisor` is zero or `sum_e` divided by `weight_divisor` exceeds `INT4_MAX`.
+    // Clamp to `INT4_MAX` when `weight_divisor` is zero or `sum_e` divided by `weight_divisor` exceeds `INT4_MAX`; otherwise `sum_e` keeps the divided value.
     if weight_divisor == 0.0 {
         sum_e = i32::MAX as f64;
     } else {

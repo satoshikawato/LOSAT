@@ -75,10 +75,10 @@ pub fn compute_length_adjustment_ncbi(
     }
 
     // Choose ell_max to be the largest nonnegative value that satisfies:
-    //   K * (m - ell) * (n - N * ell) > MAX(m, n)
+    //   K * (m - ell) * (n - N * ell) > max(m, n)
     //
     // Use quadratic formula: 2c / (-b + sqrt(b*b - 4*a*c))
-    // where a = N, b = -(m*N + n), c = n*m - MAX(m,n)/K
+    // where a = N, b = -(m*N + n), c = n*m - max(m, n)/K
     let a = n_seqs;
     let mb = m * n_seqs + n; // This is -b (negated)
     let c = n * m - m.max(n) / k;
@@ -138,7 +138,7 @@ pub fn compute_length_adjustment_ncbi(
     }
 
     // Determine the final length adjustment
-    // Match NCBI BLAST's exact behavior: (Int4) ell_min (direct cast, not floor)
+    // Match NCBI BLAST's exact behavior: truncate `ell_min` directly to `Int4` (not floor).
     // Note: f64 as i64 truncates toward zero, which is equivalent to floor for positive values
     let mut length_adjustment = ell_min as i64;
 

@@ -284,7 +284,7 @@ pub(super) fn mask_lcase(
             if !soft && !frame.seg_masks.is_empty() {
                 frame.aa_seq_nomask = Some(frame.aa_seq.clone());
                 for &(from, to) in &frame.seg_masks {
-                    // NCBI: kProtMask = 21 (X in NCBISTDAA), past the leading sentinel.
+                    // NCBI `kProtMask` is 21 (X in NCBISTDAA), past the leading sentinel.
                     frame.aa_seq[1 + from..1 + to].fill(21);
                 }
             }

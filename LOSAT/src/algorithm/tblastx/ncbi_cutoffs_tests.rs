@@ -23,7 +23,7 @@ fn compute_eff_searchsp_tblastx(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:734-847;
-// blast_stat.c:5042-5126: BLAST_ComputeLengthAdjustment(...).
+// blast_stat.c:5042-5126 (`BLAST_ComputeLengthAdjustment`).
 // Expected numbers were evaluated from the extracted NCBI C functions.
 #[test]
 fn complete_subject_set_effective_lengths() {
@@ -227,7 +227,7 @@ fn test_cutoff_score_for_update_tblastx() {
     let ungapped = blosum62_ungapped();
 
     // NCBI BlastInitialWordParametersUpdate for tblastx ungapped path
-    // Uses CUTOFF_E_TBLASTX = 1e-300 and searchsp = MIN(q_aa, s_nucl) * s_nucl
+    // Uses `CUTOFF_E_TBLASTX` (1e-300) and search space min(`q_aa`, `s_nucl`) times `s_nucl`.
     let query_len_aa = 500;
     let subject_len_nucl = 3000; // NUCLEOTIDE length, NOT AA!
     let gap_trigger = gap_trigger_raw_score(22.0, &ungapped); // 41
@@ -371,7 +371,7 @@ fn test_cutoff_score_max_long_sequence() {
     // For long sequences, cutoff_score_max should typically be > gap_trigger (41)
     // because eff_searchsp is very large
     // Note: cutoff_score_max may be > gap_trigger for very long sequences
-    // The final cutoff will be MIN(update_cutoff, gap_trigger, cutoff_score_max)
+    // The final cutoff is the minimum of `update_cutoff`, `gap_trigger`, and `cutoff_score_max`.
 }
 
 #[test]
@@ -537,8 +537,8 @@ fn test_cutoff_for_update_very_long_sequence() {
     let cutoff_score_max = cutoff_score_max_for_tblastx(eff_lengths.eff_searchsp, 10.0, &ungapped);
 
     // Verify searchsp calculation doesn't overflow
-    // searchsp = MIN(query_len_aa, subject_len_nucl) * subject_len_nucl
-    // = MIN(3,333,333, 10,000,000) * 10,000,000
+    // Search space is `min(query_len_aa, subject_len_nucl) * subject_len_nucl`
+    // = min(3,333,333, 10,000,000) * 10,000,000
     // = 3,333,333 * 10,000,000 = 33,333,330,000,000
     let min_len = (query_len_aa as u64).min(subject_len_nucl as u64);
     let searchsp = min_len * (subject_len_nucl as u64);

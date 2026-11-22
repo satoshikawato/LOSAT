@@ -2099,7 +2099,7 @@ pub(crate) fn write_blastp_query_header<W: Write + ?Sized>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1510-1514
 fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1510-1514
-    // Write `kNoHitsFound` surrounded by `*****` markers, two leading newlines, and three trailing newlines.
+    // Write `kNoHitsFound` between `"***** "` and `" *****"`, after two newlines and followed by three newlines.
     writeln!(writer)?;
     writeln!(writer)?;
     writeln!(writer, "***** No hits found *****")?;
@@ -2892,7 +2892,8 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         if self.config.program == "psiblast" {
             writeln!(writer, "Results from round 1")?;
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491: m_Outfile << "\n\n";
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491
+        // Emit two blank lines before the query header.
         writeln!(writer)?;
         writeln!(writer)?;
         // The title's bytes by query index (`query_name` is BLASTX's).
@@ -4694,7 +4695,8 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         read: super::query_warnings::SubjectReadHook<'_, W>,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491: m_Outfile << "\n\n";
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491
+        // Emit two blank lines before the query header.
         writeln!(writer)?;
         writeln!(writer)?;
         write_blastp_query_header(writer, &self.query_titles[q_idx], query.query_length)?;

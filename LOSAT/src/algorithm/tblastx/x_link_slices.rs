@@ -454,7 +454,7 @@ fn link_groups_as(
                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
             )),
     );
-    let initial_lh_size = (total_hits + 5).max(1024); // NCBI: MAX(1024, hspcnt+5)
+    let initial_lh_size = (total_hits + 5).max(1024); // NCBI: at least 1024 or `hspcnt + 5`
     let literal_port = use_legacy || fast_shadow;
     let args = GroupArgs {
         use_legacy,

@@ -669,7 +669,7 @@ fn debug_greedy_traceback_enabled(q_off: i32, s_off: i32) -> bool {
 /// - If alignment doesn't converge, double max_dist and retry
 /// - This allows finding arbitrarily long alignments
 ///
-/// For affine gap penalties (gap_open != 0 || gap_extend != 0), uses the affine
+/// For affine gap penalties (when either `gap_open` or `gap_extend` is nonzero), uses the affine
 /// greedy algorithm (NCBI BLAST's BLAST_AffineGreedyAlign).
 ///
 /// Returns: (q_consumed, s_consumed, score, matches, mismatches, gap_opens, gap_letters)
@@ -688,8 +688,8 @@ pub(crate) fn greedy_align_one_direction_ex(
     x_drop: i32,
     reverse: bool,
 ) -> (usize, usize, i32, usize, usize, usize, usize) {
-    // Calculate initial max_dist like NCBI BLAST:
-    // max_dist = MIN(GREEDY_MAX_COST, max(len1, len2) / GREEDY_MAX_COST_FRACTION + 1)
+    // Calculate initial `max_dist` like NCBI BLAST:
+    // cap `max(len1, len2) / GREEDY_MAX_COST_FRACTION + 1` at `GREEDY_MAX_COST`.
     let max_len = len1.max(len2);
     let mut max_dist = GREEDY_MAX_COST.min(max_len / GREEDY_MAX_COST_FRACTION + 1);
 
@@ -697,7 +697,7 @@ pub(crate) fn greedy_align_one_direction_ex(
     loop {
         // Choose between affine and non-affine greedy based on gap penalties
         // This matches NCBI BLAST's BLAST_AffineGreedyAlign which falls back to
-        // BLAST_GreedyAlign when gap_open == 0 && gap_extend == 0
+        // `BLAST_GreedyAlign` when both `gap_open` and `gap_extend` are zero.
         let (result, converged) = if gap_open != 0 || gap_extend != 0 {
             affine_greedy_align_one_direction_with_max_dist(
                 q_seq, s_seq, reward, penalty, gap_open, gap_extend, x_drop, max_dist,
@@ -930,7 +930,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
                     (p_plus, p, p_minus)
                 };
 
-                // Take one past the larger of the `k + 1` and `k` offsets, then compare against the `k - 1` offset.
+                // Take one past the larger of the `k + 1` and `k` offsets, then take the larger of that and the `k - 1` offset.
                 let mut seq2_index = prev_k_plus.max(prev_k) + 1;
                 seq2_index = seq2_index.max(prev_k_minus);
 

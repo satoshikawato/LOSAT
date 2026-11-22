@@ -4117,7 +4117,7 @@ fn rebuild_preliminary_interval_tree_from_list(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3419-3420,3435-3437
 // The one-hit extension's best segment can end before the last reset of its running
 // sum, so the Int4 length can be negative (a low -threshold with -window_size 0). NCBI
-// passes it as Uint4: above HSP_MAX_WINDOW, and q_start + MIN(q_length, s_length) wraps
+// passes it as Uint4: above HSP_MAX_WINDOW, and `q_start` plus `min(q_length, s_length)` wraps
 // back to q_start + length, so only the first window of HSP_MAX_WINDOW letters is scored.
 // A window that runs past the context or the subject holds its NULLB, whose
 // BLAST_SCORE_MIN makes the sum negative whatever letters follow, so it gives q_start.

@@ -195,7 +195,8 @@ fn run_main_entry() -> Result<()> {
             crate::blastinput::ncbi_environment::preparse(&argv[2..]),
             crate::blastinput::ncbi_environment::Preparsed::Words { dryrun: true, .. }
         );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+    // CLI flag names for query (`kArgQuery`) and subject (`kArgSubject`).
     let parsed = match &start {
         Some(start) => crate::cli::try_parse_from_start(argv, start),
         None => crate::cli::try_parse_from(argv),

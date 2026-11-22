@@ -550,7 +550,7 @@ def execute(argv, cwd, directory, env, timeout):
     return result
 
 
-# NCBI tabular.cpp:1098-1108: m_Ostream << m_FieldDelimiter; ... << "\n";
+# NCBI tabular.cpp:1098-1108: tabular rows emit fields separated by `m_FieldDelimiter` and terminated by a newline.
 # No whitespace/header/order normalization is permissible in this acceptance gate.
 def raw_gate(result, expected):
     if result["status"] != "PASS":

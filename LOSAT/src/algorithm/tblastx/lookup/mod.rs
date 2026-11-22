@@ -107,16 +107,14 @@ pub(crate) fn compute_mask(word_length: usize, charsize: usize) -> usize {
 #[cfg(test)]
 #[inline(always)]
 pub fn pv_test(pv: &[u32], index: usize) -> bool {
-    // NCBI PV_TEST macro:
-    // lookup[(index) >> PV_ARRAY_BTS] & (1U << (index & PV_ARRAY_MASK))
+    // NCBI `PV_TEST` macro: test the bit for `index` in the presence vector `pv`.
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57
     (pv[index >> PV_ARRAY_BTS] & (1u32 << (index & PV_ARRAY_MASK))) != 0
 }
 
 #[inline(always)]
 pub(crate) fn pv_set(pv: &mut [u32], index: usize) {
-    // NCBI PV_SET macro:
-    // lookup[(index) >> PV_ARRAY_BTS] |= (1U << (index & PV_ARRAY_MASK))
+    // NCBI `PV_SET` macro: set the bit for `index` in the presence vector `pv`.
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-50
     pv[index >> PV_ARRAY_BTS] |= 1u32 << (index & PV_ARRAY_MASK);
 }

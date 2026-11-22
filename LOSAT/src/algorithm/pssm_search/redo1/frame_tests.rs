@@ -65,7 +65,7 @@ fn encode(text: &str) -> Vec<u8> {
 }
 
 // redo_alignment.c:644-765 (cited at `windows_from_translated_aligns`): one window per alignment,
-// [MAX(0, matchStart - 200), MIN(translated length, matchEnd + 200)) in its frame, with the
+// `[max(0, matchStart - 200), min(translated length, matchEnd + 200))` in its frame, with the
 // translated length of `GET_NUCL_LENGTH` of the buffer's length; sorted by query, frame, begin
 // and end (glibc's stable sort), a window joined into the next one of its frame that it reaches
 // (the next one's alignments first), each window's alignments by score, then the windows by

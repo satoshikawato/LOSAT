@@ -1706,14 +1706,14 @@ fn sort_preliminary_by_score(hsps: &mut [(usize, GappedHsp)]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2268-2379,2455-2537:
-// qsort(hsp_array, ..., s_QueryOffsetCompareHSPs); delete equal starts;
-// qsort(hsp_array, ..., s_QueryEndCompareHSPs); delete equal ends.
+// Sorts `hsp_array` by `s_QueryOffsetCompareHSPs` and deletes duplicate starts,
+// then sorts by `s_QueryEndCompareHSPs` and deletes duplicate ends.
 // Context and subject frame must also agree before deletion.
 fn purge_preliminary_common_endpoints(
     mut incoming: Vec<(usize, GappedHsp)>,
 ) -> Vec<(usize, GappedHsp)> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2268-2323,2455-2492:
-    // qsort(..., s_QueryOffsetCompareHSPs) returns 0 for identical score,
+    // `s_QueryOffsetCompareHSPs` returns 0 for identical score,
     // query/subject starts and ends. The pinned NCBI oracle retains the first
     // score-355 HSP's gapped_start (192, 47944) on that exact comparator tie.
     incoming.sort_by(|a, b| {
@@ -1765,7 +1765,7 @@ fn purge_preliminary_common_endpoints(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2762-2864:
-// if (!combined) adopt incoming; otherwise combine by ScoreCompareHSPs
+// If there is no existing combined list, adopt incoming; otherwise combine by `ScoreCompareHSPs`
 // up to hsp_num_max, preferring the existing list on a comparator tie.
 fn append_preliminary_hsps(
     mut combined: Vec<(usize, GappedHsp)>,
@@ -2255,7 +2255,7 @@ fn sort_gapped_score_if_needed(hsps: &mut [GappedHsp]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:537,817-838,931-995:
-// return s_HSPIsContained(hsp, query_start, node->hsp, node->leftptr,
+// Delegates containment checks to `s_HSPIsContained` using the node's HSP and bounds.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:352-360:
 fn traceback_tree_hsp(hsp: &GappedHsp, query_length: i32) -> TreeHsp {
     TreeHsp {
@@ -2337,7 +2337,7 @@ fn purge_traceback_common_endpoints(mut hsps: Vec<TracebackOwnedHsp>) -> Vec<Tra
 // 709-721,1644-1684:
 // When a fence sentinel is hit, refetches the whole subject and retries traceback.
 // The NCBI endpoint purge and interval-tree pass follow traceback; ambiguity
-// reevaluation has no HSPs in this non-greedy, purge=TRUE profile.
+// reevaluation has no HSPs in this non-greedy, `purge`-enabled profile.
 #[allow(dead_code)]
 pub(super) fn full_translation_traceback_blosum62(
     query: &[u8],
@@ -2366,9 +2366,9 @@ pub(super) fn full_translation_traceback_blosum62(
 const HSP_MAX_WINDOW: usize = 11;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3248-3321:
-// For short alignments, selects the midpoint on query and subject; otherwise scans
-// the scoring window to find the maximum-scoring query offset and derives the
-// matching subject start offset along the same diagonal.
+// When the query span fits one window, both starts advance by `q_length / 2`; otherwise
+// slide the window and keep the first position whose score is strictly greater than the
+// best so far, then place the subject start on the same diagonal (`max_offset - q_start + s_start`).
 pub(super) fn blast_get_offsets_for_gapped_alignment_protein(
     query: &[u8],
     subject: &[u8],
@@ -2820,7 +2820,7 @@ fn x_traceback_in_windows<S: super::score::TbnScore>(
                 .map(|op| op.num() as usize)
                 .sum();
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-596:
-            //     adjusted_subject, hsp, score_options, &align_length, sbp);
+            // Computes identity and alignment length from the adjusted subject, HSP, and edit script.
             let num_ident = protein_identities_from_edit_ops(
                 query_nomask,
                 subject_sequence,

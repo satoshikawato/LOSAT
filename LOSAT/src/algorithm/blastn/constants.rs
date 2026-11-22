@@ -33,10 +33,11 @@ pub const SCAN_RANGE_MEGABLAST: usize = 0;
 // The dynamic calculation uses gap_trigger (bit score 27.0) and cutoff_score_max (from E-value).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:343-344: gap_trigger calculation
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:368-374: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:368-374
+// Caps the scaled `gap_trigger` cutoff at `cutoff_score_max`.
 // These constants are kept for backward compatibility but are no longer used in the main code path.
-pub const MIN_UNGAPPED_SCORE_MEGABLAST: i32 = 20; // DEPRECATED: the cutoff is MIN(gap_trigger * scale_factor, cutoff_score_max) (ncbi_cutoffs.rs)
-pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // DEPRECATED: the cutoff is MIN(gap_trigger * scale_factor, cutoff_score_max) (ncbi_cutoffs.rs)
+pub const MIN_UNGAPPED_SCORE_MEGABLAST: i32 = 20; // DEPRECATED: cutoff is `gap_trigger * scale_factor` capped at `cutoff_score_max` (ncbi_cutoffs.rs)
+pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // DEPRECATED: cutoff is `gap_trigger * scale_factor` capped at `cutoff_score_max` (ncbi_cutoffs.rs)
 
 /// Maximum word size for direct address table (4^14 = 268M entries = ~6GB, too large)
 pub const MAX_DIRECT_LOOKUP_WORD_SIZE: usize = 13;

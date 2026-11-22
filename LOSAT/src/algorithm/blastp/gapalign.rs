@@ -675,7 +675,7 @@ pub(crate) fn stats_from_edit_ops_protein(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-596:
-//     adjusted_subject, hsp, score_options, &align_length, sbp);
+// Computes identity and alignment length from the adjusted subject, HSP, and edit script.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:767-811:
 // Reuse the same edit-script walk after SEG-masked traceback.
 pub(crate) fn protein_identities_from_edit_ops(

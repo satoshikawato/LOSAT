@@ -370,7 +370,8 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-531
     if diag_entry.flag() != 0 {
-        // Skip hits that fall inside the already-extended region on this diagonal.
+        // Skip hits that fall inside the already-extended region on this diagonal
+        // (signed `Int4` comparison in NCBI; Rust compares unsigned).
         let subject_plus_offset = subject_offset.wrapping_add(diag_offset as u32);
         if subject_plus_offset < diag_entry.last_hit() as u32 {
             if cx.diag_enabled {
@@ -1310,7 +1311,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
                             s_orig_len: s_len,
                         });
                     }
-                    // Advance the diagonal's `last_hit` to the extension end minus `wordsize` minus 1 plus `diag_offset`.
+                    // Set `last_hit` to `s_last_off - (wordsize - 1)` (the extension end less `wordsize - 1`), biased by `diag_offset`.
                     diag_entry.set_last_hit(hit.s_last_off - (wordsize - 1) + *diag_offset);
                 };
                 // Perform one-hit ungapped extension (NCBI `s_BlastAaExtendOneHit`).

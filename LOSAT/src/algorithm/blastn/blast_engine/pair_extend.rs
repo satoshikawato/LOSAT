@@ -547,7 +547,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                 s_range,
                 word_length,
                 lut_word_length,
-                true, // check_double = TRUE
+                true, // check for double-word extension
                 &mut is_seed_masked,
             );
             word_type = wt;
@@ -606,7 +606,7 @@ fn extend_pairs_in<const EXT_FIRST: bool>(
                 s_range,
                 word_length,
                 lut_word_length,
-                false, // check_double = FALSE (not in two-hit block)
+                false, // skip double-word check (not in two-hit block)
                 &mut is_seed_masked,
             );
             if wt == 0 {
@@ -1164,7 +1164,7 @@ pub(super) fn off_diagonal_found(od: OffDiagonal<'_>) -> bool {
                     (0, 0)
                 }
             };
-            // NCBI: off_s_end >= s_a (signed comparison)
+            // Signed comparison checking that `off_s_end` is at least `s_a` (matching NCBI).
             // Convert to signed for comparison to match NCBI behavior
             if off_s_l > 0
                 && (off_s_end as isize) >= s_a

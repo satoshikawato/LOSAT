@@ -668,9 +668,9 @@ where
         return (1, extended, q_off_adjusted, s_off_adjusted);
     }
 
-    // Target a second full `word_length` beyond `ext_to` to test for a double word.
+    // Extend the target by one more `word_length`.
     let double_ext_to = ext_to + word_length;
-    // Cap the double-word target by `ext_max`.
+    // Limit `ext_max` to the extended target `double_ext_to`.
     let double_ext_max = ext_max.min(double_ext_to);
 
     // NCBI: try seed by seed

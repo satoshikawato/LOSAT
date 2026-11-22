@@ -3544,8 +3544,8 @@ fn run_batch_loop(
         // One message per query of the batch (`TSearchMessages::ToString` above, after
         // `RemoveDuplicates` in each query's list), `Error: ` first (`GetMessage`).
         // A query without letters keeps its own message (`Sequence contains no data`,
-        // blast_setup_cxx.cpp:631-638, id = the query's index) after the error (id
-        // kBlastMessageNoContext = -1), which `RemoveDuplicates` sorts first
+        // blast_setup_cxx.cpp:631-638, id is the query's index) after the error (context id
+        // `kBlastMessageNoContext`, -1), which `RemoveDuplicates` sorts first
         // (`CSearchMessage::operator<`, blast_types.hpp:295-304).
         if args.scoring_matrix() == TblastxMatrix::Unknown {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
@@ -5034,7 +5034,8 @@ fn search_query_batch<S: TbxScore>(
         );
 
         // NCBI: Each subject frame gets its own init_hitlist that is reset between frames.
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491 BlastInitHitListReset(init_hitlist)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491
+        // Resets `init_hitlist` via `BlastInitHitListReset` between frames.
         // After each frame, init_hsps are converted and merged into combined_ungapped_hits.
 
         // Statistics for HSP saving analysis (long sequences only)
@@ -5046,8 +5047,8 @@ fn search_query_batch<S: TbxScore>(
         let stats_hsp_filtered_by_hsp_test = 0usize;
         let mut stats_score_distribution: Vec<i32> = Vec::new();
 
-        // NCBI: Combined HSP list across all subject frames
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:438 BlastHSPList* combined_hsp_list
+        // NCBI: Combined HSP list across all subject frames (`combined_hsp_list`).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:438
         let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
 
         // EXPERIMENT (PAIRPAR), dispatch points 2 and 3 (per subject): the unit path, when the

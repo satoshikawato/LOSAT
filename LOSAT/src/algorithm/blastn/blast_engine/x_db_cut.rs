@@ -49,7 +49,7 @@
 //! More threads search at once, each with its scratch, as in the parallel `-subject` path.
 //!
 //! No NCBI counterpart for the cut itself: NCBI's search threads take chunks of
-//! MAX(sequences / 100, 1) ordinal ids from one iterator (`BlastSeqSrcIteratorNewEx`,
+//! at least 1 (or `sequences / 100`) ordinal ids from one iterator (`BlastSeqSrcIteratorNewEx`,
 //! blast_engine.c:1409; seqdbimpl.cpp:328-350, cited above `SeqDb::next_block`), whatever the
 //! thread count; LOSAT's blocks are cut by bytes, because one block is one read of one file.
 //!

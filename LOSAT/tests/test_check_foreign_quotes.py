@@ -628,8 +628,7 @@ class UnbacktickedCodeTest(unittest.TestCase):
             "// ++count;\n",
             "// --count;\n",
             "// if (a[i] == b[i]) break;\n",
-            "// Compare a[i] == b[i] here.\n",
-            "// x = f(y);\n",
+            "// NCBI: x = f(y);\n",
             "// for (i = 0; i < n; ++i)\n",
             "// return TRUE;\n",
             "/// m_Args.push_back(arg) registers the option group.\n",
@@ -649,15 +648,239 @@ class UnbacktickedCodeTest(unittest.TestCase):
         ):
             self.assert_flagged(line, 1, line)
 
-    def test_block_comments_are_checked_and_strings_are_skipped(self) -> None:
+    def test_m1_to_m8_guard_holes_are_closed(self) -> None:
+        # M1: C/C++ tail after pinned citation or alongside a source file / foreign name.
+        m1_cases = (
+            '// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: m_Outfile << "\\n\\n";\n',
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: obj = BlastCompo_AlignmentNew(gap_align->score, rule, ...);\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: (Int4)(gap_x_dropoff*NCBIMATH_LN2/min_lambda),\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 BlastInitHitListReset(init_hitlist)\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 BlastHSPList* combined_hsp_list\n",
+            "// hsp->score = score; see blast_def.h\n",
+            "// for (i = 0; i < n; i++) { x.c = 1; }\n",
+            "// Reference: hsp->score = score;\n",
+            "// x = y; // libstdc++\n",
+        )
+        for line in m1_cases:
+            self.assert_flagged(line, 1, line)
+
+        # M2: bare `file.c:NNN: <C statement>` without `c++/` prefix.
+        self.assert_flagged("// blast_aalookup.c:490: w = query + offset_list[2];\n", 1)
+        self.assert_flagged("// blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);\n", 1)
+
+        # M3: citation followed by C tail without semicolon.
+        m3_cases = (
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 - in_q_start != tree_q_start\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 - SIGN(subject.frame)\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 - while (1)\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: kDustLevel=20, kDustWindow=64, kDustLinker=1.\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.\n",
+            '// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: kArgQuery("query"), kArgSubject("subject").\n',
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: Create(eBlastp, locality).\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: options.GetMatrixName(), as typed.\n",
+        )
+        for line in m3_cases:
+            self.assert_flagged(line, 1, line)
+
+        # M4: continuation lines of quoted C statements/enums/ternaries under a citation.
+        m4_call_close = self.CITE + "//     adjusted_subject, hsp, score_options, &align_length, sbp);\nfn f() {}\n"
+        self.assertEqual([ln for ln, _ in self.unbackticked(m4_call_close)], [2])
+        m4_self_ptr = self.CITE + "//     self->startFreqRatios, self->ungappedLambda);\nfn f() {}\n"
+        self.assertEqual([ln for ln, _ in self.unbackticked(m4_self_ptr)], [2])
+        m4_enum = self.CITE + "//     eQueryOnly,\n//     eQueryAndSubject,\n//     eQueryOnlyStrandIndifferent\n// };\nfn f() {}\n"
+        self.assertEqual([ln for ln, _ in self.unbackticked(m4_enum)], [2, 3, 4, 5])
+        m4_ternary = (
+            self.CITE
+            + "// cutoff_s = do_link_hsps ?\n"
+            + "// localScalingFactor = (compo_adjust_mode != eNoCompositionBasedStats)\n"
+            + "//                      ? SCALING_FACTOR : 1.0;\nfn f() {}\n"
+        )
+        self.assertEqual(sorted(ln for ln, _ in self.unbackticked(m4_ternary)), [2, 3, 4])
+        m4_open_return = self.CITE + "// return s_HSPIsContained(hsp, query_start, node->hsp, node->leftptr,\nfn f() {}\n"
+        self.assertEqual([ln for ln, _ in self.unbackticked(m4_open_return)], [2])
+        m4_default = self.CITE + "//     default: ...\nfn f() {}\n"
+        self.assertEqual([ln for ln, _ in self.unbackticked(m4_default)], [2])
+
+        # M5: C conditions with `||`, `&&`, `==`, `!=` and C marks / foreign names.
+        m5_cases = (
+            "// Calculate cutoff_score when !gapped_calculation || matrix_only_scoring.\n",
+            "// Guard ans2 with sv[0] != INT4_MIN.\n",
+            "// Skip removed items (linked_to==-1000) in path.\n",
+            "// Regardless of flag (cutoff[0]==0).\n",
+        )
+        for line in m5_cases:
+            self.assert_flagged(line, 1, line)
+
+        # M6: C if/while conditions without body or logical operators, plus C-only control forms.
+        m6_cases = (
+            "// NCBI line 727: if (sum>H_hsp_sum)\n",
+            "// if (!combined) adopt incoming; otherwise combine\n",
+            "// if (i+upset-1 < leftend) { recurse on [lend..rend] }\n",
+            "// In NCBI, the while (number_of_hsps > 0) loop processes ALL HSPs.\n",
+            "// if (a < b)\n",
+            "// while (x)\n",
+            "// if(x)\n",
+            "// do {\n",
+            "// goto done;\n",
+            "// case eBlastTypeBlastn:\n",
+            "// default:\n",
+        )
+        for line in m6_cases:
+            self.assert_flagged(line, 1, line)
+
+        # M7: assignments, casts, macros, stdlib calls, declarations, ternaries without `;`.
+        m7_cases = (
+            "// BLAST_GAP_X_DROPOFF_FINAL_NUCL = 100; `-xdrop_gap_final` replaces it\n",
+            "// max_dist = MIN(GREEDY_MAX_COST, max(len1, len2) / GREEDY_MAX_COST_FRACTION + 1)\n",
+            "// score = MININT at the start of the row.\n",
+            "true, // check_double = TRUE\n",
+            "false, // check_double = FALSE (not in two-hit block)\n",
+            "// lookup[(index) >> PV_ARRAY_BTS] |= (1U << (index & PV_ARRAY_MASK))\n",
+            "// Match NCBI: (Int4) ell_min (direct cast, not floor)\n",
+            "// qsort(hsp_array, ..., s_QueryOffsetCompareHSPs); delete equal starts;\n",
+            "// y = cond ? 1 : 2\n",
+            "// unsigned int n = 0;\n",
+            "// int i, j;\n",
+            "// double lambda = 0.267;\n",
+            "// char* buf = malloc(n);\n",
+            "// class CBlastFoo : public CObject {\n",
+            "// enum { eFoo = 1, eBar };\n",
+            "// try {\n",
+            "// #define PV_SET(a, i) ...\n",
+            "// #include <stdio.h>\n",
+            "// static_cast<int>(x)\n",
+            "// strcmp(a, b) == 0\n",
+            "// p == NULL\n",
+            "// hsp->score < cutoff\n",
+            "// (Uint1*) seq\n",
+            "// (BlastHSP*)malloc(n)\n",
+            "// memcpy(dst, src, n)\n",
+        )
+        for line in m7_cases:
+            self.assert_flagged(line, 1, line)
+        self.assertEqual(
+            self.unbackticked(
+                "# CBlastInput(..., GetQueryBatchSize()); GetNextSeqBatch; CLocalBlast.Run()\n",
+                "x.py",
+                "python",
+            ),
+            [(1, checker.UNBACKTICKED_QUOTE)],
+        )
+
+        # M8: backtick spans with C logical OR `||` must NOT be misclassified as Rust closures.
+        m8_spans = (
+            "`a->b || c->d`",
+            "`hsp_list->hspcnt == 0 || hsp_list->hsp_array == NULL`",
+            "`m_HitsSortOption > 0 || m_HspsSortOption > 0`",
+            "`seqlocs[0]->IsNull() || seqlocs[1]->IsNull()`",
+            "`m_IsBl2Seq || m_IsIterative`",
+            "`itr || GetSaveLastPssm()`",
+        )
+        for span in m8_spans:
+            self.assertEqual(
+                self.unbackticked(f"// Check {span} here.\n"),
+                [(1, checker.INLINE_EXPRESSION)],
+                span,
+            )
+        # Rust closures (`|a, b|`, `|| expr`) and FASTA Seq-ids (`pir||A12345`) still pass.
+        for ok_span in (
+            "`|a, b| a.score > b.score`",
+            "`let f = || x + 1;`",
+            "`pir||A12345`",
+        ):
+            self.assertEqual(self.unbackticked(f"// Rust {ok_span} here.\n"), [], ok_span)
+
+    def test_rust_pseudocode_passes_and_rust_tokens_cannot_exempt_c_lines(self) -> None:
+        # Genuine Rust pseudocode and safe prose mentions pass.
+        rust_ok = (
+            "// if x == y { return; }\n",
+            "// while i < n { i += 1; }\n",
+            "// } else { x = 1; }\n",
+            "// else { skip }\n",
+            "// x = if a > b { a } else { b };\n",
+            "// x = y;\n",
+            "// score = score + 1;\n",
+            "// node.left = node.right;\n",
+            "// return x;\n",
+            "// return;\n",
+            "// break;\n",
+            "// push(row);\n",
+            "// run_scan(q, s);\n",
+            "// a[i] == b[i] for every i\n",
+            "// N = (n - 1) * (m - 1);\n",
+            "// idx = (q << 5) | s;\n",
+            "// Stage A comparison-only C++ API oracle uses FindGeneticCode(32).\n",
+            "// calls MyStruct(a) via the tuple struct\n",
+            "// unsafe { *p = 0; }\n",
+        )
+        for line in rust_ok:
+            self.assertEqual(self.unbackticked(line), [], line)
+
+        # Rust tokens (`self`, `u8`, `Some(`, `<n>`) must NOT exempt C/C++ code on the same line.
+        c_with_rust_tokens = (
+            "// hsp->score = self->score;\n",
+            "// Int4 x = (u8)y;\n",
+            "// if (hsp->score > 0) { /* returns Some(x) */ ++n; }\n",
+            "// hsp->score = 0; /* <n> items */\n",
+        )
+        for line in c_with_rust_tokens:
+            self.assert_flagged(line, 1, line)
+
+    def test_block_comments_are_checked_cohesively_and_unclosed_backtick_is_resilient(self) -> None:
         self.assert_flagged("/* if (m_QuerySeq[i] == m_SubjectSeq[i]) { ++num_ident; } */\nfn f() {}\n", 1)
-        self.assert_flagged("/*\n * x = f(y);\n */\nfn f() {}\n", 2)
+        self.assert_flagged("/*\n * hsp->score = score;\n */\nfn f() {}\n", 2)
         bc_backtick = "/* `m_Input.GetChars(count)` */\nfn f() {}\n"
         self.assertEqual(self.unbackticked(bc_backtick), [(1, checker.INLINE_EXPRESSION)])
+        # Multi-line backtick span inside `/* ... */` is checked cohesively (not misread per-line).
+        bc_multiline_ok = "/*\n * Observed label `Query= seq1\n * Length=100` in report.\n */\nfn f() {}\n"
+        self.assertEqual(self.unbackticked(bc_multiline_ok), [])
+        bc_multiline_bad = "/*\n * Uses `m_HitsSortOption > 0 ||\n * m_HspsSortOption > 0` here.\n */\nfn f() {}\n"
+        self.assertEqual(self.unbackticked(bc_multiline_bad), [(2, checker.INLINE_EXPRESSION)])
         bc_nested_ok = "/* /* matrix row A */ A */\nconst ROW: [i32; 1] = [/*A*/ 4];\n"
         self.assertEqual(self.unbackticked(bc_nested_ok), [])
-        in_string = 'let s = "/* if (a == b) { ++c; } */";\nlet r = r#"/* x = f(y); */"#;\n'
+        in_string = 'let s = "/* if (a == b) { ++c; } */";\nlet r = r#"/* hsp->score = 1; */"#;\n'
         self.assertEqual(self.unbackticked(in_string), [])
+        # A single unclosed backtick on line 1 must not blind subsequent lines in the same run.
+        unclosed_run = (
+            "// Typo with an unclosed `backtick here\n"
+            "// if (a == b) { ++c; }\n"
+            "// And balanced `ok` after.\n"
+            "fn f() {}\n"
+        )
+        self.assertEqual(self.unbackticked(unclosed_run), [(2, checker.UNBACKTICKED_QUOTE)])
+
+    def test_trailing_hash_comments_in_py_sh_toml_yml_are_checked(self) -> None:
+        self.assertEqual(
+            self.unbackticked("x = 1  # hsp->score = score;\n", "x.py", "python"),
+            [(1, checker.UNBACKTICKED_QUOTE)],
+        )
+        self.assertEqual(
+            self.unbackticked('url = "http://x#hsp->score = 1"\n', "x.py", "python"),
+            [],
+        )
+        for rel in ("x.sh", "x.toml", "x.yml"):
+            self.assertEqual(
+                self.unbackticked("x = 1  # hsp->score = score;\n", rel, "hash"),
+                [(1, checker.UNBACKTICKED_QUOTE)],
+                rel,
+            )
+            self.assertEqual(
+                self.unbackticked('s = "a # hsp->score = score;"\n', rel, "hash"),
+                [],
+                rel,
+            )
+            self.assertEqual(
+                self.unbackticked("s = 'a # hsp->score = score;'\n", rel, "hash"),
+                [],
+                rel,
+            )
+            self.assertEqual(
+                self.unbackticked("echo ${#arr[@]} # plain note\n", rel, "hash"),
+                [],
+                rel,
+            )
 
     def test_valid_losat_comments_pass(self) -> None:
         code = "fn f(x: i32, y: i32) { let _ = (x, y); }\n"
@@ -699,30 +922,65 @@ class UnbacktickedCodeTest(unittest.TestCase):
     def test_unbackticked_regexes_are_linear_time(self) -> None:
         import time
 
-        n = 5000
-        tricky_inputs = (
-            "// " + "a" * n + "\n",
-            "// if " + "(" * n + "a == b\n",
-            "// if (" + "a && " * (n // 5) + "\n",
-            "// for (" + ";" * n + "\n",
-            "// " + "a.b" * (n // 3) + " = 1\n",
-            "// " + 'a"' * (n // 2) + "\n",
-            "// " + "x[0]" * (n // 4) + "\n",
-            "// " + "Int4 " + "*" * n + "\n",
-            "// " + "; " * (n // 2) + "}\n",
-            "// return" + " " * n + "x\n",
-            "// " + "Stream" * (n // 6) + "\n",
-            "// x" + "[0]" * (n // 3) + "\n",
-            "// a" + " " * n + "x\n",
-            "/* " + "*" * n + " */\n",
+        # Measure scaling ratio t(4n) / t(n) rather than brittle fixed wall-clock caps:
+        # O(n) scales ~4x whereas O(n^2) scales ~16x. Include all adversarial inputs:
+        # escaped-quote repeats, semi-brace-comment repeats, unclosed-for repeats,
+        # unclosed-method repeats, and unclosed-struct repeats.
+        builders = (
+            ("plain_letters", lambda n: "// " + "a" * n + "\n"),
+            ("nested_if_parens", lambda n: "// if " + "(" * n + "a == b\n"),
+            ("repeated_and", lambda n: "// if (" + "a && " * (n // 5) + "\n"),
+            ("for_semis", lambda n: "// for (" + ";" * n + "\n"),
+            ("for_a_semi", lambda n: "// " + "for (a;" * (n // 7) + "\n"),
+            ("escaped_quote", lambda n: "// " + '"a\\' * (n // 3) + "\n"),
+            ("semi_brace_comment", lambda n: "// " + "; }/* " * (n // 6) + "\n"),
+            ("unclosed_method", lambda n: "// " + ".A(x" * (n // 4) + "\n"),
+            ("unclosed_camel", lambda n: "// " + "FooBar(x" * (n // 8) + "\n"),
+            ("unclosed_struct", lambda n: "// " + "struct { " * (n // 9) + "\n"),
+            ("nested_if_semi", lambda n: "// " + "if (;if (;" * (n // 10) + "\n"),
+            ("dotted_assign", lambda n: "// " + "a.b" * (n // 3) + " = 1\n"),
+            ("unclosed_quotes", lambda n: "// " + 'a"' * (n // 2) + "\n"),
+            ("indexed_var", lambda n: "// " + "x[0]" * (n // 4) + "\n"),
+            ("int4_stars", lambda n: "// " + "Int4 " + "*" * n + "\n"),
+            ("semi_brace_end", lambda n: "// " + "; " * (n // 2) + "}\n"),
+            ("return_spaces", lambda n: "// return" + " " * n + "x\n"),
+            ("stream_words", lambda n: "// " + "Stream" * (n // 6) + "\n"),
+            ("block_stars", lambda n: "/* " + "*" * n + " */\n"),
         )
-        total_start = time.perf_counter()
-        for sample in tricky_inputs:
-            start = time.perf_counter()
-            checker.check_text("x.rs", sample.splitlines(), "slash", TABLE)
-            per_case = time.perf_counter() - start
-            self.assertLess(per_case, 0.1, f"ReDoS stress case took {per_case:.3f}s")
-        self.assertLess(time.perf_counter() - total_start, 0.5)
+        n_small = 2000
+        n_large = 8000
+
+        def measure(lines: list[str], reps: int = 3) -> float:
+            best = float("inf")
+            for _ in range(reps):
+                t0 = time.perf_counter()
+                checker.check_text("x.rs", lines, "slash", TABLE)
+                dt = time.perf_counter() - t0
+                if dt < best:
+                    best = dt
+            return best
+
+        for name, build in builders:
+            small_lines = build(n_small).splitlines()
+            large_lines = build(n_large).splitlines()
+            t_small = measure(small_lines)
+            t_large = measure(large_lines)
+            # Only enforce ratio when small time is above noise floor (0.2 ms); otherwise confirm
+            # large time stays tiny (< 25 ms), which still rejects any O(n^2) blowup.
+            if t_small >= 0.0002:
+                ratio = t_large / t_small
+                self.assertLess(
+                    ratio,
+                    9.5,
+                    f"{name}: t({n_large})/t({n_small}) = {ratio:.2f} "
+                    f"({t_large*1000:.2f}ms / {t_small*1000:.2f}ms)",
+                )
+            else:
+                self.assertLess(
+                    t_large,
+                    0.025,
+                    f"{name}: t({n_large}) = {t_large*1000:.2f}ms (t({n_small})={t_small*1000:.3f}ms)",
+                )
 
 
 class FixTest(unittest.TestCase):

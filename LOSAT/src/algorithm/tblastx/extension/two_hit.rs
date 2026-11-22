@@ -783,7 +783,7 @@ pub(super) fn two_hit_walks<S: TbxScore>(
         s_last_off = s_right_off + j;
     }
 
-    // NCBI BLAST returns MAX(left_score, right_score)
+    // NCBI BLAST returns the larger of `left_score` and `right_score`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1157
     let max_score_total = left_score.max(right_score);
 

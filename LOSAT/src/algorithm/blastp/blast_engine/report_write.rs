@@ -741,7 +741,8 @@ pub(super) fn write_pairwise(
         database_name: blastp_scan_mode_definition(subject_input_label).into(),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267: options.GetMatrixName(), as typed.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267
+        // Matrix name from `GetMatrixName`, as typed.
         matrix_name: Some(args.matrix_name.clone()),
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,

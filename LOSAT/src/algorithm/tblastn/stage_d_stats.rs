@@ -267,7 +267,7 @@ pub(super) fn local_parameters_for_blocks(
     let mut prelim_evalue = options.expect_value;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:902-999:
-    //                                   query_length, avg_subject_length);
+    // Computes per-context hit-saving cutoffs from `query_length` and `avg_subject_length`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:931-946:
     let mut hit = Vec::with_capacity(query_contexts.len());
     for (context, (&(query_length, valid), params)) in

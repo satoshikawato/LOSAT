@@ -68,7 +68,7 @@ pub fn x_drop_raw_score(
 /// converts it, to `INT_MIN`: `core::blast_util::ncbi_int4_from_double`, as the X-drops are in
 /// `core::x_drop`)
 pub fn gap_trigger_raw_score(bit_trigger: f64, ungapped_params: &KarlinParams) -> i32 {
-    // NCBI computes `gap_trigger` in bits times `NCBIMATH_LN2` plus `logK`, divided by `Lambda`, truncated to `Int4`;
+    // NCBI computes `gap_trigger` in bits times `NCBIMATH_LN2`, plus `logK`, all divided by `Lambda`, truncated to `Int4`;
     // every program's one conversion (`core::x_drop`).
     crate::core::x_drop::gap_trigger_raw_score(
         bit_trigger,
@@ -137,7 +137,7 @@ pub fn try_compute_eff_lengths_tblastx(
     })
 }
 
-/// Calculate cutoff_score from E-value using BLAST_Cutoffs (dodecay=FALSE).
+/// Calculate cutoff_score from E-value using `BLAST_Cutoffs` (gap decay disabled).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4039-4063
 ///
@@ -244,7 +244,7 @@ pub fn cutoff_score_sum_stats(
     let searchsp = min_len * (avg_subject_len as i64);
 
     // Convert `evalue_hsp` via `BLAST_Cutoffs` with gap decay enabled (`gap_decay_rate`).
-    // When dodecay=TRUE, apply gap decay divisor to E-value before conversion. Every caller's
+    // When `dodecay` is enabled, apply the gap decay divisor to E-value before conversion. Every caller's
     // cutoff starts at 1 (blast_parameters.c:321 and 965), so a search space too small for
     // E = 1 gives 1, not a score below it (with `-db` SeqDB's shortest length 10 makes TBLASTN's
     // `n` 3: NCBI's cutoff is 1, which the Smith-Waterman redo's `cutoff_s` reads).
@@ -291,8 +291,8 @@ fn cutoff_score_from_evalue_with_decay(
 ///
 /// CRITICAL: subj_length is in NUCLEOTIDES (NOT divided by 3!)
 /// CRITICAL: Uses CUTOFF_E_TBLASTX = 1e-300 (NOT user's E-value threshold)
-/// CRITICAL: searchsp = MIN(query_len_aa, subj_len_nucl) * subj_len_nucl (mixes AA and nucleotide!)
-/// CRITICAL: dodecay=TRUE with gap_decay_rate
+/// CRITICAL: `searchsp` is the minimum of `query_len_aa` and `subj_len_nucl`, times `subj_len_nucl` (mixes AA and nucleotide!)
+/// CRITICAL: `dodecay` enabled with `gap_decay_rate`
 ///
 /// # Arguments
 /// * `query_len_aa` - Query length in amino acids (translated frame)
@@ -368,7 +368,7 @@ pub fn word_cutoff_score_for_update(
 
     // Convert the program cutoff E-value from `s_GetCutoffEvalue` (`CUTOFF_E_TBLASTX`, 1e-300)
     // using `BLAST_Cutoffs` with gap decay enabled (`gap_decay_rate`).
-    // dodecay=TRUE means we apply gap decay divisor
+    // Gap decay enabled (`dodecay`) means we apply the gap decay divisor.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:288,310-311
     // Without sum statistics (`-sum_stats false`, no `link_hsp_params`) NCBI passes 0, and the
@@ -396,7 +396,7 @@ pub fn word_cutoff_score_for_update(
     // (Blastn exception at line 366 does not apply to tblastx)
     new_cutoff = new_cutoff.min(gap_trigger);
 
-    // Scale the cutoff score by `sbp->scale_factor`.
+    // Multiply the cutoff score by `sbp->scale_factor` truncated to `Int4` (NCBI truncates the factor first; this code truncates the product).
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
     // Cap the cutoff score at the context's `cutoff_score_max` from `hit_params`.
@@ -420,7 +420,7 @@ pub fn word_cutoff_score_for_update(
 ///
 /// CRITICAL: Uses user's E-value threshold (NOT CUTOFF_E_TBLASTX)
 /// CRITICAL: Uses eff_searchsp WITH length adjustment (from BLAST_CalcEffLengths)
-/// CRITICAL: dodecay=FALSE, gap_decay_rate=0 (no decay)
+/// CRITICAL: gap decay disabled (`dodecay` false, `gap_decay_rate` 0; no decay)
 /// CRITICAL: For tblastx, uses UNGAPPED params (kbp) since kbp_gap is NULL
 ///
 /// # Arguments
@@ -436,7 +436,7 @@ pub fn cutoff_score_max_for_tblastx(
     ungapped_params: &KarlinParams,
 ) -> i32 {
     // Convert the user E-value via `BLAST_Cutoffs` with gap decay disabled.
-    // dodecay=FALSE means no gap decay adjustment
+    // Gap decay disabled (`dodecay` false) means no gap decay adjustment.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4108-4121
     // A NaN e-value (`-evalue -nan`) is not greater than 0, so the cutoff stays 1.
     let es = if evalue_threshold > 0.0 {

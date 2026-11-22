@@ -49,7 +49,7 @@
 //!    - stale values of earlier frames or chunks: `Blast_ExtendWordExit` moves D past every old
 //!      value (`D += len + window`, blast_extend.c:162-173), so `last_hit - D <= -window - 1`
 //!      (flag 0: too far) or `last_hit < s + D` (flag 1: reset). After the reset at
-//!      D >= INT4_MAX/4 every cell is `-window` (`s_BlastDiagClear`, blast_extend.c:87-104) with
+//!      `D` at or above `INT4_MAX` divided by 4, every cell is `-window` (`s_BlastDiagClear`, blast_extend.c:87-104) with
 //!      D = window: `last_hit - D = -2 window`, too far. The value is read through the
 //!      sign-extending `DiagStruct::last_hit` (round-1 bug: `-window` read as `2^31 - window`).
 //!    - cross-sentinel diagonals: one raw diagonal can run from context c into c+1 (q grows with
@@ -3338,7 +3338,8 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
     let wordsize = h.wordsize;
     // When the diagonal's `flag` is set, skip hits covered by a prior right extension.
     if diag_entry.flag() != 0 {
-        // Skip the hit if the offset-adjusted subject position precedes `last_hit`.
+        // Skip the hit if the offset-adjusted subject position precedes `last_hit`
+        // (signed `Int4` comparison in NCBI; Rust compares unsigned).
         let subject_plus_offset = subject_offset.wrapping_add(*diag_offset as u32);
         if subject_plus_offset < diag_entry.last_hit() as u32 {
             return XHit::Masked;
@@ -3454,9 +3455,9 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: usize>(
         let hsp_len: i32 = (hsp_qe_u - hsp_q_u) as i32;
         let s_last_off: i32 = s_last_off_u as i32;
 
-        // On a right extension, set `flag` to 1 and advance `last_hit` to the end of the extension
-        // adjusted by `wordsize` and `diag_offset`; otherwise store the current offset-adjusted
-        // subject position.
+        // On a right extension, set `flag` to 1 and `last_hit` to the extension end `s_last_off`
+        // less `wordsize - 1`, biased by `diag_offset`; otherwise `last_hit` is the subject offset
+        // biased by `diag_offset` and `flag` stays 0.
         if right_extend {
             diag_entry.set_flag(1);
             diag_entry.set_last_hit(s_last_off - (wordsize - 1) + *diag_offset);

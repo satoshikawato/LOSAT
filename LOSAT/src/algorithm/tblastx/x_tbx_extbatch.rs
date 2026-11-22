@@ -249,9 +249,9 @@ unsafe fn apply<M: TbxScore>(
         usize,
     ),
 ) {
-    // On a right extension, set `flag` to 1 and store the extension-end `last_hit` adjusted by
-    // `wordsize` and `diag_offset`; otherwise store the current offset-adjusted subject position
-    // with `flag` remaining 0.
+    // On a right extension, set `flag` to 1 and `last_hit` to the extension end `s_last_off`
+    // less `wordsize - 1`, biased by `diag_offset`; otherwise `last_hit` is the subject offset
+    // biased by `diag_offset` and `flag` stays 0.
     let raw = if right_extend {
         FLAG_BIT | ((s_last_off_u as i32 - (h.wordsize - 1) + h.diag_offset) as u32 & LAST_HIT_BITS)
     } else {
@@ -370,7 +370,8 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: usize>
                 unsafe { resolve_early::<_, SENT>(b, last_hit as usize, diag_ptr, h) };
                 continue;
             }
-            // Skip the hit if the offset-adjusted subject position precedes `last_hit`.
+            // Skip the hit if the offset-adjusted subject position precedes `last_hit`
+            // (signed `Int4` comparison in NCBI; Rust compares unsigned).
             let subject_plus_offset = subject_offset.wrapping_add(diag_offset as u32);
             // SAFETY: `entry` (cell `cell`) is in the table by this function's contract.
             if subject_plus_offset < unsafe { (*entry).last_hit() } as u32 {

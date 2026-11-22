@@ -601,8 +601,8 @@ pub fn write_subject_header<W: Write>(
 /// The alignments of one subject in outfmt 0: NCBI's `x_DisplayAlnvecInfo` for each HSP,
 /// the first one with the subject's heading (`GenerateDefline` of its title with flags 0,
 /// `defline.rs`). `write_hsp` writes the rest of one call (the score lines, the alignment
-/// and what follows it). `probe` marks the heading and each HSP without changing the
-/// written bytes.
+/// and what follows it) of an HSP and its index in the report's hits (`HspIndex`). `probe`
+/// marks the heading and each HSP without changing the written bytes.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3613-3632
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
@@ -634,7 +634,7 @@ fn write_subject_alignments_part<W: Write>(
     hsp_indices: &[HspIndex],
     part: std::ops::Range<usize>,
     html: Option<HtmlHeading<'_>>,
-    write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+    write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     let first_index = hsp_indices[0];
     let heading = super::defline::generate_defline(title, protein, false);
@@ -772,7 +772,7 @@ fn write_subject_part<'h, W: Write>(
     html: Option<&super::html_ids::HtmlReport>,
     records: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     heading_of: impl Fn(u32) -> SubjectHeading<'h>,
-    write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+    write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     let html = html.map(|report| HtmlHeading {
         report,
@@ -822,7 +822,7 @@ fn write_hsps_or_skips<W: Write>(
     part: std::ops::Range<usize>,
     mut skipped: Option<Vec<u8>>,
     mut retry: Option<impl FnMut() -> io::Result<Option<Vec<u8>>>>,
-    mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+    mut write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     for (at, (hit, &hsp_index)) in hits[part.clone()]
         .iter()
@@ -839,7 +839,7 @@ fn write_hsps_or_skips<W: Write>(
             }
         }
         match &skipped {
-            None => write_hsp(writer, hit)?,
+            None => write_hsp(writer, hit, hsp_index)?,
             Some(id) => write_skipped_alignment(writer, id)?,
         }
         if let Some(probe) = probe.as_mut() {
@@ -883,7 +883,7 @@ fn write_database_subject_alignments_part<W: Write>(
     hsp_indices: &[HspIndex],
     part: std::ops::Range<usize>,
     html: Option<HtmlHeading<'_>>,
-    write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+    write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     let first_index = hsp_indices[0];
     let skipped = if part.start == 0 {
@@ -1298,9 +1298,12 @@ fn write_hsp_identities<W: Write>(
 ///             MVLSPADKTN VKAAWGKVGA HAGEYGAEAL ERMFLSFPTT KTYFPHFDLS H
 /// Sbjct  1    MVLSPADKTN VKAAWGKVGA HAGEYGAEAL ERMFLSFPTT KTYFPHFDLS H  60
 /// ```
+///
+/// `masks`: the rows' masks under `-html` (`HtmlRowMasks`), `None` without.
 pub fn write_alignment<W: Write>(
     writer: &mut W,
     hit: &PairwiseHit,
+    masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let h = &hit.hit;
@@ -1314,8 +1317,7 @@ pub fn write_alignment<W: Write>(
             sseq,
             [&hit.query_stored_gaps, &hit.subject_stored_gaps],
             hit.query_case,
-            // The rows hold their masks in lower case (`query_anchored::output_seq`).
-            None,
+            masks,
             config,
         )?;
     } else {
@@ -1343,8 +1345,7 @@ pub fn write_alignment<W: Write>(
 /// from high to low), rows of letters (`write_hsp_rows`). `stored_gaps` are the columns of the
 /// query's and the subject's rows whose `-` is a residue (`PairwiseHit::query_stored_gaps`,
 /// `PairwiseHit::subject_stored_gaps`), `query_case` how the query row's letters compare
-/// (`PairwiseHit::query_case`), `masks` the rows' masks for `query_anchored::output_seq` (`None`:
-/// the rows hold them in lower case).
+/// (`PairwiseHit::query_case`), `masks` the rows' masks under `-html` (`write_hsp_rows`).
 fn write_alignment_with_sequences<W: Write>(
     writer: &mut W,
     hit: &Hit,
@@ -1425,6 +1426,37 @@ fn write_alignment_with_sequences<W: Write>(
     )
 }
 
+/// The rows' masks of a report's HSPs under `-html` (`HspMasks` by HSP, NCBI's
+/// `alnRoInfo->masked_regions` of each HSP's rows): `query_anchored::output_seq` puts each mask
+/// of a row's line in NCBI's span. The rows' builders keep them only then (the rows hold the
+/// masks' letters in lower case in every report, and `PairwiseHit` holds no list: the plain
+/// report reads none). `masks[i]` is that of HSP `first + i` of the run's hits (`HspIndex`);
+/// without `-html` the table is empty.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct HtmlRowMasks<'a> {
+    masks: &'a [super::query_anchored::HspMasks],
+    first: HspIndex,
+}
+
+impl<'a> HtmlRowMasks<'a> {
+    /// The table of the masks `masks` (`None` without `-html`) of the hits from HSP `first` on.
+    pub(crate) fn new(
+        masks: Option<&'a [super::query_anchored::HspMasks]>,
+        first: HspIndex,
+    ) -> Self {
+        Self {
+            masks: masks.unwrap_or_default(),
+            first,
+        }
+    }
+
+    /// The masks of the rows of HSP `hsp_index`; `None` without `-html`.
+    #[inline]
+    pub(crate) fn of(self, hsp_index: HspIndex) -> Option<&'a super::query_anchored::HspMasks> {
+        self.masks.get(hsp_index.checked_sub(self.first)?)
+    }
+}
+
 thread_local! {
     /// The vectors of outfmt 0's rows (`write_hsp_rows`): an HSP's segments and its `CAlnVec`,
     /// kept from HSP to HSP of the thread's reports. No NCBI counterpart: NCBI makes a new
@@ -1444,9 +1476,11 @@ const ROW_LABELS: [&str; 2] = ["Query", "Sbjct"];
 /// `CAlnVec` (`query_anchored::HspAlnVec`) of its Seq-align's segments, which `segments_of` makes
 /// (the producer of the program, `report::serial::seqalign`, as the query-anchored reports'
 /// `section_hsps`), of row widths `widths` (`HspStrands::no_widths`: none); `letters` are the rows'
-/// letters (NCBI's row strings: an end gap is the end character, a space), a line of a row
-/// written through `x_OutputSeq` (`query_anchored::write_output_seq`) with the row's masks of
-/// `masks`, and `write_middle(writer, columns)` writes the middle line's. `width` is the width
+/// letters (NCBI's row strings: an end gap is the end character, a space; a mask's letters in
+/// lower case), a line of a row written through `x_OutputSeq` (`query_anchored::write_output_seq`):
+/// under `-html` with the row's masks of `masks` (`HtmlRowMasks`), each in NCBI's span, else as
+/// the letters are (`masks` is `None`), and `write_middle(writer, columns)` writes the middle
+/// line's. `width` is the width
 /// of the coordinates (`maxStartLen`, `coordinate_width`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1435-1438,1452-1453
@@ -1512,7 +1546,7 @@ fn write_hsp_rows<W: Write>(
                             aln_start,
                             line.len(),
                             masks.and_then(|masks| masks.row(row)),
-                            false,
+                            masks.is_some(),
                         )
                     },
                 )?;
@@ -2584,6 +2618,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
         epilog,
         x_pool,
         None,
+        None,
     )
 }
 
@@ -2612,6 +2647,8 @@ pub fn write_blastp_pairwise_window<W: Write>(
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
+    row_masks: Option<&[super::query_anchored::HspMasks]>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -2666,6 +2703,7 @@ pub fn write_blastp_pairwise_window<W: Write>(
             parsed_subjects,
             subject_sources,
             anchored,
+            row_masks: HtmlRowMasks::new(row_masks, 0),
         },
         query_range.start,
         &hits_by_query,
@@ -2711,6 +2749,8 @@ struct BlastpSections<'a> {
     subject_sources: &'a [super::defline::SourceTaxname],
     /// The sequences of the query-anchored sections (outfmt 1 to 4).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// The rows' masks of the HSPs under `-html` (outfmt 0).
+    row_masks: HtmlRowMasks<'a>,
 }
 
 /// The HSPs of a query-anchored section (outfmt 1 to 4), added to `hsps`: the first
@@ -3225,7 +3265,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 &group.subject_hit_indices[&s_idx],
                 part,
                 None,
-                |_, _| unreachable!("a skipped alignment is written by its line"),
+                |_, _, _| unreachable!("a skipped alignment is written by its line"),
             );
         }
         let (parsed, sources) = (self.parsed_subjects, self.subject_sources);
@@ -3240,9 +3280,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             config.html.as_ref(),
             parsed,
             |subject| group_heading(group, parsed, sources, database, true, subject),
-            |writer, hit| {
+            |writer, hit, hsp_index| {
                 write_hsp_info(writer, hit, config)?;
-                write_alignment(writer, hit, config)
+                write_alignment(writer, hit, self.row_masks.of(hsp_index), config)
             },
         )
     }
@@ -3971,6 +4011,8 @@ pub fn write_blastn_pairwise_report<W: Write>(
     warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
+    row_masks: Option<&[super::query_anchored::HspMasks]>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -4007,6 +4049,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             queries,
             report,
             anchored,
+            row_masks: HtmlRowMasks::new(row_masks, 0),
         },
         query_range.start,
         &hits_by_query,
@@ -4033,6 +4076,8 @@ struct BlastnSections<'a> {
     report: &'a BlastnPairwiseReport,
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// The rows' masks of the HSPs under `-html` (outfmt 0).
+    row_masks: HtmlRowMasks<'a>,
 }
 
 impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
@@ -4148,9 +4193,9 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             config.html.as_ref(),
             parsed,
             |subject| group_heading(group, parsed, sources, database, gapped, subject),
-            |writer, hit| {
+            |writer, hit, hsp_index| {
                 hsp_info(writer, hit, config)?;
-                write_alignment(writer, hit, config)
+                write_alignment(writer, hit, self.row_masks.of(hsp_index), config)
             },
         )
     }
@@ -4351,6 +4396,7 @@ fn write_tblastx_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
 fn write_tblastx_alignment<W: Write>(
     writer: &mut W,
     hit: &PairwiseHit,
+    masks: Option<&super::query_anchored::HspMasks>,
     query_length: usize,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
@@ -4375,8 +4421,7 @@ fn write_tblastx_alignment<W: Write>(
         [3, 3],
         config.line_length,
         [q, s],
-        // The rows hold their masks in lower case (`query_anchored::output_seq`).
-        None,
+        masks,
         width,
         |writer, columns| {
             write_protein_middle(
@@ -4514,6 +4559,8 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     // The sequences of the query-anchored sections (outfmt 1 to 4, `config.view`; `None` for
     // outfmt 0).
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
+    row_masks: Option<&[super::query_anchored::HspMasks]>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -4549,6 +4596,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             report,
             database,
             anchored,
+            row_masks: HtmlRowMasks::new(row_masks, 0),
         },
         query_range.start,
         &hits_by_query,
@@ -4575,6 +4623,8 @@ struct TblastxSections<'a> {
     database: Option<&'a PairwiseDatabase>,
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// The rows' masks of the HSPs under `-html` (outfmt 0).
+    row_masks: HtmlRowMasks<'a>,
 }
 
 impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
@@ -4660,10 +4710,11 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3971-3980
         // The query's record length (`Length=`), also with `-query_loc`: the hits of the query's
         // group are its hits (`x_pairwise_par::write` groups them by `Hit::q_idx`).
-        let write_hsp = |writer: &mut W, hit: &PairwiseHit| {
+        let write_hsp = |writer: &mut W, hit: &PairwiseHit, hsp_index: HspIndex| {
             let query_length = self.queries[hit.hit.q_idx as usize].query_length;
             write_tblastx_hsp_info(writer, hit)?;
-            write_tblastx_alignment(writer, hit, query_length, config)?;
+            let masks = self.row_masks.of(hsp_index);
+            write_tblastx_alignment(writer, hit, masks, query_length, config)?;
             writeln!(writer)
         };
         // A database sequence's heading is its stored title after `>` (as BLASTP's,
@@ -4781,6 +4832,8 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
+    // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
+    row_masks: Option<&[super::query_anchored::HspMasks]>,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-224:
     // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
@@ -4842,6 +4895,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             report,
             database,
             anchored,
+            row_masks: HtmlRowMasks::new(row_masks, 0),
         },
         0,
         &hits_by_query,
@@ -4878,6 +4932,8 @@ struct TblastnSections<'a> {
     database: Option<&'a PairwiseDatabase>,
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// The rows' masks of the HSPs under `-html` (outfmt 0).
+    row_masks: HtmlRowMasks<'a>,
 }
 
 impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
@@ -4988,9 +5044,9 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         let config = self.config;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3650-3668:
         // display leaves an extra blank line after each translated HSP.
-        let write_hsp = |writer: &mut W, hit: &PairwiseHit| {
+        let write_hsp = |writer: &mut W, hit: &PairwiseHit, hsp_index: HspIndex| {
             write_tblastn_hsp_info(writer, hit)?;
-            write_tblastn_alignment(writer, hit, config)?;
+            write_tblastn_alignment(writer, hit, self.row_masks.of(hsp_index), config)?;
             writeln!(writer)
         };
         // A database sequence's heading is its stored title after `>` (as BLASTP's
@@ -5116,6 +5172,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
 fn write_tblastn_alignment<W: Write>(
     writer: &mut W,
     hit: &PairwiseHit,
+    masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let (Some(qseq), Some(sseq)) = (&hit.query_seq, &hit.subject_seq) else {
@@ -5139,8 +5196,7 @@ fn write_tblastn_alignment<W: Write>(
         [1, 3],
         config.line_length,
         [q, s],
-        // The rows hold their masks in lower case (`query_anchored::output_seq`).
-        None,
+        masks,
         width,
         |writer, columns| {
             write_protein_middle(
@@ -5206,6 +5262,8 @@ pub fn write_blastx_pairwise_report<W: Write>(
     // outfmt 0).
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
+    row_masks: Option<&[super::query_anchored::HspMasks]>,
 ) -> io::Result<()> {
     let sections = BlastxSections {
         config,
@@ -5218,6 +5276,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         records_parsed,
         record_titles,
         anchored,
+        row_masks: HtmlRowMasks::new(row_masks, first_hsp),
     };
     // `hits[i]` is HSP `first_hsp + i` of the run's hit list (LOSAT Web's `run_local` writes a run
     // batch by batch).
@@ -5286,6 +5345,8 @@ struct BlastxSections<'a> {
     record_titles: &'a [&'a [u8]],
     /// The sequences of the query-anchored sections (outfmt 1 to 4; `None` for outfmt 0).
     anchored: Option<&'a dyn super::query_anchored::ReportSequences>,
+    /// The rows' masks of the HSPs under `-html` (outfmt 0).
+    row_masks: HtmlRowMasks<'a>,
 }
 
 impl BlastxSections<'_> {
@@ -5314,9 +5375,9 @@ impl BlastxSections<'_> {
         let config = self.config;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3650-3668:
         // display leaves an extra blank line after each translated HSP.
-        let write_hsp = |writer: &mut W, hit: &PairwiseHit| {
+        let write_hsp = |writer: &mut W, hit: &PairwiseHit, hsp_index: HspIndex| {
             write_tblastn_hsp_info(writer, hit)?;
-            write_blastx_alignment(writer, hit, config)?;
+            write_blastx_alignment(writer, hit, self.row_masks.of(hsp_index), config)?;
             writeln!(writer)
         };
         let heading_of = |s_idx: u32| {
@@ -5637,6 +5698,7 @@ fn write_blastx_query_footer(
 fn write_blastx_alignment(
     writer: &mut impl Write,
     hit: &PairwiseHit,
+    masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let (Some(qseq), Some(sseq)) = (&hit.query_seq, &hit.subject_seq) else {
@@ -5671,8 +5733,7 @@ fn write_blastx_alignment(
         [3, 1],
         config.line_length,
         [q, s],
-        // The rows hold their masks in lower case (`query_anchored::output_seq`).
-        None,
+        masks,
         width,
         |writer, columns| {
             write_protein_middle(

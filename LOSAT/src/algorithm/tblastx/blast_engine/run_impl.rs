@@ -2126,27 +2126,28 @@ fn write_tblastx_outputs(
         TblastxMatrix::Table(matrix) => matrix,
         TblastxMatrix::Unknown | TblastxMatrix::Aborts => ScoringMatrix::Blosum62,
     };
-    let (engine_counts, seqalign_identities, pairwise) = if matrix == ScoringMatrix::Blosum62 {
-        report_counts(
-            Blosum62Score,
-            &mut hits,
-            outputs,
-            run,
-            &output_formats,
-            &query_code,
-            &db_code,
-        )
-    } else {
-        report_counts(
-            matrix,
-            &mut hits,
-            outputs,
-            run,
-            &output_formats,
-            &query_code,
-            &db_code,
-        )
-    };
+    let (engine_counts, seqalign_identities, pairwise, pairwise_masks) =
+        if matrix == ScoringMatrix::Blosum62 {
+            report_counts(
+                Blosum62Score,
+                &mut hits,
+                outputs,
+                run,
+                &output_formats,
+                &query_code,
+                &db_code,
+            )
+        } else {
+            report_counts(
+                matrix,
+                &mut hits,
+                outputs,
+                run,
+                &output_formats,
+                &query_code,
+                &db_code,
+            )
+        };
     // The tabular rows print record coordinates (`report::shift_to_records`); the outfmt 0
     // rows above were read from the searched letters first.
     report::shift_to_records(
@@ -2471,6 +2472,7 @@ fn write_tblastx_outputs(
                     // what it wrote before (`query_anchored::write_section`) with `CATCH_ALL`'s report
                     // (`NativeError::of_writer`), without the epilog or the later batches.
                     let mut write = |rows: &[crate::report::pairwise::PairwiseHit],
+                                     masks: Option<&[crate::report::query_anchored::HspMasks]>,
                                      range: std::ops::Range<usize>|
                      -> Result<()> {
                         crate::report::pairwise::write_tblastx_pairwise_report(
@@ -2488,11 +2490,12 @@ fn write_tblastx_outputs(
                             anchored.as_ref().map(|sequences| {
                                 sequences as &dyn crate::report::query_anchored::ReportSequences
                             }),
+                            masks,
                         )
                         .map_err(crate::cli::NativeError::of_writer)
                     };
                     match pairwise.as_deref() {
-                        Some(rows) => write(rows, 0..queries.len())?,
+                        Some(rows) => write(rows, pairwise_masks.as_deref(), 0..queries.len())?,
                         None => {
                             // The rows of a window of queries (`report::pairwise_windows`), written
                             // and dropped before the next window's (line DBID, ID4t): the same rows
@@ -2523,7 +2526,7 @@ fn write_tblastx_outputs(
                             );
                             if windows.is_empty() {
                                 // No query: the prolog and the epilog alone.
-                                write(&[], 0..0)?;
+                                write(&[], None, 0..0)?;
                             }
                             for range in windows {
                                 let first = hits
@@ -2534,12 +2537,18 @@ fn write_tblastx_outputs(
                                 let identities = seqalign_identities
                                     .as_deref()
                                     .map(|identities| &identities[first..end]);
+                                // Under `-html` the rows' masks (`HtmlRowMasks`).
+                                let mut masks = config.html.is_some().then(Vec::new);
                                 // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows as an indexed map on
                                 // the pool.
                                 let mut rows = match run.x_pool {
                                     Some(pool) => {
                                         crate::algorithm::tblastx::x_rpt_par::pairwise_hits(
-                                            pool, window, identities, &shown,
+                                            pool,
+                                            window,
+                                            identities,
+                                            &shown,
+                                            masks.as_mut(),
                                         )
                                     }
                                     None => {
@@ -2550,12 +2559,16 @@ fn write_tblastx_outputs(
                                             .iter()
                                             .enumerate()
                                             .map(|(index, hsp)| {
-                                                shown.hit(
+                                                let hit = shown.hit(
                                                     hsp,
                                                     identities.map(|identities| identities[index]),
                                                     &mut buffer,
                                                     &mut row_masks,
-                                                )
+                                                );
+                                                if let Some(table) = masks.as_mut() {
+                                                    table.push(row_masks.copy_rows());
+                                                }
+                                                hit
                                             })
                                             .collect()
                                     }
@@ -2564,7 +2577,7 @@ fn write_tblastx_outputs(
                                 if matrix != ScoringMatrix::Blosum62 {
                                     report::set_row_positives(&mut rows, matrix);
                                 }
-                                write(&rows, range)?;
+                                write(&rows, masks.as_deref(), range)?;
                             }
                         }
                     }
@@ -2767,6 +2780,8 @@ fn report_counts<S: TbxScore>(
     Vec<(u32, u32)>,
     Option<Vec<u32>>,
     Option<Vec<crate::report::pairwise::PairwiseHit>>,
+    // Under `-html`, the rows' masks of those rows (`HtmlRowMasks`, the spans of outfmt 0).
+    Option<Vec<crate::report::query_anchored::HspMasks>>,
 ) {
     // The BLAST archive (outfmt 11) writes the same Seq-aligns.
     let seqalign = output_formats.iter().any(|format| {
@@ -2839,7 +2854,10 @@ fn report_counts<S: TbxScore>(
     // The caller receives the same final result that every formatter prints, with the
     // displayed rows of outfmt 0. Otherwise outfmt 0 makes its rows a window of queries at a
     // time (`rows_up_front`).
-    let mut pairwise = rows_up_front(outputs, run, output_formats)
+    let up_front = rows_up_front(outputs, run, output_formats);
+    // Under `-html` the rows' masks of those rows (`HtmlRowMasks`).
+    let mut pairwise_masks = (up_front && run.args.html_links.is_some()).then(Vec::new);
+    let mut pairwise = up_front
         // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows as an indexed map on the pool.
         .then(|| match run.x_pool {
             Some(pool) => crate::algorithm::tblastx::x_rpt_par::pairwise_hits(
@@ -2856,6 +2874,7 @@ fn report_counts<S: TbxScore>(
                     &run.ranges.input.placements,
                     run.ranges.subject_placements,
                 ),
+                pairwise_masks.as_mut(),
             ),
             None => report::pairwise_hits(
                 hits,
@@ -2868,6 +2887,7 @@ fn report_counts<S: TbxScore>(
                 db_code,
                 &run.ranges.input.placements,
                 run.ranges.subject_placements,
+                pairwise_masks.as_mut(),
             ),
         });
     // The rows count BLOSUM62's positives (`report::set_row_positives`).
@@ -2876,7 +2896,7 @@ fn report_counts<S: TbxScore>(
             report::set_row_positives(rows, sc.matrix());
         }
     }
-    (engine_counts, seqalign_identities, pairwise)
+    (engine_counts, seqalign_identities, pairwise, pairwise_masks)
 }
 
 /// The subject ID of the tabular formats of the subject record `subject`, `None` where

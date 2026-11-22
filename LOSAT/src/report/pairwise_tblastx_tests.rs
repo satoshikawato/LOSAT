@@ -275,7 +275,7 @@ fn tblastx_reports_of_consecutive_query_ranges_are_the_whole_report() {
                         &mut diagnostics,
                     )),
                     x_pool,
-                    None,
+                    None, None,
                 )
                 .unwrap();
                 (written, diagnostics)
@@ -335,7 +335,14 @@ fn tblastx_hsp_info_prints_the_linked_set_and_both_frames() {
 fn tblastx_rows_step_three_nucleotides_in_each_frame_direction() {
     let mut out = Vec::new();
     // The query's record has 300 nucleotides (frame -2 at 200).
-    write_tblastx_alignment(&mut out, &tblastx_hit(1), 300, &PairwiseConfig::default()).unwrap();
+    write_tblastx_alignment(
+        &mut out,
+        &tblastx_hit(1),
+        None,
+        300,
+        &PairwiseConfig::default(),
+    )
+    .unwrap();
     let text = String::from_utf8(out).unwrap();
     let lines: Vec<&str> = text.lines().collect();
     let row = "ACDEFGHIKL".repeat(6);
@@ -854,6 +861,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
             0,
             None,
             pool,
+            None,
         )
         .unwrap_err();
         // The merged stream when the error comes back: the report's last bytes are there
@@ -1048,7 +1056,7 @@ fn a_title_of_unknown_encoding_is_unknown_and_its_alignments_are_skipped() {
         &[0, 1],
         0..hits[&0].len(),
         None,
-        |_, _| panic!("no HSP is written"),
+        |_, _, _| panic!("no HSP is written"),
     )
     .unwrap();
     assert_eq!(
@@ -1163,6 +1171,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
             None,
             true,
             true,
+            None,
             None,
             None,
         )

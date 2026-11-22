@@ -761,6 +761,7 @@ fn write_run(
                         .map_or(subjects, ReportedSubjects::records),
                     &batch_shown(database.as_ref(), reported.as_ref(), shown),
                     results,
+                    None,
                 )
                 .map_err(report_error)?,
             ),

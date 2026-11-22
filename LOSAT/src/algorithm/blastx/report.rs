@@ -783,11 +783,21 @@ fn write_pairwise(
             reads.push(shown.query_reads(batch.query_ordinal + qidx).clone());
         }
     }
+    // Under `-html` the rows' masks of each hit (`HtmlRowMasks`, the spans of outfmt 0), made with
+    // the rows: the hits made for the caller (`made_hits`, the same rows) are made again with them.
+    let mut html_masks = options.html.is_some().then(Vec::new);
     let made;
     let hits = match made_hits {
-        Some(hits) => hits,
-        None => {
-            made = pairwise_hits(options, queries, subjects, shown, batches)?;
+        Some(hits) if html_masks.is_none() => hits,
+        _ => {
+            made = pairwise_hits(
+                options,
+                queries,
+                subjects,
+                shown,
+                batches,
+                html_masks.as_mut(),
+            )?;
             &made
         }
     };
@@ -989,6 +999,7 @@ fn write_pairwise(
             .as_ref()
             .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
         pool.and_then(crate::report::x_pairwise_par::pool),
+        html_masks.as_deref(),
     )
     .map_err(empty_rows_stop)?;
     Ok(())
@@ -1023,12 +1034,15 @@ fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
 /// The hits of the HSPs that the reports of `batches` show (`has_seqalign`), in the order of the
 /// reports (the lists sorted by e-value, `sort_lists`); `q_idx` is the query's index in `queries`.
 /// Outfmt 0 writes them (`write_pairwise`), and LOSAT Web's `run_local` hands them to its caller.
+/// Under `-html` (`html_masks`) each hit's rows' masks are added to `html_masks` in the same order
+/// (`report::pairwise::HtmlRowMasks`).
 pub(super) fn pairwise_hits(
     options: &ResolvedOptions,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) -> Result<Vec<crate::report::pairwise::PairwiseHit>> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
@@ -1087,7 +1101,10 @@ pub(super) fn pairwise_hits(
                         num_positives: counts.positive,
                     };
                     // The row holds its masks in lower case; the lists are left to the next
-                    // row (`query_anchored::output_seq`).
+                    // row (`query_anchored::output_seq`), or copied under `-html`.
+                    if html_masks.is_some() {
+                        row_masks.clear();
+                    }
                     let query_seq = query_row_masks(
                         a.qseq,
                         (a.qstart, a.qend),
@@ -1095,6 +1112,9 @@ pub(super) fn pairwise_hits(
                         &query_masks,
                         &mut row_masks,
                     );
+                    if let Some(table) = html_masks.as_deref_mut() {
+                        table.push(row_masks.copy_rows());
+                    }
                     hits.push(PairwiseHit {
                         hit,
                         query_seq: Some(query_seq),
@@ -1159,10 +1179,10 @@ pub(super) fn pairwise_hits(
     // (`FastaRecord::archive_lowercase_runs`). `-db_soft_mask` and `-db_hard_mask`: the stored
     // masks by NCBI's Seq-id (`ReportedSubjects::shown_db_masks`).
     if let Some(masks) = db_subject_masks(shown, &hits) {
-        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &masks);
+        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &masks, html_masks);
     } else if subjects.iter().any(FastaRecord::has_lowercase_runs) {
         let kept = super::x_soft_subject::x_subject_masks(&hits, subjects);
-        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &kept);
+        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &kept, html_masks);
     }
     Ok(hits)
 }

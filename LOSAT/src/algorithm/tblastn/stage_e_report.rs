@@ -7,7 +7,6 @@ use std::sync::Arc;
 use anyhow::{bail, ensure, Context, Result};
 
 use super::search_gapped::TargetTranslation;
-use super::search_seed::encode_tblastn_lookup_query;
 use super::stage_d_pipeline::{LocalStageDScoring, SubjectSetNumbers};
 use super::stage_d_results::KappaResultHitList;
 use super::stage_d_stats::LocalSubjectParameters;
@@ -547,8 +546,10 @@ pub(super) fn render(
         .formats
         .iter()
         .any(|format| (1..=4).contains(&format_number(format.outfmt)));
-    // The masks of the rows, kept for the sections of outfmt 1 to 4 only (`pairwise_hits`).
+    // The masks of the rows, kept for the sections of outfmt 1 to 4 only (`pairwise_hits`), and
+    // under `-html` those of each hit's rows (the spans of outfmt 0).
     let mut section_masks: Vec<Vec<(usize, usize)>> = Vec::new();
+    let mut html_masks = tabular.html.is_some().then(Vec::new);
     let pairwise_hits = if outputs.hits.is_some()
         || outputs
             .formats
@@ -568,6 +569,7 @@ pub(super) fn render(
             pssm.is_none(),
             query_bioseq,
             anchored_formats.then_some(&mut section_masks),
+            html_masks.as_mut(),
         )?))
     } else {
         None
@@ -817,6 +819,7 @@ pub(super) fn render(
                     .expect("a pairwise view of formats 0 to 4"),
                     anchored.as_ref(),
                     tabular.html.as_ref(),
+                    html_masks.as_deref(),
                 )?,
                 // BLAST XML: one document per run, a header before the first query and a
                 // trailer after the last (`blast_xml`).
@@ -1214,6 +1217,9 @@ fn pairwise_hits(
     // PSSM query) are pushed in query order, for the query-anchored sections of outfmt 1 to 4,
     // which show the same masks (`render`: SEG runs once per query).
     mut masks_out: Option<&mut Vec<Vec<(usize, usize)>>>,
+    // Under `-html`, the rows' masks of each hit, in the order of the hits
+    // (`report::pairwise::HtmlRowMasks`).
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) -> Result<Vec<PairwiseHit>> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
@@ -1225,9 +1231,10 @@ fn pairwise_hits(
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1541-1557:
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:294
         // A PSSM query's search (`CPsiBlastImpl::Run`, psiblast_impl.cpp:120-170) never sets the
-        // filtered regions: its alignments show no masks.
+        // filtered regions: its alignments show no masks. The others show NCBI's list
+        // (`blast_xml::row_masks`).
         let report_masks = if query_masks {
-            encode_tblastn_lookup_query(query, seg, mask_lowercase).seg_masks
+            super::blast_xml::row_masks(query, seg, mask_lowercase)
         } else {
             Vec::new()
         };
@@ -1265,9 +1272,15 @@ fn pairwise_hits(
                     &payload.edit_script,
                 )?;
                 // The row holds its masks in lower case; the lists are left to the next row
-                // (`query_anchored::output_seq`).
+                // (`query_anchored::output_seq`), or copied under `-html`.
+                if html_masks.is_some() {
+                    row_masks.clear();
+                }
                 let qseq =
                     query_row_masks(qseq, &report_masks, hsp.q_start, hsp.q_end, &mut row_masks)?;
+                if let Some(table) = html_masks.as_deref_mut() {
+                    table.push(row_masks.copy_rows());
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
                 let report_positives = crate::report::row_letters::display_positives(
                     qseq.as_bytes(),
@@ -1407,8 +1420,10 @@ fn write_pairwise(
     // sequences `anchored`.
     view: crate::report::pairwise::PairwiseView,
     anchored: Option<&super::anchored::AnchoredSequences<'_>>,
-    // `-html`: the HTML form of the report (`TabularInputs::html`).
+    // `-html`: the HTML form of the report (`TabularInputs::html`), and the rows' masks of `hits`
+    // (`pairwise_hits`).
     html: Option<&Arc<crate::report::html_ids::HtmlLinks>>,
+    html_masks: Option<&[crate::report::query_anchored::HspMasks]>,
 ) -> Result<()> {
     ensure!(
         ungapped_karlin.len() == query_records.len() && query_validity.len() == query_records.len(),
@@ -1528,6 +1543,7 @@ fn write_pairwise(
         warnings,
         ranges.epilog,
         anchored.map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
+        html_masks,
     )?;
     Ok(())
 }

@@ -862,6 +862,8 @@ pub(super) fn write_pairwise(
                     },
                 }
             });
+        // Under `-html` the rows' masks of each HSP (`HtmlRowMasks`, the spans of outfmt 0).
+        let mut html_masks = None;
         if anchored_sequences.is_none()
             && (query_masks.is_some() || args.lcase_masking || db_subject_masks.is_some())
         {
@@ -873,10 +875,12 @@ pub(super) fn write_pairwise(
                 Default::default()
             };
             let no_masks = Default::default();
+            html_masks = args.html.is_some().then(Vec::new);
             set_row_masks(
                 rows.to_mut(),
                 query_masks.as_deref(),
                 [&lcase_masks, db_subject_masks.as_ref().unwrap_or(&no_masks)],
+                html_masks.as_mut(),
             );
         }
         // psiblast's rounds: the round's report (`psiblast_round`), without the
@@ -928,6 +932,7 @@ pub(super) fn write_pairwise(
             anchored_sequences
                 .as_ref()
                 .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
+            html_masks.as_deref(),
         )?;
     }
     Ok(())

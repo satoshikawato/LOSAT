@@ -392,7 +392,7 @@ impl RoundSections<'_> {
                 &group.subject_hit_indices[&s_idx],
                 0..hsps,
                 None,
-                |_, _| unreachable!("a skipped alignment is written by its line"),
+                |_, _, _| unreachable!("a skipped alignment is written by its line"),
             );
         }
         let parsed = self.parsed(s_idx);
@@ -413,9 +413,10 @@ impl RoundSections<'_> {
                 &group.subject_hit_indices[&s_idx],
                 0..hsps,
                 None,
-                |writer, hit| {
+                |writer, hit, _| {
                     write_hsp_info(writer, hit, config)?;
-                    write_alignment(writer, hit, config)
+                    // psiblast refuses `-html`: the rows have no spans.
+                    write_alignment(writer, hit, None, config)
                 },
             );
         }
@@ -430,9 +431,9 @@ impl RoundSections<'_> {
             &group.subject_hit_indices[&s_idx],
             0..hsps,
             None,
-            |writer, hit| {
+            |writer, hit, _| {
                 write_hsp_info(writer, hit, config)?;
-                write_alignment(writer, hit, config)
+                write_alignment(writer, hit, None, config)
             },
         )
     }

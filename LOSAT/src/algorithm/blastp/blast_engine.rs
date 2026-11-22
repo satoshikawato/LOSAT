@@ -2683,14 +2683,20 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 /// masked database search's masks, `db_mask_search::shown_db_subject_masks`), at the columns of
 /// `x_FillLocList` (`query_anchored::fill_row_loc_list`: a mask position outside the aligned range
 /// is the row's first or last residue), which `x_OutputSeq` puts in lower case when it writes the
-/// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row.
+/// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row,
+/// except under `-html`, where each HSP's go to `html_masks` in the order of `hits`
+/// (`HspMasks::copy_rows`, `report::pairwise::HtmlRowMasks`: their spans).
 fn set_row_masks(
     hits: &mut [PairwiseHit],
     query_masks: Option<&[Vec<(i32, i32)>]>,
     subject_masks: [&std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>; 2],
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) {
     let mut masks = crate::report::query_anchored::HspMasks::default();
     for hit in hits {
+        if html_masks.is_some() {
+            masks.clear();
+        }
         let query = query_masks.map_or(&[][..], |masks| &masks[hit.hit.q_idx as usize][..]);
         // A row without letters (`-ungapped`'s HSP of length 0, whose range ends before it
         // starts) has no mask.
@@ -2749,6 +2755,9 @@ fn set_row_masks(
             );
             masks.lower_row(1, &mut letters);
             *shown = String::from_utf8(letters).expect("ASCII alignment row");
+        }
+        if let Some(table) = html_masks.as_deref_mut() {
+            table.push(masks.copy_rows());
         }
     }
 }

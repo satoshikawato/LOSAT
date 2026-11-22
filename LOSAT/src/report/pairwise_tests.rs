@@ -411,7 +411,7 @@ fn heading_of(title: &[u8]) -> String {
         &[0],
         0..1,
         None,
-        |writer: &mut Vec<u8>, _| writer.write_all(b"<hsp>\n"),
+        |writer: &mut Vec<u8>, _, _| writer.write_all(b"<hsp>\n"),
     )
     .unwrap();
     String::from_utf8(written).unwrap()
@@ -713,19 +713,19 @@ fn translated_alignment_rows_of_one_column_hide_only_a_letter_row_at_1() {
     };
     let blastx = hit(6, 2, Some(1), None);
     assert_eq!(
-        text(&|out| write_blastx_alignment(out, &blastx, &config)),
+        text(&|out| write_blastx_alignment(out, &blastx, None, &config)),
         "Query  1  M  3\n          M\nSbjct     M  \n\n\
              Query  4  R  6\n          R\nSbjct  2  R  2\n\n"
     );
     let tblastn = hit(2, 6, None, Some(1));
     assert_eq!(
-        text(&|out| write_tblastn_alignment(out, &tblastn, &config)),
+        text(&|out| write_tblastn_alignment(out, &tblastn, None, &config)),
         "Query     M  \n          M\nSbjct  1  M  3\n\n\
              Query  2  R  2\n          R\nSbjct  4  R  6\n\n"
     );
     let tblastx = hit(6, 6, Some(1), Some(1));
     assert_eq!(
-        text(&|out| write_tblastx_alignment(out, &tblastx, 6, &config)),
+        text(&|out| write_tblastx_alignment(out, &tblastx, None, 6, &config)),
         "Query  1  M  3\n          M\nSbjct  1  M  3\n\n\
              Query  4  R  6\n          R\nSbjct  4  R  6\n\n"
     );
@@ -734,7 +734,7 @@ fn translated_alignment_rows_of_one_column_hide_only_a_letter_row_at_1() {
     let mut minus = hit(1, 2, Some(-1), None);
     (minus.hit.q_start, minus.hit.query_length) = (6, 6);
     assert_eq!(
-        text(&|out| write_blastx_alignment(out, &minus, &config)),
+        text(&|out| write_blastx_alignment(out, &minus, None, &config)),
         "Query  6  M  4\n          M\nSbjct     M  \n\n\
              Query  3  R  1\n          R\nSbjct  2  R  2\n\n"
     );
@@ -780,7 +780,7 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
     blastx.hit.query_length = 2707;
     for (line_length, end) in [(1431655765, 2693), (1431655766, 2706), (1431655767, 2703)] {
         assert_eq!(
-            text(&|out| write_blastx_alignment(out, &blastx, &config(line_length))),
+            text(&|out| write_blastx_alignment(out, &blastx, None, &config(line_length))),
             format!("Query  2707  MRKVL  {end}\n             MRKVL\nSbjct  4     MRKVL  8\n\n"),
             "-line_length {line_length}"
         );
@@ -788,7 +788,7 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
     let tblastn = hit((1, 5), (574, 588), None, Some(1));
     for (line_length, end) in [(1431655765, 588), (1431655766, 575), (1431655767, 578)] {
         assert_eq!(
-            text(&|out| write_tblastn_alignment(out, &tblastn, &config(line_length))),
+            text(&|out| write_tblastn_alignment(out, &tblastn, None, &config(line_length))),
             format!("Query  1    MRKVL  5\n            MRKVL\nSbjct  574  MRKVL  {end}\n\n"),
             "-line_length {line_length}"
         );
@@ -802,7 +802,7 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
         (2147483647, (16, 584)),
     ] {
         assert_eq!(
-            text(&|out| write_tblastx_alignment(out, &tblastx, 16, &config(line_length))),
+            text(&|out| write_tblastx_alignment(out, &tblastx, None, 16, &config(line_length))),
             format!(
                 "Query  2    MRKVL  {}\n            MRKVL\nSbjct  598  MRKVL  {}\n\n",
                 ends.0, ends.1
@@ -1268,6 +1268,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
                     None,
                     x_pool,
                     None,
+                    None,
                 )
                 .unwrap();
                 written
@@ -1453,4 +1454,90 @@ fn a_malformed_ncbirc_ends_the_html_prolog_after_the_version_line() {
         None,
     )
     .unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2485-2573 (cited at
+// `query_anchored::output_seq`): under `-html` the rows' masks (`HtmlRowMasks`, from the rows'
+// builder) put each mask's columns on a line in a `<font color="#000000">` span. NCBI BLAST+
+// 2.17.0's rows of `blastp -seg yes -lcase_masking -soft_masking true -outfmt 0 -html` of a query
+// of 70 Q with the letters 70-79 in lower case (line RG survey T4 §1.9, `mk.bp.segadj.f0.h`): the
+// SEG mask 0-69 starts at the HSP's first column and runs past the first line, so that line has
+// no span; the lower-case mask that touches it is a mask of its own (NCBI's list is not merged),
+// with its span back to back. Without `-html` the same rows hold the masks in lower case only.
+#[test]
+fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
+    const TAIL: &str = "AEVCLNSHCYPLCPDTSPYSITYRIVVIAWPQTAFFYFIE\
+                        ELLDLEQNTLFHRGEDEWKVQLNYADVVIRPGINGINCHAVEQREHIFTPVCFLNKNDCG\
+                        YKLMAHGSIYIWIGHHDINCSVYDASQLAPYWCWVYARRVLEFSWCHLCDGGRVYYETAC\
+                        DPPCGRPATYTNNETYPWRV";
+    let query = format!("{}vplqwyrgpk{TAIL}", "q".repeat(70));
+    let subject = format!("{}VPLQWYRGPK{TAIL}", "Q".repeat(70))
+        .replacen("SITY", "SVTY", 1)
+        .replacen("CHAVE", "CHAFE", 1)
+        .replacen("RRVLE", "RRVVE", 1);
+    assert_eq!(query.len(), 260);
+    let hit = Hit {
+        length: 260,
+        q_start: 1,
+        q_end: 260,
+        s_start: 1,
+        s_end: 260,
+        ..make_hit()
+    };
+    let config = PairwiseConfig {
+        program: "blastp".to_string(),
+        show_frame: false,
+        ..PairwiseConfig::default()
+    };
+    let mut masks = crate::report::query_anchored::HspMasks::default();
+    masks.set_row(
+        0,
+        0,
+        query.as_bytes(),
+        |_| true,
+        (0, 259),
+        true,
+        1,
+        [(0, 69, 0), (70, 79, 0)],
+    );
+    let rows = |masks: Option<&crate::report::query_anchored::HspMasks>| {
+        let mut output = Vec::new();
+        write_alignment_with_sequences(
+            &mut output,
+            &hit,
+            &query,
+            &subject,
+            [&[], &[]],
+            Default::default(),
+            masks,
+            &config,
+        )
+        .unwrap();
+        String::from_utf8(output).unwrap()
+    };
+    let html = rows(Some(&masks));
+    const OPEN: &str = "<font color=\"#000000\">";
+    const CLOSE: &str = "</font>";
+    let lines: Vec<&str> = html.lines().collect();
+    assert_eq!(lines[0], format!("Query  1    {}  60", "q".repeat(60)));
+    assert_eq!(
+        lines[4],
+        format!(
+            "Query  61   {OPEN}qqqqqqqqqq{CLOSE}{OPEN}vplqwyrgpk{CLOSE}\
+             AEVCLNSHCYPLCPDTSPYSITYRIVVIAWPQTAFFYFIE  120"
+        )
+    );
+    assert_eq!(
+        lines[5],
+        "            QQQQQQQQQQVPLQWYRGPKAEVCLNSHCYPLCPDTSPYS+TYRIVVIAWPQTAFFYFIE"
+    );
+    assert_eq!(html.matches(OPEN).count(), 2);
+    // The spans are all that `-html` adds.
+    assert_eq!(html.replace(OPEN, "").replace(CLOSE, ""), rows(None));
+    // The table of the spans gives the masks of an HSP by its index in the run's hits.
+    let table = [masks.copy_rows()];
+    let of = HtmlRowMasks::new(Some(&table[..]), 4);
+    assert!(of.of(3).is_none() && of.of(5).is_none());
+    assert_eq!(rows(of.of(4)), html);
+    assert!(HtmlRowMasks::new(None, 0).of(0).is_none());
 }

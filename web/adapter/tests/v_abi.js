@@ -1225,6 +1225,7 @@ async function main() {
     console.log(`ok ${engine.name} -logfile names: ${logRows} runs as the CLI's`);
     console.log(`ok ${engine.name} help and version: ${checkPrints(own, options.native)} argvs as the CLI`);
     const subjects = new Map(); // "program subject data_loaders" -> handle, kept across runs
+    const subjectReactors = new Map(); // the same key -> the reactor that holds the handle (a run directory's instance has its own)
     const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
     let countsRegistered = 0, countsKept = 0;
     const databases = new Map(); // a -db search's directory -> the engine's instance whose "/work" it is
@@ -1272,6 +1273,7 @@ async function main() {
           continue;
         }
         subjects.set(subjectKey, registered.status);
+        subjectReactors.set(subjectKey, reactor);
       }
       const q = together ? undefined : reactor.call("losat_web2_register", program, 0, dataLoaders ? 1 : 0, fs.readFileSync(query));
       if (q && q.status < 0) {
@@ -1400,7 +1402,7 @@ async function main() {
       if (q) assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
       if (registry !== null) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
     }
-    for (const handle of subjects.values()) assert.equal(own.call("losat_web2_release", handle).status, 0);
+    for (const [key, handle] of subjects) assert.equal(subjectReactors.get(key).call("losat_web2_release", handle).status, 0);
     for (const { handle } of counts.values()) assert.equal(own.call("losat_web2_file_release", handle).status, 0);
     for (const instance of databases.values()) await instance.close();
     if (countsRegistered + countsKept) console.log(`ok ${engine.name} -window_masker_db and -window_masker_taxid: ${countsRegistered} searches that registered counts, ${countsKept} searches with counts kept or unregistered`);

@@ -364,9 +364,9 @@
   with a valid context would read its subjects (after that chunk's setup checks and the reads of
   the database that fail before it; without a subject in hand nothing is lost and the batch is
   reported); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
-  numbered after 1.75 (line NP item M5, PR #1493, open) at the merge of dev of 2026-11-23 that
-  brought line RG item D5b-3's 1.74; first 1.52, then 1.53 at the merge of dev of 2026-11-18, then
-  1.72 and 1.74 at the merges of dev of 2026-11-22)
+  numbered after 1.75, which open PRs #1493 (line NP item M5) and #1500 (line RG item X4b-2)
+  hold, at the merge of dev of 2026-11-23 that brought line RG item D5b-3's 1.74; first 1.52, then
+  1.53 at the merge of dev of 2026-11-18, then 1.72 and 1.74 at the merges of dev of 2026-11-22)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:

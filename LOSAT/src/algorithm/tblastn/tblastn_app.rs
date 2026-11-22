@@ -163,6 +163,7 @@ fn refused_batch_setup_error(
         pssm: None,
         fetch_excluded: None,
         max_intron_length: resolved.max_intron_length,
+        query_cov_hsp_perc: resolved.query_cov_hsp_perc,
     };
     let setup = super::stage_d_pipeline::set_up_batch(
         &letters,
@@ -2429,8 +2430,9 @@ fn search(
                         break;
                     }
                     let hitlists = &results[span.clone()];
-                    // The batch's Seq-aligns, one for each HSP (`database::seq_aligns_of`).
-                    let seq_aligns = super::database::seq_aligns_of(hitlists);
+                    // The batch's Seq-aligns, one for each HSP of a gapped search, one for each
+                    // subject of an ungapped one (`database::seq_aligns_of`).
+                    let seq_aligns = super::database::seq_aligns_of(hitlists, resolved.gapped);
                     // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                     // (`shared::prefetch_off`), each query's report fetches the subjects it
                     // shows, after the query's own warnings, where the first format's rows read

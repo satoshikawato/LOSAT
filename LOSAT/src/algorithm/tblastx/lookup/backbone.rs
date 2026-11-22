@@ -603,6 +603,13 @@ pub struct BackboneCell16 {
 
 const _: () = assert!(std::mem::size_of::<BackboneCell16>() == 8);
 
+/// PROBE (exp/fx-cellbf, line FX s2): the form of [`BackboneCell16::hits`], fixed at build time
+/// (LOSAT_FXCELL_BUILD, a digit; 0 or unset = dev's branch on the cell's size).
+const X_FX_CELL: u8 = match option_env!("LOSAT_FXCELL_BUILD") {
+    Some(v) => v.as_bytes()[0].wrapping_sub(b'0'),
+    None => 0,
+};
+
 impl XCell for BackboneCell16 {
     type Hit = u16;
     // The farthest read past a list is BLASTX's cross staging (`x_cross_cell`,
@@ -624,6 +631,23 @@ impl XCell for BackboneCell16 {
     #[inline(always)]
     fn hits<'a>(&'a self, overflow: &'a [u16]) -> &'a [u16] {
         let numhits = usize::from(self.num_used);
+        if X_FX_CELL >= 1 {
+            // PROBE (exp/fx-cellbf): the list's start picked without a branch (cmov): the cell's
+            // own entries for a cell of at most AA_HITS_PER_CELL hits, else its cursor in
+            // `overflow` (checked against the array's length, a test that never fails).
+            let small = numhits <= AA_HITS_PER_CELL;
+            let cursor = self.cursor();
+            let end = std::hint::select_unpredictable(small, 0, cursor + numhits);
+            assert!(end <= overflow.len(), "cell cursor {cursor} past the overflow array");
+            let p = std::hint::select_unpredictable(
+                small,
+                self.entries.as_ptr(),
+                overflow.as_ptr().wrapping_add(cursor),
+            );
+            // SAFETY: a small cell's `numhits` (at most 3) own entries, or `cursor..end` inside
+            // `overflow` (asserted above); both borrowed for 'a.
+            return unsafe { std::slice::from_raw_parts(p, numhits) };
+        }
         if numhits <= AA_HITS_PER_CELL {
             &self.entries[..numhits]
         } else {

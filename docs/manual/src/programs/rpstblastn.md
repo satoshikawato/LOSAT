@@ -35,7 +35,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-qcov_hsp_perc P` | | Minimum percent of the query covered by an alignment |
 | `-seg yes\|no\|"W L H"` | no | Filter low-complexity regions of the translated query |
 | `-lcase_masking` | off | Treat lower-case query letters as masked |
-| `-window_size N` | | Two-hit window; 0 selects the one-hit method |
+| `-window_size N` | 40 | Two-hit window; 0 selects the one-hit method |
 | `-dbsize N`, `-searchsp N` | | Set the effective database length or search space |
 | `-num_threads N` | 1 | Number of threads; 0 means one per volume |
 | `-mt_mode N` | 0 | Split by volume (0) or by query (1); the output does not depend on it |
@@ -60,9 +60,9 @@ The output is the same at every `-num_threads` value. It is the output of NCBI's
 
 ## Output
 
-Supported `-outfmt` values: 0, 1, 2, 3, 4, 5, 6, 7, 10 and 11. Formats 6, 7 and 10 take a custom field list, including the frame fields such as `qframe`. As in NCBI's `rpstblastn`, `delim=` is read and checked but the columns keep their tab or comma. The reports are those of [blastx](blastx.md), with frames, nucleotide coordinates and NCBI's `RPSTBLASTN` header lines. As in NCBI's `rpstblastn`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
+Supported `-outfmt` values: 0 to 16, 18 and 20, every format that NCBI's `rpstblastn` writes. Formats 6, 7, 10 and 20 take a custom field list, including the frame fields such as `qframe`. As in NCBI's `rpstblastn`, `delim=` is read and checked but the columns keep their tab or comma. The reports are those of [blastx](blastx.md), with frames, nucleotide coordinates and NCBI's `RPSTBLASTN` header lines (`RPSTBLASTN (LOSAT 0.2.0)` where NCBI writes `RPSTBLASTN 2.17.0+`). As in NCBI's `rpstblastn`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
 
-`-outfmt 11` (BLAST archive) and `-outfmt 5` (BLAST XML) are the bytes of NCBI BLAST+ 2.17.0 `rpstblastn -num_threads 1`, at any thread count, except that a message stored in the archive carries LOSAT's wording where LOSAT words it as its own (the same as `blastp`'s archive). The archive is the input that [rpsbproc](rpsbproc.md) reads.
+Every format is the bytes of NCBI BLAST+ 2.17.0 `rpstblastn -num_threads 1`, at any thread count, except that LOSAT names its own version where NCBI names its own (`RPSTBLASTN (LOSAT 0.2.0)` where NCBI writes `RPSTBLASTN 2.17.0+`, `LOSAT 0.2.0` in the archive's `ident`) and that a message stored in the archive carries LOSAT's wording where LOSAT words it as its own (the same as `blastp`'s archive). The archive is the input that [rpsbproc](rpsbproc.md) reads.
 
 ## Differences from NCBI BLAST+
 
@@ -70,7 +70,7 @@ Supported `-outfmt` values: 0, 1, 2, 3, 4, 5, 6, 7, 10 and 11. Formats 6, 7 and 
 
 ## What LOSAT refuses
 
-Not yet supported: `-outfmt` other than 0 to 7, 10 and 11; `-html`; `rpstblastn` in the library API and in LOSAT Web.
+Not yet supported: `-html`; `rpstblastn` in the library API and in LOSAT Web.
 
 Also refused:
 

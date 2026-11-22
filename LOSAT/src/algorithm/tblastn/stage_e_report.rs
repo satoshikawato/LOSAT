@@ -596,7 +596,7 @@ pub(super) fn render(
                 |q_idx| {
                     Ok(crate::report::pairwise::blastp_described_subjects(
                         view.report_sort(formatting.report_sort()),
-                        false,
+                        None,
                         report_counts.num_descriptions,
                         q_idx,
                         rows,
@@ -952,7 +952,7 @@ fn write_tabular(
             .map(|list| list.hsps.hsps.len())
             .sum();
         if comments {
-            writeln!(writer, "# {program} {}", crate::NCBI_BLAST_VERSION)?;
+            writeln!(writer, "# {program} {}", crate::wording::REPORT_VERSION)?;
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
             // The title's bytes (`write_outfmt7_query_line`).
             crate::report::outfmt6::write_outfmt7_query_line(writer, &query.query_line())?;
@@ -1423,7 +1423,7 @@ fn write_pairwise(
         anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
     }
     let report = BlastpPairwiseReport {
-        version: crate::NCBI_BLAST_VERSION.into(),
+        version: crate::wording::REPORT_VERSION.into(),
         database_name: shown.name().into(),
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,
@@ -1486,6 +1486,8 @@ fn write_pairwise(
         view,
         ..PairwiseConfig::default()
     };
+    // A subject set's subjects are all loaded.
+    let every_loaded = crate::report::db_subject::HitLoads::default();
     write_tblastn_pairwise_report(
         if pssm.is_some() {
             super::in_pssm::PROGRAM
@@ -1508,7 +1510,13 @@ fn write_pairwise(
         warnings,
         ranges.epilog,
         anchored.map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
-    )?;
+        match shown {
+            ShownSubjects::Fasta { .. } => &every_loaded,
+            ShownSubjects::Database { reported, .. } => &reported.loads,
+        },
+    )
+    // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
+    .map_err(crate::cli::NativeError::of_writer)?;
     Ok(())
 }
 

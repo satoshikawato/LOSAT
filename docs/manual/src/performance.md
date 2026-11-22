@@ -24,9 +24,10 @@ tables and figures.
 - **Ratios.** BLAST+ ÷ LOSAT, from the medians: 3.9 means that NCBI BLAST+ took 3.9 times as long as
   LOSAT (or used 3.9 times as much memory). Above 1, LOSAT took less.
 - **Memory.** Peak resident memory of the process (max RSS). NCBI BLAST+ maps database files into
-  memory, so on a large database its max RSS includes database pages that the kernel can drop and
-  read again. "Warm" means the database files were read once before the timed runs; "cold" that
-  their pages were dropped from the file cache before each run.
+  memory (`mmap`), so on a large `-db` search its max RSS includes file-backed database pages that
+  the OS kernel can drop and reload rather than heap alone. "Warm" means the database files were
+  read once before the timed runs; "cold" that their pages were dropped from the page cache before
+  each run.
 - **Same output.** The same SHA-256 of the output file.
 
 ## Speed and memory by program
@@ -60,7 +61,7 @@ BLAST+ `tblastx`: one run), and of 5 LOSAT runs and one NCBI BLAST+ run at 1 thr
   range is 1.1 (`blastn-short`, `rpstblastn`) to 4.8 (`blastn`), and 104 in `tblastx` (62.35 s
   against 6,493.88 s).
 - NCBI BLAST+'s max RSS at 16 threads was 1.3 (`tblastx`) to 24.6 (`blastn`) times LOSAT's.
-- LOSAT wrote NCBI BLAST+'s output in every search but `blastp` and `blastp-fast`. There a `-db`
+- LOSAT wrote NCBI BLAST+'s output (apart from the version line, which names LOSAT) in every search but `blastp` and `blastp-fast`. There a `-db`
   search and a `-subject` search give different statistics in NCBI BLAST+ too; compared form by form
   at 1 thread, LOSAT `-subject` wrote the bytes of NCBI BLAST+ `-subject`, and LOSAT `-db` those of
   NCBI BLAST+ `-db`.
@@ -86,7 +87,7 @@ search:
 
 The output does not depend on the thread count: the same command writes the same bytes with any
 `-num_threads`, and on the release test set those are the bytes of NCBI BLAST+ 2.17.0 run with one
-thread. The release tests compare 1, 2 and 4 threads, and the benchmarks on this page up to 16. You can
+thread (apart from the version line, which names LOSAT). The release tests compare 1, 2 and 4 threads, and the benchmarks on this page up to 16. You can
 raise `-num_threads` without checking the results again.
 
 `-mt_mode` is accepted for compatibility, and the output does not depend on it either.
@@ -117,7 +118,10 @@ development build `095ff0c16`.
 ## Memory
 
 Memory use grows with the size of the query batch, the database volume being searched and the
-number of threads. If a large search runs out of memory:
+number of threads. With more than 64 threads, a search in which NCBI BLAST+'s memory does not grow
+with `-num_threads` (a `-subject` search, which it runs on one thread) can use more memory in LOSAT
+than in NCBI BLAST+: up to 1.44 times at 128 threads in the v0.2.0 tests of the development build `ff07c6a7d` (see
+[Threads with `-subject`](differences.md#threads-with--subject)). If a large search runs out of memory:
 
 - lower `-num_threads`: memory use rises with the thread count;
 - split a very large query file into several runs.
@@ -161,7 +165,7 @@ Bakta, Biopython, BlobToolKit, BRIG, BUSCO, CheckV, ECTyper, Easyfig, Galaxy, Ka
 MOB-suite, nf-core/blast, OrthoFinder, Prokka, pyani (ANIb), QIIME 2, rBLAST, ResFinder and
 PlasmidFinder, RGI, Roary, SISTR, Trinotate, Unicycler and ViPTreeGen.
 
-- **Output.** In every compared run LOSAT wrote NCBI BLAST+ 2.17.0's output. In BUSCO and QIIME 2,
+- **Output.** In every compared run LOSAT wrote NCBI BLAST+ 2.17.0's output, apart from the line that names the program's version in the formats that have one. In BUSCO and QIIME 2,
   NCBI BLAST+'s own output with several threads differs from its 1-thread output; there LOSAT's output
   at every thread count equals NCBI BLAST+'s 1-thread output.
 - **Time.** Counting only the tools' searches in which NCBI BLAST+ took at least 1 s per BLAST run
@@ -182,7 +186,7 @@ measures program start-up more than search speed.
 
 ## WebAssembly
 
-The serial WASI build (`wasm32-wasip1`) matches NCBI BLAST+ 2.17.0 on the release test set, with the
+The serial WASI build (`wasm32-wasip1`) matches NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT), with the
 same bytes as the Linux x64 native binary. The threaded WASI build (`wasm32-wasip1-threads`) takes
 `-num_threads` like the native program; it is tested in CI, outside the release's NCBI parity claim.
 Both run slower than the native program, because WebAssembly's vector instructions are narrower than
@@ -202,3 +206,9 @@ Node.js, development build `7f7db49c`, on the searches of the table above. The t
 the measured times of the previous development build `6a0a8719` scaled by the ratio of the two builds
 run side by side (1 thread: CPU cycles on the same core; 16 threads: wall time, 3 rounds). NCBI BLAST+
 `tblastx` was not run in this set.
+
+## When to choose LOSAT vs. heuristic aligners
+
+LOSAT is built for **exact NCBI BLAST+ 2.17.0 drop-in compatibility**: the same CLI options, E-values, bit scores, coordinates, and [output formats](output-formats.md) across nucleotide, translated, PSI-BLAST, RPS-BLAST, and CDD workflows.
+
+Tools such as **DIAMOND**, **MMseqs2**, or **minimap2** use different indexing, k-mer, or seeding algorithms and report their own scores, E-value calibrations, and formats. When you are clustering or mapping tens of millions of metagenomic reads, huge protein catalogs, or whole-genome assemblies and do not require BLAST+ output equivalence, those specialized aligners are designed for that scale. Choose **LOSAT** when pipelines, downstream parsers, or scientific protocols expect NCBI BLAST+ 2.17.0 options, semantics, or output formats with the runtimes and memory footprint shown in the tables above.

@@ -10,7 +10,7 @@ Questions and answers for the problems people meet most. Each answer is based on
 error: the NCBI BLAST+ option -html is not supported by LOSAT's BLASTN
 ```
 
-The command exits with status 2 and runs nothing. For an output format that NCBI writes and LOSAT does not (for example `psiblast -outfmt 5`), the message is `Error: output format 5 is not supported by LOSAT's PSIBLAST`, and it comes before any input is read.
+The command exits with status 2 and runs nothing. For an output format that NCBI writes and LOSAT does not (in `psiblast` or `tblastn -in_pssm`), see [Output formats](output-formats.md) and [`psiblast` refuses `-outfmt`](#psiblast-refuses--outfmt-such-as-xml-or-asn1).
 
 **Why?** LOSAT stops with an error for each option and value it does not implement. It never ignores an option and never runs something else in its place, so a result you get is the result you asked for.
 
@@ -24,7 +24,7 @@ A different message, `error: unknown option or argument '-xyz'; use -help to lis
 losat --install-shims: these files exist and are not this executable; nothing was installed: /path/to/bin/blastn
 ```
 
-A file with one of the 15 program names is already in the folder, often NCBI's own `blastn`. LOSAT never overwrites a file that is not a LOSAT link or copy, and it makes none of the names when one is in the way. Exit status is 1.
+A file with one of the 16 program names is already in the folder, often NCBI's own `blastn`. LOSAT never overwrites a file that is not a LOSAT link or copy, and it makes none of the names when one is in the way. Exit status is 1.
 
 You can:
 
@@ -35,17 +35,17 @@ Links made by an earlier LOSAT are replaced without a message, so you can run th
 
 ## `blastn: command not found`, or the wrong `blastn` answers
 
-The names exist only after `losat --install-shims`. Make sure the folder you gave is on your `PATH`, and before any folder with NCBI's programs if you want LOSAT to answer. `blastn -version` shows who answers: LOSAT's second line starts with `Package: LOSAT`.
+The names exist only after `losat --install-shims`. Make sure the folder you gave is on your `PATH`, and before any folder with NCBI's programs if you want LOSAT to answer. `blastn -version` shows who answers: LOSAT's first line is `blastn: LOSAT 0.2.0` and its second line starts with `Package: LOSAT`.
 
 If you moved or replaced `losat` after making the links, run `losat --install-shims DIR` again.
 
 ## The database is not found
 
 ```text
-BLAST Database error: No alias or index file found for protein database [nodb] in search path [...]
+LOSAT database error: No alias or index file found for protein database [nodb] in search path [...]
 ```
 
-This is NCBI's message. Check the database name, that it is a protein or nucleotide database as the program needs (`blastp` reads protein, `blastn` reads nucleotide), and where LOSAT looks for it: the current directory, then the directories in `BLASTDB`, then the configuration in `.ncbirc`, as NCBI BLAST+ does. See [BLAST databases](databases.md).
+The message is NCBI's; where NCBI starts it with `BLAST Database error:`, LOSAT starts it with `LOSAT database error:`. Check the database name, that it is a protein or nucleotide database as the program needs (`blastp` reads protein, `blastn` reads nucleotide), and where LOSAT looks for it: the current directory, then the directories in `BLASTDB`, then the configuration in `.ncbirc`, as NCBI BLAST+ does. See [BLAST databases](databases.md).
 
 ## A `-seqidlist` warning names `blastdb_aliastool`
 
@@ -92,7 +92,7 @@ These apply when you run `losat.wasm` yourself. See [Platforms and WebAssembly](
 
 ## Memory and threads
 
-- **`-num_threads` sets the number of threads.** The default is 1. The output is the same at every thread count, and it is what NCBI BLAST+ writes with `-num_threads 1`. `-mt_mode` is accepted and changes nothing in the output (`blastn`, `blastp`, `blastx` and `tblastn` take 0, 1 or 2; `rpsblast` and `rpstblastn` take 0 or 1; `tblastx` and `psiblast` have no `-mt_mode`, as in NCBI BLAST+ 2.17.0). `-num_threads` takes an integer of 1 or more (`rpsblast` also reads 0 as one thread for each volume of the database).
+- **`-num_threads` sets the number of threads.** The default is 1. The output is the same at every thread count, and it is what NCBI BLAST+ writes with `-num_threads 1` (apart from the version line, which names LOSAT). `-mt_mode` is accepted and changes nothing in the output (`blastn`, `blastp`, `blastx` and `tblastn` take 0, 1 or 2; `rpsblast` and `rpstblastn` take 0 or 1; `tblastx` and `psiblast` have no `-mt_mode`, as in NCBI BLAST+ 2.17.0). `-num_threads` takes an integer of 1 or more (`rpsblast` also reads 0 as one thread for each volume of the database).
 - **Threads and memory.** The page [Threads, speed and memory](performance.md) explains how threads and memory use relate.
 - **A search of a compressed file needs room for the copy.** See "A compressed input fails" above.
 - **Development variables.** Variables that start with `LOSAT_X_`, and `LOSAT_TIMING`, are for development; leave them unset.
@@ -100,6 +100,32 @@ These apply when you run `losat.wasm` yourself. See [Platforms and WebAssembly](
 ## The output differs from NCBI BLAST+
 
 First check [Differences from NCBI BLAST+](differences.md). A few differences are on purpose, for example a local `tblastx` or `tblastn` subject translated with `-db_gencode`, the last digit of some full-precision values on macOS, and the `CL:` tag of SAM output. If your case is not covered there, it is a bug: please report it.
+
+## `psiblast` refuses `-outfmt` such as XML or ASN.1
+
+`psiblast` supports `-outfmt 0`, `6`, `7`, `10` and `20` from a FASTA query, and `0`, `6` and `7` with `-in_pssm` or `-in_msa`.
+
+- A format outside `0`, `6`, `7`, `10` and `20` (such as XML `-outfmt 5` or archive `-outfmt 11`) stops before any input is read, with any query: `Error: output format N is not supported by LOSAT's PSIBLAST`.
+- With `-in_pssm` or `-in_msa`, `-outfmt 10` and `20` stop after the PSSM or alignment is read: `Error: output format N with -in_pssm is not supported by LOSAT's PSIBLAST yet` (`-in_msa` when that is given).
+- Both exit with status 1.
+
+Use NCBI BLAST+ `psiblast` if your workflow requires those formats.
+
+## `rpsblast` or `rpstblastn` rejects `-subject`
+
+Both `rpsblast` and `rpstblastn` search profile databases (`-db`, such as CDD) only and have no `-subject` option, matching NCBI BLAST+ 2.17.0. Passing `-subject` exits with status 2 at argument parsing.
+
+## `blastn -use_index true` stops with an error
+
+`losat blastn -use_index true` searches with MegaBLAST index files built by `makembindex`. It refuses the search when an index covers only some volumes of `-db`, when `-window_size` is above 0 (two-hit search), when `-db_hard_mask` is given, or when an index volume is damaged or does not match the database (see [What LOSAT refuses](refusals.md#blastn)). Omit `-use_index true` to search without an index.
+
+## `rpsblast`, `rpstblastn`, or `rpsbproc` is missing in Python (`pylosat`), Rust (`losat::api`), or LOSAT Web
+
+In v0.2.0, `losat::api` and `pylosat` run the six core search programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`) and wrap the seven tools (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex`). The `losat` npm package and LOSAT Web run `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` (`psiblast` is not available in the browser engine). `rpsblast`, `rpstblastn` and `rpsbproc` run on the command line only (through `losat` or its installed shims).
+
+## A full-precision E-value on macOS differs in the 15th digit
+
+On macOS (`-outfmt 8` or `-outfmt 11`), the last (15th) significant digit of a full-precision E-value can differ by 1 because of Apple's maths library. Tabular, JSON, XML and pairwise formats are unaffected in practice, and Linux, Windows and WASI match Linux x86_64. See [Differences from NCBI BLAST+](differences.md#last-digit-of-a-full-precision-value-on-macos) and [Platforms and WebAssembly](platforms.md#macos).
 
 ## Where to report a problem
 

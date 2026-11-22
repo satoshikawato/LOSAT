@@ -1,6 +1,6 @@
 # Installation
 
-LOSAT is one executable, `losat` (`losat.exe` on Windows). Install it from Bioconda, download a pre-built file from the GitHub release page, or build it with `cargo` from crates.io or from source. Searching and building databases need nothing else: no NCBI BLAST+ and no extra libraries. In v0.2.0 the domain annotation of `rpsbproc` reads an archive written by NCBI's `rpsblast` or `rpstblastn`, and NCBI's prebuilt databases are downloaded from NCBI.
+LOSAT is one executable, `losat` (`losat.exe` on Windows). Install it from Bioconda, download a pre-built file from the GitHub release page, or build it with `cargo` from crates.io or from source. Searching and building databases need nothing else: no NCBI BLAST+ and no extra libraries. `rpsbproc` annotates `-outfmt 11` archives written by LOSAT's own `rpsblast` and `rpstblastn` (or by NCBI BLAST+), while prebuilt databases such as CDD are downloaded from NCBI.
 
 ## Where LOSAT is published
 
@@ -23,7 +23,7 @@ LOSAT is not published on Homebrew, Docker Hub or npm.
 conda install -c bioconda -c conda-forge losat
 
 # mamba
-mamba install -c bioconda losat
+mamba install -c bioconda -c conda-forge losat
 
 # pixi
 pixi add losat
@@ -69,7 +69,7 @@ The release also carries `SHA256SUMS`, a software bill of materials (`LOSAT-0.2.
 | WASI serial | `LOSAT-0.2.0-wasm32-wasip1.tar.gz` | Supported |
 | WASI threads | `LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz` | Supported: tested in CI, outside the release's NCBI parity claim |
 
-"Supported" without a note means the output matches NCBI BLAST+ 2.17.0 on the release test set; on macOS, the last digit of a full-precision E value can differ by 1. [Platforms and WebAssembly](platforms.md) gives the details for each platform, including the macOS and WASI notes.
+"Supported" without a note means the output matches NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT); on macOS, the last digit of a full-precision E value can differ by 1. [Platforms and WebAssembly](platforms.md) gives the details for each platform, including the macOS and WASI notes.
 
 ### Install a native file
 

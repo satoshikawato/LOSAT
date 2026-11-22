@@ -19,6 +19,7 @@ use crate::record::FastaRecord;
 use crate::report::PairwiseHit;
 use crate::utils::dust::MaskedInterval;
 use crate::utils::threading::SearchPool;
+use crate::wording::ENGINE_ERROR;
 
 use super::args::BlastnArgs;
 use super::coordination::QueryLetters;
@@ -199,6 +200,8 @@ impl RepeatFilter {
     /// Adds the masks of the repeats to `masks`, the masks of `queries` so far (DUST's and the
     /// lower case; for a chunk, the batch's masks cut to the chunk too): each query's hits
     /// (`hits`) join its masks (`combine`); a query without a hit keeps its masks as they are.
+    /// Returns the hits, which the BLAST archive of a query batch reads (`archive::CallBatches`'s
+    /// `repeat_hits`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:236-306
     ///
@@ -213,19 +216,19 @@ impl RepeatFilter {
         masks: &mut [Vec<MaskedInterval>],
         outside: &mut [MasksOutside],
         pool: &SearchPool<'_>,
-    ) -> Result<(), RepeatError> {
+    ) -> Result<Vec<Vec<(usize, usize)>>, RepeatError> {
         let found = self.hits(strand, queries, pool)?;
-        for (index, (query_masks, hits)) in masks.iter_mut().zip(found).enumerate() {
+        for (index, (query_masks, hits)) in masks.iter_mut().zip(&found).enumerate() {
             if !hits.is_empty() {
                 *query_masks = join(
-                    &hits,
+                    hits,
                     query_masks,
                     queries.length(index),
                     outside.get_mut(index),
                 );
             }
         }
-        Ok(())
+        Ok(found)
     }
 
     /// The database's name, as `-filtering_db` gives it.
@@ -292,8 +295,9 @@ where
 /// `queries` queries in it: each query's set-up runs the search again (the masks are made
 /// only once they are made) and posts its error as a warning, and the batch, left without a valid
 /// query, stops with them (`TSearchMessages::ToString`: the severity, the text and a space for
-/// each query) after `BLAST engine error: ` (exit 3), as WindowMasker's error of a batch does
-/// (`window_masker::batch_error`). `None` for LOSAT's own errors (`rejection`).
+/// each query) after the engine's prefix (`ENGINE_ERROR`, NCBI's `BLAST engine error:`; exit 3),
+/// as WindowMasker's error of a batch does (`window_masker::batch_error`). `None` for LOSAT's own
+/// errors (`rejection`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:176-228
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
@@ -301,7 +305,7 @@ pub(crate) fn batch_error(error: &RepeatError, queries: usize) -> Option<crate::
     let RepeatError::Posted(text) = error else {
         return None;
     };
-    let mut message = b"BLAST engine error: ".to_vec();
+    let mut message = format!("{ENGINE_ERROR} ").into_bytes();
     for _ in 0..queries {
         message.extend_from_slice(b"Warning: ");
         message.extend_from_slice(text);

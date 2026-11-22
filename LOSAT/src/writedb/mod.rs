@@ -24,14 +24,15 @@
 //! volume (the files `.?aa`, `.?ab`, `.?ac`, version 4 and 5 alike) from the mask files that
 //! `mask_info` reads (ASN.1 text or binary, as dustmasker, segmasker, windowmasker and
 //! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
-//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask`, `-gi_mask_name` and the other options
-//! of `makeblastdb::UNSUPPORTED_OPTIONS`; `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
+//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask` and `-gi_mask_name`
+//! (`makeblastdb::UNSUPPORTED_OPTIONS`); `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
 //! files of the metadata file (`metadata::metadata_user_path`).
 //!
 //! `-input_type blastdb` copies existing databases (`raw_source`, `CRawSeqDBSource`): each
 //! sequence in the form of the sequence file with its definition lines (and their PIG), the
 //! ranges of its masking algorithms and the blobs of its other columns, through the same
-//! `BuildDatabase` and `WriteDb` as a FASTA input.
+//! `BuildDatabase` and `WriteDb` as a FASTA input; with `-randomize`, in the order of NCBI's
+//! shuffle (`crate::utils::std_shuffle`).
 
 pub mod bioseq;
 pub mod build_db;
@@ -67,6 +68,7 @@ pub mod writer;
 #[cfg(test)]
 mod tests;
 
+use crate::wording::{DATABASE_CREATION_ERROR, DATABASE_ERROR, OPTIONS_ERROR};
 use std::path::PathBuf;
 
 use crate::ncbi_exception::NcbiException;
@@ -104,9 +106,9 @@ pub enum WriteDbError {
     /// whose ranges NCBI orders by memory addresses, `mask_data::range_set`, at the close of a
     /// build that would otherwise succeed; a mask column created after the first volume): "losat
     /// makeblastdb: " and the message, exit status 1, like `MakedbError::Unsupported`. Both end
-    /// the build as an error of NCBI's build at that point does (`EndBuild(true)`: its files are
-    /// removed); a registration after the first volume (makeblastdb registers every algorithm
-    /// before the input) is refused before anything changes and leaves the build open.
+    /// the build as an error of NCBI's build at that point does (`EndBuild` with `erase` true: its
+    /// files are removed); a registration after the first volume (makeblastdb registers every
+    /// algorithm before the input) is refused before anything changes and leaves the build open.
     Unsupported(String),
     /// An allocation failed (`std::bad_alloc`): makeblastdb prints "BLAST ran
     /// out of memory".
@@ -142,15 +144,13 @@ impl WriteDbError {
     /// `std::string`.
     pub fn message(&self) -> Vec<u8> {
         let text = |prefix: &str, message: &[u8]| [prefix.as_bytes(), message].concat();
+        // LOSAT's prefixes (`crate::wording`) and a space, as NCBI's `BLAST ... error: `.
+        let losat = |prefix: &str, message: &[u8]| [prefix.as_bytes(), b" ", message].concat();
         match self {
-            WriteDbError::Creation(message) => {
-                text("BLAST Database creation error: ", message.as_bytes())
-            }
-            WriteDbError::CreationBytes(message) => {
-                text("BLAST Database creation error: ", message)
-            }
-            WriteDbError::Options(message) => text("BLAST options error: ", message.as_bytes()),
-            WriteDbError::Database(message) => text("BLAST Database error: ", message.as_bytes()),
+            WriteDbError::Creation(message) => losat(DATABASE_CREATION_ERROR, message.as_bytes()),
+            WriteDbError::CreationBytes(message) => losat(DATABASE_CREATION_ERROR, message),
+            WriteDbError::Options(message) => losat(OPTIONS_ERROR, message.as_bytes()),
+            WriteDbError::Database(message) => losat(DATABASE_ERROR, message.as_bytes()),
             // `what()` ends with a line feed and the message gets one more: the report ends
             // with an empty line.
             WriteDbError::Exception(e) => text("Error: ", &e.what()),

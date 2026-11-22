@@ -31,6 +31,14 @@ const WORKER_FILE = require.resolve("./wasi_thread_worker");
 // A worker's heap holds its WASI context and its instance; the guest's memory is the shared
 // memory, outside it.
 const WORKER_LIMITS = Object.freeze({ maxOldGenerationSizeMb: 2047, maxYoungGenerationSizeMb: 1 });
+// The descriptors of the table of files (wasi_files.js) belong to the table, not to the worker that
+// opened them: one thread opens a file and another reads or closes it, and close() below closes those
+// that the guest left open. Node's Worker (trackUnmanagedFds, on by default) closes at the worker's
+// exit every descriptor that the worker opened with fs.open and did not close itself; one that
+// another thread had closed and that the process had given out again was closed under its new owner
+// (the event loop of another worker, and Node aborted in uv_async_send with EBADF: a reactor whose
+// thread workers opened BLASTN's -filtering_db database, which its main thread closed, 2026-11-22).
+const threadWorkerOptions = workerData => ({ env: SHARE_ENV, resourceLimits: WORKER_LIMITS, trackUnmanagedFds: false, workerData });
 
 const WORKER_START_TIMEOUT_MS = parsePositiveIntEnv(
   "LOSAT_WASI_THREADS_START_TIMEOUT_MS",
@@ -492,7 +500,7 @@ function bootEarlyWorkers(count, fault) {
     const control = new SharedArrayBuffer(4 * START_WORDS);
     let worker;
     try {
-      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { control, standby: index, early: true, fault: fault || null } });
+      worker = new Worker(WORKER_FILE, threadWorkerOptions({ control, standby: index, early: true, fault: fault || null }));
     } catch { break; }
     worker.unref();
     early.push({ worker, control });
@@ -619,8 +627,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   };
   const recycledWorker = (data) => {
     const control = new SharedArrayBuffer(4 * START_WORDS);
-    const worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
-      control, files, directory, fault: options.fault || null, recycle: true, ...data } });
+    const worker = new Worker(WORKER_FILE, threadWorkerOptions({ module, wasmPath, args, memory: mainMemory,
+      control, files, directory, fault: options.fault || null, recycle: true, ...data }));
     const slot = { index: nextSlot++, worker, control, state: new Int32Array(control), tid: data.tid ?? null };
     if (data.tid === undefined) Atomics.store(slot.state, SLOT_STATE, SLOT_PREPARING);
     worker.on("message", message => {
@@ -685,8 +693,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     const control = new SharedArrayBuffer(4 * START_WORDS), view = new Int32Array(control);
     let worker;
     try {
-      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
-        startArg, tid, control, files, directory, fault: options.fault || null } });
+      worker = new Worker(WORKER_FILE, threadWorkerOptions({ module, wasmPath, args, memory: mainMemory,
+        startArg, tid, control, files, directory, fault: options.fault || null }));
     } catch (err) { event("spawn_rejected", { tid, error: String(err) }); return -1; }
     workers.add(worker); event("spawned", { tid });
     exits.set(worker, new Promise(resolve => {
@@ -720,8 +728,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
           worker = early.worker;
           worker.postMessage({ module, wasmPath, args, memory: mainMemory, files, directory });
         } else {
-          worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
-            control, files, directory, standby: index, fault: options.fault || null } });
+          worker = new Worker(WORKER_FILE, threadWorkerOptions({ module, wasmPath, args, memory: mainMemory,
+            control, files, directory, standby: index, fault: options.fault || null }));
         }
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
       worker.unref();
@@ -776,4 +784,5 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     },
   };
 }
-module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir, freeBytes };
+module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir, freeBytes,
+  threadWorkerOptions };

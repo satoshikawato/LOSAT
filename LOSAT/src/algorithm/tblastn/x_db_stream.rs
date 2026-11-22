@@ -115,7 +115,11 @@ impl<'a> XStageSubjects<'a> {
         let super::x_subject_store::SubjectLetters::Stream(stream) = subjects else {
             return Self::All(subjects);
         };
-        let mut all: Vec<usize> = oids.collect();
+        // One allocation of the iterator's upper bound: the lists without those excluded at fetch
+        // (a filter) take the block that all lists take, so the heap is laid out as without them.
+        let (fewest, most) = oids.size_hint();
+        let mut all: Vec<usize> = Vec::with_capacity(most.unwrap_or(fewest));
+        all.extend(oids);
         all.sort_unstable();
         let mut oids: Vec<usize> = Vec::new();
         let mut counts: Vec<usize> = Vec::new();

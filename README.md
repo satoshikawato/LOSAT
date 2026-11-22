@@ -19,7 +19,7 @@
 
 **LOSAT** runs the local search programs and database tools of NCBI BLAST+ 2.17.0 with their command lines and writes their output. It is one executable written in Rust: it needs no BLAST+ installation, and it does not call NCBI's programs or libraries. `losat --install-shims` puts it in place of BLAST+ in an existing pipeline, so scripts that call `blastn` or `makeblastdb` run unchanged. The same engine is also a Rust library, a Python package (`pylosat`) and a WebAssembly package for the browser.
 
-On the v0.2.0 release test set, LOSAT writes the same output as NCBI BLAST+ 2.17.0, apart from the [differences listed in the manual](docs/manual/src/differences.md), and the same output at every `-num_threads`. It searches FASTA subjects (`-subject`) on all the threads you give it, where NCBI BLAST+ uses one, reads gzip, bzip2 and Zstandard FASTA directly, and keeps its memory small on large databases: a search of `core_nt` (319.4 GB) peaked at 407 MiB of resident memory, where NCBI BLAST+ peaked at 257.4 GiB (LOSAT `095ff0c16`, an earlier development build; NCBI BLAST+ maps the database files into memory, so its figure includes file pages the system can drop).
+On the v0.2.0 release test set, LOSAT writes the same output as NCBI BLAST+ 2.17.0, apart from the [differences listed in the manual](docs/manual/src/differences.md) (among them the line that names the program's version, which says `BLASTN (LOSAT 0.2.0)` where NCBI writes `BLASTN 2.17.0+`), and the same output at every `-num_threads`. It searches FASTA subjects (`-subject`) on all the threads you give it, where NCBI BLAST+ uses one, reads gzip, bzip2 and Zstandard FASTA directly, and keeps its memory small on large databases: a search of `core_nt` (319.4 GB) peaked at 407 MiB of resident memory, where NCBI BLAST+ peaked at 257.4 GiB (LOSAT `095ff0c16`, an earlier development build; NCBI BLAST+ maps the database files into memory, so its figure includes file pages the system can drop).
 
 <p align="center">
   <picture>
@@ -83,7 +83,7 @@ cargo build --release
 
 ### Platforms
 
-Linux (x86_64, aarch64), macOS (arm64, x86_64), Windows (x86_64) and the WASI serial module are **Supported**: they match NCBI BLAST+ 2.17.0 on the release test set. The WASI threads module is **Supported** and tested in CI, outside that comparison. LOSAT Web, the search page that runs in the browser, is a **Preview**. Details, and the one macOS difference (the last digit of a full-precision E value): [Platforms](docs/manual/src/platforms.md).
+Linux (x86_64, aarch64), macOS (arm64, x86_64), Windows (x86_64) and the WASI serial module are **Supported**: they match NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT). The WASI threads module is **Supported** and tested in CI, outside that comparison. LOSAT Web, the search page that runs in the browser, is a **Preview**. Details, and the one macOS difference (the last digit of a full-precision E value): [Platforms](docs/manual/src/platforms.md).
 
 ---
 
@@ -126,12 +126,12 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `tblastn` | Protein or PSSM (`-in_pssm`) against translated nucleotide (`tblastn`, `tblastn-fast`) | `0`–`16`, `18`, `20` | [tblastn](docs/manual/src/programs/tblastn.md) |
 | `tblastx` | Translated nucleotide against translated nucleotide | `0`–`16`, `18`, `20` | [tblastx](docs/manual/src/programs/tblastx.md) |
 | `psiblast` | Iterated protein search with a PSSM (`-num_iterations`, `-in_pssm`, `-in_msa`, `-out_pssm`) | `0`, `6`, `7`, `10`, `20` (with `-in_pssm` or `-in_msa`: `0`, `6`, `7`) | [psiblast](docs/manual/src/programs/psiblast.md) |
-| `rpsblast` | Protein against a PSSM database such as CDD | `0`, `5`, `6`, `7`, `10`, `11` | [rpsblast](docs/manual/src/programs/rpsblast.md) |
-| `rpstblastn` | Translated nucleotide against a PSSM database | `0`–`7`, `10`, `11` | [rpstblastn](docs/manual/src/programs/rpstblastn.md) |
+| `rpsblast` | Protein against a PSSM database such as CDD | `0`–`16`, `18`, `20` | [rpsblast](docs/manual/src/programs/rpsblast.md) |
+| `rpstblastn` | Translated nucleotide against a PSSM database | `0`–`16`, `18`, `20` | [rpstblastn](docs/manual/src/programs/rpstblastn.md) |
 | `makeblastdb` | Builds BLAST databases (versions 5 and 4; `-parse_seqids`, `-taxid`, `-mask_data`) from FASTA, also compressed | | [makeblastdb](docs/manual/src/programs/makeblastdb.md) |
 | `blastdbcmd` | Prints sequences and information from a BLAST database (`-entry`, `-entry_batch`, `-info`, `-outfmt`) | | [blastdbcmd](docs/manual/src/programs/blastdbcmd.md) |
 | `dustmasker` | Masks low-complexity nucleotide regions | intervals, FASTA, mask files for `makeblastdb` | [dustmasker](docs/manual/src/programs/dustmasker.md) |
-| `windowmasker` | Masks repeats of nucleotide sequences with a unit counts file (`-ustat`) | intervals, FASTA, mask files for `makeblastdb` | [windowmasker](docs/manual/src/programs/windowmasker.md) |
+| `windowmasker` | Makes the unit counts file of a genome (`-mk_counts`), converts it (`-convert`), masks repeats of nucleotide sequences with it (`-ustat`) | counts files, intervals, FASTA, mask files for `makeblastdb` | [windowmasker](docs/manual/src/programs/windowmasker.md) |
 | `segmasker` | Masks low-complexity protein regions | intervals, FASTA, mask files for `makeblastdb` | [segmasker](docs/manual/src/programs/segmasker.md) |
 | `convert2blastmask` | Turns lower-case masked FASTA into mask files for `makeblastdb` | mask files, intervals | [convert2blastmask](docs/manual/src/programs/convert2blastmask.md) |
 | `makembindex` | Builds the MegaBLAST index of a nucleotide database | index files | [makembindex](docs/manual/src/programs/makembindex.md) |
@@ -143,7 +143,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 
 ## Benchmarks and pipelines
 
-Published tools and workflow managers run unchanged with LOSAT under the NCBI names (`--install-shims`), and their BLAST steps wrote the same output in every case compared (where NCBI BLAST+'s own output changes with the thread count, as in BUSCO and QIIME 2, the same as its 1-thread output):
+Published tools and workflow managers run unchanged with LOSAT under the NCBI names (`--install-shims`), and their BLAST steps wrote the same output in every case compared (where NCBI BLAST+'s own output changes with the thread count, as in BUSCO and QIIME 2, the same as its 1-thread output), apart from the line that names the program's version in the formats that have one:
 
 <p align="center">
   <picture>
@@ -160,7 +160,7 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
 
 - **Rust (`losat`):** `losat::api` runs a search on FASTA records in memory or on a BLAST database and returns the command line's reports byte for byte, plus one typed record per HSP. Add it with `cargo add losat`. See [LOSAT/README.md](LOSAT/README.md) and the [Rust library page](docs/manual/src/libraries/rust.md).
 - **Python (`pylosat`):** searches from Python, with the hits as an Arrow table for pandas or Polars. Install it with `pip install pylosat`. See [python/README.md](python/README.md) and the [Python page](docs/manual/src/libraries/python.md).
-- **WebAssembly:** the npm package `losat` (built from this repository) runs the engine in web pages and Node.js, and LOSAT Web runs on it; `losat.wasm` is the command for WASI hosts. See [web/packages/losat/README.md](web/packages/losat/README.md) and the [WebAssembly page](docs/manual/src/libraries/webassembly.md).
+- **WebAssembly & LOSAT Web:** the npm package `losat` (built from this repository) runs the engine in web pages and Node.js, and the browser preview LOSAT Web runs on it; `losat.wasm` is the command for WASI hosts. See [web/packages/losat/README.md](web/packages/losat/README.md), the [WebAssembly page](docs/manual/src/libraries/webassembly.md), and the [LOSAT Web guide](docs/manual/src/web.md).
 
 ---
 
@@ -171,16 +171,20 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
 - **[User manual](https://satoshikawato.github.io/LOSAT/)** (source in `docs/manual/src/`):
   - [Introduction](docs/manual/src/introduction.md) • [Quick start](docs/manual/src/quick-start.md) • [Common workflows](docs/manual/src/workflows.md) • [Installation](docs/manual/src/installation.md)
   - [Coming from NCBI BLAST+](docs/manual/src/from-ncbi-blast.md) • [Upgrading from LOSAT v0.1](docs/manual/src/from-losat-v0-1.md) • [Threads, speed and memory](docs/manual/src/performance.md)
-  - [Differences from NCBI BLAST+](docs/manual/src/differences.md) • [What LOSAT refuses](docs/manual/src/refusals.md) • [Databases](docs/manual/src/databases.md) • [Output formats](docs/manual/src/output-formats.md) • [Environment variables](docs/manual/src/environment.md)
-- **Not in v0.2.0:** `deltablast`, `makeprofiledb`, `blast_formatter`, `windowmasker -mk_counts` and `-convert`, `psiblast -phi_pattern`, and `-html`; options that need NCBI's servers or its GI and IPG lists (`-remote`, `-entrez_query`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
-- [v0.2.0 release record](docs/release/v0.2.0.md) • [Contributor guide](AGENTS.md)
+  - [Differences from NCBI BLAST+](docs/manual/src/differences.md) • [What LOSAT refuses](docs/manual/src/refusals.md) • [Databases](docs/manual/src/databases.md) • [Output formats](docs/manual/src/output-formats.md) • [Environment variables](docs/manual/src/environment.md) • [LOSAT Web](docs/manual/src/web.md)
+- **Not in v0.2.0:** `deltablast`, `makeprofiledb`, `blast_formatter`, `psiblast -phi_pattern` and `-html`; options that need NCBI's servers or its GI and IPG lists (`-remote`, `-entrez_query`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
+- [v0.2.0 release record](docs/release/v0.2.0.md) • [Contributing](CONTRIBUTING.md)
 
-## References
+## Citation & References
 
-1. Altschul, S. F., Gish, W., Miller, W., Myers, E. W., & Lipman, D. J. (1990). Basic local alignment search tool. *Journal of Molecular Biology*, 215(3), 403–410.
-2. Camacho, C., Coulouris, G., Avagyan, V., Ma, N., Papadopoulos, J., Bealer, K., & Madden, T. L. (2009). BLAST+: architecture and applications. *BMC Bioinformatics*, 10, 421.
-3. [NCBI C++ Toolkit](https://github.com/ncbi/ncbi-cxx-toolkit-public), whose BLAST+ code LOSAT follows.
+If you use LOSAT in published work, cite LOSAT ([CITATION.cff](CITATION.cff)) together with the foundational BLAST / BLAST+ papers:
+
+1. Kawato, S. LOSAT (LOcal Sequence Alignment Tool). Software repository: <https://github.com/satoshikawato/LOSAT>. See [CITATION.cff](CITATION.cff).
+2. Altschul, S. F., Gish, W., Miller, W., Myers, E. W., & Lipman, D. J. (1990). Basic local alignment search tool. *Journal of Molecular Biology*, 215(3), 403–410.
+3. Altschul, S. F., Madden, T. L., Schäffer, A. A., Zhang, J., Zhang, Z., Miller, W., & Lipman, D. J. (1997). Gapped BLAST and PSI-BLAST: a new generation of protein database search programs. *Nucleic Acids Research*, 25(17), 3389–3402.
+4. Camacho, C., Coulouris, G., Avagyan, V., Ma, N., Papadopoulos, J., Bealer, K., & Madden, T. L. (2009). BLAST+: architecture and applications. *BMC Bioinformatics*, 10, 421.
+5. [NCBI C++ Toolkit](https://github.com/ncbi/ncbi-cxx-toolkit-public), whose BLAST+ code LOSAT follows.
 
 ## License
 
-LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, BitMagic, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). Citation metadata: [CITATION.cff](CITATION.cff).
+LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, BitMagic, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).

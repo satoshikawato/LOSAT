@@ -1,6 +1,6 @@
 //! The first parse of the ids of a definition line with `-parse_seqids`: the id branch of
-//! `CFastaDeflineReader::ParseDefline` with the flags of makeblastdb (`fRequireID |
-//! fParseRawID | fQuickIDCheck`) or of the mask reader (`fParseRawID`), `fAssumeProt` or
+//! `CFastaDeflineReader::ParseDefline` with the flags of makeblastdb (`fRequireID`,
+//! `fParseRawID` and `fQuickIDCheck`) or of the mask reader (`fParseRawID`), `fAssumeProt` or
 //! `fAssumeNuc`: the range suffix (`ParseRange`), the ids (`x_ProcessIDs`, with
 //! `CSeq_id::ParseIDs`) and their checks (`CSeqIdCheck`, `CFastaIdValidate`). Errors end the
 //! reading (neither `CFastaBioseqSource` nor `CMaskFastaReader` gives the reader a listener,
@@ -41,8 +41,8 @@ pub(crate) fn post_seq_id_warning_of(name: &str, warning: SeqIdWarning, warn: Wa
     );
 }
 
-/// `CFastaDeflineReader::ParseRange(s, start, end)`: the length of the range suffix of
-/// the id token (`:<from>-<to>` or `:c<from>-<to>`), 0 for none, with its ends.
+/// `CFastaDeflineReader::ParseRange` of `s` with its start and end: the length of the range suffix
+/// of the id token (`:<from>-<to>` or `:c<from>-<to>`), 0 for none, with its ends.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:229-273
 /// `TSeqPos` is a 32-bit unsigned integer: the sums and `mult` wrap as NCBI's do.
@@ -99,20 +99,19 @@ fn seq_id_string(id: &ParsedSeqId) -> Vec<u8> {
     out
 }
 
-/// The `CObjReaderParseException` that `s_PostError(nullptr, lineNumber, ..., errMessage,
-/// problem, errCode)` throws (cited at `reader::Thrower::PostError`).
+/// The `CObjReaderParseException` that `s_PostError` throws, with no listener, the line number,
+/// the error message, the problem and the error code (cited at `reader::Thrower::PostError`).
 fn error(code: ErrCode, message: String, line_number: u64) -> ParseError {
     ParseError::new(Thrower::PostError, code, message, line_number)
 }
 
-/// `CFastaDeflineReader::x_ProcessIDs(id_string, info, ids, listener, CSeqIdCheck)`: the
-/// ids of the token, checked. `protein` is `fAssumeProt` (the excessive data check of the
-/// nucleotides is made without it, also for convert2blastmask's reader, which sets neither;
-/// NCBI's reader without `fAssumeNuc` also makes the check of the proteins, which only posts
-/// a warning, and convert2blastmask writes no warning, so LOSAT does not make it there),
-/// `quick_id_check` `fQuickIDCheck` (makeblastdb, the BLAST programs' `-parse_deflines`;
-/// not the mask readers), `parse_raw_id` `fParseRawID` (set by every caller but
-/// convert2blastmask's).
+/// `CFastaDeflineReader::x_ProcessIDs` of `id_string`, with `info`, `ids`, a listener and
+/// `CSeqIdCheck`: the ids of the token, checked. `protein` is `fAssumeProt` (the excessive data
+/// check of the nucleotides is made without it, also for convert2blastmask's reader, which sets
+/// neither; NCBI's reader without `fAssumeNuc` also makes the check of the proteins, which only
+/// posts a warning, and convert2blastmask writes no warning, so LOSAT does not make it there),
+/// `quick_id_check` `fQuickIDCheck` (makeblastdb, the BLAST programs' `-parse_deflines`; not the
+/// mask readers), `parse_raw_id` `fParseRawID` (set by every caller but convert2blastmask's).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:333-404
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:85,101-104
@@ -171,7 +170,8 @@ pub(crate) fn process_ids(
     Ok(ids)
 }
 
-/// `CFastaIdValidate(flags)(ids, lineNum, CIdErrorReporter(nullptr))` with `fAssumeProt` or
+/// The call of a `CFastaIdValidate` of `flags` on `ids`, the line number and a
+/// `CIdErrorReporter` without a listener, with `fAssumeProt` or
 /// `fAssumeNuc`, with or without `fQuickIDCheck`: an error throws, a warning is a
 /// `LOG_POST` line. The exception's code is the one of `CIdErrorReporter`'s map:
 ///
@@ -221,7 +221,8 @@ fn validate_ids(
     Ok(())
 }
 
-/// `s_GetIDLengthErrorString(length, idType, maxAllowedLength, lineNum)`.
+/// `s_GetIDLengthErrorString` of the length, the id type, the maximum allowed length and the
+/// line number.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:154-166
 fn id_length_error(length: usize, id_type: &str, max: usize, line_number: u64) -> ParseError {
@@ -236,7 +237,7 @@ fn id_length_error(length: usize, id_type: &str, max: usize, line_number: u64) -
     )
 }
 
-/// `CFastaIdValidate::CheckIDLength(id, lineNum, fReportError)`.
+/// `CFastaIdValidate::CheckIDLength` of `id` and the line number, with `fReportError`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:169-213
 fn check_id_length(id: &ParsedSeqId, line_number: u64) -> Result<(), ParseError> {
@@ -288,7 +289,8 @@ const WARN_NUM_NUC_CHARS_AT_END: usize = 20;
 const ERR_NUM_NUC_CHARS_AT_END: usize = 25;
 const WARN_NUM_AMINO_ACID_CHARS_AT_END: usize = 50;
 
-/// `CFastaIdValidate::CheckForExcessiveNucData(id, lineNum, fReportError)`.
+/// `CFastaIdValidate::CheckForExcessiveNucData` of `id` and the line number, with
+/// `fReportError`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:240-292
 fn check_for_excessive_nuc_data(
@@ -317,7 +319,8 @@ fn check_for_excessive_nuc_data(
     Ok(())
 }
 
-/// `CFastaIdValidate::CheckForExcessiveProtData(id, lineNum, fReportError)`.
+/// `CFastaIdValidate::CheckForExcessiveProtData` of `id` and the line number, with
+/// `fReportError`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:295-326
 fn check_for_excessive_prot_data(id: &ParsedSeqId, warn: ReaderWarn<'_>) {
@@ -340,11 +343,11 @@ fn check_for_excessive_prot_data(id: &ParsedSeqId, warn: ReaderWarn<'_>) {
     }
 }
 
-/// Whether `CFastaIdValidate(0)` (the alignment reader's `CDefaultIdValidate`, flags 0: neither
-/// `fAssumeProt` nor `fAssumeNuc`, no `fQuickIDCheck`) reports anything for `ids`: an id that ends
-/// in more than 20 nucleotide letters or more than 50 letters (warnings, or an error from 25
-/// nucleotide letters), a local id with a byte that `CheckLocalID` rejects, an id over the length
-/// limits. The alignment reader has no message listener, so every report, a warning too,
+/// Whether a `CFastaIdValidate` with flags 0 (the alignment reader's `CDefaultIdValidate`:
+/// neither `fAssumeProt` nor `fAssumeNuc`, no `fQuickIDCheck`) reports anything for `ids`: an id
+/// that ends in more than 20 nucleotide letters or more than 50 letters (warnings, or an error from
+/// 25 nucleotide letters), a local id with a byte that `CheckLocalID` rejects, an id over the
+/// length limits. The alignment reader has no message listener, so every report, a warning too,
 /// throws (`CAlnErrorReporter::Report`, cited at `blastinput::aln_reader`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_reader.cpp:162-168

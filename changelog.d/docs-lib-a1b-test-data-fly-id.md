@@ -1,0 +1,1 @@
+- Third-party notices: the notice for the test data (`LOSAT/tests/THIRD_PARTY_DATA.md`, section 11 of `THIRD_PARTY_NOTICES`) also names the definition line of a sixth FlyBase record (`FBtr0337025`) and the Swiss-Prot records in `LOSAT/tests/fasta/rps/`, and no longer gives file counts that had fallen out of date.

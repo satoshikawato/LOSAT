@@ -278,8 +278,8 @@ fn ncbi_s_pdb_lower_case_chain_and_us_patent_keys() {
     );
 }
 
-/// A key of 256 bytes is written; one of 257 bytes, which makeblastdb's `char buf[256]` cannot
-/// hold (it stops with a buffer overflow), is refused.
+/// A key of 256 bytes is written; one of 257 bytes, which makeblastdb's 256-byte `char` buffer
+/// `buf` cannot hold (it stops with a buffer overflow), is refused.
 #[test]
 fn keys_longer_than_256_bytes_are_refused() {
     let dir = Dir::new("long");

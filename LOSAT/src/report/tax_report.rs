@@ -26,7 +26,7 @@ use crate::report::query_warnings::ReadCursor;
 use crate::report::tabular::TabularNames;
 use crate::seqdb::taxdb::TaxNames;
 
-/// `max(kMinTaxFormatLineLength, kFormatLineLength)`: the report's line length (`m_LineLength`).
+/// The greater of `kMinTaxFormatLineLength` and `kFormatLineLength`: the report's line length (`m_LineLength`).
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/align_format/taxFormat.hpp:58
 const LINE_LENGTH: u32 = 100;
@@ -98,7 +98,7 @@ impl Text {
         })
     }
 
-    /// `CAlignFormatUtil::MapTemplate(text, name, value)`: every `<@name@>` replaced by `value`,
+    /// `CAlignFormatUtil::MapTemplate` of `text`, `name` and `value`: every `<@name@>` replaced by `value`,
     /// left to right; the text put in is not searched again by this call.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3593-3599
@@ -149,7 +149,7 @@ impl Text {
             .sum()
     }
 
-    /// `out << text`: one insertion of NCBI's, streamed (`cli::insert_streamed`), so that a run
+    /// The insertion of `text` into `out`: one insertion of NCBI's, streamed (`cli::insert_streamed`), so that a run
     /// of spaces is never held whole.
     fn insert_into(&self, out: &mut crate::cli::NcbiOstream<'_>) -> io::Result<()> {
         crate::cli::insert_streamed(out, self.len(), |insertion| {
@@ -181,7 +181,7 @@ enum Place {
     Center,
 }
 
-/// `CAlignFormatUtil::AddSpaces(value, width, place)` with `eAddEOLAtLineStart` (`eol_start`)
+/// `CAlignFormatUtil::AddSpaces` of `value`, `width` and `place` with `eAddEOLAtLineStart` (`eol_start`)
 /// and `eAddEOLAtLineEnd` (`eol_end`). `width` is NCBI's `size_t`: a width of 0 to 2 cuts
 /// nothing (`width - 3` wraps) and still adds `...`.
 ///
@@ -345,7 +345,9 @@ pub trait TaxSubjects {
     fn refused(&self, subject: usize, reason: &str) -> anyhow::Error;
 
     /// Whether the load of `subject` throws where its query's batch has its prefetch off
-    /// (`db_subject::HitLoads::thrown`): the report leaves its HSPs out (`organism_report`).
+    /// (`db_subject::HitLoads::thrown`), or at every load where a file of the taxonomy database
+    /// does not open and the load looks a positive taxid up
+    /// (`SubjectTable::with_loads_that_throw`): the report leaves its HSPs out (`organism_report`).
     fn throws(&self, _subject: usize) -> bool {
         false
     }
@@ -411,6 +413,19 @@ impl TaxSource<'_> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1130-1155
+    /// Whether NCBI's load of the subject Bioseq looks a positive taxid up
+    /// (`CSeqDBVol::x_GetTaxonomy`, at each definition line with one): a database sequence with
+    /// such a line (`ParsedSubject::first_source_taxid`; the stored taxid without parsed Seq-ids).
+    /// A `-subject` record is not loaded from a database.
+    fn looks_taxid_up(&self) -> bool {
+        match (self.parsed, self.plain) {
+            (Some(subject), _) => subject.first_source_taxid().is_some(),
+            (None, TaxPlain::Stored { taxid, .. }) => taxid > 0,
+            (None, TaxPlain::Record { .. }) => false,
+        }
+    }
+
     /// How LOSAT's refusals name the subject.
     fn name(&self) -> SubjectName {
         match (self.parsed, self.plain) {
@@ -437,6 +452,11 @@ enum SubjectName {
 /// hold equal ids (`db_subject::joined_in_reports`).
 pub struct SubjectTable<'p> {
     subjects: std::collections::HashMap<usize, (Vec<TaxDefline>, SubjectName)>,
+    /// The subjects whose load looks a positive taxid up (`TaxSource::looks_taxid_up`).
+    taxid_loads: std::collections::HashSet<usize>,
+    /// Whether every load of a database sequence that looks a positive taxid up throws
+    /// (`with_loads_that_throw`).
+    taxid_loads_throw: bool,
     parsed: &'p [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     /// What the reports load of each subject (`db_subject::HitLoads`; `None`: every subject).
     loads: Option<&'p crate::report::db_subject::HitLoads>,
@@ -457,20 +477,36 @@ impl<'p> SubjectTable<'p> {
         program: &str,
     ) -> Self {
         let mut subjects = std::collections::HashMap::new();
+        let mut taxid_loads = std::collections::HashSet::new();
         for hsp in queries.iter().flat_map(|query| query.hsps.iter().flatten()) {
             subjects.entry(hsp.subject).or_insert_with(|| {
                 let source = TaxSource {
                     parsed: parsed.get(hsp.subject).and_then(Option::as_deref),
                     plain: plain(hsp.subject),
                 };
+                if source.looks_taxid_up() {
+                    taxid_loads.insert(hsp.subject);
+                }
                 (source.deflines(protein), source.name())
             });
         }
         SubjectTable {
             subjects,
+            taxid_loads,
+            taxid_loads_throw: false,
             parsed,
             loads,
             program: program.to_owned(),
+        }
+    }
+
+    /// The table where every load of a database sequence that looks a positive taxid up throws
+    /// (`throws`: a file of the run's taxonomy database does not open,
+    /// `common::database::TaxdbRun::load_throws`, `TaxNamesDb::loads_throw`).
+    pub fn with_loads_that_throw(self, throws: bool) -> Self {
+        SubjectTable {
+            taxid_loads_throw: throws,
+            ..self
         }
     }
 
@@ -511,8 +547,10 @@ impl TaxSubjects for SubjectTable<'_> {
     }
 
     fn throws(&self, subject: usize) -> bool {
-        self.loads
-            .is_some_and(|loads| loads.thrown(subject).is_some())
+        (self.taxid_loads_throw && self.taxid_loads.contains(&subject))
+            || self
+                .loads
+                .is_some_and(|loads| loads.thrown(subject).is_some())
     }
 }
 
@@ -530,6 +568,9 @@ pub struct TaxNamesDb {
     /// LOSAT's error of an open or a lookup that the reader refuses or cannot read, naming the
     /// program (`common::database::taxdb_error`).
     error: fn(crate::seqdb::SeqDbError, &str) -> anyhow::Error,
+    /// Whether every load of a database sequence that looks a positive taxid up throws
+    /// (`where_loads_throw`).
+    loads_throw: bool,
 }
 
 impl TaxNamesDb {
@@ -543,6 +584,18 @@ impl TaxNamesDb {
             taxdb,
             opened_before,
             error,
+            loads_throw: false,
+        }
+    }
+
+    /// The lookups of a `-db` run where every load of a database sequence that looks a positive
+    /// taxid up throws (`throws`: a file of the database does not open,
+    /// `common::database::TaxdbRun::load_throws`): the report leaves such a subject's HSPs out at
+    /// its load (`SubjectTable::with_loads_that_throw`).
+    pub(crate) fn where_loads_throw(self, throws: bool) -> Self {
+        TaxNamesDb {
+            loads_throw: throws,
+            ..self
         }
     }
 }
@@ -613,7 +666,14 @@ impl TaxLookups {
         }
     }
 
-    /// `GetTaxInfo(taxid)`: what it finds (`None`: it throws). The database is opened at the
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1034
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1050-1055
+    // A file of the database that does not open (`SeqDbError::TaxdbThrows`) throws `CMemoryFile`'s
+    // exception at every lookup (and, with `-db`, at every load of a subject with a positive taxid
+    // before it), which the report's `catch` takes as it takes a taxid that is not found: it leaves
+    // the HSP out and writes nothing (review 1 of line WQA D18b, L1).
+    /// `GetTaxInfo` of `taxid`: what it finds (`None`: it throws, also where a file of the database
+    /// does not open). The database is opened at the
     /// run's first lookup (the texts of opening, with those of an open by earlier rows, go before
     /// the batch's first lookup's), each taxid is read once per batch. An open or a lookup that
     /// LOSAT's reader refuses is LOSAT's error (`TaxNamesDb::error`).
@@ -622,22 +682,21 @@ impl TaxLookups {
             let answer = match &self.db {
                 None => (None, Vec::new()),
                 Some(db) => {
-                    if !self.looked_up {
+                    let opened = if self.looked_up {
+                        Ok(())
+                    } else {
                         if let Some(before) = &db.opened_before {
                             self.open = std::mem::take(&mut *before.lock().expect("open texts"));
                         }
-                        let opened = db
-                            .taxdb
-                            .open()
-                            .map_err(|error| (db.error)(error, &self.program))?;
-                        self.open.extend(opened);
-                    }
+                        db.taxdb.open().map(|opened| self.open.extend(opened))
+                    };
                     let mut messages = Vec::new();
-                    let found = db
-                        .taxdb
-                        .names(taxid, &mut messages)
-                        .map_err(|error| (db.error)(error, &self.program))?;
-                    (found, messages)
+                    match opened.and_then(|()| db.taxdb.names(taxid, &mut messages)) {
+                        Ok(found) => (found, messages),
+                        // A lookup that throws where a file does not open (above).
+                        Err(crate::seqdb::SeqDbError::TaxdbThrows { .. }) => (None, Vec::new()),
+                        Err(error) => return Err((db.error)(error, &self.program)),
+                    }
                 }
             };
             self.answers.insert(taxid, answer);
@@ -831,9 +890,9 @@ impl TaxReport {
         title: &[u8],
         length: usize,
     ) -> Result<()> {
-        // The report's insertions are NCBI's (`cli::insert`, `Text::insert_into`): `m_Outfile <<
-        // reportCaption`, `m_Outfile << "\n"` (module docs), the `Query=` block's and
-        // `out << orgReportData` (`organism_report`).
+        // The report's insertions are NCBI's (`cli::insert`, `Text::insert_into`): `reportCaption`
+        // and a line feed into `m_Outfile` (module docs), the `Query=` block's and `orgReportData`
+        // into `out` (`organism_report`).
         add_spaces(
             b"Tax BLAST report",
             u64::from(LINE_LENGTH),
@@ -949,7 +1008,12 @@ pub fn report_batch<'a>(
     names: Option<&TabularNames>,
     program: &str,
 ) -> Result<TaxReport> {
-    let table = SubjectTable::new(queries, parsed, plain, protein, loads, program);
+    let table = SubjectTable::new(queries, parsed, plain, protein, loads, program)
+        .with_loads_that_throw(
+            names
+                .and_then(TabularNames::report_db)
+                .is_some_and(|db| db.loads_throw),
+        );
     TaxReport::new(queries, &table, TaxLookups::new(names, program)?)
 }
 
@@ -979,7 +1043,7 @@ fn organism_report(
         if previous.is_some_and(|previous| subjects.same(previous, hsp.subject)) {
             continue;
         }
-        // `m_Scope.GetBioseqHandle(*subid)` (taxFormat.cpp:997), before the definition lines; a
+        // `m_Scope.GetBioseqHandle` of the id `subid` (taxFormat.cpp:997), before the definition lines; a
         // load that throws goes to the `catch`, `continue`, and reads nothing.
         if subjects.throws(hsp.subject) {
             continue;

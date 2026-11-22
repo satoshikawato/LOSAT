@@ -6,7 +6,7 @@
   the scores, zero counts and coordinates and the ids, titles and taxonomy of the query's last row that read its
   sequence (`Unknown` and `N/A` before one), adds the Seq-align id to `sallseqid`, `sallgi` and `sallacc`, and goes
   on; a field list that reads the sequence otherwise (`slen`, the aligned letters, a count computed from them, or in
-  BLASTX, TBLASTN and TBLASTX the subject's frame) writes the rows before it and stops with `BLAST Database error: DB
+  BLASTX, TBLASTN and TBLASTX the subject's frame) writes the rows before it and stops with `LOSAT database error: DB
   contains no accession info.` (exit status 2), and `nident` alone stops only at a row with identities. The organism
   report leaves such a sequence out and goes on. No taxonomy text comes for such a row, and a damaged or empty
   taxonomy database is read only for the sequences that were read. LOSAT still refuses the first row of a query's

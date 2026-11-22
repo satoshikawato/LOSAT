@@ -1,6 +1,6 @@
 # rpsbproc
 
-`losat rpsbproc` turns the output of an RPS-BLAST search into a list of conserved domains. For each query it reports the domain hits, and optionally the functional sites and structural motifs of those domains, using NCBI's Conserved Domain Database (CDD) data files. It writes the same report as NCBI's `rpsbproc` 0.5.1.
+`losat rpsbproc` turns the output of an RPS-BLAST search into a list of conserved domains. For each query it reports the domain hits, and optionally the functional sites and structural motifs of those domains, using NCBI's Conserved Domain Database (CDD) data files. It writes the same report as NCBI's `rpsbproc` 0.5.1 (the status banner on standard error reads `Post-RPSBLAST Processing Utility (LOSAT 0.2.0)` where NCBI writes `v0.5.1`).
 
 ## Synopsis
 
@@ -16,7 +16,7 @@ You need two things.
 
 **1. A BLAST archive.** `rpsbproc` reads the ASN.1 text archive that `rpsblast -outfmt 11` or `rpstblastn -outfmt 11` writes, with one archive per batch of queries. Give it with `-i FILE`, or pipe it to the standard input. It also reads the BLAST XML of `-outfmt 5`, as NCBI's `rpsbproc` does, but prints NCBI's warning that XML support is deprecated.
 
-LOSAT's own `rpsblast` and `rpstblastn` write the archive with NCBI BLAST+ 2.17.0's bytes, so the two can be piped (one archive per batch of queries reaches the standard input as NCBI's do), and NCBI's `rpsblast` and `rpstblastn` work as well. For example:
+LOSAT's own `rpsblast` and `rpstblastn` write the archive with NCBI BLAST+ 2.17.0's bytes (apart from the `ident`, which holds LOSAT's version), so the two can be piped (one archive per batch of queries reaches the standard input as NCBI's do), and NCBI's `rpsblast` and `rpstblastn` work as well. For example:
 
 ```bash
 losat rpsblast -query proteins.faa -db Cdd -evalue 0.01 -outfmt 11 | losat rpsbproc -d cdd_data -t doms -m rep -f
@@ -63,11 +63,12 @@ For every option: `losat rpsbproc -help`.
 
 For nucleotide queries (from `rpstblastn`), each reading frame is classified separately. Its hits are shown with the frame after the query name, such as `Query_1[-2]`, at positions on the plus strand. The `DOMAINS` section is printed even when there are no hits.
 
-Messages and exit codes are NCBI's: 2 for a problem in the data files, 3 for the input file, 4 for the output file and 5 for the input data.
+Messages and exit codes are NCBI's: 2 for a problem in the data files, 3 for the input file, 4 for the output file and 5 for the input data. When writing the report fails, LOSAT stops with `rpsbproc failed to write output` and exit status 4 instead of exiting silently with 0 ([Differences from NCBI BLAST+](../differences.md#a-write-that-fails-a-closed-pipe-memory)).
 
 ## Differences from NCBI BLAST+
 
 - Where NCBI's `rpsbproc` reads memory it should not, or its result depends on the machine, LOSAT refuses the input or computes the value without the undefined step ([the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md)).
+- Hits of one query with equal E-value and bit score keep their input order, where NCBI's order can differ, and so can which of them is `Specific` ([Differences from NCBI BLAST+](../differences.md#rpsbproc-hits-that-tie)).
 
 ## What LOSAT refuses
 

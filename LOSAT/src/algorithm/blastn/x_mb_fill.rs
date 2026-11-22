@@ -31,8 +31,8 @@
 //!   than the longest `query_offset + seq.len()`), and an index is at most
 //!   `query_offset + seq.len()`;
 //! - `(table_size - 1) >> pv_array_bts` is a presence-vector word (NCBI sizes the array so; the
-//!   bound check of `pv_set_shift` never fails) and `(table_size - 1) / kCompressionFactor` a
-//!   helper counter;
+//!   bound check of `pv_set_shift` never fails) and one less than `table_size`, divided by
+//!   `kCompressionFactor`, a helper counter;
 //! - `next_pos` has at most `u32::MAX` elements, so an index fits its `u32`, and the queries have
 //!   at most `u32::MAX` letters, so there are fewer than 2^32 words: a helper counter stays below
 //!   2^32 and `+ 1` equals `x_mb_apply`'s `saturating_add(1)`.

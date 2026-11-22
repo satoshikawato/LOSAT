@@ -77,10 +77,10 @@ fn translations_of_fewer_than_3_bases_or_letters() {
     assert_eq!(value(translations(b"ATGAAA"))[0], b"MK");
 }
 
-// rpsbproc_main.cpp:1457 (cited at `codon`): `(char)toupper(dimTranslated[rfidx][iterRP->curr])`.
-// At the end of the translation `operator[]` gives its terminating 0; elsewhere outside it NCBI
-// reads outside the string (PS16c oracle `natoprot`, whose two 0.5.1 builds print different
-// bytes): refused, the residue numbered from 1.
+// rpsbproc_main.cpp:1457 (cited at `codon`): `toupper` of `dimTranslated[rfidx][iterRP->curr]`,
+// cast to `char`. At the end of the translation `operator[]` gives its terminating 0; elsewhere
+// outside it NCBI reads outside the string (PS16c oracle `natoprot`, whose two 0.5.1 builds print
+// different bytes): refused, the residue numbered from 1.
 #[test]
 fn residues_outside_the_translation() {
     let translation = frame(4, b"mKx");
@@ -130,11 +130,11 @@ fn codons_and_their_overflow() {
     );
 }
 
-// rpsbproc_main.cpp:1746-1747,1788-1789 (cited at `motif_ends`): `GetLeft() + 1` in `int` and
-// `GetRight() +/- 2 + 1` in `unsigned int` after `Pr2NaConvert`. A set past `int`'s range, a
-// minus-strand residue at `INT_MIN` (`domains::pr2na_ends`) and `GetLeft() + 1` at `INT_MAX`
-// overflow `int` (undefined): computed as their values (PD-LOSAT-NCBI-DEFECTS exception 12;
-// PS16-Q1 oracle `ntmotifmax` and its nearby input, the motif one residue lower).
+// rpsbproc_main.cpp:1746-1747,1788-1789 (cited at `motif_ends`): `GetLeft()` plus 1 in `int` and
+// `GetRight()` plus or minus 2, plus 1, in `unsigned int` after `Pr2NaConvert`. A set past `int`'s
+// range, a minus-strand residue at `INT_MIN` (`domains::pr2na_ends`) and `GetLeft()` plus 1 at
+// `INT_MAX` overflow `int` (undefined): computed as their values (PD-LOSAT-NCBI-DEFECTS exception
+// 12; PS16-Q1 oracle `ntmotifmax` and its nearby input, the motif one residue lower).
 #[test]
 fn motif_ends_and_their_overflow() {
     let set = |from: i64, to: i64| SegSet::from_segs(vec![Seg::new(from, to)]);

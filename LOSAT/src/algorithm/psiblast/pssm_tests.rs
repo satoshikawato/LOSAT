@@ -45,7 +45,7 @@ fn saving_a_pssm_needs_a_pssm_file() {
         native(&error),
         (
             1,
-            "BLAST query/options error: save_pssm_after_last_round option requires out_pssm or out_ascii_pssm\nPlease refer to the LOSAT user manual.\n"
+            "LOSAT query/options error: save_pssm_after_last_round option requires out_pssm or out_ascii_pssm\nPlease refer to the LOSAT user manual.\n"
                 .to_string()
         )
     );
@@ -59,7 +59,7 @@ fn saving_a_pssm_needs_a_pssm_file() {
         native(&error),
         (
             1,
-            "BLAST query/options error: save_each_pssm option requires out_pssm or out_ascii_pssm\nPlease refer to the LOSAT user manual.\n"
+            "LOSAT query/options error: save_each_pssm option requires out_pssm or out_ascii_pssm\nPlease refer to the LOSAT user manual.\n"
                 .to_string()
         )
     );
@@ -718,12 +718,12 @@ fn the_pssm_engine_checks_the_pseudocount_then_the_inclusion_threshold() {
     };
     let pseudocount = (
         1,
-        "BLAST options error: IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0\n"
+        "LOSAT options error: IPssmInputData returns invalid PSIBlastOptions: Pseudo count must be greater than or equal to 0\n"
             .to_string(),
     );
     let inclusion = (
         1,
-        "BLAST options error: IPssmInputData returns invalid PSIBlastOptions: Inclusion threshold must be greater than 0\n"
+        "LOSAT options error: IPssmInputData returns invalid PSIBlastOptions: Inclusion threshold must be greater than 0\n"
             .to_string(),
     );
     assert_eq!(native(&run(-1, 0.002).unwrap_err()), pseudocount);

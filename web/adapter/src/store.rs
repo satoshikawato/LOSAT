@@ -8,9 +8,10 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::Mutex;
 
-use losat::api::FastaRecord;
+use losat::api::{FastaRecord, QueryEnd};
 use losat::web_adapter::{
-    read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
+    read_all, read_query_records, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig,
+    RecordSource,
 };
 
 use crate::json;
@@ -28,6 +29,10 @@ pub struct Registered {
     /// The program whose reader read the records; only its runs use them.
     pub program: Program,
     pub records: Vec<FastaRecord>,
+    /// How the reading of a query ended after `records` (`QueryEnd::Input` for a subject): a run
+    /// meets it where the CLI's query batches meet it, a reader's error in the batch that reads
+    /// the record after `records` (line WQA's D10, 2026-11-19).
+    pub end: QueryEnd,
     /// The deflines that the BLAST archive cannot make from the title (`read_deflines`); the
     /// records themselves keep no source.
     pub deflines: KeptDeflines,
@@ -142,7 +147,7 @@ fn read_deflines(
         let mut alone = FastaInputSource::from_bytes(&bytes[range], config.with_defline(true));
         let read = alone.next_sequence(&mut quiet).ok();
         let Some(kept) = read.filter(|kept| kept.title == record.title) else {
-            return read_all_deflines(bytes, config);
+            return read_all_deflines(bytes, config, records.len());
         };
         if let Some(defline) = kept
             .archive_defline()
@@ -154,16 +159,20 @@ fn read_deflines(
     Ok(deflines)
 }
 
-/// `read_deflines` over the whole input: every record read again, one at a time, keeping the
+/// `read_deflines` over the whole input: the `count` records read again, one at a time, keeping the
 /// deflines that `>` and the title do not give.
 #[cold]
-fn read_all_deflines(bytes: &[u8], config: ReaderConfig) -> Result<KeptDeflines, ReadError> {
+fn read_all_deflines(
+    bytes: &[u8],
+    config: ReaderConfig,
+    count: usize,
+) -> Result<KeptDeflines, ReadError> {
     let made = |line: &[u8], title: &[u8]| line.first() == Some(&b'>') && &line[1..] == title;
     let mut source = FastaInputSource::from_bytes(bytes, config.with_defline(true));
     let mut quiet = |_: &[u8]| Ok(());
     let mut deflines = Vec::new();
     let mut index = 0;
-    while !source.end() {
+    while index < count && !source.end() {
         match source.next_sequence(&mut quiet) {
             Ok(record) => {
                 if let Some(defline) = record
@@ -189,11 +198,15 @@ fn read_all_deflines(bytes: &[u8], config: ReaderConfig) -> Result<KeptDeflines,
 /// against the index scan of the same bytes (plan TD-8), keeps them, and returns the handle and the
 /// *register* JSON.
 ///
-/// The scan (`scan/ncbi.rs`, with the same reader) comes first: it fails on the reader's own error
-/// (`CheckDataLine`), which `register` reports with the CLI's text (`BLAST query error: ...`), and
-/// on the reader's refusals, in the CLI's words (a first line that NCBI's data loaders would fetch
-/// as a Seq-id, a record longer than LOSAT reads), before the reader holds such a record. The
-/// engine's reader then reads the records.
+/// The scan (`scan/ncbi.rs`, with the same reader) comes first: it fails on the reader's refusals,
+/// in the CLI's words (a first line that NCBI's data loaders would fetch as a Seq-id, a record
+/// longer than LOSAT reads), before the reader holds such a record, and ends at the reader's own
+/// error (`CheckDataLine`). The engine's reader then reads the records: a subject's every record,
+/// or the reader's own error with the CLI's text (`LOSAT query error: ...`), as the CLI reads every
+/// subject before its first query; a query's records as the CLI's query batches read them
+/// (`read_query_records`): the records before the reader's error, and the error (`QueryEnd`),
+/// which a run meets in the batch that reads the record, after the reports of the batches before,
+/// and which the response gives (`reader_error`, line WQA's D10, 2026-11-19).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:78-80
 pub fn register(
@@ -205,49 +218,44 @@ pub fn register(
     let program = Program::parse(program)?;
     let role_name = role_name(role)?;
     let config = reader_config(program, role, data_loaders);
-    let read = || {
-        read_all(
+    // The reader's refusal, in its words: the reader refuses there too, after it held what it read
+    // of the record (a record of 2^31 letters does not fit in the browser).
+    let scanned = scan::scan_ncbi(bytes, config).map_err(|error| error.message().to_string())?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:211-216
+    // A query of white space only is NCBI's `Query is Empty!` at run time; a query of blank and
+    // comment lines only has a first batch without a query, NCBI's `Empty CBlastQueryVector`
+    // at run time too (`QueryEnd::BlankLines`).
+    let (records, end) = if role == ROLE_QUERY {
+        read_query_records(bytes, config)
+    } else {
+        let records = read_all(
             &mut FastaInputSource::from_bytes(bytes, config),
             &mut |_| Ok(()),
         )
+        .map_err(reader_error)?;
+        (records, QueryEnd::Input)
     };
-    let scanned = match scan::scan_ncbi(bytes, config) {
-        Ok(scanned) => scanned,
-        // The scan stops at the reader's error with the reader's message: the CLI's text.
-        Err(scan::ScanError::Reader(error)) => {
-            return Err(match read() {
-                Err(parse @ ReadError::Parse { .. }) if parse.to_string() == error => {
-                    reader_error(parse)
-                }
-                _ => error,
-            })
-        }
-        // The reader's refusal, in its words: the reader refuses there too, after it held what
-        // it read of the record (a record of 2^31 letters does not fit in the browser).
-        Err(scan::ScanError::Refused { message, .. }) => return Err(message),
-    };
-    let records = read().map_err(reader_error)?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:211-216
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-152
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // A query of white space only is NCBI's `Query is Empty!` at run time; a query with
-    // blank and comment lines only is not empty, and its first batch (`eEOF`, no query)
-    // fails every run, so `register` fails with NCBI's error (port plan Q2).
-    if role == ROLE_QUERY {
-        check_query_batch(bytes, &records)?;
-    }
-    check_scan(role_name, &scanned, &records)?;
-    let deflines = read_deflines(bytes, config, &scanned, &records).map_err(reader_error)?;
+    check_scan(role_name, &scanned, &records, &end)?;
+    let deflines =
+        read_deflines(bytes, config, &scanned.records, &records).map_err(reader_error)?;
     let mut response = String::new();
     let mut store = store().lock().expect("input store");
     let handle = store.next_handle()?;
-    write_records(&mut response, handle, &scanned, &records, None);
+    write_records(
+        &mut response,
+        handle,
+        &scanned.records,
+        &records,
+        &end,
+        None,
+    );
     store.entries.insert(
         handle,
         Registered {
             role,
             program,
             records,
+            end,
             deflines,
             run: None,
             data_loaders,
@@ -256,9 +264,9 @@ pub fn register(
     Ok((handle, response))
 }
 
-/// NCBI's `BLAST engine error: Empty CBlastQueryVector`, without the CLI's line end: the error of
-/// a query input whose first batch has no query (`check_query_batch`), and of a subject input
-/// without records, which ends the CLI before it reads the query (`register_inputs`).
+/// NCBI's `BLAST engine error: Empty CBlastQueryVector`, without the CLI's line end: the error of a
+/// subject input without records, which ends the CLI before it reads the query
+/// (`register_inputs`).
 fn empty_query_vector() -> String {
     format!(
         "{:#}",
@@ -266,15 +274,6 @@ fn empty_query_vector() -> String {
     )
     .trim_end_matches('\n')
     .to_string()
-}
-
-/// NCBI's error of a query input whose first batch has no query although it is not white space
-/// only (blank and comment lines; `register`).
-fn check_query_batch(bytes: &[u8], records: &[FastaRecord]) -> Result<(), String> {
-    if records.is_empty() && !losat::web_adapter::is_blank(bytes) {
-        return Err(empty_query_vector());
-    }
-    Ok(())
 }
 
 impl Store {
@@ -291,29 +290,43 @@ impl Store {
 /// The handle and the records of a *register* response (docs/web/abi_v2.md §9), `{"handle":…,
 /// "records":[…]}`: each record's index, ID (the index scan's: the title up to its first space) and
 /// length, and with `shown` (`register_inputs`) the ID that the tabular outputs show for it
-/// (`tabular_id`).
+/// (`tabular_id`). The records are the scan's: past a reader's error that the scan does not meet
+/// (an id under `-parse_deflines`), the scan's records that no run reads, with the scan's length and
+/// no `shown_id` (`null`), as the host's record table lists them. A reader's error that ends the
+/// query's records is `reader_error`, the CLI's text (line WQA's D10, 2026-11-19).
 fn write_records(
     out: &mut String,
     handle: u32,
     scanned: &[scan::ScanRecord],
     records: &[FastaRecord],
+    end: &QueryEnd,
     shown: Option<(u32, bool)>,
 ) {
     let _ = write!(out, "{{\"handle\":{handle},\"records\":[");
-    for (index, (scan, record)) in scanned.iter().zip(records).enumerate() {
+    for (index, scan) in scanned.iter().enumerate() {
         if index > 0 {
             out.push(',');
         }
+        let record = records.get(index);
         let _ = write!(out, "{{\"index\":{index},\"id\":");
         json::string(out, &scan.id);
-        let _ = write!(out, ",\"length\":{}", record.seq().len());
+        let length = record.map_or(scan.length, |record| record.seq().len() as u64);
+        let _ = write!(out, ",\"length\":{length}");
         if let Some((role, protein)) = shown {
             out.push_str(",\"shown_id\":");
-            json::string(out, &tabular_id(record, role, protein));
+            match record {
+                Some(record) => json::string(out, &tabular_id(record, role, protein)),
+                None => out.push_str("null"),
+            }
         }
         out.push('}');
     }
-    out.push_str("]}");
+    out.push(']');
+    if let QueryEnd::Error(error) = end {
+        out.push_str(",\"reader_error\":");
+        json::string(out, &String::from_utf8_lossy(error.message()));
+    }
+    out.push('}');
 }
 
 /// The ID that the tabular outputs (outfmt 6 and 7) show for a record of `role` read by the reader
@@ -346,20 +359,20 @@ fn tabular_id(record: &FastaRecord, role: u32, protein: bool) -> String {
 /// handles and the *inputs* JSON (docs/web/abi_v2.md §9): the *register* response of each, with
 /// each record's `shown_id` (`tabular_id`).
 ///
-/// The errors are the CLI's texts. Their order is the CLI's for the subjects, which the CLI reads
-/// whole before any query, and for a query that the CLI reads in one batch: every query record is
-/// read here before the run, so a reader's error in a later query batch of the CLI (two records of
-/// one Seq-id under `-parse_deflines`, for example) ends the run before the searches of the batches
-/// before it, where the CLI ends with the first error of those (a refusal of outfmt 0 in batch 1;
-/// review of line WQA's D7, L1, 2026-11-19, open). The reader has NCBI's data loaders on or off
-/// as the argv's registry sets them (`run::data_loaders`: `[BLAST] DATA_LOADERS` of `-conffile`).
-/// The scans come first: the reader's own errors and its refusals, as in `register`. A scan that
-/// fails gives the error of the reading when the reading fails (the CLI fails with that error,
-/// whatever the scan found), and its own error otherwise; where the scan refused a record (a
-/// Seq-id first line, a record longer than LOSAT reads), the reading stops before that record, as
-/// the CLI's reader does there (line WQA's D13, 2026-11-20). A subject without records ends the
-/// run with NCBI's `Empty CBlastQueryVector` before the query is read, as it ends the CLI
-/// (`register` registers it, and the run gives the error).
+/// The errors are the CLI's texts, in the CLI's order. A subject's error fails here, as the CLI
+/// reads every subject before any query. The query's records are those that the CLI's query
+/// batches read before a reader's error (an id of the other molecule under `-parse_deflines`, a
+/// line that is not plausible data), and the error is kept with the query handle (`QueryEnd`): the
+/// run meets it in the batch that reads the record, after the reports of the batches before, as
+/// the CLI does (review of line WQA's D7, L1, 2026-11-19; line WQA's D10). The reader has NCBI's
+/// data loaders on or off as the argv's registry sets them (`run::data_loaders`: `[BLAST]
+/// DATA_LOADERS` of `-conffile`). The scans come first: the reader's refusals, as in `register`.
+/// A scan that fails gives the error of the reading when the reading fails or ends with an error
+/// (the CLI fails with that error, whatever the scan found), and its own error otherwise; where the
+/// scan refused a record (a Seq-id first line, a record longer than LOSAT reads), the reading stops
+/// before that record, as the CLI's reader does there (line WQA's D13, 2026-11-20). A subject
+/// without records ends the run with NCBI's `Empty CBlastQueryVector` before the query is read, as
+/// it ends the CLI (`register` registers it, and the run gives the error).
 ///
 /// A run of `-db` (`run::searches_database`) has no subject input: its subject bytes must be empty,
 /// the query is read alone (with the ids of its deflines and the argv's data loaders), and the subject handle is 0, with `null`
@@ -392,43 +405,46 @@ pub fn register_inputs(
     };
     // A database is read by the run, not here: its subject scan is empty and is not checked.
     let subject_scan = if database {
-        Ok(Vec::new())
+        Ok(scan::Scanned {
+            records: Vec::new(),
+            stop: None,
+        })
     } else {
         scan(ROLE_SUBJECT)
     };
     if !database
         && subject_scan
             .as_ref()
-            .is_ok_and(|records| records.is_empty())
+            .is_ok_and(|scanned| scanned.records.is_empty() && scanned.stop.is_none())
     {
         return Err(empty_query_vector());
     }
     let (subject_scan, query_scan) = match (subject_scan, scan(ROLE_QUERY)) {
         (Ok(subject_scan), Ok(query_scan)) => (subject_scan, query_scan),
-        (Err(error), _) => {
+        (Err(scan::ScanError::Refused { message, record }), _) => {
             // The CLI reads the subjects whole first: the query is not read.
-            let (read, refusal) = match error {
-                scan::ScanError::Reader(error) => (read(b"", subject), error),
-                scan::ScanError::Refused { message, record } => {
-                    (read(b"", &subject[..record as usize]), message)
-                }
-            };
-            return Err(read.err().unwrap_or(refusal));
+            return Err(read(b"", &subject[..record as usize])
+                .err()
+                .unwrap_or(message));
         }
-        (Ok(_), Err(error)) => {
-            let (read, refusal) = match error {
-                scan::ScanError::Reader(error) => (read(query, subject), error),
-                scan::ScanError::Refused { message, record } => {
-                    (read(&query[..record as usize], subject), message)
-                }
-            };
-            return Err(read.err().unwrap_or(refusal));
+        (Ok(_), Err(scan::ScanError::Refused { message, record })) => {
+            // The query records before the refused one: an error that ends them comes first.
+            return Err(match read(&query[..record as usize], subject) {
+                Err(error) => error,
+                Ok(records) => match records.query_end {
+                    QueryEnd::Error(error) => String::from_utf8_lossy(error.message()).into_owned(),
+                    QueryEnd::Input | QueryEnd::BlankLines => message,
+                },
+            });
         }
     };
-    let (queries, subjects) = read(query, subject)?;
-    check_query_batch(query, &queries)?;
-    check_scan("query", &query_scan, &queries)?;
-    check_scan("subject", &subject_scan, &subjects)?;
+    let losat::api::InputRecords {
+        query: queries,
+        query_end,
+        subject: subjects,
+    } = read(query, subject)?;
+    check_scan("query", &query_scan, &queries, &query_end)?;
+    check_scan("subject", &subject_scan, &subjects, &QueryEnd::Input)?;
     let run: Vec<String> = words.iter().map(|word| word.to_string()).collect();
     let mut store = store().lock().expect("input store");
     let query_handle = store.next_handle()?;
@@ -438,8 +454,9 @@ pub fn register_inputs(
     write_records(
         &mut response,
         query_handle,
-        &query_scan,
+        &query_scan.records,
         &queries,
+        &query_end,
         shown(ROLE_QUERY),
     );
     response.push_str(",\"subject\":");
@@ -449,23 +466,25 @@ pub fn register_inputs(
         write_records(
             &mut response,
             subject_handle,
-            &subject_scan,
+            &subject_scan.records,
             &subjects,
+            &QueryEnd::Input,
             shown(ROLE_SUBJECT),
         );
     }
     response.push('}');
     let inputs = [
-        (query_handle, ROLE_QUERY, queries),
-        (subject_handle, ROLE_SUBJECT, subjects),
+        (query_handle, ROLE_QUERY, queries, query_end),
+        (subject_handle, ROLE_SUBJECT, subjects, QueryEnd::Input),
     ];
-    for (handle, role, records) in inputs.into_iter().filter(|(handle, ..)| *handle != 0) {
+    for (handle, role, records, end) in inputs.into_iter().filter(|(handle, ..)| *handle != 0) {
         store.entries.insert(
             handle,
             Registered {
                 role,
                 program,
                 records,
+                end,
                 deflines: Vec::new(),
                 run: Some(run.clone()),
                 data_loaders,
@@ -475,14 +494,24 @@ pub fn register_inputs(
     Ok((query_handle, subject_handle, response))
 }
 
-/// Fails unless the index scan found the reader's records: the same number, and for each
-/// record the same ID, length and residue counts (the stored residues upper-cased; plan
-/// TD-8).
+/// Fails unless the index scan found the reader's records: for each record the same ID, length and
+/// residue counts (the stored residues upper-cased; plan TD-8), and the same number, or where the
+/// reader's error ended the records (`end`), at least as many: the scan's records past an error
+/// that it does not meet (an id under `-parse_deflines`), before its own stop (`Scanned::stop`) or
+/// without one, and as many where the scan met the reader's own error. A reader that stops where
+/// the scan reads on has no error (review M1, 2026-11-20).
 fn check_scan(
     role: &str,
-    scanned: &[scan::ScanRecord],
+    scanned: &scan::Scanned,
     records: &[FastaRecord],
+    end: &QueryEnd,
 ) -> Result<(), String> {
+    let stopped = matches!(end, QueryEnd::Error(_));
+    let count = match (stopped, &scanned.stop) {
+        (true, _) => scanned.records.len() >= records.len(),
+        (false, Some(_)) => false,
+        (false, None) => scanned.records.len() == records.len(),
+    };
     // A record whose ids the reader read from its defline (`-parse_deflines`) has the title after
     // them: the scan's ID, the defline's first word, is not the title's.
     let agrees = |scan: &scan::ScanRecord, record: &FastaRecord| {
@@ -494,8 +523,9 @@ fn check_scan(
             && scan.length == record.seq().len() as u64
             && *scan.residue_counts == counts
     };
-    if scanned.len() != records.len()
+    if !count
         || scanned
+            .records
             .iter()
             .zip(records)
             .any(|(scan, record)| !agrees(scan, record))
@@ -532,6 +562,7 @@ pub fn release(handle: u32) -> Result<(), String> {
 /// A run with NCBI's data loaders on (`data_loaders`, `run::data_loaders` of the argv) takes no
 /// records read with them off, which may hold a first line that its reader refuses as a Seq-id
 /// (line WQA's D13 and D16, 2026-11-20); `None` where the argv's start fails, which fails the run.
+/// `work` takes the query's end with its records (`Registered::end`).
 ///
 /// A run of `-db` (`run::searches_database`) takes the subject handle 0: the engine reads the
 /// database, and `work` gets no subject records (line WQA D12a, 2026-11-20).
@@ -541,7 +572,7 @@ pub fn with_inputs<R>(
     subject: u32,
     words: &[&str],
     data_loaders: Option<bool>,
-    work: impl FnOnce(&[FastaRecord], &[FastaRecord]) -> R,
+    work: impl FnOnce(&[FastaRecord], &QueryEnd, &[FastaRecord]) -> R,
 ) -> Result<R, String> {
     let database = crate::run::searches_database(words);
     if database && subject != 0 {
@@ -613,7 +644,11 @@ pub fn with_inputs<R>(
     } else {
         &store.entries[&subject].records
     };
-    let result = work(&store.entries[&query].records, subjects);
+    let result = work(
+        &store.entries[&query].records,
+        &store.entries[&query].end,
+        subjects,
+    );
     if whole {
         set_sources(&mut store, handles, false);
     }
@@ -645,6 +680,12 @@ fn set_sources(store: &mut Store, handles: &[u32], give: bool) {
 mod tests {
     use super::*;
 
+    /// NCBI's text in LOSAT's words (`losat::web_adapter::losat_text`): the tests state what NCBI
+    /// writes and compare it with what LOSAT writes.
+    fn ncbi_in_losat_words(ncbi: &str) -> String {
+        losat::web_adapter::losat_text(ncbi).into_owned()
+    }
+
     // `register` stops when the scan and the reader disagree on the records.
     #[test]
     fn a_scan_that_disagrees_with_the_reader_fails_register() {
@@ -656,18 +697,44 @@ mod tests {
         .unwrap();
         let scanned =
             scan::scan_ncbi(bytes, reader_config(Program::Blastn, ROLE_QUERY, true)).unwrap();
-        assert!(check_scan("query", &scanned, &records).is_ok());
+        let input = QueryEnd::Input;
+        assert!(check_scan("query", &scanned, &records, &input).is_ok());
 
-        assert!(check_scan("query", &scanned[..1], &records).is_err());
+        let mut fewer = scanned.clone();
+        fewer.records.truncate(1);
+        assert!(check_scan("query", &fewer, &records, &input).is_err());
         let mut renamed = scanned.clone();
-        renamed[1].id = "c".to_string();
-        assert!(check_scan("query", &renamed, &records).is_err());
+        renamed.records[1].id = "c".to_string();
+        assert!(check_scan("query", &renamed, &records, &input).is_err());
         let mut longer = scanned.clone();
-        longer[0].length += 1;
-        assert!(check_scan("query", &longer, &records).is_err());
+        longer.records[0].length += 1;
+        assert!(check_scan("query", &longer, &records, &input).is_err());
         let mut recounted = scanned.clone();
-        recounted[0].residue_counts[b'A' as usize] += 1;
-        assert!(check_scan("query", &recounted, &records).is_err());
+        recounted.records[0].residue_counts[b'A' as usize] += 1;
+        assert!(check_scan("query", &recounted, &records, &input).is_err());
+
+        // Where the reader's error ends the records: the records before it, and the scan's stop
+        // where the scan meets that error too (line WQA's D10, 2026-11-19).
+        let bad = b">a one\nACGT\n>b\nGG\n>c\nACGT%%%%\n";
+        let (read, end) = read_query_records(bad, ReaderConfig::query("BLASTN", false, true));
+        assert!(matches!(end, QueryEnd::Error(_)));
+        let stopped =
+            scan::scan_ncbi(bad, reader_config(Program::Blastn, ROLE_QUERY, true)).unwrap();
+        assert_eq!(stopped.records, scanned.records);
+        assert_eq!(stopped.stop.as_ref().map(|stop| stop.offset), Some(18));
+        assert!(check_scan("query", &stopped, &read, &end).is_ok());
+        assert!(check_scan("query", &stopped, &read, &input).is_err());
+        assert!(check_scan("query", &scanned, &read, &input).is_ok());
+        // An error that the scan does not meet: the scan has more records, never fewer.
+        assert!(check_scan("query", &scanned, &read[..1], &end).is_ok());
+        assert!(check_scan("query", &fewer, &read, &end).is_err());
+        let mut stopped_early = stopped.clone();
+        stopped_early.records.truncate(1);
+        assert!(check_scan("query", &stopped_early, &read[..1], &end).is_ok());
+        assert!(check_scan("query", &stopped_early, &read, &end).is_err());
+        // The reader's error before the scan's own stop (an id under `-parse_deflines`): the scan
+        // has more records (review M1, 2026-11-20).
+        assert!(check_scan("query", &stopped, &read[..1], &end).is_ok());
     }
 
     /// The `records` of a *register* response.
@@ -709,8 +776,8 @@ mod tests {
             "\"records\":[{\"index\":0,\"id\":\"\u{fffd}\u{fffd}\",\"length\":4}]}"
         );
         // White space only: no record (`Query is Empty!` at run time); comment lines only:
-        // no record for a subject (the run's `Empty CBlastQueryVector`) and NCBI's error for
-        // a query.
+        // no record, and the run's `Empty CBlastQueryVector` (a subject without records; a
+        // query whose first batch has none, `QueryEnd::BlankLines`, line WQA's D10, 2026-11-19).
         assert_eq!(
             records("blastn", ROLE_QUERY, b" \n\t\n"),
             r#""records":[]}"#
@@ -719,10 +786,7 @@ mod tests {
             records("blastp", ROLE_SUBJECT, b";c\n\n"),
             r#""records":[]}"#
         );
-        assert_eq!(
-            register("blastp", ROLE_QUERY, true, b";c\n\n").unwrap_err(),
-            "BLAST engine error: Empty CBlastQueryVector"
-        );
+        assert_eq!(records("blastp", ROLE_QUERY, b";c\n\n"), r#""records":[]}"#);
     }
 
     // A `>?` gap line and the lines that NCBI's line reader joins are read as the CLI reads them,
@@ -805,22 +869,33 @@ mod tests {
             "{response}"
         );
         release(handle).unwrap();
-        let reader = register(
-            "blastp",
-            ROLE_QUERY,
-            true,
-            b">q\n1234567890123456789012345\n",
-        )
-        .unwrap_err();
+        // A subject's reader error fails `register`; a query's ends its records, and a run meets it
+        // in its batch (line WQA's D10, 2026-11-19): the response says it.
+        let cli = ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.");
+        let bad = b">p\nMKV\n>q\n1234567890123456789012345\n>r\nMKV\n";
         assert_eq!(
-            reader,
-            "BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
+            register("blastp", ROLE_SUBJECT, true, bad).unwrap_err(),
+            cli
         );
-        // With the loaders off the reader's check of the data line ends the run, as the CLI's.
+        let (handle, response) = register("blastp", ROLE_QUERY, true, bad).unwrap();
         assert_eq!(
-            register("blastn", ROLE_QUERY, false, b"NM_000518.5\n").unwrap_err(),
-            "BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
+            &response[response.find("\"records\":").unwrap()..],
+            format!(r#""records":[{{"index":0,"id":"p","length":3}}],"reader_error":"{cli}"}}"#)
         );
+        release(handle).unwrap();
+        // With the loaders off the reader's check of the data line ends the records, as the CLI's:
+        // a subject's fails `register`, a query's is its first record's error.
+        let data = ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.");
+        assert_eq!(
+            register("blastn", ROLE_SUBJECT, false, b"NM_000518.5\n").unwrap_err(),
+            data
+        );
+        let (handle, response) = register("blastn", ROLE_QUERY, false, b"NM_000518.5\n").unwrap();
+        assert!(
+            response.ends_with(&format!(r#""records":[],"reader_error":"{data}"}}"#)),
+            "{response}"
+        );
+        release(handle).unwrap();
     }
 
     // A run reads its inputs with the data loaders that its registry sets (`-conffile` with
@@ -866,7 +941,7 @@ mod tests {
             subject_handle,
             &plain,
             Some(true),
-            |_, _| (),
+            |_, _, _| (),
         )
         .unwrap_err();
         assert!(
@@ -879,7 +954,7 @@ mod tests {
             subject_handle,
             &plain,
             Some(false),
-            |_, _| ()
+            |_, _, _| ()
         )
         .is_ok());
         release(query_handle).unwrap();
@@ -905,7 +980,7 @@ mod tests {
             response.contains(r#""id":"s1","length":10,"shown_id":"s1""#),
             "{response}"
         );
-        let ids = |queries: &[FastaRecord], subjects: &[FastaRecord]| {
+        let ids = |queries: &[FastaRecord], _: &QueryEnd, subjects: &[FastaRecord]| {
             (
                 queries[0].believed().is_some(),
                 subjects[0].believed().is_some(),
@@ -931,7 +1006,7 @@ mod tests {
             subject,
             &other,
             Some(true),
-            |_, _| (),
+            |_, _, _| (),
         )
         .unwrap_err();
         assert!(
@@ -946,7 +1021,7 @@ mod tests {
             subject,
             &words,
             Some(true),
-            |_, _| (),
+            |_, _, _| (),
         )
         .unwrap_err();
         assert!(
@@ -954,7 +1029,7 @@ mod tests {
             "{mixed}"
         );
         assert_eq!(
-            with_inputs(Program::Blastp, plain_query, plain_subject, &words, Some(true), |_, _| ()).unwrap_err(),
+            with_inputs(Program::Blastp, plain_query, plain_subject, &words, Some(true), |_, _, _| ()).unwrap_err(),
             "-parse_deflines needs the inputs of register_inputs, which reads the ids of the deflines"
         );
         // Without the option the handles of `register` are the inputs, as before.
@@ -965,11 +1040,60 @@ mod tests {
             plain_subject,
             plain,
             Some(true),
-            |_, _| ()
+            |_, _, _| ()
         )
         .is_ok());
         for handle in [query, subject, plain_query, plain_subject] {
             release(handle).unwrap();
+        }
+    }
+
+    // Under `-parse_deflines` the reader's error can come before the scan's own stop (review M1,
+    // 2026-11-20): a Seq-id of the other molecule (`blastp -parse_deflines`: "Error: the Seq-id …
+    // names the other molecule" on the command line), or a first record without a defline, before
+    // a line that the scan stops at too. The inputs register with the reader's error, as the
+    // command line ends there.
+    #[test]
+    fn the_readers_error_can_come_before_the_scans_stop() {
+        let words = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let subject = b">s1\nMKVLAAGIVA\n";
+        let cases: [(&[u8], &str, usize); 2] = [
+            (
+                b">p1\nMKVLAAGIVA\n>ref|NM_000001.1|\nMKVLAAGIVA\n>bad\nMKVL%%%%\n",
+                "names the other molecule",
+                1,
+            ),
+            (
+                b"MKVLAAGIVA\n>p2\nMKVLAAGIVA\n>bad\nMKVL%%%%\n",
+                "doesn't start with a defline",
+                0,
+            ),
+        ];
+        for (query, message, read) in cases {
+            let scanned =
+                scan::scan_ncbi(query, reader_config(Program::Blastp, ROLE_QUERY, true)).unwrap();
+            assert_eq!(scanned.records.len(), 2);
+            assert!(scanned.stop.is_some());
+            let (query_handle, subject_handle, response) =
+                register_inputs(&words, query, subject).unwrap();
+            assert!(response.contains(message), "{response}");
+            let read_records = |queries: &[FastaRecord], end: &QueryEnd, _: &[FastaRecord]| {
+                (queries.len(), matches!(end, QueryEnd::Error(_)))
+            };
+            assert_eq!(
+                with_inputs(
+                    Program::Blastp,
+                    query_handle,
+                    subject_handle,
+                    &words,
+                    Some(true),
+                    read_records
+                ),
+                Ok((read, true))
+            );
+            for handle in [query_handle, subject_handle] {
+                release(handle).unwrap();
+            }
         }
     }
 
@@ -985,7 +1109,7 @@ mod tests {
             subject,
             &words,
             Some(true),
-            |_, _| (),
+            |_, _, _| (),
         )
         .unwrap_err();
         assert!(
@@ -999,7 +1123,7 @@ mod tests {
             subject,
             &words,
             Some(true),
-            |_, _| ()
+            |_, _, _| ()
         )
         .is_err());
     }

@@ -1,3 +1,5 @@
+// No NCBI counterpart: the searches of a byte string that the ports share (cited in the module).
+pub(crate) mod byte_search;
 pub mod dust;
 pub mod entry_names;
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp (`CFormatGuess`, cited in the module).
@@ -23,10 +25,10 @@ pub(crate) mod process_id;
 pub(crate) mod same_file;
 pub mod seg;
 mod seg_lnfact;
-// libstdc++ (GCC 13): bits/stl_algo.h:1939-1951 (`std::sort`, cited in the module): the order
-// in which rpsbproc's sorts leave equal elements (RpsbProc/src/common/cdalignproc_base.cpp:200,
-// ptrmap.hpp:171 of the 2025-05-13 package).
-pub(crate) mod std_sort;
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:665-674 (`-randomize`, cited
+// at `writedb::raw_source::RawSeqDbSource::new`): `std::shuffle` with a `std::mt19937`, in the
+// order observed of NCBI's Linux builds.
+pub(crate) mod std_shuffle;
 // No NCBI counterpart: test plumbing; the tests' temporary directory and process id
 // (`std::env::temp_dir()` and `std::process::id()` panic on WASI).
 #[cfg(test)]

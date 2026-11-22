@@ -16,8 +16,8 @@ fn int4_conversions_truncate_toward_zero_inside_32_bits_only() {
     }
 }
 
-// blast_parameters.c:216-221: `(Int4)(scale_factor * ceil(x_dropoff * LN2 / Lambda))`, the
-// ceiling before the scale, one conversion of the product.
+// blast_parameters.c:216-221: `scale_factor` times the ceiling of `x_dropoff` times `LN2` over
+// `Lambda`, converted to `Int4`: the ceiling before the scale, one conversion of the product.
 #[test]
 fn the_ungapped_x_drop_is_the_ceiling_times_the_scale() {
     let lambda = 0.3176;
@@ -103,7 +103,7 @@ fn cutoff_query(letters: &[u8], search_space: i64) -> RpsQuery<'_> {
 
 // blast_parameters.c:922-945 and 978-990 (cited at `RpsCutoffs`): with the Gumbel block the
 // hit cutoff is `BLAST_SpougeEtoS` of the preliminary e-value, without it
-// `BLAST_Cutoffs(.., kbp_gap, eff_searchsp)`, both times the scale (100 here).
+// `BLAST_Cutoffs` of `kbp_gap` and `eff_searchsp`, both times the scale (100 here).
 #[test]
 fn the_hit_cutoff_reads_the_gumbel_block_or_the_search_space_at_the_scale() {
     use crate::config::ProteinScoringSpec;

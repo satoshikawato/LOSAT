@@ -238,6 +238,10 @@ fn makedb_takes_makeblastdb_s_option_names() {
     assert_eq!(defaults.max_file_sz, "3GB");
     assert_eq!(defaults.blastdb_version, 5);
     assert_eq!(defaults.logfile, None);
+    assert!(!defaults.randomize);
+
+    // The hidden flag `-randomize` is read (its check against the input type is the build's).
+    assert!(args(makedb(&["-dbtype", "nucl", "-randomize"]).unwrap()).randomize);
 
     // `-dbtype` is mandatory and takes makeblastdb's two values.
     assert!(makedb(&["-in", "x.faa"]).is_err());
@@ -343,7 +347,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
 
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
     // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in ["-gi_mask", "-gi_mask_name", "-randomize"] {
+    for option in ["-gi_mask", "-gi_mask_name"] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(
@@ -783,7 +787,7 @@ fn defaults_and_task_overrides_remain_distinct() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685: -num_descriptions and -num_alignments are integers of 0 or
-// more (`CArgAllowValuesGreaterThanOrEqual(0)`), which NCBI reads with the sign and
+// more (`CArgAllowValuesGreaterThanOrEqual` with 0), which NCBI reads with the sign and
 // hexadecimal forms; blast_args.cpp:2732-2738: -max_target_seqs excludes both.
 #[test]
 fn num_descriptions_and_num_alignments_are_integers_of_zero_or_more() {
@@ -799,7 +803,7 @@ fn num_descriptions_and_num_alignments_are_integers_of_zero_or_more() {
                     "{program} {key} {value}"
                 );
             }
-            // The exclusion is NCBI's `SetDependency(eExcludes)`.
+            // The exclusion is NCBI's `SetDependency` with `eExcludes`.
             let error = parse(program, &["-max_target_seqs", "5", key, "5"])
                 .err()
                 .unwrap_or_else(|| panic!("{program} -max_target_seqs with {key}"));
@@ -1266,7 +1270,7 @@ const SHARED: &[&str] = ALL;
 const OUT_OF_RANGE: Outfmt = Outfmt::Ncbi(255, "Error: Formatting choice is out of range\n");
 const INVALID_DELIMITER: Outfmt = Outfmt::Ncbi(
     1,
-    "BLAST query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>\nPlease refer to the LOSAT user manual.\n",
+    "LOSAT query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>\nPlease refer to the LOSAT user manual.\n",
 );
 
 /// The programs, `-outfmt` value, `-out` file and result of each case. A change that makes a
@@ -1308,11 +1312,11 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (SHARED, "7 delim=/ frames", None, WritesThenNcbi(TabularWithComments, "Your custom record separator (/) is also used by the format specifier (frames) to separate multiple entries. Please use a different record separator (delim keyword).")),
         (SHARED, "10 delim=<> salltitles", None, WritesThenNcbi(CommaSeparatedValues, "Your custom record separator (<>) is also used by the format specifier (salltitles) to separate multiple entries. Please use a different record separator (delim keyword).")),
         // NCBI's errors when it reads the value (the delimiter is read before the number).
-        (ALL, "abc", None, Ncbi(1, "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
-        (ALL, "0x6", None, Ncbi(1, "BLAST query/options error: '0x6' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
-        (ALL, "6\u{a0}", None, Ncbi(1, "BLAST query/options error: '6\u{a0}' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
-        (ALL, "6\tqseqid", None, Ncbi(1, "BLAST query/options error: '6\tqseqid' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
-        (ALL, " ", None, Ncbi(1, "BLAST query/options error: '' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "abc", None, Ncbi(1, "LOSAT query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "0x6", None, Ncbi(1, "LOSAT query/options error: '0x6' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "6\u{a0}", None, Ncbi(1, "LOSAT query/options error: '6\u{a0}' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "6\tqseqid", None, Ncbi(1, "LOSAT query/options error: '6\tqseqid' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, " ", None, Ncbi(1, "LOSAT query/options error: '' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
         (ALL, "-1", None, OUT_OF_RANGE),
         (ALL, "22", None, OUT_OF_RANGE),
         (ALL, "99", None, OUT_OF_RANGE),
@@ -1432,7 +1436,7 @@ fn output_formats_follow_the_format_table() {
                         native(error),
                         (
                             1,
-                            format!("BLAST query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
+                            format!("LOSAT query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
                         ),
                         "{case}"
                     );
@@ -1444,7 +1448,7 @@ fn output_formats_follow_the_format_table() {
                         native(error),
                         (
                             1,
-                            format!("BLAST query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
+                            format!("LOSAT query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
                         ),
                         "{case}"
                     );
@@ -1872,10 +1876,11 @@ fn tblastx_takes_a_database_and_its_size() {
 }
 
 #[test]
-fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
+fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     // Decision D12 (AUTHORITY.md): an -evalue of DBL_MAX or more crashes NCBI's blastp and
-    // tblastn on some inputs; blast_hits.c:43-70: a -max_target_seqs whose preliminary size wraps to a
-    // negative int crashes NCBI.
+    // tblastn on some inputs. blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
+    // NCBI's int wraps or crashes NCBI; LOSAT computes the size without the overflow and runs
+    // (PD-LOSAT-NCBI-DEFECTS exception 19).
     let blastp = |words: &[&str]| {
         let Commands::Blastp(args) = parse("blastp", words).unwrap().command else {
             unreachable!("blastp")
@@ -1892,7 +1897,6 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
         &["-evalue", "+inf"][..],
         &["-evalue", "1e999"],
         &["-evalue", "1.7976931348623157e308"],
-        &["-max_target_seqs", "1073741799"],
     ] {
         let error = format!("{:#}", blastp(words).unwrap_err());
         assert!(
@@ -1905,6 +1909,8 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
         &["-evalue", "1.7976931348623156e308"],
         &["-max_target_seqs", "2147483647"],
         &["-max_target_seqs", "1073741798"],
+        // Past NCBI's `int` overflow of the preliminary hit list size (LOSAT computes it without).
+        &["-max_target_seqs", "1073741799"],
     ] {
         blastp(words).unwrap();
     }
@@ -2321,7 +2327,7 @@ fn short_help_h_is_display_help_for_every_program() {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (cited at
 // `cli::try_parse_from`)
 // NCBI's reader stops at its help flags, the words before them read; `-help-full` is `-help` with
-// the hidden arguments, of which LOSAT's programs run none (NCBI BLAST+ 2.17.0: the same bytes in
+// the hidden arguments, which LOSAT's help does not list (NCBI BLAST+ 2.17.0: the same bytes in
 // every place but makeblastdb's hidden `-randomize`; line RG item E2).
 #[test]
 fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
@@ -2419,9 +2425,11 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
 fn ncbi_version_request_reads_the_word_before_the_arguments() {
     use crate::cli::ncbi_version_request;
     let version = |words: &[&str]| ncbi_version_request(words.iter().copied());
+    // LOSAT's version where NCBI's programs print their own (`crate::wording::LOSAT_VERSION`).
+    let losat = format!("LOSAT {}", env!("CARGO_PKG_VERSION"));
     let text = version(&["losat", "blastn", "-version"]).unwrap();
     assert!(
-        text.starts_with("blastn: 2.17.0+\n Package: LOSAT "),
+        text.starts_with(&format!("blastn: {losat}\n Package: LOSAT ")),
         "{text}"
     );
     assert!(
@@ -2430,7 +2438,7 @@ fn ncbi_version_request_reads_the_word_before_the_arguments() {
     );
     assert!(version(&["losat", "makeblastdb", "-x", "-version"])
         .unwrap()
-        .starts_with("makeblastdb: 2.17.0+\n"));
+        .starts_with(&format!("makeblastdb: {losat}\n")));
     // Where another option expects its value, and next to invalid arguments.
     assert!(version(&["losat", "blastx", "-out", "-version"]).is_some());
     assert!(version(&["losat", "blastp", "-evalue", "x", "-version", "-bogus"]).is_some());
@@ -2454,7 +2462,7 @@ fn ncbi_version_request_reads_the_word_before_the_arguments() {
     ])
     .unwrap();
     assert!(
-        full.starts_with("blastn: 2.17.0+\n Package: LOSAT ")
+        full.starts_with(&format!("blastn: {losat}\n Package: LOSAT "))
             && full.ends_with(
                 ", output compatible with blast 2.17.0\n Package-Config:  \n GI-64bit:  TRUE\n"
             ),
@@ -2462,13 +2470,23 @@ fn ncbi_version_request_reads_the_word_before_the_arguments() {
     );
     assert!(version(&["losat", "makeblastdb", "-title", "-version-full-xml"])
         .unwrap()
-        .contains("<appname>makeblastdb</appname>\n<version_info major=\"2\" minor=\"17\" patch_level=\"0\"/>\n"));
+        .contains(&format!(
+            "<appname>makeblastdb</appname>\n<version_info major=\"{}\" minor=\"{}\" patch_level=\"{}\"",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR"),
+            env!("CARGO_PKG_VERSION_PATCH")
+        )));
     assert!(version(&["losat", "rpsbproc", "-version-full-json", "-version"])
         .unwrap()
-        .contains("\"appname\": \"rpsbproc\",\n    \"version_info\": {\"major\": 0, \"minor\": 5, \"patch_level\": 1},\n"));
+        .contains(&format!(
+            "\"appname\": \"rpsbproc\",\n    \"version_info\": {{\"major\": {}, \"minor\": {}, \"patch_level\": {}",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR"),
+            env!("CARGO_PKG_VERSION_PATCH")
+        )));
     assert!(version(&["losat", "rpstblastn", "-version-full"])
         .unwrap()
-        .starts_with("rpstblastn: 2.17.0+\n"));
+        .starts_with(&format!("rpstblastn: {losat}\n")));
     assert!(version(&["losat", "blastn", "--", "-version-full"]).is_none());
     assert!(version(&["losat", "blastn", "-logfile", "-version-full"]).is_none());
     assert!(version(&["losat", "-version"]).is_none());

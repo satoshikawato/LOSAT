@@ -41,7 +41,7 @@ With reward 0 and penalty 0 (`-task rmblastn`, or `-reward 0 -penalty 0` with an
 
 | Option | Default | Meaning |
 |:---|:---|:---|
-| `-task` | `megablast` | One of the four tasks above |
+| `-task` | `megablast` | One of the five tasks above |
 | `-evalue` | 10 (1000 for `blastn-short`) | Report hits with an E-value at or below this value |
 | `-outfmt` | 0 | Output format; see [Output](#output) |
 | `-out` | standard output | Write the report to a file |
@@ -94,7 +94,7 @@ LOSAT stops with an error for these `blastn` settings instead of running somethi
 
 - `-reward 0` with a penalty other than 0, and `-reward 0 -penalty 0` with the greedy extension of `-task megablast`.
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
-- `-use_index true` when NCBI BLAST+ would search with the MegaBLAST index (`makembindex`): its warning paths (no index found, a first index volume whose header does not read, or a `-word_size` below the index's minimum) run as in NCBI BLAST+.
+- `-use_index true` with a MegaBLAST index (`makembindex`) of only some database volumes, with `-window_size` above 0, or with `-db_hard_mask`; also an index volume whose parts do not fit together, an index not made from the database, a seed that starts at or past the last letter of its sequence, and an old-style index of fewer sequences than the database searched in more than one query batch or query chunk (NCBI reads past the index or the sequence there, or stops with an error). Other searches with an index, and the warning paths (no index found, a first index volume whose header does not read, or a `-word_size` below the index's minimum), run as in NCBI BLAST+.
 - `-db_hard_mask` with `-task blastn-short` on a database whose sequences are masked to their end, and on a database whose masks overlap or are stored out of order.
 - Extreme `-xdrop_gap`, `-xdrop_gap_final` or `-xdrop_ungap` values for which NCBI BLAST+ overflows its 32-bit arithmetic.
 

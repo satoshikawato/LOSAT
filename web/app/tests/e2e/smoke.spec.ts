@@ -39,7 +39,7 @@ test(`paste, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the 
     'losat tblastx -query query.fa -subject subject.fa -outfmt 0',
   );
   await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:0');
-  await expect(page.getByTestId('result-output')).toContainText(BUILD_HAS_ENGINE ? 'TBLASTX 2.17.0+' : 'FAKE ENGINE OUTPUT');
+  await expect(page.getByTestId('result-output')).toContainText(BUILD_HAS_ENGINE ? 'TBLASTX (LOSAT ' : 'FAKE ENGINE OUTPUT');
 
   const download = page.waitForEvent('download');
   await page.getByTestId('export-output').click();

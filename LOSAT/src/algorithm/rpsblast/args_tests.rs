@@ -72,16 +72,17 @@ fn the_search_is_blastps_with_rpsblasts_program() {
     assert_eq!(args.max_hsps_per_subject, None);
 }
 
+// Every output format that NCBI's rpsblast runs is BLASTP's report (items PS15a-1, PS15a-2);
+// `-html` is a later item's (line RG T4c).
 #[test]
 fn options_of_later_items_are_refused() {
-    for extra in [&["-outfmt", "8"][..], &["-outfmt", "1"]] {
-        let error = parse(extra).unwrap().into_blastp_args().unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("not supported by LOSAT's RPSBLAST"),
-            "{extra:?}: {error}"
-        );
+    for outfmt in [
+        "1", "4", "5", "8", "9", "11", "12", "13", "14", "15", "16", "18", "20",
+    ] {
+        parse(&["-outfmt", outfmt, "-out", "x.out"])
+            .unwrap()
+            .into_blastp_args()
+            .unwrap_or_else(|error| panic!("outfmt {outfmt}: {error}"));
     }
     let error = parse(&["-html", "1"]).unwrap_err();
     assert!(
@@ -239,7 +240,7 @@ fn an_ungapped_x_drop_of_zero_or_below_is_ncbis_options_error() {
             .unwrap_err();
         assert_eq!(
             format!("{error:#}"),
-            "BLAST query/options error: x_dropoff must be greater than zero\nPlease refer to the LOSAT user manual.\n",
+            "LOSAT query/options error: x_dropoff must be greater than zero\nPlease refer to the LOSAT user manual.\n",
             "{value}"
         );
     }

@@ -402,6 +402,13 @@ pub struct BlastpArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
+    /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
+    /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
+    /// stops in the command line's form (line WQA D10 round 5, 2026-11-20). `None` on the command
+    /// line. Not a public option.
+    #[arg(skip)]
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
     /// psiblast's PSSM options (`-save_pssm_after_last_round`, `-save_each_pssm`,
     /// `-out_ascii_pssm`, `-pseudocount`); `None` for blastp.
     #[arg(skip)]
@@ -523,12 +530,10 @@ pub struct ResolvedBlastpArgs {
     /// `-sorthits` and `-sorthsps` of the pairwise report (`FormattingArgs::report_sort`):
     /// blastp's; none for psiblast and rpsblast, which read them and sort nothing.
     pub sort: crate::report::hit_sort::ReportSort,
-    /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
-    pub max_target_seqs_given: bool,
     pub max_hsps_per_subject: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
-    /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit(0)`).
+    /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit` of 0).
     pub culling_limit: i32,
     /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge`, `None` without
     /// them (`BlastpArgs::best_hit`).
@@ -603,6 +608,8 @@ pub struct ResolvedBlastpArgs {
     pub inclusion_ethresh: f64,
     /// `BlastpArgs::first_query_ordinal`.
     pub first_query_ordinal: usize,
+    /// `BlastpArgs::scope_refusal`.
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
     /// The ASCII PSSMs that psiblast writes after its round (`algorithm::psiblast::pssm`).
     pub psi_pssm: Option<crate::algorithm::psiblast::pssm::PssmRequest>,
     /// psiblast `-in_pssm`: the query given as a PSSM, read with the options
@@ -670,14 +677,13 @@ impl ResolvedBlastpArgs {
     fn compute_traceback_hitlist_size(&self) -> usize {
         match self.app {
             // RPS-BLAST's traceback keeps `hitlist_size` lists per volume (`s_RPSComputeTraceback`,
-            // `Blast_HSPResultsInsertHSPList(results, hsp_list, hitlist_size)`).
+            // `Blast_HSPResultsInsertHSPList` of `hsp_list` into `results` with `hitlist_size`).
             BlastpApp::Blastp | BlastpApp::Rpsblast => self.max_target_seqs,
             BlastpApp::Psiblast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
                 self.max_target_seqs,
                 self.comp_based_stats.is_enabled(),
                 true,
-            )
-            .max(1) as usize,
+            ),
         }
     }
 
@@ -832,7 +838,7 @@ impl BlastpArgs {
         diagnostics.write_all(&warnings)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
         // composition-based statistics handler; `blastinput/app.rs`)
-        // The unified P-values are blastp's only (`program == eBlastp`, blast_args.cpp:880-883).
+        // The unified P-values are blastp's only (`program` is `eBlastp`, blast_args.cpp:880-883).
         let (mode, unified_p) = crate::blastinput::app::parse_comp_based_stats(
             &self.comp_based_stats,
             self.app == BlastpApp::Blastp,
@@ -1020,7 +1026,7 @@ impl BlastpArgs {
             db_mask_resolved: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
             // The options start with a database length of 0
-            // (blast_prot_options.cpp:150-156, `SetDbLength(0)`).
+            // (blast_prot_options.cpp:150-156, `SetDbLength` of 0).
             dbsize: self.dbsize.unwrap_or(0),
             searchsp: self.searchsp,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
@@ -1046,7 +1052,6 @@ impl BlastpArgs {
                 BlastpApp::Blastp => self.formatting.report_sort(),
                 BlastpApp::Psiblast | BlastpApp::Rpsblast => Default::default(),
             },
-            max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-318
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-315
@@ -1105,6 +1110,7 @@ impl BlastpArgs {
             archive: self.archive.clone(),
             strategy: self.strategy.clone(),
             first_query_ordinal: self.first_query_ordinal,
+            scope_refusal: self.scope_refusal.clone(),
             psi_pssm,
             psi_search,
             rps_search: self.rps.clone().map(std::sync::Arc::new),

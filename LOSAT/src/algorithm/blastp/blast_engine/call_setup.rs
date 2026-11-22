@@ -131,8 +131,8 @@ pub(super) fn requested_reports(
             if let Some(kind) = blastp_xml2_kind(format.outfmt) {
                 return Ok(BlastpReport::Xml2(kind));
             }
-            // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`; psiblast and rpsblast
-            // refuse them, line RG PS15).
+            // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`), rpsblast's too
+            // (item PS15a-2); psiblast refuses them (line PS item PS15b).
             if let Some(view) = blastp_query_anchored_view(args.app, format.outfmt) {
                 return Ok(BlastpReport::Pairwise(view));
             }
@@ -1151,22 +1151,16 @@ pub(super) fn prelim_cutoffs(
         .min()
         .unwrap_or(i32::MAX);
 
-    // NCBI computes the size in its `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`): a
-    // -max_target_seqs from 2^31 - 24 wraps to 2..48; a size that is not positive (NCBI
-    // crashes) was rejected with the options (`validate_requested_blastp_support`).
-    let prelim_hitlist_size =
-        usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
-            args.max_target_seqs,
-            args.comp_based_stats.is_enabled(),
-            !args.ungapped,
-        ))
-        .ok()
-        .filter(|&size| size > 0)
-        .context("BLASTP preliminary hit list size is not positive")?;
+    // Computed without NCBI's `int` overflow (`blastn/hsp.rs` `get_prelim_hitlist_size`).
+    let prelim_hitlist_size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+        args.max_target_seqs,
+        args.comp_based_stats.is_enabled(),
+        !args.ungapped,
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1008-1018
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-940
-    // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
+    // `params->prelim_evalue` is `evalue` without a Gumbel block (blast_parameters.c:931-935).
     let prelim_evalue = if gapped_gumbel.is_some() {
         blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode)
     } else {
@@ -1201,7 +1195,7 @@ pub(super) fn subject_parameters<'s>(
     // (`stats::setup::subject_eff_lengths`) and, through the setup's own `blastp_prelim_cutoffs`,
     // the hit-saving cutoffs of `BlastHitSavingParametersUpdate` with the subject's length and a
     // composition-based statistics of 0 (no stretch of the
-    // e-value: `params->prelim_evalue = evalue`, blast_parameters.c:868, 937-938), and the
+    // e-value: `params->prelim_evalue` is `evalue`, blast_parameters.c:868, 937-938), and the
     // word cutoffs of `BlastInitialWordParametersUpdate` (gapped: the gap trigger, at most the
     // hit-saving cutoff before the sum statistics lower it, `cutoff_score_max`; the X-drops keep
     // their initial values, `x_dropoff_init` is not 0). With psiblast's `-sum_stats true` the

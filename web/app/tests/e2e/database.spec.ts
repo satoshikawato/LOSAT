@@ -1,15 +1,16 @@
 // -db in the browsers through the package's API, without the application's screens (line WQA D12a, 2026-11-20): the
 // db_search rows that the wasm-threading check runs (LOSAT/tests/check_wasm_threading.py) and two of the filters
 // (-seqidlist, -taxids), each with the files of its database's folder given to the run as Files, on the serial module
-// and on the threaded one at 4 threads, whose threads read the descriptors that another thread opened. Outfmt 6 is
-// NCBI BLAST+ 2.17.0's frozen bytes (LOSAT/tests/fixtures/db_search). Each search logs its time and the engine's
-// memory after it; BLASTP's and BLASTX's rows run twice more on one thread at the end, when the browser has compiled
-// their code, for the time of a search without the compilation (line WQA D12a's measurement, P4). Two more tests give
-// the run the user's picked Files (an `<input type=file>` that Playwright sets from the disk), which the Engine worker
-// and the thread workers read from the disk with FileReaderSync, and one of them changed after its pick, which the
-// browser no longer reads (review of D12a, low 5).
+// and on the threaded one at 4 threads, whose threads read the descriptors that another thread opened. Outfmt 6 is NCBI
+// BLAST+ 2.17.0's frozen bytes (LOSAT/tests/fixtures/db_search) in LOSAT's words. Each search logs its time and the
+// engine's memory after it; BLASTP's and BLASTX's rows run twice more on one thread at the end, when the browser has
+// compiled their code, for the time of a search without the compilation (line WQA D12a's measurement, P4). Two more
+// tests give the run the user's picked Files (an `<input type=file>` that Playwright sets from the disk), which the
+// Engine worker and the thread workers read from the disk with FileReaderSync, and one of them changed after its pick,
+// which the browser no longer reads (review of D12a, low 5).
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Page } from '@playwright/test';
@@ -31,6 +32,14 @@ const LOSAT = join(REPOSITORY, 'LOSAT');
 // left out.
 const CHANGED_FILE_ERROR = /engine error: Database memory map file error/;
 const ROWS = ['db.blastn.mega.6', 'db.d1.6', 'db.blastx.default.6', 'db.tblastn.default.6', 'db.tblastx.default.6', 'db.sl.bp.bsl.6', 'db.tf.bp.nosql.6'];
+
+/** The SHA-256 of a row's frozen NCBI outfmt 6 in LOSAT's words (LOSAT/tests/losat_wording.py map-output, line NW2). */
+function frozenInLosatWords(id: string): string {
+  const mapped = spawnSync('python3', ['-I', join(LOSAT, 'tests/losat_wording.py'), 'map-output', join(LOSAT, 'tests/fixtures/db_search', `${id}.out`)]);
+  if (mapped.error) throw mapped.error;
+  if (mapped.status !== 0) throw new Error(`losat_wording.py map-output ${id}: ${mapped.stderr.toString()}`);
+  return createHash('sha256').update(mapped.stdout).digest('hex');
+}
 
 interface Row {
   readonly id: string;
@@ -92,7 +101,7 @@ test('-db searches read the database in place and write NCBI frozen outfmt 6, on
   for (const [i, result] of results.entries()) {
     const label = `${browserName} ${result.id} n=${result.threads}`;
     expect.soft(result.error, label).toBeUndefined();
-    const frozen = createHash('sha256').update(readFileSync(join(LOSAT, 'tests/fixtures/db_search', `${result.id}.out`))).digest('hex');
+    const frozen = frozenInLosatWords(result.id);
     expect.soft(result.sha256, `${label}: outfmt 6 = NCBI frozen`).toBe(frozen);
     expect.soft(result.runtime?.path, label).toBe(list[i]!.threads === 1 ? 'serial' : 'threaded');
     expect.soft(result.runtime?.threads, label).toBe(list[i]!.threads);
@@ -125,7 +134,7 @@ test("-db searches read the user's picked Files from the disk, in the Engine wor
   for (const [i, result] of results.entries()) {
     const label = `${browserName} picked ${result.id} n=${result.threads}`;
     expect.soft(result.error, label).toBeUndefined();
-    const frozen = createHash('sha256').update(readFileSync(join(LOSAT, 'tests/fixtures/db_search', `${result.id}.out`))).digest('hex');
+    const frozen = frozenInLosatWords(result.id);
     expect.soft(result.sha256, `${label}: outfmt 6 = NCBI frozen`).toBe(frozen);
     expect.soft(result.runtime?.path, label).toBe(list[i]!.threads === 1 ? 'serial' : 'threaded');
   }
@@ -150,10 +159,16 @@ test('a database file changed or removed after its pick fails the run with the e
       return target;
     });
     await pick(page, paths);
-    // The sequences change after the pick. Chromium and WebKit no longer read the picked File (NotReadableError, which
-    // the host gives the engine as EIO); Firefox reads the file's bytes as they are now (observed 2026-11-21), so its
-    // run completes.
+    // The sequences change after the pick, and their modification time moves to a later whole second. Chromium and
+    // WebKit then no longer read the picked File (NotReadableError, which the host gives the engine as EIO). WebKit
+    // compares the times in whole seconds: a change written within the second of the time that the pick saw is read
+    // as the file is now, up to the picked size, without an error (observed 2026-11-21: CI's WebKit appended within
+    // that second and its run completed), so the test sets the time. Firefox reads the file's bytes as they are now
+    // whatever the time (observed 2026-11-21), so its run completes.
+    const picked = statSync(sequences).mtimeMs;
     appendFileSync(sequences, Buffer.from([0]));
+    const later = new Date((Math.floor(picked / 1000) + 2) * 1000);
+    utimesSync(sequences, later, later);
     const changed = await run();
     console.log(`${browserName} changed ${search.id}: ${changed.error ?? `ran, outfmt 6 ${changed.sha256}`}`);
     if (browserName === 'firefox') expect(changed.error, browserName).toBeUndefined();

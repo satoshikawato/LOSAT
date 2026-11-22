@@ -10,8 +10,10 @@
 //! `win_mask_config.cpp:336-343`). The `-t_*_pct` settings are read from the `##pct:` lines
 //! that NCBI's writers print (`pct`).
 
+mod gen_counts;
 mod istat;
 mod ncbi_report;
+mod ostat;
 mod pct;
 mod score;
 mod taxid;
@@ -26,10 +28,12 @@ use std::sync::Arc;
 
 use crate::ncbi_exception::NcbiException;
 
+pub use gen_counts::{generate, GenCountsSettings, GenError, GenomeSource, DEFAULT_TH};
 pub use istat::{
     discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
 };
-pub use pct::PctSettings;
+pub use ostat::{convert_counts, CountsFormat, CountsWriter, FinalizeError};
+pub use pct::{PctSettings, PctWhy};
 pub use taxid::taxid_stat_file;
 
 use score::ScoreMean;
@@ -101,15 +105,15 @@ pub enum WinMaskError {
     /// (`seq_masker_istat_oascii.cpp:82-87, 111`).
     UnsetHashParameter { field: &'static str },
     /// A cache bit array of 0 words (units of 1 or 2 letters) that the cache boost would read:
-    /// NCBI reads past its `new Uint4[0]` (`c++/src/algo/winmask/seq_masker_cache_boost.cpp:40-48`).
+    /// NCBI reads past its array of 0 `Uint4` words from `new` (`c++/src/algo/winmask/seq_masker_cache_boost.cpp:40-48`).
     EmptyCacheBitArray { unit: u8 },
     /// A sequence of 2^32 letters or more: NCBI's positions are 32-bit (`TSeqPos`).
     SequenceTooLong { length: usize },
     /// `CSeqMaskerUsetHash::eBadIndex` (`seq_masker_uset_hash.cpp:95-99`).
     BadIndex { key: u32, value: u32 },
-    /// A `##pct:` line that the windowmasker application's `-t_*_pct` settings read and whose
-    /// words NCBI reads by the C++ runtime's number parser (`pct::count_map`): LOSAT refuses it.
-    PctLine { line: String },
+    /// A `##pct:` line whose reading by NCBI (`pct::count_map`) depends on the C++ library or
+    /// is undefined, `why` (a verb phrase): LOSAT refuses it.
+    PctLine { line: String, why: PctWhy },
 }
 
 impl WinMaskError {
@@ -153,10 +157,13 @@ impl fmt::Display for WinMaskError {
             ),
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:95-99
             Self::BadIndex { key, value } => write!(f, "bad index at key {key} : {value}"),
-            Self::PctLine { line } => write!(
-                f,
-                "the percentage line '{line}' of the counts file is not one that WindowMasker writes (counts of digits, then decimal percentages), so LOSAT does not read it for the -t_*_pct settings"
-            ),
+            Self::PctLine { line, why } => {
+                write!(
+                    f,
+                    "the percentage line '{line}' of the counts file {}",
+                    why.text()
+                )
+            }
         }
     }
 }
@@ -169,11 +176,11 @@ impl std::error::Error for WinMaskError {}
 /// LOSAT asks a source, so that LOSAT Web can give counts it holds in memory under the name of
 /// the command line. `FileCounts` is the file system.
 pub trait CountsSource: Send + Sync + fmt::Debug {
-    /// `CSeqMaskerIstatFactory::DiscoverStatType( name )`.
+    /// `CSeqMaskerIstatFactory::DiscoverStatType` of `name`.
     fn discover(&self, name: &str) -> Result<StatFile, WinMaskError>;
-    /// `CSeqMaskerIstatFactory::create( name, ... )` with `params`.
+    /// `CSeqMaskerIstatFactory::create` of `name`, with the other arguments from `params`.
     fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError>;
-    /// `CFile( path ).Exists()`: whether `path` is a file (or a link to one), which NCBI asks of
+    /// `Exists` of a `CFile` of `path`: whether `path` is a file (or a link to one), which NCBI asks of
     /// the counts file of `-window_masker_taxid` (`taxid_stat_file`).
     fn is_file(&self, path: &Path) -> bool;
 }
@@ -204,12 +211,12 @@ pub struct SeqMasker {
 }
 
 /// The window advances one letter at a time and every unit of a window is used
-/// (`arg_window_step = 1`, `arg_unit_step = 1` in blastn and the application).
+/// (`arg_window_step` and `arg_unit_step` are 1 in blastn and the application).
 const WINDOW_STEP: u32 = 1;
 const UNIT_STEP: u8 = 1;
 
 impl SeqMasker {
-    /// `s_BuildSeqMasker( lstat )` with `params` in place of its zeros.
+    /// `s_BuildSeqMasker` of `lstat` with `params` in place of its zeros.
     #[cfg(test)]
     pub fn open(path: &Path, params: &MaskerParams) -> Result<Self, WinMaskError> {
         Self::new(Arc::new(UnitCounts::open(path, params)?), params)
@@ -367,7 +374,7 @@ impl CacheBoost {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_cache_boost.cpp:40-48
-    /// `divisor_` is `32/(8*sizeof( Uint4 ))` = 1 (`seq_masker_istat.hpp:67-68`,
+    /// `divisor_` is 32 divided by the bits in a `Uint4` (8 times its `sizeof`), that is 1 (`seq_masker_istat.hpp:67-68`,
     /// `seq_masker_istat_obinary.cpp:185`).
     #[inline]
     fn bit_at(cba: &[u32], pos: u32) -> bool {

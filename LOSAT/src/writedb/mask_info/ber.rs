@@ -96,9 +96,10 @@ const TAG_NULL: u8 = 0x05;
 const TAG_ENUMERATED: u8 = 0x0a;
 const TAG_UTF8_STRING: u8 = 0x0c;
 const TAG_VISIBLE_STRING: u8 = 0x1a;
-/// `MakeTagByte(eApplication, ePrimitive, eObjectReference)`: the object index of `@n`.
+/// `MakeTagByte` of `eApplication`, `ePrimitive` and `eObjectReference`: the object index of `@n`.
 const TAG_OBJECT_REFERENCE: u8 = 0x5e;
-/// `MakeTagByte(eApplication, eConstructed, eLongTag)`: a class name follows, then its value.
+/// `MakeTagByte` of `eApplication`, `eConstructed` and `eLongTag`: a class name follows, then its
+/// value.
 const TAG_OTHER_POINTER: u8 = 0x7f;
 const TAG_SEQUENCE: i32 = 16;
 const TAG_SET: i32 = 17;
@@ -120,15 +121,15 @@ impl<'a> BerIn<'a> {
         }
     }
 
-    /// `ThrowError(fFormatError or fOverflow, message)` at `site` at the current position
-    /// (returned as the [`Fail`]: `return Err(self.throw(..))`, see [`throw_error`]).
+    /// `ThrowError` with `fFormatError` or `fOverflow` and a message, at `site` at the current
+    /// position (returned as the [`Fail`]: `return Err(self.throw(..))`, see [`throw_error`]).
     #[cold]
     #[inline(never)]
     fn throw(&self, site: ThrowSite, message: impl std::fmt::Display) -> Fail {
         throw_error(site, &self.position(), message.to_string())
     }
 
-    /// `m_Input.PeekChar(i)`: the end of the data throws `CEofException`.
+    /// `PeekChar` of `m_Input` at `i`: the end of the data throws `CEofException`.
     #[inline]
     fn peek(&self, i: usize) -> R<u8> {
         match self.data.get(self.pos + i) {
@@ -179,7 +180,7 @@ impl<'a> BerIn<'a> {
         self.peek_tag()
     }
 
-    /// `UnexpectedTagClassByte(first_tag_byte, expected_class_byte)`.
+    /// `UnexpectedTagClassByte` of the first tag byte and the expected class byte.
     #[cold]
     #[inline(never)]
     fn unexpected_tag_class_byte(&self, first: u8, class_and_constructed: u8) -> Fail {
@@ -203,8 +204,8 @@ impl<'a> BerIn<'a> {
         Ok(())
     }
 
-    /// `UnexpectedTagValue(tag_class, tag, tag_value)`. The class was checked (universal or
-    /// context specific): no "Application " or "Private " before the number.
+    /// `UnexpectedTagValue` of the tag class, the tag and the tag value. The class was checked
+    /// (universal or context specific): no "Application " or "Private " before the number.
     #[cold]
     #[inline(never)]
     fn unexpected_tag_value(&self, tag: i32, value: i32) -> Fail {
@@ -256,17 +257,18 @@ impl<'a> BerIn<'a> {
         self.limit = if len == 0x80 {
             0
         } else if len > 0x80 {
-            // `m_Input.GetStreamPosAsInt8() + ReadLengthLong(len)`: C++ does not say which
-            // operand is evaluated first. The compiler of the 2.17.0 binaries evaluates the
-            // position first, so the limit is counted from the first length byte: the item ends
-            // `n` bytes (the length of the length) before where its length says. makeblastdb 2.17.0
-            // fails with "EndOfContentsByte expected" on such an item (checked on the
-            // `long_len_*` cases of the fixtures).
+            // The stream position (`GetStreamPosAsInt8`) plus the length that `ReadLengthLong`
+            // reads: C++ does not say which operand is evaluated first. The compiler of the 2.17.0
+            // binaries evaluates the position first, so the limit is counted from the first length
+            // byte: the item ends `n` bytes (the length of the length) before where its length
+            // says. makeblastdb 2.17.0 fails with "EndOfContentsByte expected" on such an item
+            // (checked on the `long_len_*` cases of the fixtures).
             //
-            // The sum is `Int8 + size_t`: computed in 64 unsigned bits, it wraps, and is stored in
-            // the `Int8` `m_CurrentDataLimit` (objistrasnb.hpp:267). A limit of 0 is then an
-            // indefinite length (`HaveMoreElements`, `ExpectEndOfContent`), a negative one ends the
-            // members at once (checked with makeblastdb 2.17.0, the b_length_long_wrap_* fixtures).
+            // The sum is an `Int8` added to a `size_t`: computed in 64 unsigned bits, it wraps, and
+            // is stored in the `Int8` `m_CurrentDataLimit` (objistrasnb.hpp:267). A limit of 0 is
+            // then an indefinite length (`HaveMoreElements`, `ExpectEndOfContent`), a negative one
+            // ends the members at once (checked with makeblastdb 2.17.0, the b_length_long_wrap_*
+            // fixtures).
             let base = self.pos as i64;
             let long_length = self.read_length_long(len)?;
             (base as u64).wrapping_add(long_length) as i64
@@ -319,7 +321,7 @@ impl<'a> BerIn<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:374-379
-    /// `UnexpectedSysTagByte(byte)`: the tag at the current position is not `byte`.
+    /// `UnexpectedSysTagByte` of `byte`: the tag at the current position is not `byte`.
     #[cold]
     #[inline(never)]
     fn unexpected_sys_tag_byte(&self, got: u8, byte: u8) -> Fail {
@@ -333,7 +335,7 @@ impl<'a> BerIn<'a> {
         )
     }
 
-    /// `ExpectSysTagByte(byte)` (objistrasnb.inl:115-123): the exact tag byte.
+    /// `ExpectSysTagByte` of `byte` (objistrasnb.inl:115-123): the exact tag byte.
     fn expect_sys_tag_byte(&mut self, byte: u8) -> R<()> {
         let got = self.peek(0)?;
         if got != byte {
@@ -357,7 +359,7 @@ impl<'a> BerIn<'a> {
     }
 
     /// `ReadStdSigned` (`crate::seqid::ber::read_std_signed`, the one port of it): `size` is
-    /// `sizeof(T)`; the result is the value of `T` widened to `i64`.
+    /// the `sizeof` of `T`; the result is the value of `T` widened to `i64`.
     fn read_std_signed(&mut self, size: usize) -> R<i64> {
         let length = self.read_short_length()?;
         let result = crate::seqid::ber::read_std_signed(length, size, || self.byte());
@@ -545,8 +547,9 @@ impl Input for BerIn<'_> {
         } else {
             u64::from(byte)
         };
-        // `ReadBytes(s, length)`: `GetChars(str, count)`, which reserves `count` bytes first when
-        // they are not all in the input buffer, and reads to the end of the file.
+        // `ReadBytes` of `s` and `length`: `GetChars` of `str` and `count`, which reserves
+        // `count` bytes first when they are not all in the input buffer, and reads to the end of
+        // the file.
         let remaining = (self.data.len() - self.pos) as u64;
         if length > remaining {
             reserve_string(length)?;
@@ -634,8 +637,8 @@ impl Input for BerIn<'_> {
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1058-1067
 impl BerIn<'_> {
-    /// `UnexpectedMember(tag, items)` of a SEQUENCE or CHOICE whose members or variants are
-    /// `names` (their automatic tags are 0, 1, ... in order).
+    /// `UnexpectedMember` of the tag and the items, of a SEQUENCE or CHOICE whose members or
+    /// variants are `names` (their automatic tags are 0, 1, ... in order).
     #[cold]
     #[inline(never)]
     fn unexpected_member(&self, tag: i32, names: impl Iterator<Item = &'static str>) -> Fail {
@@ -648,7 +651,7 @@ impl BerIn<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:316-372
-/// `TagToString(byte)`: the class, `constructed/`, the universal type's name or the number,
+/// `TagToString` of `byte`: the class, `constructed/`, the universal type's name or the number,
 /// and the byte.
 fn tag_to_string(byte: u8) -> String {
     let class = match byte & 0xc0 {
@@ -698,7 +701,7 @@ fn tag_to_string(byte: u8) -> String {
 // (`ReadStringValue`, objistrasnb.cpp:803-826, fixes a new string after `ReadBytes`, before
 // `EndOfTag`: the position is the byte after the string. `SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_
 // READING` is 0.)
-/// `FixVisibleChars(str)` of the string `s`, read up to the byte `end` of the object: each byte
+/// `FixVisibleChars` of the string `s`, read up to the byte `end` of the object: each byte
 /// outside `' '..='~'` becomes `#`, posted with the string as fixed so far (the bytes before it
 /// already `#`).
 fn fix_visible_chars(s: &mut [u8], end: usize, posts: &mut Vec<StringPost>) {

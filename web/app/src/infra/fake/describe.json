@@ -1297,6 +1297,16 @@
     "takes_value": true
    },
    {
+    "flag": "-best_hit_overhang",
+    "help": "Best Hit algorithm overhang value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_score_edge",
+    "help": "Best Hit algorithm score edge value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
     "flag": "-subject_besthit",
     "help": "",
     "takes_value": false,
@@ -1848,6 +1858,15 @@
     ]
    },
    {
+    "flag": "-use_sw_tback",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-soft_masking",
     "help": "Apply filtering locations as soft masks [default: false]",
     "takes_value": true
@@ -1905,6 +1924,16 @@
    {
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_overhang",
+    "help": "Best Hit algorithm overhang value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_score_edge",
+    "help": "Best Hit algorithm score edge value (recommended value: 0.1)",
     "takes_value": true
    },
    {
@@ -2439,6 +2468,16 @@
    {
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_overhang",
+    "help": "Best Hit algorithm overhang value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_score_edge",
+    "help": "Best Hit algorithm score edge value (recommended value: 0.1)",
     "takes_value": true
    },
    {

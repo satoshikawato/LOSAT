@@ -117,7 +117,11 @@ pub(super) struct ReportView<'a> {
     pub(super) psiblast_hits_found: &'a Option<Vec<usize>>,
     pub(super) psi_found_before: &'a Option<psi_round::FoundBefore>,
     pub(super) rps_gapped_k: &'a Option<Vec<f64>>,
-    pub(super) tabular_unsearched: &'a [bool],
+    /// Whether NCBI's result of each query has no alignment set: a query of a batch that NCBI did
+    /// not search, but for rpsblast's search of several volumes, whose merge makes a set for every
+    /// query (`blast_engine::no_alignment_sets`). Outfmt 7's hit count, the XML2 and JSON `hits`
+    /// and message, and the organism report read it.
+    pub(super) no_alignment_set: &'a [bool],
     pub(super) context: &'a ReportContext,
     pub(super) call_batches: &'a archive::CallBatches<'a>,
     pub(super) filtered_empty: bool,
@@ -178,6 +182,7 @@ pub(super) fn write_seqalign(
     };
     seqalign::write_blastp_seqalign(
         serial,
+        args.app == BlastpApp::Rpsblast,
         !args.ungapped,
         hit_lists,
         &crate::report::record::QueryNames {
@@ -252,6 +257,7 @@ pub(super) fn write_archive(
     let call = archive::ArchiveCall {
         handle,
         gapped: !args.ungapped,
+        rps: args.app == BlastpApp::Rpsblast,
         batches: archive::CallBatches {
             masks: &masks,
             spans: &spans,
@@ -302,6 +308,7 @@ pub(super) fn write_xml(
         query_lengths,
         query_valid,
         query_batch_skipped,
+        no_alignment_set,
         database,
         listed_subjects,
         listed_titles,
@@ -415,10 +422,18 @@ pub(super) fn write_xml(
             )
         })
         .collect();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-224
+    // The result of a batch that NCBI did not search has no masks (rpsblast's merge of several
+    // volumes takes volume 0's, rpsblast_local.cpp:174-175): XML2 and JSON list none for its
+    // queries, which have an alignment set there (`no_alignment_set`).
     let xml_masks: Vec<Vec<crate::report::blast_xml::QueryMask>> =
         query_record_masks(query_frames, &ranges.query_input.placements)
             .into_iter()
-            .map(|masks| {
+            .zip(query_batch_skipped)
+            .map(|(masks, &skipped)| {
+                if skipped {
+                    return Vec::new();
+                }
                 masks
                     .into_iter()
                     .map(|(from, to)| crate::report::blast_xml::QueryMask { from, to, frame: 0 })
@@ -478,7 +493,7 @@ pub(super) fn write_xml(
     let version = format!(
         "{} {}",
         args.app.ncbi_name().to_ascii_uppercase(),
-        crate::NCBI_BLAST_VERSION
+        crate::wording::REPORT_VERSION
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
     // `-soft_masking true` (`mask_at_hash`) ends the filter string with `m;`.
@@ -519,12 +534,10 @@ pub(super) fn write_xml(
         subjects: xml_subjects,
         taxdb_notes: xml_taxdb_notes,
         masks: xml_masks,
-        // NCBI did not search the batches that the search skipped (every query in
-        // them invalid): XML2 shows it.
-        searched: query_batch_skipped
-            .iter()
-            .map(|&skipped| !skipped)
-            .collect(),
+        // A query without NCBI's alignment set (`no_alignment_set`: of a batch that the search
+        // skipped, every query in it invalid, but for the merge of several volumes): XML2 and
+        // JSON write no `hits` and add to its message.
+        searched: no_alignment_set.iter().map(|&none| !none).collect(),
         program: args.app.name(),
         epilog: reports.epilog,
         stops: !reports.epilog && reports.last_call,
@@ -657,6 +670,7 @@ pub(super) fn write_pairwise(
         psi_found_before,
         rps_gapped_k,
         blastp_parallel_pool,
+        hit_loads,
         prolog_only,
         ..
     } = *report_view;
@@ -675,6 +689,24 @@ pub(super) fn write_pairwise(
         protein_matrix: args.scoring.matrix,
         sort: view.report_sort(args.sort),
         view,
+        // psiblast's PSSM query of the molecule `other` (`PsiSearch::query_other_coding`).
+        unreadable_query: args
+            .psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding)
+            .map(|_| crate::report::pairwise::UnreadableQuery {
+                oids: listed_subjects
+                    .as_ref()
+                    .zip(database)
+                    .map(|(listed, database)| {
+                        let oids = database.oid_map();
+                        listed
+                            .ordinals
+                            .iter()
+                            .map(|&ordinal| oids.oid(ordinal).get())
+                            .collect()
+                    }),
+            }),
     };
     // psiblast `-in_pssm`: the footer prints the PSSM's `kbp_psi` and `kbp_gap_psi`
     // (the file's values).
@@ -705,7 +737,7 @@ pub(super) fn write_pairwise(
         })
         .collect();
     let pairwise_report = BlastpPairwiseReport {
-        version: crate::NCBI_BLAST_VERSION.to_string(),
+        version: crate::wording::REPORT_VERSION.to_string(),
         database_name: blastp_scan_mode_definition(subject_input_label).into(),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
@@ -861,6 +893,7 @@ pub(super) fn write_pairwise(
                 subject_titles,
                 listed_parsed,
                 listed_sources,
+                hit_loads,
                 &pairwise_report,
                 pairwise_database.as_ref(),
                 probe.as_mut(),
@@ -872,7 +905,8 @@ pub(super) fn write_pairwise(
                         .as_ref()
                         .map(|found| found.found.as_slice()),
                 },
-            )?;
+            )
+            .map_err(crate::cli::NativeError::of_writer)?;
             continue;
         }
         write_blastp_pairwise_window(
@@ -897,7 +931,10 @@ pub(super) fn write_pairwise(
             anchored_sequences
                 .as_ref()
                 .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
-        )?;
+            hit_loads,
+        )
+        // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
+        .map_err(crate::cli::NativeError::of_writer)?;
     }
     Ok(())
 }
@@ -943,7 +980,7 @@ pub(super) fn write_custom_tabular(
         engine_counts,
         pairwise_hits,
         psiblast_hits_found,
-        tabular_unsearched,
+        no_alignment_set,
         context,
         x_rows_pool,
         ..
@@ -1004,7 +1041,7 @@ pub(super) fn write_custom_tabular(
     let program_version = format!(
         "{} {}",
         args.app.ncbi_name().to_uppercase(),
-        crate::NCBI_BLAST_VERSION
+        crate::wording::REPORT_VERSION
     );
     let tab = tabular::BlastpTabular {
         spec,
@@ -1026,7 +1063,7 @@ pub(super) fn write_custom_tabular(
             .or(context.subject_name.as_deref())
             .unwrap_or_default(),
         subjects: tabular_subjects,
-        unsearched: tabular_unsearched,
+        unsearched: no_alignment_set,
         hits_found: psiblast_hits_found.as_deref(),
         prolog: reports.x_prolog,
         epilog: reports
@@ -1112,7 +1149,7 @@ pub(super) fn write_text(
         subject_accessions,
         hit_lists,
         psiblast_hits_found,
-        tabular_unsearched,
+        no_alignment_set,
         context,
         ..
     } = *view;
@@ -1128,7 +1165,7 @@ pub(super) fn write_text(
         subject_ids,
         subject_accessions,
         view.hit_loads,
-        tabular_unsearched,
+        no_alignment_set,
         psiblast_hits_found.as_deref(),
         context,
         probe.as_mut(),

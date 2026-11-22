@@ -9,6 +9,8 @@
 
 #[path = "../archive_replaced_bytes.rs"]
 mod archive_replaced_bytes;
+#[path = "../balanced_title.rs"]
+mod balanced_title;
 #[path = "../blastdbcmd_alias_keys.rs"]
 mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]
@@ -37,6 +39,8 @@ mod database_sequence_without_letters;
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]
 mod db_seqidlist;
+#[path = "../db_taxdb_unreadable.rs"]
+mod db_taxdb_unreadable;
 #[path = "../db_taxid_root.rs"]
 mod db_taxid_root;
 #[path = "../db_unreadable_files.rs"]
@@ -55,6 +59,8 @@ mod library_api;
 mod library_examples;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
+#[path = "../llvm_profile.rs"]
+mod llvm_profile;
 #[path = "../makeblastdb_failed_index.rs"]
 mod makeblastdb_failed_index;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]

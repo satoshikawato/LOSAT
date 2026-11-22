@@ -136,7 +136,7 @@ fn contexts_in_pool_equal_the_one_thread_contexts() {
         })
         .collect();
     queries.push(vec![make_poly_a_query_frame()]);
-    // Only negative scores: no Karlin block (NCBI's `is_valid = FALSE`).
+    // Only negative scores: no Karlin block (NCBI's `is_valid` false).
     queries.push(vec![make_query_frame(vec![ncbistdaa::X; 20], vec![])]);
     for matrix in [
         ScoringMatrix::Blosum62,
@@ -458,8 +458,8 @@ fn test_build_ncbi_lookup_respects_interval_boundaries() {
     assert_eq!(lookup.get_hits(aaa_index), &[0]);
 }
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:57 (`Int4
-// overflow_cursor`, cited at `BackboneCell`). A cursor below 2^31 is NCBI's `Int4` in
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:57 (`overflow_cursor`, an
+// `Int4`, cited at `BackboneCell`). A cursor below 2^31 is NCBI's `Int4` in
 // `entries[0]` (and 0 in `entries[1]`); a cursor of 2^31 or more, which NCBI's `Int4` cannot
 // hold (`-threshold 3e9`: 21,952 entries per word position, so 97,827 positions fill 2^31),
 // reads back whole, as every scanner reads it (`cursor`, `x_cursor_at`), where

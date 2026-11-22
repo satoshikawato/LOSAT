@@ -15,6 +15,7 @@
 
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::standard_protein_matrix;
+use crate::wording::ENGINE_ERROR;
 
 /// The packed table's symbols, in the order of its rows (NCBI `s_Blosum62PSM`:
 /// A, R, N, D, C, Q, E, G, H, I, L, K, M, F, P, S, T, W, Y, V, B, J, Z, X, *).
@@ -24,8 +25,8 @@ const SYMBOLS: &[u8; 25] = b"ARNDCQEGHILKMFPSTWYVBJZX*";
 /// letter: all but `*` (code 25), and `-` (code 0).
 const IUPACAA_LETTERS: &[u8; 26] = b"ABCDEFGHIKLMNPQRSTVWXYZUOJ";
 
-/// `CBlastFormattingMatrix(letter, letter)` as scores, `i32::MIN` for a pair with a letter that
-/// has no entry.
+/// The scores of `CBlastFormattingMatrix` for a pair of letters, `i32::MIN` for a pair with a
+/// letter that has no entry.
 pub struct FormattingMatrix {
     scores: Box<[i32]>,
 }
@@ -145,7 +146,7 @@ fn is_blast_xml(outfmt: &str) -> bool {
 pub fn unsupported_score_matrix() -> anyhow::Error {
     crate::cli::NativeError {
         exit: 3,
-        message: "BLAST engine error: unsupported score matrix\n".into(),
+        message: format!("{ENGINE_ERROR} unsupported score matrix\n").into(),
     }
     .into()
 }
@@ -163,7 +164,7 @@ impl FormattingMatrix {
         Some(Self { scores })
     }
 
-    /// `(*matrix)(query, subject)`.
+    /// The element of NCBI's `matrix` at row `query` and column `subject` (its `operator()`).
     pub fn score(&self, query: u8, subject: u8) -> i32 {
         self.scores[usize::from(query) * 256 + usize::from(subject)]
     }

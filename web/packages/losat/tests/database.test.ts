@@ -3,7 +3,9 @@
 // files that a folder pick of the database gives (every file of the database's folder) and the list of a filter, and
 // a reader that reads each Blob's bytes from its file as FileReaderSync reads a File in a worker. The engine opens the
 // files by the names of the argv and reads them in place; outfmt 6 is NCBI BLAST+ 2.17.0's frozen bytes for the same
-// search (LOSAT/tests/fixtures/db_search). Skips without LOSAT_WEB_REACTORS.
+// search (LOSAT/tests/fixtures/db_search) in LOSAT's words (LOSAT/tests/losat_wording.py map-output, line NW2). Skips
+// without LOSAT_WEB_REACTORS.
+import { spawnSync } from 'node:child_process';
 import { closeSync, openAsBlob, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +24,14 @@ interface Row {
   readonly db: string;
   readonly query: string;
   readonly extra: readonly string[];
+}
+
+/** A row's frozen NCBI outfmt 6 (LOSAT/tests/fixtures/db_search) in LOSAT's words, as LOSAT writes it. */
+function frozenInLosatWords(id: string): Buffer {
+  const mapped = spawnSync('python3', ['-I', join(LOSAT, 'tests/losat_wording.py'), 'map-output', join(LOSAT, 'tests/fixtures/db_search', `${id}.out`)]);
+  if (mapped.error) throw mapped.error;
+  if (mapped.status !== 0) throw new Error(`losat_wording.py map-output ${id}: ${mapped.stderr.toString()}`);
+  return mapped.stdout;
 }
 
 /** The rows of LOSAT/tests/db_search_manifest by their ID. */
@@ -119,8 +129,7 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
         else if (stream === DISCARD_STREAM) outfmt6 = [];
       });
       abi.release(query.handle);
-      const frozen = readFileSync(join(LOSAT, 'tests/fixtures/db_search', `${row.id}.out`));
-      expect(Buffer.concat(outfmt6).equals(frozen), row.id).toBe(true);
+      expect(Buffer.concat(outfmt6).equals(frozenInLosatWords(row.id)), row.id).toBe(true);
       // Only what the search reads: the database's own files (`<db>.*`) and the filter's list, by range, never
       // another file of the folder (2.8 MB in all). A file may be read more than once in a run (its index at each
       // open of the database, its sequences by the search and again by the traceback and the report), as the CLI
@@ -134,7 +143,7 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
     directory.open([]);
     const argv = ['blastp', '-db', 'tests/db_search/paja', '-query', 'q.faa', '-num_threads', '1'];
     const query = abi.register('blastp', ROLE_QUERY, true, new TextEncoder().encode('>q\nMKVLA\n'));
-    expect(() => abi.run(argv, query.handle, 0, () => undefined)).toThrow(/BLAST Database error: No alias or index file found for protein database \[tests\/db_search\/paja\]/);
+    expect(() => abi.run(argv, query.handle, 0, () => undefined)).toThrow(/LOSAT database error: No alias or index file found for protein database \[tests\/db_search\/paja\]/);
     // With the database in the directory, the names that the CLI run from LOSAT/ does not find either: an absolute
     // name (the CLI's root holds no tests/) and `..` after a name that is no folder. The CLI's message, whose
     // search path names the engine's current directory, /work (abi_v2.md §3; review of D12a, low 4).
@@ -142,7 +151,7 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
     for (const name of ['/tests/db_search/paja', 'nofolder/../tests/db_search/paja']) {
       const named = ['blastp', '-db', name, '-query', 'q.faa', '-num_threads', '1'];
       expect(() => abi.run(named, query.handle, 0, () => undefined), name).toThrow(
-        `BLAST Database error: No alias or index file found for protein database [${name}] in search path [/work::]. ` +
+        `LOSAT database error: No alias or index file found for protein database [${name}] in search path [/work::]. ` +
           'Please verify the spelling of the BLAST database and its molecule type.',
       );
     }

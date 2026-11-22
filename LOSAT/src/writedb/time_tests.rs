@@ -8,6 +8,7 @@ fn at(month: u32, day: u32, hour: u32, minute: u32) -> LocalTime {
         hour,
         minute,
         second: 7,
+        unix_seconds: 0,
     }
 }
 
@@ -71,7 +72,8 @@ fn unix_seconds_become_calendar_times() {
                 day,
                 hour,
                 minute,
-                second
+                second,
+                unix_seconds: seconds,
             },
             "{seconds}"
         );

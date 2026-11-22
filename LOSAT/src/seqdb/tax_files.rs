@@ -13,7 +13,7 @@
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::collections::BTreeSet;
 
-use super::lmdb_read::{Env, ReadAt};
+use super::lmdb_read::{Env, ReadAt, ReadError};
 
 /// NCBI text when the `.ndb` has no `volname`/`volinfo` table.
 pub const NO_VOLUME_INFO: &str = "DB contains no vol info.";
@@ -27,21 +27,21 @@ pub fn accessions_lookup_error(dbname: &[u8]) -> Vec<u8> {
     [b"Accessions to Oids lookup error in ".as_slice(), dbname].concat()
 }
 
-fn le_u32(v: &[u8], what: &str) -> Result<u32, String> {
+fn le_u32(v: &[u8], what: &str) -> Result<u32, ReadError> {
     let a: [u8; 4] = v
         .try_into()
         .map_err(|_| format!("{what}: value of {} bytes, expected 4", v.len()))?;
     Ok(u32::from_le_bytes(a))
 }
 
-fn le_u64(v: &[u8], what: &str) -> Result<u64, String> {
+fn le_u64(v: &[u8], what: &str) -> Result<u64, ReadError> {
     let a: [u8; 8] = v
         .try_into()
         .map_err(|_| format!("{what}: value of {} bytes, expected 8", v.len()))?;
     Ok(u64::from_le_bytes(a))
 }
 
-fn read_u64_at<R: ReadAt + ?Sized>(src: &R, off: u64) -> Result<u64, String> {
+fn read_u64_at<R: ReadAt + ?Sized>(src: &R, off: u64) -> Result<u64, ReadError> {
     let mut b = [0u8; 8];
     src.read_exact_at(&mut b, off)?;
     Ok(u64::from_le_bytes(b))
@@ -55,7 +55,7 @@ fn read_u64_at<R: ReadAt + ?Sized>(src: &R, off: u64) -> Result<u64, String> {
 /// Errors: [`NO_VOLUME_INFO`], "Volinfo error " (the two tables have different entry counts),
 /// "Volinfo error : N volumes" (LOSAT: a count larger than the tables' leaf pages can hold),
 /// "No volinfo for `<name>`".
-pub fn volumes<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<Vec<(Vec<u8>, u32)>, String> {
+pub fn volumes<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<Vec<(Vec<u8>, u32)>, ReadError> {
     let volname = ndb
         .open_db(b"volname")?
         .ok_or_else(|| NO_VOLUME_INFO.to_string())?;
@@ -63,7 +63,7 @@ pub fn volumes<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<Vec<(Vec<u8>, u32)>, 
         .open_db(b"volinfo")?
         .ok_or_else(|| NO_VOLUME_INFO.to_string())?;
     if volinfo.entries != volname.entries {
-        return Err("Volinfo error ".to_string());
+        return Err("Volinfo error ".to_string().into());
     }
     // LOSAT: each entry is a leaf node of at least 14 bytes (8-byte node header, 4-byte key,
     // 2-byte pointer) on one of the table's leaf pages (`md_leaf_pages`, exact for these tables,
@@ -87,7 +87,7 @@ pub fn volumes<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<Vec<(Vec<u8>, u32)>, 
             None => out.push((Vec::new(), 0)),
             Some(name) => {
                 let Some(info) = ndb.first_value(&volinfo, &key)? else {
-                    return Err(format!("No volinfo for {}", String::from_utf8_lossy(&name)));
+                    return Err(format!("No volinfo for {}", String::from_utf8_lossy(&name)).into());
                 };
                 out.push((name, le_u32(&info, "volinfo")?));
             }
@@ -116,7 +116,10 @@ pub fn total_oids(vols: &[(Vec<u8>, u32)]) -> u64 {
 ///
 /// `Err(NO_ACCESSION_INFO)` when the table is missing; other `Err` strings are LMDB or format
 /// errors, which NCBI reports as [`accessions_lookup_error`]. `Ok(None)`: id not in the table.
-pub fn acc_first_oid<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Option<u32>, String> {
+pub fn acc_first_oid<R: ReadAt + ?Sized>(
+    ndb: &Env<R>,
+    acc: &[u8],
+) -> Result<Option<u32>, ReadError> {
     let db = ndb
         .open_db(b"acc2oid")?
         .ok_or_else(|| NO_ACCESSION_INFO.to_string())?;
@@ -126,18 +129,18 @@ pub fn acc_first_oid<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Opt
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:261-303
-/// All OIDs of an accession key in LMDB duplicate order (`GetOid(.., allow_dup = true)`):
+/// All OIDs of an accession key in LMDB duplicate order (`GetOid` with `allow_dup` true):
 /// `memcmp` order of the 4 LE bytes, so {1, 256, 512} come as 256, 512, 1. Empty when absent.
 /// Works for keys with a sub-database (more than about 500 OIDs), where NCBI fails.
-pub fn acc_oids<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Vec<u32>, String> {
+pub fn acc_oids<R: ReadAt + ?Sized>(ndb: &Env<R>, acc: &[u8]) -> Result<Vec<u32>, ReadError> {
     acc_oids_of(ndb, &acc2oid(ndb)?, acc)
 }
 
 /// The `acc2oid` database of `ndb` (`mdb_dbi_open`; `NO_ACCESSION_INFO` where it has none), for
 /// `acc_oids_of` and `acc_case_variant_oids`.
-pub fn acc2oid<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<crate::seqdb::lmdb_read::Db, String> {
+pub fn acc2oid<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<crate::seqdb::lmdb_read::Db, ReadError> {
     ndb.open_db(b"acc2oid")?
-        .ok_or_else(|| NO_ACCESSION_INFO.to_string())
+        .ok_or_else(|| NO_ACCESSION_INFO.into())
 }
 
 /// `acc_oids` in the `acc2oid` database `db` of `ndb` (`acc2oid`).
@@ -145,7 +148,7 @@ pub fn acc_oids_of<R: ReadAt + ?Sized>(
     ndb: &Env<R>,
     db: &crate::seqdb::lmdb_read::Db,
     acc: &[u8],
-) -> Result<Vec<u32>, String> {
+) -> Result<Vec<u32>, ReadError> {
     ndb.values(db, acc)?
         .iter()
         .map(|v| le_u32(v, "acc2oid"))
@@ -171,11 +174,11 @@ pub fn acc_case_variant_oids<R: ReadAt + ?Sized>(
     acc: &[u8],
     from: usize,
     prefixes: &mut rustc_hash::FxHashMap<Vec<u8>, bool>,
-) -> Result<Vec<u32>, String> {
+) -> Result<Vec<u32>, ReadError> {
     // Only the short prefixes recur from one name to the next (`pir||a` for every `pir||A12345`);
     // keeping the longer ones, which each name asks alone, would only grow the map.
     let kept_up_to = from.saturating_add(KEPT_CASE_PREFIX);
-    let keys = case_variant_keys(acc, from, |prefix| -> Result<bool, String> {
+    let keys = case_variant_keys(acc, from, |prefix| -> Result<bool, ReadError> {
         if prefix.len() > kept_up_to {
             return ndb.has_key_starting_with(db, prefix);
         }
@@ -252,7 +255,7 @@ pub fn case_variant_keys<E>(
 }
 
 /// Failure of a taxid lookup, with the pieces for NCBI's message.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum TaxError {
     /// The `.ntf` has no `taxid2offset` table (`MDB_NOTFOUND` of `mdb_dbi_open`). NCBI:
     /// "No taxonomy info found in `<dbname>`".
@@ -263,9 +266,28 @@ pub enum TaxError {
     /// The `.nto` / `.not` data is unreadable or points outside the file or the OID range
     /// (a crash or a `CFileException` in NCBI). The string is the full message.
     Data(String),
+    /// The system failed to give bytes of the `.ntf`, `.nto` or `.not` after it opened
+    /// ([`ReadError::Unreadable`]): LOSAT's own error, as it is.
+    Unreadable(super::SeqDbError),
 }
 
 impl TaxError {
+    /// The failure of a read of the `.ntf` (`Lookup`), or the `Unreadable` error as it is.
+    fn lookup(error: ReadError) -> Self {
+        match error {
+            ReadError::Format(message) => TaxError::Lookup(message),
+            ReadError::Unreadable(error) => TaxError::Unreadable(error),
+        }
+    }
+
+    /// The failure of a read of the `.nto` or `.not` (`Data`), or the `Unreadable` error as it is.
+    fn data(error: ReadError) -> Self {
+        match error {
+            ReadError::Format(message) => TaxError::Data(message),
+            ReadError::Unreadable(error) => TaxError::Unreadable(error),
+        }
+    }
+
     /// The message NCBI throws (`CSeqDBException`, `eArgErr`) for this failure; `dbname` is the
     /// base name of the `.ntf` file, e.g. `nt.ntf`. `Data` has no NCBI text and gives its detail.
     pub fn message(&self, dbname: &[u8]) -> Vec<u8> {
@@ -275,6 +297,7 @@ impl TaxError {
                 [b"Taxonomy Id to Oids lookup error in ".as_slice(), dbname].concat()
             }
             TaxError::Data(m) => m.clone().into_bytes(),
+            TaxError::Unreadable(error) => error.to_string().into_bytes(),
         }
     }
 
@@ -284,6 +307,7 @@ impl TaxError {
         match self {
             TaxError::NoTaxInfo => "no taxid2offset table",
             TaxError::Lookup(d) | TaxError::Data(d) => d,
+            TaxError::Unreadable(_) => "unreadable",
         }
     }
 }
@@ -294,6 +318,7 @@ impl std::fmt::Display for TaxError {
             TaxError::NoTaxInfo => write!(f, "No taxonomy info found"),
             TaxError::Lookup(d) => write!(f, "Taxonomy Id to Oids lookup error: {d}"),
             TaxError::Data(d) => f.write_str(d),
+            TaxError::Unreadable(error) => write!(f, "{error}"),
         }
     }
 }
@@ -316,7 +341,7 @@ pub struct TaxOids {
 pub fn get_db_tax_ids<R: ReadAt + ?Sized>(ntf: &Env<R>) -> Result<Vec<i32>, TaxError> {
     let db = ntf
         .open_db(b"taxid2offset")
-        .map_err(TaxError::Lookup)?
+        .map_err(TaxError::lookup)?
         .ok_or(TaxError::NoTaxInfo)?;
     let mut out = Vec::new();
     ntf.for_each(&db, |k, _| {
@@ -327,7 +352,7 @@ pub fn get_db_tax_ids<R: ReadAt + ?Sized>(ntf: &Env<R>) -> Result<Vec<i32>, TaxE
         out.push(i32::from_le_bytes(a));
         Ok(())
     })
-    .map_err(TaxError::Lookup)?;
+    .map_err(TaxError::lookup)?;
     Ok(out)
 }
 
@@ -351,19 +376,19 @@ pub fn get_oids_for_tax_ids<R1: ReadAt + ?Sized, R2: ReadAt + ?Sized>(
 ) -> Result<TaxOids, TaxError> {
     let db = ntf
         .open_db(b"taxid2offset")
-        .map_err(TaxError::Lookup)?
+        .map_err(TaxError::lookup)?
         .ok_or(TaxError::NoTaxInfo)?;
     let mut offsets: Vec<u64> = Vec::new();
     let mut tax_ids_found: Vec<i32> = Vec::new();
     for &tax_id in tax_ids {
         let values = ntf
             .values(&db, &tax_id.to_le_bytes())
-            .map_err(TaxError::Lookup)?;
+            .map_err(TaxError::lookup)?;
         if values.is_empty() {
             continue;
         }
         for v in &values {
-            offsets.push(le_u64(v, "taxid2offset").map_err(TaxError::Lookup)?);
+            offsets.push(le_u64(v, "taxid2offset").map_err(TaxError::lookup)?);
         }
         tax_ids_found.push(tax_id);
     }
@@ -375,7 +400,7 @@ pub fn get_oids_for_tax_ids<R1: ReadAt + ?Sized, R2: ReadAt + ?Sized>(
         let count = {
             let mut b = [0u8; 4];
             nto.read_exact_at(&mut b, offset)
-                .map_err(|e| TaxError::Data(format!("taxid-to-oids file: {e}")))?;
+                .map_err(|e| TaxError::data(e.prefixed("taxid-to-oids file: ")))?;
             u32::from_le_bytes(b) as u64
         };
         let list_end = count.checked_mul(4).and_then(|n| n.checked_add(offset + 4));
@@ -390,7 +415,7 @@ pub fn get_oids_for_tax_ids<R1: ReadAt + ?Sized, R2: ReadAt + ?Sized>(
         while done < count {
             let take = (count - done).min(16384) as usize;
             nto.read_exact_at(&mut buf[..take * 4], offset + 4 + done * 4)
-                .map_err(|e| TaxError::Data(format!("taxid-to-oids file: {e}")))?;
+                .map_err(|e| TaxError::data(e.prefixed("taxid-to-oids file: ")))?;
             for c in buf[..take * 4].chunks_exact(4) {
                 let oid = u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
                 if oid >= num_oids {
@@ -409,8 +434,9 @@ pub fn get_oids_for_tax_ids<R1: ReadAt + ?Sized, R2: ReadAt + ?Sized>(
     }
 
     let oids_sz = oids.len();
-    // NCBI: sort when `oids_sz * log(oids_sz) < m_NumOids`, else scan the bit vector. (For 0 the
-    // product is NaN and the scan finds nothing.) Both give ascending unique OIDs.
+    // NCBI: sort when `oids_sz` times the log of `oids_sz` is below `m_NumOids`, else scan the bit
+    // vector. (For 0 the product is NaN and the scan finds nothing.) Both give ascending unique
+    // OIDs.
     if (oids_sz as f64) * (oids_sz as f64).glibc_ln() < num_oids as f64 {
         oids.sort_unstable();
     } else {
@@ -440,12 +466,13 @@ struct OidIndex {
 }
 
 impl OidIndex {
-    fn open<R: ReadAt + ?Sized>(src: &R, what: &str) -> Result<OidIndex, String> {
+    fn open<R: ReadAt + ?Sized>(src: &R, what: &str) -> Result<OidIndex, ReadError> {
         let file_len = src.len();
         if file_len == 0 {
-            return Err(format!("Failed to open oid-to-{what} lookup file"));
+            return Err(format!("Failed to open oid-to-{what} lookup file").into());
         }
-        let n_oids = read_u64_at(src, 0).map_err(|e| format!("oid-to-{what} lookup file: {e}"))?;
+        let n_oids =
+            read_u64_at(src, 0).map_err(|e| e.prefixed(&format!("oid-to-{what} lookup file: ")))?;
         let data_start = n_oids
             .checked_add(1)
             .and_then(|n| n.checked_mul(8))
@@ -464,12 +491,13 @@ impl OidIndex {
         src: &R,
         oid: u32,
         what: &str,
-    ) -> Result<(u64, u64), String> {
+    ) -> Result<(u64, u64), ReadError> {
         if oid as u64 >= self.n_oids {
             return Err(format!(
                 "oid-to-{what} lookup file: OID {oid} is not below the {} OIDs of the file",
                 self.n_oids
-            ));
+            )
+            .into());
         }
         let at = 8 + 8 * oid as u64;
         let (begin, end) = if oid == 0 {
@@ -485,7 +513,8 @@ impl OidIndex {
         if begin > end {
             return Err(format!(
                 "oid-to-{what} lookup file: ends of OID {oid} go backwards ({begin} > {end})"
-            ));
+            )
+            .into());
         }
         Ok((begin, end))
     }
@@ -501,7 +530,7 @@ pub struct OidTaxIds<'r, R: ReadAt + ?Sized> {
 impl<'r, R: ReadAt + ?Sized> OidTaxIds<'r, R> {
     /// Open and check the header (an empty file is NCBI's "Failed to open oid-to-taxids lookup
     /// file").
-    pub fn open(src: &'r R) -> Result<Self, String> {
+    pub fn open(src: &'r R) -> Result<Self, ReadError> {
         Ok(OidTaxIds {
             src,
             idx: OidIndex::open(src, "taxids")?,
@@ -515,21 +544,22 @@ impl<'r, R: ReadAt + ?Sized> OidTaxIds<'r, R> {
     }
 
     /// Taxids of one OID, as stored (ascending; 0 = unknown).
-    pub fn taxids(&self, oid: u32) -> Result<Vec<i32>, String> {
+    pub fn taxids(&self, oid: u32) -> Result<Vec<i32>, ReadError> {
         let (begin, end) = self.idx.range(self.src, oid, "taxids")?;
         let len = (end - begin).checked_mul(4);
         let start = begin
             .checked_mul(4)
             .and_then(|b| b.checked_add(self.idx.data_start));
         let (Some(len), Some(start)) = (len, start) else {
-            return Err(format!(
-                "oid-to-taxids lookup file: taxids of OID {oid} are out of range"
-            ));
+            return Err(
+                format!("oid-to-taxids lookup file: taxids of OID {oid} are out of range").into(),
+            );
         };
         if start.checked_add(len).is_none_or(|e| e > self.idx.file_len) {
             return Err(format!(
                 "oid-to-taxids lookup file: taxids of OID {oid} run past the end of the file"
-            ));
+            )
+            .into());
         }
         let mut buf = vec![0u8; len as usize];
         self.src.read_exact_at(&mut buf, start)?;
@@ -543,7 +573,7 @@ impl<'r, R: ReadAt + ?Sized> OidTaxIds<'r, R> {
 /// Taxids of one OID from a `.not`/`.pot` file (`CLookupTaxIds::GetTaxIdListForOid`). For many
 /// OIDs use [`OidTaxIds`], which reads the header once.
 #[cfg(test)]
-pub fn taxids_of_oid<R: ReadAt + ?Sized>(not: &R, oid: u32) -> Result<Vec<i32>, String> {
+pub fn taxids_of_oid<R: ReadAt + ?Sized>(not: &R, oid: u32) -> Result<Vec<i32>, ReadError> {
     OidTaxIds::open(not)?.taxids(oid)
 }
 
@@ -563,11 +593,11 @@ pub fn negative_tax_ids_to_oids<R1: ReadAt + ?Sized, R2: ReadAt + ?Sized, R3: Re
     tax_ids: &BTreeSet<i32>,
 ) -> Result<TaxOids, TaxError> {
     let positive = get_oids_for_tax_ids(ntf, nto, num_oids, tax_ids)?;
-    let lookup = OidTaxIds::open(not).map_err(TaxError::Data)?;
+    let lookup = OidTaxIds::open(not).map_err(TaxError::data)?;
     let tax_id_list: BTreeSet<i32> = positive.tax_ids_found.iter().copied().collect();
     let mut rv = Vec::new();
     for &oid in &positive.oids {
-        let file_list = lookup.taxids(oid).map_err(TaxError::Data)?;
+        let file_list = lookup.taxids(oid).map_err(TaxError::data)?;
         if file_list.len() > tax_ids.len() {
             continue;
         }
@@ -591,7 +621,7 @@ pub struct OidSeqIds<'r, R: ReadAt + ?Sized> {
 impl<'r, R: ReadAt + ?Sized> OidSeqIds<'r, R> {
     /// Open and check the header (an empty file is NCBI's "Failed to open oid-to-seqid lookup
     /// file").
-    pub fn open(src: &'r R) -> Result<Self, String> {
+    pub fn open(src: &'r R) -> Result<Self, ReadError> {
         Ok(OidSeqIds {
             src,
             idx: OidIndex::open(src, "seqid")?,
@@ -607,7 +637,7 @@ impl<'r, R: ReadAt + ?Sized> OidSeqIds<'r, R> {
     /// Seqids of one OID in stored order (bytewise ascending): the versioned form where the id
     /// has a version (`AAA00001.1`), the plain id otherwise; GI numbers and names are absent.
     /// Each is `[u8 len][bytes]`, or `0xFF` + `u32 len` + bytes when 255 or longer.
-    pub fn seqids(&self, oid: u32) -> Result<Vec<Vec<u8>>, String> {
+    pub fn seqids(&self, oid: u32) -> Result<Vec<Vec<u8>>, ReadError> {
         let (begin, end) = self.idx.range(self.src, oid, "seqid")?;
         let start = self.idx.data_start.checked_add(begin);
         let len = end - begin;
@@ -617,7 +647,8 @@ impl<'r, R: ReadAt + ?Sized> OidSeqIds<'r, R> {
         {
             return Err(format!(
                 "oid-to-seqid lookup file: seqids of OID {oid} run past the end of the file"
-            ));
+            )
+            .into());
         }
         let mut buf = vec![0u8; len as usize];
         self.src.read_exact_at(&mut buf, start.unwrap_or(0))?;
@@ -647,7 +678,7 @@ impl<'r, R: ReadAt + ?Sized> OidSeqIds<'r, R> {
 /// Seqids of one OID from a `.nos`/`.pos` file (`CLookupSeqIds::GetSeqIdListForOid`). For many
 /// OIDs use [`OidSeqIds`].
 #[cfg(test)]
-pub fn seqids_of_oid<R: ReadAt + ?Sized>(nos: &R, oid: u32) -> Result<Vec<Vec<u8>>, String> {
+pub fn seqids_of_oid<R: ReadAt + ?Sized>(nos: &R, oid: u32) -> Result<Vec<Vec<u8>>, ReadError> {
     OidSeqIds::open(nos)?.seqids(oid)
 }
 

@@ -216,8 +216,8 @@ fn gap_lines_become_runs_of_n_or_x() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/Seq_gap.cpp:157-172 and
-// c++/include/objects/seq/Seq_gap.hpp:93 (`gapTypeMap.find(CanonicalizeString(sName).c_str())`
-// on a `const char*` map: a gap-type is looked up up to its first NUL byte). The messages are
+// c++/include/objects/seq/Seq_gap.hpp:93 (`gapTypeMap.find` of the canonical string of `sName`
+// as a C string, on a `const char*` map: a gap-type is looked up up to its first NUL byte). The messages are
 // NCBI BLAST+ 2.17.0's for the same lines (`blastn -outfmt 6`, audit A-1 of session SFc):
 // `within-scaffold` forbids linkage evidence (an ignored problem, no message),
 // `between-scaffolds` needs one, a value that starts with NUL is unknown (the message keeps
@@ -355,7 +355,7 @@ fn seq_id_lines_are_rejected_with_data_loaders() {
         assert!(source.end(), "{text:?}");
     }
     // After a rejection the source is past the one line that NCBI reads as the Seq-id
-    // (`*++GetLineReader()` with no `UngetLine` when the CSeq_id parse succeeds,
+    // (the line from `GetLineReader` after an increment, with no `UngetLine` when the CSeq_id parse succeeds,
     // blast_fasta_input.cpp:132-144), and the local-ID counter has not moved: the next
     // call reads from the following line, as NCBI's next ReadOneSeq does after a Seq-id
     // record (oracle BI net2: `AB123456` then `>q1`; net5: five Seq-id lines, then the
@@ -1065,7 +1065,7 @@ fn read_subjects_writes_messages_per_record_and_stops_at_a_range_past_the_end() 
         native(&error),
         (
             1,
-            "BLAST query/options error: Invalid from coordinate (greater than sequence length)\nPlease refer to the LOSAT user manual.\n".to_string()
+            "LOSAT query/options error: Invalid from coordinate (greater than sequence length)\nPlease refer to the LOSAT user manual.\n".to_string()
         )
     );
     // s1's hyphen and title warnings and s2's title warning; s3 is never read.
@@ -1142,7 +1142,7 @@ fn subjects_without_a_first_defline_end_with_the_input_error_of_get_all_seqs() {
                 (
                     1,
                     format!(
-                        "BLAST query/options error: Query input doesn't start with a defline or \
+                        "LOSAT query/options error: Query input doesn't start with a defline or \
                          comment, line {line}\0\nPlease refer to the LOSAT user manual.\n"
                     )
                 ),
@@ -1169,7 +1169,7 @@ fn subjects_without_a_first_defline_end_with_the_input_error_of_get_all_seqs() {
                 (
                     1,
                     format!(
-                        "BLAST query error: CFastaReader: Input doesn't start with a defline or \
+                        "LOSAT query error: CFastaReader: Input doesn't start with a defline or \
                          comment around line {line}\n"
                     )
                 ),
@@ -1212,7 +1212,7 @@ fn read_subjects_reader_errors_end_the_program() {
         native(&error),
         (
             1,
-            "BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n".to_string()
+            "LOSAT query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n".to_string()
         )
     );
     assert_eq!(written, NUC_TITLE_WARNING.as_bytes());

@@ -123,7 +123,7 @@ pub(super) fn refuse_anchored_reports(
                     let rows = rows_of_query(q_idx)?;
                     Ok(crate::report::pairwise::blastp_described_subjects(
                         view.report_sort(sort),
-                        false,
+                        None,
                         report.num_descriptions,
                         q_idx,
                         &rows,
@@ -311,7 +311,7 @@ pub(super) fn write_structured_xml(
             messages
         })
         .collect();
-    let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
+    let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
     let filter = crate::report::blast_xml::filter::filter_string(
         report.dust,
         None,

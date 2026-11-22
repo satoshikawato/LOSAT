@@ -50,19 +50,48 @@ fn stable_hsp_sort_preserves_comparator_equal_input_order() {
 fn test_prelim_hitlist_size_gapped() {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70
     assert_eq!(get_prelim_hitlist_size(1, false, true), 10);
-    // NCBI's Int4 arithmetic wraps (c++/src/algo/blast/core/blast_hits.c:68).
-    assert_eq!(get_prelim_hitlist_size(1 << 30, false, true), 10);
+    assert_eq!(get_prelim_hitlist_size(30, false, true), 60);
+    assert_eq!(get_prelim_hitlist_size(1000, false, true), 1050);
     assert_eq!(
         get_prelim_hitlist_size((1 << 30) - 1, false, true),
         (1 << 30) + 49
     );
-    assert!(get_prelim_hitlist_size(i32::MAX as usize - 49, false, true) < 0);
-    assert_eq!(get_prelim_hitlist_size(30, false, true), 60);
-    assert_eq!(get_prelim_hitlist_size(1000, false, true), 1050);
+    // NCBI's `Int4` overflows from 2^30 on (NCBI BLAST+ 2.17.0: 10, then a negative size);
+    // LOSAT keeps the mathematical size (PD-LOSAT-NCBI-DEFECTS, hit list sizes past `Int4`).
+    assert_eq!(
+        get_prelim_hitlist_size(1 << 30, false, true),
+        (1 << 30) + 50
+    );
+    assert_eq!(
+        get_prelim_hitlist_size(i32::MAX as usize, false, true) as u64,
+        i32::MAX as u64 + 50
+    );
+}
+
+#[test]
+fn prelim_hitlist_size_with_composition_based_statistics() {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:56-63
+    assert_eq!(get_prelim_hitlist_size(1, true, true), 1050);
+    assert_eq!(get_prelim_hitlist_size(500, true, true), 1050);
+    assert_eq!(get_prelim_hitlist_size(501, true, true), 1052);
+    assert_eq!(
+        get_prelim_hitlist_size(1_073_741_798, true, true),
+        2_147_483_646
+    );
+    // NCBI's `2 * h + 50` overflows its `Int4` from 1073741799 on (NCBI BLAST+ 2.17.0: a size of
+    // 0 or less, then 2 to 48 from 2147483624); LOSAT keeps the mathematical size.
+    assert_eq!(
+        get_prelim_hitlist_size(1_073_741_799, true, true) as u64,
+        2_147_483_648
+    );
+    assert_eq!(
+        get_prelim_hitlist_size(i32::MAX as usize, true, true) as u64,
+        4_294_967_344
+    );
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1258-1292 testSBlastHitsParamsUngapped
-// NCBI's case is a blastp search with `gapped_calculation = FALSE` and the default hit list
+// NCBI's case is a blastp search with `gapped_calculation` false and the default hit list
 // size; the function is the same one (`GetPrelimHitlistSize`), which keeps the hit list size
 // for an ungapped search.
 #[test]
@@ -71,7 +100,7 @@ fn ungapped_prelim_hitlist_size_is_the_hit_list_size() {
     assert_eq!(get_prelim_hitlist_size(1, false, false), 1);
     assert_eq!(
         get_prelim_hitlist_size(i32::MAX as usize, false, false),
-        i32::MAX
+        i32::MAX as usize
     );
     // A gapped search adds 50 (testSBlastHitsParamsGapped).
     assert_eq!(get_prelim_hitlist_size(500, false, true), 550);
@@ -313,7 +342,11 @@ fn test_blastn_outfmt7_header_matches_ncbi_shape() {
 
     assert_eq!(
         String::from_utf8(output).unwrap(),
-        "# BLASTN 2.17.0+\n# Query: query full description\n# Database: User specified sequence set (Input: subject.fasta)\n# 0 hits found\n# BLAST processed 1 queries\n"
+        concat!(
+            "# BLASTN (LOSAT ",
+            env!("CARGO_PKG_VERSION"),
+            ")\n# Query: query full description\n# Database: User specified sequence set (Input: subject.fasta)\n# 0 hits found\n# BLAST processed 1 queries\n"
+        )
     );
     // A query of a batch that NCBI did not search has no count.
     let mut output = Vec::new();

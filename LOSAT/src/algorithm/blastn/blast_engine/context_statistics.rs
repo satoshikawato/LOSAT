@@ -27,6 +27,7 @@ use crate::algorithm::blastn::scoring::{
     karlin_error,
 };
 use crate::report::pairwise::BlastnIntro;
+use crate::wording::ENGINE_ERROR;
 use anyhow::Result;
 
 /// What `context_statistics` reads: the batch's contexts with the ungapped blocks of their
@@ -311,9 +312,9 @@ fn effective_search_spaces<const UNGAPPED: bool>(
         // refusal (`common::database::check_setup_count`, D1a-5 of line RG) at this batch, after
         // the reports of the batches before (NCBI's output before its crash in the tabular
         // formats), as the error below; a run whose batches have no valid context does not reach
-        // it and is reported as NCBI's. Else
-        // `stats::setup::setup_subject_length`: `(Uint4)(Int4)(total / num_seqs) == 0` (a
-        // negative `NSEQ` passes; one of 2^31 fails).
+        // it and is reported as NCBI's. Else `stats::setup::setup_subject_length`: the total
+        // divided by `num_seqs`, cast to `Int4` and then to `Uint4`, is 0 (a negative `NSEQ`
+        // passes; one of 2^31 fails).
         let setup_error = crate::algorithm::common::database::check_setup_count(
             total_length,
             num_seqs,
@@ -328,7 +329,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
                     anyhow::Error::from(crate::cli::NativeError {
                         exit: 3,
                         message: format!(
-                            "BLAST engine error: {}\n",
+                            "{ENGINE_ERROR} {}\n",
                             crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
                         )
                         .into(),

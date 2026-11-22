@@ -31,7 +31,7 @@ fn record(title: &str, letters: usize) -> FastaRecord {
 /// error) or at the end of the queries.
 fn scan(batches: &[Vec<FastaRecord>], stops: bool, holds_back: bool) -> Result<QueryScan> {
     let options = super::super::stage_c_tests::options();
-    scan_queries(&options, holds_back, true, &mut |deliver| {
+    scan_queries(&options, holds_back, true, None, &mut |deliver| {
         for batch in batches {
             deliver(batch)?;
         }
@@ -76,12 +76,96 @@ fn the_last_query_before_a_stop_is_checked_only_where_its_report_is_written() {
     // A run whose XML format fails for its matrix name writes no report and no title
     // (`xml_matrix_failure`, probe K4f of line RG): its batches are read, no title is checked.
     let options = super::super::stage_c_tests::options();
-    let found = scan_queries(&options, false, false, &mut |deliver| {
+    let found = scan_queries(&options, false, false, None, &mut |deliver| {
         deliver(&[bad(), plain()])?;
         deliver(&[bad()])
     })
     .unwrap();
     assert_eq!(found.stops_after, None);
+}
+
+// Under `-parse_deflines` the read adds each batch that NCBI does not fail to the scopes of the
+// queries, and LOSAT's refusal of two queries with one id stops it at the batch of the second
+// (line WQA D10 round 4, 2026-11-20): the batch before is written, the refused batch's titles
+// are not checked, and the search's add of that batch gives the refusal. A batch that NCBI fails
+// at its set-up adds nothing (review M3, 2026-11-20).
+#[test]
+fn a_refusal_of_two_queries_with_one_id_stops_the_read_at_its_batch() {
+    use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+    use crate::blastinput::query_batch::{QueryScopeSpan, QueryScopes};
+    let parsed = |names: &[&str], letters: usize| -> Vec<FastaRecord> {
+        let mut text = Vec::new();
+        for name in names {
+            text.extend_from_slice(format!(">{name}\n").as_bytes());
+            text.extend_from_slice(&record("x", letters).sequence);
+            text.push(b'\n');
+        }
+        let config = ReaderConfig::query("BLASTX", false, false).with_parse_deflines(true);
+        // The ids that the reader read (`FastaRecord::believed`), on BLASTX's records.
+        read_all(
+            &mut FastaInputSource::from_bytes(&text, config),
+            &mut |_| Ok(()),
+        )
+        .unwrap()
+        .into_iter()
+        .map(|read| FastaRecord {
+            title: read.title,
+            source: read.source,
+            ..record("x", letters)
+        })
+        .collect()
+    };
+    let options = super::super::stage_c_tests::options();
+    let first = parsed(&["q1", "q2"], 300);
+    // The second `q1`, with a title that the documents refuse.
+    let mut second = parsed(&["q1"], 300);
+    second[0].title = b", ,".to_vec();
+    let found = scan_queries(
+        &options,
+        false,
+        true,
+        Some(QueryScopes::new(QueryScopeSpan::Run, "BLASTX")),
+        &mut |deliver| {
+            deliver(&first)?;
+            deliver(&second)
+        },
+    )
+    .unwrap();
+    assert_eq!(found.stops_after, Some(2));
+    let mut scopes = found.query_scopes.expect("the scopes read ahead");
+    let ids = |batch: &[FastaRecord]| -> Vec<_> {
+        batch
+            .iter()
+            .map(|record| (record.believed().cloned(), record.sequence.len()))
+            .collect()
+    };
+    let add = |scopes: &mut QueryScopes, batch: &[FastaRecord], first: usize| {
+        let ids = ids(batch);
+        scopes.add_batch_ids(ids.iter().map(|(ids, len)| (ids.as_ref(), *len)), first)
+    };
+    add(&mut scopes, &first, 0).unwrap();
+    let refusal = add(&mut scopes, &second, 2).unwrap_err().to_string();
+    assert!(
+        refusal.contains("two query records have the Seq-id lcl|q1"),
+        "{refusal}"
+    );
+    // The second `q1` without letters: NCBI fails its batch, which adds nothing.
+    let empty = parsed(&["q1"], 0);
+    let found = scan_queries(
+        &options,
+        false,
+        true,
+        Some(QueryScopes::new(QueryScopeSpan::Run, "BLASTX")),
+        &mut |deliver| {
+            deliver(&first)?;
+            deliver(&empty)
+        },
+    )
+    .unwrap();
+    assert_eq!(found.stops_after, Some(2));
+    let mut scopes = found.query_scopes.expect("the scopes read ahead");
+    add(&mut scopes, &first, 0).unwrap();
+    add(&mut scopes, &empty, 2).unwrap();
 }
 
 /// The (title, letters) of every record that the search's stream of `file` reads.
@@ -141,6 +225,7 @@ fn the_read_before_the_search_gives_the_open_file_back_where_it_was() {
         id_scope: None,
         strand: crate::report::archive::bioseq::SeqLocStrand::Both,
         data_loaders: false,
+        batch_count: None,
     };
     let options = super::super::stage_c_tests::options();
     let open = |start: u64| {

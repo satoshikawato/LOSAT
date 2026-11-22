@@ -37,7 +37,8 @@ joined with `,`).
   BLASTN X-drop / `-no_greedy` searches (DI-6).
 
 Both suites add a TBLASTX search over several subjects, which the threaded reactor
-reduces in the wasm-threads-only path, the BLASTN `-window_masker_db` and `-window_masker_taxid`
+reduces in the wasm-threads-only path, the searches of a query whose reader fails in its second
+query batch (`reader_error`), the BLASTN `-window_masker_db` and `-window_masker_taxid`
 searches (`window_masker`), whose counts files the host registers by name (abi_v2.md §4 `file_begin`),
 the runs whose outcome and standard error are those of the argv's own `-outfmt` (`own_search`), the
 `-db` searches of the db_search rows that the wasm-threading check runs and of two filters (`database`),
@@ -334,6 +335,18 @@ def database() -> list[dict]:
                      "cases": ["db.d16.blastp.conffile_no_loaders"], "frozen": {}, "database": True})
     searches.append({"program": "blastp", "argv": argv, "cwd": str(REPO), "cases": ["db.d16.blastp.loaders_on"],
                      "frozen": {}, "expect": "failure", "database": True})
+    # A run of -db reads its query as every run reads it (line WQA's D10 with D12a, 2026-11-22): 30 copies of the
+    # db.d1 query (358 letters each) fill more than BLASTP's first batch of 10000 letters, and a reader's error on
+    # the record after them ends the run in its batch, after the database search of the batches before, as on the
+    # CLI (the native CLI's run of the argv is the reference). Written under LOSAT/target, as reader_error's inputs.
+    directory = Path("target/v_abi_reader_error")
+    (REPO / "LOSAT" / directory).mkdir(parents=True, exist_ok=True)
+    d1 = rows["db.d1.6"]
+    query = (REPO / "LOSAT" / d1["query"]).read_bytes() * 30 + b">bad\nMKVL%%%%\n"
+    (REPO / "LOSAT" / directory / "blastp_db.q.fa").write_bytes(query)
+    searches.append({"program": "blastp", "argv": ["blastp", "-db", d1["db"], "-query", str(directory / "blastp_db.q.fa")],
+                     "cwd": str(REPO / "LOSAT"), "cases": ["db.d1.reader_error"], "frozen": {}, "expect": "failure",
+                     "database": True})
     return searches
 
 
@@ -469,6 +482,80 @@ def window_masker() -> list[dict]:
     return list(searches.values())
 
 
+# The copies of each program's subject sequence in `reader_error`: the outfmt 0 report of the first
+# batch is then over 1 MiB (the CLI's file before its error: 1.26 to 1.46 MB, measured 2026-11-20).
+COPIES = {"blastn": 72, "blastp": 30, "tblastn": 16, "blastx": 72, "tblastx": 10}
+
+
+def reader_error() -> list[dict]:
+    """A query whose reader fails on a record of its second query batch (line WQA's sweep, D10,
+    2026-11-19): the CLI searches the first batch, writes its report and ends with the reader's error
+    (`CFastaReader: Near line N, ...`, exit 1) in the batch that reads the record; `register` takes
+    the records before it with the error (abi_v2.md §4), and the run ends with the same error. The
+    records fill more than each program's first batch (BLASTP 10000 letters, TBLASTN 20000, BLASTX
+    and TBLASTX 10002, BLASTN's `CBatchSizeMixer` batch for a subject of 5000 letters), as in
+    LOSAT/src/api/reader_end_tests.rs; the inputs are written under LOSAT/target, as
+    window_masker's. A BLASTP search with -parse_deflines: two records of one ID in the first batch
+    end the CLI there, before the record of the second batch whose Seq-id names a nucleotide
+    sequence (`register_inputs` reads it, and the run ends with the first batch's error, after the
+    CLI writes the outfmt 0 prolog, as NCBI writes it when it stops in its first batch: line WQA D10
+    round 4, 2026-11-20; before, LOSAT refused before the prolog). The subject holds copies of its
+    sequence, so that the outfmt 0 report of the first batch is over the adapter's chunk of 1 MiB
+    (`emit::CHUNK`): a run sends whole chunks as they fill and nothing smaller before it fails, so
+    the run's first chunk of outfmt 0, which the CLI's file starts with, shows the batch before the
+    error (`sends`; review L3, 2026-11-20)."""
+    import random
+
+    engine = REPO / "LOSAT"
+    directory = Path("target/v_abi_reader_error")
+    (engine / directory).mkdir(parents=True, exist_ok=True)
+    rng = random.Random(20261119)
+    codons = dict(zip("ACDEFGHIKLMNPQRSTVWY", ["GCT", "TGT", "GAT", "GAA", "TTT", "GGT", "CAT", "ATT", "AAA", "CTG",
+                                                "ATG", "AAT", "CCG", "CAG", "CGT", "AGC", "ACC", "GTG", "TGG", "TAT"]))
+
+    def letters(alphabet: str, length: int) -> str:
+        return "".join(rng.choice(alphabet) for _ in range(length))
+
+    def protein(length: int) -> str:
+        return letters("ACDEFGHIKLMNPQRSTVWY", length)
+
+    def coding(residues: str) -> str:
+        return "".join(codons[residue] for residue in residues)
+
+    def fasta(names: list[str], sequence: str) -> bytes:
+        rows = [sequence[i:i + 60] for i in range(0, len(sequence), 60)]
+        lines = [line for name in names for line in (f">{name}", *rows)]
+        return ("\n".join(lines) + "\n").encode()
+
+    bad = b">bad\nACGTAC%%%%\n"
+    nucleotide, residues, long_residues = letters("ACGT", 5000), protein(1100), protein(2100)
+    # The query records, the query and subject sequences, and the copies of the subject sequence.
+    inputs = {
+        "blastn": (40, nucleotide, nucleotide, COPIES["blastn"]),
+        "blastp": (12, residues, residues, COPIES["blastp"]),
+        "tblastn": (12, long_residues, coding(long_residues), COPIES["tblastn"]),
+        "blastx": (5, coding(residues), residues, COPIES["blastx"]),
+        "tblastx": (5, coding(residues), coding(residues), COPIES["tblastx"]),
+    }
+    searches = []
+    for program, (count, query, subject, copies) in inputs.items():
+        names = [f"q{i}" for i in range(1, count + 1)]
+        (engine / directory / f"{program}.q.fa").write_bytes(fasta(names, query) + bad)
+        subjects = b"".join(fasta([f"s{i}"], subject) for i in range(1, copies + 1))
+        (engine / directory / f"{program}.s.fa").write_bytes(subjects)
+        searches.append({"program": program, "argv": [program, "-query", str(directory / f"{program}.q.fa"),
+                                                      "-subject", str(directory / f"{program}.s.fa")],
+                         "cwd": str(engine), "cases": [f"reader_error.{program}"], "frozen": {}, "expect": "failure",
+                         "sends": [0]})
+    names = ["q1", "q1", *(f"q{i}" for i in range(3, 12)), "ref|NM_000001.1|"]
+    (engine / directory / "blastp_pd.q.fa").write_bytes(fasta(names, residues))
+    (engine / directory / "blastp_pd.s.fa").write_bytes(fasta(["s1"], residues[:300]))
+    searches.append({"program": "blastp", "argv": ["blastp", "-query", str(directory / "blastp_pd.q.fa"),
+                                                   "-subject", str(directory / "blastp_pd.s.fa"), "-parse_deflines"],
+                     "cwd": str(engine), "cases": ["reader_error.blastp_pd_order"], "frozen": {}, "expect": "failure"})
+    return searches
+
+
 def own_search() -> list[dict]:
     """Runs whose outcome and standard error are those of the argv's own `-outfmt`, as the CLI's
     run of that argv (line WQA's sweep, D3 reviews, 2026-11-19).
@@ -476,14 +563,15 @@ def own_search() -> list[dict]:
     Runs of two searches (`-num_descriptions`, `-num_alignments`; abi_v2.md §7) that fail:
     `-num_alignments 0` with `-outfmt 6` in every program (NCBI's `No hits are being saved` after
     the formatting handler's warning, where the CLI's outfmt 0 completes), also with `-evalue 0`,
-    whose error the CLI gives after the hit list's (`validate` too); BLASTN's `-num_descriptions
-    2147483647` without `-outfmt` (LOSAT's error for format 0, whose N + 50 overflows, where the
-    CLI's outfmt 6 and 7 complete); and two searches that both fail, with and without `-outfmt 6`,
-    whose error and stream 3 are those of the argv's own `-outfmt` (BLASTN's overflow with
-    `-num_alignments 0`, BLASTX's `-num_alignments 0 -evalue 0`). Runs of two searches that
-    complete where the other search fails, whose formats are empty and whose warnings and error
-    stream 3 adds after the argv's (review r2 L1): `-num_alignments 0` without `-outfmt` in every
-    program, BLASTN's overflow with `-outfmt 6`.
+    whose error the CLI gives after the hit list's (`validate` too); and two searches that both
+    fail, with and without `-outfmt 6`, whose error and stream 3 are those of the argv's own
+    `-outfmt` (BLASTX's `-num_alignments 0 -evalue 0`). Runs of two searches that complete where
+    the other search fails, whose formats are empty and whose warnings and error stream 3 adds
+    after the argv's (review r2 L1): `-num_alignments 0` without `-outfmt` in every program, also
+    with BLASTN's `-num_descriptions 2147483647`, whose format 0 keeps every hit (LOSAT computes the
+    preliminary hit list size without NCBI's 32-bit overflow, PD-LOSAT-NCBI-DEFECTS); BLASTN's
+    `-num_descriptions 2147483647` with `-outfmt 6` fails as the argv's `-num_alignments 0`, and
+    without `-num_alignments 0` completes with every format, with and without `-outfmt 6`.
 
     The formatting handler's warnings of the formats that the argv does not ask for (review r2
     M1): runs that fail with `-line_length`, `-sorthits`, `-sorthsps` or equal `-num_descriptions`
@@ -545,11 +633,11 @@ def own_search() -> list[dict]:
         add(f"own_search.{program}.na0.outfmt6", program, ["-num_alignments", "0"], "6")
         add(f"own_search.{program}.na0", program, ["-num_alignments", "0"], failure=False)
     overflow = ["-num_descriptions", "2147483647"]
-    add("own_search.blastn.nd_overflow", "blastn", overflow, prolog=False)
+    add("own_search.blastn.nd_overflow", "blastn", overflow, failure=False)
     add("own_search.blastn.nd_overflow.outfmt6", "blastn", overflow, "6", failure=False)
+    add("own_search.blastn.nd_overflow.na0.outfmt0", "blastn", [*overflow, "-num_alignments", "0"], failure=False)
+    add("own_search.blastn.nd_overflow.na0.outfmt6", "blastn", [*overflow, "-num_alignments", "0"], "6")
     for outfmt, name in ((None, "outfmt0"), ("6", "outfmt6")):
-        add(f"own_search.blastn.nd_overflow.na0.{name}", "blastn", [*overflow, "-num_alignments", "0"], outfmt,
-            prolog=False)
         for program in ("blastx", "blastp", "tblastn", "tblastx"):
             add(f"own_search.{program}.na0.evalue0.{name}", program, ["-num_alignments", "0", "-evalue", "0"],
                 outfmt, prolog=False)
@@ -768,6 +856,7 @@ def main() -> int:
     if not args.group:
         searches.append(direct_tblastx())
         searches += window_masker()
+        searches += reader_error()
         searches += own_search()
         searches += database()
         searches += scan_d13()

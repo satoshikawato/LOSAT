@@ -65,6 +65,12 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   `CWriteDB::CreateUserColumn` in 2007): six proteins and the user column `comedy`, whose data
   file is the big-endian `.pab` alone; no masks. Its `.pnd .pni .psd .psi` and `.pog` files are
   left out.
+- `db/seqn.{nin,nsq,nhr,nni,nnd}` and `db/seqp.{pin,psq,phr,pni,pnd}`: copies of NCBI's
+  `c++/src/algo/blast/unit_tests/seqdb_reader/data/seqn` and `seqp` (598d8ae6; version 4, GIs with
+  DDBJ, GenBank and other accessions), whose `GetBioseq` and `GetHdr` texts NCBI's cases GetBioseqN,
+  GetBioseqP, GetHdrN and GetHdrP expect (`LOSAT/tests/blastdbcmd_retrieve.rs`, `-outfmt %b` and
+  `%d`). Their string-id ISAM files (`.nsd .nsi .psd .psi`), the `.nhd .nhi .phd .phi` and `.nog .pog`
+  files are left out: the cases look the sequences up by GI.
 - `expected/mask_*.algorithms.txt`: the table that NCBI prints for the algorithms of the
   database (`GetAvailableMaskAlgorithmDescriptions`, with its leading empty line).
 - `expected/mask_*.masks.tsv`: rows `algorithm<TAB>oid<TAB>ranges` from
@@ -101,8 +107,9 @@ each of them:
   the header of the file explains them).
 - `make_mask_parse_fixtures.py` rebuilds these (`--ncbi-bin DIR --work DIR`); the tools and the
   inputs are deterministic, so a rebuild changes nothing.
-- `stl_sort/cases.txt`: the permutations that libstdc++'s `std::sort` gives ranges under NCBI's
-  `CRange_Less` / `CRange_ReverseLess` (`stl_sort/README.md`), for the port of `CSeq_loc::Add`.
+- `stl_sort/cases.txt`: orders in which C++ `std::sort` leaves ranges under NCBI's
+  `CRange_Less` / `CRange_ReverseLess` (`stl_sort/README.md`), for the test of the sort in the port
+  of `CSeq_loc::Add`.
 
 `make_fixtures.py` rebuilds everything but `expected/search_path/`. NCBI BLAST+ is the comparison oracle only; the tests
 read the committed files and run no NCBI program. A rebuild changes the dates stored in the

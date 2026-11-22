@@ -238,6 +238,10 @@ fn makedb_takes_makeblastdb_s_option_names() {
     assert_eq!(defaults.max_file_sz, "3GB");
     assert_eq!(defaults.blastdb_version, 5);
     assert_eq!(defaults.logfile, None);
+    assert!(!defaults.randomize);
+
+    // The hidden flag `-randomize` is read (its check against the input type is the build's).
+    assert!(args(makedb(&["-dbtype", "nucl", "-randomize"]).unwrap()).randomize);
 
     // `-dbtype` is mandatory and takes makeblastdb's two values.
     assert!(makedb(&["-in", "x.faa"]).is_err());
@@ -343,7 +347,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
 
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
     // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in ["-gi_mask", "-gi_mask_name", "-randomize"] {
+    for option in ["-gi_mask", "-gi_mask_name"] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(
@@ -2323,7 +2327,7 @@ fn short_help_h_is_display_help_for_every_program() {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (cited at
 // `cli::try_parse_from`)
 // NCBI's reader stops at its help flags, the words before them read; `-help-full` is `-help` with
-// the hidden arguments, of which LOSAT's programs run none (NCBI BLAST+ 2.17.0: the same bytes in
+// the hidden arguments, which LOSAT's help does not list (NCBI BLAST+ 2.17.0: the same bytes in
 // every place but makeblastdb's hidden `-randomize`; line RG item E2).
 #[test]
 fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {

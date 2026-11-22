@@ -7269,7 +7269,7 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    args.megablast_index_loaded = megablast_index.check(&args)?;
+    args.megablast_index_loaded = megablast_index.check()?;
     if args.megablast_index_loaded.is_some() {
         mb_index::note_index_use(args.archive.as_ref(), args.strategy.as_ref())?;
     }
@@ -10777,6 +10777,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     two_hits: crate::algorithm::blastn::coordination::determine_window_size(args)
                         as u64,
                 },
+                db_hard_mask.map(|algo_id| (database, algo_id)),
             ))
         }
         _ => None,

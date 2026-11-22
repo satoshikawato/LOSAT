@@ -1,4 +1,4 @@
-//! `losat blastn -use_index true` against NCBI BLAST+ 2.17.0 (line RG items D5b-1 and D5b-2):
+//! `losat blastn -use_index true` against NCBI BLAST+ 2.17.0 (line RG items D5b-1 to D5b-5):
 //! each row of `tests/blastn_mb_index/cases.tsv` runs in its own copy of
 //! `tests/blastn_mb_index/in`, after its setup steps (LOSAT's `makembindex`, whose index files are
 //! NCBI's bytes, LOSAT's `makeblastdb` of FASTA files made from the genomes of `tests/fasta`
@@ -8,8 +8,8 @@
 //! not run here. A row's first `NAME=value` words are variables of its run
 //! (`masker_fixtures::take_variables`).
 //!
-//! A row with a refusal is one where NCBI searches with an index in a way that LOSAT does not
-//! (`-db_hard_mask`), or reads the index in a way that leaves the search undefined or fails:
+//! A row with a refusal is one where NCBI reads the index in a way that leaves the search
+//! undefined or fails:
 //! LOSAT refuses it with that text, and NCBI's output is kept for the lines that take these
 //! searches. Where NCBI exits with its error, crashes or never ends in a later query batch, LOSAT
 //! writes what NCBI wrote before (its output of the batches before) and refuses there; where
@@ -19,7 +19,17 @@
 //! A row whose fourth field is `same as NAME` (the setup and the words of row NAME, with another
 //! `-num_threads`) is compared with row NAME's NCBI files: NCBI's `-num_threads 1` output, which
 //! LOSAT gives at every thread count (Owner 2026-10-13), for a run whose NCBI result at more
-//! threads depends on its threads.
+//! threads depends on its threads. A row whose fourth field is `plain NAME` (row NAME's search
+//! with `-use_index true` and `-db_hard_mask`, its setup with the index made, at any
+//! `-num_threads`) is compared with row NAME's NCBI files: NCBI's search without the index, whose
+//! output LOSAT's one-hit search with the index gives there, the masked letters matching nothing
+//! and the seeds in their hard ranges (the Owner's answer C to Q-HARDIDX, approved exception 24 of
+//! PD-LOSAT-NCBI-DEFECTS). A row whose fourth field is `expect NAME` (a search with the index and
+//! `-db_hard_mask`) is compared with `exception24/NAME.{out,err,rc}`: LOSAT's output where no NCBI
+//! search gives it, the two-hit search (`-window_size`), whose index and scan pair other hits; that
+//! file is NCBI's search without the index with the rows that
+//! `the_two_hit_index_search_adds_the_index_s_pairs` names, and its rows are the same at every
+//! `-num_threads` and on the database whose masked letters are others (hmr).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -44,8 +54,14 @@ struct Case {
     /// LOSAT's refusal (`@CWD@` for the row's directory), for a row that NCBI searches with
     /// the index.
     refusal: Option<String>,
-    /// The row whose NCBI files this row is compared with (itself, or that of `same as NAME`).
+    /// The row whose NCBI files this row is compared with (itself, or that of `same as NAME` or
+    /// `plain NAME`), or the name of its `exception24` files (`expect NAME`).
     ncbi: String,
+    /// A `plain NAME` row.
+    plain: bool,
+    /// The directory of the files that the row is compared with: `ncbi`, or `exception24` for
+    /// an `expect NAME` row.
+    files: &'static str,
 }
 
 /// The rows of the table.
@@ -64,6 +80,8 @@ fn cases() -> Vec<Case> {
         let mut words = shell_words(fields[2]).0;
         let variables = take_variables(&mut words);
         let same_as = fields.get(3).and_then(|text| text.strip_prefix("same as "));
+        let plain = fields.get(3).and_then(|text| text.strip_prefix("plain "));
+        let expect = fields.get(3).and_then(|text| text.strip_prefix("expect "));
         cases.push(Case {
             name: fields[0].to_string(),
             setup,
@@ -71,17 +89,38 @@ fn cases() -> Vec<Case> {
             variables,
             refusal: fields
                 .get(3)
-                .filter(|_| same_as.is_none())
+                .filter(|_| same_as.is_none() && plain.is_none() && expect.is_none())
                 .map(|text| text.to_string()),
-            ncbi: same_as.unwrap_or(fields[0]).to_string(),
+            ncbi: same_as
+                .or(plain)
+                .or(expect)
+                .unwrap_or(fields[0])
+                .to_string(),
+            plain: plain.is_some(),
+            files: if expect.is_some() {
+                "exception24"
+            } else {
+                "ncbi"
+            },
         });
     }
-    // A `same as` row runs its row's search with another thread count.
-    let without_threads = |words: &[String]| {
+    for case in cases.iter().filter(|case| case.files == "exception24") {
+        assert!(
+            case.words
+                .windows(2)
+                .any(|pair| pair == ["-use_index", "true"])
+                && case.words.iter().any(|word| word == "-db_hard_mask"),
+            "{}: an expect row is a search with the index and -db_hard_mask",
+            case.name
+        );
+    }
+    // A `same as` row runs its row's search with another thread count; a `plain` row, with the
+    // index (made in its setup) and the hard mask, at any thread count.
+    let without_threads = |words: &[String], index: bool| {
         let mut kept = Vec::new();
         let mut words = words.iter();
         while let Some(word) = words.next() {
-            if word == "-num_threads" {
+            if word == "-num_threads" || (index && word == "-use_index") {
                 words.next();
             } else {
                 kept.push(word.clone());
@@ -89,17 +128,38 @@ fn cases() -> Vec<Case> {
         }
         kept
     };
-    for case in cases.iter().filter(|case| case.ncbi != case.name) {
+    let without_index = |setup: &[Vec<String>]| -> Vec<Vec<String>> {
+        setup
+            .iter()
+            .filter(|step| step[0] != "makembindex")
+            .cloned()
+            .collect()
+    };
+    for case in cases
+        .iter()
+        .filter(|case| case.ncbi != case.name && case.files == "ncbi")
+    {
         let row = cases
             .iter()
             .find(|row| row.name == case.ncbi)
             .unwrap_or_else(|| panic!("{}: no row {}", case.name, case.ncbi));
-        assert!(
+        let same = if case.plain {
             row.ncbi == row.name
-                && row.setup == case.setup
-                && row.variables == case.variables
-                && without_threads(&row.words) == without_threads(&case.words),
-            "{}: not row {}'s search with another -num_threads",
+                && without_index(&row.setup) == without_index(&case.setup)
+                && case
+                    .words
+                    .windows(2)
+                    .any(|pair| pair == ["-use_index", "true"])
+                && case.words.iter().any(|word| word == "-db_hard_mask")
+                && !row.words.iter().any(|word| word == "-use_index")
+        } else {
+            row.ncbi == row.name && row.setup == case.setup
+        };
+        assert!(
+            same && row.variables == case.variables
+                && without_threads(&row.words, case.plain)
+                    == without_threads(&case.words, case.plain),
+            "{}: not row {}'s search with another -num_threads (or with the index)",
             case.name,
             row.name
         );
@@ -271,7 +331,7 @@ fn rows_that_differ() -> Vec<String> {
                 let ncbi = |extension: &str| {
                     fs::read(
                         fixtures()
-                            .join("ncbi")
+                            .join(case.files)
                             .join(format!("{}.{extension}", case.ncbi)),
                     )
                     .unwrap()
@@ -300,7 +360,7 @@ fn rows_that_differ() -> Vec<String> {
                 let file = |extension: &str| {
                     fs::read(
                         fixtures()
-                            .join("ncbi")
+                            .join(case.files)
                             .join(format!("{}.{extension}", case.ncbi)),
                     )
                     .unwrap()
@@ -352,6 +412,43 @@ fn rows_that_differ() -> Vec<String> {
         }
     }
     differ
+}
+
+/// The rows of `exception24/hm_i_win.out` (LOSAT's two-hit search with the index and
+/// `-db_hard_mask 11`, approved exception 24) are NCBI's search without the index
+/// (`ncbi/hm_n_win.out`) and three rows that the index's two-hit search finds and the scan's does
+/// not: NCBI's own search with the index and without the mask finds the row of qhm7 in hm4 too
+/// (`ncbi/hm_iu_win.out`; hm4's only mask is 700 letters away); the rows of qhm2 in hm0 and of
+/// qhm8 in hm5 are stretches that a mask ends (hm0 999..1060, hm5 2304..2562 with 2238..2304), of
+/// exact runs a mismatch apart that the index's search pairs within the window (it pairs a hit
+/// with one that ends at most the window before its start; NCBI's scan, before its end).
+#[test]
+fn the_two_hit_index_search_adds_the_index_s_pairs() {
+    let read = |path: &str| fs::read_to_string(fixtures().join(path)).unwrap();
+    let added = [
+        "qhm2\thm0\t98.990\t99\t1\t0\t1152\t1250\t999\t901\t4.13e-47\t178",
+        "qhm7\thm4\t97.100\t1000\t29\t0\t1\t1000\t301\t1300\t0.0\t1687",
+        "qhm8\thm5\t97.959\t196\t4\t0\t2105\t2300\t2305\t2500\t9.21e-96\t340",
+    ];
+    let expected = read("exception24/hm_i_win.out");
+    let without: Vec<&str> = expected
+        .lines()
+        .filter(|line| !added.contains(line))
+        .collect();
+    assert_eq!(
+        without,
+        read("ncbi/hm_n_win.out").lines().collect::<Vec<_>>()
+    );
+    assert_eq!(expected.lines().count(), without.len() + added.len());
+    assert!(read("ncbi/hm_iu_win.out")
+        .lines()
+        .any(|line| line == added[1]));
+    for extension in ["err", "rc"] {
+        assert_eq!(
+            read(&format!("exception24/hm_i_win.{extension}")),
+            read(&format!("ncbi/hm_n_win.{extension}"))
+        );
+    }
 }
 
 #[test]

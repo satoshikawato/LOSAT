@@ -1,4 +1,4 @@
-# name<TAB>setup<TAB>arguments[<TAB>refusal] (line RG items D5b-1 to D5b-3). Each row runs in a copy of in/: the setup steps
+# name<TAB>setup<TAB>arguments[<TAB>refusal] (line RG items D5b-1 to D5b-5). Each row runs in a copy of in/: the setup steps
 # (" ; "-separated: makembindex ARGS and makeblastdb ARGS with LOSAT's programs, put FILE OFFSET VALUE, cut FILE SIZE,
 # cp FROM TO, rm FILE, cat OUT FROM... (the bytes of the FROM files), join OUT TITLE FROM... (one FASTA record ">TITLE" with
 # the sequence lines of the FROM files); @TESTS@ in a step is LOSAT/tests), then blastn with the arguments (their first
@@ -8,7 +8,7 @@
 # the rows down to "D5b-3 rows" by ad-RG-D5-5's subagent with freeze_d5b2.py there (which re-freezes every row; in/'s D5b-2 files:
 # its --make-in-d5b2, gen2.py and gen_d5b2.py), the D5b-3 rows by ad-RG-D5-9 with freeze_d5b2.py --only, 2026-11-22 (in/qst1.fa
 # and qst2.fa: two random queries each from that session's probe). Rows on databases made in the setup print no database date (outfmt 6).
-# A row with a refusal is one where NCBI searches with an index in a way LOSAT does not (-db_hard_mask), or reads one in an
+# A row with a refusal is one where NCBI reads an index in an
 # undefined way (or crashes): LOSAT refuses with "-use_index true with <refusal> is not supported by LOSAT's BLASTN", after the
 # output of the query batches before; NCBI's output stays for the lines that take them. A fourth field "same as NAME" compares
 # the row with row NAME's files: NCBI's -num_threads 1 output, which LOSAT gives at every thread count (Owner 2026-10-13), where
@@ -69,7 +69,7 @@ used_old_empty	makembindex -input db.fa -iformat fasta -old_style_index true -ou
 undefined_idx38	makembindex -input v1 -nmer 8 ; cut v1.00.idx 38	-query q.fa -outfmt 6 -use_index true -db al	a MegaBLAST index volume whose header NCBI does not read whole (@CWD@/v1.00.idx)
 old_endless	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx,,0,-1	an -index_name range of volumes that NCBI's loader does not finish ('oidx,,0,-1')
 # D5b-2 rows (2026-11-21): the indexed search (one-hit seeds), compared with NCBI; then the combinations D5b-2 refused (since
-# D5b-3 compared, except -db_hard_mask and the m_mixed2 crash).
+# D5b-3 compared, except -db_hard_mask, D5b-5's, and the m_mixed2 crash).
 p1_0	makembindex -input v1 -nmer 8	-query q.fa -outfmt 0 -use_index true -db v1
 p1_arch	makembindex -input v1 -nmer 8	-query q.fa -outfmt 11 -use_index true -db v1
 b2_16	makembindex -input b2 -nmer 8	-query q2.fa -outfmt 6 -use_index true -db b2 -word_size 16
@@ -119,7 +119,6 @@ z_28_t4	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TEST
 z_20_t1	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out z -title z ; makembindex -input z -nmer 8	-query qz.fa -outfmt 6 -use_index true -db z -word_size 20
 z_20_t4	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out z -title z ; makembindex -input z -nmer 8	-query qz.fa -outfmt 6 -use_index true -db z -word_size 20 -num_threads 4
 win_i	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -window_size 40
-sm_i_hard	makembindex -input sm -nmer 8	-query qsm.fa -outfmt 6 -use_index true -db sm -dust no -db_hard_mask 11	a MegaBLAST database index (@CWD@/sm.00.idx) and -db_hard_mask
 firstvol_list	makembindex -input v1 -nmer 8	-query q.fa -outfmt 6 -use_index true -db 'v1 mv'
 mixed_list	makembindex -input mv -nmer 8	-query q.fa -outfmt 6 -use_index true -db 'v1 mv'
 m_mixed1	cat z.fa @TESTS@/fasta/AP027078.fasta @TESTS@/fasta/AP027131.fasta @TESTS@/fasta/AP027133.fasta @TESTS@/fasta/AP027152.fasta @TESTS@/fasta/AP027155.fasta @TESTS@/fasta/AP027202.fasta @TESTS@/fasta/AvCLPV.fasta @TESTS@/fasta/LC738869.fasta @TESTS@/fasta/LC738875.fasta @TESTS@/fasta/LC741431.fasta ; makeblastdb -in z.fa -dbtype nucl -out mz -title mz -max_file_sz 400KB ; makembindex -input mz -nmer 8 -volsize 1 ; rm mz.01.shd	-query qz.fa -outfmt 6 -use_index true -db mz
@@ -154,3 +153,29 @@ c_win_e28_48	makembindex -input b2 -legacy false -nmer 11 -stride 3	-query q2.fa
 c_win_e28_49	makembindex -input b2 -legacy false -nmer 11 -stride 3	-query q2.fa -outfmt 6 -use_index true -db b2 -window_size 49
 c_win_e16	makembindex -input b2 -legacy false -nmer 11 -stride 3	-query q2.fa -outfmt 6 -use_index true -db b2 -word_size 16 -window_size 40
 c_win_old	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx -window_size 40
+# D5b-5 rows (2026-11-23, ad-RG-D5-10): -use_index true with -db_hard_mask, the masked letters matching nothing and the seeds in
+# their hard ranges (the Owner's answer C to Q-HARDIDX, approved exception 24 of PD-LOSAT-NCBI-DEFECTS). A fourth field "plain
+# NAME" compares the row with row NAME's files: NCBI's search without the index (frozen with freeze_d5b2.py --only), which LOSAT's
+# one-hit search with the index gives on these inputs. A fourth field "expect NAME" compares the row with exception24/NAME.*:
+# LOSAT's two-hit search, NCBI's search without the index with the rows of the index's pairs (blastn_mb_index_fixtures.rs,
+# the_two_hit_index_search_adds_the_index_s_pairs), the same at 4 threads and on hmr. in/hm.fa, in/qhm.fa and the database hm
+# (dustmasker's masks, algorithm 11): gen_d5b5.py; in/hmr.fa and the database hmr (hm's letters with every masked one replaced
+# at random, hm's masks): gen_d5b5_r.py; both by NCBI's programs.
+sm_n_hard	-	-query qsm.fa -outfmt 6 -db sm -dust no -db_hard_mask 11
+sm_i_hard	makembindex -input sm -nmer 8	-query qsm.fa -outfmt 6 -use_index true -db sm -dust no -db_hard_mask 11	plain sm_n_hard
+hm_n	-	-query qhm.fa -outfmt 6 -db hm -db_hard_mask 11
+hm_i	makembindex -input hm -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -db_hard_mask 11	plain hm_n
+hm_i_t4	makembindex -input hm -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -db_hard_mask 11 -num_threads 4	plain hm_n
+hm_i_n11	makembindex -input hm -nmer 11	-query qhm.fa -outfmt 6 -use_index true -db hm -db_hard_mask 11	plain hm_n
+hm_i_e	makembindex -input hm -legacy false -nmer 9 -stride 3	-query qhm.fa -outfmt 6 -use_index true -db hm -db_hard_mask 11	plain hm_n
+hm_n_ws16	-	-query qhm.fa -outfmt 6 -db hm -db_hard_mask 11 -word_size 16
+hm_i_ws16	makembindex -input hm -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -db_hard_mask 11 -word_size 16	plain hm_n_ws16
+hm_n_win	-	-query qhm.fa -outfmt 6 -db hm -db_hard_mask 11 -window_size 20
+hm_iu_win	makembindex -input hm -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -window_size 20
+hm_i_win	makembindex -input hm -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -db_hard_mask 11 -window_size 20	expect hm_i_win
+hm_i_win_t4	makembindex -input hm -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -db_hard_mask 11 -window_size 20 -num_threads 4	expect hm_i_win
+hm_i_win_r	makembindex -input hmr -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hmr -db_hard_mask 11 -window_size 20	expect hm_i_win
+hm_n_r	-	-query qhm.fa -outfmt 6 -db hmr -db_hard_mask 11
+hm_i_r	makembindex -input hmr -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hmr -db_hard_mask 11	plain hm_n_r
+hm_n_nodust	-	-query qhm.fa -outfmt 6 -db hm -db_hard_mask 11 -dust no
+hm_i_nodust	makembindex -input hm -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -db_hard_mask 11 -dust no	plain hm_n_nodust

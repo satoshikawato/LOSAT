@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.76
+- Version: 1.77
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -369,7 +369,13 @@
   -comp_based_stats 0 -use_sw_tback`, on which NCBI crashes at every query batch it searches;
   otherwise Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after
   1.73, line RG item X4b-1, after 1.74, line RG item D5b-3, and after 1.75, line NP item M5, at
-  the merges of dev, and after exception 22)
+  the merges of dev, and after exception 22);
+  1.77 2026-11-23 (approved exception 24, the Owner's answer of 2026-11-22 「Q5=C」 to line RG's
+  question Q-HARDIDX: `losat blastn -use_index true` with `-db_hard_mask` searches the MegaBLAST
+  index with the masked letters matching nothing and each seed in the hard range that holds it,
+  where NCBI BLAST+ 2.17.0 takes for each hard chunk the index's list of the chunk with the same
+  number; the refusal that LOSAT made from line RG item D5b-2 until this version removed; line
+  RG item D5b-5)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2912,6 +2918,64 @@ test, so most searches with hits in this mode were refused). Numbered after exce
     inputs with `-best_hit_overhang` against `-db bh3p`, on which NCBI crashes as is. Unit tests
     `a_context_past_the_batch_tests_an_empty_heap` (`LOSAT/src/algorithm/blastx/results_boundary_tests.rs`) and
     `a_heap_test_past_the_batch_reads_an_empty_heap` (`LOSAT/tests/blastx_sw_tback.rs`).
+
+## Approved exception 24 (BLASTN `-use_index true` with `-db_hard_mask`, the seeds in their hard ranges, version 1.77)
+
+Version 1.77, line RG item D5b-5. The Owner decided on 2026-11-22 22:3x JST: the answer 「Q5=C」
+(the whole answer 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A Q10=A Q11=A Q12=A Q13=OK」) to
+question Q5 of that day's batch, line RG's question Q-HARDIDX, whose option C read 「種を正しい範囲に置く
+（NCBI が出さない正しい結果、どの thread 数でも同じ）」 (place the seeds in their right ranges: a correct
+result that NCBI does not give, the same at every thread count). Not taken: option A, NCBI's
+one-thread result at every thread count through a pass over the sequences in OID order that
+decides which list each range takes (the line's recommendation before the answer), and option B,
+the refusal (`-use_index true with a MegaBLAST database index (...) and -db_hard_mask`) that LOSAT
+made from item D5b-2 (PR #1472) until this version. Owner-delegated (standing instruction
+2026-09-29, restated 2026-10-07; P2, P3): what the right range of a seed means, below (in the
+index's search a masked letter matches no query letter, and two hits of a diagonal with a masked
+letter between them do not pair). Not taken: NCBI's lists cut at the masked letters after the
+search (the item's first version), under which a masked letter could still qualify a two-hit
+seed (6 of 400 random databases). Also delegated: the masks of sequences that an OID list leaves
+out of the search are not read.
+
+24. **BLASTN `-use_index true` with `-db_hard_mask`.** NCBI's indexed word finder
+    (`MB_IndexedWordFinder`, `na_ungapped.c:1697-1782`) takes the seeds of `GetResults` of the
+    sequence and `subject->chunk` (`blast_dbindex.cpp:869-875`): the list of the index's chunk
+    whose number is the number of the chunk being searched. The index numbers each sequence's
+    chunks over its whole range (5,000,000 letters that overlap by 100), while with
+    `-db_hard_mask` each hard range starts chunks of its own (`s_GetNextSubjectChunk`,
+    `blast_engine.c:221-262`). So NCBI extends the seeds of a masked sequence at the offsets of
+    another range's chunk, and a sequence with more hard ranges than index chunks takes the lists
+    of the sequences after it, which the word finder moves out, so that what each sequence finds
+    depends on which thread reaches it first: in the survey's probe g_f (dustmasker's masks,
+    `-db_hard_mask 11`) NCBI wrote 5 rows at `-num_threads 1`, 7 or 8 rows from run to run at 4
+    threads, where its search without the index wrote 12. LOSAT searches the index with each letter of the
+    `-db_hard_mask` masks matching no query letter (`dbindex::search`): a root whose Nmer holds a
+    masked letter is no root, the extensions (`ExtendLeft`, `ExtendRight`) stop before a masked
+    letter, and the two-hit search takes no earlier hit of a diagonal with a masked letter between
+    it and the seed. (NCBI's search reads the index's letters, masked or not, and its two-hit
+    search can qualify a seed by masked letters.) So each seed lies in one unmasked stretch, and
+    no masked letter decides one. Each seed then goes to the hard range that holds its left end,
+    into the last chunk of the range that starts at or before it (the index's own rule where
+    chunks overlap), in the order of the lists and of each list (`mb_index_seeds::HardSeeds`).
+    The refusals of the search without the masks still apply: a chunk that is a later sequence's
+    in the index, and a seed at or past its chunk's last letter. The word finder, the ungapped
+    and gapped stages and the traceback are those of every hard chunk. A local id of the index
+    (its group of sequences) without masked letters is searched as without `-db_hard_mask`. A
+    sequence without masked letters keeps NCBI's seeds, unless one of its exact runs reaches past
+    its end into masked letters of the next sequence of its local id (NCBI's index search reads on
+    there). The result depends neither on `-num_threads` nor on the masked letters. The masks of a
+    sequence that an OID list leaves out of the search are not read: its letters count as
+    unmasked, and only a run past the end of the sequence before it reads them. The refusals of
+    `HardMaskShape` and approved exception 13 (a mask that runs to the end) apply as they do
+    without the index. Evidence: the rows `plain NAME` of `LOSAT/tests/blastn_mb_index/cases.tsv` (`hm_i*`,
+    `sm_i_hard`; database hm of `gen_d5b5.py`: masks inside, at the start and at the end of
+    sequences and hard ranges of 1 and 2 letters; nmer 8, 9 with stride 3, and 11; word sizes 16
+    and 28; `-window_size 20`; `-dust no`; 1 and 4 threads), whose output is NCBI's search without
+    the index with the same `-db_hard_mask` (hm: 32 rows, where NCBI's search with the index
+    writes 5); random comparison `remaining-gaps-20261112/D/d5/probe/d5b5/rand_d5b5.py`
+    (RANDOM_EVIDENCE). Unit tests `a_masked_letter_ends_a_run_and_pairs_no_hits` and
+    `the_masks_are_of_their_own_sequence` (`LOSAT/src/dbindex/search_tests.rs`), and the placement
+    tests of `LOSAT/src/algorithm/blastn/blast_engine/mb_index_seeds_tests.rs`.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

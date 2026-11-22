@@ -56,10 +56,10 @@ pub(super) struct Record {
 
 /// How a run stops early.
 pub(super) enum Failure {
-    /// An NCBI exception that leaves `Run`: `NCBI_REPORT_EXCEPTION_X(16, "Application's
-    /// execution failed", e)`, exit status 3.
+    /// An NCBI exception that leaves `Run`: reported by `NCBI_REPORT_EXCEPTION_X` (subcode 16,
+    /// title "Application's execution failed"), exit status 3.
     Ncbi(NcbiException),
-    /// A `std::exception` that leaves `Run`: `ERR_POST_X(7, ...)`, exit status 3.
+    /// A `std::exception` that leaves `Run`: posted by `ERR_POST_X` (subcode 7), exit status 3.
     Std(String),
     /// A case LOSAT does not reproduce.
     Refused(String),
@@ -180,7 +180,7 @@ pub(super) fn reader<'a, R: Read + 'a>(
     }
 }
 
-/// `CMaskFastaReader( input, true, parse_seqids )`: a failed first read is the stream's
+/// `CMaskFastaReader` of `input`, nucleotide, with `parse_seqids`: a failed first read is the stream's
 /// `std::ios_base::failure`.
 pub(super) fn fasta_source<'a, R: Read + 'a>(
     input: R,
@@ -193,7 +193,7 @@ pub(super) fn fasta_source<'a, R: Read + 'a>(
     }))
 }
 
-/// `CMaskBDBReader( name )` of the nucleotide database `name` on the search path of `registry`
+/// `CMaskBDBReader` of the nucleotide database `name` on the search path of `registry`
 /// (`Options::blastdb_registry`); `title_printed` as `MaskBdbReader::open`'s.
 pub(super) fn database_source(
     name: &str,
@@ -277,7 +277,7 @@ pub(super) fn post_seq_id_warning(diag: &mut Diag, warning: &SeqIdWarning) {
     diag.post_bytes(&line)
 }
 
-/// `CMaskBDBReader(name)` of a nucleotide database (`seqmasks_io::bdb_reader`).
+/// `CMaskBDBReader` of `name`, a nucleotide database (`seqmasks_io::bdb_reader`).
 struct DatabaseSource {
     reader: MaskBdbReader,
 }
@@ -406,7 +406,7 @@ fn masker(options: &Options<'_>, diag: &mut Diag) -> Result<SeqMasker, Failure> 
     SeqMasker::new(Arc::new(counts), &options.params).map_err(|error| winmask_failure(&file, error))
 }
 
-/// `CSeqMaskerIstatFactory::create( name, ... )` with the thresholds `params` and the
+/// `CSeqMaskerIstatFactory::create` of the counts file `name` with the thresholds `params` and the
 /// percentages `pct`, its warnings posted as NCBI posts them: the factory's at once, the
 /// readers' after. `file` names the file in LOSAT's refusals (`-ustat <name>`).
 pub(super) fn open_counts(

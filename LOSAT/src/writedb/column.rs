@@ -105,14 +105,14 @@ fn write_var_int(out: &mut Vec<u8>, x: u64) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbblob.cpp:393-403
-/// `WriteString(str, eSizeVar)`.
+/// `WriteString` with `eSizeVar`.
 fn write_string_var(out: &mut Vec<u8>, text: &[u8]) {
     write_var_int(out, text.len() as u64);
     out.extend_from_slice(text);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbblob.cpp:562-585
-/// `WritePadBytes(8, eString)`: 1 to 8 bytes, `#` and a NUL at the end.
+/// `WritePadBytes` to a multiple of 8 bytes with `eString`: 1 to 8 bytes, `#` and a NUL at the end.
 fn write_pad_bytes_string(out: &mut Vec<u8>, align: usize) {
     let pads = align - out.len() % align;
     out.extend(std::iter::repeat_n(b'#', pads - 1));
@@ -305,8 +305,8 @@ impl Column {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:93-107
-    /// `AddBlob(blob, blob2)` (`AddBlob(blob)` is the call with an empty `blob2`); an empty blob
-    /// adds an entry without data, and an empty `blob2` writes nothing.
+    /// `AddBlob` of `blob` and `blob2` (`AddBlob` of `blob` alone is the call with an empty
+    /// `blob2`); an empty blob adds an entry without data, and an empty `blob2` writes nothing.
     pub(crate) fn add_blob(&mut self, blob: &[u8], blob2: &[u8]) -> Result<(), WriteDbError> {
         let data_size = self.data.write_blob(blob)?;
         self.index.write_blob_index(data_size);
@@ -340,7 +340,7 @@ impl Column {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:84-91
-    /// `ListFiles(files, true)`: the files of a column that holds data.
+    /// `ListFiles` of `files` with the second argument true: the files of a column that holds data.
     pub(crate) fn list_files(&self, files: &mut Vec<String>) {
         if self.data.data_length != 0 {
             files.push(self.index.file.filename().to_string());

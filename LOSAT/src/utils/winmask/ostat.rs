@@ -212,7 +212,7 @@ impl CountsWriter {
         self.algo_version = version;
     }
 
-    /// `SetMaxCount( max_count )` and `SetCount( i, pct )` of every count: `count_map` holds the
+    /// `SetMaxCount` with `max_count`, and `SetCount` of every count with its percentage: `count_map` holds the
     /// percentage of each count from 0 to `max_count`.
     pub fn set_count_map(&mut self, count_map: Vec<f64>) {
         self.count_map = count_map;
@@ -536,7 +536,7 @@ fn memory_exception(line: u32) -> FinalizeError {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_opt.cpp:212-332
 ///
-/// The key size is a `Uint1` and the bound `2u-7` an `int`: with units of 1 to 3 letters and
+/// The key size is a `Uint1` and its bound, 7 less than the unit's bits, an `int`: with units of 1 to 3 letters and
 /// no memory (`-smem` a multiple of 65536), the first loop takes `k` below 0, where it wraps,
 /// and stops when the halved estimate reaches 0, at 253; the second loop then allocates 8 GiB
 /// and shifts by 253 bits (undefined behaviour in C++): LOSAT refuses that case. With units of 0
@@ -661,7 +661,7 @@ fn cache_bit_array_space(unit_size: u8) -> Result<(Vec<u32>, usize), FinalizeErr
     Ok((cba, size))
 }
 
-/// `findBestRoff( k, ... )` for units of `ubs` bits: for each right offset from 0 to `ubs - k`,
+/// `findBestRoff` of the key size `k` for units of `ubs` bits: for each right offset from 0 to `k` less than `ubs`,
 /// the number of units of each key of `ht`; the offset with the lowest average number of units
 /// in a key that has more than one (the first such), its largest number of units in a key (as
 /// a `Uint1`) and its number of units in keys with more than one (`M`).

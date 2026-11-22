@@ -210,7 +210,7 @@ unsafe fn walk<const RIGHT: bool>(
     }
 }
 
-/// `s_BlastAaExtendLeft(.., s_off, q_off, ..)`: (score, length, codes read).
+/// `s_BlastAaExtendLeft` at `s_off` and `q_off`: (score, length, codes read).
 #[inline(always)]
 fn extend_left(
     tab: &Table,
@@ -223,7 +223,8 @@ fn extend_left(
 ) -> (i32, i32, u8) {
     let n = s_off.min(q_off);
     if n < 0 {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:853-883, `best_i = n + 1` with no step taken.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:853-883
+        // `best_i` is one more than `n`, with no step taken.
         return (maxscore, 0, 0);
     }
     // n + 1 steps down from (q_off, s_off); both offsets are >= n.
@@ -242,7 +243,7 @@ fn extend_left(
     (w.best, w.len, w.codes)
 }
 
-/// `s_BlastAaExtendRight(.., s_off, q_off, ..)`: (score, length, s_last_off, codes read).
+/// `s_BlastAaExtendRight` at `s_off` and `q_off`: (score, length, s_last_off, codes read).
 #[inline(always)]
 fn extend_right(
     tab: &Table,

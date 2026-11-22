@@ -48,7 +48,7 @@ pub fn discover_stat_type(path: &Path) -> Result<StatFile, WinMaskError> {
 
 /// The counts file `path` opened by name.
 ///
-/// No NCBI counterpart: `CNcbiIfstream( "" )` and POSIX `open( "" )` fail (ENOENT) on every
+/// No NCBI counterpart: `CNcbiIfstream` and POSIX `open` of an empty name fail (ENOENT) on every
 /// platform NCBI runs on, which is what the empty name of a `-window_masker_taxid` run without a
 /// counts file must give; WASI's `path_open` takes the empty path as the preopened directory
 /// and succeeds, so the empty name is "not found" here on every target.
@@ -679,7 +679,7 @@ impl UnitCounts {
                 // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_obinary.cpp:164-186
                 // `arg_use_ba` is true for blastn and the application (`winmask_filter.cpp:121`,
                 // `win_mask_config.cpp:361`), so the array is kept. Units of 1 or 2 letters give
-                // an array of 0 words that is still in use (`new Uint4[0]`); see `SeqMasker::mask`.
+                // an array of 0 words that is still in use (a `new` of 0 `Uint4` words); see `SeqMasker::mask`.
                 let cba_size = (1u64 << (2 * unit_size as u32)) / 32;
                 match s.read_u32s(cba_size) {
                     Some(cba) => self.cba = Some(cba),
@@ -860,7 +860,7 @@ impl UnitCounts {
         &self.metadata
     }
 
-    /// The warnings NCBI posts while reading the file (`ERR_POST( Warning << ...)`).
+    /// The warnings NCBI posts while reading the file (`ERR_POST` with `Warning`).
     pub fn warnings(&self) -> &[String] {
         &self.warnings
     }
@@ -938,8 +938,8 @@ impl UsetHash {
 }
 
 impl UsetArray {
-    /// `CSeqMaskerUsetArray::get_info(unit)`: the count of the unit or of its reverse complement,
-    /// whichever is smaller, 0 when the array has no entry for it.
+    /// `CSeqMaskerUsetArray::get_info` of a unit: the count of the unit or of its reverse
+    /// complement, whichever is smaller, 0 when the array has no entry for it.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_array.cpp:64-82
     /// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_uset_array.hpp:151-153
@@ -1063,20 +1063,20 @@ impl<R: Read> Stream<'_, R> {
         }
     }
 
-    /// `is.read( (char *)&word, sizeof( Uint4 ) )`, in the machine's byte order.
+    /// `is.read` of one `Uint4` into `word`, in the machine's byte order.
     fn read_into(&mut self, word: &mut u32) {
         let mut bytes = word.to_ne_bytes();
         self.read(&mut bytes);
         *word = u32::from_ne_bytes(bytes);
     }
 
-    /// `is.read( (char *)array, n*sizeof( Uint4 ) )` into a new array; `None` when the read
+    /// `is.read` of `n` `Uint4` words into a new array; `None` when the read
     /// fails (checked against the file's length before the array is allocated).
     fn read_u32s(&mut self, n: u64) -> Option<Vec<u32>> {
         self.read_array(n, u32::from_ne_bytes)
     }
 
-    /// `is.read( (char *)array, n*sizeof( Uint2 ) )` into a new array; `None` when it fails.
+    /// `is.read` of `n` `Uint2` words into a new array; `None` when it fails.
     fn read_u16s(&mut self, n: u64) -> Option<Vec<u16>> {
         self.read_array(n, u16::from_ne_bytes)
     }
@@ -1128,7 +1128,7 @@ impl<R: Read> Stream<'_, R> {
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:361-366
 /// The binary formats read the first `##pct:` line only (the loop breaks after it), the ascii
 /// ones every such line. A line of exactly those six letters throws `std::out_of_range` from
-/// `substr( 7 )`; the text is libstdc++'s, as in NCBI's Linux builds. A binary line whose
+/// `substr` at position 7; the text is libstdc++'s, as in NCBI's Linux builds. A binary line whose
 /// largest count reads as `u32::MAX` (also a larger number, which the stream stores as that) is
 /// refused whether or not the percentages are used: NCBI's table has room for the count plus
 /// one, 0 in 32 bits, and its loop reads past it (undefined behaviour in C++). The percentages

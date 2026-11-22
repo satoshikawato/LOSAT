@@ -50,7 +50,7 @@ pub trait GenomeSource {
     /// Posts again what the last `read` posted: a read of the same input that NCBI makes and
     /// LOSAT does not repeat.
     fn repeat_posts(&mut self) -> Result<(), Self::Error>;
-    /// `LOG_POST( line )`.
+    /// `LOG_POST` of `line`.
     fn log(&mut self, line: &str) -> Result<(), Self::Error>;
 }
 

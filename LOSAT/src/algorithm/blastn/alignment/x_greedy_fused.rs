@@ -34,8 +34,8 @@
 //!   of distance `d - 1` a diagonal reads are kept in a window that moves by one cell per
 //!   diagonal; distance `d` never writes the row of `d - 1`, which is the same as reading the
 //!   cells again.
-//! - The same slide. `s_FindFirstMismatch` with `rem == 4` continues while
-//!   `seq1[i] < 4 && seq1[i] == seq2[i]`; per byte that is `(b1 ^ b2) | (b1 & 0xFC) == 0`, so the
+//! - The same slide. `s_FindFirstMismatch` with a `rem` of 4 continues while `seq1[i]` is below 4
+//!   and equals `seq2[i]`; per byte that is `(b1 ^ b2) | (b1 & 0xFC) == 0`, so the
 //!   first non-zero byte of `(w1 ^ w2) | (w1 & 0xFC..FC)` over eight positions (lowest byte first
 //!   to the right, highest byte first to the left) is the first mismatch. The eight-byte
 //!   comparison runs when both sequences have at least eight positions left; a slide that stops
@@ -168,7 +168,7 @@ struct XColdState {
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565-614
 /// A kept diagonal, as the C loop handles it after its X-drop test: the slide by
-/// `s_FindFirstMismatch` for `rem == 4` (`x_first_mismatch`: the same predicate, eight bytes at a
+/// `s_FindFirstMismatch` for a `rem` of 4 (`x_first_mismatch`: the same predicate, eight bytes at a
 /// time, then byte by byte), its fence test with its bound, and every update in the C order. The
 /// diagonals whose slide one eight-byte comparison does not settle (fewer than eight positions
 /// left, eight or more matches, the fence at the stop, a longer run than the seed's), except a
@@ -235,7 +235,7 @@ unsafe fn x_cell_cold<const REVERSE: bool>(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:509-686
-/// The distance loop of `BLAST_GreedyAlign` without an edit block, for `rem == 4`, from the
+/// The distance loop of `BLAST_GreedyAlign` without an edit block, for a `rem` of 4, from the
 /// state the set-up left (module doc). The parts below say which C lines they port. `WIDE`:
 /// both sequences have at least eight bytes, so the eight-byte comparison may run; without it
 /// every kept diagonal takes `x_cell_cold`.

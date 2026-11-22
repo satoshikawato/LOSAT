@@ -159,10 +159,10 @@ impl std::io::Read for FailingReader {
     }
 }
 
-/// A read error ends the reading (`while (f && !f.eof())`, taxid_set.cpp:47): the entries read
-/// so far stay, the line read up to the error is taken, no error is reported; an error at the
-/// start is an empty map (makeblastdb 2.17.0 with a directory as `-taxid_map`: exit status 0,
-/// no message; review B S2).
+/// A read error ends the reading (the loop that runs while the stream is good and not at its end,
+/// taxid_set.cpp:47): the entries read so far stay, the line read up to the error is taken, no
+/// error is reported; an error at the start is an empty map (makeblastdb 2.17.0 with a directory as
+/// `-taxid_map`: exit status 0, no message; review B S2).
 #[test]
 fn a_read_error_keeps_the_map_read_so_far() {
     let read = |data: &'static [u8]| {

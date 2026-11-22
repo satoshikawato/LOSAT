@@ -28,8 +28,9 @@ fn terminate_block(num_seqs: &mut usize, block: &mut BlockInfo) -> Result<(), Sc
     Ok(())
 }
 
-/// `sIsConservationLine`: the result of `line.find_first_not_of(":.* \t\r\n")` taken as a `bool`,
-/// so true unless that position is 0: a line that starts with `:`, `.` or `*` is a conservation
+/// `sIsConservationLine`: the position that `find_first_not_of` finds in the line for a character
+/// outside the set `:.*`, space, tab, CR and LF, taken as a `bool`, so true unless that position
+/// is 0: a line that starts with `:`, `.` or `*` is a conservation
 /// line also when other text follows, and a line of nothing else is one too (`npos` is not 0).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner_clustal.cpp:200-206
@@ -76,8 +77,9 @@ pub(crate) fn scan(input: &mut PeekAheadStream<'_>) -> Result<Scanned, ScanFailu
             in_block = false;
             continue;
         }
-        // `NStr::Split(line, " \t", tokens, NStr::fSplit_Tokenize)`: the repository's one port
-        // (`utils::format_guess::tokens`), two or three tokens: the id, the data and a count.
+        // `NStr::Split` of the line at space and tab with `NStr::fSplit_Tokenize`: the repository's
+        // one port (`utils::format_guess::tokens`), two or three tokens: the id, the data and a
+        // count.
         let tokens = tokens(line, b" \t");
         let (Some(id), Some(data)) = (tokens.get(0), tokens.get(1)) else {
             return Err(ScanFailure::Failed);
@@ -86,7 +88,7 @@ pub(crate) fn scan(input: &mut PeekAheadStream<'_>) -> Result<Scanned, ScanFailu
             return Err(ScanFailure::Failed);
         }
         if let Some(count) = tokens.get(2) {
-            // `StringToInt(..., fConvErr_NoThrow)`: 0 for a token that is no number.
+            // `StringToInt` with `fConvErr_NoThrow`: 0 for a token that is no number.
             if string_to_int(count, 0).unwrap_or(0) == 0 {
                 return Err(ScanFailure::Failed);
             }

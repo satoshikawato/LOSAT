@@ -2,7 +2,7 @@
 //! which `-mk_counts` runs before it counts. Samples of 100 letters every 10,000 letters of each
 //! sequence of 50,000 letters or more go into a table; every 100 letters of each later sequence
 //! are looked up in it, and runs of at least 4 samples found at the same distances in an earlier
-//! sequence are reported as possible duplications (`LOG_POST( Warning << ...)`, without a
+//! sequence are reported as possible duplications (a `LOG_POST` of a `Warning`, without a
 //! prefix). The counts do not change.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_dup_table.cpp:55-586
@@ -206,7 +206,7 @@ impl Tracker<'_> {
     }
 }
 
-/// The label of a sequence's best id (`sequence::GetId( bsh, eGetId_Best )`, the first id of
+/// The label of a sequence's best id (`sequence::GetId` with `eGetId_Best`, the first id of
 /// the lowest `CSeq_id::Score`, then `GetLabel` in its default form: `lcl|1`,
 /// `gnl|BL_ORD_ID:0`).
 ///

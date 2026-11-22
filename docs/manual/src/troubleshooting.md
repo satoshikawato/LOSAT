@@ -10,7 +10,7 @@ Questions and answers for the problems people meet most. Each answer is based on
 error: the NCBI BLAST+ option -html is not supported by LOSAT's BLASTN
 ```
 
-The command exits with status 2 and runs nothing. For an output format that NCBI writes and LOSAT does not, see [`psiblast` refuses `-outfmt`](#psiblast-refuses--outfmt-such-as-xml-or-asn1).
+The command exits with status 2 and runs nothing. For an output format that NCBI writes and LOSAT does not (in `psiblast` or `tblastn -in_pssm`), see [Output formats](output-formats.md) and [`psiblast` refuses `-outfmt`](#psiblast-refuses--outfmt-such-as-xml-or-asn1).
 
 **Why?** LOSAT stops with an error for each option and value it does not implement. It never ignores an option and never runs something else in its place, so a result you get is the result you asked for.
 
@@ -105,8 +105,9 @@ First check [Differences from NCBI BLAST+](differences.md). A few differences ar
 
 `psiblast` supports `-outfmt 0`, `6`, `7`, `10` and `20` from a FASTA query, and `0`, `6` and `7` with `-in_pssm` or `-in_msa`.
 
-- From a FASTA query (and for formats outside `0`, `6`, `7`, `10` and `20` such as XML `-outfmt 5` or archive `-outfmt 11`), LOSAT stops before reading input with `Error: output format N is not supported by LOSAT's PSIBLAST`.
-- With `-in_pssm` or `-in_msa`, formats `10` and `20` stop after reading the PSSM or alignment with `output format N with -in_pssm is not supported by LOSAT's PSIBLAST yet` (or `-in_msa` when `-in_msa` is used).
+- A format outside `0`, `6`, `7`, `10` and `20` (such as XML `-outfmt 5` or archive `-outfmt 11`) stops before any input is read, with any query: `Error: output format N is not supported by LOSAT's PSIBLAST`.
+- With `-in_pssm` or `-in_msa`, `-outfmt 10` and `20` stop after the PSSM or alignment is read: `Error: output format N with -in_pssm is not supported by LOSAT's PSIBLAST yet` (`-in_msa` when that is given).
+- Both exit with status 1.
 
 Use NCBI BLAST+ `psiblast` if your workflow requires those formats.
 
@@ -124,7 +125,7 @@ In v0.2.0, `losat::api` and `pylosat` run the six core search programs (`blastn`
 
 ## A full-precision E-value on macOS differs in the 15th digit
 
-On macOS (`-outfmt 8` or `-outfmt 11`), the [last digit on macOS](differences.md#last-digit-of-a-full-precision-value-on-macos) of a full-precision E-value can differ by 1 in its 15th digit because of Apple's maths library. Tabular, JSON, XML and pairwise formats are unaffected in practice, and Linux, Windows and WASI match Linux x86_64. See also [Platforms and WebAssembly](platforms.md#macos).
+On macOS (`-outfmt 8` or `-outfmt 11`), the last (15th) significant digit of a full-precision E-value can differ by 1 because of Apple's maths library. Tabular, JSON, XML and pairwise formats are unaffected in practice, and Linux, Windows and WASI match Linux x86_64. See [Differences from NCBI BLAST+](differences.md#last-digit-of-a-full-precision-value-on-macos) and [Platforms and WebAssembly](platforms.md#macos).
 
 ## Where to report a problem
 

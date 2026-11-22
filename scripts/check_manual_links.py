@@ -18,7 +18,7 @@ Package READMEs (--package-readme PATH, for crates.io / PyPI / npm):
 - Only https:// URLs or same-page `#fragment` heading anchors are allowed; relative file
   paths fail because package registries do not serve files outside the README.
 
-Usage: check_manual_links.py SRC_DIR [--repo-root DIR] [--repo-readme PATH]... [--package-readme PATH]...
+Usage: check_manual_links.py SRC_DIR [--repo-root DIR] [--repo-readme PATH]... [--package-readme PATH]... [--check-figure-sync]
 Exit status 1 with one line per problem.
 """
 

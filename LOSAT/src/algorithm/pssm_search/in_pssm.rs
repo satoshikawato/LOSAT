@@ -409,8 +409,10 @@ fn query_residues(seq_data: Option<&SeqData>) -> QueryResidues {
 }
 
 /// The query record of the PSSM's Bioseq (`PsiSearch::query`, the reasons in
-/// `psi_search_and_object`): one local id is the record's id (`CObject_id::AsString`), other ids are
-/// believed; a Bioseq without one (only where the object manager stops the run first,
+/// `psi_search_and_object`): one local id is the record's id (`CObject_id::AsString`), which an
+/// integer keeps as the Bioseq's Seq-id for the Seq-aligns (`FastaRecord::keeping_bioseq_ids`:
+/// `local id 5`, where the record's local id is a string); other ids are believed; a Bioseq
+/// without one (only where the object manager stops the run first,
 /// `stopped_as_query_joins_scope`) has no id.
 fn query_record_of(ids: &[ParsedSeqId], title: &[u8], letters: &[u8]) -> FastaRecord {
     match ids {
@@ -418,7 +420,9 @@ fn query_record_of(ids: &[ParsedSeqId], title: &[u8], letters: &[u8]) -> FastaRe
         [ParsedSeqId::Local(ObjectId::Str(id))] => {
             FastaRecord::new(String::from_utf8_lossy(id).into_owned(), title, letters)
         }
-        [ParsedSeqId::Local(ObjectId::Id(id))] => FastaRecord::new(id.to_string(), title, letters),
+        [ParsedSeqId::Local(ObjectId::Id(id))] => {
+            FastaRecord::new(id.to_string(), title, letters).keeping_bioseq_ids(ids.to_vec())
+        }
         _ => FastaRecord::new(String::new(), title, letters).believing(ids.to_vec()),
     }
 }

@@ -296,8 +296,7 @@ fn sum_statistics_read_the_cutoff_score_in_every_window() {
     assert_eq!(run.heap_asks, 0);
 }
 
-// An error of the heap test ends the call with it (BLASTX's read past NCBI's heap array, item
-// X4b-2, comes this way).
+// An error of the heap test ends the call with it.
 #[test]
 fn an_error_of_the_heap_test_ends_the_call() {
     let run = run(

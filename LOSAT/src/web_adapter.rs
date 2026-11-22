@@ -138,6 +138,13 @@ pub use crate::algorithm::blastn::coordination::{
 };
 pub use crate::algorithm::blastn::scoring::{check_losat_limits, check_scoring_options};
 pub use crate::algorithm::blastn::BlastnArgs;
+
+/// Gives BLASTN's `-filtering_db` its repeat search with the run's `settings` (the lookup of the
+/// database as of `-db`: the run's working directory and registry), as the command line does
+/// before a search; nothing without the option (`BlastnArgs::resolve_repeat_filter`).
+pub fn resolve_blastn_repeat_filter(args: &mut BlastnArgs, settings: &ApplicationSettings) {
+    args.resolve_repeat_filter(settings);
+}
 pub use crate::algorithm::blastp::blast_engine::check_options as check_blastp_options;
 pub use crate::algorithm::blastx::check_options as check_blastx_options;
 pub use crate::algorithm::blastx::BlastxArgs;

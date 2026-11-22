@@ -3,6 +3,7 @@ use super::{
     args::ResolvedOptions, linking::link_parameters, parameters::ContextParameters,
     preliminary::PreliminaryHsp, query_setup::PreparedQueryBatch,
 };
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::{
     algorithm::blastp::gapalign::{
         blast_gapped_alignment_with_traceback_with_scratch, GapAlignScratch,
@@ -14,9 +15,14 @@ use crate::{
             BlastCompositionWorkspace,
         },
         redo_alignment::*,
+        smith_waterman_match::{
+            redo_one_match_smith_waterman, sw_batch_failed_error, sw_endless_error,
+            unadjusted_square_matrix, SwMatchScratch,
+        },
     },
     stats::{compute_blosum62_ideal_karlin_params, lookup_protein_params},
     utils::{
+        glibc_fma_libm::GlibcLibm,
         matrix::BLASTAA_SIZE,
         seg::{SegMasker, SegParams},
     },
@@ -48,9 +54,11 @@ pub fn query_infos(
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3100-3109
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2438-2479
-/// The composition mode of `-comp_based_stats` (`args.rs` `composition_mode`, 1 to 3 here).
+/// The composition mode of `-comp_based_stats` (`args.rs` `composition_mode`; 0 only with
+/// `-use_sw_tback`, whose redo runs without composition-based statistics too).
 fn compo_adjust_mode(composition: u8) -> BlastCompoAdjustMode {
     match composition {
+        0 => BlastCompoAdjustMode::NoCompositionBasedStats,
         1 => BlastCompoAdjustMode::CompositionBasedStats,
         3 => BlastCompoAdjustMode::ForceFullMatrixAdjust,
         _ => BlastCompoAdjustMode::CompositionMatrixAdjust,
@@ -74,16 +82,28 @@ fn other_matrix_workspace(matrix: ScoringMatrix) -> Result<BlastCompositionWorks
     BlastCompositionWorkspace::new(matrix)
 }
 
+/// The redo's scaling factor: 32 with composition-based statistics, 1 without (the
+/// Smith-Waterman redo of `-comp_based_stats 0`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3100-3108
+pub(crate) fn redo_scale(options: &ResolvedOptions) -> f64 {
+    if options.composition != 0 {
+        32.0
+    } else {
+        1.0
+    }
+}
+
 pub fn redo_params(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
 ) -> Result<BlastRedoAlignParams> {
     ensure!(
-        options.composition != 0 && options.gapped,
-        "BLASTX Kappa requires a gapped composition mode"
+        (options.composition != 0 || options.use_sw_tback) && options.gapped,
+        "BLASTX Kappa requires a gapped composition mode or the Smith-Waterman traceback"
     );
-    let scale = 32.0;
+    let scale = redo_scale(options);
     let matrix = options.scoring;
     let ka = lookup_protein_params(&ProteinScoringSpec {
         matrix,
@@ -119,8 +139,8 @@ pub fn redo_params(
     Ok(BlastRedoAlignParams {
         matrix_info: build_matrix_info(matrix, ideal.lambda / scale)?,
         gapping_params: BlastCompoGappingParams {
-            gap_open: options.gap_open * 32,
-            gap_extend: options.gap_extend * 32,
+            gap_open: options.gap_open * scale as i32,
+            gap_extend: options.gap_extend * scale as i32,
             // blast_kappa.c:2374-2382 (`core::x_drop::redo_x_dropoff`).
             x_dropoff: crate::core::x_drop::redo_x_dropoff(
                 options.gap_x_dropoff_final,
@@ -134,7 +154,11 @@ pub fn redo_params(
         composition_test_index: 0,
         log_k: 0.0,
         score_divisor: scale,
-        smith_waterman: false,
+        // NCBI's traceback runs this redo with composition-based statistics or the Smith-Waterman
+        // traceback, which redoes each match with or without them.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
+        smith_waterman: options.use_sw_tback,
         near_identical_cutoff: 1.74 * std::f64::consts::LN_2 / scaled_lambda,
         position_based: false,
         ccat_query_length: batch
@@ -280,17 +304,13 @@ const CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:770-803
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3590-3641
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3641
-pub(crate) fn redo_context_observed(
+/// The redo's list of a match's preliminary HSPs in `context_index`, in their order, with
+/// their scores scaled by `score_divisor` (each names its HSP, for the X-drop redo's callback).
+fn incoming_alignments(
     input: &[PreliminaryHsp],
     context_index: usize,
-    infos: &[BlastCompoQueryInfo],
-    subject: &[u8],
-    params: &BlastRedoAlignParams,
-    lambda: f64,
-    scratch: &mut GapAlignScratch,
-    workspace: &mut BlastCompositionWorkspace,
-    matrix_state: &mut Option<AdjustedProteinMatrix>,
-) -> Result<BlastRedoOneMatchResult> {
+    score_divisor: f64,
+) -> Option<Box<BlastCompoAlignment>> {
     let mut incoming = None;
     let mut tail = &mut incoming;
     for (index, h) in input
@@ -299,7 +319,7 @@ pub(crate) fn redo_context_observed(
         .filter(|(_, h)| h.context == context_index)
     {
         let node = blast_compo_alignment_new(
-            (h.score as f64 * params.score_divisor) as i32,
+            (h.score as f64 * score_divisor) as i32,
             EMatrixAdjustRule::DontAdjustMatrix,
             h.q_start,
             h.q_end,
@@ -312,6 +332,120 @@ pub(crate) fn redo_context_observed(
         *tail = Some(node);
         tail = &mut tail.as_mut().expect("incoming inserted").next;
     }
+    incoming
+}
+
+/// The Smith-Waterman redo of the match's preliminary HSPs in `context_index` (`-use_sw_tback`,
+/// item X4b-2): core's match body (`redo_one_match_smith_waterman`) on the context's windows (the
+/// HSPs' query range with the border, the whole subject), with BLASTX's subject range
+/// (`get_range`). `lambda` and `sw.log_k` are the scaled gapped block's, the context's
+/// (`kbp_gap[context_index]`); `would_insert(context, evalue, score)` is the heap test of e-value
+/// mode, which NCBI makes on the heap the window's context indexes (`kappa_batch`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3601-3622
+#[allow(clippy::too_many_arguments)]
+fn sw_redo_context(
+    input: &[PreliminaryHsp],
+    context_index: usize,
+    infos: &[BlastCompoQueryInfo],
+    subject: &[u8],
+    params: &BlastRedoAlignParams,
+    lambda: f64,
+    sw: &mut SwState,
+    workspace: &mut BlastCompositionWorkspace,
+    matrix_state: &mut Option<AdjustedProteinMatrix>,
+    would_insert: &mut dyn FnMut(usize, f64, i32) -> Result<bool>,
+) -> Result<BlastRedoOneMatchResult> {
+    let incoming = incoming_alignments(input, context_index, params.score_divisor);
+    let matching = BlastCompoMatchingSequence::new(0, subject);
+    redo_one_match_smith_waterman(
+        &incoming,
+        params,
+        lambda,
+        sw.log_k,
+        &matching,
+        infos,
+        &CALLBACKS,
+        workspace,
+        matrix_state,
+        sw.unadjusted.as_ref(),
+        sw.cutoff_e,
+        would_insert,
+        &mut sw.scratch,
+    )
+}
+
+/// The error of a query batch whose last redone match failed its Smith-Waterman redo: NCBI's
+/// `Traceback failed` (exit 3), or LOSAT's refusal where NCBI's clean-up crashes, when the
+/// batch's first query holds a redone match (`first_query_holds_match`, the heap of the batch's
+/// first query is not empty; PD-LOSAT-NCBI-DEFECTS 1.53, 1.73 and 1.76, rule 3), after the reports
+/// of the batches before (`ErrorAfterBatchReports`, which `native::search_error_as_is` passes).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3802
+#[cold]
+#[inline(never)]
+pub(crate) fn sw_batch_failed(first_query_holds_match: bool) -> anyhow::Error {
+    ErrorAfterBatchReports(sw_batch_failed_error("blastx", first_query_holds_match)).into()
+}
+
+/// LOSAT's refusal of a batch with a match whose Smith-Waterman redo does not end in NCBI (a
+/// significant score of 0 in a window of two or more preliminary HSPs whose first query letter,
+/// the window's first, scores the subject's first letter above 0; PD-LOSAT-NCBI-DEFECTS 1.76, in
+/// the class of 1.30, rule 3), after the reports of the batches before. What makes the score of
+/// 0 significant: a cutoff score of 0 with sum statistics (`do_link_hsps`), or its e-value in
+/// e-value mode.
+#[cold]
+#[inline(never)]
+pub(crate) fn sw_endless(do_link_hsps: bool) -> anyhow::Error {
+    let why = if do_link_hsps {
+        "a score of 0 reaches the cutoff score, a window of the match has several preliminary HSPs and the window's first query letter scores the subject's first letter above 0"
+    } else {
+        "the e-value of a score of 0 passes the threshold, a window of the match has several preliminary HSPs and the window's first query letter scores the subject's first letter above 0"
+    };
+    ErrorAfterBatchReports(sw_endless_error("blastx", why)).into()
+}
+
+/// LOSAT's refusal of `-use_sw_tback` with `-ungapped` (which only `-comp_based_stats 0` lets
+/// reach a search): NCBI's traceback runs the Smith-Waterman redo for an ungapped search too, and
+/// its set-up reads the gapped Karlin blocks of every context, which an ungapped search does not
+/// make, and crashes (SIGSEGV) at every query batch NCBI searches, with hits or without, with
+/// `-subject` and with `-db` (line RG X4b's survey, a debugger's trace; probes `u.*` of item X4b-2
+/// on ws, 2026-11-21). PD-LOSAT-NCBI-DEFECTS 1.76, rule 3. The caller refuses at the traceback of
+/// the first query batch that is searched, after the reports of the batches before it: batches
+/// without a valid context (a two-base query alone), which NCBI reports with a warning and does
+/// not search (rows `db.x4b2.rej.ungapped.ac.b1.*`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3092-3095
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
+#[cold]
+#[inline(never)]
+pub(crate) fn sw_ungapped_refusal() -> anyhow::Error {
+    ErrorAfterBatchReports(anyhow::anyhow!(
+        "-use_sw_tback with -ungapped, on which NCBI BLAST+ 2.17.0's blastx crashes at every query batch it searches, is not supported by LOSAT's BLASTX"
+    ))
+    .into()
+}
+
+/// The heap test of a redo that makes none: the X-drop redo, and the Smith-Waterman redo in
+/// cutoff-score mode (sum statistics), whose significance reads no heap.
+pub(crate) fn no_heap_test(_context: usize, _evalue: f64, _score: i32) -> Result<bool> {
+    bail!("the redo's heap test was not expected here")
+}
+
+pub(crate) fn redo_context_observed(
+    input: &[PreliminaryHsp],
+    context_index: usize,
+    infos: &[BlastCompoQueryInfo],
+    subject: &[u8],
+    params: &BlastRedoAlignParams,
+    lambda: f64,
+    scratch: &mut GapAlignScratch,
+    workspace: &mut BlastCompositionWorkspace,
+    matrix_state: &mut Option<AdjustedProteinMatrix>,
+) -> Result<BlastRedoOneMatchResult> {
+    let incoming = incoming_alignments(input, context_index, params.score_divisor);
     let matching = BlastCompoMatchingSequence::new(0, subject);
     let state = RedoContext {
         input,
@@ -391,7 +525,41 @@ pub struct KappaState {
     scratch: GapAlignScratch,
     workspace: BlastCompositionWorkspace,
     matrix: Option<AdjustedProteinMatrix>,
+    /// `-use_sw_tback`: what the Smith-Waterman redo reads besides the X-drop redo's state
+    /// (`SwState`); `None` without it.
+    sw: Option<Box<SwState>>,
 }
+
+/// What the Smith-Waterman redo of a BLASTX match (`-use_sw_tback`, item X4b-2) reads besides
+/// the X-drop redo's state: the scaled block's `logK` (the significance test's e-value), `-evalue`
+/// (`params->cutoff_e`), the search's matrix that the windows read without composition-based
+/// statistics (`unadjusted_square_matrix`, `None` with them) and the round loop's memory.
+struct SwState {
+    log_k: f64,
+    cutoff_e: f64,
+    unadjusted: Option<AdjustedProteinMatrix>,
+    scratch: SwMatchScratch,
+}
+
+impl SwState {
+    /// `None` without `-use_sw_tback`. `log_k` is the logarithm of the gapped block's K, which
+    /// the redo's rescaling leaves unscaled (every context of a BLASTX query has the matrix's
+    /// gapped block).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2117-2134
+    fn of(options: &ResolvedOptions, k: f64) -> Option<Box<Self>> {
+        options.use_sw_tback.then(|| {
+            Box::new(Self {
+                log_k: k.glibc_ln(),
+                cutoff_e: options.evalue,
+                unadjusted: (options.composition == 0)
+                    .then(|| unadjusted_square_matrix(options.scoring)),
+                scratch: SwMatchScratch::new(),
+            })
+        })
+    }
+}
+
 impl KappaState {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3244-3248
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3340-3367
@@ -410,10 +578,11 @@ impl KappaState {
         Ok(Self {
             params,
             infos: std::sync::Arc::new(infos),
-            lambda: ka.lambda / 32.0,
+            lambda: ka.lambda / redo_scale(options),
             scratch: GapAlignScratch::new(),
             workspace: composition_workspace(options.scoring)?,
             matrix: None,
+            sw: SwState::of(options, ka.k),
         })
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3326-3338,3346-3350,3499-3502
@@ -437,6 +606,14 @@ impl KappaState {
             scratch: GapAlignScratch::new(),
             workspace: composition_workspace(options.scoring)?,
             matrix: None,
+            sw: self.sw.as_ref().map(|sw| {
+                Box::new(SwState {
+                    log_k: sw.log_k,
+                    cutoff_e: sw.cutoff_e,
+                    unadjusted: sw.unadjusted.clone(),
+                    scratch: SwMatchScratch::new(),
+                })
+            }),
         })
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3502,3625-3641
@@ -444,6 +621,12 @@ impl KappaState {
     // Blast_RedoOneMatch call to the next on that thread. x_take_matrix and x_set_matrix move it
     // between Rust states so that a match redone out of order sees the matrix it would have seen in
     // stream order.
+    /// Whether the redo's significance is the cutoff score of sum statistics (`do_link_hsps`), not
+    /// the e-value.
+    pub(crate) fn do_link_hsps(&self) -> bool {
+        self.params.do_link_hsps
+    }
+
     /// The matrix a match leaves for the next one.
     #[cfg(feature = "parallel")]
     pub(crate) fn x_take_matrix(&mut self) -> Option<AdjustedProteinMatrix> {
@@ -462,6 +645,22 @@ impl KappaState {
         batch: &PreparedQueryBatch,
         subject: &[u8],
     ) -> Result<Vec<RedoneHsp>> {
+        self.redo_list_tested(input, batch, subject, &mut no_heap_test)
+    }
+
+    /// `redo_list_observed` with the Smith-Waterman redo's heap test (`sw_redo_context`): each
+    /// frame of the match in turn, as NCBI's redo loop calls the redo once per frame; with
+    /// `-use_sw_tback` an error of a frame's redo ends the match (NCBI goes to the match's
+    /// clean-up and redoes no later frame).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3644-3646
+    pub(crate) fn redo_list_tested(
+        &mut self,
+        input: &[PreliminaryHsp],
+        batch: &PreparedQueryBatch,
+        subject: &[u8],
+        would_insert: &mut dyn FnMut(usize, f64, i32) -> Result<bool>,
+    ) -> Result<Vec<RedoneHsp>> {
         let query_index = input.first().map(|h| h.context / 6);
         ensure!(
             input.iter().all(|h| Some(h.context / 6) == query_index),
@@ -473,17 +672,31 @@ impl KappaState {
             if !input.iter().any(|h| h.context == context_index) {
                 continue;
             }
-            let result = redo_context_observed(
-                input,
-                context_index,
-                &self.infos,
-                subject,
-                &self.params,
-                self.lambda,
-                &mut self.scratch,
-                &mut self.workspace,
-                &mut self.matrix,
-            )?;
+            let result = match self.sw.as_deref_mut() {
+                None => redo_context_observed(
+                    input,
+                    context_index,
+                    &self.infos,
+                    subject,
+                    &self.params,
+                    self.lambda,
+                    &mut self.scratch,
+                    &mut self.workspace,
+                    &mut self.matrix,
+                ),
+                Some(sw) => sw_redo_context(
+                    input,
+                    context_index,
+                    &self.infos,
+                    subject,
+                    &self.params,
+                    self.lambda,
+                    sw,
+                    &mut self.workspace,
+                    &mut self.matrix,
+                    would_insert,
+                ),
+            }?;
             for (context, alignments) in result.alignments_by_query.into_iter().enumerate() {
                 let mut current = alignments;
                 while let Some(mut align) = current {

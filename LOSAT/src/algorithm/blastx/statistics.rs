@@ -134,7 +134,7 @@ pub fn normalize_scores(list: &mut LinkedHspList, options: &ResolvedOptions) -> 
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     });
-    let scale = if options.composition != 0 { 32.0 } else { 1.0 };
+    let scale = super::kappa::redo_scale(options);
     list.hsps
         .iter_mut()
         .map(|h| {

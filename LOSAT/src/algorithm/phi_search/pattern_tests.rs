@@ -14,14 +14,14 @@ fn compiled(text: &str) -> PhiPattern {
 
 fn ncbi(text: &[u8]) -> String {
     match PhiPattern::compile(text) {
-        Err(PhiCompileError::Ncbi(message)) => message,
+        Err(PhiError::Ncbi(message)) => message,
         other => panic!("{text:?}: {other:?}"),
     }
 }
 
 fn refused(text: &[u8]) -> String {
     match PhiPattern::compile(text) {
-        Err(PhiCompileError::Refusal(message)) => message,
+        Err(PhiError::Refusal(message)) => message,
         other => panic!("{text:?}: {other:?}"),
     }
 }

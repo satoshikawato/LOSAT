@@ -4,13 +4,13 @@
 //! very long). The arrays are NCBI's, with NCBI's sizes, so that the positions past the written
 //! part keep what NCBI's keep (the stale "last position" flags of the expansion, the unexpanded
 //! entries of a very long pattern). A write that NCBI makes past one of its arrays, and an input
-//! whose result NCBI leaves undefined, is LOSAT's refusal (`PhiCompileError::Refusal`), raised
-//! here, before the prolog; NCBI's own messages are `PhiCompileError::Ncbi`, which the search
+//! whose result NCBI leaves undefined, is LOSAT's refusal (`PhiError::Refusal`), raised
+//! here, before the prolog; NCBI's own messages are `PhiError::Ncbi`, which the search
 //! reports where NCBI's engine raises them.
 
 use crate::core::blast_util::BLASTAA_SIZE;
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/pattern.h:50-63
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/pattern.h:50-58
 /// The positions of a pattern (`PHI_MAX_PATTERN_LENGTH`).
 pub(crate) const PHI_MAX_PATTERN_LENGTH: usize = 330;
 /// The bits of one word of the multi-word representations (`PHI_BITS_PACKED_PER_WORD`).
@@ -28,7 +28,7 @@ pub(crate) const MASK_AA_ALPHABET_BITS: i32 = (1 << BLASTAA_SIZE) - 1;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:105-113
 /// NCBI's `AMINOACID_TO_NCBISTDAA` (128 entries): what the compiler indexes with a pattern byte.
-const AMINOACID_TO_NCBISTDAA: [u8; 128] = [
+pub(crate) const AMINOACID_TO_NCBISTDAA: [u8; 128] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 27, 10, 11, 12, 13, 26, 14, 15, 16, 17, 18, 24, 19, 20, 21,
@@ -76,9 +76,9 @@ pub(crate) struct PhiPattern {
     pub(crate) most_specific: usize,
 }
 
-/// Why a pattern does not compile.
+/// Why a pattern does not compile or a PHI search stops.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PhiCompileError {
+pub(crate) enum PhiError {
     /// NCBI's message (`Blast_MessageWrite` of `SPHIPatternSearchBlkNew`), which NCBI's engine
     /// raises after the prolog: `Warning: <message> ` with exit 3.
     Ncbi(String),
@@ -88,14 +88,14 @@ pub(crate) enum PhiCompileError {
 }
 
 /// LOSAT's refusal of a pattern with `what`, where NCBI BLAST+ 2.17.0 `why`.
-fn refusal_because(what: &str, why: &str) -> PhiCompileError {
-    PhiCompileError::Refusal(format!(
+pub(crate) fn refusal_because(what: &str, why: &str) -> PhiError {
+    PhiError::Refusal(format!(
         "a -phi_pattern with {what} (NCBI BLAST+ 2.17.0 {why}) is not supported by LOSAT's PSIBLAST"
     ))
 }
 
 /// The refusal of `what` by the reason NCBI's compiler has for it.
-fn refusal(what: &str) -> PhiCompileError {
+fn refusal(what: &str) -> PhiError {
     let why = match what {
         "x(n,m) without two numbers" => "reads uninitialised values",
         "a count outside 32-bit integers" => "overflows a 32-bit integer",
@@ -114,7 +114,7 @@ fn refusal(what: &str) -> PhiCompileError {
 struct PatternBytes<'a>(&'a [u8]);
 
 impl PatternBytes<'_> {
-    fn at(&self, index: usize, what: &str) -> Result<u8, PhiCompileError> {
+    fn at(&self, index: usize, what: &str) -> Result<u8, PhiError> {
         match index.cmp(&self.0.len()) {
             std::cmp::Ordering::Less => Ok(self.0[index]),
             std::cmp::Ordering::Equal => Ok(0),
@@ -131,7 +131,7 @@ fn c_space(byte: u8) -> bool {
 /// A decimal integer as C's `%d` and `atoi` read it from `at`: white space, a sign, digits. `None`
 /// without a digit; LOSAT's refusal for a value outside `int` (undefined in C). Returns the value
 /// and the index after it.
-fn read_int(bytes: &PatternBytes<'_>, at: usize) -> Result<Option<(i32, usize)>, PhiCompileError> {
+fn read_int(bytes: &PatternBytes<'_>, at: usize) -> Result<Option<(i32, usize)>, PhiError> {
     let mut index = at;
     let mut byte = bytes.at(index, "an unterminated count")?;
     while c_space(byte) {
@@ -162,7 +162,7 @@ fn read_int(bytes: &PatternBytes<'_>, at: usize) -> Result<Option<(i32, usize)>,
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:141-205
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:141-202
 /// `s_ExpandPattern` on the arrays from `base`: each variable entry replaced by its alternatives
 /// (the one-wildcard form in place, then 0, then 2 to the entry's count), the copies' flags taken
 /// from the snapshot and the inserted wildcards' flags left as they were. -1 when the expanded
@@ -230,7 +230,7 @@ fn expand(
     length as i32
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:286-298
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:268-278
 /// `s_NumOfOne`: the set bits of a positive mask (0 for a negative one).
 fn num_of_one(mut a: i32) -> i32 {
     let mut count = 0;
@@ -265,18 +265,18 @@ impl PhiPattern {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:388-680
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:388-688
     /// `SPHIPatternSearchBlkNew` of a protein pattern (`raw`: the text as read, without the NUL
     /// that ends NCBI's string) with the standard residue probabilities (`Blast_ResFreqStdComp`).
-    pub(crate) fn compile(raw: &[u8]) -> Result<Self, PhiCompileError> {
+    pub(crate) fn compile(raw: &[u8]) -> Result<Self, PhiError> {
         if raw.len() >= PHI_MAX_PATTERN_LENGTH {
-            return Err(PhiCompileError::Ncbi(format!(
+            return Err(PhiError::Ncbi(format!(
                 "Pattern is too long ({} but only {} supported)",
                 raw.len(),
                 PHI_MAX_PATTERN_LENGTH
             )));
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:373-386
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:370-385
         // `s_MakePatternUpperCase`: `a` to `z` only.
         let text: Vec<u8> = raw.iter().map(u8::to_ascii_uppercase).collect();
         let prob = crate::stats::karlin_calc::compute_std_aa_composition();
@@ -291,7 +291,7 @@ impl PhiPattern {
             masked: &mut [i32; PHI_MAX_PATTERN_LENGTH],
             pos: &mut usize,
             value: i32,
-        ) -> Result<(), PhiCompileError> {
+        ) -> Result<(), PhiError> {
             if *pos >= PHI_MAX_PATTERN_LENGTH {
                 return Err(refusal("a pattern longer than NCBI's 330 positions"));
             }
@@ -299,7 +299,7 @@ impl PhiPattern {
             *pos += 1;
             Ok(())
         }
-        let order = |byte: u8, what: &str| -> Result<usize, PhiCompileError> {
+        let order = |byte: u8, what: &str| -> Result<usize, PhiError> {
             AMINOACID_TO_NCBISTDAA
                 .get(byte as usize)
                 .map(|&code| code as usize)
@@ -363,9 +363,7 @@ impl PhiPattern {
                                 remaining -= 1;
                                 write(&mut blk.masked, &mut pos, MASK_AA_ALPHABET_BITS)?;
                                 if pos >= PHI_MAX_PATTERN_LENGTH {
-                                    return Err(PhiCompileError::Ncbi(
-                                        "Pattern too long".to_string(),
-                                    ));
+                                    return Err(PhiError::Ncbi("Pattern too long".to_string()));
                                 }
                             }
                             if variable != 0 {
@@ -408,7 +406,7 @@ impl PhiPattern {
                     }
                     // A byte of 0x80 or more is a negative `char`: below `A`.
                     if !(b'A'..=b'Z').contains(&byte) {
-                        return Err(PhiCompileError::Ncbi(
+                        return Err(PhiError::Ncbi(
                             "pattern description has a non-alphabeticcharacter inside a bracket"
                                 .to_string(),
                         ));
@@ -464,11 +462,11 @@ impl PhiPattern {
                 blk.probability *= position_probability;
             }
             if pos >= PHI_MAX_PATTERN_LENGTH {
-                return Err(PhiCompileError::Ncbi("Pattern is too long".to_string()));
+                return Err(PhiError::Ncbi("Pattern is too long".to_string()));
             }
             index += 1;
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:612-640
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:613-635
         // Trailing variable entries are dropped (the entry before the first, NCBI's read at -1, is
         // 0 in NCBI's zeroed structure); a leading variable region after the first non-wildcard
         // entry's search is shifted out.
@@ -518,7 +516,7 @@ impl PhiPattern {
             blk.pack_long(expanded, &flags);
             return Ok(blk);
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:231-242
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:211-220
         // `s_PackPattern`: the flags of the expanded positions as a bit mask.
         blk.match_mask = flags[..expanded]
             .iter()
@@ -537,7 +535,7 @@ impl PhiPattern {
         Ok(blk)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:243-285
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:231-262
     /// `s_PackLongPattern`: the words of the flags and each residue's positions per word.
     fn pack_long(&mut self, num_places: usize, flags: &[u8; PHI_MAX_PATTERN_LENGTH]) {
         let bits = PHI_BITS_PACKED_PER_WORD as usize;
@@ -564,7 +562,7 @@ impl PhiPattern {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:299-370
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:286-344
     /// `s_PackVeryLongPattern`: the unexpanded positions cut into words at each variable entry and
     /// every 30 positions, each word's residue positions, the spacing after it and the most
     /// specific word (the lowest product of the positions' residue fractions). A word of no
@@ -574,7 +572,7 @@ impl PhiPattern {
         &mut self,
         masked: &[i32; PHI_MAX_PATTERN_LENGTH],
         num_places: usize,
-    ) -> Result<(), PhiCompileError> {
+    ) -> Result<(), PhiError> {
         let bits = PHI_BITS_PACKED_PER_WORD as usize;
         let mut most_specific = 1.0f64;
         self.most_specific = 0;

@@ -38,7 +38,7 @@ A search that v0.1.0 supported gives NCBI BLAST+ 2.17.0's output in v0.2.0 too. 
 | NCBI program names | none | `losat --install-shims` links `blastn`, `makeblastdb` and the other names to `losat` ([Coming from NCBI BLAST+](from-ncbi-blast.md)) |
 | Genetic codes | The 26 codes of NCBI's `-db_gencode` for `tblastx` | The same, and `tblastn` also accepts code 32 |
 | WASI threads | Preview | Supported: tested in CI, outside the release's NCBI parity claim ([Platforms and WebAssembly](platforms.md)) |
-| Library and Python | Internal only | A public library module, and a Python binding you build yourself ([Using LOSAT as a library](library.md)) |
+| Libraries and WebAssembly | Internal only | A public Rust library (`losat::api`), a Python package (`pylosat` on PyPI), and a WebAssembly npm package (`losat`, built from the repository) ([Using LOSAT as a library](library.md)) |
 | Web GUI | not part of the release | Preview ([Platforms and WebAssembly](platforms.md)) |
 
 ### Databases and `-db`

@@ -360,17 +360,25 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
     ] {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
-    for extra in [
-        &["-gilist", "ids.gil"][..],
-        &["-remote"],
-        &["-use_sw_tback"],
-    ] {
+    for extra in [&["-gilist", "ids.gil"][..], &["-remote"]] {
         let error = crate::cli::render_message(&parse(extra).unwrap_err());
         assert!(
             error.contains("is not supported by LOSAT's TBLASTN"),
             "{extra:?}: {error}"
         );
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806,885
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
+    // `-use_sw_tback` is a flag that sets the Smith-Waterman traceback, with every
+    // `-comp_based_stats` (the redo runs with mode 0 too).
+    for cbs in ["0", "1", "2", "3"] {
+        let args = parse(&["-use_sw_tback", "-comp_based_stats", cbs]).unwrap();
+        check_options(&args).unwrap();
+        let resolved = args.resolve().unwrap();
+        assert!(resolved.use_sw_tback, "{cbs}");
+    }
+    assert!(!parse(&[]).unwrap().resolve().unwrap().use_sw_tback);
+    assert!(parse(&["-use_sw_tback", "true"]).is_err());
 }
 
 /// The tblastn arguments `-in_pssm <psiblast's frozen PSSM> -subject s.fna <extra>`.

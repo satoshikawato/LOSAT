@@ -59,14 +59,15 @@ about:
   description: |
     LOSAT is a standalone, pure-Rust implementation of NCBI BLAST+ 2.17.0 local
     sequence search. It runs NCBI's command lines for blastn, blastp, blastx,
-    tblastn, tblastx, psiblast, rpsblast and rpstblastn against FASTA subjects
-    (-subject) or BLAST databases (-db), and provides makeblastdb, blastdbcmd,
+    tblastn, tblastx and psiblast against FASTA subjects (-subject) or BLAST
+    databases (-db), rpsblast and rpstblastn against profile databases (-db),
+    and provides makeblastdb, blastdbcmd,
     dustmasker, segmasker, windowmasker, convert2blastmask, makembindex,
     makeprofiledb and rpsbproc. Its output equals NCBI BLAST+ 2.17.0's on the release test set (E-values, bit
     scores, coordinates and every output format byte for byte), and it needs no
     BLAST+ installation.
   dev_url: https://github.com/satoshikawato/LOSAT
-  doc_url: https://github.com/satoshikawato/LOSAT/blob/v{{ version }}/README.md
+  doc_url: https://satoshikawato.github.io/LOSAT/
 
 extra:
   additional-platforms:

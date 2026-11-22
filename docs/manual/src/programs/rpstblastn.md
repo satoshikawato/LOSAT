@@ -35,7 +35,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-qcov_hsp_perc P` | | Minimum percent of the query covered by an alignment |
 | `-seg yes\|no\|"W L H"` | no | Filter low-complexity regions of the translated query |
 | `-lcase_masking` | off | Treat lower-case query letters as masked |
-| `-window_size N` | | Two-hit window; 0 selects the one-hit method |
+| `-window_size N` | 40 | Two-hit window; 0 selects the one-hit method |
 | `-dbsize N`, `-searchsp N` | | Set the effective database length or search space |
 | `-num_threads N` | 1 | Number of threads; 0 means one per volume |
 | `-mt_mode N` | 0 | Split by volume (0) or by query (1); the output does not depend on it |

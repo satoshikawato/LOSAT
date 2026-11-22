@@ -183,7 +183,7 @@ fn a_heap_test_past_the_batch_reads_an_empty_heap() {
     let subject = input(OK_FAIL);
     let bslice = input("db_search/bslice.faa");
     // (query, padded query, subject, as-is batch size, padded batch size): tks_W alone (contexts 1
-    // to 5 past one heap), q12 one query per batch (each with five pads in a batch of 1720 letters).
+    // to 5 past one heap), q2 one query per batch (each with five pads in a batch of 1720 letters).
     let cases = [
         (
             "fasta/x4b2/w.fna",
@@ -193,8 +193,8 @@ fn a_heap_test_past_the_batch_reads_an_empty_heap() {
             None,
         ),
         (
-            "fasta/x4b2/q12.fna",
-            "fasta/x4b2/q12_b1_pad.fna",
+            "fasta/x4b2/q2.fna",
+            "fasta/x4b2/q2_b1_pad.fna",
             &bslice,
             Some("1"),
             Some("1720"),

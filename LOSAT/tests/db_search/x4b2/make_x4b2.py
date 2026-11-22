@@ -43,12 +43,15 @@ Query files (`tests/fasta/x4b2/`):
   added heaps stay empty: NCBI's run of the padded file is the expectation of the as-is file.
   - `w_pad.fna`, `w_rc_pad.fna`, `qok1_pad.fna`, `qok1_rc_pad.fna`: one query and five pads, in one batch.
   - `pre20_pad_wrc_pad.fna`: `pre20_pad_wrc.fna` and five pads, which join its second batch with BATCH_SIZE=1644.
-  - `q12_b1_pad.fna` (with BATCH_SIZE=1720 for the as-is BATCH_SIZE=1): m_fam_1k and five pads (1720 letters), m_mix_1k
-    and five pads (1720 letters), then the ten queries without a hit as the last batch (no hit, so no heap test: their
-    batches write no row in either run).
-  - `big12_pad.fna` (with BATCH_SIZE=12040 for the default 10002 of `big12.fna`): m_fam and m_mix (10600 letters, one
-    batch at 10002) and ten pads (12040 letters), then the ten queries without a hit as the last batch. NCBI splits a
-    BLASTX batch of more than one query into no chunks, so both runs search each batch whole.
+  - `q2.fna` (m_fam_1k and m_mix_1k, `q12.fna` without its ten queries without a hit) and `q2_b1_pad.fna` (with
+    BATCH_SIZE=1720 for the as-is BATCH_SIZE=1): m_fam_1k and five pads (1720 letters), m_mix_1k and five pads (1720
+    letters).
+  - `big2.fna` (m_fam and m_mix, `big12.fna` without its ten queries without a hit: 10600 letters, one batch at the
+    default 10002) and `big2_pad.fna` (with BATCH_SIZE=12040): m_fam, m_mix and ten pads (12040 letters). NCBI splits
+    a BLASTX batch of more than one query into no chunks, so both runs search each batch whole.
+  - Neither pair has a batch of queries without a hit only: NCBI warns about such a batch's queries (`Could not
+    calculate ungapped Karlin-Altschul parameters`) by their numbers in the file, which the pads before them would
+    shift.
 
 Subject files: `ok_fail.faa` (sok1, then sfail: the failing match is the stream's last).
 
@@ -162,8 +165,10 @@ queries = {
     "qok1_pad.fna": [qok1] + pad[:5],
     "qok1_rc_pad.fna": [qok1_rc] + pad[:5],
     "pre20_pad_wrc_pad.fna": [pre20] + nohit[:11] + [w_rc] + pad[:5],
-    "q12_b1_pad.fna": [m_fam_1k] + pad[:5] + [m_mix_1k] + pad[5:10] + nohit[1:11],
-    "big12_pad.fna": [m_fam, m_mix] + pad[:10] + nohit[1:11],
+    "q2.fna": [m_fam_1k, m_mix_1k],
+    "big2.fna": [m_fam, m_mix],
+    "q2_b1_pad.fna": [m_fam_1k] + pad[:5] + [m_mix_1k] + pad[5:10],
+    "big2_pad.fna": [m_fam, m_mix] + pad[:10],
     "q240.fna": [("m_fam_240 bases 1-240 of m_fam", slices["m_fam"][:240])],
     "q120.fna": [("m_fam_120 bases 1-120 of m_fam", slices["m_fam"][:120])],
     "ok_fail.faa": [("sok1 BDT63546.1 of PajaWSV", SOK1),
@@ -190,8 +195,8 @@ def batches(records, size):
 
 # Each padded batch is an as-is batch followed by pads (none for the last, whose queries have no hit), enough to keep
 # every context of its queries with a hit inside the batch's array of heaps (5N pads keep all 6N contexts inside).
-for as_is, as_size, padded, pad_size in [("q12.fna", 1, "q12_b1_pad.fna", 1720),
-                                         ("big12.fna", 10002, "big12_pad.fna", 12040),
+for as_is, as_size, padded, pad_size in [("q2.fna", 1, "q2_b1_pad.fna", 1720),
+                                         ("big2.fna", 10002, "big2_pad.fna", 12040),
                                          ("pre20_pad_wrc.fna", 1644, "pre20_pad_wrc_pad.fna", 1644)]:
     own, oracle = batches(queries[as_is], as_size), batches(queries[padded], pad_size)
     stripped = [[name for name in batch if not name.startswith("pad")] for batch in oracle]

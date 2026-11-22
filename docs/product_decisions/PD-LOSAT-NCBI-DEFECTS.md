@@ -2679,7 +2679,7 @@ test, so most searches with hits in this mode were refused). Numbered after exce
     (`LOSAT/tests/fasta/x4b2/*_pad.fna`, `LOSAT/tests/db_search/x4b2/make_x4b2.py`), and the rows
     `db.x4b2.past.*` without `.pad` take them as the expectation of the inputs as is (`ncbi-near:`,
     `LOSAT/tests/db_search_fixtures.py`): one query with hits in frames -1, -2 and -3, with
-    `-subject` and `-db`, the 12 one-query batches of `BATCH_SIZE=1`, NCBI's default batch of two
+    `-subject` and `-db`, two one-query batches of `BATCH_SIZE=1`, NCBI's default batch of two
     queries of 5,000 and 5,600 letters, and batches that fail. Unit tests
     `a_context_past_the_batch_tests_an_empty_heap` (`LOSAT/src/algorithm/blastx/results_boundary_tests.rs`) and
     `a_heap_test_past_the_batch_reads_an_empty_heap` (`LOSAT/tests/blastx_sw_tback.rs`).

@@ -108,8 +108,9 @@ fn the_first_motif_site_sets_the_positions_for_every_later_check() {
     );
 }
 
-// DECISIONS 25 Q2 = A (2026-11-11): the compare `rMappedRes[mapIdx].ori > st_motif_pos[mtfIdx]`
-// with `mtfIdx` at the end of the list reads heap bytes in NCBI; LOSAT fails the check.
+// DECISIONS 25 Q2 = A (2026-11-11): the compare of `rMappedRes[mapIdx].ori` against
+// `st_motif_pos[mtfIdx]` with `mtfIdx` at the end of the list reads heap bytes in NCBI; LOSAT fails
+// the check.
 #[test]
 fn a_minimal_map_longer_than_the_stored_positions_fails_the_check() {
     let data = load(&[

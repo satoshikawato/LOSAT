@@ -259,9 +259,8 @@ pub struct OptionInputs {
     pub ungapped: bool,
     /// `-no_greedy` (BLASTN): the dynamic programming algorithms are recorded.
     pub no_greedy: bool,
-    /// The name of the MegaBLAST index that a BLASTN run asked for and did not use (`-use_index
-    /// true`, task megablast: the `-index_name` value, else `-db`;
-    /// `blastn::blast_engine::mb_index`).
+    /// The name of the MegaBLAST index that a BLASTN run asked for (`-use_index true`, task
+    /// megablast: the `-index_name` value, else `-db`; `blastn::blast_engine::mb_index`).
     pub mb_index_name: Option<String>,
     pub max_intron_length: i32,
     pub query_gencode: i32,
@@ -269,7 +268,7 @@ pub struct OptionInputs {
     /// `-max_target_seqs`, else `-num_alignments`, else 500.
     pub hitlist_size: i32,
     pub comp_based_stats: i32,
-    /// The `u` of `-comp_based_stats 2u` as given: `SetUnifiedP(1)` for BLASTP in an adjusting mode
+    /// The `u` of `-comp_based_stats 2u` as given: `SetUnifiedP` set to 1 for BLASTP in an adjusting mode
     /// (`algorithm_options`).
     pub unified_p: bool,
     pub use_sw_tback: bool,
@@ -378,7 +377,7 @@ fn is_default_word_threshold(kind: RequestKind, value: i32) -> bool {
     }
 }
 
-/// The setters of the task (`CBlastOptionsFactory::Create(task)` outside defaults mode).
+/// The setters of the task (`CBlastOptionsFactory::Create` of `task` outside defaults mode).
 fn task_calls(task: &str) -> Vec<Param> {
     use ParamValue::{Boolean, Evalue, Integer, Str};
     let p = |name, value| Param { name, value };
@@ -391,7 +390,7 @@ fn task_calls(task: &str) -> Vec<Param> {
             p("DustFiltering", Boolean(false)),
             p("SegFiltering", Boolean(false)),
             p("RepeatFiltering", Boolean(false)),
-            // `ClearFilterOptions` ends with `SetMaskAtHash(false)` (api/blast_options_cxx.cpp:1022-1031).
+            // `ClearFilterOptions` ends with `SetMaskAtHash` set to false (api/blast_options_cxx.cpp:1022-1031).
             p("MaskAtHash", Boolean(false)),
         ],
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:365-370
@@ -418,7 +417,7 @@ fn task_calls(task: &str) -> Vec<Param> {
             p("DustFiltering", Boolean(false)),
             p("SegFiltering", Boolean(false)),
             p("RepeatFiltering", Boolean(false)),
-            // `ClearFilterOptions` ends with `SetMaskAtHash(false)` (api/blast_options_cxx.cpp:1022-1031).
+            // `ClearFilterOptions` ends with `SetMaskAtHash` set to false (api/blast_options_cxx.cpp:1022-1031).
             p("MaskAtHash", Boolean(false)),
         ],
         _ => Vec::new(),
@@ -811,9 +810,10 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:2619-2632
             // `CMbIndexArgs` sets both (`force_index` true, the `-db` name); the index that
-            // does not load sets `SetUseIndex(false)` (api/setup_factory.cpp:455-459), whose
+            // does not load calls `SetUseIndex` with false (api/setup_factory.cpp:455-459), whose
             // defaults make the first FALSE in its place and leave the name. An empty name
-            // (`-index_name ''`) is not set.
+            // (`-index_name ''`) is not set. A search with the index sets it TRUE again in the
+            // run's options handle (`blastn::blast_engine::mb_index::note_index_use`).
             Class::MbIndex => {
                 if let Some(name) = &inputs.mb_index_name {
                     list.set("ForceMbIndex", Boolean(false));

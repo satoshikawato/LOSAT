@@ -375,7 +375,7 @@ fn test_link_sort_tie_preserves_current_hsp_list_order_for_equal_hits() {
 /// NCBI comparison logic (c++/src/algo/blast/core/link_hsps.c:359-375):
 ///
 /// C qsort: compare(a,b) > 0 means "a comes after b"
-/// So `if (h1 < h2) return 1` means smaller values come AFTER = DESCENDING order
+/// So returning 1 when `h1` is below `h2` means smaller values come AFTER = DESCENDING order
 #[test]
 fn test_hsp_sort_order_matches_ncbi() {
     // Test data: hits with varying coordinates

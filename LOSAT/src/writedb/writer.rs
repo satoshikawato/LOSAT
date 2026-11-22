@@ -41,7 +41,7 @@ pub struct WriteDb {
     /// `m_VolumeList`; the last element is `m_Volume`.
     volumes: Vec<Volume>,
     closed: bool,
-    /// `m_Bioseq`, or `m_Sequence` and `m_Ambig` of `AddSequence(seq, ambig)`, while
+    /// `m_Bioseq`, or `m_Sequence` and `m_Ambig` of `AddSequence` of `seq` and `ambig`, while
     /// `m_HaveSequence` is set.
     pending: Option<Pending>,
     /// What NCBI's serializer posts to the diagnostic stream, in order.
@@ -101,9 +101,9 @@ pub struct WriteDb {
     reason = "one value per writer; a box would add an allocation for each FASTA sequence"
 )]
 enum Pending {
-    /// `AddSequence(const CBioseq &)`.
+    /// `AddSequence` of a `CBioseq`.
     Bioseq(Bioseq),
-    /// `AddSequence(seq, ambig)`: a sequence in the form of the sequence file.
+    /// `AddSequence` of `seq` and `ambig`: a sequence in the form of the sequence file.
     Raw(BinarySequence),
 }
 
@@ -182,7 +182,8 @@ fn post_bad_chars(diagnostics: &mut Vec<u8>, bad: &[BadChar]) {
 }
 
 impl WriteDb {
-    /// `CWriteDB(dbname, seqtype, title, ..., dbver, ...)` followed by
+    /// `CWriteDB` of the database name, the sequence type, the title and the database version
+    /// (among other arguments), followed by
     /// `SetMaxFileSize`. `date` is the creation date of the index files, in
     /// the form of `current_date`'s argument; `platform` the platform whose
     /// makeblastdb the files follow ([`Platform::host`] for a build);
@@ -303,7 +304,7 @@ impl WriteDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:158-180
-    /// `AddSequence(const CBioseq &)`: publishes the previous sequence and
+    /// `AddSequence` of a `CBioseq`: publishes the previous sequence and
     /// keeps this one.
     pub fn add_sequence(&mut self, bioseq: Bioseq) -> Result<(), WriteDbError> {
         self.publish()?;
@@ -329,9 +330,9 @@ impl WriteDb {
     // makeblastdb adds such sequences with `-parse_seqids` indices (`eFullIndex`), and their
     // definition lines come from `SetDeflines`: the header of a sequence without them (built
     // from a `CBioseq` with the injected `gnl|BL_ORD_ID|<oid>`) has no counterpart here.
-    /// `AddSequence(seq, ambig)`: publishes the previous sequence and keeps this one, given in
-    /// the form of the sequence file (a protein's NCBIstdaa bytes; a nucleotide's packed bases
-    /// and its ambiguity data), as a database stores it.
+    /// `AddSequence` of `seq` and `ambig`: publishes the previous sequence and keeps this one,
+    /// given in the form of the sequence file (a protein's NCBIstdaa bytes; a nucleotide's packed
+    /// bases and its ambiguity data), as a database stores it.
     pub fn add_raw_sequence(&mut self, seq: &[u8], ambig: &[u8]) -> Result<(), WriteDbError> {
         self.publish()?;
         self.reset_sequence_data();
@@ -535,7 +536,7 @@ impl WriteDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1158-1175
-    /// `m_Volume->WriteSequence(...)` with the kept sequence's data, then its LMDB entries when
+    /// `WriteSequence` of `m_Volume` with the kept sequence's data, then its LMDB entries when
     /// it was written; `false` when it does not fit the current volume.
     fn write_to_volume(
         &mut self,
@@ -579,8 +580,9 @@ impl WriteDb {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.hpp:655
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:58
     // An OID is a 4-byte signed integer in NCBI's writer and in its LMDB files, so a database
-    // has at most 2^31 sequences; NCBI's `m_LmdbOid++` overflows past that. LOSAT stops with
-    // an error at the sequence that would get OID 2^31 (no NCBI overflow reproduced).
+    // has at most 2^31 sequences; NCBI's `m_LmdbOid` overflows when it is incremented past that.
+    // LOSAT stops with an error at the sequence that would get OID 2^31 (no NCBI overflow
+    // reproduced).
     /// The keys of the ids (`-parse_seqids`) and the tax ids of the sequence just written,
     /// under the next OID of the database (version 5).
     fn insert_lmdb_entries(&mut self) -> Result<(), WriteDbError> {
@@ -776,10 +778,10 @@ impl WriteDb {
         }
     }
 
-    /// `RegisterMaskAlgorithm(program, options, name)`: registers a masking algorithm of the
-    /// filtering program `program` (a `Blast-filter-program` number) and returns its id.
-    /// `name` is the name of the mask file for makeblastdb. The first registration creates
-    /// the mask column.
+    /// `RegisterMaskAlgorithm` of a program, its options and a name: registers a masking algorithm
+    /// of the filtering program `program` (a `Blast-filter-program` number) and returns its id.
+    /// `name` is the name of the mask file for makeblastdb. The first registration creates the mask
+    /// column.
     pub fn register_mask_algorithm(
         &mut self,
         program: i32,
@@ -793,7 +795,8 @@ impl WriteDb {
         Ok(id)
     }
 
-    /// `RegisterMaskAlgorithm(id, description, options)`: the form of `makeblastdb -mask_id`.
+    /// `RegisterMaskAlgorithm` of an id, a description and options: the form of
+    /// `makeblastdb -mask_id`.
     pub fn register_mask_algorithm_id(
         &mut self,
         id: &[u8],
@@ -892,7 +895,7 @@ impl WriteDb {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1537-1555
     // The mask column's blobs are made by `SetMaskData`.
-    /// `SetBlobData(col_id)` filled with `data` (`Clear`, `WriteRaw`): the next blob of column
+    /// `SetBlobData` of `col_id` filled with `data` (`Clear`, `WriteRaw`): the next blob of column
     /// `col_id` for the sequence added last.
     pub fn set_blob_data(&mut self, col_id: usize, data: &[u8]) -> Result<(), WriteDbError> {
         match self.columns.get_mut(col_id) {
@@ -1021,10 +1024,10 @@ fn gi_only_between_keys_error(oid: u32, name: &[u8]) -> WriteDbError {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:749-761
-// The writer calls it with the defaults `use_index = false`, `index = 0`
+// The writer calls it with the defaults of `use_index` (false) and `index` (0)
 // (include/objtools/blast/seqdb_reader/impl/seqdb_lmdb.hpp:118): one LMDB file for the
 // database, beside its volumes.
-/// `BuildLMDBFileName(basename, is_protein)`: `<db>.pdb` or `<db>.ndb`.
+/// `BuildLMDBFileName` of `basename` and `is_protein`: `<db>.pdb` or `<db>.ndb`.
 pub(crate) fn build_lmdb_file_name(basename: &str, is_protein: bool) -> String {
     format!("{basename}{}", if is_protein { ".pdb" } else { ".ndb" })
 }
@@ -1060,7 +1063,7 @@ fn union_of_tax_ids(deflines: &[crate::seqid::BlastDefline]) -> Vec<i32> {
     tax_ids
 }
 
-/// `CDirEntry(path).GetName()`: the part after the last path separator.
+/// `GetName` of a `CDirEntry` of `path`: the part after the last path separator.
 fn file_name(path: &str) -> &str {
     let is_separator = |c: char| c == '/' || (cfg!(windows) && (c == '\\' || c == ':'));
     match path.rfind(is_separator) {

@@ -987,7 +987,7 @@ struct LookupBackboneChains {
 }
 
 impl LookupBackboneChains {
-    /// `calloc(backbone_size, sizeof(Int4 *))`
+    /// A `calloc` of `backbone_size` pointers to `Int4`.
     fn new(backbone_size: usize) -> Self {
         Self {
             cells: std::iter::repeat_with(|| None)

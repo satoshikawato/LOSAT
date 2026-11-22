@@ -138,8 +138,8 @@ As on the command line, `makeblastdb` needs `-title` when it reads standard inpu
 All errors derive from `LosatError` and carry the command line's message for the same failure:
 
 - `ArgumentError`: an option or value that the parser refuses.
-- `InputError`: a FASTA input that the reader refuses or cannot open.
-- `SearchError`: a search, database or tool that fails.
+- `InputError`: a FASTA input that does not open, or a subject record that the reader refuses (the command line reads every subject before the first query).
+- `SearchError`: a search, database or tool that fails. A query record that the reader refuses is one too: the command line reads its queries one batch at a time, so the search ends in the batch of that record, after the batches before it. `batches` gives those batches, and `run_to_file` writes their reports, as the command line's `-out` does.
 
 `error.message_bytes` is the message as bytes, made from what the command line writes to its standard error for the failure: a search's message of NCBI's (such as the engine's error) keeps its newlines; LOSAT's own refusals have no `Error: ` and no last newline; `InputError`, the errors of the tools and that of a start that ends the program (`Critical: ...`) are the command line's text without its last newlines. Text that a search writes before the failure, such as a warning, is not in the message. `str(error)` is the message as text, with one U+FFFD per maximal ill-formed subpart of its bytes.
 

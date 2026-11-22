@@ -1,0 +1,156 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: multidb na; multidb nnp
+           17 sequences; 11,514 total letters
+
+
+
+Query= pfo_f the letters of multidb/na's ENST00000335295.4 (HBB)
+
+Length=628
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ENST00000335295.4 Unknown                                             1160    0.0   
+ENST00000292901.8 Unknown                                             558     4e-162
+ENST00000396895.3 Unknown                                             322     6e-91 
+
+
+Sequence with id ENST00000335295.4 no longer exists in database...alignment skipped
+Sequence with id ENST00000292901.8 no longer exists in database...alignment skipped
+Sequence with id ENST00000396895.3 no longer exists in database...alignment skipped
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 6901767
+
+
+Query= mix2_u glob1 of multidb/nnp (no accession table)
+
+Length=1043
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+FBtr0083245 cdna primary_assembly:BDGP6.54:3R:15896926:15902584:-...  1927    0.0  
+
+
+>FBtr0083245 cdna primary_assembly:BDGP6.54:3R:15896926:15902584:-1 
+gene:FBgn0027657 gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob1 description:globin 
+1
+Length=1043
+
+ Score = 1927 bits (1043),  Expect = 0.0
+ Identities = 1043/1043 (100%), Gaps = 0/1043 (0%)
+ Strand=Plus/Plus
+
+Query  1     GTAGCTTCGTTTGCTGCGTTTATTTTGTGTCAGTTGTTGTTGCCGCTCGGAAGTCTTTTA  60
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1     GTAGCTTCGTTTGCTGCGTTTATTTTGTGTCAGTTGTTGTTGCCGCTCGGAAGTCTTTTA  60
+
+Query  61    TAAAGGCCAGTCGGGCTAGAAATTCTATTCAGTTCAAATATTAACGGCGTCGTGTGCAGT  120
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61    TAAAGGCCAGTCGGGCTAGAAATTCTATTCAGTTCAAATATTAACGGCGTCGTGTGCAGT  120
+
+Query  121   TGCCTGGCATTTGATATAAACTCCTAAAAGCCATTAAGAGAGGGCCGAACGCTTATAGAG  180
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121   TGCCTGGCATTTGATATAAACTCCTAAAAGCCATTAAGAGAGGGCCGAACGCTTATAGAG  180
+
+Query  181   AGCTATAGAGTGAAAGCTGAGAAGAACCAAAACGGAGCATAAACATGAACAGCGATGAGG  240
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181   AGCTATAGAGTGAAAGCTGAGAAGAACCAAAACGGAGCATAAACATGAACAGCGATGAGG  240
+
+Query  241   TGCAACTGATCAAGAAGACCTGGGAAATCCCCGTGGCAACACCAACAGATTCTGGAGCGG  300
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  241   TGCAACTGATCAAGAAGACCTGGGAAATCCCCGTGGCAACACCAACAGATTCTGGAGCGG  300
+
+Query  301   CGATACTGACGCAGTTTTTCAACCGCTTTCCGTCCAACTTGGAGAAGTTCCCCTTCCGCG  360
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301   CGATACTGACGCAGTTTTTCAACCGCTTTCCGTCCAACTTGGAGAAGTTCCCCTTCCGCG  360
+
+Query  361   ATGTTCCTTTGGAGGAGCTAAGTGGAAATGCTCGCTTCCGAGCACATGCCGGCAGAATCA  420
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361   ATGTTCCTTTGGAGGAGCTAAGTGGAAATGCTCGCTTCCGAGCACATGCCGGCAGAATCA  420
+
+Query  421   TAAGGGTCTTTGACGAGTCCATCCAGGTCCTGGGCCAGGATGGCGATCTGGAGAAGCTGG  480
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  421   TAAGGGTCTTTGACGAGTCCATCCAGGTCCTGGGCCAGGATGGCGATCTGGAGAAGCTGG  480
+
+Query  481   ACGAGATCTGGACCAAAATTGCCGTTAGTCACATTCCGCGGACCGTTTCCAAGGAGTCTT  540
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  481   ACGAGATCTGGACCAAAATTGCCGTTAGTCACATTCCGCGGACCGTTTCCAAGGAGTCTT  540
+
+Query  541   ACAACCAACTGAAAGGAGTTATCCTGGATGTGCTGACAGCTGCCTGCAGTCTGGACGAGA  600
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  541   ACAACCAACTGAAAGGAGTTATCCTGGATGTGCTGACAGCTGCCTGCAGTCTGGACGAGA  600
+
+Query  601   GTCAAGCGGCCACGTGGGCCAAGCTGGTGGACCATGTCTACGGAATCATCTTCAAGGCGA  660
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  601   GTCAAGCGGCCACGTGGGCCAAGCTGGTGGACCATGTCTACGGAATCATCTTCAAGGCGA  660
+
+Query  661   TCGACGACGACGGCAACGCCAAGTAGATGAGGCAGCTGGAGGTGGAGATGCAACCGAATC  720
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  661   TCGACGACGACGGCAACGCCAAGTAGATGAGGCAGCTGGAGGTGGAGATGCAACCGAATC  720
+
+Query  721   CGCGGAAGGATGCAACTGATGCCAGCCGGTGGCACTTGCAACACATGCACAGCTTATGTA  780
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  721   CGCGGAAGGATGCAACTGATGCCAGCCGGTGGCACTTGCAACACATGCACAGCTTATGTA  780
+
+Query  781   GTTCTAAGTAATTGATAAATGTTAGCTATTCTCGTTTTGTAATAATGAATGCGAATGTCC  840
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  781   GTTCTAAGTAATTGATAAATGTTAGCTATTCTCGTTTTGTAATAATGAATGCGAATGTCC  840
+
+Query  841   AAAACAAAAATACACACACAGTGAAAACTTATGTCTGCGTAGAGCTACTGacacacgcgc  900
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  841   AAAACAAAAATACACACACAGTGAAAACTTATGTCTGCGTAGAGCTACTGACACACGCGC  900
+
+Query  901   acaccccacacacatacacccgcacTTGCATTGCTCTGTAAAGCTTTAACCCATTGTCAG  960
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  901   ACACCCCACACACATACACCCGCACTTGCATTGCTCTGTAAAGCTTTAACCCATTGTCAG  960
+
+Query  961   CCTTAAGCACTTGATAGCAAACAATACATGGAATCAGCAAAGGAGAAATAAGAAAGCTTA  1020
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  961   CCTTAAGCACTTGATAGCAAACAATACATGGAATCAGCAAAGGAGAAATAAGAAAGCTTA  1020
+
+Query  1021  TAAATAAAATCCAGTTTGAAAGC  1043
+             |||||||||||||||||||||||
+Sbjct  1021  TAAATAAAATCCAGTTTGAAAGC  1043
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 11545534
+
+
+  Database: multidb na
+    Posted date:  Nov 1, 2026  11:22 AM
+  Number of letters in database: 4,849
+  Number of sequences in database:  8
+
+  Database: multidb nnp
+    Posted date:  Nov 1, 2026  11:22 AM
+  Number of letters in database: 6,665
+  Number of sequences in database:  9
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

@@ -330,8 +330,8 @@ pub(crate) fn read_shown_stored(
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqinfosrc_aux.cpp:51-69
 // The masks of a sequence carry its first Seq-id; its Seq-aligns carry its first GI, else that
 // first Seq-id. A database without parsed Seq-ids names each sequence `gnl|BL_ORD_ID|oid`.
-/// The [`ordered_key`]s of the first Seq-id of a database sequence (`CSeqDB::GetSeqIDs(oid)`'s
-/// first: NCBI's subject masks are kept under it) and of its Seq-align id
+/// The [`ordered_key`]s of the first Seq-id of a database sequence (`CSeqDB::GetSeqIDs` of `oid`,
+/// its first: NCBI's subject masks are kept under it) and of its Seq-align id
 /// (`DeflineSet::alignment_id`: a row looks the masks up by it): those of its parsed Seq-ids
 /// `parsed`, or `gnl|BL_ORD_ID|oid` for both.
 pub(crate) fn subject_id_keys(

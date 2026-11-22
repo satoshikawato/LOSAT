@@ -1,7 +1,7 @@
 //! The masked ranges of the sequences, by algorithm and sequence
 //! (`CMaskedRangeSet`, `c++/src/app/blastdb/masked_range_set.cpp`), with the
 //! combination of several Seq-locs of one sequence (`CSeq_loc::Add` with
-//! `fMerge_All | fSort`, Seq_loc.cpp:4283-4693, 5060-5084).
+//! the flags `fMerge_All` and `fSort`, Seq_loc.cpp:4283-4693, 5060-5084).
 //!
 //! A mask finds a sequence the way NCBI's `map<CSeq_id_Handle, CConstRef<CSeq_loc>>` does: through
 //! the handle of its Seq-id, and a sequence looks its Seq-ids up in the order of its `GetId()`
@@ -29,13 +29,13 @@
 //! LOSAT refuses (`WriteDbError::Unsupported`, "losat makeblastdb: ...", exit status 1) only what
 //! NCBI decides by memory addresses. `x_MergeAndSort` groups the ranges of a combination in
 //! `map<CSeq_id_Handle_Wrapper, TRanges>` (Seq_loc.cpp:4651-4686), ordered by
-//! `CSeq_id_Handle::operator<`: `m_Packed - 1` as unsigned, then the address of the handle's info
-//! (seq_id_handle.hpp:201-207); the plus-strand groups are written before the minus-strand ones
-//! (`x_RangesToSeq_loc` once per map, 4688-4691), and ranges of different handles are never merged.
-//! Two different handles with the same `m_Packed` (`gi|5` and `gb|AY000005.1|`, 5; two unpacked
-//! handles such as a local id and a `general` string tag, or two `giim` handles, 0) are ordered by
-//! address, so LOSAT refuses a combination that writes ranges of two such handles on one strand
-//! in an order that matters (the ranges written of one are not those of the other repeated,
+//! `CSeq_id_Handle::operator<`: `m_Packed` less 1 as unsigned, then the address of the handle's
+//! info (seq_id_handle.hpp:201-207); the plus-strand groups are written before the minus-strand
+//! ones (`x_RangesToSeq_loc` once per map, 4688-4691), and ranges of different handles are never
+//! merged. Two different handles with the same `m_Packed` (`gi|5` and `gb|AY000005.1|`, 5; two
+//! unpacked handles such as a local id and a `general` string tag, or two `giim` handles, 0) are
+//! ordered by address, so LOSAT refuses a combination that writes ranges of two such handles on one
+//! strand in an order that matters (the ranges written of one are not those of the other repeated,
 //! `note_ties`). One strand each is decided, as plus before minus (review probe p4).
 //!
 //! The refusal waits for the end of the build. `get_ranges` writes LOSAT's order (tied groups in
@@ -45,8 +45,9 @@
 //! order is visible only in the column files that a successful build keeps, so every error of
 //! NCBI that comes later in the run decides the outcome first: the bounds check of the same
 //! sequence over all its algorithms (`SetMaskData`, writedb_impl.cpp:1339-1386), and any error of
-//! a later sequence or file, after which `EndBuild(true)` removes the files (build_db.cpp:1415-1417).
-//! A refusal at the close leaves the files that such an error leaves (`BuildDatabase::end_build`).
+//! a later sequence or file, after which `EndBuild` with `erase` true removes the files
+//! (build_db.cpp:1415-1417). A refusal at the close leaves the files that such an error leaves
+//! (`BuildDatabase::end_build`).
 //!
 //! `giim` handles need no rule of their own: the first mask Seq-id of a number makes the first
 //! handle, which stays (a key of `m_Values`); a Seq-id that is not `Equals` to it finds that
@@ -181,7 +182,7 @@ fn merge_ranges(rg1: &mut Range, rg2: Range, reverse: bool) -> bool {
         rg1.combine(rg2);
         return true;
     }
-    // Abutting: `CopyTo` sets `to_open` to `rg2.GetTo() + 1`, `CopyFrom` sets `from`.
+    // Abutting: `CopyTo` sets `to_open` to one more than `rg2.GetTo()`, `CopyFrom` sets `from`.
     if !reverse {
         if rg1.to_open == rg2.from {
             rg1.to_open = rg2.to_open;
@@ -422,7 +423,7 @@ struct Part {
     /// `None` for an `empty` or `null` Seq-loc: skipped by `CSeq_loc_CI` (`eEmpty_Skip`, the
     /// final iteration), `TRange::GetEmpty()` with `eEmpty_Allow` (inside `CSeq_loc::Add`).
     range: Option<Range>,
-    /// `IsReverse(strand)`: the strand is used for nothing else.
+    /// `IsReverse` of the strand: the strand is used for nothing else.
     reverse: bool,
 }
 
@@ -513,8 +514,8 @@ struct Group {
 // `x_MergeAndSort` returns. A `null` Seq-loc has an unset Seq-id, whose handle is the null one:
 // its group writes one `null` Seq-loc. A whole range becomes a `whole` Seq-loc and an empty one an
 // `empty` Seq-loc, both without strand (the next iteration sees them on the plus strand).
-/// `L1->Add(L2, fMerge_All | fSort, NULL)`: the Seq-loc `x_MergeAndSort` writes, with what in
-/// it depends on memory addresses (`Loc::written`).
+/// `Add` of `L2` to `L1` with the flags `fMerge_All` and `fSort`, and no synonym mapper: the
+/// Seq-loc `x_MergeAndSort` writes, with what in it depends on memory addresses (`Loc::written`).
 fn add_locs(tree: &mut GiimTree, l1: &Loc, l2: &Loc) -> Loc {
     let parts = || {
         l1.parts
@@ -593,7 +594,7 @@ fn add_locs(tree: &mut GiimTree, l1: &Loc, l2: &Loc) -> Loc {
     for (number, handle) in made {
         tree.drop_handle(number, handle);
     }
-    // `operator<`: `m_Packed - 1` unsigned, then the info's address (the null handle's is 0).
+    // `operator<`: `m_Packed` less 1, unsigned, then the info's address (the null handle's is 0).
     // Groups that the address orders keep the order of their first range here.
     groups.sort_by_key(|g| (mask_handle_order(g.packed), g.handle != GroupHandle::Null));
     let mut out = Loc::default();

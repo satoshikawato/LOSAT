@@ -1,0 +1,11 @@
+Blast-def-line ::= {
+  title "tr|A0A000|A0A000_YEAST trembl entry",
+  seqid {
+    general {
+      db "BL_ORD_ID",
+      tag id 3
+    }
+  },
+  taxid 0
+}
+

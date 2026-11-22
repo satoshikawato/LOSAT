@@ -34,7 +34,7 @@ pub fn filter_string(
         if dust == DUST_DEFAULTS {
             text.push_str("L;");
         } else {
-            // `char buffer[24]`: snprintf cuts the text at 23 bytes.
+            // `buffer` holds 24 bytes: snprintf cuts the text at 23 bytes.
             text.push_str(&truncated(format!("D {} {} {};", dust.0, dust.1, dust.2)));
         }
     }
@@ -88,7 +88,7 @@ fn glibc_fixed1(value: f64) -> String {
     }
 }
 
-/// `snprintf(buffer, 24, ...)`: at most 23 bytes.
+/// `snprintf` into `buffer` of 24 bytes: at most 23 bytes.
 fn truncated(mut text: String) -> String {
     text.truncate(23);
     text

@@ -48,7 +48,7 @@ use crate::utils::matrix::standard_score;
 /// hit-saving options.
 pub(super) struct OrdinaryTraceback<'a> {
     pub(super) contexts: &'a [QueryContext],
-    /// `query_blk->length + 1`, the query bound of NCBI's containment tree.
+    /// One more than `query_blk->length`, the query bound of NCBI's containment tree.
     pub(super) total_query_span: i32,
     pub(super) subjects: XRedoSubjects<'a>,
     pub(super) matrix: ScoringMatrix,
@@ -205,7 +205,7 @@ impl OrdinaryTraceback<'_> {
             });
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:634-692
-        // For BLASTP the purge deletes (`purge |= (program != eBlastTypeBlastn)`,
+        // For BLASTP the purge deletes (`purge` is set when `program` is not `eBlastTypeBlastn`,
         // blast_hits.c:2464) and returns the HSP count, so the re-evaluation loop from
         // `extra_start` (blast_traceback.c:647-665) has nothing to do.
         purge_hsps_with_common_endpoints(&mut traced);

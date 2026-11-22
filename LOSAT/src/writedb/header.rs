@@ -178,8 +178,8 @@ fn write_int8(out: &mut Vec<u8>, data: i64) {
     out.extend_from_slice(&data.to_be_bytes()[8 - length..]);
 }
 
-/// The BER writer of a whole `Blast-def-line-set` (`oss << MSerial_AsnBinary <<
-/// *deflines`), with the member path of each string for the serializer's diagnostics.
+/// The BER writer of a whole `Blast-def-line-set` (`*deflines` streamed to `oss` through
+/// `MSerial_AsnBinary`), with the member path of each string for the serializer's diagnostics.
 struct SetWriter<'a> {
     out: Vec<u8>,
     path: Vec<&'static str>,

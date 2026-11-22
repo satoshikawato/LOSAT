@@ -91,7 +91,7 @@ fn prelim_hitlist_size_with_composition_based_statistics() {
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1258-1292 testSBlastHitsParamsUngapped
-// NCBI's case is a blastp search with `gapped_calculation = FALSE` and the default hit list
+// NCBI's case is a blastp search with `gapped_calculation` false and the default hit list
 // size; the function is the same one (`GetPrelimHitlistSize`), which keeps the hit list size
 // for an ungapped search.
 #[test]

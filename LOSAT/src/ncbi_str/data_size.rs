@@ -1,13 +1,15 @@
-//! `NStr::StringToUInt8_DataSize(str, flags = 0)` (corelib/ncbistr.cpp), which makeblastdb calls for
+//! `NStr::StringToUInt8_DataSize` with `flags` at 0 (corelib/ncbistr.cpp), which makeblastdb calls for
 //! the value of `-max_file_sz`.
 //!
-//! Only the default-flags behaviour of `NStr::StringToUInt8_DataSize(str)` is ported (the two-argument overload, `flags = 0`).
-//! The deprecated three-argument overload (`flags`, `base`, ncbistr.cpp:1460) is not what makeblastdb calls and is not ported.
-//! With `flags == 0` these flag-dependent branches of the C++ never run and are therefore not ported:
-//! `fConvErr_NoThrow` (errors always throw), `fMandatorySign`, `fAllowCommas`, `fAllowLeadingSymbols`,
-//! `fAllowTrailingSymbols`, `fDS_ForceBinary`, `fDS_ProhibitFractions` (so a '.' is always a decimal point) and
-//! `fDS_ProhibitSpaceBeforeSuffix` (so one space before the suffix is always accepted).
-//! Also not ported: the "Wrong set of flags" check and the errno bookkeeping of `CS2N_Guard`.
+//! Only the default-flags behaviour of `NStr::StringToUInt8_DataSize` is ported (the overload of
+//! the string and `flags`, with `flags` at its default 0). The deprecated three-argument overload
+//! (`flags`, `base`, ncbistr.cpp:1460) is not what makeblastdb calls and is not ported. With
+//! `flags` at 0 these flag-dependent branches of the C++ never run and are therefore not ported:
+//! `fConvErr_NoThrow` (errors always throw), `fMandatorySign`, `fAllowCommas`,
+//! `fAllowLeadingSymbols`, `fAllowTrailingSymbols`, `fDS_ForceBinary`, `fDS_ProhibitFractions` (so
+//! a '.' is always a decimal point) and `fDS_ProhibitSpaceBeforeSuffix` (so one space before the
+//! suffix is always accepted). Also not ported: the "Wrong set of flags" check and the errno
+//! bookkeeping of `CS2N_Guard`.
 //!
 //! C `isdigit`, `isprint` and `toupper` are the ones of the "C" locale (ASCII only); the C++ works on bytes, so this port works on the bytes of the `&str`.
 
@@ -33,7 +35,7 @@ impl DataSizeError {
     }
 }
 
-/// A throw of `S2N_CONVERT_ERROR(Uint8, ...)` at `line` of `NStr::StringToUInt8_DataSize`.
+/// A throw of `S2N_CONVERT_ERROR` for `Uint8` at `line` of `NStr::StringToUInt8_DataSize`.
 const fn data_size_site(line: u32) -> ThrowSite {
     ThrowSite {
         file: "src/corelib/ncbistr.cpp",
@@ -43,9 +45,10 @@ const fn data_size_site(line: u32) -> ThrowSite {
     }
 }
 
-/// `err_guard.Message(str, "Uint8", kEmptyStr)` as thrown by `S2N_CONVERT_ERROR(Uint8, kEmptyStr, errcode, pos)`
-/// at `site`: a `CStringException` with this message and position `pos` (the `msg` argument is always empty in the
-/// ported paths).
+/// The `Message` of `err_guard` for `str`, "Uint8" and `kEmptyStr`, as thrown by
+/// `S2N_CONVERT_ERROR` with `Uint8`, `kEmptyStr`, `errcode` and `pos` at `site`: a
+/// `CStringException` with this message and position `pos` (the `msg` argument is always empty in
+/// the ported paths).
 fn convert_error(str_: &[u8], site: ThrowSite, pos: usize) -> DataSizeError {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:488-558
     let mut s = String::new();
@@ -61,7 +64,7 @@ fn convert_error(str_: &[u8], site: ThrowSite, pos: usize) -> DataSizeError {
     }
 }
 
-/// `NStr::StringToUInt8_DataSize(text)` with default flags (0).
+/// `NStr::StringToUInt8_DataSize` of `text` with default flags (0).
 pub fn string_to_uint8_data_size(text: &str) -> Result<u64, DataSizeError> {
     let str_ = text.as_bytes();
     let str_end = str_.len();
@@ -112,7 +115,8 @@ pub fn string_to_uint8_data_size(text: &str) -> Result<u64, DataSizeError> {
     if have_dot && digs_post_dot == 0 {
         str_ptr -= 1;
     }
-    // (the `else if (... *(str_ptr - 1) == ',')` arm cannot fire without fAllowCommas)
+    // (the `else if` arm that tests the byte before `str_ptr` for a comma cannot fire without
+    // fAllowCommas)
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1620-1631
     const NO_DIGIT: ThrowSite = data_size_site(1622);

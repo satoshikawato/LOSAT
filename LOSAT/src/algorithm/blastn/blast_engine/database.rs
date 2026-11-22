@@ -894,6 +894,38 @@ impl BlastnDatabase {
         Ok(())
     }
 
+    /// The stored masks of the database sequences `ordinals` for the algorithm `algo_id`, read
+    /// in blocks of at most `MASK_BLOCK_SEQS` sequences (`stored_masks`), each sequence's given to
+    /// `each` with its ordinal id: the masked letters of a MegaBLAST index volume's search with
+    /// `-db_hard_mask` (`mb_index_seeds::IndexSeeds::volume_masks`). A sequence whose masks do not
+    /// read is left out; its own search reads them again and reports the error.
+    pub(super) fn masks_of(
+        &self,
+        ordinals: std::ops::Range<u32>,
+        algo_id: i32,
+        mut each: impl FnMut(u32, &[(u32, u32)]),
+    ) {
+        let mut masks = MaskBlock::default();
+        let mut ordinal = ordinals.start;
+        while ordinal < ordinals.end {
+            let end = ordinals.end.min(ordinal.saturating_add(MASK_BLOCK_SEQS));
+            let Some(block) = self.db.x_block_range(ordinal, end) else {
+                break;
+            };
+            if block.is_empty() {
+                break;
+            }
+            for at in ordinal..ordinal + block.len() {
+                if let Ok(stored) =
+                    self.stored_masks(block, at, algo_id, &mut masks, shared::search_read_error_of)
+                {
+                    each(at, stored);
+                }
+            }
+            ordinal += block.len();
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
     /// The stored masks of database sequence `ordinal` for the algorithm `algo_id`, in the order
     /// they are stored (`[start, end)`), which the reports of a masked search show in lowercase
@@ -959,6 +991,9 @@ impl BlastnDatabase {
         }
     }
 }
+
+/// The sequences of one read of masks in `BlastnDatabase::masks_of` (its blobs are held at once).
+const MASK_BLOCK_SEQS: u32 = 1 << 16;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1665-1673

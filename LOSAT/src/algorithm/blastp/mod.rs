@@ -14,6 +14,10 @@ pub(crate) mod encoding;
 // status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
 // The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
 pub(crate) mod extension;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276
+// The hard chunks of a protein database sequence with `-db_hard_mask`, whose word finders BLASTP
+// and BLASTX share (series NP, M4b-3b).
+pub(crate) mod hard_chunk_scan;
 // The ungapped X-drop walks of aa_ungapped.c:804-883 with a byte score table, same results.
 pub(crate) mod x_ungapped_fast;
 // EXPERIMENT (LOSAT_X_BPUNGAPSENT): blastp's two-hit extension for word size 3 inlined into the

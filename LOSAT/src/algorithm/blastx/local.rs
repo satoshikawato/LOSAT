@@ -1133,7 +1133,15 @@ fn search_database(
         let mask =
             database.resolve_mask_option(&option, archive, None, &mut *outputs.diagnostics)?;
         if let Some(mask) = &mask {
-            database.check_mask_limits(mask)?;
+            // Once per word and window of the formats' options (they are the same search's).
+            let mut checked: Vec<(i32, i32)> = Vec::new();
+            for options in &resolved {
+                let scan = (options.word_size, options.window_size);
+                if !checked.contains(&scan) {
+                    database.check_mask_limits(mask, options)?;
+                    checked.push(scan);
+                }
+            }
         }
         for options in &mut resolved {
             options.db_mask = mask.clone();

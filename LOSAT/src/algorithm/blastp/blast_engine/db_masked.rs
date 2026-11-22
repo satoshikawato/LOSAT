@@ -11,33 +11,45 @@
 //!   chunk: its scan, extensions, gapped stage and purge, or with `-ungapped` its ungapped hits),
 //!   its HSPs moved by the chunk's offset and merged; then the E-values of the whole sequence and
 //!   the reap by the preliminary E-value (`BlastpPrelimKernel::subject_lists`, or
-//!   `BlastpPrelimKernel::ungapped_lists`).
+//!   `BlastpPrelimKernel::ungapped_lists`). Every chunk is walked, whatever its length (masks
+//!   sorted by their start may overlap or nest; series NP, M4b-3b): a chunk shorter than the word
+//!   gives the two-hit search its one word (`blastp::hard_chunk_scan::OneWord`) and the one-hit
+//!   search nothing, and the diagonal offset moves by each chunk's length plus the window.
 //!
 //! The masks come from `SeqDb::read_mask_block`, a window of sequences at a time
 //! (`algorithm::common::db_mask_search::SubjectMasks`); the first read error by ordinal id ends
-//! the preliminary stage as a read error of the sequences does (`prelim_run.rs`).
+//! the preliminary stage as a read error of the sequences does (`prelim_run.rs`), and so does
+//! LOSAT's refusal of a sequence whose short chunk saves a seed
+//! (`blastp::hard_chunk_scan::short_chunk_seed_refusal`).
 
 use std::sync::Mutex;
 
 use super::prelim_kernel::BlastpPrelimKernel;
 use super::{
-    preliminary_score_compare, BlastpPrelimValues, BlastpSubjectRef, BlastpSubjectResult,
-    BlastpSubjectScratch,
+    blastp_context_idx_for_query_offset_with_bounds, preliminary_score_compare, x_soft_subject,
+    BlastpPrelimValues, BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch,
 };
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
+use crate::algorithm::blastp::hard_chunk_scan::{
+    short_chunk_seed_refusal, ChunkWork, DiagonalWalk, OneWord, WordContext,
+};
 use crate::algorithm::common::database::search_read_error_of;
 use crate::algorithm::common::db_mask_search::{SearchMask, SubjectMasks, SubjectPlan};
+use crate::core::subject_split::HardChunk;
 use crate::seqdb::SeqDb;
 
 /// What a worker keeps for the masked kernels: the reader of the stored masks, the stored masks
-/// of the sequence, its plan, the letters of a hard chunk between two sentinels, and the HSPs of
-/// its chunks.
+/// of the sequence, its plan and its hard chunks, the letters of a hard chunk between two
+/// sentinels (or of a short chunk's one word), the query offsets of that word's hits, and the
+/// HSPs of its chunks.
 #[derive(Debug, Default)]
 pub(super) struct BlastpMaskScratch {
     reader: SubjectMasks,
     stored: Vec<(u32, u32)>,
     plan: SubjectPlan,
+    chunks: Vec<HardChunk>,
     letters: Vec<u8>,
+    word_hits: Vec<i32>,
     hits: Vec<BlastpPreliminaryHsp>,
 }
 
@@ -122,15 +134,21 @@ impl BlastpDbMasking<'_> {
                 Some(ranges),
                 false,
             );
-        } else {
-            hard_chunks(
-                kernel,
-                scratch,
-                &mut masked,
-                s_idx,
-                subject,
-                subject_result,
-                values,
+        } else if hard_chunks(
+            kernel,
+            scratch,
+            &mut masked,
+            s_idx,
+            subject,
+            subject_result,
+            values,
+        )
+        .is_err()
+        {
+            subject_result.reset(s_idx);
+            self.note_error(
+                ordinal,
+                short_chunk_seed_refusal(self.db.oid(ordinal), self.program),
             );
         }
         scratch.db_mask = Some(masked);
@@ -158,15 +176,25 @@ impl BlastpDbMasking<'_> {
 // (`BLAST_GetUngappedHSPList`) and merges it as above (the merge's gap flag only matters for HSPs
 // in the overlap, of which there are none); after the chunks, the HSPs of a negative length go,
 // then the E-values with the whole length and the reaps (`BlastpPrelimKernel::ungapped_lists`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:476-500
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+// Every chunk goes through the word finder, whose exit moves the diagonal offset by the chunk's
+// length (negative between overlapping masks) plus the window.
 /// The hard chunks of a sequence with masks (`masked.stored`), searched one by one into the HSPs
-/// of the sequence, and its HSP lists per query in `subject_result`. A chunk shorter than the
-/// word finds nothing in NCBI's one-hit and two-hit scans alike and is passed over
-/// (`SubjectPlan::next_searched_chunk`). Every chunk is searched over its own letters, the chunk
-/// from the start before a mask that runs to the end included, which NCBI scans past its end (its
-/// "no chunking" branch; an approved NCBI defect, PD-LOSAT-NCBI-DEFECTS exception 21, the Owner's
-/// answer Q1 = B of M4b). The sequences that LOSAT refuses never come here: a mask past the
-/// sequence's end (`HardMaskShape::PastEnd`) and a range longer than `MAX_DBSEQ_LEN`
-/// (`HardMaskShape::LongRange`).
+/// of the sequence, and its HSP lists per query in `subject_result`; `Err(())` where the one word
+/// of a chunk shorter than the word saves a seed (LOSAT's refusal, the caller's). Every chunk is
+/// walked in order (`hard_chunk_scan::DiagonalWalk`): a chunk that holds a word is searched over
+/// its own letters (by the reference scan where its diagonal offset went back below an entry of
+/// an earlier chunk), the chunk from the start before a mask that runs to the end included, which
+/// NCBI scans past its end (its "no chunking" branch; an approved NCBI defect,
+/// PD-LOSAT-NCBI-DEFECTS exception 21, the Owner's answer Q1 = B of M4b); a shorter one gives the
+/// two-hit search its one word and the one-hit search nothing. The sequences that LOSAT refuses
+/// never come here: masks out of the order of their start (`HardMaskShape::Unsorted`), a mask
+/// past the sequence's end (`HardMaskShape::PastEnd`), a range longer than `MAX_DBSEQ_LEN`
+/// (`HardMaskShape::LongRange`), word hits that reach other sequences' diagonal entries
+/// (`HardMaskShape::StaleDiagonals`) and a one word past the sentinel that can change a result
+/// (`HardMaskShape::WordPastEnd`), so the sequence's result does not depend on the diagonal
+/// table's earlier sequences.
 fn hard_chunks(
     kernel: &BlastpPrelimKernel<'_>,
     scratch: &mut BlastpSubjectScratch,
@@ -175,31 +203,58 @@ fn hard_chunks(
     subject: BlastpSubjectRef<'_>,
     subject_result: &mut BlastpSubjectResult,
     values: &BlastpPrelimValues<'_>,
-) {
+) -> Result<(), ()> {
     subject_result.reset(s_idx);
     masked.plan.start_hard(&masked.stored, subject.aa_len);
+    masked.plan.hard_chunks(&mut masked.chunks);
     masked.hits.clear();
     let residues = &subject.aa_seq[1..=subject.aa_len];
-    let word = usize::try_from(kernel.word_size).unwrap_or(usize::MAX);
-    while let Some(chunk) = masked.plan.next_searched_chunk(word) {
+    let (word, window) = (kernel.word_size, kernel.window);
+    let walk = || DiagonalWalk::new(word, window, subject.aa_len);
+    let mut ahead = walk();
+    for chunk in &masked.chunks {
+        ahead.chunk(chunk.offset, chunk.length);
+    }
+    if ahead.clears_inside(scratch.diag_offset) {
+        scratch.clear_diagonals(window);
+    }
+    let mut walk = walk();
+    for index in 0..masked.chunks.len() {
+        let chunk = masked.chunks[index];
+        let reference = match walk.chunk(chunk.offset, chunk.length) {
+            ChunkWork::Words { reference } => reference,
+            ChunkWork::OneWord => {
+                if one_word(kernel, scratch, masked, residues, chunk, values) {
+                    return Err(());
+                }
+                scratch.finish_chunk(chunk.length, window);
+                continue;
+            }
+            ChunkWork::Nothing => {
+                scratch.finish_chunk(chunk.length, window);
+                continue;
+            }
+        };
         // The chunk's letters between two sentinels, as a sequence of the database block.
+        let letters = chunk.letters();
         masked.letters.clear();
         masked.letters.push(0);
         masked
             .letters
-            .extend_from_slice(&residues[chunk.offset..chunk.offset + chunk.length]);
+            .extend_from_slice(&residues[chunk.offset..chunk.offset + letters]);
         masked.letters.push(0);
         let chunk_subject = BlastpSubjectRef {
             aa_seq: &masked.letters,
-            aa_len: chunk.length,
+            aa_len: letters,
         };
+        let whole = [(0, chunk.length)];
         kernel.search_subject_in(
             scratch,
             s_idx,
             chunk_subject,
             subject_result,
             values,
-            None,
+            reference.then_some(&whole[..]),
             true,
         );
         let offset = chunk.offset as i32;
@@ -240,4 +295,71 @@ fn hard_chunks(
             subject_result,
         );
     }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-505
+// The two-hit scan of a chunk shorter than the word reads the one word at the chunk's offset, from
+// the sequence's stored letters (the preliminary stage's fetch is not masked).
+/// The one word of a hard chunk `chunk` shorter than the word in a two-hit search
+/// (`hard_chunk_scan::OneWord`): the stored letters from the chunk's offset (`residues`, the
+/// sequence's; the sentinel after the last letter, zeros past it, which only a word whose hits
+/// change nothing reads: `HardMaskShape::WordPastEnd`), their lookup hits by the reference scan of
+/// one word, and NCBI's two-hit test of each on the scratch's diagonal table with the contexts'
+/// X-drops and cutoffs. Returns whether a hit saved a seed.
+fn one_word(
+    kernel: &BlastpPrelimKernel<'_>,
+    scratch: &mut BlastpSubjectScratch,
+    masked: &mut BlastpMaskScratch,
+    residues: &[u8],
+    chunk: HardChunk,
+    values: &BlastpPrelimValues<'_>,
+) -> bool {
+    let word = usize::try_from(kernel.word_size).unwrap_or(0);
+    let stored = &residues[chunk.offset..(chunk.offset + word).min(residues.len())];
+    masked.letters.clear();
+    masked.letters.extend_from_slice(stored);
+    // The word and the sentinel after it, as the scan reads a subject.
+    masked.letters.resize(word + 1, 0);
+    let hits = &mut masked.word_hits;
+    hits.clear();
+    x_soft_subject::x_for_each_hit(
+        kernel.lookup,
+        &masked.letters,
+        word,
+        &[(0, kernel.word_size)],
+        &mut scratch.offset_pairs,
+        true,
+        &mut |pair, _| hits.push(pair.q_off as i32),
+    );
+    let test = OneWord {
+        query: kernel.concatenated_query.as_slice(),
+        letters: &masked.letters[..word],
+        length: chunk.length,
+        word: kernel.word_size,
+        window: kernel.window,
+        scores: crate::utils::matrix::protein_score_rows(kernel.args.scoring.matrix),
+    };
+    let context = |q: i32| {
+        let (index, start) = kernel.x_context_table.get_with_start(q).unwrap_or_else(|| {
+            let index = blastp_context_idx_for_query_offset_with_bounds(
+                kernel.contexts.as_slice(),
+                kernel.context_lookup_bounds,
+                q,
+            );
+            (index, kernel.contexts[index].frame_base)
+        });
+        WordContext {
+            start,
+            x_drop: kernel.x_dropoff_per_context[index],
+            cutoff: values.word_cutoff_scores[index],
+        }
+    };
+    test.test(
+        &masked.word_hits,
+        &mut scratch.diag_array,
+        kernel.diag_mask,
+        scratch.diag_offset,
+        context,
+    )
 }

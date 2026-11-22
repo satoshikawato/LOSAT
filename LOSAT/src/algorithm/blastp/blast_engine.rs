@@ -536,13 +536,30 @@ impl BlastpSubjectScratch {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:152-172
     fn finish_subject(&mut self, subject_length: usize, window: i32) {
+        self.finish_chunk(subject_length as i32, window);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+    /// `Blast_ExtendWordExit` after a subject, or a hard chunk, of `length` letters (NCBI's
+    /// `Int4`: negative for a chunk between overlapping masks, `db_masked.rs`).
+    #[inline(always)]
+    fn finish_chunk(&mut self, length: i32, window: i32) {
         if self.diag_offset >= i32::MAX / 4 {
-            self.diag_offset = window;
-            for diag in &mut self.diag_array {
-                *diag = DiagStruct::clear(window);
-            }
+            self.clear_diagonals(window);
         } else {
-            self.diag_offset += subject_length as i32 + window;
+            self.diag_offset += length + window;
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// The diagonal table cleared and its offset set to `window`, as `Blast_ExtendWordExit` does at
+    /// INT4_MAX / 4 (also before a masked sequence in whose chunks that clear would fall,
+    /// `hard_chunk_scan::DiagonalWalk::clears_inside`).
+    #[inline(always)]
+    fn clear_diagonals(&mut self, window: i32) {
+        self.diag_offset = window;
+        for diag in &mut self.diag_array {
+            *diag = DiagStruct::clear(window);
         }
     }
 }
@@ -5849,7 +5866,10 @@ fn search(
         mask.check_losat_limits(
             database.seqdb(),
             args.app.name(),
-            crate::blastinput::db_mask::HardScan::Protein,
+            crate::blastinput::db_mask::HardScan::Protein {
+                word: args.word_size as i32,
+                window: args.window_size as i32,
+            },
         )?;
     }
     check_blastp_environment(args.app, database.is_none())?;

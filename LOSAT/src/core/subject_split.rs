@@ -53,8 +53,12 @@ pub struct HardChunk {
     /// `backup->offset`: the chunk's first letter in the subject, a multiple of
     /// `COMPRESSION_RATIO` in BLASTN (`next` itself in the protein programs).
     pub offset: usize,
-    /// `subject->length`: the chunk's letters.
-    pub length: usize,
+    /// `subject->length`: NCBI's `Int4` `right - offset`, the chunk's letters where its hard range
+    /// is in order, 0 for a range of no letters (a mask at 0, masks that touch) and negative for an
+    /// inverted range (the end of a mask past the start of the next: masks that overlap or nest,
+    /// which only the protein programs search, series NP, M4b-3b). [`HardChunk::letters`] is the
+    /// letters a chunk holds.
+    pub length: i32,
     /// `residual`: the letters before the chunk's hard range (`next % COMPRESSION_RATIO`),
     /// where its scan starts (`seq_ranges[0].left`).
     pub residual: usize,
@@ -76,6 +80,13 @@ pub struct HardChunk {
     /// M4a-2). The overlap is then LOSAT's: the full range's end, which no chunk starts at, gives
     /// `chunk_overlap`, as the unmasked search's `(&full_range)[1]`.
     pub overlap_past_list: bool,
+}
+
+impl HardChunk {
+    /// The letters of the chunk: its length, or none where the length is negative.
+    pub fn letters(&self) -> usize {
+        usize::try_from(self.length).unwrap_or(0)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:122-143
@@ -125,10 +136,10 @@ impl HardSplitState {
     /// range of no letters: a mask at 0, masks that touch), scanned from the residual (NCBI scans
     /// the full range in the "no chunking" branch, [`HardChunk::full_range`]); with the overlap of
     /// the merge after it ([`HardChunk::overlap`], [`HardChunk::overlap_past_list`]). NCBI's
-    /// `Int4` arithmetic: the
-    /// hard ranges of sorted masks never go back, so no length is negative (masks out of order
-    /// are refused before the search, `HardMaskShape::Unsorted`); a negative one would be clamped
-    /// to 0, where NCBI moves the diagonal offset back by it.
+    /// `Int4` arithmetic: the hard range of masks that overlap or nest (sorted by start) runs
+    /// from the end of one mask back to the start of the next, and its chunk's length is
+    /// negative, as NCBI's (the word finders then move the diagonal offset back by it; BLASTN and
+    /// the translated programs refuse such masks before the search, `HardMaskShape::Unsorted`).
     pub fn next_chunk(&mut self, chunk_overlap: usize) -> Option<HardChunk> {
         if self.next >= self.full_right {
             return None;
@@ -145,22 +156,18 @@ impl HardSplitState {
             self.next = offset + MAX_DBSEQ_LEN as i32 - chunk_overlap as i32;
             MAX_DBSEQ_LEN as i32
         } else {
-            debug_assert!(
-                hard_right >= offset,
-                "a hard range that ends at {hard_right}, before its chunk's offset {offset}"
-            );
             self.hm_index += 1;
             self.next = self
                 .ranges
                 .get(self.hm_index)
                 .map_or(self.full_right, |&(left, _)| left);
-            (hard_right - offset).max(0)
+            hard_right - offset
         };
         let full_range = offset == 0 && residual == 0 && self.next == self.full_right;
         let next_left = self.ranges.get(self.hm_index).map(|&(left, _)| left);
         Some(HardChunk {
             offset: offset as usize,
-            length: length as usize,
+            length,
             residual: residual as usize,
             full_range,
             range,

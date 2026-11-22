@@ -77,40 +77,45 @@ fn plans_of_soft_and_hard_masks() {
     assert!(plan.next_chunk().is_none());
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-500 and 762-766 (cited at
-// `SubjectPlan::next_searched_chunk`): a chunk shorter than the word gives nothing in either
-// scan, so the searched chunks are those that hold a word.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276 (cited at
+// `core::subject_split::HardSplitState::next_chunk`)
+// Every chunk goes through the word finder, whatever its length (series NP, M4b-3b): the plan
+// gives them all, in order, chunks of no letters and of a negative length (masks sorted by their
+// start that overlap or nest) included.
 #[test]
-fn chunks_shorter_than_the_word_are_passed_over() {
-    let searched = |masks: &[(u32, u32)], length: usize, word: usize| {
-        let mut plan = SubjectPlan::default();
+fn hard_chunks_are_every_chunk_in_order() {
+    let mut plan = SubjectPlan::default();
+    let mut chunks = |masks: &[(u32, u32)], length: usize| {
+        let mut found = Vec::new();
         plan.start_hard(masks, length);
-        let mut chunks = Vec::new();
-        while let Some(chunk) = plan.next_searched_chunk(word) {
-            chunks.push((chunk.offset, chunk.length));
-        }
-        chunks
+        plan.hard_chunks(&mut found);
+        found
+            .iter()
+            .map(|chunk| (chunk.offset, chunk.length))
+            .collect::<Vec<_>>()
     };
     // The hand masks of p5 (`dbmaskp/edge_tiny.asnt`): masks of one letter at 101 and 104 leave
-    // the two letters 102 and 103, passed over at a word of 3 and searched at a word of 2.
+    // the two letters 102 and 103.
     let tiny = [(101, 102), (104, 105), (200, 202)];
-    assert_eq!(searched(&tiny, 250, 3), [(0, 101), (105, 95), (202, 48)]);
     assert_eq!(
-        searched(&tiny, 250, 2),
+        chunks(&tiny, 250),
         [(0, 101), (102, 2), (105, 95), (202, 48)]
     );
-    // Touching masks leave a chunk of no letters, a mask at the start one at 0, and a chunk of
-    // exactly the word's letters is searched (`dbmaskp/edge_short.asnt`).
-    assert_eq!(searched(&[(30, 60), (60, 90)], 150, 3), [(0, 30), (90, 60)]);
-    assert_eq!(searched(&[(0, 4), (10, 20)], 30, 3), [(4, 6), (20, 10)]);
-    assert_eq!(searched(&[(1, 10)], 150, 3), [(10, 140)]);
+    // Touching masks leave a chunk of no letters, a mask at the start one at 0.
     assert_eq!(
-        searched(&[(30, 60), (63, 90)], 150, 3),
-        [(0, 30), (60, 3), (90, 60)]
+        chunks(&[(30, 60), (60, 90)], 150),
+        [(0, 30), (60, 0), (90, 60)]
     );
-    assert_eq!(searched(&[(30, 60), (62, 90)], 150, 3), [(0, 30), (90, 60)]);
-    // Every chunk short: nothing is searched.
-    assert!(searched(&[(2, 5), (7, 9)], 10, 3).is_empty());
+    assert_eq!(chunks(&[(0, 4), (10, 20)], 30), [(0, 0), (4, 6), (20, 10)]);
+    // Overlapping and nested masks.
+    assert_eq!(
+        chunks(&[(40, 60), (55, 70)], 240),
+        [(0, 40), (60, -5), (70, 170)]
+    );
+    assert_eq!(
+        chunks(&[(40, 100), (50, 60)], 240),
+        [(0, 40), (100, -50), (60, 180)]
+    );
 }
 
 // The reader gives each sequence's stored masks as `SeqDb::mask_ranges_at` does, across the

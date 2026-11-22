@@ -251,14 +251,14 @@ pub(crate) fn translated_db_mask_chunks(
         // The protein programs' chunks have no residual: the scan starts at the chunk's start. The
         // "no chunking" chunk of a whole frame stops at the frame's end, not on its sentinel.
         let right = if chunk.full_range {
-            chunk.length.min(frame_length)
+            chunk.letters().min(frame_length)
         } else {
-            chunk.length
+            chunk.letters()
         };
         calls.push((
             TranslatedChunk {
                 offset: chunk.offset,
-                length: chunk.length,
+                length: chunk.letters(),
                 overlap: chunk.overlap,
             },
             vec![(0, i32::try_from(right)?)],

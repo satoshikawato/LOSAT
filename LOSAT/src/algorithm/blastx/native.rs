@@ -627,7 +627,7 @@ fn run_inner(
     // LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`) come where NCBI
     // starts the search, after its checks.
     if let (Some(database), Some(mask)) = (&database, options.db_mask.as_ref()) {
-        database.check_mask_limits(mask)?;
+        database.check_mask_limits(mask, &options)?;
     }
     app::check_search_environment(program.upper, database.is_none())?;
     // RPSTBLASTN's refusals of the database's files and of its options, before the first byte
@@ -1490,6 +1490,7 @@ pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
         || error.is::<super::split::QuerySplitRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
         || error.is::<super::database::LongSubjectRefusal>()
+        || error.is::<crate::algorithm::blastp::hard_chunk_scan::ShortChunkSeedRefusal>()
         || error.is::<NativeError>()
 }
 

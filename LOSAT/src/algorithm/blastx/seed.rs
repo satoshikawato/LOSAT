@@ -251,6 +251,39 @@ impl Diagonals {
         }
         Ok(())
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+    /// [`Diagonals::finish_subject`] of a hard chunk of a `-db_hard_mask` sequence that the word
+    /// finder does not search as a subject of its own (`search_db_masked.rs`), whose length is
+    /// NCBI's `Int4` (`core::subject_split::HardChunk::length`: negative between overlapping
+    /// masks).
+    pub(crate) fn finish_chunk(&mut self, length: i32) -> Result<()> {
+        if self.offset >= i32::MAX / 4 {
+            self.clear();
+        } else {
+            self.offset = self
+                .offset
+                .checked_add(length)
+                .and_then(|v| v.checked_add(self.window))
+                .ok_or_else(|| anyhow::anyhow!("BLASTX diagonal offset exceeds Int4"))?;
+        }
+        Ok(())
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// Clears the table and sets the offset to the window (`s_BlastDiagClear`).
+    pub(crate) fn clear(&mut self) {
+        self.offset = self.window;
+        self.entries.fill(DiagStruct::clear(self.window));
+    }
+    /// The diagonal offset of the next subject.
+    pub(crate) fn offset(&self) -> i32 {
+        self.offset
+    }
+    /// The entries, the mask of a diagonal's index and the diagonal offset, which the two-hit test
+    /// of a hard chunk's one word reads (`blastp::hard_chunk_scan::OneWord::test`).
+    pub(crate) fn table(&mut self) -> (&mut [DiagStruct], i32, i32) {
+        let (mask, offset) = (self.entries.len() as i32 - 1, self.offset);
+        (self.entries.as_mut_slice(), mask, offset)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:273-313

@@ -290,7 +290,8 @@ fn a_run_of_losat_web_writes_the_files_of_the_command_line() {
             Ok(())
         }
     }
-    let disk = std::env::temp_dir().join(format!("ww3a-wm-{}", std::process::id()));
+    let disk = crate::utils::test_dir::temp_dir()
+        .join(format!("ww3a-wm-{}", crate::utils::test_dir::process_id()));
     std::fs::create_dir_all(&disk).unwrap();
     let fasta = "tests/winmask/fasta/dm2L_3k.fa";
     let counts = "tests/winmask/counts/dm2L_u9.binary";

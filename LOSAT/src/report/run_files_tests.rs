@@ -481,7 +481,10 @@ fn a_receiver_s_output_file_goes_to_the_receiver_when_it_is_closed() {
     drop((null, full));
     assert_eq!(kept.0.lock().unwrap().len(), 1, "no file of the devices");
     // The command line's and the library's files are the file system's.
-    let directory = std::env::temp_dir().join(format!("ww3a-disk-{}", std::process::id()));
+    let directory = crate::utils::test_dir::temp_dir().join(format!(
+        "ww3a-disk-{}",
+        crate::utils::test_dir::process_id()
+    ));
     std::fs::create_dir_all(&directory).unwrap();
     let path = directory.join("c.counts");
     let Ok(Created::File(mut disk)) = RunFiles::Disk.create(path.to_str().unwrap()) else {

@@ -30,7 +30,7 @@ A search that v0.1.0 supported gives NCBI BLAST+ 2.17.0's output in v0.2.0 too. 
 | Area | v0.1.0 | v0.2.0 |
 |:---|:---|:---|
 | Search programs | `blastn`, `blastp`, `tblastx` | Also `blastx`, `tblastn`, `psiblast`, `rpsblast` and `rpstblastn` |
-| Database tools | none | `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker` (masking with a counts file), `convert2blastmask`, `makembindex`, `makeprofiledb` (profile databases for `rpsblast` and `rpstblastn`), and `rpsbproc` for domain annotation |
+| Database tools | none | `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb` (profile databases for `rpsblast` and `rpstblastn`), and `rpsbproc` for domain annotation |
 | Databases | `-query` against a `-subject` FASTA file only | `-db` searches BLAST databases made by `losat makeblastdb` or NCBI's `makeblastdb`, including NCBI's distributed databases |
 | Standard input | not available | `-query -` in every search program |
 | Tasks | `megablast` and `blastn` for `blastn`; `blastp` for `blastp` | Also `dc-megablast`, `blastn-short`, `rmblastn`, `blastp-fast`, `blastp-short`, `blastx-fast`, `tblastn-fast` |
@@ -51,4 +51,4 @@ If you parsed `-outfmt 6` or `7` output in v0.1.0, nothing changes: the columns 
 
 ## What is still not available
 
-`deltablast`, `blast_formatter`, `makeprofiledb -binary`, `-dbtype delta` and `-dbtype cobalt`, `windowmasker -mk_counts` and `-convert`, `-html`, `psiblast -phi_pattern`, and the options that need NCBI's servers (`-remote`, `-entrez_query`) are not in v0.2.0. The [Introduction](introduction.md) lists them, and [What LOSAT refuses](refusals.md) shows the error you get.
+`deltablast`, `blast_formatter`, `makeprofiledb -binary`, `-dbtype delta` and `-dbtype cobalt`, `-html`, `psiblast -phi_pattern` and the options that need NCBI's servers (`-remote`, `-entrez_query`) are not in v0.2.0. The [Introduction](introduction.md) lists them, and [What LOSAT refuses](refusals.md) shows the error you get.

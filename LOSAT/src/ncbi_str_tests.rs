@@ -658,3 +658,147 @@ fn c_atoi_is_glibcs() {
     assert_eq!(c_atoi(b"-9223372036854775808"), 0);
     assert_eq!(c_atoi(b"-9223372036854775807"), 1);
 }
+
+/// The texts of the search tests: lengths across one and two blocks of `find_byte`, from an
+/// alphabet of few bytes (so that needles occur, overlap and stop short at the end), with the
+/// bytes that makeblastdb's titles and the report's titles search for.
+fn search_texts() -> Vec<Vec<u8>> {
+    const ALPHABET: &[u8] = b"ab\\t\x01\t. [";
+    let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut texts = Vec::new();
+    for len in (0..=100).chain([127, 128, 129, 300]) {
+        for round in 0..12 {
+            // Some texts draw from the first two letters only, where every needle of them
+            // occurs many times and overlaps itself.
+            let letters = if round % 3 == 0 { 2 } else { ALPHABET.len() };
+            texts.push(
+                (0..len)
+                    .map(|_| ALPHABET[(next() % letters as u64) as usize])
+                    .collect(),
+            );
+        }
+    }
+    texts
+}
+
+/// The needles of the search tests: every one of up to three bytes from the texts' alphabet
+/// that the callers' needles share a first byte with, and the callers' own.
+fn search_needles() -> Vec<Vec<u8>> {
+    let letters = b"ab\\t\x01";
+    let mut needles: Vec<Vec<u8>> = vec![b"\\t".to_vec(), b". [".to_vec(), b", [".to_vec()];
+    for &x in letters {
+        needles.push(vec![x]);
+        for &y in letters {
+            needles.push(vec![x, y]);
+            for &z in b"ab" {
+                needles.push(vec![x, y, z]);
+            }
+        }
+    }
+    needles
+}
+
+/// `NStr::Replace` as dev had it before `find` (a slice compare at every byte), the reference
+/// of the tests.
+fn replace_by_windows(src: &[u8], search: &[u8], replacement: &[u8]) -> Vec<u8> {
+    let mut dst = Vec::new();
+    let mut pos = 0;
+    while let Some(found) = src[pos..]
+        .windows(search.len())
+        .position(|window| window == search)
+    {
+        dst.extend_from_slice(&src[pos..pos + found]);
+        dst.extend_from_slice(replacement);
+        pos += found + search.len();
+    }
+    dst.extend_from_slice(&src[pos..]);
+    dst
+}
+
+#[test]
+fn find_byte_is_the_first_index() {
+    for text in search_texts() {
+        for byte in b"ab\\t\x01\t. [z".iter().copied() {
+            assert_eq!(
+                find_byte(&text, byte),
+                text.iter().position(|&b| b == byte),
+                "{text:?} {byte}"
+            );
+        }
+    }
+    // A byte at each place of a text of two blocks and a half, alone.
+    for len in [1, 31, 32, 33, 63, 64, 65, 80] {
+        for at in 0..len {
+            let mut text = vec![b'a'; len];
+            text[at] = b'\\';
+            assert_eq!(find_byte(&text, b'\\'), Some(at), "{len} {at}");
+        }
+        assert_eq!(find_byte(&vec![b'a'; len], b'\\'), None);
+    }
+}
+
+#[test]
+fn find_is_the_first_occurrence() {
+    let texts = search_texts();
+    for needle in search_needles() {
+        for text in &texts {
+            let expected = text
+                .windows(needle.len())
+                .position(|window| window == needle.as_slice());
+            assert_eq!(find(text, &needle), expected, "{text:?} {needle:?}");
+        }
+    }
+    assert_eq!(find(b"abc", b""), Some(0));
+    assert_eq!(find(b"", b""), Some(0));
+    assert_eq!(find(b"", b"a"), None);
+    assert_eq!(find(b"ab", b"abc"), None);
+    assert_eq!(find(b"xab", b"ab"), Some(1));
+}
+
+#[test]
+fn replace_is_the_window_search() {
+    let texts = search_texts();
+    for search in search_needles() {
+        for replacement in [&b""[..], b"X", b"   ", b"a", b"aa", b"\\t"] {
+            for text in &texts {
+                let expected = replace_by_windows(text, &search, replacement);
+                let got = replace(text, &search, replacement);
+                assert_eq!(*got, expected, "{text:?} {search:?} {replacement:?}");
+                let unchanged = search == replacement || find(text, &search).is_none();
+                assert_eq!(
+                    matches!(got, Cow::Borrowed(_)),
+                    unchanged,
+                    "{text:?} {search:?} {replacement:?}"
+                );
+                let mut in_place = text.clone();
+                replace_in_place(&mut in_place, &search, replacement);
+                assert_eq!(in_place, expected, "{text:?} {search:?} {replacement:?}");
+            }
+        }
+    }
+}
+
+/// Occurrences from the left, at the ends, overlapping, and in a replacement (never read again).
+#[test]
+fn replace_takes_occurrences_from_the_left() {
+    let r = |src: &[u8], search: &[u8], replacement: &[u8]| {
+        replace(src, search, replacement).into_owned()
+    };
+    assert_eq!(r(b"", b"\\t", b"   "), b"");
+    assert_eq!(r(b"\\t", b"\\t", b"   "), b"   ");
+    assert_eq!(r(b"\\ta\\t", b"\\t", b"   "), b"   a   ");
+    assert_eq!(r(b"a\\\\tb", b"\\t", b"   "), b"a\\   b");
+    assert_eq!(r(b"aaa", b"aa", b"X"), b"Xa");
+    assert_eq!(r(b"aaaa", b"aa", b"a"), b"aa");
+    assert_eq!(r(b"abab", b"ab", b"abab"), b"abababab");
+    assert_eq!(r(b"x. [. [", b". [", b" ["), b"x [ [");
+    assert_eq!(r(b"a. . [b", b". [", b" ["), b"a.  [b");
+    assert_eq!(r(b"b\x01\x01\x01", b"\x01", b" "), b"b   ");
+    assert_eq!(r(b"a", b"ab", b"X"), b"a");
+}

@@ -9,9 +9,10 @@
 //! (module `double`: the real arguments, the SEG locut and hicut, rpsbproc's bit score
 //! thresholds, the constraints of the arguments and the REAL values of the ASN.1 text and XML
 //! readers). Also the string functions that more than one port calls: `NStr::ParseEscapes`
-//! (makeblastdb's titles and the registry reader), `NStr::TruncateSpaces` (each `ETrunc`: the
-//! FASTA readers, the argument readers, the format guess), `NStr::IsBlank`, `NStr::StringToBool`
-//! and C's `isspace`.
+//! (makeblastdb's titles and the registry reader), `NStr::Replace` and `NStr::ReplaceInPlace` with
+//! the search they share, `string::find` (makeblastdb's titles and the report's titles),
+//! `NStr::TruncateSpaces` (each `ETrunc`: the FASTA readers, the argument readers, the format
+//! guess), `NStr::IsBlank`, `NStr::StringToBool` and C's `isspace`.
 //!
 //! Not ported: `fConvErr_NoThrow` and the errno bookkeeping of `CS2N_Guard` (a caller that passes
 //! `fConvErr_NoThrow` takes NCBI's 0 for an error itself), the bases other than 10 (but 16 of
@@ -475,7 +476,7 @@ pub(crate) fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
     let mut out = Vec::with_capacity(str.len());
     let mut pos = 0;
     loop {
-        let Some(found) = str[pos..].iter().position(|&byte| byte == b'\\') else {
+        let Some(found) = find_byte(&str[pos..], b'\\') else {
             out.extend_from_slice(&str[pos..]);
             break;
         };
@@ -531,6 +532,104 @@ pub(crate) fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
         pos = pos2 + 1;
     }
     Ok(out)
+}
+
+/// The bytes [`find_byte`] tests at once.
+const BLOCK: usize = 32;
+
+/// The index of the first `byte` of `haystack` (C's `memchr`). The bytes are tested a block of
+/// [`BLOCK`] at a time, in a loop without an early exit that the compiler can turn into vector
+/// compares (on x86-64, two SSE2 compares and one mask test per block), and the block that holds
+/// `byte` is then searched byte by byte. The last block ends at the end of `haystack` and overlaps
+/// the one before it, whose bytes hold no `byte`; only a haystack shorter than a block is searched
+/// byte by byte alone.
+pub(crate) fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
+    let holds = |block: &[u8; BLOCK]| block.iter().fold(false, |any, &b| any | (b == byte));
+    let first = |block: &[u8], start: usize| {
+        block
+            .iter()
+            .position(|&b| b == byte)
+            .map(|offset| start + offset)
+    };
+    let (blocks, tail) = haystack.as_chunks::<BLOCK>();
+    for (index, block) in blocks.iter().enumerate() {
+        if holds(block) {
+            return first(block, index * BLOCK);
+        }
+    }
+    if blocks.is_empty() || tail.is_empty() {
+        return first(tail, 0);
+    }
+    let start = haystack.len() - BLOCK;
+    let last = &haystack[start..].as_chunks::<BLOCK>().0[0];
+    if holds(last) {
+        first(last, start)
+    } else {
+        None
+    }
+}
+
+/// `string::find(needle)` of `haystack`: the index of the first occurrence of `needle` (0 for
+/// an empty one). The first byte of `needle` is searched with [`find_byte`], and the rest is
+/// compared where it is found; one general search for every needle, whatever its length.
+pub(crate) fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    let Some((&head, rest)) = needle.split_first() else {
+        return Some(0);
+    };
+    let mut from = 0;
+    while let Some(offset) = find_byte(&haystack[from..], head) {
+        let at = from + offset;
+        if haystack[at + 1..].starts_with(rest) {
+            return Some(at);
+        }
+        from = at + 1;
+    }
+    None
+}
+
+/// `NStr::Replace(src, search, replace)` and `NStr::ReplaceInPlace(src, search, replace)` with
+/// their defaults (from the start, every occurrence): the occurrences of `search` from the left,
+/// each search starting after the text just put in, so that a replacement is never searched and
+/// occurrences do not overlap. Both NCBI functions give this text (the copy loops of
+/// `NStr::Replace` for a long `src` and a longer `replace` find the same occurrences); `src` is
+/// borrowed where it holds none, or `search` is `replace` (NCBI returns a copy). `search` is not
+/// empty (NCBI's loops do not end for an empty one; no caller passes it).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3310-3398
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3401-3428
+pub(crate) fn replace<'a>(src: &'a [u8], search: &[u8], replace: &[u8]) -> Cow<'a, [u8]> {
+    assert!(!search.is_empty(), "NStr::Replace of an empty search");
+    if search == replace {
+        return Cow::Borrowed(src);
+    }
+    let Some(mut found) = find(src, search) else {
+        return Cow::Borrowed(src);
+    };
+    let mut dst = Vec::with_capacity(src.len());
+    let mut pos = 0;
+    loop {
+        dst.extend_from_slice(&src[pos..found]);
+        dst.extend_from_slice(replace);
+        pos = found + search.len();
+        match find(&src[pos..], search) {
+            Some(offset) => found = pos + offset,
+            None => break,
+        }
+    }
+    dst.extend_from_slice(&src[pos..]);
+    Cow::Owned(dst)
+}
+
+/// [`replace`] of the string `src` in place (`NStr::ReplaceInPlace`): `src` is left as it is
+/// where nothing is replaced.
+pub(crate) fn replace_in_place(src: &mut Vec<u8>, search: &[u8], replacement: &[u8]) {
+    let replaced = match replace(src, search, replacement) {
+        Cow::Owned(dst) => Some(dst),
+        Cow::Borrowed(_) => None,
+    };
+    if let Some(dst) = replaced {
+        *src = dst;
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3145-3180

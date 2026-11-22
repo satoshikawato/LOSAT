@@ -18,6 +18,8 @@
 //! wrap and reads past the end of the string (and crashes); `clean_and_compress` stops at
 //! the end of the string there (approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
 
+use crate::ncbi_str::replace_in_place;
+
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3431-3446
 const TPA_PREFIXES: [&str; 14] = [
     "MAG ",
@@ -1116,34 +1118,10 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> (Vec<u8>, bool) {
         out.push(curr);
     }
     if is_protein {
-        out = replace_in_place(&out, b". [", b" [");
-        out = replace_in_place(&out, b", [", b" [");
+        replace_in_place(&mut out, b". [", b" [");
+        replace_in_place(&mut out, b", [", b" [");
     }
     (out, wrapped)
-}
-
-/// `NStr::ReplaceInPlace(src, search, replace)` with its defaults (from the start, every
-/// occurrence): each search resumes after the text just put in.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3401-3428
-fn replace_in_place(src: &[u8], search: &[u8], replace: &[u8]) -> Vec<u8> {
-    let mut src = src.to_vec();
-    let mut start_pos = 0;
-    if start_pos + search.len() > src.len() || search == replace {
-        return src;
-    }
-    while let Some(found) = src[start_pos..]
-        .windows(search.len())
-        .position(|window| window == search)
-    {
-        let at = start_pos + found;
-        src.splice(at..at + search.len(), replace.iter().copied());
-        start_pos = at + replace.len();
-        if start_pos > src.len() {
-            break;
-        }
-    }
-    src
 }
 
 #[cfg(test)]

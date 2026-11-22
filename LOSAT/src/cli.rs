@@ -1055,7 +1055,6 @@ fn refuses_option(scope: &clap::Command, name: &str) -> bool {
 /// as it leaves the parser's refusals (`refuses_option`).
 pub(crate) const RUN_REFUSALS: &[(&str, &str, &str)] = &[
     ("psiblast", "use_sw_tback", "the Smith-Waterman traceback"),
-    ("tblastn", "ungapped", "an ungapped search"),
     (
         "rpstblastn",
         "ungapped",

@@ -120,8 +120,9 @@ fn run_refusals_name_the_argument_and_the_program() {
         "-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's PSIBLAST"
     );
     assert_eq!(
-        run_refusal("TBLASTN", "ungapped"),
-        "-ungapped (an ungapped search) is not supported by LOSAT's TBLASTN"
+        run_refusal("RPSTBLASTN", "ungapped"),
+        "-ungapped (NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search) is not \
+         supported by LOSAT's RPSTBLASTN"
     );
 }
 

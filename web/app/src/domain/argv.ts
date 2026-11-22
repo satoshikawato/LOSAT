@@ -73,22 +73,6 @@ export interface ArgvInput {
 }
 
 /**
- * The argv of a run as the user would type it: `-query` and `-subject` name the files as the user gave them (a compressed
- * file is inflated under its plain name for the engine, whose argv names that one; the CLI reads `q.fa.gz` itself and gives
- * the same bytes). Every place that shows a run's command takes the argv from here (line WQA's D21, S3-3, 2026-11-23).
- */
-export function shownArgv(run: {
-  readonly argv: readonly string[];
-  readonly query: { readonly fileName?: string };
-  readonly subject: { readonly fileName?: string };
-}): readonly string[] {
-  const { argv, query, subject } = run;
-  if (query.fileName === undefined && subject.fileName === undefined) return argv;
-  // buildArgv's layout: [program, '-query', name, '-subject', name, ...].
-  return argv.map((word, at) => (at === 2 && query.fileName !== undefined ? query.fileName : at === 4 && subject.fileName !== undefined ? subject.fileName : word));
-}
-
-/**
  * Builds `[program, -query, name, -subject, name, ...parameters]`.
  * Engine defaults are never written out, so the CLI command stays minimal.
  */

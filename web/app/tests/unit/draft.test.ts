@@ -1220,36 +1220,32 @@ describe('SearchDraft submit', () => {
     expect(requests.at(-1)![0]!).toMatchObject({ program: 'blastx', parameters: [['-query_loc', '2-10']] });
   });
 
-  it('opens a file named .gz under its plain name and inflated size', async () => {
-    const { draft } = setup();
+  // Line WQA's D21, 2026-11-23 (S3-3, and F1/F2 of the review of D20): the card shows the plain name and the inflated size, but the
+  // run's argv names the file as the user gave it, where the command line writes the name (outfmt 0 and 7's `Input:` line, SAM's
+  // command line) and the command shown can be typed.
+  it("opens a file named .gz under its plain name and inflated size, and names it in the argv as the user gave it", async () => {
+    const { draft, requests } = setup();
     draft.addFiles('subject', [new File([gzipSync('>a\nACGT\n')], 'x.fa.gz')]);
+    draft.addFiles('query', [new File([zstdCompressSync('>q\nACGT\n')], 'Q.FA.ZST')]);
     await draft.idle();
     expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', name: 'x.fa', size: 8 });
-    expect(draft.inputName('subject')).toBe('x.fa');
-  });
-
-  // Line WQA's D21, S3-3, 2026-11-23: a compressed file is inflated under its plain name, which the engine's argv names; the
-  // run keeps the user's file name, which the commands shown name.
-  it("gives a run of a compressed file the user's file name beside the plain name that the argv has", async () => {
-    const { draft, requests } = setup();
-    draft.addFiles('query', [new File([gzipSync('>q\nACGT\n')], 'q.fa.gz')]);
-    draft.addFiles('subject', [new File([zstdCompressSync('>s\nACGT\n')], 's.fa.zst')]);
-    await draft.idle();
+    expect(draft.inputName('subject')).toBe('x.fa.gz');
+    expect(draft.inputName('query')).toBe('Q.FA.ZST');
     expect(await draft.submit()).toMatchObject({ ok: true });
     const [request] = requests[0]!;
-    expect(datasetOf(request!, 'query')).toMatchObject({ name: 'q.fa', fileName: 'q.fa.gz' });
-    expect(datasetOf(request!, 'subject')).toMatchObject({ name: 's.fa', fileName: 's.fa.zst' });
-    // A plain file, pasted text and several files searched together need no other name.
-    draft.removeSource('query', sourceOf(draft, 'query').key);
-    draft.removeSource('subject', sourceOf(draft, 'subject').key);
+    expect(datasetOf(request!, 'subject').name).toBe('x.fa.gz');
+    expect(datasetOf(request!, 'query').name).toBe('Q.FA.ZST');
+  });
+
+  it('names several files searched together, or pasted text, as before', async () => {
+    const { draft, requests } = setup();
     draft.setPaste('query', '>q\nACGT\n');
     draft.addFiles('subject', [file('a.fa', '>a\nACGT\n'), new File([gzipSync('>b\nACGT\n')], 'b.fa.gz')]);
     await draft.idle();
     expect(await draft.submit()).toMatchObject({ ok: true });
-    const [next] = requests[1]!;
-    expect('fileName' in datasetOf(next!, 'query')).toBe(false);
-    expect(datasetOf(next!, 'subject').name).toBe('combined_subject.fa');
-    expect('fileName' in datasetOf(next!, 'subject')).toBe(false);
+    const [request] = requests[0]!;
+    expect(datasetOf(request!, 'query').name).toBe('query.fa');
+    expect(datasetOf(request!, 'subject').name).toBe('combined_subject.fa');
   });
 
   it('runs an empty query, also from an empty .gz or .zst file, as the command line does', async () => {
@@ -1269,7 +1265,7 @@ describe('SearchDraft submit', () => {
     draft.addFiles('subject', [new File([zstdCompressSync('>a\nACGT\n')], 'x.fa.zst')]);
     await draft.idle();
     expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', name: 'x.fa', size: 8 });
-    expect(draft.inputName('subject')).toBe('x.fa');
+    expect(draft.inputName('subject')).toBe('x.fa.zst');
   });
 
   it('queues one combined search of all files, named as plan §5.3 says', async () => {

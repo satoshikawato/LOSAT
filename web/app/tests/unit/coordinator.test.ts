@@ -973,25 +973,6 @@ describe('Coordinator', () => {
     expect([...inner.sources.keys()]).toEqual([source.sourceId]);
   });
 
-  // Line WQA's D21, S3-3, 2026-11-23: the snapshot's argv names the plain file that the engine reads; the input keeps the
-  // name of the user's file, which the commands shown name.
-  it("keeps the name of the user's file beside the plain name of its input, only where they differ", async () => {
-    const { coordinator, data } = setup();
-    const add = async (name: string, text: string) => {
-      const source = await data.addSource(new File([text], name));
-      return (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
-    };
-    const query = await add('q.fa', '>q\nACGT\n');
-    const subject = await add('s.fa', '>s\nACGT\n');
-    const result = await coordinator.enqueueAll([
-      { ...request, query: { dataset: { name: 'q.fa', fileName: 'q.fa.gz', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', fileName: 's.fa', revisionIds: [subject] } } },
-    ]);
-    const { argv, query: q, subject: s } = viewOf(coordinator, result.runIds![0]!)!.snapshot;
-    expect(argv.slice(0, 5)).toEqual(['blastn', '-query', 'q.fa', '-subject', 's.fa']);
-    expect(q.fileName).toBe('q.fa.gz');
-    expect('fileName' in s).toBe(false);
-  });
-
   it('runs dataset inputs as the revisions say, and shares the bytes of the same revisions', async () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {

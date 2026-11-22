@@ -49,14 +49,7 @@ import { Store } from './store';
  * indexes itself. A run keeps its input in its snapshot (bytes and records), not its sources.
  */
 export type SequenceInput =
-  | {
-      readonly dataset: {
-        readonly name: string;
-        readonly revisionIds: readonly string[];
-        /** The name of the user's file when it is not `name` (a compressed file's; `InputSnapshot.fileName`). */
-        readonly fileName?: string;
-      };
-    }
+  | { readonly dataset: { readonly name: string; readonly revisionIds: readonly string[] } }
   | { readonly text: string }
   | { readonly file: File };
 
@@ -467,8 +460,7 @@ export class Coordinator {
         runInput = this.deps.data.buildRunInput(revisionIds);
       }
       const { bytes, sha256, records } = await runInput;
-      const fileName = 'dataset' in input ? input.dataset.fileName : undefined;
-      return Object.freeze({ name, ...(fileName === undefined || fileName === name ? {} : { fileName }), bytes, sha256, revisionIds, records });
+      return Object.freeze({ name, bytes, sha256, revisionIds, records });
     } catch (error) {
       // A part of LOSAT that could not be loaded or stopped is no fault of the input (line WQA's sweep, D1).
       if (isUnavailable(error)) throw error;

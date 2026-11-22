@@ -14,7 +14,6 @@ import {
   refusedFields,
   RESERVED_FLAGS,
   shellWords,
-  shownArgv,
   splitOptions,
   toShellCommand,
 } from '../../src/domain/argv';
@@ -319,20 +318,5 @@ describe('refusedFields', () => {
   it('names "Additional options" for the messages about its text', () => {
     expect(fields("Additional options: a quote (') is not closed", "-strand 'plus")).toEqual({ extra: true, flags: [] });
     expect(fields("Additional options: '' is not accepted", "''")).toEqual({ extra: true, flags: [] });
-  });
-});
-
-// Line WQA's D21, S3-3, 2026-11-23: the commands shown name the files as the user gave them.
-describe('shownArgv', () => {
-  const argv = ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-evalue', '1'];
-  it("names a compressed file as the user gave it, in place of the plain name that the engine's argv has", () => {
-    expect(shownArgv({ argv, query: { fileName: 'q.fa.gz' }, subject: {} })).toEqual(['blastn', '-query', 'q.fa.gz', '-subject', 's.fa', '-evalue', '1']);
-    expect(shownArgv({ argv, query: {}, subject: { fileName: 's.fa.zst' } })).toEqual(['blastn', '-query', 'q.fa', '-subject', 's.fa.zst', '-evalue', '1']);
-    expect(shownArgv({ argv, query: { fileName: 'q.fa.bz2' }, subject: { fileName: 's.fa.gz' } })).toEqual(['blastn', '-query', 'q.fa.bz2', '-subject', 's.fa.gz', '-evalue', '1']);
-  });
-  it('is the argv itself where the files are as the user gave them, and leaves the option values alone', () => {
-    expect(shownArgv({ argv, query: {}, subject: {} })).toBe(argv);
-    const same = ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-db', 'q.fa'];
-    expect(shownArgv({ argv: same, query: { fileName: 'q.fa.gz' }, subject: {} })).toEqual(['blastn', '-query', 'q.fa.gz', '-subject', 's.fa', '-db', 'q.fa']);
   });
 });

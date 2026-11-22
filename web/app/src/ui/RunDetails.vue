@@ -7,7 +7,7 @@ import { computed } from 'vue';
 import { CUSTOM_OUTPUT } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 import { optionGrammar, type LoadedRun } from '../application/results';
-import { commandWords, shownArgv } from '../domain/argv';
+import { commandWords } from '../domain/argv';
 import { COUNTS_FILE } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
 import { customOutfmt } from '../domain/output-format';
@@ -22,8 +22,6 @@ import VerificationBadge from './VerificationBadge.vue';
 const props = defineProps<{ run: RunView; loaded: LoadedRun }>();
 const snapshot = computed(() => props.run.snapshot);
 const record = computed(() => props.run.record);
-/** The run's argv with the files named as the user gave them: what the command lines here show (line WQA's D21, S3-3). */
-const argv = computed(() => shownArgv(props.run.snapshot));
 const takesValue = computed(() => optionGrammar(props.loaded.description).takesValue);
 /** The -outfmt value of the output of the run's own -outfmt, if it has one. */
 const custom = computed(() => customOutfmt(snapshot.value.argv));
@@ -64,7 +62,7 @@ const inputs = computed(() => [
         <dt>Mode</dt>
         <dd>{{ programById(snapshot.program).label }}</dd>
         <dt>Arguments</dt>
-        <dd><code data-testid="run-argv"><CommandText :words="argv" :takes-value="takesValue" /></code></dd>
+        <dd><code data-testid="run-argv"><CommandText :words="snapshot.argv" :takes-value="takesValue" /></code></dd>
         <template v-for="{ role, input } in inputs" :key="role">
           <dt>{{ role }}</dt>
           <dd :data-testid="`run-input-${role.toLowerCase()}`">
@@ -144,10 +142,10 @@ const inputs = computed(() => [
     <h3>Command line</h3>
     <ul class="commands">
       <li v-for="format in loaded.description.formats" :key="format">
-        outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(argv, format)" :takes-value="takesValue" /></code>
+        outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(snapshot.argv, format)" :takes-value="takesValue" /></code>
       </li>
       <li v-if="custom !== undefined">
-        outfmt {{ custom }}: <code data-testid="run-command-custom"><CommandText :words="commandWords(argv, CUSTOM_OUTPUT)" :takes-value="takesValue" /></code>
+        outfmt {{ custom }}: <code data-testid="run-command-custom"><CommandText :words="commandWords(snapshot.argv, CUSTOM_OUTPUT)" :takes-value="takesValue" /></code>
       </li>
     </ul>
 

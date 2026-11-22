@@ -1188,10 +1188,7 @@ export class SearchDraft {
 
   private async resolveGroup(group: { readonly name: string; readonly sources: readonly DraftSource[] }) {
     const revisionIds = await Promise.all(group.sources.map((source) => this.revisionFor(source)));
-    // One file of the user's: its own name, which a compressed file's plain name hides (line WQA's D21, S3-3, 2026-11-23).
-    const only = group.sources.length === 1 ? group.sources[0]! : undefined;
-    const fileName = only?.origin === 'file' && only.file.name !== group.name ? only.file.name : undefined;
-    return { name: group.name, revisionIds, ...(fileName === undefined ? {} : { fileName }) };
+    return { name: group.name, revisionIds };
   }
 
   // --- asynchronous work ------------------------------------------------------------------
@@ -1878,8 +1875,15 @@ export function noSequenceOf(source: DraftSource): 'none' | 'excluded' | undefin
   return records.some((record) => record.length > 0) ? 'excluded' : 'none';
 }
 
+/**
+ * The name that a source has in the run's argv: the user's own file name, as the command line is typed. A file named `.gz`,
+ * `.bz2` or `.zst` is inflated for the engine (the card's `name` is the plain one), but the engine's run takes the bytes of its
+ * inputs, not files, and writes the names of its argv where the command line writes the names of its files (outfmt 0 and 7's
+ * `Input:` line of a subject set, SAM's command line), so the argv names the file the user gave (line WQA's D21, S3-3 and the
+ * review's F1, 2026-11-23).
+ */
 function nameOf(source: DraftSource, role: InputRole): string {
-  return source.origin === 'paste' ? PASTED_NAMES[role] : source.name;
+  return source.origin === 'paste' ? PASTED_NAMES[role] : source.file.name;
 }
 
 function describeSource(source: DraftSource): string {

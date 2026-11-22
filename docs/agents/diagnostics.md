@@ -1968,14 +1968,14 @@ Rebuilding less:
   cap(q) grows only by q's jobs at risk of a window whose replay passed all of q's matches in it, so each
   stopped window before it carries at most cap(q) new jobs at risk of q on to it: it drops at most
   4 x cap(q) x (1 + those stopped windows) results of q, and at most the 2 x 4 x 64 x threads results it
-  holds. Evidence (head 4dba02449, node 1 of the workstation, 8 cores, median of 3, `-db paja`, every output =
-  NCBI 2.17.0 `-num_threads 1`): SicyWSV.faa 0.66 s at 8 threads against 4.07 s before (dev 560b269b8) and
-  NCBI's 1.91 s; AP027131.faa 3.40 s against 20.44 s and 4.80 s; with `-max_target_seqs 1` and 5 0.54 /
-  3.65 / 0.99 / 4.46 s (dev 3.33 / 17.02 / 3.99 / 19.99 s, NCBI 1.73 / 4.26 / 2.58 / 4.63 s); one thread
-  unchanged; max RSS at most 32.1 MiB (NCBI 73-94 MiB). UniRef50 (5 volumes, 19 GB) with 100 human
-  queries, `-max_target_seqs` 1 and 5, at 32 threads: 387 / 391 s against dev's 663 / 662 s and NCBI's
-  1,176 / 1,186 s, max RSS 143 / 142 MiB (dev 249 / 245 MiB, NCBI 12,027 / 12,067 MiB with the volumes
-  mapped); the same rows. With
+  holds. Evidence (head a988bc0f2, node 1 of the workstation, 8 cores, median of 3, `-db paja`, every output =
+  NCBI 2.17.0 `-num_threads 1`): SicyWSV.faa 0.72 s at 8 threads against 4.36 s before (dev dab8ae2ae) and
+  NCBI's 2.14 s; AP027131.faa 2.79 s against 20.52 s and 4.50 s; with `-max_target_seqs 1` and 5 0.67 /
+  2.51 / 1.14 / 3.32 s (dev 3.60 / 17.05 / 4.32 / 20.01 s, NCBI 1.78 / 3.84 / 2.63 / 4.37 s); one thread
+  unchanged (instructions x0.99998); max RSS at most 32.0 MiB (NCBI 74-94 MiB). UniRef50 (5 volumes,
+  19 GB) with 100 human queries, `-max_target_seqs` 1 and 5, at 32 threads (head 4dba02449; no replay
+  stops there, so no carry): 387 / 391 s against dev's 663 / 662 s and NCBI's 1,176 / 1,186 s, max RSS
+  143 / 142 MiB (dev 249 / 245 MiB, NCBI 12,027 / 12,067 MiB with the volumes mapped); the same rows. With
   `LOSAT_TIMING=1` each search the path runs prints
   `[TIMING] x_bpredopar: matches=<n> jobs=<j> windows=<w> split=<s> ended=<e> skipped=<k> wasted=<x>
   par_s=<s> replay_s=<s>` (on one line; `split`: windows that end inside a query; `ended`: the matches the

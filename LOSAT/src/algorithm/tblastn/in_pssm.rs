@@ -117,15 +117,17 @@ pub(super) fn check_limits(
     // The query-anchored formats 1 to 4 are outfmt 0's report with another alignment section
     // (line RG T3b: NCBI 2.17.0's `-in_pssm` sections, probes `tn.t3b.pssm.*`, are those of the
     // PSSM's query).
-    if searched && !matches!(outfmt, 0..=10 | 20) {
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:330-332
+    // With a PSSM NCBI's tblastn writes the archive from a query factory it never made: the null
+    // reference's exception carries a stack trace whose addresses change from run to run (also in
+    // the error archive), so outfmt 11 has no fixed bytes to match.
+    if searched && outfmt == 11 {
         bail!(
-            "output format {outfmt} with -in_pssm is not supported by LOSAT's TBLASTN yet{}",
-            if outfmt == 11 {
-                " (NCBI BLAST+ 2.17.0's tblastn stops with a C++ exception)"
-            } else {
-                ""
-            }
+            "output format 11 with -in_pssm is not supported by LOSAT's TBLASTN (NCBI BLAST+ 2.17.0's tblastn stops with a C++ exception whose report changes from run to run)"
         );
+    }
+    if searched && !matches!(outfmt, 0..=10 | 20) {
+        bail!("output format {outfmt} with -in_pssm is not supported by LOSAT's TBLASTN yet");
     }
     Ok(())
 }

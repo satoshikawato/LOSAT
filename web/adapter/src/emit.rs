@@ -1,5 +1,5 @@
-//! Output streams to the host (docs/web/abi_v2.md §3, §5): `losat_host.emit(stream,
-//! ptr, len)`. The engine formats on the thread that called the export (the caller
+//! Output streams to the host (docs/web/abi_v2.md §3, §5): the `losat_host.emit` import
+//! takes a stream, a pointer and a length. The engine formats on the thread that called the export (the caller
 //! runs the search pool's slot zero, `LOSAT/src/utils/threading.rs`), so every call
 //! reaches the host's own thread.
 

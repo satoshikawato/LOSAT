@@ -1,7 +1,7 @@
 //! NCBI's `CFormatGuess` (c++/src/util/format_guess.cpp, NCBI BLAST+ 2.17.0), the one port of it that LOSAT's callers
 //! share: makeblastdb's FASTA check (`writedb::format_guess::appears_fasta`, the preferred formats eBinaryASN,
 //! eTextASN and eFasta) and its mask files (`writedb::mask_info::guess`, eBinaryASN and eTextASN), and the
-//! `-in_pssm` file of psiblast and tblastn, whose `CFormatGuess().Format(in)` has no hints
+//! `-in_pssm` file of psiblast and tblastn, whose `CFormatGuess` (its `Format` of the input) has no hints
 //! (`algorithm::pssm_search::in_pssm`): every test of `sm_CheckOrder` up to eBinaryASN, then ePhrapAce and
 //! eUCSCRegion.
 //!
@@ -103,16 +103,16 @@ const fn init_symbol_type_table() -> [u8; 256] {
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:2509-2510
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7439-7545
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-321
-// `NStr::Split(data, delims, lines, NStr::fSplit_Tokenize)` with `delims` a set of single characters
+// `NStr::Split` of `data` at `delims` into lines, with `NStr::fSplit_Tokenize`, with `delims` a set of single characters
 // (`fSplit_ByPattern` is not set, so every character of the delimiter string is a delimiter): the non-empty runs of
 // bytes between delimiters. Leading, trailing and repeated delimiters give no empty token.
 
 /// The tokens a test reads by position: `IsLinePsl`'s 21 after its first column is the most.
 const KEPT_TOKENS: usize = 24;
 
-/// The tokens of `NStr::Split(str, delims, tokens, NStr::fSplit_Tokenize)` (and `fSplit_MergeDelimiters |
-/// fSplit_Truncate`, the same flags): how many there are, and the first [`KEPT_TOKENS`] of them, which are all the
-/// tests read by position (a test that reads every token goes through the line itself).
+/// The tokens of `NStr::Split` of `str` at `delims` with `NStr::fSplit_Tokenize` (that is,
+/// `fSplit_MergeDelimiters` and `fSplit_Truncate` together, the same flags): how many there are, and the first
+/// [`KEPT_TOKENS`] of them, which are all the tests read by position (a test that reads every token goes through the line itself).
 #[derive(Clone, Copy)]
 pub(crate) struct Tokens<'a> {
     kept: [&'a [u8]; KEPT_TOKENS],
@@ -163,7 +163,7 @@ pub(crate) fn tokens<'a>(str: &'a [u8], delims: &[u8]) -> Tokens<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3574-3597
-/// `NStr::SplitInTwo(str, delims, str1, str2, flags)`: `str1` (the bytes before the first delimiter, all of `str`
+/// `NStr::SplitInTwo` of `str` at `delims` with `flags`: `str1` (the bytes before the first delimiter, all of `str`
 /// when there is none), `str2` (after it; after the run of delimiters with `fSplit_MergeDelimiters`, `merge`) and
 /// whether a delimiter was found. `CStrTokenizeBase::Advance` (cited at [`tokens`]) without
 /// `fSplit_Truncate_Begin` keeps an empty `str1` before a leading delimiter.
@@ -186,7 +186,7 @@ pub(crate) fn split_in_two<'a>(
     }
 }
 
-/// `NStr::Find(str, pattern)` (case-sensitive) is not `NPOS`.
+/// `NStr::Find` of `pattern` in `str` (case-sensitive) is not `NPOS`.
 fn contains(str: &[u8], pattern: &[u8]) -> bool {
     find(str, pattern).is_some()
 }
@@ -216,7 +216,7 @@ fn find_byte(hay: &[u8], byte: u8) -> Option<usize> {
         .map(|rest| at + rest)
 }
 
-/// `NStr::Find(str, pattern)`: the position of the first `pattern` (one byte or more) in `str`, found from its
+/// `NStr::Find` of `pattern` in `str`: the position of the first `pattern` (one byte or more) in `str`, found from its
 /// first byte.
 fn find(str: &[u8], pattern: &[u8]) -> Option<usize> {
     let (&first, rest) = pattern.split_first()?;
@@ -235,8 +235,8 @@ fn find(str: &[u8], pattern: &[u8]) -> Option<usize> {
     None
 }
 
-/// The C string that starts `bytes` (up to its first NUL): what `std::string(const char*)`, `CTempString(const
-/// char*)` and `sscanf` read of a buffer that holds a NUL.
+/// The C string that starts `bytes` (up to its first NUL): what the `std::string` and `CTempString`
+/// constructors from a `const char*` and `sscanf` read of a buffer that holds a NUL.
 fn c_string(bytes: &[u8]) -> &[u8] {
     &bytes[..bytes.iter().position(|&c| c == 0).unwrap_or(bytes.len())]
 }
@@ -300,7 +300,7 @@ struct Stream<S> {
 }
 
 impl<S: Source> Stream<S> {
-    /// `m_Stream.read(buf, n)` and `m_Stream.gcount()`: the bytes read, as a range of `bytes`. A read of fewer than
+    /// `read` of `n` bytes from `m_Stream` and its `gcount()`: the bytes read, as a range of `bytes`. A read of fewer than
     /// `n` bytes sets `eofbit` and `failbit`; a stream that is not good reads nothing (its `sentry` fails).
     fn read(&mut self, n: usize) -> Range<usize> {
         let start = self.pos;
@@ -321,7 +321,7 @@ impl<S: Source> Stream<S> {
         self.good = true;
     }
 
-    /// `CStreamUtils::Stepback(m_Stream, buffer, size)` of the bytes just read: the next read reads them again.
+    /// `CStreamUtils::Stepback` of `m_Stream` with the bytes just read: the next read reads them again.
     fn stepback(&mut self, read: &Range<usize>) {
         self.pos = read.start;
     }
@@ -342,7 +342,7 @@ pub(crate) struct Stats {
     pub(crate) aa_chars: usize,
 }
 
-/// The non-empty runs of `data` between the bytes for which `ends` holds (`NStr::Split(..., fSplit_Tokenize)`, the
+/// The non-empty runs of `data` between the bytes for which `ends` holds (`NStr::Split` with `fSplit_Tokenize`, the
 /// lines of `NcbiGetline`): the bytes that are no line end and follow one or the start.
 fn count_runs(data: &[u8], ends: impl Fn(u8) -> bool + Copy) -> usize {
     let mut runs = 0;
@@ -358,8 +358,8 @@ fn count_runs(data: &[u8], ends: impl Fn(u8) -> bool + Copy) -> usize {
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:687-749
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:55-134
 
-/// `EnsureStats` on the sample. `NcbiGetline(..., "\r\n")` ends a line at `\r` or `\n`; a `\r` followed by `\n` is one
-/// delimiter and every other pair (`\n\r`, `\r\r`, `\n\n`) is two, so an empty line only adds an empty `strLine`, which
+/// `EnsureStats` on the sample. `NcbiGetline` with `\r\n` as the delimiters ends a line at `\r` or
+/// `\n`; a `\r` followed by `\n` is one delimiter and every other pair (`\n\r`, `\r\r`, `\n\n`) is two, so an empty line only adds an empty `strLine`, which
 /// `EnsureStats` does not count. The lines are therefore the non-empty runs between `\r`/`\n` bytes, each with one `\n`
 /// appended; the loop ends at the first read that finds nothing left (`fail()`), after the last line.
 fn stats_of(data: &[u8]) -> Stats {
@@ -588,7 +588,7 @@ impl Lines {
     }
 }
 
-/// `CFormatGuess` on a stream (`CFormatGuess(CNcbiIstream&)`).
+/// `CFormatGuess` on a stream (the `CFormatGuess` constructor from a `CNcbiIstream&`).
 pub(crate) struct FormatGuess<S> {
     stream: Stream<S>,
     /// `m_pTestBuffer` (`m_iTestDataSize` bytes), as the bytes of the stream it holds.
@@ -607,7 +607,7 @@ pub(crate) struct FormatGuess<S> {
 }
 
 impl<R: Read> FormatGuess<ReadSource<R>> {
-    /// `CFormatGuess(input)` (`Initialize`) on a reader.
+    /// `CFormatGuess` on the input (`Initialize`), here a reader.
     pub(crate) fn new(input: R) -> Self {
         FormatGuess::on(ReadSource {
             reader: input,
@@ -623,14 +623,14 @@ impl<R: Read> FormatGuess<ReadSource<R>> {
 }
 
 impl<'a> FormatGuess<&'a [u8]> {
-    /// `CFormatGuess(input)` on a stream over `bytes` (the whole input, which the guess does not copy).
+    /// `CFormatGuess` on the input, a stream over `bytes` (the whole input, which the guess does not copy).
     pub(crate) fn over(bytes: &'a [u8]) -> Self {
         FormatGuess::on(bytes)
     }
 }
 
 impl<S: Source> FormatGuess<S> {
-    /// `CFormatGuess(input)` (`Initialize`).
+    /// `CFormatGuess` on the input (`Initialize`).
     fn on(source: S) -> Self {
         FormatGuess {
             stream: Stream {
@@ -699,15 +699,15 @@ impl<S: Source> FormatGuess<S> {
         self.lines().nth(at)
     }
 
-    /// `m_TestLines.push_back(line)` of `TestFormatNewick` and `TestFormatHgvs`: their split failed, so this is the
-    /// one line they add (the split lines left are those of a buffer whose split failed too, or of a pass that
+    /// The `push_back` of one line to `m_TestLines` in `TestFormatNewick` and `TestFormatHgvs`: their
+    /// split failed, so this is the one line they add (the split lines left are those of a buffer whose split failed too, or of a pass that
     /// doubled it).
     fn push_line(&mut self, line: Range<usize>) {
         debug_assert!(self.lines.extra.is_none(), "one line added");
         self.lines.extra = Some(line);
     }
 
-    /// The line `m_pTestBuffer` holds as a C string (`m_TestLines.push_back(m_pTestBuffer)` of
+    /// The line `m_pTestBuffer` holds as a C string (added to `m_TestLines` by `push_back` in
     /// `TestFormatNewick` and `TestFormatHgvs`).
     fn c_string_line(&self) -> Range<usize> {
         let buffer = self.buffer.clone().unwrap_or_default();
@@ -747,7 +747,7 @@ impl<S: Source> FormatGuess<S> {
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:513-601 (`x_TestFormat`: each format
     // calls its own test, and the UCSC region format always answers false)
-    /// `x_TestFormat(format)`.
+    /// `x_TestFormat` of `format`.
     fn test_format(&mut self, format: Format) -> Result<bool, Stop> {
         Ok(match format {
             Format::Bam => false,
@@ -800,7 +800,7 @@ impl<S: Source> FormatGuess<S> {
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:625-684
     /// `EnsureTestBuffer()`: false for an empty stream (which stays at its end) and for an all-comment sample that
     /// ended before the buffer was full. Each pass reads the stream again from where the last one put its bytes
-    /// back (`CStreamUtils::Stepback`), so the sample is the next `Multiplier * 8096` bytes.
+    /// back (`CStreamUtils::Stepback`), so the sample is the next 8096 bytes times `Multiplier`.
     pub(crate) fn ensure_test_buffer(&mut self) -> bool {
         if self.buffer.is_some() {
             return true;
@@ -881,7 +881,8 @@ impl<S: Source> FormatGuess<S> {
             return false;
         }
         self.lines.clear();
-        // `NStr::Split(data, delims, m_TestLines, NStr::fSplit_Tokenize)`: the non-empty runs between delimiters.
+        // `NStr::Split` of `data` at `delims` into `m_TestLines` with `NStr::fSplit_Tokenize`: the non-empty
+        // runs between delimiters.
         let ends = if data.contains(&b'\r') && find(data, b"\r\n").is_some() {
             LineEnds::CrLf
         } else if data.contains(&b'\n') {
@@ -927,12 +928,12 @@ impl<S: Source> FormatGuess<S> {
         true
     }
 
-    /// `EnsureTestBuffer() && EnsureSplitLines()`, the first check of most tests.
+    /// `EnsureTestBuffer()` and then `EnsureSplitLines()`, the first check of most tests.
     fn ensure_lines(&mut self) -> bool {
         self.ensure_test_buffer() && self.ensure_split_lines()
     }
 
-    /// `EnsureStats() && EnsureSplitLines()`.
+    /// `EnsureStats()` and then `EnsureSplitLines()`.
     fn ensure_stats_and_lines(&mut self) -> bool {
         self.ensure_stats() && self.ensure_split_lines()
     }
@@ -1017,7 +1018,7 @@ impl<S: Source> FormatGuess<S> {
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1678-1716
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3680-3689
     /// `TestFormatTextAsn`. The statistics are those of `EnsureStats`'s buffer, the size and the lines those of the
-    /// buffer now (another one after `TestFormatNewick` replaced it). `NcbiGetline(..., "\n\r")` (cited at
+    /// buffer now (another one after `TestFormatNewick` replaced it). `NcbiGetline` with `\n\r` as the delimiters (cited at
     /// [`stats_of`]) ends a line at either byte, and the empty lines of a pair have no field: comments.
     pub(crate) fn test_format_text_asn(&mut self) -> bool {
         if !self.ensure_stats() {
@@ -1046,7 +1047,7 @@ impl<S: Source> FormatGuess<S> {
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1640-1675
     // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:340-347 (`CTempString::operator[]`, cited at
     // `skip_comment_and_blank`: NUL past the end)
-    /// `TestFormatFasta`: `Some(answer)`, or `None` when its `NStr::Find(m_pTestBuffer, "|")` decides and the input
+    /// `TestFormatFasta`: `Some(answer)`, or `None` when its `NStr::Find` of `|` in `m_pTestBuffer` decides and the input
     /// does not. `m_pTestBuffer` is a `char*` there: the C string ends at its first NUL, which `EnsureTestBuffer`'s
     /// buffer does not hold after its bytes. The first `|` of the bytes decides when it comes at position 10 or before
     /// (and before a NUL), and so does a NUL; a buffer of 11 bytes or more without either gives a position past 10.
@@ -1095,7 +1096,7 @@ impl<S: Source> FormatGuess<S> {
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1061-1158
     /// `TestFormatNewick`. When the split fails it reads a buffer of its own (8096 bytes from where the stream is,
     /// a NUL after them) and adds it to the lines as a C string, which the later tests read. The NEXUS scan reads
-    /// the stream on without stepping back: the text reader then starts where it stopped. `CTempString(test_buf)` is
+    /// the stream on without stepping back: the text reader then starts where it stopped. The `CTempString` of `test_buf` is
     /// the C string of the chunk with the 12 bytes `strncpy` carried before it (a NUL among them hides the chunk);
     /// a short chunk is the last (`eofbit`), so its overlapping `strncpy` is never read.
     fn test_format_newick(&mut self) -> bool {
@@ -1128,7 +1129,8 @@ impl<S: Source> FormatGuess<S> {
                         self.stream.clear(); // in case we reached eof
                         return true;
                     }
-                    // `strncpy(test_buf, test_buf + num_read, check_size)`: up to a NUL, the rest NUL.
+                    // `strncpy` of `check_size` bytes, from `num_read` bytes into `test_buf` to its start: up to a NUL,
+                    // the rest NUL.
                     let carried = c_string(&test_buf[num_read..num_read + CHECK_SIZE]).len();
                     test_buf.copy_within(num_read..num_read + carried, 0);
                     test_buf[carried..CHECK_SIZE].fill(0);
@@ -1157,13 +1159,13 @@ impl<S: Source> FormatGuess<S> {
 // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:537-549
 // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:362-373
 /// `SkipCommentAndBlank`. `text[0]` of an empty text is NUL, which is not in `;#!`. A comment line without a following
-/// line end (`find_first_of` gives `npos`) makes `substr(npos)` the empty string.
+/// line end (`find_first_of` gives `npos`) makes `substr` from `npos` the empty string.
 fn skip_comment_and_blank(mut text: &[u8]) -> &[u8] {
     loop {
         text = truncate_spaces_begin(text);
         let first = text.first().copied().unwrap_or(0);
         if matches!(first, b';' | b'#' | b'!') {
-            // `find_first_of(NEW_LINE_SYMBOLS, 1)`: search from index 1
+            // `find_first_of` of `NEW_LINE_SYMBOLS` from index 1
             let pos = text
                 .iter()
                 .skip(1)
@@ -1182,7 +1184,7 @@ fn skip_comment_and_blank(mut text: &[u8]) -> &[u8] {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2989-2999 (`NStr::FindNoCase`: the first letter in both
 // cases, then the pattern compared without case)
-/// `NStr::FindNoCase(str, pattern) != NPOS` (ASCII case).
+/// `NStr::FindNoCase` of `pattern` in `str` is not `NPOS` (ASCII case).
 fn find_nocase(str: &[u8], pattern: &[u8]) -> bool {
     str.len() >= pattern.len()
         && str
@@ -1191,7 +1193,7 @@ fn find_nocase(str: &[u8], pattern: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:2946-3071
-/// `IsSampleNewick(pSample)` of the sample read (`cline` is its C string, up to its first NUL; a sample whose first
+/// `IsSampleNewick` of `pSample`, the sample read (`cline` is its C string, up to its first NUL; a sample whose first
 /// byte after the spaces is not `(` is no tree before the C string is cut).
 fn is_sample_newick(sample: &[u8]) -> bool {
     if truncate_spaces_begin(sample).first() != Some(&b'(') {

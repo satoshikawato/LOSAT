@@ -224,7 +224,7 @@ fn values_convert_as_ncbi_converts_them() {
     );
 }
 
-// `NStr::StringToInt(str, fConvErr_NoThrow | fAllowTrailingSymbols)` (the version of
+// `NStr::StringToInt` with `fConvErr_NoThrow` and `fAllowTrailingSymbols` (the version of
 // `CSeqDBVol::x_CheckVersions`, `seqdb::isam::check_versions`): the bytes after the digits
 // are skipped, NUL included; `fConvErr_NoThrow` gives 0 for an error.
 #[test]
@@ -263,7 +263,7 @@ fn trailing_symbols_skip_the_rest_of_the_string() {
     );
 }
 
-// `NStr::StringToInt(str)` with the default flags, as `seqdb::mask` reads the mask
+// `NStr::StringToInt` with the default flags, as `seqdb::mask` reads the mask
 // algorithm ids and `s_IsNumericId` tests a program: a sign and digits only, up to the
 // first NUL.
 #[test]
@@ -294,7 +294,7 @@ fn default_flags_take_a_sign_and_digits_only() {
     ] {
         assert_eq!(string_to_int(text, 0).ok(), value, "{text:?}");
     }
-    // `NStr::StringToNumeric<TGi>(acc)` of `CSeq_id::Set` (`seqid::parse`).
+    // `NStr::StringToNumeric` for a `TGi`, of `acc`, in `CSeq_id::Set` (`seqid::parse`).
     assert_eq!(string_to_int8(b"4294967296", 0).ok(), Some(4_294_967_296));
     assert_eq!(string_to_int8(b"-5", 0).ok(), Some(-5));
     assert_eq!(string_to_int8(b"9223372036854775808", 0).ok(), None);
@@ -303,7 +303,7 @@ fn default_flags_take_a_sign_and_digits_only() {
         Some(i64::MIN)
     );
     assert_eq!(string_to_int8(b"12\x0034", 0).ok(), Some(12));
-    // `NStr::StringToUInt(str)` of the string ISAM's data pages (`seqdb::isam`).
+    // `NStr::StringToUInt` of the string ISAM's data pages (`seqdb::isam`).
     assert_eq!(string_to_uint(b"+5"), Ok(5));
     assert!(string_to_uint(b"-5").is_err());
     assert!(string_to_uint(b"4294967296").is_err());
@@ -311,7 +311,7 @@ fn default_flags_take_a_sign_and_digits_only() {
     assert!(string_to_uint(b"5\x00").is_err());
 }
 
-// `NStr::StringToNumeric<TTaxId>(id, fAllowLeadingSpaces | fAllowTrailingSpaces)` of a taxid
+// `NStr::StringToNumeric<TTaxId>` with `fAllowLeadingSpaces` and `fAllowTrailingSpaces`, of a taxid
 // list entry (`blastinput::db_filter`, `blastdbcmd::taxonomy`).
 #[test]
 fn taxid_list_entries_take_spaces_around_the_number() {

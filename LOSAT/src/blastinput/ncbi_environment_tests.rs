@@ -653,7 +653,7 @@ fn unescape(field: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:527-533
-// (`registry.HasEntry("BLAST", "BLASTDB")` and `registry.Get`, cited at `blastdb_of`) and
+// (`registry.HasEntry` for section "BLAST", entry "BLASTDB", and `registry.Get`, cited at `blastdb_of`) and
 // c++/src/corelib/ncbireg.cpp:1235-1246, 1577-1583 (the environment, then the program's
 // `.ini`, then `.ncbirc`).
 /// `tests/seqdb/expected/search_path/registry.tsv`: the value of `[BLAST] BLASTDB` that
@@ -1295,7 +1295,8 @@ fn a_log_name_is_read_on_windows_as_ncbi_reads_it() {
     }
 }
 
-/// `CDir::GetCwd` reads a working directory of up to 4094 characters (`getcwd(buf, 4095)`),
+/// `CDir::GetCwd` reads a working directory of up to 4094 characters (`getcwd` with a buffer of
+/// 4095 bytes),
 /// and NCBI's free space is its `Uint8` product, modulo 2^64: 2^64 bytes free is none (line
 /// WQA's D11 round 3, 2026-11-20).
 #[test]

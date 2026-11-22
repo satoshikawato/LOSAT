@@ -18,9 +18,10 @@ const GAP_THRESHOLD: i64 = 35;
 
 /// `TDomSeqAlignment`, with the members that the domain output reads.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:1084-1123,1206-1221
-// (`m_iFrom` and `m_iTo` are `i64`: the XML input's `GetQuery_from() - COORDSBASE` of
-// `-2147483648` stores `INT_MIN - 1` there, the value of NCBI's overflowing `int` arithmetic,
-// PD-LOSAT-NCBI-DEFECTS exception 12; an archive's are `int`s, converted from `TSeqPos`.)
+// (`m_iFrom` and `m_iTo` are `i64`: the XML input's `GetQuery_from` less `COORDSBASE`, for a value
+// of `-2147483648`, stores one less than `INT_MIN` there, the value of NCBI's overflowing `int`
+// arithmetic, PD-LOSAT-NCBI-DEFECTS exception 12; an archive's are `int`s, converted from
+// `TSeqPos`.)
 #[derive(Clone, Debug)]
 pub(crate) struct DomAlign {
     pub(crate) pssm_id: u32,
@@ -40,7 +41,7 @@ pub(crate) struct DomAlign {
     /// `m_ClipSet`: the query ranges (as positions on the model, `ori_from` side) that a
     /// structural-domain hit keeps for its motifs (set by `calculate`, empty otherwise).
     pub(crate) clip_set: SegSet,
-    /// `m_eAlignType == ePr2Na`: a hit of a translated query (a `Std-seg` whose query locations
+    /// `m_eAlignType` being `ePr2Na`: a hit of a translated query (a `Std-seg` whose query locations
     /// carry a strand); its `m_starts` are positions on a "pseudo-protein".
     pub(crate) pr2na: bool,
     /// `m_ReadingFrame` (`TFRAMEINDEX`, an `unsigned int`): the plus-strand frame index of
@@ -85,13 +86,13 @@ impl DomAlign {
         }
     }
 
-    /// The aligned length in codons of a minus-strand hit (`m_ReadingFrame >> 2`), 0 for the
-    /// others.
+    /// The aligned length in codons of a minus-strand hit (`m_ReadingFrame` shifted right by 2), 0
+    /// for the others.
     pub(crate) fn aligned_len(&self) -> u32 {
         self.reading_frame >> 2
     }
 
-    /// The plus-strand frame index (`m_ReadingFrame & READINGFRAME::RF_SIZE`).
+    /// The plus-strand frame index (`m_ReadingFrame` masked with `READINGFRAME::RF_SIZE`).
     pub(crate) fn plus_rf_idx(&self) -> u32 {
         self.reading_frame & RF_SIZE
     }
@@ -100,9 +101,10 @@ impl DomAlign {
 /// `m_vecSStarts` (`std::vector<SeqPos_t>`): the starts of the segments on the model. NCBI keeps
 /// `int`s; LOSAT keeps `i32`s, 4 bytes a segment, until a start past `int`'s range comes, and
 /// `i64`s from then on: `ParseAlignStrings` of the XML input moves its `int` `hf` past the range
-/// with `++hf`, `--hf` (and `- COORDSBASE` of an `Hsp_hit-from` of `-2147483648`), which LOSAT
-/// computes as their values (PD-LOSAT-NCBI-DEFECTS exception 12). An archive's starts are `int`s
-/// (converted from `TSeqPos`), so they stay narrow, and so does every start of a real document.
+/// with an increment and a decrement of `hf` (and `COORDSBASE` taken off an `Hsp_hit-from` of
+/// `-2147483648`), which LOSAT computes as their values (PD-LOSAT-NCBI-DEFECTS exception 12). An
+/// archive's starts are `int`s (converted from `TSeqPos`), so they stay narrow, and so does every
+/// start of a real document.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:1121
 // (No equality of two of them: the storage is not part of the value. The tests compare the values
 // with a list, `PartialEq<Vec<i64>>`.)
@@ -216,7 +218,8 @@ fn clean_alignment(seg: &DenseSeg, align: &mut DomAlign) {
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_blast.cpp:214-262
 // (`ParseAlignScores`, cited at `archive::ArchiveStream::align_score`, which keeps the scores
 // it reads.)
-// (`m_vecMStarts[...] + m_vecLens[...] - 1` adds an `int` and an `unsigned int`: the sum wraps
+// (One less than the sum of an entry of `m_vecMStarts` (an `int`) and of `m_vecLens` (an
+// `unsigned int`) is computed in `unsigned int`: the sum wraps
 // as an `unsigned int` and is stored back in an `int`.)
 pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAlign {
     let mut dom = DomAlign::empty(align, pssm_id);
@@ -235,24 +238,24 @@ pub(crate) fn parse_align(seg: &DenseSeg, align: &Align, pssm_id: u32) -> DomAli
 /// reads outside its vectors.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_blast.cpp:44-133
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_blast.cpp:166-209
-// The types decide the arithmetic: `GetFrom`/`GetTo`/`GetPoint` are `TSeqPos` (unsigned)
-// stored in `SeqPos_t` (`int`, wraps in NCBI's build); `t - f + 1` is `int` arithmetic, which
-// overflows for an interval of 2^31 positions or more (undefined): computed as its value
-// (PD-LOSAT-NCBI-DEFECTS exception 12), which `push_back` converts to the `unsigned int` of
-// `m_vecLens` (modulo 2^32); `m_iFrom % RF_SIZE`, `*iterMS / RF_SIZE` and the minus-strand sum
-// are `unsigned int` arithmetic (wraps); `m_iTo + 1` is `int` (`m_iTo` is at least 0), which
-// overflows for a hit that ends at 2^31 - 1: computed as its value (exception 12), which the
-// division by the `unsigned int` `RF_SIZE` converts modulo 2^32. A segment whose subject location is
-// neither `int` nor `pnt` leaves its query start without a subject start and length: the
-// vectors differ in length, which the plus-strand code and the classification read within
-// bounds (LOSAT keeps the three vectors as NCBI does), but the minus-strand loop above reads
-// `m_vecLens` past its end (refused). `ids` with fewer than 2 ids in the first segment is read
-// past its end (refused, by the caller). `seqlocs[0]->IsNull() || seqlocs[1]->IsNull()` reads
-// `seqlocs[1]` only when the first location is not `null`: a segment without locations, or
-// whose only location is not `null`, is read past its end (refused), and a segment whose first
-// location is `null` is skipped whatever follows (PS16c review oracle `nullone`). The strand
-// that counts is the last one set; `unknown`, `plus` and `both` make a plus-strand hit, `minus`
-// and `both-rev` a minus-strand one, `other` (or none) an alignment of two proteins.
+// The types decide the arithmetic: `GetFrom`/`GetTo`/`GetPoint` are `TSeqPos` (unsigned) stored in
+// `SeqPos_t` (`int`, wraps in NCBI's build); `t - f + 1` is `int` arithmetic, which overflows for
+// an interval of 2^31 positions or more (undefined): computed as its value (PD-LOSAT-NCBI-DEFECTS
+// exception 12), which `push_back` converts to the `unsigned int` of `m_vecLens` (modulo 2^32);
+// `m_iFrom` modulo `RF_SIZE`, `*iterMS` divided by `RF_SIZE` and the minus-strand sum are `unsigned
+// int` arithmetic (wraps); `m_iTo` plus 1 is `int` (`m_iTo` is at least 0), which overflows for a
+// hit that ends at 2^31 - 1: computed as its value (exception 12), which the division by the
+// `unsigned int` `RF_SIZE` converts modulo 2^32. A segment whose subject location is neither `int`
+// nor `pnt` leaves its query start without a subject start and length: the vectors differ in
+// length, which the plus-strand code and the classification read within bounds (LOSAT keeps the
+// three vectors as NCBI does), but the minus-strand loop above reads `m_vecLens` past its end
+// (refused). `ids` with fewer than 2 ids in the first segment is read past its end (refused, by the
+// caller). The test of `seqlocs[0]` and `seqlocs[1]` for `null` (`IsNull`, joined by "or") reads
+// `seqlocs[1]` only when the first location is not `null`: a segment without locations, or whose only location is not `null`, is
+// read past its end (refused), and a segment whose first location is `null` is skipped whatever
+// follows (PS16c review oracle `nullone`). The strand that counts is the last one set; `unknown`,
+// `plus` and `both` make a plus-strand hit, `minus` and `both-rev` a minus-strand one, `other` (or
+// none) an alignment of two proteins.
 pub(crate) fn parse_std_align(
     segs: &[StdPair],
     align: &Align,
@@ -335,10 +338,10 @@ pub(crate) fn parse_std_align(
     Ok(dom)
 }
 
-/// `TSeqAlignment::CalcMasterGaps(GAP_THRESHOLD)`: the query ranges between segments that are
+/// `TSeqAlignment::CalcMasterGaps` with `GAP_THRESHOLD`: the query ranges between segments that are
 /// at least `GAP_THRESHOLD` long.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1324-1339
-// (`(SeqPos_t)m_vecLens[i]` converts an `unsigned int` to `int`, which wraps in NCBI's build;
+// (`m_vecLens[i]` cast to `SeqPos_t` converts an `unsigned int` to `int`, which wraps in NCBI's build;
 // the `int` sums after it are computed in `i64`, `segset::Seg`.)
 fn master_gaps(align: &DomAlign) -> SegSet {
     let mut gaps = SegSet::new();
@@ -385,19 +388,17 @@ struct Facility {
 // The models missing from the data are looked up again after `x_LoadMissingDomains`, which the
 // offline processor does not override (`cdalignproc_base.hpp:123`, an empty body): they stay
 // missing and their hits are dropped (cdalignproc_base.cpp:133-195). `Multidom` hits (`m_iRepClass`
-// 1) are not made since 2018-04-04 (the commented lines above), so the output's `Multidom` type
-// is never printed.
-// (`m_uiLength - (sstart + len)` is `unsigned int` arithmetic stored in an `int`, of the start's
-// value modulo 2^32 where the XML input took it past `int` (`SubjectStarts`); `iNMissing` is
-// that value (PD-LOSAT-NCBI-DEFECTS exception 12); the ratios
-// divide doubles, so a model of length 0 gives an infinity or a NaN as NCBI's does. The two
-// sorts by `TDomAlignOrderByEValue` are Rust's standard sort with that order made total
-// (`e_value_order`: a NaN E-value or bit score, which NCBI's comparison orders against no number,
-// sorts after every number) and the hit's index as the last key (`sort_ties_in_input_order`;
-// `selected` is in increasing order): hits equal in E-value and bit score keep the order of
-// `selected`, where NCBI's `std::sort` may leave them in another, and so may become the
-// representative or `Specific` hit in NCBI's place (PD-LOSAT-NCBI-DEFECTS 1.67, the order of tied
-// hits).)
+// 1) are not made since 2018-04-04 (the commented lines above), so the output's `Multidom` type is
+// never printed. (`m_uiLength` less the sum of `sstart` and `len` is `unsigned int` arithmetic
+// stored in an `int`, of the start's value modulo 2^32 where the XML input took it past `int`
+// (`SubjectStarts`); `iNMissing` is that value (PD-LOSAT-NCBI-DEFECTS exception 12); the ratios
+// divide doubles, so a model of length 0 gives an infinity or a NaN as NCBI's does. The two sorts
+// by `TDomAlignOrderByEValue` are Rust's standard sort with that order made total (`e_value_order`:
+// a NaN E-value or bit score, which NCBI's comparison orders against no number, sorts after every
+// number) and the hit's index as the last key (`sort_ties_in_input_order`; `selected` is in
+// increasing order): hits equal in E-value and bit score keep the order of `selected`, where NCBI's
+// `std::sort` may leave them in another, and so may become the representative or `Specific` hit in
+// NCBI's place (PD-LOSAT-NCBI-DEFECTS 1.67, the order of tied hits).)
 pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddData) -> AlignIndex {
     let mut index = AlignIndex::default();
     let mut gap_sets: Vec<SegSet> = Vec::new();
@@ -513,7 +514,7 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddD
         index.standard = index.sorted.clone();
     }
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.cpp:305-342
-    // (`m_uiLength - 1` is `unsigned int`, converted to `SeqPos_t` by `AddSeg`: a model of length
+    // (`m_uiLength` less 1 is `unsigned int`, converted to `SeqPos_t` by `AddSeg`: a model of length
     // 0 gives -1, an empty range.)
     if !structural.is_empty() {
         sort_ties_in_input_order(
@@ -587,7 +588,7 @@ pub(crate) fn sort_reading_frames(
     Ok(frames)
 }
 
-/// `TSeqAlignment::GetRFIdx(seqLen)`: the reading frame index (0 to 5) of an alignment.
+/// `TSeqAlignment::GetRFIdx` of `seqLen`: the reading frame index (0 to 5) of an alignment.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1342-1351
 pub(crate) fn rf_index(align: &DomAlign, query_len: u32) -> u32 {
     if !align.pr2na {
@@ -601,7 +602,7 @@ pub(crate) fn rf_index(align: &DomAlign, query_len: u32) -> u32 {
     }
 }
 
-/// `TSeqAlignment::MapSegSet(segset)` of a protein alignment.
+/// `TSeqAlignment::MapSegSet` with `segset`, for a protein alignment.
 pub(crate) fn map_seg_set(set: &mut SegSet, align: &DomAlign) {
     set.map_through(&align.m_starts, &align.s_starts, &align.lens);
 }
@@ -611,11 +612,12 @@ pub(crate) fn map_seg_set(set: &mut SegSet, align: &DomAlign) {
 /// original position; `Err` with the text of NCBI's exception when a minus-strand hit reaches
 /// past the query's length.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1252-1294
-// (`qLen - rfidx` and `c + offset` are `unsigned int` arithmetic, which wraps; `c + offset`
-// is stored in an `int`. `++c` and `ori_from + inc` are `int` arithmetic, which overflows past
-// `INT_MAX` (undefined; a mapped range at the limit, made by hand): computed as their values,
-// which the plus strand stores as they are (PD-LOSAT-NCBI-DEFECTS exception 12); a position
-// outside the translation is then read by the out-of-range rules of its reader.)
+// (`qLen` less `rfidx` and `c` plus `offset` are `unsigned int` arithmetic, which wraps; the sum
+// of `c` and `offset` is stored in an `int`. The increment of `c` and the sum of `ori_from` and
+// `inc` are `int` arithmetic, which overflows past `INT_MAX` (undefined; a mapped range at the limit, made by
+// hand): computed as their values, which the plus strand stores as they are (PD-LOSAT-NCBI-DEFECTS
+// exception 12); a position outside the translation is then read by the out-of-range rules of its
+// reader.)
 pub(crate) fn translated_pos_map(
     set: &SegSet,
     align: &DomAlign,
@@ -663,11 +665,11 @@ pub(crate) fn translated_pos_map(
 /// them are `unsigned int`'s, modulo 2^32.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:1137-1177
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:281-290
-// Only the ends are printed (the motif lines), so only the first and the last ranges are
-// converted; `ori_from` is not read after the conversion. The minus strand reverses the list:
-// the left end comes from the last range's `to`, the right end from the first range's `from`.
-// The minus strand's `ori_from += (to - from + 1) / m_iFactor - 1` is not computed: its value
-// is never read, so no printed number depends on it (PS16c review S3-4).
+// Only the ends are printed (the motif lines), so only the first and the last ranges are converted;
+// `ori_from` is not read after the conversion. The minus strand reverses the list: the left end
+// comes from the last range's `to`, the right end from the first range's `from`. The minus strand's
+// update of `ori_from` (it grows by the range length divided by `m_iFactor`, less one) is not
+// computed: its value is never read, so no printed number depends on it (PS16c review S3-4).
 pub(crate) fn pr2na_ends(set: &SegSet, align: &DomAlign) -> Option<(i64, i64)> {
     let (first, last) = (set.segs().first()?, set.segs().last()?);
     if !align.pr2na {

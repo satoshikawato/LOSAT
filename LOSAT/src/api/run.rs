@@ -165,7 +165,7 @@ pub struct HspRecord {
     pub gap_open: usize,
     /// The gap columns (`gaps`).
     pub gaps: usize,
-    /// How many HSPs NCBI's sum statistics linked with this one (`Expect(n)` of the pairwise
+    /// How many HSPs NCBI's sum statistics linked with this one (the `n` of `Expect` in the pairwise
     /// format), where the program links HSPs; `None` otherwise. 0 and 1 both mean an HSP on its
     /// own (`BlastHSP::num`).
     pub sum_n: Option<i32>,

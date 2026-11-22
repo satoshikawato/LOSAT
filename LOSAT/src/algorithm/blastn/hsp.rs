@@ -397,7 +397,7 @@ pub trait HitListEntry {
     fn oid(&self) -> u32;
     fn hsp_count(&self) -> usize;
     fn best_evalue(&self) -> f64;
-    /// `hsp_list->best_evalue = s_BlastGetBestEvalue(hsp_list)`.
+    /// Sets `hsp_list->best_evalue` from `s_BlastGetBestEvalue`.
     fn update_best_evalue(&mut self);
     /// `hsp_list->hsp_array[0]->score`.
     fn first_score(&self) -> Option<i32>;

@@ -25,8 +25,8 @@ const SYMBOLS: &[u8; 25] = b"ARNDCQEGHILKMFPSTWYVBJZX*";
 /// letter: all but `*` (code 25), and `-` (code 0).
 const IUPACAA_LETTERS: &[u8; 26] = b"ABCDEFGHIKLMNPQRSTVWXYZUOJ";
 
-/// `CBlastFormattingMatrix(letter, letter)` as scores, `i32::MIN` for a pair with a letter that
-/// has no entry.
+/// The scores of `CBlastFormattingMatrix` for a pair of letters, `i32::MIN` for a pair with a
+/// letter that has no entry.
 pub struct FormattingMatrix {
     scores: Box<[i32]>,
 }

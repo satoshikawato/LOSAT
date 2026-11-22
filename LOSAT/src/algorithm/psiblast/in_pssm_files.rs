@@ -8,11 +8,11 @@
 //! LOSAT's refusals of what NCBI cannot write.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:385-408
-//! With `-in_pssm` the loop's first `SavePssmToFile(pssm, &itr)` writes the input PSSM, the object
-//! that `CPsiBlast` searches (`CPsiBlast(pssm, db_adapter, psi_opts)` holds the same `CRef`); its
-//! ASCII PSSM takes the ancillary data of the PSSM itself, which stays for the files written after
-//! the loop until the next PSSM is computed (`ComputePssmForNextIteration` replaces
-//! `m_AncillaryData`).
+//! With `-in_pssm` the loop's first `SavePssmToFile` of `pssm` writes the input PSSM, the object
+//! that `CPsiBlast` searches (the `CPsiBlast` made from `pssm`, `db_adapter` and `psi_opts` holds
+//! the same `CRef`); its ASCII PSSM takes the ancillary data of the PSSM itself, which stays for
+//! the files written after the loop until the next PSSM is computed (`ComputePssmForNextIteration`
+//! replaces `m_AncillaryData`).
 
 use anyhow::{bail, Result};
 
@@ -289,10 +289,10 @@ impl InPssmRounds {
     }
 }
 
-/// `PrintAsciiPssm(*pssm, ExtractPssmAncillaryData(*pssm))` of a file PSSM: the scores of the file
-/// (`GetScores`), the query's letters (`GetQuerySequenceData`), the long form with the file's
-/// diagnostics when it has `informationContent`, and the PSI blocks of its `finalData` (a member
-/// it lacks is `CPssm::kInvalidStat`, 0).
+/// `PrintAsciiPssm` of a file PSSM, with the ancillary data that `ExtractPssmAncillaryData` takes
+/// from it: the scores of the file (`GetScores`), the query's letters (`GetQuerySequenceData`), the
+/// long form with the file's diagnostics when it has `informationContent`, and the PSI blocks of
+/// its `finalData` (a member it lacks is `CPssm::kInvalidStat`, 0).
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:792-804
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:117-134
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:186-196

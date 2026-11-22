@@ -84,7 +84,7 @@ impl Options {
     }
 }
 
-/// `GetCodeBits(stride)`: the bits of `stride`, at least 1.
+/// `GetCodeBits` of `stride`: the bits of `stride`, at least 1.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:438-443
 pub(crate) fn code_bits(stride: u64) -> u64 {
     let mut stride = stride;
@@ -98,7 +98,7 @@ pub(crate) fn code_bits(stride: u64) -> u64 {
     }
 }
 
-/// `GetMinOffset(stride)`: 4 to the power `code_bits(stride)`, which NCBI computes by shifting
+/// `GetMinOffset` of `stride`: 4 to the power `code_bits(stride)`, which NCBI computes by shifting
 /// an `int`; defined for a stride below 32768 (`code_bits` 15 or less), which `makembindex`
 /// checks first (`MAX_STRIDE`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:446-447

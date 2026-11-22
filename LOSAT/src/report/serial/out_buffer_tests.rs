@@ -84,7 +84,7 @@ fn after(stream: Stream, before: usize, piece: Piece, bytes: &[u8]) -> OutBuffer
 
 #[test]
 fn asn_text_header_enum_and_real_are_split_as_ncbi_calls_them() {
-    // `WriteFileHeader`: `WriteId(name)` (14 bytes fit at 4080) and `PutString(" ::= ")`,
+    // `WriteFileHeader`: `WriteId` of the name (14 bytes fit at 4080) and `PutString` of `" ::= "`,
     // which flushes 4094 - 80 bytes; one call of 19 bytes would flush at 4080.
     let buffer = after(Stream::AsnText, 4080, Piece::Header, b"Blast4-archive ::= ");
     assert_eq!((buffer.written(), buffer.used), (4014, 85));
@@ -106,9 +106,9 @@ fn asn_text_header_enum_and_real_are_split_as_ncbi_calls_them() {
 
 #[test]
 fn asn_text_octets_wrap_with_one_byte_calls() {
-    // `BeginBytes` (`'`), two `PutChar`s per byte with `WrapAt(78, false)`'s end of line
-    // (`PutEol(false)`: `Reserve(1)`, no indentation) between them, then `PutString("'H")`:
-    // the 97th of the one-byte calls flushes 4096 - 80 bytes.
+    // `BeginBytes` (`'`), two `PutChar`s per byte with the end of line of `WrapAt` at 78 with
+    // `false` (`PutEol` with `false`: `Reserve` of 1, no indentation) between them, then
+    // `PutString` of `"'H"`: the 97th of the one-byte calls flushes 4096 - 80 bytes.
     let mut octets = b"'".to_vec();
     octets.extend(b"AB".repeat(39));
     octets.push(b'\n');
@@ -141,8 +141,8 @@ fn a_text_post_after_a_wrap_of_its_string_counts_the_wrap() {
 
 #[test]
 fn an_xml_character_reference_is_a_put_string_and_one_byte_calls() {
-    // `&#x9;`: `PutString("&#x")` fits at 4092, `PutChar('9')` ends the buffer and
-    // `PutChar(';')` flushes 4095 bytes (XML keeps 1); one call of 5 bytes would flush at
+    // `&#x9;`: `PutString` of `"&#x"` fits at 4092, `PutChar` of the digit 9 ends the buffer and
+    // `PutChar` of a semicolon flushes 4095 bytes (XML keeps 1); one call of 5 bytes would flush at
     // 4092.
     let buffer = after(Stream::Xml, 4092, Piece::Str, b"&#x9;");
     assert_eq!((buffer.written(), buffer.used), (4095, 2));

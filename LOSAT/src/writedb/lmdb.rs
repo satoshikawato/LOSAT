@@ -126,7 +126,7 @@ pub(crate) fn lmdb_file_name(lmdb_filename: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// The bytes up to the first NUL (`strlen(id.c_str())`).
+/// The bytes up to the first NUL (`strlen` of `id.c_str()`).
 fn c_str(b: &[u8]) -> &[u8] {
     match b.iter().position(|&c| c == 0) {
         Some(n) => &b[..n],
@@ -135,7 +135,8 @@ fn c_str(b: &[u8]) -> &[u8] {
 }
 
 /// Run the batches of `x_CommitTransaction`: `[i, j)` with
-/// `j = i + m_MaxEntryPerTxn` in `unsigned int` arithmetic, clipped to the list size.
+/// `j` the sum of `i` and `m_MaxEntryPerTxn`, in `unsigned int` arithmetic, clipped to the list
+/// size.
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:312-321
 // `MAX_LMDB_TXN_ENTRY=0` makes makeblastdb loop for ever (no batch ever ends the list), and a
 // batch end that wraps past 4294967295 sends its loop back over entries already put: LOSAT
@@ -370,7 +371,7 @@ impl WriteDbLmdb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:108-117
-    /// `InsertEntries(m_Ids, oid)`: the keys of the Seq-ids of the sequence of OID `oid`.
+    /// `InsertEntries` of `m_Ids` and `oid`: the keys of the Seq-ids of the sequence of OID `oid`.
     /// Returns how many elements were added to `m_list` (0 when every id is a GI).
     pub(crate) fn insert_entries(
         &mut self,
@@ -389,10 +390,10 @@ impl WriteDbLmdb {
     // `NStr::ToUpper` changes the letters a-z only (the C locale; the ids of the FASTA reader
     // hold no byte past 0x7f, makedb-v5 DECISIONS 28), so a copy differs exactly when the id
     // has such a letter. Each Seq-id's bytes are stored once (`KeyValuePair`): the id with the
-    // version is written and the id without it is its start (`GetSeqIdString(false)` is the
-    // start of `GetSeqIdString(true)`, above); a PDB molecule is the start of
-    // `GetSeqIdString(true)` (the molecule, then `_` and the chain: `label::content`). Where
-    // a start is not the shorter id, it is stored on its own.
+    // version is written and the id without it is its start (`GetSeqIdString` without the version
+    // is the start of `GetSeqIdString` with it, above); a PDB molecule is the start of
+    // `GetSeqIdString` with the version (the molecule, then `_` and the chain: `label::content`).
+    // Where a start is not the shorter id, it is stored on its own.
     /// `x_InsertEntry`: the elements of `m_list` of one Seq-id of OID `oid`.
     fn insert_seq_id(&mut self, seqid: &ParsedSeqId, oid: u32) -> Result<(), WriteDbError> {
         if matches!(seqid, ParsedSeqId::Gi(_)) {
@@ -453,8 +454,8 @@ impl WriteDbLmdb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:74-94
-    /// `InsertVolumesInfo`: the names of the volumes (`CDirEntry(volume name).GetName()`) and
-    /// the number of OIDs in each.
+    /// `InsertVolumesInfo`: the names of the volumes (`GetName` of a `CDirEntry` of the volume
+    /// name) and the number of OIDs in each.
     pub(crate) fn insert_volumes_info(
         &mut self,
         vol_names: &[String],
@@ -502,7 +503,7 @@ impl WriteDbLmdb {
         self.env.txn_commit().map_err(lmdb_error)
     }
 
-    /// `set_mapsize` when `total_pages_needed + last_page_num > max_num_pages`. NCBI's
+    /// `set_mapsize` when `total_pages_needed` plus `last_page_num` exceeds `max_num_pages`. NCBI's
     /// `size_t` arithmetic is done in `u64` on every platform (a 32-bit `usize` would cut
     /// it); a size the platform cannot map is refused by `Env::set_mapsize`.
     fn grow_map(&mut self, total_pages_needed: u64) -> Result<(), WriteDbError> {

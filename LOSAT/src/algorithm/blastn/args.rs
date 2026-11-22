@@ -337,7 +337,7 @@ pub struct BlastnArgs {
     #[arg(skip)]
     pub window_masker_registry:
         Option<Result<crate::blastinput::ncbi_environment::WindowMaskerRegistry, String>>,
-    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath` of `taxdb.bti`), asked
     /// before the search where a tabular field list looks every taxid up (the plural names of the
     /// taxonomy database, the organism report; `algorithm::blastn::tabular`), by the command line
     /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no

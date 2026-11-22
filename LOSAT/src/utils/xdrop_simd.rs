@@ -57,7 +57,7 @@
 //! `max(a - b, 0)` on lanes in `0 ..= i32::MAX`, `subsu32`). So the argument above holds as it
 //! stands, with one addition: the scores come from the same 16-bit tables, where an entry of
 //! -32768 may stand for a lower score (`build_row_table` clamps there; the BLASTNA gap letter's
-//! `INT4_MIN / 2`). The argument covers that clamp only for an X-drop below 32768, so the 32-bit
+//! half of `INT4_MIN`). The argument covers that clamp only for an X-drop below 32768, so the 32-bit
 //! kernel declines a problem in which a row letter meets such an entry with a column letter of
 //! the problem (`x32_amb_of`), and the scalar port runs it. Switch: `LOSAT_X_DP32` (strict set,
 //! `x_dp32`): `=0` runs neither the 32-bit lanes nor the clamp below, so such calls go to the
@@ -71,7 +71,7 @@
 //! (`ALIGN_EX`, `Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`) run the same steps and return
 //! the same offsets, score, fence flag and edit script; so the kernels run a call with `X > R` as
 //! one with `X = R`. `x_dropoff` enters the loops in three tests only: the end of row 0
-//! (`if (score < -x_dropoff) break`), the drop test (`best_score - score > x_dropoff`) and the
+//! (a break when `score` is below minus `x_dropoff`), the drop test (`best_score - score > x_dropoff`) and the
 //! band extension (`score_gap_row >= best_score - x_dropoff`); `num_extra_cells` (`x_dropoff /
 //! gap_extend + 3`) only sizes memory. Take `X >= R`.
 //! (a) Row 0 holds `-goe - ge * (i - 1) >= -R` at every column `i <= N`, so it is not cut:
@@ -88,7 +88,7 @@
 //!     `score_gap_row` are at least a kept score minus `goe`. So `best_score - score < R <= X`:
 //!     the cell is kept. By induction no cell is dropped.
 //! (c) With `b_size = N + 1` the extension (`b_size <= N`) never runs and no `MININT` sentinel
-//!     is written (`if (b_size <= N)`); the only `MININT` values are the starts of each row
+//!     is written (it is written only when `b_size` is at most `N`); the only `MININT` values are the starts of each row
 //!     (`score`, `score_gap_row`), and the column gap of the first cell, a real value, wins the
 //!     maximum over them. (In a traceback the fence ends the DP (`*fence_hit`); without
 //!     `check_fence` a fence byte is a letter the kernels decline. Were the extension to run, its
@@ -1008,7 +1008,7 @@ pub(crate) struct XTrace {
     t: Vec<Vec<u8>>,
     /// The chunk being filled (the last of `t`).
     tc: usize,
-    /// Where the next row starts in `t[tc]` (NCBI `state_array + used`).
+    /// Where the next row starts in `t[tc]` (NCBI's `state_array` plus `used`).
     wp: *mut u8,
     /// The last place in `t[tc]` where a row may end: its record fits after it.
     wend: *mut u8,
@@ -1142,8 +1142,8 @@ impl XTrace {
         self.wp
     }
 
-    /// The row just written at `x_row`: `cells` cells from column `start` (NCBI `used +=`,
-    /// `edit_start_offset[a_index] = first_b_index`), `trace_bytes(nib, cells)` bytes, then its
+    /// The row just written at `x_row`: `cells` cells from column `start` (NCBI adds to `used`
+    /// and sets `edit_start_offset` of `a_index` to `first_b_index`), `trace_bytes(nib, cells)` bytes, then its
     /// record (`cells`, then the step of `start` from the row above: one byte each below 255, else
     /// the long form). Returns the end of the record (`x_best`).
     #[inline(always)]
@@ -1201,7 +1201,7 @@ impl XTrace {
     }
 
     /// The record that ends at `end` (`x_row_done`): the step of the row's first column from the
-    /// row above (NCBI `edit_start_offset[i] - edit_start_offset[i - 1]`), its cells, and the
+    /// row above (NCBI's `edit_start_offset` of this row less the one of the row above), its cells, and the
     /// record's first byte (the row's bytes end there).
     ///
     /// # Safety

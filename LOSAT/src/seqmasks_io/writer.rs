@@ -100,7 +100,8 @@ pub(crate) struct MaskInfoWriter {
 }
 
 impl MaskWriter {
-    /// `CMaskWriterBlastDbMaskInfo(os, format, algo_id, filt_program, algo_options)`;
+    /// The `CMaskWriterBlastDbMaskInfo` constructor (stream, format, algorithm id, filtering
+    /// program and algorithm options);
     /// `serial` is `None` for the format `interval`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:45-67
@@ -113,7 +114,7 @@ impl MaskWriter {
         MaskWriter::MaskInfo(MaskInfoWriter::new(serial, algo_id, program, options))
     }
 
-    /// `Print(bsh, mask, parsed_id)` of the writer; `diag` takes the posts of the serial
+    /// `Print` of the writer, given `bsh`, the mask and `parsed_id`; `diag` takes the posts of the serial
     /// stream (`write_document`).
     pub(crate) fn print(
         &mut self,
@@ -187,7 +188,8 @@ impl MaskWriter {
 }
 
 impl MaskInfoWriter {
-    /// `CMaskWriterBlastDbMaskInfo(os, format, algo_id, filt_program, algo_options)`, cited at
+    /// The `CMaskWriterBlastDbMaskInfo` constructor (stream, format, algorithm id, filtering
+    /// program and algorithm options), cited at
     /// `MaskWriter::mask_info`.
     pub(crate) fn new(
         serial: Option<Serial>,
@@ -204,7 +206,7 @@ impl MaskInfoWriter {
         }
     }
 
-    /// `CMaskWriterBlastDbMaskInfo::Print(id, mask)`: nothing for an empty mask; with the
+    /// `CMaskWriterBlastDbMaskInfo::Print` of an id and a mask: nothing for an empty mask; with the
     /// format `interval`, the intervals at once (`CMaskWriterInt::PrintMasks`, no id); else
     /// the mask is kept for the object that `finish` writes.
     ///
@@ -276,11 +278,11 @@ enum Document<'a> {
     MaskInfo(&'a MaskInfoWriter),
 }
 
-/// `os << MSerial_<format> << object`: one document in `serial` appended to `out`. A byte that
-/// NCBI's stream writes as `#` with an error message (`ReplacedChar`) makes the encoder report
-/// `NonVisibleChar`; such a document is written again through `Traced` and its messages are
-/// posted (`rewrite_and_post`, which writes the start of the document to `stream` before them),
-/// before the caller writes the rest of `out` to `stream`.
+/// The stream `os` given `MSerial_<format>` and then the object: one document in `serial` appended
+/// to `out`. A byte that NCBI's stream writes as `#` with an error message (`ReplacedChar`) makes
+/// the encoder report `NonVisibleChar`; such a document is written again through `Traced` and its
+/// messages are posted (`rewrite_and_post`, which writes the start of the document to `stream`
+/// before them), before the caller writes the rest of `out` to `stream`.
 fn write_document(
     serial: Serial,
     document: &Document<'_>,
@@ -412,7 +414,7 @@ fn encode<E: Encoder>(enc: &mut E, document: &Document<'_>) -> Option<SerialErro
 }
 
 /// `CMaskWriter::IdToString`: `>`, with `-parse_seqids` the Seq-ids in FASTA form
-/// (`GetStringDescr(eFormat_FastA)`, which ranks the ids for a protein when the Bioseq is one:
+/// (`GetStringDescr` with `eFormat_FastA`, which ranks the ids for a protein when the Bioseq is one:
 /// segmasker's `lcl|a|sp|P12345|` is `sp|P12345|`) and a space, then
 /// `CDeflineGenerator::GenerateDefline`.
 ///

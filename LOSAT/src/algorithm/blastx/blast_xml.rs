@@ -1643,7 +1643,7 @@ fn write_with_posts(
     crate::report::query_warnings::write_posts_to(buf, &hits, 0, writer, diagnostics, None)
 }
 
-/// NCBI's post (`ERR_POST(Error << message)`) of a structured report's caught exception
+/// NCBI's post (`ERR_POST` at the error level with `message`) of a structured report's caught exception
 /// (`CaughtException`, `StructuredXml::caught_message`), as BLASTX writes it: `Error: [blastx] `,
 /// the message (which ends with the `what()` text's end of line) and the post's end of line.
 fn caught_post(message: &[u8]) -> Vec<u8> {

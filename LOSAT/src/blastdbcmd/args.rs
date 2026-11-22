@@ -6,7 +6,7 @@
 //! With it `string_to_int8_message`, `NStr::StringToInt8` (`ncbi_str`) for the values blastdbcmd
 //! converts itself (`-mask_sequence_with`, the lines of its batch files).
 
-/// `NStr::StringToInt8(value)` (`ncbi_str::string_to_int8`): the number, or the message of
+/// `NStr::StringToInt8` of `value` (`ncbi_str::string_to_int8`): the number, or the message of
 /// NCBI's exception as `GetMsg` gives it (without the position).
 pub(super) fn string_to_int8_message(value: &str) -> Result<i64, String> {
     crate::ncbi_str::string_to_int8(value.as_bytes(), 0)

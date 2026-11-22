@@ -144,9 +144,9 @@ impl MaskDataError {
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-275,282-301
-/// `NStr::Split(text, ",", list)` (no flags): the empty string gives no token, any other string
-/// one token for each comma plus one, empty tokens included ("," gives two, "a," gives "a" and
-/// ""). The tokens are not trimmed.
+/// `NStr::Split` of `text` at `","` into `list` (no flags): the empty string gives no token, any
+/// other string one token for each comma plus one, empty tokens included ("," gives two, "a," gives
+/// "a" and ""). The tokens are not trimmed.
 fn split_commas(text: &str) -> Vec<&str> {
     if text.is_empty() {
         Vec::new()
@@ -157,7 +157,7 @@ fn split_commas(text: &str) -> Vec<&str> {
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:897-909
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:3611-3616,3663-3668
-/// `NStr::StringToNumeric<Int4>(text, &nid, fConvErr_NoThrow, 10)`: whether `text` converts
+/// `NStr::StringToNumeric` of `text` to an `Int4` (`nid`, with `fConvErr_NoThrow`, base 10): whether `text` converts
 /// (`StringToInt` with no flag, `ncbi_str::string_to_int`; with `fConvErr_NoThrow` a failed
 /// conversion gives 0 and sets errno).
 fn is_numeric_int4(text: &str) -> bool {

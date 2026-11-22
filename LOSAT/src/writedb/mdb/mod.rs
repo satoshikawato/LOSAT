@@ -145,7 +145,7 @@ const MAXDATASIZE: usize = 0xffff_ffff;
 const P_INVALID: u64 = !0;
 const DEFAULT_MAPSIZE: u64 = 1_048_576;
 const MDB_VALID: u16 = 0x8000;
-/// `(0xffff & ~(MDB_VALID))` in 16 bits.
+/// `0xffff` without the `MDB_VALID` bit, in 16 bits.
 const PERSISTENT_FLAGS: u16 = !MDB_VALID;
 const FREE_DBI: usize = 0;
 const MAIN_DBI: usize = 1;
@@ -207,7 +207,7 @@ impl LmdbError {
         if (MDB_KEYEXIST..=MDB_LAST_ERRCODE).contains(&code) {
             return MDB_ERRSTR[(code - MDB_KEYEXIST) as usize].to_string();
         }
-        // glibc's `strerror(ENOMEM)`, the same on every platform.
+        // glibc's `strerror` of `ENOMEM`, the same on every platform.
         if code == ENOMEM {
             return "Cannot allocate memory".to_string();
         }
@@ -416,9 +416,10 @@ pub(crate) struct Dbi(usize);
 impl Env {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:78-112
     /// `CBlastLMDBManager::CBlastEnv` for writing: `mdb_env_create`,
-    /// `mdb_env_set_maxdbs(3)`, `mdb_env_set_mapsize(map_size)` unless `map_size` is 0, and
-    /// `mdb_env_open(path, MDB_NOSUBDIR, 0664)` on a new file, on the platform `platform`
-    /// (its page size, the file's length on Windows, its `size_t`; [`super::platform`]).
+    /// `mdb_env_set_maxdbs` with 3, `mdb_env_set_mapsize` with `map_size` unless `map_size` is 0,
+    /// and `mdb_env_open` of `path` with `MDB_NOSUBDIR` and mode 0664, on a new file, on the
+    /// platform `platform` (its page size, the file's length on Windows, its `size_t`;
+    /// [`super::platform`]).
     pub(crate) fn create(
         path: &Path,
         map_size: u64,
@@ -582,18 +583,18 @@ impl Env {
         &self.metas[(self.metas[0].txnid < self.metas[1].txnid) as usize]
     }
 
-    /// `mdb_env_stat(env).ms_psize`.
+    /// The `ms_psize` that `mdb_env_stat` gives for the environment.
     pub(crate) fn psize(&self) -> usize {
         self.psize
     }
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:9688-9705 (mdb_env_info)
-    /// `mdb_env_info(env).me_last_pgno`.
+    /// `me_last_pgno` of `mdb_env_info` of `env`.
     pub(crate) fn last_pgno(&self) -> u64 {
         self.pick_meta().last_pg
     }
 
-    /// `mdb_env_info(env).me_mapsize`.
+    /// The `me_mapsize` that `mdb_env_info` gives for the environment.
     pub(crate) fn mapsize(&self) -> u64 {
         self.mapsize
     }
@@ -670,7 +671,7 @@ impl Env {
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:2747-2809
     // (mdb_txn_renew0, write txn)
-    /// `mdb_txn_begin(env, NULL, 0)` (lmdb++ `txn::begin`).
+    /// `mdb_txn_begin` of `env` with no parent and no flags (lmdb++ `txn::begin`).
     pub(crate) fn txn_begin(&mut self) -> Result<(), LmdbError> {
         if self.t_flags & MDB_TXN_FINISHED == 0 {
             return Err(self.error("mdb_txn_begin", EINVAL));
@@ -1023,7 +1024,7 @@ impl Env {
             }
             let c = m2.unwrap();
             let (rc, key) = if first && set_range {
-                // `key.mv_data = &last`: the search key is `last` after its increment.
+                // `key.mv_data` points at `last`: the search key is `last` after its increment.
                 let k = last.to_le_bytes();
                 let (rc, key, _) = self.cursor_set(c, &k, false, CursorOp::SetRange, None);
                 (rc, key)
@@ -1198,7 +1199,7 @@ impl Env {
 // destructor, and its lock file stays (a data file that cannot be made, a header that cannot
 // be written, a file that cannot be given its length: probes of 2026-11-11 and 2026-11-12). An
 // `Env` that `create` has not finished (`lock` is `None`) is that writer: it removes nothing.
-// The removal is `CFile(name).Remove()`: `CDirEntry::Remove(eRecursive)`; its result is not
+// The removal is `Remove` of a `CFile`: `CDirEntry::Remove` with `eRecursive`; its result is not
 // looked at. Where makeblastdb aborts instead of unwinding (a destructor that throws), it leaves
 // the lock files; LOSAT, which ends with an error there, removes them (PD-LOSAT-DATABASE-SEARCH).
 impl Drop for Env {
@@ -1221,8 +1222,9 @@ fn lock_path(path: &Path) -> PathBuf {
 // (mdb_env_setup_locks)
 // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:540,780-784
 // (MDB_MAGIC, MDB_LOCK_FORMAT)
-/// The size of a new lock file: `(126 - 1) * sizeof(MDB_reader) + sizeof(MDB_txninfo)`,
-/// 125 reader slots of 64 bytes and a header of three 64-byte cache lines.
+/// The size of a new lock file: 125 (126 less 1) times the `sizeof` of `MDB_reader`, plus the
+/// `sizeof` of `MDB_txninfo`: 125 reader slots of 64 bytes and a header of three 64-byte cache
+/// lines.
 const LOCK_FILE_SIZE: usize = 8192;
 
 /// The bytes of a lock file that no transaction has used, as makeblastdb 2.17.0 of the Linux
@@ -1234,7 +1236,7 @@ const LOCK_FILE_SIZE: usize = 8192;
 /// a commit); LOSAT ends an aborting build with an error and removes the file instead, so it
 /// never leaves those. The bytes are `mti_magic` and `mti_format` (`MDB_LOCK_VERSION` 1 in the
 /// low half, `MDB_PIDLOCK` in bit 16), and the `__kind` of the read mutex (offset 0x18) and of the write mutex (0x50), which is
-/// `PTHREAD_MUTEX_ROBUST_NORMAL_NP | PTHREAD_PROCESS_SHARED` (0x10 + 0x80). Every other byte is 0.
+/// `PTHREAD_MUTEX_ROBUST_NORMAL_NP` (0x10) together with `PTHREAD_PROCESS_SHARED` (0x80). Every other byte is 0.
 /// Other platforms keep other things in the file (a macOS semaphore name, a Windows mutex
 /// name): their bytes are not compared (PD-LOSAT-DATABASE-SEARCH).
 fn lock_file_bytes() -> [u8; LOCK_FILE_SIZE] {
@@ -1246,7 +1248,7 @@ fn lock_file_bytes() -> [u8; LOCK_FILE_SIZE] {
     bytes
 }
 
-/// `mdb_fopen(env, fname, MDB_O_LOCKS, 0664, ...)` and the initialisation of the lock region:
+/// `mdb_fopen` of the lock file (`MDB_O_LOCKS`, mode 0664) and the initialisation of the lock region:
 /// the file is created (or an existing one opened) and holds the bytes of a new lock file.
 fn write_lock_file(lock: &Path) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();

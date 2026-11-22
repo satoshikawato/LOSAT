@@ -61,8 +61,8 @@ pub fn combine_masks(masks: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
     combine_linked(masks, 0)
 }
 
-/// `BlastSeqLocCombine(mask_loc, link_value)` of inclusive `(left, right)` intervals: sorted by
-/// their left ends, an interval joins the one before it when that one's right end plus
+/// `BlastSeqLocCombine` of `mask_loc` with `link_value`, on inclusive `(left, right)` intervals:
+/// sorted by their left ends, an interval joins the one before it when that one's right end plus
 /// `link_value` is past its left end (`combine_masks` with 0; the repeat masks of blastn's
 /// `-filtering_db` with `REPEAT_MASK_LINK_VALUE`, `blastn::repeat_filter`). NCBI's `qsort`
 /// compares the left ends only; the result does not depend on the order of equal ones.

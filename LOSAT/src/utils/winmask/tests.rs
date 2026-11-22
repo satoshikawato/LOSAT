@@ -40,7 +40,7 @@ fn read_fasta(path: &Path) -> Vec<(String, Vec<u8>)> {
 }
 
 /// The windowmasker application's flags that set `CSeqMasker` arguments
-/// (`win_mask_config.cpp:331-335, 399-402`). `-window` goes into `Uint1 window_size`
+/// (`win_mask_config.cpp:331-335, 399-402`). `-window` goes into `window_size`, a `Uint1`
 /// (`win_mask_config.hpp:643`), so 256 is 0, the default.
 fn params_from_flags(flags: &str) -> MaskerParams {
     let mut params = MaskerParams::default();
@@ -494,7 +494,7 @@ fn empty_and_short_sequences_have_no_masks() {
 #[test]
 fn an_empty_cache_bit_array_fails_only_when_the_boost_reads_it() {
     // Units of 2 letters: NCBI writes a cache bit array of 4^2/32 = 0 words and keeps it in use
-    // (`new Uint4[0]`). The manifest row `dm_u2` never scores below T_extend (500), so the boost
+    // (a `new` of 0 `Uint4` words). The manifest row `dm_u2` never scores below T_extend (500), so the boost
     // does not run and NCBI's intervals come out; here every unit is below T_low, so the first
     // window scores 1 < T_extend and the boost would read past the array.
     let file = obinary_file(
@@ -1029,7 +1029,7 @@ fn unescape_line(text: &str) -> Vec<u8> {
     out
 }
 
-/// The hash parameters are read as NCBI's `istringstream >> M >> k >> roff >> bc` reads them: every
+/// The hash parameters are read as NCBI's `istringstream` reads `M`, `k`, `roff` and `bc` in turn: every
 /// line of the table observed with NCBI 2.17.0's C++ library gives the same values and the same
 /// number of stored ones (for four values, and for each prefix of them).
 #[test]

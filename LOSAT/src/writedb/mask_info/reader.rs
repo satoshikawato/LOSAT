@@ -148,7 +148,7 @@ impl Fail {
     }
 }
 
-/// `ThrowError(flag, message)` of NCBI's object stream at `site` (`ThrowError1`,
+/// `ThrowError` of NCBI's object stream with a flag and a message, at `site` (`ThrowError1`,
 /// objistr.cpp:828-853): a `CSerialException` whose message is the stream's position
 /// (`GetPosition()`: `line N` in text, `byte N` in binary) and `message`. It returns the
 /// [`Fail`], not an `R`: the path that calls it ends there (`return Err(throw_error(..))`), so
@@ -202,13 +202,13 @@ const GET_REGISTERED_OBJECT: ThrowSite = istr_site(
 pub(super) const STRING_CREATE_LENGTH_ERROR: &str = "basic_string::_M_create";
 
 /// The bytes of the file that one string of `length` bytes asks NCBI for (`GetChars`:
-/// `str.reserve(count)` before the bytes are read, when they are not all in the input buffer):
-/// a length over `max_size()` (2^63 - 1, `rpsbproc::prosite::CxxString`) is `std::length_error`;
-/// an allocation of [`USER_SPACE_BYTES`] or more `std::bad_alloc` on every host; one of
-/// [`HOST_DEPENDENT_BYTES`] or more succeeds or fails by the host's memory, which LOSAT refuses
-/// (DECISIONS 40 of line PS: memory that NCBI builds from a length field of the input, as
-/// `losat rpsbproc` does). Below that the allocation succeeds and the read goes on to the end of
-/// the file.
+/// `str` reserves `count` bytes before the bytes are read, when they are not all in the input
+/// buffer): a length over `max_size()` (2^63 - 1, `rpsbproc::prosite::CxxString`) is
+/// `std::length_error`; an allocation of [`USER_SPACE_BYTES`] or more `std::bad_alloc` on every
+/// host; one of [`HOST_DEPENDENT_BYTES`] or more succeeds or fails by the host's memory, which
+/// LOSAT refuses (DECISIONS 40 of line PS: memory that NCBI builds from a length field of the
+/// input, as `losat rpsbproc` does). Below that the allocation succeeds and the read goes on to the
+/// end of the file.
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:496-523
 // (checked with makeblastdb 2.17.0 on lengths 2^62 - 1, 2^62, 2^63 - 2 and 2^63 - 1: "BLAST ran
 // out of memory", status 4; 2^63: "Error: basic_string::_M_create", status 255.)
@@ -255,10 +255,10 @@ pub(super) enum StringPost {
 /// A message that NCBI's reader posts while it reads a mask file.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MaskPost {
-    /// `ERR_POST_X(7)` of a byte read as `#`.
+    /// `ERR_POST_X` (subcode 7) of a byte read as `#`.
     BadChar(ReplacedChar),
-    /// `ERR_POST_X_ONCE(10, Warning << ...)` of a UTF8String tag for the VisibleString member at
-    /// the stack trace: once per process.
+    /// A warning posted once (`ERR_POST_X_ONCE`, subcode 10) for a UTF8String tag for the
+    /// VisibleString member at the stack trace: once per process.
     Utf8Tag(String),
 }
 
@@ -302,8 +302,8 @@ pub(super) trait Input {
     /// `ReadFileHeader`: the type name that precedes an object in text; binary files have none.
     fn read_file_header(&mut self) -> R<Option<Vec<u8>>>;
     fn begin_class(&mut self) -> R<()>;
-    /// `BeginClassMember(classType, pos)`: the next member, searched from `pos` on, or `None`
-    /// at the end of the class.
+    /// `BeginClassMember` of the class type and `pos`: the next member, searched from `pos` on, or
+    /// `None` at the end of the class.
     fn begin_member(&mut self, def: &'static ClassDef, pos: usize) -> R<Option<usize>>;
     fn end_member(&mut self) -> R<()>;
     fn end_class(&mut self) -> R<()>;
@@ -323,7 +323,8 @@ pub(super) trait Input {
     /// the default of `SERIAL_WRONG_CHARS_READ`), and what NCBI posts while it reads it, in
     /// `posts` (also when it then fails).
     fn read_string(&mut self, posts: &mut Vec<StringPost>) -> R<Vec<u8>>;
-    /// `ReadEnum(values)`: the value (`CEnumeratedTypeInfo::ReadEnum` adds its line to an error).
+    /// `ReadEnum` of the enum's `values`: the value (`CEnumeratedTypeInfo::ReadEnum` adds its line
+    /// to an error).
     fn read_enum(&mut self, def: &'static EnumDef) -> R<i32>;
     /// `ReadPointerType()`, where NCBI reads a `CRef<>` that is empty at that moment
     /// (`Rd::read_pointer`): a `NULL` is taken, the `@` or `:` that starts the other two forms too.
@@ -420,8 +421,8 @@ struct Trace {
 
 /// How far `CSeq_loc::CheckId` walks one Seq-loc (`x_CheckId`, cited at `read_seq_loc_parts`):
 /// each Seq-loc starts a walk of its own (`my_id`, NULL), takes the Seq-ids of its parts in
-/// order, and hands its own to the Seq-loc around it (`x_UpdateId(id, my_id)`) once its walk is
-/// done. makeblastdb's `GetId` of a mask is this walk of the mask's Seq-loc.
+/// order, and hands its own to the Seq-loc around it (`x_UpdateId` of `id` and `my_id`) once its
+/// walk is done. makeblastdb's `GetId` of a mask is this walk of the mask's Seq-loc.
 #[derive(Debug)]
 enum IdWalk {
     /// Every Seq-id met so far is `Equals` to this one (`None`: none yet).
@@ -434,7 +435,7 @@ enum IdWalk {
 }
 
 impl IdWalk {
-    /// `x_UpdateId(id, &seq_id)` of a part.
+    /// `x_UpdateId` of `id` and the address of `seq_id`, for a part.
     fn update(&mut self, seq_id: ParsedSeqId) {
         match self {
             IdWalk::Same(None) => *self = IdWalk::Same(Some(seq_id)),
@@ -444,15 +445,15 @@ impl IdWalk {
         }
     }
 
-    /// `(*li)->CheckId(id, may_throw)` of an element of a `mix` or `equiv`: the element's own walk
-    /// `inner`, if this walk gets that far.
+    /// `CheckId` of `id` and `may_throw`, called on an element (`*li`) of a `mix` or `equiv`:
+    /// the element's own walk `inner`, if this walk gets that far.
     fn nested(&mut self, inner: IdWalk) {
         if !matches!(self, IdWalk::Same(_)) {
             return;
         }
         match inner {
             IdWalk::Same(Some(seq_id)) => self.update(seq_id),
-            // `x_UpdateId(id, NULL)` keeps `id`.
+            // `x_UpdateId` of `id` and `NULL` keeps `id`.
             IdWalk::Same(None) => {}
             stopped_or_null => *self = stopped_or_null,
         }
@@ -524,7 +525,7 @@ impl<I: Input> Rd<I> {
     // `HANDLE_EOF`)
     /// One `BEGIN_OBJECT_FRAME` ... `END_OBJECT_FRAME` of a frame of `kind` (of the type
     /// `type_name`): an error that leaves it gets NCBI's handling. A `CSerialException` takes the
-    /// frame's name (`AddFrameInfo(GetFrameName())`); a `CEofException` is `HandleEOF`, which
+    /// frame's name (`AddFrameInfo` of `GetFrameName()`); a `CEofException` is `HandleEOF`, which
     /// passes it on when fewer than 2 frames stay and throws its own `CSerialException` (with the
     /// frame's information, and without the frame's name) otherwise; another `CException` takes
     /// the frame's line (`NCBI_RETHROW_SAME` with `GetFrameInfo()`, at the `END_OBJECT_FRAME` of
@@ -1428,7 +1429,7 @@ impl<I: Input> Rd<I> {
         })
     }
 
-    /// `file >> MSerial_Asn... >> *obj` for a `Blast-db-mask-info`.
+    /// The read of `file` into the object through `MSerial_Asn...`, for a `Blast-db-mask-info`.
     fn read_info(&mut self) -> R<MaskInfo> {
         let mut algo_id = 0;
         let mut algo_program = 0;
@@ -1453,7 +1454,8 @@ impl<I: Input> Rd<I> {
         })
     }
 
-    /// `file >> MSerial_Asn... >> *obj` for a `Blast-mask-list` (the continuation).
+    /// The read of `file` into the object through `MSerial_Asn...`, for a `Blast-mask-list` (the
+    /// continuation).
     fn read_list(&mut self) -> R<MaskList> {
         let mut list = None;
         self.read_top(&BLAST_MASK_LIST, |s| {
@@ -1466,7 +1468,7 @@ impl<I: Input> Rd<I> {
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:882-901
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:971-975
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:959-969
-    /// `file >> MSerial_Asn... >> *obj` of the type `def`: `SkipFileHeader`, then `Read` with
+    /// The read of `file` into the object through `MSerial_Asn...`, of the type `def`: `SkipFileHeader`, then `Read` with
     /// `read`, each in a frame of its own.
     fn read_top(&mut self, def: &'static ClassDef, read: impl FnOnce(&mut Self) -> R<()>) -> R<()> {
         // Every frame entered was left (`exit`), and with it every stack trace completed.

@@ -181,7 +181,7 @@ pub(crate) struct HitCollector {
     query_lengths: Vec<usize>,
     /// `-evalue`: an HSP above it is removed before the lists.
     evalue_threshold: f64,
-    /// Whether NCBI's traceback sorts the results at its end (`BlastSeqSrcGetTotLen > 0`:
+    /// Whether NCBI's traceback sorts the results at its end (a positive `BlastSeqSrcGetTotLen`:
     /// `SubjectSetNumbers::link_total`).
     sorts_results: bool,
     /// The OID the lists take next, and the subjects past it that have come (`push`).

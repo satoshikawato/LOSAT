@@ -164,7 +164,7 @@ fn frame_rank(frame: i8) -> u8 {
 /// The results masks of a searched query: one mask per frame with intervals, in NCBI's frame
 /// order, the intervals in nucleotide coordinates of the searched letters moved into the record
 /// by the start of the `-query_loc` interval; a mask that covers the whole query is dropped
-/// (`range != kTarget`, blast_aux.cpp:936-951), as BLASTX's.
+/// (`range` differs from `kTarget`, blast_aux.cpp:936-951), as BLASTX's.
 fn query_results_masks(
     query: &FastaRecord,
     stats: &TblastxQueryStats,

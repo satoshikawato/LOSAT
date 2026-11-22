@@ -109,8 +109,9 @@ fn opened<T>(
 }
 
 impl IdLookup<'_> {
-    /// `x_CheckOrFindOID(oid) && oid == oid0` once NCBI's OID list is set up (the search's
-    /// lookups of its reported Seq-ids, after the search): an OID the database includes.
+    /// `x_CheckOrFindOID` of `oid` together with the test that `oid` is `oid0` once NCBI's OID list
+    /// is set up (the search's lookups of its reported Seq-ids, after the search): an OID the
+    /// database includes.
     fn visible(&self, oid: u32) -> bool {
         self.db.includes_oid(oid)
     }
@@ -343,10 +344,10 @@ impl IdLookup<'_> {
     // is where `CheckOrFindOID` left it (the next OID of the list, the range's start, or the
     // OID itself past the range's end), which blastdbcmd writes (cases A183-A190 of
     // tests/blastdbcmd_alias_keys.rs). A volume without the GI leaves -1 (`x_IdentToOid`).
-    /// `GiToOidwFilterCheck(gi, oid)`: NCBI's `oid` when it is not negative. The OID of the GI in
-    /// the first volume whose file has it and whose OID NCBI's check keeps (`SeqDb::check_or_find_oid`;
-    /// NCBI does not set its OID list up first), else, when the last volume has the GI, the OID that
-    /// the check moved to.
+    /// `GiToOidwFilterCheck` with `gi` and `oid`: NCBI's `oid` when it is not negative. The OID of
+    /// the GI in the first volume whose file has it and whose OID NCBI's check keeps
+    /// (`SeqDb::check_or_find_oid`; NCBI does not set its OID list up first), else, when the last
+    /// volume has the GI, the OID that the check moved to.
     pub fn gi_to_oid(&self, gi: i64) -> Result<Option<u32>, SeqDbError> {
         let mut left = None;
         for at in 0..self.db.volumes.len() {

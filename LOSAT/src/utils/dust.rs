@@ -235,7 +235,7 @@ impl DustMasker {
         stop: usize,
         rng: &mut NcbiLfgRandom,
     ) -> Vec<MaskedInterval> {
-        // NCBI's `it.GetPos() <= stop` as `pos < end` over the letters up to `stop`: the
+        // NCBI's loop test (`GetPos` of the iterator is at most `stop`) as `pos < end` over the letters up to `stop`: the
         // compiler then knows that each `seq[pos]` is in bounds.
         let seq = &seq[..=stop];
         let end = seq.len();
@@ -584,7 +584,7 @@ impl<'a> XTripletWindow<'a> {
 
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:76-114
     /// The same steps in the same order on the same integers. The two `if`s that depend on
-    /// the sequence (`c_w[s] == 0` and `L == start_`) are written as arithmetic on the 0/1
+    /// the sequence (whether `c_w[s]` is 0 and whether `L` is `start_`) are written as arithmetic on the 0/1
     /// value of the condition, which gives the same values.
     #[inline(always)]
     fn shift_window(&mut self, triplet: u8, perfect_list: &mut VecDeque<PerfectInterval>) -> bool {

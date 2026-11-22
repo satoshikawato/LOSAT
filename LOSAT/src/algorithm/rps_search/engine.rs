@@ -253,7 +253,7 @@ fn x_drop_overflow(
 // The limit of NCBI's gapped kernels' sizes (`kernel_x_drop_fits`, its `Int4` arithmetic on the X-drop
 // over the scaled gap extension) is the protein programs' (`core::x_drop`). Reachable here only
 // where the scaled gap extension is 1 or 2 (scale 1 or 2 with BLOSUM62 11/1): the quotient is at
-// most `INT4_MAX / scale` otherwise.
+// most `INT4_MAX` over `scale` otherwise.
 use crate::core::x_drop::kernel_x_drop_fits;
 
 /// A query's ungapped X-drop (`x_dropoff_init`) from the X-drop in bits `bits` (above 0,

@@ -35,7 +35,7 @@ const FASTA_TAGS: [&[u8]; 20] = [
 // The tag of a patent id with an application number is `pat|` too (the constant named
 // `pgp` holds "pat|").
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2347-2375
-/// `CSeq_id::WriteAsFasta(ostr, bioseq)` (`GetStringDescr(bioseq, eFormat_FastA)`): the first
+/// `CSeq_id::WriteAsFasta` of the Bioseq (`GetStringDescr` with `eFormat_FastA`): the first
 /// GI of the Bioseq's ids `ids`, then `|` and its best id for FASTA (`FastaAARank` for a
 /// protein, else `FastaNARank`) when that is not a GI: `gi|123|gb|ABC12345.1|`.
 pub fn bioseq_fasta(ids: &[ParsedSeqId], protein: bool, out: &mut Vec<u8>) {
@@ -139,7 +139,7 @@ fn patent_fasta(id: &PatentSeqId, out: &mut Vec<u8>) {
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1926-2038
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2145-2154
-/// `CSeq_id::GetSeqIdString(with_version)` (`GetLabel(eContent)` with the flag
+/// `CSeq_id::GetSeqIdString` with `with_version` (`GetLabel` of `eContent` with the flag
 /// `fLabel_Version` or none): the upper-cased accession (else the name) of a Textseq-id with
 /// `.version` when asked and stored, the number of a `gi`, `db:tag` of a `general` id,
 /// `mol_chain` of a `pdb` id, `country number_seqid` of a patent.
@@ -148,8 +148,8 @@ pub fn content(id: &ParsedSeqId, with_version: bool, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/multisource_util.cpp:157-160
-/// `GetLabel(eContent, fLabel_GeneralDbIsContent)` (makeblastdb's `GetSeqIdKey`, the keys of
-/// `-taxid_map`): `content` without the version, and only the tag of a `general` id (its
+/// `GetLabel` of `eContent` with `fLabel_GeneralDbIsContent` (makeblastdb's `GetSeqIdKey`, the keys
+/// of `-taxid_map`): `content` without the version, and only the tag of a `general` id (its
 /// database is part of the type, not of the content).
 pub fn content_general_db_is_content(id: &ParsedSeqId, out: &mut Vec<u8>) {
     label_content(id, false, true, out);
@@ -221,7 +221,7 @@ fn label_content(
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2059-2084
 // Without `fLabel_GeneralDbIsContent` the type of a `general` id is "gnl" and of a patent
 // "pat", which are the FASTA tags; `s_TextId` names a swissprot id "sp" whatever its release.
-/// `GetLabel(eDefault, fLabel_Default | fLabel_UpperCase)` (`eDefault` is `eBoth`,
+/// `GetLabel` of `eDefault` with `fLabel_Default` and `fLabel_UpperCase` (`eDefault` is `eBoth`,
 /// `fLabel_Default` is `fLabel_Version`): the label of CWriteDB_Volume's duplicate check,
 /// `REF|NP_000549.1`, `SP|P69905`, `LCL|ABC`, `GNL|DB|TAG`, `PDB|1ABC|a`, `GI|123`,
 /// `PAT|US|1234567|1`.
@@ -240,9 +240,9 @@ pub fn both_upper_version(id: &ParsedSeqId, out: &mut Vec<u8>) {
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2059-2086 (cited at
 // `both_upper_version`): without `fLabel_UpperCase`, `eBoth` is the type, `|` and
 // `x_GetLabel_Content` (`label_content`).
-/// `GetLabel(eDefault, fLabel_Default)` (`eBoth` with `fLabel_Version`, not upper-cased):
+/// `GetLabel` of `eDefault` with `fLabel_Default` (`eBoth` with `fLabel_Version`, not upper-cased):
 /// `lcl|Query_1`, `ref|NP_000549.1`, `gnl|CDD:1234`, `gi|123` (rpsbproc's query label,
-/// `CSeq_id::GetStringDescr(eFormat_BestWithVersion)`).
+/// `CSeq_id::GetStringDescr` with `eFormat_BestWithVersion`).
 pub fn both_version(id: &ParsedSeqId, out: &mut Vec<u8>) {
     out.extend_from_slice(FASTA_TAGS[usize::from(id.alternative())]);
     out.push(b'|');
@@ -320,7 +320,7 @@ fn compose_oslt_label(id: &ParsedSeqId, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:907-930
-/// `CAlignFormatUtil::GetLabel(id, with_version)`: a `general` id as its tag alone, every
+/// `CAlignFormatUtil::GetLabel` of `id` with `with_version`: a `general` id as its tag alone, every
 /// other id (and a `general` id with an empty tag) as `content`.
 pub fn format_label(id: &ParsedSeqId, with_version: bool, out: &mut Vec<u8>) {
     if let ParsedSeqId::General(dbtag) = id {
@@ -344,8 +344,8 @@ pub fn bare(id: &ParsedSeqId, out: &mut Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:155-189
-/// `CShowBlastDefline::GetSeqIdListString(ids, show_gi)`: the first GI in FASTA form (with
-/// `show_gi`), then `|` and the FASTA form of the `Score`-best id unless that is the GI (a
+/// `CShowBlastDefline::GetSeqIdListString` of `ids` with `show_gi`: the first GI in FASTA form
+/// (with `show_gi`), then `|` and the FASTA form of the `Score`-best id unless that is the GI (a
 /// local id as its content, without `lcl|`): `gi|123456|ref|NP_000002.1|`, `myprot9`.
 pub fn seqid_list_string(ids: &[ParsedSeqId], show_gi: bool, out: &mut Vec<u8>) {
     let best = find_best(ids, text_score);

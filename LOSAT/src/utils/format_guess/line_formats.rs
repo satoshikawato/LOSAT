@@ -25,7 +25,7 @@ fn is_token_integer(token: &[u8]) -> bool {
     }
 }
 
-/// `s_IsTokenDouble`: the first `.` (`ReplaceInPlace(token, ".", "1", 0, 1)`), then a first `-` and a first `0`
+/// `s_IsTokenDouble`: the first `.` (`ReplaceInPlace` of `.` by `1` in the token, at most once), then a first `-` and a first `0`
 /// of a token of two bytes or more, count as `1`.
 fn is_token_double(token: &[u8]) -> bool {
     let dot = token.iter().position(|&c| c == b'.');
@@ -44,7 +44,7 @@ fn is_token_double(token: &[u8]) -> bool {
     }
 }
 
-/// `token.size() == 1 && NPOS != token.find_first_of(set)`.
+/// Whether the token is one byte long and `find_first_of` finds it in `set` (a result other than `NPOS`).
 fn one_of(token: &[u8], set: &[u8]) -> bool {
     token.len() == 1 && set.contains(&token[0])
 }
@@ -158,7 +158,7 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:901-936
-    /// `TestFormatGff3` (after `EnsureTestBuffer() && EnsureSplitLines()`).
+    /// `TestFormatGff3` (after `EnsureTestBuffer()` and then `EnsureSplitLines()`, both true).
     pub(super) fn test_format_gff3(&mut self) -> bool {
         if !self.ensure_lines() {
             return false;
@@ -216,7 +216,7 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:939-974
-    /// `TestFormatAugustus` (after `EnsureTestBuffer() && EnsureSplitLines()`).
+    /// `TestFormatAugustus` (after `EnsureTestBuffer()` and then `EnsureSplitLines()`, both true).
     pub(super) fn test_format_augustus(&mut self) -> bool {
         if !self.ensure_lines() {
             return false;
@@ -264,7 +264,7 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1861-1890
-    /// `TestFormatWiggle`. `NStr::Find(...)` as a condition is true unless it is 0 (`NPOS` is true too).
+    /// `TestFormatWiggle`. `NStr::Find` as a condition is true unless it is 0 (`NPOS` is true too).
     pub(super) fn test_format_wiggle(&mut self) -> bool {
         if !self.ensure_stats_and_lines() {
             return false;
@@ -624,9 +624,9 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1434-1576
-    /// `TestFormatCLUSTAL`. `NcbiGetline(..., "\r\n")` (cited at `stats_of`) takes `\r\n` as one line end; a last
+    /// `TestFormatCLUSTAL`. `NcbiGetline` with `\r\n` as the delimiters (cited at `stats_of`) takes `\r\n` as one line end; a last
     /// line without an end sets `eofbit` (with `failbit` too when it is empty), and the read after a last line end
-    /// finds nothing (`eofbit | failbit`).
+    /// finds nothing (`eofbit` and `failbit`).
     fn test_format_clustal(&mut self) -> bool {
         if !self.ensure_test_buffer() {
             return false;
@@ -718,7 +718,7 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1521-1576 (`x_TestTableDelimiter`)
-    /// `x_TestTableDelimiter(delims)`: the count starts again at the line that gave the columns, so that line counts
+    /// `x_TestTableDelimiter` of `delims`: the count starts again at the line that gave the columns, so that line counts
     /// twice.
     fn test_table_delimiter(&self, delims: &[u8]) -> bool {
         let skip = (5..7).filter(|&i| self.lines.len() > i).count();
@@ -777,7 +777,7 @@ impl<S: Source> FormatGuess<S> {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3615-3677
-/// `IsLinePsl(line, ignoreFirstLine)`.
+/// `IsLinePsl` of `line` with `ignoreFirstLine`.
 fn is_line_psl(line: &[u8], ignore_first_column: bool) -> bool {
     let tokens = tokens(line, b" \t");
     let first = usize::from(ignore_first_column);
@@ -794,7 +794,7 @@ fn is_line_psl(line: &[u8], ignore_first_column: bool) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3542-3612
-/// `IsLineRmo(line)`.
+/// `IsLineRmo` of `line`.
 fn is_line_rmo(line: &[u8]) -> bool {
     let values = tokens(line, b" \t");
     values.len() >= 14
@@ -816,7 +816,7 @@ fn gff_columns(tokens: &Tokens<'_>, strands: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3242-3270
-/// `IsLineGtf(line)`.
+/// `IsLineGtf` of `line`.
 fn is_line_gtf(line: &[u8]) -> bool {
     let tokens = tokens(line, b" \t");
     tokens.len() >= 9
@@ -825,7 +825,7 @@ fn is_line_gtf(line: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3273-3346
-/// `IsLineGvf(line)`: a line of eight columns that passes the column tests reads `tokens[8]` past the end of the
+/// `IsLineGvf` of `line`: a line of eight columns that passes the column tests reads `tokens[8]` past the end of the
 /// vector (`Stop::Undecided`).
 fn is_line_gvf(line: &[u8]) -> Result<bool, Stop> {
     const TERMS: [&[u8]; 25] = [
@@ -877,7 +877,7 @@ fn is_line_gvf(line: &[u8]) -> Result<bool, Stop> {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3349-3390
-/// `IsLineGff3(line)`.
+/// `IsLineGff3` of `line`.
 fn is_line_gff3(line: &[u8]) -> bool {
     let tokens = tokens(line, b" \t");
     if tokens.len() < 9 || !gff_columns(&tokens, b".+-?") {
@@ -900,14 +900,14 @@ fn is_line_gff3(line: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3486-3511
-/// `IsLineGff2(line)`.
+/// `IsLineGff2` of `line`.
 fn is_line_gff2(line: &[u8]) -> bool {
     let tokens = tokens(line, b" \t");
     tokens.len() >= 8 && gff_columns(&tokens, b".+-")
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3393-3483
-/// `IsLineAugustus(line)`: `SplitInTwo` without flags, so a run of delimiters gives empty columns.
+/// `IsLineAugustus` of `line`: `SplitInTwo` without flags, so a run of delimiters gives empty columns.
 fn is_line_augustus(line: &[u8]) -> bool {
     // The columns 0 to 7: an id, a method, the feature type, start, stop, score, strand and phase.
     let tests: [fn(&[u8]) -> bool; 8] = [
@@ -942,7 +942,7 @@ fn is_line_augustus(line: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3201-3239
-/// `IsLineGlimmer3(line)`: `NStr::StringToInt` with its default flags throws for a frame beyond `int`
+/// `IsLineGlimmer3` of `line`: `NStr::StringToInt` with its default flags throws for a frame beyond `int`
 /// (`CStringException`, NCBI BLAST+ 2.17.0 psiblast `-in_pssm`: "Cannot convert string '99999999999' to int,
 /// overflow", exit status 255).
 fn is_line_glimmer3(line: &[u8]) -> Result<bool, Stop> {
@@ -959,7 +959,7 @@ fn is_line_glimmer3(line: &[u8]) -> Result<bool, Stop> {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3129-3198
-/// `IsLineAgp(strLine)`.
+/// `IsLineAgp` of `strLine`.
 fn is_line_agp(line: &[u8]) -> bool {
     let line = match find(line, b"#") {
         Some(comment) => &line[..comment],
@@ -1002,7 +1002,7 @@ fn is_line_agp(line: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3795-3843
-/// `IsLineHgvs(line)`.
+/// `IsLineHgvs` of `line`.
 fn is_line_hgvs(line: &[u8]) -> bool {
     let mut state = 0;
     let mut i = 0;
@@ -1036,7 +1036,7 @@ fn is_line_hgvs(line: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3074-3100
-/// `IsLineFlatFileSequence(line)`.
+/// `IsLineFlatFileSequence` of `line`.
 fn is_line_flat_file_sequence(line: &[u8]) -> bool {
     let Some(pos) = line.iter().position(|c| !b"0123456789 \t".contains(c)) else {
         return false;
@@ -1053,9 +1053,9 @@ fn is_line_flat_file_sequence(line: &[u8]) -> bool {
     })
 }
 
-/// `sscanf(line, "rs%d\t%d\t%d", ...) == 3` of glibc on a C string: `rs`, then three conversions of `%d` (white
-/// space, a sign, one digit or more; the value does not matter), each `\t` of the format any white space, none
-/// included.
+/// The glibc `sscanf` of `line` with the format `"rs%d\t%d\t%d"` that converts all three values, on
+/// a C string: `rs`, then three conversions of `%d` (white space, a sign, one digit or more; the
+/// value does not matter), each `\t` of the format any white space, none included.
 fn scans_snp_marker(line: &[u8]) -> bool {
     let Some(mut rest) = line.strip_prefix(b"rs") else {
         return false;
@@ -1078,7 +1078,7 @@ fn scans_snp_marker(line: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1348-1362
-/// `x_LooksLikeCLUSTALConservedInfo(line)`.
+/// `x_LooksLikeCLUSTALConservedInfo` of `line`.
 fn looks_like_clustal_conserved_info(line: &[u8]) -> bool {
     line.iter()
         .all(|&c| is_space(c) || matches!(c, b':' | b'*' | b'.'))
@@ -1087,7 +1087,7 @@ fn looks_like_clustal_conserved_info(line: &[u8]) -> bool {
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1366-1407
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:569-590 (`S2N_CONVERT_ERROR`: with
 // `fConvErr_NoThrow` the conversion returns 0)
-/// `x_TryProcessCLUSTALSeqData(line, id, seg_length)`: the id and the length.
+/// `x_TryProcessCLUSTALSeqData` of `line`, which gives `id` and `seg_length`: the id and the length.
 fn try_process_clustal_seq_data(line: &[u8]) -> Option<(&[u8], usize)> {
     let toks = tokens(line, b" \t");
     if toks.len() != 2 && toks.len() != 3 {
@@ -1115,7 +1115,7 @@ fn try_process_clustal_seq_data(line: &[u8]) -> Option<(&[u8], usize)> {
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:307-374 (`CFormatGuess::SequenceType`, from `case
 // eST_Strict`)
-/// `SequenceType(str, size, eST_Strict) != eUndefined`.
+/// Whether `SequenceType` of `str` with its size and `eST_Strict` is other than `eUndefined`.
 fn strict_sequence_type(str: &[u8]) -> bool {
     use super::{F_ALPHA, F_DIGIT, F_DNA_AMBIG_ALPHABET, F_PROTEIN_ALPHABET, F_SPACE};
     let (mut main_nuc, mut ambig, mut bad_nuc, mut amino_acid, mut exotic_aa, mut bad_aa) =
@@ -1141,7 +1141,7 @@ fn strict_sequence_type(str: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3514-3539
-/// `IsLinePhrapId(line)`: an `AS` line of fewer than three tokens reads past the end of the vector
+/// `IsLinePhrapId` of `line`: an `AS` line of fewer than three tokens reads past the end of the vector
 /// (`Stop::Undecided`) where `&&` does not stop first.
 fn is_line_phrap_id(line: &[u8]) -> Result<bool, Stop> {
     let values = tokens(line, b" \t");
@@ -1165,7 +1165,7 @@ fn is_line_phrap_id(line: &[u8]) -> Result<bool, Stop> {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:777-798
-/// `s_LooksLikeNucSeqData(line)`: `nucCount/line.size()` divides integers, so every byte is a letter of ACGNTU.
+/// `s_LooksLikeNucSeqData` of `line`: `nucCount` divided by the line's size is an integer division, so every byte is a letter of ACGNTU.
 fn looks_like_nuc_seq_data(line: &[u8]) -> bool {
     if line.len() < 10 {
         return false;

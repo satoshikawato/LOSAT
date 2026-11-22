@@ -55,9 +55,9 @@ pub(crate) const fn is_space(c: u8) -> bool {
     matches!(c, b'\t'..=b'\r' | b' ')
 }
 
-/// `atoi` of glibc, which NCBI's Linux builds call: `(int) strtol(s, NULL, 10)` in the C locale
-/// (white space, a sign, the digits up to the first other byte; a value beyond `long` is
-/// `LONG_MAX` or `LONG_MIN`), truncated to `int`.
+/// `atoi` of glibc, which NCBI's Linux builds call: `strtol` of `s` in base 10 cast to `int`, in
+/// the C locale (white space, a sign, the digits up to the first other byte; a value beyond `long`
+/// is `LONG_MAX` or `LONG_MIN`), truncated to `int`.
 pub(crate) fn c_atoi(s: &[u8]) -> i32 {
     let mut i = 0;
     while i < s.len() && is_space(s[i]) {
@@ -85,12 +85,12 @@ pub(crate) fn c_atoi(s: &[u8]) -> i32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:106-115
-/// `NStr::IsBlank(s)`: every byte is a C `isspace` space (an empty string included).
+/// `NStr::IsBlank`: every byte of `s` is a C `isspace` space (an empty string included).
 pub(crate) fn is_blank(s: &[u8]) -> bool {
     s.iter().all(|&c| is_space(c))
 }
 
-/// `NStr::StringToNonNegativeInt(str)`: the value, or -1 (the `errno` it sets is not kept; no
+/// `NStr::StringToNonNegativeInt`: the value, or -1 (the `errno` it sets is not kept; no
 /// caller reads it).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:457-491
@@ -130,14 +130,14 @@ const fn convert_site(line: u32, function: &'static str) -> ThrowSite {
     }
 }
 
-/// `NStr::PrintableString(str)` with its default mode `fNewLine_Quote | fNonAscii_Passthru`
-/// (both 0) and language C: what `CS2N_Guard::Message` quotes the input string with, and the
-/// form in which `CFastaReader` keeps a definition line (fasta.cpp:600, read back by
+/// `NStr::PrintableString` with its default mode (the flags `fNewLine_Quote` and
+/// `fNonAscii_Passthru`, both 0) and language C: what `CS2N_Guard::Message` quotes the input string
+/// with, and the form in which `CFastaReader` keeps a definition line (fasta.cpp:600, read back by
 /// makeblastdb, `writedb::fasta_source::title`, and written by the archive, `report::archive`).
-/// Ported branches: `s_PrintableString` with `mode == 0`, `lang == eLanguage_C`
-/// (so `fNewLine_Passthru`, `fNonAscii_Quote`, `fPrintable_Full` and `eLanguage_Javascript` are
-/// not ported). `isprint` is the C locale's (0x20 to 0x7E), so every byte of the result is
-/// printable ASCII; it borrows `str_` when nothing is escaped (NCBI returns a copy of it).
+/// Ported branches: `s_PrintableString` with a `mode` of 0 and a `lang` of `eLanguage_C` (so
+/// `fNewLine_Passthru`, `fNonAscii_Quote`, `fPrintable_Full` and `eLanguage_Javascript` are not
+/// ported). `isprint` is the C locale's (0x20 to 0x7E), so every byte of the result is printable
+/// ASCII; it borrows `str_` when nothing is escaped (NCBI returns a copy of it).
 pub(crate) fn printable_string(str_: &[u8]) -> Cow<'_, [u8]> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3736-3742
     let mut out: Option<Vec<u8>> = None;
@@ -210,7 +210,7 @@ pub(crate) fn printable_string(str_: &[u8]) -> Cow<'_, [u8]> {
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:545-558
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:569-575
-/// `S2N_CONVERT_ERROR(to_type, msg, errcode, pos)` at `site` for the string `str`.
+/// `S2N_CONVERT_ERROR` with `to_type`, `msg`, `errcode` and `pos`, at `site` for the string `str`.
 fn convert_error(
     str: &[u8],
     to_type: &str,
@@ -232,7 +232,7 @@ fn convert_error(
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:798-873
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:740-759
 // `CTempString::operator[]` gives NUL past the end (tempstr.hpp:341-347): the loop ends there and
-// at an embedded NUL, whose end check (`if ( str[pos] )`, lines 603-606) then passes, so
+// at an embedded NUL, whose end check (a test of `str[pos]`, lines 603-606) then passes, so
 // "12\0x" is 12. A decimal point stops the skipping of trailing spaces, and the end check then
 // fails on it, as on any other byte that is not a space. The errors are thrown at lines 852
 // (overflow), 861 (no digit) and 870 (`CHECK_ENDPTR`).
@@ -240,7 +240,7 @@ const STRING_TO_INT8_OVERFLOW: ThrowSite = convert_site(852, "ncbi::NStr::String
 const STRING_TO_INT8_INVAL: ThrowSite = convert_site(861, "ncbi::NStr::StringToInt8");
 const STRING_TO_INT8_ENDPTR: ThrowSite = convert_site(870, "ncbi::NStr::StringToInt8");
 
-/// `s_SkipAllowedSymbols(str, pos, eSkipSpacesOnly, flags)`: the position after the white space
+/// `s_SkipAllowedSymbols` in the mode `eSkipSpacesOnly`: the position after the white space
 /// from `pos`.
 fn skip_spaces(s: &[u8], mut pos: usize) -> usize {
     while pos < s.len() {
@@ -253,7 +253,7 @@ fn skip_spaces(s: &[u8], mut pos: usize) -> usize {
     pos
 }
 
-/// `NStr::StringToInt8(str, flags)` in base 10, `flags` [`ALLOW_LEADING_SPACES`] and
+/// `NStr::StringToInt8` with `flags` in base 10, `flags` [`ALLOW_LEADING_SPACES`] and
 /// [`ALLOW_TRAILING_SPACES`] or [`ALLOW_TRAILING_SYMBOLS`], or 0.
 pub(crate) fn string_to_int8(s: &[u8], flags: Flags) -> Result<i64, NcbiException> {
     string_to_int8_base(s, flags, 10)
@@ -262,7 +262,7 @@ pub(crate) fn string_to_int8(s: &[u8], flags: Flags) -> Result<i64, NcbiExceptio
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:765-795
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:684-712
 // `pos0` is set before the radix check: a `0x` with no digit after it is 0 (`pos != pos0`).
-/// `NStr::StringToInt8(str, flags, base)` in base 10 or 16 (`s_StringToInt8` of the argument
+/// `NStr::StringToInt8` with `flags` and a `base` of 10 or 16 (`s_StringToInt8` of the argument
 /// readers tries 16 after 10: `ncbi_app::args`, `blastinput::value_parsers::ncbi_int8`), `flags`
 /// as for [`string_to_int8`].
 pub(crate) fn string_to_int8_base(s: &[u8], flags: Flags, base: u8) -> Result<i64, NcbiException> {
@@ -333,7 +333,7 @@ pub(crate) fn string_to_int8_base(s: &[u8], flags: Flags, base: u8) -> Result<i6
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643
 const STRING_TO_INT_OVERFLOW: ThrowSite = convert_site(640, "ncbi::NStr::StringToInt");
 
-/// `NStr::StringToInt(str, flags)` in base 10, `flags` as for [`string_to_int8`].
+/// `NStr::StringToInt` with `flags` in base 10, `flags` as for [`string_to_int8`].
 pub(crate) fn string_to_int(s: &[u8], flags: Flags) -> Result<i32, NcbiException> {
     let value = string_to_int8(s, flags)?;
     i32::try_from(value).map_err(|_| convert_error(s, "int", "overflow", STRING_TO_INT_OVERFLOW, 0))
@@ -349,7 +349,7 @@ const STRING_TO_UINT8_EMPTY: ThrowSite = convert_site(895, "ncbi::NStr::StringTo
 const STRING_TO_UINT8_DIGIT: ThrowSite = convert_site(908, "ncbi::NStr::StringToUInt8");
 const STRING_TO_UINT8_OVERFLOW: ThrowSite = convert_site(912, "ncbi::NStr::StringToUInt8");
 
-/// `NStr::StringToUInt8(str)` with the default flags and base (the fast conversion).
+/// `NStr::StringToUInt8` with the default flags and base (the fast conversion).
 pub(crate) fn string_to_uint8(s: &[u8]) -> Result<u64, NcbiException> {
     let error = |site: ThrowSite, pos: usize| convert_error(s, "Uint8", "", site, pos);
     let mut ptr = 0;
@@ -380,7 +380,7 @@ pub(crate) fn string_to_uint8(s: &[u8]) -> Result<u64, NcbiException> {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:646-655
 const STRING_TO_UINT_OVERFLOW: ThrowSite = convert_site(652, "ncbi::NStr::StringToUInt");
 
-/// `NStr::StringToUInt(str)` with the default flags and base.
+/// `NStr::StringToUInt` with the default flags and base.
 pub(crate) fn string_to_uint(s: &[u8]) -> Result<u32, NcbiException> {
     let value = string_to_uint8(s)?;
     u32::try_from(value)
@@ -399,7 +399,7 @@ const STRING_TO_UINT8_BASE_OVERFLOW: ThrowSite = convert_site(964, "ncbi::NStr::
 const STRING_TO_UINT8_BASE_INVAL: ThrowSite = convert_site(973, "ncbi::NStr::StringToUInt8");
 const STRING_TO_UINT8_BASE_ENDPTR: ThrowSite = convert_site(980, "ncbi::NStr::StringToUInt8");
 
-/// `NStr::StringToUInt8(str, 0, base)` with `base` 0 (from the string: `0x` hexadecimal, a
+/// `NStr::StringToUInt8` with flags 0 and `base`: `base` 0 (from the string: `0x` hexadecimal, a
 /// leading `0` octal, else decimal) or 2 to 36; base 10 is the fast conversion
 /// ([`string_to_uint8`]).
 pub(crate) fn string_to_uint8_base(s: &[u8], base: u32) -> Result<u64, NcbiException> {
@@ -457,14 +457,14 @@ pub(crate) fn string_to_uint8_base(s: &[u8], base: u32) -> Result<u64, NcbiExcep
     Ok(n)
 }
 
-/// `NStr::StringToUInt(str, 0, base)` (`base` as for [`string_to_uint8_base`]).
+/// `NStr::StringToUInt` with flags 0 and `base` (`base` as for [`string_to_uint8_base`]).
 pub(crate) fn string_to_uint_base(s: &[u8], base: u32) -> Result<u32, NcbiException> {
     let value = string_to_uint8_base(s, base)?;
     u32::try_from(value)
         .map_err(|_| convert_error(s, "unsigned int", "overflow", STRING_TO_UINT_OVERFLOW, 0))
 }
 
-/// `NStr::ParseEscapes(str)` with its default mode (`eEscSeqRange_Standard`), as makeblastdb's
+/// `NStr::ParseEscapes` with its default mode (`eEscSeqRange_Standard`), as makeblastdb's
 /// title (`writedb::fasta_source::title`) and NCBI's registry reader
 /// (`blastinput::ncbi_registry`) call it. An error is the message of NCBI's `CStringException`
 /// (an escape that ends the string, `\x` without a hexadecimal digit, or one whose value
@@ -502,7 +502,7 @@ pub(crate) fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
                 if pos == pos2 {
                     return Err("\\x followed by no hexadecimal digits");
                 }
-                // `StringToUInt(..., 0, 16)` throws for a value above 4,294,967,295.
+                // `StringToUInt` (flags 0, base 16) throws for a value above 4,294,967,295.
                 let mut value: u32 = 0;
                 for &digit in &str[pos2..pos] {
                     let digit = (digit as char).to_digit(16).unwrap_or(0);
@@ -536,25 +536,25 @@ pub(crate) fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3145-3180
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3187-3195
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3182-3185
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3197-3235 (`TruncateSpacesInPlace(string&
-// str, ETrunc where)`: the loops of `s_TruncateSpaces` over `str.data()`, then)
-// `NStr::TruncateSpaces`, `TruncateSpaces_Unsafe` and the two `TruncateSpacesInPlace` cut the same
-// bytes; the four functions below are its `where`, as the slice of `str` that is left (empty when
-// every byte is a space), `truncate_spaces_str` for a `string`.
-/// `NStr::TruncateSpaces(str)` (`eTrunc_Both`, as `TruncateSpacesInPlace`): `str` without the C
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3197-3235 (`TruncateSpacesInPlace`,
+// which takes a string and an `ETrunc` `where`: the loops of `s_TruncateSpaces` over `str.data()`,
+// then) `NStr::TruncateSpaces`, `TruncateSpaces_Unsafe` and the two `TruncateSpacesInPlace` cut the
+// same bytes; the four functions below are its `where`, as the slice of `str` that is left (empty
+// when every byte is a space), `truncate_spaces_str` for a `string`.
+/// `NStr::TruncateSpaces` (`eTrunc_Both`, as `TruncateSpacesInPlace`): `str` without the C
 /// `isspace` spaces at its ends.
 pub(crate) fn truncate_spaces(str: &[u8]) -> &[u8] {
     truncate_spaces_end(truncate_spaces_begin(str))
 }
 
-/// `NStr::TruncateSpaces(str, NStr::eTrunc_Begin)`: `str` without the C `isspace` spaces at its
+/// `NStr::TruncateSpaces` with `NStr::eTrunc_Begin`: `str` without the C `isspace` spaces at its
 /// start.
 pub(crate) fn truncate_spaces_begin(str: &[u8]) -> &[u8] {
     let beg = str.iter().position(|&c| !is_space(c)).unwrap_or(str.len());
     &str[beg..]
 }
 
-/// `NStr::TruncateSpaces(str, NStr::eTrunc_End)`: `str` without the C `isspace` spaces at its
+/// `NStr::TruncateSpaces` with `NStr::eTrunc_End`: `str` without the C `isspace` spaces at its
 /// end.
 pub(crate) fn truncate_spaces_end(str: &[u8]) -> &[u8] {
     let end = str
@@ -572,7 +572,7 @@ pub(crate) fn truncate_spaces_str(str: &str) -> &str {
     &str[beg..end]
 }
 
-/// `NStr::StringToBool(str)`: `None` where NCBI throws.
+/// `NStr::StringToBool`: `None` where NCBI throws.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2817-2839
 pub(crate) fn string_to_bool(value: &str) -> Option<bool> {
@@ -599,7 +599,8 @@ pub(crate) fn string_to_bool(value: &str) -> Option<bool> {
 fn print_base10_uint8_with_commas(mut value: u64) -> Vec<u8> {
     const PRINT_INT8_CHUNK: u64 = 1_000_000_000;
     const PRINT_INT8_CHUNK_SIZE: usize = 9;
-    // NCBI's buffer is 64 characters (`CHAR_BIT * sizeof(value)`); the text fills it from the end.
+    // NCBI's buffer is 64 characters (`CHAR_BIT` times the size of `value`); the text fills it from
+    // the end.
     let mut buffer = [0u8; 64];
     let mut pos = buffer.len();
     let mut cnt: i32 = -1;
@@ -640,7 +641,7 @@ fn print_base10_uint8_with_commas(mut value: u64) -> Vec<u8> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2055-2073
-/// `NStr::UInt8ToString(n, NStr::fWithCommas)`: `n` in decimal with a comma between groups of
+/// `NStr::UInt8ToString` with `NStr::fWithCommas`: `n` in decimal with a comma between groups of
 /// three digits, with NCBI's loss of digits from 4,294,967,296,000,000,000
 /// (`print_base10_uint8_with_commas`).
 pub(crate) fn with_commas(n: u64) -> String {
@@ -651,7 +652,7 @@ pub(crate) fn with_commas(n: u64) -> String {
 // `-svalue` of INT64_MIN overflows; GCC's wrapped result, cast to `Uint8`, is 2^63, its magnitude
 // (`unsigned_abs`), so the text is the value's under either reading (probe p5_neg_2p63 of line
 // RG D1a-3: `-923,372,036,854,775,808`).
-/// `NStr::Int8ToString(n, NStr::fWithCommas)`: the sign, then the magnitude as
+/// `NStr::Int8ToString` with `NStr::fWithCommas`: the sign, then the magnitude as
 /// [`with_commas`] prints it.
 pub(crate) fn int8_with_commas(n: i64) -> String {
     let digits = print_base10_uint8_with_commas(n.unsigned_abs());
@@ -667,7 +668,7 @@ pub(crate) fn int8_with_commas(n: i64) -> String {
 // The `int` is widened to `long` before it is negated: INT_MIN prints whole
 // (`-2,147,483,648`, probe p5_pr_N2p31 of line RG D1a-3), and every magnitude of an `int` is
 // below 2^32, where the digits are whole.
-/// `NStr::IntToString(n, NStr::fWithCommas)`: the sign, then the magnitude with commas.
+/// `NStr::IntToString` with `NStr::fWithCommas`: the sign, then the magnitude with commas.
 pub(crate) fn int_with_commas(n: i32) -> String {
     let digits = print_base10_uint8_with_commas(u64::from(n.unsigned_abs()));
     let mut text = String::with_capacity(digits.len() + 1);

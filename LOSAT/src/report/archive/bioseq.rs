@@ -139,7 +139,7 @@ pub fn write_seq_loc<E: Encoder>(enc: &mut E, loc: &QuerySeqLoc<'_>) {
     enc.int(loc.from);
     enc.end_member();
     enc.member("to", 1);
-    // `TSeqPos`: `seqlen - 1` of an empty record is written unsigned (x_FastaToSeqLoc).
+    // `TSeqPos`: for an empty record, one less than `seqlen` is written unsigned (x_FastaToSeqLoc).
     if loc.to < 0 {
         enc.big_int(i64::from(u32::MAX));
     } else {

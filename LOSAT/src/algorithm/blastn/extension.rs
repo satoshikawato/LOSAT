@@ -614,7 +614,7 @@ where
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:553-554
     let ext_to = word_length - (q_end - q_off_adjusted);
-    // NCBI's `Int4 ext_max` is negative for a word that runs past the context or the scan
+    // NCBI's `ext_max` (an `Int4`) is negative for a word that runs past the context or the scan
     // range (the aligned small-table extension does not check the right end at the end of
     // the query); then `ext_to > ext_max`, and no extension or double word is possible.
     let ext_max = (q_range as i64 - q_end as i64).min(s_range as i64 - s_end as i64);

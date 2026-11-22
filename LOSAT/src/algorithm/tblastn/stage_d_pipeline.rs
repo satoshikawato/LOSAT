@@ -1921,7 +1921,8 @@ fn run_local_search_with_pool(
 /// Graduated 2026-10-22 (was `LOSAT_X_TBNOIDCHUNK`): the bases one chunk of subjects may hold.
 #[cfg(feature = "parallel")]
 fn x_oid_chunk_bases(threads: usize, largest_file: u64) -> u64 {
-    // NCBI's Int8 `GetSliceSize() / (4*m_NumThreads) + 1`; usize fits u64 on every target.
+    // NCBI's Int8: `GetSliceSize()` divided by the product of 4 and `m_NumThreads`, plus 1; usize
+    // fits u64 on every target.
     let divisor = u64::try_from(threads.max(1))
         .unwrap_or(u64::MAX)
         .saturating_mul(4);
@@ -1938,7 +1939,8 @@ fn x_subject_file_size(subjects: SubjectLetters<'_>) -> u64 {
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697-707
 // A chunk takes its first subject and then the next ones while the bases taken stay within
-// the budget (`tot_length >= res.length` is `taken + length <= bases`). NCBI's last condition
+// the budget (NCBI tests `tot_length` against `res.length`: the bases taken plus the length
+// are at most the budget). NCBI's last condition
 // compares the OID after the next one with the end, so the last subject of a database always
 // starts a chunk of its own, and a chunk never crosses a volume; LOSAT does not copy these, as
 // `-subject` has one volume and the rest is scheduling only. NCBI reads the exact length of each
@@ -3409,7 +3411,7 @@ fn finish_local_mode0_no_sum_stats(
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1518-1521
     // NCBI traces the batches of its HSP stream (the lists of one subject) on its threads
-    // (`schedule(guided)`), each into the results of its thread, which are joined afterward
+    // (OpenMP's `guided` schedule), each into the results of its thread, which are joined afterward
     // (SThreadLocalDataArrayConsolidateResults). Here the lists of a batch are traced on the search
     // pool and their results put in the hit lists in the order of the lists, as the serial loop
     // puts them; a list's result is a function of the list alone.

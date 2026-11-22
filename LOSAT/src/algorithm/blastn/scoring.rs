@@ -452,7 +452,7 @@ pub(crate) fn check_gapped_x_dropoffs(
         return Ok(());
     }
     use super::alignment::greedy::greedy_xdrop_offset;
-    // NCBI's `max_score` holds `max_d + 1 + d_diff` cells, `d_diff` the offset of the larger raw
+    // NCBI's `max_score` holds `max_d` plus 1 plus `d_diff` cells, `d_diff` the offset of the larger raw
     // X-drop (`s_BlastGreedyAlignMemAlloc`). With an odd reward the doubling wraps, so the smaller
     // X-drop can have the larger offset (`-xdrop_gap -3e9`: 174306649 against 19), which NCBI
     // zero-fills past the array (SIGSEGV, review 1 of line RG X1b).

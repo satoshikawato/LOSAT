@@ -15,7 +15,7 @@ fn key(u: UngappedData) -> (usize, usize, usize, i32) {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:197 and
 // blast_stat.c:1124-1127
 /// `-xdrop_ungap 1e10` (X-drop `INT_MIN`, which negates to itself): the left walk from the hit
-/// at 3 passes the two sentinels (`INT4_MIN / 2` each: `INT_MIN`) and the mismatch A/C (-3),
+/// at 3 passes the two sentinels (half of `INT4_MIN` each: `INT_MIN`) and the mismatch A/C (-3),
 /// where the `Int4` sum wraps to 2^31 - 3, above 0, as in NCBI's x86-64 build; the right walk
 /// adds the two matches: `i32::MAX`. A build with overflow checks gives the same.
 #[test]

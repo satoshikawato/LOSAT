@@ -30,7 +30,7 @@ pub(super) struct FormatSpec {
     separators: Vec<Vec<u8>>,
     /// `m_GetDefline`: a specifier reads the definition lines.
     get_defline: bool,
-    /// `m_OtherFields & (1 << e_seq)`, `(1 << e_hash)`.
+    /// The bits `e_seq` and `e_hash` of `m_OtherFields`.
     need_seq: bool,
     need_hash: bool,
 }

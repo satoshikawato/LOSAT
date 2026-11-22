@@ -145,14 +145,15 @@ pub struct TblastxArgs {
     )]
     pub seg: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
-    // (`CFilteringArgs(!kQueryIsProtein)`, tblastx_args.cpp:78, takes this protein branch.) Read
-    // by `soft_masking`.
+    // (`CFilteringArgs` of the negation of `kQueryIsProtein`, tblastx_args.cpp:78, takes this
+    // protein branch.) Read by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244
-    // (`CGenericSearchArgs( !kQueryIsProtein, false, false, true)`, tblastx_args.cpp:68, does not
-    // suppress it.) Option, not a value with a default: whether it was given is what a BLAST
-    // archive (outfmt 11) records (`SumStatistics`); the search reads `sum_stats()`.
+    // (`CGenericSearchArgs` of the negation of `kQueryIsProtein`, false, false and true,
+    // tblastx_args.cpp:68, does not suppress it.) Option, not a value with a default: whether it
+    // was given is what a BLAST archive (outfmt 11) records (`SumStatistics`); the search reads
+    // `sum_stats()`.
     #[arg(long, value_parser = ncbi_boolean, help = "Use sum statistics [default: true]")]
     pub sum_stats: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
@@ -167,7 +168,7 @@ pub struct TblastxArgs {
     pub strand: String,
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-214, 276-278
-    // TBLASTX has no gapped X-drops (blast_args.cpp:216-229, `!m_IsTblastx`). Read by
+    // TBLASTX has no gapped X-drops (blast_args.cpp:216-229, gated on `m_IsTblastx` being false). Read by
     // `x_drop_ungapped_bits`.
     #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = tblastx_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
     pub xdrop_ungap: Option<f64>,
@@ -217,7 +218,7 @@ pub struct TblastxArgs {
     /// (`strategy::StrategyExport::for_run`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
-    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath` of `taxdb.bti`), asked
     /// before the search where a tabular field list looks every taxid up (the plural names of the
     /// taxonomy database, the organism report; `algorithm::tblastx::tabular`), by the command line
     /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no

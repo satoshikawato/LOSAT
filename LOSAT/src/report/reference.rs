@@ -27,7 +27,7 @@ pub(crate) enum Publication {
     MaxPublications,
 }
 
-/// The number of entries of the tables (`eMaxPublications + 1`).
+/// The number of entries of the tables (one more than `eMaxPublications`).
 const TABLE_LEN: usize = Publication::MaxPublications as usize + 1;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/version.cpp:46-83
@@ -161,7 +161,7 @@ pub(crate) fn write_version_line<W: Write + ?Sized>(
     program: &str,
     version: &str,
 ) -> io::Result<()> {
-    // `BlastGetVersion(program)`, one insertion, built on the stack where it fits.
+    // `BlastGetVersion` of `program`, one insertion, built on the stack where it fits.
     let len = program.len() + 1 + version.len();
     let mut stack = [0u8; 64];
     let mut heap = Vec::new();

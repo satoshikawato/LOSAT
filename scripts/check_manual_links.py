@@ -18,13 +18,14 @@ Package READMEs (--package-readme PATH, for crates.io / PyPI / npm):
 - Only https:// URLs or same-page `#fragment` heading anchors are allowed; relative file
   paths fail because package registries do not serve files outside the README.
 
-Usage: check_manual_links.py SRC_DIR [--repo-root DIR] [--repo-readme PATH]... [--package-readme PATH]...
+Usage: check_manual_links.py SRC_DIR [--repo-root DIR] [--repo-readme PATH]... [--package-readme PATH]... [--check-figure-sync]
 Exit status 1 with one line per problem.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import sys
 import unicodedata
@@ -130,6 +131,9 @@ def check(src: Path) -> list[str]:
     listed = set()
     for number, line in prose_lines(summary.read_text(encoding="utf-8")):
         for target in LINK.findall(line):
+            if target in listed:
+                problems.append(f"SUMMARY.md:{number}: lists {target} more than once")
+                continue
             listed.add(target)
             if target not in pages:
                 problems.append(f"SUMMARY.md:{number}: lists {target}, which does not exist")
@@ -213,6 +217,37 @@ def check_package_readme(path: Path, display_name: str | None = None) -> list[st
     return problems
 
 
+def check_figure_sync(repo_root: Path) -> list[str]:
+    """Check that every benchmark PNG matches its copy in docs/manual/src/images byte for byte."""
+    problems: list[str] = []
+    bench_figs_dir = repo_root / "benchmarks" / "v0.2.0" / "figures"
+    manual_imgs_dir = repo_root / "docs" / "manual" / "src" / "images"
+    if not bench_figs_dir.is_dir():
+        return [f"{bench_figs_dir}: missing benchmark figures directory"]
+    if not manual_imgs_dir.is_dir():
+        return [f"{manual_imgs_dir}: missing manual images directory"]
+
+    bench_pngs = {p.name: p for p in sorted(bench_figs_dir.glob("fig*.png"))}
+    manual_pngs = {p.name: p for p in sorted(manual_imgs_dir.glob("fig*.png"))}
+    if not bench_pngs:
+        problems.append(f"{bench_figs_dir}: no fig*.png files found")
+        return problems
+
+    for name, src_path in bench_pngs.items():
+        dst_path = manual_pngs.get(name)
+        if dst_path is None:
+            problems.append(f"docs/manual/src/images/{name}: missing copy of benchmarks/v0.2.0/figures/{name}")
+            continue
+        if hashlib.sha256(src_path.read_bytes()).digest() != hashlib.sha256(dst_path.read_bytes()).digest():
+            problems.append(
+                f"docs/manual/src/images/{name}: differs from benchmarks/v0.2.0/figures/{name} "
+                "(run render_figures.py to synchronize)"
+            )
+    for name in sorted(set(manual_pngs) - set(bench_pngs)):
+        problems.append(f"docs/manual/src/images/{name}: stale figure without matching file in benchmarks/v0.2.0/figures")
+    return problems
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Checks LOSAT user manual, repository README/docs, and package READMEs.",
@@ -221,6 +256,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", type=Path, default=None, help="Repository root for --repo-readme checks")
     parser.add_argument("--repo-readme", action="append", default=[], type=Path, help="Repo-scoped Markdown file to check")
     parser.add_argument("--package-readme", action="append", default=[], type=Path, help="Package README (no relative links)")
+    parser.add_argument("--check-figure-sync", action="store_true", help="Check benchmarks/v0.2.0/figures matches docs/manual/src/images")
     return parser
 
 
@@ -239,6 +275,8 @@ def main(argv: list[str]) -> int:
         problems.extend(check_repo_markdown(readme, repo_root=repo_root))
     for pkg in args.package_readme:
         problems.extend(check_package_readme(pkg))
+    if args.check_figure_sync:
+        problems.extend(check_figure_sync(repo_root))
 
     for problem in problems:
         print(problem)

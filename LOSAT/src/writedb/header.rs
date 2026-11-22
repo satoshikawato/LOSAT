@@ -19,6 +19,7 @@ const INDEFINITE_LENGTH_BYTE: u8 = 0x80;
 
 use crate::seqid::model::{Date, ObjectId, ParsedSeqId, PatentNumber, TextseqId};
 use crate::seqid::DeflineSet;
+use crate::utils::byte_search::find_first;
 
 /// Member tags of `Blast-def-line` (blastdb.asn:34-46, in order).
 const DEFLINE_TITLE: u8 = 0;
@@ -83,21 +84,22 @@ fn write_int4(out: &mut Vec<u8>, data: i32) {
 // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
 // makeblastdb runs with the default method (replace and warn) and the
 // substitute '#': every byte outside ' '..'~' is written as '#' and reported
-// with the stream position of the replacement.
+// with the stream position of the replacement. The runs of visible bytes between them are
+// found a block at a time (`find_first`) and copied whole.
 fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleChar>) {
     out.push(TAG_VISIBLE_STRING);
     write_length(out, text.len());
-    for &byte in text {
-        if (b' '..=b'~').contains(&byte) {
-            out.push(byte);
-        } else {
-            bad.push(BadTitleChar {
-                byte,
-                stream_offset: out.len(),
-            });
-            out.push(b'#');
-        }
+    let mut rest = text;
+    while let Some(at) = find_first(rest, |byte| !(b' '..=b'~').contains(&byte)) {
+        out.extend_from_slice(&rest[..at]);
+        bad.push(BadTitleChar {
+            byte: rest[at],
+            stream_offset: out.len(),
+        });
+        out.push(b'#');
+        rest = &rest[at + 1..];
     }
+    out.extend_from_slice(rest);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-893

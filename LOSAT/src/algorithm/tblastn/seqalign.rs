@@ -54,11 +54,13 @@ pub(super) fn write_tblastn_seqalign(
     ranges: &ReportRanges<'_>,
     program_type: Option<crate::report::record::ProgramType>,
     warnings: &mut QueryWarnings<'_>,
+    gapped: bool,
 ) -> Result<()> {
+    // An ungapped search's alignments are Std-seg diagonals (`report::serial::seqalign`).
     let run = RunRecord {
         program: Program::Tblastn,
         db_title: shown.db_title(),
-        gapped: true,
+        gapped,
         program_type,
     };
     let mut subjects: Vec<SubjectRecord<'_>> = Vec::new();

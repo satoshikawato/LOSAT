@@ -930,3 +930,21 @@ fn a_meta_page_that_cannot_be_read_gives_mdb_env_opens_text() {
         SeqDbError::NotFound(_)
     ));
 }
+
+#[test]
+fn ordinals_in_names_the_ordinals_of_an_oid_range() {
+    let included = [0u32, 3, 4, 9, 64, 65, 130];
+    let filter = filter_of(140, &included);
+    let map = OidMap(Some(&filter));
+    for from in 0..=140 {
+        for to in 0..=140 {
+            let ordinals = map.ordinals_in(from, to);
+            let expected: Vec<u32> = (0..included.len() as u32)
+                .filter(|&ordinal| (from..to).contains(&included[ordinal as usize]))
+                .collect();
+            assert_eq!(ordinals.collect::<Vec<_>>(), expected, "{from}..{to}");
+        }
+    }
+    assert_eq!(OidMap::unrestricted().ordinals_in(3, 7), 3..7);
+    assert_eq!(OidMap::unrestricted().ordinals_in(7, 3), 7..7);
+}

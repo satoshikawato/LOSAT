@@ -1,4 +1,4 @@
-//! The search programs (blastn, blastp, blastx, psiblast, pssm_search, rps_search, rpsblast,
+//! The search programs (blastn, blastp, blastx, phi_search, psiblast, pssm_search, rps_search, rpsblast,
 //! rpstblastn, tblastn, tblastx) and
 //! `common`, the code they share.
 //!
@@ -14,6 +14,9 @@
 pub mod blastn;
 pub mod blastp;
 pub mod common;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_lookup.c:388-680
+// PHI-BLAST (psiblast `-phi_pattern`): the pattern, its scans, statistics, alignments and engine.
+pub mod phi_search;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
 pub mod psiblast;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:46-47

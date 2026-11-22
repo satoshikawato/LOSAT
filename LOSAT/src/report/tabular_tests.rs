@@ -1186,6 +1186,76 @@ fn end_gaps_are_spaces_in_the_rows_and_btop() {
     assert_eq!(out, b"4K-");
 }
 
+// Review S1 of PS15a-2 (`tmp/rev15a2/col`, every field alone against NCBI with a profile whose id
+// is `lcl|Query_1`): the RPS programs refuse outfmt 18 and 20 only where NCBI's bytes differ.
+#[test]
+fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
+    use crate::blastinput::app::Program;
+    let spec = |number: i32, format: ReportFormat, fields: &str| {
+        TabularSpec::of_app(
+            format,
+            &FormatChoice {
+                number,
+                spec: fields.to_string(),
+                delimiter: String::new(),
+            },
+            crate::report::archive::options::RequestKind::Rpsblast,
+        )
+        .unwrap()
+    };
+    let csv = |fields: &str| spec(20, ReportFormat::CommaSeparatedValuesWithHeader, fields);
+    let refuses = |fields: &str, program, ident, taxid| {
+        csv(fields).refuses_generated_id(program, ident, taxid)
+    };
+    for program in [Program::Blastp, Program::Blastx] {
+        // The profile's own ids and the scores: NCBI's bytes.
+        for fields in [
+            "qseqid sseqid sacc saccver sgi sallgi evalue",
+            "qseqid bitscore score qcovs qcovus",
+        ] {
+            assert!(!refuses(fields, program, 5, true), "{fields} {program:?}");
+        }
+        // What NCBI finds by the id beyond it: refused.
+        for fields in [
+            "qseqid sallseqid",
+            "qseqid sallacc",
+            "qseqid stitle",
+            "qseqid salltitles",
+            "qseqid staxids",
+            "qseqid slen",
+            "qseqid sseq",
+            "qseqid pident",
+            "",
+        ] {
+            assert!(refuses(fields, program, 5, false), "{fields} {program:?}");
+        }
+        // Taxonomy: only where the profile has a taxid.
+        for fields in ["qseqid staxid", "qseqid ssciname", "qseqid sskingdoms"] {
+            assert!(!refuses(fields, program, 5, false), "{fields} {program:?}");
+            assert!(refuses(fields, program, 5, true), "{fields} {program:?}");
+        }
+        // `nident` where the block opens for it (identities).
+        assert!(!refuses("qseqid nident", program, 0, false));
+        assert!(refuses("qseqid nident", program, 1, false));
+        // The organism report: only a profile with a taxid; outfmt 6, 7 and 10 are line RG X7's.
+        let report = spec(18, ReportFormat::TaxFormat, "");
+        assert!(!report.refuses_generated_id(program, 5, false));
+        assert!(report.refuses_generated_id(program, 5, true));
+        for (number, format) in [
+            (6, ReportFormat::Tabular),
+            (7, ReportFormat::TabularWithComments),
+            (10, ReportFormat::CommaSeparatedValues),
+        ] {
+            assert!(!spec(number, format, "qseqid stitle").refuses_generated_id(program, 5, true));
+        }
+    }
+    // RPSBLAST: the query's letters and the strand; RPSTBLASTN: the alignment block throws.
+    for fields in ["qseqid qseq", "qseqid sstrand", "qseqid qstart length"] {
+        assert!(!refuses(fields, Program::Blastp, 5, false), "{fields}");
+        assert!(refuses(fields, Program::Blastx, 5, false), "{fields}");
+    }
+}
+
 /// The exception of a query of the molecule `other` names the coding of its Seq-data (NCBI's
 /// object manager converts it to the coding 1).
 #[test]

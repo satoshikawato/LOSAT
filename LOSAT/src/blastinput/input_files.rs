@@ -8,7 +8,7 @@ use anyhow::Result;
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:862-866
 /// `in >> c` skips the characters of C's `isspace`: the test is `NStr::IsBlank`'s
-/// (`ncbi_str::is_blank`), public for the Web adapter (`web_adapter::is_blank`).
+/// (`ncbi_str::is_blank`); the library API's `read_query_records` reads it too.
 pub fn is_blank(bytes: &[u8]) -> bool {
     crate::ncbi_str::is_blank(bytes)
 }

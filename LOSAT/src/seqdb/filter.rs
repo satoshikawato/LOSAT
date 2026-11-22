@@ -1804,13 +1804,19 @@ impl SeqDb {
     // sees them, and the post is not printed. The sequence was searched and its length counts
     // in the statistics (`drops_lineless_hits`; under a negative list the search's fetches
     // exclude it earlier, `excludes_lineless_at_fetch`). (Line DBID items lineless and
-    // lineless2; DI-8 `DECISIONS.md` 17 had refused such a list before the search.)
-    /// Whether the database's rule is a seqid list, positive or negative, which may keep a
-    /// sequence without any of its lines: such a sequence is searched and counts in the
-    /// statistics, and its hits that reach NCBI's Seq-aligns leave the reports there
-    /// (`keeps_line`, `algorithm::common::database::SeqAligned`).
+    // lineless2; DI-8 `DECISIONS.md` 17 had refused such a list before the search.) The alias
+    // files' `OID_MASK_TYPE` erases the lines of model sequences in the same read (line RG D1b-2):
+    // a sequence that the OID list keeps with only such lines is searched, counts, and its hits
+    // leave the reports the same way (probes A5, A6 of line RG D1b); it fills no id set, so the
+    // fetches exclude nothing for it.
+    /// Whether the database's reads may keep a sequence without any of its lines (a seqid list,
+    /// positive or negative, or the alias files' erasure of model lines): such a sequence is
+    /// searched and counts in the statistics, and its hits that reach NCBI's Seq-aligns leave the
+    /// reports there (`keeps_line`, `algorithm::common::database::SeqAligned`).
     pub fn drops_lineless_hits(&self) -> bool {
-        self.volumes.iter().any(|volume| volume.has_seqid_rule())
+        self.volumes
+            .iter()
+            .any(|volume| volume.may_drop_every_line())
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:302-313
@@ -1841,15 +1847,30 @@ impl SeqDb {
     }
 
     /// Whether NCBI turns a hit on `ordinal` into a Seq-align: false where the database's seqid
-    /// list keeps the sequence but none of its definition lines; the reader's error where a
-    /// tag cannot be read as NCBI's header read adjusts it. True without a seqid list (a
-    /// taxid list keeps at least one line of each sequence it keeps).
+    /// list or its erasure of model lines (`OID_MASK_TYPE`) keeps the sequence but none of its
+    /// definition lines; the reader's error where a tag cannot be read as NCBI's header read
+    /// adjusts it. True without either (a taxid list keeps at least one line of each sequence it
+    /// keeps).
     pub fn keeps_line(&self, ordinal: u32) -> Result<bool, SeqDbError> {
         if self.filter.is_none() {
             return Ok(true);
         }
         let at = self.find_volume(ordinal)?;
         self.volumes[at.volume].keeps_line(at.vol_oid)
+    }
+
+    /// [`SeqDb::keeps_line`] of the sequence of OID `oid`, included or not (the Seq-aligns of an
+    /// RPS search read their profiles' headers by OID).
+    pub fn keeps_line_of_oid(&self, oid: u32) -> Result<bool, SeqDbError> {
+        let at = self.locate_oid(oid)?;
+        self.volumes[at.volume].keeps_line(at.vol_oid)
+    }
+
+    /// Whether the database's reads remove a definition line of the sequence of OID `oid`,
+    /// included or not (`Volume::erases_a_line`: nothing posted or refused for its lines).
+    pub fn erases_a_line_of_oid(&self, oid: u32) -> Result<bool, SeqDbError> {
+        let at = self.locate_oid(oid)?;
+        self.volumes[at.volume].erases_a_line(at.vol_oid)
     }
 
     /// The bitmap of the OIDs a seqid list keeps in a version 5 database (`ids`: sorted and

@@ -68,7 +68,11 @@ impl Search {
             "tblastn" => Program::Tblastn,
             _ => Program::Tblastx,
         };
-        let (queries, subjects) = crate::api::input::read_search_inputs(
+        let crate::api::InputRecords {
+            query: queries,
+            query_end,
+            subject: subjects,
+        } = crate::api::input::read_search_inputs(
             program,
             &command(),
             Some(false),
@@ -98,13 +102,21 @@ impl Search {
             observer: None,
         };
         let result = match command() {
-            Commands::Blastn(args) => run_local_blastn(args, &queries, &subjects, &mut outputs),
-            Commands::Blastp(args) => {
-                run_local_blastp(args, &queries, &subjects, "", "", &mut outputs)
+            Commands::Blastn(args) => {
+                run_local_blastn(args, &queries, &query_end, &subjects, &mut outputs)
             }
-            Commands::Blastx(args) => run_local_blastx(args, &queries, &subjects, &mut outputs),
-            Commands::Tblastn(args) => run_local_tblastn(args, &queries, &subjects, &mut outputs),
-            Commands::Tblastx(args) => run_local_tblastx(args, &queries, &subjects, &mut outputs),
+            Commands::Blastp(args) => {
+                run_local_blastp(args, &queries, &query_end, &subjects, "", "", &mut outputs)
+            }
+            Commands::Blastx(args) => {
+                run_local_blastx(args, &queries, &query_end, &subjects, &mut outputs)
+            }
+            Commands::Tblastn(args) => {
+                run_local_tblastn(args, &queries, &query_end, &subjects, &mut outputs)
+            }
+            Commands::Tblastx(args) => {
+                run_local_tblastx(args, &queries, &query_end, &subjects, &mut outputs)
+            }
             _ => unreachable!("a search program"),
         };
         result.expect("run_local");

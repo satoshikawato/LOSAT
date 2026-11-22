@@ -1,0 +1,31 @@
+{
+  "version": "1.2",
+  "dbname": "omn",
+  "dbtype": "Nucleotide",
+  "db-version": 5,
+  "description": "omn.fna",
+  "number-of-letters": 3399,
+  "number-of-sequences": 8,
+  "last-updated": "2026-11-21T17:53:00",
+  "number-of-volumes": 2,
+  "bytes-total": 51447,
+  "bytes-to-cache": 1135,
+  "files": [
+    "omn.00.nhr",
+    "omn.00.nin",
+    "omn.00.nog",
+    "omn.00.nsq",
+    "omn.00.nxm",
+    "omn.01.nhr",
+    "omn.01.nin",
+    "omn.01.nog",
+    "omn.01.nsq",
+    "omn.01.nxm",
+    "omn.nal",
+    "omn.ndb",
+    "omn.nos",
+    "omn.not",
+    "omn.ntf",
+    "omn.nto"
+  ]
+}

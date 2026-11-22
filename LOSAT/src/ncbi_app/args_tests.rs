@@ -785,9 +785,11 @@ fn the_refusals_and_the_sets_come_from_the_tables() {
     assert_eq!(refusal("blastn", "db"), None);
     assert_eq!(refusal("nosuchprogram", "remote"), None);
     assert_eq!(
-        refusal("tblastn", "ungapped"),
-        Some(Refusal::Run("an ungapped search"))
+        refusal("psiblast", "use_sw_tback"),
+        Some(Refusal::Run("the Smith-Waterman traceback"))
     );
+    // tblastn's `-ungapped` runs (line NP item O4c).
+    assert_eq!(refusal("tblastn", "ungapped"), None);
     assert!(matches!(
         refusal("makeblastdb", "gi_mask_name"),
         Some(Refusal::Read(Some(why))) if why.starts_with("it writes GI-indexed mask files")

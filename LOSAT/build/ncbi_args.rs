@@ -218,10 +218,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ("tblastn", "import_search_strategy", Refused::Read(None)),
     ("tblastn", "negative_gilist", Refused::Read(None)),
     ("tblastn", "remote", Refused::Read(None)),
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918
-    // tblastn's `-ungapped` with composition-based statistics: NCBI's
-    // `Composition-adjusted searched are not supported with an ungapped search` comes first.
-    ("tblastn", "ungapped", Refused::Run("an ungapped search")),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
     ("tblastx", "entrez_query", Refused::Read(None)),

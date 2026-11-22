@@ -522,6 +522,27 @@ pub(crate) fn sw_endless_error(program: &str, why: &str) -> anyhow::Error {
     )
 }
 
+/// LOSAT's refusal of `-use_sw_tback` with `-ungapped` (which only `-comp_based_stats 0` lets
+/// reach a search), for `program` (NCBI's name, `blastx`): NCBI's traceback runs the
+/// Smith-Waterman redo for an ungapped search too, and its set-up reads the gapped Karlin-Altschul
+/// blocks of every context, which an ungapped search does not make, and crashes (SIGSEGV) at every
+/// query batch NCBI searches, with hits or without, with `-subject` and with `-db`
+/// (PD-LOSAT-NCBI-DEFECTS 1.76 for BLASTX, 1.79 for TBLASTN, rule 3). The caller refuses at the
+/// traceback of the first query batch that is searched, after the reports of the batches before.
+/// Exit status 1, its message.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3092-3095
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
+#[cold]
+#[inline(never)]
+pub(crate) fn sw_ungapped_error(program: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "-use_sw_tback with -ungapped, on which NCBI BLAST+ 2.17.0's {program} crashes at every query batch it searches, is not supported by LOSAT's {}",
+        program.to_ascii_uppercase()
+    )
+}
+
 #[cfg(test)]
 #[path = "smith_waterman_match_tests.rs"]
 mod tests;

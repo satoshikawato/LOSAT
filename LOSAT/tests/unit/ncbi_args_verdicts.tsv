@@ -1,0 +1,484 @@
+# The verdicts of NCBI BLAST+ 2.17.0's argument reader (CArgDescriptions, 598d8ae6) on the cases of
+# remaining-gaps-20261112/K/k4i/probe.py (line RG item K4i, 2026-11-13; rpsbproc: RpsbProc 0.5.1),
+# made by K/k4i1/tools/make_verdicts.py: case<TAB>program<TAB>code<TAB>n<TAB>n messages<TAB>the words.
+# code `ok`: the reader accepted the words (a later check may still fail); else the CArgException
+# code and its messages, oldest first (stderr, or the -logfile log). `in/...` and `TMP/...` are
+# the probe's files; the reader opens none of them.
+blastp.task.bad	blastp	eConstraint	1	Argument "task". Illegal value, expected Permissible values: 'blastp' 'blastp-fast' 'blastp-short' :  `bogus'	-query	in/q_p.fa	-subject	in/s_p.fa	-task	bogus
+blastp.task.case	blastp	eConstraint	1	Argument "task". Illegal value, expected Permissible values: 'blastp' 'blastp-fast' 'blastp-short' :  `BLASTP'	-query	in/q_p.fa	-subject	in/s_p.fa	-task	BLASTP
+blastp.task.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-task	blastp-short
+blastp.out.long	blastp	eConstraint	1	Argument "out". Illegal value, expected file name length < 256:  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'	-query	in/q_p.fa	-subject	in/s_p.fa	-out	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+blastp.out.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-out	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+blastp.evalue.e1e	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	1e
+blastp.evalue.abc	blastp	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "evalue". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	abc
+blastp.word_size.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "word_size". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	abc
+blastp.word_size.ovf	blastp	eConvert	1	Argument "word_size". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	2147483648
+blastp.word_size.lo	blastp	eConstraint	1	Argument "word_size". Illegal value, expected >=2:  `1'	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	1
+blastp.word_size.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	2
+blastp.gapopen.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "gapopen". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-gapopen	abc
+blastp.gapopen.ovf	blastp	eConvert	1	Argument "gapopen". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-gapopen	2147483648
+blastp.gapextend.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "gapextend". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-gapextend	abc
+blastp.gapextend.ovf	blastp	eConvert	1	Argument "gapextend". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-gapextend	2147483648
+blastp.threshold.e1e	blastp	eConstraint	1	Argument "threshold". Illegal value, expected >=0:  `1e'	-query	in/q_p.fa	-subject	in/s_p.fa	-threshold	1e
+blastp.threshold.abc	blastp	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "threshold". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-threshold	abc
+blastp.threshold.lo	blastp	eConstraint	1	Argument "threshold". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-threshold	-1
+blastp.threshold.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-threshold	0
+blastp.num_descriptions.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "num_descriptions". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_descriptions	abc
+blastp.num_descriptions.ovf	blastp	eConvert	1	Argument "num_descriptions". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_descriptions	2147483648
+blastp.num_descriptions.lo	blastp	eConstraint	1	Argument "num_descriptions". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_descriptions	-1
+blastp.num_descriptions.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-num_descriptions	0
+blastp.num_alignments.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "num_alignments". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_alignments	abc
+blastp.num_alignments.ovf	blastp	eConvert	1	Argument "num_alignments". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_alignments	2147483648
+blastp.num_alignments.lo	blastp	eConstraint	1	Argument "num_alignments". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_alignments	-1
+blastp.num_alignments.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-num_alignments	0
+blastp.line_length.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "line_length". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-line_length	abc
+blastp.line_length.ovf	blastp	eConvert	1	Argument "line_length". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-line_length	2147483648
+blastp.line_length.lo	blastp	eConstraint	1	Argument "line_length". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-line_length	0
+blastp.line_length.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-line_length	1
+blastp.sorthits.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "sorthits". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthits	abc
+blastp.sorthits.ovf	blastp	eConvert	1	Argument "sorthits". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthits	2147483648
+blastp.sorthits.lo	blastp	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthits	-1
+blastp.sorthits.hi	blastp	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthits	5
+blastp.sorthits.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthits	4
+blastp.sorthsps.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "sorthsps". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthsps	abc
+blastp.sorthsps.ovf	blastp	eConvert	1	Argument "sorthsps". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthsps	2147483648
+blastp.sorthsps.lo	blastp	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthsps	-1
+blastp.sorthsps.hi	blastp	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthsps	5
+blastp.sorthsps.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthsps	4
+blastp.soft_masking.bool	blastp	eConvert	2	String cannot be converted to bool (m_Pos = 0)	Argument "soft_masking". Argument cannot be converted:  `maybe'	-query	in/q_p.fa	-subject	in/s_p.fa	-soft_masking	maybe
+blastp.soft_masking.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-soft_masking	Y
+blastp.qcov_hsp_perc.e1e	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-qcov_hsp_perc	1e
+blastp.qcov_hsp_perc.abc	blastp	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "qcov_hsp_perc". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-qcov_hsp_perc	abc
+blastp.qcov_hsp_perc.lo	blastp	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `-0.5'	-query	in/q_p.fa	-subject	in/s_p.fa	-qcov_hsp_perc	-0.5
+blastp.qcov_hsp_perc.hi	blastp	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `100.5'	-query	in/q_p.fa	-subject	in/s_p.fa	-qcov_hsp_perc	100.5
+blastp.qcov_hsp_perc.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-qcov_hsp_perc	100
+blastp.max_hsps.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "max_hsps". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-max_hsps	abc
+blastp.max_hsps.ovf	blastp	eConvert	1	Argument "max_hsps". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-max_hsps	2147483648
+blastp.max_hsps.lo	blastp	eConstraint	1	Argument "max_hsps". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-max_hsps	0
+blastp.max_hsps.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-max_hsps	1
+blastp.culling_limit.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "culling_limit". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-culling_limit	abc
+blastp.culling_limit.ovf	blastp	eConvert	1	Argument "culling_limit". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-culling_limit	2147483648
+blastp.culling_limit.lo	blastp	eConstraint	1	Argument "culling_limit". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-culling_limit	-1
+blastp.culling_limit.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-culling_limit	0
+blastp.best_hit_overhang.e1e	blastp	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `1e'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_overhang	1e
+blastp.best_hit_overhang.abc	blastp	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "best_hit_overhang". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_overhang	abc
+blastp.best_hit_overhang.lo	blastp	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_overhang	0
+blastp.best_hit_overhang.hi	blastp	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_overhang	0.5
+blastp.best_hit_overhang.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_overhang	0.1
+blastp.best_hit_score_edge.e1e	blastp	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `1e'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_score_edge	1e
+blastp.best_hit_score_edge.abc	blastp	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "best_hit_score_edge". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_score_edge	abc
+blastp.best_hit_score_edge.lo	blastp	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_score_edge	0
+blastp.best_hit_score_edge.hi	blastp	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_score_edge	0.5
+blastp.best_hit_score_edge.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_score_edge	0.1
+blastp.max_target_seqs.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "max_target_seqs". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-max_target_seqs	abc
+blastp.max_target_seqs.ovf	blastp	eConvert	1	Argument "max_target_seqs". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-max_target_seqs	2147483648
+blastp.max_target_seqs.lo	blastp	eConstraint	1	Argument "max_target_seqs". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-max_target_seqs	0
+blastp.max_target_seqs.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-max_target_seqs	1
+blastp.dbsize.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "dbsize". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-dbsize	abc
+blastp.dbsize.ovf	blastp	eConvert	2	Cannot convert string '9223372036854775808' to Int8, overflow (m_Pos = 18)	Argument "dbsize". Argument cannot be converted:  `9223372036854775808'	-query	in/q_p.fa	-subject	in/s_p.fa	-dbsize	9223372036854775808
+blastp.searchsp.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "searchsp". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-searchsp	abc
+blastp.searchsp.ovf	blastp	eConvert	2	Cannot convert string '9223372036854775808' to Int8, overflow (m_Pos = 18)	Argument "searchsp". Argument cannot be converted:  `9223372036854775808'	-query	in/q_p.fa	-subject	in/s_p.fa	-searchsp	9223372036854775808
+blastp.searchsp.lo	blastp	eConstraint	1	Argument "searchsp". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-searchsp	-1
+blastp.searchsp.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-searchsp	0
+blastp.xdrop_ungap.e1e	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-xdrop_ungap	1e
+blastp.xdrop_ungap.abc	blastp	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "xdrop_ungap". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-xdrop_ungap	abc
+blastp.xdrop_gap.e1e	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-xdrop_gap	1e
+blastp.xdrop_gap.abc	blastp	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "xdrop_gap". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-xdrop_gap	abc
+blastp.xdrop_gap_final.e1e	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-xdrop_gap_final	1e
+blastp.xdrop_gap_final.abc	blastp	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "xdrop_gap_final". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-xdrop_gap_final	abc
+blastp.window_size.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "window_size". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-window_size	abc
+blastp.window_size.ovf	blastp	eConvert	1	Argument "window_size". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-window_size	2147483648
+blastp.window_size.lo	blastp	eConstraint	1	Argument "window_size". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-window_size	-1
+blastp.window_size.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-window_size	0
+blastp.num_threads.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "num_threads". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_threads	abc
+blastp.num_threads.ovf	blastp	eConvert	1	Argument "num_threads". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_threads	2147483648
+blastp.num_threads.lo	blastp	eConstraint	1	Argument "num_threads". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_threads	0
+blastp.num_threads.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-num_threads	1
+blastp.mt_mode.abc	blastp	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "mt_mode". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_threads	1	-mt_mode	abc
+blastp.mt_mode.ovf	blastp	eConvert	1	Argument "mt_mode". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_threads	1	-mt_mode	2147483648
+blastp.mt_mode.lo	blastp	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<2):  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_threads	1	-mt_mode	-1
+blastp.mt_mode.hi	blastp	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<2):  `3'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_threads	1	-mt_mode	3
+blastp.mt_mode.in	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-num_threads	1	-mt_mode	2
+blastn.strand.bad	blastn	eConstraint	1	Argument "strand". Illegal value, expected `both', `minus', `plus':  `bogus'	-query	in/q_n.fa	-subject	in/s_n.fa	-strand	bogus
+blastn.strand.case	blastn	eConstraint	1	Argument "strand". Illegal value, expected `both', `minus', `plus':  `PLUS'	-query	in/q_n.fa	-subject	in/s_n.fa	-strand	PLUS
+blastn.strand.in	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-strand	plus
+blastn.task.bad	blastn	eConstraint	1	Argument "task". Illegal value, expected Permissible values: 'blastn' 'blastn-short' 'dc-megablast' 'megablast' 'rmblastn' :  `bogus'	-query	in/q_n.fa	-subject	in/s_n.fa	-task	bogus
+blastn.task.in	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-task	blastn
+blastn.out.long	blastn	eConstraint	1	Argument "out". Illegal value, expected file name length < 256:  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'	-query	in/q_n.fa	-subject	in/s_n.fa	-out	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+blastn.word_size.lo	blastn	eConstraint	1	Argument "word_size". Illegal value, expected >=4:  `3'	-query	in/q_n.fa	-subject	in/s_n.fa	-word_size	3
+blastn.word_size.in	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-word_size	4
+blastn.penalty.abc	blastn	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "penalty". Argument cannot be converted:  `abc'	-query	in/q_n.fa	-subject	in/s_n.fa	-penalty	abc
+blastn.penalty.ovf	blastn	eConvert	1	Argument "penalty". Integer value is out of range:  `2147483648'	-query	in/q_n.fa	-subject	in/s_n.fa	-penalty	2147483648
+blastn.penalty.hi	blastn	eConstraint	1	Argument "penalty". Illegal value, expected <=0:  `1'	-query	in/q_n.fa	-subject	in/s_n.fa	-penalty	1
+blastn.penalty.in	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-penalty	0
+blastn.reward.abc	blastn	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "reward". Argument cannot be converted:  `abc'	-query	in/q_n.fa	-subject	in/s_n.fa	-reward	abc
+blastn.reward.ovf	blastn	eConvert	1	Argument "reward". Integer value is out of range:  `2147483648'	-query	in/q_n.fa	-subject	in/s_n.fa	-reward	2147483648
+blastn.reward.lo	blastn	eConstraint	1	Argument "reward". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-reward	-1
+blastn.reward.in	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-reward	0
+blastn.use_index.bool	blastn	eConvert	2	String cannot be converted to bool (m_Pos = 0)	Argument "use_index". Argument cannot be converted:  `maybe'	-query	in/q_n.fa	-subject	in/s_n.fa	-use_index	maybe
+blastn.use_index.in	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-use_index	Y
+blastn.num_descriptions.lo	blastn	eConstraint	1	Argument "num_descriptions". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-num_descriptions	-1
+blastn.num_alignments.lo	blastn	eConstraint	1	Argument "num_alignments". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-num_alignments	-1
+blastn.line_length.lo	blastn	eConstraint	1	Argument "line_length". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-line_length	0
+blastn.sorthits.lo	blastn	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-sorthits	-1
+blastn.sorthits.hi	blastn	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_n.fa	-subject	in/s_n.fa	-sorthits	5
+blastn.sorthsps.lo	blastn	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-sorthsps	-1
+blastn.sorthsps.hi	blastn	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_n.fa	-subject	in/s_n.fa	-sorthsps	5
+blastn.window_masker_taxid.abc	blastn	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "window_masker_taxid". Argument cannot be converted:  `abc'	-query	in/q_n.fa	-subject	in/s_n.fa	-window_masker_taxid	abc
+blastn.window_masker_taxid.ovf	blastn	eConvert	1	Argument "window_masker_taxid". Integer value is out of range:  `2147483648'	-query	in/q_n.fa	-subject	in/s_n.fa	-window_masker_taxid	2147483648
+blastn.perc_identity.e1e	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-perc_identity	1e
+blastn.perc_identity.abc	blastn	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "perc_identity". Argument cannot be converted:  `abc'	-query	in/q_n.fa	-subject	in/s_n.fa	-perc_identity	abc
+blastn.perc_identity.lo	blastn	eConstraint	1	Argument "perc_identity". Illegal value, expected 0..100:  `-0.5'	-query	in/q_n.fa	-subject	in/s_n.fa	-perc_identity	-0.5
+blastn.perc_identity.hi	blastn	eConstraint	1	Argument "perc_identity". Illegal value, expected 0..100:  `100.5'	-query	in/q_n.fa	-subject	in/s_n.fa	-perc_identity	100.5
+blastn.perc_identity.in	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-perc_identity	100
+blastn.qcov_hsp_perc.lo	blastn	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `-0.5'	-query	in/q_n.fa	-subject	in/s_n.fa	-qcov_hsp_perc	-0.5
+blastn.qcov_hsp_perc.hi	blastn	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `100.5'	-query	in/q_n.fa	-subject	in/s_n.fa	-qcov_hsp_perc	100.5
+blastn.max_hsps.lo	blastn	eConstraint	1	Argument "max_hsps". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-max_hsps	0
+blastn.culling_limit.lo	blastn	eConstraint	1	Argument "culling_limit". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-culling_limit	-1
+blastn.best_hit_overhang.lo	blastn	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-best_hit_overhang	0
+blastn.best_hit_overhang.hi	blastn	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_n.fa	-subject	in/s_n.fa	-best_hit_overhang	0.5
+blastn.best_hit_score_edge.lo	blastn	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-best_hit_score_edge	0
+blastn.best_hit_score_edge.hi	blastn	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_n.fa	-subject	in/s_n.fa	-best_hit_score_edge	0.5
+blastn.max_target_seqs.lo	blastn	eConstraint	1	Argument "max_target_seqs". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-max_target_seqs	0
+blastn.template_type.bad	blastn	eConstraint	1	Argument "template_type". Illegal value, expected `coding', `coding_and_optimal', `optimal':  `bogus'	-query	in/q_n.fa	-subject	in/s_n.fa	-task	dc-megablast	-template_length	18	-template_type	bogus
+blastn.template_type.case	blastn	eConstraint	1	Argument "template_type". Illegal value, expected `coding', `coding_and_optimal', `optimal':  `OPTIMAL'	-query	in/q_n.fa	-subject	in/s_n.fa	-task	dc-megablast	-template_length	18	-template_type	OPTIMAL
+blastn.template_type.in	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-task	dc-megablast	-template_length	18	-template_type	optimal
+blastn.template_length.abc	blastn	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "template_length". Argument cannot be converted:  `abc'	-query	in/q_n.fa	-subject	in/s_n.fa	-task	dc-megablast	-template_type	coding	-template_length	abc
+blastn.template_length.ovf	blastn	eConvert	1	Argument "template_length". Integer value is out of range:  `2147483648'	-query	in/q_n.fa	-subject	in/s_n.fa	-task	dc-megablast	-template_type	coding	-template_length	2147483648
+blastn.template_length.bad	blastn	eConstraint	1	Argument "template_length". Illegal value, expected Permissible values: '16' '18' '21' :  `17'	-query	in/q_n.fa	-subject	in/s_n.fa	-task	dc-megablast	-template_type	coding	-template_length	17
+blastn.template_length.in	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-task	dc-megablast	-template_type	coding	-template_length	18
+blastn.searchsp.lo	blastn	eConstraint	1	Argument "searchsp". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-searchsp	-1
+blastn.min_raw_gapped_score.abc	blastn	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "min_raw_gapped_score". Argument cannot be converted:  `abc'	-query	in/q_n.fa	-subject	in/s_n.fa	-min_raw_gapped_score	abc
+blastn.min_raw_gapped_score.ovf	blastn	eConvert	1	Argument "min_raw_gapped_score". Integer value is out of range:  `2147483648'	-query	in/q_n.fa	-subject	in/s_n.fa	-min_raw_gapped_score	2147483648
+blastn.window_size.lo	blastn	eConstraint	1	Argument "window_size". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-window_size	-1
+blastn.off_diagonal_range.abc	blastn	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "off_diagonal_range". Argument cannot be converted:  `abc'	-query	in/q_n.fa	-subject	in/s_n.fa	-off_diagonal_range	abc
+blastn.off_diagonal_range.ovf	blastn	eConvert	1	Argument "off_diagonal_range". Integer value is out of range:  `2147483648'	-query	in/q_n.fa	-subject	in/s_n.fa	-off_diagonal_range	2147483648
+blastn.off_diagonal_range.lo	blastn	eConstraint	1	Argument "off_diagonal_range". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-off_diagonal_range	-1
+blastn.off_diagonal_range.in	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-off_diagonal_range	0
+blastn.num_threads.lo	blastn	eConstraint	1	Argument "num_threads". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-num_threads	0
+blastn.mt_mode.lo	blastn	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<2):  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-num_threads	1	-mt_mode	-1
+blastn.mt_mode.hi	blastn	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<2):  `3'	-query	in/q_n.fa	-subject	in/s_n.fa	-num_threads	1	-mt_mode	3
+blastx.strand.bad	blastx	eConstraint	1	Argument "strand". Illegal value, expected `both', `minus', `plus':  `bogus'	-query	in/q_n.fa	-subject	in/s_p.fa	-strand	bogus
+blastx.query_gencode.abc	blastx	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "query_gencode". Argument cannot be converted:  `abc'	-query	in/q_n.fa	-subject	in/s_p.fa	-query_gencode	abc
+blastx.query_gencode.ovf	blastx	eConvert	1	Argument "query_gencode". Integer value is out of range:  `2147483648'	-query	in/q_n.fa	-subject	in/s_p.fa	-query_gencode	2147483648
+blastx.query_gencode.gap	blastx	eConstraint	1	Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	-query	in/q_n.fa	-subject	in/s_p.fa	-query_gencode	7
+blastx.query_gencode.hi	blastx	eConstraint	1	Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	-query	in/q_n.fa	-subject	in/s_p.fa	-query_gencode	34
+blastx.query_gencode.in	blastx	ok	0	-query	in/q_n.fa	-subject	in/s_p.fa	-query_gencode	33
+blastx.task.bad	blastx	eConstraint	1	Argument "task". Illegal value, expected Permissible values: 'blastx' 'blastx-fast' :  `bogus'	-query	in/q_n.fa	-subject	in/s_p.fa	-task	bogus
+blastx.task.in	blastx	ok	0	-query	in/q_n.fa	-subject	in/s_p.fa	-task	blastx-fast
+blastx.out.long	blastx	eConstraint	1	Argument "out". Illegal value, expected file name length < 256:  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'	-query	in/q_n.fa	-subject	in/s_p.fa	-out	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+blastx.word_size.lo	blastx	eConstraint	1	Argument "word_size". Illegal value, expected >=2:  `1'	-query	in/q_n.fa	-subject	in/s_p.fa	-word_size	1
+blastx.max_intron_length.abc	blastx	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "max_intron_length". Argument cannot be converted:  `abc'	-query	in/q_n.fa	-subject	in/s_p.fa	-max_intron_length	abc
+blastx.max_intron_length.ovf	blastx	eConvert	1	Argument "max_intron_length". Integer value is out of range:  `2147483648'	-query	in/q_n.fa	-subject	in/s_p.fa	-max_intron_length	2147483648
+blastx.max_intron_length.lo	blastx	eConstraint	1	Argument "max_intron_length". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_p.fa	-max_intron_length	-1
+blastx.max_intron_length.in	blastx	ok	0	-query	in/q_n.fa	-subject	in/s_p.fa	-max_intron_length	0
+blastx.threshold.lo	blastx	eConstraint	1	Argument "threshold". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_p.fa	-threshold	-1
+blastx.num_descriptions.lo	blastx	eConstraint	1	Argument "num_descriptions". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_p.fa	-num_descriptions	-1
+blastx.num_alignments.lo	blastx	eConstraint	1	Argument "num_alignments". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_p.fa	-num_alignments	-1
+blastx.line_length.lo	blastx	eConstraint	1	Argument "line_length". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_p.fa	-line_length	0
+blastx.sorthits.lo	blastx	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_n.fa	-subject	in/s_p.fa	-sorthits	-1
+blastx.sorthits.hi	blastx	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_n.fa	-subject	in/s_p.fa	-sorthits	5
+blastx.sorthsps.lo	blastx	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_n.fa	-subject	in/s_p.fa	-sorthsps	-1
+blastx.sorthsps.hi	blastx	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_n.fa	-subject	in/s_p.fa	-sorthsps	5
+blastx.qcov_hsp_perc.lo	blastx	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `-0.5'	-query	in/q_n.fa	-subject	in/s_p.fa	-qcov_hsp_perc	-0.5
+blastx.qcov_hsp_perc.hi	blastx	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `100.5'	-query	in/q_n.fa	-subject	in/s_p.fa	-qcov_hsp_perc	100.5
+blastx.max_hsps.lo	blastx	eConstraint	1	Argument "max_hsps". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_p.fa	-max_hsps	0
+blastx.culling_limit.lo	blastx	eConstraint	1	Argument "culling_limit". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_p.fa	-culling_limit	-1
+blastx.best_hit_overhang.lo	blastx	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_n.fa	-subject	in/s_p.fa	-best_hit_overhang	0
+blastx.best_hit_overhang.hi	blastx	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_n.fa	-subject	in/s_p.fa	-best_hit_overhang	0.5
+blastx.best_hit_score_edge.lo	blastx	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_n.fa	-subject	in/s_p.fa	-best_hit_score_edge	0
+blastx.best_hit_score_edge.hi	blastx	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_n.fa	-subject	in/s_p.fa	-best_hit_score_edge	0.5
+blastx.max_target_seqs.lo	blastx	eConstraint	1	Argument "max_target_seqs". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_p.fa	-max_target_seqs	0
+blastx.searchsp.lo	blastx	eConstraint	1	Argument "searchsp". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_p.fa	-searchsp	-1
+blastx.sum_stats.bool	blastx	eConvert	2	String cannot be converted to bool (m_Pos = 0)	Argument "sum_stats". Argument cannot be converted:  `maybe'	-query	in/q_n.fa	-subject	in/s_p.fa	-sum_stats	maybe
+blastx.sum_stats.in	blastx	ok	0	-query	in/q_n.fa	-subject	in/s_p.fa	-sum_stats	Y
+blastx.window_size.lo	blastx	eConstraint	1	Argument "window_size". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_p.fa	-window_size	-1
+blastx.num_threads.lo	blastx	eConstraint	1	Argument "num_threads". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_p.fa	-num_threads	0
+blastx.mt_mode.lo	blastx	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<2):  `-1'	-query	in/q_n.fa	-subject	in/s_p.fa	-num_threads	1	-mt_mode	-1
+blastx.mt_mode.hi	blastx	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<2):  `3'	-query	in/q_n.fa	-subject	in/s_p.fa	-num_threads	1	-mt_mode	3
+tblastn.task.bad	tblastn	eConstraint	1	Argument "task". Illegal value, expected Permissible values: 'tblastn' 'tblastn-fast' :  `bogus'	-query	in/q_p.fa	-subject	in/s_n.fa	-task	bogus
+tblastn.task.in	tblastn	ok	0	-query	in/q_p.fa	-subject	in/s_n.fa	-task	tblastn-fast
+tblastn.out.long	tblastn	eConstraint	1	Argument "out". Illegal value, expected file name length < 256:  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'	-query	in/q_p.fa	-subject	in/s_n.fa	-out	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+tblastn.word_size.lo	tblastn	eConstraint	1	Argument "word_size". Illegal value, expected >=2:  `1'	-query	in/q_p.fa	-subject	in/s_n.fa	-word_size	1
+tblastn.db_gencode.abc	tblastn	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "db_gencode". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_n.fa	-db_gencode	abc
+tblastn.db_gencode.ovf	tblastn	eConvert	1	Argument "db_gencode". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_n.fa	-db_gencode	2147483648
+tblastn.db_gencode.gap	tblastn	eConstraint	1	Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	-query	in/q_p.fa	-subject	in/s_n.fa	-db_gencode	7
+tblastn.db_gencode.hi	tblastn	eConstraint	1	Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	-query	in/q_p.fa	-subject	in/s_n.fa	-db_gencode	34
+tblastn.db_gencode.in	tblastn	ok	0	-query	in/q_p.fa	-subject	in/s_n.fa	-db_gencode	33
+tblastn.max_intron_length.lo	tblastn	eConstraint	1	Argument "max_intron_length". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_n.fa	-max_intron_length	-1
+tblastn.threshold.lo	tblastn	eConstraint	1	Argument "threshold". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_n.fa	-threshold	-1
+tblastn.num_descriptions.lo	tblastn	eConstraint	1	Argument "num_descriptions". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_n.fa	-num_descriptions	-1
+tblastn.num_alignments.lo	tblastn	eConstraint	1	Argument "num_alignments". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_n.fa	-num_alignments	-1
+tblastn.line_length.lo	tblastn	eConstraint	1	Argument "line_length". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_n.fa	-line_length	0
+tblastn.sorthits.lo	tblastn	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_p.fa	-subject	in/s_n.fa	-sorthits	-1
+tblastn.sorthits.hi	tblastn	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_p.fa	-subject	in/s_n.fa	-sorthits	5
+tblastn.sorthsps.lo	tblastn	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_p.fa	-subject	in/s_n.fa	-sorthsps	-1
+tblastn.sorthsps.hi	tblastn	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_p.fa	-subject	in/s_n.fa	-sorthsps	5
+tblastn.qcov_hsp_perc.lo	tblastn	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `-0.5'	-query	in/q_p.fa	-subject	in/s_n.fa	-qcov_hsp_perc	-0.5
+tblastn.qcov_hsp_perc.hi	tblastn	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `100.5'	-query	in/q_p.fa	-subject	in/s_n.fa	-qcov_hsp_perc	100.5
+tblastn.max_hsps.lo	tblastn	eConstraint	1	Argument "max_hsps". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_n.fa	-max_hsps	0
+tblastn.culling_limit.lo	tblastn	eConstraint	1	Argument "culling_limit". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_n.fa	-culling_limit	-1
+tblastn.best_hit_overhang.lo	tblastn	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_p.fa	-subject	in/s_n.fa	-best_hit_overhang	0
+tblastn.best_hit_overhang.hi	tblastn	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_p.fa	-subject	in/s_n.fa	-best_hit_overhang	0.5
+tblastn.best_hit_score_edge.lo	tblastn	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_p.fa	-subject	in/s_n.fa	-best_hit_score_edge	0
+tblastn.best_hit_score_edge.hi	tblastn	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_p.fa	-subject	in/s_n.fa	-best_hit_score_edge	0.5
+tblastn.max_target_seqs.lo	tblastn	eConstraint	1	Argument "max_target_seqs". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_n.fa	-max_target_seqs	0
+tblastn.searchsp.lo	tblastn	eConstraint	1	Argument "searchsp". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_n.fa	-searchsp	-1
+tblastn.window_size.lo	tblastn	eConstraint	1	Argument "window_size". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_n.fa	-window_size	-1
+tblastn.num_threads.lo	tblastn	eConstraint	1	Argument "num_threads". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_n.fa	-num_threads	0
+tblastn.mt_mode.lo	tblastn	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<2):  `-1'	-query	in/q_p.fa	-subject	in/s_n.fa	-num_threads	1	-mt_mode	-1
+tblastn.mt_mode.hi	tblastn	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<2):  `3'	-query	in/q_p.fa	-subject	in/s_n.fa	-num_threads	1	-mt_mode	3
+tblastx.strand.bad	tblastx	eConstraint	1	Argument "strand". Illegal value, expected `both', `minus', `plus':  `bogus'	-query	in/q_n.fa	-subject	in/s_n.fa	-strand	bogus
+tblastx.query_gencode.gap	tblastx	eConstraint	1	Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	-query	in/q_n.fa	-subject	in/s_n.fa	-query_gencode	7
+tblastx.query_gencode.hi	tblastx	eConstraint	1	Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	-query	in/q_n.fa	-subject	in/s_n.fa	-query_gencode	34
+tblastx.out.long	tblastx	eConstraint	1	Argument "out". Illegal value, expected file name length < 256:  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'	-query	in/q_n.fa	-subject	in/s_n.fa	-out	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+tblastx.word_size.lo	tblastx	eConstraint	1	Argument "word_size". Illegal value, expected >=2:  `1'	-query	in/q_n.fa	-subject	in/s_n.fa	-word_size	1
+tblastx.max_intron_length.lo	tblastx	eConstraint	1	Argument "max_intron_length". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-max_intron_length	-1
+tblastx.threshold.lo	tblastx	eConstraint	1	Argument "threshold". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-threshold	-1
+tblastx.db_gencode.gap	tblastx	eConstraint	1	Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	-query	in/q_n.fa	-subject	in/s_n.fa	-db_gencode	7
+tblastx.db_gencode.hi	tblastx	eConstraint	1	Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	-query	in/q_n.fa	-subject	in/s_n.fa	-db_gencode	34
+tblastx.num_descriptions.lo	tblastx	eConstraint	1	Argument "num_descriptions". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-num_descriptions	-1
+tblastx.num_alignments.lo	tblastx	eConstraint	1	Argument "num_alignments". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-num_alignments	-1
+tblastx.line_length.lo	tblastx	eConstraint	1	Argument "line_length". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-line_length	0
+tblastx.sorthits.lo	tblastx	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-sorthits	-1
+tblastx.sorthits.hi	tblastx	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_n.fa	-subject	in/s_n.fa	-sorthits	5
+tblastx.sorthsps.lo	tblastx	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-sorthsps	-1
+tblastx.sorthsps.hi	tblastx	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_n.fa	-subject	in/s_n.fa	-sorthsps	5
+tblastx.qcov_hsp_perc.lo	tblastx	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `-0.5'	-query	in/q_n.fa	-subject	in/s_n.fa	-qcov_hsp_perc	-0.5
+tblastx.qcov_hsp_perc.hi	tblastx	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `100.5'	-query	in/q_n.fa	-subject	in/s_n.fa	-qcov_hsp_perc	100.5
+tblastx.max_hsps.lo	tblastx	eConstraint	1	Argument "max_hsps". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-max_hsps	0
+tblastx.culling_limit.lo	tblastx	eConstraint	1	Argument "culling_limit". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-culling_limit	-1
+tblastx.best_hit_overhang.lo	tblastx	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-best_hit_overhang	0
+tblastx.best_hit_overhang.hi	tblastx	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_n.fa	-subject	in/s_n.fa	-best_hit_overhang	0.5
+tblastx.best_hit_score_edge.lo	tblastx	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-best_hit_score_edge	0
+tblastx.best_hit_score_edge.hi	tblastx	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_n.fa	-subject	in/s_n.fa	-best_hit_score_edge	0.5
+tblastx.max_target_seqs.lo	tblastx	eConstraint	1	Argument "max_target_seqs". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-max_target_seqs	0
+tblastx.searchsp.lo	tblastx	eConstraint	1	Argument "searchsp". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-searchsp	-1
+tblastx.window_size.lo	tblastx	eConstraint	1	Argument "window_size". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-subject	in/s_n.fa	-window_size	-1
+tblastx.num_threads.lo	tblastx	eConstraint	1	Argument "num_threads". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-subject	in/s_n.fa	-num_threads	0
+psiblast.out.long	psiblast	eConstraint	1	Argument "out". Illegal value, expected file name length < 256:  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'	-query	in/q_p.fa	-subject	in/s_p.fa	-out	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+psiblast.word_size.lo	psiblast	eConstraint	1	Argument "word_size". Illegal value, expected >=2:  `1'	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	1
+psiblast.threshold.lo	psiblast	eConstraint	1	Argument "threshold". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-threshold	-1
+psiblast.num_descriptions.lo	psiblast	eConstraint	1	Argument "num_descriptions". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_descriptions	-1
+psiblast.num_alignments.lo	psiblast	eConstraint	1	Argument "num_alignments". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_alignments	-1
+psiblast.line_length.lo	psiblast	eConstraint	1	Argument "line_length". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-line_length	0
+psiblast.sorthits.lo	psiblast	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthits	-1
+psiblast.sorthits.hi	psiblast	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthits	5
+psiblast.sorthsps.lo	psiblast	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthsps	-1
+psiblast.sorthsps.hi	psiblast	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_p.fa	-subject	in/s_p.fa	-sorthsps	5
+psiblast.qcov_hsp_perc.lo	psiblast	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `-0.5'	-query	in/q_p.fa	-subject	in/s_p.fa	-qcov_hsp_perc	-0.5
+psiblast.qcov_hsp_perc.hi	psiblast	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `100.5'	-query	in/q_p.fa	-subject	in/s_p.fa	-qcov_hsp_perc	100.5
+psiblast.max_hsps.lo	psiblast	eConstraint	1	Argument "max_hsps". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-max_hsps	0
+psiblast.culling_limit.lo	psiblast	eConstraint	1	Argument "culling_limit". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-culling_limit	-1
+psiblast.best_hit_overhang.lo	psiblast	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_overhang	0
+psiblast.best_hit_overhang.hi	psiblast	eConstraint	1	Argument "best_hit_overhang". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_overhang	0.5
+psiblast.best_hit_score_edge.lo	psiblast	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_score_edge	0
+psiblast.best_hit_score_edge.hi	psiblast	eConstraint	1	Argument "best_hit_score_edge". Illegal value, expected (>0 and <0.5):  `0.5'	-query	in/q_p.fa	-subject	in/s_p.fa	-best_hit_score_edge	0.5
+psiblast.max_target_seqs.lo	psiblast	eConstraint	1	Argument "max_target_seqs". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-max_target_seqs	0
+psiblast.searchsp.lo	psiblast	eConstraint	1	Argument "searchsp". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-searchsp	-1
+psiblast.window_size.lo	psiblast	eConstraint	1	Argument "window_size". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-window_size	-1
+psiblast.gap_trigger.e1e	psiblast	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-gap_trigger	1e
+psiblast.gap_trigger.abc	psiblast	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "gap_trigger". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-gap_trigger	abc
+psiblast.num_threads.lo	psiblast	eConstraint	1	Argument "num_threads". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_threads	0
+psiblast.num_iterations.abc	psiblast	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "num_iterations". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_iterations	abc
+psiblast.num_iterations.ovf	psiblast	eConvert	1	Argument "num_iterations". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_iterations	2147483648
+psiblast.num_iterations.lo	psiblast	eConstraint	1	Argument "num_iterations". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-subject	in/s_p.fa	-num_iterations	-1
+psiblast.num_iterations.in	psiblast	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-num_iterations	0
+psiblast.msa_master_idx.abc	psiblast	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "msa_master_idx". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-msa_master_idx	abc
+psiblast.msa_master_idx.ovf	psiblast	eConvert	1	Argument "msa_master_idx". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-msa_master_idx	2147483648
+psiblast.msa_master_idx.lo	psiblast	eConstraint	1	Argument "msa_master_idx". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-subject	in/s_p.fa	-msa_master_idx	0
+psiblast.msa_master_idx.in	psiblast	eConstraint	1	Argument "query". Incompatible with argument:  `msa_master_idx'	-query	in/q_p.fa	-subject	in/s_p.fa	-msa_master_idx	1
+psiblast.pseudocount.abc	psiblast	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "pseudocount". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-pseudocount	abc
+psiblast.pseudocount.ovf	psiblast	eConvert	1	Argument "pseudocount". Integer value is out of range:  `2147483648'	-query	in/q_p.fa	-subject	in/s_p.fa	-pseudocount	2147483648
+psiblast.inclusion_ethresh.e1e	psiblast	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-inclusion_ethresh	1e
+psiblast.inclusion_ethresh.abc	psiblast	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "inclusion_ethresh". Argument cannot be converted:  `abc'	-query	in/q_p.fa	-subject	in/s_p.fa	-inclusion_ethresh	abc
+rpsblast.out.long	rpsblast	eConstraint	1	Argument "out". Illegal value, expected file name length < 256:  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'	-query	in/q_p.fa	-db	in/rps/rps_mini	-out	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+rpsblast.num_descriptions.lo	rpsblast	eConstraint	1	Argument "num_descriptions". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-db	in/rps/rps_mini	-num_descriptions	-1
+rpsblast.num_alignments.lo	rpsblast	eConstraint	1	Argument "num_alignments". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-db	in/rps/rps_mini	-num_alignments	-1
+rpsblast.line_length.lo	rpsblast	eConstraint	1	Argument "line_length". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-db	in/rps/rps_mini	-line_length	0
+rpsblast.sorthits.lo	rpsblast	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_p.fa	-db	in/rps/rps_mini	-sorthits	-1
+rpsblast.sorthits.hi	rpsblast	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_p.fa	-db	in/rps/rps_mini	-sorthits	5
+rpsblast.sorthsps.lo	rpsblast	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_p.fa	-db	in/rps/rps_mini	-sorthsps	-1
+rpsblast.sorthsps.hi	rpsblast	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_p.fa	-db	in/rps/rps_mini	-sorthsps	5
+rpsblast.qcov_hsp_perc.lo	rpsblast	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `-0.5'	-query	in/q_p.fa	-db	in/rps/rps_mini	-qcov_hsp_perc	-0.5
+rpsblast.qcov_hsp_perc.hi	rpsblast	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `100.5'	-query	in/q_p.fa	-db	in/rps/rps_mini	-qcov_hsp_perc	100.5
+rpsblast.max_hsps.lo	rpsblast	eConstraint	1	Argument "max_hsps". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-db	in/rps/rps_mini	-max_hsps	0
+rpsblast.max_target_seqs.lo	rpsblast	eConstraint	1	Argument "max_target_seqs". Illegal value, expected >=1:  `0'	-query	in/q_p.fa	-db	in/rps/rps_mini	-max_target_seqs	0
+rpsblast.searchsp.lo	rpsblast	eConstraint	1	Argument "searchsp". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-db	in/rps/rps_mini	-searchsp	-1
+rpsblast.window_size.lo	rpsblast	eConstraint	1	Argument "window_size". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-db	in/rps/rps_mini	-window_size	-1
+rpsblast.num_threads.lo	rpsblast	eConstraint	1	Argument "num_threads". Illegal value, expected >=0:  `-1'	-query	in/q_p.fa	-db	in/rps/rps_mini	-num_threads	-1
+rpsblast.num_threads.in	rpsblast	ok	0	-query	in/q_p.fa	-db	in/rps/rps_mini	-num_threads	0
+rpsblast.mt_mode.lo	rpsblast	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<1):  `-1'	-query	in/q_p.fa	-db	in/rps/rps_mini	-num_threads	1	-mt_mode	-1
+rpsblast.mt_mode.hi	rpsblast	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<1):  `2'	-query	in/q_p.fa	-db	in/rps/rps_mini	-num_threads	1	-mt_mode	2
+rpsblast.mt_mode.in	rpsblast	ok	0	-query	in/q_p.fa	-db	in/rps/rps_mini	-num_threads	1	-mt_mode	1
+rpstblastn.query_gencode.gap	rpstblastn	eConstraint	1	Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	-query	in/q_n.fa	-db	in/rps/rps_mini	-query_gencode	7
+rpstblastn.query_gencode.hi	rpstblastn	eConstraint	1	Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	-query	in/q_n.fa	-db	in/rps/rps_mini	-query_gencode	34
+rpstblastn.strand.bad	rpstblastn	eConstraint	1	Argument "strand". Illegal value, expected `both', `minus', `plus':  `bogus'	-query	in/q_n.fa	-db	in/rps/rps_mini	-strand	bogus
+rpstblastn.out.long	rpstblastn	eConstraint	1	Argument "out". Illegal value, expected file name length < 256:  `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'	-query	in/q_n.fa	-db	in/rps/rps_mini	-out	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+rpstblastn.num_descriptions.lo	rpstblastn	eConstraint	1	Argument "num_descriptions". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-db	in/rps/rps_mini	-num_descriptions	-1
+rpstblastn.num_alignments.lo	rpstblastn	eConstraint	1	Argument "num_alignments". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-db	in/rps/rps_mini	-num_alignments	-1
+rpstblastn.line_length.lo	rpstblastn	eConstraint	1	Argument "line_length". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-db	in/rps/rps_mini	-line_length	0
+rpstblastn.sorthits.lo	rpstblastn	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_n.fa	-db	in/rps/rps_mini	-sorthits	-1
+rpstblastn.sorthits.hi	rpstblastn	eConstraint	1	Argument "sorthits". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_n.fa	-db	in/rps/rps_mini	-sorthits	5
+rpstblastn.sorthsps.lo	rpstblastn	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `-1'	-query	in/q_n.fa	-db	in/rps/rps_mini	-sorthsps	-1
+rpstblastn.sorthsps.hi	rpstblastn	eConstraint	1	Argument "sorthsps". Illegal value, expected (>=0 and =<4):  `5'	-query	in/q_n.fa	-db	in/rps/rps_mini	-sorthsps	5
+rpstblastn.qcov_hsp_perc.lo	rpstblastn	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `-0.5'	-query	in/q_n.fa	-db	in/rps/rps_mini	-qcov_hsp_perc	-0.5
+rpstblastn.qcov_hsp_perc.hi	rpstblastn	eConstraint	1	Argument "qcov_hsp_perc". Illegal value, expected 0..100:  `100.5'	-query	in/q_n.fa	-db	in/rps/rps_mini	-qcov_hsp_perc	100.5
+rpstblastn.max_hsps.lo	rpstblastn	eConstraint	1	Argument "max_hsps". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-db	in/rps/rps_mini	-max_hsps	0
+rpstblastn.max_target_seqs.lo	rpstblastn	eConstraint	1	Argument "max_target_seqs". Illegal value, expected >=1:  `0'	-query	in/q_n.fa	-db	in/rps/rps_mini	-max_target_seqs	0
+rpstblastn.searchsp.lo	rpstblastn	eConstraint	1	Argument "searchsp". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-db	in/rps/rps_mini	-searchsp	-1
+rpstblastn.window_size.lo	rpstblastn	eConstraint	1	Argument "window_size". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-db	in/rps/rps_mini	-window_size	-1
+rpstblastn.num_threads.lo	rpstblastn	eConstraint	1	Argument "num_threads". Illegal value, expected >=0:  `-1'	-query	in/q_n.fa	-db	in/rps/rps_mini	-num_threads	-1
+rpstblastn.mt_mode.lo	rpstblastn	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<1):  `-1'	-query	in/q_n.fa	-db	in/rps/rps_mini	-num_threads	1	-mt_mode	-1
+rpstblastn.mt_mode.hi	rpstblastn	eConstraint	1	Argument "mt_mode". Illegal value, expected (>=0 and =<1):  `2'	-query	in/q_n.fa	-db	in/rps/rps_mini	-num_threads	1	-mt_mode	2
+makeblastdb.dbtype.bad	makeblastdb	eConstraint	1	Argument "dbtype". Illegal value, expected `nucl', `prot':  `bogus'	-in	in/q_n.fa	-out	TMP/db	-dbtype	bogus
+makeblastdb.dbtype.case	makeblastdb	eConstraint	1	Argument "dbtype". Illegal value, expected `nucl', `prot':  `PROT'	-in	in/q_n.fa	-out	TMP/db	-dbtype	PROT
+makeblastdb.dbtype.in	makeblastdb	ok	0	-in	in/q_n.fa	-out	TMP/db	-dbtype	nucl
+makeblastdb.input_type.bad	makeblastdb	eConstraint	1	Argument "input_type". Illegal value, expected `asn1_bin', `asn1_txt', `blastdb', `fasta':  `bogus'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-input_type	bogus
+makeblastdb.input_type.case	makeblastdb	eConstraint	1	Argument "input_type". Illegal value, expected `asn1_bin', `asn1_txt', `blastdb', `fasta':  `FASTA'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-input_type	FASTA
+makeblastdb.input_type.in	makeblastdb	ok	0	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-input_type	fasta
+makeblastdb.blastdb_version.abc	makeblastdb	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "blastdb_version". Argument cannot be converted:  `abc'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-blastdb_version	abc
+makeblastdb.blastdb_version.ovf	makeblastdb	eConvert	1	Argument "blastdb_version". Integer value is out of range:  `2147483648'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-blastdb_version	2147483648
+makeblastdb.blastdb_version.lo	makeblastdb	eConstraint	1	Argument "blastdb_version". Illegal value, expected 4..5:  `3'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-blastdb_version	3
+makeblastdb.blastdb_version.hi	makeblastdb	eConstraint	1	Argument "blastdb_version". Illegal value, expected 4..5:  `6'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-blastdb_version	6
+makeblastdb.blastdb_version.in	makeblastdb	ok	0	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-blastdb_version	5
+makeblastdb.taxid.abc	makeblastdb	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "taxid". Argument cannot be converted:  `abc'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-taxid	abc
+makeblastdb.taxid.ovf	makeblastdb	eConvert	1	Argument "taxid". Integer value is out of range:  `2147483648'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-taxid	2147483648
+makeblastdb.taxid.lo	makeblastdb	eConstraint	1	Argument "taxid". Illegal value, expected >=0:  `-1'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-taxid	-1
+makeblastdb.taxid.in	makeblastdb	ok	0	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-taxid	0
+makeblastdb.oid_masks.abc	makeblastdb	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "oid_masks". Argument cannot be converted:  `abc'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-oid_masks	abc
+makeblastdb.oid_masks.ovf	makeblastdb	eConvert	1	Argument "oid_masks". Integer value is out of range:  `2147483648'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-oid_masks	2147483648
+blastdbcmd.dbtype.bad	blastdbcmd	eConstraint	1	Argument "dbtype". Illegal value, expected `guess', `nucl', `prot':  `bogus'	-db	in/db/ndb	-entry	all	-dbtype	bogus
+blastdbcmd.dbtype.case	blastdbcmd	eConstraint	1	Argument "dbtype". Illegal value, expected `guess', `nucl', `prot':  `PROT'	-db	in/db/ndb	-entry	all	-dbtype	PROT
+blastdbcmd.dbtype.in	blastdbcmd	ok	0	-db	in/db/ndb	-entry	all	-dbtype	nucl
+blastdbcmd.ipg.abc	blastdbcmd	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "ipg". Argument cannot be converted:  `abc'	-db	in/db/ndb	-ipg	abc
+blastdbcmd.ipg.ovf	blastdbcmd	eConvert	1	Argument "ipg". Integer value is out of range:  `2147483648'	-db	in/db/ndb	-ipg	2147483648
+blastdbcmd.ipg.lo	blastdbcmd	eConstraint	1	Argument "ipg". Illegal value, expected >=0:  `-1'	-db	in/db/ndb	-ipg	-1
+blastdbcmd.ipg.in	blastdbcmd	ok	0	-db	in/db/ndb	-ipg	0
+blastdbcmd.strand.bad	blastdbcmd	eConstraint	1	Argument "strand". Illegal value, expected `minus', `plus':  `bogus'	-db	in/db/ndb	-entry	all	-strand	bogus
+blastdbcmd.strand.case	blastdbcmd	eConstraint	1	Argument "strand". Illegal value, expected `minus', `plus':  `PLUS'	-db	in/db/ndb	-entry	all	-strand	PLUS
+blastdbcmd.strand.in	blastdbcmd	ok	0	-db	in/db/ndb	-entry	all	-strand	minus
+blastdbcmd.line_length.abc	blastdbcmd	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "line_length". Argument cannot be converted:  `abc'	-db	in/db/ndb	-entry	all	-line_length	abc
+blastdbcmd.line_length.ovf	blastdbcmd	eConvert	1	Argument "line_length". Integer value is out of range:  `2147483648'	-db	in/db/ndb	-entry	all	-line_length	2147483648
+blastdbcmd.line_length.lo	blastdbcmd	eConstraint	1	Argument "line_length". Illegal value, expected >=1:  `0'	-db	in/db/ndb	-entry	all	-line_length	0
+blastdbcmd.line_length.in	blastdbcmd	ok	0	-db	in/db/ndb	-entry	all	-line_length	1
+dustmasker.window.abc	dustmasker	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "window". Argument cannot be converted:  `abc'	-in	in/q_n.fa	-window	abc
+dustmasker.window.ovf	dustmasker	eConvert	1	Argument "window". Integer value is out of range:  `2147483648'	-in	in/q_n.fa	-window	2147483648
+dustmasker.level.abc	dustmasker	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "level". Argument cannot be converted:  `abc'	-in	in/q_n.fa	-level	abc
+dustmasker.level.ovf	dustmasker	eConvert	1	Argument "level". Integer value is out of range:  `2147483648'	-in	in/q_n.fa	-level	2147483648
+dustmasker.linker.abc	dustmasker	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "linker". Argument cannot be converted:  `abc'	-in	in/q_n.fa	-linker	abc
+dustmasker.linker.ovf	dustmasker	eConvert	1	Argument "linker". Integer value is out of range:  `2147483648'	-in	in/q_n.fa	-linker	2147483648
+dustmasker.outfmt.bad	dustmasker	eConstraint	1	Argument "outfmt". Illegal value, expected `acclist', `fasta', `interval', `maskinfo_asn1_bin', `maskinfo_asn1_text', `maskinfo_xml', `seqloc_asn1_bin', `seqloc_asn1_text', `seqloc_xml':  `bogus'	-in	in/q_n.fa	-outfmt	bogus
+dustmasker.outfmt.in	dustmasker	ok	0	-in	in/q_n.fa	-outfmt	acclist
+segmasker.infmt.bad	segmasker	eConstraint	1	Argument "infmt". Illegal value, expected `blastdb', `fasta':  `bogus'	-in	in/q_p.fa	-infmt	bogus
+segmasker.infmt.in	segmasker	ok	0	-in	in/q_p.fa	-infmt	fasta
+segmasker.outfmt.bad	segmasker	eConstraint	1	Argument "outfmt". Illegal value, expected `fasta', `interval', `maskinfo_asn1_bin', `maskinfo_asn1_text', `maskinfo_xml', `seqloc_asn1_bin', `seqloc_asn1_text', `seqloc_xml':  `bogus'	-in	in/q_p.fa	-outfmt	bogus
+segmasker.outfmt.in	segmasker	ok	0	-in	in/q_p.fa	-outfmt	interval
+segmasker.locut.e1e	segmasker	ok	0	-in	in/q_p.fa	-locut	1e
+segmasker.locut.abc	segmasker	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "locut". Argument cannot be converted:  `abc'	-in	in/q_p.fa	-locut	abc
+segmasker.hicut.e1e	segmasker	ok	0	-in	in/q_p.fa	-hicut	1e
+segmasker.hicut.abc	segmasker	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "hicut". Argument cannot be converted:  `abc'	-in	in/q_p.fa	-hicut	abc
+convert2blastmask.outfmt.bad	convert2blastmask	eConstraint	1	Argument "outfmt". Illegal value, expected `interval', `maskinfo_asn1_bin', `maskinfo_asn1_text', `maskinfo_xml':  `bogus'	-in	in/mask.fa	-masking_algorithm	dust	-masking_options	default	-outfmt	bogus
+convert2blastmask.outfmt.in	convert2blastmask	ok	0	-in	in/mask.fa	-masking_algorithm	dust	-masking_options	default	-outfmt	interval
+edge.blastp.word_size.plus	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	+5
+edge.blastp.word_size.lead_sp	blastp	eConvert	2	Cannot convert string ' 5' to Int8 (m_Pos = 0)	Argument "word_size". Argument cannot be converted:  ` 5'	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	 5
+edge.blastp.word_size.trail_sp	blastp	eConvert	2	Cannot convert string '5 ' to Int8 (m_Pos = 1)	Argument "word_size". Argument cannot be converted:  `5 '	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	5 
+edge.blastp.word_size.hex	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	0x5
+edge.blastp.word_size.hex_empty	blastp	eConstraint	1	Argument "word_size". Illegal value, expected >=2:  `0x'	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	0x
+edge.blastp.word_size.exp	blastp	eConvert	2	Cannot convert string '1e1' to Int8 (m_Pos = 1)	Argument "word_size". Argument cannot be converted:  `1e1'	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	1e1
+edge.blastp.word_size.point	blastp	eConvert	2	Cannot convert string '5.0' to Int8 (m_Pos = 1)	Argument "word_size". Argument cannot be converted:  `5.0'	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	5.0
+edge.blastp.word_size.empty	blastp	eConvert	2	Cannot convert string '' to Int8 (m_Pos = 0)	Argument "word_size". Argument cannot be converted	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	
+edge.blastp.word_size.neg_ovf	blastp	eConvert	1	Argument "word_size". Integer value is out of range:  `-2147483649'	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	-2147483649
+edge.blastp.word_size.eq_form	blastp	eConstraint	1	Argument "word_size". Illegal value, expected >=2:  `1'	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size=1
+edge.blastp.gapopen.hex	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-gapopen	0xB
+edge.blastp.gapopen.hex_empty	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-gapopen	0x
+edge.blastp.gapopen.point	blastp	eConvert	2	Cannot convert string '11.0' to Int8 (m_Pos = 2)	Argument "gapopen". Argument cannot be converted:  `11.0'	-query	in/q_p.fa	-subject	in/s_p.fa	-gapopen	11.0
+edge.blastp.evalue.inf	blastp	eConvert	2	Cannot convert string 'inf' to double (m_Pos = 0)	Argument "evalue". Argument cannot be converted:  `inf'	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	inf
+edge.blastp.evalue.nan	blastp	eConvert	2	Cannot convert string 'nan' to double (m_Pos = 0)	Argument "evalue". Argument cannot be converted:  `nan'	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	nan
+edge.blastp.evalue.big	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	1e400
+edge.blastp.evalue.tiny	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	1e-400
+edge.blastp.evalue.comma	blastp	eConvert	2	Cannot convert string '1,5' to double (m_Pos = 1)	Argument "evalue". Argument cannot be converted:  `1,5'	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	1,5
+edge.blastp.evalue.hexfloat	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	0x1p3
+edge.blastp.evalue.lead_sp	blastp	eConvert	2	Cannot convert string ' 1' to double (m_Pos = 0)	Argument "evalue". Argument cannot be converted:  ` 1'	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	 1
+edge.blastp.evalue.trail_sp	blastp	eConvert	2	Cannot convert string '1 ' to double (m_Pos = 1)	Argument "evalue". Argument cannot be converted:  `1 '	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	1 
+edge.blastp.evalue.empty	blastp	eConvert	2	Cannot convert string '' to double (m_Pos = 0)	Argument "evalue". Argument cannot be converted	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	
+edge.blastp.threshold.nan	blastp	eConvert	2	Cannot convert string 'nan' to double (m_Pos = 0)	Argument "threshold". Argument cannot be converted:  `nan'	-query	in/q_p.fa	-subject	in/s_p.fa	-threshold	nan
+edge.blastp.threshold.inf	blastp	eConvert	2	Cannot convert string 'inf' to double (m_Pos = 0)	Argument "threshold". Argument cannot be converted:  `inf'	-query	in/q_p.fa	-subject	in/s_p.fa	-threshold	inf
+edge.blastp.threshold.comma	blastp	eConvert	2	Cannot convert string '1,5' to double (m_Pos = 1)	Argument "threshold". Argument cannot be converted:  `1,5'	-query	in/q_p.fa	-subject	in/s_p.fa	-threshold	1,5
+edge.blastp.threshold.hexfloat	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-threshold	0x1p3
+edge.blastp.qcov_hsp_perc.nan	blastp	eConvert	2	Cannot convert string 'nan' to double (m_Pos = 0)	Argument "qcov_hsp_perc". Argument cannot be converted:  `nan'	-query	in/q_p.fa	-subject	in/s_p.fa	-qcov_hsp_perc	nan
+edge.blastp.qcov_hsp_perc.hexfloat	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-qcov_hsp_perc	0x1p3
+edge.blastp.soft_masking.TRUE	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-soft_masking	TRUE
+edge.blastp.soft_masking.one	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-soft_masking	1
+edge.blastp.soft_masking.on	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-soft_masking	on
+edge.blastp.searchsp.hex	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-searchsp	0x10
+edge.blastp.searchsp.max	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-searchsp	9223372036854775807
+edge.blastp.dbsize.max	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-dbsize	9223372036854775807
+edge.blastp.max_target_seqs.hex	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-max_target_seqs	0x5
+edge.blastn.perc_identity.nan	blastn	eConvert	2	Cannot convert string 'nan' to double (m_Pos = 0)	Argument "perc_identity". Argument cannot be converted:  `nan'	-query	in/q_n.fa	-subject	in/s_n.fa	-perc_identity	nan
+edge.blastdbcmd.line_length.hex	blastdbcmd	ok	0	-db	in/db/ndb	-entry	all	-line_length	0x5
+edge.blastdbcmd.line_length.plus	blastdbcmd	ok	0	-db	in/db/ndb	-entry	all	-line_length	+5
+edge.blastdbcmd.line_length.exp	blastdbcmd	eConvert	2	Cannot convert string '1e1' to Int8 (m_Pos = 1)	Argument "line_length". Argument cannot be converted:  `1e1'	-db	in/db/ndb	-entry	all	-line_length	1e1
+edge.dustmasker.window.hex	dustmasker	ok	0	-in	in/q_n.fa	-window	0x10
+edge.dustmasker.window.point	dustmasker	eConvert	2	Cannot convert string '64.0' to Int8 (m_Pos = 2)	Argument "window". Argument cannot be converted:  `64.0'	-in	in/q_n.fa	-window	64.0
+edge.segmasker.locut.nan	segmasker	eConvert	2	Cannot convert string 'nan' to double (m_Pos = 0)	Argument "locut". Argument cannot be converted:  `nan'	-in	in/q_p.fa	-locut	nan
+edge.segmasker.locut.comma	segmasker	eConvert	2	Cannot convert string '2,2' to double (m_Pos = 1)	Argument "locut". Argument cannot be converted:  `2,2'	-in	in/q_p.fa	-locut	2,2
+edge.makeblastdb.taxid.hex	makeblastdb	ok	0	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-taxid	0x10
+edge.blastn.task.rmblastn	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-task	rmblastn
+edge.makeblastdb.blastdb_version.hex	makeblastdb	ok	0	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-blastdb_version	0x5
+edge.makeblastdb.blastdb_version.plus	makeblastdb	ok	0	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-blastdb_version	+5
+edge.blastx.query_gencode.hex	blastx	eConstraint	1	Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x1'	-query	in/q_n.fa	-subject	in/s_p.fa	-query_gencode	0x1
+edge.blastx.query_gencode.plus	blastx	ok	0	-query	in/q_n.fa	-subject	in/s_p.fa	-query_gencode	+1
+edge.tblastn.db_gencode.plus	tblastn	ok	0	-query	in/q_p.fa	-subject	in/s_n.fa	-db_gencode	+1
+edge.blastn.word_size.two_bad	blastn	eConstraint	1	Argument "word_size". Illegal value, expected >=4:  `3'	-query	in/q_n.fa	-subject	in/s_n.fa	-word_size	3	-evalue	abc
+later.blastp.evalue0	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	0
+later.blastp.evalue_neg	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-evalue	-1
+later.blastp.word_size8	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	8
+later.blastp.word_size6	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-word_size	6
+later.blastp.xdrop_ungap0	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-xdrop_ungap	0
+later.blastp.gapopen_neg	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-gapopen	-1
+later.blastp.threshold0	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-threshold	0
+later.blastp.matrix_bad	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-matrix	BOGUS
+later.blastp.outfmt99	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-outfmt	99
+later.blastp.outfmt_abc	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-outfmt	abc
+later.blastp.comp_based_stats9	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-comp_based_stats	9
+later.blastp.seg_bad	blastp	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-seg	1 2
+later.blastn.evalue0	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-evalue	0
+later.blastn.xdrop_ungap0	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-xdrop_ungap	0
+later.blastn.reward0_penalty0	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-reward	0	-penalty	0
+later.blastn.reward_penalty_bad	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-reward	3	-penalty	-1
+later.blastn.dc_word_size13	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-task	dc-megablast	-word_size	13
+later.blastn.min_raw_gapped_score_neg	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-min_raw_gapped_score	-1
+later.blastn.dust_bad	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-dust	1 2
+later.blastn.gapopen_neg	blastn	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-gapopen	-1
+later.blastx.word_size8	blastx	ok	0	-query	in/q_n.fa	-subject	in/s_p.fa	-word_size	8
+later.tblastn.word_size8	tblastn	ok	0	-query	in/q_p.fa	-subject	in/s_n.fa	-word_size	8
+later.tblastx.word_size8	tblastx	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-word_size	8
+later.tblastx.threshold0	tblastx	ok	0	-query	in/q_n.fa	-subject	in/s_n.fa	-threshold	0
+later.psiblast.pseudocount_neg	psiblast	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-pseudocount	-1
+later.psiblast.inclusion_ethresh0	psiblast	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-inclusion_ethresh	0
+later.psiblast.num_iterations2	psiblast	ok	0	-query	in/q_p.fa	-subject	in/s_p.fa	-num_iterations	2
+later.rpsblast.evalue0	rpsblast	ok	0	-query	in/q_p.fa	-db	in/rps/rps_mini	-evalue	0
+later.rpstblastn.evalue0	rpstblastn	ok	0	-query	in/q_n.fa	-db	in/rps/rps_mini	-evalue	0
+later.makeblastdb.max_file_sz_abc	makeblastdb	ok	0	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-max_file_sz	abc
+later.makeblastdb.oid_masks5	makeblastdb	ok	0	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-oid_masks	5
+later.dustmasker.window0	dustmasker	ok	0	-in	in/q_n.fa	-window	0
+later.dustmasker.infmt_bad	dustmasker	ok	0	-in	in/q_n.fa	-infmt	bogus
+later.segmasker.window0	segmasker	ok	0	-in	in/q_p.fa	-window	0
+later.blastdbcmd.range_bad	blastdbcmd	ok	0	-db	in/db/ndb	-entry	all	-range	abc
+later.blastdbcmd.outfmt_bad	blastdbcmd	ok	0	-db	in/db/ndb	-entry	all	-outfmt	%z
+log.blastp.word_size	blastp	eConstraint	1	Argument "word_size". Illegal value, expected >=2:  `1'	-query	in/q_p.fa	-subject	in/s_p.fa	-logfile	TMP/log	-word_size	1
+log.blastn.evalue	blastn	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "evalue". Argument cannot be converted:  `abc'	-query	in/q_n.fa	-subject	in/s_n.fa	-logfile	TMP/log	-evalue	abc
+log.makeblastdb.blastdb_version	makeblastdb	eConstraint	1	Argument "blastdb_version". Illegal value, expected 4..5:  `3'	-in	in/q_n.fa	-dbtype	nucl	-out	TMP/db	-logfile	TMP/log	-blastdb_version	3
+log.blastdbcmd.line_length	blastdbcmd	eConstraint	1	Argument "line_length". Illegal value, expected >=1:  `0'	-db	in/db/ndb	-entry	all	-logfile	TMP/log	-line_length	0
+log.dustmasker.window	dustmasker	eConvert	2	Cannot convert string 'abc' to Int8 (m_Pos = 0)	Argument "window". Argument cannot be converted:  `abc'	-in	in/q_n.fa	-logfile	TMP/log	-window	abc
+rpsbproc.e.e1e	rpsbproc	ok	0	-e	1e
+rpsbproc.e.abc	rpsbproc	eConvert	2	Cannot convert string 'abc' to double (m_Pos = 0)	Argument "e". Argument cannot be converted:  `abc'	-e	abc
+rpsbproc.e.in	rpsbproc	ok	0	-e	0.5
+rpsbproc.m.bad	rpsbproc	eConstraint	1	Argument "m". Illegal value, expected `full', `rep', `std':  `bogus'	-m	bogus
+rpsbproc.m.case	rpsbproc	eConstraint	1	Argument "m". Illegal value, expected `full', `rep', `std':  `STD'	-m	STD
+rpsbproc.m.in	rpsbproc	ok	0	-m	std
+rpsbproc.t.bad	rpsbproc	eConstraint	1	Argument "t". Illegal value, expected `both', `doms', `feats':  `bogus'	-t	bogus
+rpsbproc.t.in	rpsbproc	ok	0	-t	doms
+rpsbproc.evalue_alias.e1e	rpsbproc	ok	0	--evalue	1e
+rpsbproc.data_mode_alias.bad	rpsbproc	eConstraint	1	Argument "m". Illegal value, expected `full', `rep', `std':  `bogus'	--data-mode	bogus

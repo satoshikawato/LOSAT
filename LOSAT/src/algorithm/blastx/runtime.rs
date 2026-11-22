@@ -100,6 +100,17 @@ pub struct BatchResults {
 }
 
 impl BatchResults {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:139-185
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
+    /// Whether NCBI's result of each query of the batch has an alignment set: a batch that NCBI
+    /// searched, and every batch of RPSTBLASTN's search of several volumes, whose merge makes a
+    /// new set for every query (empty where the batch was not searched). The one rule of the
+    /// reports that tell the two apart: outfmt 7's hit count, XML2 and JSON (`hits` and the
+    /// message), the organism report.
+    pub(crate) fn has_alignment_set(&self, options: &super::args::ResolvedOptions) -> bool {
+        !self.search_skipped || options.merged_volumes()
+    }
+
     /// The HSPs of the query `query` of the batch whose profiles left its merged lists past the
     /// formatter's cut (`unlisted`), 0 for every other search.
     pub fn unlisted_hsps(&self, query: usize) -> usize {

@@ -236,27 +236,34 @@ impl<'h> QueryGroup<'h> {
             .count()
     }
 
-    /// The subjects of the description table (the first `num_descriptions`).
+    /// The subjects of the description table (the first `num_descriptions`; psiblast's two-part
+    /// table after the first round shows those of `described_subjects`).
     pub(crate) fn described(&self, num_descriptions: usize) -> &[u32] {
-        &self.subject_order[..self.subject_order.len().min(num_descriptions)]
+        first(&self.subject_order, num_descriptions)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:541-554
-    /// The HSPs of psiblast's two-part description table (`x_SplitSeqAlign`), each with the
-    /// subject whose hit shows it: the first `num_descriptions` in the group's order, and the first
-    /// alone for 0 (the count is checked after an HSP is put in its part).
-    pub(crate) fn first_hsps(
+    /// Each HSP of the group in the group's order, with the subject whose hit shows it.
+    pub(crate) fn hsps(&self) -> impl Iterator<Item = (u32, &'h PairwiseHit)> + '_ {
+        self.subject_order.iter().flat_map(move |&shown| {
+            self.subject_hits[&shown]
+                .iter()
+                .map(move |&hit| (shown, hit))
+        })
+    }
+
+    /// The subjects whose description lines the group's report shows, in the order of the lines
+    /// (`described_subjects` of the group's subjects and their HSPs' own subjects).
+    pub(crate) fn described_subjects(
         &self,
         num_descriptions: usize,
-    ) -> impl Iterator<Item = (u32, &'h PairwiseHit)> + '_ {
-        self.subject_order
-            .iter()
-            .flat_map(move |&shown| {
-                self.subject_hits[&shown]
-                    .iter()
-                    .map(move |&hit| (shown, hit))
-            })
-            .take(num_descriptions.max(1))
+        found_before: Option<&[bool]>,
+    ) -> Vec<u32> {
+        described_subjects(
+            &self.subject_order,
+            |shown| self.subject_hits[&shown].iter().map(|hit| hit.hit.s_idx),
+            num_descriptions,
+            found_before,
+        )
     }
 
     /// The subjects with alignments (the first `num_alignments`).
@@ -264,31 +271,35 @@ impl<'h> QueryGroup<'h> {
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1014-1040
     /// (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
     pub(crate) fn aligned(&self, num_alignments: usize) -> &[u32] {
-        &self.subject_order[..self.subject_order.len().min(num_alignments)]
+        first(&self.subject_order, num_alignments)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1523-1530
-    /// The subjects of one query's pairwise report in the order its description lines and
-    /// alignment headings read them, for the models of the reads that make the texts of those
-    /// reads before the rows exist (`common::database::subject_read_texts`): `hits`, each HSP of
-    /// the query's hit list with its subject as the report's rows name it, in the order of the
-    /// rows, are grouped as [`Self::new`] groups the rows (`joins`) and the groups put in the
-    /// order of `-sorthits` (`sort`, TBLASTX's `tblastx`) as [`Self::sort`] puts them, by the
-    /// same `sort_query_hits` of the HSPs' values (`scores`, read only where `sort` sorts: the
-    /// row's `HspScores::of`). Each subject comes once, those shown in a group's hit after the
-    /// group's own subject, in the order of their first HSP.
+    /// What one query's pairwise report reads, for the models of the reads that are made before
+    /// the rows exist (the loads, `report::db_subject::HitLoads::of`; the texts of the reads,
+    /// `common::database::subject_read_texts`): `hits`, each HSP of the query's hit list with its
+    /// subject as the report's rows name it, in the order of the rows, are grouped as
+    /// [`Self::new`] groups the rows (`joins`), and the groups and each group's HSPs put in the
+    /// order of `-sorthits` and `-sorthsps` (`reading.sort`, TBLASTX's `tblastx`) as
+    /// [`Self::sort`] puts them, by the same `sort_query_hits` of the HSPs' values (`scores`, read
+    /// only where the sort sorts: the row's `HspScores::of`); of those hits, the description
+    /// lines show those of `described_subjects` (the counts of `reading.shown`; `found_before`:
+    /// psiblast's previous round's set, its two-part table), the alignments the first ones
+    /// (`aligned`): the writer's own answers on the same groups.
     pub(crate) fn read_order<T>(
         hits: impl IntoIterator<Item = (u32, T)>,
         scores: impl Fn(&T) -> super::hit_sort::HspScores,
         joins: impl Fn(u32, u32) -> bool,
-        sort: super::hit_sort::ReportSort,
+        reading: super::pairwise::PairwiseReading,
         tblastx: bool,
-    ) -> Vec<u32> {
+        found_before: Option<&[bool]>,
+    ) -> super::db_subject::PairwiseReads {
         let hits: Vec<(u32, T)> = hits.into_iter().collect();
         let shown = shown_subjects(hits.iter().map(|&(s_idx, _)| s_idx), joins);
         let mut order: Vec<u32> = Vec::new();
-        let mut grouped: HashMap<u32, Vec<&T>> = HashMap::new();
-        let mut members: HashMap<u32, Vec<u32>> = HashMap::new();
+        // Each group's HSPs, with their own subjects, and its subjects, each once.
+        let mut grouped: HashMap<u32, Vec<(u32, &T)>> = HashMap::new();
+        let mut members: HashMap<u32, Vec<usize>> = HashMap::new();
         let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
         for ((s_idx, hit), shown) in hits.iter().zip(shown) {
             grouped
@@ -297,19 +308,169 @@ impl<'h> QueryGroup<'h> {
                     order.push(shown);
                     Vec::new()
                 })
-                .push(hit);
+                .push((*s_idx, hit));
             if seen.insert(*s_idx) {
-                members.entry(shown).or_default().push(*s_idx);
+                members.entry(shown).or_default().push(*s_idx as usize);
             }
         }
-        if let Some(sorted) = sort_group(&order, &grouped, |hit| scores(hit), sort, tblastx) {
+        if let Some(sorted) = sort_group(
+            &order,
+            &grouped,
+            |(_, hit)| scores(hit),
+            reading.sort,
+            tblastx,
+        ) {
+            for (shown, hsp_order) in order.iter().zip(&sorted.hsps) {
+                if let Some(hsps) = grouped.get_mut(shown) {
+                    *hsps = hsp_order.iter().map(|&k| hsps[k]).collect();
+                }
+            }
             order = sorted.hits.iter().map(|&group| order[group]).collect();
         }
+        let described = described_subjects(
+            &order,
+            |shown| grouped[&shown].iter().map(|&(own, _)| own),
+            reading.shown.descriptions,
+            found_before,
+        );
+        let position: HashMap<u32, usize> = order
+            .iter()
+            .enumerate()
+            .map(|(hit, &shown)| (shown, hit))
+            .collect();
+        super::db_subject::PairwiseReads {
+            described: described.iter().map(|shown| position[shown]).collect(),
+            aligned: first(&order, reading.shown.alignments).len(),
+            hits: order
+                .iter()
+                .map(|shown| members.remove(shown).unwrap_or_default())
+                .collect(),
+        }
+    }
+}
+
+/// The writer's reads of the rows of one query (`rows`, all of the query `q_idx`, in the order of
+/// the rows; `joins` and `reading` as the writer's sections give them, `tblastx` TBLASTX's sort):
+/// its group (`QueryGroup::sorted`), the subjects shown in each hit (its own first, then the
+/// copies, each once, in the order of their first row: the writer reads a hit's copies with the
+/// hit and has no order of them, so that order is the model's rule, `PairwiseReads::hits`), the
+/// hits of its description lines
+/// (`QueryGroup::described_subjects`) and of its alignments (`QueryGroup::aligned`). The tests of
+/// each program's `pairwise_read_order` compare their model with it (review 2 of line DBID
+/// pfoff-3, L5): the groups, their order and what the description lines and alignments show. The
+/// order of a hit's copies here is the model's rule copied, not the writer's, so those tests do
+/// not check it (review 3, L-4).
+#[cfg(test)]
+pub(crate) fn writer_reads(
+    rows: &[PairwiseHit],
+    joins: impl Fn(u32, u32) -> bool,
+    reading: super::pairwise::PairwiseReading,
+    tblastx: bool,
+    found_before: Option<&[bool]>,
+) -> super::db_subject::PairwiseReads {
+    let query_hits: Vec<(HspIndex, &PairwiseHit)> = rows.iter().enumerate().collect();
+    let titles: Vec<Arc<[u8]>> = Vec::new();
+    let Some(group) = QueryGroup::sorted(&query_hits, &titles, joins, reading.sort, tblastx) else {
+        return Default::default();
+    };
+    let position = |shown: &u32| group.subject_order.iter().position(|s| s == shown).unwrap();
+    let shown_in: HashMap<u32, u32> = group
+        .hsps()
+        .map(|(shown, hit)| (hit.hit.s_idx, shown))
+        .collect();
+    let mut members: HashMap<u32, Vec<usize>> = HashMap::new();
+    for row in rows {
+        let hit = members.entry(shown_in[&row.hit.s_idx]).or_default();
+        if !hit.contains(&(row.hit.s_idx as usize)) {
+            hit.push(row.hit.s_idx as usize);
+        }
+    }
+    super::db_subject::PairwiseReads {
+        hits: group
+            .subject_order
+            .iter()
+            .map(|shown| members.remove(shown).unwrap_or_default())
+            .collect(),
+        described: group
+            .described_subjects(reading.shown.descriptions, found_before)
+            .iter()
+            .map(position)
+            .collect(),
+        aligned: group.aligned(reading.shown.alignments).len(),
+    }
+}
+
+/// The first `count` subjects of `order` (`-num_descriptions`, `-num_alignments`).
+fn first(order: &[u32], count: usize) -> &[u32] {
+    &order[..order.len().min(count)]
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:541-554
+// `x_SplitSeqAlign` walks the query's Seq-aligns (one per HSP) in order, puts each in the part of
+// the subjects of the previous round's set or in the new part by its subject's id, and stops once
+// it has put `-num_descriptions` of them, counting after it puts one.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:578-602
+// `x_DisplayDeflines` then shows the part of the subjects found before, a blank line, and the new
+// part, each a description table of its own.
+/// psiblast's two-part description table of one query after the first round (`x_SplitSeqAlign`):
+/// of the query's HSPs `hsps` (Seq-aligns, in the report's order, each with the subject whose hit
+/// shows it), the first `num_descriptions`, counted after an HSP is put in its part (so the count
+/// is of HSPs, not hits, and `-num_descriptions 0` keeps the first), each in the part of the
+/// subjects found before where `found_before` holds for it, else in the new part. The lines of a
+/// part are its HSPs of one shown subject that follow each other in it, each line the subject and
+/// those HSPs. Returns the part of the subjects found before, then the new part: the table shows
+/// them in that order (`psiblast_round`).
+pub(crate) fn two_part_lines<T>(
+    hsps: impl IntoIterator<Item = (u32, T)>,
+    num_descriptions: usize,
+    found_before: impl Fn(&T) -> bool,
+) -> [Vec<(u32, Vec<T>)>; 2] {
+    let mut parts: [Vec<(u32, Vec<T>)>; 2] = [Vec::new(), Vec::new()];
+    for (shown, hsp) in hsps.into_iter().take(num_descriptions.max(1)) {
+        let part = &mut parts[usize::from(!found_before(&hsp))];
+        match part.last_mut() {
+            Some((last, hsps)) if *last == shown => hsps.push(hsp),
+            _ => part.push((shown, vec![hsp])),
+        }
+    }
+    parts
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:686-700
+// The description table makes a line of each subject of the Seq-aligns in their order, up to
+// `-num_descriptions` lines.
+/// The subjects whose description lines one query's pairwise report shows, each once, in the order
+/// of the lines: of the report's subjects `order` (in its order, each the subject whose hit shows
+/// its HSPs, `hsps(shown)` the own subjects of those HSPs in the hit's order), the first
+/// `num_descriptions` (`QueryGroup::described`), or after psiblast's first round (`found_before`:
+/// whether each subject, by subject index, is in the previous round's inclusion set) those of the
+/// lines of its two-part table (`two_part_lines`, which count HSPs). The one answer of which
+/// subjects a report's description lines show: for its writer (`psiblast_round`), for the
+/// refusals decided before it (`pairwise::blastp_described_subjects`) and for the models of its
+/// loads (`QueryGroup::read_order`).
+pub(crate) fn described_subjects<I: IntoIterator<Item = u32>>(
+    order: &[u32],
+    hsps: impl Fn(u32) -> I,
+    num_descriptions: usize,
+    found_before: Option<&[bool]>,
+) -> Vec<u32> {
+    let Some(found_before) = found_before else {
+        return first(order, num_descriptions).to_vec();
+    };
+    let parts = two_part_lines(
         order
             .iter()
-            .flat_map(|shown| members.remove(shown).unwrap_or_default())
-            .collect()
+            .flat_map(|&shown| hsps(shown).into_iter().map(move |own| (shown, own))),
+        num_descriptions,
+        |&own| found_before.get(own as usize).copied().unwrap_or(false),
+    );
+    let mut described: Vec<u32> = Vec::new();
+    for (shown, _) in parts.iter().flatten() {
+        if !described.contains(shown) {
+            described.push(*shown);
+        }
     }
+    described
 }
 
 /// The subject whose hit shows each of one query's hits, whose subjects are `s_idxs` in the
@@ -383,10 +544,10 @@ pub(crate) trait QuerySections: Sync {
     }
 
     /// `-sorthits` and `-sorthsps` of the report and whether it is TBLASTX's
-    /// (`QueryGroup::sort`); none by default.
-    fn sort(&self) -> (super::hit_sort::ReportSort, bool) {
-        (super::hit_sort::ReportSort::default(), false)
-    }
+    /// (`QueryGroup::sort`). Every program gives its own: the order of the hits, which the reads
+    /// of a batch whose prefetch is off follow (`read_order`), is the report's (review 3 of line
+    /// DBID pfoff-3, L-1).
+    fn sort(&self) -> (super::hit_sort::ReportSort, bool);
 
     /// `\n\n`, the query's header, then "No hits found" and the query's footer (`group` is
     /// `None`), or the description table and the blank line after it; `read` before each
@@ -411,10 +572,24 @@ pub(crate) trait QuerySections: Sync {
         part: std::ops::Range<usize>,
     ) -> io::Result<()>;
 
+    /// The report's view (`PairwiseView`), which says what the report does after a subject whose
+    /// lookup throws (`alignment_end`): every program gives its own (review 3 of line DBID
+    /// pfoff-3, L-1).
+    fn view(&self) -> super::pairwise::PairwiseView;
+
     /// Whether the query's alignments are one section (`alignments`) in place of each subject's
     /// (`subject`): the query-anchored reports, outfmt 1 to 4 (`report::query_anchored`).
     fn merges_alignments(&self) -> bool {
-        false
+        self.view() != super::pairwise::PairwiseView::Pairwise
+    }
+
+    /// The load of subject `s_idx` where it throws (its batch's prefetch is off and its lookup
+    /// fails, `report::db_subject::HitLoads::thrown`): its exception, and whether its Seq-align id
+    /// is a local id (`pairwise::thrown_load`); `None` by default (every subject loads). Its
+    /// description line and alignments are written as NCBI's `catch`es write them, and the
+    /// query's alignments may end the run there (`alignment_end`).
+    fn thrown(&self, _s_idx: u32) -> Option<(&crate::ncbi_exception::NcbiException, bool)> {
+        None
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2002-2009
@@ -503,6 +678,51 @@ pub(crate) fn write<S: QuerySections, W: Write>(
     written
 }
 
+/// Where the alignments of the query of `group` end the run (`aligned_end` of what the report's
+/// view does after a throw, `PairwiseView::after_throw`, the answer that the model of the loads
+/// takes too, `FormatThrow::of`, and of the loads of its aligned subjects,
+/// `QuerySections::thrown`).
+fn alignment_end<'s, S: QuerySections>(
+    sections: &'s S,
+    group: &QueryGroup<'_>,
+) -> Option<(usize, &'s crate::ncbi_exception::NcbiException)> {
+    aligned_end(
+        sections.view().after_throw(),
+        group.aligned(sections.num_alignments()),
+        |s_idx| sections.thrown(s_idx),
+    )
+}
+
+/// Where the alignments of the subjects `aligned` (in their order) of a report whose writer does
+/// `after` after a throw end the run (`AfterThrow::alignment_end` of the loads `thrown`: the
+/// exception of a subject whose load throws, and whether its Seq-align id is local): the position
+/// among the aligned subjects and the exception, which the writers return there (`end_here`)
+/// after the loads before it, as NCBI's application ends with it (`CATCH_ALL`).
+pub(super) fn aligned_end<'t>(
+    after: crate::report::db_subject::AfterThrow,
+    aligned: &[u32],
+    thrown: impl Fn(u32) -> Option<(&'t crate::ncbi_exception::NcbiException, bool)>,
+) -> Option<(usize, &'t crate::ncbi_exception::NcbiException)> {
+    let end = after.alignment_end(
+        aligned.iter().copied(),
+        |s_idx| thrown(s_idx).is_some(),
+        |s_idx| thrown(s_idx).is_some_and(|(_, local)| local),
+    )?;
+    Some((end, thrown(aligned[end])?.0))
+}
+
+/// The exception of `end` (`alignment_end`) as the writer's error where the alignments reach its
+/// position `position` (before the load of that aligned subject).
+pub(super) fn end_here(
+    end: Option<(usize, &crate::ncbi_exception::NcbiException)>,
+    position: usize,
+) -> io::Result<()> {
+    match end {
+        Some((at, exception)) if at == position => Err(exception.clone().into_io_error()),
+        _ => Ok(()),
+    }
+}
+
 /// The serial writer: each query's warnings and parts on `writer`, in order.
 fn write_serial<S: QuerySections, W: Write>(
     writer: &mut W,
@@ -533,17 +753,26 @@ fn write_serial<S: QuerySections, W: Write>(
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1997-2003
                 // The merge loads every aligned subject before the section's first byte
                 // (`merged_subject` after each load); without one (`-num_alignments 0`) there is
-                // no section (`DisplaySeqalign` returns at once).
+                // no section (`DisplaySeqalign` returns at once). A load that throws ends the run
+                // there (`alignment_end`).
                 let aligned = group.aligned(sections.num_alignments());
+                let end = alignment_end(sections, group);
                 if !aligned.is_empty() {
-                    for &s_idx in aligned {
+                    for (position, &s_idx) in aligned.iter().enumerate() {
+                        end_here(end, position)?;
                         read(s_idx, &mut *writer)?;
                         sections.merged_subject(writer, group, s_idx)?;
                     }
                     sections.alignments(writer, q_idx, group)?;
                 }
             } else {
-                for &s_idx in group.aligned(sections.num_alignments()) {
+                // `GetDbType`'s load of the first alignment's subject may end the run before any
+                // alignment (`alignment_end`).
+                let end = alignment_end(sections, group);
+                for (position, &s_idx) in
+                    group.aligned(sections.num_alignments()).iter().enumerate()
+                {
+                    end_here(end, position)?;
                     read(s_idx, &mut *writer)?;
                     let hsps = group.subject_hits[&s_idx].len();
                     sections.subject(writer, probe.as_deref_mut(), group, s_idx, 0..hsps)?;
@@ -766,6 +995,7 @@ fn format_piece<S: QuerySections>(
         Part::Alignments((first, first_hsp), (last, end_hsp)) => {
             let group = group.expect("a query with alignment pieces has hits");
             let aligned = group.aligned(sections.num_alignments());
+            let end = alignment_end(sections, group);
             for (position, &s_idx) in aligned.iter().enumerate().take(last + 1).skip(first) {
                 let from = if position == first { first_hsp } else { 0 };
                 let to = if position == last {
@@ -775,6 +1005,7 @@ fn format_piece<S: QuerySections>(
                 };
                 if from < to {
                     if from == 0 {
+                        end_here(end, position)?;
                         mark(s_idx, &mut buffer)?;
                     }
                     sections.subject(&mut buffer, None, group, s_idx, from..to)?;
@@ -784,7 +1015,9 @@ fn format_piece<S: QuerySections>(
         }
         Part::Section => {
             let group = group.expect("a query with a section has hits");
-            for &s_idx in group.aligned(sections.num_alignments()) {
+            let end = alignment_end(sections, group);
+            for (position, &s_idx) in group.aligned(sections.num_alignments()).iter().enumerate() {
+                end_here(end, position)?;
                 mark(s_idx, &mut buffer)?;
                 sections.merged_subject(&mut buffer, group, s_idx)?;
             }

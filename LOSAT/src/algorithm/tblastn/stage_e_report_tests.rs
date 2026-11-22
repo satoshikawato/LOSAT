@@ -152,6 +152,7 @@ fn initial_tabular_oracle_bytes() {
         let mut outputs_bytes = vec![Vec::new(); FORMATS.len()];
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: FORMATS
                 .iter()
                 .zip(outputs_bytes.iter_mut())

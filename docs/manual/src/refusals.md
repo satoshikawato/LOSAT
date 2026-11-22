@@ -63,7 +63,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-parse_deflines` with two queries of one id in one query batch | Refused. |
 | `-parse_deflines` with a query and a subject of one id that are not the same record | Refused. |
 | `-db` with a sequence whose id NCBI cannot report correctly | Refused. The error names the sequence. |
-| An alias file with `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `MEMB_BIT`, `MASKLIST` or `OID_MASK_TYPE` | Refused. See Alias files below. |
+| An alias file with `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `MEMB_BIT` or `MASKLIST` | Refused. See Alias files below. |
 | `SEQ_ID_PREFER_ACCESSION_OVER_GI` or `SEQ_ID_AVOID_GI` with a database that has parsed ids | Refused. |
 | `-xmlhelp`, `-version`, `-version-full`, `-version-full-xml`, `-version-full-json` in the library API and pylosat | Refused. They work on the command line and in LOSAT Web, which prints the command line's text. |
 | `-dryrun` | Reads and checks the arguments, then stops. It refuses what a normal run refuses. |
@@ -94,7 +94,12 @@ Output formats:
 
 Two queries or two subjects with one id (`-parse_deflines`):
 
-- Two queries with one id in one query batch are refused. With `-subject` or `-outfmt 5` this applies to any two batches, because NCBI keeps every batch's queries there.
+- Two queries with one id in one query batch are refused. With `-subject` or `-outfmt 5` this applies to any two batches, because NCBI keeps every batch's queries there. LOSAT first writes the results of the query batches before the second query's batch, as NCBI writes them when it stops at a batch, then stops with the error. An error that NCBI gives for an earlier batch comes first.
+- With `-outfmt 11` LOSAT's output differs from NCBI's stop: NCBI ends the BLAST archive with an error record that holds its message (`request-id "Error"`). LOSAT's archive has the earlier batches' records without that record, because the refusal is LOSAT's message, not NCBI's.
+- The query batches are NCBI's: like NCBI, LOSAT counts the second query into its batch by the first one's letters, so the second query's batch holds the queries of NCBI's batch, and an error of NCBI's reader comes in the batch where NCBI's reader meets it.
+- In the second query's batch, NCBI's errors that do not depend on that query's letters come instead of the refusal, as NCBI gives them. Examples are subjects too short for `-searchsp` ("The average subject length is too short") and a database whose sequence file cannot be read ("Database memory map file error"). This holds where a query of that batch whose id is new in it has letters that NCBI can search. Otherwise the refusal comes.
+- The refusal comes also where the second query's ids meet two earlier queries or only some of an earlier query's ids, and in `blastn` where the second query is longer than the first.
+- With `-export_search_strategy`, LOSAT writes no search strategy for the refused batch. With one query batch, the file stays empty.
 - A query and a subject with one id are refused unless they are one record: the same definition line and the same letters.
 - `blastx` and `tblastn` refuse even one record that is both query and subject.
 - With `-outfmt 0`, `blastn`, `blastp` and `tblastx` refuse such a record when it has masks.
@@ -313,12 +318,14 @@ These refusals apply to every search program that reads databases.
 
 | Option or value | What happens |
 | :--- | :--- |
-| Alias-file keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `MEMB_BIT`, `MASKLIST` and `OID_MASK_TYPE` | Refused. They select sequences by a list, a mask or a membership bit. |
+| Alias-file keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `MEMB_BIT` and `MASKLIST` | Refused. They select sequences by a list, a mask or a membership bit. |
+| An alias file whose `OID_MASK_TYPE` hides predicted RefSeq lines, over a sequence with an id that NCBI warns about when it reads the id's accession | Refused where the sequence's lines are read. NCBI writes the warning again at each read. |
 | An `OIDLIST` file that is empty or shorter than 5 bytes (no byte after its 4-byte header) | Refused. NCBI crashes on an empty file, and its error for the other names a line of its source. A file whose bits NCBI would read past the memory page after its end is refused too. |
 | An alias file whose `FIRST_OID`-`LAST_OID` range lies outside the OIDs that the ranges of the alias files below it keep (it ends before them, or starts past the bytes NCBI keeps for them) | Refused where the database's OID list is first used. NCBI clears bits outside its array of those OIDs there: before the array it crashes, and past it it writes over its own memory, which crashes it unless the bytes happen to fall in unused memory. `blastdbcmd -info` does not use the list and works. |
 | Databases of a `-db` list whose total lengths sum past 64 bits (`-outfmt` 0 to 5 and 13 to 16) | Refused. NCBI's arithmetic overflows. |
 | Databases of a `-db` list whose numbers of sequences sum past 32 bits (`-outfmt` 5) | Refused. |
 | `rpsblast` and `rpstblastn`: a reported hit of a profile that an alias file's `FIRST_OID`, `LAST_OID` and `OIDLIST` leave out | Refused. NCBI's search ignores these keys, and its report does not find the profile: it writes `Unknown` or stops with a null pointer exception. A profile whose id an included copy of its record holds is written as that copy, as NCBI finds it. |
+| `rpsblast` and `rpstblastn` over an RPS database of several volumes: a reported hit of a profile whose definition line an alias file's `OID_MASK_TYPE` hides | Refused. NCBI searches each volume without the alias files, and its report does not find the profile: it writes `Unknown` or stops with a null pointer exception. With one volume NCBI drops such a profile's hits, as LOSAT does. |
 
 `TITLE`, `DBLIST`, `NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`, `FIRST_OID`, `LAST_OID` and `OIDLIST` work as in NCBI BLAST+, and `VDBLIST` and `MAX_SEQ_LENGTH` are ignored, as NCBI's reader ignores them. In the profile databases of `rpsblast` and `rpstblastn` they act as in NCBI's search of such a database: one volume is searched with all its keys, and each of several volumes with its own length, count and shortest length under the database's `LENGTH` or `STATS_TOTLEN` and `NSEQ` or `STATS_NSEQ` where these are above 0.
 
@@ -419,11 +426,11 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-outfmt` other than 0, 5, 6, 7, 10 and 11 | Refused: not yet supported. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 17, 19 and 21, and 13 and 14 without `-out` | NCBI's own errors. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpsblast` option. |
-| `-outfmt 5` with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI's XML takes the query for the entry (the query's title in `Hit_def`). `-outfmt 11` writes NCBI's bytes, apart from its `ident` (`LOSAT 0.2.0` where NCBI writes `2.17.0+`). |
+| `-outfmt 1` to `5` or `13` to `16`, `-outfmt 18` when the profile has a taxid, or `-outfmt 20` with a field that shows more of the profile than its id (`sallseqid`, `sallacc`, `stitle`, `salltitles`, `staxids`, `slen`, `sseq`, `btop`, `nident`, `pident`, `mismatch`, `positive`, `ppos`, as in the default fields, or a taxonomy field when the profile has a taxid), with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI takes the query for the entry (the query's title in `Hit_def`, its letters in the identities, its taxonomy in the organism report). `-outfmt 8`, `9`, `11` and `12`, and `-outfmt 18` and `20` otherwise (such as `20 qseqid sseqid sacc evalue`), write NCBI's bytes (outfmt 11 apart from its `ident`: `LOSAT 0.2.0` where NCBI writes `2.17.0+`). |
 | A query above 5,000,000 letters | Refused. |
 | A database that lists one volume twice (`-db "x x"`) | Refused. The database layer refuses it for every program; NCBI's `rpsblast` searches the volume once. |
 | A profile database whose volumes differ in matrix or gap costs | Refused. |
@@ -450,13 +457,13 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number 
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-outfmt` other than 0 to 7, 10 and 11 | Refused: not yet supported. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 17, 19 and 21, and 13 and 14 without `-out` | NCBI's own errors. |
 | `-use_sw_tback` with composition-based statistics | Refused. |
 | `-ungapped` without composition-based statistics | Refused. NCBI's `rpstblastn` crashes after the search. With composition-based statistics it gets NCBI's own error. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpstblastn` option. |
-| `-outfmt 5` with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI stops with an exception after half a document. `-outfmt 11` writes NCBI's bytes, apart from its `ident` (`LOSAT 0.2.0` where NCBI writes `2.17.0+`). |
+| `-outfmt 1` to `5` or `13` to `16`, `-outfmt 18` when the profile has a taxid, or `-outfmt 20` with a field of the alignment (such as `qstart`, `length` or the default fields) or a field that shows more of the profile than its id (`sallseqid`, `sallacc`, `stitle`, `salltitles`, `staxids`, `slen`, or a taxonomy field when the profile has a taxid), with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI stops with an exception (after half a document in BLAST XML, after the header line in `-outfmt 20`) or takes the query for the entry. `-outfmt 8`, `9`, `11` and `12`, and `-outfmt 18` and `20` otherwise (such as `20 qseqid sseqid sacc evalue`), write NCBI's bytes (outfmt 11 apart from its `ident`: `LOSAT 0.2.0` where NCBI writes `2.17.0+`). |
 | `-query_gencode 32` | Refused (exit status 2). |
 | `rpstblastn` in the library API and the Web engine | Refused. |
 | The database refusals of `rpsblast` above, with its alias-file cases | Refused. |
@@ -649,7 +656,7 @@ error: the NCBI BLAST+ option -gi_mask is not supported by LOSAT's makeblastdb (
 | `-legacy false` with a `-stride` of 32768 or more | Refused when the first sequence of an index volume is read. NCBI's index has no defined result. |
 | A command-line word that is not UTF-8 | Refused. |
 | The database sequences, definition lines and damaged taxonomy records that `dustmasker` refuses | Refused, as for `dustmasker`. |
-| A database sequence without letters (only a damaged database has one) | Refused. NCBI's `makembindex` stops with a null-pointer report. |
+| A database sequence without letters (only a damaged database has one), or, with `-old_style_index true`, one whose every definition line an alias file's `OID_MASK_TYPE` hides | Refused. NCBI's `makembindex` stops with a null-pointer report. |
 | A FASTA record of 4,294,967,296 letters or more (`-old_style_index true`) | Refused. |
 | An index volume of more than 4 GiB of packed sequences, which needs a `-volsize` of about 18,000 or more and more than 16 Gbp of sequences in one index volume | Refused when the sequence that passes 4 GiB is read. NCBI writes an index whose sizes and positions wrap at 32 bits. |
 
@@ -663,7 +670,6 @@ error: the NCBI BLAST+ option -gi_mask is not supported by LOSAT's makeblastdb (
 - `windowmasker -mk_counts` and `-convert`, which make and convert counts files.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
-- The `rpsblast` output formats other than `0`, `5`, `6`, `7`, `10` and `11`, and the `rpstblastn` ones other than `0` to `7`, `10` and `11`.
 - `-html`.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases

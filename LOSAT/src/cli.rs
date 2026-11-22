@@ -205,7 +205,7 @@ pub struct Cli {
     pub command: Commands,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
     /// Translated nucleotide query vs protein subject (blastx)

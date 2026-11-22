@@ -63,8 +63,10 @@ LOSAT/tests/db_search (README.md there says how they were built).
   (no `-out`); `stdout-stderr-fsize=N`: standard output and standard error are that one file (`> file 2>&1`);
   `stderr-full`: standard error is /dev/full (standard output is the report); `stdout-closed`, `stderr-closed`: a
   pipe whose reader closed before the start, LOSAT's only (NCBI is ended by SIGPIPE), whose expectation is the
-  `ncbi-near` row of the full device (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 5). `check --library` skips these rows (`library-skip`): the library's
-  writers have no NCBI stream; outside Linux they are `device-skip`.
+  `ncbi-near` row of the full device (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 5). `check --library` skips these rows (`library-skip`): the library writes
+  no standard output or standard error of NCBI's, and the `-out` file of its `run_to_file` (the command line's stream,
+  `report::ostream::ReportStream::of_library_file`) is checked against the command line in `tests/library_api.rs`;
+  outside Linux they are `device-skip`.
 - a `ncbi` row whose `covers` cell has `ncbi-copies: PATH [NAME=VALUE ...]` (up to a ` | ` or the end; a "copy row",
   `copies_cell`): the expectation is made from NCBI's run on the oracle query file PATH (relative to LOSAT/) in place
   of the row's query file. In PATH each query that ends a query batch of LOSAT's run (`query_batches`) is followed by

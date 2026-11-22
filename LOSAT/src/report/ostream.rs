@@ -1050,6 +1050,21 @@ impl ReportStream {
         stream
     }
 
+    /// The `-out` file `file` of the library's `run_to_file` (`api::local_blast::OutFile`): the
+    /// command line's `-out` stream of `program` for `-outfmt` `outfmt` (`of_cli`), whose posts
+    /// go to `posts` (the call's diagnostics, `api::local_blast::Posts`) where the command line
+    /// writes them to its standard error.
+    pub(crate) fn of_library_file(
+        file: std::fs::File,
+        program: &'static str,
+        outfmt: &str,
+        posts: Box<dyn std::io::Write + Send>,
+    ) -> Self {
+        let stream = Self::of_cli(Some(file), program, outfmt, None);
+        lock(&stream.0).diagnostics = Some((posts, Cerr::new()));
+        stream
+    }
+
     /// The `-out` file `inner`, its report starting in `site`.
     pub fn file(inner: Box<dyn std::io::Write + Send>, program: &'static str, site: Site) -> Self {
         Self::new(
@@ -1784,9 +1799,10 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
 /// constructors below, one per destination, each saying what comes after it: they are the only
 /// places where a buffer or hold could come between the report's insertions and NCBI's buffer
 /// (`ReportStream`, which counts each write as one insertion). A format's sink (`sink`: the
-/// command line's `ReportStream`, `OutputSink::Report`, or the library's and LOSAT Web's
-/// writers), blastx's command line (`report`), and the hold of a library call (`held`). Only the
-/// command line's stream takes NCBI's regions and flushes (`ReportWrite`).
+/// command line's `ReportStream`, `OutputSink::Report`, the same stream of the library's
+/// `run_to_file`, or the library's and LOSAT Web's writers), blastx's command line (`report`), and
+/// the hold of a library call (`held`). Only the command line's `-out` and standard output streams
+/// and the `-out` stream of `run_to_file` take NCBI's regions and flushes (`ReportWrite`).
 pub struct NcbiOstream<'a> {
     out: Box<dyn std::io::Write + 'a>,
     report: Option<ReportHandle>,
@@ -1808,10 +1824,12 @@ impl<'a> NcbiOstream<'a> {
     }
 
     /// A format's sink opened as its report's stream (`OutputSink::open`): the command line's
-    /// `ReportStream` (`OutputSink::Report`); or the caller's writer as it is, which a library
-    /// caller or LOSAT Web gives (no stream of NCBI's to model); or, for a library call's
-    /// `Stdout` and `File` sinks, LOSAT's buffered standard output or file (no stream of NCBI's
-    /// either: the report's bytes are NCBI's, the times at which they reach the device are not).
+    /// `ReportStream` (`OutputSink::Report`) and the same stream of the library's `run_to_file`
+    /// (`OutputSink::Out`, `ReportStream::of_library_file`); or the caller's writer as it is,
+    /// which a library caller or LOSAT Web gives (no stream of NCBI's to model); or, for a
+    /// library call's `Stdout` and `File` sinks, LOSAT's buffered standard output or file (no
+    /// stream of NCBI's either: the report's bytes are NCBI's, the times at which they reach the
+    /// device are not).
     pub(crate) fn sink(
         sink: &'a mut crate::api::local_blast::OutputSink<'_>,
     ) -> std::io::Result<Self> {

@@ -313,7 +313,7 @@ def version_output(command_prefix: Sequence[str], repo_root: Path) -> str:
     return result.stdout.strip()
 
 
-# NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-107
 # The RC smoke invokes the already-certified LOSAT BLASTP CLI arguments; this
 # release helper does not implement, normalize, or classify BLAST behavior.
 def run_smoke(
@@ -486,8 +486,7 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
             )
         command_prefix = [str(binary)]
     else:
-        # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-        # CATCH_ALL(status); return status;
+        # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
         # The frozen release scope is serial command WASI. Reject a reactor or
         # threaded artifact before running its entry point or assembling it.
         inspection = subprocess.run(

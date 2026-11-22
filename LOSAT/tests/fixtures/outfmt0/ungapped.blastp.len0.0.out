@@ -1,0 +1,418 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/len0_l0015_s.faa).
+           1 sequences; 189 total letters
+
+
+
+Query= q1
+
+Length=183
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1                                                                    14.8    1.2  
+
+
+> s1
+Length=189
+
+ Score = 14.8 bits (26),  Expect = 1.2
+ Identities = 3/3 (100%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+
+Query  12  DYR  14
+           DYR
+Sbjct  62  DYR  64
+
+
+ Score = 14.3 bits (25),  Expect = 1.7
+ Identities = 3/3 (100%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+
+Query  55   CFS  57
+            CFS
+Sbjct  153  CFS  155
+
+
+ Score = 13.8 bits (24),  Expect = 2.4
+ Identities = 4/6 (67%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+
+Query  164  YDSIHD  169
+            YD  HD
+Sbjct  101  YDRQHD  106
+
+
+ Score = 13.3 bits (23),  Expect = 3.3
+ Identities = 3/4 (75%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+
+Query  93   YSHQ  96
+            Y HQ
+Sbjct  117  YDHQ  120
+
+
+ Score = 12.8 bits (22),  Expect = 4.7
+ Identities = 3/6 (50%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+
+Query  166  SIHDFI  171
+            S  D+I
+Sbjct  12   SFNDYI  17
+
+
+ Score = 11.3 bits (19),  Expect = 13
+ Identities = 4/10 (40%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+
+Query  87   YSQQQNYSHQ  96
+            Y  +QN S +
+Sbjct  116  YYDHQNTSNE  125
+
+
+ Score = 10.3 bits (17),  Expect = 26
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+
+Query  73  FP  74
+           FP
+Sbjct  45  FP  46
+
+
+ Score = 10.3 bits (17),  Expect = 26
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+
+Query  156  GYQ  158
+            GY+
+Sbjct  95   GYE  97
+
+
+ Score =  9.8 bits (16),  Expect = 37
+ Identities = 1/6 (17%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+
+Query  170  FIHYYF  175
+            + H+++
+Sbjct  24   YMHFFY  29
+
+
+ Score =  9.8 bits (16),  Expect = 37
+ Identities = 0/0 (100%), Positives = 0/0 (100%), Gaps = 0/0 (100%)
+
+
+ Score =  9.3 bits (15),  Expect = 53
+ Identities = 2/6 (33%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+
+Query  87   YSQQQN  92
+            Y  Q++
+Sbjct  101  YDRQHD  106
+
+
+ Score =  8.8 bits (14),  Expect = 74
+ Identities = 2/5 (40%), Positives = 3/5 (60%), Gaps = 0/5 (0%)
+
+Query  100  DGMNW  104
+            +G  W
+Sbjct  145  EGVRW  149
+
+
+ Score =  8.3 bits (13),  Expect = 105
+ Identities = 2/5 (40%), Positives = 3/5 (60%), Gaps = 0/5 (0%)
+
+Query  69  YFWNF  73
+           +F  F
+Sbjct  27  FFYEF  31
+
+
+ Score =  8.3 bits (13),  Expect = 105
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+
+Query  31  W  31
+           W
+Sbjct  72  W  72
+
+
+ Score =  7.8 bits (12),  Expect = 148
+ Identities = 2/6 (33%), Positives = 3/6 (50%), Gaps = 0/6 (0%)
+
+Query  86  AYSQQQ  91
+           A+   Q
+Sbjct  37  AFADRQ  42
+
+
+ Score =  7.8 bits (12),  Expect = 148
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+
+Query  174  YF  175
+            Y+
+Sbjct  116  YY  117
+
+
+ Score =  7.3 bits (11),  Expect = 209
+ Identities = 2/4 (50%), Positives = 2/4 (50%), Gaps = 0/4 (0%)
+
+Query  89  QQQN  92
+           Q  N
+Sbjct  47  QNRN  50
+
+
+ Score =  6.8 bits (10),  Expect = 294
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+
+Query  157  Y  157
+            Y
+Sbjct  33   Y  33
+
+
+ Score =  6.3 bits (9),  Expect = 415
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+
+Query  118  F  118
+            F
+Sbjct  11   F  11
+
+
+ Score =  6.3 bits (9),  Expect = 415
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+
+Query  177  KD  178
+            K+
+Sbjct  35   KN  36
+
+
+ Score =  6.3 bits (9),  Expect = 415
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+
+Query  146  F  146
+            F
+Sbjct  67   F  67
+
+
+ Score =  2.8 bits (2),  Expect = 4629
+ Identities = 0/1 (0%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+
+Query  93  Y  93
+           +
+Sbjct  38  F  38
+
+
+
+Lambda      K        H
+   0.344    0.278     2.01 
+
+
+Effective search space used: 33115
+
+
+Query= q2
+
+Length=83
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1                                                                    13.7    1.1  
+
+
+> s1
+Length=189
+
+ Score = 13.7 bits (24),  Expect = 1.1
+ Identities = 3/5 (60%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+
+Query  23  CCNYR  27
+           C +YR
+Sbjct  60  CADYR  64
+
+
+ Score = 13.7 bits (24),  Expect = 1.1
+ Identities = 3/5 (60%), Positives = 3/5 (60%), Gaps = 0/5 (0%)
+
+Query  27  RGRWN  31
+           R  WN
+Sbjct  89  RDQWN  93
+
+
+ Score = 12.2 bits (21),  Expect = 3.0
+ Identities = 3/6 (50%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+
+Query  38  VLYHFY  43
+           V + FY
+Sbjct  19  VFFPFY  24
+
+
+ Score = 12.2 bits (21),  Expect = 3.0
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+
+Query  11   WE  12
+            WE
+Sbjct  144  WE  145
+
+
+ Score =  9.3 bits (15),  Expect = 24
+ Identities = 3/9 (33%), Positives = 5/9 (56%), Gaps = 0/9 (0%)
+
+Query  13   QQNIRVPMW  21
+            Q++   P W
+Sbjct  104  QHDDKMPNW  112
+
+
+ Score =  8.3 bits (13),  Expect = 47
+ Identities = 2/4 (50%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+
+Query  58   LLYH  61
+            L +H
+Sbjct  130  LQFH  133
+
+
+ Score =  4.8 bits (6),  Expect = 515
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+
+Query  81  A  81
+           A
+Sbjct  65  A  65
+
+
+
+Lambda      K        H
+   0.342    0.275     2.01 
+
+
+Effective search space used: 14615
+
+
+Query= q3
+
+Length=111
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1                                                                    17.2    0.13 
+
+
+> s1
+Length=189
+
+ Score = 17.2 bits (31),  Expect = 0.13
+ Identities = 4/5 (80%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+
+Query  89  CAGYR  93
+           CA YR
+Sbjct  60  CADYR  64
+
+
+ Score = 13.2 bits (23),  Expect = 2.0
+ Identities = 3/6 (50%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+
+Query  61  FMNRHP  66
+           F +R+P
+Sbjct  38  FADRQP  43
+
+
+ Score = 13.2 bits (23),  Expect = 2.0
+ Identities = 3/6 (50%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+
+Query  41   TIHLEW  46
+            TI+ +W
+Sbjct  164  TIQSDW  169
+
+
+ Score = 12.7 bits (22),  Expect = 2.9
+ Identities = 3/4 (75%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+
+Query  60   CFMN  63
+            CF N
+Sbjct  153  CFSN  156
+
+
+ Score = 12.3 bits (21),  Expect = 4.1
+ Identities = 3/4 (75%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+
+Query  4   VCHM  7
+           V HM
+Sbjct  83  VIHM  86
+
+
+ Score = 10.3 bits (17),  Expect = 16
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+
+Query  33  IH  34
+           IH
+Sbjct  84  IH  85
+
+
+ Score =  9.8 bits (16),  Expect = 23
+ Identities = 2/5 (40%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+
+Query  48   CYMDT  52
+            C+ +T
+Sbjct  153  CFSNT  157
+
+
+ Score =  9.3 bits (15),  Expect = 32
+ Identities = 2/4 (50%), Positives = 2/4 (50%), Gaps = 0/4 (0%)
+
+Query  94   MCKW  97
+            M  W
+Sbjct  109  MPNW  112
+
+
+ Score =  8.3 bits (13),  Expect = 63
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+
+Query  74   W  74
+            W
+Sbjct  149  W  149
+
+
+ Score =  7.8 bits (12),  Expect = 89
+ Identities = 2/5 (40%), Positives = 3/5 (60%), Gaps = 0/5 (0%)
+
+Query  66  PRDPN  70
+           P + N
+Sbjct  46  PQNRN  50
+
+
+ Score =  6.3 bits (9),  Expect = 249
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+
+Query  18   DT  19
+            +T
+Sbjct  121  NT  122
+
+
+ Score =  6.3 bits (9),  Expect = 249
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+
+Query  87   H  87
+            H
+Sbjct  133  H  133
+
+
+
+Lambda      K        H
+   0.343    0.275     2.00 
+
+
+Effective search space used: 19795
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/len0_l0015_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 189
+  Number of sequences in database:  1
+
+
+
+Matrix: PAM30
+Neighboring words threshold: 9

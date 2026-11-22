@@ -32,18 +32,6 @@ mod line_formats;
 mod guess_tests;
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:174-183
-// ```c++
-// enum ESymbolType {
-//     fDNA_Main_Alphabet  = 1<<0, ///< Just ACGTUN-.
-//     fDNA_Ambig_Alphabet = 1<<1, ///< Anything else representable in ncbi4na.
-//     fProtein_Alphabet   = 1<<2, ///< Allows BZX*-, but not JOU.
-//     fLineEnd            = 1<<3,
-//     fAlpha              = 1<<4,
-//     fDigit              = 1<<5,
-//     fSpace              = 1<<6,
-//     fInvalid            = 1<<7
-// };
-// ```
 pub(crate) const F_DNA_MAIN_ALPHABET: u8 = 1 << 0;
 pub(crate) const F_DNA_AMBIG_ALPHABET: u8 = 1 << 1;
 pub(crate) const F_PROTEIN_ALPHABET: u8 = 1 << 2;
@@ -64,46 +52,6 @@ fn c_isgraph(c: u8) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:249-286
-// ```c++
-// static void init_symbol_type_table(void)
-// {
-//     if ( symbol_type_table[0] == 0 ) {
-//         for ( const char* s = "ACGNTU"; *s; ++s ) {
-//             int c = *s;
-//             symbol_type_table[c] |= fDNA_Main_Alphabet;
-//             c = tolower(c);
-//             symbol_type_table[c] |= fDNA_Main_Alphabet;
-//         }
-//         for ( const char* s = "BDHKMRSVWY"; *s; ++s ) {
-//             int c = *s;
-//             symbol_type_table[c] |= fDNA_Ambig_Alphabet;
-//             c = tolower(c);
-//             symbol_type_table[c] |= fDNA_Ambig_Alphabet;
-//         }
-//         for ( const char* s = "ACDEFGHIKLMNPQRSTVWYBZX"; *s; ++s ) {
-//             int c = *s;
-//             symbol_type_table[c] |= fProtein_Alphabet;
-//             c = tolower(c);
-//             symbol_type_table[c] |= fProtein_Alphabet;
-//         }
-//         symbol_type_table[(int)'-'] |= fDNA_Main_Alphabet | fProtein_Alphabet;
-//         symbol_type_table[(int)'*'] |= fProtein_Alphabet;
-//         for ( const char* s = "\r\n"; *s; ++s ) {
-//             int c = *s;
-//             symbol_type_table[c] |= fLineEnd;
-//         }
-//         for ( int c = 1; c < 256; ++c ) {
-//             if ( isalpha((unsigned char)c) )
-//                 symbol_type_table[c] |= fAlpha;
-//             if ( isdigit((unsigned char)c) )
-//                 symbol_type_table[c] |= fDigit;
-//             if ( isspace((unsigned char)c) )
-//                 symbol_type_table[c] |= fSpace;
-//         }
-//         symbol_type_table[0] |= fInvalid;
-//     }
-// }
-// ```
 /// `symbol_type_table` after `init_symbol_type_table()`.
 pub(crate) static SYMBOL_TYPE_TABLE: [u8; 256] = init_symbol_type_table();
 
@@ -153,181 +101,8 @@ const fn init_symbol_type_table() -> [u8; 256] {
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:2509-2510
-// ```c++
-//         /// All delimiters are merged and trimmed, to get non-empty tokens only
-//         fSplit_Tokenize        = fSplit_MergeDelimiters | fSplit_Truncate
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:7439-7545
-// ```c++
-// bool CStrTokenizeBase::Advance(CTempStringList* part_collector, SIZE_TYPE* ptr_part_start, SIZE_TYPE* ptr_delim_pos)
-// {
-//     SIZE_TYPE pos, part_start, delim_pos = 0, quote_pos = 0;
-//     bool      found_text = false, done;
-//     char      active_quote = '\0';
-//
-//     // Skip leading delimiters.
-//     // NOTE: We cannot process
-//     if (!m_Pos  &&  (m_Flags & NStr::fSplit_Truncate_Begin) != 0) {
-//         SkipDelims();
-//     }
-//     pos = part_start = m_Pos;
-//     done = (pos == NPOS);
-//     // save part start position
-//     if (ptr_part_start) {
-//         *ptr_part_start = part_start;
-//     }
-//
-//     // Checks
-//     if (pos >= m_Str.size()) {
-//         pos = NPOS;
-//         done = true;
-//     }
-//     if (ptr_delim_pos) {
-//         *ptr_delim_pos = NPOS;
-//     }
-//
-//     // Each chunk covers the half-open interval [part_start, delim_pos).
-//
-//     while ( !done  &&
-//             ((delim_pos = m_Str.find_first_of(m_InternalDelim, pos)) != NPOS)) {
-//
-//         SIZE_TYPE next_start = pos = delim_pos + 1;
-//         bool      handled    = false;
-//         char      c          = m_Str[delim_pos];
-//
-//         if ((m_Flags & NStr::fSplit_CanEscape) != 0  &&  c == '\\') {
-//             // treat the following character literally
-//             if (++pos > m_Str.size()) {
-//                 NCBI_THROW2(CStringException, eFormat, "Unescaped trailing \\", delim_pos);
-//             }
-//             handled = true;
-//
-//         } else if ((m_Flags & NStr::fSplit_CanQuote) != 0) {
-//             if (active_quote != '\0') {
-//                 if (c == active_quote) {
-//                     if (pos < m_Str.size()  &&  m_Str[pos] == active_quote) {
-//                         // count a doubled quote as one literal occurrence
-//                         ++pos;
-//                     } else {
-//                         active_quote = '\0';
-//                     }
-//                 } else {
-//                     continue; // not actually a boundary
-//                 }
-//                 handled = true;
-//             } else if (((m_Flags & NStr::fSplit_CanSingleQuote) != 0  &&  c == '\'') ||
-//                        ((m_Flags & NStr::fSplit_CanDoubleQuote) != 0  &&  c == '"')) {
-//                 active_quote = c;
-//                 quote_pos    = delim_pos;
-//                 handled = true;
-//             }
-//         }
-//
-//         if ( !handled ) {
-//             if ((m_Flags & NStr::fSplit_ByPattern) != 0) {
-//                 if (delim_pos + m_Delim.size() <= m_Str.size()
-//                     &&  (memcmp(m_Delim.data() + 1, m_Str.data() + pos,
-//                                 m_Delim.size() - 1) == 0)) {
-//                     done = true;
-//                     next_start = pos = delim_pos + m_Delim.size();
-//                 } else {
-//                     continue;
-//                 }
-//             } else {
-//                 done = true;
-//             }
-//             // save delimiter position
-//             if (ptr_delim_pos) {
-//                 *ptr_delim_pos = delim_pos;
-//             }
-//         }
-//
-//         if (delim_pos > part_start) {
-//             found_text = true;
-//             if (part_collector != NULL) {
-//                 part_collector->Add(m_Str.substr(part_start, delim_pos - part_start));
-//             }
-//         }
-//         part_start = next_start;
-//     }
-//
-//     if (active_quote != '\0') {
-//         NCBI_THROW2(CStringException, eFormat, string("Unbalanced ") + active_quote, quote_pos);
-//     }
-//
-//     if (delim_pos == NPOS) {
-//         found_text = true;
-//         if (part_collector != NULL) {
-//             part_collector->Add(m_Str.substr(part_start));
-//         }
-//         m_Pos = NPOS;
-//     } else {
-//         m_Pos = pos;
-//         MergeDelims();
-//     }
-//     return found_text;
-// ```
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-321
-// ```c++
-//     void Do(TContainer&     target,
-//             TPosContainer&  token_pos,
-//             const TString&  empty_str = TString())
-//     {
-//         auto target_initial_size = target.size();
-//
-//         // Special cases
-//         if (m_Str.empty()) {
-//             return;
-//         } else if (m_Delim.empty()) {
-//             target.push_back(m_Str);
-//             token_pos.push_back(0);
-//             return;
-//         }
-//         // Do target space reservation (if applicable)
-//         TReserveTrait::Reserve(*this, target, token_pos);
-//
-//         // Tokenization
-//
-//         CTempStringList part_collector(m_Storage);
-//         SIZE_TYPE prev_pos;
-//         SIZE_TYPE delim_pos = NPOS;
-//         m_Pos = 0;
-//         do {
-//             Advance(&part_collector, &prev_pos, &delim_pos);
-//             target.push_back(empty_str); // reserve space for value added next line
-//             part_collector.Join(&target.back());
-//             part_collector.Clear();
-//             token_pos.push_back(prev_pos);
-//         } while ( !AtEnd() );
-//
-//         if ( (m_Flags & NStr::fSplit_Truncate_End) == 0 ) {
-//             // account training delimiter
-//             if (delim_pos != NPOS) {
-//                 // add empty token after last delimiter
-//                 target.push_back(empty_str);
-//                 token_pos.push_back(delim_pos + 1);
-//             }
-//         }
-//         else {
-//             // truncate trailing delimiters
-//
-//             // number of newly added items
-//             SIZE_TYPE num_new = target.size() - target_initial_size;
-//             // number of empty trailing items to delete
-//             SIZE_TYPE num_del = 0;
-//             for (auto i = target.rbegin(); i != target.rend() && num_new--; ++i) {
-//                 if (!i->empty()) {
-//                     break;
-//                 }
-//                 num_del++;
-//             }
-//             if (num_del) {
-//                 target.resize(target.size()-num_del);
-//                 token_pos.resize(token_pos.size()-num_del);
-//             }
-//         }
-//     }
-// ```
 // `NStr::Split(data, delims, lines, NStr::fSplit_Tokenize)` with `delims` a set of single characters
 // (`fSplit_ByPattern` is not set, so every character of the delimiter string is a delimiter): the non-empty runs of
 // bytes between delimiters. Leading, trailing and repeated delimiters give no empty token.
@@ -339,36 +114,38 @@ const KEPT_TOKENS: usize = 24;
 /// fSplit_Truncate`, the same flags): how many there are, and the first [`KEPT_TOKENS`] of them, which are all the
 /// tests read by position (a test that reads every token goes through the line itself).
 #[derive(Clone, Copy)]
-struct Tokens<'a> {
+pub(crate) struct Tokens<'a> {
     kept: [&'a [u8]; KEPT_TOKENS],
     len: usize,
 }
 
 impl<'a> Tokens<'a> {
     /// `tokens.size()`.
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.len
     }
 
     /// `tokens.empty()`.
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// `tokens[i]` of a token that exists (`i < len()`).
-    fn at(&self, i: usize) -> &'a [u8] {
+    pub(crate) fn at(&self, i: usize) -> &'a [u8] {
         assert!(i < self.len.min(KEPT_TOKENS), "token {i} of {}", self.len);
         self.kept[i]
     }
 
     /// `tokens[i]` when it exists.
-    fn get(&self, i: usize) -> Option<&'a [u8]> {
+    pub(crate) fn get(&self, i: usize) -> Option<&'a [u8]> {
         (i < self.len.min(KEPT_TOKENS)).then(|| self.kept[i])
     }
 }
 
-/// [`Tokens`] of `str` split at the bytes `delims`.
-fn tokens<'a>(str: &'a [u8], delims: &[u8]) -> Tokens<'a> {
+/// [`Tokens`] of `str` split at the bytes `delims`. The one port of `NStr::Split` with
+/// `fSplit_Tokenize`: the format guess's tests and the Clustal scanner of psiblast's `-in_msa`
+/// (`blastinput::aln_reader::clustal`) read their lines through it.
+pub(crate) fn tokens<'a>(str: &'a [u8], delims: &[u8]) -> Tokens<'a> {
     let mut tokens = Tokens {
         kept: [&[]; KEPT_TOKENS],
         len: 0,
@@ -386,30 +163,15 @@ fn tokens<'a>(str: &'a [u8], delims: &[u8]) -> Tokens<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3574-3597
-// ```c++
-// bool NStr::SplitInTwo(const CTempString str, const CTempString delim,
-//                       CTempStringEx& str1, CTempStringEx& str2,
-//                       TSplitFlags flags, CTempString_Storage* storage)
-// {
-//     ...
-//     // get first part
-//     splitter.Advance(&part_collector, NULL, &delim_pos);
-//     part_collector.Join(&str1);
-//     part_collector.Clear();
-//
-//     // don't need further splitting, just quote and escape parsing
-//     splitter.SetDelim(kEmptyStr);
-//     splitter.Advance(&part_collector);
-//     part_collector.Join(&str2);
-//
-//     return delim_pos != NPOS;
-// }
-// ```
 /// `NStr::SplitInTwo(str, delims, str1, str2, flags)`: `str1` (the bytes before the first delimiter, all of `str`
 /// when there is none), `str2` (after it; after the run of delimiters with `fSplit_MergeDelimiters`, `merge`) and
-/// whether a delimiter was found. `CStrTokenizeBase::Advance` (quoted at [`tokens`]) without
+/// whether a delimiter was found. `CStrTokenizeBase::Advance` (cited at [`tokens`]) without
 /// `fSplit_Truncate_Begin` keeps an empty `str1` before a leading delimiter.
-fn split_in_two<'a>(str: &'a [u8], delims: &[u8], merge: bool) -> (&'a [u8], &'a [u8], bool) {
+pub(crate) fn split_in_two<'a>(
+    str: &'a [u8],
+    delims: &[u8],
+    merge: bool,
+) -> (&'a [u8], &'a [u8], bool) {
     match str.iter().position(|c| delims.contains(c)) {
         None => (str, &[], false),
         Some(at) => {
@@ -430,17 +192,6 @@ fn contains(str: &[u8], pattern: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2887-2920 (`NStr::Find`, `eCase`, `eForwardSearch`)
-// ```c++
-//     if (plen > slen) {
-//         return NPOS;
-//     }
-//
-//     if (use_case == eCase) {
-//
-//         if (direction == eForwardSearch) {
-//             do {
-//                 pos = str.find(pattern, search_pos);
-// ```
 /// The position of the first `byte` in `hay`, read eight bytes at a time (a byte equal to `byte` is a zero byte of
 /// the word XOR `byte` in every lane; the lowest flagged lane is the first zero, a borrow only flags lanes above
 /// one).
@@ -605,154 +356,7 @@ fn count_runs(data: &[u8], ends: impl Fn(u8) -> bool + Copy) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:687-749
-// ```c++
-// bool
-// CFormatGuess::EnsureStats()
-// //  ----------------------------------------------------------------------------
-// {
-//     if ( m_bStatsAreValid ) {
-//         return true;
-//     }
-//     if ( ! EnsureTestBuffer() ) {
-//         return false;
-//     }
-//
-//     string strBuffer(m_pTestBuffer, m_iTestDataSize);
-//     CNcbiIstrstream TestBuffer(strBuffer);
-//     string strLine;
-//
-//     init_symbol_type_table();
-//     // Things we keep track of:
-//     //   m_iStatsCountAlNumChars: number of characters that are letters or
-//     //     digits
-//     //   m_iStatsCountData: number of characters not part of a line starting
-//     //     with '>', ignoring whitespace
-//     //   m_iStatsCountDnaChars: number of characters counted in m_iStatsCountData
-//     //     from the DNA alphabet
-//     //   m_iStatsCountAaChars: number of characters counted in m_iStatsCountData
-//     //     from the AA alphabet
-//     //  m_iStatsCountBraces: Opening { and closing } braces
-//     //
-//     while ( ! TestBuffer.fail() ) {
-//         NcbiGetline( TestBuffer, strLine, "\r\n" );
-// // code in CFormatGuess::Format counts line ends
-// // so, we will count them here as well
-//         if (!strLine.empty()) {
-//             strLine += '\n';
-//         }
-//         size_t size = strLine.size();
-//         bool is_header = size > 0 && strLine[0] == '>';
-//         for ( size_t i=0; i < size; ++i ) {
-//             unsigned char c = strLine[i];
-//             unsigned char type = symbol_type_table[c];
-//
-//             if ( type & (fAlpha | fDigit | fSpace) ) {
-//                 ++m_iStatsCountAlNumChars;
-//             }
-//             else if (c == '{'  ||  c == '}') {
-//                 ++m_iStatsCountBraces;
-//             }
-//             if ( !is_header ) {
-//                 if ( !(type & fSpace) ) {
-//                     ++m_iStatsCountData;
-//                 }
-//
-//                 if ( type & fDNA_Main_Alphabet ) {
-//                     ++m_iStatsCountDnaChars;
-//                 }
-//                 if ( type & fProtein_Alphabet ) {
-//                     ++m_iStatsCountAaChars;
-//                 }
-//             }
-//         }
-//     }
-//     m_bStatsAreValid = true;
-//     return true;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:55-134
-// ```c++
-// CNcbiIstream& NcbiGetline(CNcbiIstream& is, string& str, const string& delims,
-//                           SIZE_TYPE* count)
-// {
-//     str.erase();
-//
-//     IOS_BASE::fmtflags f = is.flags();
-//     is.unsetf(IOS_BASE::skipws);
-// #ifdef NO_PUBSYNC
-//     if ( !is.ipfx(1) ) {
-//         is.flags(f);
-//         is.setstate(NcbiFailbit);
-//         return is;
-//     }
-// #else
-//     CNcbiIstream::sentry s(is);
-//     if ( !s ) {
-//         is.flags(f);
-//         is.setstate(NcbiFailbit);
-//         return is;
-//     }
-// #endif //NO_PUBSYNC
-//     _ASSERT( is.good() );
-//
-//     char buf[1024];
-//     SIZE_TYPE pos = 0;
-//     SIZE_TYPE size = 0;
-//     SIZE_TYPE max_size = str.max_size();
-//     SIZE_TYPE delim_count = 0;
-//     IOS_BASE::iostate iostate = NcbiGoodbit/*0*/;
-//     for (;;) {
-//         CT_INT_TYPE ch = is.rdbuf()->sbumpc();
-//         if ( CT_EQ_INT_TYPE(ch, CT_EOF) ) {
-//             iostate = NcbiEofbit;
-//             break;
-//         }
-//         SIZE_TYPE delim_pos = delims.find(CT_TO_CHAR_TYPE(ch));
-//         if (delim_pos != NPOS) {
-//             // Special case -- if two different delimiters are back to
-//             // back and in the same order as in delims, treat them as
-//             // a single delimiter (necessary for correct handling of
-//             // DOS/MAC-style CR/LF endings).
-//             ch = is.rdbuf()->sgetc();
-//             if (!CT_EQ_INT_TYPE(ch, CT_EOF)
-//                 &&  delims.find(CT_TO_CHAR_TYPE(ch), delim_pos + 1) != NPOS) {
-//                 is.rdbuf()->sbumpc();
-//                 delim_count = 2;
-//             } else {
-//                 delim_count = 1;
-//             }
-//             break;
-//         }
-//         if (size == max_size) {
-//             CT_INT_TYPE bk = is.rdbuf()->sungetc();
-//             iostate = CT_EQ_INT_TYPE(bk, ch) ? NcbiFailbit : NcbiBadbit;
-//             break;
-//         }
-//
-//         buf[pos++] = CT_TO_CHAR_TYPE(ch);
-//         if (pos == sizeof(buf)) {
-//             str.append(buf, pos);
-//             pos  = 0;
-//         }
-//         size++;
-//     }
-//     if (pos > 0)
-//         str.append(buf, pos);
-//     if (count != NULL)
-//         *count = size + delim_count;
-//
-// #ifdef NO_PUBSYNC
-//     is.isfx();
-// #endif //NO_PUBSYNC
-//     is.flags(f);
-//     if (iostate) {
-//         if (iostate == NcbiEofbit  &&  str.empty())
-//             iostate |= NcbiFailbit;
-//         is.clear(iostate);
-//     }
-//     return is;
-// }
-// ```
 
 /// `EnsureStats` on the sample. `NcbiGetline(..., "\r\n")` ends a line at `\r` or `\n`; a `\r` followed by `\n` is one
 /// delimiter and every other pair (`\n\r`, `\r\r`, `\n\n`) is two, so an empty line only adds an empty `strLine`, which
@@ -818,50 +422,6 @@ fn stats_of(data: &[u8]) -> Stats {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:46-87
-// ```c++
-// static const CFormatGuess::EFormat sm_CheckOrder[] =
-// {
-//     CFormatGuess::eBam, // must precede eGZip!
-//     CFormatGuess::eZip,
-//     CFormatGuess::eZstd,
-//     CFormatGuess::eGZip,
-//     CFormatGuess::eBZip2,
-//     CFormatGuess::eLzo,
-//     CFormatGuess::eSra,
-//     CFormatGuess::ePsl, // must be checked before eRmo!
-//     CFormatGuess::eRmo,
-//     CFormatGuess::eVcf,
-//     CFormatGuess::eGvf,
-//     CFormatGuess::eGff3,
-//     CFormatGuess::eGtf,
-//     CFormatGuess::eGffAugustus,
-//     CFormatGuess::eGff2,
-//     CFormatGuess::eGlimmer3,
-//     CFormatGuess::eAgp,
-//     CFormatGuess::eXml,
-//     CFormatGuess::eWiggle,
-//     CFormatGuess::eNewick,
-//     CFormatGuess::eBed,
-//     CFormatGuess::eBed15,
-//     CFormatGuess::eHgvs,
-//     CFormatGuess::eDistanceMatrix,
-//     CFormatGuess::eFlatFileSequence,
-//     CFormatGuess::eFlatFileUniProt,
-//     CFormatGuess::eFlatFileEna,
-//     CFormatGuess::eFlatFileGenbank,
-//     CFormatGuess::eFiveColFeatureTable,
-//     CFormatGuess::eSnpMarkers,
-//     CFormatGuess::eFasta,
-//     CFormatGuess::eTextASN,
-//     CFormatGuess::eAlignment,
-//     CFormatGuess::eTaxplot,
-//     CFormatGuess::eTable,
-//     CFormatGuess::eBinaryASN,
-//     CFormatGuess::ePhrapAce,
-//     CFormatGuess::eUCSCRegion,
-//     CFormatGuess::eJSON,
-// };
-// ```
 /// `CFormatGuess::EFormat`, of the formats `sm_CheckOrder` lists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Format {
@@ -1167,43 +727,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:452-491
-    // ```c++
-    // CFormatGuess::EFormat
-    // CFormatGuess::GuessFormat( EOnError onerror )
-    // {
-    //     //sqd-4036:
-    //     // make sure we got something to work with
-    //     //
-    //     if (!x_TestInput(m_Stream, onerror)) {
-    //         return eUnknown;
-    //     }
-    //     if (!EnsureTestBuffer()) {
-    //         //one condition that won't allow us to get a good test buffer is an ascii
-    //         // file without any line breaks. so before giving up, let's specifically
-    //         // try any formats that would allow for that:
-    //         if(TestFormatNewick(eQuick)) {
-    //             return CFormatGuess::eNewick;
-    //         }
-    //         return CFormatGuess::eUnknown;
-    //     }
-    //
-    //     EMode mode = eQuick;
-    //
-    //     // First, try to use hints
-    //     if ( !m_Hints.IsEmpty() ) {
-    //         ...
-    //     }
-    //
-    //     // Check other formats, skip the ones that are disabled through hints
-    //     for (size_t f = 0; f < sm_CheckOrder_Size; ++f) {
-    //         EFormat fmt = EFormat( sm_CheckOrder[f] );
-    //         if ( ! m_Hints.IsDisabled(fmt)  &&  x_TestFormat(fmt, mode) ) {
-    //             return fmt;
-    //         }
-    //     }
-    //     return eUnknown;
-    // }
-    // ```
     /// `GuessFormat()` without hints.
     pub(crate) fn guess_format(&mut self) -> Result<Guessed, Stop> {
         let format = if !self.ensure_test_buffer() {
@@ -1229,8 +752,8 @@ impl<S: Source> FormatGuess<S> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:513-601 (`x_TestFormat`: `case eBinaryASN: return
-    // TestFormatBinaryAsn( mode );` and so on for each format; `case eUCSCRegion: return false;`)
+    // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:513-601 (`x_TestFormat`: each format
+    // calls its own test, and the UCSC region format always answers false)
     /// `x_TestFormat(format)`.
     fn test_format(&mut self, format: Format) -> Result<bool, Stop> {
         Ok(match format {
@@ -1282,68 +805,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:625-684
-    // ```c++
-    // bool
-    // CFormatGuess::EnsureTestBuffer()
-    // //  ----------------------------------------------------------------------------
-    // {
-    //     if ( m_pTestBuffer ) {
-    //         return true;
-    //     }
-    //     if ( ! m_Stream.good() ) {
-    //         return false;
-    //     }
-    //
-    //     // Fix to the all-comment problem.
-    //     // Read a test buffer,
-    //     // Test it for being all comment
-    //     // If its all comment, read a twice as long buffer
-    //     // Stop when its no longer all comment, end of the stream,
-    //     //   or Multiplier hits 1024
-    //
-    //     const streamsize k_TestBufferGranularity = 8096;
-    //
-    //     int Multiplier = 1;
-    //
-    //     while(true) {
-    //         m_iTestBufferSize = Multiplier * k_TestBufferGranularity;
-    //         m_pTestBuffer = new char[ m_iTestBufferSize ];
-    //         m_Stream.read( m_pTestBuffer, m_iTestBufferSize );
-    //         m_iTestDataSize = m_Stream.gcount();
-    //         if (m_iTestDataSize == 0) {
-    //             delete[] m_pTestBuffer;
-    //             m_pTestBuffer = 0;
-    //             m_iTestBufferSize = 0;
-    //             return false; //empty file
-    //         }
-    //         m_Stream.clear();  // in case we reached eof
-    //         CStreamUtils::Stepback( m_Stream, m_pTestBuffer, m_iTestDataSize );
-    //
-    //         if (IsAllComment()) {
-    //             if (Multiplier >= 1024)  {
-    //                 // this is how far we will go and no further.
-    //                 // if it's indeed all comments then none of the format specific
-    //                 //  tests will assert.
-    //                 // if something was misidentified as a comment then the relevant
-    //                 //  format specific test may still have a good sample to work with.
-    //                 // so it does not hurt to at least try.
-    //                 return true;
-    //             }
-    //             Multiplier *= 2;
-    //             delete [] m_pTestBuffer;
-    //             m_pTestBuffer = NULL;
-    //             if (m_iTestDataSize < m_iTestBufferSize)  {
-    //                 return false;
-    //             }
-    //             continue;
-    //         } else {
-    //             break;
-    //         }
-    //     }
-    //
-    //     return true;
-    // }
-    // ```
     /// `EnsureTestBuffer()`: false for an empty stream (which stays at its end) and for an all-comment sample that
     /// ended before the buffer was full. Each pass reads the stream again from where the last one put its bytes
     /// back (`CStreamUtils::Stepback`), so the sample is the next `Multiplier * 8096` bytes.
@@ -1385,26 +846,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3747-3764
-    // ```c++
-    // bool
-    // CFormatGuess::IsAsciiText()
-    // {
-    //     const double REQUIRED_ASCII_RATIO = 0.9;
-    //
-    //     // first stab - are we text?  comments are only valid if we are text
-    //     size_t count = 0;
-    //     size_t count_print = 0;
-    //     for (int i = 0;  i < m_iTestDataSize;  ++i, ++count) {
-    //         if (isprint((unsigned char) m_pTestBuffer[i])) {
-    //             ++count_print;
-    //         }
-    //     }
-    //     if (count_print < (double)count * REQUIRED_ASCII_RATIO) {
-    //         return false;
-    //     }
-    //     return true;
-    // }
-    // ```
     fn is_ascii_text(&self) -> bool {
         const REQUIRED_ASCII_RATIO: f64 = 0.9;
         let data = self.data();
@@ -1414,34 +855,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3767-3792
-    // ```c++
-    // bool
-    // CFormatGuess::IsAllComment()
-    // {
-    //     if (!IsAsciiText()) {
-    //         return false;
-    //     }
-    //
-    //     m_bSplitDone = false;
-    //     m_TestLines.clear();
-    //     EnsureSplitLines();
-    //
-    //     ITERATE(list<string>, it, m_TestLines) {
-    //         if(it->empty()) {
-    //             continue;
-    //         }
-    //         if (NStr::StartsWith(*it, "#")) {
-    //             continue;
-    //         }
-    //         if(NStr::StartsWith(*it, "--")) {
-    //             continue;
-    //         }
-    //         return false;
-    //     }
-    //
-    //     return true;
-    // }
-    // ```
     /// Lines are not trimmed: " # x" is not a comment. When `EnsureSplitLines` gives no line (it returned false
     /// early), the loop does not run and the sample counts as all comment.
     fn is_all_comment(&mut self) -> bool {
@@ -1456,61 +869,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3692-3744
-    // ```c++
-    // bool
-    // CFormatGuess::EnsureSplitLines()
-    // //  ----------------------------------------------------------------------------
-    // {
-    //     if ( m_bSplitDone ) {
-    //         return !m_TestLines.empty();
-    //     }
-    //     m_bSplitDone = true;
-    //
-    //     //
-    //     //  Make sure the given data is ASCII before checking potential line breaks:
-    //     //
-    //     const size_t MIN_HIGH_RATIO = 20;
-    //     size_t high_count = 0;
-    //     for ( streamsize i=0; i < m_iTestDataSize; ++i ) {
-    //         if ( 0x80 & m_pTestBuffer[i] ) {
-    //             ++high_count;
-    //         }
-    //     }
-    //     if ( 0 < high_count && m_iTestDataSize / high_count < MIN_HIGH_RATIO ) {
-    //         return false;
-    //     }
-    //
-    //     //
-    //     //  Let's expect at least one line break in the given data:
-    //     //
-    //     string data( m_pTestBuffer, (size_t)m_iTestDataSize );
-    //     m_TestLines.clear();
-    //
-    //     if ( string::npos != data.find("\r\n") ) {
-    //         NStr::Split(data, "\r\n", m_TestLines, NStr::fSplit_Tokenize);
-    //     }
-    //     else if ( string::npos != data.find("\n") ) {
-    //         NStr::Split(data, "\n", m_TestLines, NStr::fSplit_Tokenize);
-    //     }
-    //     else if ( string::npos != data.find("\r") ) {
-    //         NStr::Split(data, "\r", m_TestLines, NStr::fSplit_Tokenize);
-    //     }
-    //     else if ( m_iTestDataSize == m_iTestBufferSize) {
-    //         //most likely single truncated line
-    //         return false;
-    //     }
-    //     else {
-    //         //test buffer contains the entire file
-    //         m_TestLines.push_back(data);
-    //     }
-    //
-    //     if ( m_iTestDataSize == m_iTestBufferSize   &&  m_TestLines.size() > 1 ) {
-    //         //multiple lines, last likely truncated
-    //         m_TestLines.pop_back();
-    //     }
-    //     return !m_TestLines.empty();
-    // }
-    // ```
     /// `EnsureSplitLines()`: an early `return false` leaves `m_TestLines` as they were (empty after
     /// `IsAllComment`'s `clear()`, and at the start).
     pub(crate) fn ensure_split_lines(&mut self) -> bool {
@@ -1587,25 +945,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1928-1950
-    // ```c++
-    //     if ( ! EnsureTestBuffer() ) {
-    //         return false;
-    //     }
-    //     // check if the first two bytes match with the zip magic number: 0x504B,
-    //     // or PK and the next two bytes match with any of 0x0102, 0x0304, 0x0506
-    //     // and 0x0708.
-    //     if ( m_iTestDataSize < 4) {
-    //         return false;
-    //     }
-    //     if (m_pTestBuffer[0] == 'P'  &&  m_pTestBuffer[1] == 'K'  &&
-    //         ((m_pTestBuffer[2] == (char)1  &&  m_pTestBuffer[3] == (char)2)  ||
-    //          (m_pTestBuffer[2] == (char)3  &&  m_pTestBuffer[3] == (char)4)  ||
-    //          (m_pTestBuffer[2] == (char)5  &&  m_pTestBuffer[3] == (char)6) ||
-    //          (m_pTestBuffer[2] == (char)7  &&  m_pTestBuffer[3] == (char)8) ) ) {
-    //         return true;
-    //     }
-    //     return false;
-    // ```
     /// `TestFormatZip`.
     fn test_format_zip(&mut self) -> bool {
         if !self.ensure_test_buffer() {
@@ -1618,45 +957,12 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1953-1991 (`TestFormatGZip`, `TestFormatZstd`)
-    // ```c++
-    //     // check if the first two bytes match the gzip magic number: 0x1F8B
-    //     if ( m_iTestDataSize < 2) {
-    //         return false;
-    //     }
-    //     if (m_pTestBuffer[0] == (char)31  &&  m_pTestBuffer[1] == (char)139) {
-    //         return true;
-    //     }
-    //     ...
-    //     // check if the first 4 bytes match with the zstd magic number: 0xFD2FB528
-    //     if ( m_iTestDataSize < 4) {
-    //         return false;
-    //     }
-    //     if (m_pTestBuffer[0] == (char)0x28  &&
-    //         m_pTestBuffer[1] == (char)0xB5  &&
-    //         m_pTestBuffer[2] == (char)0x2F  &&
-    //         m_pTestBuffer[3] == (char)0xFD  ) {
-    //         return true;
-    //     }
-    // ```
     /// `TestFormatGZip`, `TestFormatZstd`: the buffer starts with `magic`.
     fn test_magic(&mut self, magic: &[u8]) -> bool {
         self.ensure_test_buffer() && self.data().starts_with(magic)
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1994-2016
-    // ```c++
-    //     // check if the first two bytes match with the bzip2 magic number: 0x425A,
-    //     // or 'BZ' and the next two bytes match with 0x68(h) and 0x31-39(1-9)
-    //     if ( m_iTestDataSize < 4) {
-    //         return false;
-    //     }
-    //
-    //     if (m_pTestBuffer[0] == 'B'  &&  m_pTestBuffer[1] == 'Z'  &&
-    //         m_pTestBuffer[2] == 'h'  &&  m_pTestBuffer[3] >= '1'  &&
-    //         m_pTestBuffer[3] <= '9') {
-    //         return true;
-    //     }
-    // ```
     /// `TestFormatBZip2`.
     fn test_format_bzip2(&mut self) -> bool {
         if !self.ensure_test_buffer() {
@@ -1667,23 +973,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:2019-2044
-    // ```c++
-    //     if (m_iTestDataSize >= 3  &&  m_pTestBuffer[0] == 'L'  &&
-    //         m_pTestBuffer[1] == 'Z'  &&  m_pTestBuffer[2] == 'O') {
-    //         if (m_iTestDataSize == 3  ||
-    //             (m_iTestDataSize > 3  &&  m_pTestBuffer[3] == '\0')) {
-    //             return true;
-    //         }
-    //     }
-    //
-    //     if (m_iTestDataSize >= 4  &&  m_pTestBuffer[1] == 'L'  &&
-    //         m_pTestBuffer[2] == 'Z'  &&  m_pTestBuffer[3] == 'O') {
-    //         if (m_iTestDataSize == 4  ||
-    //             (m_iTestDataSize > 4  &&  m_pTestBuffer[4] == '\0')) {
-    //             return true;
-    //         }
-    //     }
-    // ```
     /// `TestFormatLzo`.
     fn test_format_lzo(&mut self) -> bool {
         if !self.ensure_test_buffer() {
@@ -1695,25 +984,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:2047-2063
-    // ```c++
-    // bool CFormatGuess::TestFormatSra(EMode /* not used */ )
-    // {
-    //     if ( !EnsureTestBuffer()  ||  m_iTestDataSize < 16
-    //         ||  CTempString(m_pTestBuffer, 8) != "NCBI.sra") {
-    //         return false;
-    //     }
-    //
-    //     if (m_pTestBuffer[8] == '\x05'  &&  m_pTestBuffer[9] == '\x03'
-    //         &&  m_pTestBuffer[10] == '\x19'  &&  m_pTestBuffer[11] == '\x88') {
-    //         return true;
-    //     } else if (m_pTestBuffer[8] == '\x88'  &&  m_pTestBuffer[9] == '\x19'
-    //         &&  m_pTestBuffer[10] == '\x03'  &&  m_pTestBuffer[11] == '\x05') {
-    //         return true;
-    //     } else {
-    //         return false;
-    //     }
-    // }
-    // ```
     /// `TestFormatSra`.
     fn test_format_sra(&mut self) -> bool {
         if !self.ensure_test_buffer() {
@@ -1726,40 +996,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1277-1313
-    // ```c++
-    //     if ( ! EnsureTestBuffer() ) {
-    //         return false;
-    //     }
-    //
-    //     string input( m_pTestBuffer, (size_t)m_iTestDataSize );
-    //     NStr::TruncateSpacesInPlace( input, NStr::eTrunc_Begin );
-    //
-    //     //
-    //     //  Test 1: If it starts with typical XML decorations such as "<?xml..."
-    //     //  then respect that:
-    //     //
-    //     if ( NStr::StartsWith( input, "<?XML", NStr::eNocase ) ) {
-    //         return true;
-    //     }
-    //     if ( NStr::StartsWith( input, "<!DOCTYPE", NStr::eNocase ) ) {
-    //         return true;
-    //     }
-    //
-    //     //
-    //     //  Test 2: In the absence of XML specific declarations, check whether the
-    //     //  input starts with the opening tag of a well known set of doc types:
-    //     //
-    //     static const char* known_types[] = {
-    //         "<Blast4-request>"
-    //     };
-    //     for ( size_t i=0; i < ArraySize(known_types); ++i ) {
-    //         if ( NStr::StartsWith( input, known_types[i], NStr::eCase ) ) {
-    //             return true;
-    //         }
-    //     }
-    //
-    //     return false;
-    // ```
     /// `TestFormatXml`. `eTrunc_Begin` drops C's `isspace` bytes, the vertical tab included.
     fn test_format_xml(&mut self) -> bool {
         if !self.ensure_test_buffer() {
@@ -1775,28 +1011,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1161-1186
-    // ```c++
-    //     if ( ! EnsureTestBuffer() ) {
-    //         return false;
-    //     }
-    //
-    //     //
-    //     //  Criterion: Presence of any non-printing characters
-    //     //
-    //     EConfidence conf = eNo;
-    //     for (int i = 0;  i < m_iTestDataSize;  ++i) {
-    //         if ( !isgraph((unsigned char) m_pTestBuffer[i])  &&
-    //              !isspace((unsigned char) m_pTestBuffer[i]) )
-    //         {
-    //             if (m_pTestBuffer[i] == '\1') {
-    //                 conf = eMaybe;
-    //             } else {
-    //                 return true;
-    //             }
-    //         }
-    //     }
-    //     return (conf == eYes);
-    // ```
     /// `TestFormatBinaryAsn`: a byte that is neither `isgraph` nor `isspace`, other than `\1` (`conf` never becomes
     /// `eYes`).
     pub(crate) fn test_format_binary_asn(&mut self) -> bool {
@@ -1808,61 +1022,9 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1678-1716
-    // ```c++
-    // bool
-    // CFormatGuess::TestFormatTextAsn(
-    //     EMode /* not used */ )
-    // {
-    //     if ( ! EnsureStats() ) {
-    //         return false;
-    //     }
-    //
-    //     // reject obvious misfits:
-    //     if ( m_iTestDataSize == 0 || m_pTestBuffer[0] == '>' ) {
-    //         return false;
-    //     }
-    //
-    //     // criteria:
-    //     // at least 80% text-ish,
-    //     // 1st field of the first non-blank not comment line must start with letter.
-    //     // "::=" as the 2nd field of the first non-blank non comment line.
-    //     //
-    //     double dAlNumFraction = (double)(m_iStatsCountAlNumChars+m_iStatsCountBraces) /
-    //                             (double)m_iTestDataSize;
-    //     if ( dAlNumFraction < 0.80 ) {
-    //         return false;
-    //     }
-    //
-    //     string strBuffer(m_pTestBuffer, m_iTestDataSize);
-    //     CNcbiIstrstream TestBuffer(strBuffer);
-    //     string strLine;
-    //
-    //     while ( ! TestBuffer.fail() ) {
-    //         vector<string> Fields;
-    //         NcbiGetline(TestBuffer, strLine, "\n\r");
-    //         NStr::Split(strLine, " \t", Fields, NStr::fSplit_Tokenize);
-    //         if ( IsAsnComment( Fields  ) ) {
-    //             continue;
-    //         }
-    //         return ( Fields.size() >= 2 && Fields[1] == "::=" && isalpha(Fields[0][0]));
-    //     }
-    //     return false;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:3680-3689
-    // ```c++
-    // bool
-    // CFormatGuess::IsAsnComment(
-    //     const vector<string>& Fields )
-    // {
-    //     if ( Fields.size() == 0 ) {
-    //         return true;
-    //     }
-    //     return ( NStr::StartsWith( Fields[0], "--" ) );
-    // }
-    // ```
     /// `TestFormatTextAsn`. The statistics are those of `EnsureStats`'s buffer, the size and the lines those of the
-    /// buffer now (another one after `TestFormatNewick` replaced it). `NcbiGetline(..., "\n\r")` (quoted at
+    /// buffer now (another one after `TestFormatNewick` replaced it). `NcbiGetline(..., "\n\r")` (cited at
     /// [`stats_of`]) ends a line at either byte, and the empty lines of a pair have no field: comments.
     pub(crate) fn test_format_text_asn(&mut self) -> bool {
         if !self.ensure_stats() {
@@ -1889,45 +1051,7 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1640-1675
-    // ```c++
-    // CFormatGuess::TestFormatFasta( EMode /* not used */ )
-    // {
-    //     if ( ! EnsureStats() ) {
-    //         return false;
-    //     }
-    //
-    //     // reject obvious misfits:
-    //     CTempString header(m_pTestBuffer, m_iTestDataSize);
-    //     SkipCommentAndBlank(header);
-    //     if ( m_iTestDataSize == 0 || header.length() == 0 || header[0] != '>' ) {
-    //         return false;
-    //     }
-    //     if ( m_iStatsCountData == 0 ) {
-    //         if (0.75 > double(m_iStatsCountAlNumChars)/double(m_iTestDataSize) ) {
-    //             return false;
-    //         }
-    //         return ( NStr::Find( m_pTestBuffer, "|" ) <= 10 );
-    //     }
-    //
-    //     // remaining decision based on text stats:
-    //     double dAlNumFraction = (double)m_iStatsCountAlNumChars / (double)m_iTestDataSize;
-    //     double dDnaFraction   = (double)m_iStatsCountDnaChars / (double)m_iStatsCountData;
-    //     double dAaFraction    = (double)m_iStatsCountAaChars / (double)m_iStatsCountData;
-    //
-    //     // want at least 80% text-ish overall:
-    //     if ( dAlNumFraction < 0.8 ) {
-    //         return false;
-    //     }
-    //
-    //     // want more than 91 percent of either DNA content or AA content in what we
-    //     // presume is data:
-    //     if ( dDnaFraction > 0.91 || dAaFraction > 0.91 ) {
-    //         return true;
-    //     }
-    //     return false;
-    // }
-    // ```
-    // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:340-347 (`CTempString::operator[]`, quoted at
+    // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:340-347 (`CTempString::operator[]`, cited at
     // `skip_comment_and_blank`: NUL past the end)
     /// `TestFormatFasta`: `Some(answer)`, or `None` when its `NStr::Find(m_pTestBuffer, "|")` decides and the input
     /// does not. `m_pTestBuffer` is a `char*` there: the C string ends at its first NUL, which `EnsureTestBuffer`'s
@@ -1976,106 +1100,6 @@ impl<S: Source> FormatGuess<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1061-1158
-    // ```c++
-    // bool
-    // CFormatGuess::TestFormatNewick(
-    //     EMode /* not used */ )
-    // {
-    // //  -----------------------------------------------------------------------------
-    //     // newick trees can be found in nexus files. check for that first as a special case
-    //     if ( ! EnsureTestBuffer() || ! EnsureSplitLines() ) {
-    //         const int BUFFSIZE = 8096;
-    //         if (m_pTestBuffer) {
-    //             delete [] m_pTestBuffer;
-    //         }
-    //         m_pTestBuffer = new char[BUFFSIZE+1];
-    //         m_Stream.read( m_pTestBuffer, BUFFSIZE );
-    //         m_iTestDataSize = m_Stream.gcount();
-    //         m_pTestBuffer[m_iTestDataSize] = 0;
-    //         m_Stream.clear();  // in case we reached eof
-    //         CStreamUtils::Stepback( m_Stream, m_pTestBuffer, m_iTestDataSize );
-    //         m_TestLines.push_back(m_pTestBuffer);
-    //     }
-    //
-    //     // Note: We can live with false negatives. Avoid false positives
-    //     // at all cost.
-    //
-    //     bool is_nexus = false;
-    //     bool has_trees = false;
-    //     const size_t check_size = 12;
-    //
-    //     ITERATE( list<string>, it, m_TestLines ) {
-    //         if ( NPOS != it->find( "#NEXUS" ) ) {
-    //             is_nexus = true;
-    //         }
-    //     }
-    //
-    //     // Trees can be anywhere in a nexus file.  If nexus is true,
-    //     // try to read the whole file to see if there is a tree.
-    //     if (is_nexus) {
-    //         // Read in file one chunk at a time.  Readline would be better
-    //         // but is not avialable for this stream.  Since the text we
-    //         // are looking for "begin trees;" may span two chunks, we
-    //         // copy the last 12 characters of the previous chunk to
-    //         // the front of the new one.
-    //         const size_t read_size = 16384;
-    //         char test_buf[read_size + check_size + 1];
-    //         memset(test_buf, ' ', check_size); // "previous chunk" initially blank.
-    //
-    //         size_t max_reads = 32768;  // max read to locate tree: 512 MB
-    //         for (size_t i = 0; i < max_reads; ++i) {
-    //             m_Stream.read(test_buf+check_size, read_size);
-    //             size_t num_read = m_Stream.gcount();
-    //             if (num_read > 0) {
-    //                 test_buf[num_read + check_size] = 0; // null terminator
-    //                 if (NPOS != NStr::FindNoCase(CTempString(test_buf), "begin trees;")) {
-    //                     has_trees = true;
-    //                     m_Stream.clear();  // in case we reached eof
-    //                     break;
-    //                 }
-    //                 // copy end of buffer to beginning in case string
-    //                 // spans two buffers:
-    //                 strncpy(test_buf, test_buf + num_read, check_size);
-    //             }
-    //
-    //             if (m_Stream.eof() || m_Stream.fail()) {
-    //                 m_Stream.clear();  // clear eof
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //
-    //     // In a nexus file with a tree, we will just read in the tree (ignoring for now
-    //     // the alignment)
-    //     if (is_nexus ) {
-    //         if (has_trees)
-    //             return true;
-    //         return false;
-    //     }
-    //
-    //     //  special newick consideration:
-    //     //  newick files may come with all data cramped into a single run-on line,
-    //     //  that single oversized line may not have a line terminator
-    //     const size_t maxSampleSize = 8*1024-1;
-    //     size_t sampleSize = 0;
-    //     char* pSample = new char[maxSampleSize+1];
-    //     AutoArray<char> autoDelete(pSample);
-    //
-    //     m_Stream.read(pSample, maxSampleSize);
-    //     sampleSize = (size_t)m_Stream.gcount();
-    //     m_Stream.clear();  // in case we reached eof
-    //     CStreamUtils::Stepback(m_Stream, pSample, sampleSize);
-    //     if (0 == sampleSize) {
-    //         return false;
-    //     }
-    //
-    //     pSample[sampleSize] = 0;
-    //     if (!IsSampleNewick(pSample)) { // tolerant of embedded line breaks
-    //         return false;
-    //     }
-    //     return true;
-    // }
-    // ```
     /// `TestFormatNewick`. When the split fails it reads a buffer of its own (8096 bytes from where the stream is,
     /// a NUL after them) and adds it to the lines as a C string, which the later tests read. The NEXUS scan reads
     /// the stream on without stepping back: the text reader then starts where it stopped. `CTempString(test_buf)` is
@@ -2136,64 +1160,9 @@ impl<S: Source> FormatGuess<S> {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:1624-1637
-// ```c++
-// void SkipCommentAndBlank(CTempString &text)
-// {
-//     const CTempString COMMENT_SYMBOLS(";#!");
-//     const CTempString NEW_LINE_SYMBOLS("\r\n");
-//     while (true) {
-//         text = NStr::TruncateSpaces_Unsafe(text, NStr::eTrunc_Begin);
-//         if ( COMMENT_SYMBOLS.find(text[0]) != CTempString::npos ) {
-//             CTempString::size_type pos = text.find_first_of(NEW_LINE_SYMBOLS, 1);
-//             text = text.substr(pos);
-//         } else {
-//             break;
-//         }
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:340-347
-// ```c++
-// inline
-// char CTempString::operator[](size_type pos) const
-// {
-//     if ( pos < m_Length ) {
-//         return m_String[pos];
-//     }
-//     return '\0';
-// }
-// ```
 // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:537-549
-// ```c++
-// inline
-// CTempString::size_type CTempString::find_first_of(const CTempString match,
-//                                                   size_type pos) const
-// {
-//     if (match.length()  &&  pos < length()) {
-//         const_iterator it = std::find_first_of(begin() + pos, end(),
-//                                                match.begin(), match.end());
-//         if (it != end()) {
-//             return it - begin();
-//         }
-//     }
-//     return npos;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:362-373
-// ```c++
-// inline
-// void CTempString::x_Init(const char* str, size_type str_len,
-//                          size_type pos)
-// {
-//     if ( pos >= str_len ) {
-//         clear();
-//     }
-//     else {
-//         m_String = str + pos;
-//         m_Length = str_len - pos;
-//     }
-// }
-// ```
 /// `SkipCommentAndBlank`. `text[0]` of an empty text is NUL, which is not in `;#!`. A comment line without a following
 /// line end (`find_first_of` gives `npos`) makes `substr(npos)` the empty string.
 fn skip_comment_and_blank(mut text: &[u8]) -> &[u8] {
@@ -2229,117 +1198,6 @@ fn find_nocase(str: &[u8], pattern: &[u8]) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:2946-3071
-// ```c++
-// bool
-// CFormatGuess::IsSampleNewick(
-//     const string& cline )
-// //  ----------------------------------------------------------------------------
-// {
-//     string line = NStr::TruncateSpaces( cline );
-//     if ( line.empty()  ||  line[0] != '(') {
-//         return false;
-//     }
-//     {{
-//         //  Strip out comments:
-//         string trimmed;
-//         bool in_comment = false;
-//         for ( size_t ii=0; line.c_str()[ii] != 0; ++ii ) {
-//             if ( ! in_comment ) {
-//                 if ( line.c_str()[ii] != '[' ) {
-//                     trimmed += line.c_str()[ii];
-//                 }
-//                 else {
-//                     in_comment = true;
-//                 }
-//             }
-//             else /* in_comment */ {
-//                 if ( line.c_str()[ii] == ']' ) {
-//                     in_comment = false;
-//                 }
-//             }
-//         }
-//         line = trimmed;
-//     }}
-//     {{
-//         //  Compress quoted labels:
-//         string trimmed;
-//         bool in_quote = false;
-//         for ( size_t ii=0; line.c_str()[ii] != 0; ++ii ) {
-//             if ( ! in_quote ) {
-//                 if ( line.c_str()[ii] != '\'' ) {
-//                     trimmed += line.c_str()[ii];
-//                 }
-//                 else {
-//                     in_quote = true;
-//                     trimmed += 'A';
-//                 }
-//             }
-//             else { /* in_quote */
-//                 if ( line.c_str()[ii] == '\'' ) {
-//                     in_quote = false;
-//                 }
-//             }
-//         }
-//         line = trimmed;
-//     }}
-//     {{
-//         //  Strip distance markers:
-//         string trimmed;
-//         size_t ii=0;
-//         while ( line.c_str()[ii] != 0 ) {
-//             if ( line.c_str()[ii] != ':' ) {
-//                 trimmed += line.c_str()[ii++];
-//             }
-//             else {
-//                 ii++;
-//                 if ( line.c_str()[ii] == '-'  || line.c_str()[ii] == '+' ) {
-//                     ii++;
-//                 }
-//                 while ( '0' <= line.c_str()[ii] && line.c_str()[ii] <= '9' ) {
-//                     ii++;
-//                 }
-//                 if ( line.c_str()[ii] == '.' ) {
-//                     ii++;
-//                     while ( '0' <= line.c_str()[ii] && line.c_str()[ii] <= '9' ) {
-//                         ii++;
-//                     }
-//                 }
-//             }
-//         }
-//         line = trimmed;
-//     }}
-//     {{
-//         //  Rough lexical analysis of what's left. Bail immediately on fault:
-//         if (line.empty()  ||  line[0] != '(') {
-//             return false;
-//         }
-//         size_t paren_count = 1;
-//         for ( size_t ii=1; line.c_str()[ii] != 0; ++ii ) {
-//             switch ( line.c_str()[ii] ) {
-//                 default:
-//                     break;
-//                 case '(':
-//                     ++paren_count;
-//                     break;
-//                 case ')':
-//                     if ( paren_count == 0 ) {
-//                         return false;
-//                     }
-//                     --paren_count;
-//                     break;
-//                 case ',':
-//                     if ( paren_count == 0 ) {
-//                         return false;
-//                     }
-//                     break;
-//                 case ';':
-//                     break;
-//             }
-//         }
-//     }}
-//     return true;
-// }
-// ```
 /// `IsSampleNewick(pSample)` of the sample read (`cline` is its C string, up to its first NUL; a sample whose first
 /// byte after the spaces is not `(` is no tree before the C string is cut).
 fn is_sample_newick(sample: &[u8]) -> bool {

@@ -76,7 +76,8 @@ fn blastdbcmd(words: &[&str], out_dir: &Path) -> (Vec<u8>, Vec<u8>, i32) {
     (output.stdout, output.stderr, output.status.code().unwrap())
 }
 
-/// The frozen file `name` of `tests/blastdbcmd/expected`, with `{R}` placed.
+/// The frozen file `name` of `tests/blastdbcmd/expected`, with `{R}` placed, in LOSAT's words
+/// (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
 fn expected(name: &str) -> Vec<u8> {
     let tests = tests_dir();
     let text = fs::read(tests.join("blastdbcmd/expected").join(name)).unwrap();
@@ -87,8 +88,8 @@ fn expected(name: &str) -> Vec<u8> {
     let text = text
         .replace("database [db/", "database [db\\")
         .replace("{R}::]", "{R};;]");
-    text.replace("{R}", tests.join("blastdbcmd").to_str().unwrap())
-        .into_bytes()
+    let text = text.replace("{R}", tests.join("blastdbcmd").to_str().unwrap());
+    losat::wording::losat_output_bytes(text.as_bytes()).into_owned()
 }
 
 fn check(id: &str, words: &[&str], status: i32, out_dir: &Path) {
@@ -524,7 +525,7 @@ fn damaged_lookup_files_are_reported_as_ncbi_s_or_refused() {
         &nopdb,
         &["-entry", "all"],
         format!(
-            "BLAST Database error: File {nopdb}.pdb not found. If you renamed any BLAST database \
+            "LOSAT database error: File {nopdb}.pdb not found. If you renamed any BLAST database \
              files, please use original file names, and makeblastdb to rename the database. If \
              you deleted any BLAST database files, you need to recreate the database."
         ),
@@ -536,7 +537,7 @@ fn damaged_lookup_files_are_reported_as_ncbi_s_or_refused() {
         open_error(
             &garbage,
             words,
-            "BLAST Database error: LMDB runtime error: mdb_env_open: MDB_INVALID: File is not an \
+            "LOSAT database error: LMDB runtime error: mdb_env_open: MDB_INVALID: File is not an \
              LMDB file"
                 .to_string(),
         );
@@ -545,7 +546,7 @@ fn damaged_lookup_files_are_reported_as_ncbi_s_or_refused() {
     open_error(
         &empty,
         &["-entry", "all"],
-        "BLAST Database error: LMDB runtime error: mdb_env_open: Bad file descriptor".to_string(),
+        "LOSAT database error: LMDB runtime error: mdb_env_open: Bad file descriptor".to_string(),
     );
     let wrong = damaged("wrong", &|db| {
         let d5 = tests_dir().join("blastdbcmd/db/d5.pdb");
@@ -554,7 +555,7 @@ fn damaged_lookup_files_are_reported_as_ncbi_s_or_refused() {
     open_error(
         &wrong,
         &["-entry", "all"],
-        "BLAST Database error: Input db vol does not match lmdb vol".to_string(),
+        "LOSAT database error: Input db vol does not match lmdb vol".to_string(),
     );
 
     #[cfg(unix)]
@@ -569,7 +570,7 @@ fn damaged_lookup_files_are_reported_as_ncbi_s_or_refused() {
             open_error(
                 &unreadable,
                 &["-entry", "all"],
-                "BLAST Database error: LMDB runtime error: mdb_env_open: Permission denied"
+                "LOSAT database error: LMDB runtime error: mdb_env_open: Permission denied"
                     .to_string(),
             );
         }

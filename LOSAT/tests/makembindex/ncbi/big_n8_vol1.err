@@ -1,0 +1,2 @@
+creating @CWD@/gen/bigdb/big.00.idx...removed (empty)
+Error: number of sequence reported by BLAST database volume (2) is not the same as in the index (0)

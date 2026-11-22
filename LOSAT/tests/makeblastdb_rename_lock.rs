@@ -33,6 +33,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 const PROT: &str = ">sp|P12345|AAA_HUMAN Alpha protein\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV\n>sp|Q99999|BBB_HUMAN Beta protein\nMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNA\n>sp|P55555|CCC_HUMAN Gamma\nMSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVYLLPRRGPRLGVRATRKTSERSQPRGRRQPIPKARR\n";
 const NUC: &str = ">seq1 first\nACGTACGTACGTAGCTAGCTAGCTAGCATCGATCGATCGATCGATCGTAGCTAGCTAGCTAGCTAGCATGC\n>seq2 second\nTTGACCGGTTAACCGGTTAAGGCCTTAAGGCCTTAAACGTACGTACGTAGCTAGCTAGCATCGATCGATCG\n";
 
@@ -86,7 +87,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.pin"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n",
-        stderr: "BLAST Database error: No alias or index file found for protein database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
+        stderr: "LOSAT database error: No alias or index file found for protein database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
         files: "db.00.pin:* db.pdb:32768 db.phd:37 db.phi:65 db.phr:264 db.pin/ db.pog:44 db.pos:53 db.pot:44 db.psq:214 db.ptf:16384 db.pto:16",
     },
     Case {
@@ -95,7 +96,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.pin", "db.psq"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n",
-        stderr: "BLAST Database error: No alias or index file found for protein database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
+        stderr: "LOSAT database error: No alias or index file found for protein database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
         files: "db.00.pin:* db.00.psq:214 db.pdb:32768 db.phd:37 db.phi:65 db.phr:264 db.pin/ db.pog:44 db.pos:53 db.pot:44 db.psq/ db.ptf:16384 db.pto:16",
     },
     Case {
@@ -140,7 +141,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.pin"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n",
-        stderr: "BLAST Database error: No alias or index file found for protein database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
+        stderr: "LOSAT database error: No alias or index file found for protein database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
         files: "db.00.pin:* db.phd:37 db.phi:65 db.phr:264 db.pin/ db.pog:44 db.psd:63 db.psi:64 db.psq:214",
     },
     Case {
@@ -176,7 +177,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.nin"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Nucleotide\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 2 sequences in <S> seconds.\n\n\n",
-        stderr: "BLAST Database error: No alias or index file found for nucleotide database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
+        stderr: "LOSAT database error: No alias or index file found for nucleotide database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
         files: "db.00.nin:* db.ndb:32768 db.nhd:25 db.nhi:65 db.nhr:97 db.nin/ db.nog:40 db.nos:34 db.not:32 db.nsq:37 db.ntf:16384 db.nto:12",
     },
     Case {
@@ -203,7 +204,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.nin"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Nucleotide\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 2 sequences in <S> seconds.\n\n\n",
-        stderr: "BLAST Database error: No alias or index file found for nucleotide database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
+        stderr: "LOSAT database error: No alias or index file found for nucleotide database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
         files: "db.00.nin:* db.nhd:25 db.nhi:65 db.nhr:97 db.nin/ db.nog:40 db.nsd:36 db.nsi:63 db.nsq:37",
     },
     Case {
@@ -221,7 +222,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.pin"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n",
-        stderr: "BLAST Database error: No alias or index file found for protein database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
+        stderr: "LOSAT database error: No alias or index file found for protein database [<D>/db] in search path [<C>::]. Please verify the spelling of the BLAST database and its molecule type.\n",
         files: "db.00.pin:* db.pdb:20480 db.phr:279 db.pin/ db.pot:44 db.psq:214 db.ptf:16384 db.pto:16",
     },
     Case {
@@ -311,7 +312,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.pdb"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\n\nNo volumes were created.\n\n",
-        stderr: "BLAST Database error: LMDB runtime error: mdb_env_open: Is a directory\n",
+        stderr: "LOSAT database error: LMDB runtime error: mdb_env_open: Is a directory\n",
         files: "db.pdb/ db.pdb-lock:8192",
     },
     Case {
@@ -320,7 +321,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.ptf"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\n\nNo volumes were created.\n\n",
-        stderr: "BLAST Database error: LMDB runtime error: mdb_env_open: Is a directory\n",
+        stderr: "LOSAT database error: LMDB runtime error: mdb_env_open: Is a directory\n",
         files: "db.pdb:8192 db.ptf/ db.ptf-lock:8192",
     },
     Case {
@@ -329,7 +330,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.pdb-lock"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\n\nNo volumes were created.\n\n",
-        stderr: "BLAST Database error: LMDB runtime error: mdb_env_open: Is a directory\n",
+        stderr: "LOSAT database error: LMDB runtime error: mdb_env_open: Is a directory\n",
         files: "db.pdb-lock/",
     },
     Case {
@@ -338,7 +339,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.ptf-lock"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\n\nNo volumes were created.\n\n",
-        stderr: "BLAST Database error: LMDB runtime error: mdb_env_open: Is a directory\n",
+        stderr: "LOSAT database error: LMDB runtime error: mdb_env_open: Is a directory\n",
         files: "db.pdb:8192 db.ptf-lock/",
     },
     Case {
@@ -347,7 +348,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.000.pin"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n",
-        stderr: "BLAST Database error: Could not find volume or alias file (db.000) referenced in alias file (<D>/db).\n",
+        stderr: "LOSAT database error: Could not find volume or alias file (db.000) referenced in alias file (<D>/db).\n",
         files: "+db.00.pin:* ~db.000.pin/ -db.pjs",
     },
     Case {
@@ -374,7 +375,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.050.pin"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n",
-        stderr: "BLAST Database error: Could not find volume or alias file (db.050) referenced in alias file (<D>/db).\n",
+        stderr: "LOSAT database error: Could not find volume or alias file (db.050) referenced in alias file (<D>/db).\n",
         files: "~db.050.pin/ +db.50.pin:* -db.pjs",
     },
     Case {
@@ -392,7 +393,7 @@ const CASES: &[Case] = &[
         setup: Setup::Blocked(&["db.000.pin", "db.050.psq"]),
         status: 2,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n",
-        stderr: "BLAST Database error: Could not find volume or alias file (db.000) referenced in alias file (<D>/db).\n",
+        stderr: "LOSAT database error: Could not find volume or alias file (db.000) referenced in alias file (<D>/db).\n",
         files: "+db.00.pin:* ~db.000.pin/ ~db.050.psq/ +db.50.psq:62 -db.pjs",
     },
     Case {

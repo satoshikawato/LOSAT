@@ -6,14 +6,6 @@
 //! together, round 1 first, as NCBI formats one result set per round.
 //!
 //! NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_results.hpp:361-386
-//! ```c++
-//!     /// @param i query sequence index if result type is eDatabaseSearch,
-//!     /// otherwise it's the query-subject index [in]
-//!     CSearchResults & operator[](size_type i) {
-//!     ...
-//!     /// @note it only works for results of type eSequenceComparison
-//!     CSearchResults & GetResults(size_type qi, size_type si);
-//! ```
 #![warn(missing_docs, unused)]
 
 use super::run::{HspRecord, Outcome, QueryRounds, QueryStats};
@@ -93,11 +85,6 @@ impl<'a> QueryHits<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
-    // ```c++
-    //     if (itr_num != numeric_limits<unsigned int>::max()) {
-    //         m_Outfile << "Results from round " << itr_num << "\n";
-    //     }
-    // ```
     /// The results of each round of this query, round 1 first, each with its HSPs and its
     /// statistics (`QueryRounds::stats`): one for a search without rounds, also a round without
     /// hits. The view of one round gives itself.

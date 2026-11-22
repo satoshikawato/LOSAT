@@ -107,7 +107,9 @@ const phaseTimes = computed(() => {
     <p v-if="phaseTimes" class="muted small" data-testid="run-status-phases">{{ phaseTimes }}</p>
     <!-- The one consequence that matters while a search runs (stop-describing-ui rule 3). -->
     <p class="muted small run-status-warning" data-testid="run-status-tab-warning">
-      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
+      <!-- feather-icons 4.29.2: dist/icons/alert-triangle.svg, coordinates rounded (MIT License: THIRD_PARTY_NOTICES, section 9 (Feather)).
+           Its round caps draw the dot of the "!" (the subpath "h.01"). -->
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
       Closing or reloading this tab ends the search
     </p>
   </div>

@@ -62,16 +62,22 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, fields
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_search_fixtures import ncbi_env  # noqa: E402  (NCBI's runs: the usage report off)
+import losat_wording  # noqa: E402  (LOSAT's words in NCBI's frozen bytes, AGENTS.md rule 8)
 
 ENGINE = Path(__file__).resolve().parents[1]
 FIXTURES = ENGINE / "tests/fixtures/fasta_input"
 REL = "tests/fixtures/fasta_input"
 MANIFEST_DIR = ENGINE / "tests/fasta_input_fixtures"      # one <program>.tsv per program
+# NCBI's streams (`<row id>.err`, `.merged`, `.out`) of the rows whose NCBI stream holds an exception
+# report: LOSAT writes it in LOSAT's words (`losat_wording`), which a hash of NCBI's bytes cannot check.
+# Each file's sha256 is the manifest's.
+NCBI_STREAMS = MANIFEST_DIR / "ncbi"
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 TIMEOUT = 180
 # NCBI reads these and each one changes the batches or the report.
@@ -1511,6 +1517,85 @@ def first_difference(expected: bytes, actual: bytes) -> str:
     return f"line {min(len(left), len(right))}: expected {len(left) - 1} lines, got {len(right) - 1}"
 
 
+def stdout_before_posts(merged: bytes, err: bytes) -> bytes | None:
+    """The standard output in the merged stream `merged` before its last post: `merged` without the
+    posts of `err` (the standard error of a run of its own; a post starts a line with `Error: (` or
+    `Warning: (`), each found in order; None when a post is not found."""
+    starts = [m.start() for m in re.finditer(rb"(?m)^(?:Error|Warning): \(", err) if m.start() > 0]
+    stdout, done = bytearray(), 0
+    for begin, end in zip([0, *starts], [*starts, len(err)]):
+        post = err[begin:end]
+        if not post:
+            continue
+        at = merged.find(post, done)
+        if at < 0:
+            return None
+        stdout += merged[done:at]
+        done = at + len(post)
+    return bytes(stdout)
+
+
+def title_forms(text: bytes) -> list[bytes]:
+    """The encoded forms of `text` in a stream (`tests/balanced_title.rs`): ASN.1 text (`"text"`), XML
+    (`>text<`, `&`, `<` and `>` escaped) and ASN.1 binary (a VisibleString, tag 26 and a length byte)."""
+    xml = text.replace(b"&", b"&amp;").replace(b"<", b"&lt;").replace(b">", b"&gt;")
+    forms = [b'"' + text + b'"', b">" + xml + b"<"]
+    if len(text) < 0x80:
+        forms.append(bytes([0x1A, len(text)]) + text)
+    return forms
+
+
+def balanced_combined(losat: Path, row: Row, result: dict[str, object]) -> bytes | None:
+    """The merged stream of a run whose first query title is shorter by the bytes LOSAT's words add
+    before the posts, read back in NCBI's words with the title restored, or None when there is no such
+    run (`tests/balanced_title.rs`, whose expectation is NCBI's frozen stream; this harness holds only
+    its hash).
+
+    NCBI's diagnostics flush `cout`, so a post lands after the bytes NCBI's output buffer had written by
+    then. LOSAT states its own version where NCBI states `2.17.0+` (AGENTS.md rule 8): its buffer reaches
+    its output at other bytes of the content, and the post lands elsewhere. With a title shorter by
+    those bytes, spread over the title's occurrences before the posts, every later byte is where NCBI's
+    was; NCBI's words read back (`losat_wording.ncbi_hash_form`, positions as written) and the title
+    restored give NCBI's stream, which the frozen hash judges exactly."""
+    merged, err = result["combined"], result["stderr"]
+    if row.query in ("", "-") or stdin_of(row)[0] or not isinstance(merged, bytes) or not isinstance(err, bytes):
+        return None
+    before = stdout_before_posts(merged, err)
+    if not before:
+        return None
+    added = len(before) - len(losat_wording.ncbi_hash_form(before, positions=False))
+    query = (ENGINE / rp(row.query)).read_bytes()
+    first, newline, rest = query.partition(b"\n")
+    if added <= 0 or not newline or not first.startswith(b">") or b"\r" in first:
+        return None
+    defline = first[1:]
+    title = defline.partition(b" ")[2] if "-parse_deflines" in shlex.split(row.args) else defline
+    # The title is the first query's alone, and every occurrence of it in the stream is one of its forms.
+    if not title or not title.isascii() or query.count(title) != 1:
+        return None
+    strings = [first, title]
+    if merged.count(title) != sum(merged.count(form) for text in strings for form in title_forms(text)):
+        return None
+    occurrences = sum(before.count(form) for text in strings for form in title_forms(text))
+    if occurrences == 0 or added % occurrences:
+        return None
+    shorter = added // occurrences
+    if shorter >= len(title):
+        return None
+    argv = row_argv(row, True)
+    with tempfile.TemporaryDirectory(prefix="balanced_title_") as tmp:
+        path = Path(tmp) / Path(rp(row.query)).name
+        path.write_bytes(first[:-shorter] + newline + rest)
+        argv[argv.index("-query") + 1] = str(path)
+        rc, stream, _ = execute([str(losat), row.program, *argv], row, True)
+    if rc != result["rc_merged"]:
+        return None
+    for text in strings:
+        for full, short in zip(title_forms(text), title_forms(text[:-shorter])):
+            stream = stream.replace(short, full)
+    return losat_wording.ncbi_hash_form(stream, positions=False)
+
+
 def check_one(losat: Path, expected_dir: Path | None, row: Row) -> tuple[Row, str, str]:
     result = streams([str(losat), row.program, *row_argv(row, True)], row)
     if result["rc"] == -999 or result["rc_merged"] == -999:
@@ -1518,8 +1603,32 @@ def check_one(losat: Path, expected_dir: Path | None, row: Row) -> tuple[Row, st
     first_err = result["stderr"].split(b"\n")[0][:140].decode(errors="replace")
     if row.stdout_sha256 == "pending":
         return row, "pending", re.sub(r"[\t\r\n]+", " ", f"rc {result['rc']}: {first_err}")
-    actual = {"rc": str(result["rc"]), "stdout_sha256": sha256(result["stdout"]),
-              "stderr_sha256": sha256(result["stderr"]), "combined_sha256": sha256(result["combined"])}
+    # The manifest holds the hashes of NCBI's streams, which LOSAT writes in LOSAT's words
+    # (`losat_wording`, AGENTS.md rule 8): LOSAT's footer, version statement and error prefixes are
+    # read as NCBI's for the hash (`ncbi_hash_form`); a stream whose NCBI bytes are in NCBI_STREAMS
+    # (an exception report) is compared with those bytes in LOSAT's words, after their hash is
+    # checked against the manifest.
+    if row.kind == "ncbi":
+        for stream_name in ("stdout", "stderr", "combined"):
+            if (found := losat_wording.names_ncbi(result[stream_name])) is not None:
+                return row, "differs", f"{stream_name} still writes NCBI's {found.decode()!r}"
+    norm = losat_wording.ncbi_hash_form if row.kind == "ncbi" else (lambda b: b)
+    actual = {"rc": str(result["rc"]), "stdout_sha256": sha256(norm(result["stdout"])),
+              "stderr_sha256": sha256(norm(result["stderr"])), "combined_sha256": sha256(norm(result["combined"]))}
+    for field, name, ext in (("stdout_sha256", "stdout", "out"), ("stderr_sha256", "stderr", "err"),
+                             ("combined_sha256", "combined", "merged")):
+        frozen = NCBI_STREAMS / f"{row.row_id}.{ext}"
+        if row.kind == "ncbi" and frozen.exists():
+            ncbi = frozen.read_bytes()
+            if sha256(ncbi) != getattr(row, field):
+                return row, "differs", f"{frozen.name} does not match the manifest"
+            actual[field] = getattr(row, field) if result[name] == losat_wording.losat_output_bytes(ncbi) else "differs"
+    # A merged stream whose posts land in the output (an archive's) is judged by a run with a shorter
+    # title (`balanced_combined`) when LOSAT's words move the bytes before them.
+    if row.kind == "ncbi" and actual["combined_sha256"] != row.combined_sha256 \
+            and not (NCBI_STREAMS / f"{row.row_id}.merged").exists() \
+            and (balanced := balanced_combined(losat, row, result)) is not None and sha256(balanced) == row.combined_sha256:
+        actual["combined_sha256"] = row.combined_sha256
     names = {"rc": "exit", "stdout_sha256": "stdout", "stderr_sha256": "stderr", "combined_sha256": "combined"}
     differing = [names[f] for f in EXPECTED if actual[f] != getattr(row, f)]
     if not differing:
@@ -1529,8 +1638,12 @@ def check_one(losat: Path, expected_dir: Path | None, row: Row) -> tuple[Row, st
         detail.append(f"exit {actual['rc']}, expected {row.rc}")
     files = {"stdout": ("out", result["stdout"]), "stderr": ("err", result["stderr"]), "combined": ("merged", result["combined"])}
     for name in ("stdout", "stderr", "combined"):
-        if name in differing and expected_dir is not None and (expected_dir / f"{row.row_id}.{files[name][0]}").exists():
-            expected = (expected_dir / f"{row.row_id}.{files[name][0]}").read_bytes()
+        source = next((d / f"{row.row_id}.{files[name][0]}" for d in (NCBI_STREAMS, expected_dir)
+                       if d is not None and (d / f"{row.row_id}.{files[name][0]}").exists()), None)
+        if name in differing and source is not None:
+            expected = source.read_bytes()
+            if row.kind == "ncbi":
+                expected = losat_wording.losat_output_bytes(expected)
             detail.append(f"{name} {first_difference(expected, files[name][1])}")
             break
     else:

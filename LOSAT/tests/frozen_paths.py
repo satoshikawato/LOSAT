@@ -7,14 +7,13 @@ machine's checkout. Outfmt 7 prints the -subject string in its `# Database:` lin
 in the `Database: User specified sequence set (Input: <path>).` lines, wrapped at 68 columns:
 
 NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:544
-    x_WrapOutputLine(dbinfo->definition, line_length, out);
 
 (line_length is kFormatLineLength, 68). The wrap is NStr::Wrap with fWrap_FlatFile
 (align_format_util.cpp:283), which breaks only at white space, '-' and ',' and otherwise cuts
 at the width:
 
-NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5228
-    else if (do_flat ? c == '-' : ispunct((unsigned char)c)) {
+NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:5228 (in flat-file mode a break may
+follow '-', otherwise any punctuation)
 
 So where the wrapped lines break depends on the path's length and on those characters, and
 replacing a checkout path of another length after the run does not give the frozen bytes.

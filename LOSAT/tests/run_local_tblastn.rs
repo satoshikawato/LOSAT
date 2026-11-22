@@ -115,21 +115,8 @@ fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
     (bytes, output.stderr)
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:289-301
-// ```c
-// CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-// results = lcl_blast.Run();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     formatter.PrintOneResultSet(**result, query);
-// }
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
-// ```c
-// if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
-//    hitlist_size = args[kArgMaxTargetSequences].AsInteger();
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:289-301
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
 // This half compares `losat::api`'s search with the CLI run of every format (reports and warnings);
 // the half about the entry itself (the hit records and the observer change nothing) is the test of
 // the same name in `LOSAT/src/api/local_blast_tests/tblastn.rs`.
@@ -159,20 +146,6 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
                 "CLI outfmt {outfmt} {extra:?}"
             );
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
-            // ```c++
-            //     if (m_FormatType == CFormattingArgs::eAsnText
-            //       ...
-            //       || m_FormatType == CFormattingArgs::eJsonSeqalign
-            //       || m_FormatType == CFormattingArgs::eSAM)
-            //     {
-            //         x_PrintStructuredReport(results, queries);
-            //         return;
-            //     }
-            //     ...
-            //     if (results.HasWarnings()) {
-            //         ERR_POST(Warning << results.GetWarningStrings());
-            //     }
-            // ```
             // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9, 11, 12, 15 and 16 write
             // no query result warnings, so their CLI runs equal `run_local` with that format alone.
             if matches!(*outfmt, "5" | "8" | "9" | "11" | "12" | "15" | "16") {
@@ -216,30 +189,8 @@ fn cli_run(query: &Path, subject: &Path, extra: &[&str]) -> (Option<i32>, Vec<u8
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
-// ```c
-//         catch(CBlastException & e ) {
-//         	// Skip bad subject sequence
-//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-//         		seqblk_vec->push_back(subj);
-//         ...
-//         		warning += "Subject sequence contains no data";
-//         		ERR_POST(Warning << warning);
-// ```
-// NCBI reference: c++/src/algo/blast/core/blast_setup.c:969-979
-// ```c
-//    if (sbp->gbp) {
-//        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-//        if (Blast_SubjectIsTranslated(program_number)) {
-//            min_subject_length/=3;
-//        }
-//    } else {
-//        min_subject_length = (Int4) (total_length/num_seqs);
-//    }
-//
-//    if(min_subject_length <=0) {
-//	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-979
 // A subject without residues gets its warning before the search (after `Query is Empty!`),
 // counts in the database statistics and is never searched; the gapped tblastn raises the
 // shortest subject to 10 letters, so subjects without letters only never stop the search.
@@ -313,20 +264,6 @@ fn subjects_without_residues_are_kept_with_ncbis_warnings() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
-// ```c++
-//         } catch (const CException& e) {
-//             ...
-//             CRef<CSearchMessage> m
-//                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
-//             messages[index].push_back(m);
-//             s_InvalidateQueryContexts(qinfo, index);
-//         }
-//     ...
-//     // Validate that at least one query context is valid
-//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-//     }
-// ```
 // A query without residues is set up without data: its warning comes before its report and
 // the other queries' rows do not change; a batch of such queries only stops the run with
 // NCBI's set-up error (exit 3), after the outfmt 0 prolog (oracle `tblastn.batch_late_empty.*`,
@@ -358,12 +295,13 @@ fn queries_without_residues_are_kept_and_a_batch_of_them_stops() {
         assert_eq!(code, Some(3), "{stderr}");
         assert_eq!(
             stderr,
-            "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+            "LOSAT engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
         );
         let report = String::from_utf8_lossy(&stdout);
         if outfmt == "0" {
             assert!(
-                report.starts_with("TBLASTN 2.17.0+\n") && report.ends_with(" total letters\n\n"),
+                report.starts_with(concat!("TBLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
+                    && report.ends_with(" total letters\n\n"),
                 "{report}"
             );
         } else {
@@ -373,7 +311,7 @@ fn queries_without_residues_are_kept_and_a_batch_of_them_stops() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 and
-// c++/src/algo/blast/core/blast_message.c:215-217 (quoted at `stage_d_pipeline::SetupEngineError`).
+// c++/src/algo/blast/core/blast_message.c:215-217 (cited at `stage_d_pipeline::SetupEngineError`).
 // Without the Gumbel block (`-searchsp` or `OLD_FSC`) a set of subjects whose average is below one letter
 // fails the setup of a batch with NCBI's engine error (exit 3) after the start of the outfmt 0
 // report, and after the report of a first batch that NCBI does not search (`BATCH_SIZE=1`, an
@@ -389,7 +327,7 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
     let path = subject.0.display().to_string();
     let subjects_warning = "Warning: [tblastn] Subject_2 b: Subject sequence contains no data\n\
                             Warning: [tblastn] Subject_3 c: Subject sequence contains no data\n";
-    let error = "BLAST engine error: The average subject length is too short\n";
+    let error = "LOSAT engine error: The average subject length is too short\n";
     // The prolog's database line wraps a long path as NCBI's does, so only its end is compared.
     let prolog_end = "           3 sequences; 1 total letters\n\n";
     for (args, env, first_batch) in [
@@ -415,13 +353,13 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
             );
             match (outfmt, first_batch) {
                 ("0", false) => assert!(
-                    stdout.starts_with("TBLASTN 2.17.0+\n")
+                    stdout.starts_with(concat!("TBLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
                         && stdout.contains("Database: User specified sequence set (Input:")
                         && stdout.ends_with(prolog_end),
                     "{stdout}"
                 ),
                 ("0", true) => assert!(
-                    stdout.starts_with("TBLASTN 2.17.0+\n")
+                    stdout.starts_with(concat!("TBLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
                         && stdout.contains("Database: User specified sequence set (Input:")
                         && stdout.ends_with(&format!(
                             "{prolog_end}\n\nQuery= qx all X\n\nLength=30\n\n\n***** No hits found *****\n\n\n\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nGapped\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nEffective search space used: 0\n"
@@ -431,7 +369,7 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
                 ("7", true) => assert_eq!(
                     stdout,
                     format!(
-                        "# TBLASTN 2.17.0+\n# Query: qx all X\n# Database: User specified sequence set (Input: {path})\n"
+                        concat!("# TBLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n# Query: qx all X\n# Database: User specified sequence set (Input: {path})\n"), path = path
                     )
                 ),
                 _ => assert!(stdout.is_empty(), "{args:?} {env:?}: {stdout}"),

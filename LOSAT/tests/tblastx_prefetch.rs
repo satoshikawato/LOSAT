@@ -8,11 +8,6 @@
 //! `LOSAT_X_STATS` take, do not depend on it.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-516
-//! ```c
-//!     for (i = 0; i < hits; ++i) {
-//!         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//!         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//! ```
 //! NCBI's loop over a batch's hits issues no hint; the switch only adds one, so the property under
 //! test is that nothing the search reports depends on it. That reports equal NCBI's is the business
 //! of the fixture comparisons, which run on the default paths. The input (150,000 bases of MelaMJNV

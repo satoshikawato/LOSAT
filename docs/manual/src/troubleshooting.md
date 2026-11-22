@@ -16,7 +16,7 @@ The command exits with status 2 and runs nothing. For an output format that NCBI
 
 **What can I do?** Look the option up in [What LOSAT refuses](refusals.md) and on the page of your program. Options that need NCBI's servers or its GI and IPG databases (`-remote`, `-entrez_query`, `-gilist`, `-ipglist`) are not available. For an option that is refused, use NCBI BLAST+ for that run. The [Introduction](introduction.md) lists the programs and options planned for a later release.
 
-A different message, `error: unknown option or argument '-xyz'; use -help for CLI v2 syntax`, means the option does not exist. Check the spelling with `losat <program> -help`. LOSAT takes NCBI's single-dash names (`-evalue`, not `--evalue`).
+A different message, `error: unknown option or argument '-xyz'; use -help to list the options`, means the option does not exist. Check the spelling with `losat <program> -help`. LOSAT takes NCBI's single-dash names (`-evalue`, not `--evalue`).
 
 ## `losat --install-shims` stops with "nothing was installed"
 
@@ -24,7 +24,7 @@ A different message, `error: unknown option or argument '-xyz'; use -help for CL
 losat --install-shims: these files exist and are not this executable; nothing was installed: /path/to/bin/blastn
 ```
 
-A file with one of the 14 program names is already in the folder, often NCBI's own `blastn`. LOSAT never overwrites a file that is not a LOSAT link or copy, and it makes none of the names when one is in the way. Exit status is 1.
+A file with one of the 15 program names is already in the folder, often NCBI's own `blastn`. LOSAT never overwrites a file that is not a LOSAT link or copy, and it makes none of the names when one is in the way. Exit status is 1.
 
 You can:
 
@@ -35,17 +35,17 @@ Links made by an earlier LOSAT are replaced without a message, so you can run th
 
 ## `blastn: command not found`, or the wrong `blastn` answers
 
-The names exist only after `losat --install-shims`. Make sure the folder you gave is on your `PATH`, and before any folder with NCBI's programs if you want LOSAT to answer. `blastn -version` shows who answers: LOSAT's second line starts with `Package: LOSAT`.
+The names exist only after `losat --install-shims`. Make sure the folder you gave is on your `PATH`, and before any folder with NCBI's programs if you want LOSAT to answer. `blastn -version` shows who answers: LOSAT's first line is `blastn: LOSAT 0.2.0` and its second line starts with `Package: LOSAT`.
 
 If you moved or replaced `losat` after making the links, run `losat --install-shims DIR` again.
 
 ## The database is not found
 
 ```text
-BLAST Database error: No alias or index file found for protein database [nodb] in search path [...]
+LOSAT database error: No alias or index file found for protein database [nodb] in search path [...]
 ```
 
-This is NCBI's message. Check the database name, that it is a protein or nucleotide database as the program needs (`blastp` reads protein, `blastn` reads nucleotide), and where LOSAT looks for it: the current directory, then the directories in `BLASTDB`, then the configuration in `.ncbirc`, as NCBI BLAST+ does. See [BLAST databases](databases.md).
+The message is NCBI's; where NCBI starts it with `BLAST Database error:`, LOSAT starts it with `LOSAT database error:`. Check the database name, that it is a protein or nucleotide database as the program needs (`blastp` reads protein, `blastn` reads nucleotide), and where LOSAT looks for it: the current directory, then the directories in `BLASTDB`, then the configuration in `.ncbirc`, as NCBI BLAST+ does. See [BLAST databases](databases.md).
 
 ## A `-seqidlist` warning names `blastdb_aliastool`
 
@@ -55,7 +55,7 @@ With a text file in `-seqidlist` or `-negative_seqidlist`, LOSAT writes NCBI's w
 
 A `-query`, `-subject` or `makeblastdb -in` file whose name ends in `.gz`, `.bz2` or `.zst` is decompressed by LOSAT, and the name alone decides. If the file is not really compressed, LOSAT stops before the search with a message such as `-query: 'x.fa.gz' is named .gz but is not gzip data` (exit status 1). Rename the file, or decompress it yourself.
 
-A search program writes the decompressed data into a temporary file next to the input first. If that folder refuses it or has no room, LOSAT uses the folder in `TMPDIR`, so point `TMPDIR` to one with room. `makeblastdb` streams and needs no copy. A WASI command has no temporary directory and stops instead; see [WASI host problems](#wasi-host-problems).
+A search program writes the decompressed data into a temporary file next to the input first. If that folder refuses it or has no room, LOSAT uses the folder in `TMPDIR`, so point `TMPDIR` to one with room. `makeblastdb` streams and needs no copy. A WASI command has no `TMPDIR` to fall back on: if the input's folder refuses the copy, it stops; see [WASI host problems](#wasi-host-problems).
 
 ## macOS blocks the downloaded program
 
@@ -85,14 +85,14 @@ These apply when you run `losat.wasm` yourself. See [Platforms and WebAssembly](
 
 - **"File not found" for a file that exists.** The host must preopen the directory that holds it. The release tests give the module `/`.
 - **`makeblastdb` writes UTC times, or `New DB name:` shows `/...`.** The host did not pass `TZ` (or the zone files) and `PWD`. Pass both.
-- **A compressed input stops the search.** A WASI command has no temporary directory. Decompress the file first, or pipe the data to `-query -`.
+- **A compressed input stops the search.** The WASI command writes the decompressed copy beside the input and has no temporary directory to fall back on. Make the input's folder writable for the module, or pipe the data to `-query -`.
 - **A path with `..` works when it should not.** With Node.js, `..` is read as text without looking at the directory before it, so `-query gone/../q.fa` reads `q.fa` even if `gone` does not exist. NCBI BLAST+ and native LOSAT stop with an error.
 - **Calls fail with `EINVAL` on large runs.** A host that passes pointers as signed numbers breaks once the module uses 2 GiB or more of memory. Pass WASI parameters as unsigned 32-bit values; the repository's Node.js runner does.
 - **The threaded module will not start.** It needs a host with shared memory and WASI threads. It declares a shared memory of up to 4 GiB less one page, and a host that cannot reserve that much address space fails when it creates the memory. The repository's Node.js runner (`LOSAT/tests/run_losat_wasi_threads.js`) retries with smaller maximums.
 
 ## Memory and threads
 
-- **`-num_threads` sets the number of threads.** The default is 1. The output is the same at every thread count, and it is what NCBI BLAST+ writes with `-num_threads 1`. `-mt_mode` is accepted and changes nothing in the output (`blastn`, `blastp`, `blastx` and `tblastn` take 0, 1 or 2; `rpsblast` and `rpstblastn` take 0 or 1; `tblastx` and `psiblast` have no `-mt_mode`, as in NCBI BLAST+ 2.17.0). `-num_threads` takes an integer of 1 or more (`rpsblast` also reads 0 as one thread for each volume of the database).
+- **`-num_threads` sets the number of threads.** The default is 1. The output is the same at every thread count, and it is what NCBI BLAST+ writes with `-num_threads 1` (apart from the version line, which names LOSAT). `-mt_mode` is accepted and changes nothing in the output (`blastn`, `blastp`, `blastx` and `tblastn` take 0, 1 or 2; `rpsblast` and `rpstblastn` take 0 or 1; `tblastx` and `psiblast` have no `-mt_mode`, as in NCBI BLAST+ 2.17.0). `-num_threads` takes an integer of 1 or more (`rpsblast` also reads 0 as one thread for each volume of the database).
 - **Threads and memory.** The page [Threads, speed and memory](performance.md) explains how threads and memory use relate.
 - **A search of a compressed file needs room for the copy.** See "A compressed input fails" above.
 - **Development variables.** Variables that start with `LOSAT_X_`, and `LOSAT_TIMING`, are for development; leave them unset.

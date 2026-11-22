@@ -59,9 +59,9 @@ The output is the same at every `-num_threads` value. It is the output of NCBI's
 
 ## Output
 
-Supported `-outfmt` values: 0, 6, 7 and 10. Formats 6, 7 and 10 take a custom field list and `delim=`. Subjects in the report are profile IDs such as `CDD:103`. As in NCBI's `rpsblast`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
+Supported `-outfmt` values: 0, 5, 6, 7, 10 and 11. Formats 6, 7 and 10 take a custom field list. As in NCBI's `rpsblast`, `delim=` is read and checked but the columns keep their tab or comma. Subjects in the report are profile IDs such as `CDD:103`. As in NCBI's `rpsblast`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
 
-LOSAT's `rpsblast` does not write `-outfmt 11` (BLAST archive) in v0.2.0, the input that [rpsbproc](rpsbproc.md) reads.
+`-outfmt 11` (BLAST archive) and `-outfmt 5` (BLAST XML) are the bytes of NCBI BLAST+ 2.17.0 `rpsblast -num_threads 1`, at any thread count, except that a message stored in the archive carries LOSAT's wording where LOSAT words it as its own (the same as `blastp`'s archive). The archive is the input that [rpsbproc](rpsbproc.md) reads: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data`.
 
 ## Differences from NCBI BLAST+
 

@@ -7,7 +7,7 @@ import type { AvailabilityState } from '../../src/application/availability';
 import { SearchDraft } from '../../src/application/draft';
 import { ExampleLoader } from '../../src/application/examples';
 import { Store } from '../../src/application/store';
-import { EXAMPLE_BYTE_LIMIT, EXAMPLE_SETS, exampleById, exampleHost, exampleQuery, examplesFor } from '../../src/domain/examples';
+import { EXAMPLE_BYTE_LIMIT, EXAMPLE_SETS, exampleById, exampleHost, exampleQuery, exampleQuerySources, examplesFor } from '../../src/domain/examples';
 import { PROGRAMS, programById, sequenceKind } from '../../src/domain/programs';
 import { BrowserFileDownloader } from '../../src/infra/browser/example-downloader';
 import { DataService } from '../../src/infra/data/data-service';
@@ -63,7 +63,7 @@ function setup(
   });
   const fake = new FakeEngine();
   const draft = new SearchDraft({
-    engine: { describe: fake.describe.bind(fake), start: fake.start.bind(fake), validate: async () => ({ ok: true }), prepare: () => undefined },
+    engine: { describe: fake.describe.bind(fake), start: fake.start.bind(fake), validate: async () => ({ ok: true, dataLoaders: true }), prepare: () => undefined },
     data,
     enqueueAll: async (batch) => ({ ok: true, runIds: batch.map((_, i) => `r${i}`) }),
     fetcher: new FakeAccessionFetcher(),
@@ -101,6 +101,17 @@ describe('Example table', () => {
         expect(nucleotide, `${set.id} ${program.id}`).toBe(sequenceKind(programById(program.id), 'query') === 'nucleotide');
       }
     }
+  });
+
+  it("names where every mode's queries come from, with the accession of each query's defline", () => {
+    for (const program of PROGRAMS) {
+      const sources = exampleQuerySources(program.id);
+      const deflines = [...new Set(examplesFor(program.id).map((set) => exampleQuery(set, program.id).split('\n')[0]!))];
+      expect(sources.length, program.id).toBe(deflines.length);
+      deflines.forEach((defline, i) => expect(defline, program.id).toContain(sources[i]!.split(' (')[0]!.split(' ').at(-1)!));
+    }
+    // UniProt's CC BY 4.0 asks for the credit.
+    expect(exampleQuerySources('blastp')).toEqual(['UniProtKB P16971 (UniProt, CC BY 4.0)']);
   });
 
   it('downloads only from hosts that the CSP names, over HTTPS, without anything of the user in the URL', () => {

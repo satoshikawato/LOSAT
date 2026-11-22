@@ -1,0 +1,366 @@
+Blast-db-mask-info ::= {
+  algo-id 3,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 2,
+          to 18,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 41,
+          to 67,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 92,
+          to 106,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 130,
+          to 143,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 360,
+          to 374,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 405,
+          to 420,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1115,
+          to 1135,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1666,
+          to 1687,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2379,
+          to 2394,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2463,
+          to 2477,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2530,
+          to 2547,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2661,
+          to 2677,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2837,
+          to 2853,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3023,
+          to 3035,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3049,
+          to 3064,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3094,
+          to 3109,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3190,
+          to 3207,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3319,
+          to 3332,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3345,
+          to 3358,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3362,
+          to 3377,
+          id ddbj {
+            accession "AB000001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 711,
+          to 735,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 960,
+          to 993,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1129,
+          to 1159,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1251,
+          to 1265,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1429,
+          to 1446,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1468,
+          to 1482,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1500,
+          to 1514,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1553,
+          to 1570,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1810,
+          to 1822,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1885,
+          to 1913,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1929,
+          to 1945,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1955,
+          to 1969,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2001,
+          to 2024,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2035,
+          to 2047,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2212,
+          to 2267,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2272,
+          to 2286,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2304,
+          to 2318,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2385,
+          to 2399,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2536,
+          to 2552,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2602,
+          to 2622,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2659,
+          to 2680,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2731,
+          to 2757,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2791,
+          to 2805,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2838,
+          to 2852,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        }
+      }
+    },
+    more FALSE
+  }
+}

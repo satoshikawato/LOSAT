@@ -1,6 +1,6 @@
 # Output formats
 
-`-outfmt` chooses how a search writes its results. LOSAT reads `-outfmt` as NCBI BLAST+ 2.17.0 does, and writes the same bytes. The default is `0`.
+`-outfmt` chooses how a search writes its results. LOSAT reads `-outfmt` as NCBI BLAST+ 2.17.0 does, and writes the same bytes, apart from the places that name the program's version, where LOSAT writes its own name and version: `BLASTN (LOSAT 0.2.0)` where NCBI writes `BLASTN 2.17.0+` (the first line of `0` to `4`, the `# BLASTN` line of `7`, the version of `5` and of `13` to `16`), and `LOSAT 0.2.0` where NCBI writes `2.17.0+` alone (`ident` in `11`, `VN:` in `17`). See [Differences from NCBI BLAST+](differences.md#the-version-line-and-the-error-prefixes-name-losat). The default is `0`.
 
 A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOSAT program does not write is refused before the inputs are read, with `output format N is not supported by LOSAT's PROGRAM`. Numbers `19` and `21` belong to NCBI's `igblastn` and `magicblast` and give NCBI's error in every program.
 
@@ -34,10 +34,10 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 "All eight" is the five programs, `psiblast`, `rpsblast` and `rpstblastn`. Some programs write fewer formats than the table shows:
 
 - `psiblast` writes `0`, `6`, `7`, `10` and `20`; with `-in_pssm`, `0`, `6` and `7`.
-- `rpsblast` writes `0`, `6`, `7` and `10`.
+- `rpsblast` writes `0`, `5`, `6`, `7`, `10` and `11`; `rpstblastn` writes `0` to `7`, `10` and `11`.
 - `tblastn` with `-in_pssm` writes `0` to `4`, `6`, `7` and `10`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` have their own formats, listed on their pages.
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` have their own formats, listed on their pages.
 
 ## Pairwise and query-anchored text (0 to 4)
 
@@ -74,6 +74,8 @@ To change the separator, add `delim=` right after the number (before the field n
 losat blastn -query query.fna -subject genome.fna -outfmt "10 delim=@ qacc sacc score"
 ```
 
+As in NCBI BLAST+, `psiblast`, `rpsblast` and `rpstblastn` read and check `delim=` but keep the tab or comma. In every program, a separator that a listed field uses between its entries (`;` with `sallseqid`, `staxids`, `sscinames`, `scomnames`, `sblastnames` or `sskingdoms`, `/` with `frames`, `<>` with `salltitles`) gets NCBI's error.
+
 LOSAT ignores a word that is not a field name; a list with no known field gives the default columns.
 
 ### Field names
@@ -108,12 +110,12 @@ That is 50 field names. The GI fields print `0` where a sequence has no GI. The 
 ## ASN.1 and the archive (8, 9, 11)
 
 - `8` and `9` write the alignments as an ASN.1 Seq-align, in text (`8`) and binary (`9`).
-- `11` writes the BLAST archive, which holds the query, the search settings and the results. `rpsbproc` reads it for the CDD domain report. The environment variable `ARCHIVE_FORMAT` chooses the encoding as in NCBI: unset for ASN.1 text, a value starting with `bin` for ASN.1 binary, `xml` for XML.
+- `11` writes the BLAST archive, which holds the query, the search settings and the results. A message stored in it carries LOSAT's wording where LOSAT words that message as its own (the manual's name, the exception headers), as in the other formats' messages; its `ident` reads `LOSAT 0.2.0` where NCBI writes `2.17.0+`; the rest is NCBI's bytes. `rpsbproc` reads it for the CDD domain report. The environment variable `ARCHIVE_FORMAT` chooses the encoding as in NCBI: unset for ASN.1 text, a value starting with `bin` for ASN.1 binary, `xml` for XML.
 - A title, id or database name with a byte that NCBI's stream replaces is written with `#` and NCBI's error message for each byte, as NCBI does.
 
 ## SAM (17)
 
-`blastn` writes SAM with `-outfmt 17`. `-outfmt "17 SQ"` adds the target sequence in the SEQ column and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI. The document is NCBI's byte for byte except the `CL:` tag of the `@PG` line, which holds LOSAT's own command line. Like NCBI, LOSAT writes the document when the search ends.
+`blastn` writes SAM with `-outfmt 17`. `-outfmt "17 SQ"` adds the target sequence in the SEQ column and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI. With `-ungapped`, each subject has one line that joins all of its alignments with the query, as in NCBI: the CIGAR is the summed length of the alignments as one `M`, the position and clipping span all of them, `AS`, `EV` and `BS` are the best alignment's, and `PI` divides the best alignment's identities by the summed length. The document is NCBI's byte for byte except two things in the `@PG` line: the `CL:` tag holds LOSAT's own command line, and `VN:` reads `LOSAT 0.2.0` where NCBI writes `2.17.0+`. Like NCBI, LOSAT writes the document when the search ends.
 
 ## Organism report (18)
 
@@ -122,6 +124,7 @@ That is 50 field names. The GI fields print `0` where a sequence has no GI. The 
 ## Differences from NCBI BLAST+
 
 - `-outfmt 17`: the `CL:` tag of `@PG` holds LOSAT's command line.
+- The version line of formats 0, 5, 7, 11, 13 to 17 names LOSAT, as described above.
 - A few reports that NCBI cannot finish (it crashes or never ends) are refused after the part NCBI writes: see [What LOSAT refuses](refusals.md) under Output.
 
 ## Examples

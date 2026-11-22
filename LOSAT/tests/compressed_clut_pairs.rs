@@ -4,15 +4,6 @@
 //! searches of the three programs that build those tables.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053
-//! ```c
-//!     if (current_pos == info->wordsize - 1) {
-//!         ...
-//!         for (i = 0; i < info->compressed_alphabet_size &&
-//!                (score + rowSorted[i] >= info->threshold); i++) {
-//!             subject_word[current_pos] = charSorted[i];
-//!             s_CompressedLookupAddEncoded(lookup, subject_word,
-//!                                          query_offset);
-//! ```
 //! The switch is in the strict set (on unless it is `0`). A query offset gets the same cells as
 //! from the loops, in another order within the offset, which changes no table (the lib tests
 //! `paired_cells_are_the_loops_cells` and `pair_tables_hold_every_matrix` compare the cells and the

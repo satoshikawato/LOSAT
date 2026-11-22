@@ -7,11 +7,6 @@
 //! x86-64 only (on other targets `=2` compares the old path with itself).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-605
-//! ```c
-//! score = s_BlastAaExtendTwoHit(matrix, subject, query,
-//!                               last_hit + wordsize,
-//!                               subject_offset, query_offset, ...);
-//! ```
 //! NCBI extends at once; the path extends later, in batches, with the same cell states and the
 //! same saved init HSPs (the module's argument), so the property under test is that the report does
 //! not depend on it. That reports equal NCBI's is the business of the fixture comparisons. The input

@@ -1,7 +1,7 @@
 //! The mask data of a BLAST database (`makeblastdb -mask_data`): the filtering algorithms
 //! that were applied to the sequences, and the masked ranges of each sequence.
 //!
-//! NCBI reads them in `CSeqDBImpl` (`seqdbimpl.cpp`: `x_BuildMaskAlgorithmList`,
+//! NCBI reads them in `CSeqDBImpl` (`c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp`: `x_BuildMaskAlgorithmList`,
 //! `GetMaskAlgorithmDetails`, `GetAvailableMaskAlgorithmDescriptions`, `GetMaskData`) with
 //! the id table `CSeqDB_IdRemapper`. The data is in the column titled `BlastDb/MaskData` of
 //! each volume ([`super::column`]): its metadata maps the volume's algorithm ids to
@@ -69,12 +69,6 @@ pub enum NameMaskError<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2138-2141
-// ```c++
-// static bool s_IsNumericId(const string &id) {
-//     Int4 nid(-1);
-//     return NStr::StringToNumeric(id, &nid, NStr::fConvErr_NoThrow, 10);
-// }
-// ```
 // `StringToNumeric(str, &int, flags, base)` is `NStr::StringToInt` that returns whether it
 // converted the text (`*value || !errno`; a converted 0 leaves `errno` at 0).
 /// `s_IsNumericId(id)` (`blastinput::db_mask::FilteringAlgorithm::parse` is the same test of
@@ -84,48 +78,6 @@ fn is_numeric_id(id: &str) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-303
-// ```c++
-//     void Do(TContainer&     target,
-//             TPosContainer&  token_pos,
-//             const TString&  empty_str = TString())
-//     {
-//         auto target_initial_size = target.size();
-//
-//         // Special cases
-//         if (m_Str.empty()) {
-//             return;
-//         } else if (m_Delim.empty()) {
-//             target.push_back(m_Str);
-//             token_pos.push_back(0);
-//             return;
-//         }
-//         // Do target space reservation (if applicable)
-//         TReserveTrait::Reserve(*this, target, token_pos);
-//
-//         // Tokenization
-//
-//         CTempStringList part_collector(m_Storage);
-//         SIZE_TYPE prev_pos;
-//         SIZE_TYPE delim_pos = NPOS;
-//         m_Pos = 0;
-//         do {
-//             Advance(&part_collector, &prev_pos, &delim_pos);
-//             target.push_back(empty_str); // reserve space for value added next line
-//             part_collector.Join(&target.back());
-//             part_collector.Clear();
-//             token_pos.push_back(prev_pos);
-//         } while ( !AtEnd() );
-//
-//         if ( (m_Flags & NStr::fSplit_Truncate_End) == 0 ) {
-//             // account training delimiter
-//             if (delim_pos != NPOS) {
-//                 // add empty token after last delimiter
-//                 target.push_back(empty_str);
-//                 token_pos.push_back(delim_pos + 1);
-//             }
-//         }
-//         else {
-// ```
 /// `NStr::Split(s, ":", items)` with flags 0: every `:` separates, empty tokens are kept
 /// (so `"30:"` is `["30", ""]`), and the empty string has no tokens.
 pub(super) fn ncbi_split(s: &str) -> Vec<&str> {
@@ -137,17 +89,6 @@ pub(super) fn ncbi_split(s: &str) -> Vec<&str> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:51-59
-// ```text
-// Blast-filter-program ::= INTEGER {
-//     not-set             (0),
-//     dust                (10),
-//     seg                 (20),
-//     windowmasker        (30),
-//     repeat              (40),
-//     other               (100),
-//     max                 (255)
-// }
-// ```
 /// The named values of `Blast-filter-program`, with their names as NCBI prints them: the one
 /// table of LOSAT (the mask writers of the masking tools, makeblastdb's mask reader and
 /// registry, and this reader of the column), made from [`FilterProgram`], so a name or value
@@ -232,31 +173,6 @@ fn filter_program_name(value: i32) -> Option<&'static str> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2143-2165
-// ```c++
-// static const string* s_CheckUniqueValues(const map<string, string> & m)
-// {
-//     typedef map<string, string> TStringMap;
-//
-//     set<string> seen;
-//
-//     ITERATE(TStringMap, iter, m) {
-//         string v = iter->second;
-//         vector<string> items;
-//         NStr::Split(v, ":", items);
-//
-//         if (items.size() == 4) {
-//             v = items[2];
-//         }
-//
-//         if (s_Contains(seen, v)) {
-//             return & iter->second;
-//         }
-//
-//         seen.insert(v);
-//     }
-//
-//     return NULL;
-// ```
 /// `s_CheckUniqueValues`: the first value (in key order) whose description repeats an
 /// earlier one.
 fn first_duplicate<'a>(metadata: &[(&str, &'a str)]) -> Option<&'a str> {
@@ -319,13 +235,6 @@ pub struct MaskAlgorithms {
 
 impl MaskAlgorithms {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2167-2171
-    // ```c++
-    //
-    // CSeqDB_IdRemapper::CSeqDB_IdRemapper()
-    //     : m_NextId(100), m_Empty(true), m_CacheRealAlgo(-1)
-    // {
-    // }
-    // ```
     fn new() -> Self {
         Self {
             next_id: 100,
@@ -336,59 +245,6 @@ impl MaskAlgorithms {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2182-2232
-    // ```c++
-    // void CSeqDB_IdRemapper::AddMapping(int vol_id, int id, const string & desc)
-    // {
-    //     string real_desc = desc;
-    //     vector<string> items;
-    //     NStr::Split(desc, ":", items);
-    //     if (items.size() == 4) {
-    //         real_desc = items[2];
-    //     }
-    //     bool found_desc = s_Contains(m_DescToId, real_desc);
-    //     bool found_id   = s_Contains(m_IdToDesc, id);
-    //
-    //     int real_id = id;
-    //
-    //     if (found_desc) {
-    //         if ((! found_id) || (m_DescToId[real_desc] != id)) {
-    //             // This description is mapped to a different ID.
-    //             real_id = m_DescToId[real_desc];
-    //         }
-    //     } else {
-    //         // New description.
-    //
-    //         if (found_id) {
-    //             // Pick a 'synthetic' ID for this description,
-    //             // i.e. one that is not actually used by any of
-    //             // the existing volumes so far.
-    //
-    //             while(s_Contains(m_IdToDesc, m_NextId)) {
-    //                 m_NextId++;
-    //             }
-    //
-    //             real_id = m_NextId;
-    //         }
-    //
-    //         // Add the new description.
-    //
-    //         m_IdToDesc[real_id] = desc;
-    //         m_DescToId[real_desc] = real_id;
-    //     }
-    //
-    //     m_RealIdToVolumeId[vol_id][real_id] = id;
-    // }
-    //
-    // bool CSeqDB_IdRemapper::GetDesc(int algorithm_id, string & desc)
-    // {
-    //     if (! s_Contains(m_IdToDesc, algorithm_id)) {
-    //        return false;
-    //     }
-    //
-    //     desc = m_IdToDesc[algorithm_id];
-    //     return true;
-    // }
-    // ```
     fn add_mapping(&mut self, volume: usize, id: i32, description: &str, source: &Path) {
         let items = ncbi_split(description);
         let real_desc = if items.len() == 4 {
@@ -428,62 +284,6 @@ impl MaskAlgorithms {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2414-2467
-    // ```c++
-    // void CSeqDBImpl::x_BuildMaskAlgorithmList(CSeqDBLockHold & locked)
-    // {
-    //     m_Atlas.Lock(locked);
-    //
-    //     if (! m_AlgorithmIds.Empty()) {
-    //         return;
-    //     }
-    //
-    //     int col_id = x_GetMaskDataColumn(locked);
-    //
-    //     if (col_id < 0) {
-    //         // No mask data column exists, therefore, the algorithms list
-    //         // is empty, and we are done.
-    //         return;
-    //     }
-    //
-    //     CSeqDB_ColumnEntry & entry = *m_ColumnInfo[col_id];
-    //
-    //     typedef map<string,string> TStringMap;
-    //
-    //     // Results needed:
-    //     // 1. Map global ids to desc.
-    //     // 2. Map local id+vol -> global id
-    //
-    //     for(int vol_idx = 0; vol_idx < m_VolSet.GetNumVols(); vol_idx++) {
-    //         // Get volume column #.
-    //         int vol_col_id = entry.GetVolumeIndex(vol_idx);
-    //
-    //         if (vol_col_id < 0) {
-    //             continue;
-    //         }
-    //
-    //         CSeqDBVol * volp = m_VolSet.GetVolNonConst(vol_idx);
-    //         const TStringMap & volmap =
-    //             volp->GetColumnMetaData(vol_col_id, locked);
-    //
-    //         // Check for identical algorithm descriptions (should not happen.)
-    //
-    //         const string * dup = s_CheckUniqueValues(volmap);
-    //
-    //         if (dup != NULL) {
-    //             ostringstream oss;
-    //             oss << "Error: volume (" << volp->GetVolName()
-    //                 << ") mask data has duplicates value (" << *dup <<  ")";
-    //
-    //             NCBI_THROW(CSeqDBException, eArgErr, oss.str());
-    //         }
-    //
-    //         ITERATE(TStringMap, iter, volmap) {
-    //             int id1 = NStr::StringToInt(iter->first);
-    //             const string & desc1 = iter->second;
-    //
-    //             m_AlgorithmIds.AddMapping(vol_idx, id1, desc1);
-    //         }
-    // ```
     /// Builds the table from the mask columns of `volumes` (in database order). Every
     /// volume opens its columns first, as `x_GetColumnId` does, so an error in a later
     /// volume wins over one in an earlier volume's data.
@@ -527,51 +327,13 @@ impl MaskAlgorithms {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2173-2180
-    // ```c++
-    // void CSeqDB_IdRemapper::GetIdList(vector<int> & algorithms)
-    // {
-    //     typedef map<int,string> TIdMap;
-    //
-    //     ITERATE(TIdMap, iter, m_IdToDesc) {
-    //         algorithms.push_back(iter->first);
-    //     }
-    // }
-    // ```
     /// The database-wide algorithm ids, ascending.
     pub fn ids(&self) -> Vec<i32> {
         self.id_to_desc.keys().copied().collect()
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2268
-    // ```c++
-    // int CSeqDB_IdRemapper::GetAlgoId(const string & id)
-    // {
-    //     if (! s_Contains(m_DescToId, id)) {
-    //         NCBI_THROW(CSeqDBException, eArgErr,
-    //                    "Cannot find string algorithm id in algorithm map.");
-    //     }
-    //
-    //     return m_DescToId[id];
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2292-2307
-    // ```c++
-    // int CSeqDBImpl::GetMaskAlgorithmId(const string & algo)
-    // {
-    //     if (m_UseGiMask) {
-    //         return m_GiMask->GetAlgorithmId(algo);
-    //     }
-    //
-    //     CHECK_MARKER();
-    //     CSeqDBLockHold locked(m_Atlas);
-    //     m_Atlas.Lock(locked);
-    //
-    //     if (m_AlgorithmIds.Empty()) {
-    //         x_BuildMaskAlgorithmList(locked);
-    //     }
-    //
-    //     return m_AlgorithmIds.GetAlgoId(algo);
-    // }
-    // ```
     /// `GetMaskAlgorithmId`: the id of the algorithm with this description (item 2 of a
     /// four-item description; otherwise the whole description, for example `"30:"`), or
     /// `None` where NCBI throws "Cannot find string algorithm id in algorithm map.".
@@ -580,43 +342,6 @@ impl MaskAlgorithms {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2344-2378
-    // ```c++
-    // static const string s_RestoreColon(const string &in) {
-    //     const char l = 0x1;
-    //     return NStr::Replace(in, string(l,1), ":");
-    // }
-    //
-    // static
-    // void s_GetDetails(const string          & desc,
-    //                   string                & program,
-    //                   string                & program_name,
-    //                   string                & algo_opts)
-    // {
-    //     static const CEnumeratedTypeValues* enum_type_vals = NULL;
-    //     if (enum_type_vals == NULL) {
-    //         enum_type_vals = GetTypeInfo_enum_EBlast_filter_program();
-    //     }
-    //     _ASSERT(enum_type_vals);
-    //
-    //     vector<string> items;
-    //     NStr::Split(desc, ":", items);
-    //
-    //     if (items.size() == 2) {
-    //         EBlast_filter_program
-    //            pid = (EBlast_filter_program) NStr::StringToInt(items[0]);
-    //         program.assign(items[0]);
-    //         program_name.assign(enum_type_vals->FindName(pid, false));
-    //         algo_opts.assign(s_RestoreColon(items[1]));
-    //     } else if (items.size() == 4) {
-    //         program.assign(s_RestoreColon(items[0]));
-    //         program_name.assign(s_RestoreColon(items[2]));
-    //         algo_opts.assign(s_RestoreColon(items[1]));
-    //     } else {
-    //         NCBI_THROW(CSeqDBException, eArgErr,
-    //                    "Error in stored mask algorithm description data.");
-    //     }
-    // }
-    // ```
     fn parse_details(
         id: i32,
         description: &str,
@@ -666,41 +391,6 @@ impl MaskAlgorithms {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2380-2412
-    // ```c++
-    // void CSeqDBImpl::GetMaskAlgorithmDetails(int                 algorithm_id,
-    //                          string            & program,
-    //                          string            & program_name,
-    //                          string            & algo_opts)
-    // {
-    //     CHECK_MARKER();
-    //     CSeqDBLockHold locked(m_Atlas);
-    //     m_Atlas.Lock(locked);
-    //
-    //     string s;
-    //     bool found;
-    //
-    //     if (m_UseGiMask) {
-    //        // TODO:  to get description s
-    //        s = m_GiMask->GetDesc(algorithm_id, locked);
-    //        found = true;
-    //     } else {
-    //        if (m_AlgorithmIds.Empty()) {
-    //            x_BuildMaskAlgorithmList(locked);
-    //        }
-    //        found = m_AlgorithmIds.GetDesc(algorithm_id, s);
-    //     }
-    //
-    //     if (found == false) {
-    //         CNcbiOstrstream oss;
-    //         oss << "Filtering algorithm ID " << algorithm_id
-    //             << " is not supported." << endl;
-    //         oss << GetAvailableMaskAlgorithmDescriptions();
-    //         NCBI_THROW(CSeqDBException, eArgErr, CNcbiOstrstreamToString(oss));
-    //     }
-    //
-    //     s_GetDetails(s, program, program_name, algo_opts);
-    // }
-    // ```
     /// `GetMaskAlgorithmDetails`. An id the database does not have gives NCBI's text
     /// ("Filtering algorithm ID `<id>` is not supported." and the list of algorithms) in
     /// [`SeqDbError::Range`].
@@ -715,42 +405,6 @@ impl MaskAlgorithms {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2309-2342
-    // ```c++
-    // string CSeqDBImpl::GetAvailableMaskAlgorithmDescriptions()
-    // {
-    //     vector<int> algorithms;
-    //     GetAvailableMaskAlgorithms(algorithms);
-    //     if (algorithms.empty()) {
-    //         return kEmptyStr;
-    //     }
-    //
-    //     CNcbiOstrstream retval;
-    //     retval << endl
-    //            << "Available filtering algorithms applied to database sequences:"
-    //            << endl << endl;
-    //
-    //     retval << setw(13) << left << "Algorithm ID"
-    //            << setw(40) << left << "Algorithm name"
-    //            << setw(40) << left << "Algorithm options" << endl;
-    //     ITERATE(vector<int>, algo_id, algorithms) {
-    //         string algo, algo_opts, algo_name;
-    //         GetMaskAlgorithmDetails(*algo_id, algo, algo_name, algo_opts);
-    //         if (algo_opts.empty()) {
-    //             algo_opts.assign("default options used");
-    //         }
-    //         if (s_IsNumericId(algo)) {
-    //             retval << setw(13) << left << (*algo_id)
-    //                    << setw(40) << left << algo_name
-    //                    << setw(40) << left << algo_opts << endl;
-    //         } else {
-    //             retval << setw(13) << left << (*algo_id)
-    //                    << setw(40) << left << algo
-    //                    << setw(40) << left << algo_opts << endl;
-    //         }
-    //     }
-    //     return CNcbiOstrstreamToString(retval);
-    // }
-    // ```
     /// `GetAvailableMaskAlgorithmDescriptions`: the table of `blastdbcmd -info`; empty when
     /// the database has no mask data.
     pub fn descriptions(&self) -> Result<String, SeqDbError> {
@@ -785,24 +439,6 @@ impl MaskAlgorithms {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2244-2259
-    // ```c++
-    // int CSeqDB_IdRemapper::RealToVol(int vol_idx, int algo_id)
-    // {
-    //     if (! s_Contains(m_RealIdToVolumeId, vol_idx)) {
-    //         NCBI_THROW(CSeqDBException, eArgErr,
-    //                    "Cannot find volume in algorithm map.");
-    //     }
-    //
-    //     map<int,int> & trans = m_RealIdToVolumeId[vol_idx];
-    //
-    //     if (! s_Contains(trans, algo_id)) {
-    //         NCBI_THROW(CSeqDBException, eArgErr,
-    //                    "Cannot find volume algorithm in algorithm map.");
-    //     }
-    //
-    //     return trans[algo_id];
-    // }
-    // ```
     /// `RealToVol`: the id the volume `volume` (index in the database) uses for the
     /// database-wide `algo_id`; `None` where NCBI throws ("Cannot find volume in algorithm
     /// map." or "Cannot find volume algorithm in algorithm map.").
@@ -812,65 +448,7 @@ impl MaskAlgorithms {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2470-2506
-// ```c++
-//     m_AlgorithmIds.SetNotEmpty();
-// }
-//
-// struct SReadInt4 {
-//     enum { numeric_size = 4 };
-//
-//     static int Read(CBlastDbBlob & blob)
-//     {
-//         return blob.ReadInt4();
-//     }
-//
-//     static void Read(CBlastDbBlob & blob, int n,
-//                      CSeqDB::TSequenceRanges & ranges)
-//     {
-//         const void * src = (const void *) blob.ReadRaw(n*8);
-//         ranges.append(src, n);
-//     }
-// };
-//
-// template<class TRead>
-// void s_ReadRanges(int                       vol_algo,
-//                   CSeqDB::TSequenceRanges & ranges,
-//                   CBlastDbBlob            & blob)
-// {
-//     int num_ranges = TRead::Read(blob);
-//
-//     for(int rng = 0; rng < num_ranges; rng++) {
-//         int algo = TRead::Read(blob);
-//         int num_pairs = TRead::Read(blob);
-//         if (algo == vol_algo) {
-//             TRead::Read(blob, num_pairs, ranges);
-//             break;
-//         }
-//         int skip_amt = num_pairs * 2 * TRead::numeric_size;
-//         blob.SeekRead(blob.GetReadOffset() + skip_amt);
-//     }
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3276-3292
-// ```c++
-// void CSeqDBVol::GetColumnBlob(int              col_id,
-//                               int              oid,
-//                               CBlastDbBlob   & blob,
-//                               bool             keep,
-//                               CSeqDBLockHold & locked)
-// {
-//     if (! m_HaveColumns) {
-//         x_OpenAllColumns(locked);
-//     }
-//
-//     if ((int)m_Columns.size() == 0 || m_Columns[col_id].Empty())
-// 	return;
-//
-//     _ASSERT(col_id >= 0);
-//
-//     m_Columns[col_id]->GetBlob(oid, blob, keep, & locked);
-// }
-// ```
 // `col_id` is the database's number of the mask column (0), not the volume's: NCBI reads
 // the first column of a volume as its masks. `makeblastdb` writes the mask column alone.
 /// Refuses a database with masks that has a volume whose first column is another one.
@@ -934,22 +512,7 @@ fn read_ranges_into(
             // `ReadRaw(n*8)`: a negative count is NCBI's "hit end of data".
             let bytes = blob.read_raw(i64::from(num_pairs) * 8).map_err(format)?;
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1418-1423
-            // ```c++
-            //             ITERATE(TPairVector, r2, r1->offsets) {
-            //                 blob.WriteInt4(r2->first);
-            //                 blob.WriteInt4(r2->second);
-            //                 blob2.WriteInt4_LE(r2->first);
-            //                 blob2.WriteInt4_LE(r2->second);
-            //             }
-            // ```
             // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdb.hpp:302-306
-            // ```c++
-            //         void append(const void *src, size_type num_elements) {
-            //             reserve(_size + num_elements);
-            //             memcpy(&_data[1+ 2*_size], src, num_elements * sizeof(value_type));
-            //             _size += num_elements;
-            //         }
-            // ```
             // `blob` goes to `.?xb`, `blob2` to `.?xc`. The copy keeps the bytes in host order;
             // on a little-endian host they are the numbers of `blob2`, and those of `blob`
             // byte-reversed (`blastdbcmd -outfmt %m` of a column without its `.?xc`, line BDC's
@@ -980,48 +543,6 @@ impl SeqDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2508-2547
-    // ```c++
-    // void CSeqDBImpl::GetMaskData(int                       oid,
-    //                              int                       algo_id,
-    //                              CSeqDB::TSequenceRanges & ranges)
-    // {
-    //     CHECK_MARKER();
-    //
-    //     // This reads the data written by CWriteDB_Impl::SetMaskData
-    //     ranges.clear();
-    //
-    //     CSeqDBLockHold locked(m_Atlas);
-    //     m_Atlas.Lock(locked);
-    //
-    //     if (m_UseGiMask) {
-    //         m_GiMask->GetMaskData(algo_id, x_GetSeqGI(oid, locked), ranges, locked);
-    //         return;
-    //     }
-    //
-    //     if (m_AlgorithmIds.Empty()) {
-    //         x_BuildMaskAlgorithmList(locked);
-    //     }
-    //
-    //     int vol_oid = 0, vol_idx = -1;
-    //
-    //     CSeqDBVol * vol = const_cast<CSeqDBVol*>
-    //         (m_VolSet.FindVol(oid, vol_oid, vol_idx));
-    //
-    //     if (! vol) {
-    //         NCBI_THROW(CSeqDBException, eArgErr, CSeqDB::kOidNotFound);
-    //     }
-    //
-    //     // Get the data.
-    //
-    //     CBlastDbBlob blob;
-    //     vol->GetColumnBlob(x_GetMaskDataColumn(locked), vol_oid, blob, false, locked);
-    //
-    //     if (blob.Size() != 0) {
-    //         // If there actually is mask data, then we need to do the
-    //         // algorithm translation.
-    //
-    //         int vol_algo_id = -1;
-    // ```
     /// `GetMaskData`: the ranges that the algorithm `algo_id` (a database-wide id, see
     /// [`MaskAlgorithms::ids`]) masked in the sequence at `at` (`SeqDb::locate_oid`: NCBI's
     /// `FindVol`, whose `OID not found` NCBI throws here after it reads the algorithms, which
@@ -1051,6 +572,7 @@ impl SeqDb {
             &mut block,
         );
         match block.ranges(vol_oid) {
+            Ok(BlockMasks::NoMaskData) => return Ok(MaskRanges::Ranges(Vec::new())),
             Ok(BlockMasks::Ranges(ranges)) => return Ok(MaskRanges::Ranges(ranges.to_vec())),
             Ok(BlockMasks::AlgorithmNotInVolume) => {
                 return Ok(MaskRanges::AlgorithmNotInVolume {
@@ -1064,7 +586,7 @@ impl SeqDb {
     }
 
     // No NCBI counterpart (reads only): NCBI maps the column files and its `GetMaskData` points into
-    // them for each sequence (seqdbimpl.cpp:2508-2547, quoted at `mask_ranges_at`).
+    // them for each sequence (seqdbimpl.cpp:2508-2547, cited at `mask_ranges_at`).
     /// The masks of the sequences of `range` for the filtering algorithm `algo_id` into `block`
     /// (unless it holds them already), as a search reads them with the sequences of its blocks
     /// (`SeqDb::read_block`): one read of the mask column's offset array for the block and one of
@@ -1104,38 +626,8 @@ impl SeqDb {
         column.read_blobs(range.first, range.end, &mut block.blobs);
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:479-492
-    // ```c++
-    //     vector<CTempString> dbs;
-    //     SeqDB_SplitQuoted(blastdb_names, dbs, true);
-    //     retval.reserve(dbs.size());
-    //
-    //     ITERATE(vector<CTempString>, i, dbs) {
-    //         CAlignFormatUtil::SDbInfo info;
-    //         info.is_protein = is_protein;
-    //         bool success = false;
-    // 	// Unsafe OK as kDbName only used in this loop.
-    //         const string kDbName = NStr::TruncateSpaces_Unsafe(*i);
-    //         if (kDbName.empty())
-    //             continue;
-    //
-    //         success = s_FillDbInfoLocally(kDbName, info, dbfilt_algorithm);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:476-492
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:376-406
-    // ```c++
-    //     CRef<CSeqDB> seqdb(new CSeqDB(dbname, info.is_protein
-    //                           ? CSeqDB::eProtein : CSeqDB::eNucleotide));
-    //     ...
-    //     if (dbfilt_algorithm == -1) {
-    //         return true;
-    //     }
-    //     ...
-    //     string filtering_algorithm;
-    //     seqdb->GetMaskAlgorithmDetails(dbfilt_algorithm,
-    //                                    filtering_algorithm,
-    //                                    info.filt_algorithm_name,
-    //                                    info.filt_algorithm_options);
-    // ```
     /// What the formatter of a search with the filtering algorithm `algo_id` (not -1) reads of
     /// each name of the `-db` list, in the order of the list: that name's database's own
     /// `GetMaskAlgorithmDetails`, from the table its record keeps (`NameRecord::mask_algorithms`,
@@ -1156,19 +648,8 @@ impl SeqDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2234-2242
-    // ```c++
-    // int CSeqDB_IdRemapper::GetVolAlgo(int vol_idx, int algo_id)
-    // {
-    //     if (vol_idx != m_CacheVolIndex || algo_id != m_CacheRealAlgo) {
-    //         m_CacheVolIndex = vol_idx;
-    //         m_CacheRealAlgo = algo_id;
-    //         m_CacheVolAlgo = RealToVol(vol_idx, algo_id);
-    //     }
-    //     return m_CacheVolAlgo;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3345-3358
-    // (quoted at `column::open_all`): a little-endian host reads a column from its `.?xc` file,
+    // (cited at `column::open_all`): a little-endian host reads a column from its `.?xc` file,
     // or from its `.?xb` file when it has no `.?xc`.
     /// LOSAT's refusals of a search masked with the filtering algorithm `algo_id` (line NP,
     /// M/DECISIONS 9; decision D5 of M4a-2), before the search writes anything: a volume with a
@@ -1210,13 +691,14 @@ impl SeqDb {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321 (cited at
     // `MaskBlock::ranges`): the search reads the masks of the sequences it searches only.
     /// The first sequence that the search reads (by ordinal id: those the list and the alias
     /// files' ranges include) whose masks of the filtering algorithm `algo_id`, as stored, `test`
     /// finds a refusal in, with its NCBI OID (as `blastdbcmd`'s `%o`) and its volume's path.
     /// `test` gets the masks (never empty), the bounds of the sequence's length that the index
-    /// gives (`Volume::nucleotide_length_bounds`, read once per block at its first sequence with
+    /// gives (`Volume::nucleotide_length_bounds`, or a protein's exact length,
+    /// `Volume::x_protein_lengths`, read once per block at its first sequence with
     /// masks; `None` where they give none or cannot be read) and a function that reads the
     /// sequence's length (the sequence's index and its last byte; `None` when they cannot be
     /// read, and `test` then gives `Err(())`), which `test` calls only where the bounds do not
@@ -1236,6 +718,7 @@ impl SeqDb {
         ) -> Result<Option<T>, ()>,
     ) -> Option<(u32, PathBuf, T)> {
         const WALK_BLOCK: u32 = 4096;
+        let protein = self.seqtype() == super::SeqType::Protein;
         let mut block = MaskBlock::default();
         let mut ordinal = 0u32;
         let end_ordinal = self.num_seqs();
@@ -1250,23 +733,46 @@ impl SeqDb {
                 let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
                 let masks = match block.ranges(vol_oid) {
                     Ok(BlockMasks::Ranges(masks)) => masks,
-                    // Refused before (`check_search_masks`).
-                    Ok(BlockMasks::AlgorithmNotInVolume) => continue,
+                    // No masks; an algorithm not in the volume is refused before
+                    // (`check_search_masks`).
+                    Ok(BlockMasks::NoMaskData | BlockMasks::AlgorithmNotInVolume) => continue,
                     Err(_) => return None,
                 };
                 if masks.is_empty() {
                     continue;
                 }
+                let volume = &self.volumes[run.volume];
                 let length_bounds = bounds
                     .get_or_insert_with(|| {
-                        self.volumes[run.volume]
-                            .nucleotide_length_bounds(run.first, run.end)
-                            .unwrap_or_default()
+                        if protein {
+                            // A protein's length is exact in its index (series NP, M4b).
+                            volume
+                                .x_protein_lengths(run.first, run.end)
+                                .map(|lengths| {
+                                    lengths
+                                        .into_iter()
+                                        .map(|length| Some((length as usize, length as usize)))
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        } else {
+                            volume
+                                .nucleotide_length_bounds(run.first, run.end)
+                                .unwrap_or_default()
+                        }
                     })
                     .get((vol_oid - run.first) as usize)
                     .copied()
                     .flatten();
-                let length = || self.nucleotide_length(seq_ordinal).ok();
+                let length = || {
+                    if protein {
+                        self.protein_length(seq_ordinal)
+                            .ok()
+                            .map(|length| length as usize)
+                    } else {
+                        self.nucleotide_length(seq_ordinal).ok()
+                    }
+                };
                 match test(masks, length_bounds, &length) {
                     Ok(None) => {}
                     Ok(Some(found)) => {
@@ -1331,7 +837,10 @@ pub struct MaskBlock {
 /// The masks of a sequence of a [`MaskBlock`].
 #[derive(Debug)]
 pub enum BlockMasks<'a> {
-    /// The ranges, as stored (none for a sequence without mask data).
+    /// The sequence has no mask data (its volume has no mask column, or the sequence's blob is
+    /// empty): no ranges, and NCBI does not look the algorithm up in the volume.
+    NoMaskData,
+    /// The ranges of the sequence's mask data, as stored.
     Ranges(&'a [(u32, u32)]),
     /// The sequence has mask data but its volume does not know the algorithm
     /// ([`MaskRanges::AlgorithmNotInVolume`]).
@@ -1357,34 +866,8 @@ impl BlockMaskError<'_> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2531-2546
-// ```c++
-//     CBlastDbBlob blob;
-//     vol->GetColumnBlob(x_GetMaskDataColumn(locked), vol_oid, blob, false, locked);
-//
-//     if (blob.Size() != 0) {
-//         // If there actually is mask data, then we need to do the
-//         // algorithm translation.
-//
-//         int vol_algo_id = -1;
-//
-//         try {
-//             vol_algo_id = m_AlgorithmIds.GetVolAlgo(vol_idx, algo_id);
-//         }
-//         catch(CSeqDBException &) {
-//             return;
-//         }
-//
-//         s_ReadRanges<SReadInt4>(vol_algo_id, ranges, blob);
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2531-2555
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321
-// ```c++
-//     if (datap->mask_type != eNoSubjMasking) {
-//         ASSERT(datap->mask_algo_id != -1);
-//         seqdb.GetMaskData(oid, datap->mask_algo_id, datap->seq_ranges);
-//     }
-// ```
 impl MaskBlock {
     /// `GetMaskData` of the sequence `vol_oid` (volume-relative) of the block read: its ranges
     /// of the algorithm in the order they are stored, valid until the next call.
@@ -1393,11 +876,11 @@ impl MaskBlock {
             return Err(BlockMaskError::Read(error));
         }
         if !self.column {
-            return Ok(BlockMasks::Ranges(&[]));
+            return Ok(BlockMasks::NoMaskData);
         }
         let blob = self.blobs.blob(vol_oid).map_err(BlockMaskError::Read)?;
         if blob.is_empty() {
-            return Ok(BlockMasks::Ranges(&[]));
+            return Ok(BlockMasks::NoMaskData);
         }
         let Some(volume_algo) = self.volume_algo else {
             return Ok(BlockMasks::AlgorithmNotInVolume);
@@ -1415,7 +898,7 @@ impl MaskBlock {
     }
 
     /// The read error that [`MaskBlock::ranges`] gives the sequence `vol_oid` (`Read`), owned.
-    fn into_read_error(self, vol_oid: u32) -> SeqDbError {
+    pub(crate) fn into_read_error(self, vol_oid: u32) -> SeqDbError {
         match self.error {
             Some(error) => error,
             None => self.blobs.into_error(vol_oid),

@@ -1,15 +1,19 @@
 # Product Decision: LOSAT Web application boundary
 
 - Decision ID: `PD-LOSAT-WEB-APP-BOUNDARY`
-- Version: 1.1
-- Date: 2026-09-29; amended 2026-11-04
+- Version: 1.2
+- Date: 2026-09-29; amended 2026-11-04 and 2026-11-20
 - Status: Accepted by the maintainer on 2026-09-29 (plan decisions DW-1 and DW-49, numbered DW-12 until 2026-11-05, in
   [`docs/losat_web_gui_plan.md`](../losat_web_gui_plan.md)). 1.1 2026-11-04 (the maintainer's
   instruction of 2026-11-04, recorded in [`docs/web/ncbi_ui_mapping.md`](../web/ncbi_ui_mapping.md)
   §4: a run's mark says "Supported" or "Not yet supported", and LOSAT Web, the README and the
   CLI help do not say "verification", "verify", "verified", "certified" or "certification";
   the sentences' form is Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07). The invariants are unchanged.
+  2026-10-07; the invariants were unchanged). 1.2 2026-11-20 (invariant 2.1 also names the files
+  that the argv names, so that `-db` runs in LOSAT Web as on the CLI; the Owner approved it the
+  same day, with no words: at 14:24 JST the Owner pressed "Ready for review" on pull request
+  #1360, which proposed this text as the answer A of its question Q-DB and named that press as the
+  last step of the answer; line WQA DECISIONS 26 and 33).
 
 ## Scope
 
@@ -44,13 +48,17 @@ NCBI source authority, NCBI reference comments and the parity gates.
    only while the invariants below hold.
 2. Invariants:
    1. **Engine input.** The engine receives exactly what an equivalent CLI invocation
-      receives: an argv parsed by the same clap parser as the CLI, and FASTA bytes made
+      receives: an argv parsed by the same clap parser as the CLI; FASTA bytes made
       only of whole original records, in their original order, as stored in the run
       snapshot (a single newline may be added between concatenated files that do not
-      end with one). The application never changes sequences, options or statistics,
-      and never splits one search into independent searches whose results are joined.
-      The exact input bytes of every run can be exported, so the run can be reproduced
-      with the CLI.
+      end with one); and the files that the argv names (a BLAST database of `-db` and
+      the ID lists of its filters, a WindowMasker counts file, the registry file of
+      `-conffile`, a PSSM), read as the user gave them and never changed. The
+      application never changes sequences, options or statistics, and never splits one
+      search into independent searches whose results are joined. The exact input bytes
+      of every run can be exported, so the run can be reproduced with the CLI; a file
+      that the argv names is exported by its name, as the CLI command names it, and the
+      user keeps the file (a BLAST database can be many gigabytes).
    2. **Compatibility outputs.** outfmt 0, 6 and 7 are produced only by the engine's
       formatters. The application stores and exports them byte for byte and never
       rewrites, filters or regenerates them.
@@ -129,3 +137,9 @@ be implemented in the engine under the root `AGENTS.md` rules, or not at all.
   read drops the verification and certification words (the maintainer's instruction of
   2026-11-04); the compatibility contract states what the gates compared; Non-goals reworded.
   Invariants unchanged.
+- 1.2 (2026-11-20, proposed by line WQA and approved by the Owner the same day, pull request
+  #1360): invariant 2.1 also
+  names the files that the argv names, read as the user gave them, and exports them by name, so
+  that `-db` runs in LOSAT Web as on the CLI (the maintainer's rule of 2026-10-22: every option
+  of the native CLI works in LOSAT Web). LOSAT Web already gives the engine WindowMasker counts
+  files and `-conffile` registry files this way. Other invariants unchanged.

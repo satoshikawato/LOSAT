@@ -2,11 +2,6 @@
 //! (`LOSAT_X_BPCLUT`, `src/algorithm/blastx/seed.rs` `x_compressed_lookup`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-//! ```c
-//!     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//!                                     query, locations);
-//!     s_CompressedLookupFinalize(lookup);
-//! ```
 //! The flat table lists each cell's hits in the order of the reference table's scan (the lib tests
 //! of `x_clut_direct.rs`), so the property under test is that the report does not depend on the
 //! switch, for subjects read from FASTA (`-subject`) and from a database (`-db`), on one thread

@@ -111,6 +111,23 @@ def test_results_survive_pickle(case):
     assert pickle.loads(pickle.dumps(part)) == part
 
 
+def test_an_id_that_is_not_utf8_is_text_with_replacement_characters():
+    # Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
+    letters = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ"
+    # Latin-1's `é` (0xE9), a truncated `€` (E2 82) and a lone 0xFF; `é` in UTF-8.
+    query = b">q\xe9\xe2\x82 a title\n" + letters + b"\n"
+    subject = b">s\xc3\xa9\xff a title\n" + letters + b"\n"
+    outcome = Search("blastp").run(Sequences.from_text(query), Sequences.from_text(subject), outfmt="6")
+    report = outcome.reports[0]
+    assert len(outcome.hsps) > 0
+    for hsp in outcome.hsps:
+        row = report.bytes[report.spans[hsp.index]]
+        query_id, subject_id = row.split(b"\t")[:2]
+        assert (query_id, subject_id) == (b"q\xe9\xe2\x82", b"s\xc3\xa9\xff")
+        assert hsp.query_id == query_id.decode("utf-8", "replace") == "q\ufffd\ufffd"
+        assert hsp.subject_id == subject_id.decode("utf-8", "replace") == "s\u00e9\ufffd"
+
+
 def test_a_pickled_row_does_not_carry_the_table(blastp):
     assert len(pickle.dumps(blastp.hsps[:1])) < len(pickle.dumps(blastp.hsps)) / 2
 

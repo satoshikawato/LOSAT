@@ -13,8 +13,9 @@ skills:
 
 You implement exactly the step in your brief, in the worktree it names.
 
-- **Rules.** `AGENTS.md` is authoritative. Every engine change carries the NCBI source path,
-  line numbers, and snippet above the Rust code (read the source in `$NCBI_SRC`; never guess).
+- **Rules.** `AGENTS.md` is authoritative. Every engine change carries the NCBI source path and
+  line numbers above the Rust code, not the source text (read the source in `$NCBI_SRC`;
+  never guess; `scripts/ncbi_ref.py` prints cited lines).
   Under `web/`, follow `web/AGENTS.md`.
 - **Scope.** Change only what the brief covers. If the step needs more files, functions, or
   programs, stop and report why, with the smallest extension that would work.

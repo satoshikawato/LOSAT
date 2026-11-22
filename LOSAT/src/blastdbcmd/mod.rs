@@ -21,6 +21,7 @@ mod range;
 mod retrieve;
 mod taxonomy;
 
+use crate::wording::DATABASE_ERROR;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 
@@ -35,30 +36,23 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 const PROGRAM: &str = "BLASTDBCMD";
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:907-909
-// ```c++
-//     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
-//                   "BLAST database client, version " + CBlastVersion().Print());
-// ```
 /// The text of `blastdbcmd -help` (NCBI 2.17.0's, `CArgDescriptions::PrintUsage` of the
 /// descriptions in `args`). Its part before `OPTIONAL ARGUMENTS` is the usage that `-h` and the
 /// argument errors print.
 const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
-// ```c++
-//     SetDiagPostLevel(eDiag_Warning);
-//     SetDiagPostPrefix("blastdbcmd");
-// ```
-/// blastdbcmd as NCBI's application runs it (`ncbi_app`): its `-version` is that of BLAST+
-/// (`CBlastDBCmdApp` sets `CBlastVersion`), its diagnostics carry the prefix `[blastdbcmd]`.
+/// blastdbcmd as NCBI's application runs it (`ncbi_app`): its `-version` states LOSAT's version
+/// where NCBI's states BLAST+'s (`CBlastDBCmdApp` sets `CBlastVersion`), its diagnostics carry the
+/// prefix `[blastdbcmd]`.
 static TOOL: Tool = Tool {
     program: "blastdbcmd",
     refusal_name: PROGRAM,
-    version: crate::NCBI_BLAST_VERSION,
     help: HELP,
     descs: args::DESCS,
     dependencies: args::dependencies,
     post_prefix: Some("blastdbcmd"),
+    components: &[],
 };
 
 /// Runs `blastdbcmd` with `words` (the command line after `losat blastdbcmd`), after its
@@ -99,20 +93,10 @@ fn run_body(
         Err(reason) => return diag.refuse(&refusal(reason)),
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1179-1180
-    // ```c++
-    //     try {
-    //         CNcbiOstream& out = args["out"].AsOutputFile();
-    // ```
     let mut out = match args.output_file("out", out) {
         Ok(out) => out,
         Err(error) => {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-            // ```c++
-            //     catch (const CArgException& e) {                                        \
-            //         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-            //         exit_code = BLAST_INPUT_ERROR;                                      \
-            //     }                                                                       \
-            // ```
             diag.post(&format!("Command line argument error: {}", error.message()));
             return 1;
         }
@@ -125,11 +109,6 @@ fn run_body(
         Err(error) => return database_error(diag, error),
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1181-1184
-    // ```c++
-    //         if (args["show_blastdb_search_path"]) {
-    //             out << CSeqDB::GenerateSearchPath() << NcbiEndl;
-    //             return status;
-    // ```
     if args.given("show_blastdb_search_path") {
         let _ = writeln!(out, "{}", path.as_str());
         let _ = out.flush();
@@ -145,19 +124,6 @@ fn run_body(
         .any(|selector| args.given(selector));
     if !selected && (args.given("taxids") || args.given("taxidlist")) {
         // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:358-369
-        // ```c++
-        //     CSeqDB::ESeqType seqtype = ParseMoleculeTypeString(args[kArgDbType].AsString());
-        //     m_DbIsProtein = static_cast<bool>(seqtype == CSeqDB::eProtein);
-        //     m_TargetOnly = args["target_only"];
-        //    	if(m_TargetOnly) {
-        //     	CRef<CSeqDBGiList> taxid_list(new CSeqDBGiList());
-        //     	taxid_list->AddTaxIds(m_TaxIdList);
-        //    		m_BlastDb.Reset(new CSeqDBExpert(args[kArgDb].AsString(), seqtype, taxid_list.GetPointer()));
-        //     }
-        //    	else {
-        //    		m_BlastDb.Reset(new CSeqDBExpert(args[kArgDb].AsString(), seqtype));
-        //    	}
-        // ```
         // With `-target_only` the list's errors are those of the open, inside NCBI's guess
         // of the type: a protein database the list fails on is then looked for as a
         // nucleotide one (probe J111 of line BDC: `No alias or index file found for
@@ -210,8 +176,16 @@ fn run_body(
             "{name}: the date of the database is not UTF-8 text"
         )));
     }
+    let exact = if args.given("exact_length") {
+        match db.exact_totals() {
+            Ok(totals) => Some(totals),
+            Err(error) => return database_error(diag, error),
+        }
+    } else {
+        None
+    };
     let mut text = Vec::new();
-    write_info_head(&mut text, &db);
+    write_info_head(&mut text, &db, exact);
     let masks = db
         .mask_algorithms()
         .and_then(|algorithms| algorithms.descriptions());
@@ -245,41 +219,14 @@ fn refusal(reason: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:110-153
-// ```c++
-// static CSeqDBImpl *
-// s_SeqDBInit(const string       & dbname,
-//             char                 prot_nucl,
-//             ...
-// {
-//     CSeqDBImpl * impl = 0;
-//
-//     if (prot_nucl == '-') {
-//         try {
-//             prot_nucl = 'p';
-//             impl = new CSeqDBImpl(dbname,
-//                                   prot_nucl,
-//                                   ...
-//         }
-//         catch(CSeqDBException &) {
-//             prot_nucl = 'n';
-//         }
-//     }
-//
-//     if (! impl) {
-//         impl = new CSeqDBImpl(dbname,
-//                               prot_nucl,
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:524-531
-// ```c++
-//     CSeqDB::ESeqType seqtype = ParseMoleculeTypeString(args[kArgDbType].AsString());
-//     m_BlastDb.Reset(new CSeqDBExpert(args[kArgDb].AsString(), seqtype));
-// ```
 /// Opens the database `name` (the `-db` value as given, one name or several: blastdbcmd does not
 /// trim it) of the type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide),
 /// with the list of its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
-/// constructor applies). With `guess`, an error that NCBI raises too (`ncbi_message`) moves
-/// on to the nucleotide database, and the nucleotide error is the one reported; an error of
-/// LOSAT's is reported at once, since NCBI may open that protein database.
+/// constructor applies). With `guess`, an exception of NCBI's reader
+/// (`SeqDbError::is_seqdb_exception`) moves on to the nucleotide database, and the nucleotide
+/// error is the one reported; a refusal of LOSAT's is reported at once, since NCBI may open that
+/// protein database.
 fn open_database(
     name: &str,
     dbtype: &str,
@@ -305,85 +252,44 @@ fn open_database(
             Ok((db, volumes))
         });
         match opened {
-            Err(error) if types.peek().is_some() && error.ncbi_message().is_some() => {}
+            Err(error) if types.peek().is_some() && error.is_seqdb_exception() => {}
             opened => return opened,
         }
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
-// ```c++
-//     catch (const CSeqDBException& e) {                                      \
-//         ...
-//         else {                                                              \
-//         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
-//         	exit_code = BLAST_DATABASE_ERROR;                               \
-//         }                                                                   \
-//     }                                                                       \
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
-// ```c++
-//     catch (const CException& e) {                                           \
-//         LOG_POST(Error << "Error: " << e.what());                           \
-//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-//     }                                                                       \
-// ```
 /// A reader error: NCBI's own (`SeqDbError::ncbi_message`) as `BLAST Database error: <text>`
 /// with exit status 2, another exception of NCBI's (`SeqDbError::ncbi_exception`: an alias
 /// file's value that does not convert) as `Error: <what()>` with exit status 255, else LOSAT's
 /// refusal.
 fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
     if let Some(exception) = error.ncbi_exception() {
-        diag.post(&format!("Error: {}", exception.what()));
+        diag.post_bytes(&[b"Error: ".as_slice(), &exception.what()].concat());
         return 255;
     }
     match error.ncbi_message() {
         Some(text) => {
-            diag.post(&format!("BLAST Database error: {text}"));
+            diag.post_bytes(&[DATABASE_ERROR.as_bytes(), b" ", &text].concat());
             2
         }
-        None => diag.refuse(&refusal(&error.to_string())),
+        None => diag.refuse(&crate::algorithm::common::database::losat_reader_error(
+            &error, PROGRAM,
+        )),
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:533-573
-// ```c++
-//     static const NStr::TNumToStringFlags kFlags = NStr::fWithCommas;
-//     const string kLetters = m_DbIsProtein ? "residues" : "bases";
-//     const string kVersion = (m_BlastDb->GetBlastDbVersion() == EBlastDbVersion::eBDB_Version5) ? "5":"4";
-//     ...
-//     // Print basic database information
-//     out << "Database: " << m_BlastDb->GetTitle() << endl
-//         << "\t" << NStr::IntToString(m_BlastDb->GetNumSeqs(), kFlags)
-//         << " sequences; ";
-//         if(args["exact_length"])
-//         	out << NStr::UInt8ToString(m_BlastDb->GetExactTotalLength(), kFlags);
-//         else
-//         	out << NStr::UInt8ToString(m_BlastDb->GetTotalLength(), kFlags);
-//     out << " total " << kLetters << endl << endl
-//         << "Date: " << m_BlastDb->GetDate()
-//         << "\tLongest sequence: "
-//         << NStr::IntToString(m_BlastDb->GetMaxLength(), kFlags) << " "
-//         << kLetters << endl << endl;
-//
-//     out << "BLASTDB Version: " << kVersion << endl;
-//     ...
-//     out << m_BlastDb->GetAvailableMaskAlgorithmDescriptions();
-//     ...
-//     out << endl << "Volumes:" << endl;
-//     ITERATE(vector<string>, file_name, volumes) {
-//         out << "\t" << *file_name << endl;
-//     }
-// ```
 /// The text of `-info` for `db` up to its filtering algorithms.
 ///
 /// The counts are `GetNumSeqs` and `GetTotalLength` of the database opened without a list:
-/// the walks of the alias tree (`SeqDb::printed_num_seqs`). `-exact_length` changes nothing
-/// here: NCBI's exact total differs from the total only when its totals are counted over a
-/// filtered list of sequences (an alias file with `GILIST`, `SEQIDLIST`, `OIDLIST`, ...,
-/// seqdbimpl.cpp:104-131), which LOSAT's reader refuses; the OID ranges (`FIRST_OID`,
-/// `LAST_OID`) do not make NCBI scan.
-fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
+/// the walks of the alias tree, or the scan of the included OIDs that an alias file's
+/// `OIDLIST` asks for (`SeqDb::printed_num_seqs`). `exact` is `-exact_length`'s exact total and
+/// the longest length after it (`SeqDb::exact_totals`), which differ from the others only where
+/// NCBI scanned the totals (the OID ranges `FIRST_OID`, `LAST_OID` do not make it scan).
+fn write_info_head(out: &mut Vec<u8>, db: &SeqDb, exact: Option<(u64, u32)>) {
+    let (total, longest) = exact.unwrap_or((db.printed_total_length(), db.max_length()));
     let letters = match db.seqtype() {
         SeqType::Protein => "residues",
         SeqType::Nucleotide => "bases",
@@ -396,10 +302,10 @@ fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
         "\t{} sequences; {} total {letters}\n\nDate: {}\tLongest sequence: {} {letters}\n\n\
          BLASTDB Version: {}\n",
         int_with_commas(db.printed_num_seqs()),
-        with_commas(db.printed_total_length()),
+        with_commas(total),
         db.date(),
-        // `GetMaxLength` is NCBI's `int` of the index files' longest length.
-        int_with_commas(db.max_length() as i32),
+        // `GetMaxLength` is NCBI's `int` of the index files' longest length (of the scan's).
+        int_with_commas(longest as i32),
         if db.is_version5() { "5" } else { "4" },
     );
 }
@@ -413,205 +319,5 @@ fn write_info_volumes(out: &mut Vec<u8>, volumes: &[String]) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn commas_group_three_digits() {
-        assert_eq!(with_commas(0), "0");
-        assert_eq!(with_commas(999), "999");
-        assert_eq!(with_commas(1_000), "1,000");
-        assert_eq!(with_commas(186_063_409), "186,063,409");
-    }
-
-    // help.txt is NCBI's frozen `-help` text and is not edited or split: this keeps the version
-    // that it names and the version that LOSAT writes elsewhere from drifting apart.
-    #[test]
-    fn the_frozen_help_names_the_version_that_losat_writes() {
-        assert!(HELP.contains(&format!(
-            "   BLAST database client, version {}\n",
-            crate::NCBI_BLAST_VERSION
-        )));
-    }
-
-    #[test]
-    fn the_short_usage_is_the_head_of_the_help() {
-        let usage = crate::ncbi_app::short_usage(HELP);
-        assert_eq!(usage.len(), 780);
-        assert!(usage.starts_with("USAGE\n  blastdbcmd [-h] [-help] [-db dbname]"));
-        assert!(usage.ends_with(
-            "   BLAST database client, version 2.17.0+\n\nUse '-help' to print detailed \
-             descriptions of command line arguments\n"
-        ));
-        assert_eq!(HELP.len(), 9450);
-    }
-
-    /// An output whose every write fails (a full disk).
-    struct FullDisk;
-
-    impl Write for FullDisk {
-        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::other("no space left"))
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Err(std::io::Error::other("no space left"))
-        }
-    }
-
-    /// A pipe whose reader has closed.
-    struct ClosedPipe;
-
-    impl Write for ClosedPipe {
-        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    /// The exit status and the diagnostics of `words` run with `input` as the standard input
-    /// and `out` as the standard output.
-    fn run_on(words: &[&str], input: &str, out: &mut dyn Write) -> (i32, String) {
-        let words: Vec<OsString> = words.iter().map(OsString::from).collect();
-        let mut err = Vec::new();
-        let status = run_with(&words, &mut input.as_bytes(), out, &mut err);
-        (status, String::from_utf8(err).unwrap())
-    }
-
-    fn fixture_db(name: &str) -> String {
-        format!("{}/tests/{name}", env!("CARGO_MANIFEST_DIR"))
-    }
-
-    // NCBI 2.17.0 with `-out /dev/full` (review 2 of line RG item K1, F3): a failed write leaves
-    // the retrieval going on, so an id that is not found after it is reported as without the
-    // failure (`Skipped NOSUCHID`, exit status 1). The batch is the standard input (`-`).
-    #[test]
-    fn a_failed_write_leaves_the_later_entries_of_a_batch_and_their_errors() {
-        let db = fixture_db("blastdbcmd/db/p5");
-        let words = ["-db", db.as_str(), "-entry_batch", "-"];
-        let batch = "XP_000001.1\nnosuchid\nP99999.2\n";
-        let mut written = Vec::new();
-        let expected = run_on(&words, batch, &mut written);
-        assert_eq!(
-            expected,
-            (1, "Error: [blastdbcmd] Skipped NOSUCHID\n".to_string())
-        );
-        assert!(written.starts_with(b">"));
-        assert_eq!(run_on(&words, batch, &mut FullDisk), expected);
-        // A closed pipe ends NCBI's process by SIGPIPE (exit status 141) outside Windows before
-        // the `Skipped` line, as `cerr`'s tie flushes the output first: the retrieval ends with
-        // exit status 0 and no message (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). On
-        // Windows it is a failed write like the others.
-        let closed = if cfg!(windows) {
-            expected
-        } else {
-            (0, String::new())
-        };
-        assert_eq!(run_on(&words, batch, &mut ClosedPipe), closed);
-    }
-
-    /// Standard output and standard error into one file (`2>&1`).
-    #[derive(Clone)]
-    struct Merged(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
-
-    impl Write for Merged {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.borrow_mut().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    // `cerr` is tied to `cout`: NCBI flushes the output before each diagnostic, so with `2>&1`
-    // the sequences of the entries before a missing id come before its `Skipped` line, and an
-    // unfinished line before an `-outfmt` error (review of line RG item K1b, R2-F1).
-    #[test]
-    fn diagnostics_come_after_the_output_written_before_them() {
-        let db = fixture_db("blastdbcmd/db/p5");
-        for (words, batch, error) in [
-            (
-                vec!["-db", db.as_str(), "-entry_batch", "-", "-outfmt", "%a"],
-                "XP_000001.1\nnosuchid\n",
-                "Error: [blastdbcmd] Skipped NOSUCHID\n",
-            ),
-            (
-                vec![
-                    "-db",
-                    db.as_str(),
-                    "-entry",
-                    "XP_000001.1",
-                    "-outfmt",
-                    "%a %Z",
-                ],
-                "",
-                "Error: [blastdbcmd] Unrecognized format specification: '%Z'\n",
-            ),
-        ] {
-            let mut alone = Vec::new();
-            let (status, err) = run_on(&words, batch, &mut alone);
-            assert_eq!(err, error, "{words:?}");
-            let merged = Merged(Default::default());
-            let words: Vec<OsString> = words.iter().map(OsString::from).collect();
-            let status_merged = run_with(
-                &words,
-                &mut batch.as_bytes(),
-                &mut merged.clone(),
-                &mut merged.clone(),
-            );
-            assert_eq!(status_merged, status);
-            let mut expected = alone;
-            expected.extend_from_slice(error.as_bytes());
-            assert_eq!(*merged.0.borrow(), expected, "{words:?}");
-        }
-        // A bad mask algorithm id of a batch line, between the outputs of its neighbours
-        // (NCBI 2.17.0 `-ipg_batch - -outfmt "%a %g" 2>&1`, review of K1b, R3-F1).
-        let db = fixture_db("blastdbcmd/db/m/pmg");
-        let words: Vec<OsString> = ["-db", db.as_str(), "-ipg_batch", "-", "-outfmt", "%a %g"]
-            .iter()
-            .map(OsString::from)
-            .collect();
-        let merged = Merged(Default::default());
-        let status = run_with(
-            &words,
-            &mut &b"1001 21\n1002 99\n1003 21\n"[..],
-            &mut merged.clone(),
-            &mut merged.clone(),
-        );
-        assert_eq!(status, 1);
-        assert_eq!(
-            String::from_utf8(merged.0.borrow().clone()).unwrap(),
-            "XP_1001.1 1001\nError: [blastdbcmd] Invalid filtering algorithm ID: 99\nError: \
-             [blastdbcmd] Skipped IPG : 1002\nXP_1003.1 1003\n"
-        );
-    }
-
-    // NCBI 2.17.0 with `-out /dev/full` (F2): the serial stream of `-metadata` reports the
-    // failed write (five lines, exit status 6), which LOSAT refuses.
-    #[test]
-    fn a_failed_write_of_the_metadata_is_refused() {
-        let db = fixture_db("dustmasker/db/basic");
-        let words = ["-db", db.as_str(), "-metadata"];
-        let mut written = Vec::new();
-        assert_eq!(run_on(&words, "", &mut written), (0, String::new()));
-        assert!(written.ends_with(b"}\n"));
-        assert_eq!(
-            run_on(&words, "", &mut FullDisk),
-            (
-                1,
-                "Error: a failed write of the -metadata output (NCBI's serial stream reports it) \
-                 is not supported by LOSAT's BLASTDBCMD\n"
-                    .to_string()
-            )
-        );
-        // A closed pipe ends the program silently outside Windows, where SIGPIPE ends NCBI's.
-        if !cfg!(windows) {
-            assert_eq!(run_on(&words, "", &mut ClosedPipe), (0, String::new()));
-        }
-    }
-}
+#[path = "tests.rs"]
+mod tests;

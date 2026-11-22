@@ -378,6 +378,40 @@ for (const end of ['a mode change', 'Cancel'] as const) {
   });
 }
 
+// W-3 of line WQA (2026-11-21): a mode pressed as LOSAT was asked again was not chosen (Firefox in CI, run 44767268395).
+// A mode change asks LOSAT again, and the alert above the tabs goes a moment later; when that came between the next
+// press and its release, the form moved up under the pointer by as much, and the release chose nothing. The page now
+// says what it said until the press ends (ui/press-hold.ts).
+test('a mode pressed as LOSAT is asked again is chosen, and the alert goes after the press', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, ENGINE_ONLY);
+  test.setTimeout(120_000);
+  const file = await engineFile(page);
+  await stubExampleHost(page);
+  await pastedWhileUnavailable(page, file);
+  // The connection is back, and the engine file is on its way: an Example asks LOSAT again.
+  file.mode = 'hold';
+  await page.getByTestId('example-refseq-16s-bacteria').click();
+  await expect.poll(() => file.held.length).toBeGreaterThan(0);
+  await expect(page.locator('main')).toHaveAttribute('data-losat', 'unavailable');
+  await expect(page.getByTestId('losat-unavailable')).toBeVisible();
+  // A press on BLASTN at the top of the page (as in CI: no scroll can keep it under the pointer).
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const mode = page.getByTestId('program-blastn');
+  const pressed = (await mode.boundingBox())!;
+  await page.mouse.move(pressed.x + pressed.width / 2, pressed.y + pressed.height / 2);
+  await page.mouse.down();
+  // The change to BLASTP that came before the press in CI comes during it here, and so does what it ends: the page
+  // no longer reads LOSAT as unavailable before the release.
+  await page.getByTestId('program-blastp').evaluate((input: HTMLInputElement) => input.click());
+  await expect(page.locator('main')).toHaveAttribute('data-losat', 'available', { timeout: 30_000 });
+  expect.soft((await mode.boundingBox())!.y, 'where BLASTN is at the release').toBe(pressed.y);
+  await page.mouse.up();
+  await expect(mode).toBeChecked();
+  await expect(page.getByTestId('losat-unavailable')).toHaveCount(0);
+  file.mode = 'pass';
+  for (const route of file.held.splice(0)) await route.continue();
+});
+
 // The fifth review of D1 and D2, M1 (2026-11-19): what the form asked again read as asked while it was on its way, so a
 // second press (after Cancel, or of the other set) asked nothing: it was refused at once with "Reload the page", which
 // stayed once the engine file downloaded, and nothing was downloaded.
@@ -513,7 +547,7 @@ test('a search whose threaded module cannot be downloaded fails with the file an
   await submit(page);
   await waitStatus(page, 1, 'failed', 30_000);
   expect(await runMessage(page, 1)).toMatch(
-    /^Run 1 failed: LOSAT could not download its engine file \/engine\/losat-web-threads-[0-9a-f]+\.wasm \(network error\)\. Reload the page\. A failed run keeps no results\.$/,
+    /^Run 1 failed: LOSAT could not download its engine file \/engine\/losat-web-threads-[0-9a-f]+\.wasm \(network error\)\. Reload the page\. It keeps no outputs\.$/,
   );
 });
 
@@ -525,7 +559,7 @@ test('a search whose Engine worker cannot be loaded fails with what could not st
   await submit(page);
   await waitStatus(page, 1, 'failed', 30_000);
   expect(await runMessage(page, 1)).toBe(
-    `Run 1 failed: LOSAT could not start the part that runs searches. ${RELOAD} A failed run keeps no results.`,
+    `Run 1 failed: LOSAT could not start the part that runs searches. ${RELOAD} It keeps no outputs.`,
   );
 });
 
@@ -568,7 +602,7 @@ test('a search whose Data worker ended fails at once with what stopped, and its 
   // commit of its results, while the page already said that the part that keeps the results stopped (the review of D2, L2).
   await expect.poll(() => endedByPage(page, 'losat-engine'), { timeout: 15_000 }).toBe(engines + 1);
   await waitStatus(page, 1, 'failed', 30_000);
-  expect(await runMessage(page, 1)).toBe(`Run 1 failed: ${DATA_ENDED} A failed run keeps no results.`);
+  expect(await runMessage(page, 1)).toBe(`Run 1 failed: ${DATA_ENDED} It keeps no outputs.`);
   await expect(page.getByTestId('losat-unavailable')).toHaveText(DATA_ENDED);
 });
 
@@ -581,7 +615,7 @@ test('a search whose Engine worker ended fails with what stopped, and the next s
   expect(await openKeeperLinks(page)).toBe(1);
   await endWorker(page, 'losat-engine');
   await waitStatus(page, 1, 'failed', 30_000);
-  expect(await runMessage(page, 1)).toBe(`Run 1 failed: ${ENGINE_ENDED} A failed run keeps no results.`);
+  expect(await runMessage(page, 1)).toBe(`Run 1 failed: ${ENGINE_ENDED} It keeps no outputs.`);
   // The worker's threads and its keeper ended with it: the page ends its runtime at once. Before, the page waited for the
   // keeper's answer for good, with the keeper's channel open (here in Chromium, Firefox and WebKit).
   await expect.poll(() => openKeeperLinks(page), { timeout: 15_000 }).toBe(0);
@@ -638,7 +672,7 @@ for (const [end, sentence] of [
     await expect(page.getByTestId('run-2-option')).toHaveAttribute('data-status', 'running', { timeout: 60_000 });
     await endWorker(page, 'losat-engine', end === 'fails' ? 'out of memory' : undefined);
     await waitStatus(page, 2, 'failed', 30_000);
-    expect(await runMessage(page, 2)).toBe(`Run 2 failed: ${sentence} A failed run keeps no results.`);
+    expect(await runMessage(page, 2)).toBe(`Run 2 failed: ${sentence} It keeps no outputs.`);
   });
 }
 

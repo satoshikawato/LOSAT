@@ -9,13 +9,6 @@
 //! the whole query batch.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3410-3420
-//! ```c
-//!     for (index1=q_start; index1<hsp_end; index1++) {
-//!         if (!(positionBased))
-//!             score += sbp->matrix->data[*query_var][*subject_var];
-//!         else
-//!             score += sbp->psi_matrix->pssm->data[index1][*subject_var];
-//! ```
 //! NCBI's code is the same for both, with a branch on `positionBased` (or `use_pssm`) where it
 //! reads a score: `MatrixScore` holds tblastn's calls as they were, each `#[inline(always)]`, so
 //! that the default instance is tblastn's code; `PssmScore` calls the PSSM kernels of
@@ -223,8 +216,7 @@ impl TbnScore for MatrixScore {
         scratch
     }
 
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
-    // max_offset = BlastGetStartForGappedAlignment(query_tmp.sequence,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
     //     subject->sequence, gap_align->sbp, q_start, length, s_start, length);
     #[inline(always)]
     fn gapped_start(
@@ -243,23 +235,6 @@ impl TbnScore for MatrixScore {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 and
     // c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3405-3413,3419-3420,3435-3437
-    // ```c
-    //     init_hit_width = q_right_off - q_left_off + 1;
-    //     *hsp_len = left_disp + right_disp + init_hit_width;
-    // ...
-    //    const BlastScoreBlk* sbp, Uint4 q_start, Uint4 q_length,
-    //     if (q_length <= HSP_MAX_WINDOW) {
-    //     hsp_end = q_start + HSP_MAX_WINDOW;
-    // ...
-    //             score += sbp->matrix->data[*query_var][*subject_var];
-    // ...
-    //     hsp_end = q_start + MIN(q_length, s_length);
-    //     for (index1=q_start + HSP_MAX_WINDOW; index1<hsp_end; index1++) {
-    // ...
-    //        max_offset -= HSP_MAX_WINDOW/2;
-    //     else
-    //        max_offset = q_start;
-    // ```
     // A negative Int4 length read as Uint4 is above HSP_MAX_WINDOW, and q_start + MIN(q_length,
     // s_length) wraps back to q_start + length, so only the first window is scored: its sum over
     // the bytes NCBI reads gives q_start + 5 when above 0, else q_start (`gapped_start_int4` of
@@ -284,27 +259,6 @@ impl TbnScore for MatrixScore {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4171-4189,4257-4258,4295
-    // ```c
-    //    if (subject_length < MAX_SUBJECT_OFFSET) {
-    //       *start_shift = 0;
-    //       return;
-    //    }
-    // ...
-    //    if (s_offset <= max_extension_left) {
-    //       *start_shift = 0;
-    //    } else {
-    //       *start_shift = s_offset - max_extension_left;
-    //       *subject_offset_ptr = max_extension_left;
-    //    }
-    //
-    //    *subject_length_ptr =
-    //       MIN(subject_length, s_offset + max_extension_right) - *start_shift;
-    // ...
-    //    AdjustSubjectRange(&s_length, &subject_length, q_length, query_length,
-    //                       &subject_shift);
-    // ...
-    //    if (q_length < query_length && s_length < subject_length) {
-    // ```
     // NCBI's `subject->length` enters the alignment only through `AdjustSubjectRange` and the
     // test of the right extension. With `s_off >= subject->length`, the alignment on the letters
     // up to `s_off` (a `subject->length` of `s_off + 1`) gives NCBI's values whenever both lengths
@@ -351,14 +305,7 @@ impl TbnScore for MatrixScore {
         ))
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-790
-    // ```c
-    //                 score = s_BlastAaExtendOneHit(matrix, subject, query,
-    //                                               subject_offset, query_offset,
-    //                                               cutoffs->x_dropoff,
-    //                                               &hsp_q, &hsp_s, &hsp_len,
-    //                                               wordsize, use_pssm, &s_last_off);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-791
     #[inline(always)]
     fn one_hit(
         self,
@@ -373,7 +320,7 @@ impl TbnScore for MatrixScore {
         extend_one_hit_for(matrix, query, subject, q_off, s_off, dropoff, word_size)
     }
 
-    // NCBI c++/src/algo/blast/core/blast_gapalign.c:3953:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3953:
     // status = s_BlastProtGappedAlignment(...);
     #[inline(always)]
     fn score_only(
@@ -402,7 +349,7 @@ impl TbnScore for MatrixScore {
         )
     }
 
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:436-449:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-449:
     // retval = BlastGetOffsetsForGappedAlignment(...);
     #[inline(always)]
     fn offsets(
@@ -420,13 +367,7 @@ impl TbnScore for MatrixScore {
         )
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-512
-    // ```c
-    //            BLAST_GappedAlignmentWithTraceback(program_number, query,
-    //                  adjusted_subject, gap_align, score_params, q_start, s_start,
-    //                  query_length, adjusted_s_length,
-    //                  fence_hit);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-512
     #[inline(always)]
     fn traceback(
         self,
@@ -490,7 +431,7 @@ impl<'a> TbnScore for PssmScore<'a> {
         scratch.0
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3410-3420 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3410-3420 (cited at
     // `pssm_search::gapalign::pssm_get_start_for_gapped_alignment`)
     fn gapped_start(
         self,
@@ -510,14 +451,7 @@ impl<'a> TbnScore for PssmScore<'a> {
         ) as usize
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3394,3405-3413
-    // ```c
-    //    const BlastScoreBlk* sbp, Uint4 q_start, Uint4 q_length,
-    // ...
-    //     hsp_end = q_start + HSP_MAX_WINDOW;
-    // ...
-    //             score += sbp->psi_matrix->pssm->data[index1][*subject_var];
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3394-3414
     // A negative length is not below HSP_MAX_WINDOW as Uint4, so the first window of
     // HSP_MAX_WINDOW positions is scored (`pssm_get_start_for_gapped_alignment` takes the Int4
     // length) on the bytes NCBI reads (`subject_window`: past the frame its NULLB, whose score is
@@ -548,7 +482,7 @@ impl<'a> TbnScore for PssmScore<'a> {
         ) as usize)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4245-4347 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4245-4347 (cited at
     // `pssm_search::gapalign::pssm_score_only_gapped_alignment`, which takes `subject->length`)
     #[cold]
     fn score_only_past_chunk(
@@ -590,14 +524,8 @@ impl<'a> TbnScore for PssmScore<'a> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-790 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-791 (cited at
     // `pssm_search::ungapped::pssm_extend_one_hit`, the `use_pssm` branch)
-    // ```c
-    //                 score = s_BlastAaExtendOneHit(matrix, subject, query,
-    //                                               subject_offset, query_offset,
-    // ...
-    //                                               wordsize, use_pssm, &s_last_off);
-    // ```
     // The query offsets are the PSSM's row indices (one context at offset 0).
     fn one_hit(
         self,
@@ -619,7 +547,7 @@ impl<'a> TbnScore for PssmScore<'a> {
         ))
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4245-4347 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4245-4347 (cited at
     // `pssm_search::gapalign::pssm_score_only_gapped_alignment`; `subject->length` is the unit's
     // letters, the slice)
     fn score_only(
@@ -654,7 +582,7 @@ impl<'a> TbnScore for PssmScore<'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3248-3320 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3248-3320 (cited at
     // `pssm_search::gapalign::pssm_get_offsets_for_gapped_alignment`)
     fn offsets(
         self,
@@ -677,7 +605,7 @@ impl<'a> TbnScore for PssmScore<'a> {
         Some((usize::try_from(q).ok()?, usize::try_from(s).ok()?))
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4599-4718 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4599-4718 (cited at
     // `pssm_search::gapalign::pssm_gapped_alignment_with_traceback`, which reports the fence)
     fn traceback(
         self,
@@ -738,7 +666,7 @@ impl PssmRows for XOneHitRows<'_> {
 /// reference (the finder is made with `XTwoHit::x_with_walks`). The query offsets of the word
 /// finder are the PSSM's row indices (one context, at offset 0).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1157 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1157 (cited at
 /// `pssm_search::ungapped::pssm_extend_two_hit`)
 #[derive(Clone, Copy)]
 pub(super) struct XPssmWalks<'a>(pub(super) &'a QueryPssm);

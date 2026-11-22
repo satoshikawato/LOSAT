@@ -10,31 +10,11 @@
 //! LOSAT_X_BNFEWSUBJ's serial chunks, on this thread; else the batch's jobs on the pool, a scratch
 //! per worker, each job's chunks in order), and each chunk's list merged into the subject's in
 //! chunk order (`merge_prelim_hit_lists`), then the subject best-hit filter; then the subject's
-//! list reaped by the preliminary e-value (`reap_prelim_by_evalue`) or, in an ungapped search,
-//! finished (`finish_ungapped_prelim`).
+//! list reaped by the preliminary e-value or, under matrix-only scoring, by raw score
+//! (`reap_prelim`), or, in an ungapped search, finished (`finish_ungapped_prelim`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-599 (the chunk loop of
 //! `s_BlastSearchEngineOneContext`, :422-602)
-//! ```c
-//!     while (TRUE) {
-//!         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-//!                                        dbseq_chunk_overlap);
-//!
-//!         if (status == SUBJECT_SPLIT_DONE) break;
-//!         if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-//! ...
-//!         if (aux_struct->WordFinder) {
-//!             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-//! ...
-//!         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-//!                      kHspNumMax, &(backup.offset), INT4_MIN,
-//!                      overlap, score_options->gapped_calculation,
-//!                      Blast_ProgramIsMapping(program_number));
-//! ...
-//!     } /* End loop on chunks of subject sequence */
-//! ...
-//!     *hsp_list_out_ptr = combined_hsp_list;
-//! ```
 //! NCBI searches a subject's chunks one after another (its threads take whole subjects); the pool's
 //! chunk batches and their jobs are LOSAT's, and their lists are merged in chunk order as that loop
 //! merges them.
@@ -73,12 +53,12 @@ use super::{x_few_subj, MAX_DBSEQ_LEN};
 use super::{
     advance_diag_table_offset, build_subject_seq_ranges_from_masks,
     calculate_blastn_context_statistics, database, diag_hash_insert_window,
-    encode_iupac_to_blastna, hsp_survives_evalue_reap, merge_prelim_hit_lists, na_scan,
-    next_subject_chunk, prelim_hsp_list, prelim_subject_best_hit, read_db_seq_ranges,
-    two_stage_scan, ungapped_subject_stage, x_diag_lv, x_pair_seed, BlastnSubjectRef, BlastnTiming,
-    ContextKarlin, DiagStruct, GapAlignScratch, HspListSplit, PrelimHit, QueryContext,
-    QueryContextIndex, SubjectChunk, SubjectChunkStatus, SubjectCtx, SubjectScratch,
-    SubjectSplitState, COMPRESSION_RATIO, DBSEQ_CHUNK_OVERLAP,
+    encode_iupac_to_blastna, merge_prelim_hit_lists, na_scan, next_subject_chunk, prelim_hsp_list,
+    prelim_subject_best_hit, read_db_seq_ranges, two_stage_scan, ungapped_subject_stage, x_diag_lv,
+    x_pair_seed, BlastnSubjectRef, BlastnTiming, ContextKarlin, DiagStruct, GapAlignScratch,
+    HspListSplit, PrelimHit, PrelimReap, QueryContext, QueryContextIndex, SubjectChunk,
+    SubjectChunkStatus, SubjectCtx, SubjectScratch, SubjectSplitState, COMPRESSION_RATIO,
+    DBSEQ_CHUNK_OVERLAP,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::alignment::x_greedy_prelim::XPrelimSubject;
@@ -98,18 +78,6 @@ use crate::utils::threading::SearchPool;
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:422-432
 /// (`s_BlastSearchEngineOneContext`'s parameters)
-/// ```c
-/// s_BlastSearchEngineOneContext(EBlastProgramType program_number,
-///         BLAST_SequenceBlk* query, BlastQueryInfo* query_info,
-///         BLAST_SequenceBlk* subject, Int4 orig_length, LookupTableWrap* lookup,
-///         BlastGapAlignStruct* gap_align,
-///         const BlastScoringParameters* score_params,
-///         const BlastInitialWordParameters* word_params,
-///         const BlastExtensionParameters* ext_params,
-///         const BlastHitSavingParameters* hit_params,
-///         BlastDiagnostics* diagnostics,
-///         BlastCoreAuxStruct* aux_struct,
-/// ```
 /// The parallel shape and the diagnostics have no NCBI counterpart.
 pub(super) struct PrelimBatch<'a> {
     /// The query block: the context of a query offset, the length of the concatenated query (every
@@ -159,6 +127,9 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) nucl_score_table: &'a [i32; 256],
     pub(super) reward: i32,
     pub(super) penalty: i32,
+    /// NCBI's matrix-only scoring (`TaskConfig::matrix_only`): every ungapped extension is the
+    /// exact one, and the preliminary lists are reaped by raw score (`PrelimReap`).
+    pub(super) matrix_only: bool,
     pub(super) gap_open: i32,
     pub(super) gap_extend: i32,
     pub(super) use_dp: bool,
@@ -199,15 +170,15 @@ pub(super) struct PrelimBatch<'a> {
     pub(super) lcase_masking: bool,
     pub(super) db_mask: Option<(&'a database::BlastnDatabase, i32, MaskKind)>,
     pub(super) db_mask_error: &'a std::sync::Mutex<Option<(u32, anyhow::Error)>>,
-    /// The subject's list after its chunks (the reap by the preliminary e-value, the `-ungapped`
-    /// finish): the concatenated query's letters without its masks (NCBI's `sequence_nomask`, as
+    /// The subject's list after its chunks (the reap, the `-ungapped` finish): the concatenated
+    /// query's letters without its masks (NCBI's `sequence_nomask`, as
     /// `encoded_query_concat_blastna` is laid out), the Karlin blocks by context, whether an
-    /// e-value is rounded down from its score, the e-value threshold and the minimum percent
-    /// identity.
+    /// e-value is rounded down from its score, the reap (by the e-value threshold, or by raw
+    /// score under matrix-only scoring) and the minimum percent identity.
     pub(super) encoded_query_concat_nomask: &'a [u8],
     pub(super) search_karlin_ref: &'a [ContextKarlin],
     pub(super) round_down_evalue_score: bool,
-    pub(super) evalue_threshold: f64,
+    pub(super) prelim_reap: PrelimReap,
     pub(super) percent_identity: f64,
     /// The diagnostics: BLEMIR_DEBUG, LOSAT_DEBUG_BLASTN, the trace lines (`blastn_trace`), the
     /// verbose lines and the debug window.
@@ -231,16 +202,9 @@ pub(super) struct PrelimBatch<'a> {
 /// the subjects and the chunks on the pool). Each chunk's inputs are a reference to it and the
 /// chunk's own values (its letters, length, ranges, masks, diagonal offset and ids).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-497 (the word finder of a
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-498 (the word finder of a
 /// chunk takes pointers to the search's shared structs: the query, its contexts, the lookup table,
 /// the matrix and the word parameters)
-/// ```c
-///             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-///                                    word_params, aux_struct->ewp,
-///                                    aux_struct->offset_pairs,
-///                                    kScanSubjectOffsetArraySize,
-///                                    init_hitlist, ungapped_stats);
-/// ```
 /// and c++/src/algo/blast/core/na_ungapped.c:1597-1608 (`BlastNaWordFinder`'s parameters, read
 /// through those pointers where they are used). The level bound, the diagnostics and the timing
 /// counters have no NCBI counterpart.
@@ -264,6 +228,13 @@ pub(super) struct ScanBatch<'a> {
     pub(super) reduced_cutoff_scores: &'a [i32],
     pub(super) score_matrix: &'a BlastnaMatrix,
     pub(super) nucl_score_table: &'a [i32; 256],
+    /// Whether the ungapped extension is the exact one (`s_NuclUngappedExtendExact`) rather than
+    /// the approximate one with its exact recomputation: under matrix-only scoring or for a word
+    /// shorter than 11 letters. One value of the batch, read by every word finder.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:740-742 (the same at
+    /// 910-912)
+    pub(super) exact_ungapped: bool,
     /// The words: the word size capped at 31 letters (`safe_k`, the na tables' word), the word and
     /// lookup word lengths (the two-stage table's, else `safe_k`), the scan step, the off-diagonal
     /// range, the window and whether it is a two-hit search, the size at which a batch of offset
@@ -313,42 +284,14 @@ pub(super) struct ScanBatch<'a> {
 impl<'a> ScanBatch<'a> {
     /// The word finder's values of `batch` with its lookup tables `tables`.
     pub(super) fn new(batch: &'a PrelimBatch<'a>, tables: &'a LookupTables) -> Self {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
-        // ```c
-        // typedef struct BlastNaLookupTable {
-        //     ...
-        // } BlastNaLookupTable;
-        // ```
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:131-156
         let two_stage_lookup_ref = tables.two_stage_lookup.as_ref();
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:166-233
-        // ```c
-        // const int kQueryLenForHashTable = 8000; /* For blastn, use hash table rather
-        //                                         than diag array for any query longer
-        //                                         than this */
-        // if (Blast_ProgramIsNucleotide(program_number) &&
-        //     !Blast_QueryIsPattern(program_number) &&
-        //     (query_info->contexts[query_info->last_context].query_offset +
-        //      query_info->contexts[query_info->last_context].query_length) > kQueryLenForHashTable)
-        //     p->container_type = eDiagHash;
-        // else
-        //     p->container_type = eDiagArray;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:166-233
         let use_array_indexing = batch.diag_container_query_length <= 8000;
         let (diag_table_length, diag_table_mask) =
             (batch.diag_array_length, batch.diag_mask as isize);
         let safe_k = batch.effective_word_size.min(31);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1625-1637
-        // ```c
-        //     else if (lookup_wrap->lut_type == eMBLookupTable) {
-        //         BlastMBLookupTable *lookup =
-        //                                 (BlastMBLookupTable *) lookup_wrap->lut;
-        //         if (lookup->discontiguous) {
-        //             word_length = lookup->template_length;
-        //             lut_word_length = lookup->template_length;
-        //         } else {
-        //             word_length = lookup->word_length;
-        //             lut_word_length = lookup->lut_word_length;
-        // ```
         let (word_length, lut_word_length) = two_stage_lookup_ref
             .map_or((safe_k, safe_k), |table| {
                 (table.word_length(), table.lut_word_length())
@@ -356,6 +299,7 @@ impl<'a> ScanBatch<'a> {
         let window_size = batch.window_size;
         let two_hits = window_size > 0;
         let debug_enabled = batch.debug_mode || batch.blastn_debug;
+        let exact_ungapped = batch.matrix_only || word_length < 11;
         ScanBatch {
             batch,
             two_stage_lookup_ref,
@@ -371,6 +315,7 @@ impl<'a> ScanBatch<'a> {
             reduced_cutoff_scores: batch.reduced_cutoff_scores,
             score_matrix: batch.score_matrix,
             nucl_score_table: batch.nucl_score_table,
+            exact_ungapped,
             safe_k,
             word_length,
             lut_word_length,
@@ -388,11 +333,7 @@ impl<'a> ScanBatch<'a> {
             use_array_indexing,
             diag_table_length,
             diag_table_mask,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
-            // ```c
-            // diag = s_off + diag_table->diag_array_length - q_off;
-            // real_diag = diag & diag_table->diag_mask;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:663-664
             diag_array_length: if use_array_indexing {
                 diag_table_length as isize
             } else {
@@ -408,23 +349,13 @@ impl<'a> ScanBatch<'a> {
             } else {
                 0
             },
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
-            // ```c
-            // Delta = MIN(word_params->options->scan_range, window_size - word_length);
-            // if (Delta < 0) Delta = 0;
-            // s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-            //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
-            //                       hit_ready, s_off_pos, window_size + Delta + 1);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:825-826, 939-941
             diag_hash_window: if use_array_indexing {
                 0
             } else {
                 diag_hash_insert_window(window_size, batch.scan_range, word_length)
             },
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-662
-            // ```c
-            // s_off_pos = s_off + diag_table->offset;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:668
             diag_window: window_size as i32,
             debug_mode: batch.debug_mode,
             blastn_debug: batch.blastn_debug,
@@ -449,21 +380,6 @@ impl<'a> ScanBatch<'a> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:425,461-469,476
 /// (`s_BlastSearchEngineOneContext`: the subject, its chunks' overlap and the backup of the subject
 /// that its chunks are cut from)
-/// ```c
-///         BLAST_SequenceBlk* subject, Int4 orig_length, LookupTableWrap* lookup,
-/// ...
-///     if (Blast_ProgramIsMapping(program_number) &&
-///         (Int4)query_info->max_length < 110) {
-///
-///         dbseq_chunk_overlap = (Int4)query_info->max_length
-///             + (query_info->max_length / 2);
-///     }
-///     else {
-///         dbseq_chunk_overlap = DBSEQ_CHUNK_OVERLAP;
-///     }
-/// ...
-///     s_BackupSubject(subject, &backup);
-/// ```
 /// The trace id and the one-byte letters have no NCBI counterpart.
 pub(super) struct PrelimSubject<'a> {
     /// The subject: its index in the batch, its trace id (made only for the debug and trace lines),
@@ -492,36 +408,6 @@ pub(super) struct PrelimSubject<'a> {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:487-500,522-527,555,560-563
 /// (one turn of the chunk loop of `s_BlastSearchEngineOneContext`)
-/// ```c
-///         /* Delete if not done in last loop iteration to prevent memory leak. */
-///         hsp_list = Blast_HSPListFree(hsp_list);
-///
-///         BlastInitHitListReset(init_hitlist);
-///
-///         if (aux_struct->WordFinder) {
-///             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-///                                    word_params, aux_struct->ewp,
-///                                    aux_struct->offset_pairs,
-///                                    kScanSubjectOffsetArraySize,
-///                                    init_hitlist, ungapped_stats);
-///
-///             if (init_hitlist->total == 0) continue;
-///         }
-/// ...
-///         if (aux_struct->GetGappedScore) {
-///             status = aux_struct->GetGappedScore(program_number, query,
-///                     query_info,
-///                     subject, gap_align, score_params, ext_params, hit_params,
-///                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
-///         }
-/// ...
-///         Blast_HSPListSortByScore(hsp_list);
-/// ...
-///         } else {
-///             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-///                     hit_params->options, &hsp_list);
-///         }
-/// ```
 pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     scan: &ScanBatch<'_>,
     subject: &PrelimSubject<'_>,
@@ -541,13 +427,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         x_prelim_subject,
         ..
     } = subject;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-    // ```c
-    // /* Delete if not done in last loop iteration to prevent memory leak. */
-    // hsp_list = Blast_HSPListFree(hsp_list);
-    //
-    // BlastInitHitListReset(init_hitlist);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
     let hits = &mut subject_scratch.hits;
     hits.clear();
     let prelim_hits = &mut subject_scratch.prelim_hits;
@@ -555,19 +435,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     let greedy_align_scratch = &mut subject_scratch.greedy_align_scratch;
 
     let s_len = chunk.length;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-307
-    // ```c
-    // if (backup->offset == 0 && residual == 0 && backup->next == backup->full_range.right) {
-    //     subject->seq_ranges = backup->soft_ranges;
-    //     subject->num_seq_ranges = backup->num_soft_ranges;
-    //     return SUBJECT_SPLIT_OK;
-    // }
-    // ...
-    // for (i=0; i<len; i++) {
-    //     subject->seq_ranges[i].left = backup->soft_ranges[i+start].left - backup->offset;
-    //     subject->seq_ranges[i].right = backup->soft_ranges[i+start].right - backup->offset;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-307
     let seq_ranges_scratch = &mut subject_scratch.seq_ranges_scratch;
     let subject_seq_ranges = chunk.seq_ranges.as_slice(
         soft_ranges,
@@ -580,19 +448,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     let packed_offset = chunk.offset / COMPRESSION_RATIO;
     let s_seq_packed = &s_seq_packed_full[packed_offset..];
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-    // ```c
-    // for (; s <= s_end; s += scan_step) {
-    //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-    //     if (num_hits == 0)
-    //         continue;
-    //     s_BlastLookupRetrieve(lookup,
-    //                           index,
-    //                           offset_pairs + total_hits,
-    //                           ...);
-    //     total_hits += num_hits;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
     // (`scan.debug_enabled`: BLEMIR_DEBUG or LOSAT_DEBUG_BLASTN.)
 
     // Debug counters for this subject (only updated when debug_enabled)
@@ -605,94 +461,44 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     let mut dbg_gapped_attempted = 0usize;
     let mut dbg_window_seeds = 0usize;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:147-259
-    // ```c
-    // /* Scan the compressed subject sequence */
-    // index = s[0] << 16 | s[1] << 8 | s[2];
-    // index = (index >> shift) & mask;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:147-259
 
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847 (subject blastna + ncbi2na)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2949-3016 (packed subject for score-only DP)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:806-833 (GetReverseNuclSequence uses ncbi4na/blastna)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed ncbi2na used for ungapped extension)
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:866-869 (query blastna, subject ncbi2na)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847 (subject blastna + ncbi2na)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2949-3016 (packed subject for score-only DP)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:806-833 (GetReverseNuclSequence uses ncbi4na/blastna)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:85-93 (IUPACNA_TO_BLASTNA)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:148-349 (packed ncbi2na used for ungapped extension)
     // The interval tree of the gapped stage is set up there, for a chunk with initial hits only
     // (`prelim_hsp_list::gapped_hsp_list`, as `BLAST_GetGappedScore` makes its tree after its
     // return for an empty list, blast_gapalign.c:3706-3707,3826-3831).
 
     // NCBI architecture: Collect all ungapped hits first, then process in score-descending order
-    // NCBI reference: blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
     // This is critical for correct containment checking: high-score HSPs must be processed first
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-    // ```c
-    // hsp_list = Blast_HSPListFree(hsp_list);
-    // BlastInitHitListReset(init_hitlist);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
     let ungapped_hits = &mut subject_scratch.ungapped_hits;
     ungapped_hits.clear();
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-64
-    // ```c
-    // diag_array_length = 1;
-    // while (diag_array_length < (qlen+window_size))
-    //     diag_array_length = diag_array_length << 1;
-    // diag_table->diag_array_length = diag_array_length;
-    // diag_table->diag_mask = diag_array_length-1;
-    // diag_table->offset = window_size;
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
-    // ```c
-    // if ((status = BlastExtendWordNew(query->length, word_params,
-    //                                 &aux_struct->ewp)) != 0)
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-64
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003
     // One diagonal table for the whole query block (every query and both
     // strands): `query->length` is the last context's offset plus its
     // length, `query_concat_length` here, and the diagonals use offsets in
     // the concatenated query (`scan.diag_table_length`, `scan.diag_table_mask`).
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:166-233
-    // ```c
-    // const int kQueryLenForHashTable = 8000; /* For blastn, use hash table rather
-    //                                         than diag array for any query longer
-    //                                         than this */
-    // if (Blast_ProgramIsNucleotide(program_number) &&
-    //     !Blast_QueryIsPattern(program_number) &&
-    //     (query_info->contexts[query_info->last_context].query_offset +
-    //      query_info->contexts[query_info->last_context].query_length) > kQueryLenForHashTable)
-    //     p->container_type = eDiagHash;
-    // else
-    //     p->container_type = eDiagArray;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:166-233
     // (`scan.use_array_indexing`, set once per batch, `ScanBatch::new`.)
     let use_array_indexing = scan.use_array_indexing;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:786-833
-    // ```c
-    // first_context = 1;
-    // last_context = 1;
-    // ...
-    // subject->frame = context;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:786-833
     // BLASTN scans subject plus strand only; query contexts cover both strands.
     for _subject_strand in [false] {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-        // ```c
-        // BlastSeqBlkSetSequence(subj, sequence.data.release(),
-        //    ((sentinels == eSentinels) ? sequence.length - 2 :
-        //     sequence.length));
-        // ...
-        // BlastSeqBlkSetCompressedSequence(subj,
-        //                                  compressed_seq.data.release());
-        // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-349 (packed subject used by ungapped extension)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:148-349 (packed subject used by ungapped extension)
         let search_seq_packed: &[u8] = s_seq_packed;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-662
-        // ```c
-        // s_off_pos = s_off + diag_table->offset;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:668
         let diag_offset = if use_array_indexing {
             subject_scratch.diag_table_offset as isize
         } else {
@@ -705,18 +511,8 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         // This mask_array/mask_hash was LOSAT-specific and caused excessive filtering
         // REMOVED to match NCBI BLAST behavior
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:84-105
-        // ```c
-        // n = diag->diag_array_length;
-        // diag->offset = diag->window;
-        // diag_struct_array = diag->hit_level_array;
-        // for (i = 0; i < n; i++) {
-        //     diag_struct_array[i].flag = 0;
-        //     diag_struct_array[i].last_hit = -diag->window;
-        //     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
-        // }
-        // ```
-        // NCBI reference: blast_extend.h:77-80, na_ungapped.c:660-666
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:84-105
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:77-80, c++/src/algo/blast/core/na_ungapped.c:660-666
         // Two-hit tracking: DiagStruct array for tracking last_hit and flag per diagonal
         // hit_level_array[diag] contains {last_hit, flag} (equivalent to NCBI's DiagStruct)
         // hit_len_array[diag] contains hit length (0 = no hit, >0 = hit length)
@@ -743,15 +539,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             }
         }
         if use_array_indexing {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:145-149
-            // ```c
-            // diag_table->hit_level_array = (DiagStruct *)
-            //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-            // if (word_params->options->window_size) {
-            //     diag_table->hit_len_array = (Uint1 *)
-            //          calloc(diag_table->diag_array_length, sizeof(Uint1));
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-149
             if hit_level_array.len() != diag_array_size {
                 let had_entries = !hit_level_array.is_empty();
                 let diag_default = DiagStruct::default();
@@ -772,32 +560,14 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                 hit_len_array.clear();
             }
         } else {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-182
-            // ```c
-            // if (ewp->hash_table->offset >= INT4_MAX / 4) {
-            //     ewp->hash_table->occupancy = 1;
-            //     ewp->hash_table->offset = ewp->hash_table->window;
-            //     memset(ewp->hash_table->backbone, 0,
-            //            ewp->hash_table->num_buckets * sizeof(Int4));
-            // } else {
-            //     ewp->hash_table->offset += subject_length + ewp->hash_table->window;
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-182
             // Hash-based diagonals persist across chunks; only clear on offset overflow.
             hit_level_array.clear();
             hit_len_array.clear();
         }
 
         if s_len < batch.effective_word_size {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
-            // ```c
-            // if (ewp->diag_table->offset >= INT4_MAX / 4) {
-            //     ewp->diag_table->offset = ewp->diag_table->window;
-            //     s_BlastDiagClear(ewp->diag_table);
-            // } else {
-            //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
             advance_diag_table_offset(
                 &mut subject_scratch.diag_table_offset,
                 scan.diag_window,
@@ -813,16 +583,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         // TWO-STAGE LOOKUP: Use separate rolling k-mer for lut_word_length
         if let Some(two_stage) = scan.two_stage_lookup_ref {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-            // ```c
-            //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-            //
-            //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-            // ...
-            //         hits_extended += extend(offset_pairs, hitsfound, word_params,
-            //                                 lookup_wrap, query, subject, matrix,
-            //                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
-            //     }
-            // ```
             // Dispatch point of PAIRPAR: `x_pair_seed::run` does what
             // `two_stage_scan::scan_two_stage_lookup` does (scan, word extension, diagonal
             // table, ungapped extension; in the scopes of `x_pair_seed.rs` and, for a
@@ -858,6 +618,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                     reduced_cutoff_scores: scan.reduced_cutoff_scores,
                     score_matrix: scan.score_matrix,
                     nucl_score_table: scan.nucl_score_table,
+                    exact_ungapped: scan.exact_ungapped,
                     diag_offset,
                     diag_hash_window: diag_hash_insert_window(
                         scan.window_size,
@@ -886,14 +647,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-498
-            // ```c
-            //         if (aux_struct->WordFinder) {
-            //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-            //                                    word_params, aux_struct->ewp,
-            //                                    aux_struct->offset_pairs,
-            //                                    kScanSubjectOffsetArraySize,
-            //                                    init_hitlist, ungapped_stats);
-            // ```
             // The reference scan of this chunk and the steps of the offset pairs it collects
             // (`two_stage_scan::scan_two_stage_lookup`), with what they read and write, built once per
             // chunk.
@@ -927,19 +680,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         }
         if scan.two_stage_lookup_ref.is_none() {
             // Original lookup method (for non-two-stage lookup)
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
-            // ```c
-            // for (; s <= s_end; s += scan_step) {
-            //     num_hits = s_BlastLookupGetNumHits(lookup, index);
-            //     if (num_hits == 0)
-            //         continue;
-            //     s_BlastLookupRetrieve(lookup,
-            //                           index,
-            //                           offset_pairs + total_hits,
-            //                           ...);
-            //     total_hits += num_hits;
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
             // Dispatch point of LOSAT_X_PAIRPARNA: `x_pair_seed::run_na` does what
             // `na_scan::scan_na_lookup` does (scan, diagonal hash, ungapped extension;
             // one-hit diagonal-hash scope only) with the subject scan in strips on the pool
@@ -972,6 +713,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                     reduced_cutoff_scores: scan.reduced_cutoff_scores,
                     score_matrix: scan.score_matrix,
                     nucl_score_table: scan.nucl_score_table,
+                    exact_ungapped: scan.exact_ungapped,
                     diag_offset,
                     diag_hash_window: diag_hash_insert_window(
                         scan.window_size,
@@ -992,15 +734,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
-            // ```c
-            //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
-            //
-            //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
-            // ...
-            //         hits_extended += extend(offset_pairs, hitsfound, word_params,
-            // ...
-            //     }
-            // ```
             // The reference scan of this chunk and the steps of the seeds it finds
             // (`na_scan::scan_na_lookup`), with what they read and write, built once per
             // chunk.
@@ -1033,24 +766,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     } // end of strand loop
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500
-    // ```c
-    //         if (aux_struct->WordFinder) {
-    //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-    //                                    word_params, aux_struct->ewp,
-    //                                    aux_struct->offset_pairs,
-    //                                    kScanSubjectOffsetArraySize,
-    //                                    init_hitlist, ungapped_stats);
-    //
-    //             if (init_hitlist->total == 0) continue;
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1686-1689
-    // ```c
-    //     Blast_ExtendWordExit(ewp, subject->length);
-    //
-    //     Blast_UngappedStatsUpdate(ungapped_stats, total_hits, hits_extended,
-    //                               init_hitlist->total);
-    // ```
     // A chunk without an initial hit ends here, as NCBI's chunk loop goes on to the next chunk
     // after its word finder: the diagonal table's offset moves on (`Blast_ExtendWordExit` runs
     // inside the word finder, before the `continue`), the saved hits counted are none, and nothing
@@ -1061,7 +777,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // stage's empty list was. LOSAT's `-verbose` line of the gapped stage (no NCBI counterpart)
     // is still written for the chunk, with no extension.
     if ungapped_hits.is_empty() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
         // (the diagonal table's offset moves on after each chunk, as below)
         advance_diag_table_offset(
             &mut subject_scratch.diag_table_offset,
@@ -1083,19 +799,13 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:560-563
-    // ```c
-    //         } else {
-    //             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-    //                     hit_params->options, &hsp_list);
-    //         }
-    // ```
     // An ungapped (`-ungapped`) search makes the chunk's HSP list from its initial hits
     // (`prelim_hsp_list::ungapped_hsp_list`); the diagonal table then moves on, as after
     // a gapped search's chunk.
     if UNGAPPED {
         let chunk_prelim_hits =
             prelim_hsp_list::ungapped_hsp_list(ungapped_hits, chunk, batch.good_init_extends);
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
         // (the diagonal table's offset moves on after each chunk, as below)
         advance_diag_table_offset(
             &mut subject_scratch.diag_table_offset,
@@ -1110,13 +820,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1688-1692
-    // ```c
-    //     Blast_UngappedStatsUpdate(ungapped_stats, total_hits, hits_extended,
-    //                               init_hitlist->total);
-    //
-    //     if (word_params->ungapped_extension)
-    //         Blast_InitHitListSortByScore(init_hitlist);
-    // ```
     // The initial hits sorted by score for the gapped loop, or grouped by query for its
     // query group tasks (LOSAT_X_QGROUPPAR), and counted
     // (`prelim_hsp_list::sort_ungapped_hits_for_gapped`).
@@ -1139,19 +842,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // (`prelim_hsp_list::x_prelim_extend`) read, for the query group tasks and the
     // look-ahead helpers on the pool as for this thread.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3664-3674
-    // ```c
-    // Int2 BLAST_GetGappedScore (EBlastProgramType program_number,
-    //         BLAST_SequenceBlk* query, BlastQueryInfo* query_info,
-    //         BLAST_SequenceBlk* subject,
-    //         BlastGapAlignStruct* gap_align,
-    //         const BlastScoringParameters* score_params,
-    //         const BlastExtensionParameters* ext_params,
-    //         const BlastHitSavingParameters* hit_params,
-    //         const BlastInitialWordParameters* word_params,
-    //         BlastInitHitList* init_hitlist,
-    //         BlastHSPList** hsp_list_ptr, BlastGappedStats* gapped_stats,
-    //         Boolean * fence_hit)
-    // ```
     // No NCBI counterpart: the look-ahead's schedule (scheduling only).
     let gapped = prelim_hsp_list::GappedPrelim {
         batch,
@@ -1165,17 +855,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         total_ungapped,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-526,545,555
-    // ```c
-    //         if (aux_struct->GetGappedScore) {
-    //             status = aux_struct->GetGappedScore(program_number, query,
-    //                     query_info,
-    //                     subject, gap_align, score_params, ext_params, hit_params,
-    //                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
-    // ...
-    //             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-    // ...
-    //         Blast_HSPListSortByScore(hsp_list);
-    // ```
     // The chunk's gapped HSP list (`prelim_hsp_list::gapped_hsp_list`): the gapped loop per
     // query on the pool (LOSAT_X_QGROUPPAR) or over the chunk's list on this thread with
     // the subject's scratch, then the purge, the sort and the chunk's offset.
@@ -1207,15 +886,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         dbg_window_seeds,
         total_ungapped,
     );
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
-    // ```c
-    // if (ewp->diag_table->offset >= INT4_MAX / 4) {
-    //     ewp->diag_table->offset = ewp->diag_table->window;
-    //     s_BlastDiagClear(ewp->diag_table);
-    // } else {
-    //     ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
     let hit_level_array = &mut subject_scratch.hit_level_array;
     let hit_len_array = &mut subject_scratch.hit_len_array;
     let diag_hash = &mut subject_scratch.diag_hash;
@@ -1328,27 +999,6 @@ fn batch_jobs<'a>(chunks: &'a [SubjectChunk], job_ends: &[usize]) -> Vec<&'a [Su
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,578-593
 /// (the chunk loop of `s_BlastSearchEngineOneContext`)
-/// ```c
-///     while (TRUE) {
-///         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-///                                        dbseq_chunk_overlap);
-///
-///         if (status == SUBJECT_SPLIT_DONE) break;
-///         if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-/// ...
-///         Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-///         overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
-///                   0 : dbseq_chunk_overlap;
-///         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-///                      kHspNumMax, &(backup.offset), INT4_MIN,
-///                      overlap, score_options->gapped_calculation,
-///                      Blast_ProgramIsMapping(program_number));
-///
-///         if((hit_params->options->hsp_filt_opt != NULL) &&
-///            (hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
-/// ...
-///     } /* End loop on chunks of subject sequence */
-/// ```
 /// The chunk batches on the pool have no NCBI counterpart (NCBI's threads take whole subjects).
 pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
     scan: &ScanBatch<'_>,
@@ -1370,14 +1020,8 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
         ..
     } = subject;
     let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-536
-    // status = s_GetNextSubjectChunk(subject, &backup, kNucleotide, ...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-536
     // A single subject can contain independent chunks. Pool availability
     // is separate from the outer subject traversal's number of jobs.
     if requested_parallel {
@@ -1397,16 +1041,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                 window_size,
                 ..
             } = batch;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
-            // ```c
-            // while (TRUE) {
-            //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-            //                                    dbseq_chunk_overlap);
-            //     if (status == SUBJECT_SPLIT_DONE) break;
-            //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-            //     ...
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-536
             // A batch holds up to `max_in_flight` jobs. The chunks of an unmasked or soft-masked
             // subject are jobs of one chunk each (`job_takes`: every chunk but the last has
             // `MAX_DBSEQ_LEN` letters), so its instance takes `max_in_flight` chunks as they
@@ -1457,14 +1092,8 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                     break;
                 }
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
-                // ```c
-                // subject->seq_ranges = backup->soft_ranges;
-                // subject->num_seq_ranges = backup->num_soft_ranges;
-                // return SUBJECT_SPLIT_OK;
-                // ```
-                // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-500
-                // status = s_GetNextSubjectChunk(subject, &backup, ...);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500
                 // EXPERIMENT (LOSAT_X_BNFEWSUBJ): a batch whose longest chunk is a large
                 // part of its letters (`x_few_subj::serial_chunks`), which this subject's
                 // owner searches by itself, searches its chunks in order as one-chunk
@@ -1499,11 +1128,6 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                             true,
                         );
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500,565
-                        // ```c
-                        //             if (init_hitlist->total == 0) continue;
-                        // ...
-                        //         if (hsp_list->hspcnt == 0) continue;
-                        // ```
                         // An empty list is neither merged nor followed by the best-hit filter
                         // (the merge of an empty list returns at once, and the filter of an
                         // unchanged list removes nothing).
@@ -1524,26 +1148,14 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                             }
                             hits
                         };
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-                        // ```c
-                        // /* Delete if not done in last loop iteration to prevent memory leak. */
-                        // hsp_list = Blast_HSPListFree(hsp_list);
-                        //
-                        // BlastInitHitListReset(init_hitlist);
-                        // ```
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
                         subject_scratch.prelim_hits = hits;
                     }
                 } else {
                     let new_scratches = || {
                         (
                             GapAlignScratch::new(),
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                            // ```c
-                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                            // ...
-                            // aux_struct->offset_pairs =
-                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                            // ```
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:991-1041
                             SubjectScratch::new(offset_array_size, window_size),
                         )
                     };
@@ -1564,8 +1176,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                     let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> =
                         Vec::with_capacity(chunk_batch.len());
                     if HARD {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-500
-                        // status = s_GetNextSubjectChunk(subject, &backup, ...);
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500
                         // Each job's chunks one after another with one scratch, as the subject's
                         // own loop searches them.
                         let mut job_results: Vec<Vec<(usize, usize, Vec<PrelimHit>)>> =
@@ -1587,11 +1198,6 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                     }
                     for (offset, overlap, hits) in chunk_results {
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500,565
-                        // ```c
-                        //             if (init_hitlist->total == 0) continue;
-                        // ...
-                        //         if (hsp_list->hspcnt == 0) continue;
-                        // ```
                         // An empty list is neither merged nor followed by the best-hit filter.
                         if hits.is_empty() {
                             continue;
@@ -1622,16 +1228,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
             unreachable!("use_parallel is false when parallel threads are disabled");
         }
     } else {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
-        // ```c
-        // while (TRUE) {
-        //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-        //                                    dbseq_chunk_overlap);
-        //     if (status == SUBJECT_SPLIT_DONE) break;
-        //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-        //     ...
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-536
         loop {
             match next_subject_chunk::<HARD>(
                 split_state,
@@ -1642,14 +1239,8 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                 SubjectChunkStatus::Done => break,
                 SubjectChunkStatus::NoRange => continue,
                 SubjectChunkStatus::Ok(chunk) => {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
-                    // ```c
-                    // subject->seq_ranges = backup->soft_ranges;
-                    // subject->num_seq_ranges = backup->num_soft_ranges;
-                    // return SUBJECT_SPLIT_OK;
-                    // ```
-                    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-500
-                    // status = s_GetNextSubjectChunk(subject, &backup, ...);
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500
                     crate::utils::threading::report_stage("blastn", "subject_chunks", 1, false);
                     let soft_ranges = split_state.soft_ranges.as_slice();
                     let hits = prelim_chunk_hits::<UNGAPPED>(
@@ -1662,11 +1253,6 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         true,
                     );
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500,565
-                    // ```c
-                    //             if (init_hitlist->total == 0) continue;
-                    // ...
-                    //         if (hsp_list->hspcnt == 0) continue;
-                    // ```
                     // An empty list is neither merged nor followed by the best-hit filter
                     // (the merge of an empty list returns at once, and the filter of an
                     // unchanged list removes nothing).
@@ -1687,13 +1273,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
                         }
                         hits
                     };
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-                    // ```c
-                    // /* Delete if not done in last loop iteration to prevent memory leak. */
-                    // hsp_list = Blast_HSPListFree(hsp_list);
-                    //
-                    // BlastInitHitListReset(init_hitlist);
-                    // ```
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
                     subject_scratch.prelim_hits = hits;
                 }
             }
@@ -1710,29 +1290,13 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
 /// one per byte for the greedy aligner, and the split state of its chunks; the debug line of its
 /// cutoffs; then its chunks searched and their lists merged (`collect_subject_prelim`), the soft
 /// ranges' buffer given back to the scratch, and the subject's list reaped by the preliminary
-/// e-value (`reap_prelim_by_evalue`) or, in an ungapped search, finished
+/// e-value or by raw score (`reap_prelim`) or, in an ungapped search, finished
 /// (`finish_ungapped_prelim`). Returns the list that the preliminary stage gives to the collector
 /// (empty after an early return). `subject_ctx` is what `search_subject` read of the call after
 /// its early return without a valid context.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1475,1480-1482,1541-1542
 /// (one subject of the loop of `BLAST_PreliminarySearchEngine`)
-/// ```c
-///       status =
-///           s_BlastSearchEngineCore(program_number, query, query_info,
-///                                   seq_arg.seq, lookup_wrap, gap_align,
-///                                   score_params, word_params, ext_params,
-///                                   hit_params, db_options, diagnostics,
-///                                   aux_struct, &hsp_list,
-///                                   interrupt_search, progress_info);
-/// ...
-///       if (hsp_list && hsp_list->hspcnt > 0) {
-///          int query_index=0; /* Used to loop over queries below. */
-///          if (!gapped_calculation) {
-/// ...
-///             Blast_HSPListGetBitScores(hsp_list, gapped_calculation, sbp);
-///          }
-/// ```
 /// `s_BlastSearchEngineCore` (:701-918) searches the subject's chunks
 /// (`s_BlastSearchEngineOneContext`), then sets the e-values of the subject's list and reaps it
 /// (:870-900).
@@ -1760,52 +1324,11 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         s_len_full,
     } = subject_ctx;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1662
-    // ```c
-    // scan_range[0] = 0;  /* subject seq mask index */
-    // scan_range[1] = 0;  /* start pos of scan */
-    // scan_range[2] = subject->length - lut_word_length;
-    // if (subject->mask_type != eNoSubjMasking) {
-    //     scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
-    //     scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:856-874
-    // ```c
-    // case 'a': case 'b': case 'c': case 'd':
-    // case 'g': case 'h':
-    // ...
-    //     char_type = eCharType_MaskedNonGap;
-    //     break;
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:1079-1089
-    // ```c
-    // void CFastaReader::x_OpenMask(void)
-    // {
-    //     m_MaskRangeStart = GetCurrentPos(ePosWithGapsAndSegs);
-    // }
-    // void CFastaReader::x_CloseMask(void)
-    // {
-    //     m_CurrentMask->SetPacked_int().AddInterval(...);
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
-    // ```c
-    // if (subjects.GetMask(i).NotEmpty()) {
-    //     s_SeqLoc2MaskedSubjRanges(...);
-    //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1662
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-874
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1079-1089
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2550-2556
-    // ```c++
-    //         const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking)
-    // 	    ? bool(args[kArgUseLCaseMasking])
-    //             : kDfltArgUseLCaseMasking;
-    //         CRef<blast::CBlastQueryVector> subjects;
-    //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
-    //                                        subj_range, parse_deflines,
-    //                                        use_lcase_masks, subjects, m_IsMapper);
-    // ```
     // The lowercase masks of the subjects are those of the FASTA records of
     // `-subject`; a database sequence has none.
     let subject_masks = match (subject.letters, subject.store) {
@@ -1821,7 +1344,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     } else {
         Vec::new()
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:399-405 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:399-405 (cited at
     // `SubjectScratch::db_masks`)
     // With `-db_soft_mask` or `-db_hard_mask` every database sequence is a masked subject
     // (its mask type is set whether or not it has masks; decision D3 of M4a-2): the
@@ -1858,30 +1381,11 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         return Vec::new();
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-    // ```c
-    // if (subj_is_na) {
-    //     BlastSeqBlkSetSequence(subj, sequence.data.release(),
-    //        ((sentinels == eSentinels) ? sequence.length - 2 :
-    //         sequence.length));
-    //     ...
-    //     SBlastSequence compressed_seq =
-    //         subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
-    //                                   eNa_strand_plus, eNoSentinels);
-    //     BlastSeqBlkSetCompressedSequence(subj,
-    //                               compressed_seq.data.release());
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
     // The packed letters of the subject set's record (`PreparedSubjects::packed`) or the
     // stored data of the database sequence (`BlastnSubjectRef::packed`).
     let s_seq_packed_full = subject.packed;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4019-4025
-    // ```c
-    //             status = BLAST_GreedyGappedAlignment(
-    //                          query_tmp.sequence, subject->sequence,
-    // ...
-    //                          (Boolean) TRUE, FALSE, fence_hit);
-    // ```
     // No NCBI counterpart: this subject's packed sequence widened to one base per byte for
     // the preliminary greedy alignment instead: a window around each call's ungapped hit, and
     // the whole subject once a call reads past its window (made then, shared by every chunk
@@ -1897,18 +1401,6 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,593-599
-    // ```c
-    //     while (TRUE) {
-    //         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-    //                                        dbseq_chunk_overlap);
-    //
-    //         if (status == SUBJECT_SPLIT_DONE) break;
-    //         if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-    // ...
-    //     } /* End loop on chunks of subject sequence */
-    // ...
-    //     *hsp_list_out_ptr = combined_hsp_list;
-    // ```
     // The subject's chunks searched and their lists merged (`collect_subject_prelim`), with what
     // the search of its chunks reads of the subject, built once per subject (what it reads of the
     // batch is `scan`'s, or `special_subject`'s copy's). A database sequence of a search with
@@ -1947,101 +1439,60 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     }
 
     if !UNGAPPED && !combined_prelim_hits.is_empty() {
-        reap_prelim_by_evalue(batch, &mut combined_prelim_hits);
+        reap_prelim(batch, &mut combined_prelim_hits);
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482-1541
-    // ```c
-    //       if (hsp_list && hsp_list->hspcnt > 0) {
-    //          if (!gapped_calculation) {
-    //             status = Blast_HSPListReevaluateUngapped(program_number, hsp_list, query,
-    //                         seq_arg.seq, word_params, hit_params, query_info, sbp,
-    //                         score_params, seq_src, seq_arg.seq->gen_code_string);
-    //             ...
-    //                Blast_HSPListGetEvalues(program_number, query_info, stat_length,
-    //                                        hsp_list, gapped_calculation, FALSE, sbp, 0, 1.0);
-    //             ...
-    //         	   status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
-    //             Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
-    //             Blast_HSPListGetBitScores(hsp_list, gapped_calculation, sbp);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1482-1541
     // An ungapped (`-ungapped`) search finishes each subject's HSP list here, in the
     // preliminary stage: the traceback only keeps what this leaves.
     if UNGAPPED && !combined_prelim_hits.is_empty() {
-        finish_ungapped_prelim(batch, subject, &mut combined_prelim_hits);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:891-895
+        // (`s_BlastSearchEngineCore`, for gapped and ungapped searches)
+        // Under matrix-only scoring the list is reaped by raw score before its finish (which
+        // reaps it again after the re-evaluation, blast_engine.c:1527-1535); the e-values that
+        // NCBI computes before this reap are computed again in the finish. The e-value reap of
+        // the core is not run for an ungapped search here.
+        if let PrelimReap::RawScore(cutoff) = batch.prelim_reap {
+            combined_prelim_hits.retain(|hit| hit.prelim_score >= cutoff);
+        }
+        if !combined_prelim_hits.is_empty() {
+            finish_ungapped_prelim(batch, subject, &mut combined_prelim_hits);
+        }
     }
     combined_prelim_hits
 }
 
-/// The reap of a gapped search's subject list by the preliminary e-value, after its chunks are
-/// merged: each HSP's e-value from its preliminary score, kept in the HSP, and the HSPs over the
-/// e-value threshold dropped, in place and in order.
+/// The reap of a gapped search's subject list, after its chunks are merged: each HSP's e-value
+/// from its preliminary score, kept in the HSP, and the HSPs over the e-value threshold (under
+/// matrix-only scoring: below the raw cutoff, `PrelimReap`) dropped, in place and in order.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:885-888,897-899
 /// (`s_BlastSearchEngineCore`) and :654,662-664 (`s_Blast_HSPListReapByPrelimEvalue`, :642-674)
-/// ```c
-///         Blast_HSPListGetEvalues(program_number, query_info,
-///                                          stat_length, hsp_list_out,
-///                                          score_options->gapped_calculation,
-///                                          isRPS, gap_align->sbp, 0, scale_factor);
-/// ...
-///     }else {
-///        /* Discard HSPs that don't pass the e-value test. */
-///         status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
-/// ...
-///    cutoff = hit_params->prelim_evalue;
-/// ...
-///       if (hsp->evalue > cutoff) {
-///          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-///       } else {
-/// ```
-pub(super) fn reap_prelim_by_evalue(
-    batch: &PrelimBatch<'_>,
-    combined_prelim_hits: &mut Vec<PrelimHit>,
-) {
+pub(super) fn reap_prelim(batch: &PrelimBatch<'_>, combined_prelim_hits: &mut Vec<PrelimHit>) {
     let &PrelimBatch {
         query_eff_searchsp,
         search_karlin_ref,
         round_down_evalue_score,
-        evalue_threshold,
+        prelim_reap,
         ..
     } = batch;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:885-899
-    // ```c
-    // Blast_HSPListGetEvalues(program_number, query_info,
-    //                                  stat_length, hsp_list_out,
-    //                                  score_options->gapped_calculation,
-    //                                  isRPS, gap_align->sbp, 0, scale_factor);
-    // ...
-    // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:642-671
-    // ```c
-    // cutoff = hit_params->prelim_evalue;
-    // ...
-    // if (hsp->evalue > cutoff) {
-    //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:868,933
-    // ```c
-    // params->prelim_evalue = options->expect_value;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:885-899
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:642-671
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:868,933
     // This reap happens after preliminary gapped scoring and before the
     // traceback stream is consumed, so low preliminary scores cannot survive
     // solely because traceback later finds a high-scoring alignment.
-    combined_prelim_hits.retain_mut(|prelim| {
+    prelim_reap.reap(combined_prelim_hits, |prelim| {
         let eff_searchsp = query_eff_searchsp
             .get(prelim.context_idx as usize)
             .copied()
             .unwrap_or(0);
-        let (_, prelim_evalue) = calculate_blastn_context_statistics(
+        calculate_blastn_context_statistics(
             prelim.prelim_score,
             &search_karlin_ref[prelim.context_idx as usize].gapped,
             eff_searchsp,
             round_down_evalue_score,
-        );
-        prelim.prelim_evalue = prelim_evalue;
-        hsp_survives_evalue_reap(prelim_evalue, evalue_threshold)
+        )
+        .1
     });
 }
 
@@ -2053,25 +1504,6 @@ pub(super) fn reap_prelim_by_evalue(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1492-1497,1521-1526,1534-1536
 /// (`BLAST_PreliminarySearchEngine`)
-/// ```c
-///                status =
-///                   Blast_HSPListReevaluateUngapped(
-///                             program_number, hsp_list, query,
-///                             seq_arg.seq, word_params, hit_params,
-///                             query_info, sbp, score_params, seq_src,
-///                             seq_arg.seq->gen_code_string);
-/// ...
-///                } else {
-///                   Blast_HSPListGetEvalues(program_number, query_info,
-///                                           stat_length, hsp_list,
-///                                           gapped_calculation, FALSE,
-///                                           sbp, 0, 1.0);
-///                }
-/// ...
-///                }else {
-///                    status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
-///                }
-/// ```
 /// The tab that indents line 1535 is written as spaces.
 pub(super) fn finish_ungapped_prelim(
     batch: &PrelimBatch<'_>,
@@ -2085,17 +1517,12 @@ pub(super) fn finish_ungapped_prelim(
         percent_identity,
         search_karlin_ref,
         round_down_evalue_score,
-        evalue_threshold,
+        prelim_reap,
         query_eff_searchsp,
         cutoff_scores,
         ..
     } = batch;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2645-2668
-    // ```c
-    //       	seq_arg.encoding = (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
-    //       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2645-2668
     // The subject again, unpacked (BLASTNA, without sentinel bytes). A database
     // sequence has none here: the preliminary search's caller reads it again, for
     // the sequences that keep an HSP, and finishes the list itself
@@ -2139,7 +1566,7 @@ pub(super) fn finish_ungapped_prelim(
                 )
                 .1
             },
-            evalue_threshold,
+            prelim_reap,
         );
     }
 }
@@ -2149,132 +1576,5 @@ pub(super) fn finish_ungapped_prelim(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-mod tests {
-    use super::super::SeqRanges;
-    use super::*;
-
-    fn chunk(length: usize) -> SubjectChunk {
-        SubjectChunk {
-            offset: 0,
-            length,
-            seq_ranges: SeqRanges::Inline {
-                range: (0, length as i32),
-            },
-            masked: true,
-            overlap: 0,
-        }
-    }
-
-    /// The batches of `next_chunk_batch` of the chunks of `lengths` with at most `max_jobs` jobs
-    /// each: per batch the lengths of each job's chunks. Fails if a batch is empty or the chunks
-    /// come out of order, or if `next_chunk` is called after it ended.
-    fn batches(lengths: &[usize], max_jobs: usize) -> Vec<Vec<Vec<usize>>> {
-        let mut source = lengths.iter().enumerate();
-        let mut ended = false;
-        let (mut chunks, mut job_ends, mut kept) = (Vec::new(), Vec::new(), None);
-        let mut found = Vec::new();
-        let mut order = Vec::new();
-        loop {
-            let done = next_chunk_batch(&mut chunks, &mut job_ends, &mut kept, max_jobs, || {
-                assert!(!ended, "a chunk asked for after the last");
-                let next = source.next().map(|(index, &length)| SubjectChunk {
-                    offset: index,
-                    ..chunk(length)
-                });
-                ended = next.is_none();
-                next
-            });
-            if chunks.is_empty() {
-                assert!(done && kept.is_none());
-                break;
-            }
-            assert!(job_ends.len() <= max_jobs && job_ends.last() == Some(&chunks.len()));
-            order.extend(chunks.iter().map(|chunk| chunk.offset));
-            found.push(
-                batch_jobs(&chunks, &job_ends)
-                    .iter()
-                    .map(|job| job.iter().map(|chunk| chunk.length).collect())
-                    .collect(),
-            );
-            if done {
-                assert!(kept.is_none());
-                break;
-            }
-        }
-        assert_eq!(order, (0..lengths.len()).collect::<Vec<_>>());
-        found
-    }
-
-    // The batches of the pool's chunk jobs (review F4 of M4a-2b, review 2 S2 and T2): jobs are
-    // runs of consecutive chunks of at most MAX_DBSEQ_LEN letters in all, at least one chunk
-    // each, and a batch holds up to `max_jobs` of them; the chunk that would start one more job
-    // is kept for the next batch. A hard-masked subject's short chunks (chunks of no letters
-    // too) are one job, searched serially; full chunks are a job each, as are the chunks of a
-    // range over MAX_DBSEQ_LEN letters after a short one (`hard1` of
-    // `tests/blastn_db_hard_long.rs`: 1,001, 5,000,000 and 299,100 letters).
-    #[test]
-    fn chunk_batches_hold_jobs_of_at_most_ncbi_s_chunk_length() {
-        const MAX: usize = MAX_DBSEQ_LEN;
-        assert_eq!(batches(&[1000, 0, 2000], 4), [vec![vec![1000, 0, 2000]]]);
-        assert_eq!(
-            batches(&[MAX, MAX, 500_100], 8),
-            [vec![vec![MAX], vec![MAX], vec![500_100]]]
-        );
-        assert_eq!(
-            batches(&[MAX - 10, 10, 0, 1], 4),
-            [vec![vec![MAX - 10, 10, 0], vec![1]]]
-        );
-        assert_eq!(
-            batches(&[1001, MAX, 299_100], 4),
-            [vec![vec![1001], vec![MAX], vec![299_100]]]
-        );
-        assert!(batches(&[], 4).is_empty());
-        // The kept chunk: five jobs at two jobs per batch (two threads' worth of the probe `jb`
-        // of review 2 at one thread), the chunk that starts the third job of a batch opens the
-        // next one, with the chunks that join it.
-        assert_eq!(
-            batches(&[MAX, MAX, MAX - 5, 5, 3, MAX, 7], 2),
-            [
-                vec![vec![MAX], vec![MAX]],
-                vec![vec![MAX - 5, 5], vec![3]],
-                vec![vec![MAX], vec![7]],
-            ]
-        );
-        assert_eq!(
-            batches(&[2, 3, MAX, 4], 1),
-            [vec![vec![2, 3]], vec![vec![MAX]], vec![vec![4]]]
-        );
-        // Random lengths: the jobs are the greedy runs (a chunk opens a new job only when the job
-        // before cannot take it), every batch but the last is full.
-        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
-        let mut next = |bound: u64| {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            (seed % bound) as usize
-        };
-        for _ in 0..2000 {
-            let lengths: Vec<usize> = (0..next(30))
-                .map(|_| match next(4) {
-                    0 => MAX,
-                    1 => next(MAX as u64 + 1),
-                    _ => next(5_000),
-                })
-                .collect();
-            let max_jobs = 1 + next(6);
-            let found = batches(&lengths, max_jobs);
-            let jobs: Vec<&Vec<usize>> = found.iter().flatten().collect();
-            for (index, batch) in found.iter().enumerate() {
-                assert!(!batch.is_empty() && batch.len() <= max_jobs);
-                assert!(index + 1 == found.len() || batch.len() == max_jobs);
-            }
-            for (index, job) in jobs.iter().enumerate() {
-                let letters: usize = job.iter().sum();
-                assert!(job.len() == 1 || letters <= MAX, "{lengths:?}");
-                if let Some(following) = jobs.get(index + 1) {
-                    assert!(letters + following[0] > MAX, "{lengths:?} {max_jobs}");
-                }
-            }
-        }
-    }
-}
+#[path = "prelim_subject_tests.rs"]
+mod tests;

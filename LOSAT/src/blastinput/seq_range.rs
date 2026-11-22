@@ -21,19 +21,8 @@ pub enum RangeRole {
 }
 
 impl RangeRole {
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1996-1998
-    // ```c++
-    //         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
-    //                                      "Invalid specification of query location");
-    // ```
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2541-2545
-    // ```c++
-    //         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
-    //             subj_range =
-    //                 ParseSequenceRange(args[kArgSubjectLocation].AsString(),
-    //                             "Invalid specification of subject location");
-    //         }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1996-1998
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2541-2545
     fn error_prefix(self) -> &'static str {
         match self {
             Self::Query => "Invalid specification of query location",
@@ -54,59 +43,22 @@ impl SequenceRange {
     /// The length of the range as given (`TSeqRange::GetLength`), which the tabular
     /// formats print as `qlen` even where the range ends past a record.
     pub fn length(&self) -> usize {
-        self.to - self.from + 1
+        // `GetLength`: 0 when the end is not past the start (a strategy's range only).
+        (self.to + 1).saturating_sub(self.from)
     }
+
+    /// `kEmptyRange.GetFrom()`: a strategy's range without `RequiredStart` (the command line's
+    /// ranges never have it).
+    pub const EMPTY_FROM: usize = u32::MAX as usize;
+    /// `kEmptyRange.GetTo()`: a strategy's range without `RequiredEnd`.
+    pub const EMPTY_TO: usize = u32::MAX as usize - 1;
 }
 
 /// NCBI's `ParseSequenceRange`: `start-stop`, 1-based and closed.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input_aux.cpp:145-179
-/// ```c++
-/// TSeqRange
-/// ParseSequenceRange(const string& range_str,
-///                    const char* error_prefix /* = NULL */)
-/// {
-///     static const char* kDfltErrorPrefix = "Failed to parse sequence range";
-///     static const string kDelimiters("-");
-///     string error_msg(error_prefix ? error_prefix : kDfltErrorPrefix);
-///
-///     vector<string> tokens;
-///     NStr::Split(range_str, kDelimiters, tokens);
-///     if (tokens.size() != 2 || tokens.front().empty() || tokens.back().empty()) {
-///         error_msg += " (Format: start-stop)";
-///         NCBI_THROW(CBlastException, eInvalidArgument, error_msg);
-///     }
-///     int from = NStr::StringToInt(tokens.front());
-///     int to = NStr::StringToInt(tokens.back());
-///     if (from <= 0 || to <= 0) {
-///         error_msg += " (range elements cannot be less than or equal to 0)";
-///         NCBI_THROW(CBlastException, eInvalidArgument, error_msg);
-///     }
-///     if (from == to) {
-///         error_msg += " (range cannot be empty)";
-///         NCBI_THROW(CBlastException, eInvalidArgument, error_msg);
-///     }
-///     if (from > to) {
-///         error_msg += " (start cannot be larger than stop)";
-///         NCBI_THROW(CBlastException, eInvalidArgument, error_msg);
-///     }
-///     from--, to--;   // decrement to make range 0-based
-/// ```
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:216-227
-/// ```c++
-///     catch (const blast::CBlastException& e) {                               \
-///         ...
-///         } else {                                                            \
-///             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-///             exit_code = BLAST_ENGINE_ERROR;                                 \
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:145-179
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-227
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
-/// ```c++
-///     catch (const CException& e) {                                           \
-///         LOG_POST(Error << "Error: " << e.what());                           \
-///         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-///     }                                                                       \
-/// ```
 /// `NStr::Split` keeps empty tokens (`1--5` has three, `-10` an empty first one).
 /// `NStr::StringToInt` (flags 0, `ncbi_str::string_to_int`) converts the start, then the stop,
 /// before the other checks; a part that it cannot convert (`a`, `1.5`, ` 5`) throws its
@@ -168,36 +120,26 @@ pub enum RecordInterval {
 
 /// The interval of a record of `length` letters.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_fasta_input.cpp:433-460
-/// ```c++
-///     // sanity checks for the range
-///     const TSeqPos from = m_Config.GetRange().GetFrom() == kEmptyRange.GetFrom()
-///         ? 0 : m_Config.GetRange().GetFrom();
-///     const TSeqPos to = m_Config.GetRange().GetTo() == kEmptyRange.GetTo()
-///         ? 0 : m_Config.GetRange().GetTo();
-///
-///     // Get the sequence length
-///     const TSeqPos seqlen = seq_entry->GetSeq().GetInst().GetLength();
-///     ...
-///     if (to > 0 && to < from) {
-///         NCBI_THROW(CInputException, eInvalidRange,
-///                    "Invalid sequence range");
-///     }
-///     if (from > seqlen) {
-///         NCBI_THROW(CInputException, eInvalidRange,
-///                    "Invalid from coordinate (greater than sequence length)");
-///     }
-///     // N.B.: if the to coordinate is greater than or equal to the sequence
-///     // length, we fix that silently
-///
-///
-///     // set sequence range
-///     retval->SetInt().SetFrom(from);
-///     retval->SetInt().SetTo((to > 0 && to < seqlen) ? to : (seqlen-1));
-/// ```
-/// The parser leaves `to > from`, so `Invalid sequence range` cannot occur. A start equal
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:433-460
+/// The parser leaves `to > from`, so `Invalid sequence range` cannot occur; a strategy's range
+/// (`-import_search_strategy`) may lack its start or its end (`kEmptyRange`'s), and one whose end
+/// comes before its start is refused at the import. A start equal
 /// to the record's length passes the check and gives the interval `[seqlen, seqlen-1]`.
 pub fn record_interval(range: &SequenceRange, length: usize) -> RecordInterval {
+    let from = if range.from == SequenceRange::EMPTY_FROM {
+        0
+    } else {
+        range.from
+    };
+    let to = if range.to == SequenceRange::EMPTY_TO {
+        0
+    } else {
+        range.to
+    };
+    let range = &SequenceRange {
+        from,
+        to: if to == 0 { usize::MAX } else { to },
+    };
     if range.from > length {
         RecordInterval::PastEnd
     } else if range.from == length {
@@ -257,36 +199,9 @@ impl Placements {
 /// A record whose interval starts more than one letter past its end stops NCBI, in file
 /// order, while the subjects are read.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:198-219
-/// ```c++
-/// CRef<CBlastQueryVector>
-/// CBlastInput::GetAllSeqs(CScope& scope)
-/// {
-///     CRef<CBlastQueryVector> retval(new CBlastQueryVector);
-///
-///     while (!End()) {
-///         try { retval->AddQuery(m_Source->GetNextSequence(scope)); }
-///         catch (const CObjReaderParseException& e) {
-///             auto err = e.GetErrCode();
-///             if (err == CObjReaderParseException::eEOF) {
-///                 break;
-///             } else if (err == CObjReaderParseException::eNoDefline) {
-///                 ...
-///             }
-///             throw;
-///         }
-///     }
-///
-///     return retval;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:198-219
 /// The range's `CInputException` is not caught here.
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:172-176
-/// ```c++
-///     catch (const blast::CInputException& e) {                               \
-///         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
-///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
-///         exit_code = BLAST_INPUT_ERROR;                                      \
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176
 pub fn cut_subjects<R: InputRecord>(
     records: &[R],
     range: Option<&SequenceRange>,
@@ -380,14 +295,6 @@ impl QueryInput {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-146
-    // ```c++
-    //     TSeqPos size_read = 0;
-    //
-    //     while (size_read < GetBatchSize()) {
-    //
-    //         if (End())
-    //             break;
-    // ```
     // No NCBI counterpart for the slice itself: a batch is counted from its first record alone, so
     // the input records from the start of a batch have the batches of the whole input from there.
     /// The input records `input` as an input of their own: their lengths and skips, and the
@@ -449,20 +356,7 @@ pub struct RangedQueries<R = crate::blastinput::fasta_reader::FastaRecord> {
 /// record whose interval starts more than one letter past its end, so that record is not
 /// searched and nothing is reported for it.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:144-155
-/// ```c++
-///         CRef<CBlastSearchQuery> q;
-///         try { q.Reset(m_Source->GetNextSequence(scope)); }
-///         catch (const CObjReaderParseException& e) {
-///             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-///                 break;
-///             }
-///             throw;
-///         }
-///         catch (const exception&) {
-///             continue; //SB-2307. ignore well formed, not found accession
-///         }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-155
 pub fn cut_queries<R: InputRecord>(records: &[R], range: &SequenceRange) -> RangedQueries<R> {
     let mut ranged = RangedQueries {
         records: Vec::with_capacity(records.len()),
@@ -508,24 +402,7 @@ pub struct RangedBatch {
 /// A skipped record adds nothing to the residues read; the others add the length of the
 /// whole record, not of its interval.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:138-170
-/// ```c++
-///     TSeqPos size_read = 0;
-///
-///     while (size_read < GetBatchSize()) {
-///
-///         if (End())
-///             break;
-///         ...
-///         CConstRef<CSeq_loc> loc = q->GetQuerySeqLoc();
-///
-///         if (loc->IsInt()) {
-///             size_read += sequence::GetLength(loc->GetInt().GetId(),
-///                                              q->GetScope());
-///         ...
-///         retval->AddQuery(q);
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
 /// `size_read` and the batch size are `TSeqPos` (32-bit unsigned): an `Int4` batch size
 /// converts to it (a negative one becomes 2^32 plus the value).
 pub fn next_ranged_batch_end(
@@ -543,16 +420,7 @@ pub fn next_ranged_batch_end(
 /// reading after the last record (an `eEOF`, a reader error) comes in that batch; after a
 /// batch that reached its size it comes in the next one.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:140-146
-/// ```c++
-///     while (size_read < GetBatchSize()) {
-///
-///         if (End())
-///             break;
-///
-///         CRef<CBlastSearchQuery> q;
-///         try { q.Reset(m_Source->GetNextSequence(scope)); }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-146
 pub fn next_ranged_batch(
     input_lengths: &[usize],
     skipped: &[bool],
@@ -574,22 +442,7 @@ pub fn next_ranged_batch(
 /// coordinate of the row's start (the low end on the plus strand, the high end on the
 /// minus strand) and the length of the whole record.
 ///
-/// NCBI reference: c++/src/objtools/align_format/showalign.cpp:411-422
-/// ```c++
-/// static int s_GetFrame (int start, ENa_strand strand, const CSeq_id& id,
-///                        CScope& sp)
-/// {
-///     int frame = 0;
-///     if (strand == eNa_strand_plus) {
-///         frame = (start % 3) + 1;
-///     } else if (strand == eNa_strand_minus) {
-///         frame = -(((int)sp.GetBioseqHandle(id).GetBioseqLength() - start - 1)
-///                   % 3 + 1);
-///
-///     }
-///     return frame;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:411-422
 /// `start` is the 0-based record coordinate; the tabular `qframe`/`sframe` use the same
 /// rule (`CAlignFormatUtil::GetFrame`, align_format_util.cpp:1233-1245). Without a range
 /// it equals the frame of the search.
@@ -607,30 +460,7 @@ pub fn record_frame(plus: bool, start: usize, record_length: usize) -> i32 {
 /// covers the whole interval.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:825-843
-/// ```c++
-/// template <class Position>
-/// CRange<Position> Map(const CRange<Position>& target,
-///                      const CRange<Position>& range)
-/// {
-///     ...
-///     if (range.Empty() ||
-///         (range.GetFrom() > target.GetTo()) ||
-///         ((range.GetFrom() + target.GetFrom()) > target.GetTo())) {
-///         return target;
-///     }
-///
-///     CRange<Position> retval;
-///     retval.SetFrom(max(target.GetFrom() + range.GetFrom(), target.GetFrom()));
-///     retval.SetTo(min(target.GetFrom() + range.GetTo(), target.GetTo()));
-///     return retval;
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-938
-/// ```c++
-///                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
-///                 TSeqRange range(Map(kTarget, masked_range));
-///                 if (range.NotEmpty() && range != kTarget) {
-/// ```
 pub fn record_mask(from: i32, to: i32, length: usize, offset: usize) -> Option<(i32, i32)> {
     let target = (offset as i32, (offset + length) as i32 - 1);
     if from > to || from > target.1 || from + target.0 > target.1 {
@@ -641,252 +471,5 @@ pub fn record_mask(from: i32, to: i32, length: usize, offset: usize) -> Option<(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn message(error: anyhow::Error) -> String {
-        format!("{error:#}")
-    }
-
-    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2760-2763 ParseSequenceRange_EmptyRange
-    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2767-2770 ParseSequenceRange_0BasedRange
-    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2774-2777 ParseSequenceRange_InvalidDelimiter
-    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2781-2788 ParseSequenceRange_IncompleteRange
-    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2792-2798 ParseSequenceRange_InvalidRange
-    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2802-2805 ParseSequenceRange_1BasedRange
-    #[test]
-    fn spellings_follow_ncbis_parser() {
-        let parse = |text: &str| parse_sequence_range(text, RangeRole::Query);
-        assert_eq!(parse("10-20").unwrap(), SequenceRange { from: 9, to: 19 });
-        assert_eq!(parse("+1-5").unwrap(), SequenceRange { from: 0, to: 4 });
-        assert_eq!(parse("01-05").unwrap(), SequenceRange { from: 0, to: 4 });
-        assert_eq!(parse("1-+5").unwrap(), SequenceRange { from: 0, to: 4 });
-        assert_eq!(
-            parse("1-2147483647").unwrap(),
-            SequenceRange {
-                from: 0,
-                to: 2147483646
-            }
-        );
-        for text in [
-            "", "-", "--", "-10", "10-", "10", "1--5", "1-2-3", "-5-10", "3,4",
-        ] {
-            assert_eq!(
-                message(parse(text).unwrap_err()),
-                "BLAST engine error: Invalid specification of query location (Format: start-stop)\n",
-                "{text:?}"
-            );
-        }
-        for text in ["0-10", "10-0"] {
-            assert!(message(parse(text).unwrap_err())
-                .contains("(range elements cannot be less than or equal to 0)"));
-        }
-        for text in ["1-1", "5-5"] {
-            assert!(message(parse(text).unwrap_err()).contains("(range cannot be empty)"));
-        }
-        assert!(message(parse("20-10").unwrap_err()).contains("(start cannot be larger than stop)"));
-        // NCBI BLAST+ 2.17.0 blastn and blastp `-query_loc` / `-subject_loc` (env parity probe
-        // h_probe of 2026-11-12, cases `LOC.*`: `a-10`, `1-b`, `1-1.5`): the part that
-        // `NStr::StringToInt` cannot convert stops the program with its `CStringException`, the
-        // start before the stop.
-        let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
-        for (text, part, line, kind, pos) in [
-            ("a-10", "a", 861, "Int8", 0),
-            ("1-b", "b", 861, "Int8", 0),
-            ("1-1.5", "1.5", 870, "Int8", 1),
-            (" 1-5", " 1", 861, "Int8", 0),
-            ("1-5 ", "5 ", 870, "Int8", 1),
-            ("1-5a", "5a", 870, "Int8", 1),
-            ("1.0-5", "1.0", 870, "Int8", 1),
-            ("0x10-0x20", "0x10", 870, "Int8", 1),
-            ("0-a", "a", 861, "Int8", 0),
-            ("1-2147483648", "2147483648", 640, "int, overflow", 0),
-            (
-                "1-99999999999999999999",
-                "99999999999999999999",
-                852,
-                "Int8, overflow",
-                18,
-            ),
-        ] {
-            let function = if line == 640 {
-                "StringToInt"
-            } else {
-                "StringToInt8"
-            };
-            let error = parse(text).unwrap_err();
-            let native = error
-                .downcast_ref::<crate::cli::NativeError>()
-                .expect("NCBI's exception");
-            assert_eq!(native.exit, 255, "{text:?}");
-            assert_eq!(
-                native.message,
-                format!(
-                    "Error: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{part}' to {kind} (m_Pos = {pos})\n\n"
-                ),
-                "{text:?}"
-            );
-        }
-        assert!(
-            message(parse_sequence_range("5-3", RangeRole::Subject).unwrap_err())
-                .starts_with("BLAST engine error: Invalid specification of subject location")
-        );
-    }
-
-    #[test]
-    fn intervals_follow_the_record_length() {
-        let range = SequenceRange { from: 9, to: 19 };
-        assert_eq!(
-            record_interval(&range, 30),
-            RecordInterval::Letters { from: 9, to: 19 }
-        );
-        assert_eq!(
-            record_interval(&range, 15),
-            RecordInterval::Letters { from: 9, to: 14 }
-        );
-        assert_eq!(
-            record_interval(&range, 10),
-            RecordInterval::Letters { from: 9, to: 9 }
-        );
-        assert_eq!(record_interval(&range, 9), RecordInterval::Empty);
-        assert_eq!(record_interval(&range, 8), RecordInterval::PastEnd);
-    }
-
-    #[test]
-    fn skipped_queries_keep_their_ordinals_and_batches_count_whole_records() {
-        let records: Vec<crate::blastinput::fasta_reader::FastaRecord> =
-            [8000usize, 400, 3000, 200]
-                .iter()
-                .enumerate()
-                .map(|(index, &length)| {
-                    crate::blastinput::fasta_reader::FastaRecord::new(
-                        format!("Query_{}", index + 1),
-                        format!("q{index}").as_bytes(),
-                        &vec![b'A'; length],
-                    )
-                })
-                .collect();
-        let ranged = cut_queries(&records, &SequenceRange { from: 500, to: 999 });
-        let input = &ranged.input;
-        assert_eq!(input.ordinals, vec![0, 2]);
-        assert_eq!(input.skipped, vec![false, true, false, true]);
-        assert_eq!(input.range_length, Some(500));
-        assert_eq!(ranged.records[0].seq().len(), 500);
-        assert_eq!(input.placements.offset(1), 500);
-        assert_eq!(input.placements.length(1, 500), 3000);
-        // 8000 letters reach a batch of 5000: the next batch holds q1 (skipped), q2, q3.
-        assert_eq!(
-            input.batches(5000),
-            vec![
-                RangedBatch {
-                    input: 0..1,
-                    searched: 0..1
-                },
-                RangedBatch {
-                    input: 1..4,
-                    searched: 1..2
-                }
-            ]
-        );
-        // A batch of 3000 letters closes after q2; q3 alone is skipped: an empty batch.
-        assert_eq!(
-            input.batches(3000),
-            vec![
-                RangedBatch {
-                    input: 0..1,
-                    searched: 0..1
-                },
-                RangedBatch {
-                    input: 1..3,
-                    searched: 1..2
-                },
-                RangedBatch {
-                    input: 3..4,
-                    searched: 2..2
-                }
-            ]
-        );
-    }
-
-    // EXPERIMENT (LOSAT_X_BPQBLOCK): the input records from the start of a batch to the end of a
-    // later one have the whole input's batches of those records (each moved by the slice's first
-    // record and first searched query), with their placements and positions; with `-query_loc`
-    // (skipped records inside a batch) and without it.
-    #[test]
-    fn a_slice_of_whole_batches_has_the_batches_of_the_input() {
-        let lengths = [
-            8000usize, 400, 3000, 200, 7000, 50, 9000, 600, 600, 1200, 300,
-        ];
-        let records: Vec<crate::blastinput::fasta_reader::FastaRecord> = lengths
-            .iter()
-            .enumerate()
-            .map(|(index, &length)| {
-                crate::blastinput::fasta_reader::FastaRecord::new(
-                    format!("Query_{}", index + 1),
-                    format!("q{index}").as_bytes(),
-                    &vec![b'A'; length],
-                )
-            })
-            .collect();
-        let ranged = cut_queries(&records, &SequenceRange { from: 500, to: 999 });
-        assert!(ranged.input.skipped.iter().any(|&skipped| skipped));
-        for input in [QueryInput::whole(&records), ranged.input] {
-            for batch_size in [1u32, 700, 3000, 5000, 10000] {
-                let batches = input.batches(batch_size);
-                for first in 0..batches.len() {
-                    for last in first..batches.len() {
-                        let records = batches[first].input.start..batches[last].input.end;
-                        let searched = batches[first].searched.start..batches[last].searched.end;
-                        let slice = input.slice(records.clone());
-                        let expected: Vec<RangedBatch> = batches[first..=last]
-                            .iter()
-                            .map(|batch| RangedBatch {
-                                input: batch.input.start - records.start
-                                    ..batch.input.end - records.start,
-                                searched: batch.searched.start - searched.start
-                                    ..batch.searched.end - searched.start,
-                            })
-                            .collect();
-                        let what = format!("batch size {batch_size}, records {records:?}");
-                        assert_eq!(slice.batches(batch_size), expected, "{what}");
-                        assert_eq!(slice.ordinals.len(), searched.len(), "{what}");
-                        for (index, query) in searched.clone().enumerate() {
-                            assert_eq!(
-                                slice.ordinal(index) + records.start,
-                                input.ordinal(query),
-                                "{what}"
-                            );
-                            assert_eq!(
-                                slice.placements.get(index),
-                                input.placements.get(query),
-                                "{what}"
-                            );
-                        }
-                        assert_eq!(slice.range_length, input.range_length);
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn frames_are_those_of_the_whole_record() {
-        assert_eq!(record_frame(true, 0, 100), 1);
-        assert_eq!(record_frame(true, 4, 100), 2);
-        assert_eq!(record_frame(false, 99, 100), -1);
-        assert_eq!(record_frame(false, 97, 100), -3);
-    }
-
-    #[test]
-    fn masks_move_into_the_record_and_stop_at_the_interval() {
-        // Without a range: as found, other than the whole record.
-        assert_eq!(record_mask(10, 20, 100, 0), Some((10, 20)));
-        assert_eq!(record_mask(0, 99, 100, 0), None);
-        assert_eq!(record_mask(5, 4, 100, 0), None);
-        // The interval 501-600 of a record: moved by its start, cut at its end.
-        assert_eq!(record_mask(10, 20, 100, 500), Some((510, 520)));
-        assert_eq!(record_mask(90, 150, 100, 500), Some((590, 599)));
-        assert_eq!(record_mask(0, 99, 100, 500), None);
-        assert_eq!(record_mask(100, 120, 100, 500), None);
-    }
-}
+#[path = "seq_range_tests.rs"]
+mod tests;

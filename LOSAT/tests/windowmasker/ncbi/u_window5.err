@@ -1,0 +1,2 @@
+Error: (CSeqMaskerException::validation error) window size (5) must be greater or equal to unit size (9)
+Error: (106.16) Application's execution failed (CSeqMaskerException::validation error) window size (5) must be greater or equal to unit size (9)

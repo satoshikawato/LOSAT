@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "std" }, inst { repr raw, mol aa, length 30, seq-data ncbistdaa '000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D'H } }
+      }
+    }

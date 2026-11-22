@@ -26,14 +26,6 @@ pub(crate) fn x_bnstore() -> bool {
 /// gives the bytes the records' letters give (the comparison tests of `packed_subject.rs`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-/// ```c
-///     virtual SBlastSequence GetCompressedPlusStrand() {
-///         SBlastSequence retval(size());
-///         string ncbi4na = kEmptyStr;
-///         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-///         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-///         return retval;
-/// ```
 /// NCBI keeps the subjects in its scope and makes each form a stage reads from it: the packed
 /// bases of the preliminary stage, the blastna letters of the traceback, the IUPAC letters of the
 /// report.

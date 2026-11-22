@@ -7,13 +7,6 @@
 use crate::sequence::packed_subject::PackedNucleotide;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-// ```c
-//     virtual SBlastSequence GetCompressedPlusStrand() {
-//         SBlastSequence retval(size());
-//         string ncbi4na = kEmptyStr;
-//         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-//         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-// ```
 // The records are read as `fasta_reader::read_subjects` reads them (NCBI's `GetAllSeqs`,
 // blast_input.cpp:198-219); NCBI packs a subject when its search needs it. No NCBI counterpart for
 // packing each record as it is read: only where the letters are held.
@@ -109,13 +102,6 @@ fn x_packed(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-// ```c
-//     virtual SBlastSequence GetCompressedPlusStrand() {
-//         SBlastSequence retval(size());
-//         string ncbi4na = kEmptyStr;
-//         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-//         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-// ```
 // No NCBI counterpart for the thread: NCBI packs a subject when its search needs it. Here the
 // reader packs the records of the whole set before the search, on the thread that reads them, so
 // the packing adds to the time the search waits for its subjects (about 0.5 s for the 1.37 Gb

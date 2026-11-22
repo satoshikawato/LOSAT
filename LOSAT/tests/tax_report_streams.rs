@@ -7,14 +7,7 @@
 //! the length and `"\n"`.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:729
-//! ```c++
-//!         out << label << "= ";
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:743-744
-//! ```c++
-//!             out << "\nLength=";
-//!             out << cbs.GetInst().GetLength() <<"\n";
-//! ```
 //!
 //! The cases (NCBI BLAST+ 2.17.0, review 3's probe B, `tests/fixtures/tax_report_streams`): blastp
 //! of `ids/txr_p` with the taxonomy database `offset_last_past_end`, whose lookup of B's taxid
@@ -206,24 +199,9 @@ fn under_fsize(command: &Command, room: u64, stdout: Stdio) -> std::process::Out
         };
     }
     let mut output = limited.output().expect("run LOSAT CLI under prlimit");
-    // An instrumented build (cargo llvm-cov, the nightly coverage jobs) writes its profile at the
-    // exit, where the same limit refuses it ("LLVM Profile Error: Failed to write file ...: File
-    // too large"). That line is the instrumentation's, not LOSAT's: it is not compared.
-    if std::env::var_os("LLVM_PROFILE_FILE").is_some() {
-        output.stderr = without_profile_errors(&output.stderr);
-    }
+    // The same limit refuses an instrumented build's profile: not compared.
+    output.stderr = crate::llvm_profile::without_profile_errors(&output.stderr);
     output
-}
-
-/// `stderr` without the lines of LLVM's profile runtime ("LLVM Profile Error: ...").
-#[cfg(target_os = "linux")]
-fn without_profile_errors(stderr: &[u8]) -> Vec<u8> {
-    stderr
-        .split_inclusive(|&byte| byte == b'\n')
-        .filter(|line| !line.starts_with(b"LLVM Profile Error: "))
-        .flatten()
-        .copied()
-        .collect()
 }
 
 /// The bytes of standard output and standard error of `command`, in one pipe (as `2>&1 | cat`),
@@ -240,6 +218,11 @@ fn merged(mut command: Command) -> (Vec<u8>, Option<i32>) {
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes).unwrap();
     (bytes, child.wait().unwrap().code())
+}
+
+/// NCBI's frozen bytes of the fixture `name` in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+fn ncbi_fixture(name: &str) -> Vec<u8> {
+    losat::wording::losat_output_bytes(&fixture(name)).into_owned()
 }
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -263,7 +246,7 @@ fn the_out_files_buffer_writes_at_the_end_of_ncbis_insertions() {
             std::fs::remove_dir_all(&dir).unwrap();
             assert_eq!(exit, Some(0), "{}", case.name);
             assert!(
-                bytes == fixture(&format!("{}.out.txt", case.name)),
+                bytes == ncbi_fixture(&format!("{}.out.txt", case.name)),
                 "{} at {threads} threads:\n{}",
                 case.name,
                 String::from_utf8_lossy(&bytes)
@@ -283,7 +266,7 @@ fn the_standard_outputs_texts_come_after_the_report_before_them() {
             std::fs::remove_dir_all(&dir).unwrap();
             assert_eq!(exit, Some(0), "{}", case.name);
             assert!(
-                bytes == fixture(&format!("{}.stdout.txt", case.name)),
+                bytes == ncbi_fixture(&format!("{}.stdout.txt", case.name)),
                 "{} at {threads} threads:\n{}",
                 case.name,
                 String::from_utf8_lossy(&bytes)
@@ -316,7 +299,7 @@ fn a_full_out_file_fails_where_ncbis_buffer_writes() {
         );
         // The file holds the report's first `room` bytes (the report: NCBI's `-out` stream without
         // the texts on standard error).
-        let report = String::from_utf8(fixture(&format!("{}.out.txt", case.name)))
+        let report = String::from_utf8(ncbi_fixture(&format!("{}.out.txt", case.name)))
             .unwrap()
             .replace(OFFSET_ERROR, "");
         assert!(
@@ -353,7 +336,7 @@ fn a_query_without_warnings_leaves_standard_output_held() {
         ),
         (Some(0), "".into())
     );
-    assert!(written == fixture("blastx_tie.stdout.txt")[..4200]);
+    assert!(written == ncbi_fixture("blastx_tie.stdout.txt")[..4200]);
 }
 
 /// blastx with `-export_search_strategy`, whose run held its output while a later batch's title
@@ -390,7 +373,7 @@ fn a_blastx_strategy_report_is_written_where_ncbis_buffer_writes_it() {
             std::fs::remove_dir_all(&dir).unwrap();
             assert_eq!(exit, Some(0), "{name}");
             assert!(
-                bytes == fixture(name),
+                bytes == ncbi_fixture(name),
                 "{name} at {threads} threads:\n{}",
                 String::from_utf8_lossy(&bytes)
             );
@@ -451,7 +434,7 @@ fn hold_error_run(dir: &Path, threads: &str, replaced: bool) -> Command {
 #[test]
 fn a_blastx_strategy_run_that_ends_in_ncbis_error_writes_ncbis_order() {
     let db = std::fs::canonicalize(manifest().join("tests/db_search")).unwrap();
-    let expected = String::from_utf8(fixture("blastx_hold_error.txt"))
+    let expected = String::from_utf8(ncbi_fixture("blastx_hold_error.txt"))
         .unwrap()
         .replace("{DB}", db.to_str().unwrap());
     for replaced in [true, false] {
@@ -586,7 +569,7 @@ fn a_query_batch_that_ncbi_does_not_search_is_refused_after_its_length_line() {
             }
             let (bytes, exit) = merged(run);
             std::fs::remove_dir_all(&dir).unwrap();
-            let mut expected = fixture(&format!("unsearched.{name}.txt"));
+            let mut expected = ncbi_fixture(&format!("unsearched.{name}.txt"));
             if refused {
                 expected.extend_from_slice(unsearched_refusal(&program.to_uppercase()).as_bytes());
             }

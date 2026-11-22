@@ -7,9 +7,9 @@
 //! environment; a failure of the library ends the example with exit status 1 and the error's
 //! message after the call's diagnostics.
 //!
-//! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104 (quoted at
+//! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104 (cited at
 //! `common::database::subject_taxonomy`) and c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
-//! (quoted at `cli::create_out_file`).
+//! (cited at `cli::create_out_file`).
 #![cfg(unix)]
 
 use std::ffi::{OsStr, OsString};

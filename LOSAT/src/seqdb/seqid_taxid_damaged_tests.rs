@@ -33,6 +33,7 @@ use super::filter::{DbList, SeqidList, TaxidList};
 use super::isam::{seqdb_simplify_accession, NegativeOids, SiOid, StringIsam};
 use super::isam_num::NumericIsam;
 use super::lmdb_read::Env;
+use super::lmdb_read::ReadError;
 use super::seqidlist::{parse_list_id, read_si_list};
 use super::tax_files::{self, OidSeqIds, OidTaxIds, TaxError};
 use super::tax_sqlite::TaxonomySqlite;
@@ -85,7 +86,7 @@ fn volume_tables_with_more_entries_than_the_file_holds_are_errors() {
             assert!(set_entries(&mut file, b"volname", entries) > 0, "{name}");
             assert!(set_entries(&mut file, b"volinfo", entries) > 0, "{name}");
             let env = Env::open(&file).unwrap();
-            let error = tax_files::volumes(&env).unwrap_err();
+            let error = tax_files::volumes(&env).unwrap_err().to_string();
             assert_eq!(
                 error,
                 format!("Volinfo error : {entries} volumes"),
@@ -183,7 +184,10 @@ fn branching_sqlite() -> Vec<u8> {
 #[test]
 fn sqlite_header_page_count_past_the_file_is_an_error() {
     let file = branching_sqlite();
-    let error = TaxonomySqlite::open(&file).err().expect("must not open");
+    let error = TaxonomySqlite::open(&file)
+        .err()
+        .expect("must not open")
+        .to_string();
     assert!(error.contains("malformed"), "{error}");
     // The header's count alone, as SQLite 3.51.1 reads it: 248 pages on a file of 247 pages is
     // malformed; on 247 pages and 100 bytes (248 pages rounded up) the file opens.
@@ -194,7 +198,10 @@ fn sqlite_header_page_count_past_the_file_is_an_error() {
     file[28..32].copy_from_slice(&247u32.to_be_bytes());
     assert!(TaxonomySqlite::open(&file).is_ok());
     file[28..32].copy_from_slice(&248u32.to_be_bytes());
-    let error = TaxonomySqlite::open(&file).err().expect("248 pages on 247");
+    let error = TaxonomySqlite::open(&file)
+        .err()
+        .expect("248 pages on 247")
+        .to_string();
     assert!(error.contains("malformed"), "{error}");
     file.extend_from_slice(&[0; 100]);
     assert!(TaxonomySqlite::open(&file).is_ok());
@@ -226,9 +233,19 @@ impl ErrorText for String {
     }
 }
 
+impl ErrorText for ReadError {
+    fn text(&self) -> String {
+        self.to_string()
+    }
+}
+
 impl ErrorText for TaxError {
     fn text(&self) -> String {
-        format!("{self} {} {}", self.message("db"), self.detail())
+        format!(
+            "{self} {} {}",
+            String::from_utf8_lossy(&self.message(b"db")),
+            self.detail()
+        )
     }
 }
 

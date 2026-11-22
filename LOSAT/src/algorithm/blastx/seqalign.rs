@@ -26,20 +26,6 @@
 //!   `s_RemapToSubjectLoc` add to the rows (`FastaRecord::placement`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:518-531
-//! ```c
-//!             query = query_blk->sequence +
-//!                 query_info->contexts[hsp->context].query_offset;
-//!             query_nomask = query_blk->sequence_nomask +
-//!                 query_info->contexts[hsp->context].query_offset;
-//!         }
-//!
-//!         /* Translate subject if needed. */
-//!         if (program_number == eBlastTypeTblastn) {
-//!             ...
-//!         }
-//!         else
-//!             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
-//! ```
 
 use std::io::Write;
 
@@ -55,7 +41,7 @@ use crate::report::serial::{write_query_to, SerialFormat};
 
 /// The subjects of a BLASTX search as the Seq-aligns name them: the records of `-subject`
 /// (`Subject_N`), or a database's reported sequences by rank with the database's title.
-pub(super) enum SeqalignSubjects<'a> {
+pub(crate) enum SeqalignSubjects<'a> {
     Records,
     Database {
         reported: &'a ReportedSubjects,
@@ -63,7 +49,10 @@ pub(super) enum SeqalignSubjects<'a> {
     },
 }
 
-/// Writes the documents of every query of `batches` to `writer`. A structured format writes
+/// Writes the documents of every query of `batches` to `writer`, each of the lists that the
+/// formatter's cut keeps (`PruneSeqalign` with `m_HitlistSize`, blast_format.cpp:690-704, quoted
+/// in `report::render_queries_with`: RPSTBLASTN's merged lists of several volumes,
+/// `BatchResults::shown_lists`, of `options`). A structured format writes
 /// none of a query's own warnings (`ReportFormat::writes_query_warnings`); what goes to
 /// `stderr` here are NCBI's posts of the bytes that its stream replaces in a query's document
 /// (`write_query_to`).
@@ -72,7 +61,7 @@ pub(super) fn write_blastx_seqalign(
     format: SerialFormat,
     writer: &mut impl Write,
     stderr: &mut dyn Write,
-    gapped: bool,
+    options: &super::args::ResolvedOptions,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
     names: &SeqalignSubjects<'_>,
@@ -84,16 +73,16 @@ pub(super) fn write_blastx_seqalign(
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
-        gapped,
+        gapped: options.gapped,
     };
     let mut subject_records: Vec<SubjectRecord<'_>> = Vec::new();
     let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();
     let mut buf: Vec<u8> = Vec::new();
     for batch in batches {
-        for (qidx, lists) in batch.queries.iter().enumerate() {
+        for qidx in 0..batch.queries.len() {
             let query = &queries[batch.query_ordinal + qidx];
             query_records(
-                lists,
+                batch.shown_lists(qidx, options),
                 subjects,
                 names,
                 &mut subject_records,
@@ -155,11 +144,15 @@ pub(super) fn query_records<'a>(
             use_this_seqid: crate::report::db_subject::use_this_seqid(parsed),
         });
         for hsp in &list.hsps {
-            let (q_end, s_end) = hsp.seqalign_ends();
+            // The subject's end is the Seq-align's (the edit script from the starts); the query's
+            // is the HSP's own, which `Blast_HSPGetQueryCoverage` reads for `hsp_percent_coverage`
+            // (blast_seqalign.cpp:1222-1225): the redo of RPSTBLASTN leaves an HSP whose own end
+            // is not the script's, as the tabular `qcovhsp` reads it (`raw.q_end - raw.q_start`).
+            let (_, s_end) = hsp.seqalign_ends();
             hsp_records.push(HspRecord {
                 subject: subject_index,
                 q_offset: hsp.hsp.q_start,
-                q_end,
+                q_end: hsp.hsp.q_end,
                 s_offset: hsp.hsp.s_start,
                 s_end,
                 q_frame: hsp.hsp.frame,

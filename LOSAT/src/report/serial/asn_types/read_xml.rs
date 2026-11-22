@@ -1,25 +1,12 @@
 //! The XML front end of the generic reader (`read`): NCBI's `CObjectIStreamXml` as
-//! `CObjectIStream::Open(eSerial_Xml, f)` makes it for blast_formatter's `-archive` (no
-//! `SetEnforcedStdXml`): the ASN.1-style XML that `ARCHIVE_FORMAT=xml` writes, where each type of an
-//! ASN.1 module is a tag (`<Seq-id>`), each member of a SEQUENCE or variant of a CHOICE is a tag
-//! named by its parent (`<Seq-id_local>`), the elements of a list of anonymous types are
-//! `<Parent_E>`, and an ENUMERATED or BOOLEAN is the attribute `value="..."` of its tag.
+//! `CObjectIStream::Open` with the format `eSerial_Xml` makes it for blast_formatter's `-archive`
+//! (`SetEnforcedStdXml` is not called): the ASN.1-style XML that `ARCHIVE_FORMAT=xml` writes,
+//! where each type of an ASN.1 module is a tag (`<Seq-id>`), each member of a SEQUENCE or
+//! variant of a CHOICE is a tag named by its parent (`<Seq-id_local>`), the elements of a list of
+//! anonymous types are `<Parent_E>`, and an ENUMERATED or BOOLEAN is the attribute `value="..."`
+//! of its tag.
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2069-2093
-//! ```c++
-//! void CObjectIStreamXml::BeginClass(const CClassTypeInfo* classInfo)
-//! {
-//!     CheckStdXml(classInfo);
-//!     if (m_SkipNextTag) {
-//!         ...
-//!     }
-//!     if (x_IsStdXml()) {
-//!         ...
-//!     } else {
-//!         OpenTagIfNamed(classInfo);
-//!     }
-//! }
-//! ```
 //! (`CheckStdXml`: every class of the table is `EDataSpec::eASN` of `CodeVersion` 22400, so
 //! `m_StdXml` stays false and `m_SkipNextTag` (set only by an alias with `SetFullAlias` or in
 //! standard XML) stays false; no member of an ASN.1 module has `notag`, an attribute list,
@@ -30,7 +17,7 @@
 //! this module is the grammar of NCBI's stream over the walk's steps: the names of the tags
 //! from the frames of the object stack (`SkipStackTagName`), the members and variants by those
 //! names, lists, named types, enumerated values and booleans as attributes. The style of the
-//! stream (`XmlStyle`) is an input: `Asn` is the archive's, and `Std` (`SetEnforcedStdXml(true)`,
+//! stream (`XmlStyle`) is an input: `Asn` is the archive's, and `Std` (`SetEnforcedStdXml` set,
 //! the search strategy's) is left to its own reader, where `Xml::file_header` refuses it.
 //!
 //! Where NCBI's stream throws a `CSerialException` the result is `ReadError::Serial`; the end of
@@ -38,22 +25,22 @@
 //! `CSerialException` inside two frames or more); the number reads throw NCBI's `CUtilException`
 //! (`ReadError::Exception`).
 
-use super::read::{read_delayed_in, Cx, Frame, FrameKind, Front, ReadError, R};
-use super::read_text::{BAD_NUMBER, NUMBER_OVERFLOW};
+use super::read::{read_delayed_in, Cx, Frame, Front, ReadError, R};
 use super::{type_info, EnumValue, Member, Storage, StringKind, Value};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::is_space;
-use crate::report::serial::asn_text_reader::{AsnSource, SliceSource};
+use crate::report::serial::asn_text_reader::{AsnSource, SliceSource, BAD_NUMBER, NUMBER_OVERFLOW};
 use crate::report::serial::encoder::StreamPosition;
+use crate::report::serial::object_frame::FrameKind;
 use crate::report::serial::xml_reader::{TagState, XmlError, XmlReader, EOF_MESSAGE};
 
 /// The style of an XML stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum XmlStyle {
-    /// ASN.1-style XML: `CObjectIStream::Open(eSerial_Xml, f)` of blast_formatter's archive
+    /// ASN.1-style XML: `CObjectIStream::Open` with `eSerial_Xml` of blast_formatter's archive
     /// (`m_StdXml` false for every type of an ASN.1 module).
     Asn,
-    /// Standard XML (`SetEnforcedStdXml(true)`, remote_blast.cpp:2278-2283: the search strategy
+    /// Standard XML (`SetEnforcedStdXml` set, remote_blast.cpp:2278-2283: the search strategy
     /// of `-import_search_strategy`): not read here. The place for it is `Xml::file_header` and
     /// the members of `Front` below, which an `Std` stream would answer by the rules of
     /// `x_IsStdXml()`; until then it refuses the input (`ReadError::Unsupported`).
@@ -87,22 +74,9 @@ impl<S: AsnSource> Xml<S> {
     /// `EndOfData()`: whether no object follows: the end of the input, or white space, comments
     /// and processing instructions up to it, or a failure in them.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:118-129
-    // ```c++
-    // bool CObjectIStreamXml::EndOfData(void)
-    // {
-    //     if (CObjectIStream::EndOfData()) {
-    //         return true;
-    //     }
-    //     try {
-    //         SkipWSAndComments();
-    //     } catch (...) {
-    //         return true;
-    //     }
-    //     return false;
-    // }
-    // ```
-    // (`CObjectIStream::EndOfData`, quoted at `stream::ObjectStream::end_of_data`: the end of
-    // the input; a failed stream is `ObjectStream::failed`.)
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
+    // (`CObjectIStream::EndOfData`: the end of the input; a failed stream is
+    // `ObjectStream::failed`.)
     pub(crate) fn end_of_data(&mut self) -> bool {
         self.x.src.byte_at(self.x.pos).is_none() || self.x.skip_ws_and_comments().is_err()
     }
@@ -120,21 +94,8 @@ impl<S: AsnSource> Xml<S> {
         Ok(result?)
     }
 
-    /// `OpenTag(e)`: the opening tag `e` (the name given back by `UndoClassMember`, or read).
+    /// `OpenTag`: the opening tag `e` (the name given back by `UndoClassMember`, or read).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1563-1573
-    // ```c++
-    // void CObjectIStreamXml::OpenTag(const string& e)
-    // {
-    //     CTempString tagName;
-    //     if (m_RejectedTag.empty()) {
-    //         tagName = ReadName(BeginOpeningTag());
-    //     } else {
-    //         tagName = RejectedName();
-    //     }
-    //     if ( tagName != e )
-    //         ThrowError(fFormatError, "tag '"+e+"' expected: "+string(tagName));
-    // }
-    // ```
     fn open_tag(&mut self, e: &str) -> R<()> {
         self.read_tag_name()?;
         if self.x.last_tag != e.as_bytes() {
@@ -147,19 +108,8 @@ impl<S: AsnSource> Xml<S> {
     }
 
     /// The name of the next opening tag, in `last_tag`: the one given back, or read
-    /// (`ReadName(BeginOpeningTag())`, `RejectedName`).
+    /// (`ReadName` of what `BeginOpeningTag` finds, or `RejectedName`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:525-535
-    // ```c++
-    // CTempString CObjectIStreamXml::RejectedName(void)
-    // {
-    //     _ASSERT(!m_RejectedTag.empty());
-    //     m_LastTag = m_RejectedTag;
-    //     m_RejectedTag.erase();
-    //     m_TagState = eTagInsideOpening;
-    //     ...
-    //     return m_LastTag;
-    // }
-    // ```
     fn read_tag_name(&mut self) -> R<()> {
         match self.x.rejected.take() {
             Some(name) => {
@@ -174,22 +124,8 @@ impl<S: AsnSource> Xml<S> {
         Ok(())
     }
 
-    /// `CloseTag(e)`: nothing after a self-closed opening tag, else the closing tag `e`.
+    /// `CloseTag`: nothing after a self-closed opening tag, else the closing tag `e`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1575-1586
-    // ```c++
-    // void CObjectIStreamXml::CloseTag(const string& e)
-    // {
-    //     if ( SelfClosedTag() ) {
-    //         EndSelfClosedTag();
-    //     }
-    //     else {
-    //         CTempString tagName = ReadName(BeginClosingTag());
-    //         if ( tagName != e )
-    //             ThrowError(fFormatError, "tag '"+e+"' expected: "+string(tagName));
-    //         EndClosingTag();
-    //     }
-    // }
-    // ```
     fn close_tag(&mut self, e: &str) -> R<()> {
         if self.x.state == TagState::SelfClosed {
             self.x.state = TagState::Outside;
@@ -206,25 +142,8 @@ impl<S: AsnSource> Xml<S> {
         Ok(self.x.end_tag()?)
     }
 
-    /// `OpenStackTag(0)` of an element of a list: the opening tag named by the stack.
+    /// `OpenStackTag` at level 0 of an element of a list: the opening tag named by the stack.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1588-1602
-    // ```c++
-    // void CObjectIStreamXml::OpenStackTag(size_t level)
-    // {
-    //     CTempString tagName;
-    //     if (m_RejectedTag.empty()) {
-    //         tagName = ReadName(BeginOpeningTag());
-    //         if (!x_IsStdXml()) {
-    //             CTempString rest = SkipStackTagName(tagName, level);
-    //             if ( !rest.empty() )
-    //                 ThrowError(fFormatError,
-    //                     "unexpected tag: "+string(tagName)+string(rest));
-    //         }
-    //     } else {
-    //         tagName = RejectedName();
-    //     }
-    // }
-    // ```
     fn open_stack_tag(&mut self, frames: &[Frame]) -> R<()> {
         if self.x.rejected.is_none() {
             let c = self.x.begin_opening_tag()?;
@@ -235,31 +154,9 @@ impl<S: AsnSource> Xml<S> {
         }
     }
 
-    /// `CloseStackTag(0)`: nothing after a self-closed opening tag, else the closing tag named
-    /// by the stack.
+    /// `CloseStackTag` at level 0: nothing after a self-closed opening tag, else the closing tag
+    /// named by the stack.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1604-1623
-    // ```c++
-    // void CObjectIStreamXml::CloseStackTag(size_t level)
-    // {
-    //     if ( SelfClosedTag() ) {
-    //         EndSelfClosedTag();
-    //     }
-    //     else {
-    //         if (m_Attlist) {
-    //             m_TagState = eTagInsideClosing;
-    //         } else {
-    //             CTempString tagName = ReadName(BeginClosingTag());
-    //             if (!x_IsStdXml()) {
-    //                 CTempString rest = SkipStackTagName(tagName, level);
-    //                 if ( !rest.empty() )
-    //                     ThrowError(fFormatError,
-    //                         "unexpected tag: "+string(tagName)+string(rest));
-    //             }
-    //         }
-    //         EndClosingTag();
-    //     }
-    // }
-    // ```
     fn close_stack_tag(&mut self, frames: &[Frame]) -> R<()> {
         if self.x.state == TagState::SelfClosed {
             self.x.state = TagState::Outside;
@@ -271,8 +168,8 @@ impl<S: AsnSource> Xml<S> {
         Ok(self.x.end_tag()?)
     }
 
-    /// The tag in `last_tag` must be the one the stack names: `SkipStackTagName(tag, 0)` leaves
-    /// nothing.
+    /// The tag in `last_tag` must be the one the stack names: `SkipStackTagName` of it from
+    /// level 0 leaves nothing.
     fn check_stack_tag(&self, frames: &[Frame]) -> R<()> {
         let tag = &self.x.last_tag;
         let rest = skip_stack_tag_name(frames, tag, 0)?;
@@ -294,7 +191,10 @@ impl<S: AsnSource> Xml<S> {
     }
 
     /// `GetInt4`, `GetUint4` (`signed` false: no `-`) and `GetInt8` of `CIStreamBuffer`, the
-    /// digits checked against `max` as NCBI checks them (quoted at `read_text::Text::get_number`).
+    /// digits checked against `max` as NCBI checks them.
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-669
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:672-700
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:703-746
     fn get_number(&mut self, max: u64, signed: bool) -> R<i64> {
         let mut c = loop {
             let c = self.x.get_char()?;
@@ -344,36 +244,6 @@ impl<S: AsnSource> Xml<S> {
     /// `SkipSNumber` (`signed`) and `SkipUNumber`: an optional sign (`+` only for the unsigned)
     /// right before a digit, then digits, with no range.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2648-2675
-    // ```c++
-    // void CObjectIStreamXml::SkipSNumber(void)
-    // {
-    //     if (ExpectSpecialCase()!=0 && UseSpecialCaseRead()) {
-    //         return;
-    //     }
-    //     BeginData();
-    //     size_t i;
-    //     char c = SkipWSAndComments();
-    //     switch ( c ) {
-    //     case '+':
-    //     case '-':
-    //         c = m_Input.PeekChar(1);
-    //         // next char
-    //         i = 2;
-    //         break;
-    //     default:
-    //         // next char
-    //         i = 1;
-    //         break;
-    //     }
-    //     if ( c < '0' || c > '9' ) {
-    //         ThrowError(fFormatError, "invalid symbol in number");
-    //     }
-    //     while ( (c = m_Input.PeekCharNoEOF(i)) >= '0' && c <= '9' ) {
-    //         ++i;
-    //     }
-    //     m_Input.SkipChars(i);
-    // }
-    // ```
     // (`SkipUNumber`, 2677-2703, takes only `+`.)
     fn skip_number(&mut self, signed: bool) -> R<()> {
         self.x.begin_data()?;
@@ -402,18 +272,8 @@ impl<S: AsnSource> Xml<S> {
     }
 }
 
-/// `SkipTagName(tag, name)`: `tag` after the prefix `name`.
+/// `SkipTagName`: `tag` after the prefix `name`.
 // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1508-1515
-// ```c++
-// CTempString CObjectIStreamXml::SkipTagName(CTempString tag,
-//                                             const char* str, size_t length)
-// {
-//     if ( tag.size() < length ||
-//          memcmp(tag.data(), str, length) != 0 )
-//         ThrowError(fFormatError, "invalid tag name: "+string(tag));
-//     return CTempString(tag.data() + length, tag.size() - length);
-// }
-// ```
 fn skip_tag_name<'t>(tag: &'t [u8], name: &[u8]) -> R<&'t [u8]> {
     if !tag.starts_with(name) {
         return Err(ReadError::Serial(format!(
@@ -424,57 +284,10 @@ fn skip_tag_name<'t>(tag: &'t [u8], name: &[u8]) -> R<&'t [u8]> {
     Ok(&tag[name.len()..])
 }
 
-/// `SkipStackTagName(tag, level)`: what is left of `tag` after the name that the frame `level`
+/// `SkipStackTagName`: what is left of `tag` after the name that the frame `level`
 /// frames below the top of the stack gives it: a type's name, a member's tag (its parent's name,
 /// `_` and its own), an element's (its parent's, `_E`).
 // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1517-1561
-// ```c++
-// CTempString CObjectIStreamXml::SkipStackTagName(CTempString tag,
-//                                                  size_t level)
-// {
-//     const TFrame& frame = FetchFrameFromTop(level);
-//     switch ( frame.GetFrameType() ) {
-//     case TFrame::eFrameNamed:
-//     case TFrame::eFrameArray:
-//     case TFrame::eFrameClass:
-//     case TFrame::eFrameChoice:
-//         {
-//             const string& name = frame.GetTypeInfo()->GetName();
-//             if ( !name.empty() )
-//                 return SkipTagName(tag, name);
-//             else
-//                 return SkipStackTagName(tag, level + 1);
-//         }
-//     case TFrame::eFrameClassMember:
-//     case TFrame::eFrameChoiceVariant:
-//         {
-//             tag = SkipStackTagName(tag, level + 1, '_');
-//             return SkipTagName(tag, frame.GetMemberId().GetName());
-//         }
-//     case TFrame::eFrameArrayElement:
-//         {
-//             if (GetStackDepth() > level+1) {
-//                 tag = SkipStackTagName(tag, level + 1);
-//                 return SkipTagName(tag, "_E");
-//             }
-//             return CTempString();
-//         }
-//     default:
-//         break;
-//     }
-//     ThrowError(fIllegalCall, "illegal frame type");
-//     return tag;
-// }
-//
-// CTempString CObjectIStreamXml::SkipStackTagName(CTempString tag,
-//                                                  size_t level, char c)
-// {
-//     tag = SkipStackTagName(tag, level);
-//     if ( tag.empty() || tag[0] != c )
-//         ThrowError(fFormatError, "invalid tag name: "+string(tag));
-//     return CTempString(tag.data() + 1, tag.size() - 1);
-// }
-// ```
 fn skip_stack_tag_name<'t>(frames: &[Frame], tag: &'t [u8], level: usize) -> R<&'t [u8]> {
     let Some(frame) = frames.len().checked_sub(level + 1).map(|at| &frames[at]) else {
         return Err(ReadError::Serial("illegal frame type".into()));
@@ -518,20 +331,8 @@ fn skip_stack_tag_char<'t>(frames: &[Frame], tag: &'t [u8], level: usize, c: u8)
     }
 }
 
-/// `UnexpectedMember(id, items)`.
+/// `UnexpectedMember`.
 // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2105-2114
-// ```c++
-// void CObjectIStreamXml::UnexpectedMember(const CTempString& id,
-//                                          const CItemsInfo& items)
-// {
-//     string message =
-//         "\""+string(id)+"\": unexpected member, should be one of: ";
-//     for ( CItemsInfo::CIterator i(items); i.Valid(); ++i ) {
-//         message += '\"' + items.GetItemInfo(i)->GetId().ToString() + "\" ";
-//     }
-//     ThrowError(fFormatError, message);
-// }
-// ```
 fn unexpected_member(id: &[u8], items: &[Member]) -> ReadError {
     let mut message = format!(
         "\"{}\": unexpected member, should be one of: ",
@@ -558,26 +359,9 @@ fn truncate_spaces(text: &[u8]) -> &[u8] {
     &text[start..end]
 }
 
-/// `CEnumeratedTypeValues::FindValue(name)`: the value of the name, or of the name with its first
+/// `CEnumeratedTypeValues::FindValue`: the value of the name, or of the name with its first
 /// letter in upper case.
 // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:124-138
-// ```c++
-// TEnumValueType CEnumeratedTypeValues::FindValue(const CTempString& name) const
-// {
-//     const TNameToValue& m = NameToValue();
-//     TNameToValue::const_iterator i = m.find(name);
-//     if ( i == m.end() ) {
-//         string name_alt = string(name);
-//         name_alt[0] = (char)toupper((unsigned char)name_alt[0]);
-//         i = m.find(name_alt);
-//         if ( i == m.end() ) {
-//             NCBI_THROW(CSerialException,eInvalidData,
-//                        "invalid value of enumerated type: " + string(name));
-//         }
-//     }
-//     return i->second;
-// }
-// ```
 fn find_value(values: &'static [EnumValue], name: &[u8]) -> R<i32> {
     let mut upper = name.to_vec();
     if let Some(first) = upper.first_mut() {
@@ -604,22 +388,9 @@ impl<S: AsnSource> Front for Xml<S> {
     const NAMED_TYPES: bool = true;
     const ARRAY_FRAMES: bool = false;
 
-    /// `WillHaveName(elementType)`: the element of a list has the frame of an element when its
-    /// type has no name.
+    /// `WillHaveName`: the element of a list has the frame of an element when its type has no
+    /// name.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1638-1648
-    // ```c++
-    // bool CObjectIStreamXml::WillHaveName(TTypeInfo elementType)
-    // {
-    //     while ( elementType->GetName().empty() ) {
-    //         if ( elementType->GetTypeFamily() != eTypeFamilyPointer )
-    //             return false;
-    //         elementType = CTypeConverter<CPointerTypeInfo>::SafeCast(
-    //             elementType)->GetPointedType();
-    //     }
-    //     // found named type
-    //     return true;
-    // }
-    // ```
     fn element_frame(element: u16) -> bool {
         type_info(element).name().is_empty()
     }
@@ -676,29 +447,11 @@ impl<S: AsnSource> Front for Xml<S> {
     /// `ResetState` and `ReadFileHeader`: the state of the stream at its root, the byte order
     /// mark, the declaration, the `DOCTYPE`, and the name of the root's tag (given back).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:84-101
-    // ```c++
-    // void CObjectIStreamXml::ResetState(void)
-    // {
-    //     CObjectIStream::ResetState();
-    //     if (GetStackDepth() > 1) {
-    //         return;
-    //     }
-    //     m_TagState = eTagOutside;
-    //     m_LeadingWs = 0;
-    //     m_LastTag.clear();
-    //     m_RejectedTag.clear();
-    //     m_Attlist = false;
-    //     m_IsNil = false;;
-    //     m_LastPrimitive.clear();
-    //     m_CurrNsPrefix.clear();
-    //     m_Utf8Buf.clear();
-    //     m_Utf8Pos = m_Utf8Buf.begin();
-    //     m_SkipNextTag = false;
-    // }
-    // ```
-    // (`ReadFileHeader`, quoted at `XmlReader::read_file_header`. Its `m_Encoding` is the one of
-    // the stream so far; a declaration with an `encoding` sets it. `Read` of a root object
-    // starts with `SkipFileHeader`, whose first call is `ResetState`, objistr.cpp:883-900.)
+    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:582-670
+    // (`ResetState` returns at once when more than one frame is on the stack; at the root it
+    // clears the tag state and the tag names kept. The `m_Encoding` of `ReadFileHeader` is the
+    // one of the stream so far; a declaration with an `encoding` sets it. `Read` of a root
+    // object starts with `SkipFileHeader`, whose first call is `ResetState`, objistr.cpp:883-900.)
     fn file_header(&mut self, _cx: &mut Cx<'_>) -> R<Vec<u8>> {
         if self.style == XmlStyle::Std {
             return Err(ReadError::Unsupported(
@@ -719,68 +472,15 @@ impl<S: AsnSource> Front for Xml<S> {
         Ok(())
     }
 
-    /// `BeginClassMember(classType, pos)` of a SEQUENCE of an ASN.1 module: the member whose
-    /// tag, `Class_member`, follows; the end of the members at the closing tag.
+    /// `BeginClassMember` of a SEQUENCE of an ASN.1 module: the member whose tag,
+    /// `Class_member`, follows; the end of the members at the closing tag. A self-closed tag, a
+    /// closing tag, a position past the last member or no tag ahead also ends the members.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2191-2367
-    // ```c++
-    // TMemberIndex
-    // CObjectIStreamXml::BeginClassMember(const CClassTypeInfo* classType,
-    //                                     TMemberIndex pos)
-    // {
-    //     CTempString tagName;
-    //     TMemberIndex first = classType->GetMembers().FirstIndex();
-    //     if (m_RejectedTag.empty()) {
-    //         if (m_Attlist && InsideTag()) {
-    //             ...
-    //         } else {
-    //             if (!m_Attlist) {
-    //                 if (pos == first) {
-    //                     ...
-    // // if class spec defines no attributes, but there are some - skip them
-    //                     if (HasAttlist()) {
-    //                         ReadUndefinedAttributes();
-    //                     }
-    //                 }
-    //             }
-    //             ...
-    //             if ( SelfClosedTag() || ThisTagIsSelfClosed()) {
-    //                 m_Attlist = false;
-    //                 ...
-    //                 return kInvalidMember;
-    //             }
-    //             if ( NextTagIsClosing() )
-    //                 return kInvalidMember;
-    //             if (pos <= classType->GetItems().LastIndex()) {
-    //                 ...
-    //             } else {
-    //                 ...
-    //                 return kInvalidMember;
-    //             }
-    //             if (!NextIsTag()) {
-    //                 return kInvalidMember;
-    //             }
-    //             tagName = ReadName(BeginOpeningTag());
-    //         }
-    //     } else {
-    //         tagName = RejectedName();
-    //     }
-    //     ...
-    //     CTempString id = SkipStackTagName(tagName, 1, '_');
-    //     TMemberIndex index = classType->GetMembers().Find(id, pos);
-    //     if ( index == kInvalidMember ) {
-    //         if (CanSkipUnknownMembers()) {
-    //             ...
-    //         } else {
-    //            UnexpectedMember(id, classType->GetMembers());
-    //         }
-    //     }
-    //     return index;
-    // }
-    // ```
-    // (`Find(tagName)` and `FindDeep(tagName, pos)` before the last lines look for a member whose
-    // name is the whole tag, or one of a member's class: a tag of an ASN.1-style document is
-    // `Class_member`, which neither names; `FindDeep` is not ported. Unknown members are not
-    // skipped, `SERIAL_SKIP_UNKNOWN_MEMBERS` being its registry parameter's default no.)
+    // (`Find` by the tag name and `FindDeep` by the tag name from `pos`, before the last lines,
+    // look for a member whose name is the whole tag, or one of a member's class: a tag of an
+    // ASN.1-style document is `Class_member`, which neither names; `FindDeep` is not ported.
+    // Unknown members are not skipped, `SERIAL_SKIP_UNKNOWN_MEMBERS` being its registry
+    // parameter's default no.)
     fn next_member(
         &mut self,
         members: &'static [Member],
@@ -827,24 +527,6 @@ impl<S: AsnSource> Front for Xml<S> {
 
     /// `BeginChoice`: the tag of a choice with a name.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2391-2409
-    // ```c++
-    // void CObjectIStreamXml::BeginChoice(const CChoiceTypeInfo* choiceType)
-    // {
-    //     CheckStdXml(choiceType);
-    //     if (m_SkipNextTag) {
-    //         ...
-    //     }
-    //     OpenTagIfNamed(choiceType);
-    // }
-    // void CObjectIStreamXml::EndChoice(void)
-    // {
-    //     if (TopFrame().GetNotag()) {
-    //         ...
-    //     }
-    //     CloseTagIfNamed(TopFrame().GetTypeInfo());
-    //     x_EndTypeNamespace();
-    // }
-    // ```
     fn begin_choice(&mut self, ty: u16, _cx: &mut Cx<'_>) -> R<()> {
         let name = type_info(ty).name();
         if !name.is_empty() {
@@ -865,50 +547,7 @@ impl<S: AsnSource> Front for Xml<S> {
     /// `Choice_variant`, follows. A choice without a variant tag is the "choice variant id
     /// expected" of `ReadChoiceSimple`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2411-2507
-    // ```c++
-    // TMemberIndex CObjectIStreamXml::BeginChoiceVariant(const CChoiceTypeInfo* choiceType)
-    // {
-    //     CTempString tagName;
-    //     TMemberIndex first = choiceType->GetVariants().FirstIndex();
-    //     if (m_RejectedTag.empty()) {
-    //         if (!m_Attlist) {
-    //             ...
-    // // if spec defines no attributes, but there are some - skip them
-    //             if (HasAttlist()) {
-    //                 ReadUndefinedAttributes();
-    //             }
-    //         }
-    //         m_Attlist = false;
-    //         if ( SelfClosedTag() ) {
-    //             return kInvalidMember;
-    //         }
-    //         if ( NextTagIsClosing() ) {
-    //             if (choiceType->MayBeEmpty()) {
-    //                 return kInvalidMember;
-    //             }
-    //             ...
-    //         }
-    //         if (!NextIsTag()) {
-    //             ...
-    //         }
-    //         tagName = ReadName(BeginOpeningTag());
-    //     } else {
-    //         tagName = RejectedName();
-    //     }
-    //     ...
-    //     CTempString id = SkipStackTagName(tagName, 1, '_');
-    //     ind = choiceType->GetVariants().Find(id);
-    //     if ( ind == kInvalidMember ) {
-    //         if (CanSkipUnknownVariants()) {
-    //             ...
-    //         } else {
-    //             UnexpectedMember(tagName, choiceType->GetVariants());
-    //         }
-    //     }
-    //     return ind;
-    // }
-    // ```
-    // (`FindDeep(tagName)` and `Find(tagName)` before: see `next_member`. No CHOICE of the
+    // (`FindDeep` and `Find` by the tag name come before: see `next_member`. No CHOICE of the
     // table may be empty (`MayBeEmpty`) or has a variant without a tag (`FindEmpty`).)
     fn begin_variant(
         &mut self,
@@ -924,7 +563,7 @@ impl<S: AsnSource> Front for Xml<S> {
                 return Err(ReadError::Serial("choice variant id expected".into()));
             }
             // `NextIsTag` looks for a variant without a tag when no tag follows (none in an
-            // ASN.1 module); then `ReadName(BeginOpeningTag())` throws for what is there.
+            // ASN.1 module); then `ReadName` of `BeginOpeningTag` throws for what is there.
             self.x.next_is_tag()?;
         }
         self.read_tag_name()?;
@@ -953,32 +592,7 @@ impl<S: AsnSource> Front for Xml<S> {
     /// element's opening tag. The end of the input in `HasMoreElements` is no more elements (the
     /// closing tag after the list meets it again).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1765-1825
-    // ```c++
-    // bool CObjectIStreamXml::HasMoreElements(TTypeInfo elementType)
-    // {
-    //     bool no_more=false;
-    //     try {
-    //         no_more = ThisTagIsSelfClosed() || NextTagIsClosing();
-    //     } catch (CEofException&) {
-    //         no_more = true;
-    //     }
-    //     if (no_more) {
-    //         m_LastPrimitive.erase();
-    //         return false;
-    //     }
-    //     ...
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1895-1910
-    // ```c++
-    // void CObjectIStreamXml::BeginArrayElement(TTypeInfo elementType)
-    // {
-    //     if (x_IsStdXml()) {
-    //         ...
-    //     }
-    //     OpenStackTag(0);
-    // }
-    // ```
     fn next_element(&mut self, _element: u16, _block: &mut bool, cx: &mut Cx<'_>) -> R<bool> {
         let no_more = match self
             .x
@@ -1004,16 +618,6 @@ impl<S: AsnSource> Front for Xml<S> {
 
     /// `EndArrayElement`: the closing tag of an element that had an opening tag of its own.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1912-1919
-    // ```c++
-    // void CObjectIStreamXml::EndArrayElement(void)
-    // {
-    //     if (TopFrame().GetNotag()) {
-    //         TopFrame().SetNotag(false);
-    //     } else {
-    //         CloseStackTag(0);
-    //     }
-    // }
-    // ```
     fn end_element(&mut self, cx: &mut Cx<'_>) -> R<()> {
         if cx
             .frames
@@ -1033,32 +637,6 @@ impl<S: AsnSource> Front for Xml<S> {
 
     /// `BeginNamedType`: the tag of the named type (`<IUPACna>`, `<Seq-descr>`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2002-2037
-    // ```c++
-    // void CObjectIStreamXml::BeginNamedType(TTypeInfo namedTypeInfo)
-    // {
-    //     CheckStdXml(namedTypeInfo);
-    //     if (m_SkipNextTag || namedTypeInfo->GetName().empty()) {
-    //         ...
-    //     } else {
-    //         TTypeInfo realtype = GetRealTypeInfo(namedTypeInfo);
-    //         if (realtype->GetTypeFamily() == eTypeFamilyPrimitive &&
-    //             GetStackDepth() > 2 && m_StdXml) {
-    //             ...
-    //         }
-    //         OpenTag(namedTypeInfo);
-    //     }
-    //     ...
-    // }
-    //
-    // void CObjectIStreamXml::EndNamedType(void)
-    // {
-    //     m_SkipNextTag = false;
-    //     if (TopFrame().GetNotag()) {
-    //         ...
-    //     }
-    //     CloseTag(TopFrame().GetTypeInfo()->GetName());
-    // }
-    // ```
     fn begin_named(&mut self, ty: u16, _cx: &mut Cx<'_>) -> R<()> {
         self.open_tag(type_info(ty).name())
     }
@@ -1070,26 +648,8 @@ impl<S: AsnSource> Front for Xml<S> {
 
     /// `ReadInt4`, `ReadUint4`, `ReadInt8`, `ReadInt2` by the member's storage, or their skip.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:991-1025
-    // ```c++
-    // Int4 CObjectIStreamXml::ReadInt4(void)
-    // {
-    //     if (ExpectSpecialCase()!=0 && UseSpecialCaseRead()) {
-    //         return x_UseMemberDefault<Int4>();
-    //     }
-    //     BeginData();
-    //     return m_Input.GetInt4();
-    // }
-    //
-    // Uint4 CObjectIStreamXml::ReadUint4(void)
-    // {
-    //     if (ExpectSpecialCase()!=0 && UseSpecialCaseRead()) {
-    //         return x_UseMemberDefault<Uint4>();
-    //     }
-    //     BeginData();
-    //     return m_Input.GetUint4();
-    // }
-    // ```
-    // (`ReadInt2`, quoted at `read_text::Text::integer_number`.)
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1697-1704
+    // (`ReadInt2` reads an Int4 that must fit: "integer overflow".)
     fn integer(
         &mut self,
         _ty: u16,
@@ -1125,74 +685,6 @@ impl<S: AsnSource> Front for Xml<S> {
     /// `ReadEnum` of the stream: the attribute `value` of the tag (of the type's own tag when it
     /// has a name), or, for an INTEGER with named values, the number after the tag.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1376-1453
-    // ```c++
-    // TEnumValueType CObjectIStreamXml::ReadEnum(const CEnumeratedTypeValues& values)
-    // {
-    //     TEnumValueType value;
-    //     bool valueonly = m_StdXml;
-    //     ...
-    //     const string& enumName = values.GetName();
-    //     if ( !m_SkipNextTag && !enumName.empty() ) {
-    //         // global enum
-    //         OpenTag(enumName);
-    //         _ASSERT(InsideOpeningTag());
-    //     }
-    //     if ( InsideOpeningTag() ) {
-    //         // try to read attribute 'value'
-    //         if ( IsEndOfTagChar( SkipWS()) ) {
-    //             // no attribute
-    //             if ( !values.IsInteger() )
-    //                 ThrowError(fFormatError, "attribute 'value' expected");
-    //             m_Input.SkipChar();
-    //             Found_gt();
-    //             BeginData();
-    //             value = m_Input.GetInt4();
-    //         }
-    //         else {
-    //             if (m_Attlist) {
-    //                 ...
-    //             } else {
-    //                 CTempString attr;
-    //                 while (HasAttlist()) {
-    //                     attr = ReadAttributeName();
-    //                     if ( attr == "value" ) {
-    //                         break;
-    //                     }
-    //                     string value_tmp;
-    //                     ReadAttributeValue(value_tmp);
-    //                 }
-    //                 if ( attr != "value" ) {
-    //                     EndOpeningTagSelfClosed();
-    //                     ThrowError(fMissingValue,"attribute 'value' is missing");
-    //                 }
-    //                 string valueName;
-    //                 ReadAttributeValue(valueName);
-    //                 NStr::TruncateSpacesInPlace(valueName);
-    //                 value = values.FindValue(valueName);
-    //                 if ( !EndOpeningTagSelfClosed() && values.IsInteger() ) {
-    //                     // read integer value
-    //                     SkipWSAndComments();
-    //                     if ( value != m_Input.GetInt4() )
-    //                         ThrowError(fInvalidData,
-    //                                    "incompatible name and value of named integer");
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     else {
-    //         // outside of tag
-    //         if ( !values.IsInteger() )
-    //             ThrowError(fFormatError, "attribute 'value' expected");
-    //         BeginData();
-    //         value = m_Input.GetInt4();
-    //     }
-    //     if ( !m_SkipNextTag && !enumName.empty() ) {
-    //         // global enum
-    //         CloseTag(enumName);
-    //     }
-    //     return value;
-    // }
-    // ```
     fn enumerated(
         &mut self,
         ty: u16,
@@ -1217,49 +709,6 @@ impl<S: AsnSource> Front for Xml<S> {
     /// `ReadBool` / `SkipBool`: the attribute `value` of the tag, or the word in it; the tag
     /// must be empty after it.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:933-977
-    // ```c++
-    // bool CObjectIStreamXml::ReadBool(void)
-    // {
-    //     CTempString attr;
-    // // accept both   <a>true</a>   and   <a value="true"/>
-    // // for compatibility with ASN-generated classes
-    //     string sValue;
-    //     bool haveattr=false;
-    //     if (!m_Attlist) {
-    //         while (HasAttlist()) {
-    //             attr = ReadAttributeName();
-    //             if ( attr == "value" ) {
-    //                 ReadAttributeValue(sValue);
-    //                 haveattr = true;
-    //                 continue;
-    //             }
-    //             ...
-    //             string value;
-    //             ReadAttributeValue(value);
-    //         }
-    //         ...
-    //     }
-    //     if (!haveattr) {
-    //         ReadWord(sValue);
-    //     }
-    //     NStr::TruncateSpacesInPlace(sValue);
-    //
-    // // http://www.w3.org/TR/xmlschema11-2/#boolean
-    //     bool value;
-    //     if ( sValue == "true"  || sValue == "1")
-    //         value = true;
-    //     else {
-    //         if ( sValue != "false"  && sValue != "0") {
-    //             ThrowError(fFormatError,
-    //                        "'true' or 'false' value expected: "+sValue);
-    //         }
-    //         value = false;
-    //     }
-    //     if ( !m_Attlist && !EndOpeningTagSelfClosed() && !NextTagIsClosing() )
-    //         ThrowError(fFormatError, "boolean tag must have empty contents");
-    //     return value;
-    // }
-    // ```
     fn boolean(&mut self, _ty: u16, _skip: bool, cx: &mut Cx<'_>) -> R<bool> {
         let mut text = Vec::new();
         let mut have = false;
@@ -1301,21 +750,7 @@ impl<S: AsnSource> Front for Xml<S> {
 
     /// `ReadNull`, `SkipNull`: an empty tag.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1044-1048
-    // ```c++
-    // void CObjectIStreamXml::ReadNull(void)
-    // {
-    //     if ( !EndOpeningTagSelfClosed() && !NextTagIsClosing() )
-    //         ThrowError(fFormatError, "empty tag expected");
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2725-2729
-    // ```c++
-    // void CObjectIStreamXml::SkipNull(void)
-    // {
-    //     if ( !EndOpeningTagSelfClosed() )
-    //         ThrowError(fFormatError, "empty tag expected");
-    // }
-    // ```
     fn null(&mut self, _ty: u16, skip: bool, _cx: &mut Cx<'_>) -> R<()> {
         let empty =
             self.x.end_opening_tag_self_closed()? || (!skip && self.x.next_tag_is_closing()?);
@@ -1335,23 +770,8 @@ impl<S: AsnSource> Front for Xml<S> {
     /// `ReadString` (a self-closed tag is the empty string) with the bytes replaced by `#` and
     /// posted (`x_VerifyChar`), or `SkipString`: the text up to the next tag.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2710-2723
-    // ```c++
-    // void CObjectIStreamXml::SkipString(EStringType type)
-    // {
-    //     if (ExpectSpecialCase()!=0 && UseSpecialCaseRead()) {
-    //         return;
-    //     }
-    //     BeginData();
-    //     EEncoding enc = m_Encoding;
-    //     if (type == eStringTypeUTF8) {
-    //         m_Encoding = eEncoding_ISO8859_1;
-    //     }
-    //     while ( ReadEscapedChar(m_Attlist ? '\"' : '<') >= 0 )
-    //         continue;
-    //     m_Encoding = enc;
-    // }
-    // ```
-    // (`ReadString`, quoted at `XmlReader::string`.)
+    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1233-1258
+    // (`ReadString`: a self-closed tag is the empty string.)
     fn string(&mut self, _ty: u16, _kind: StringKind, skip: bool, cx: &mut Cx<'_>) -> R<Vec<u8>> {
         let mut out = Vec::new();
         if skip {
@@ -1372,83 +792,8 @@ impl<S: AsnSource> Front for Xml<S> {
     /// `ReadBytes` of an OCTET STRING: pairs of hexadecimal digits up to the next tag (an odd
     /// last digit is the high half of a byte); `SkipByteBlock`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2524-2542
-    // ```c++
-    // int CObjectIStreamXml::GetHexChar(void)
-    // {
-    //     char c = m_Input.GetChar();
-    //     if ( c >= '0' && c <= '9' ) {
-    //         return c - '0';
-    //     }
-    //     else if ( c >= 'A' && c <= 'Z' ) {
-    //         return c - 'A' + 10;
-    //     }
-    //     else if ( c >= 'a' && c <= 'z' ) {
-    //         return c - 'a' + 10;
-    //     }
-    //     else {
-    //         m_Input.UngetChar(c);
-    //         if ( c != '<' )
-    //             ThrowError(fFormatError, "invalid char in octet string");
-    //     }
-    //     return -1;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2596-2613
-    // ```c++
-    //     while ( length-- > 0 ) {
-    //         int c1 = GetHexChar();
-    //         if ( c1 < 0 ) {
-    //             block.EndOfBlock();
-    //             return count;
-    //         }
-    //         int c2 = GetHexChar();
-    //         if ( c2 < 0 ) {
-    //             *dst++ = char(c1 << 4);
-    //             count++;
-    //             block.EndOfBlock();
-    //             return count;
-    //         }
-    //         else {
-    //             *dst++ = char((c1 << 4) | c2);
-    //             count++;
-    //         }
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2731-2762
-    // ```c++
-    // void CObjectIStreamXml::SkipByteBlock(void)
-    // {
-    //     BeginData();
-    //     for ( ;; ) {
-    //         char c = m_Input.GetChar();
-    //         if ( IsDigit(c) ) {
-    //             continue;
-    //         }
-    //         else if ( c >= 'A' && c <= 'Z' ) {
-    //             continue;
-    //         }
-    //         else if ( c >= 'a' && c <= 'z' ) {
-    //             continue;
-    //         }
-    //         else if ( c == '\r' || c == '\n' ) {
-    //             m_Input.SkipEndOfLine(c);
-    //             continue;
-    //         }
-    //         else if ( c == '+' || c == '/' || c == '=' ) {
-    //             // to allow base64 byte blocks
-    //             continue;
-    //         }
-    //         else if ( c == '<' ) {
-    //             m_Input.UngetChar(c);
-    //             break;
-    //         }
-    //         else {
-    //             m_Input.UngetChar(c);
-    //             ThrowError(fFormatError, "invalid char in octet string");
-    //         }
-    //     }
-    // }
-    // ```
     fn octets(&mut self, _ty: u16, skip: bool, _cx: &mut Cx<'_>) -> R<Option<Vec<u8>>> {
         self.x.begin_data()?;
         if skip {
@@ -1483,17 +828,6 @@ impl<S: AsnSource> Front for Xml<S> {
     /// `StartDelayBuffer`: `BeginData`, the buffer starts here (the source keeps the bytes from
     /// here, `held`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1492-1500
-    // ```c++
-    // void CObjectIStreamXml::StartDelayBuffer(void)
-    // {
-    //     BeginData();
-    //     CObjectIStream::StartDelayBuffer();
-    //     if (!m_RejectedTag.empty()) {
-    //         m_Input.GetSubSourceCollector()->AddChunk("<", 1);
-    //         m_Input.GetSubSourceCollector()->AddChunk(m_RejectedTag.c_str(), m_RejectedTag.size());
-    //     }
-    // }
-    // ```
     // (A member's own tag is read before its value: the rejected tag is the first of a member
     // read by its inner class's name, which no delayed member of the table is.)
     fn delay_start(&mut self, _cx: &mut Cx<'_>) -> R<usize> {
@@ -1512,20 +846,6 @@ impl<S: AsnSource> Front for Xml<S> {
     /// of its class and of the member, as `read_delayed_in` does): LOSAT's value of a delayed
     /// member is its parsed value, as the binary stream's.
     // NCBI reference (598d8ae6): c++/src/serial/member.cpp:490-501
-    // ```c++
-    // void CMemberInfo::UpdateDelayedBuffer(CObjectIStream& in,
-    //                                       TObjectPtr classPtr) const
-    // {
-    //     _ASSERT(CanBeDelayed());
-    //     _ASSERT(GetDelayBuffer(classPtr).GetIndex() == GetIndex());
-    //
-    //     BEGIN_OBJECT_FRAME_OF2(in, eFrameClass, GetClassType());
-    //     BEGIN_OBJECT_FRAME_OF2(in, eFrameClassMember, GetId());
-    //     GetTypeInfo()->ReadData(in, GetItemPtr(classPtr));
-    //     END_OBJECT_FRAME_OF(in);
-    //     END_OBJECT_FRAME_OF(in);
-    // }
-    // ```
     fn delay_end(&mut self, start: usize, ty: u16, cx: &mut Cx<'_>) -> R<Value> {
         self.x.held = None;
         let bytes = self.x.src.bytes(start..self.x.pos).to_vec();

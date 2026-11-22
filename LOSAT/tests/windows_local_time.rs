@@ -1,7 +1,6 @@
 //! makeblastdb's local time on Windows against Microsoft's C runtime (UCRT), which NCBI BLAST+'s
 //! Windows build reads it from: `CTime(CTime::eCurrent)` calls `localtime`, which takes the zone
-//! from `TZ` in UCRT's form or from the system (`LOSAT/src/writedb/local_offset.rs`, section
-//! "Windows").
+//! from `TZ` in UCRT's form or from the system (`LOSAT/src/writedb/windows_zone.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1722-1734 (`x_SetTime`: `localtime`),
 //! c++/src/objtools/blast/seqdb_writer/build_db.cpp:1104-1105 (the log's current time),
@@ -15,7 +14,7 @@
 //! 1970-01-01 00:00:00 and more than three days before its last second, 3001-01-19 07:59:59 UTC
 //! (ucrt/time/localtime.cpp:58; corecrt_internal_time.h:98). That is where LOSAT's port is
 //! defined. The branch for the three days at either end is not ported: the current time is
-//! never there, and `local_offset.rs` gives UTC instead of one UCRT version's edge behaviour.
+//! never there, and `windows_zone.rs` gives UTC instead of one UCRT version's edge behaviour.
 //! The `ucrt/time` sources of the Windows SDKs 10.0.22621.0 and 10.0.26100.0 are identical.
 
 #![cfg(windows)]
@@ -27,7 +26,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// UCRT's zones and local times with `TZ` set, from `ucrtbase.dll` (scripts/ucrt_tz_vectors.py);
-/// the unit tests of `local_offset.rs` compare LOSAT's port with the same file.
+/// the unit tests of `windows_zone.rs` compare LOSAT's port with the same file.
 const VECTORS: &str = include_str!("unit/ucrt_local_time_vectors.tsv");
 
 /// The variable that makes `ucrt_child` print (the instants, separated by spaces).
@@ -195,7 +194,7 @@ fn vector_tz(text: &str) -> Vec<u16> {
 }
 
 // The UCRT of this machine gives the zones and times of the vectors, which LOSAT's port gives
-// (`local_offset.rs`, `ucrt_tz_values_match_the_c_runtime`).
+// (`windows_zone.rs`, `ucrt_tz_values_match_the_c_runtime`).
 #[test]
 fn ucrt_of_this_machine_gives_the_vectors() {
     let mut zones: Vec<(String, String, Vec<(i64, String)>)> = Vec::new();
@@ -265,6 +264,7 @@ fn now() -> i64 {
 /// Runs makeblastdb and blastdbcmd -info in `dir` with `TZ`; returns the log's current time,
 /// the database's date and the seconds the run took place in.
 fn build(dir: &Path, tz: Option<&[u16]>) -> (String, String, Vec<i64>) {
+    // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
     std::fs::write(dir.join("in.fa"), ">p1\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     let losat = env!("CARGO_BIN_EXE_losat");
     let mut command = Command::new(losat);

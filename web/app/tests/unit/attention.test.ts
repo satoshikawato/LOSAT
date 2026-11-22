@@ -61,6 +61,9 @@ class FakePage implements PagePort {
 const run = (runId: string, number: number, status: RunStatus): RunView =>
   ({ snapshot: { runId, number }, status, record: {} }) as unknown as RunView;
 
+/** A failed run that kept the outputs it wrote before its error (D15): it holds results, as a completed run does. */
+const keptRun = (runId: string, number: number): RunView => ({ ...run(runId, number, 'failed'), result: { runId } }) as unknown as RunView;
+
 /** The Data worker's answer when every stored result is still there. */
 const KEPT: StoredResultsCheck = { removed: [], unreadable: [] };
 
@@ -137,6 +140,14 @@ describe('leave guard', () => {
     setRuns([run('a', 1, 'completed')]);
     expect(page.guard).toBe(true);
     expect(state()).toMatchObject({ active: false, busy: false });
+  });
+
+  it('stays on while a failed run holds the outputs it kept, and not for one that kept none', () => {
+    const { page, setRuns } = setup({ runs: [run('a', 1, 'running')] });
+    setRuns([run('a', 1, 'failed')]);
+    expect(page.guard).toBe(false);
+    setRuns([keptRun('a', 1)]);
+    expect(page.guard).toBe(true);
   });
 
   it('is on while the search form holds a pasted text or a source of either role', () => {
@@ -564,6 +575,16 @@ describe('resume report', () => {
       await flush();
       // A run that is no longer in the list ('gone') or not completed ('e') is left out.
       expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1, 3], unreadable: [4] });
+    });
+
+    it('names a failed run that kept its outputs among the runs whose stored results the browser removed', async () => {
+      const checkStored = vi.fn(() => Promise.resolve<StoredResultsCheck>({ removed: ['a', 'b'], unreadable: [] }));
+      const { page, setRuns, state } = setup({ runs: [keptRun('a', 1), run('b', 2, 'failed'), run('c', 3, 'running')], checkStored });
+      page.setVisible(false);
+      setRuns([keptRun('a', 1), run('b', 2, 'failed'), run('c', 3, 'cancelled')]);
+      page.setVisible(true);
+      await flush();
+      expect(state().resume).toMatchObject({ stored: 'checked', removed: [1] });
     });
 
     it('has no time limit: a slow check leaves the report checking, never "not-responding"', async () => {

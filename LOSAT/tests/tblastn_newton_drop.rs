@@ -4,9 +4,6 @@
 //! (`LOSAT_X_NEWTONBATCH`, in the strict set), on whole TBLASTN searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1143-1143
-//! ```c
-//!     for (window_index = 0;  window_index < nWindows;  window_index++) {
-//! ```
 //! TBLASTN's redo walks a match's windows once, in order, and solves the Newton problems of the
 //! coming windows ahead (Newton lanes); a result is taken only by the call with the same input
 //! bits, and a call whose result is missing solves its problem itself with the same bits. The

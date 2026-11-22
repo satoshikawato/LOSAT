@@ -1,0 +1,172 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_tbx_s.fna).
+           3 sequences; 576 total letters
+
+
+
+Query= qx1 plus strand gene
+
+Length=129
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx1 plus strand gene                                                  95.9    1e-25  1
+sx2 minus strand gene                                                 60.2    7e-15  1
+
+
+> sx1 plus strand gene
+Length=218
+
+ Score = 95.9 bits (203),  Expect = 1e-25
+ Identities = 35/39 (90%), Positives = 35/39 (90%), Gaps = 0/39 (0%)
+ Frame = +1/+1
+
+Query  4    LMGVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPTNMCW  120
+            L  VFAVRRKVMDDPKIRDGPMAVMKGWENYCWP NM W
+Sbjct  40   LKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSW  156
+
+
+ Score = 51.9 bits (107),  Expect = 2e-12
+ Identities = 23/37 (62%), Positives = 28/37 (76%), Gaps = 0/37 (0%)
+ Frame = +3/+3
+
+Query  9    GRIRSQTEGNGRPKDP*WPHGCYERLGKLLLANKHVL  119
+            GR+R Q  G+G PK+    HG YERLGKLLLA+K+VL
+Sbjct  45   GRVRRQA*GHG*PKNQRRAHGGYERLGKLLLASKYVL  155
+
+
+ Score = 49.6 bits (102),  Expect = 1e-11
+ Identities = 21/35 (60%), Positives = 23/35 (66%), Gaps = 0/35 (0%)
+ Frame = +2/+2
+
+Query  17   SQSDGR*WTTQRSVMAPWLL*KVGKITAGQQTCVG  121
+            S S  R W TQ+S   PW L*K GKI AGQQ C+G
+Sbjct  53   SPSGVRSWMTQKSETGPWRL*KAGKIIAGQQICLG  157
+
+
+ Score = 11.1 bits (18),  Expect = 4.1
+ Identities = 4/16 (25%), Positives = 7/16 (44%), Gaps = 0/16 (0%)
+ Frame = +3/-3
+
+Query  66   HGCYERLGKLLLANKH  113
+            H C+  +      N+H
+Sbjct  150  HICWPAIIFPAFHNRH  103
+
+
+> sx2 minus strand gene
+Length=208
+
+ Score = 60.2 bits (125),  Expect = 7e-15
+ Identities = 22/25 (88%), Positives = 24/25 (96%), Gaps = 0/25 (0%)
+ Frame = +1/-1
+
+Query  28   RKVMDDPKIRDGPMAVMKGWENYCW  102
+            RKVMDDPKIRDGPMAVMK WE+YC+
+Sbjct  190  RKVMDDPKIRDGPMAVMKVWESYCF  116
+
+
+ Score = 30.9 bits (61),  Expect = 5e-06
+ Identities = 13/27 (48%), Positives = 15/27 (56%), Gaps = 0/27 (0%)
+ Frame = +2/-2
+
+Query  32   R*WTTQRSVMAPWLL*KVGKITAGQQT  112
+            R WTT R     WLL*K G++T    T
+Sbjct  186  RLWTTLR*ETVQWLL*KCGRVTVSYST  106
+
+
+ Score = 29.9 bits (59),  Expect = 9e-06
+ Identities = 12/23 (52%), Positives = 16/23 (70%), Gaps = 0/23 (0%)
+ Frame = +3/-3
+
+Query  30   EGNGRPKDP*WPHGCYERLGKLL  98
+            +G GRP D    +GCYE +G+LL
+Sbjct  188  KGYGRP*DKRRSNGCYESVGELL  120
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 4836
+
+
+Query= qx2 minus strand gene
+
+Length=129
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx2 minus strand gene                                                 49.2    1e-11  1
+sx1 plus strand gene                                                  29.9    9e-06  1
+
+
+> sx2 minus strand gene
+Length=208
+
+ Score = 49.2 bits (101),  Expect = 1e-11
+ Identities = 24/37 (65%), Positives = 27/37 (73%), Gaps = 0/37 (0%)
+ Frame = +2/+3
+
+Query  14   YFIRTCALMLAMLCRMKQYDSHTFITAIGPSRIFGST  124
+            YFI+T A M A+   MKQ  SHTFITAIGPS I GS+
+Sbjct  69   YFIKT*ADMFAIEWSMKQ*LSHTFITAIGPSLILGSS  179
+
+
+> sx1 plus strand gene
+Length=218
+
+ Score = 29.9 bits (59),  Expect = 9e-06
+ Identities = 12/17 (71%), Positives = 14/17 (82%), Gaps = 0/17 (0%)
+ Frame = +2/-1
+
+Query  74   SHTFITAIGPSRIFGST  124
+            S  FITA+GPS IFGS+
+Sbjct  125  SQPFITAMGPSLIFGSS  75
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 4836
+
+
+Query= qx3 no hits
+
+Length=90
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 3021
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_tbx_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 576
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

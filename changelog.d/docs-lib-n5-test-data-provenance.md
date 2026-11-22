@@ -1,0 +1,1 @@
+- Tests: every test input says where it comes from; the pylosat sdist no longer ships notes for coding agents (`python/AGENTS.md`).

@@ -126,8 +126,7 @@ export function reactorControl(reactor: () => Promise<ReactorAbi>, instantiate: 
         }
         await loadFile(abi, FILE_REGISTRY, registry.name, registry.file);
       }
-      const message = abi.validate(argv);
-      return message === undefined ? { ok: true } : { ok: false, message };
+      return abi.validate(argv);
     },
   };
 }

@@ -5,49 +5,9 @@
 //! its annotations are indexed (phase I: a Bioseq-set's own annotations, then its members').
 //!
 //! NCBI reference (598d8ae6): c++/src/objmgr/bioseq_set_info.cpp:246-264 (phase C of a set)
-//! ```c++
-//!     if ( obj.IsSetSeq_set() ) {
-//!         NON_CONST_ITERATE ( TObject::TSeq_set, it, obj.SetSeq_set() ) {
-//!             CRef<CSeq_entry_Info> info(new CSeq_entry_Info(**it));
-//!             m_Seq_set.push_back(info);
-//!             x_AttachEntry(info);
-//!         }
-//!     }
-//!     if ( obj.IsSetAnnot() ) {
-//!         x_SetAnnot();
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:150-167 (the TSE is made, then attached)
-//! ```c++
-//!     SetSeq_entry(entry);
-//!     m_LoadState = eLoaded;
-//!
-//!     x_TSEAttach(*this);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objmgr/bioseq_set_info.cpp:139-154 (attach of a set)
-//! ```c++
-//!     if ( IsSetId() ) {
-//!         m_Bioseq_set_Id = x_GetBioseq_set_Id(GetId());
-//!         if ( m_Bioseq_set_Id >= 0 ) {
-//!             tse.x_SetBioseq_setId(m_Bioseq_set_Id, this);
-//!         }
-//!     }
-//!     SetBioObjectId(tse.x_IndexBioseq_set(this));
-//!     // members
-//!     NON_CONST_ITERATE ( TSeq_set, it, m_Seq_set ) {
-//!         (*it)->x_TSEAttach(tse);
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objmgr/bioseq_set_info.cpp:564-570 (phase I of a set)
-//! ```c++
-//! void CBioseq_set_Info::x_UpdateAnnotIndexContents(CTSE_Info& tse)
-//! {
-//!     TParent::x_UpdateAnnotIndexContents(tse);
-//!     for ( size_t i = 0; i < m_Seq_set.size(); ++i ) {
-//!         m_Seq_set[i]->x_UpdateAnnotIndex(tse);
-//!     }
-//! }
-//! ```
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -249,16 +209,6 @@ impl<'a> Tse<'a> {
 
     /// `CBioseq_Info::IdString()` of the Bioseq attached at `index`: its handles' `AsString()`.
     // NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:1221-1230
-    // ```c++
-    // string CBioseq_Info::IdString(void) const
-    // {
-    //     CNcbiOstrstream os;
-    //     ITERATE ( TId, it, m_Id ) {
-    //         if ( it != m_Id.begin() )
-    //             os << " | ";
-    //         os << it->AsString();
-    //     }
-    // ```
     fn id_string(&self, ids: &[Vec<Handle>], handles: &LiveHandles, index: usize) -> String {
         self.bioseq_ids(index)
             .iter()
@@ -270,17 +220,6 @@ impl<'a> Tse<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:891-905
-// ```c++
-//         ITERATE ( CBioseq_Info::TId, it, info->GetId() ) {
-//             pair<TBioseqs::iterator, bool> ins =
-//                 m_Bioseqs.insert(TBioseqs::value_type(*it, info));
-//             if ( !ins.second ) {
-//                 // No duplicate bioseqs in the same TSE
-//                 NCBI_THROW(CObjMgrException, eAddDataError,
-//                            "duplicate Bioseq id "+it->AsString()+" present in"+
-//                            "\n  seq1: " + ins.first->second->IdString()+
-//                            "\n  seq2: " + info->IdString());
-// ```
 const BIOSEQ_ID_DUPLICATE: ThrowSite = ThrowSite {
     file: "src/objmgr/tse_info.cpp",
     line: 901,
@@ -289,13 +228,6 @@ const BIOSEQ_ID_DUPLICATE: ThrowSite = ThrowSite {
 };
 
 // NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:941-953
-// ```c++
-//     pair<TBioseq_sets::iterator, bool> ins =
-//         m_Bioseq_sets.insert(TBioseq_sets::value_type(key, info));
-//     ...
-//         NCBI_THROW(CObjMgrException, eAddDataError,
-//                    " duplicate Bioseq_set id '"+NStr::IntToString(key));
-// ```
 const SET_ID_DUPLICATE: ThrowSite = ThrowSite {
     file: "src/objmgr/tse_info.cpp",
     line: 951,

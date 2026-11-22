@@ -68,7 +68,7 @@ fn test_build_ncbi_lookup_longest_chain_tracks_max_cell() {
 #[test]
 fn test_get_context_idx_matches_ncbi() {
     // Test get_context_idx against NCBI BSearchContextInfo behavior
-    // Reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/queryinfo_unit_test.cpp:174-180
+    // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/queryinfo_unit_test.cpp:174-180
     //
     // NCBI test cases:
     // - BSearchContextInfo(0, query_info) → 0 (first context)

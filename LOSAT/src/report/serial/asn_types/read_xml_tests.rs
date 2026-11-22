@@ -227,7 +227,7 @@ fn enumerated_values_and_numbers() {
     {
         // The exception as thrown (the oldest of its chain: each frame left rethrows it).
         Err(ReadError::Exception(e)) => {
-            let report = e.what();
+            let report = String::from_utf8_lossy(&e.what()).into_owned();
             let first = report.lines().nth(1).expect("the throw").to_string();
             let line = first
                 .split(", line ")

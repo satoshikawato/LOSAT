@@ -78,28 +78,7 @@ pub fn print_summary() {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
-// ```c
-// index = ComputeTableIndex(word_length - 1, lookup->charsize, s_first);
-// for (s = s_first; s <= s_last; s++) {
-//     index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
-//     if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
-//         numhits = bbc[index].num_used;
-//         if (numhits <= (array_size - totalhits)) {
-//             ...
-//             for (i = 0; i < numhits; i++) {
-//                 offset_pairs[i + totalhits].qs_offsets.q_off = src[i];
-//                 offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
-//             }
-//             totalhits += numhits;
-//         } else {
-//             s_range[1] = (Int4)(s - subject->sequence);
-//             return totalhits;
-//         }
-//     }
-// }
-// s_range[1] = (Int4)(s - subject->sequence);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127
 /// `s_blast_aa_scan_subject_one_range` with the presence test
 /// made branch-free (see the module text). Same arguments, same result, same `s_range`;
 /// `offset_pairs` must hold `array_size + X_SCAN_BF_SLACK` entries.
@@ -130,7 +109,7 @@ pub(crate) fn x_scan_one_range_bf(
     let s_first = s_range[1] as usize;
     let s_last = s_range[2] as usize;
 
-    // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:96-107 (ComputeTableIndex)
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:96-107 (ComputeTableIndex)
     let mut index: usize = 0;
     for i in 0..(word_length - 1) {
         // SAFETY: as in `s_blast_aa_scan_subject_one_range`: the scan range follows NCBI's
@@ -161,7 +140,7 @@ pub(crate) fn x_scan_one_range_bf(
             let cell = unsafe { &*backbone.add((c & 0xffff_ffff) as usize) };
             let numhits = cell.num_used;
             if numhits > array_size - totalhits {
-                // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:118-123
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:118-123
                 s_range[1] = s_off as i32;
                 return totalhits;
             }
@@ -191,7 +170,7 @@ pub(crate) fn x_scan_one_range_bf(
         block_first = block_last + 1;
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:125-127
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:125-127
     s_range[1] = (s_last + 1) as i32;
     totalhits
 }
@@ -220,14 +199,11 @@ fn x_candidates_w3c5(
     let mut n = 0usize;
     let mut position = (block.0 as u64) << 32;
     for k in 0..words {
-        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:121-127
-        // ```c
-        // return ((index << charsize) | word[wordsize - 1]) & mask;
-        // ```
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:121-127
         // SAFETY: as above.
         let new_char = unsafe { *letters.add(k) } as usize;
         ix = ((ix << 5) | new_char) & X_MASK_W3C5;
-        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
         // SAFETY: `ix` is masked to the backbone space the presence vector covers.
         let bit = (unsafe { *pv.add(ix >> PV_ARRAY_BTS) } >> (ix & PV_ARRAY_MASK)) & 1;
         // SAFETY: `n <= k < X_BLOCK`.
@@ -283,14 +259,11 @@ fn x_candidates<const WORD: usize, const CHARSIZE: usize>(
     let mut ix = *index;
     let mut n = 0usize;
     for s in block.0..=block.1 {
-        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:121-127
-        // ```c
-        // return ((index << charsize) | word[wordsize - 1]) & mask;
-        // ```
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:121-127
         // SAFETY: `s <= s_last`, the positions NCBI's loop reads.
         let new_char = unsafe { *subject.get_unchecked(s + word_length - 1) } as usize;
         ix = ((ix << charsize) | new_char) & mask;
-        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
         // SAFETY: `ix` is masked to the backbone space the presence vector covers.
         let bit = (unsafe { *pv.add(ix >> PV_ARRAY_BTS) } >> (ix & PV_ARRAY_MASK)) & 1;
         // SAFETY: `n <= s - block.0 < X_BLOCK`.

@@ -1,9 +1,10 @@
 //! The generic reader of the type table: NCBI's `CObjectIStream` with its object stack, for any
-//! type of `table` (`read_object`, `read_document`), over the steps of one encoding (`Front`): ASN.1
-//! text (`read_text`, `CObjectIStreamAsn`), binary ASN.1 (`read_ber`, `CObjectIStreamAsnBinary`)
-//! and XML (`CObjectIStreamXml`). The walk of a value (the frames of NCBI's stack, the members in
-//! module order, the mandatory members, the lists, the hooks of NCBI's classes) is this module's;
-//! how each step reads its bytes is the front end's.
+//! type of `table` (`read_object`, `read_document`), over the steps of one encoding (`Front`):
+//! ASN.1 text (`read_text`, `CObjectIStreamAsn`), binary ASN.1 (`read_ber`,
+//! `CObjectIStreamAsnBinary`) and XML (`read_xml`, `CObjectIStreamXml`). The walk of a value
+//! (the frames of NCBI's stack, the members in module order, the mandatory members, the lists,
+//! the hooks of NCBI's classes) is this module's; how each step reads its bytes is the front
+//! end's.
 //!
 //! It reads as NCBI's readers read:
 //! - the members of a SEQUENCE in module order (by name, by tag in brackets or by context tag);
@@ -13,7 +14,7 @@
 //!   ENUMERATED by a name or a number that has a name, INTEGER with named values by name or any
 //!   number;
 //! - a VisibleString (and, in text, StringStore) byte outside 0x20..0x7E as `#`, with NCBI's
-//!   `ERR_POST_X(7)` (`Post::BadChar`), a UTF8String as it is;
+//!   `ERR_POST_X` with subcode 7 (`Post::BadChar`), a UTF8String as it is;
 //! - the delayed member (`Auth-list.names`) with the skip functions;
 //! - the hooks of NCBI's hand-written classes that change what is read (`super::hooks` of this
 //!   file: `CSeq_descr::PostRead`, `CVariation_ref::PostRead`, the reserve hooks), and the Seq-id
@@ -30,18 +31,20 @@ use super::{resolved, EnumValue, Kind, Member, Storage, StringKind, Value};
 use crate::ncbi_exception::NcbiException;
 use crate::report::serial::asn_text_reader::{AsnTextError, AsnTextErrorKind, Reader, SliceSource};
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
+use crate::report::serial::object_frame::{frame_info, FrameKind};
 
 use super::read_text::Text;
 
 /// A message that NCBI's reader posts while it reads, in the order posted.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Post {
-    /// `ReplaceVisibleChar`'s `ERR_POST_X(7, message)` of a byte read as `#`.
+    /// `ReplaceVisibleChar`'s `ERR_POST_X` of subcode 7 with a message, for a byte read as `#`.
     BadChar(ReplacedChar),
-    /// `ERR_POST(Error << text)` of a class's `PostRead` (`CVariation_ref::PostRead`).
+    /// `ERR_POST` of an `Error` with a text, from a class's `PostRead`
+    /// (`CVariation_ref::PostRead`).
     Error(&'static str),
-    /// The binary reader's `ERR_POST_X_ONCE(10, Warning << ...)` of a UTF8String read for a
-    /// VisibleString, with the path of the member (`GetStackTraceASN`).
+    /// The binary reader's warning of subcode 10 (`ERR_POST_X_ONCE`: once in the process) of a
+    /// UTF8String read for a VisibleString, with the path of the member (`GetStackTraceASN`).
     Utf8ForVisible(String),
 }
 
@@ -104,21 +107,6 @@ impl From<AsnTextError> for ReadError {
     }
 }
 
-/// A frame of NCBI's object stack (`CObjectStackFrame::EFrameType`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum FrameKind {
-    Named,
-    /// An `eFrameNamed` frame of `ReadNamedType` (a named type that is neither a SEQUENCE nor a
-    /// CHOICE), which only a stream that opens a tag for it (`Front::NAMED_TYPES`) has.
-    NamedType,
-    Class,
-    ClassMember,
-    Choice,
-    ChoiceVariant,
-    Array,
-    ArrayElement,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Frame {
     kind: FrameKind,
@@ -167,62 +155,10 @@ impl Frame {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:366-382
-// ```c++
-// const char* CObjectStackFrame::GetFrameTypeName(void) const
-// {
-//     const char* s;
-//     switch (GetFrameType())
-//     {
-//     default:                  s = "UNKNOWN";             break;
-//     case eFrameOther:         s = "eFrameOther";         break;
-//     case eFrameNamed:         s = "eFrameNamed";         break;
-//     case eFrameArray:         s = "eFrameArray";         break;
-//     case eFrameArrayElement:  s = "eFrameArrayElement";  break;
-//     case eFrameClass:         s = "eFrameClass";         break;
-//     case eFrameClassMember:   s = "eFrameClassMember";   break;
-//     case eFrameChoice:        s = "eFrameChoice";        break;
-//     case eFrameChoiceVariant: s = "eFrameChoiceVariant"; break;
-//     }
-//     return s;
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:399-410
-// ```c++
-// string CObjectStackFrame::GetFrameInfo(void) const
-// {
-//     string info(" Frame type= ");
-//     info += GetFrameTypeName();
-//     if (m_TypeInfo) {
-//         info += ", Object type= " + m_TypeInfo->GetName();
-//     }
-//     if (m_MemberId) {
-//         info += ", Member name= " + m_MemberId->GetName();
-//     }
-//     return info;
-// }
-// ```
 impl Frame {
+    /// `GetFrameInfo()` of the frame (`object_frame::frame_info`).
     fn info(&self) -> String {
-        let kind = match self.kind {
-            FrameKind::Named | FrameKind::NamedType => "eFrameNamed",
-            FrameKind::Class => "eFrameClass",
-            FrameKind::ClassMember => "eFrameClassMember",
-            FrameKind::Choice => "eFrameChoice",
-            FrameKind::ChoiceVariant => "eFrameChoiceVariant",
-            FrameKind::Array => "eFrameArray",
-            FrameKind::ArrayElement => "eFrameArrayElement",
-        };
-        let mut info = format!(" Frame type= {kind}");
-        if let Some(name) = self.type_name {
-            info.push_str(", Object type= ");
-            info.push_str(name);
-        }
-        if let Some(member) = self.member {
-            info.push_str(", Member name= ");
-            info.push_str(member);
-        }
-        info
+        frame_info(self.kind, self.type_name, self.member)
     }
 }
 
@@ -319,9 +255,9 @@ pub(super) trait Front {
     fn file_header(&mut self, cx: &mut Cx<'_>) -> R<Vec<u8>>;
     /// `BeginClass` of the SEQUENCE `ty`.
     fn begin_class(&mut self, ty: u16, cx: &mut Cx<'_>) -> R<()>;
-    /// `BeginClassMember(classType, pos)`: the position of the next member (one of `members`
-    /// from `pos`), or `None` at the end of the class. `block` is the class's state (`true`
-    /// before its first member).
+    /// `BeginClassMember`: the position of the next member (one of `members` from `pos`), or
+    /// `None` at the end of the class. `block` is the class's state (`true` before its first
+    /// member).
     fn next_member(
         &mut self,
         members: &'static [Member],
@@ -521,35 +457,7 @@ impl<F: Front> TypedReader<'_, F> {
     /// line; an end of the data (`CEofException`, `HandleEOF`, objistr.cpp:599-608) becomes a
     /// `CSerialException` unless fewer than 2 frames stay.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:201-214
-    // ```c++
-    // #define END_OBJECT_FRAME_OF(Stream) \
-    //     } catch (CSerialException& s_expt) { \
-    //         std::string msg((Stream).TopFrame().GetFrameName()); \
-    //         (Stream).PopFrame(); \
-    //         s_expt.AddFrameInfo(msg); \
-    //         throw; \
-    //     } catch ( CEofException& e_expt ) { \
-    //         (Stream).HandleEOF(e_expt); \
-    //     } catch (CException& expt) { \
-    //         std::string msg((Stream).TopFrame().GetFrameInfo()); \
-    //         (Stream).PopFrame(); \
-    //         NCBI_RETHROW_SAME(expt,msg); \
-    //     } \
-    //     (Stream).PopFrame()
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
-    // ```c++
-    // void CObjectIStream::HandleEOF(CEofException& expt)
-    // {
-    //     string msg(TopFrame().GetFrameInfo());
-    //     PopFrame();
-    //     if (GetStackDepth() < 2) {
-    //         NCBI_RETHROW_SAME(expt,msg);
-    //     } else {
-    //         ThrowError(fEOF, msg);
-    //     }
-    // }
-    // ```
     fn pop<T>(&mut self, result: R<T>) -> R<T> {
         let frame = self.frames.pop().expect("a frame to leave");
         result.map_err(|error| match error {
@@ -571,34 +479,6 @@ impl<F: Front> TypedReader<'_, F> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:883-900 and 959-969
-    // ```c++
-    // void CObjectIStream::SkipFileHeader(TTypeInfo typeInfo)
-    // {
-    //     ...
-    //     BEGIN_OBJECT_FRAME2(eFrameNamed, typeInfo);
-    //
-    //     string name = ReadFileHeader();
-    //     const string& tname = typeInfo->GetName();
-    //     if ( !name.empty() && !tname.empty() && name != tname ) {
-    //         ThrowError(fFormatError,
-    //                    "incompatible type "+name+"<>"+typeInfo->GetName());
-    //     }
-    //
-    //     END_OBJECT_FRAME();
-    // }
-    // ...
-    // void CObjectIStream::Read(TObjectPtr object, TTypeInfo typeInfo, ENoFileHeader)
-    // {
-    //     // root object
-    //     BEGIN_OBJECT_FRAME2(eFrameNamed, typeInfo);
-    //
-    //     ReadObject(object, typeInfo);
-    //
-    //     EndOfRead();
-    //
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
     fn document(&mut self, root: u16) -> R<Value> {
         let name = super::type_info(root).name();
         self.push(FrameKind::Named, Some(name), false);
@@ -617,10 +497,10 @@ impl<F: Front> TypedReader<'_, F> {
         self.pop(value)
     }
 
-    /// One value of the type `ty` (`ReadObject`), or its skip (`SkipObject`, `skip`), with the hooks
-    /// of NCBI's classes that a read runs. The values inside it are read in turn from the list of
-    /// the values being read (`open`), as NCBI's functions recurse; an error leaves NCBI's frames
-    /// from the innermost out (`pop`), as it passes `END_OBJECT_FRAME` of each.
+    /// One value of the type `ty` (`ReadObject`), or its skip (`SkipObject`, `skip`), with the
+    /// hooks of NCBI's classes that a read runs. The values inside it are read in turn from the
+    /// list of the values being read (`open`), as NCBI's functions recurse; an error leaves
+    /// NCBI's frames from the innermost out (`pop`), as it passes `END_OBJECT_FRAME` of each.
     fn value(&mut self, ty: u16, skip: bool) -> R<Value> {
         let (open, frames) = (self.open.len(), self.frames.len());
         let mut step = self.start(ty, skip);
@@ -757,32 +637,6 @@ impl<F: Front> TypedReader<'_, F> {
     /// `BeginNamedType`. The number of them. A named SEQUENCE or CHOICE has its own tag (its
     /// class or choice calls) and so has a named ENUMERATED (`ReadEnum` of a type with a name).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2039-2052 and objistr.cpp:1302-1313
-    // ```c++
-    // void CObjectIStreamXml::ReadNamedType(TTypeInfo namedTypeInfo,
-    //                                       TTypeInfo typeInfo,
-    //                                       TObjectPtr object)
-    // {
-    //     BEGIN_OBJECT_FRAME2(eFrameNamed, namedTypeInfo);
-    //
-    //     BeginNamedType(namedTypeInfo);
-    //     ReadObject(object, typeInfo);
-    //     EndNamedType();
-    //
-    //     END_OBJECT_FRAME();
-    // }
-    // ...
-    // void CObjectIStream::SkipNamedType(TTypeInfo namedTypeInfo,
-    //                                    TTypeInfo typeInfo)
-    // {
-    //     BEGIN_OBJECT_FRAME2(eFrameNamed, namedTypeInfo);
-    //     BeginNamedType(namedTypeInfo);
-    //
-    //     SkipObject(typeInfo);
-    //
-    //     EndNamedType();
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
     // (An alias (`CAliasTypeInfo`) reads through `ReadNamedType` of its aliased type, a named
     // implicit class (`Seq-descr`) through `ReadImplicitMember`, a named string, number or
     // OCTET STRING as an alias of the anonymous type: each is one such frame.)
@@ -820,39 +674,11 @@ impl<F: Front> TypedReader<'_, F> {
     }
 
     /// `ReadClassSequential` / `SkipClassSequential` (`start`: the class frame, `BeginClass`, the
-    /// member frame): the next member in module order (`BeginClassMember(classType, pos)`) with
-    /// the mandatory members before it checked, and a read's (not a skip's) member hooks before
+    /// member frame): the next member in module order (`BeginClassMember` from `pos`) with the
+    /// mandatory members before it checked, and a read's (not a skip's) member hooks before
     /// its value (`hooks::pre_read_member`); after the last, the member frame left, the mandatory
     /// members after it checked, `EndClass`, the class frame left.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:86-111
-    // ```c++
-    // #define ClassSequentialContentsBegin(classType) \
-    // { \
-    //     CClassTypeInfo::CIterator pos(classType); \
-    //     BEGIN_OBJECT_FRAME(eFrameClassMember); \
-    //     {
-    //
-    // #define ClassSequentialContentsMember(Func, Args) \
-    //     { \
-    //         const CMemberInfo* memberInfo = classType->GetMemberInfo(index); \
-    //         SetTopMemberId(memberInfo->GetId()); \
-    //         for ( TMemberIndex i = *pos; i < index; ++i ) { \
-    //             classType->GetMemberInfo(i)->NCBI_NAME2(Func,MissingMember)Args; \
-    //         } \
-    //         { \
-    //             memberInfo->NCBI_NAME2(Func,Member)Args; \
-    //         } \
-    //         pos.SetIndex(index + 1); \
-    //     }
-    //
-    // #define ClassSequentialContentsEnd(Func, Args) \
-    //     } \
-    //     END_OBJECT_FRAME(); \
-    //     for ( ; pos.Valid(); ++pos ) { \
-    //         classType->GetMemberInfo(pos)->NCBI_NAME2(Func,MissingMember)Args; \
-    //     } \
-    // }
-    // ```
     fn next_member(
         &mut self,
         ty: u16,
@@ -909,28 +735,6 @@ impl<F: Front> TypedReader<'_, F> {
     /// `ReadChoiceSimple` / `SkipChoiceSimple`: the variant of the CHOICE `ty`; a read (not a skip)
     /// runs the class's variant hooks before its value (`hooks::pre_read_variant`).
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1501
-    // ```c++
-    // void CObjectIStream::ReadChoiceSimple(const CChoiceTypeInfo* choiceType,
-    //                                       TObjectPtr choicePtr)
-    // {
-    //     BEGIN_OBJECT_FRAME3(eFrameChoice, choiceType, choicePtr);
-    //     BeginChoice(choiceType);
-    //     BEGIN_OBJECT_FRAME(eFrameChoiceVariant);
-    //     TMemberIndex index = BeginChoiceVariant(choiceType);
-    //     if ( index == kInvalidMember ) {
-    //         ThrowError(fFormatError,"choice variant id expected");
-    //     }
-    //     const CVariantInfo* variantInfo = choiceType->GetVariantInfo(index);
-    //     SetTopMemberId(variantInfo->GetId());
-    //
-    //     variantInfo->ReadVariant(*this, choicePtr);
-    //
-    //     EndChoiceVariant();
-    //     END_OBJECT_FRAME();
-    //     EndChoice();
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
     fn start_choice(
         &mut self,
         ty: u16,
@@ -955,26 +759,6 @@ impl<F: Front> TypedReader<'_, F> {
 
     /// `ReadContainer` / `SkipContainer`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1245-1274
-    // ```c++
-    // void CObjectIStreamAsn::ReadContainer(const CContainerTypeInfo* contType,
-    //                                       TObjectPtr contPtr)
-    // {
-    //     BEGIN_OBJECT_FRAME2(eFrameArray, contType);
-    //     StartBlock();
-    //
-    //     BEGIN_OBJECT_FRAME(eFrameArrayElement);
-    //     ...
-    //     while ( NextElement() ) {
-    //         ...
-    //             contType->AddElement(contPtr, *this);
-    //     }
-    //     ...
-    //     END_OBJECT_FRAME();
-    //
-    //     EndBlock();
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
     // The container's type information is anonymous (an implicit class such as `Seq-descr` has
     // no frame of its own, `ReadImplicitMember`, classinfo.cpp:289-306): `Object type= ` names
     // nothing (c07 of SURVEY_D3).
@@ -1078,21 +862,6 @@ impl<F: Front> TypedReader<'_, F> {
     /// `CEnumeratedTypeInfo::ReadEnum` / `SkipEnum` over `ReadEnum` of the stream; an exception
     /// that is not a `CSerialException` gets the line of the type's `NCBI_RETHROW_SAME`.
     // NCBI reference (598d8ae6): c++/src/serial/enumerated.cpp:416-432
-    // ```c++
-    // void CEnumeratedTypeInfo::ReadEnum(CObjectIStream& in,
-    //                                    TTypeInfo objectType,
-    //                                    TObjectPtr objectPtr)
-    // {
-    //     const CEnumeratedTypeInfo* enumType =
-    //         CTypeConverter<CEnumeratedTypeInfo>::SafeCast(objectType);
-    //     try {
-    //         enumType->m_ValueType->SetValueInt(objectPtr,
-    //                                            in.ReadEnum(enumType->Values()));
-    //     }
-    //     catch ( CException& e ) {
-    //         NCBI_RETHROW_SAME(e,"invalid enum value");
-    //     }
-    // ```
     // (`SkipEnum`, 468-484, reads the value the same way and rethrows at 478.)
     fn enumerated(
         &mut self,
@@ -1124,15 +893,6 @@ impl<F: Front> TypedReader<'_, F> {
 /// `ReadMissingSimpleMember` -> `ExpectedMember` of a mandatory member: "member X expected"
 /// (`CSerialException`, NCBI's default verification).
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
-// ```c++
-// bool CObjectIStream::ExpectedMember(const CMemberInfo* memberInfo)
-// {
-//     const CItemInfo* info = CItemsInfo::FindNextMandatory(memberInfo);
-//     if (info) {
-//         if (GetVerifyData() == eSerialVerifyData_Yes) {
-//             ThrowError(fFormatError,
-//                     "member "+info->GetId().ToString()+" expected");
-// ```
 fn expected_member(member: &Member) -> R<()> {
     if member.optional() {
         return Ok(());

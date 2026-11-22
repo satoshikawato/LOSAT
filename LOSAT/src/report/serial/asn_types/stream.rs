@@ -1,13 +1,15 @@
-//! The objects of a serial stream read one after another (`CObjectIStreamAsn` over an `istream`),
-//! and the choice of the stream's encoding that NCBI's readers of a stream make before they read
-//! (`CFormatGuess().Format(in)`): blast_formatter's `-archive` (Blast4-archive objects until the
+//! The objects of a serial stream read one after another (`CObjectIStreamAsn`,
+//! `CObjectIStreamAsnBinary` or `CObjectIStreamXml` over an `istream`), and the choice of the
+//! stream's encoding that NCBI's readers of a stream make before they read (`Format` of a
+//! `CFormatGuess` over the stream): blast_formatter's `-archive` (Blast4-archive objects until the
 //! end of the data, `CRemoteBlast::LoadFromArchive`) and the search strategy of
 //! `-import_search_strategy` (one Blast4-get-search-strategy-reply, or else one Blast4-request,
 //! `ExtractBlast4Request`).
 //!
 //! The guess is the one port of `CFormatGuess` (`utils::format_guess`); each encoding is read by
 //! the generic reader of the type table (`read`) over that encoding's front end (`read_text`,
-//! `read_ber`, `read_xml`) on a stream read in blocks (`StreamSource`), so one object at a time is in memory.
+//! `read_ber`, `read_xml`) on a stream read in blocks (`StreamSource`), so one object at a time
+//! is in memory.
 
 use std::io::{Read as IoRead, Seek, SeekFrom};
 
@@ -18,39 +20,20 @@ use super::read_xml::Xml;
 pub(crate) use super::read_xml::XmlStyle;
 use super::Value;
 use crate::ncbi_exception::NcbiException;
-use crate::report::serial::asn_text_reader::{AsnSource, Reader, StreamSource};
+use crate::report::serial::asn_text_reader::{Reader, StreamSource};
 use crate::utils::format_guess::{Format, FormatGuess, Stop};
 
 /// The encoding of a serial stream, as the readers of NCBI's archives and strategies take
 /// `CFormatGuess`'s answer.
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
-// ```c++
-//       CFormatGuess::EFormat fmt_type = ncbi::CFormatGuess().Format(f);
-//       switch (fmt_type) {
-//         case CFormatGuess::eBinaryASN:
-//             m_ObjectStream.reset(new CObjectIStreamAsnBinary(f));
-//             break;
-//
-//         case CFormatGuess::eTextASN:
-//             m_ObjectStream.reset(new CObjectIStreamAsn(f));
-//             break;
-//
-//         case CFormatGuess::eXml:
-//             m_ObjectStream.reset(CObjectIStream::Open(eSerial_Xml, f));
-//             break;
-//
-//          default:
-//             NCBI_THROW(CBlastException, eInvalidArgument,
-//                        "BLAST archive must be one of text ASN.1, binary ASN.1 or XML.");
-//       }
-// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Encoding {
     /// `eTextASN`: `CObjectIStreamAsn`.
     Text,
     /// `eBinaryASN`: `CObjectIStreamAsnBinary`.
     Binary,
-    /// `eXml`: `CObjectIStream::Open(eSerial_Xml, f)`, `CObjectIStreamXml`.
+    /// `eXml`: the stream `CObjectIStream::Open` makes for the format `eSerial_Xml`,
+    /// `CObjectIStreamXml`.
     Xml,
     /// Any other answer (`eUnknown`, `eJSON`, another format): the caller's invalid input.
     Other,
@@ -78,7 +61,7 @@ pub(crate) struct Guessed<R> {
     input: R,
 }
 
-/// `CFormatGuess().Format(input)` (the whole order of `sm_CheckOrder`, no hints), its answer
+/// `CFormatGuess`'s `Format` of `input` (the whole order of `sm_CheckOrder`, no hints), its answer
 /// taken as [`Encoding`]. `TestFormatFasta`, which comes before `eTextASN` and `eBinaryASN` in
 /// the order, may search past its buffer (`Guessed::fasta_undecided`): its answer would be
 /// `eFasta`, an invalid input, so a text or binary answer after it is not decided.
@@ -113,10 +96,17 @@ pub(crate) fn guess_encoding<R: IoRead>(input: R) -> Guessed<R> {
 }
 
 impl<R: IoRead> Guessed<R> {
-    /// The object stream of the encoding guessed (`new CObjectIStreamAsn(f)`,
-    /// `new CObjectIStreamAsnBinary(f)`, `CObjectIStream::Open(eSerial_Xml, f)`: the ASN.1-style
-    /// XML, no `SetEnforcedStdXml`), from where the guess left the input; `None` for an
-    /// encoding that is not one of them (the caller's invalid input).
+    /// The text reader of the stream (a new `CObjectIStreamAsn` over the input), from where the
+    /// guess left it.
+    pub(crate) fn into_text(self) -> ObjectStream<R> {
+        ObjectStream::new(self.input, &self.taken[self.start..])
+    }
+
+    /// The object stream of the encoding guessed (a new `CObjectIStreamAsn` or
+    /// `CObjectIStreamAsnBinary` over the input, or the stream `CObjectIStream::Open` makes for
+    /// `eSerial_Xml`: the ASN.1-style XML, `SetEnforcedStdXml` not called), from where the guess
+    /// left the input; `None` for an encoding that is not one of them (the caller's invalid
+    /// input).
     pub(crate) fn into_stream(self) -> Option<ObjectStream<R>> {
         let first = &self.taken[self.start..];
         match self.encoding {
@@ -125,6 +115,13 @@ impl<R: IoRead> Guessed<R> {
             Ok(Encoding::Xml) => Some(ObjectStream::xml(self.input, first, XmlStyle::Asn)),
             _ => None,
         }
+    }
+
+    /// The stream from where the guess left it: the bytes the guess took from there, and the
+    /// input after them.
+    pub(crate) fn into_parts(mut self) -> (Vec<u8>, R) {
+        self.taken.drain(..self.start);
+        (self.taken, self.input)
     }
 }
 
@@ -180,40 +177,16 @@ impl<R: IoRead> ObjectStream<R> {
     /// them (or an unclosed comment) is the end too. Anything else, garbage included, is the start
     /// of an object for the next read.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:98-109
-    // ```c++
-    // bool CObjectIStreamAsn::EndOfData(void)
-    // {
-    //     if (CObjectIStream::EndOfData()) {
-    //         return true;
-    //     }
-    //     try {
-    //         SkipWhiteSpace();
-    //     } catch (...) {
-    //         return true;
-    //     }
-    //     return false;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
-    // ```c++
-    // bool CObjectIStream::EndOfData(void)
-    // {
-    //     const TFailFlags failure =
-    //         fEOF | fReadError | fFormatError | fOverflow | fInvalidData |
-    //         fIllegalCall | fFail | fNotOpen | fNotImplemented;
-    //     if (GetFailFlags() & failure || m_Input.EndOfData()) {
-    //         return true;
-    //     }
-    //     return !m_Input.HasMore();
-    // }
-    // ```
     // (`m_Input.EndOfData()` and `HasMore()` of `CIStreamBuffer` ask whether a byte follows,
     // reading the stream for one: the end of the input here.)
     // The binary stream keeps `EndOfData` of its base: any byte after an object starts the next.
-    // The XML stream's (`CObjectIStreamXml::EndOfData`, quoted at `Xml::end_of_data`) skips white
+    // The XML stream's (`CObjectIStreamXml::EndOfData`, cited at `Xml::end_of_data`) skips white
     // space, comments and processing instructions as the text stream does, and anything that
     // fails there is the end too.
+    #[cfg(test)]
     pub(crate) fn end_of_data(&mut self) -> bool {
+        use crate::report::serial::asn_text_reader::AsnSource;
         if self.failed {
             return true;
         }
@@ -227,9 +200,9 @@ impl<R: IoRead> ObjectStream<R> {
         }
     }
 
-    /// `in >> object` of the root type `root`: one object, from its file header (`Read`), with
-    /// the messages posted. The stream stands after the object's last byte; a failed read leaves
-    /// it failed (`end_of_data`).
+    /// One object of the root type `root` extracted from the stream (`Read`: its file header,
+    /// then the value), with the messages posted. The stream stands after the object's last
+    /// byte; a failed read leaves it failed (`end_of_data`).
     pub(crate) fn read(&mut self, root: u16) -> Read<Value> {
         let read = match &mut self.front {
             Fronts::Text(text) => read_object(text, root),
@@ -267,9 +240,9 @@ impl<R: IoRead> ObjectStream<R> {
 }
 
 impl<R: IoRead + Seek> ObjectStream<R> {
-    /// `in.seekg(0)` (remote_blast.cpp:2302, after a failed read of a strategy reply): the input
-    /// from its start, for a new guess and read; the error of an input that cannot seek (a
-    /// pipe), whose stream NCBI's `seekg` leaves failed.
+    /// The stream's `seekg` to its start (remote_blast.cpp:2302, after a failed read of a
+    /// strategy reply): the input from its start, for a new guess and read; the error of an
+    /// input that cannot seek (a pipe), whose stream NCBI's `seekg` leaves failed.
     pub(crate) fn rewind(self) -> std::io::Result<R> {
         let (_, mut input) = self.into_rest();
         input.seek(SeekFrom::Start(0))?;

@@ -4,10 +4,10 @@
 //! which translates both query and subject sequences in all six reading frames
 //! and performs protein-protein alignment.
 
-// NCBI c++/src/app/blast/tblastx_app.cpp:198 (`WriteArchive`): TBLASTX's BLAST archive (outfmt 11),
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198 (`WriteArchive`): TBLASTX's BLAST archive (outfmt 11),
 // one Blast4-archive per query batch.
 mod anchored;
-mod archive;
+pub(crate) mod archive;
 pub mod args;
 pub mod blast_aascan;
 pub mod blast_engine;
@@ -26,7 +26,7 @@ pub mod lookup;
 pub mod ncbi_cutoffs;
 pub mod reevaluate;
 pub(crate) mod report;
-// NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod scan;
 pub(crate) mod seqalign;
@@ -35,7 +35,7 @@ pub(crate) mod scoring;
 pub mod stage_dump;
 pub(crate) mod subjects;
 pub mod sum_stats_linking;
-// NCBI c++/src/algo/blast/format/blast_format.cpp:770-834 (`CBlastTabularInfo`): the tabular
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-834 (`CBlastTabularInfo`): the tabular
 // reports with a field list or a delimiter and outfmt 10 and 20, once per run, from the final hit
 // list (`report::tabular`).
 mod tabular;

@@ -39,8 +39,14 @@ struct Run {
 }
 
 fn unescape(field: &str) -> String {
+    // The standard error of NCBI's programs is bytes; these tests only compare it with ASCII.
+    String::from_utf8_lossy(&unescape_bytes(field)).into_owned()
+}
+
+/// A field of `expected.tsv` as the bytes it stands for.
+fn unescape_bytes(field: &str) -> Vec<u8> {
     if field == "\\e" {
-        return String::new();
+        return Vec::new();
     }
     let bytes = field.as_bytes();
     let mut out = Vec::new();
@@ -66,8 +72,7 @@ fn unescape(field: &str) -> String {
         }
         i += 2;
     }
-    // The standard error of NCBI's programs is bytes; the tests only compare it with ASCII.
-    String::from_utf8_lossy(&out).into_owned()
+    out
 }
 
 fn read_expected() -> BTreeMap<String, Run> {
@@ -123,6 +128,17 @@ fn read_all(reader: &mut MaskFileReader) -> Result<Vec<(MaskInfo, Vec<MaskList>)
 
 fn open_all(path: &Path) -> Result<Vec<(MaskInfo, Vec<MaskList>)>, MaskFileError> {
     read_all(&mut MaskFileReader::open(path)?)
+}
+
+/// The error of a file that NCBI's serial reader refuses: what makeblastdb reports for what it
+/// throws (a `CException`, `std::bad_alloc`, `std::length_error`).
+fn refused<T>(result: &Result<T, MaskFileError>) -> bool {
+    matches!(
+        result,
+        Err(MaskFileError::Ncbi(
+            WriteDbError::Exception(_) | WriteDbError::OutOfMemory | WriteDbError::Other(_)
+        ))
+    )
 }
 
 fn infos(path: &Path) -> Vec<MaskInfo> {
@@ -186,13 +202,16 @@ fn describe(path: &std::path::Path) -> String {
                     String::from_utf8_lossy(&info.algo_options),
                     dump_list(&info.masks)
                 );
-                let mut bad = program_bad || info.masks.masks.iter().any(|m| m.id.is_none());
+                let incomplete = |list: &MaskList| {
+                    list.null_element.is_some() || list.masks.iter().any(|m| m.id.is_none())
+                };
+                let mut bad = program_bad || incomplete(&info.masks);
                 let mut more = info.masks.more;
                 while more && !bad {
                     match reader.next_list() {
                         Ok(list) => {
                             out += &format!(" +{}", dump_list(&list));
-                            bad = list.masks.iter().any(|m| m.id.is_none());
+                            bad = incomplete(&list);
                             more = list.more;
                         }
                         Err(MaskFileError::EofInContinuation { .. }) => {
@@ -213,7 +232,7 @@ fn describe(path: &std::path::Path) -> String {
 
 fn kind(e: &MaskFileError) -> String {
     match e {
-        MaskFileError::Malformed { message, .. } => format!("MALFORMED\t{message}"),
+        MaskFileError::Ncbi(error) => format!("NCBI\t{error}"),
         MaskFileError::Unsupported(m) => format!("UNSUPPORTED\t{m}"),
         other => format!("OTHER\t{other}"),
     }
@@ -441,9 +460,11 @@ fn masks_equal_what_blastdbcmd_prints() {
 enum Outcome {
     /// "Unknown encoding for mask data in ..." (rc 1)
     Unknown,
-    /// the serial reader throws (rc 255)
+    /// the serial reader throws a `CException` (rc 255)
     Serial,
-    /// bad_alloc (rc 4)
+    /// `std::length_error` (rc 255)
+    LengthError,
+    /// `std::bad_alloc` (rc 4)
     OutOfMemory,
     /// the build is abandoned without an error status (a missing continuation)
     NoDb,
@@ -454,8 +475,10 @@ enum Outcome {
 fn outcome(run: &Run) -> Outcome {
     if run.rc == 1 && run.stderr.contains("Unknown encoding for mask data in '") {
         Outcome::Unknown
-    } else if run.rc == 255 && run.stderr.starts_with("Error: NCBI C++ Exception:") {
+    } else if run.rc == 255 && run.stderr.contains("Error: NCBI C++ Exception:") {
         Outcome::Serial
+    } else if run.rc == 255 && run.stderr.ends_with("Error: basic_string::_M_create\n") {
+        Outcome::LengthError
     } else if run.rc == 4 {
         Outcome::OutOfMemory
     } else if run.rc == 0 && run.no_db {
@@ -471,15 +494,6 @@ fn outcome(run: &Run) -> Outcome {
         Outcome::Accepted
     }
 }
-
-/// Files that makeblastdb reads and LOSAT does not.
-const UNSUPPORTED: [&str; 3] = [
-    // NCBI replaces a byte that is not printable in a VisibleString with '#' and logs it, and
-    // warns about a UTF8String tag for a VisibleString; LOSAT does not write those lines
-    "h_string_nonprint.asnt",
-    "h_utf8_in_options.asnt",
-    "b_utf8_options.asnb",
-];
 
 #[test]
 fn every_file_is_read_as_makeblastdb_reads_it() {
@@ -499,30 +513,29 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
                     panic!("{file}: not rejected by the format guess");
                 };
                 // NCBI's stderr names the file as it was given; here the path is absolute.
+                // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
                 assert_eq!(
-                    run.stderr,
+                    crate::wording::losat_text(&run.stderr),
                     format!(
-                        "BLAST options error: {}\n",
+                        "LOSAT options error: {}\n",
                         text.replace(&path.display().to_string(), file)
                     ),
                     "{file}"
                 );
             }
-            Outcome::Serial | Outcome::OutOfMemory => {
+            Outcome::Serial | Outcome::LengthError | Outcome::OutOfMemory => {
+                assert!(refused(&result), "{file}: {result:?}");
+                // makeblastdb's line for it (the end-to-end tests compare all of the text)
+                let line = format!("{}\n", result.unwrap_err());
+                // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
                 assert!(
-                    matches!(result, Err(MaskFileError::Malformed { .. })),
-                    "{file}: {result:?}"
+                    crate::wording::losat_text(&run.stderr).contains(&line),
+                    "{file}: {line}"
                 );
             }
             Outcome::NoDb => {
                 assert!(
                     matches!(result, Err(MaskFileError::EofInContinuation { .. })),
-                    "{file}: {result:?}"
-                );
-            }
-            Outcome::Accepted if UNSUPPORTED.contains(&file.as_str()) => {
-                assert!(
-                    matches!(result, Err(MaskFileError::Unsupported(_))),
                     "{file}: {result:?}"
                 );
             }
@@ -532,7 +545,14 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
         }
     }
     // every outcome is covered
-    for key in ["Unknown", "Serial", "OutOfMemory", "NoDb", "Accepted"] {
+    for key in [
+        "Unknown",
+        "Serial",
+        "LengthError",
+        "OutOfMemory",
+        "NoDb",
+        "Accepted",
+    ] {
         assert!(
             seen.contains_key(key),
             "no file with outcome {key}: {seen:?}"
@@ -540,27 +560,63 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
     }
 }
 
+/// What the reader hands out for every file are the first lines of makeblastdb's standard
+/// error, byte for byte, and no other line of it comes from the serial reader's posts (`(803.`):
+/// the byte stored as `#` with its stack trace, line or byte and chunk (`Bad char`), and the
+/// UTF8String warning once per run. The objects are read as `x_ProcessMaskData` reads them: up to
+/// the first error, or the first mask without a Seq-id ("Cannot get masked range Seq-id").
 #[test]
-fn unsupported_files_name_what_is_not_read() {
-    for (file, what) in [
-        (
-            "h_string_nonprint.asnt",
-            "byte 0x09 in the VisibleString member `algo-options`",
-        ),
-        (
-            "h_utf8_in_options.asnt",
-            "byte 0xc3 in the VisibleString member `algo-options`",
-        ),
-        (
-            "b_utf8_options.asnb",
-            "a UTF8String tag for the VisibleString member `algo-options`",
-        ),
-    ] {
-        let Err(MaskFileError::Unsupported(text)) = open_all(&parse_dir().join(file)) else {
-            panic!("{file}");
-        };
-        assert!(text.contains(what), "{file}: {text}");
+fn posts_equal_what_makeblastdb_posts() {
+    let text = String::from_utf8(read_file(&parse_dir().join("expected.tsv"))).unwrap();
+    let mut posting = 0;
+    for line in text.lines().filter(|l| l.starts_with("RUN\t")) {
+        let f: Vec<&str> = line.split('\t').collect();
+        let (file, ncbi) = (f[1], unescape_bytes(f[5]));
+        let mut posted = Vec::new();
+        if let Ok(mut reader) = MaskFileReader::open(&parse_dir().join(file)) {
+            let mut warned = false;
+            let mut post = |reader: &mut MaskFileReader| {
+                for post in reader.take_posts() {
+                    if matches!(post, MaskPost::Utf8Tag(_)) {
+                        if warned {
+                            continue;
+                        }
+                        warned = true;
+                    }
+                    posted.extend_from_slice(&post.line());
+                }
+            };
+            let complete = |list: &MaskList| {
+                list.null_element.is_none() && list.masks.iter().all(|mask| mask.id.is_some())
+            };
+            loop {
+                let next = reader.next_info();
+                post(&mut reader);
+                let Ok(Some(info)) = next else { break };
+                let (mut more, mut go_on) = (info.masks.more, complete(&info.masks));
+                while go_on && more {
+                    let next = reader.next_list();
+                    post(&mut reader);
+                    (more, go_on) = match &next {
+                        Ok(list) => (list.more, complete(list)),
+                        Err(_) => (false, false),
+                    };
+                }
+                if !go_on {
+                    break;
+                }
+            }
+        }
+        assert!(
+            ncbi.starts_with(&posted),
+            "{file}: {}",
+            String::from_utf8_lossy(&posted)
+        );
+        let rest = String::from_utf8_lossy(&ncbi[posted.len()..]).into_owned();
+        assert!(!rest.contains("(803."), "{file}: {rest}");
+        posting += usize::from(!posted.is_empty());
     }
+    assert_eq!(posting, 13);
 }
 
 #[test]
@@ -610,6 +666,7 @@ fn hand_written_text_values() {
                     parts: vec![MaskPart::Interval(interval(5, 14))],
                 }],
                 more: false,
+                null_element: None,
             },
         }]
     );
@@ -718,13 +775,10 @@ fn objects_continuations_and_the_end_of_the_file() {
     // a continuation read as an object, and an object read as a continuation
     assert!(matches!(
         open_all(&path("h_more_true_wrong_type.asnt")),
-        Err(MaskFileError::Malformed { .. })
+        Err(MaskFileError::Ncbi(WriteDbError::Exception(_)))
     ));
     let mut r = MaskFileReader::open(&path("h_ok.asnt")).unwrap();
-    assert!(
-        matches!(r.next_list(), Err(MaskFileError::Malformed { .. })),
-        "an object is not a list"
-    );
+    assert!(refused(&r.next_list()), "an object is not a list");
     // the end of the file: nothing but comments and white space, or a file that ends in the type
     // name, after `::=`, or in the first bytes of a binary object, is the end
     for file in [
@@ -755,10 +809,7 @@ fn objects_continuations_and_the_end_of_the_file() {
         "b_trailing_zero.asnb",
         "b_trailing_sequence_start.asnb",
     ] {
-        assert!(
-            open_all(&path(file)).is_err_and(|e| matches!(e, MaskFileError::Malformed { .. })),
-            "{file}"
-        );
+        assert!(refused(&open_all(&path(file))), "{file}");
     }
 }
 
@@ -788,7 +839,7 @@ fn files_that_are_neither_encoding() {
     assert_eq!(
         error.to_string(),
         format!(
-            "BLAST options error: Unknown encoding for mask data in '{}'",
+            "LOSAT options error: Unknown encoding for mask data in '{}'",
             fasta.display()
         )
     );
@@ -935,10 +986,7 @@ fn every_truncation_of_a_binary_file() {
             // the file ends where the outermost SEQUENCE has no closing byte: the end of the file
             306 => assert_eq!(result.unwrap().len(), 0, "{n}"),
             307 => assert_eq!(result.unwrap().len(), 1, "{n}"),
-            _ => assert!(
-                matches!(result, Err(MaskFileError::Malformed { .. })),
-                "{n}: {result:?}"
-            ),
+            _ => assert!(refused(&result), "{n}: {result:?}"),
         }
     }
 }
@@ -948,10 +996,7 @@ fn damaged_binary_files() {
     let dust = read_file(&seqdb_dir().join("mask_dust.asnb"));
     let malformed = |label: &str, data: &[u8]| {
         let r = read_bytes(label, data);
-        assert!(
-            matches!(r, Err(MaskFileError::Malformed { .. })),
-            "{label}: {r:?}"
-        );
+        assert!(refused(&r), "{label}: {r:?}");
     };
     // a length larger than the file (an options string of 2^28 bytes), larger than a `size_t`
     // can hold the length of, and with the first length byte zero
@@ -1055,9 +1100,12 @@ enum Cut {
 }
 
 fn cut_result(data: &[u8]) -> Cut {
-    match read_bytes("cut", data) {
+    let result = read_bytes("cut", data);
+    if refused(&result) {
+        return Cut::Malformed;
+    }
+    match result {
         Err(MaskFileError::Ncbi(_)) => Cut::Unknown,
-        Err(MaskFileError::Malformed { .. }) => Cut::Malformed,
         Err(MaskFileError::EofInContinuation { .. }) => Cut::MissingContinuation,
         Err(other) => panic!("{other}"),
         Ok(objects) => Cut::Objects(objects.len()),
@@ -1131,15 +1179,8 @@ fn text_edits_never_panic() {
     }
     assert!(matches!(
         read_bytes("deep", deep.as_bytes()),
-        Err(MaskFileError::Unsupported(_)) | Err(MaskFileError::Malformed { .. })
+        Err(MaskFileError::Unsupported(_))
     ));
-}
-
-#[test]
-fn visible_strings_replace_what_is_not_printable() {
-    let mut s = *b"a\tb\xe9 \x7f~\x00";
-    super::reader::fix_visible_chars(&mut s);
-    assert_eq!(&s, b"a#b# #~#");
 }
 
 /// The options of the first object, against what `blastdbcmd -info` prints for the database that
@@ -1153,7 +1194,7 @@ fn algorithm_options_equal_what_blastdbcmd_prints() {
         }
         let objects = open_all(&parse_dir().join(&file));
         if matches!(objects, Err(MaskFileError::Unsupported(_))) {
-            continue; // NCBI's text has '#' for bytes that LOSAT refuses
+            continue; // what LOSAT does not read
         }
         let options = String::from_utf8(objects.unwrap()[0].0.algo_options.clone()).unwrap();
         // The table prints an empty string as "default options used".
@@ -1172,27 +1213,12 @@ fn algorithm_options_equal_what_blastdbcmd_prints() {
 #[test]
 fn an_error_is_final() {
     let mut r = MaskFileReader::open(&parse_dir().join("h_cut_inside_object.asnt")).unwrap();
-    assert!(matches!(
-        r.next_info(),
-        Err(MaskFileError::Malformed { .. })
-    ));
+    assert!(refused(&r.next_info()));
+    // makeblastdb ends there; a later call is not one of its reads
     for _ in 0..2 {
-        assert!(matches!(
-            r.next_info(),
-            Err(MaskFileError::Malformed { .. })
-        ));
-        assert!(matches!(
-            r.next_list(),
-            Err(MaskFileError::Malformed { .. })
-        ));
+        assert!(matches!(r.next_info(), Err(MaskFileError::Unsupported(_))));
+        assert!(matches!(r.next_list(), Err(MaskFileError::Unsupported(_))));
     }
-    // a refusal as well
-    let mut r = MaskFileReader::open(&parse_dir().join("h_string_nonprint.asnt")).unwrap();
-    assert!(matches!(r.next_info(), Err(MaskFileError::Unsupported(_))));
-    assert!(matches!(
-        r.next_info(),
-        Err(MaskFileError::Malformed { .. })
-    ));
     // a missing continuation
     let mut r =
         MaskFileReader::open(&parse_dir().join("h_more_true_no_continuation.asnt")).unwrap();
@@ -1243,4 +1269,280 @@ fn a_text_file_is_read_in_blocks() {
         r.buffered()
     );
     assert!(r.next_info().unwrap().is_none());
+}
+
+// ---------------------------------------------------------------------------------------------
+// NCBI's pointer syntax: what LOSAT refuses (the files that makeblastdb reads or fails on are the
+// h_pointer_* and b_pointer_* fixtures)
+
+/// A text object whose `masks` list holds `masks`.
+fn text_object(masks: &str) -> Vec<u8> {
+    format!(
+        "Blast-db-mask-info ::= {{ algo-id 0, algo-program windowmasker, algo-options \"x\", \
+         masks {{ masks {{ {masks} }}, more FALSE }} }}\n"
+    )
+    .into_bytes()
+}
+
+/// A BER item with an indefinite length: the tag, `80`, `content`, `00 00`.
+fn ber(tag: u8, content: &[u8]) -> Vec<u8> {
+    [&[tag, 0x80][..], content, &[0, 0][..]].concat()
+}
+
+/// The member or variant `[n]` holding `content`.
+fn ber_member(n: u8, content: &[u8]) -> Vec<u8> {
+    ber(0xa0 | n, content)
+}
+
+fn ber_int(n: u8) -> Vec<u8> {
+    vec![0x02, 0x01, n]
+}
+
+/// `Seq-interval { from, to, id local id <id> }` in BER.
+fn ber_interval(from: u8, to: u8, id: u8) -> Vec<u8> {
+    let local = ber_member(0, &ber_member(0, &ber_int(id)));
+    let members = [
+        ber_member(0, &ber_int(from)),
+        ber_member(1, &ber_int(to)),
+        ber_member(3, &local),
+    ];
+    ber(0x30, &members.concat())
+}
+
+/// A binary object whose `masks` list holds the Seq-locs `locs`.
+fn binary_object(locs: &[Vec<u8>]) -> Vec<u8> {
+    let more = ber_member(1, &[0x01, 0x01, 0x00]);
+    let masks = [ber_member(0, &ber(0x30, &locs.concat())), more].concat();
+    let members = [
+        ber_member(0, &ber_int(0)),
+        ber_member(1, &ber_int(30)),
+        ber_member(2, &[0x1a, 0x01, b'x']),
+        ber_member(3, &ber(0x30, &masks)),
+    ];
+    ber(0x30, &members.concat())
+}
+
+/// The list of the one object of `data`.
+fn one_list(label: &str, data: &[u8]) -> MaskList {
+    let mut objects = read_bytes(label, data).unwrap_or_else(|e| panic!("{label}: {e}"));
+    assert_eq!(objects.len(), 1, "{label}");
+    objects.remove(0).0.masks
+}
+
+/// The list of an element stated as `NULL` that makeblastdb dereferences, and LOSAT's refusal
+/// of it.
+fn null_list(label: &str, list: &MaskList) -> &'static str {
+    let null = list
+        .null_element
+        .as_ref()
+        .unwrap_or_else(|| panic!("{label}: {list:?}"));
+    assert!(
+        matches!(null.refusal(), MaskFileError::Unsupported(_)),
+        "{label}"
+    );
+    null.list
+}
+
+const MASKS: &str = "the masks of a Blast-mask-list";
+const MIX: &str = "a Seq-loc-mix (mix)";
+const EQUIV: &str = "a Seq-loc-equiv (equiv)";
+const PACKED_INT: &str = "a Packed-seqint (packed-int)";
+
+#[test]
+fn null_elements_that_makeblastdb_dereferences_are_refused() {
+    let int = |id: u32| format!("int {{ from 5, to 14, id local id {id} }}");
+    let text = |masks: &str| one_list(masks, &text_object(masks));
+    // a NULL mask: the masks before it are kept, those after it dropped
+    let masks = format!("{}, NULL, {}", int(3), int(4));
+    let list = text(&masks);
+    assert_eq!(null_list(&masks, &list), MASKS);
+    assert_eq!(list.masks.len(), 1);
+    assert_eq!(list.masks[0].id, local(3));
+    assert_eq!(list.masks[0].intervals(), vec![interval(5, 14)]);
+    // an element of each list inside a mask, reached by `CheckId`
+    for (masks, expected) in [
+        (format!("mix {{ {}, NULL }}", int(3)), MIX),
+        (format!("equiv {{ {}, NULL }}", int(3)), EQUIV),
+        (
+            "packed-int { { from 5, to 14, id local id 3 }, NULL }".to_string(),
+            PACKED_INT,
+        ),
+        // each Seq-loc walks its own parts: the inner mix reaches its NULL although its Seq-id
+        // differs from the outer one
+        (
+            format!("mix {{ {}, mix {{ {}, NULL }} }}", int(4), int(3)),
+            MIX,
+        ),
+        (format!("NULL, {}", int(3)), MASKS),
+    ] {
+        let list = text(&masks);
+        assert_eq!(null_list(&masks, &list), expected, "{masks}");
+        assert!(list.masks.is_empty(), "{masks}");
+    }
+    // the walk stops before the NULL: two Seq-ids, or a `feat` (makeblastdb: "Cannot get masked
+    // range Seq-id")
+    for masks in [
+        format!("mix {{ {}, {}, NULL }}", int(3), int(4)),
+        format!("equiv {{ {}, {}, NULL }}", int(3), int(4)),
+        "packed-int { { from 5, to 14, id local id 3 }, { from 20, to 29, id local id 4 }, NULL }"
+            .to_string(),
+        "mix { feat gibb 5, NULL }".to_string(),
+    ] {
+        let list = text(&masks);
+        assert_eq!(list.null_element, None, "{masks}");
+        assert_eq!(list.masks.len(), 1, "{masks}");
+        assert_eq!(list.masks[0].id, None, "{masks}");
+    }
+    // a mask without a Seq-id before a NULL mask: makeblastdb fails on the first
+    let list = text("null NULL, NULL");
+    assert_eq!(null_list("null NULL, NULL", &list), MASKS);
+    assert_eq!(list.masks.len(), 1);
+    assert_eq!(list.masks[0].id, None);
+    // an error of the reader later in the object comes first
+    let masks = "NULL, int { from 5, to 14, id local id 3, bad 1 }";
+    assert!(refused(&read_bytes(masks, &text_object(masks))));
+    // optional members stated as NULL are unset, as makeblastdb leaves them
+    let masks = "packed-int { { from 5, to 14, id local id 3, fuzz-from NULL } }";
+    let list = text(masks);
+    assert_eq!(list.null_element, None);
+    assert_eq!(list.masks[0].id, local(3));
+
+    // binary: `05 00`
+    let null = vec![0x05, 0x00];
+    let int3 = ber_member(3, &ber_interval(5, 14, 3));
+    let int4 = ber_member(3, &ber_interval(20, 29, 4));
+    let list = one_list(
+        "masks",
+        &binary_object(&[int3.clone(), null.clone(), int4.clone()]),
+    );
+    assert_eq!(null_list("masks", &list), MASKS);
+    assert_eq!(list.masks.len(), 1);
+    assert_eq!(list.masks[0].id, local(3));
+    let packed = ber_member(
+        4,
+        &ber(0x30, &[ber_interval(5, 14, 3), null.clone()].concat()),
+    );
+    let mix = ber_member(7, &ber(0x30, &[int3.clone(), null.clone()].concat()));
+    let equiv = ber_member(8, &ber(0x31, &[int3.clone(), null.clone()].concat()));
+    for (label, loc, expected) in [
+        ("packed-int", packed, PACKED_INT),
+        ("mix", mix, MIX),
+        ("equiv", equiv, EQUIV),
+    ] {
+        let list = one_list(label, &binary_object(&[loc]));
+        assert_eq!(null_list(label, &list), expected, "{label}");
+        assert!(list.masks.is_empty(), "{label}");
+    }
+    let stopped = ber_member(7, &ber(0x30, &[int3, int4, null].concat()));
+    let list = one_list("two ids", &binary_object(&[stopped]));
+    assert_eq!(list.null_element, None);
+    assert_eq!(list.masks[0].id, None);
+}
+
+#[test]
+fn a_value_of_another_type_is_refused() {
+    let refused_text = |masks: &str| {
+        let result = read_bytes(masks, &text_object(masks));
+        assert!(
+            matches!(result, Err(MaskFileError::Unsupported(_))),
+            "{masks}: {result:?}"
+        );
+    };
+    // `:Type` naming a type other than the declared one: makeblastdb reads it or not by the types
+    // its process has met before
+    refused_text(":Seq-interval { from 5, to 14, id local id 3 }");
+    refused_text(":No-such-type int { from 5, to 14, id local id 3 }");
+    refused_text("packed-int { :Seq-loc int { from 5, to 14, id local id 3 } }");
+    refused_text("mix { :Seq-interval { from 5, to 14, id local id 3 } }");
+    refused_text("packed-int { { from 5, to 14, id local id 3, fuzz-from :Seq-loc null NULL } }");
+    refused_text("bond { a { point 5, id local id 3 }, b :Seq-interval { from 5, to 9 } }");
+    // the declared type is read
+    let masks = ":Seq-loc int { from 5, to 14, id local id 3 }";
+    let list = one_list(masks, &text_object(masks));
+    assert_eq!(list.masks[0].id, local(3));
+    // binary: the application long tag whose bytes spell the name
+    let other = |name: &str, value: &[u8]| -> Vec<u8> {
+        let bytes = name.as_bytes();
+        let mut tag = vec![0x7f];
+        tag.extend(bytes[..bytes.len() - 1].iter().map(|b| b | 0x80));
+        tag.push(bytes[bytes.len() - 1]);
+        ber_tagged(&tag, value)
+    };
+    let seq_interval = ber_interval(5, 14, 3);
+    let result = read_bytes(
+        "other",
+        &binary_object(&[other("Seq-interval", &seq_interval)]),
+    );
+    assert!(
+        matches!(result, Err(MaskFileError::Unsupported(_))),
+        "{result:?}"
+    );
+    let list = one_list(
+        "declared",
+        &binary_object(&[other("Seq-loc", &ber_member(3, &seq_interval))]),
+    );
+    assert_eq!(list.masks[0].id, local(3));
+}
+
+/// A BER item whose tag is the bytes `tag`, with an indefinite length.
+fn ber_tagged(tag: &[u8], content: &[u8]) -> Vec<u8> {
+    [tag, &[0x80][..], content, &[0, 0][..]].concat()
+}
+
+/// The bytes of a file, one per read.
+struct OneByteReads(std::io::Cursor<Vec<u8>>);
+
+impl std::io::Read for OneByteReads {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = buf.len().min(1);
+        self.0.read(&mut buf[..n])
+    }
+}
+
+/// `read_all` and the posts of a text file whose bytes come in blocks or one per read.
+fn read_text(data: &[u8], by_byte: bool) -> String {
+    let path = Path::new("text.asnt");
+    let reader = if by_byte {
+        MaskFileReader::from_read(
+            path,
+            Box::new(OneByteReads(std::io::Cursor::new(data.to_vec()))),
+        )
+    } else {
+        MaskFileReader::from_bytes(path, data.to_vec())
+    };
+    match reader {
+        Ok(mut reader) => {
+            let objects = read_all(&mut reader);
+            format!("{objects:?} {:?}", reader.take_posts())
+        }
+        Err(error) => format!("open {error:?}"),
+    }
+}
+
+/// The text mask files read with one byte per read are read as with blocks: the same objects,
+/// posts and errors, whole and cut at every length up to 4 KiB and at 64 lengths beyond.
+#[test]
+fn text_files_read_one_byte_per_read() {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(parse_dir())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|e| e == "asnt"))
+        .collect();
+    paths.sort();
+    assert!(paths.len() > 20, "{}", paths.len());
+    for path in paths {
+        let data = read_file(&path);
+        let mut cuts: Vec<usize> = (0..=data.len().min(4096)).collect();
+        cuts.extend((1..=64).map(|k| data.len() * k / 64));
+        cuts.sort_unstable();
+        cuts.dedup();
+        for cut in cuts {
+            assert_eq!(
+                read_text(&data[..cut], false),
+                read_text(&data[..cut], true),
+                "{} cut {cut}",
+                path.display()
+            );
+        }
+    }
 }

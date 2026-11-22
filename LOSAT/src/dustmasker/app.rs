@@ -14,20 +14,6 @@ use super::work::{self, report, Options, Report};
 /// not an argument error, ncbiapp.cpp:711-734).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:273-285
-/// ```c++
-/// int CDustMaskApplication::Run (void)
-/// {
-///     // Set up the input and output streams.
-///     CNcbiOstream& output_stream = GetArgs()[kOutput].AsOutputFile();
-///
-///     // Set up the object manager.
-///     CRef<CObjectManager> om(CObjectManager::GetInstance());
-///
-///     // Set up the duster object.
-///     Uint4 level = GetArgs()["level"].AsInteger();
-///     duster_type::size_type window = GetArgs()["window"].AsInteger();
-///     duster_type::size_type linker = GetArgs()["linker"].AsInteger();
-/// ```
 /// `stdin` is the standard input, which `-in -` reads (`work::run` opens `-in`).
 pub(super) fn run(
     args: &Args,
@@ -59,7 +45,7 @@ pub(super) fn run(
         Ok(()) => 0,
         Err(failure) => match report(failure) {
             Report::Posts { lines, status } => {
-                diag.write_text(lines.as_bytes());
+                diag.write_text(&lines);
                 status
             }
             Report::Refused(reason) => diag.refuse(&reason),

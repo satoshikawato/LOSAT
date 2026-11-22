@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { title "dloc" }, inst { repr delta, mol na, length 6, ext delta { literal { length 2, seq-data iupacna "AC" }, loc whole local str "Other" } } }
+      }
+    }

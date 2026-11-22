@@ -17,7 +17,7 @@
 //! (rc 0, NCBI 2.17.0 probes P3.104 and P7.001-002); 2 to 16 bytes missing end inside the member
 //! frame, an invalid input (P7.003-022).
 
-use super::read::{read_delayed, Cx, FrameKind, Front, Post, ReadError, R};
+use super::read::{read_delayed, Cx, Front, Post, ReadError, R};
 use super::{EnumValue, Member, Storage, StringKind, Value};
 use crate::ncbi_str::{string_to_double_posix, NCBI_NAN};
 use crate::report::serial::asn_ber::{
@@ -29,6 +29,7 @@ use crate::report::serial::asn_ber::{
 };
 use crate::report::serial::asn_text_reader::{AsnSource, SliceSource};
 use crate::report::serial::encoder::StreamPosition;
+use crate::report::serial::object_frame::FrameKind;
 
 /// `kMaxDoubleLength`: the longest REAL NCBI's reader takes.
 const MAX_DOUBLE_LENGTH: usize = 256;
@@ -47,7 +48,7 @@ pub(crate) struct Ber<S: AsnSource> {
     limit: i64,
     /// `m_DataLimits`: the limits of the values around it.
     limits: Vec<i64>,
-    /// `ERR_POST_X_ONCE(10, ...)` of `ExpectStringTag` was posted.
+    /// The warning post with subcode 10 (`ERR_POST_X_ONCE`) of `ExpectStringTag` was made.
     utf8_warned: bool,
     /// The start of a delay buffer being skipped: the source keeps its bytes.
     held: Option<usize>,
@@ -72,7 +73,8 @@ impl<S: AsnSource> Ber<S> {
         self.src.release_before(keep);
     }
 
-    /// `PeekTagByte(index)` / `PeekChar(index)`: the end of the data is a `CEofException`.
+    /// `PeekTagByte` / `PeekChar` at an offset from the position: the end of the data is a
+    /// `CEofException`.
     fn peek(&mut self, index: usize) -> R<u8> {
         self.src.byte_at(self.pos + index).ok_or(ReadError::Eof)
     }
@@ -84,8 +86,8 @@ impl<S: AsnSource> Ber<S> {
         Ok(byte)
     }
 
-    /// `GetChars(count)` / `ReadBytes`: the next `count` bytes, taken; the end of the data before
-    /// them is a `CEofException`.
+    /// `GetChars` / `ReadBytes` of `count` bytes: the next `count` bytes, taken; the end of the
+    /// data before them is a `CEofException`.
     fn take(&mut self, count: usize) -> R<std::ops::Range<usize>> {
         let start = self.pos;
         let end = start.checked_add(count).ok_or(ReadError::Eof)?;
@@ -96,25 +98,9 @@ impl<S: AsnSource> Ber<S> {
         Ok(start..end)
     }
 
-    /// `ExpectSysTagByte(byte)`: the identifier must be `byte`.
+    /// `ExpectSysTagByte`: the identifier must be `byte`.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:114-123
-    // ```c++
-    // inline
-    // void CObjectIStreamAsnBinary::ExpectSysTagByte(TByte byte)
-    // {
-    //     if ( StartTag(PeekTagByte()) != byte )
-    //         UnexpectedSysTagByte(byte);
-    //     m_CurrentTagLength = 1;
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:374-379
-    // ```c++
-    // void CObjectIStreamAsnBinary::UnexpectedSysTagByte(TByte tag_byte)
-    // {
-    //     TByte got = PeekTagByte();
-    //     ThrowError(fFormatError, "unexpected tag: " + TagToString(got) +
-    //                              ", should be: "    + TagToString(tag_byte));
-    // }
-    // ```
     fn expect_sys_tag(&mut self, byte: u8) -> R<()> {
         let got = self.peek(0)?;
         if got != byte {
@@ -124,26 +110,10 @@ impl<S: AsnSource> Ber<S> {
         Ok(())
     }
 
-    /// `ExpectIntegerTag`: an INTEGER, universal or application (a big integer).
+    /// `ExpectIntegerTag`: an INTEGER, universal or application (a big integer). NCBI's code also
+    /// flags the application tag as the special case `eReadAsBigInt`, which changes nothing in
+    /// the value.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:145-164
-    // ```c++
-    // inline
-    // void CObjectIStreamAsnBinary::ExpectIntegerTag(void)
-    // {
-    //     if (m_SkipNextTag) {
-    //         m_SkipNextTag = false;
-    //         return;
-    //     }
-    //     Uint1 tag = StartTag(PeekTagByte());
-    //     Uint1 exp = MakeTagByte(  eUniversal, ePrimitive, eInteger);
-    //     if (tag != exp) {
-    //         if (tag != MakeTagByte(eApplication, ePrimitive, eInteger)) {
-    //             UnexpectedSysTagByte(exp);
-    //         }
-    //         SetSpecialCaseUsed(CObjectIStream::eReadAsBigInt);
-    //     }
-    //     m_CurrentTagLength = 1;
-    // ```
     fn expect_integer_tag(&mut self) -> R<()> {
         let got = self.peek(0)?;
         if got != TAG_INTEGER && got != TAG_APPLICATION_INTEGER {
@@ -153,43 +123,10 @@ impl<S: AsnSource> Ber<S> {
         Ok(())
     }
 
-    /// `PeekTag(first, tag_class, tag_constructed)` (`class` the class and constructed bits):
+    /// `PeekTag` with a class and constructed check (`class`: the class and constructed bits):
     /// the tag number of the identifier that starts with `first`, its length in `tag_len`.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:166-200
-    // ```c++
-    // inline
-    // void CObjectIStreamAsnBinary::ExpectTagClassByte(TByte first_tag_byte,
-    //                                                  TByte expected_class_byte)
-    // {
-    //     if ( GetTagClassAndConstructed(first_tag_byte) != expected_class_byte ) {
-    //         UnexpectedTagClassByte(first_tag_byte, expected_class_byte);
-    //     }
-    // }
-    //
-    // inline
-    // CObjectIStreamAsnBinary::TLongTag
-    // CObjectIStreamAsnBinary::PeekTag(TByte first_tag_byte)
-    // {
-    //     TByte byte = StartTag(first_tag_byte);
-    //     ETagValue sysTag = GetTagValue(byte);
-    //     if ( sysTag == eLongTag ) {
-    //         return PeekLongTag();
-    //     }
-    //     ...
-    //     m_CurrentTagLength = 1;
-    //     return sysTag;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:174-180
-    // ```c++
-    // void CObjectIStreamAsnBinary::UnexpectedTagClassByte(TByte first_tag_byte,
-    //                                                      TByte expected_class_byte)
-    // {
-    //     ThrowError(fFormatError, "unexpected tag: " +
-    //                              TagToString(first_tag_byte) + ", should be " +
-    //                              TagToString(expected_class_byte));
-    // }
-    // ```
     fn peek_tag(&mut self, first: u8, class: u8) -> R<i32> {
         if first & (TAG_CLASS_MASK | TAG_CONSTRUCTED) != class {
             return Err(ReadError::Serial(format!(
@@ -206,28 +143,6 @@ impl<S: AsnSource> Ber<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:151-172
-    // ```c++
-    // CObjectIStreamAsnBinary::TLongTag
-    // CObjectIStreamAsnBinary::PeekLongTag(void)
-    // {
-    //     TLongTag tag = 0;
-    //     size_t i = 1;
-    //     const size_t KBitsInByte = 8; // ?
-    //     const size_t KTagBits = sizeof(tag) * KBitsInByte - 1;
-    //     TByte byte;
-    //     do {
-    //         if ( tag >= (1 << (KTagBits - 7)) ) {
-    //             ThrowError(fOverflow,
-    //                        "tag number is too big: "+NStr::IntToString(tag));
-    //         }
-    //         byte = PeekTagByte(i++);
-    //         tag = (tag << 7) | (byte & 0x7f);
-    //     } while ( (byte & 0x80) != 0 );
-    //     ...
-    //     m_CurrentTagLength = i;
-    //     return tag;
-    // }
-    // ```
     fn long_tag(&mut self) -> R<i32> {
         let mut tag = 0i32;
         let mut i = 1;
@@ -246,37 +161,10 @@ impl<S: AsnSource> Ber<S> {
         Ok(tag)
     }
 
-    /// `ExpectTag(tag_class, eConstructed, tag)` of a universal class: the identifier of a
-    /// SEQUENCE (16) or SET (17).
+    /// `ExpectTag` of a universal class and the constructed form: the identifier of a SEQUENCE
+    /// (16) or SET (17).
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:209-219
-    // ```c++
-    // void CObjectIStreamAsnBinary::ExpectTag(TByte first_tag_byte,
-    //     ETagClass tag_class, ETagConstructed tag_constructed, TLongTag tag_value)
-    // {
-    //     ExpectTagClassByte(first_tag_byte,
-    //                        MakeTagClassAndConstructed(tag_class, tag_constructed));
-    //     TLongTag tag = PeekTag(first_tag_byte);
-    //     if (tag != tag_value) {
-    //         UnexpectedTagValue( tag_class, tag, tag_value);
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:205-217
-    // ```c++
-    // void CObjectIStreamAsnBinary::UnexpectedTagValue(ETagClass tag_class,
-    //     TLongTag tag_got, TLongTag tag_expected)
-    // {
-    //     string s("Unexpected tag: ");
-    //     if (tag_class == eApplication) {
-    //         s += "Application ";
-    //     } else if (tag_class == ePrivate) {
-    //         s += "Private ";
-    //     }
-    //     s += NStr::NumericToString(tag_got) + ", expected: " +
-    //          NStr::NumericToString(tag_expected);
-    //     ThrowError(fFormatError, s);
-    // }
-    // ```
     fn expect_constructed(&mut self, number: i32) -> R<()> {
         let first = self.peek(0)?;
         let tag = self.peek_tag(first, TAG_CONSTRUCTED)?;
@@ -297,27 +185,6 @@ impl<S: AsnSource> Ber<S> {
 
     /// `ReadShortLength`.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:337-355
-    // ```c++
-    // inline
-    // size_t CObjectIStreamAsnBinary::ReadShortLength(void)
-    // {
-    //     TByte byte = FlushTag();
-    //     if ( byte >= 0x80 ) {
-    //         UnexpectedLongLength();
-    //     }
-    //     return StartTagData(byte);
-    // }
-    //
-    // inline
-    // size_t CObjectIStreamAsnBinary::ReadLengthInlined(void)
-    // {
-    //     TByte byte = FlushTag();
-    //     if ( byte >= 0x80 ) {
-    //         return ReadLengthLong(byte);
-    //     }
-    //     return StartTagData(byte);
-    // }
-    // ```
     // (`UnexpectedLongLength` is "ShortLength expected", objistrasnb.cpp:200-203; `StartTagData`
     // checks nothing without `CHECK_INSTREAM_LIMITS`.)
     fn short_length(&mut self) -> R<usize> {
@@ -338,26 +205,6 @@ impl<S: AsnSource> Ber<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:394-411
-    // ```c++
-    // size_t CObjectIStreamAsnBinary::ReadLengthLong(TByte byte)
-    // {
-    //     size_t lengthLength = byte - 0x80;
-    //     if ( lengthLength == 0 ) {
-    //         ThrowError(fFormatError, "unexpected indefinite length");
-    //     }
-    //     if ( lengthLength > sizeof(size_t) ) {
-    //         ThrowError(fOverflow, "length overflow");
-    //     }
-    //     size_t length = m_Input.GetChar() & 0xff;
-    //     if ( length == 0 ) {
-    //         ThrowError(fFormatError, "illegal length start");
-    //     }
-    //     while ( --lengthLength > 0 ) {
-    //         length = (length << 8) | (m_Input.GetChar() & 0xff);
-    //     }
-    //     return StartTagData(length);
-    // }
-    // ```
     fn long_length(&mut self, byte: u8) -> R<u64> {
         let mut count = usize::from(byte - 0x80);
         if count == 0 {
@@ -389,23 +236,6 @@ impl<S: AsnSource> Ber<S> {
     /// `ExpectIndefiniteLength` (`USE_DEF_LEN`): the length of a constructed value, whose end
     /// becomes the limit (`HaveMoreElements`, `ExpectEndOfContent`).
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:276-312
-    // ```c++
-    // inline
-    // void CObjectIStreamAsnBinary::ExpectIndefiniteLength(void)
-    // {
-    //     ...
-    // #if USE_DEF_LEN
-    //     TByte len = FlushTag();
-    //     m_DataLimits.push_back(m_CurrentDataLimit);
-    //     if (len == eIndefiniteLengthByte) {
-    //         m_CurrentDataLimit = 0;
-    //     } else  if (len > eIndefiniteLengthByte) {
-    //         m_CurrentDataLimit = m_Input.GetStreamPosAsInt8() + ReadLengthLong(len);
-    //         ...
-    //     } else {
-    //         m_CurrentDataLimit = m_Input.GetStreamPosAsInt8() + len;
-    //     }
-    // ```
     // The order of the two operands of the long form is not set by C++ (unsequenced); NCBI
     // 2.17.0's build takes the position before the length's bytes: impl D's probe (2026-11-20,
     // `F3/tmp/d/probe/probe_d.py`) gave a root `30 82 HH LL` whose length counts only its content
@@ -428,18 +258,6 @@ impl<S: AsnSource> Ber<S> {
 
     /// `HaveMoreElements`: before the limit, or before `00`.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:242-251
-    // ```c++
-    // inline
-    // bool CObjectIStreamAsnBinary::HaveMoreElements(void)
-    // {
-    // #if USE_DEF_LEN
-    //     if (m_CurrentDataLimit != 0) {
-    //         return m_CurrentDataLimit > m_Input.GetStreamPosAsInt8();
-    //     }
-    // #endif
-    //     return PeekTagByte() != eEndOfContentsByte;
-    // }
-    // ```
     fn have_more_elements(&mut self) -> R<bool> {
         if self.limit != 0 {
             return Ok(self.limit > self.pos as i64);
@@ -449,45 +267,7 @@ impl<S: AsnSource> Ber<S> {
 
     /// `ExpectEndOfContent`: at the limit, or `00 00`; the limit of the value around it back.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:373-392
-    // ```c++
-    // inline
-    // void CObjectIStreamAsnBinary::ExpectEndOfContent(void)
-    // {
-    //     ...
-    // #if USE_DEF_LEN
-    //     if (m_CurrentDataLimit != 0) {
-    //         if (m_CurrentDataLimit != m_Input.GetStreamPosAsInt8()) {
-    //             UnexpectedContinuation();
-    //         }
-    //     } else {
-    //         if ( !m_Input.SkipExpectedChars(char(eEndOfContentsByte),
-    //                                         char(eZeroLengthByte)) ) {
-    //             UnexpectedContinuation();
-    //         }
-    //     }
-    //     m_CurrentDataLimit = m_DataLimits.back();
-    //     m_DataLimits.pop_back();
-    // ```
     // NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:72-88
-    // ```c++
-    // inline
-    // bool CIStreamBuffer::SkipExpectedChar(char c, size_t offset)
-    // {
-    //     const char* pos = m_CurrentPos+offset;
-    //     if ( pos >= m_DataEndPos )
-    //         pos = FillBuffer(pos);
-    //     if ( *pos != c )
-    //         return false;
-    //     m_CurrentPos = pos+1;
-    //     return true;
-    // }
-    //
-    // inline
-    // bool CIStreamBuffer::SkipExpectedChars(char c1, char c2, size_t offset)
-    // {
-    //     return SkipExpectedChar(c1, offset) && SkipExpectedChar(c2, 0);
-    // }
-    // ```
     // (`UnexpectedContinuation` is "EndOfContentsByte expected", objistrasnb.cpp:195-198.)
     fn expect_end_of_content(&mut self) -> R<()> {
         let continuation = || ReadError::Serial("EndOfContentsByte expected".into());
@@ -510,16 +290,9 @@ impl<S: AsnSource> Ber<S> {
         Ok(())
     }
 
-    /// `SkipTagData`: the value's length, its bytes skipped (`GetChars(count)`: the end of the
-    /// data before them is a `CEofException`).
+    /// `SkipTagData`: the value's length, its bytes skipped (as `GetChars` takes them: the end of
+    /// the data before them is a `CEofException`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1785-1789
-    // ```c++
-    // void CObjectIStreamAsnBinary::SkipTagData(void)
-    // {
-    //     SkipBytes(ReadLength());
-    //     EndOfTag();
-    // }
-    // ```
     fn skip_tag_data(&mut self) -> R<()> {
         let length = self.data_length()?;
         self.take(length)?;
@@ -529,46 +302,6 @@ impl<S: AsnSource> Ber<S> {
     /// `ReadStdSigned` of a C++ integer of `size` bytes: the value's bytes, two's complement,
     /// more than `size` of them only as the sign's extension.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:475-512
-    // ```c++
-    // template<typename T>
-    // void ReadStdSigned(CObjectIStreamAsnBinary& in, T& data)
-    // {
-    //     size_t length = in.ReadShortLength();
-    //     if ( length == 0 ) {
-    //         in.ThrowError(in.fFormatError, "zero length of number");
-    //     }
-    //     T n;
-    //     if ( length > sizeof(data) ) {
-    //         // skip
-    //         --length;
-    //         Int1 c = in.ReadSByte();
-    //         if ( c != 0 && c != -1 ) {
-    //             in.ThrowError(in.fOverflow, "overflow error");
-    //         }
-    //         while ( length > sizeof(data) ) {
-    //             --length;
-    //             if ( in.ReadSByte() != c ) {
-    //                 in.ThrowError(in.fOverflow, "overflow error");
-    //             }
-    //         }
-    //         --length;
-    //         n = in.ReadSByte();
-    //         if ( ((n ^ c) & 0x80) != 0 ) {
-    //             in.ThrowError(in.fOverflow, "overflow error");
-    //         }
-    //     }
-    //     else {
-    //         --length;
-    //         n = in.ReadSByte();
-    //     }
-    //     while ( length > 0 ) {
-    //         --length;
-    //         n = (n << 8) | in.ReadByte();
-    //     }
-    //     data = n;
-    //     in.EndOfTag();
-    // }
-    // ```
     // (`ReadInt8` reads into a `Uint8`: the same bits.)
     fn std_signed(&mut self, size: usize) -> R<i64> {
         let overflow = || ReadError::Serial("overflow error".into());
@@ -607,44 +340,6 @@ impl<S: AsnSource> Ber<S> {
 
     /// `ReadStdUnsigned` of a `Uint4`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:514-549
-    // ```c++
-    // template<typename T>
-    // void ReadStdUnsigned(CObjectIStreamAsnBinary& in, T& data)
-    // {
-    //     size_t length = in.ReadShortLength();
-    //     if ( length == 0 ) {
-    //         in.ThrowError(in.fFormatError, "zero length of number");
-    //     }
-    //     T n;
-    //     if ( length > sizeof(data) ) {
-    //         // skip
-    //         while ( length > sizeof(data) ) {
-    //             --length;
-    //             if ( in.ReadSByte() != 0 ) {
-    //                 in.ThrowError(in.fOverflow, "overflow error");
-    //             }
-    //         }
-    //         --length;
-    //         n = in.ReadByte();
-    //     }
-    //     else if ( length == sizeof(data) ) {
-    //         --length;
-    //         n = in.ReadByte();
-    //         if ( (n & 0x80) != 0 ) {
-    //             in.ThrowError(in.fOverflow, "overflow error");
-    //         }
-    //     }
-    //     else {
-    //         n = 0;
-    //     }
-    //     while ( length > 0 ) {
-    //         --length;
-    //         n = (n << 8) | in.ReadByte();
-    //     }
-    //     data = n;
-    //     in.EndOfTag();
-    // }
-    // ```
     fn std_unsigned4(&mut self) -> R<u32> {
         let overflow = || ReadError::Serial("overflow error".into());
         let mut length = self.short_length()?;
@@ -677,48 +372,10 @@ impl<S: AsnSource> Ber<S> {
         Ok(n)
     }
 
-    /// `ExpectStringTag(type)`: a VisibleString or a UTF8String takes the other's tag too
+    /// `ExpectStringTag`: a VisibleString or a UTF8String takes the other's tag too
     /// (`SERIAL_READ_ANY_VISIBLESTRING_TAG` 1 and `SERIAL_READ_ANY_UTF8STRING_TAG` true, the
     /// defaults); a UTF8String's tag for a VisibleString is posted once.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:281-316
-    // ```c++
-    // void CObjectIStreamAsnBinary::ExpectStringTag(EStringType type)
-    // {
-    //     if (m_SkipNextTag) {
-    //         m_SkipNextTag = false;
-    //         return;
-    //     }
-    //     if ( type == eStringTypeUTF8 ) {
-    //         static CSafeStatic<NCBI_PARAM_TYPE(SERIAL, READ_ANY_UTF8STRING_TAG)> sx_ReadAnyUtf8;
-    //         if ( sx_ReadAnyUtf8->Get() ) {
-    //             // may be eVisibleString
-    //             TByte alt_tag = MakeTagByte(eUniversal,ePrimitive,eVisibleString);
-    //             if ( PeekTagByte() == alt_tag ) {
-    //                 ExpectSysTagByte(alt_tag);
-    //                 return;
-    //             }
-    //         }
-    //         ExpectSysTag(eUniversal, ePrimitive, eUTF8String);
-    //     }
-    //     else {
-    //         static CSafeStatic<NCBI_PARAM_TYPE(SERIAL, READ_ANY_VISIBLESTRING_TAG)> sx_ReadAny;
-    //         if ( sx_ReadAny->Get() ) {
-    //             // may be eUTF8String
-    //             TByte alt_tag = MakeTagByte(eUniversal,ePrimitive,eUTF8String);
-    //             if ( PeekTagByte() == alt_tag ) {
-    //                 // optionally issue a warning
-    //                 if ( sx_ReadAny->Get() == 1 ) {
-    //                     ERR_POST_X_ONCE(10, Warning<<
-    //                                     "CObjectIStreamAsnBinary: UTF8String data for VisibleString member "<<GetStackTraceASN()<<", ASN.1 specification may need an update");
-    //                 }
-    //                 ExpectSysTagByte(alt_tag);
-    //                 return;
-    //             }
-    //         }
-    //         ExpectSysTag(eUniversal, ePrimitive, eVisibleString);
-    //     }
-    // }
-    // ```
     // (`ERR_POST_X_ONCE` posts once in the process; LOSAT reads one archive or strategy stream
     // in a process, and once in it, its delay buffers included.)
     fn expect_string_tag(&mut self, utf8: bool, cx: &mut Cx<'_>) -> R<()> {
@@ -752,18 +409,6 @@ fn unexpected_sys_tag(got: u8, expected: u8) -> ReadError {
 
 /// `UnexpectedMember`: the tag read, and every member or variant with its tag.
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1058-1067
-// ```c++
-// void CObjectIStreamAsnBinary::UnexpectedMember(TLongTag tag, const CItemsInfo& items)
-// {
-//     string message ="unexpected member: ["+NStr::IntToString(tag)+
-//                     "], should be one of: ";
-//     for ( CItemsInfo::CIterator i(items); i.Valid(); ++i ) {
-//         message += items.GetItemInfo(i)->GetId().GetName()+ "[" +
-//             NStr::IntToString(items.GetItemInfo(i)->GetId().GetTag()) + "] ";
-//     }
-//     ThrowError(fFormatError, message);
-// }
-// ```
 fn unexpected_member(tag: i32, items: &[Member]) -> ReadError {
     let mut message = format!("unexpected member: [{tag}], should be one of: ");
     for item in items {
@@ -775,39 +420,6 @@ fn unexpected_member(tag: i32, items: &[Member]) -> ReadError {
 /// `TagToString`: the class, `constructed/`, the universal type's name or the number, and the
 /// byte.
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:318-372
-// ```c++
-// string CObjectIStreamAsnBinary::TagToString(TByte byte)
-// {
-//     const char *cls, *con;
-//
-//     switch (byte & eTagClassMask) {
-//     default:
-//     case eUniversal:       cls = "";                break;
-//     case eApplication:     cls = "application/";    break;
-//     case eContextSpecific: cls = "contextspecific/";break;
-//     case ePrivate:         cls = "private/";        break;
-//     }
-//     string str(cls);
-//     switch (byte & eTagConstructedMask) {
-//     default:
-//     case ePrimitive:         con = "";              break;
-//     case eConstructed:       con = "constructed/";  break;
-//     }
-//     str += con;
-//     if ((byte & eTagClassMask) == eUniversal) {
-//         const char *v;
-//         switch (byte & eTagValueMask) {
-//         case eNone:              v= "None";             break;
-//         ...
-//         default:                 v= "unknown";          break;
-//         }
-//         str += v;
-//     } else {
-//         str += NStr::NumericToString((byte & eTagValueMask));
-//     }
-//     return str += " (" + NStr::NumericToString(byte) + ")";
-// }
-// ```
 fn tag_to_string(byte: u8) -> String {
     let class = match byte & TAG_CLASS_MASK {
         0x40 => "application/",
@@ -921,14 +533,6 @@ impl<S: AsnSource> Front for Ber<S> {
 
     /// `CObjectIStream::ReadFileHeader`: a byte must follow; no type name.
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1121-1126
-    // ```c++
-    // string CObjectIStream::ReadFileHeader(void)
-    // {
-    //     // this is to check if the file is empty or not
-    //     m_Input.PeekChar();
-    //     return NcbiEmptyString;
-    // }
-    // ```
     fn file_header(&mut self, _cx: &mut Cx<'_>) -> R<Vec<u8>> {
         self.peek(0)?;
         Ok(Vec::new())
@@ -936,55 +540,17 @@ impl<S: AsnSource> Front for Ber<S> {
 
     /// `BeginClass`: a SEQUENCE's identifier and length.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1029-1044
-    // ```c++
-    // void CObjectIStreamAsnBinary::BeginClass(const CClassTypeInfo* classType)
-    // {
-    // #if USE_OLD_TAGS
-    //     ExpectContainer(classType->RandomOrder());
-    // #else
-    //     _ASSERT(classType->HasTag());
-    //     _ASSERT(classType->IsTagConstructed());
-    //     bool need_eoc = !m_SkipNextTag;
-    //     if (!m_SkipNextTag) {
-    //         ExpectTag(classType->GetTagClass(), eConstructed, classType->GetTag());
-    //         ExpectIndefiniteLength();
-    //     }
-    // ```
     fn begin_class(&mut self, _ty: u16, _cx: &mut Cx<'_>) -> R<()> {
         self.expect_constructed(i32::from(TAG_SEQUENCE & TAG_VALUE_MASK))?;
         self.expect_indefinite_length()
     }
 
-    /// `BeginClassMember(classType, pos)` of an automatically tagged class: the next member's
-    /// context tag, one of the members from `pos`.
+    /// `BeginClassMember` of an automatically tagged class: the next member's context tag, one
+    /// of the members from `pos`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1122-1174
-    // ```c++
-    // TMemberIndex
-    // CObjectIStreamAsnBinary::BeginClassMember(const CClassTypeInfo* classType,
-    //                                           TMemberIndex pos)
-    // {
-    // #if USE_DEF_LEN
-    //     if (!HaveMoreElements()) {
-    //         return kInvalidMember;
-    //     }
-    //     TByte first_tag_byte = PeekTagByte();
-    // ...
-    //     TLongTag tag = PeekTag(first_tag_byte, eContextSpecific, eConstructed);
-    //     ExpectIndefiniteLength();
-    //     TMemberIndex index = classType->GetMembers().Find(tag, eContextSpecific, pos);
-    //     if ( index == kInvalidMember ) {
-    //         if (CanSkipUnknownMembers()) {
-    //             ...
-    //         }
-    //         else {
-    //             UnexpectedMember(tag, classType->GetItems());
-    //         }
-    //     }
-    //     return index;
-    // }
-    // ```
-    // (`Find(tag, eContextSpecific, pos)`, memberlist.cpp:462-473: the member whose tag it is,
-    // when its position is `pos` or later; NCBI's readers skip no unknown member by default.)
+    // (`Find` of a context-specific tag from the position `pos`, memberlist.cpp:462-473: the
+    // member whose tag it is, when its position is `pos` or later; NCBI's readers skip no
+    // unknown member by default.)
     fn next_member(
         &mut self,
         members: &'static [Member],
@@ -1008,75 +574,18 @@ impl<S: AsnSource> Front for Ber<S> {
 
     /// `EndClassMember`: the member's `00 00`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1176-1182
-    // ```c++
-    // void CObjectIStreamAsnBinary::EndClassMember(void)
-    // {
-    //     m_SkipNextTag = false;
-    //     if (!TopFrame().GetNoEOC()) {
-    //         ExpectEndOfContent();
-    //     }
-    // }
-    // ```
     fn end_member(&mut self, _cx: &mut Cx<'_>) -> R<()> {
         self.expect_end_of_content()
     }
 
     /// `EndClass`: the class's `00 00`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1046-1056
-    // ```c++
-    // void CObjectIStreamAsnBinary::EndClass(void)
-    // {
-    // #if USE_OLD_TAGS
-    //     ExpectEndOfContent();
-    // #else
-    //     m_SkipNextTag = false;
-    //     if (!TopFrame().GetNoEOC()) {
-    //         ExpectEndOfContent();
-    //     }
-    // #endif
-    // }
-    // ```
     fn end_class(&mut self, _cx: &mut Cx<'_>) -> R<()> {
         self.expect_end_of_content()
     }
 
     /// `ReadChoiceSimple` of an automatically tagged CHOICE: the variant's context tag.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1380-1412
-    // ```c++
-    // void CObjectIStreamAsnBinary::ReadChoiceSimple(const CChoiceTypeInfo* choiceType,
-    //                                                TObjectPtr choicePtr)
-    // {
-    //     BEGIN_OBJECT_FRAME3(eFrameChoice, choiceType, choicePtr);
-    //     BEGIN_OBJECT_FRAME(eFrameChoiceVariant);
-    //     TMemberIndex index;
-    //     if (choiceType->GetTagType() != eAutomatic) {
-    //         index = CObjectIStreamAsnBinary::BeginChoiceVariant(choiceType);
-    //     } else {
-    //         TLongTag tag = PeekTag(PeekTagByte(), eContextSpecific, eConstructed);
-    //         ExpectIndefiniteLength();
-    //         index = choiceType->GetVariants().Find(tag, eContextSpecific);
-    //         if ( index == kInvalidMember ) {
-    //             if (!CanSkipUnknownVariants()) {
-    //                 UnexpectedMember(tag, choiceType->GetItems());
-    //             }
-    //             SetFailFlags(fUnknownValue);
-    //             SkipAnyContent();
-    //         }
-    //     }
-    //     if ( index != kInvalidMember ) {
-    //         const CVariantInfo* variantInfo = choiceType->GetVariantInfo(index);
-    //         SetTopMemberId(variantInfo->GetId());
-    //         variantInfo->ReadVariant(*this, choicePtr);
-    //     }
-    //     if (choiceType->GetTagType() != eAutomatic) {
-    //         CObjectIStreamAsnBinary::EndChoiceVariant();
-    //     } else {
-    //         ExpectEndOfContent();
-    //     }
-    //     END_OBJECT_FRAME();
-    //     END_OBJECT_FRAME();
-    // }
-    // ```
     fn begin_variant(
         &mut self,
         _ty: u16,
@@ -1098,40 +607,6 @@ impl<S: AsnSource> Front for Ber<S> {
 
     /// `ReadContainer`'s start: the SEQUENCE OF's (16) or SET OF's (17) identifier and length.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:955-1000
-    // ```c++
-    // void CObjectIStreamAsnBinary::ReadContainer(const CContainerTypeInfo* cType,
-    //                                             TObjectPtr containerPtr)
-    // {
-    // #if USE_OLD_TAGS
-    //     ExpectContainer(cType->RandomElementsOrder());
-    // #else
-    //     BEGIN_OBJECT_FRAME2(eFrameArray, cType);
-    //     _ASSERT(cType->HasTag());
-    //     _ASSERT(cType->IsTagConstructed());
-    //     bool need_eoc = !m_SkipNextTag;
-    //     if (!m_SkipNextTag) {
-    //         ExpectTag(cType->GetTagClass(), eConstructed, cType->GetTag());
-    //         ExpectIndefiniteLength();
-    //     }
-    //     m_SkipNextTag = cType->IsTagImplicit();
-    // #endif
-    //
-    //     BEGIN_OBJECT_FRAME(eFrameArrayElement);
-    //     ...
-    //     while ( HaveMoreElements() ) {
-    //     ...
-    //     END_OBJECT_FRAME();
-    //
-    // #if USE_OLD_TAGS
-    //     ExpectEndOfContent();
-    // #else
-    //     if (need_eoc) {
-    //         ExpectEndOfContent();
-    //     }
-    //     END_OBJECT_FRAME();
-    // #endif
-    // }
-    // ```
     fn begin_list(&mut self, set: bool, _cx: &mut Cx<'_>) -> R<()> {
         self.expect_constructed(if set { 17 } else { 16 })?;
         self.expect_indefinite_length()
@@ -1151,45 +626,7 @@ impl<S: AsnSource> Front for Ber<S> {
     /// `ReadStdUnsigned`) and `ReadInt2` (an Int4 that must fit), or the skip (`SkipSNumber`,
     /// `SkipUNumber`: the tag and the bytes, no range).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:569-591
-    // ```c++
-    // Int4 CObjectIStreamAsnBinary::ReadInt4(void)
-    // {
-    //     ExpectIntegerTag();
-    //     Int4 data;
-    //     ReadStdSigned(*this, data);
-    //     return data;
-    // }
-    //
-    // Uint4 CObjectIStreamAsnBinary::ReadUint4(void)
-    // {
-    //     ExpectIntegerTag();
-    //     Uint4 data;
-    //     ReadStdUnsigned(*this, data);
-    //     return data;
-    // }
-    //
-    // Int8 CObjectIStreamAsnBinary::ReadInt8(void)
-    // {
-    //     ExpectIntegerTag();
-    //     Uint8 data;
-    //     ReadStdSigned(*this, data);
-    //     return data;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2077-2087
-    // ```c++
-    // void CObjectIStreamAsnBinary::SkipSNumber(void)
-    // {
-    //     ExpectIntegerTag();
-    //     SkipTagData();
-    // }
-    //
-    // void CObjectIStreamAsnBinary::SkipUNumber(void)
-    // {
-    //     ExpectIntegerTag();
-    //     SkipTagData();
-    // }
-    // ```
     // (`CObjectIStream::ReadInt2`, objistr.cpp:1697-1704: "integer overflow".)
     fn integer(
         &mut self,
@@ -1221,25 +658,6 @@ impl<S: AsnSource> Front for Ber<S> {
     /// `ReadEnum` (the skip, `SkipEnum`, reads the same): an INTEGER with named values takes any
     /// number, an ENUMERATED one of its values.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2023-2039
-    // ```c++
-    // TEnumValueType
-    // CObjectIStreamAsnBinary::ReadEnum(const CEnumeratedTypeValues& values)
-    // {
-    //     TEnumValueType value;
-    //     if ( values.IsInteger() ) {
-    //         // allow any integer
-    //         ExpectIntegerTag();
-    //         ReadStdSigned(*this, value);
-    //     }
-    //     else {
-    //         // enum element by value
-    //         ExpectSysTag(eEnumerated);
-    //         ReadStdSigned(*this, value);
-    //         values.FindName(value, false); // check value
-    //     }
-    //     return value;
-    // }
-    // ```
     fn enumerated(
         &mut self,
         _ty: u16,
@@ -1262,16 +680,6 @@ impl<S: AsnSource> Front for Ber<S> {
 
     /// `ReadBool` / `SkipBool`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:551-558
-    // ```c++
-    // bool CObjectIStreamAsnBinary::ReadBool(void)
-    // {
-    //     ExpectSysTag(eBoolean);
-    //     ExpectShortLength(1);
-    //     bool ret = ReadByte() != 0;
-    //     EndOfTag();
-    //     return ret;
-    // }
-    // ```
     fn boolean(&mut self, _ty: u16, _skip: bool, _cx: &mut Cx<'_>) -> R<bool> {
         self.expect_sys_tag(TAG_BOOLEAN)?;
         self.expect_short_length(1)?;
@@ -1280,14 +688,6 @@ impl<S: AsnSource> Front for Ber<S> {
 
     /// `ReadNull` / `SkipNull`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1505-1510
-    // ```c++
-    // void CObjectIStreamAsnBinary::ReadNull(void)
-    // {
-    //     ExpectSysTag(eNull);
-    //     ExpectShortLength(0);
-    //     EndOfTag();
-    // }
-    // ```
     fn null(&mut self, _ty: u16, _skip: bool, _cx: &mut Cx<'_>) -> R<()> {
         self.expect_sys_tag(TAG_NULL)?;
         self.expect_short_length(0)
@@ -1295,70 +695,7 @@ impl<S: AsnSource> Front for Ber<S> {
 
     /// `ReadDouble` / `SkipFNumber`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:603-646
-    // ```c++
-    // double CObjectIStreamAsnBinary::ReadDouble(void)
-    // {
-    //     ExpectSysTag(eReal);
-    //     size_t length = ReadLength();
-    //     if ( length < 2 ) {
-    //         if ( length == 0 ) {
-    //             EndOfTag();
-    //             return 0.;
-    //         }
-    //         Uint1 special = ReadByte();
-    //         EndOfTag();
-    //         if (special == ePositiveInfinity) {
-    //             return HUGE_VAL;
-    //         } else if (special == eNegativeInfinity) {
-    //             return -HUGE_VAL;
-    //         } else if (special == eNotANumber) {
-    // 	    return HUGE_VAL/HUGE_VAL; /* NCBI_FAKE_WARNING */
-    //         } else if (special == eNegativeZero) {
-    //             return -0.;
-    //         }
-    //         ThrowError(fFormatError, "Unrecognized REAL data");
-    //     }
-    //     if ( length > kMaxDoubleLength ) {
-    //         ThrowError(fFormatError, "too long REAL data: length > "
-    //             + NStr::SizetToString(kMaxDoubleLength));
-    //     }
-    //
-    //     Uint1 type = ReadByte();
-    //     if ((type & eDecimalEncoding) != eDecimal) {
-    //         ThrowError(fNotImplemented, "Unsupported encoding of REAL data: encoding = "
-    //             + NStr::NumericToString(type));
-    //     }
-    //     length--;
-    //     char buffer[kMaxDoubleLength + 2];
-    //     ReadBytes(buffer, length);
-    //     EndOfTag();
-    //     buffer[length] = 0;
-    //     char* endptr;
-    //     double result = NStr::StringToDoublePosix(buffer, &endptr, NStr::fDecimalPosixFinite);
-    //     if ( *endptr != 0 ) {
-    //         ThrowError(fFormatError, "bad REAL data string");
-    //     }
-    //     return result;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2089-2103
-    // ```c++
-    // void CObjectIStreamAsnBinary::SkipFNumber(void)
-    // {
-    //     ExpectSysTag(eReal);
-    //     size_t length = ReadLength();
-    //     if ( length != 0 ) {
-    //         if ( length > kMaxDoubleLength )
-    //             ThrowError(fFormatError, "too long REAL data: length > "
-    //                 + NStr::SizetToString(kMaxDoubleLength));
-    //
-    //         ReadByte();
-    //         length--;
-    //         SkipBytes(length);
-    //     }
-    //     EndOfTag();
-    // }
-    // ```
     fn real(&mut self, _ty: u16, skip: bool, _cx: &mut Cx<'_>) -> R<Option<f64>> {
         let too_long =
             || ReadError::Serial(format!("too long REAL data: length > {MAX_DOUBLE_LENGTH}"));
@@ -1410,54 +747,10 @@ impl<S: AsnSource> Front for Ber<S> {
     /// (application tag 1, no fix), or the skips (`SkipString`, `SkipStringStore`: the tag and
     /// the bytes).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:785-827
-    // ```c++
-    // void CObjectIStreamAsnBinary::ReadString(string& s, EStringType type)
-    // {
-    //     ExpectStringTag(type);
-    //     ReadStringValue(ReadLength(), s,
-    //                     type == eStringTypeVisible? x_FixCharsMethod(): eFNP_Allow);
-    // }
-    //
-    //
-    // void CObjectIStreamAsnBinary::ReadStringStore(string& s)
-    // {
-    //     if (m_SkipNextTag) {
-    //         m_SkipNextTag = false;
-    //     } else {
-    //         ExpectSysTagByte(MakeTagByte(eApplication, ePrimitive, eStringStore));
-    //     }
-    //     ReadStringValue(ReadLength(), s, eFNP_Allow);
-    // }
-    //
-    // void CObjectIStreamAsnBinary::ReadStringValue(size_t length,
-    //                                               string& s,
-    //                                               EFixNonPrint fix_method)
-    // {
-    //     static const size_t BUFFER_SIZE = 1024;
-    //     if ( length != s.size() || length > BUFFER_SIZE ) {
-    //         // new string
-    //         ReadBytes(s, length);
-    //         if (fix_method != eFNP_Allow) {
-    //             FixVisibleChars(s, fix_method);
-    //         }
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2105-2115
-    // ```c++
-    // void CObjectIStreamAsnBinary::SkipString(EStringType type)
-    // {
-    //     ExpectStringTag(type);
-    //     SkipTagData();
-    // }
-    //
-    // void CObjectIStreamAsnBinary::SkipStringStore(void)
-    // {
-    //     ExpectSysTag(eApplication, ePrimitive, eStringStore);
-    //     SkipTagData();
-    // }
-    // ```
-    // (A string the reader makes is empty, so its bytes go through `FixVisibleChars(string&)`;
-    // the buffer form, for a string of the same length as the old one, fixes the same bytes.)
+    // (A string the reader makes is empty, so its bytes go through the string form of
+    // `FixVisibleChars`; the buffer form, for a string of the same length as the old one, fixes
+    // the same bytes.)
     fn string(&mut self, _ty: u16, kind: StringKind, skip: bool, cx: &mut Cx<'_>) -> R<Vec<u8>> {
         match kind {
             StringKind::Store => self.expect_sys_tag(TAG_STRING_STORE)?,
@@ -1480,39 +773,7 @@ impl<S: AsnSource> Front for Ber<S> {
     /// `ReadBytes` of an OCTET STRING (or a BIT STRING, without its first byte), or the skip
     /// (`SkipByteBlock`: an OCTET STRING's tag and bytes).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1448-1473
-    // ```c++
-    // void CObjectIStreamAsnBinary::BeginBytes(ByteBlock& block)
-    // {
-    //     CAsnBinaryDefs::ETagValue type = CAsnBinaryDefs::eNone;
-    //     TByte bt = PeekByte();
-    //     if (bt == MakeTagByte(eUniversal, ePrimitive, eOctetString)) {
-    //         type = eOctetString;
-    //     } else if (bt == MakeTagByte(eUniversal, ePrimitive, eBitString)) {
-    //         type = eBitString;
-    //     } else if (m_SkipNextTag) {
-    //         ...
-    //     }
-    //     if (type == eOctetString) {
-    //         ExpectSysTag(eOctetString);
-    //         block.SetLength(ReadLength());
-    //     } else if (type == eBitString) {
-    //         ExpectSysTag(eBitString);
-    //         block.SetLength(ReadLength()-1);
-    //         ReadByte();
-    //     } else {
-    //         ThrowError(fUnknownValue,
-    //             "Unable to identify the type of byte block");
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2124-2128
-    // ```c++
-    // void CObjectIStreamAsnBinary::SkipByteBlock(void)
-    // {
-    //     ExpectSysTag(eOctetString);
-    //     SkipTagData();
-    // }
-    // ```
     // (A BIT STRING of length 0 has `SIZE_MAX` bytes: its bytes reach the end of the data.)
     fn octets(&mut self, _ty: u16, skip: bool, _cx: &mut Cx<'_>) -> R<Option<Vec<u8>>> {
         if skip {
@@ -1542,8 +803,8 @@ impl<S: AsnSource> Front for Ber<S> {
     }
 
     /// `CObjectIStream::StartDelayBuffer`: the buffer starts at the member's identifier.
-    // NCBI reference (598d8ae6): c++/src/serial/member.cpp:848-869 (quoted at
-    // `read_text::Text::delay_start`: the member's value skipped into the buffer)
+    // NCBI reference (598d8ae6): c++/src/serial/member.cpp:848-869
+    // (The member's value is skipped into the buffer.)
     fn delay_start(&mut self, _cx: &mut Cx<'_>) -> R<usize> {
         self.held = Some(self.pos);
         Ok(self.pos)
@@ -1566,18 +827,8 @@ impl<S: AsnSource> Front for Ber<S> {
 }
 
 impl<S: AsnSource> Ber<S> {
-    /// `ExpectShortLength(length)`.
+    /// `ExpectShortLength`.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:364-371
-    // ```c++
-    // inline
-    // void CObjectIStreamAsnBinary::ExpectShortLength(size_t length)
-    // {
-    //     size_t got = ReadShortLength();
-    //     if ( got != length ) {
-    //         UnexpectedShortLength(got, length);
-    //     }
-    // }
-    // ```
     fn expect_short_length(&mut self, length: usize) -> R<()> {
         let got = self.short_length()?;
         if got != length {
@@ -1588,48 +839,10 @@ impl<S: AsnSource> Ber<S> {
         Ok(())
     }
 
-    /// `FixVisibleChars(string&, eFNP_ReplaceAndWarn)`: each byte outside 0x20..0x7E posted (the
-    /// string as fixed so far, the position after its bytes) and replaced by `#`.
+    /// `FixVisibleChars` with the method `eFNP_ReplaceAndWarn`: each byte outside 0x20..0x7E
+    /// posted (the string as fixed so far, the position after its bytes) and replaced by `#`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:703-749
-    // ```c++
-    // bool CObjectIStreamAsnBinary::FixVisibleChars(string& str, EFixNonPrint fix_method)
-    // {
-    //     _ASSERT(fix_method != eFNP_Allow);
-    //     bool result = false;
-    //     char subst = x_FixCharsSubst();
-    //     string::iterator to = str.end();
-    //     if (fix_method == eFNP_Replace && subst != '\0') {
-    //         ...
-    //     } else {
-    //         for(string::iterator i = str.begin(); i < to; ++i) {
-    //             if ( BadVisibleChar(*i) ) {
-    // #if SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING
-    //                 ...
-    // #endif
-    //                 {
-    //                     char c = ReplaceVisibleChar(*i, fix_method, this, str, subst);
-    //                     if (c != '\0') {
-    //                         *i = subst;
-    //                     } else {
-    //                         str.erase(i);
-    //                         to = str.end();
-    //                     }
-    //                     result = true;
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     return result;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:815-819
-    // ```c++
-    // void CObjectIStream::Location(string& loc_type, size_t& loc) const
-    // {
-    //     loc_type = "byte";
-    //     loc = NcbiStreamposToInt8(GetStreamPos());
-    // }
-    // ```
     // (`CObjectIStreamAsnBinary` keeps `Location` of its base: `GetPosition`, objistr.cpp:807-813,
     // is "byte <position>".)
     fn fix_visible_chars(&mut self, string: &mut [u8], cx: &mut Cx<'_>) {

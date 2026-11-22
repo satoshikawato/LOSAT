@@ -8,13 +8,6 @@
 //! of `tests/db_search_manifest/tblastx.tsv` and `tests/xml_dbname.rs`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
-//! ```c++
-//!     if( incremental_output && incremental_struct->m_IterationNum == 0) {
-//!         ...
-//!         *out_stream << serial_xml_start << "\n<BlastOutput_iterations>" ;
-//!         incremental_struct->m_SerialXmlEnd = "\n</BlastOutput_iterations>" + serial_xml_end;
-//!     }
-//! ```
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -286,7 +279,7 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
         let stderr = String::from_utf8_lossy(&failed.stderr);
         assert_eq!(failed.status.code(), Some(1), "{stderr}");
         assert!(
-            stderr.starts_with("BLAST query error: CFastaReader: "),
+            stderr.starts_with("LOSAT query error: CFastaReader: "),
             "{stderr}"
         );
         let partial = String::from_utf8(failed.stdout).expect("ASCII");

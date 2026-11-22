@@ -1,15 +1,6 @@
 //! The Bioseq of a query or subject record in a BLAST archive.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:597-603
-//! ```c++
-//!     if ( !TestFlag(fNoUserObjs) ) {
-//!         // store the raw defline in a User-object for reference
-//!         CRef<CSeqdesc> desc(new CSeqdesc);
-//!         desc->SetUser().SetType().SetStr("CFastaReader");
-//!         desc->SetUser().AddField("DefLine", NStr::PrintableString(s));
-//!         m_CurrentSeq->SetDescr().Set().push_back(desc);
-//!     }
-//! ```
 //! A record is `id { local str "Query_N" }` (`Subject_N` for `-subject`), `descr` with the
 //! `CFastaReader` user object (the raw defline line) and the `title` (absent when it is
 //! empty), and `inst` (`repr raw`, `mol na|aa`, the length and the data: `ncbi2na` when every
@@ -214,9 +205,6 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
     enc.member("data", 2);
     enc.variant("User-field_data", "str", 0);
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:601
-    // ```c++
-    //         desc->SetUser().AddField("DefLine", NStr::PrintableString(s));
-    // ```
     // The default mode `fNewLine_Quote` writes a line feed as `\n` (ncbistr.hpp:2730).
     enc.visible_str(&crate::ncbi_str::printable_string(&bioseq.defline));
     enc.end_variant();
@@ -289,37 +277,5 @@ pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The `DefLine` field is `NStr::PrintableString(s)` of the raw line (fasta.cpp:601) in the
-    /// default `fNewLine_Quote` mode: a line feed, which only a record the library builds can
-    /// hold, is written as `\n`.
-    #[test]
-    fn the_defline_field_quotes_a_line_feed() {
-        let mut buf = Vec::new();
-        let mut enc = crate::report::serial::asn_text::AsnTextEncoder::new(&mut buf);
-        let bioseq = BioseqInput {
-            id: "Query_1",
-            ids: None,
-            seq_loc: None,
-            defline: std::borrow::Cow::Borrowed(b">a\nb"),
-            title: b"a",
-            letters: b"MKV",
-            protein: true,
-        };
-        write_bioseq(&mut enc, &bioseq);
-        assert_eq!(enc.error(), None);
-        let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains(r#"str ">a\nb""#), "{text}");
-    }
-
-    #[test]
-    fn nucleotides_pack_into_two_or_four_bits() {
-        assert_eq!(pack_nucleotides(b"ACGT"), (true, vec![0b0001_1011]));
-        assert_eq!(pack_nucleotides(b"acgta"), (true, vec![0b0001_1011, 0]));
-        // N makes the whole sequence ncbi4na: A=1 C=2 N=15 T=8.
-        assert_eq!(pack_nucleotides(b"ACNT"), (false, vec![0x12, 0xf8]));
-        assert_eq!(pack_nucleotides(b"RYK"), (false, vec![0x5a, 0xc0]));
-    }
-}
+#[path = "bioseq_tests.rs"]
+mod tests;

@@ -10,11 +10,20 @@
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
-import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type ProgramId, type RunFile, type RunOutput } from 'losat/domain';
+import {
+  WINDOW_MASKER_FLAG,
+  WINDOW_MASKER_TAXID_FLAG,
+  type FastaReader,
+  type PrintedKind,
+  type ProgramId,
+  type RunFile,
+  type RunOutput,
+} from 'losat/domain';
 import {
   isUnavailable,
   RunCancelledError,
   runFilesOf,
+  runOutputFailedOf,
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
@@ -24,10 +33,9 @@ import {
 } from 'losat/ports';
 import { buildArgv, optionValue, PASTED_NAMES } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
-import { outputFileName, outputMediaType, runFileName, runOutputs } from '../domain/output-format';
-import { fastaParser, programById } from '../domain/programs';
+import { outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
 import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
-import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
+import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import { failureText } from './availability';
 import { registryName, unreadableConffile } from './conffile';
@@ -96,8 +104,10 @@ export interface CoordinatorDeps {
   readonly dataWorkerEnded?: Promise<Error>;
 }
 
-export type EnqueueResult = ValidationResult & { readonly runId?: string };
-export type EnqueueAllResult = ValidationResult & { readonly runIds?: readonly string[] };
+/** Whether a request was queued, or why not (a refusal of its argv is the validation's). */
+type Queued = { readonly ok: true } | { readonly ok: false; readonly message: string };
+export type EnqueueResult = Queued & { readonly runId?: string };
+export type EnqueueAllResult = Queued & { readonly runIds?: readonly string[] };
 
 const PHASE_STATUS: Readonly<Record<EnginePhase, RunStatus>> = {
   preparing: 'preparing',
@@ -171,7 +181,7 @@ export class Coordinator {
       }
       if (!start.ok) return start;
       let conffile: Prepared['conffile'];
-      const { dryRun } = start.start;
+      const { dryRun, prints } = start.start;
       // The file chosen for the argv's -conffile, under its name (`registryName`: none for `-conffile=`).
       const conffileName = registryName(start.start);
       if (conffileName !== undefined && request.conffile !== undefined) {
@@ -192,7 +202,7 @@ export class Coordinator {
         return { ok: false, message: uncheckedOptions(error) };
       }
       if (!validation.ok) return validation;
-      prepared.push({ request, argv, queryName, subjectName, conffile, dryRun });
+      prepared.push({ request, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders: validation.dataLoaders });
     }
 
     // The snapshots hold what the runs need: the sources made here from text and files are
@@ -213,13 +223,15 @@ export class Coordinator {
     /** The bytes of the registry file of each snapshot, in their order. */
     const conffiles: Array<Blob | undefined> = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
-    for (const [index, { request, argv, queryName, subjectName, conffile, dryRun }] of prepared.entries()) {
-      const program = programById(request.program);
+    for (const [index, { request, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders }] of prepared.entries()) {
       let query: InputSnapshot;
       let subject: InputSnapshot;
+      // The engine's readers of the run's inputs, with the data loaders of its registry (line WQA's D16, 2026-11-20).
+      const reader = (role: 'query' | 'subject'): FastaReader => ({ program: request.program, role, dataLoaders });
       try {
-        query = await this.snapshotInput('Query', request.query, queryName, fastaParser(program, 'query'), made);
-        subject = await this.snapshotInput('Subject', request.subject, subjectName, fastaParser(program, 'subject'), made);
+        // A run that prints the command line's help or version reads no input (line WQA's D14, 2026-11-20).
+        query = prints !== null ? await this.noInput(queryName) : await this.snapshotInput('Query', request.query, queryName, reader('query'), made);
+        subject = prints !== null ? await this.noInput(subjectName) : await this.snapshotInput('Subject', request.subject, subjectName, reader('subject'), made);
       } catch (error) {
         return { ok: false, message: failureText(error) };
       }
@@ -250,6 +262,7 @@ export class Coordinator {
           ...(windowMasker === undefined ? {} : { windowMasker }),
           ...(conffile === undefined ? {} : { conffile: conffile.snapshot }),
           ...(dryRun ? { dryRun: true as const } : {}),
+          ...(prints === null ? {} : { prints }),
           queuedAt: this.deps.now(),
           ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: prepared.length }) }),
         }),
@@ -312,10 +325,13 @@ export class Coordinator {
     this.deps.engine.cancel(runId);
   }
 
-  /** Saves one compatibility output of a completed run, byte for byte, named by outputFileName, with its format's media type. */
+  /**
+   * Saves one compatibility output of a run that kept its outputs (a completed run, or a failed run: the bytes that the
+   * CLI leaves before its error), byte for byte, named by outputFileName, with its format's media type.
+   */
   async exportOutput(runId: string, output: RunOutput): Promise<void> {
     const view = this.find(runId);
-    if (view?.status !== 'completed') throw new Error('only completed runs can be exported');
+    if (view?.result === undefined) throw new Error('only runs that kept their outputs can be exported');
     const { number, program, argv, queuedAt } = view.snapshot;
     const [bytes, task] = await Promise.all([this.deps.data.readOutput(runId, output), this.taskOf(view.snapshot)]);
     this.deps.downloader.save(outputFileName({ number, program, task, queuedAt, argv }, output), bytes, outputMediaType(argv, output));
@@ -334,6 +350,26 @@ export class Coordinator {
     this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name), file.bytes, 'text/plain');
   }
 
+  /** The input of a run that reads none (one that prints the command line's help or version): no bytes, no records. */
+  private async noInput(name: string): Promise<InputSnapshot> {
+    const bytes = new Uint8Array(0);
+    return Object.freeze({ name, bytes, sha256: await this.deps.digest(bytes), revisionIds: Object.freeze([]), records: Object.freeze([]) });
+  }
+
+  /**
+   * Saves the text that a run printed in place of a search (RunRecord.printed: the command line's help or version; line
+   * WQA's D14, 2026-11-20), its bytes as the engine wrote them, named by printedFileName.
+   */
+  async exportPrinted(runId: string): Promise<void> {
+    const view = this.find(runId);
+    const bytes = view?.record.printed;
+    const kind = view?.snapshot.prints;
+    if (view?.status !== 'completed' || bytes === undefined || kind === undefined) throw new Error('the run printed no text');
+    const { number, program, argv, queuedAt } = view.snapshot;
+    const task = await this.taskOf(view.snapshot);
+    this.deps.downloader.save(printedFileName({ number, program, task, queuedAt, argv }, kind, bytes), bytes, printedFileType(bytes).type);
+  }
+
   /**
    * Reads the file chosen for `-conffile` once: its bytes as a Blob (a copy that the file's later
    * changes do not reach), the run's input, and their SHA-256.
@@ -350,14 +386,15 @@ export class Coordinator {
     return description === undefined ? optionValue(snapshot.argv, '-task') : taskOf(snapshot.argv, description).task;
   }
 
-  /** Opens one output of a completed run without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
+  /** Opens one output of a run that kept its outputs without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
   async checkOutput(runId: string, output: RunOutput): Promise<void> {
-    if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
+    if (this.find(runId)?.result === undefined) throw new Error('run has no outputs');
     await this.deps.data.readOutputRange(runId, output, 0, 0);
   }
 
+  /** One output of a run that kept its outputs (a completed run, or a failed run: what the CLI leaves before its error). */
   async readOutput(runId: string, output: RunOutput): Promise<string> {
-    if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
+    if (this.find(runId)?.result === undefined) throw new Error('run has no outputs');
     return new TextDecoder().decode(await this.deps.data.readOutput(runId, output));
   }
 
@@ -396,7 +433,7 @@ export class Coordinator {
     role: string,
     input: SequenceInput,
     name: string,
-    parser: FastaParserKind,
+    reader: FastaReader,
     made: Made,
   ): Promise<InputSnapshot> {
     try {
@@ -418,7 +455,7 @@ export class Coordinator {
         const file = 'file' in input ? input.file : new File([input.text], name, { type: 'text/plain' });
         const source = await this.deps.data.addSource(file);
         made.sources.push(source.sourceId);
-        const revision = await this.deps.data.indexSource(source.sourceId, parser);
+        const revision = await this.deps.data.indexSource(source.sourceId, reader);
         revisionIds = Object.freeze([revision.revisionId]);
         runInput = this.deps.data.buildRunInput(revisionIds);
       }
@@ -446,8 +483,11 @@ export class Coordinator {
     const conffile = this.conffiles.get(runId);
     let staged = false;
     const startedAt = this.deps.now();
-    // The files that the run made besides its outputs, which a completed and a failed run keep.
+    // The files that the run made besides its outputs, which a completed and a failed run keep, and
+    // whether the engine ended the output of a failed run with `fail`, after which the data layer has
+    // the warnings that it wrote before its error (a completed run's are in its results).
     let runFiles: readonly RunFile[] | undefined;
+    let outputFailed = false;
     // Why the run was stopped (stopActive), if it was.
     let stop: Error | undefined;
     const stopped = new Promise<never>((_, reject) => {
@@ -480,6 +520,7 @@ export class Coordinator {
         (phase) => this.onPhase(runId, phase),
       ).catch((error: unknown) => {
         runFiles = runFilesOf(error);
+        outputFailed = runOutputFailedOf(error);
         throw error;
       });
       const runtime = await Promise.race([search, stopped]);
@@ -510,18 +551,32 @@ export class Coordinator {
             ? {}
             : { windowMasker: { ...runtime.windowMasker, ...(snapshot.windowMasker?.origin === undefined ? {} : { origin: snapshot.windowMasker.origin }) } }),
           ...(runFiles === undefined ? {} : { runFiles }),
+          ...(runtime.printed === undefined ? {} : { printed: runtime.printed }),
         },
       });
     } catch (error) {
-      // Not waited for: a Data worker that does not answer must not keep the run from ending (line WQA's sweep, D2).
-      if (staged) void this.deps.data.discardRun(runId).catch(() => undefined);
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
+      // A failed run keeps the outputs that the CLI leaves before its error, and the warnings that it wrote before it
+      // (stream 3), which the data layer commits as it commits a completed run's (docs/web/abi_v2.md §5; line WQA's
+      // sweep, D3, 2026-11-19, and D15, 2026-11-20). A stop (Cancel, the end of the Data worker) ends that wait, and the
+      // other discards are not waited for: a Data worker that does not answer must not keep the run from ending (line
+      // WQA's sweep, D2). What was kept after the wait ended is deleted.
+      let kept: KeptRun | undefined;
+      if (staged && outputFailed && !cancelled && stop === undefined) {
+        const keeping = this.deps.data.keepFailedRun(runId);
+        kept = await Promise.race([keeping, stopped]).catch(() => {
+          void keeping.then((late) => (late === undefined ? undefined : this.deps.data.deleteRun(runId))).catch(() => undefined);
+          return undefined;
+        });
+      } else if (staged) void this.deps.data.discardRun(runId).catch(() => undefined);
       this.update(runId, {
         status: cancelled ? 'cancelled' : 'failed',
+        ...(kept?.result === undefined ? {} : { result: kept.result }),
         record: {
           endedAt: this.deps.now(),
           ...(cancelled ? {} : { error: failureText(error) }),
           ...(cancelled || runFiles === undefined ? {} : { runFiles }),
+          ...(cancelled || !kept?.diagnostics ? {} : { diagnostics: kept.diagnostics }),
         },
       });
     } finally {
@@ -570,6 +625,10 @@ interface Prepared {
   /** The registry file of the argv's `-conffile`, read from the chosen file: what the snapshot keeps of it, and its bytes. */
   readonly conffile: { readonly snapshot: ConffileSnapshot; readonly file: Blob } | undefined;
   readonly dryRun: boolean;
+  /** What the run prints in place of a search, as the engine's start says; null for a search. */
+  readonly prints: PrintedKind | null;
+  /** Whether the run reads its inputs with NCBI's data loaders on (the validation's verdict: `[BLAST] DATA_LOADERS` of its registry). */
+  readonly dataLoaders: boolean;
 }
 
 /** What one enqueueAll made: sources of text and files, and the cached run inputs of dataset revisions. */

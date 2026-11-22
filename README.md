@@ -5,119 +5,51 @@
   </picture>
 </p>
 
-# LOSAT: LOcal Sequence Alignment Tool
+<h3 align="center">LOSAT: LOcal Sequence Alignment Tool. NCBI BLAST+ 2.17.0's local searches, written in Rust, for the command line, Rust, Python and the browser</h3>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.92%2B-orange.svg)](https://www.rust-lang.org)
-[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](https://anaconda.org/bioconda/losat)
-[![Conda Version](https://img.shields.io/conda/vn/bioconda/losat.svg?style=flat)](https://anaconda.org/bioconda/losat)
-[![WebAssembly](https://img.shields.io/badge/Wasm-WASI%20%7C%20Web-purple.svg)](#webassembly-wasm-integration)
-[![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/downloads.svg)](https://anaconda.org/bioconda/losat)
-[![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/latest_release_date.svg)](https://anaconda.org/bioconda/losat)
-[![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/platforms.svg)](https://anaconda.org/bioconda/losat)
-
-
-**LOSAT** is a lightweight, pure-Rust reimplementation of the NCBI BLAST sequence alignment algorithm. It compares query sequences with subject sequences from FASTA files (`-query` vs `-subject`) and searches BLAST databases (`-db`), including those written by NCBI's `makeblastdb` or by `losat makeblastdb`.
-
-On the pairwise profiles and fixtures of its [release test set](docs/release/v0.2.0_certification_plan.md), LOSAT is checked against declared NCBI source, executable, or API oracle contracts for scores, E-values, coordinates, and output. Exact-byte parity applies where each contract requires it; documented local subject genetic-code exceptions apply to TBLASTX and TBLASTN. LOSAT runs without external C/C++ libraries or a BLAST+ installation, and a `-subject` search needs no pre-formatted database. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
+<p align="center">
+  <a href="https://satoshikawato.github.io/LOSAT/">User manual</a> •
+  <a href="benchmarks/v0.2.0/README.md">v0.2.0 benchmarks</a> •
+  <a href="LOSAT/README.md">Rust library</a> •
+  <a href="python/README.md">Python package</a> •
+  <a href="web/packages/losat/README.md">WebAssembly package</a>
+</p>
 
 ---
 
-## Key Highlights
+**LOSAT** runs the local search programs and database tools of NCBI BLAST+ 2.17.0 with their command lines and writes their output. It is one executable written in Rust: it needs no BLAST+ installation, and it does not call NCBI's programs or libraries. `losat --install-shims` puts it in place of BLAST+ in an existing pipeline, so scripts that call `blastn` or `makeblastdb` run unchanged. The same engine is also a Rust library, a Python package (`pylosat`) and a WebAssembly package for the browser.
 
-- **NCBI Parity on Test Fixtures**: Matches the declared NCBI source, CLI, or API oracle contract on the release test fixtures, including exact output bytes where required and the documented local subject genetic-code exceptions.
-- **Pure Rust, Zero Dependencies**: Standalone single executable. Does not wrap, link, or shell out to external NCBI binaries or libraries.
-- **Direct Pairwise Alignment**: Compares FASTA files directly via `-query` and `-subject` without running `makeblastdb`.
-- **WebAssembly Ready**: Compiles to serial and threaded command-WASI (see [Platforms](#platforms)) and runs in the browser through the [Web GUI (preview)](#web-gui-preview). Browser/reactor APIs exist for integrations such as [gbdraw](https://github.com/satoshikawato/gbdraw).
-- **Corrected TBLASTX Genetic Codes**: Fully respects `-db_gencode` for translated subject sequences in pairwise searches (resolving NCBI BLAST+'s default fallback to standard code; see [Scope & Differences](#scope--differences-from-ncbi-blast)).
-- **High Performance**: Multithreaded execution via Rayon natively and shared-memory threading in WebAssembly (`wasm32-wasip1-threads`).
+On the v0.2.0 release test set, LOSAT writes the same output as NCBI BLAST+ 2.17.0, apart from the [differences listed in the manual](docs/manual/src/differences.md) (among them the line that names the program's version, which says `BLASTN (LOSAT 0.2.0)` where NCBI writes `BLASTN 2.17.0+`), and the same output at every `-num_threads`. It searches FASTA subjects (`-subject`) on all the threads you give it, where NCBI BLAST+ uses one, reads gzip, bzip2 and Zstandard FASTA directly, and keeps its memory small on large databases: a search of `core_nt` (319.4 GB) peaked at 407 MiB of resident memory, where NCBI BLAST+ peaked at 257.4 GiB (LOSAT `095ff0c16`, an earlier development build; NCBI BLAST+ maps the database files into memory, so its figure includes file pages the system can drop).
 
----
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="benchmarks/v0.2.0/figures/fig1_standard_workloads_dark.png">
+    <img alt="Wall time and peak memory of LOSAT 0.2.0 and NCBI BLAST+ 2.17.0 in 12 search modes, 1 and 16 threads" src="benchmarks/v0.2.0/figures/fig1_standard_workloads.png" width="100%">
+  </picture>
+</p>
 
-## Supported Programs & Tasks
-
-| Program | Supported Tasks | Output Formats (`-outfmt`) | Description |
-|:---|:---|:---|:---|
-| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `17`, `18`, `20` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
-| **`blastx`** | `blastx` (default), `blastx-fast`; native and Wasm entry points | `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `18`, `20` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
-| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `18`, `20` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
-| **`tblastx`** | `tblastx` | `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `18`, `20` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
-| **`tblastn`** | `tblastn` (default), `tblastn-fast`; a PSSM query (`-in_pssm`, PSI-TBLASTN) | `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `18`, `20` (see [Output formats](#output-formats); `-in_pssm`: `0` to `4`, `6`, `7`, `10`) | Protein query vs. translated nucleotide subject (see [section 4](#4-protein-vs-translated-nucleotide-tblastn)) |
-| **`psiblast`** | the rounds of FASTA queries (`-num_iterations N`, 0 until convergence); a PSSM query (`-in_pssm`, its rounds too) | `0`, `6`, `7`, `10`, `20` (`-in_pssm`: `0`, `6`, `7`) | Position-Specific Iterated BLAST: blastp's search in round 1, then the search of the PSSM made from each round's alignments, or the search of a PSSM (see [section 7](#7-psi-blast-psiblast)) |
-| **`rpsblast`** | composition-based statistics 0, 1, 2 and 3 (the default 1), profile databases of one or several volumes | `0`, `6`, `7`, `10` | Reverse Position-Specific BLAST: protein queries against a database of profiles such as CDD (see [section 8](#8-reverse-psi-blast-rpsblast)) |
-| **`rpstblastn`** | composition-based statistics 0, 1, 2 and 3 (the default 1), both strands or one | `0`, `1`, `2`, `3`, `4`, `6`, `7`, `10` | Translated Reverse Position-Specific BLAST: the six frames of nucleotide queries against a database of profiles (see [section 9](#9-translated-reverse-psi-blast-rpstblastn)) |
-| **`rpsbproc`** | the domain hits, sites and motifs of protein queries and of nucleotide queries per reading frame (`-t doms`, `feats`, `both`, `-m rep`, `std`, `full`, `-f`) | NCBI rpsbproc's tab-delimited report | NCBI's post-RPSBLAST processing utility 0.5.1: the conserved domains of rpsblast's and rpstblastn's ASN.1 archives (and of their BlastOutput XML) with the CDD data files (see [section 10](#10-cdd-domain-annotation-rpsbproc)) |
-| **`dustmasker`** | the low-complexity regions of nucleotide sequences (symmetric DUST, `-window`, `-level`, `-linker`), FASTA or BLAST database input | `interval` (default), `acclist`, `fasta` (with `-hard_masking`), `seqloc_asn1_bin`, `seqloc_asn1_text`, `seqloc_xml`, `maskinfo_asn1_bin`, `maskinfo_asn1_text`, `maskinfo_xml` | NCBI's dustmasker 1.0.0: the masks for `makeblastdb -mask_data` and for reading (see [section 11](#11-masks-dustmasker-segmasker-convert2blastmask)) |
-| **`segmasker`** | the low-complexity regions of protein sequences (SEG, `-window`, `-locut`, `-hicut`), FASTA or BLAST database input | `interval` (default), `fasta`, `seqloc_asn1_bin`, `seqloc_asn1_text`, `seqloc_xml`, `maskinfo_asn1_bin`, `maskinfo_asn1_text`, `maskinfo_xml` | NCBI's segmasker 1.0.0: the protein masks for `makeblastdb -mask_data` and for reading (see [section 11](#11-masks-dustmasker-segmasker-convert2blastmask)) |
-| **`convert2blastmask`** | the lower case letters of FASTA input, and its lines `from - to`, as masking information (`-masking_algorithm`, `-masking_options`, `-parse_seqids`) | `maskinfo_asn1_text` (default), `maskinfo_asn1_bin`, `maskinfo_xml`, `interval` | NCBI's convert2blastmask: the masks for `makeblastdb -mask_data` from FASTA that another tool has masked (see [section 11](#11-masks-dustmasker-segmasker-convert2blastmask)) |
-
-> **Note**: Tabular output (`-outfmt 6`, `7`, `10` and `20`) writes the 12 standard BLAST fields by default:  
-> `qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`.  
-> All five programs, `psiblast`, `rpsblast` and `rpstblastn` also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`) and `delim=`.
->
-> LOSAT refuses an NCBI option or value it does not implement with an error; see [Scope & Differences](#scope--differences-from-ncbi-blast) for the list.
-
----
-
-## Output formats
-
-The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`) write; `19` and `21` belong to igblastn and magicblast. Every LOSAT program reads `-outfmt` as NCBI does and gives NCBI's error for a value that NCBI rejects. A format that NCBI writes and LOSAT does not write is rejected with "output format N is not supported by LOSAT's PROGRAM" before the inputs are read. The default is `0`.
-
-`psiblast`, `rpsblast` and `rpstblastn` write the formats that [Supported Programs & Tasks](#supported-programs--tasks) lists for them.
-
-| `-outfmt` | NCBI name | NCBI programs that write it | LOSAT |
-|:---|:---|:---|:---|
-| `0` | Pairwise | all five | all five programs |
-| `1` | Query-anchored showing identities | all five | all five programs (with `-subject` and `-db`) |
-| `2` | Query-anchored no identities | all five | all five programs (with `-subject` and `-db`) |
-| `3` | Flat query-anchored showing identities | all five | all five programs (with `-subject` and `-db`) |
-| `4` | Flat query-anchored no identities | all five | all five programs (with `-subject` and `-db`) |
-| `5` | BLAST XML | all five | all five programs (with `-subject` and `-db`) |
-| `6` | Tabular | all five | all five programs |
-| `7` | Tabular with comment lines | all five | all five programs |
-| `8` | Seqalign (Text ASN.1) | all five | all five programs (a `-db` title or an id with a byte NCBI's stream replaces is written with `#` and NCBI's error message for each byte of each query's document) |
-| `9` | Seqalign (Binary ASN.1) | all five | all five programs (as outfmt 8) |
-| `10` | Comma-separated values | all five | all five programs |
-| `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all five | all five programs (with `-subject` and `-db`; `ARCHIVE_FORMAT` unset: ASN.1 text, `bin...`: ASN.1 binary, `xml`: XML (`Blast4-archive`), any case, as NCBI reads it; a title, id, `-db` name or `-window_masker_db` path with a byte NCBI's stream replaces is written with `#` and NCBI's error message for each byte, as in the search strategy file) |
-| `12` | Seqalign (JSON) | all five | all five programs |
-| `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
-| `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
-| `15` | Single-file BLAST JSON | all five | all five (with `-subject` and `-db`) |
-| `16` | Single-file BLAST XML2 | all five | all five (with `-subject` and `-db`) |
-| `17` | Sequence Alignment/Map (SAM) | `blastn` only | `blastn` (with `-subject` and `-db`; `SQ` and `SR` as in NCBI) |
-| `18` | Organism Report | all five | all five programs (with `-subject` and `-db`; a query batch that NCBI does not search is refused, see [What LOSAT refuses](#what-losat-refuses)) |
-| `20` | Comma-separated values with header lines | all five | all five programs |
-
-Outfmt `17` (SAM, `blastn` only) is NCBI's document byte for byte except the `CL:` tag of its `@PG` line, which holds LOSAT's own command line (every argument followed by one space, as NCBI writes its own); a run without a command line (the library) has no `CL:` tag. NCBI writes the whole document when the search ends, and so does LOSAT, which holds the records as text until then. `-outfmt "17 SQ"` writes the target's letters in SEQ and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI.
-
-Outfmt `18` (the organism report, NCBI's "Tax BLAST report") groups each query's subjects by the taxid of each definition line under the names that the taxonomy database gives for it (`taxdb.bti` and `taxdb.btd`, found as for outfmt `13` to `16` below; a `-subject` record has taxid 0). As in NCBI BLAST+, a subject whose taxid the database does not know is left out but still widens the columns, a subject whose title is in an encoding that NCBI cannot read is left out without widening them, each definition line of a database sequence is a row of its own, and without a taxonomy database the report has the headers only. Where the identifiers, scores and E-values take more than 96 columns, NCBI's unsigned column width wraps and a line is padded with about 4 GiB of spaces; LOSAT writes the same bytes, holding the spaces as a count.
-
-Outfmt `13` and `14` write the report of the n-th query to `<base>_<n>.json` / `<base>_<n>.xml` next to `-out FILE` and a master file at `FILE` that lists them, with NCBI's names: the base is `FILE` without its extension if that is `.json` (13) or `.xml` (14), and the master file always uses the `.xml` rule and drops the directory (`-out o.json` with `-outfmt 13` lists `o.json_1.json`); `blastx` holds the side files in memory, like the document of `-outfmt 5`, 15 and 16, in the rare run in which a later query batch could still be refused. Outfmt `13` to `16` with `-db` write the scientific name of a sequence's taxid (`sciname`) when `taxdb.bti` is found as NCBI finds it: in the current directory, in `BLASTDB` (the environment variable, `~/.ncbirc` or `NCBI_CONFIG__BLAST__BLASTDB`), not in the `-db` directory. The other output formats never read it.
+*Twelve search modes on a dual Xeon Gold 6338 workstation (64 cores), LOSAT at commit `93ca2f652` against NCBI BLAST+ 2.17.0. At 16 threads LOSAT was faster in all twelve: 629 times on `tblastx` (4.72 s against 2,970.75 s), 1.7 to 18.3 times on ten other modes, and 1.02 times on `psiblast`. Where the subject is a FASTA file, LOSAT ran `-subject` and NCBI BLAST+ `-db` on a database made from the same file. Inputs, commands and every number: [benchmarks/v0.2.0](benchmarks/v0.2.0/README.md).*
 
 ---
 
 ## Installation
 
-### Bioconda (Recommended)
-
-LOSAT is available on [Bioconda](https://anaconda.org/bioconda/losat) for Linux and macOS:
+### Bioconda (Linux and macOS)
 
 ```bash
-# Using conda
 conda install -c bioconda -c conda-forge losat
-
-# Using mamba (recommended for fast dependency resolution)
-mamba install -c bioconda losat
-
-# Using pixi
-pixi add losat
+# or
+mamba install -c bioconda -c conda-forge losat
 ```
 
-### Pre-built Binaries
-Each release from v0.2.0 provides eight items on the [Releases](https://github.com/satoshikawato/LOSAT/releases) page (earlier releases list their own items on their release pages):
+With pixi, add the `bioconda` and `conda-forge` channels to the workspace, then `pixi add losat`.
 
-| Item | Target | Archive | Binary |
-|:---|:---|:---|:---|
+### Release files
+
+The [v0.2.0 release](https://github.com/satoshikawato/LOSAT/releases) has one archive per platform, the source crate, `SHA256SUMS`, a CycloneDX SBOM (`LOSAT-0.2.0.cdx.json`) and GitHub build attestations:
+
+| Platform | Target | Archive | Program |
+| --- | --- | --- | --- |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `.tar.gz` | `losat` |
 | Linux aarch64 | `aarch64-unknown-linux-gnu` | `.tar.gz` | `losat` |
 | macOS arm64 | `aarch64-apple-darwin` | `.tar.gz` | `losat` |
@@ -125,487 +57,130 @@ Each release from v0.2.0 provides eight items on the [Releases](https://github.c
 | Windows x86_64 | `x86_64-pc-windows-msvc` | `.zip` | `losat.exe` |
 | WASI serial | `wasm32-wasip1` | `.tar.gz` | `losat.wasm` |
 | WASI threads | `wasm32-wasip1-threads` | `.tar.gz` | `losat.wasm` |
-| Source crate | n/a | `.crate` | n/a |
 
-LOSAT is not published on crates.io, Homebrew, PyPI, Docker Hub or npm. Bioconda (above) is the only package-manager channel.
+The macOS and Windows programs are not code-signed; [Installation](docs/manual/src/installation.md) says how to run them.
 
-### Build from Source
-Requires the [Rust toolchain](https://rustup.rs/) (edition 2021, Rust 1.92+ recommended). There is no crates.io package, so `cargo` builds from source only:
+### crates.io
+
+With Rust 1.92 or later:
+
+```bash
+cargo install --locked losat
+```
+
+`--locked` builds with the dependency versions of the release build.
+
+### Build from source
+
+Requires Rust 1.92 or later.
 
 ```bash
 git clone https://github.com/satoshikawato/LOSAT.git
 cd LOSAT/LOSAT
 cargo build --release
+# the program is target/release/losat
 ```
-The compiled binary will be located at `target/release/losat`.
 
 ### Platforms
 
-| Platform | Status in v0.2.0 |
-|:---|:---|
-| Linux x86_64, Linux aarch64, macOS arm64, macOS x86_64, Windows x86_64 (native) | **Supported**: matches NCBI BLAST+ 2.17.0 on the release test set |
-| WASI serial (`wasm32-wasip1`) | **Supported**: matches NCBI BLAST+ 2.17.0 on the release test set |
-| WASI threads (`wasm32-wasip1-threads`) | **Supported**: tested in CI, outside the release's NCBI parity claim |
-| [Web GUI](#web-gui-preview) (browser) | **Preview**: outside the release's NCBI parity claim; each run is marked "Supported" or "Not yet supported" |
-
-On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can differ from other platforms by 1 in its last (15th) digit because of Apple's libm, as in NCBI BLAST+ built on macOS; see [PD-LOSAT-PLATFORM-LIBM](docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
-
-A WASI command learns the time zone and the working directory only from its host: makeblastdb writes local times when the host passes `TZ` or gives the module the zone files (`/etc/localtime`, `/usr/share/zoneinfo`), UTC otherwise, and relative file names and makeblastdb's `New DB name:` start from the `PWD` the host passes (`/` without it). `LOSAT/tests/run_losat_wasi.js` passes the environment and `PWD` and gives the module `/`.
-
-On WASI, the host program opens the files: Node.js (`node:wasi`) reads `..` in a path as text, without looking at the directory before it, so with Node.js `makeblastdb -out gone/../db` builds `db` and `-query gone/../q.fa` reads `q.fa` even when `gone` does not exist, where NCBI BLAST+ and native LOSAT on Linux stop with an error.
+Linux (x86_64, aarch64), macOS (arm64, x86_64), Windows (x86_64) and the WASI serial module are **Supported**: they match NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT). The WASI threads module is **Supported** and tested in CI, outside that comparison. LOSAT Web, the search page that runs in the browser, is a **Preview**. Details, and the one macOS difference (the last digit of a full-precision E value): [Platforms](docs/manual/src/platforms.md).
 
 ---
 
-## Quick Start
+## Quick start
 
-Tools that look for `blastn` on `PATH` can use LOSAT without changes: `losat --install-shims [DIR]` links `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask` and `rpsbproc` to `losat` in `DIR` (default: the directory of `losat`; Windows gets copies), and an executable called by one of these names runs that program. A link or copy that an earlier LOSAT made is replaced; it stops without changing anything if another file of one of these names is already there, such as NCBI's own program.
+Run any program as `losat <program>`, or install links with the NCBI names so that existing scripts call LOSAT:
 
-LOSAT adopts the standard NCBI single-dash command-line syntax:
-
-### 1. Nucleotide Alignment (BLASTN / MegaBLAST)
 ```bash
-# Fast pairwise nucleotide search with MegaBLAST
-losat blastn \
-  -query query.fna \
-  -subject subject.fna \
-  -task megablast \
-  -outfmt 6
+# Build a database and search it on 16 threads (the query can be gzip, bzip2 or Zstandard)
+losat makeblastdb -in 16s_all.fna -dbtype nucl -out 16s_db
+losat blastn -query reads.fna.gz -db 16s_db -evalue 1e-5 -outfmt 6 -num_threads 16
+
+# Compare two genomes directly, without a database
+losat blastn -query genome_a.fna -subject genome_b.fna -outfmt 6 -num_threads 16
+
+# PSI-BLAST and a conserved-domain search
+losat psiblast -query proteins.faa -db swissprot -num_iterations 3 -outfmt 6 -num_threads 8
+losat rpsblast -query proteins.faa -db Cdd -evalue 0.01 -outfmt 6 -num_threads 8
+
+# Use LOSAT under the NCBI names (blastn, blastp, makeblastdb, ...)
+losat --install-shims ~/.local/share/losat-shims
+export PATH="$HOME/.local/share/losat-shims:$PATH"
+blastp -version
 ```
 
-### 2. Protein Alignment (BLASTP)
-```bash
-# Protein alignment with custom E-value cutoff and multithreading
-losat blastp \
-  -query query.faa \
-  -subject subject.faa \
-  -evalue 1e-5 \
-  -num_threads 4 \
-  -outfmt 6
-```
+<a id="common-command-line-options"></a>
+<a id="database-searches"></a>
 
-### 3. Translated Alignment (TBLASTX)
-```bash
-# 6-frame translated search using bacterial genetic code (Table 11)
-losat tblastx \
-  -query contigA.fna \
-  -subject contigB.fna \
-  -query_gencode 11 \
-  -db_gencode 11 \
-  -outfmt 6
-```
+Every search program reads BLAST databases (`-db`, versions 4 and 5, found through `BLASTDB` as in NCBI BLAST+) and its query from standard input (`-query -`). All except `rpsblast` and `rpstblastn` also take FASTA subjects (`-subject`), as in NCBI BLAST+. Options, output formats and examples for each program are in the [user manual](docs/manual/src/introduction.md).
 
 ---
 
-### Translated Query vs. Protein Subject (BLASTX)
+## Programs
 
-```bash
-losat blastx -query transcripts.fna -subject proteins.faa \
-  -query_gencode 1 -num_threads 1 -outfmt 6
-```
-
-The current branch implements native threaded BLASTX, command-WASI, and the
-Web/reactor entry points. See the [CLI scope and custom fields](docs/losatx_blastx_native_cli.md).
-The release record for v0.2.0 is [docs/release/v0.2.0.md](docs/release/v0.2.0.md).
-
-### 4. Protein vs. Translated Nucleotide (TBLASTN)
-```bash
-losat tblastn \
-  -query proteins.faa \
-  -subject genome.fna \
-  -task tblastn \
-  -db_gencode 1 \
-  -outfmt 6
-```
-
-The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. `-task tblastn-fast` and `-word_size 5`, `6` and `7` (NCBI's compressed-alphabet lookup table) run with every matrix but IDENTITY, which crashes NCBI BLAST+'s tblastn; database searches (`-db`) are described in section 6.
-
-With `-in_pssm FILE` (in place of `-query`; `-in_pssm -` reads the standard input) tblastn searches a PSSM as NCBI's PSI-TBLASTN does: the PSSM's scores replace the matrix in the lookup table, the extensions and the alignments, and its Karlin-Altschul values give the cutoffs, E-values and bit scores. As in NCBI, `-comp_based_stats` has no effect (no composition-based statistics), HSPs are linked only with `-sum_stats true`, the subjects are translated with the genetic code 1 whatever `-db_gencode` says (the value is still checked), `-task tblastn-fast` changes nothing, and the word size is 2 to 4 with one of the standard matrices (NCBI's errors for the others; a PSSM of frequency ratios only gets its scores from the `-matrix` with the gap costs 11/1). SEG (on by default) keeps the masked positions out of the lookup table and out of the ungapped Karlin-Altschul values, and the reports (`PSITBLASTN`; outfmt 0, 6, 7 and 10) show no query masks. The PSSM is read as psiblast's `-in_pssm` reads it (section 7).
-
-### 5. Writing a BLAST Database (makeblastdb)
-```bash
-losat makeblastdb \
-  -in proteins.faa \
-  -dbtype prot \
-  -out proteins_db \
-  -title "my proteins"
-```
-
-`losat makeblastdb` writes the files of `makeblastdb`: the sequence, header and index files, the alias file of a database in several volumes, the JSON metadata file (`.pjs`, `.njs`) and, as in makeblastdb, the LMDB files of format version 5, which is the default (`-blastdb_version 4` writes the older layout). The sequence and header files are the same bytes, and the index and metadata files differ only in their creation date; this is checked against makeblastdb 2.17.0 on Linux x86-64 (on Windows and macOS LOSAT follows NCBI's source where it depends on the platform, untested against makeblastdb there). Several FASTA files can be named in `-in`, and `-logfile` redirects the log to a file. `-max_file_sz` splits the database into volumes as makeblastdb does. `-parse_seqids` stores the Seq-ids of the definition lines and writes makeblastdb's id indexes (with version 5 the accession keys of the `.pdb` file and the `.pos` file), `-hash_index` the sequence hash index, `-taxid` or `-taxid_map` the tax ids (`-taxid_map -` reads the map from the standard input), and `-mask_data`, `-mask_id` and `-mask_desc` the mask column of the masks that dustmasker, segmasker, windowmasker and convert2blastmask write (ASN.1 text or binary; with or without `-parse_seqids`, version 5 or 4), which `losat blastdbcmd` and NCBI's `blastdbcmd` read back. NCBI BLAST+ programs and LOSAT's BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX and PSIBLAST search such a database with `-db` (section 6); the makeblastdb options LOSAT does not implement (`-gi_mask`, `-gi_mask_name`, `-randomize`, `-oid_masks`, `-metadata_output_prefix`) are rejected by name.
-
-Every program answers `-version` as NCBI BLAST+ does (`blastn: 2.17.0+`, then a `Package:` line that names LOSAT), `-version-full`, `-version-full-xml` and `-version-full-json` in NCBI's forms with LOSAT's package, and `-h` with a short usage, all with exit code 0; `-help` and `-h` open with NCBI's `USAGE` and `DESCRIPTION` headings. `-mt_mode 0|1|2` (with `-num_threads`, as in NCBI) is accepted by BLASTN, BLASTP, BLASTX and TBLASTN and does not change the output, which is always that of NCBI `-num_threads 1`: NCBI's `-mt_mode 1` writes the end of an outfmt 0 report or each XML document once per batch of queries, which LOSAT does not reproduce. BLASTN reads `-use_index` as NCBI does: `true` changes nothing with `-subject` or a task other than megablast, and a megablast search of a database without a MegaBLAST index writes NCBI's warning and searches without one.
-
-### 6. Searching a BLAST Database (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX)
-```bash
-losat blastp \
-  -query proteins.faa \
-  -db proteins_db \
-  -outfmt 6 \
-  -num_threads 8
-```
-```bash
-losat makeblastdb -in genomes.fna -dbtype nucl -out genomes_db
-losat blastn \
-  -query contigs.fna \
-  -db genomes_db \
-  -outfmt 6 \
-  -num_threads 8
-```
-```bash
-losat blastx \
-  -query contigs.fna \
-  -db proteins_db \
-  -outfmt 6 \
-  -num_threads 8
-```
-
-`blastp -db`, `blastn -db` (megablast, blastn, dc-megablast), `tblastn -db`, `blastx -db` and `tblastx -db` search a protein or nucleotide database written by `makeblastdb` or `losat makeblastdb`, with or without `-parse_seqids` (format versions 4 and 5, several volumes, alias files), so also NCBI's distributed databases such as swissprot, pdbaa and the RefSeq nucleotide databases; the database is found as NCBI finds it (the current directory, `BLASTDB`, `.ncbirc`). The output is that of NCBI BLAST+ 2.17.0 `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db` or `tblastx -db` run with `-num_threads 1`, subject ids and titles included, in every format the program writes, and it is the same at every `-num_threads`. A database search differs from `-subject` on the same sequences as it does in NCBI BLAST+ (the statistics see the database and the `Database:` lines differ; the random bases that stand for ambiguous letters in a nucleotide database are the ones `-subject` draws, but a database stores a hyphen as `N` where `-subject` drops it). `-dbsize` and `-searchsp` are accepted with `-db` and `-subject`, the taxid and seqid lists (`-taxids`, `-taxidlist`, `-seqidlist` and their negative forms) with `-db`; `-db` may name several databases (`-db "a b"`, a name with spaces between double quotes), which are searched as one database as NCBI BLAST+ searches them. `blastn -db_soft_mask ID` (an id or a name of `blastdbcmd -info`'s filtering algorithms) searches with the database's masks of that algorithm (made with `makeblastdb -mask_data`): words inside them do not start hits, as in NCBI BLAST+, outfmt 0 names the algorithm after the database title and shows the masked letters of the database sequences in lower case, and the BLAST archive and the search strategy record it. `-db_hard_mask ID` cuts the masked letters out of the search as NCBI BLAST+ does: the database sequences are searched in pieces between the masks, an alignment that crosses a mask in the traceback scores its letters as `B`, and the identities of the rows that the reports show (outfmt 0, 5, 13 to 16, tabular rows with sequence columns) count the stored letters while the Seq-align's (outfmt 8, 9, 11, 12, the standard tabular columns, SAM) count the masked ones as mismatches. [What LOSAT refuses](#what-losat-refuses) lists what is rejected and [PD-LOSAT-DATABASE-SEARCH](docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md) gives the reasons.
-
-`losat blastdbcmd -db NAME -info` prints what NCBI BLAST+ 2.17.0 `blastdbcmd -info` prints for the database (title, number of sequences, total length, date, longest sequence, format version, volumes), found as the search programs find it, with NCBI's error messages and exit codes, `-dbtype`, `-exact_length`, `-out`, `-logfile`, `-h`, `-help` and `-version`; its command line is read as NCBI reads it. `losat blastdbcmd -db NAME -entry all` writes the database as FASTA (or as the lines of `-outfmt "%a %l %T"` and every other `%` specifier but the ASN.1 texts `%d` and `%b`), and `-entry` / `-entry_batch` retrieve sequences by accession, name, local id or GI in a database built with `-parse_seqids`, of version 5 (NCBI's distributed databases such as swissprot and pdbaa) or version 4 (the ISAM files of its volumes, PIGs included), by `gnl|BL_ORD_ID|n` in any version 4 database, and answer as NCBI does for a database built without `-parse_seqids`, with `-range`, `-strand`, `-line_length`, `-ctrl_a`, `-target_only`, `-get_dups` and `-long_seqids`, byte for byte as NCBI writes them (the outputs NCBI gets wrong are written correctly: [`PD-LOSAT-BLASTDBCMD-DEVIATIONS`](docs/product_decisions/PD-LOSAT-BLASTDBCMD-DEVIATIONS.md); an accession on more than about 500 sequences, on which NCBI stops with an error, is looked up like any other). It also serves `-list`, the taxonomy options, `-metadata`, `-ipg`, and the masks of `makeblastdb -mask_data` (the filtering algorithms of `-info`, `-mask_sequence_with`, `-outfmt %m<id>`, the mask id of a batch line). `-db` may name several databases (`-db "a b"`, a name with spaces between double quotes), read as one database as NCBI reads them. `-outfmt %d` / `%b` are rejected, and so is a list in which an alias and another name give the same volume, a taxonomy database lookup that reads a record of an empty `taxdb.btd` (NCBI maps the file as a null pointer and crashes: the FASTA output of a sequence with a taxid, whose loads look its taxids up, `-outfmt` with `%S`, `%L`, `%B`, `%K`, `%C` or `%N`, and `-tax_info` with a name field; `-outfmt "%a %T"` and the other formats that look nothing up, and `-info`, are not refused), a name written from a record of a damaged `taxdb.btd` that reaches past NCBI's mapping of the file (the super kingdom of `%K` and of `-tax_info`, and any name of a record whose third tab is past the mapping: NCBI reads memory past its mapping there, and what it writes, or whether it crashes, depends on its memory map; the other names of such a record are written as NCBI writes them, and so are NCBI's messages for the other damaged taxonomy databases), and a failed write of the `-metadata` output (NCBI's serial stream reports it; after a failed write of the retrieved sequences the retrieval goes on, as NCBI's does, and a closed pipe ends it at once, with exit status 0 where NCBI is ended by SIGPIPE).
-
-### 7. PSI-BLAST (psiblast)
-```bash
-losat psiblast \
-  -query protein.faa \
-  -db proteins_db \
-  -outfmt 6
-```
-
-`losat psiblast` runs NCBI BLAST+ 2.17.0 `psiblast` on FASTA queries, with `-subject` or `-db` (databases built with `-parse_seqids` too, with blastp's subject ids, titles and refusals; section 6), one query at a time: round 1 is the search of the query with blastp's options and psiblast's report (the `PSIBLAST` header and references, `Results from round N`, `# Iteration: N`); with `-num_iterations N` (default 1; 0 runs until convergence) each later round searches with the PSSM that NCBI's PSSM engine makes from the round before (its alignments below `-inclusion_ethresh`, with `-pseudocount`), until a round has no hits, every subject below the threshold was below it in the round before too (`Search has CONVERGED!`), or N rounds have run. The description table of a later round has NCBI's two parts ("Sequences used in model and found again", "Sequences not found previously or not previously below threshold"), outfmt 7 counts the rounds in `# BLAST processed N queries`, and every `-comp_based_stats` mode is taken (round 1 searches as blastp in that mode; the later rounds run 2, the default, and 3 as 1, with NCBI's warning once per query). `-out_pssm` and `-out_ascii_pssm` get the PSSM at the start of each later round (with `-save_each_pssm` as `F.1`, `F.2`, ... over the whole run) and with `-save_pssm_after_last_round` after the last one, as NCBI writes them. It takes blastp's options without `-task` and `-ungapped`, and `-inclusion_ethresh` and `-pseudocount`. blastp's database filters (`-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-no_taxid_expansion`) keep every round to the sequences they select, and `-show_gis` and `-parse_deflines` hold in every round, as in NCBI; with `-parse_deflines` the PSSMs carry the query's Seq-align id (of `gi|4504347|ref|NP_000549.1|`, the gi), and an `-in_pssm` query is shown by its PSSM's id (`Query= Query_1 ...`). `-searchsp` (and the environment variable `OLD_FSC`, which NCBI sets for any `-searchsp`) holds in every round, those of `-in_pssm` too: every cutoff and E-value is then computed without the finite-size correction on the round's search space, so the alignments a round includes, the number of rounds and the PSSMs change with it, as in NCBI. `-sum_stats true` links the HSPs of each subject in every round and with `-in_pssm`, as NCBI does: an HSP's E-value is its linked set's, from the Karlin-Altschul values without the finite-size correction, the HSPs are kept from a lower score (the sum statistics' cutoff), and outfmt 0 shows the set's size as `Expect(2)`, so the alignments a round includes and the PSSMs change with it. With `-query_loc` every round searches the range, as in NCBI: the PSSM of a later round is made of the whole record, and the search reads its rows from the record's first row on, one per letter of the range (the range's first letter with the record's first row), so the later rounds' alignments and identities are NCBI's. `-seg`, `-soft_masking true` and `-lcase_masking` mask the query of every round, and of `-in_pssm`'s rounds, as NCBI does with one query for all the rounds: round 1 masks the record's letters (SEG's intervals and the lower case), each later round runs SEG again on the letters that the rounds before masked (X; none become X with `-soft_masking true`), the lower case being masked in round 1 only, and every round's PSSM lookup table leaves out the words of its masked letters; the reports show the record's letters and count the identities on them. The options and values it refuses (`-in_msa`, `-phi_pattern`, and others) are listed under [Scope & Differences](#scope--differences-from-ncbi-blast).
-
-```bash
-losat psiblast \
-  -in_pssm query.pssm \
-  -db proteins_db \
-  -outfmt 6
-```
-
-With `-in_pssm FILE` (in place of `-query`; `-in_pssm -` reads the standard input) the query is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`, as psiblast's `-out_pssm` writes it): its scores replace the matrix in the lookup table, the extensions and the alignments, the report shows the PSSM's query, and the footer prints the PSSM's Karlin-Altschul parameters. A PSSM of frequency ratios only gets its scores from the ratios, as NCBI computes them. The composition-based statistics are NCBI's position-based ones: `-comp_based_stats 1`, and the default 2 and 3, which NCBI runs as 1 with a PSSM (with its warning), rescale the PSSM for each subject's composition and redo the alignments; `-comp_based_stats 0` keeps the PSSM's scores. With `-num_iterations N` the rounds run as a FASTA query's: round 1 searches the PSSM, each later round the PSSM made from the round before, with the PSSM's query (its Seq-id and title) in every report and every PSSM made. `-out_pssm` and `-out_ascii_pssm` get the input PSSM at the start of round 1 (with one round too), as NCBI writes it back: a PSSM of frequency ratios only with the scores computed from them, and the ASCII form `Last position-specific scoring matrix computed` with the scores and the PSSM's own Karlin-Altschul values (the long form when the PSSM holds its information content); then the PSSMs of the later rounds as for a FASTA query. After a first round without hits, `-save_pssm_after_last_round` writes the input PSSM again with the Karlin-Altschul values of its search, as NCBI does.
-
-### 8. Reverse PSI-BLAST (rpsblast)
-```bash
-losat rpsblast \
-  -query proteins.faa \
-  -db Cdd \
-  -comp_based_stats 0 \
-  -outfmt 6
-```
-
-`losat rpsblast` searches protein queries against a profile database written by NCBI's `makeprofiledb -dbtype rps` (for example NCBI's CDD, 29 volumes), as NCBI BLAST+ 2.17.0 `rpsblast -num_threads 1` does, byte for byte: with composition-based statistics (`-comp_based_stats 1`, the default, and `2` and `3`, which NCBI runs as `1` with a larger preliminary E-value threshold; `T` and `t` are `1`) when the database has frequency ratios (`.freq` files), without (`0`, `F`, `f`, `D`, `d`) otherwise; a database whose first volume has no `.freq` file gets NCBI's warning and the search without them, and a later volume without one NCBI's error. It reads databases of one or more volumes (format versions 4 and 5, the 28-column profiles of makeprofiledb 2.17 and the older 26-column ones, a whole scale such as CDD's 100; the volumes ordered by file name, then by path, as NCBI orders them, searched one after the other and merged per query as NCBI merges them, `-num_threads 0` being one thread per volume) through read-only memory maps of their `.loo`, `.rps` and `.freq` files, writes outfmt 0, 6, 7 and 10 (custom fields too; `positive` and `ppos` count the identities, as NCBI's rpsblast does), and takes `-evalue`, `-dbsize`, `-max_target_seqs`, `-num_descriptions`, `-num_alignments`, `-max_hsps`, `-qcov_hsp_perc`, `-window_size`, `-query_loc`, `-parse_deflines`, `-show_gis`, `-num_threads`, `-mt_mode`, the query masks `-seg` and `-lcase_masking` (the masked letters are X for the whole search; outfmt 0 shows them in lower case and the identities count the letters as read), `-soft_masking` (which changes only how outfmt 0 shows the masks: NCBI's soft masking acts on a query lookup table, which an RPS search does not build), the X-drops `-xdrop_ungap`, `-xdrop_gap` and `-xdrop_gap_final` (in bits, at the database's scale; `-xdrop_ungap` of 0 or less gets NCBI's error), `-line_length`, `-sorthits` and `-sorthsps` (read with NCBI's warnings; they sort nothing, as in NCBI's rpsblast), `-sum_stats false` and `-use_sw_tback` (with composition-based statistics NCBI's Smith-Waterman alignments of each profile; without them it changes nothing, as in NCBI); the queries are searched in parallel and the output is the same at every thread count (it is NCBI's `-num_threads 1` output, which NCBI's own `-mt_mode 1` and, for outfmt 0, its multi-thread runs of several volumes do not always repeat). Options of later items are refused, as listed under [Scope & Differences](#scope--differences-from-ncbi-blast).
-
-### 9. Translated Reverse PSI-BLAST (rpstblastn)
-```bash
-losat rpstblastn \
-  -query contigs.fna \
-  -db Cdd \
-  -comp_based_stats 0 \
-  -outfmt 6
-```
-
-`losat rpstblastn` searches the six frames of nucleotide queries against a profile database (as `rpsblast` reads it, section 8), as NCBI BLAST+ 2.17.0 `rpstblastn -num_threads 1` does, byte for byte, with composition-based statistics 0, 1, 2 and 3 (`-comp_based_stats` and its letters, as `rpsblast` reads them; the default 1 adjusts the scores of each profile's matches in each frame, from the profiles' `.freq` file, which NCBI's error names when it is missing; with `-strand plus` or `minus` as NCBI's rpstblastn adjusts them). The queries are read in NCBI's batches of 10,000 letters and translated as `blastx` translates them (`-query_gencode`, `-strand`, `-query_loc`); the query masks `-seg` and `-lcase_masking` make the masked letters of the frames X for the whole search (outfmt 0 shows them in lower case), and `-soft_masking` changes only how outfmt 0 shows the masks, as in `rpsblast` (NCBI's soft masking acts on a query lookup table, which an RPS search does not build); the reports are those of `blastx` (frames, nucleotide coordinates, `qframe`) with NCBI's `RPSTBLASTN` lines; `positive` and `ppos` count the identities, as NCBI's rpstblastn does. It writes outfmt 0 to 4, 6, 7 and 10 (custom fields too) and takes `-evalue`, `-max_target_seqs`, `-num_descriptions`, `-num_alignments`, `-max_hsps`, `-qcov_hsp_perc`, `-window_size`, the X-drops (`-xdrop_ungap` of 0 or less gets NCBI's error), `-parse_deflines`, `-show_gis`, `-line_length`, `-sorthits` and `-sorthsps` (read with NCBI's warnings, sorting nothing), `-sum_stats false`, `-use_sw_tback` (which NCBI's search does not read without composition-based statistics), `-searchsp`, `-dbsize` and the environment variable `OLD_FSC` (which NCBI sets for any `-searchsp`: the cutoffs and e-values without the finite-size correction, on each frame's effective search space; with `-dbsize` on several volumes, each volume's own number of profiles), `-num_threads` and `-mt_mode`; the output is the same at every thread count. `-help` prints NCBI's text. Options of later items are refused, as listed under [Scope & Differences](#scope--differences-from-ncbi-blast).
-
----
-
-### 10. CDD domain annotation (rpsbproc)
-```bash
-losat rpsbproc -i hits.asn -d data -t doms -m rep -f
-```
-
-`losat rpsbproc` reads the ASN.1 text archives of `rpsblast -outfmt 11` and `rpstblastn -outfmt 11` (NCBI's, one archive per query batch, from a file or the standard input) and the six CDD data files of NCBI's `pub/mmdb/cdd/` (`cddid.tbl`, `cdtrack.txt`, `family_superfamily_links`, `cddannot.dat`, `cddannot_generic.dat`, `bitscore_specific.txt`, in `-d` or `-d/data`, else in `./data`, `./` or the directory of the program) and writes the conserved domain hits of each query as NCBI's rpsbproc 0.5.1 (the package of 2025-05-13) writes them, byte for byte: the classification into regions and the concise (`-m rep`), standard (`std`) and full sets, specific and non-specific hits and superfamilies, `-f` (`SUPERFAMILIES`), the sites and motifs of `-t feats` and `-t both` (NCBI's default; `SITES` with the specific sites of the representative curated hits and the generic sites of their hierarchy roots, `MOTIFS` with the structural motifs, PROSITE motif checks as NCBI runs them), nucleotide queries (rpstblastn's: the hits of each reading frame classified apart and printed with the frame after the query's label, `Query_1[-2]`, at positions on the plus strand; `DOMAINS` printed even without hits; the sites with the plus-strand codon of each residue of the frame's translation, which rpsbproc makes with the standard genetic code whatever `-query_gencode` the search used, and the motifs as ranges of bases; NCBI's motif position list shared with the protein queries of the run; NCBI's exceptions of a session, exit 3: a minus-strand hit that reaches past the query's length, `Invalid protein length`, a nucleotide query of length 0 with hits, `Cannot sort reading frames`, a `Packed-seg` or a `Std-seg` that names no query id, `CSeq_align::GetSeq_id`, NCBIpna or NCBIpaa data, `Requested conversion not implemented`), `-e` (shown in the header; it selects no hit of an archive, as in NCBI), `-o`, `-q`, NCBI's messages and exit codes (2 for the data, 3 for the input file, 4 for the output file, 5 for the input data), and the archive read one object at a time, so its memory is that of the data and one archive. It reads the BlastOutput XML of `rpsblast -outfmt 5` and `rpstblastn -outfmt 5` too, which NCBI's rpsbproc reads as deprecated (`Warning: XML format support is deprecated!`): one session per `BlastOutput` document, the documents one after another until one does not read (the rest of the input is then not read, as in NCBI: a truncated document prints nothing, BLAST XML2 gives no session), the `SESSION` line with the document's program version, database, matrix and E-value threshold, and per `Iteration` its query with the HSPs whose E-value passes `-e` (in the XML input `-e` drops hits), the PSSM-ID of each hit from `Hit_accession` (`lcl` ids give 0), the segments and residues taken from the alignment strings (a query without a kept hit is printed as `Peptide`; the sites of a nucleotide query read the residues of its alignments, `-` elsewhere, not a translation), and NCBI's exceptions (exit 3: a missing `Parameters_matrix`, `Hsp_align-len`, `Hsp_identity` or `Hsp_query-frame`; `basic_string::replace` for an alignment outside its query's length). The XML is read as NCBI's object stream reads it (declaration, DOCTYPE, comments, entity and character references, CDATA, the declared encoding, members in their order); LOSAT keeps each document's queries, not its text, so its memory stays far below NCBI's, which holds the whole document. Refused: the forms listed under [Scope & Differences](#scope--differences-from-ncbi-blast).
-
-### 11. Masks (dustmasker, segmasker, convert2blastmask)
-```bash
-losat dustmasker -in genome.fna -outfmt maskinfo_asn1_bin -out genome.dust.asnb
-losat segmasker -in proteins.faa -outfmt maskinfo_asn1_bin -out proteins.seg.asnb
-losat convert2blastmask -in masked.fna -masking_algorithm other -masking_options 'my masker' -out masked.asnt
-```
-
-`losat dustmasker` writes what NCBI BLAST+ 2.17.0 `dustmasker` writes, byte for byte: the low-complexity intervals of each nucleotide sequence of a FASTA file (`-in`, the standard input by default) or of a BLAST database (`-infmt blastdb -in NAME`: every sequence of its volumes, as NCBI's dustmasker reads them, also those outside an alias file's `FIRST_OID`-`LAST_OID` range, and of alias files whose `NSEQ` or `LENGTH` a search reads differently), found by the symmetric DUST of blastn's query masking with dustmasker's handling of runs of `N`, in each of its nine `-outfmt` forms, with `-parse_seqids`, `-hard_masking`, `-window`, `-level` and `-linker` (values outside NCBI's ranges are taken as NCBI takes them), `-out`, `-logfile`, `-conffile`, `-dryrun`, `-h`, `-help` and `-version`, and NCBI's error messages and exit codes. The `maskinfo_*` files are the `-mask_data` input of NCBI's `makeblastdb` and of `losat makeblastdb`. The library API runs it as `run_dustmasker` (pylosat: `dustmasker`), with sequences in memory as its standard input.
-
-`losat segmasker` writes what NCBI BLAST+ 2.17.0 `segmasker` writes, byte for byte: the low-complexity intervals of each protein sequence of a FASTA file (`-in`, the standard input by default) or of a protein BLAST database (`-infmt blastdb -in NAME`, every sequence of its volumes as for dustmasker), found by the SEG of blastp's and blastx's query masking without its merging of overlapping segments (segmasker keeps NCBI's `overlaps` off), in each of its eight `-outfmt` forms, with `-parse_seqids`, `-window`, `-locut` and `-hicut` (values outside NCBI's ranges, and NCBI's spellings of a number such as `0x10` or `2e`, taken as NCBI takes them), `-out`, `-logfile`, `-conffile`, `-dryrun`, `-h`, `-help` and `-version`, and NCBI's error messages and exit codes (the NCBI exceptions of its run with their report, exit status 1). The library API runs it as `run_segmasker` (pylosat: `segmasker`).
-
-`losat convert2blastmask` writes what NCBI BLAST+ 2.17.0 `convert2blastmask` writes, byte for byte: the masking information of FASTA input that another tool has masked (`-in`, the standard input by default). The lower case letters of each sequence, and the lines `from - to` in the place of sequence data (the form that `-outfmt interval` writes), are the masked intervals, written in `-outfmt maskinfo_asn1_text` (the default), `maskinfo_asn1_bin`, `maskinfo_xml` or `interval`, with `-parse_seqids`, `-masking_algorithm` and `-masking_options` (both required: the name of the masking program and a free text that describes how the masking was made), `-out`, `-h`, `-help` and `-version`, and NCBI's error messages and exit codes. The `maskinfo_*` files are the `-mask_data` input of `makeblastdb` (NCBI's and `losat makeblastdb`). The library API runs it as `run_convert2blastmask` (pylosat: `convert2blastmask`).
-
-## Common Command-Line Options
-
-| Flag | Type | Default | Description |
-|:---|:---|:---|:---|
-| `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA; a name ending in `.gz`, `.bz2` or `.zst` is inflated, see below) |
-| `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA; `.gz`, `.bz2`, `.zst` as for `-query`) |
-| `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX, PSIBLAST; section 6) |
-| `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp`, `blastp-fast` or `blastp-short` (for `blastp`); `blastx` or `blastx-fast` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`) |
-| `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7`/`10`/`20` with fields | `0` | Output format for every program: `0`=pairwise, `1` to `4`=query-anchored (with and without identities, flat), `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `10`=CSV, `11`=BLAST archive, `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out`, `15`=BLAST JSON and `16`=BLAST XML2, `17`=SAM (BLASTN only), `18`=organism report, `20`=CSV with header lines; custom tabular fields and `delim=` with `6`, `7`, `10` and `20` in every program |
-| `-num_threads <int>` | Integer | `1` | Number of threads to use |
-| `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
-| `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
-| `-num_descriptions <int>` | Integer (0 or more) | `500` | Number of database sequences to show one-line descriptions for (outfmt 0 to 4; ignored with a warning for outfmt above 4). Without `-max_target_seqs`, either `-num_descriptions` or `-num_alignments` sets the hit list size to the larger of the two (outfmt 0 to 4), and `-num_alignments` sets it for the tabular formats; 0 for both, or `-num_alignments 0` with a tabular format, is NCBI's error `No hits are being saved`. Excludes `-max_target_seqs` |
-| `-num_alignments <int>` | Integer (0 or more) | `250` | Number of database sequences to show alignments for (outfmt 0 to 4), or the number of subjects of the tabular formats. Excludes `-max_target_seqs` |
-| `-line_length <int>` | Integer (1 or more) | `60` | Letters per row of the alignments of outfmt 0 to 4 (ignored with a warning for outfmt above 4) |
-| `-sorthits <int>` | Integer (0 to 4) | — | Order of the subjects of outfmt 0 to 4: `0` by E-value (the search's order), `1` bit score, `2` total score, `3` percent identity, `4` query coverage, as NCBI BLAST+ orders them (ties included); any value adds NCBI's Total score, Query cover and Max ident columns to the description table (all five programs; `psiblast`, `rpsblast` and `rpstblastn` read it and sort nothing, as NCBI does) |
-| `-sorthsps <int>` | Integer (0 to 4) | — | Order of each subject's HSPs in outfmt 0: `0` by E-value, `1` score, `2` query start, `3` percent identity, `4` subject start (ignored with a warning for other formats; `psiblast`, `rpsblast` and `rpstblastn` as for `-sorthits`) |
-| `-qcov_hsp_perc <real>` | Float | `0` (no filter) | Percent query coverage per HSP: HSPs that cover less of the query (of the query frame in BLASTX/TBLASTX) are removed |
-| `-dust <args>` | String | `20 64 1` | DUST low-complexity filter for BLASTN (`yes`, `no`, or `"level window linker"`) |
-| `-seg <args>` | String | `no` (blastp)<br>`12 2.2 2.5` (blastx/tblastx/tblastn) | SEG low-complexity filter for BLASTX/BLASTP/TBLASTX/TBLASTN (`yes`, `no`, or `"window locut hicut"`) |
-| `-soft_masking <bool>` | Boolean | `true` (blastn)<br>`false` (blastp/blastx/tblastn/tblastx) | Apply the filtering locations as soft masks: they keep words out of the lookup table, but the query keeps its letters. With `false` the masked letters are also written as N or X in the searched query |
-| `-lcase_masking` | Flag | off | Lower-case letters of the query join the filtering locations, and those of a `-subject` are not scanned for words (all five programs) |
-| `-query_gencode <int>` | Integer | `1` | Genetic code for query translation (BLASTX/TBLASTX) |
-| `-db_gencode <int>` | Integer | `1` | Genetic code for subject translation (TBLASTX/TBLASTN) |
-
-A `-query`, `-subject` or `makeblastdb -in` file whose name ends in `.gz`, `.bz2` or `.zst` (in any case) is read through gzip, bzip2 or zstd, concatenated members, streams and frames (the output of `bgzip`, `pbzip2` and `pzstd`) included; the name alone decides, as it does in NCBI's makeblastdb, and `-` (standard input) is read as it comes (`zcat reads.fa.gz | losat blastn -query - ...`). A search program inflates the whole file first, into an unnamed temporary file beside the input (under `TMPDIR` when that directory refuses it or has no room; the WASI command has no temporary directory and stops instead); makeblastdb streams. NCBI BLAST+ inflates these only in makeblastdb, which reads every gzip member but only the first bzip2 stream or zstd frame; its search programs read such a file as text and stop at its first line. The run needs room for the inflated copy; a `.gz` file is read as makeblastdb reads it (a member's trailer is not checked), and a file that is not what its name says is refused before the search (`-query: 'x.fa.gz' is named .gz but is not gzip data (...)`, exit status 1). The decoders are pure Rust (flate2, bzip2 with libbz2-rs-sys, ruzstd).
-
----
-
-## Accuracy and Benchmarks
-
-### Alignment Parity
-LOSAT is continuously audited against NCBI BLAST+ 2.17.0 across the retained
-comparison fixtures. This is a compute-program comparison, not biological
-interpretation of the input sequences.
-
-![Alignment Hit Distribution](benchmarks/v0.1.0/hit_distribution.png)
-
-The current plot contains 45 exact output pairs and 1,565,630 normalized rows.
-TBLASTX uses a prebuilt NCBI database (including matching `-db_gencode`), while
-BLASTN and BLASTP use NCBI local-subject output. The LOSAT side uses its local
-`-subject` interface.
-
-### Execution Speed
-Benchmarked on an Intel Core i9-14900HX comparing NCBI BLAST+ 2.17.0, native
-LOSAT, and WebAssembly modes (single-threaded and requested 8-thread
-configurations):
-
-![Execution Time Benchmark](benchmarks/v0.1.0/execution_time.png)
-
-The figure reports the median of three retained wall-clock samples after one
-warmup, with the full three-sample range. Every timed NCBI search uses a prebuilt
-`-db`; database construction is excluded. Hit-distribution target selection is
-independent of these timing targets. Process and Wasm startup are included.
-
-*For complete reproducible datasets, scripts, and methodology, see the [Benchmark Documentation](benchmarks/v0.1.0/README.md).*
-
-### Database searches
-LOSAT `-db` was timed against NCBI BLAST+ 2.17.0 `-db` on small public databases
-(RefSeq 16S, Swiss-Prot, the yeast proteome) on a workstation with two Intel Xeon
-Gold 6338 CPUs, using 16 physical cores of one NUMA node with memory bound to that
-node. Each tool and thread count had one untimed warmup and three timed rounds,
-with the tool order alternating by round; the table gives median wall time in
-seconds (LOSAT / NCBI = ratio). Both tools searched the `makeblastdb` default
-(version 5) database, and every LOSAT output equals NCBI BLAST+ 2.17.0
-`-db -num_threads 1` byte for byte at 1, 8 and 16 threads.
-
-| Case (query x database) | 1 thread | 8 threads | 16 threads |
+| Program | What it does | Output formats (`-outfmt`) | Manual |
 | --- | --- | --- | --- |
-| megablast, 100 full-length 16S x RefSeq 16S | 65.9 / 111.2 = 0.59 | 13.1 / 17.2 = 0.76 | 6.6 / 10.6 = 0.62 |
-| megablast, 100 amplicon-like 460 nt slices x 16S | 21.6 / 34.7 = 0.62 | 4.6 / 6.7 = 0.68 | 2.3 / 5.5 = 0.43 |
-| blastn task, the same 100 slices x 16S | 54.7 / 128.9 = 0.42 | 10.8 / 18.7 = 0.57 | 5.5 / 10.8 = 0.51 |
-| blastp, 1 protein x Swiss-Prot | 3.67 / 3.70 = 0.99 | 0.53 / 0.66 = 0.80 | 0.36 / 0.51 = 0.71 |
-| blastp, 100 proteins x Swiss-Prot | 153.5 / 249.7 = 0.61 | 20.5 / 36.4 = 0.56 | 11.0 / 20.2 = 0.54 |
-| blastp, yeast proteome all against all (a) | 279.1 / 885.7 = 0.32 | 38.6 / 114.3 = 0.34 | 22.9 / 61.4 = 0.37 |
-| blastx, 10 transcripts x Swiss-Prot (b) | 28.3 / 30.2 = 0.94 | 3.90 / 4.12 = 0.95 | 2.24 / 2.27 = 0.99 |
+| `blastn` | Nucleotide against nucleotide (`megablast`, `blastn`, `dc-megablast`, `blastn-short`, `rmblastn`) | `0`–`18`, `20` | [blastn](docs/manual/src/programs/blastn.md) |
+| `blastp` | Protein against protein (`blastp`, `blastp-fast`, `blastp-short`) | `0`–`16`, `18`, `20` | [blastp](docs/manual/src/programs/blastp.md) |
+| `blastx` | Translated nucleotide against protein (`blastx`, `blastx-fast`) | `0`–`16`, `18`, `20` | [blastx](docs/manual/src/programs/blastx.md) |
+| `tblastn` | Protein or PSSM (`-in_pssm`) against translated nucleotide (`tblastn`, `tblastn-fast`) | `0`–`16`, `18`, `20` | [tblastn](docs/manual/src/programs/tblastn.md) |
+| `tblastx` | Translated nucleotide against translated nucleotide | `0`–`16`, `18`, `20` | [tblastx](docs/manual/src/programs/tblastx.md) |
+| `psiblast` | Iterated protein search with a PSSM (`-num_iterations`, `-in_pssm`, `-in_msa`, `-out_pssm`) | `0`, `6`, `7`, `10`, `20` (with `-in_pssm` or `-in_msa`: `0`, `6`, `7`) | [psiblast](docs/manual/src/programs/psiblast.md) |
+| `rpsblast` | Protein against a PSSM database such as CDD | `0`, `5`, `6`, `7`, `10`, `11` | [rpsblast](docs/manual/src/programs/rpsblast.md) |
+| `rpstblastn` | Translated nucleotide against a PSSM database | `0`–`7`, `10`, `11` | [rpstblastn](docs/manual/src/programs/rpstblastn.md) |
+| `makeblastdb` | Builds BLAST databases (versions 5 and 4; `-parse_seqids`, `-taxid`, `-mask_data`) from FASTA, also compressed | | [makeblastdb](docs/manual/src/programs/makeblastdb.md) |
+| `blastdbcmd` | Prints sequences and information from a BLAST database (`-entry`, `-entry_batch`, `-info`, `-outfmt`) | | [blastdbcmd](docs/manual/src/programs/blastdbcmd.md) |
+| `dustmasker` | Masks low-complexity nucleotide regions | intervals, FASTA, mask files for `makeblastdb` | [dustmasker](docs/manual/src/programs/dustmasker.md) |
+| `windowmasker` | Masks repeats of nucleotide sequences with a unit counts file (`-ustat`) | intervals, FASTA, mask files for `makeblastdb` | [windowmasker](docs/manual/src/programs/windowmasker.md) |
+| `segmasker` | Masks low-complexity protein regions | intervals, FASTA, mask files for `makeblastdb` | [segmasker](docs/manual/src/programs/segmasker.md) |
+| `convert2blastmask` | Turns lower-case masked FASTA into mask files for `makeblastdb` | mask files, intervals | [convert2blastmask](docs/manual/src/programs/convert2blastmask.md) |
+| `makembindex` | Builds the MegaBLAST index of a nucleotide database | index files | [makembindex](docs/manual/src/programs/makembindex.md) |
+| `rpsbproc` | Annotates conserved domains, sites and motifs from RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 | domain report | [rpsbproc](docs/manual/src/programs/rpsbproc.md) |
 
-(a) The small-tier run (build 0b7335ce) lost at 16 threads (97.9 s vs NCBI 61.4 s) because the 2.9 MB database made only 3 blocks of 1 MiB. The development variable `LOSAT_X_BPDBCUT` (#231, in the default set since #289) fixes it. The LOSAT numbers here are from a later paired run on the same workstation (2026-10-18, build 9560b7c1, medians of 3, 2 and 1 runs at 16, 8 and 1 threads) that had no NCBI arm; the ratios use NCBI's small-tier medians (a cross-run ratio).
-
-(b) The small-tier run lost at 8 and 16 threads (7.1 vs 4.1 s, 4.9 vs 2.2 s). The development variable `LOSAT_X_BXSUBJFLOW` (#287, default ON) fixes it. The 8- and 16-thread numbers are from a later run with NCBI in the same rounds (2026-10-17, build 6d0c7b1e, medians of 3); the 1-thread value is the small-tier one, because the flow does not act at one thread.
-
-Database construction (median of three, one thread): `makeblastdb` 0.69 s for
-RefSeq 16S, 8.47 s for Swiss-Prot and 0.16 s for the yeast proteome; `losat makeblastdb`
-0.17 s, 2.02 s and 0.03 s. Data sources, build hashes, memory use, the machine
-state and the row files are in the [Database benchmark documentation](benchmarks/db6-small/README.md).
-
----
-
-## WebAssembly (Wasm) Integration
-
-LOSAT can be built as a standalone WASI module or embedded into web browsers:
-
-```bash
-cd LOSAT
-
-# Build single-threaded WASI command
-cargo build --release --bin losat --target wasm32-wasip1 --no-default-features
-
-# Build multithreaded WASI command (requires shared-memory runtime)
-cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads
-```
-
-LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](https://github.com/satoshikawato/gbdraw), enabling interactive circular and linear genome visualization without any backend server requirements.
+`rpsbproc` reads `-outfmt 11` archives, which LOSAT's `rpsblast` and `rpstblastn` write as NCBI BLAST+'s do: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data` ([rpsbproc](docs/manual/src/programs/rpsbproc.md)).
 
 ---
 
-## Library use (Rust)
+## Benchmarks and pipelines
 
-The library is the crate `losat` (not on crates.io yet; until then, depend on this repository's `LOSAT/` directory by path or git). The crate's public surface is the module `losat::api` ([plan](docs/losat_library_surface_plan.md)); every other module is the command line or the engine, hidden from the documentation and outside the compatibility promise. `api` searches FASTA records in memory with the command line's options and returns the command line's reports byte for byte, plus one typed record per HSP and the statistics of each query:
+Published tools and workflow managers run unchanged with LOSAT under the NCBI names (`--install-shims`), and their BLAST steps wrote the same output in every case compared (where NCBI BLAST+'s own output changes with the thread count, as in BUSCO and QIIME 2, the same as its 1-thread output), apart from the line that names the program's version in the formats that have one:
 
-```rust
-use losat::api::{read_fasta, run_collect, validate, Inputs, Program, Role};
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="benchmarks/v0.2.0/figures/fig3_downstream_tools_dark.png">
+    <img alt="Time of the BLAST steps of published tools with LOSAT 0.2.0 and with NCBI BLAST+ 2.17.0" src="benchmarks/v0.2.0/figures/fig3_downstream_tools.png" width="100%">
+  </picture>
+</p>
 
-let query = read_fasta(Program::Blastp, Role::Query, &std::fs::read("query.faa")?)?;
-let subject = read_fasta(Program::Blastp, Role::Subject, &std::fs::read("subject.faa")?)?;
-let search = validate(Program::Blastp, &["-evalue", "1e-5", "-num_threads", "4"])?;
-let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"])?;
-// outcome.reports[0].bytes == `losat blastp -query query -subject subject -outfmt 6 -evalue 1e-5 ...`
-// outcome.hsps[i]: the numbers of the `-outfmt` columns (scores, coordinates, strands, frames, counts)
-// outcome.reports[0].spans[i]: the byte range of that HSP's row in the report
-// outcome.query_stats[q]: the query's effective search space, length adjustment, lambda, K and H
-// outcome.queries(): the same results by query, and .subjects() of each by subject
-```
-
-`run_batches` gives the same records one of NCBI's query batches at a time, so a caller keeps one batch in memory, reports progress between batches and stops by not asking for the next. The inputs are records, a BLAST database by its name (`Inputs::database(&query, "core_nt")`, the command line's `-db`), or the PSSM query of psiblast and tblastn by its file (`Inputs::pssm(path, &subject)` and `Inputs::pssm_database(path, "core_nt")`, the command line's `-in_pssm`: the search reads the file, and the one query is the PSSM's sequence, query 0 of the results, in one batch of `run_batches`; `-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are not argv options of the API; psiblast's PSSM files, `-out_pssm` and `-out_ascii_pssm` with `-save_pssm_after_last_round` and `-save_each_pssm`, are written where the command line writes them, `-save_each_pssm` numbering them over the whole run, also over `run_batches`' batches), `run_to_file` is `-out` (and the way to outfmt 13 and 14, with their side files: the name is checked as the command line's `-out` and the file is made where the command line makes it, after the subjects are read), `run_makeblastdb`, `run_blastdbcmd` and `run_dustmasker` run the tools with the caller's reader as their standard input and the caller's writers, the search writes nothing to standard output or error, and errors carry the command line's messages. `cargo run --release --example library_search -- blastp query.faa subject.faa -evalue 1e-5` prints the outfmt 6 report; `cargo doc --no-deps --open` shows the API. The crate is not on crates.io yet (the plan's LIB-3).
-
-## Library use (Python)
-
-[`python/`](python/README.md) holds `pylosat`, a binding of `losat::api` built with PyO3: a search runs in the Python process, with the command line's options and report bytes, its HSPs as an Arrow table, and Ctrl-C between query batches. It is not published yet; build it from the repository with `maturin develop`.
+[benchmarks/v0.2.0](benchmarks/v0.2.0/README.md) has all four figures (standard searches, scaling with threads, queries and database size, published tools, WebAssembly), the inputs, and the measured values as TSV files.
 
 ---
 
-## Web GUI (preview)
+## Libraries and WebAssembly
 
-LOSAT also runs in the browser through the Web GUI (`web/app`), which follows the page layout of NCBI BLAST: a search form with a "Run LOSAT" button, then a Graphic Summary and Descriptions on one page. It is a **preview**, outside the release's NCBI parity claim. A run is marked "Supported" only when its options were compared with NCBI BLAST+ on LOSAT's test fixtures and its browser runtime was checked against the native engine, and "Not yet supported" otherwise; the mark is about the build and the options, not a comparison of your inputs with NCBI. It rejects `-db` (database searches are native only). Its boundary is set by [PD-LOSAT-WEB-APP-BOUNDARY](docs/product_decisions/PD-LOSAT-WEB-APP-BOUNDARY.md); the build and test commands are in [web/AGENTS.md](web/AGENTS.md).
-
----
-
-## Development variables (unsupported)
-
-The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X_REACH` and the `--features diagnostics` build are development variables. They are unsupported and may change or disappear without notice. The defaults (no variable set, a normal build) are the configuration that the release tests cover; do not set these variables in production runs.
-
-[Environment variables](docs/user/environment.md) lists the environment variables and configuration files that LOSAT reads as NCBI BLAST+ does (`BLASTDB`, `.ncbirc` and the others), the ones it does not yet read as NCBI BLAST+ does, the ones it refuses, and the development ones.
+- **Rust (`losat`):** `losat::api` runs a search on FASTA records in memory or on a BLAST database and returns the command line's reports byte for byte, plus one typed record per HSP. Add it with `cargo add losat`. See [LOSAT/README.md](LOSAT/README.md) and the [Rust library page](docs/manual/src/libraries/rust.md).
+- **Python (`pylosat`):** searches from Python, with the hits as an Arrow table for pandas or Polars. Install it with `pip install pylosat`. See [python/README.md](python/README.md) and the [Python page](docs/manual/src/libraries/python.md).
+- **WebAssembly:** the npm package `losat` (built from this repository) runs the engine in web pages and Node.js, and LOSAT Web runs on it; `losat.wasm` is the command for WASI hosts. See [web/packages/losat/README.md](web/packages/losat/README.md) and the [WebAssembly page](docs/manual/src/libraries/webassembly.md).
 
 ---
 
-## Scope & Differences from NCBI BLAST+
-
-- **Intended Use Case**: LOSAT compares a `-query` file with a `-subject` FASTA file, or searches a BLAST database with `-db`.
-- **Database searches**: LOSAT searches `-subject` FASTA files and BLAST databases (`-db`, section 6) written by `makeblastdb` (also with `-parse_seqids`) or by `losat makeblastdb`; `-db` gives NCBI BLAST+ 2.17.0 `-db -num_threads 1` output at every thread count. In `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`, `-db` may name several databases (`-db "a b"`) and take the filters `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist` and `-no_taxid_expansion` (`psiblast` in every round).
-- **`gb`, `emb` and `dbj` ids**: NCBI BLAST+ keeps these three id types in one table for the whole run, and ids with the same prefix, digit count and version share one entry, so it can print `gb|AF000002.1|` for a sequence stored as `emb|AF000002.1|`. LOSAT prints the stored type, as NCBI BLAST+ does with `OBJECTS_PACK_TEXTID=0`. The default tabular fields (`qaccver saccver ...`) do not show it. It shows in a custom field list, in `sseqid` with `-db` and in `qseqid` with `-parse_deflines`, and with `-subject -parse_deflines` also in `sseqid`, `sallseqid` and the ids of outfmt 5, 8, 9, 11, 12 and 13 to 16. It needs definition lines that give one accession prefix two of these types: none of the 57 million such ids of NCBI's core_nt does. See [PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
-- **TBLASTX Subject Genetic Code**: In NCBI BLAST+, local `-subject` searches inadvertently default to genetic code 1 (Standard) regardless of command-line flags. LOSAT correctly translates the subject according to `-db_gencode`. See [PD-TBLASTX-LOCAL-SUBJECT-GENCODE](docs/product_decisions/PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md).
-- **TBLASTX cutoffs on large genome pairs**: NCBI BLAST+ 2.17.0 turns a cutoff quotient past the range of a double into a cutoff of 1 (a conversion that C leaves undefined), so its word cutoff becomes 1. With the default options this happens on ordinary genome pairs, where NCBI BLAST+ ran out of memory or time without output in our runs (a 1.2 Mb query against a 5.5 Mb genome: a crash after 44 GB, or no output in 4 hours with 300 GB). LOSAT keeps the mathematically equal finite cutoff and reports the hits (88,562 rows in 2 minutes there); where the quotient stays finite, both give the same bytes. With an extreme `-searchsp` and `-evalue` on small inputs NCBI BLAST+ reports more rows than LOSAT. See [PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) (exception 8).
-- **BLASTN `-db_hard_mask` on a sequence whose first mask runs to its end**: on a sequence masked to its end with nothing but its first piece before the mask (all masked, or a masked tail such as a poly-A tail), NCBI BLAST+ 2.17.0 scans the masked letters past that piece while it extends only within the piece: it can report an alignment from a word that runs into the mask, lose the alignments of the sequence it searches next (which sequence depends on the thread count), or run out of memory and crash. With a word of 11 letters or more (megablast, blastn, dc-megablast) LOSAT searches such a sequence before its mask, as NCBI BLAST+ searches every other piece; that gives NCBI BLAST+'s result wherever its scan past the piece finds nothing more, and the next sequences are searched as without it. With `-task blastn-short` LOSAT refuses such a database (below). See [PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md), exception 13.
-- **One-hit gapped starts past NCBI BLAST+'s buffers**: with `-window_size 0` and a low `-threshold`, the window of 11 letters that NCBI BLAST+ scores for the gapped start of a one-hit alignment of negative length can pass the end of the query batch or of the subject, where NCBI BLAST+ 2.17.0 reads outside its memory and can crash. `blastp`, `blastx` and `tblastn` read the letters past the sequence as its end marker. That gives NCBI BLAST+'s own output where those bytes are zero: under valgrind, which reports the reads, NCBI BLAST+ wrote LOSAT's output in every such search of ours that LOSAT runs and valgrind finished ([PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) exception 3).
-- **Fail-Fast Configuration**: Unsupported flags and tasks fail fast with clear error messages rather than silently falling back to defaults outside the release test set.
-
-### What LOSAT refuses
-
-LOSAT stops with an error for each option and value below; it does not run something else in its place. Use NCBI BLAST+ for them, except where an item says that NCBI BLAST+ fails there too. "All five programs" means `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
-
-**Output**
-- `-outfmt 1`, `2`, `3` and `4` with `-parse_deflines` and a query record that is also a subject (one record, see **Query and subject**): `blastp` and `blastn`, where the first of the longest aligned segments of the query's alignments (in their order) is in an ungapped HSP of the record with itself that is not its first. NCBI BLAST+ 2.17.0 then leaves the record's subject rows out of its merged alignment, writes past its vectors and aborts (`double free or corruption`); LOSAT stops before the report's first byte (`blastn`: after the prolog, which it writes before the search as NCBI does) or, in a run of many queries that it searches in blocks, before the first byte of the block that holds the query, after the reports of the blocks before (what NCBI writes before its abort depends on its buffers).
-- `-outfmt 1`, `2`, `3` and `4` with `-db` and queries read without `-parse_deflines`: `blastp`, `blastn`, `blastx`, `tblastn` and `tblastx`, a database sequence whose Seq-align id or display id (`makeblastdb -parse_seqids`; the display id is the id of its description line, `lcl|Query_1` of `gi|777|lcl|Query_1`) is the id that NCBI BLAST+ gives a query of the query batch that reports it (`lcl|Query_1` for the first query, its letters in any case). For the Seq-align id NCBI BLAST+ shows that query in its place (its title and letters) and can abort on its alignments, for the display id it shows the query's title in the description line where the table lists the sequence (not past `-num_descriptions`); LOSAT stops where it stops for the item above. With `tblastn -in_pssm` the id of a query is the PSSM query's local id (`lcl|myprot`), in place of `lcl|Query_1`. With `-parse_deflines`, see **Query and subject**.
-- `-html`: all five programs.
-- The tabular `sacc` or `saccver` (the default fields of `-outfmt 6`, `7` and `10` print `saccver`) of a subject whose title, or for a database sequence the name in the taxonomy database from which NCBI makes an empty title or the end of a protein title ending in `[ ]`, is in a text encoding that NCBI BLAST+ cannot tell, where NCBI makes the subject's ids from that title (a `-subject` record whose title's first word starts with `Subject_`, or whose id read with `-parse_deflines` is `lcl|Subject_N`; a database sequence without parsed Seq-ids or with an `lcl|Subject_N` id), and `staxid` of such a subject on the first row of a query's report: all five programs. NCBI BLAST+ 2.17.0 stops at that row with a null pointer exception (exit status 255), or prints an uninitialised number for `staxid`; LOSAT writes what NCBI writes before the query batch's report. Other field lists and formats write NCBI's output for such a subject (`Unknown` and the subject's own id; [PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) 1.37).
-- `-outfmt 18` with a taxonomy database that names a taxid of a shown group with the text `<@bl_taxid@>` (NCBI BLAST+ writes an uninitialised number there), with a `./.ncbirc` that has a syntax error (NCBI's report stops there with an exception) or `[NCBI] .Inherits` (NCBI's report reads the files it names): all five programs, before the query batch's first byte.
-- `-outfmt 18` with a query batch that NCBI BLAST+ does not search (no query of it has a valid context: "Could not calculate ungapped Karlin-Altschul parameters", such as a batch of one query of only `N` or `X`): all five programs. NCBI BLAST+ 2.17.0 stops at the query's report with a null pointer exception (exit status 255); LOSAT writes what NCBI writes before it (the earlier queries' reports and the query's first lines, up to `Length=`) and then stops with the error. A query without a valid context in a batch that NCBI searches gets the report of a query without hits, as in NCBI.
-- `-sorthits` with a description table that lists every subject and whose last subject alone has a total score above 99999 bits: all five programs. NCBI BLAST+ 2.17.0 pads that row with spaces without end, so it never finishes the report and has no output to use there either; LOSAT writes what NCBI writes before that table (the earlier queries' reports and the query's first lines) and then stops with the error.
-
-**Scoring and search settings**
-- `-matrix` and gap costs: `blastp`, `blastx` and `tblastn` accept every matrix with any gap costs of NCBI's table for the matrix, but IDENTITY not with the compressed lookup table (word sizes 5 to 7; 5 is the default of `-task blastp-fast`, `blastx-fast` and `tblastn-fast`), with which NCBI crashes, and `blastx` no other name that begins with IDENTITY (such as IDENTITYX), with which NCBI aborts; `tblastx` accepts every matrix.
-- `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`): `blastp` and `psiblast` (modes 0 to 3 work in `blastp`, `blastx`, `tblastn` and `psiblast`; `blastx` and `tblastn` read `1u` to `3u` as the mode alone, as NCBI does; `rpsblast` runs 2 and 3 as 1, as NCBI does).
-- An `-evalue` that is not finite (`+inf`, `1e999`, `-nan`): `blastx`. An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) or more: `tblastn` (NCBI's `tblastn` crashes on some inputs with it).
-- `-threshold` with the compressed lookup table (`-word_size` 5 to 7, and the default of the `-fast` tasks), when the neighboring words of a query batch fill NCBI's 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap: `blastp`, `blastx`, `tblastn`, `psiblast`.
-- A hit list size (`-max_target_seqs`, or what `-num_descriptions` and `-num_alignments` set) whose preliminary size overflows NCBI's 32-bit integer (2^31 - 50 or more; 2^30 - 25 or more with composition-based statistics; NCBI crashes): `blastn`, `blastp`, `blastx`, `tblastn`, `psiblast`.
-- `-task rmblastn`: `blastn`.
-- `-use_sw_tback`: `blastp`, `blastx`, `tblastn`.
-- `-max_intron_length` other than 0: `tblastn` with sum statistics (its default, and `-sum_stats true` with `-in_pssm`; without them NCBI does not use it, and neither does LOSAT), and `tblastx` the option itself. `blastx` accepts it.
-- With `-window_size 0` (the one-hit word finder) and a low `-threshold`: a one-hit ungapped alignment of length 0 or less that meets another in the overlap of two 5,000,000-letter parts of a subject frame where their lengths add up to 0, which NCBI BLAST+ merges by dividing by that sum (its result is undefined; [PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) 1.21): `tblastx`; two gapped starts of one-hit alignments of negative length that lie at the end of their 5,000,000-letter part of a frame or past it, on which NCBI BLAST+ never finishes; with `-in_pssm` one whose window of 11 letters passes the PSSM's last position, where NCBI BLAST+ reads past its matrix ([PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) 1.18); with `-in_pssm` and a PSSM whose `-` column scores above NCBI BLAST+'s minimum, one whose gapped start lies past the end of NCBI BLAST+'s translation of the subject (after its last frame), where NCBI BLAST+'s gapped alignment reads the byte after its end, which it never sets, or past it ([PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) 1.48), one whose gapped start lies after the end of its frame's translation (its NULLB) and that reaches NCBI BLAST+'s traceback, which reads a byte its translation does not set there ([PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) 1.44), and the report of one whose traceback starts on the NULLB, whose column NCBI BLAST+ places past the subject's end (a result LOSAT does not reproduce yet; such alignments that NCBI BLAST+ drops before its reports give its output): `tblastn`.
-- An alignment on a subject (or its `-subject_loc` range) of fewer than 12 bases that reaches the traceback (`tblastn`) or the ungapped re-evaluation (`tblastx`), where NCBI BLAST+ reads the translation of the subject's frame, which it never makes for a subject this short, and crashes ([PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) 1.46 and 1.51; in practice with `-window_size 0`: no frame of such a subject, three letters at most, holds two words that do not overlap; `tblastx` first writes the reports of the query batches before in full, which NCBI BLAST+ writes before it crashes except what its output buffer still holds, with `-outfmt 0` the end of the last one): `tblastn`, `tblastx`.
-- With `-ungapped -window_size 0` and a low `-threshold`, and `-subject` (also with `-subject_loc`): a one-hit ungapped alignment of length 0 at the first letter of the searched part of a subject with alignments of letters among the hits that the reports show (NCBI BLAST+ may stop earlier at another alignment of length 0; LOSAT refuses the batch before its first byte), which NCBI BLAST+'s Seq-loc mapper cuts into two alignments without scores (NCBI BLAST+ then writes rows of the query's Seq-align id with an E-value of 0.0 and a bit score of -1.0, stops with an exception or runs out of memory, depending on the frame, the fields and the memory limit), and a subject whose every such alignment has length 0, one of them at the first or second letter of the searched part, of which the mapper, finding no sequence type, makes alignments without scores of query nucleotides against the subject's letters (more rows, exceptions or an out-of-memory stop for two or more; the tabular reports of a subject's only one are written as NCBI BLAST+ writes them): `blastx`, in every format but `-outfmt 18`. Elsewhere LOSAT reports alignments of length 0 as NCBI BLAST+ does (rows of empty ranges, NCBI's exceptions and caught errors).
-- With `-ungapped -window_size 0` and a low `-threshold`, `-outfmt 1` to `4`: a one-hit ungapped alignment of length 0 among the alignments shown where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in every such run of ours; [PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) 1.39): one whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1, and one followed on its query row by unaligned letters, whose segment the merge's `FillUnalignedRegions` frees unless it is the last segment the merge made: `blastx`, before the report's first byte, unless the report of a query before it ends with NCBI BLAST+'s exception.
-- A gapped X-drop whose raw score makes the sizes of NCBI's gapped alignment kernels leave 32-bit integers (from about 4.14e8 to 8.27e8 bits with BLOSUM62 11/1; NCBI's arithmetic overflows. A larger value leaves 32-bit integers itself and becomes NCBI's INT_MIN, which the kernels raise to the gap costs: those searches run as NCBI's): `-xdrop_gap` at every `-comp_based_stats`, and `-xdrop_gap_final` with `-comp_based_stats 0` (the redo of modes 1 to 3 runs with its own X-drop): `blastp`, `blastx`, `tblastn`, `psiblast` (its later rounds and `-in_pssm` with the PSSM's Lambda).
-- A final gapped X-drop of dynamic programming (`-task blastn`, `blastn-short`, `dc-megablast`, `-no_greedy`) whose raw score divided by the gap extension reaches 1,073,741,721 (NCBI's arithmetic overflows), and a gapped X-drop of greedy extension (`-task megablast`) at which NCBI's greedy alignment reads or writes outside its arrays (NCBI then corrupts its heap, reads memory it did not write, crashes or stops with `BLAST engine error: Unknown error code -1`): with the default scores (reward 1, penalty -2), `-xdrop_gap` or `-xdrop_gap_final` from about -7.4 to -1.98e9 bits and from about 1.98e9 to 3.97e9 bits, and from about -1.98e9 to -3.97e9 bits unless the other X-drop is as large in NCBI's doubled arithmetic; the limits move with the scores, and with an even reward a value past 32-bit integers is refused too: `blastn`.
-- `-ungapped`: `blastp`, `tblastn`; with `-outfmt` 8, 9, 11, 12 and 17: `blastn`.
-- An alignment that NCBI BLAST+ keeps outside its query context and that the report reaches: from an ungapped extension that runs past an end of its context (such as with `-xdrop_ungap 1e10`, which NCBI BLAST+ turns into INT_MIN: the extension then runs past two sentinels, where NCBI's 32-bit sum wraps), with `-ungapped` an alignment whose re-evaluation keeps its part outside the context (that part reaches the cutoff and the letters in the context score no more), and with `-task megablast` one whose greedy extension from the middle of such an extension stays outside the context; no e-value, percent identity, query coverage, `-max_hsps`, `-max_target_seqs`, `-culling_limit` or `-subject_besthit` limit drops it first (LOSAT drops it where NCBI BLAST+ does). Where its query coordinates leave the query on the left (a query start below 1: a start left of the context on the plus strand, an end past it on the minus strand), NCBI BLAST+ 2.17.0's report stops with an exception (exit status 255: `CAnnotMapperException` with `-subject`; from a database the tabular report writes the rows before it and stops with `CAlnException`, and the pairwise report leaves the alignment out); where they pass the query's end (the other two cases), its reports show them. LOSAT reproduces neither yet and stops before the rows of the query batch. Where the part outside the context is below the cutoff, or the greedy extension comes back into the context, NCBI's alignment lies in its context and LOSAT reports it as NCBI does: `blastn`.
-- `-strand` and `-sum_stats`: `tblastx`.
-- `-best_hit_overhang` and `-best_hit_score_edge`: all five programs.
-- `-subject_besthit`: `blastp`, `tblastn`, `tblastx`.
-- An ungapped extension that passes the end of a query frame into the frame next to it in the query batch and scores higher there: `tblastx`, with an `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62; a raw X-drop above 32,768). In the cases checked, NCBI BLAST+ 2.17.0 keeps such an alignment in the frame where it started, with query coordinates outside that frame, and writes coordinates past the query or leaves the alignment out of every report ([PD-LOSAT-NCBI-DEFECTS](docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md) 1.40). LOSAT writes the results of the query batches before and then stops with the error. An extension that passes into the next frame without scoring higher there gives NCBI BLAST+'s output.
-
-**Query and subject**
-- A protein subject longer than 5,000,000 residues (a `-subject` record or a database sequence): `blastx`. NCBI BLAST+ searches such a subject in overlapping parts; LOSAT does not split protein subjects.
-- A query batch whose search fails after a first batch that NCBI does not search (its queries give no Karlin-Altschul parameters): `blastp` writes NCBI's report of that first batch and then the error for `-searchsp` or `OLD_FSC` with subjects of fewer letters than sequences, a database without sequences and a database whose sequence file cannot be read, with `-outfmt` 0 to 4, 6, 7 and 10; refused with the other formats.
-- `-parse_deflines`: two subjects with one id; two queries with one id in one query batch (with `-subject` or `-outfmt 5`, in any two batches: NCBI keeps every batch's queries there); a query and a subject with one id, unless they are one record (the same definition line and the same letters; `blastx` and `tblastn` refuse that too, with `-outfmt 0` `blastn`, `blastp` and `tblastx` refuse it when the record has masks; with `-outfmt` 1 to 4 `tblastx` writes NCBI's report, whose sections show the record's alignments with itself on the query's rows; where NCBI BLAST+ 2.17.0's merge of such a section throws, as it can for a repeat whose copies `-query_loc` and `-subject_loc` keep apart, a palindrome or a tandem repeat (`Start iterator already exists for seq2` or `Infinite loop detected`), `tblastx` writes NCBI's report up to that query's description table and then NCBI's error, exit status 255); a database sequence with the id of a query of the batch that reports it (with `-outfmt 5`, of any batch) as its Seq-align id, or with `-outfmt` 0 to 4 (`blastp`, `psiblast`, `rpsblast`; 1 to 4 of `blastn`, `blastx`, `tblastn` and `tblastx`) as the display id of its line in the description table (the id of that line: `lcl|abc` of `gi|779|lcl|abc`), where NCBI BLAST+ shows the query's title. `psiblast` searches one query per batch, so against a database it refuses only a database sequence with the id of the query whose rounds report it; with `-in_pssm` (`psiblast` and `tblastn`), a subject or a database sequence whose id is the PSSM query's local id (`lcl|Query_1`), even the PSSM query's own record. A PSSM query whose Seq-ids are not one local id is shown with its ids without `-parse_deflines` too, so a database sequence with one of them (`sp|P69905.2|` against a PSSM of `swissprot P69905.2`) is refused with or without the option (NCBI shows the PSSM query for it), and a `-subject` record with one of them under `-parse_deflines` (NCBI's `tblastn` then fails).
-
-**Databases**
-- `-db_soft_mask` and `-db_hard_mask`: `blastp`, `blastx`, `tblastn`, `tblastx`. With `-db_hard_mask`, `blastn` refuses, before it writes anything, a database with a searched sequence of at least the word's letters whose first mask with letters runs to its end with at most 5,000,000 letters before it and no other mask before it than masks of no letters at its start, with a word below 11 letters (`-task blastn-short`; all masked, or a masked tail such as a poly-A tail: NCBI BLAST+ 2.17.0 then scans the masked letters past its first piece and can crash; with a word of 11 letters or more such a sequence is searched before its mask, above), whose masks are stored out of order or overlap, or whose last mask is shorter than the 1 to 3 letters before its end that the last piece starts with, where that piece and an earlier piece that ends after its start are both long enough to hold a word (NCBI BLAST+ 2.17.0 then merges their alignments by a value it reads past its list of pieces; not where the stretch after the mask is longer than 5,000,000 letters); the error names the first such sequence by its OID. With `-db_soft_mask` or `-db_hard_mask`, `blastn` refuses a search that reads masks from a volume without the algorithm (a database whose volumes give the algorithm differently) or from a volume whose masks have only their big-endian file (`.nab` without `.nac`), where NCBI BLAST+ reads masks of another algorithm or reversed numbers; such a volume whose searched sequences (by `-seqidlist`, `-negative_seqidlist` or an alias file's `FIRST_OID` and `LAST_OID`) have no masks is searched.
-- `-filtering_db` and `-index_name`: `blastn`. `-window_masker_taxid` with an ascii counts file whose unit size is 17 to 251 (NCBI BLAST+ masks with units that do not fit its 32-bit units), or with an optimized ascii counts file whose hash parameters line (its third) leaves unread a value that NCBI BLAST+ then checks (it checks it uninitialized): `blastn`; NCBI's result is undefined in both. `-use_index true` with a megablast search (without `-template_type`) of a database that has a MegaBLAST index (`makembindex`), or with a `-db` value that has a comma (old-style index volumes): `blastn`.
-- Alias-file keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `MEMB_BIT`, `MASKLIST` and `OID_MASK_TYPE` (they select sequences by a list, an OID mask or a membership bit). `TITLE`, `DBLIST`, `NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`, `FIRST_OID` and `LAST_OID` work as in NCBI BLAST+, and `VDBLIST` and `MAX_SEQ_LENGTH` are ignored, as NCBI's reader ignores them. An `NSEQ` that is negative as a 32-bit count or of 2^31 or more, and a `LENGTH` of 2^63 or more, are read as NCBI BLAST+ reads them, as 32-bit and 64-bit signed counts, through the statistics and the reports (whose commas lose digits from 4,294,967,296,000,000,000, as NCBI's do). A `LENGTH` of 0, and a list whose count of the database visits no sequence, make each subject's statistics its own, as in NCBI BLAST+. Also refused for now: `FIRST_OID`, `LAST_OID`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`, and a `LENGTH` of 0 or of 2^63 or more, in RPSBLAST databases. Refused where NCBI BLAST+'s arithmetic overflows: the databases of a `-db` list whose total lengths sum past 64 bits (`-outfmt` 0 to 5 and 13 to 16) or whose numbers of sequences sum past 32 bits (`-outfmt` 5), and a total length of exactly 9,223,372,036,854,775,808 in BLAST XML and XML2 (`-outfmt` 5, 14 and 16, which NCBI writes as `-0`). BLASTN and TBLASTX refuse an alias file's `NSEQ 0`, and its `LENGTH` or `STATS_TOTLEN` without `NSEQ` or `STATS_NSEQ` over volumes without sequences, on which NCBI BLAST+ crashes, and so do BLASTP, BLASTX, TBLASTN and PSI-BLAST with `-searchsp` or `OLD_FSC` (BLASTX also with `-ungapped`).
-- On a database built with `-parse_seqids`, a reported sequence of the kinds below. The error names the sequence, and [PD-LOSAT-DATABASE-SEARCH](docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md#databases-with-parsed-seq-ids-version-13-line-dbid) has the full list. No comparison with NCBI on its swissprot, pdbaa, 18S_fungal_sequences and 16S_ribosomal_RNA was refused (all six programs, not every program on every database).
-  - An id that NCBI's formatters do not find, or find on another sequence first (`gnl|PIG|`, `gim|` ids, in version 4 `bbs|` and `nat|`, `gb|X|` after `gb|X.1|`, `lcl|300` after `bbs|300` in version 5, a stored `gnl|BL_ORD_ID|n` with n other than the sequence's position in its volume), or that another sequence also holds in any letter case (`lcl|555` and `gb|X.1|` with `lcl|555` in its second definition line), in outfmt 0, 5, 6, 7, 10, 13 to 17 and 20. NCBI stops, writes `Unknown` or writes the other sequence's names. The same record in two databases is not refused; with other tax ids, only in outfmt 13 to 16 and the tabular tax id and name fields (NCBI writes the first copy's tax ids for both) and where a title that the report shows (outfmt 0, a printed tabular id that replaces `lcl|Subject_N`) or the taxonomy database's messages depend on them.
-  - An id that NCBI's scope matches weakly to the id of a query read with `-parse_deflines` in the batch that reports it (with `-outfmt 5`, in any batch; `sp|P00001.1|NAME` and a query `sp||NAME`, `gb|X|` and a query `gb|X.1|`): a Seq-align id in every format, a display id (the id of the sequence's line in the description table) in outfmt 0 to 4 of `blastp`, `psiblast` and `rpsblast` and 1 to 4 of `blastn`, `blastx`, `tblastn` and `tblastx`; in a query batch whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off (0, or a value below the batch's number of alignments), also to an id of another sequence of the database (in version 5 any id with a name or of `pir` or `prf`), in outfmt 0, 5, 6, 7, 10, 13 to 17 and 20. NCBI writes the query's or the other sequence's names.
-  - Following hits whose ids NCBI takes for one sequence but that are not copies of one record (`pdb|1ABC|` and `pdb|1ABC|AA`, `gb|X|` and `gb|X.1|`), in outfmt 0, 5 and 13 to 16 and the tabular `qcovs` and `qcovus`, and in every format of `psiblast` when they reach its `-max_target_seqs` cut. Copies of one record (the same definition lines but for their tax ids) that follow each other are shown in one hit, as NCBI shows them. `psiblast`'s PSSM puts such hits in one row, as NCBI does.
-  - In `psiblast`, where it compares them by NCBI's id handles (its inclusion sets, a PSSM made by its rounds or by `-save_pssm_after_last_round` with `-out_pssm` or `-out_ascii_pssm`, the outfmt 0 two-part table): two sequences whose ids those handles can take for one sequence, such as ids that differ only in letter case or one accession under `gb`, `emb` and `dbj`; a `gim|` id in such a PSSM; and two copies of one record with another hit between them (NCBI BLAST+ 2.17.0 crashes).
-  - Ids and titles that NCBI cannot write, such as an outfmt 0 description id of 65 bytes or more. The titles that NCBI makes from taxonomy data are written as NCBI writes them: an empty title from the organism's name, and the end of a protein title ending in `]` rewritten from the first tax id (`alpha, partial [Bacillus sp.]` becomes `alpha [Bacillus sp.]`).
-- A version 5 list (`-db "a b"`) of databases with and without the accession table of `makeblastdb -parse_seqids`, where a query batch's prefetch stops at a reported parsed Seq-id that a database without the table cannot look up (NCBI BLAST+ 2.17.0: `BLAST Database error: DB contains no accession info.`, exit status 2), with a taxonomy database that writes a text (a damaged `taxdb.bti` or `taxdb.btd`): a stopping batch whose other sequences' loads write such a text or throw on their ids (all five programs), or, with `-outfmt 5`, look a tax id up after a batch whose BLAST XML report NCBI's XML stream cuts at a query title or id outside US-ASCII before its hits (`blastp`, `blastn`, `tblastn` and `tblastx`). NCBI then writes the texts before the error or not, as the order of its loads decides. Refused before the first byte.
-- On such a database, the environment variables `SEQ_ID_PREFER_ACCESSION_OVER_GI` and `SEQ_ID_AVOID_GI`.
-
-**Strategy files**
-- `-import_search_strategy`: all five programs, `psiblast`, `rpsblast` and `rpstblastn`.
-- `-export_search_strategy`: the five programs, `psiblast` (with a FASTA query or `-in_pssm`), `rpsblast`, `rpstblastn` and `tblastn -in_pssm` write NCBI's file (with `-in_pssm` NCBI's PSI-BLAST request, which holds the PSSM as read, with `-db`, and NCBI's error after the prolog with `-subject`; `rpsblast` and `rpstblastn` the file of NCBI's `-num_threads 1` at every `-num_threads` and `-mt_mode`: with `-mt_mode 1` and more than one thread NCBI's threads write their requests into the file at the same time, and with a database of several volumes they leave out the search space of the batch before); refused there: the standard output (`-export_search_strategy -`) or the file of `-out` or of the standard output (NCBI writes each batch's request into the report or over it), a file that cannot be written to the end (NCBI writes a message and exits with status 0), a strategy file name that is not UTF-8, `-dbsize` with a list that keeps no sequence of the database, and the library API (and pylosat; the command line writes the file).
-
-**NCBI C++ Toolkit options**
-- `-xmlhelp` works on the command line in `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `rpsbproc`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask`: NCBI BLAST+ 2.17.0's XML description of the program's arguments, without the options that this section refuses whatever their value (`-use_sw_tback` and `-ungapped` included where they are refused) and the dependencies that name them; the options that LOSAT runs keep NCBI's definitions byte for byte (`blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` refuse no option by name, so theirs is NCBI's whole XML). The library API (and pylosat) and the Web engine refuse it. `-h`, `-help`, `-help-full` (the text of `-help`) and `-version` work, and as in NCBI the arguments after `-h`, `-help`, `-help-full` or `-xmlhelp` are not read (an unknown option or a missing value there is no error).
-- `-version-full`, `-version-full-xml` and `-version-full-json` work in every program, as `-version` does: NCBI's text, XML and JSON forms with NCBI's first line (`blastn: 2.17.0+`) and LOSAT's package (`Package: LOSAT ...`, in the XML and JSON the package `LOSAT` and its version); the lines that NCBI's build writes about itself (its configuration, build signature, dates and revisions) are not written, and `Package-Config` and the build information are empty. The library API (and pylosat) and the Web engine refuse the versions, `-version` too, in all programs but `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask`, whose library runs print them.
-- `-dryrun` works on the command line as in NCBI in `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask`: the arguments are read and checked against their definitions (an error in them is reported as without `-dryrun`), then nothing runs, no input is read and no file but the `-logfile` file is made, exit status 0. `rpsbproc` runs its own dry run, as NCBI's rpsbproc 0.5.1: its start runs as for a run (the `-i` file is opened and read up to its first character, the `-o` file is made empty, the data files are loaded), then it writes `Dryrun passed, all resources are present and loaded successfully.` or `Dryrun failed, error subcode = N` and exits with N (an error in the data files that ends NCBI's start ends it with NCBI's report and exit status 2, without that line); it reads no archive, so an archive or XML document that a run refuses passes, and so do the environment variables that change how NCBI reads an archive (`SERIAL_VERIFY_DATA_READ`, `SERIAL_VERIFY_DATA_GET`, `OBJECTS_SEQ_DESCR_ALLOW_EMPTY`). An NCBI option that LOSAT does not run, a form of a value that it does not read, and the other registry and environment settings that it refuses are refused as without `-dryrun`. The library API (and pylosat) runs it in `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast` and the library's tools as on the command line: a search writes no report (an empty report per format), makes no `-out` file and reads no record (pylosat's `Search.dry_run` tells it). The Web engine runs it in `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` as the command line does: a run writes no output.
-- `-logfile` and `-conffile` work on the command line as in NCBI (the diagnostics in the file, appended; tblastx, rpsblast, rpstblastn, blastdbcmd and dustmasker also write the messages of their run there, the other programs to the standard error; segmasker and convert2blastmask write the NCBI exceptions of their run to the standard error and the others to the file, as NCBI's; rpsbproc writes its messages there and its program information and progress to the standard error; the registry file read in place of `<program>.ini`; a `-conffile` name that is not UTF-8 is refused). The library API (and pylosat) runs them as the command line does, in each call: the `-logfile` file gets what the command line writes there (tblastx's run messages too), NCBI's messages about the registry files go where the command line writes them (the call's diagnostics stand for its standard error; the call's error is the text of a start that ends the program), and the registry and environment settings that the command line refuses are the call's error. The Web engine runs them in `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` as the command line does, in each run: the file of `-conffile` is a file that the page gives the engine under that name, the `-logfile` file comes with the run's outputs (tblastx's run messages in it), and a `-logfile` name with a directory is refused (the browser has no directories). On LOSAT Web's page they go in Additional options: the page asks for the file that `-conffile` names, shows the `-logfile` file after the output formats (and under a failed run's status), and says when a run was a dry run. `-logfile -` is the standard error, and `""` and `/dev/null` send the messages nowhere, and `.` and `..` go to the standard error, as NCBI sends a log it cannot open to `cerr`. `tblastx`, `rpsblast` and `rpstblastn` refuse a `-logfile` file in the WASI command-line build, which cannot send its standard error to a file.
-
-**psiblast** runs the rounds of FASTA queries with every matrix and gap cost of NCBI's tables (BLOSUM45, BLOSUM50, BLOSUM62, BLOSUM80, BLOSUM90, PAM30, PAM70, PAM250) and every `-comp_based_stats` mode (0 to 3, the default 2; round 1 is blastp's search in that mode, the later rounds run 2 and 3 as 1); a query that NCBI splits into chunks (19,800 letters and more by default) runs every round as NCBI runs it; the library API (and pylosat) runs the rounds too, with the command line's report bytes and each HSP record's round, each round's statistics and whether the rounds converged, and writes the PSSM files as the command line (refused there: a call of `run` or `run_collect` whose formats take two searches, with `-num_descriptions` or `-num_alignments`, and that writes PSSM files; one call per format writes the command line's). The redo of the later rounds' composition-based statistics runs the subjects one after the other (NCBI's one-thread order). `-in_pssm` runs its rounds with every `-comp_based_stats` mode (2 and 3 as 1, as NCBI), outfmt 0, 6 and 7 and BLOSUM62 11/1, a PSSM in ASN.1 text whose query has Seq-ids of any kind (one local id, as psiblast's own PSSMs, shown as a FASTA query's local id; any other id, such as the `gi 4504347` of a PSSM made with `-parse_deflines`, and several ids, shown with or without `-parse_deflines` as `-parse_deflines` shows a FASTA query's ids, the first id naming the query in its alignments, later PSSMs and warnings, as NCBI's) and whose sizes match its scores (or its frequency ratios, when it has no scores) and query; the composition-based redo runs the subjects one after the other at every thread count (NCBI's one-thread order); refused with it: a PSSM of frequency ratios only written by row (NCBI reads the scores it computes for it in the wrong order), a PSSM whose position-based scaling gives score frequencies but no Karlin-Altschul parameters (NCBI goes on with a Lambda of -1), a PSSM with a negative gapped Karlin-Altschul value (`lambda`, `kappa` or `h`; NCBI goes on with a block it holds invalid; a negative ungapped value, `lambdaUngapped`, `kappaUngapped` or `hUngapped`, gets NCBI's error of a query without Karlin-Altschul parameters, as in NCBI), a PSSM of frequency ratios only from which NCBI's PSSM engine makes no scaled scores (NCBI does not finish or stops with an error), a binary or XML PSSM, a query without a Seq-id, with a Geninfo import id (`gim|`, which NCBI cannot resolve) or a database ordinal (`gnl|BL_ORD_ID|n`), with a local Seq-id among other Seq-ids (NCBI's reports then show it as no FASTA query is shown), with an empty local id or with a Seq-id that has neither an accession nor a name (NCBI's run then depends on the database and the report: a database error with some databases, `Failed to resolve SeqId` in the pairwise report, `Unknown` in tabular reports), a query with more than one title or with white space at the ends of its title (these, the output formats other than 0, 6 and 7 and the `-out_pssm` and `-out_ascii_pssm` refusals below are not refused where NCBI stops before the search and writes its prolog and error: `-export_search_strategy` with `-subject`, a PSSM that NCBI's checks reject, a PSSM of frequency ratios only whose scores NCBI's PSSM engine cannot make; nor is any refusal of this paragraph, other than the object manager's own cases below, where NCBI's object manager ends the run as it adds the query's Seq-entry to its scope: an error about the query's annotations, a Seq-id twice in the entry (two Seq-ids that NCBI's object manager takes as one: equal ones, and ones that differ only where NCBI does not look, such as the case of letters, GenBank, EMBL or DDBJ for an accession alone, or PDB's `chain` and `chain-id`; a `giim` id and a Textseq-id with neither an accession nor a name never meet themselves), or a query Seq-entry set, whose annotations NCBI's object manager takes and which NCBI then stops at with its exception (`CSeq_entry::GetSeq()`); NCBI reads the PSSM's other values, the subjects' Seq-ids under `-parse_deflines`, the PSSM files and the search's options only after that), a score outside -32,768 to 32,767 (`BLAST_SCORE_MIN` to `BLAST_SCORE_MAX`), a PSSM whose columns' largest scores add up to 2^30 or more (NCBI's `Int4` sums of its alignments can then overflow; every PSSM of fewer than 19,800 columns passes), a query whose letters give no Karlin-Altschul parameters (NCBI crashes), a PSSM without a query, query Seq-data other than `iupacaa`, `ncbieaa` and `ncbistdaa`, a query whose `annot` gives a case of NCBI's object manager whose output names a memory address or depends on the machine (an empty location, `Empty region in 0x...`; a NULL-pointer report; a Dense-seg that NCBI divides by zero; BitMagic data; reads past a Packed-seg's vectors; integer overflows; two Seq-ids of one location (a feature's, a Seq-table's or a Seq-table row's) with different messages that NCBI orders by address, as no gi, accession or general id number orders them; a Seq-table of more than 10,000,000 rows or a Std-seg of more than 1,000,000 rows; XML and JSON reports of an untitled query whose annotations hold features), with `-subject` a Seq-id twice in the query's entry where NCBI's exception may write a Seq-id as a subject record spelled it (a GenBank, EMBL or DDBJ accession alone, a name or a patent number or country with a letter, more than 64 letters in a local or general id or in an accession), with `-out_pssm` a PSSM of frequency ratios only without `rpsdbparams` (NCBI cannot write its matrix name), and with `-out_ascii_pssm` a PSSM whose information content comes without the other columns of NCBI's long ASCII form. The PSSM's ASN.1 text is read as NCBI reads it, every member of every type it reaches (from NCBI's ASN.1 modules), and values nested in themselves (Bioseq-sets, Seq-loc mixes, User-objects and the like) are read to any depth: NCBI may crash on a nest of thousands of levels with its default 8 MiB stack (no output), where LOSAT writes what NCBI writes with a larger stack. The reader gives NCBI's format error (`Unrecognized format for PSSM`), its report of a number outside the range of its member's C++ type and of a member tag it cannot convert (`Error: NCBI C++ Exception:`, exit status 255), its silent end of a file that ends right after `PssmWithParameters ::=`, and its messages for a byte outside the visible ASCII range of a string (read as `#`) and for the deprecated members of a `Variation-ref`. The query's annotations are indexed as NCBI's object manager indexes them (feature tables, alignments, graphs, locations, Seq-tables): the PSSM is searched, with NCBI's messages (`Invalid 'lens' size in denseg`, the Seq-table column messages, `Failed to parse location of`, after which NCBI's later messages print their headers only and an empty location prints the ASN.1 text of its feature, graph or alignment, or the location itself for a location set or a Seq-table location, as far as NCBI's output buffer writes it, which ends the run with exit status 0) and its errors (`Error: NCBI C++ Exception:`, `Error: vector::reserve`), where NCBI writes them. NCBI's errors for a file that cannot be read or whose format is not a PSSM, and its checks of the PSSM, come as in NCBI. With `-save_pssm_after_last_round -out_ascii_pssm FILE` (and `-save_each_pssm`) it writes the round's PSSM in NCBI's ASCII form; with `-out_pssm FILE` it writes it as NCBI's ASN.1 text `PssmWithParameters` (the scores, the frequency ratios, the Karlin-Altschul parameters, the query and the scoring parameters; with `-out_ascii_pssm` also the other diagnostics; the PSSM of `-in_pssm` with every member it held, as NCBI writes it back). With a FASTA query and one round the PSSM files are written after the reports (a run that fails before its reports leaves them as they were); with more rounds, and with `-in_pssm` (whose input PSSM is written before round 1), each file is written where NCBI writes it. A query title with a byte outside the visible ASCII range is written in the ASN.1 PSSM as NCBI writes it (`#` for each such byte, with NCBI's error message for each at each write of the file). Refused: an `-out_pssm` file that cannot be written, an `-out_pssm` or `-out_ascii_pssm` file that is also the standard output, the standard error or the `-out` file, and an `-out_pssm` that is a named pipe, a block device or a symbolic link to a missing file.
-- Refused: `-in_msa`, `-msa_master_idx`, `-ignore_msa_master`, `-phi_pattern`, `-outfmt` other than 0, 6, 7, 10 and 20, and a `-subject` set whose sequences all have no letters (NCBI's psiblast crashes; blastp runs it).
-- It also refuses the `blastp` entries above that apply to it (IDENTITY is NCBI's own error: psiblast takes the eight matrices of NCBI's tables, each with the gap costs of its table, in every round), and with `-in_pssm` every matrix and gap cost but BLOSUM62 with 11/1.
-- A REAL of a PSSM (`-in_pssm`, also tblastn's) whose exponent overflows NCBI's 32-bit `int` (`1.55e-2147483647`; NCBI's arithmetic is undefined, its binary wraps the exponent and reads the largest double) is read with the exact exponent: the smallest normal double (PD-LOSAT-NCBI-DEFECTS 1.19).
-
-**tblastn -in_pssm** (PSI-TBLASTN) refuses the `tblastn` entries above, the PSSMs and PSSM queries that psiblast's `-in_pssm` refuses (above), and, where NCBI BLAST+ 2.17.0 crashes or aborts: `-ungapped`, `-use_sw_tback`, `-outfmt 11` (where NCBI searches), `-mt_mode 1` with more than one thread and `-db`, and a PSSM query that `-seg` masks completely. Also refused: `-outfmt` other than 0 to 4, 6, 7 and 10, `-db_gencode 32` (not one of NCBI's codes; LOSAT's `tblastn` takes it for its own translations), and `-in_pssm` in LOSAT Web (the library API and pylosat take it as an input, `Inputs::pssm` and `Pssm`). Where NCBI stops before the search (as for psiblast's `-in_pssm` above), the output formats (every format `tblastn` writes, `-outfmt 11` included) and the query's titles are not refused: NCBI's prolog and error are written. Where NCBI's object manager ends the run as it adds the query's Seq-entry to its scope (as for psiblast's `-in_pssm` above), neither are LOSAT's limits of what NCBI's tblastn makes after it (its formatter, its requests and its search: an `-xdrop_gap` or `-xdrop_gap_final` that NCBI's kernels cannot size, `-dbsize` with `-outfmt 11` and a list that keeps no sequence, a database named `n/a` or `SRA` in a Seq-annot format, database lengths whose sums the report cannot write): NCBI's messages and error are written, with `-outfmt 11` in its error archive.
-
-**rpsblast** runs with and without composition-based statistics on databases of one or several volumes (section 8).
-- Refused: `-outfmt` other than 0, 6, 7 and 10 (17 gets NCBI's own error), `-sum_stats true` (NCBI's rpsblast then links HSPs with the profiles' numbers as query indexes and reads past its arrays: its output depends on memory contents or it crashes), an X-drop whose raw score, or its product with the database's scale, leaves 32-bit integers (NCBI's conversion is undefined), and a gapped X-drop whose raw score over the scaled gap extension reaches 1,073,741,721 (about 4.1e8 bits, at scales 1 and 2 only: the sizes of NCBI's alignment kernels then overflow), `-html`, `-entrez_query`, `-remote`, `-import_search_strategy`, the environment variable `ADAPTIVE_CBS` with composition-based statistics, a database that lists one volume twice (`-db "x x"`: the database layer refuses it for every program, NCBI's rpsblast searches the volume once), a `.freq` file whose rows give a profile no Karlin-Altschul parameters (NCBI goes on with a Lambda of -1), a profile database whose volumes differ in matrix or gap costs or whose profile can score above 2,147,483,647 (the sum of its rows' best scores; NCBI's 32-bit scores overflow), a profile whose Smith-Waterman redo (`-use_sw_tback`) NCBI repeats without end (only where the e-value of a score of 0, the query's search space times K, passes `-evalue`, the profile has two or more preliminary HSPs and its first position scores the query's first letter above 0: NCBI stops only when an allocation fails), a profile database whose matrix and gap costs are not BLOSUM62 11/1 or whose scale is not a whole number, makes a scaled gap cost, X-drop or score cutoff leave 32-bit integers (NCBI's products overflow) or is one at which NCBI's Lambda changes from one e-value to the next (such as 531: NCBI divides Lambda by the scale and multiplies it back), an empty or inconsistent `.rps` or `.loo` file, or an inconsistent `.aux` file (NCBI reads past its buffers or crashes), a query above 5,000,000 letters, and rpsblast in the library API and the Web engine. NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number or an empty `.aux` come as in NCBI (exit status 3). `-subject` is not an rpsblast option: LOSAT's parser refuses it (exit status 2; NCBI prints its usage).
-
-**rpsbproc** gives the domain hits, sites and motifs of protein and nucleotide queries (section 10).
-- Refused: a motif match whose result depends on the bytes that NCBI reads beyond the residues of a site, or that may read beyond NCBI's buffer of them, a motif whose check makes NCBI hold 1 GiB or more at once (its minimal map's string with the old buffer while it grows, or its match records with their copies, in allocations below 2^47 bytes: whether NCBI's allocations succeed depends on the host's memory; a repeat that does not advance, such as `<*`, makes NCBI's records grow until the memory runs out; these refusals name the site and quote its motif), a site or motif at a position outside the query's residues other than their end (NCBI reads memory outside the string: a query without residues or with fewer than its alignments reach), file names that are not UTF-8, a `[datafiles]` entry of a registry file (`rpsbproc.ini` or the file of `-conffile`), a `.ncbirc` with a syntax error (NCBI's rpsbproc reports it with the name of a source file of its own build), the environment variables `OBJECTS_SEQ_DESCR_ALLOW_EMPTY` and `SERIAL_VERIFY_DATA_READ` or `SERIAL_VERIFY_DATA_GET` set to turn the checks off, `SEQ_ID_PREFER_ACCESSION_OVER_GI` and `SEQ_ID_AVOID_GI` with a query that has a gi, and in an archive: a VisibleString with a byte outside the visible ASCII range (NCBI replaces it by `#` and posts an error; the DefLine, a UTF8String, takes any byte), a member named by its tag (`[0]`), Seq-align segments other than `Dense-seg`, `Std-seg` and `Packed-seg` (`dendiag`, `disc`, `spliced`, `sparse`), a `Std-seg` alignment whose query id NCBI would take from a first location of the kind `packed-int`, `packed-pnt`, `mix`, `equiv`, `bond` or `feat` (whose ids LOSAT does not look up), residues in NCBI8aa and NCBIstdaa codes from 28, a query without a title but with `annot`, a mask location other than a `packed-int` of one Seq-id, hits whose NaN E-values or bit scores would make NCBI's sort of them read outside its vector (other NaN E-values and bit scores are kept, sorted as NCBI's `std::sort` sorts them and printed `-nan`), and the data lines on which NCBI's loader reads outside the line (`cdtrack.txt` lines that end without a root or after a field it skips). For nucleotide queries also, where NCBI's rpsbproc reads outside its vectors or strings or crashes: a first `Std-seg` with fewer than 2 ids, a `Std-seg` without locations or whose only location is not `null` (one whose only location is `null` is skipped, as in NCBI), a minus-strand alignment with a subject location other than `int` or `pnt` (NCBI reads past its segment lengths), a query whose hits carry sites or motifs and whose bases, or the IUPACna letters of their reverse complement, are fewer than 3 (NCBI's `TranslateAll` erases from an empty string and crashes), and a site at a residue outside its frame's translation other than its end. In the XML input (none of these occurs in the XML that NCBI's rpsblast and rpstblastn write): XML attributes, namespace prefixes and control characters in character data (NCBI skips attributes, strips prefixes and replaces control characters with a warning), an `Hsp_hseq` shorter than its `Hsp_qseq` by more than one letter (NCBI reads past it), an alignment that writes a residue other than NUL at or past the end of NCBI's string of its query's frame, a query whose strings NCBI holds as 1 GiB or more at once (whether NCBI's allocation succeeds depends on the host's memory: a nucleotide query of 0 or 1 base gives frames of over a billion residues), and an `Hsp_qseq` of 2^31 letters or more that NCBI's check of the query's type reads past its end or loops over without end.
-- PSSM-IDs of 2^31 and more are compared without the overflow of NCBI's `int` difference, so every row of the data is found (NCBI's binary can miss one; no CDD release has such an id).
-- A REAL of an archive or of the XML input whose exponent overflows NCBI's 32-bit `int` is read with the exact exponent, as psiblast's `-in_pssm` reads it (above; PD-LOSAT-NCBI-DEFECTS 1.19).
-- A motif check that reads NCBI's list of motif positions past its end (the list belongs to the first motif site checked in a run; NCBI reads heap bytes) counts as failed and drops the site (PD-LOSAT-NCBI-DEFECTS 1.14).
-- Positions whose arithmetic overflows NCBI's 32-bit `int` are computed without the overflow, for protein and nucleotide queries and in the XML input alike: a hit that starts or ends at base 2^31 prints that position (NCBI's binary prints -2147483648), and so do a site's or motif's base there, a subject interval of 2^31 positions or more, an XML coordinate of -2147483648, and the positions of an `Hsp_qseq` of 2^31 letters or more (PD-LOSAT-NCBI-DEFECTS 1.26).
-- As in NCBI: a motif match that reads beyond a site's residues gives NCBI's answer where it does not depend on the bytes read; a minimal map longer than NCBI's string can hold ends the run with exit 3 and `basic_string::_M_replace_aux`, one that needs an allocation of 2^47 bytes or more with `std::bad_alloc`, the report cut before the site's line as for a motif that does not parse; the residues of a query held in the literals of `ext delta` are read.
-
-**rpstblastn** runs composition-based statistics 0, 1, 2 and 3 (section 9).
-- Refused: `-use_sw_tback` with composition-based statistics (a later item), `-outfmt` other than 0 to 4, 6, 7 and 10 (17, and 13 and 14 without `-out`, get NCBI's own errors), `-ungapped` without composition-based statistics (NCBI's rpstblastn crashes after the search; with them it gets NCBI's own error), `-sum_stats true` (NCBI's rpstblastn then links HSPs with the profiles' numbers as query indexes: its output depends on memory contents or it crashes), a `CHUNK_SIZE` that NCBI cannot read as a number (NCBI stops with an exception that names its build's source files), `-html`, `-entrez_query`, `-remote`, `-import_search_strategy`, and rpstblastn in the library API and the Web engine, with the refusals of `rpsblast`'s databases above. NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux` come as in NCBI (exit status 3). The refusals of options and databases come before the first byte of output, as `rpsblast`'s do, also for queries without a valid frame, which NCBI does not search. `-subject` is not an rpstblastn option: LOSAT's parser refuses it (exit status 2; NCBI prints its usage).
-**dustmasker** runs every option of its `-help` (`-xmlhelp` on the command line only, see the Toolkit options above); refused: a title whose text encoding NCBI cannot tell (NCBI stops with a string error) or on which NCBI's definition line generator reads past its end, in every `-outfmt` a database sequence with a taxid whose lookup reads a record of an empty `taxdb.btd` (NCBI maps the file as a null pointer and crashes), and a title made from the scientific name of a taxid whose record in a damaged `taxdb.btd` has its third tab past NCBI's mapping of the file (NCBI reads memory past its mapping there, and what it writes, or whether it crashes, depends on its memory map; a sequence whose title is stored, or whose name lies inside the mapping, is written as NCBI writes it; NCBI's messages for the other damaged taxonomy databases, such as a wrong magic number, are written as NCBI writes them, where it writes them), a database definition line with bytes NCBI reads as `#`, a `Seq-loc` or `Blast-db-mask-info` that LOSAT's serial writer cannot write as NCBI does, a failed write of a `seqloc_*` or `maskinfo_*` output (NCBI's serial stream reports it; the other formats go on silently, as NCBI's), and a FASTA record of 4,294,967,296 letters or more, counting the letters of its `>?` gap lines (NCBI counts the length of a record in 32 bits, which wrap there).
-
-**segmasker** runs every option of its `-help` (`-xmlhelp` on the command line only, see the Toolkit options above); refused: what dustmasker refuses above (titles, database sequences and definition lines, the serial writer, a failed write of a `seqloc_*` or `maskinfo_*` output and a FASTA record of 4,294,967,296 letters or more), a protein database whose residue bytes are above 127 (makeblastdb writes 0 to 27; NCBI's SEG reads them as negative characters), and a database error that LOSAT reports without the place in NCBI's source that NCBI's report names (a missing database or volume, an alias file without `DBLIST`, an empty database name and an alias value that NCBI cannot convert are reported as NCBI reports them).
-
-**convert2blastmask** runs every option of its `-help` (`-xmlhelp` on the command line only, see the Toolkit options above); a byte outside the visible ASCII range in `-masking_options` or in a `-parse_seqids` id (DEL) is written as NCBI writes it (`#` with NCBI's error message for each such byte in `maskinfo_asn1_text` and `maskinfo_asn1_bin`, and for each control character other than TAB, LF and CR in `maskinfo_xml`; as in dustmasker's and segmasker's `seqloc_*` and `maskinfo_*` outputs); refused: a command-line word that is not UTF-8, a `Blast-db-mask-info` that LOSAT's serial writer cannot write as NCBI does, and a failed write of a `maskinfo_*` output (NCBI's serial stream reports it; `interval` goes on silently, as NCBI's, as for dustmasker and segmasker).
-
-**makeblastdb**
-- `-randomize`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix`.
-- `-input_type blastdb`, `asn1_txt` and `asn1_bin` (`fasta` works).
-- A FASTA record of 4,294,967,296 letters or more, counting the letters of its gaps, whose sequence NCBI builds from all those letters (NCBI counts the length of a record in 32 bits, which wrap there, and allocates the letters of the gaps). What NCBI does with such a record without building it comes as in NCBI: the error for a sequence longer than 2,147,483,647 bases when the length modulo 2^32 is above that, the record skipped when that remainder is 0, when it has a gi above 4294967295 or when it starts with a gap of unknown length, and the error for a protein whose `>?` lines sum to a multiple of 2^32.
-
-**Programs LOSAT does not provide**
-- `deltablast`, `makeprofiledb`, `blast_formatter`, `blastdb_aliastool`, `windowmasker`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastdbcheck`, `blastn_vdb`, `tblastn_vdb`, `makembindex`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh`, `cleanup-blastdb-volumes.py`.
-
-**Out of scope** (they need NCBI's servers or its GI / IPG databases)
-- `-remote` and `-entrez_query`: all programs.
-- `-gilist` and `-negative_gilist`: all five programs.
-- `-ipglist` and `-negative_ipglist`: `blastp`, `blastx`, `psiblast`.
-
----
+<a id="scope--differences-from-ncbi-blast"></a>
 
 ## Documentation
 
-- [User manual](docs/manual/src/introduction.md): installation, a quick start, one page for each program, output formats, databases, and the differences from NCBI BLAST+
-- [v0.2.0 release record](docs/release/v0.2.0.md)
-- [v0.1.0 historical release scope](docs/archive/v0.1.0_scope.md)
-- [v0.1.0 NCBI Parity Specifications](docs/release/pure_rust_runtime_v0.1.0_certification.md)
-- [CLI Migration Details](docs/cli_v2_migration.md)
-- [Developer & Contributor Guidelines](AGENTS.md)
-
----
+- **[User manual](https://satoshikawato.github.io/LOSAT/)** (source in `docs/manual/src/`):
+  - [Introduction](docs/manual/src/introduction.md) • [Quick start](docs/manual/src/quick-start.md) • [Common workflows](docs/manual/src/workflows.md) • [Installation](docs/manual/src/installation.md)
+  - [Coming from NCBI BLAST+](docs/manual/src/from-ncbi-blast.md) • [Upgrading from LOSAT v0.1](docs/manual/src/from-losat-v0-1.md) • [Threads, speed and memory](docs/manual/src/performance.md)
+  - [Differences from NCBI BLAST+](docs/manual/src/differences.md) • [What LOSAT refuses](docs/manual/src/refusals.md) • [Databases](docs/manual/src/databases.md) • [Output formats](docs/manual/src/output-formats.md) • [Environment variables](docs/manual/src/environment.md)
+- **Not in v0.2.0:** `deltablast`, `makeprofiledb`, `blast_formatter`, `windowmasker -mk_counts` and `-convert`, `psiblast -phi_pattern`, and `-html`; options that need NCBI's servers or its GI and IPG lists (`-remote`, `-entrez_query`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`) and `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
+- [v0.2.0 release record](docs/release/v0.2.0.md) • [Contributor guide](AGENTS.md)
 
 ## References
 
 1. Altschul, S. F., Gish, W., Miller, W., Myers, E. W., & Lipman, D. J. (1990). Basic local alignment search tool. *Journal of Molecular Biology*, 215(3), 403–410.
 2. Camacho, C., Coulouris, G., Avagyan, V., Ma, N., Papadopoulos, J., Bealer, K., & Madden, T. L. (2009). BLAST+: architecture and applications. *BMC Bioinformatics*, 10, 421.
-3. [NCBI C++ Toolkit Repository](https://github.com/ncbi/ncbi-cxx-toolkit-public)
-
----
+3. [NCBI C++ Toolkit](https://github.com/ncbi/ncbi-cxx-toolkit-public), whose BLAST+ code LOSAT follows.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, BitMagic, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). Citation metadata: [CITATION.cff](CITATION.cff).

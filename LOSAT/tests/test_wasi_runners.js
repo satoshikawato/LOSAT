@@ -1180,6 +1180,41 @@ function descriptorReader(file) {
   ]);
 }
 
+// The table's descriptors belong to the table (threadWorkerOptions in wasi_thread_host.js): a thread
+// worker's exit leaves alone a descriptor that the worker opened and another thread closed, whose
+// number the process has given out again (2026-11-22: Node aborted when a worker's exit closed the
+// event loop of another worker under that number).
+test("a thread worker's exit leaves the number of a descriptor that it opened and another thread closed", async () => {
+  const { Worker } = require("node:worker_threads");
+  const { once } = require("node:events");
+  const { threadWorkerOptions } = require("./wasi_thread_host");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-worker-fds-"));
+  try {
+    const first = path.join(directory, "first.txt"), second = path.join(directory, "second.txt");
+    fs.writeFileSync(first, "first");
+    fs.writeFileSync(second, "second");
+    const worker = new Worker(`
+      const { parentPort, workerData } = require("node:worker_threads");
+      parentPort.postMessage(require("node:fs").openSync(workerData, "r"));
+      parentPort.once("message", () => parentPort.close());`, { ...threadWorkerOptions(first), eval: true });
+    const [opened] = await once(worker, "message");
+    fs.closeSync(opened);
+    // The process gives out the lowest free number: open until it gives this one again.
+    const held = [];
+    while (held.length < 64 && held.at(-1) !== opened) held.push(fs.openSync(second, "r"));
+    for (const descriptor of held.slice(0, -1)) fs.closeSync(descriptor);
+    assert.equal(held.at(-1), opened, "the number came back");
+    const exited = once(worker, "exit");
+    worker.postMessage("exit");
+    await exited;
+    const read = Buffer.alloc(16);
+    assert.equal(read.toString("latin1", 0, fs.readSync(opened, read, 0, 16, 0)), "second");
+    fs.closeSync(opened);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("a descriptor that the main thread opened reads on a thread worker (-num_threads 2)", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-descriptor-"));
   try {

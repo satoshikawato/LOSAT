@@ -1,0 +1,22 @@
+# BLASTX 2.17.0+
+# Query: dq0
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/bh3_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+dq0	s7	79.667	300	61	0	59	958	188	487	3.27e-172	486
+# BLASTX 2.17.0+
+# Query: dq1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/bh3_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+dq1	s10	55.328	488	61	4	1820	483	337	709	3.07e-162	474
+dq1	s10	66.667	54	18	0	1823	1662	18	71	3.52e-16	72.8
+dq1	s10	59.259	54	22	0	569	408	276	329	2.91e-11	57.0
+# BLASTX 2.17.0+
+# Query: dq2
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/bh3_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+dq2	s7	81.818	220	40	0	1633	974	221	440	1.25e-124	370
+dq2	s7	70.238	84	25	0	649	900	371	454	9.35e-34	126
+# BLAST processed 3 queries

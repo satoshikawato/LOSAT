@@ -1380,7 +1380,10 @@ impl<'a> FetchExcluded<'a> {
     /// is noted, in increasing ordinal (`take_utf8`): of a fetch that reads every subject with
     /// hits, as the ungapped re-evaluation of a nucleotide subject does.
     pub(crate) fn excludes(&self, ordinal: u32) -> Result<bool, SeqDbError> {
-        let read = self.check.read(ordinal)?;
+        let read = self
+            .check
+            .read(ordinal)
+            .map_err(|error| self.read_error(ordinal, error))?;
         if read.utf8 {
             self.utf8
                 .note_ordinal(self.check.db, u128::from(ordinal), ordinal);
@@ -1450,7 +1453,10 @@ impl<'a> FetchExcluded<'a> {
         for (index, item) in items.iter().enumerate() {
             let keeps = match ordinal(item) {
                 Some(ordinal) => {
-                    let read = self.check.read(ordinal).map_err(|error| (ordinal, error))?;
+                    let read = self
+                        .check
+                        .read(ordinal)
+                        .map_err(|error| (ordinal, self.read_error(ordinal, error)))?;
                     if read.utf8 {
                         utf8.push((
                             FetchedUtf8 {
@@ -1470,6 +1476,24 @@ impl<'a> FetchExcluded<'a> {
             excluded.push(!keeps);
         }
         Ok((FetchMarks(excluded), utf8))
+    }
+
+    /// The error of the read of `ordinal`'s header for `refusal`: a record that NCBI's read
+    /// fails on (`SeqDbError::Ncbi`, the text of NCBI's exception, which names no file) is named
+    /// by its header file, as the reader's other errors are.
+    #[cold]
+    #[inline(never)]
+    fn read_error(&self, ordinal: u32, error: SeqDbError) -> SeqDbError {
+        if !matches!(error, SeqDbError::Ncbi(_)) {
+            return error;
+        }
+        match self.check.db.header_file(ordinal) {
+            Some(path) => SeqDbError::Format {
+                path,
+                message: error.to_string(),
+            },
+            None => error,
+        }
     }
 
     /// LOSAT's refusal (in `program`'s name) of a search whose fetch of `ordinal` cannot read

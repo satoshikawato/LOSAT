@@ -33,8 +33,9 @@ fn hex(text: &str) -> Vec<u8> {
         .collect()
 }
 
-/// The taxid that both decoders read from `record` (`None`: the line has none), or the
-/// messages (`GetMsg()`, oldest first) of NCBI's exception, which both give.
+/// The taxid that both decoders read from `record` (`None`: the line has none), or NCBI's text
+/// of the exception that both give (`NcbiException::ncbi_what`, the report that LOSAT's
+/// `what()` maps to its words): its places, codes and messages, oldest first.
 fn read_taxid(record: &[u8]) -> Result<Option<i32>, String> {
     let full = decode_full_set(record).map(|set| set.deflines[0].taxid);
     let ordinal = decode_deflines_as(record, Path::new("t.phr"), 0, true);
@@ -46,7 +47,7 @@ fn read_taxid(record: &[u8]) -> Result<Option<i32>, String> {
         (Err(error), Err(ordinal)) => {
             let exception = error.exception().expect("NCBI's report");
             assert_eq!(ordinal.ncbi_exception(), Some(&exception));
-            Err(String::from_utf8_lossy(&exception.what()).into_owned())
+            Err(String::from_utf8_lossy(&exception.ncbi_what()).into_owned())
         }
         (full, ordinal) => panic!("the decoders differ: {full:?} / {ordinal:?}"),
     }

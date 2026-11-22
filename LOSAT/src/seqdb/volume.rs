@@ -186,7 +186,7 @@ impl Volume {
         self.seq_file().map(|_| ())
     }
 
-    fn hdr_file(&self) -> Result<&DbFile, SeqDbError> {
+    pub(super) fn hdr_file(&self) -> Result<&DbFile, SeqDbError> {
         self.lazy_file(&self.hdr, "hr")
     }
 

@@ -934,7 +934,8 @@ fn damaged_records_are_errors() {
         for cut in 1..record.len() {
             let error = decode_full_set(&record[..cut]).expect_err("cut short");
             let exception = error.exception().expect("NCBI's report");
-            let what = String::from_utf8_lossy(&exception.what()).into_owned();
+            // NCBI's text of the report (`ncbi_what`), whose class and code LOSAT's leaves out.
+            let what = String::from_utf8_lossy(&exception.ncbi_what()).into_owned();
             assert!(
                 what.contains("Error: (CSerialException::eEOF) ")
                     || what.contains("Error: (CEofException::eEof) "),
@@ -1628,11 +1629,16 @@ fn header_reads_fail_as_ncbis_object_stream_fails() {
             "\"R/",
             &format!("\"{}/", crate::ncbi_exception::NCBI_BUILD_ROOT),
         );
+        // NCBI's report, and LOSAT's: NCBI's in LOSAT's words (`crate::wording::losat_bytes`).
+        let losat = crate::wording::losat_bytes(report.as_bytes()).into_owned();
         match program {
-            "what" => assert_eq!(exception.what(), report.as_bytes(), "{case}"),
+            "what" => {
+                assert_eq!(exception.ncbi_what(), report.as_bytes(), "{case}");
+                assert_eq!(exception.what(), losat, "{case}");
+            }
             _ => assert_eq!(
                 exception.report_default_ex(106, 16, "Application's execution failed"),
-                report.as_bytes(),
+                losat,
                 "{case}"
             ),
         }

@@ -1859,6 +1859,16 @@ impl SeqDb {
         self.volumes[at.volume].line_read(at.vol_oid)
     }
 
+    /// The header file of the volume that holds `ordinal` (`None` outside the database, or where
+    /// the file does not open): LOSAT's refusal of a header that NCBI's fetch cannot read names
+    /// it (`algorithm::common::database::FetchExcluded::refusal`).
+    #[cold]
+    pub fn header_file(&self, ordinal: u32) -> Option<PathBuf> {
+        let at = self.find_volume(ordinal).ok()?;
+        let file = self.volumes[at.volume].hdr_file().ok()?;
+        Some(file.path().to_path_buf())
+    }
+
     /// The bitmap of the OIDs a seqid list keeps in a version 5 database (`ids`: sorted and
     /// unique, as the lookup wants them).
     fn seqid_words_v5(

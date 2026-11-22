@@ -87,13 +87,14 @@ Warnings about the input, such as a counts file without percentages when a `-t_*
 
 None that change the output of a normal run. When the reader of the output closes a pipe early, LOSAT stops at once with exit status 0, where NCBI ends with the signal (141). See [the decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md).
 
+A line of an `-ids` or `-exclude_ids` file (matched as text, without `-text_match F`) that gives an empty id, such as a line that starts with a space or a tab, or a line `>` or `|`, gets NCBI's error `bad id: ...: ignoring` and is skipped; the rest of the output is NCBI's for the file without that line. NCBI writes the same error and then crashes. See [`windowmasker`: an empty id in `-ids` or `-exclude_ids`](../differences.md#windowmasker-an-empty-id-in--ids-or--exclude_ids).
+
 ## What LOSAT refuses
 
 - Counts files on which NCBI's result is undefined, such as an `ascii` file with units of more than 16 letters.
 - `-mk_counts` of an input without a unit of unambiguous letters (all `N`; or, with `-unit`, no sequence, as when `-ids` keeps none): NCBI writes its percentages as its C runtime prints 0/0.
 - `-mk_counts -infmt seqids`: NCBI fetches each sequence from NCBI's servers.
 - `-mk_counts` or `-convert` of units of 1 to 3 letters to `oascii` or `obinary` with an `-smem` that is a multiple of 65536: NCBI's result is undefined.
-- An ids file matched as text (without `-text_match F`) with an empty id (a line that starts with a space or a tab, `>`, `|` or `>|`).
 
 See [What LOSAT refuses](../refusals.md#windowmasker).
 

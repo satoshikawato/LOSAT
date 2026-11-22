@@ -184,6 +184,20 @@ i_excl_b_fasta	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -exclude_
 i_ids_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_a.txt -parse_seqids
 i_excl_ps	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -exclude_ids in/ids_a.txt -parse_seqids
 i_ids_dust	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_b.txt -dust T
+# -ids and -exclude_ids lists with lines that give an empty id (in/ids_e_*.txt of make_inputs.py: in/ids_a.txt with such lines; in/ids_e_only.txt such lines alone). NCBI posts its bad id error for the first and crashes (SIGSEGV, rc 139), frozen as it is; LOSAT posts the error for each, skips those ids and writes the bytes of the near row (in/ids_a.txt, or the empty list in/ids_empty.txt), PD-LOSAT-NCBI-DEFECTS approved exception 22 (tests/masker_fixtures.rs EMPTY_ID_ROWS; added 2026-11-22 by ad-M5-7).
+i_ids_emptyfile	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_empty.txt
+e_ids_gt	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_e_gt.txt
+e_ids_gtsp	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_e_gtsp.txt
+e_ids_tab	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_e_tab.txt
+e_ids_sp	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_e_sp.txt
+e_ids_pipe	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_e_pipe.txt
+e_ids_gtpipe	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_e_gtpipe.txt
+e_ids_gtgt	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_e_gtgt.txt
+e_ids_gtgtpipe	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_e_gtgtpipe.txt
+e_ids_all	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_e_all.txt
+e_ids_only	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -ids in/ids_e_only.txt
+e_excl_gt	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -exclude_ids in/ids_e_gt.txt
+e_excl_all	-ustat ../winmask/counts/dm2L_u9.binary -in in/multi.fa -exclude_ids in/ids_e_all.txt
 # -infmt blastdb: db/wm (makeblastdb of in/multi.fa) and db/wm_ps (with -parse_seqids); @CWD@ in the expected text is this directory.
 b_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm
 b_db_ps	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps
@@ -298,6 +312,8 @@ k_ids_missing	-mk_counts -in in/multi.fa -ids in/nonexistent.txt -unit 5 -sforma
 k_ids_none	-mk_counts -in in/multi.fa -ids in/ids_none.txt
 k_ids_tab	-mk_counts -in in/multi.fa -ids in/ids_tab.txt -unit 5 -sformat binary
 k_textmatch_f	-mk_counts -in in/multi.fa -ids in/ids_a.txt -text_match F -unit 5 -sformat binary
+e_k_gt	-mk_counts -in in/multi.fa -ids in/ids_e_gt.txt -unit 5 -sformat binary
+e_k_all	-mk_counts -in in/multi.fa -ids in/ids_e_all.txt -unit 5 -sformat binary
 k_blastdb	-mk_counts -infmt blastdb -in db/wm -sformat binary
 k_blastdb2	-mk_counts -infmt blastdb -in db/wm,db/wm_ps -unit 5 -sformat binary
 k_blastdb_missing	-mk_counts -infmt blastdb -in db/none -unit 5

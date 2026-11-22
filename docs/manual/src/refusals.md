@@ -549,7 +549,6 @@ error: the NCBI BLAST+ option -gi_mask is not supported by LOSAT's makeblastdb (
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-outfmt` with `%d` or `%b` (the ASN.1 texts) | Refused. |
 | A `-db` list in which an alias and another name give the same volume | Refused. |
 | FASTA output of a sequence with a tax id, or `-outfmt` with `%S`, `%L`, `%B`, `%K`, `%C` or `%N`, or `-tax_info` with a name field, when `taxdb.btd` is empty | Refused. NCBI maps the file as a null pointer and crashes. `-outfmt "%a %T"`, other formats that look nothing up, and `-info` work. |
 | A failed write of the `-metadata` output | Refused. NCBI's serial stream reports it. |

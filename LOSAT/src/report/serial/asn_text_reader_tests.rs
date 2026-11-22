@@ -26,6 +26,14 @@ impl Read for OneByte<'_> {
     }
 }
 
+/// A source of `text` that reads one byte per fill, so that the bytes it keeps end at every byte
+/// of the text.
+pub(crate) fn one_byte_per_fill(text: &[u8]) -> StreamSource<OneByte<'_>> {
+    let mut src = StreamSource::new(OneByte(text), &[]);
+    src.fill_one_byte_at_a_time();
+    src
+}
+
 /// One step of a walk: what was read, and the reader's position and line after it.
 fn note<S: AsnSource>(r: &Reader<S>, log: &mut Vec<String>, what: String) {
     log.push(format!("{what} @{}:{}", r.pos, r.line));
@@ -175,7 +183,7 @@ fn walk_every_source(label: &str, text: &[u8], mode: usize) -> u64 {
     let first = text.len().min(1);
     let blocks = walk(StreamSource::new(&text[first..], &text[..first]), mode);
     assert_eq!(slice, blocks, "{label}: slice and stream differ");
-    let bytes = walk(StreamSource::new(OneByte(text), &[]), mode);
+    let bytes = walk(one_byte_per_fill(text), mode);
     assert_eq!(slice, bytes, "{label}: slice and one byte per read differ");
     let mut hasher = DefaultHasher::new();
     slice.hash(&mut hasher);
@@ -716,7 +724,7 @@ fn literal_walks() {
         let first = text.len().min(1);
         let blocks = literal_walk(StreamSource::new(&text[first..], &text[..first]), mode, ops);
         assert_eq!(slice, blocks, "walk {k}: slice and stream differ");
-        let bytes = literal_walk(StreamSource::new(OneByte(text), &[]), mode, ops);
+        let bytes = literal_walk(one_byte_per_fill(text), mode, ops);
         assert_eq!(slice, bytes, "walk {k}: slice and one byte per read differ");
         if slice != expected {
             differ.push(k);

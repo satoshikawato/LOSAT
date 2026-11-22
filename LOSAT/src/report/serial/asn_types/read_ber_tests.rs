@@ -130,18 +130,18 @@ fn a_later_object_counts_its_own_bytes_and_lines() {
 
 /// A string longer than a block of the stream comes from the input straight into the value
 /// (`StreamSource::read_into`): an Object-id `str` of 102,400 bytes (`a1 80 1a 83 01 90 00`, the
-/// bytes, then the end of the CHOICE) read through a reader that gives one byte per call is the
+/// bytes, then the end of the CHOICE) read through a source that reads one byte per fill is the
 /// value read from memory.
 #[test]
 fn a_long_string_comes_from_the_stream_as_from_memory() {
-    use crate::report::serial::asn_text_reader::tests::OneByte;
+    use crate::report::serial::asn_text_reader::tests::one_byte_per_fill;
     let mut bytes = vec![0xa1, 0x80, 0x1a, 0x83, 0x01, 0x90, 0x00];
     bytes.extend((0..0x19000u32).map(|i| b'a' + (i % 26) as u8));
     bytes.extend([0, 0]);
     let from_memory =
         ObjectStream::binary(SliceSource::new(&bytes), Names::TEST).read_object(named::OBJECT_ID);
-    let from_stream = ObjectStream::binary(StreamSource::new(OneByte(&bytes), &[]), Names::TEST)
-        .read_object(named::OBJECT_ID);
+    let from_stream =
+        ObjectStream::binary(one_byte_per_fill(&bytes), Names::TEST).read_object(named::OBJECT_ID);
     assert!(from_memory.1.is_empty(), "{:?}", from_memory.1);
     match &from_memory.0 {
         Ok(Value::Choice(1, value)) => {

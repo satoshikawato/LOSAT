@@ -294,8 +294,9 @@ impl AsnSource for SliceSource<'_> {
 }
 
 /// A text read from a stream in blocks. It keeps the bytes from the last position given to
-/// `release_before` on (dropping the bytes before it once they make up most of the buffer), so
-/// its memory is about the largest value read between two releases, not the whole text.
+/// `release_before` on (dropping the bytes before it, when it reads the next block, once they
+/// make up most of the buffer), so its memory is about the largest value read between two
+/// releases, not the whole text.
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:125-139
 // NCBI's object stream reads its input in blocks too and gives the bytes it did not use back
 // to the stream when an object ends, so the next object is read from the byte after the last
@@ -308,9 +309,12 @@ pub(crate) struct StreamSource<R: Read> {
     eof: bool,
     /// The first byte that `release_before` keeps (`AsnSource::hold`).
     held: Option<usize>,
-    /// The block each read fills before its bytes are appended to `buf` (allocated once, so a
-    /// short read costs only the bytes it gives).
-    scratch: Box<[u8]>,
+    /// The last position given to `release_before`: the bytes before it may be dropped when the
+    /// next block is read (`fill_to`), so a release, once per element, is a store.
+    released: usize,
+    /// The bytes that one fill reads: a block (`STREAM_BLOCK`). The tests also read one byte per
+    /// fill (`fill_one_byte_at_a_time`), so that the kept bytes end at every byte of a text.
+    fill_size: usize,
 }
 
 /// The size of one read from the stream.
@@ -326,8 +330,16 @@ impl<R: Read> StreamSource<R> {
             base: 0,
             eof: false,
             held: None,
-            scratch: vec![0; STREAM_BLOCK].into_boxed_slice(),
+            released: 0,
+            fill_size: STREAM_BLOCK,
         }
+    }
+
+    /// Reads one byte per fill from now on (the tests of the readers at the end of the kept
+    /// bytes).
+    #[cfg(test)]
+    pub(crate) fn fill_one_byte_at_a_time(&mut self) {
+        self.fill_size = 1;
     }
 
     /// The bytes kept.
@@ -336,25 +348,37 @@ impl<R: Read> StreamSource<R> {
         self.buf.len()
     }
 
-    /// Reads blocks until `pos` is in the buffer or the stream ends. A read error ends the
-    /// text, as a failed read ends an `istream` (its bad bit, which the object stream reads as
-    /// the end of its input).
+    /// Reads blocks until `pos` is in the buffer or the stream ends, after dropping the released
+    /// bytes once they are most of a buffer of more than a few blocks (each byte is moved at
+    /// most once on average). A read error ends the text, as a failed read ends an `istream` (its
+    /// bad bit, which the object stream reads as the end of its input).
     #[cold]
     fn fill_to(&mut self, pos: usize) -> Option<u8> {
         assert!(pos >= self.base, "a released byte was asked for");
+        let keep = self
+            .held
+            .map_or(self.released, |held| held.min(self.released));
+        // (`read_into` may have dropped the bytes up to the end of a long value since the last
+        // release: nothing more to drop then.)
+        let dead = keep.saturating_sub(self.base);
+        if dead > 4 * STREAM_BLOCK && dead * 2 > self.buf.len() {
+            self.buf.drain(..dead);
+            self.base = keep;
+        }
         while pos - self.base >= self.buf.len() {
             if self.eof {
                 return None;
             }
-            let read = loop {
-                match self.input.read(&mut self.scratch) {
-                    Ok(read) => break read,
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => break 0,
-                }
-            };
-            self.buf.extend_from_slice(&self.scratch[..read]);
-            if read == 0 {
+            // A block comes straight into the room after the kept bytes (`take` stops at its
+            // end), not through a block of its own and a copy. Fewer bytes than `fill_size` is the
+            // end of the stream; a read error ends the text, as in `read_into`.
+            self.buf.reserve(self.fill_size);
+            let before = self.buf.len();
+            let failed = std::io::Read::by_ref(&mut self.input)
+                .take(self.fill_size as u64)
+                .read_to_end(&mut self.buf)
+                .is_err();
+            if failed || self.buf.len() - before < self.fill_size {
                 self.eof = true;
             }
         }
@@ -380,16 +404,10 @@ impl<R: Read> AsnSource for StreamSource<R> {
         &self.buf[range.start - self.base..range.end - self.base]
     }
 
+    /// The bytes before `pos` are dropped when the next block is read (`fill_to`).
     #[inline]
     fn release_before(&mut self, pos: usize) {
-        let pos = self.held.map_or(pos, |held| held.min(pos));
-        let dead = pos - self.base;
-        // Drop the read bytes once they are most of a buffer of more than a few blocks: each
-        // byte is moved at most once on average.
-        if dead > 4 * STREAM_BLOCK && dead * 2 > self.buf.len() {
-            self.buf.drain(..dead);
-            self.base = pos;
-        }
+        self.released = pos;
     }
 
     #[inline]

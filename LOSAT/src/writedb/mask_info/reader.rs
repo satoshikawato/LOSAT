@@ -1403,10 +1403,16 @@ impl MaskFileReader {
         Self::from_reader(path, Box::new(std::io::Cursor::new(data)))
     }
 
-    /// The reader of the bytes `input` gives; `path` is only used in messages.
+    /// The reader of the bytes `input` gives, read one byte per fill after the format guess (the
+    /// bytes it keeps end at every byte); `path` is only used in messages.
     #[cfg(test)]
     pub(crate) fn from_read(path: &Path, input: Box<dyn Read>) -> Result<Self, MaskFileError> {
-        Self::from_reader(path, input)
+        let mut reader = Self::from_reader(path, input)?;
+        match &mut reader.source {
+            Source::Text(rd) => rd.inp.r.src.fill_one_byte_at_a_time(),
+            Source::Binary(rd) => rd.inp.src.fill_one_byte_at_a_time(),
+        }
+        Ok(reader)
     }
 
     /// The reader of the file `input`; `path` is only used in messages.

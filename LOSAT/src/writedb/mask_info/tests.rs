@@ -1521,7 +1521,7 @@ fn ber_tagged(tag: &[u8], content: &[u8]) -> Vec<u8> {
     [tag, &[0x80][..], content, &[0, 0][..]].concat()
 }
 
-/// The bytes of a file, one per read.
+/// The bytes of a file, one per read (`MaskFileReader::from_read` reads one byte per fill).
 struct OneByteReads(std::io::Cursor<Vec<u8>>);
 
 impl std::io::Read for OneByteReads {
@@ -1533,7 +1533,12 @@ impl std::io::Read for OneByteReads {
 
 /// `read_all` and the posts of a text file whose bytes come in blocks or one per read.
 fn read_text(data: &[u8], by_byte: bool) -> String {
-    let path = Path::new("text.asnt");
+    read_stream(Path::new("text.asnt"), data, by_byte)
+}
+
+/// `read_all` and the posts of the file `path` whose bytes are `data`, read whole or one byte
+/// per fill.
+fn read_stream(path: &Path, data: &[u8], by_byte: bool) -> String {
     let reader = if by_byte {
         MaskFileReader::from_read(
             path,
@@ -1548,6 +1553,32 @@ fn read_text(data: &[u8], by_byte: bool) -> String {
             format!("{objects:?} {:?}", reader.take_posts())
         }
         Err(error) => format!("open {error:?}"),
+    }
+}
+
+/// The binary mask files read one byte per fill are read as whole: the same objects, posts and
+/// errors, whole and cut at every length (each form that `BerReader` reads from the kept bytes is
+/// then read one byte at a time, at each place where the kept bytes end).
+#[test]
+fn binary_files_read_one_byte_per_fill() {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(parse_dir())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|e| e == "asnb"))
+        .collect();
+    paths.sort();
+    assert!(paths.len() > 20, "{}", paths.len());
+    let path = Path::new("binary.asnb");
+    for file in paths {
+        let data = read_file(&file);
+        for cut in 0..=data.len() {
+            assert_eq!(
+                read_stream(path, &data[..cut], false),
+                read_stream(path, &data[..cut], true),
+                "{} cut {cut}",
+                file.display()
+            );
+        }
     }
 }
 

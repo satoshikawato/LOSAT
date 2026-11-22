@@ -202,6 +202,7 @@ fn a_stream_refills_and_releases() {
     let whole = read_all(&text);
     assert_eq!(whole.len(), copies);
     let mut stream = ArchiveStream::new(OneByte(&text[1..]), &text[..1]);
+    stream.fill_one_byte_at_a_time();
     let mut largest = 0;
     for expected in &whole {
         let archive = stream.next_archive().unwrap().unwrap();
@@ -449,6 +450,7 @@ fn read_all_by_byte(text: &[u8]) -> Vec<std::result::Result<Archive, AsnTextErro
         .position(|&b| (b as i8) > b' ' as i8)
         .expect("a byte that is not white space");
     let mut stream = ArchiveStream::new(OneByte(&text[start + 1..]), &text[start..=start]);
+    stream.fill_one_byte_at_a_time();
     let mut out = Vec::new();
     loop {
         match stream.next_archive() {

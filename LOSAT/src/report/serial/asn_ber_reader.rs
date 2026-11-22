@@ -147,8 +147,10 @@ pub(crate) struct BerReader<S: AsnSource> {
     pub(crate) src: S,
     /// The position in `src` of the first byte of the object being read (`new_object`).
     base: usize,
-    /// The bytes of the object read so far (the position of NCBI's input buffer).
-    pos: usize,
+    /// The position in `src` of the next byte; `at - base` is the position of NCBI's input
+    /// buffer (the bytes of the object read so far, [`pos`](Self::pos)). The cursor is the
+    /// source's position, so a byte is read without adding the object's start to it.
+    at: usize,
     /// `m_CurrentTagLength`: the bytes of the tag that was peeked, before its length.
     tag_len: usize,
     /// `m_CurrentDataLimit`: the end of the definite-length item being read, 0 for an
@@ -166,7 +168,7 @@ impl<S: AsnSource> BerReader<S> {
         BerReader {
             src,
             base: 0,
-            pos: 0,
+            at: 0,
             tag_len: 0,
             limit: 0,
             limits: Vec::new(),
@@ -176,13 +178,87 @@ impl<S: AsnSource> BerReader<S> {
 
     /// The position in the source of the next byte (where the next object of a file starts).
     pub(crate) fn offset(&self) -> usize {
-        self.base + self.pos
+        self.at
+    }
+
+    /// The bytes of the object read so far (`GetStreamPosAsInt8()`).
+    #[inline(always)]
+    fn pos(&self) -> usize {
+        self.at - self.base
     }
 
     /// The reader will not ask for a byte before the current one again.
     #[inline]
     pub(crate) fn release(&mut self) {
-        self.src.release_before(self.base + self.pos);
+        self.src.release_before(self.at);
+    }
+
+    /// The bytes that the source keeps from the cursor on.
+    ///
+    /// Three forms make most items of an object: a short tag and an indefinite length (the start
+    /// of an item), the end-of-contents bytes (its end) and an INTEGER of a short length. When all
+    /// the bytes of such a form are kept and NCBI reads them without an error, they are read from
+    /// this slice in locals (`kept_indefinite_item`, `expect_end_of_content`, `kept_integer`). Any
+    /// other bytes (a long tag or length, a form that goes past the slice: the end of a block or
+    /// of the input, an error) are read one at a time (`peek`), which asks the source for more
+    /// past its slice. Both readings leave the same state after the same bytes (the tests read
+    /// the same files from memory and one byte per fill).
+    #[inline(always)]
+    fn kept(&self) -> &[u8] {
+        self.src.rest(self.at)
+    }
+
+    /// A short tag whose first byte has `first & mask == want` and an indefinite length, both
+    /// kept: `peek_tag` and `expect_indefinite_length` of them (the tag number). `None` reads
+    /// nothing.
+    #[inline(always)]
+    fn kept_indefinite_item(&mut self, mask: u8, want: u8) -> Option<i32> {
+        let first = match *self.kept() {
+            [first, 0x80, ..] if first & mask == want && first & LONG_TAG != LONG_TAG => first,
+            _ => return None,
+        };
+        self.at += 2;
+        self.limits.push(self.limit);
+        self.limit = 0;
+        self.tag_len = 0;
+        Some(i32::from(first & LONG_TAG))
+    }
+
+    /// An INTEGER tag (`expect_integer_tag`), a short length of 1 to `width` (at most 8) bytes
+    /// (`read_short_length`) and that many content bytes, which `accept` takes (given the bytes
+    /// as one big-endian number and their count), with at least 8 bytes kept after the length:
+    /// that number and count, the bytes read. `None` reads nothing.
+    #[inline(always)]
+    fn kept_integer(
+        &mut self,
+        width: usize,
+        accept: impl FnOnce(u64, usize) -> bool,
+    ) -> Option<(u64, usize)> {
+        let (n, length) = match *self.kept() {
+            [TAG_INTEGER | TAG_APPLICATION_INTEGER, length, a, b, c, d, e, f, g, h, ..]
+                if length != 0 && usize::from(length) <= width =>
+            {
+                // (The content bytes are the first `length` of the eight.)
+                let eight = u64::from_be_bytes([a, b, c, d, e, f, g, h]);
+                (eight >> (64 - 8 * u32::from(length)), usize::from(length))
+            }
+            _ => return None,
+        };
+        if !accept(n, length) {
+            return None;
+        }
+        self.at += 2 + length;
+        self.tag_len = 0;
+        Some((n, length))
+    }
+
+    /// `ReadStdSigned` of a kept INTEGER of a signed type of `width` bytes whose content bytes
+    /// are no more than the type's (`kept_integer`): the bytes, sign-extended.
+    #[inline(always)]
+    fn kept_signed(&mut self, width: usize) -> Option<i64> {
+        let (n, length) = self.kept_integer(width, |_, _| true)?;
+        let shift = 64 - 8 * length as u32;
+        Some(((n << shift) as i64) >> shift)
     }
 
     /// `ThrowError(fFormatError or fOverflow, message)` at `site` at the current position
@@ -194,31 +270,48 @@ impl<S: AsnSource> BerReader<S> {
     }
 
     /// `PeekChar` of the input buffer, `i` bytes ahead: the end of the data throws
-    /// `CEofException`.
-    #[inline]
+    /// `CEofException`. A byte the source keeps is read from its slice; the source reads more
+    /// only past its end (`peek_after_fill`).
+    #[inline(always)]
     fn peek(&mut self, i: usize) -> R<u8> {
-        match self.src.byte_at(self.base + self.pos + i) {
-            Some(byte) => Ok(byte),
-            None => Err(Fail::Eof),
+        let at = self.at + i;
+        match self.src.rest(at).first() {
+            Some(&byte) => Ok(byte),
+            None => self.peek_after_fill(at),
         }
     }
 
+    /// [`peek`](Self::peek) of a byte that the source does not keep yet.
+    #[cold]
+    #[inline(never)]
+    fn peek_after_fill(&mut self, at: usize) -> R<u8> {
+        self.src.byte_after_fill(at).ok_or(Fail::Eof)
+    }
+
     /// `GetChar` of the input buffer.
+    #[inline(always)]
     fn byte(&mut self) -> R<u8> {
         let b = self.peek(0)?;
-        self.pos += 1;
+        self.at += 1;
         Ok(b)
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:132-171
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:158-170,175-188
     /// `PeekTag`: the tag number of the tag at the current position; `tag_len` is its length.
+    #[inline(always)]
     fn peek_tag(&mut self) -> R<i32> {
         let first = self.peek(0)?;
         if first & LONG_TAG != LONG_TAG {
             self.tag_len = 1;
             return Ok(i32::from(first & LONG_TAG));
         }
+        self.peek_long_tag()
+    }
+
+    /// [`peek_tag`](Self::peek_tag) of a tag whose number follows its first byte.
+    #[inline(never)]
+    fn peek_long_tag(&mut self) -> R<i32> {
         let mut tag: i32 = 0;
         let mut i = 1;
         loop {
@@ -239,6 +332,7 @@ impl<S: AsnSource> BerReader<S> {
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:138-156,167-199
     /// `PeekTag(first_tag_byte, class, constructed)`: the tag number of a tag of that class and
     /// form.
+    #[inline(always)]
     pub(crate) fn peek_tag_of_class(&mut self, class_and_constructed: u8) -> R<i32> {
         let first = self.peek(0)?;
         if first & CLASS_AND_CONSTRUCTED_MASK != class_and_constructed {
@@ -264,6 +358,7 @@ impl<S: AsnSource> BerReader<S> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:171-178
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:158-185,209-217
     /// `ExpectTag(class, constructed, value)`.
+    #[inline(always)]
     pub(crate) fn expect_tag(&mut self, class_and_constructed: u8, value: i32) -> R<()> {
         let tag = self.peek_tag_of_class(class_and_constructed)?;
         if tag != value {
@@ -284,6 +379,7 @@ impl<S: AsnSource> BerReader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:394-410
+    #[inline(never)]
     fn read_length_long(&mut self, byte: u8) -> R<u64> {
         let mut length_length = usize::from(byte - 0x80);
         if length_length == 0 {
@@ -319,8 +415,9 @@ impl<S: AsnSource> BerReader<S> {
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:236-246,253-263
     /// `ExpectIndefiniteLength`: the tag that `peek_tag` found is followed by the length of a
     /// constructed item (a definite length sets the item's data limit).
+    #[inline(always)]
     pub(crate) fn expect_indefinite_length(&mut self) -> R<()> {
-        self.pos += self.tag_len;
+        self.at += self.tag_len;
         let len = self.byte()?;
         self.limits.push(self.limit);
         self.limit = if len == 0x80 {
@@ -337,11 +434,11 @@ impl<S: AsnSource> BerReader<S> {
             // the `Int8` `m_CurrentDataLimit` (objistrasnb.hpp:267). A limit of 0 is then an
             // indefinite length (`HaveMoreElements`, `ExpectEndOfContent`), a negative one ends the
             // members at once (checked with makeblastdb 2.17.0, the b_length_long_wrap_* fixtures).
-            let base = self.pos as i64;
+            let base = self.pos() as i64;
             let long_length = self.read_length_long(len)?;
             (base as u64).wrapping_add(long_length) as i64
         } else {
-            self.pos as i64 + i64::from(len)
+            self.pos() as i64 + i64::from(len)
         };
         self.tag_len = 0;
         Ok(())
@@ -350,10 +447,11 @@ impl<S: AsnSource> BerReader<S> {
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:174-182,242-250
     /// `HaveMoreElements`; the bytes before the next member or element are not read again
     /// (`AsnSource::release_before`).
+    #[inline(always)]
     pub(crate) fn have_more_elements(&mut self) -> R<bool> {
         self.release();
         if self.limit != 0 {
-            return Ok(self.limit > self.pos as i64);
+            return Ok(self.limit > self.pos() as i64);
         }
         Ok(self.peek(0)? != 0)
     }
@@ -361,20 +459,33 @@ impl<S: AsnSource> BerReader<S> {
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:358-405
     // NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:70-90
     /// `ExpectEndOfContent`: the end of a constructed item.
+    #[inline(always)]
     pub(crate) fn expect_end_of_content(&mut self) -> R<()> {
+        if self.limit == 0 && matches!(self.kept(), [0, 0, ..]) {
+            self.at += 2;
+            self.limit = self.limits.pop().unwrap_or(0);
+            self.tag_len = 0;
+            return Ok(());
+        }
+        self.expect_end_of_content_bytes()
+    }
+
+    /// [`expect_end_of_content`](Self::expect_end_of_content) one byte at a time.
+    #[inline(never)]
+    fn expect_end_of_content_bytes(&mut self) -> R<()> {
         if self.limit != 0 {
-            if self.limit != self.pos as i64 {
+            if self.limit != self.pos() as i64 {
                 return Err(self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected"));
             }
         } else {
             if self.peek(0)? != 0 {
                 return Err(self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected"));
             }
-            self.pos += 1;
+            self.at += 1;
             if self.peek(0)? != 0 {
                 return Err(self.throw(UNEXPECTED_CONTINUATION, "EndOfContentsByte expected"));
             }
-            self.pos += 1;
+            self.at += 1;
         }
         self.limit = self.limits.pop().unwrap_or(0);
         self.tag_len = 0;
@@ -383,8 +494,9 @@ impl<S: AsnSource> BerReader<S> {
 
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:309-329,338-352
     /// `ReadShortLength` after the tag.
+    #[inline(always)]
     fn read_short_length(&mut self) -> R<usize> {
-        self.pos += self.tag_len;
+        self.at += self.tag_len;
         self.tag_len = 0;
         let byte = self.byte()?;
         if byte >= 0x80 {
@@ -395,8 +507,9 @@ impl<S: AsnSource> BerReader<S> {
 
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:331-337
     /// `ReadLength` after the tag (`ReadLengthInlined`): a short or a long form.
+    #[inline(always)]
     fn read_length(&mut self) -> R<u64> {
-        self.pos += self.tag_len;
+        self.at += self.tag_len;
         self.tag_len = 0;
         let byte = self.byte()?;
         if byte >= 0x80 {
@@ -421,6 +534,7 @@ impl<S: AsnSource> BerReader<S> {
     }
 
     /// `ExpectSysTagByte(byte)` (objistrasnb.inl:115-123): the exact tag byte.
+    #[inline(always)]
     pub(crate) fn expect_sys_tag_byte(&mut self, byte: u8) -> R<()> {
         let got = self.peek(0)?;
         if got != byte {
@@ -432,6 +546,7 @@ impl<S: AsnSource> BerReader<S> {
 
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:145-160
     /// `ExpectIntegerTag`.
+    #[inline(always)]
     pub(crate) fn expect_integer_tag(&mut self) -> R<()> {
         match self.peek(0)? {
             // The application tag only sets `eReadAsBigInt`, which has no effect on the number
@@ -462,6 +577,7 @@ impl<S: AsnSource> BerReader<S> {
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:514-549
     /// `ReadStdUnsigned` of a `Uint4`.
+    #[inline(always)]
     pub(crate) fn read_std_unsigned32(&mut self) -> R<u32> {
         let mut length = self.read_short_length()?;
         if length == 0 {
@@ -508,10 +624,10 @@ impl<S: AsnSource> BerReader<S> {
         }
         let last = usize::try_from(count)
             .ok()
-            .and_then(|count| (self.base + self.pos).checked_add(count - 1));
+            .and_then(|count| self.at.checked_add(count - 1));
         match last {
             Some(last) if self.src.byte_at(last).is_some() => {
-                self.pos += count as usize;
+                self.at += count as usize;
                 Ok(())
             }
             _ => Err(Fail::Eof),
@@ -522,8 +638,8 @@ impl<S: AsnSource> BerReader<S> {
     /// (`AsnSource::read_into`: a long value is not held twice); the end of the data before them is
     /// a `CEofException`.
     fn read_bytes(&mut self, count: u64, out: &mut Vec<u8>) -> R<()> {
-        let read = self.src.read_into(self.base + self.pos, count, out);
-        self.pos += read as usize;
+        let read = self.src.read_into(self.at, count, out);
+        self.at += read as usize;
         if read < count {
             return Err(Fail::Eof);
         }
@@ -574,6 +690,62 @@ impl<S: AsnSource> BerReader<S> {
         }
         self.throw(UNEXPECTED_MEMBER, message)
     }
+
+    /// The member or variant of tag number `tag` (from the `pos`-th item on), read after its
+    /// length: an unknown one is an error at the byte after its length.
+    #[inline(always)]
+    fn member_index(&self, tag: i32, items: &(impl Items + ?Sized), pos: usize) -> R<usize> {
+        match usize::try_from(tag) {
+            Ok(index) if index >= pos && index < items.count() => Ok(index),
+            _ => Err(self.unexpected_member(tag, items)),
+        }
+    }
+
+    // The forms of the `Input` primitives below one byte at a time (see `kept`).
+
+    /// `begin_class` and `begin_container`: a SEQUENCE (or SET) tag and its length.
+    #[inline(never)]
+    fn begin_constructed_bytes(&mut self, number: i32) -> R<()> {
+        self.expect_tag(UNIVERSAL_CONSTRUCTED, number)?;
+        self.expect_indefinite_length()
+    }
+
+    /// `begin_member`.
+    #[inline(never)]
+    fn begin_member_bytes(
+        &mut self,
+        items: &(impl Items + ?Sized),
+        pos: usize,
+    ) -> R<Option<usize>> {
+        if !self.have_more_elements()? {
+            return Ok(None);
+        }
+        let tag = self.peek_tag_of_class(CONTEXT_CONSTRUCTED)?;
+        self.expect_indefinite_length()?;
+        self.member_index(tag, items, pos).map(Some)
+    }
+
+    /// `begin_variant`.
+    #[inline(never)]
+    fn begin_variant_bytes(&mut self, items: &(impl Items + ?Sized)) -> R<usize> {
+        let tag = self.peek_tag_of_class(CONTEXT_CONSTRUCTED)?;
+        self.expect_indefinite_length()?;
+        self.member_index(tag, items, 0)
+    }
+
+    /// `read_i32` and `read_i64`: a signed type of `width` bytes.
+    #[inline(never)]
+    fn read_signed_bytes(&mut self, width: usize) -> R<i64> {
+        self.expect_integer_tag()?;
+        self.read_std_signed(width)
+    }
+
+    /// `read_u32`.
+    #[inline(never)]
+    fn read_u32_bytes(&mut self) -> R<u32> {
+        self.expect_integer_tag()?;
+        self.read_std_unsigned32()
+    }
 }
 
 impl<S: AsnSource> Input for BerReader<S> {
@@ -582,13 +754,12 @@ impl<S: AsnSource> Input for BerReader<S> {
     /// `GetPosition()` of the binary stream: the bytes read from the start of the object.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:118-121
     fn position(&self) -> StreamPosition {
-        StreamPosition::Byte(self.pos as u64)
+        StreamPosition::Byte(self.pos() as u64)
     }
 
     /// The state of a new stream at the next byte: its positions count from there.
     fn new_object(&mut self) {
-        self.base += self.pos;
-        self.pos = 0;
+        self.base = self.at;
         self.tag_len = 0;
         self.limit = 0;
         self.limits.clear();
@@ -597,7 +768,7 @@ impl<S: AsnSource> Input for BerReader<S> {
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
     #[cfg(test)]
     fn end_of_data(&mut self) -> bool {
-        self.src.byte_at(self.base + self.pos).is_none()
+        self.src.byte_at(self.at).is_none()
     }
 
     /// `ReadFileHeader` of the binary stream: `CObjectIStream`'s, which reads nothing (an empty
@@ -609,8 +780,10 @@ impl<S: AsnSource> Input for BerReader<S> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1029-1042
     // (A SEQUENCE: universal tag 16.)
     fn begin_class(&mut self) -> R<()> {
-        self.expect_tag(UNIVERSAL_CONSTRUCTED, SEQUENCE_NUMBER)?;
-        self.expect_indefinite_length()
+        if self.kept_indefinite_item(u8::MAX, TAG_SEQUENCE).is_some() {
+            return Ok(());
+        }
+        self.begin_constructed_bytes(SEQUENCE_NUMBER)
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1096-1179
@@ -618,15 +791,20 @@ impl<S: AsnSource> Input for BerReader<S> {
     // (The length is read before the tag is looked up: the error of an unknown member is at the
     // byte after its length.)
     fn begin_member(&mut self, items: &(impl Items + ?Sized), pos: usize) -> R<Option<usize>> {
-        if !self.have_more_elements()? {
-            return Ok(None);
+        // (In an item of an indefinite length, `have_more_elements` is the first byte of a
+        // member's tag; a 0 ends the members.)
+        if self.limit == 0 {
+            self.release();
+            if let Some(tag) =
+                self.kept_indefinite_item(CLASS_AND_CONSTRUCTED_MASK, CONTEXT_CONSTRUCTED)
+            {
+                return self.member_index(tag, items, pos).map(Some);
+            }
+            if self.kept().first() == Some(&0) {
+                return Ok(None);
+            }
         }
-        let tag = self.peek_tag_of_class(CONTEXT_CONSTRUCTED)?;
-        self.expect_indefinite_length()?;
-        match usize::try_from(tag) {
-            Ok(index) if index >= pos && index < items.count() => Ok(Some(index)),
-            _ => Err(self.unexpected_member(tag, items)),
-        }
+        self.begin_member_bytes(items, pos)
     }
 
     fn end_member(&mut self) -> R<()> {
@@ -643,11 +821,9 @@ impl<S: AsnSource> Input for BerReader<S> {
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1306-1332,1344-1353
     fn begin_variant(&mut self, items: &(impl Items + ?Sized)) -> R<usize> {
-        let tag = self.peek_tag_of_class(CONTEXT_CONSTRUCTED)?;
-        self.expect_indefinite_length()?;
-        match usize::try_from(tag) {
-            Ok(index) if index < items.count() => Ok(index),
-            _ => Err(self.unexpected_member(tag, items)),
+        match self.kept_indefinite_item(CLASS_AND_CONSTRUCTED_MASK, CONTEXT_CONSTRUCTED) {
+            Some(tag) => self.member_index(tag, items, 0),
+            None => self.begin_variant_bytes(items),
         }
     }
 
@@ -663,8 +839,13 @@ impl<S: AsnSource> Input for BerReader<S> {
     // (`SEQUENCE OF`: universal tag 16, `SET OF`: 17.)
     fn begin_container(&mut self, set: bool) -> R<()> {
         let number = if set { SET_NUMBER } else { SEQUENCE_NUMBER };
-        self.expect_tag(UNIVERSAL_CONSTRUCTED, number)?;
-        self.expect_indefinite_length()
+        if self
+            .kept_indefinite_item(u8::MAX, UNIVERSAL_CONSTRUCTED | number as u8)
+            .is_some()
+        {
+            return Ok(());
+        }
+        self.begin_constructed_bytes(number)
     }
 
     fn begin_element(&mut self) -> R<bool> {
@@ -677,20 +858,27 @@ impl<S: AsnSource> Input for BerReader<S> {
 
     #[inline]
     fn read_i32(&mut self) -> R<i32> {
-        self.expect_integer_tag()?;
-        Ok(self.read_std_signed(4)? as i32)
+        match self.kept_signed(4) {
+            Some(n) => Ok(n as i32),
+            None => self.read_signed_bytes(4).map(|n| n as i32),
+        }
     }
 
     #[inline]
     fn read_i64(&mut self) -> R<i64> {
-        self.expect_integer_tag()?;
-        self.read_std_signed(8)
+        match self.kept_signed(8) {
+            Some(n) => Ok(n),
+            None => self.read_signed_bytes(8),
+        }
     }
 
     #[inline]
     fn read_u32(&mut self) -> R<u32> {
-        self.expect_integer_tag()?;
-        self.read_std_unsigned32()
+        // (`ReadStdUnsigned` takes a first byte of four with its high bit set as an overflow.)
+        match self.kept_integer(4, |n, length| length < 4 || n >> 31 == 0) {
+            Some((n, _)) => Ok(n as u32),
+            None => self.read_u32_bytes(),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2077-2087

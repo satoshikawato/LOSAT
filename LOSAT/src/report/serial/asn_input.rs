@@ -43,8 +43,9 @@ pub(crate) enum Fail {
     /// `std::bad_alloc` (the string that a length announces, `GetChars`' `reserve`).
     OutOfMemory,
     /// Another `std::exception`, by its `what()`: `std::length_error` of a reserve
-    /// ([`STRING_CREATE_LENGTH_ERROR`], `vector::reserve` of a reserve hook).
-    Std(&'static str),
+    /// ([`STRING_CREATE_LENGTH_ERROR`], `vector::reserve` of a reserve hook). The `what()` is
+    /// held by a thin reference to its constant, so `Fail` stays a tag and a word (see above).
+    Std(&'static &'static str),
     /// NCBI reads it, or not, by what LOSAT does not know (the host's memory); LOSAT refuses it.
     Unsupported(Box<Refusal>),
 }
@@ -54,6 +55,13 @@ pub(crate) enum Fail {
 pub(crate) struct Refusal(pub(crate) String);
 
 pub(crate) type R<T> = Result<T, Fail>;
+
+// `Fail` is a tag and a word: a primitive's `R<()>` comes back in two registers, its `R<u32>` or
+// `R<bool>` in 16 bytes. A third word (a `&'static str` in a variant) returned every result of every
+// primitive through 24 bytes of memory (part of +16.6 % instructions on a binary mask file, line RG
+// item D3c-3a).
+const _: () = assert!(std::mem::size_of::<Fail>() == 2 * std::mem::size_of::<usize>());
+const _: () = assert!(std::mem::size_of::<R<u32>>() == std::mem::size_of::<Fail>());
 
 impl Fail {
     /// [`Fail::Serial`] of `e`.
@@ -187,8 +195,8 @@ pub(crate) enum Reserve {
 pub(crate) fn reserve(length: u64, what: Reserve, names: Names) -> R<()> {
     if length > (1 << 63) - 1 {
         return Err(Fail::Std(match what {
-            Reserve::String => STRING_CREATE_LENGTH_ERROR,
-            Reserve::Bytes => VECTOR_RESERVE_LENGTH_ERROR,
+            Reserve::String => &STRING_CREATE_LENGTH_ERROR,
+            Reserve::Bytes => &VECTOR_RESERVE_LENGTH_ERROR,
         }));
     }
     let bytes = match what {
@@ -663,6 +671,7 @@ impl<S: AsnSource> Input for TextInput<S> {
         self.begin_class()
     }
 
+    #[inline(always)]
     fn begin_element(&mut self) -> R<bool> {
         let more = self.r.next_element(&mut self.block_start);
         more.map_err(|e| self.fail(e))
@@ -854,7 +863,7 @@ impl<S: AsnSource> Input for TextInput<S> {
         let id = self.r.type_id();
         match id.map_err(|e| self.fail(e))? {
             Some(id) => Ok(self.r.bytes(id).to_vec()),
-            None => Err(Fail::Std(STRING_CREATE_LENGTH_ERROR)),
+            None => Err(Fail::Std(&STRING_CREATE_LENGTH_ERROR)),
         }
     }
 

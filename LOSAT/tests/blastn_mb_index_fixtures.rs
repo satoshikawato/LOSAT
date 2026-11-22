@@ -20,8 +20,8 @@
 //! `-num_threads`) is compared with row NAME's NCBI files: NCBI's `-num_threads 1` output, which
 //! LOSAT gives at every thread count (Owner 2026-10-13), for a run whose NCBI result at more
 //! threads depends on its threads. A row whose fourth field is `plain NAME` (row NAME's search
-//! with `-use_index true` and `-db_hard_mask`, its setup with the index made, at any
-//! `-num_threads`) is compared with row NAME's NCBI files: NCBI's search without the index, whose
+//! with `-use_index true` (and `-index_name` for an old-style index) and `-db_hard_mask`, its
+//! setup with the index made, at any `-num_threads`) is compared with row NAME's NCBI files: NCBI's search without the index, whose
 //! output LOSAT's one-hit search with the index gives there, the masked letters matching nothing
 //! and the seeds in their hard ranges (the Owner's answer C to Q-HARDIDX, approved exception 24 of
 //! PD-LOSAT-NCBI-DEFECTS). A row whose fourth field is `expect NAME` (a search with the index and
@@ -115,12 +115,14 @@ fn cases() -> Vec<Case> {
         );
     }
     // A `same as` row runs its row's search with another thread count; a `plain` row, with the
-    // index (made in its setup) and the hard mask, at any thread count.
+    // index (made in its setup, named by `-index_name` for an old-style one) and the hard mask,
+    // at any thread count.
     let without_threads = |words: &[String], index: bool| {
         let mut kept = Vec::new();
         let mut words = words.iter();
         while let Some(word) = words.next() {
-            if word == "-num_threads" || (index && word == "-use_index") {
+            if word == "-num_threads" || (index && (word == "-use_index" || word == "-index_name"))
+            {
                 words.next();
             } else {
                 kept.push(word.clone());
@@ -422,6 +424,14 @@ fn rows_that_differ() -> Vec<String> {
 /// qhm8 in hm5 are stretches that a mask ends (hm0 999..1060, hm5 2304..2562 with 2238..2304), of
 /// exact runs a mismatch apart that the index's search pairs within the window (it pairs a hit
 /// with one that ends at most the window before its start; NCBI's scan, before its end).
+///
+/// `exception24/hm_win_stretches.out` is NCBI's own two-hit search with the index of the database
+/// of hm's unmasked stretches, each its own sequence (`hm0_1061`: hm0's letters from 1,061), with
+/// each query's search space of hm's search with `-db_hard_mask 11` (`-searchsp`), its rows mapped
+/// back to hm's sequences and letters (`remaining-gaps-20261112/D/d5/probe/d5b5/st_oracle.py`). Its
+/// rows are LOSAT's, the three above included, but for the three rows that cross hm0's 7-letter
+/// mask at 1,502..1,508: NCBI's search without the index (and LOSAT's) runs the traceback on the
+/// whole sequence with the masked letters as B, across the mask, where the stretches end.
 #[test]
 fn the_two_hit_index_search_adds_the_index_s_pairs() {
     let read = |path: &str| fs::read_to_string(fixtures().join(path)).unwrap();
@@ -449,6 +459,19 @@ fn the_two_hit_index_search_adds_the_index_s_pairs() {
             read(&format!("ncbi/hm_n_win.{extension}"))
         );
     }
+    let stretches = read("exception24/hm_win_stretches.out");
+    let crossing: Vec<&str> = expected
+        .lines()
+        .filter(|line| !stretches.lines().any(|row| row == *line))
+        .collect();
+    assert_eq!(
+        crossing,
+        [
+            "qhm0\thm0\t99.222\t900\t7\t0\t261\t1160\t1061\t1960\t0.0\t1637",
+            "qhm1\thm0\t97.444\t900\t23\t0\t211\t1110\t1061\t1960\t0.0\t1548",
+            "qhm2\thm0\t97.778\t900\t20\t0\t191\t1090\t1960\t1061\t0.0\t1565",
+        ]
+    );
 }
 
 #[test]

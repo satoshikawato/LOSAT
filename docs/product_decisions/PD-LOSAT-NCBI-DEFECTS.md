@@ -3021,10 +3021,29 @@ out of the search are not read.
     without the index. Evidence: the rows `plain NAME` of `LOSAT/tests/blastn_mb_index/cases.tsv` (`hm_i*`,
     `sm_i_hard`; database hm of `gen_d5b5.py`: masks inside, at the start and at the end of
     sequences and hard ranges of 1 and 2 letters; nmer 8, 9 with stride 3, and 11; word sizes 16
-    and 28; `-window_size 20`; `-dust no`; 1 and 4 threads), whose output is NCBI's search without
-    the index with the same `-db_hard_mask` (hm: 32 rows, where NCBI's search with the index
-    writes 5); random comparison `remaining-gaps-20261112/D/d5/probe/d5b5/rand_d5b5.py`
-    (RANDOM_EVIDENCE). Unit tests `a_masked_letter_ends_a_run_and_pairs_no_hits` and
+    and 28; `-dust no`; 1 and 4 threads; an old-style index; database hmr of `gen_d5b5_r.py`, hm with every masked
+    letter replaced at random), whose output is NCBI's one-hit search without the index with the
+    same `-db_hard_mask` (hm: 32 rows, where NCBI's search with the index writes 5). The two-hit
+    search (`-window_size`) of NCBI's index pairs other hits than its scan even without masks, so
+    no NCBI search gives its result: the rows `expect hm_i_win` (`-window_size 20` at 1 and 4
+    threads, and on hmr) give LOSAT's 31 rows, NCBI's 28 rows without the index and 3 of the
+    index's pairs (`the_two_hit_index_search_adds_the_index_s_pairs`: the row of qhm7 in hm4 is in
+    NCBI's own indexed search without the mask, `hm_iu_win`; the other two are runs that a mask
+    ends, paired within the window); and NCBI's own two-hit search with the index of the database
+    of hm's unmasked stretches, each its own sequence (`hm_win_stretches.out`), gives each of
+    LOSAT's rows but for three that NCBI's search without the index and LOSAT's carry across a
+    7-letter mask (the traceback reads the whole sequence with the masked letters as B, where the
+    stretches end). Random comparison `remaining-gaps-20261112/D/d5/probe/d5b5/rand_d5b5.py` (400
+    databases of dustmasker's masks with queries across the masked stretches; NCBI 2.17.0): the
+    308 one-hit searches give NCBI's rows without the index; of the 92 two-hit searches, 61 give
+    them, and 31 are of databases where NCBI's index and scan pair other hits even without the
+    mask. For those 31, NCBI's indexed search of the database of unmasked stretches
+    (`st_oracle.py`, `st_explain.py`) gives LOSAT's rows in 17; in 12 the only differences are
+    alignments carried across a short mask as above, and in the last 2 (indexes that store every
+    19th and every 2nd position, `-legacy false`) the stretch database moves the stored positions,
+    after which NCBI's two-hit rule pairs other hits (traced: a root 7 letters later drops the earlier
+    hit). No run depended on `-num_threads` (1 and 4) or on the masked letters (the same database
+    with every masked letter replaced at random). Unit tests `a_masked_letter_ends_a_run_and_pairs_no_hits` and
     `the_masks_are_of_their_own_sequence` (`LOSAT/src/dbindex/search_tests.rs`), and the placement
     tests of `LOSAT/src/algorithm/blastn/blast_engine/mb_index_seeds_tests.rs`.
 

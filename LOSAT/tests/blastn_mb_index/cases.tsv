@@ -179,3 +179,4 @@ hm_n_r	-	-query qhm.fa -outfmt 6 -db hmr -db_hard_mask 11
 hm_i_r	makembindex -input hmr -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hmr -db_hard_mask 11	plain hm_n_r
 hm_n_nodust	-	-query qhm.fa -outfmt 6 -db hm -db_hard_mask 11 -dust no
 hm_i_nodust	makembindex -input hm -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -db_hard_mask 11 -dust no	plain hm_n_nodust
+hm_i_old	makembindex -input hm.fa -iformat fasta -old_style_index true -output hmo -nmer 8	-query qhm.fa -outfmt 6 -use_index true -db hm -index_name hmo -db_hard_mask 11	plain hm_n

@@ -279,7 +279,8 @@ impl<'a> IndexSeeds<'a> {
     /// that the search reads, by their sequence in the volume (`dbindex::search`), read with the
     /// masks of their blocks; a sequence whose masks do not read has none here (its own search
     /// reads them again and reports the error). The sequences that the search does not read (an
-    /// OID list) have none.
+    /// OID list) have none. Out of line, as `dbindex::search`'s setup of the masks.
+    #[inline(never)]
     fn volume_masks(&self, at: usize) -> Vec<(u32, Vec<(u32, u32)>)> {
         let Some((database, algo_id)) = self.hard_masks else {
             return Vec::new();

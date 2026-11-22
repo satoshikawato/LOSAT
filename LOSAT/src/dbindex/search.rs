@@ -439,12 +439,16 @@ struct Search<'a> {
 }
 
 /// The masked letters `masks` of the sequences of `volume` (`search`) as letters of its packed
-/// sequences (from each sequence's first chunk's data), sorted and merged. A sequence without
-/// chunks has no letters there.
+/// sequences (from each sequence's first chunk's data), sorted and merged, and for each local id
+/// of `map` the part of them that its extensions read. A sequence without chunks has no letters
+/// there. Kept out of line: inlined, this setup of a volume spilled registers in the search's
+/// per-root loop (+0.5 % instructions of a search without masks, D5b-5 A/B).
+#[inline(never)]
 fn volume_masked_letters(
     volume: &IndexVolume,
+    map: &SubjectMap<'_>,
     masks: &[(u32, Vec<(u32, u32)>)],
-) -> Vec<(u64, u64)> {
+) -> (Vec<(u64, u64)>, Vec<(usize, usize)>) {
     let (subjects, chunks) = (volume.subjects(), volume.chunks());
     let mut letters: Vec<(u64, u64)> = Vec::new();
     for (seq, ranges) in masks {
@@ -474,7 +478,16 @@ fn volume_masked_letters(
             _ => merged.push((start, end)),
         }
     }
-    merged
+    let lid_masks = (0..map.num_subjects() - 1)
+        .map(|lid| {
+            // The letters that the local id's extensions read (`subj_end_` bounds them loosely).
+            let (start, end) = map.subj_info(lid);
+            let (from, to) = (u64::from(start) * CR, u64::from(end) * CR);
+            let lo = merged.partition_point(|&(_, stop)| stop <= from);
+            (lo, merged.partition_point(|&(begin, _)| begin < to).max(lo))
+        })
+        .collect();
+    (merged, lid_masks)
 }
 
 /// `CSeedRoots::LIMIT_ROOTS`: the roots kept before the seeds are computed from them.
@@ -504,16 +517,7 @@ pub(crate) fn search(
         min_offset: volume.min_offset(),
     };
     let num_lids = map.num_subjects() - 1;
-    let masked = volume_masked_letters(volume, masks);
-    let lid_masks = (0..num_lids)
-        .map(|lid| {
-            // The letters that the local id's extensions read (`subj_end_` bounds them loosely).
-            let (start, end) = map.subj_info(lid);
-            let (from, to) = (u64::from(start) * CR, u64::from(end) * CR);
-            let lo = masked.partition_point(|&(_, stop)| stop <= from);
-            (lo, masked.partition_point(|&(begin, _)| begin < to).max(lo))
-        })
-        .collect();
+    let (masked, lid_masks) = volume_masked_letters(volume, &map, masks);
     let seeds = (0..num_lids)
         .map(|lid| TrackedSeeds {
             seeds: Vec::new(),

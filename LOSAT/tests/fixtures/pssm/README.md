@@ -35,7 +35,7 @@ by `#`, so for three twins, `ps9_rnd_ctrl.asnb`, `ps9_rnd_ident_utf8.asnb` and `
 source's raw bytes back after the conversion (same lengths; the title and identifier bytes `C3 A9` and the iupacaa byte `E9`).
 The NCBI answers of the rows were frozen with the official NCBI BLAST+ 2.17.0 Linux build, `-num_threads 1`.
 
-`ps9_ber_<case>.asnb` (101 files): hand-made BER inputs for the rows `db.ber.ps.<case>` (psiblast, 101 rows, `-comp_based_stats 0
+`ps9_ber_<case>.asnb` (107 files): hand-made BER inputs for the rows `db.ber.ps.<case>` (psiblast, 107 rows, `-comp_based_stats 0
 -evalue 1000`, database `tests/db_search/paja`) and `db.ber.tbn.<case>` (tblastn, 8 rows: `base def title_utf8tag title_ff
 real_pinf cut_title after_broken len89`, database `tests/db_search/tslice`), in `tests/db_search_manifest/psiblast.ber.tsv` and
 `tblastn.ber.tsv`. `ps9_ber_base.asnb` (2,907 bytes) is `ps9_rnd.asnb` without the Pssm member `intermediateData` (its 840
@@ -49,3 +49,6 @@ strings with bytes outside the visible range, lengths past the end, truncations 
 `uint_ff` and `uint5_hi`, end psiblast by a signal (no row is possible) and are not kept here. The NCBI answers were frozen with
 the official NCBI BLAST+ 2.17.0 Linux build, `-num_threads 1`, and eleven rows were repeated with the bioconda 2.17.0 build with
 the same bytes. The probes of `makeblastdb` on the same inputs are in `remaining-gaps-20261112/D/d3/c3a/probe/ber/SUMMARY.tsv`.
+The six `block_*` cases (the query's ncbistdaa OCTET STRING with a length past the end, or as a BIT STRING) are the inputs of
+the review of D3c-3a (`remaining-gaps-20261112/D/d3/c3a/review_probe/`), frozen with the official build under an address limit
+of 8 GiB.

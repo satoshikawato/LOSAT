@@ -660,7 +660,7 @@ impl<A: clap::Args> clap::FromArgMatches for GivenArguments<A> {
         if matches.value_source(IMPORT_SEARCH_STRATEGY) != Some(CommandLine) {
             return Ok(Self::default());
         }
-        let definitions = A::augment_args(clap::Command::new("given"));
+        let definitions = A::augment_args(clap::Command::default());
         let list = definitions
             .get_arguments()
             .filter(|arg| matches.value_source(arg.get_id().as_str()) == Some(CommandLine))

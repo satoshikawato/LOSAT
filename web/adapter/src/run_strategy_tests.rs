@@ -154,20 +154,21 @@ fn a_file_that_is_not_a_strategy_is_the_command_lines_error() {
     files::release(handle).unwrap();
 }
 
-/// blastn runs a TBLASTX strategy as the command line does (row `C.blastn.from.tblastx.db`:
-/// NCBI's output is tblastx's import with blastn's warnings), on the database the strategy names.
+/// blastn runs a TBLASTX strategy as the command line does (row `C.blastn.from.tblastx.sub`:
+/// NCBI's output is tblastx's import with blastn's warnings), on the subjects the strategy holds
+/// (the browser has no database files).
 #[test]
 fn a_strategy_of_another_program_runs_as_on_the_command_line() {
     let table = std::fs::read_to_string(format!("{}/import_cases.tsv", fixtures())).unwrap();
     let cells: Vec<&str> = table
         .lines()
-        .find(|line| line.starts_with("C.blastn.from.tblastx.db\t"))
+        .find(|line| line.starts_with("C.blastn.from.tblastx.sub\t"))
         .expect("the row")
         .split('\t')
         .collect();
-    let bytes = std::fs::read(format!("{}/ss/tblastx.db.ss", fixtures())).unwrap();
-    let handle = register_strategy("tblastx.db.ss", &bytes);
-    let words = ["blastn", "-import_search_strategy", "tblastx.db.ss"];
+    let bytes = std::fs::read(format!("{}/ss/tblastx.sub.ss", fixtures())).unwrap();
+    let handle = register_strategy("tblastx.sub.ss", &bytes);
+    let words = ["blastn", "-import_search_strategy", "tblastx.sub.ss"];
     let (program, _, _) = crate::run::parse_imported(&words).unwrap();
     assert_eq!(program.name(), "tblastx", "the strategy's program runs");
     let streams = run_imported(&words, b"", b"").unwrap();

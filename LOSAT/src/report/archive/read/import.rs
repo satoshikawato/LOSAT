@@ -720,6 +720,7 @@ impl Start {
             ),
             app: self.app,
             searchsp_from_strategy: false,
+            mb_index: None,
             query_range,
             recorded: self
                 .imported

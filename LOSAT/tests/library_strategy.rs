@@ -11,21 +11,27 @@ use std::path::PathBuf;
 
 use losat::api::{run, run_collect, validate, Error, Inputs, Program};
 
+/// The rows `C.<program>.from.<program>` of `import_cases.tsv` that exit 0 (alone and with the
+/// command line's options).
+const C_ROWS: usize = 11;
+
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/strategy/import")
 }
 
-/// A row of `import_cases.tsv` that imports one strategy file without any other option.
+/// A row of `import_cases.tsv` that imports one strategy file, with the command line's options
+/// `options` (none in the rows named `.alone`).
 struct Row {
     name: String,
     program: Program,
     file: String,
+    options: Vec<String>,
     out: String,
     err: String,
 }
 
-/// The rows of `import_cases.tsv` named as `named` says that import one strategy file alone and
-/// exit 0.
+/// The rows of `import_cases.tsv` named as `named` says that import one strategy file (its name
+/// without spaces) and exit 0.
 fn rows_named(named: impl Fn(&str) -> bool) -> Vec<Row> {
     let table = std::fs::read_to_string(fixtures().join("import_cases.tsv")).expect("the table");
     table
@@ -34,11 +40,16 @@ fn rows_named(named: impl Fn(&str) -> bool) -> Vec<Row> {
         .filter_map(|line| {
             let cells: Vec<&str> = line.split('\t').collect();
             let program = Program::parse(cells[1]).ok()?;
-            let file = cells[2].strip_prefix("-import_search_strategy {ss}/")?;
-            (named(cells[0]) && cells[3] == "0" && !file.contains(' ')).then(|| Row {
+            let mut words = cells[2]
+                .strip_prefix("-import_search_strategy {ss}/")?
+                .split(' ');
+            let file = words.next()?;
+            let options: Vec<String> = words.map(|word| word.replace("%20", " ")).collect();
+            (named(cells[0]) && cells[3] == "0" && !file.contains("%20")).then(|| Row {
                 name: cells[0].to_string(),
                 program,
                 file: file.to_string(),
+                options,
                 out: cells[4].to_string(),
                 err: cells[5].to_string(),
             })
@@ -48,6 +59,9 @@ fn rows_named(named: impl Fn(&str) -> bool) -> Vec<Row> {
 
 fn rows() -> Vec<Row> {
     rows_named(|name| name.ends_with(".alone"))
+        .into_iter()
+        .filter(|row| row.options.is_empty())
+        .collect()
 }
 
 /// NCBI's bytes of the file `name` of `bytes/` (`-`: none) in LOSAT's words.
@@ -63,11 +77,19 @@ fn strategy_bytes(file: &str) -> Vec<u8> {
     std::fs::read(fixtures().join("ss").join(file)).expect("a strategy file")
 }
 
-/// Runs each row through the library (a search of `argv` that reads the row's strategy file as
-/// bytes) and lists the rows whose report or diagnostics differ from NCBI's.
+/// Runs each row through the library (a search of the row's options and `argv` that reads the
+/// row's strategy file as bytes) and lists the rows whose report or diagnostics differ from
+/// NCBI's.
 fn differing(rows: &[Row], argv: &[&str]) -> Vec<String> {
     let mut failed = Vec::new();
     for row in rows {
+        let words: Vec<&str> = row
+            .options
+            .iter()
+            .map(String::as_str)
+            .chain(argv.iter().copied())
+            .collect();
+        let argv = words.as_slice();
         let search = validate(row.program, argv).unwrap();
         let outcome = (|| -> Result<(Vec<u8>, Vec<u8>), Error> {
             let strategy = search.read_strategy(&strategy_bytes(&row.file))?;
@@ -117,11 +139,12 @@ fn a_strategy_as_bytes_is_the_command_lines_import() {
 
 /// blastn and blastx run a TBLASTX strategy, tblastx a BLASTX or a BLASTN one, as the command
 /// line does (NCBI's output is the strategy's program's import with the running program's
-/// warnings).
+/// warnings, those of the options the command line gives among them).
 #[test]
 fn a_strategy_of_another_program_runs_as_on_the_command_line() {
     let rows = rows_named(|name| name.starts_with("C.") && name.contains(".from."));
-    assert_eq!(rows.len(), 4, "the rows C.*.from.*");
+    assert_eq!(rows.len(), C_ROWS, "the rows C.*.from.*");
+    assert!(rows.iter().any(|row| !row.options.is_empty()));
     let failed = differing(&rows, &[]);
     assert!(failed.is_empty(), "{failed:#?}");
 }

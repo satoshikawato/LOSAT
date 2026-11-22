@@ -878,7 +878,7 @@ pub(crate) fn windows_from_translated_aligns(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:681-693
-fn windows_from_translated_query_aligns(
+pub(crate) fn windows_from_translated_query_aligns(
     alignments: &Option<Box<BlastCompoAlignment>>,
     query_infos: &[BlastCompoQueryInfo],
     subject_length: i32,
@@ -927,7 +927,7 @@ fn windows_from_translated_query_aligns(
     Ok(joined)
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938
-fn translated_query_composition(
+pub(crate) fn translated_query_composition(
     query: &BlastCompoSequenceData,
     range: &BlastCompoSequenceRange,
     align: &BlastCompoAlignment,

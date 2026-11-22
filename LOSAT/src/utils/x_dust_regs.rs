@@ -25,6 +25,13 @@
 //! perfect list as one slice (`VecDeque::make_contiguous`), copying the intervals it passes in one
 //! piece.
 //!
+//! A full window stays full: each letter pops one triplet and pushes one. While it is full and
+//! holds two or more distinct triplets, `x_run_full` takes the letters with only the scalars that
+//! change (`head`, the suffix length, `r_w`, `r_v`, `num_diff`): `start` rises with `pos`, `L`
+//! follows from the suffix length, and `needs_processing` is one comparison with a table of
+//! thresholds that has `u32::MAX` past its end (`x_padded_thresholds`). The window's first letters,
+//! the rare `shift_high` branch and the run after a uniform window go through `XHot`, as before.
+//!
 //! Why the result is the same. Every method below is the `XTripletWindow` method of the same name
 //! with the same statements in the same order on the same integers; only where the values live
 //! changes. The ring holds the same triplet at `head + i` as `XTripletWindow` holds at
@@ -388,6 +395,206 @@ fn x_merge_at(
     }
 }
 
+/// NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:75-84
+/// The 2-bit code of `base` (`convert_iupac_to_ncbi2na`), drawing from `rng` where the table says 4.
+#[inline(always)]
+fn x_code(base: u8, rng: &mut NcbiLfgRandom) -> u8 {
+    let c = X_BASE_CODE[base as usize];
+    if c < 4 {
+        c
+    } else {
+        (rng.next() & 0x3) as u8
+    }
+}
+
+/// No NCBI counterpart: the thresholds of a full window with one more entry, `u32::MAX`, at the
+/// index of a suffix as long as the window. In a full window the suffix length `sl` (the distance
+/// from NCBI's `L` up to its `stop_`) is at most the window's length `max_size`, and `needs_processing`'s three tests
+/// (the suffix shorter than the window, shorter than the table, ten times the window's score above
+/// its threshold) are one comparison with this table: the table has `max_size` entries, so for
+/// `sl < max_size` the entry is the C threshold and both length tests hold, and for `sl == max_size`
+/// the entry is `u32::MAX`, which ten times a score never exceeds (at most 18,910).
+fn x_padded_thresholds(k: XConst) -> [u32; X_RING] {
+    debug_assert_eq!(k.thresholds.len(), k.max_size);
+    let mut thr = [u32::MAX; X_RING];
+    thr[..k.thresholds.len()].copy_from_slice(k.thresholds);
+    thr
+}
+
+/// No NCBI counterpart: the loop's position, last triplet and window, handed to and from the
+/// runs below.
+struct XRun {
+    pos: usize,
+    current_triplet: u8,
+    h: XHot,
+}
+
+/// No NCBI counterpart: why `x_run_full` stopped.
+enum XFullExit {
+    /// No letters left (`pos` is the end).
+    End,
+    /// The window holds at most one distinct triplet before the next letter: `shift_window` takes
+    /// its rare branch (`shift_high`), so the loop's own step runs that letter.
+    Generic,
+    /// The letter's `shift_window` returned false (the window became uniform): the run of
+    /// `x_run_uniform` comes next, as in the loop.
+    Uniform,
+}
+
+impl DustMasker {
+    /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:229-262, c++/src/algo/dustmask/symdust.cpp:76-114
+    /// The letters of the loop of `x_mask_range` while the window is full (its length `max_size`)
+    /// and holds two or more distinct triplets before each letter: the loop's save, triplet and
+    /// `pos` steps, then `shift_window`'s branch for a full window (`XHot::shift_window`, the same
+    /// statements on the same values), then `needs_processing` and `find_perfect`. A full window
+    /// stays full (each letter pops one triplet and pushes one), so the run keeps no length, and
+    /// the scalars it carries are the ones that change: `head`, the suffix length `sl` (from `L` up to
+    /// `stop`),
+    /// `r_w`, `r_v` and `num_diff`. `start` rises by one with `pos` on every letter, so it is
+    /// `pos - delta` for the run's `delta`; `L` is `start + max_size - sl`. With `stop = start +
+    /// max_size` (`XHot::stop`), `shift_window`'s updates of `L` and `stop` (`L` up by one where it
+    /// equals `start`, then `start` and `stop` up by one) leave `sl` the same where `sl == max_size`
+    /// and raise it by one otherwise; each step of the suffix trim raises `L`, so it lowers `sl`, and
+    /// the trim reads the ring at `sl - 1` (`XHot::shift_window`'s `off`).
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    fn x_run_full(
+        &self,
+        seq: &[u8],
+        run: &mut XRun,
+        a: &mut XArrays,
+        k: XConst,
+        thr: &[u32; X_RING],
+        rng: &mut NcbiLfgRandom,
+        result: &mut Vec<MaskedInterval>,
+        current_start: usize,
+        merged: &mut Vec<PerfectInterval>,
+        perfect_list: &mut VecDeque<PerfectInterval>,
+    ) -> XFullExit {
+        let end = seq.len();
+        let max = k.max_size;
+        let mut pos = run.pos;
+        let mut cur = run.current_triplet;
+        let delta = pos - run.h.start;
+        let mut head = run.h.head;
+        let mut sl = run.h.stop() - run.h.l;
+        let mut r_w = run.h.r_w;
+        let mut r_v = run.h.r_v;
+        let mut num_diff = run.h.num_diff;
+        let exit = loop {
+            if pos >= end {
+                break XFullExit::End;
+            }
+            if num_diff <= 1 {
+                break XFullExit::Generic;
+            }
+            if !perfect_list.is_empty() {
+                self.save_masked_regions(result, pos - delta, current_start, perfect_list);
+            }
+            let triplet = ((cur << 2) & 0x3F) + x_code(seq[pos], rng);
+            cur = triplet;
+            pos += 1;
+
+            // `XHot::shift_window`, the branch of a full window with two or more distinct triplets.
+            let old = (a.ring[(head + max - 1) & (2 * X_RING - 1)] & 63) as usize;
+            a.c_w[old] -= 1;
+            r_w -= a.c_w[old] as u32;
+            num_diff -= (a.c_w[old] == 0) as u32;
+            let at_start = (sl == max) as u8;
+            let suffix_count = a.c_v[old] - at_start;
+            a.c_v[old] = suffix_count;
+            r_v -= suffix_count as u32 * at_start as u32;
+            sl += 1 - at_start as usize;
+
+            head = (head + X_RING - 1) & (X_RING - 1);
+            a.ring[head] = triplet;
+            a.ring[head + X_RING] = triplet;
+            let idx = (triplet & 63) as usize;
+            num_diff += (a.c_w[idx] == 0) as u32;
+            add_triplet(&mut r_w, &mut a.c_w, triplet);
+            add_triplet(&mut r_v, &mut a.c_v, triplet);
+
+            if a.c_v[idx] > k.low_k {
+                loop {
+                    let t = a.ring[(head + sl - 1) & (2 * X_RING - 1)];
+                    rem_triplet(&mut r_v, &mut a.c_v, t);
+                    sl -= 1;
+                    if t == triplet || sl == 0 {
+                        break;
+                    }
+                }
+            }
+
+            let start = pos - delta;
+            if num_diff <= 1 {
+                perfect_list.clear();
+                perfect_list.push_front(PerfectInterval::new(start, start + max + 1, 0, 0));
+                break XFullExit::Uniform;
+            }
+
+            // `XHot::needs_processing` (`x_padded_thresholds`).
+            if 10 * r_w > thr[sl & (X_RING - 1)] {
+                let h = XHot {
+                    head,
+                    len: max,
+                    start,
+                    l: start + max - sl,
+                    r_w,
+                    r_v,
+                    num_diff,
+                };
+                find_perfect(h, a, k.thresholds, merged, perfect_list);
+            }
+        };
+        let start = pos - delta;
+        run.pos = pos;
+        run.current_triplet = cur;
+        run.h = XHot {
+            head,
+            len: max,
+            start,
+            l: start + max - sl,
+            r_w,
+            r_v,
+            num_diff,
+        };
+        exit
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:247-262
+    /// The inner loop of `x_mask_range` after a `shift_window` that returned false, statement by
+    /// statement. Returns true where a `shift_window` returned true (the window is done).
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    fn x_run_uniform(
+        &self,
+        seq: &[u8],
+        run: &mut XRun,
+        a: &mut XArrays,
+        k: XConst,
+        rng: &mut NcbiLfgRandom,
+        result: &mut Vec<MaskedInterval>,
+        current_start: usize,
+        perfect_list: &mut VecDeque<PerfectInterval>,
+    ) -> bool {
+        let end = seq.len();
+        while run.pos < end {
+            if !perfect_list.is_empty() {
+                self.save_masked_regions(result, run.h.start, current_start, perfect_list);
+            }
+
+            let new_triplet = ((run.current_triplet << 2) & 0x3F) + x_code(seq[run.pos], rng);
+            run.current_triplet = new_triplet;
+
+            if run.h.shift_window(a, k, new_triplet, perfect_list) {
+                return true;
+            }
+            run.pos += 1;
+        }
+        false
+    }
+}
+
 impl DustMasker {
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:229-282
     /// `x_mask_range` statement by statement, with the window in `XHot` + `XArrays` (module doc).
@@ -408,15 +615,7 @@ impl DustMasker {
             low_k: self.low_k,
             thresholds: &self.thresholds,
         };
-        // NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:75-84
-        let code = |base: u8, rng: &mut NcbiLfgRandom| -> u8 {
-            let c = X_BASE_CODE[base as usize];
-            if c < 4 {
-                c
-            } else {
-                (rng.next() & 0x3) as u8
-            }
-        };
+        let thr = x_padded_thresholds(k);
         let mut merged: Vec<PerfectInterval> = Vec::new();
 
         while stop > current_start + 2 {
@@ -429,11 +628,57 @@ impl DustMasker {
             };
 
             let mut current_triplet =
-                (code(seq[current_start], rng) << 2) + code(seq[current_start + 1], rng);
+                (x_code(seq[current_start], rng) << 2) + x_code(seq[current_start + 1], rng);
             let mut pos = current_start + 2;
             let mut done = false;
 
             while !done && pos < end {
+                // Once the window is full it stays full: `x_run_full` takes the letters while the
+                // window holds two or more distinct triplets before the letter (module doc).
+                if h.len == k.max_size && h.num_diff > 1 {
+                    let mut run = XRun {
+                        pos,
+                        current_triplet,
+                        h,
+                    };
+                    let exit = self.x_run_full(
+                        seq,
+                        &mut run,
+                        &mut a,
+                        k,
+                        &thr,
+                        rng,
+                        &mut result,
+                        current_start,
+                        &mut merged,
+                        &mut perfect_list,
+                    );
+                    (pos, current_triplet, h) = (run.pos, run.current_triplet, run.h);
+                    match exit {
+                        XFullExit::End => break,
+                        XFullExit::Generic => {}
+                        XFullExit::Uniform => {
+                            let mut run = XRun {
+                                pos,
+                                current_triplet,
+                                h,
+                            };
+                            done = self.x_run_uniform(
+                                seq,
+                                &mut run,
+                                &mut a,
+                                k,
+                                rng,
+                                &mut result,
+                                current_start,
+                                &mut perfect_list,
+                            );
+                            (pos, current_triplet, h) = (run.pos, run.current_triplet, run.h);
+                            continue;
+                        }
+                    }
+                }
+
                 if !perfect_list.is_empty() {
                     self.save_masked_regions(
                         &mut result,
@@ -443,7 +688,7 @@ impl DustMasker {
                     );
                 }
 
-                let new_triplet = ((current_triplet << 2) & 0x3F) + code(seq[pos], rng);
+                let new_triplet = ((current_triplet << 2) & 0x3F) + x_code(seq[pos], rng);
                 current_triplet = new_triplet;
                 pos += 1;
 
@@ -452,25 +697,22 @@ impl DustMasker {
                         find_perfect(h, &a, k.thresholds, &mut merged, &mut perfect_list);
                     }
                 } else {
-                    while pos < end {
-                        if !perfect_list.is_empty() {
-                            self.save_masked_regions(
-                                &mut result,
-                                h.start,
-                                current_start,
-                                &mut perfect_list,
-                            );
-                        }
-
-                        let new_triplet = ((current_triplet << 2) & 0x3F) + code(seq[pos], rng);
-                        current_triplet = new_triplet;
-
-                        if h.shift_window(&mut a, k, new_triplet, &mut perfect_list) {
-                            done = true;
-                            break;
-                        }
-                        pos += 1;
-                    }
+                    let mut run = XRun {
+                        pos,
+                        current_triplet,
+                        h,
+                    };
+                    done = self.x_run_uniform(
+                        seq,
+                        &mut run,
+                        &mut a,
+                        k,
+                        rng,
+                        &mut result,
+                        current_start,
+                        &mut perfect_list,
+                    );
+                    (pos, current_triplet, h) = (run.pos, run.current_triplet, run.h);
                 }
             }
 

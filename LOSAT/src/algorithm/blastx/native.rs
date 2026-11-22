@@ -1364,6 +1364,7 @@ pub(super) fn reported_batch(
             asks.throw,
             // The pairwise report reads the subjects that it shows as its writer reads them.
             options.pairwise_reading(),
+            prefetch_queries.unrecorded_calls(),
         ),
     );
     super::x_timing::run(XRun::Titles, x_t);

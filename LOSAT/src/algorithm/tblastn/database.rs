@@ -885,7 +885,9 @@ fn pairwise_read_order<'l>(
 /// of `batches`, the query ranges of the batches of `hitlists`, whose prefetch is on reports it;
 /// what the formats do after a `Hit` that throws, `after_throw`, with the call's refusal over the
 /// `-outfmt` values of its other searches, `others`, for the one answer of what the reports load,
-/// `hit_loads`, with how the pairwise reports read each query's subjects, `pairwise`). The packed
+/// `hit_loads`, with how the pairwise reports read each query's subjects, `pairwise`, after the
+/// loads of the calls before where `unrecorded_calls`: the library's calls after the first, whose
+/// loads nothing here records, `HitLoads::of`). The packed
 /// subjects are read from the database (`SubjectLetters::Stream`, one read each) instead of
 /// cloned from the copy.
 #[allow(clippy::too_many_arguments)]
@@ -896,7 +898,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-    others: &[&str],
+    (others, unrecorded_calls): (&[&str], bool),
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
@@ -955,7 +957,13 @@ pub(super) fn reported_subjects(
     let pairwise_order = (0..hitlists.len())
         .map(pairwise_keys)
         .collect::<Result<Vec<_>>>()?;
-    let loads = hit_loads(hitlists, &prefetch, after, pairwise_order, titled);
+    let loads = hit_loads(
+        hitlists,
+        &prefetch,
+        (after, unrecorded_calls),
+        pairwise_order,
+        titled,
+    );
     ordinals.sort_unstable();
     ordinals.dedup();
     for hitlist in hitlists.iter_mut() {
@@ -1085,16 +1093,19 @@ pub(super) fn reported_subjects(
 /// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch reads one by one
 /// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a key;
 /// the `Hit`s are those that `blast_xml::prepare`'s reports make (the lists with HSPs), or a
-/// pairwise report's reads (`pairwise_reads[query]`, where given).
+/// pairwise report's reads (`pairwise_reads[query]`, where given). TBLASTN keeps no record of its
+/// loads: the reports are the call's first loads, after those of calls before whose loads nothing
+/// here holds where `unrecorded_calls` (`HitLoads::of`).
 fn hit_loads<'p>(
     hitlists: &[KappaResultHitList],
     prefetch: &shared::BatchPrefetch,
-    after: crate::report::db_subject::FormatThrow,
+    (after, unrecorded_calls): (crate::report::db_subject::FormatThrow, bool),
     pairwise_reads: Vec<Option<crate::report::db_subject::PairwiseReads>>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
     let mut pairwise_reads = pairwise_reads.into_iter();
     HitLoads::of(
+        crate::report::db_subject::LoadsBefore::new(&[], unrecorded_calls),
         after,
         hitlists.iter().enumerate().map(|(query, hitlist)| {
             let keys = match pairwise_reads.next().flatten() {

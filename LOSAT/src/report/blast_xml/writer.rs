@@ -582,10 +582,28 @@ impl<'a> HspSink<'a> {
     /// Whether the writer reads the alignment of each HSP of the `Hit` being written (its
     /// coordinates, frames and rows): not in outfmt 5's `Hit` of a subject whose lookup throws,
     /// whose HSPs NCBI writes with their Seq-align scores alone (`Xml5Hsps`). The program then
-    /// hands each HSP as `XmlHsp::unaligned`, and reads nothing of the subject for it (its letters,
-    /// its rows, the checks of its rows).
+    /// hands each HSP as `XmlHsp::unaligned` (`HspSink::unaligned`), and reads nothing of the
+    /// subject for it (its letters, its rows, the checks of its rows).
     pub fn reads_alignment(&self) -> bool {
         self.inner.reads_alignment()
+    }
+
+    /// Where the writer does not read the alignments of the `Hit` being written
+    /// (`reads_alignment`): writes the HSPs `unaligned` (each `XmlHsp::unaligned`, made as they
+    /// are written) and returns true, so that the program reads nothing of the subject for them;
+    /// false, writing nothing, where the program writes each HSP with its alignment. The one
+    /// answer of every program's outfmt 5 adapter (review 1 of line DBID pfoff-4, L3).
+    pub fn unaligned<'h>(
+        &mut self,
+        unaligned: impl IntoIterator<Item = XmlHsp<'h>>,
+    ) -> Result<bool> {
+        if self.reads_alignment() {
+            return Ok(false);
+        }
+        for hsp in unaligned {
+            self.hsp(&hsp)?;
+        }
+        Ok(true)
     }
 }
 

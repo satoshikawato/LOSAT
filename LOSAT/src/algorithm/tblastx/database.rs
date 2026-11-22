@@ -644,7 +644,13 @@ pub(crate) fn batch_prefetch_stop(
     queries: &shared::PrefetchQueries<'_>,
 ) -> Result<()> {
     let prefetch = batches_prefetch(before, before_queries, before_spans);
-    let loads = hit_loads(before, &prefetch, (after, None), titles, identities);
+    let loads = hit_loads(
+        before,
+        &prefetch,
+        (after, None, queries.unrecorded_calls()),
+        titles,
+        identities,
+    );
     shared::held_batch_prefetch_stop(
         &database.db,
         &database.taxdb,
@@ -784,13 +790,17 @@ pub(crate) struct ReportedSubjects {
 /// throws (`FormatThrow::of_outfmts`), `identities` the engine's identities of a hit
 /// (`hit_identities`), which tell whether a row of `nident` alone reads its subject; the `Hit`s
 /// are those that `blast_xml` makes (the HSPs of each query, a subject's following each other),
-/// or the pairwise reports' reads (`pairwise`: how they read them, `pairwise_keys`).
+/// or the pairwise reports' reads (`pairwise`: how they read them, `pairwise_keys`). The reports
+/// are the call's first loads (where a lookup can fail, the reports are not streamed and the run
+/// records none of its batches, `report_stream::Off::Database`), after those of calls before whose
+/// loads nothing here holds where `unrecorded_calls` (`HitLoads::of`).
 fn hit_loads(
     ordered: &[TblastxHsp],
     prefetch: &shared::BatchPrefetch,
-    (after, pairwise): (
+    (after, pairwise, unrecorded_calls): (
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
+        bool,
     ),
     titles: &DatabaseTitles,
     identities: &dyn Fn(&TblastxHsp) -> usize,
@@ -799,6 +809,7 @@ fn hit_loads(
         .chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx)
         .collect();
     HitLoads::of(
+        crate::report::db_subject::LoadsBefore::new(&[], unrecorded_calls),
         after,
         reports.iter().map(|hits| {
             // A batch that prefetches loads every subject, in any order.
@@ -897,12 +908,13 @@ pub(crate) fn pairwise_reading(
 /// before it in the run, `run`; `identities`: [`hit_identities`]): the subjects of its reads one
 /// by one (`run_impl`'s texts of a batch whose prefetch is off), not one whose load throws, nor
 /// one that no report reaches after it. `pairwise`: how a pairwise report reads them
-/// (`pairwise_keys`).
+/// (`pairwise_keys`); `unrecorded_calls`: calls before this one loaded what nothing here holds
+/// (`hit_loads`).
 pub(crate) fn report_loads(
     run: &crate::report::db_subject::RunLoads,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
-    pairwise: Option<crate::report::pairwise::PairwiseReading>,
+    (pairwise, unrecorded_calls): (Option<crate::report::pairwise::PairwiseReading>, bool),
     identities: impl Fn(&TblastxHsp) -> usize,
 ) -> HitLoads {
     // A subject's HSPs follow each other: one `Hit`.
@@ -918,6 +930,7 @@ pub(crate) fn report_loads(
         )
     });
     run.loads(
+        crate::report::db_subject::LoadsBefore::new(&[], unrecorded_calls),
         [(true, keys)],
         |ordinal| titled_parsed(titles, ordinal),
         |_, subject| subjects[subject].iter().map(&identities).max().unwrap_or(0),
@@ -971,9 +984,10 @@ fn batches_prefetch(
 /// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; where only the prefetch reads a subject, a batch whose
 /// prefetch is on reports it, `batches_prefetch` of the hits' `queries` queries and the queries of
-/// each batch `spans`; `after`: what the formats do after a subject whose lookup throws and how
-/// the pairwise reports read the subjects, for the one answer of what the reports load, `hit_loads`, with the
-/// hits' engine `identities`, `hit_identities`).
+/// each batch `spans`; `after`: what the formats do after a subject whose lookup throws, how
+/// the pairwise reports read the subjects and whether calls before loaded what nothing here holds,
+/// for the one answer of what the reports load, `hit_loads`, with the hits' engine `identities`,
+/// `hit_identities`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn reported_subjects(
     database: &TblastxDatabase,
@@ -985,6 +999,7 @@ pub(crate) fn reported_subjects(
     after: (
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
+        bool,
     ),
     identities: &dyn Fn(&TblastxHsp) -> usize,
     queries: usize,

@@ -2103,10 +2103,6 @@ fn write_tblastx_outputs(
         TblastxMatrix::Table(matrix) => matrix,
         TblastxMatrix::Unknown | TblastxMatrix::Aborts => ScoringMatrix::Blosum62,
     };
-    // BLAST XML's `catch` of an HSP whose subject's lookup throws writes the engine's identities,
-    // read before the display counts replace them (`blast_xml::thrown_identities`).
-    let xml_thrown_identities =
-        super::super::blast_xml::thrown_identities(&hits, run, &output_formats);
     let (engine_counts, seqalign_identities, pairwise) = if matrix == ScoringMatrix::Blosum62 {
         report_counts(
             Blosum62Score,
@@ -2600,7 +2596,7 @@ fn write_tblastx_outputs(
                     false,
                     xml_only_xml2,
                     &mut writer,
-                    (&hits, xml_thrown_identities.as_deref()),
+                    (&hits, seqalign_identities.as_deref()),
                     run,
                     warnings.as_mut(),
                 )?,
@@ -2723,8 +2719,9 @@ fn rows_up_front(
                 || run.ranges.subject_placements.ranged()))
 }
 
-/// The Seq-aligns' engine counts (outfmt 8, 12), their identities for the outfmt 0 rows when
-/// the report reads them (`report::seqalign_identities`), the display counts of `hits` and the
+/// The Seq-aligns' engine counts (outfmt 8, 12), their identities for the outfmt 0 rows and BLAST
+/// XML's thrown HSPs when the reports read them (`report::seqalign_identities`), the display
+/// counts of `hits` and the
 /// outfmt 0 rows made up front (`rows_up_front`), with the positives of the search's matrix
 /// `sc` (`write_tblastx_outputs`).
 #[allow(clippy::too_many_arguments)]
@@ -2777,9 +2774,18 @@ fn report_counts<S: TbxScore>(
     // read the HSPs' Seq-align scores in the pairwise report.
     // The rows of outfmt 0 and of the caller's hit records keep the engine's identities, read
     // before the display counts replace them, when the report reads them.
-    let seqalign_identities = (run.args.formatting.report_sort().reads_hsp_scores()
-        && (outputs.hits.is_some() || output_formats.iter().any(|format| format.is_pairwise())))
-    .then(|| report::seqalign_identities(hits));
+    let rows_read = run.args.formatting.report_sort().reads_hsp_scores()
+        && (outputs.hits.is_some() || output_formats.iter().any(|format| format.is_pairwise()));
+    // BLAST XML's `catch` of an HSP whose subject's lookup throws writes them too
+    // (`XmlHsp::alignment_identities`): where the run writes BLAST XML and the load of some
+    // subject of its database throws (`HitLoads::any_throws`). The one producer of both (review 1
+    // of line DBID pfoff-4, L2).
+    let xml_thrown = output_formats.contains(&report::TblastxOutputFormat::Xml)
+        && run
+            .database
+            .as_ref()
+            .is_some_and(|database| database.reported.loads.any_throws());
+    let seqalign_identities = (rows_read || xml_thrown).then(|| report::seqalign_identities(hits));
     // The display counts are read by the outfmt 0, 6 and 7 reports and the caller's hit
     // records only.
     if outputs.hits.is_some()
@@ -3848,7 +3854,7 @@ fn run_batch_loop(
                                 &run_loads,
                                 &ordered[from..to],
                                 &reports.titles.borrow(),
-                                pairwise,
+                                (pairwise, unrecorded_calls),
                                 identities,
                             );
                             let shown: Vec<&TblastxHsp> = match rows {
@@ -4251,6 +4257,8 @@ impl BatchReports<'_> {
                             self.args.formatting.report_sort(),
                             self.args.report_counts,
                         ),
+                        // A call of the library's batches after the first.
+                        self.args.first_query_ordinal > 0,
                     ),
                     &|hsp| {
                         super::super::database::hit_identities(

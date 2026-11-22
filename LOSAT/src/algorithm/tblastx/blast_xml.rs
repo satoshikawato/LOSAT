@@ -135,30 +135,10 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203 (cited at
-// `report::serial::seqalign::read_num_ident`)
-/// The Seq-align's `num_ident` of each HSP of `hits`, by HSP index, for BLAST XML's `catch` of an
-/// HSP whose subject's lookup throws (`XmlHsp::alignment_identities`): the engine's identities
-/// (`report::seqalign_identities`), which the display counts replace in `hits` where another
-/// format of the run reads them (`report::set_displayed_identities`), so they are read before
-/// that. Made only where the run writes BLAST XML (`formats`) and the load of some subject of its
-/// database throws (`HitLoads::any_throws`); `None` otherwise.
-pub(crate) fn thrown_identities(
-    hits: &[TblastxHsp],
-    run: &TblastxReportRun<'_>,
-    formats: &[crate::algorithm::tblastx::report::TblastxOutputFormat],
-) -> Option<Vec<u32>> {
-    let throws = run
-        .database
-        .as_ref()
-        .is_some_and(|database| database.reported.loads.any_throws());
-    (throws && formats.contains(&crate::algorithm::tblastx::report::TblastxOutputFormat::Xml))
-        .then(|| crate::algorithm::tblastx::report::seqalign_identities(hits))
-}
-
 /// Writes the document of every query of `run` (`hits` is the final list after
 /// `shift_to_records`: record coordinates, in query order, with the Seq-align's `num_ident` of
-/// each HSP where the display counts replaced its identities, `thrown_identities`) through
+/// each HSP where the display counts replaced its identities, `report::seqalign_identities`, which
+/// `run_impl::report_counts` makes) through
 /// `document` (BLAST XML, or the XML2 / JSON documents) to `writer`, each query's warnings before it, with the document's
 /// header before the first query and its end after the last when `run.epilog`. A query or
 /// subject title that NCBI crashes on (`names::Refusal`) is refused before the first byte; every
@@ -396,13 +376,12 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                             }),
                             false,
                         );
-                        if !hsps.reads_alignment() {
-                            hsps.hsp(&XmlHsp::unaligned(
-                                hsp.hit.raw_score,
-                                hsp.hit.bit_score,
-                                seqalign_evalue(hsp.hit.e_value),
-                                identities,
-                            ))?;
+                        if hsps.unaligned([XmlHsp::unaligned(
+                            hsp.hit.raw_score,
+                            hsp.hit.bit_score,
+                            seqalign_evalue(hsp.hit.e_value),
+                            identities,
+                        )])? {
                             continue;
                         }
                         run.subject_letters.rows_into(

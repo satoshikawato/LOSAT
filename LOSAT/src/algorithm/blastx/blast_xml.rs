@@ -1499,13 +1499,12 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 let identities = read_num_ident(hsp.identity as i64, false);
                                 // The `catch` of an HSP whose subject's lookup throws comes before
                                 // NCBI reads its rows (`HspSink::reads_alignment`).
-                                if !hsps.reads_alignment() {
-                                    hsps.hsp(&XmlHsp::unaligned(
-                                        hsp.hsp.score,
-                                        hsp.bit_score,
-                                        seqalign_evalue(hsp.evalue),
-                                        identities,
-                                    ))?;
+                                if hsps.unaligned([XmlHsp::unaligned(
+                                    hsp.hsp.score,
+                                    hsp.bit_score,
+                                    seqalign_evalue(hsp.evalue),
+                                    identities,
+                                )])? {
                                     continue;
                                 }
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175

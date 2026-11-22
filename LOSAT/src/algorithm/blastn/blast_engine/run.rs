@@ -8904,6 +8904,7 @@ fn run_in_pool(
                         .and_then(crate::report::pairwise::PairwiseView::of)
                         .is_some(),
                     gapped: !args.ungapped,
+                    unrecorded_calls: args.first_query_ordinal > 0,
                 };
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
                     database::seq_aligns_of(hit_lists, !args.ungapped)
@@ -9672,6 +9673,8 @@ fn write_reports_untimed(
                         args.formatting.report_sort(),
                         args.report_counts,
                     ),
+                    // A call of the library's batches after the first.
+                    args.first_query_ordinal > 0,
                 ),
                 results.batches,
                 written.queries,

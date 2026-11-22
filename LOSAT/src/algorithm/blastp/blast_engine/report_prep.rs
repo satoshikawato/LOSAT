@@ -318,6 +318,8 @@ pub(super) fn prefetch_reported_subjects(
         .as_ref()
         .map_or_else(Default::default, |titles| {
             titles.hit_loads(
+                // A call of the library's batches after the first (`api::run_batches`).
+                (database, args.first_query_ordinal > 0),
                 reported_lists,
                 batch_prefetch,
                 crate::report::db_subject::FormatThrow::of_outfmts(

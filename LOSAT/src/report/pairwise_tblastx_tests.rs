@@ -1014,6 +1014,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
             aligned: 2,
         });
     let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         Some(RunThrow::every_row(AfterThrow::SkipsAlignment)),
         [(true, reads)],
         |key| parsed[key].as_deref(),

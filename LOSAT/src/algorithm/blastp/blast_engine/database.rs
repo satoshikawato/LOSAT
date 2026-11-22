@@ -2139,9 +2139,12 @@ impl ListedTitles<'_> {
     /// every subject is loaded where it writes nothing, `FormatThrow::run`), at the rows that load
     /// it (by the HSPs' identities, the Seq-align's `num_ident`, as `fetched_ranks`).
     /// A pairwise run (outfmt 0 to 4) reads of query `query` what its writer reads,
-    /// `pairwise_reads(query)` (by rank), asked where its batch reads one by one.
+    /// `pairwise_reads(query)` (by rank), asked where its batch reads one by one. The reports come
+    /// after the loads of the run's record on `database` (psiblast's rounds before) and, where
+    /// `unrecorded_calls`, of calls before whose loads it does not hold (`HitLoads::of`).
     pub(super) fn hit_loads(
         &self,
+        (database, unrecorded_calls): (Option<&BlastpDatabase>, bool),
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
         run: crate::report::db_subject::FormatThrow,
@@ -2159,7 +2162,9 @@ impl ListedTitles<'_> {
             run
         };
         let pairwise = run.run().is_some_and(|run| run.after.is_pairwise());
+        let recorded = database.map_or_else(Vec::new, |database| database.taxdb.loaded());
         HitLoads::of(
+            crate::report::db_subject::LoadsBefore::new(&recorded, unrecorded_calls),
             run,
             (0..hit_lists.len()).map(|query| {
                 // A batch that prefetches loads every subject, in any order.

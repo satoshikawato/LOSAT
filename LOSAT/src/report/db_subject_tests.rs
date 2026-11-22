@@ -545,6 +545,7 @@ fn the_hits_after_one_whose_lookup_throws_load_nothing() {
     let subject = |key: usize| parsed[key].as_ref();
     let none = |_: usize, _: usize| 0;
     let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         Some(RunThrow::every_row(AfterThrow::EndsReport)),
         [
             // Read one by one: 1 loads, 0 throws, the copies 2 and 3, 4 and 6 load nothing.
@@ -584,7 +585,13 @@ fn the_hits_after_one_whose_lookup_throws_load_nothing() {
         (Some(RunThrow::every_row(AfterThrow::EndsReport)), false),
         (None, true),
     ] {
-        let every = HitLoads::of(after, [(one_by_one, vec![Some(0), Some(1)])], subject, none);
+        let every = HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
+            after,
+            [(one_by_one, vec![Some(0), Some(1)])],
+            subject,
+            none,
+        );
         assert!(every.loaded(0) && every.loaded(1));
     }
     // The refusals take the answer: a `Hit` that throws is not refused for what the lookup
@@ -640,19 +647,37 @@ fn the_formats_say_what_loads_after_a_throw() {
     };
     let every = |after| Some(RunThrow::every_row(after));
     let none = |_: usize, _: usize| 0;
-    let rows = HitLoads::of(every(AfterThrow::WritesRow), reports(), subject, none);
+    let rows = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        every(AfterThrow::WritesRow),
+        reports(),
+        subject,
+        none,
+    );
     assert!(rows.loaded(0) && rows.loaded(2) && rows.loaded(4));
     assert_eq!(rows.load(1), HitLoad::Throws);
     assert_eq!(rows.load(3), HitLoad::Throws);
     assert!(rows.any_throws());
-    let run = HitLoads::of(every(AfterThrow::EndsRun), reports(), subject, none);
+    let run = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        every(AfterThrow::EndsRun),
+        reports(),
+        subject,
+        none,
+    );
     assert!(run.loaded(0));
     assert_eq!(run.load(1), HitLoad::Throws);
     // The run ended at 1: the next report reads nothing (3 does not throw).
     for unread in [2, 3, 4] {
         assert_eq!(run.load(unread), HitLoad::Unread, "{unread}");
     }
-    let report = HitLoads::of(every(AfterThrow::EndsReport), reports(), subject, none);
+    let report = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        every(AfterThrow::EndsReport),
+        reports(),
+        subject,
+        none,
+    );
     assert_eq!(report.load(2), HitLoad::Unread);
     assert_eq!(report.load(3), HitLoad::Throws);
     assert_eq!(report.load(4), HitLoad::Unread);
@@ -752,14 +777,42 @@ fn the_formats_say_what_loads_after_a_throw() {
         Some(RunThrow::every_row(AfterThrow::SkipsAlignment))
     );
     assert_eq!(after(&["6 qseqid evalue"]), None);
+    // Review 1 of line DBID pfoff-4, M1: a format whose run ends at the throw with one whose run
+    // goes on, and two that end at different rows (`nident` alone: the rows of HSPs with
+    // identities), stop at different places in NCBI's runs of each: refused.
+    for mixed in [
+        &["6 qseqid slen", "15"][..],
+        &["5", "6 qseqid slen"],
+        &["13", "6"],
+        &["14", "18"],
+        &["6 qseqid nident", "6 qseqid slen"],
+        &["13", "6 qseqid nident"],
+    ] {
+        assert_eq!(
+            answer(mixed),
+            FormatThrow::Refused(ThrowRefusal::Mixed),
+            "{mixed:?}"
+        );
+    }
+    // Runs that stop at the same place: two that end at the same rows, two whose runs go on.
     assert_eq!(
-        after(&["6 qseqid slen", "15"]),
-        Some(RunThrow::every_row(AfterThrow::EndsReport))
-    );
-    // Rows of `nident` alone and rows of every HSP load at every row.
-    assert_eq!(
-        after(&["6 qseqid nident", "6 qseqid slen"]),
+        after(&["13", "6 qseqid slen"]),
         Some(RunThrow::every_row(AfterThrow::EndsRun))
+    );
+    assert_eq!(
+        after(&["6 qseqid nident", "7 qseqid nident"]),
+        Some(RunThrow {
+            after: AfterThrow::EndsRun,
+            rows: super::super::tabular::SubjectFetch::WithIdentities,
+        })
+    );
+    assert_eq!(
+        after(&["16", "18", "5"]),
+        Some(RunThrow::every_row(AfterThrow::WritesRow))
+    );
+    assert_eq!(
+        after(&["0", "0"]),
+        Some(RunThrow::every_row(AfterThrow::SkipsAlignment))
     );
 }
 
@@ -788,6 +841,7 @@ fn each_hit_of_blast_xml_looks_its_own_subject_up() {
     let subject = |key: usize| parsed.get(key);
     let none = |_: usize, _: usize| 0;
     let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         Some(RunThrow::every_row(AfterThrow::WritesHit)),
         [
             (true, vec![Some(0), Some(1), None, Some(2), Some(3)]),
@@ -810,6 +864,7 @@ fn each_hit_of_blast_xml_looks_its_own_subject_up() {
     // With a table of a field of the subject block, each row looks its subject up: the copy 1
     // throws on its own.
     let rows = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesHit)).and(FormatThrow::Writes(
             RunThrow::every_row(AfterThrow::WritesRow),
         )),
@@ -858,7 +913,13 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
             (true, vec![Some(3), Some(4)]),
         ]
     };
-    let loads = HitLoads::of(nident, reports(), subject, identities);
+    let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        nident,
+        reports(),
+        subject,
+        identities,
+    );
     assert_eq!(loads.load(1), HitLoad::Unread);
     assert!(loads.thrown(1).is_none());
     assert!(loads.loaded(0) && loads.loaded(2));
@@ -866,6 +927,7 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     assert_eq!(loads.load(4), HitLoad::Unread);
     // Every row reads the subject: 1 throws and ends the run.
     let every = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         Some(RunThrow::every_row(AfterThrow::EndsRun)),
         reports(),
         subject,
@@ -876,18 +938,29 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     // The reports made apart, one call each, carry the end of the run.
     let run = RunLoads::new(nident);
     let [first, second] = reports();
-    let first = run.loads([first], subject, |_, entry| [5, 0, 7][entry]);
+    let first = run.loads(LoadsBefore::NONE, [first], subject, |_, entry| {
+        [5, 0, 7][entry]
+    });
     assert!(!run.ended());
     assert_eq!(first.load(1), HitLoad::Unread);
-    let second = run.loads([second], subject, |_, entry| [2, 4][entry]);
+    let second = run.loads(LoadsBefore::NONE, [second], subject, |_, entry| {
+        [2, 4][entry]
+    });
     assert!(run.ended());
     assert_eq!(second.load(3), HitLoad::Throws);
-    let later = run.loads([(true, vec![Some(0), Some(2)])], subject, |_, _| 9);
+    let later = run.loads(
+        LoadsBefore::NONE,
+        [(true, vec![Some(0), Some(2)])],
+        subject,
+        |_, _| 9,
+    );
     assert_eq!(later.load(0), HitLoad::Unread);
     assert_eq!(later.load(2), HitLoad::Unread);
     // A run without a throw's answer loads every subject and never ends.
     let none = RunLoads::new(None);
-    assert!(none.loads(reports(), subject, identities).loaded(3));
+    assert!(none
+        .loads(LoadsBefore::NONE, reports(), subject, identities)
+        .loaded(3));
     assert!(!none.ended());
 }
 
@@ -922,26 +995,52 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
             (true, vec![Some(0), Some(2)]),
         ]
     };
-    let ended = HitLoads::of(every(AfterThrow::EndsRun), reports(), subject, none);
+    let ended = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        every(AfterThrow::EndsRun),
+        reports(),
+        subject,
+        none,
+    );
     assert!(ended.reaches(0) && ended.reaches(1));
     assert!(!ended.reaches(2) && !ended.reaches(3));
     // A format that writes the row and goes on, one that ends its report, a refusal and a run
     // whose formats read nothing: every report runs.
     for loads in [
-        HitLoads::of(every(AfterThrow::WritesRow), reports(), subject, none),
-        HitLoads::of(every(AfterThrow::EndsReport), reports(), subject, none),
         HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
+            every(AfterThrow::WritesRow),
+            reports(),
+            subject,
+            none,
+        ),
+        HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
+            every(AfterThrow::EndsReport),
+            reports(),
+            subject,
+            none,
+        ),
+        HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
             FormatThrow::Refused(ThrowRefusal::Mixed),
             reports(),
             subject,
             none,
         ),
-        HitLoads::of(FormatThrow::Unread, reports(), subject, none),
+        HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
+            FormatThrow::Unread,
+            reports(),
+            subject,
+            none,
+        ),
     ] {
         assert!(loads.reaches(2) && loads.reaches(usize::MAX), "{loads:?}");
     }
     // The last report ends the run: every report runs, none after it.
     let last = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         every(AfterThrow::EndsRun),
         [(true, vec![Some(0)]), (true, vec![Some(1)])],
         subject,
@@ -950,9 +1049,14 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
     assert!(last.reaches(1) && !last.reaches(2));
     // The reports made apart, one call each: a call after the end reaches none of its reports.
     let run = RunLoads::new(every(AfterThrow::EndsRun));
-    let first = run.loads([(true, vec![Some(0), Some(1)])], subject, none);
+    let first = run.loads(
+        LoadsBefore::NONE,
+        [(true, vec![Some(0), Some(1)])],
+        subject,
+        none,
+    );
     assert!(first.reaches(0) && !first.reaches(1));
-    let later = run.loads([(true, vec![Some(2)])], subject, none);
+    let later = run.loads(LoadsBefore::NONE, [(true, vec![Some(2)])], subject, none);
     assert!(!later.reaches(0));
     // The keys renamed keep the reports reached.
     assert!(!later.renamed(Some).reaches(0));
@@ -1002,9 +1106,12 @@ fn the_call_refuses_a_throw_over_all_its_searches() {
     // Formats that agree: each search keeps its own answer (a table of fields that read nothing
     // of the subject too).
     assert_eq!(search(&["0"], &["8"]), writes(AfterThrow::SkipsAlignment));
+    assert_eq!(search(&["15"], &["5"]), writes(AfterThrow::EndsReport));
+    // A table that ends the run at the throw with outfmt 15, whose run goes on (review 1 of line
+    // DBID pfoff-4, M1).
     assert_eq!(
         search(&["6 qseqid slen"], &["15"]),
-        writes(AfterThrow::EndsRun)
+        FormatThrow::Refused(ThrowRefusal::Mixed)
     );
     assert_eq!(search(&["6 qseqid evalue"], &["6"]), FormatThrow::Unread);
 }
@@ -1032,6 +1139,7 @@ fn a_refused_throw_gives_the_reason_of_its_situation() {
     assert!(thrown.fetched(false, true, HitLoad::Throws).is_ok());
     // The loads of a run whose formats refuse give each subject the reason.
     let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         FormatThrow::Refused(ThrowRefusal::Format),
         [(true, vec![Some(0)])],
         |_| Some(&thrown),
@@ -1066,6 +1174,7 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
         Some(std::sync::Arc::new(with_taxid("XM_000002", 99990))),
     ];
     let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         Some(RunThrow::every_row(AfterThrow::WritesRow)),
         [(true, vec![Some(0), Some(1)])],
         |rank| parsed[rank].as_deref(),
@@ -2110,6 +2219,7 @@ fn the_model_and_the_writer_end_the_run_at_the_same_alignment() {
         );
         let run = RunLoads::new(Some(RunThrow::every_row(after)));
         let loads = run.loads(
+            LoadsBefore::NONE,
             [(true, ReportKeys::Pairwise(reads))],
             |key| parsed.get(key),
             |_, _| 0,
@@ -2203,7 +2313,13 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
         (one_by_one, keys)
     };
     let loads = |run, reports: Vec<(bool, ReportKeys)>| {
-        let loads = HitLoads::of(run, reports, subject, none);
+        let loads = HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
+            run,
+            reports,
+            subject,
+            none,
+        );
         (0..6).map(|key| loads.load(key)).collect::<Vec<_>>()
     };
     use HitLoad::{Loaded as L, Throws as T, Unread as U};
@@ -2309,10 +2425,20 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     );
     // A later call's reports read nothing after the end (`RunLoads`).
     let calls = RunLoads::new(run(AfterThrow::SkipsAlignment));
-    let first = calls.loads([report(true, &[3, 4], every, every)], subject, none);
+    let first = calls.loads(
+        LoadsBefore::NONE,
+        [report(true, &[3, 4], every, every)],
+        subject,
+        none,
+    );
     assert_eq!(first.load(3), HitLoad::Throws);
     assert!(calls.ended());
-    let later = calls.loads([report(true, &[5], every, every)], subject, none);
+    let later = calls.loads(
+        LoadsBefore::NONE,
+        [report(true, &[5], every, every)],
+        subject,
+        none,
+    );
     assert_eq!(later.load(5), HitLoad::Unread);
 }
 
@@ -2355,4 +2481,199 @@ fn a_thrown_description_is_the_alignment_id_and_unknown() {
         let gap: &[u8] = if subject.show_gis { b"  " } else { b"" };
         assert_eq!(title.text, [gap, b"Unknown"].concat());
     }
+}
+
+// Review 1 of line DBID pfoff-4, H1 and H2 (`R/pfoff/p4/review1`, cases `*.scope.*` and
+// `*.scopef.*`): a subject whose lookup fails on a file is held where the run loaded another
+// sequence that holds its Seq-align id before the subject's load, in NCBI's order (the reports
+// before, the rows and `Hit`s before in its report, a pairwise report's description lines before
+// its alignments, the run's record and the calls before), and the reports refuse it with the words
+// of such a holder; a holder loaded after it leaves it thrown (the `U1` and `U2` queries).
+#[test]
+fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
+    let failure = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let plain = |accession: &str, ordinal: u32| {
+        ParsedSubject::new(one_defline(vec![gb(accession, 1)]))
+            .unwrap()
+            .in_database(DbSequence::of_unrestricted(ordinal))
+    };
+    let holder = DbSequence::of_unrestricted(10);
+    // 0: the holder (its own lookup does not fail; another record, as `gi|5001|ref|NP_100001.1|`
+    // is for `ref|NP_100001.1|`); 1: a failing lookup that 0 holds; 2: one that no other sequence
+    // holds; 3: one whose holders LOSAT cannot list; 4: another subject.
+    let parsed: Vec<ParsedSubject> = vec![
+        plain("AAA00009", 10),
+        plain("AAA00001", 11)
+            .found_instead(failure())
+            .scope_holders(ScopeHolders::Listed(vec![holder])),
+        plain("AAA00002", 12)
+            .found_instead(failure())
+            .scope_holders(ScopeHolders::Listed(Vec::new())),
+        plain("AAA00003", 13)
+            .found_instead(failure())
+            .scope_holders(ScopeHolders::Unknown("its holders".to_owned())),
+        plain("AAA00004", 14),
+    ];
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let loads = |before: LoadsBefore<'_>, after, reports: Vec<(bool, ReportKeys)>| {
+        let loads = HitLoads::of(
+            before,
+            Some(RunThrow::every_row(after)),
+            reports,
+            subject,
+            none,
+        );
+        (0..5).map(|key| loads.load(key)).collect::<Vec<_>>()
+    };
+    let entries = |keys: &[usize]| {
+        (
+            true,
+            ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect()),
+        )
+    };
+    use HitLoad::{Held as H, Loaded as L, Throws as T, Unread as U};
+    for after in [
+        AfterThrow::WritesHit,
+        AfterThrow::WritesRow,
+        AfterThrow::EndsReport,
+    ] {
+        // The holder after the throw in the report: NCBI looks the id up and it throws (and
+        // the holder is not read where the report ends there).
+        let holder_after = if after == AfterThrow::EndsReport {
+            U
+        } else {
+            L
+        };
+        assert_eq!(
+            loads(LoadsBefore::NONE, after, vec![entries(&[1, 0])]),
+            [holder_after, T, L, L, L],
+            "{after:?}"
+        );
+        // In a later report (H1's query 2): held, and a held subject ends nothing.
+        assert_eq!(
+            loads(
+                LoadsBefore::NONE,
+                after,
+                vec![entries(&[0]), entries(&[1, 3, 2])]
+            )[..4],
+            [L, H(Some(holder)), T, H(None)],
+            "{after:?}"
+        );
+    }
+    // The holder loaded after the throw in the first report, then the subject in the next.
+    assert_eq!(
+        loads(
+            LoadsBefore::NONE,
+            AfterThrow::WritesRow,
+            vec![entries(&[1, 0]), entries(&[1, 2])]
+        )[..3],
+        [L, H(Some(holder)), T]
+    );
+    // Outfmt 5's next `Hit` after the holder's.
+    assert_eq!(
+        loads(
+            LoadsBefore::NONE,
+            AfterThrow::WritesHit,
+            vec![entries(&[0, 1, 4])]
+        ),
+        [L, H(Some(holder)), L, L, L]
+    );
+    // Nothing loaded before: a list that LOSAT cannot make leaves it thrown.
+    assert_eq!(
+        loads(
+            LoadsBefore::NONE,
+            AfterThrow::WritesRow,
+            vec![entries(&[3, 4])]
+        )[3],
+        T
+    );
+    // The run's record of the batches and rounds before, and calls before of which nothing here
+    // holds a record.
+    let recorded = [10];
+    for before in [
+        LoadsBefore::new(&recorded, false),
+        LoadsBefore::new(&[], true),
+    ] {
+        assert_eq!(
+            loads(before, AfterThrow::WritesRow, vec![entries(&[1, 2])])[1],
+            H(Some(holder)),
+            "{before:?}"
+        );
+    }
+    assert_eq!(
+        loads(
+            LoadsBefore::new(&[12], false),
+            AfterThrow::WritesRow,
+            vec![entries(&[1])]
+        )[1],
+        T
+    );
+    // A held subject ends nothing: the run goes on after it (outfmt 13 and 14).
+    let held_first = HitLoads::of(
+        LoadsBefore::NONE,
+        Some(RunThrow::every_row(AfterThrow::EndsRun)),
+        [entries(&[0, 1]), entries(&[4])],
+        subject,
+        none,
+    );
+    assert_eq!(held_first.load(1), H(Some(holder)));
+    assert!(held_first.reaches(1) && held_first.loaded(4) && held_first.thrown(1).is_none());
+    let thrown_first = HitLoads::of(
+        LoadsBefore::NONE,
+        Some(RunThrow::every_row(AfterThrow::EndsRun)),
+        [entries(&[1, 0]), entries(&[4])],
+        subject,
+        none,
+    );
+    assert_eq!(thrown_first.load(1), T);
+    assert!(!thrown_first.reaches(1));
+    // A pairwise report: the description lines load before the alignments, so the alignment of a
+    // subject whose description line threw is held where a later line loaded its holder.
+    let pairwise = |described: Vec<usize>, aligned: usize| {
+        vec![(
+            true,
+            ReportKeys::Pairwise(PairwiseReads {
+                hits: vec![vec![1], vec![0], vec![4]],
+                described,
+                aligned,
+            }),
+        )]
+    };
+    for after in [AfterThrow::SkipsAlignment, AfterThrow::EndsAtAlignment] {
+        assert_eq!(
+            loads(LoadsBefore::NONE, after, pairwise(vec![0, 1, 2], 3)),
+            [L, H(Some(holder)), L, L, L],
+            "{after:?}"
+        );
+        // Without description lines, the first alignment throws and ends the run.
+        assert_eq!(
+            loads(LoadsBefore::NONE, after, pairwise(Vec::new(), 3))[..2],
+            [HitLoad::Unread, T],
+            "{after:?}"
+        );
+        // The description line alone throws (no alignments).
+        assert_eq!(
+            loads(LoadsBefore::NONE, after, pairwise(vec![0, 1], 0))[..2],
+            [L, T],
+            "{after:?}"
+        );
+    }
+    // The refusal: the words of another sequence that holds the Seq-align id, as for a lookup that
+    // does not fail; of holders that LOSAT cannot list.
+    let error = parsed[1].fetched(false, true, H(Some(holder))).unwrap_err();
+    assert!(
+        error.contains(&format!("which database sequence {holder} also holds")),
+        "{error}"
+    );
+    let error = parsed[3].fetched(false, true, H(None)).unwrap_err();
+    assert!(error.contains("LOSAT cannot list its holders"), "{error}");
+    // `held_before` asks only a lookup that fails on a file.
+    assert_eq!(parsed[0].held_before(|_| true, true), None);
+    assert_eq!(parsed[1].held_before(|_| false, true), None);
+    assert_eq!(parsed[1].held_before(|_| true, false), Some(Some(holder)));
 }

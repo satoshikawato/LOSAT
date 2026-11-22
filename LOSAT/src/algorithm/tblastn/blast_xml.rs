@@ -542,15 +542,17 @@ impl PreparedXml {
                                 list.payloads.len() == list.hsps.hsps.len(),
                                 "TBLASTN report payload count mismatch"
                             );
-                            if !hsps.reads_alignment() {
-                                for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-                                    hsps.hsp(&XmlHsp::unaligned(
+                            let unaligned = list.hsps.hsps.iter().zip(&list.payloads).map(
+                                |(linked, payload)| {
+                                    XmlHsp::unaligned(
                                         linked.hsp.score,
                                         payload.bit_score,
                                         seqalign_evalue(linked.evalue),
                                         read_num_ident(i64::from(payload.num_ident), false),
-                                    ))?;
-                                }
+                                    )
+                                },
+                            );
+                            if hsps.unaligned(unaligned)? {
                                 continue;
                             }
                             let record_length = self.subject_lengths[oid];

@@ -192,13 +192,12 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                         next_row += 1;
                         let identities =
                             read_num_ident(row.seqalign_num_ident as i64, xml.psiblast);
-                        if !hsps.reads_alignment() {
-                            hsps.hsp(&XmlHsp::unaligned(
-                                hsp.raw_score,
-                                hsp.bit_score,
-                                seqalign_evalue(hsp.e_value),
-                                identities,
-                            ))?;
+                        if hsps.unaligned([XmlHsp::unaligned(
+                            hsp.raw_score,
+                            hsp.bit_score,
+                            seqalign_evalue(hsp.e_value),
+                            identities,
+                        )])? {
                             continue;
                         }
                         let (Some(qrow), Some(srow)) = (&row.query_seq, &row.subject_seq) else {

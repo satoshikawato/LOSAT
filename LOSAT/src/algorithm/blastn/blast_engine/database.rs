@@ -253,6 +253,11 @@ pub(super) struct BlastnDatabase {
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
     /// and the batches' prefetch of outfmt 0, 5, 6, 7 and 17).
     taxdb: shared::TaxdbRun,
+    /// The run's record of its loads (`shared::TaxdbRun::loaded`) as it was before the last batch
+    /// that `note_loaded` recorded: the loads before the reports that the loop writes next
+    /// (LOSAT_X_RPTSTREAM, which records each batch before it writes the batch's reports; empty
+    /// without it, where the loop records nothing), for `reported_subjects`.
+    loaded_before_batch: std::sync::Mutex<Vec<u32>>,
     /// Whether the database has parsed Seq-ids (`shared::check_seqids`), whose subjects NCBI's
     /// prefetch can fail at (`batch_prefetch`).
     parsed_seqids: bool,
@@ -443,6 +448,7 @@ impl BlastnDatabase {
             name: name.to_string(),
             metadata,
             taxdb: shared::TaxdbRun::default(),
+            loaded_before_batch: Default::default(),
             parsed_seqids,
         })
     }
@@ -667,9 +673,13 @@ impl BlastnDatabase {
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<()> {
         let prefetch = batches_prefetch(before, 0, spans, gapped);
-        let loads = hit_loads(before, &prefetch, after, None, |ordinal| {
-            titled_parsed(titles, ordinal)
-        });
+        let loads = hit_loads(
+            before,
+            &prefetch,
+            (after, None),
+            crate::report::db_subject::LoadsBefore::new(&[], queries.unrecorded_calls()),
+            |ordinal| titled_parsed(titles, ordinal),
+        );
         shared::held_batch_prefetch_stop(
             &self.db,
             &self.taxdb,
@@ -696,6 +706,10 @@ impl BlastnDatabase {
         rows: SubjectFetch,
     ) {
         if self.parsed_seqids() {
+            *self
+                .loaded_before_batch
+                .lock()
+                .expect("the loads before the batch") = self.taxdb.loaded();
             let batch = [0..hit_lists.len()];
             self.taxdb.note_loaded(&self.db, || {
                 Self::loaded_subjects(
@@ -1778,14 +1792,19 @@ fn pairwise_keys<'p>(
 /// those reports alone, by ordinal id, after the reports before them in the run, `run`): the
 /// subjects of its reads one by one (`DatabaseTitles`' texts of a batch whose prefetch is off),
 /// not one whose load throws, nor one that no report reaches after it. `pairwise`: how a
-/// pairwise report reads them (`pairwise_keys`).
+/// pairwise report reads them (`pairwise_keys`); `before`: the loads of the run's record and of
+/// the calls before (`RunLoads::loads`).
 fn report_loads(
     run: &crate::report::db_subject::RunLoads,
     titles: &DatabaseTitles,
     hit_lists: &[Option<BlastnHitList>],
-    pairwise: Option<crate::report::pairwise::PairwiseReading>,
+    (pairwise, before): (
+        Option<crate::report::pairwise::PairwiseReading>,
+        crate::report::db_subject::LoadsBefore<'_>,
+    ),
 ) -> HitLoads {
     run.loads(
+        before,
         hit_lists.iter().map(|hit_list| {
             let parsed = |oid: u32| titled_parsed(titles, oid as usize);
             let keys =
@@ -1827,6 +1846,9 @@ pub(super) struct QueryFetches<'a> {
     pub(super) pairwise_first: bool,
     /// Whether each HSP is a Seq-align (`seq_aligns_of`).
     pub(super) gapped: bool,
+    /// Whether calls before this one loaded what the run's record does not hold (the library's
+    /// calls after the first, `PrefetchQueries::unrecorded_calls`), for the loads.
+    pub(super) unrecorded_calls: bool,
 }
 
 impl QueryFetches<'_> {
@@ -1874,7 +1896,11 @@ impl QueryFetches<'_> {
             .enumerate()
             .map(|(index, hit_list)| {
                 let shown = std::slice::from_ref(hit_list);
-                let loads = report_loads(self.run, self.titles, shown, self.pairwise);
+                // The loop records a batch after its texts here (`note_loaded`).
+                let recorded = self.database.taxdb.loaded();
+                let before =
+                    crate::report::db_subject::LoadsBefore::new(&recorded, self.unrecorded_calls);
+                let loads = report_loads(self.run, self.titles, shown, (self.pairwise, before));
                 let mut messages = Vec::new();
                 if fetches && seq_aligns_of(shown, self.gapped) > 0 {
                     if self.places {
@@ -1946,12 +1972,16 @@ pub(super) fn reports_unchanged_by_load_throws(output_formats: &[BlastnOutputFor
 /// the one answer): `prefetch` tells by query whether its batch reads one by one
 /// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a
 /// key; the `Hit`s are those that `blast_xml::write_blastn_xml` makes, or the pairwise reports'
-/// reads (`pairwise`: how they read them, `pairwise_keys`).
+/// reads (`pairwise`: how they read them, `pairwise_keys`), after the loads `before`
+/// (`HitLoads::of`).
 pub(super) fn hit_loads<'p>(
     hit_lists: &[Option<BlastnHitList>],
     prefetch: &shared::BatchPrefetch,
-    after: crate::report::db_subject::FormatThrow,
-    pairwise: Option<crate::report::pairwise::PairwiseReading>,
+    (after, pairwise): (
+        crate::report::db_subject::FormatThrow,
+        Option<crate::report::pairwise::PairwiseReading>,
+    ),
+    before: crate::report::db_subject::LoadsBefore<'_>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
     let lists = |query: usize| {
@@ -1960,6 +1990,7 @@ pub(super) fn hit_loads<'p>(
             .map_or(&[][..], |hit_list| hit_list.hsplist_array.as_slice())
     };
     HitLoads::of(
+        before,
         after,
         (0..hit_lists.len()).map(|query| {
             // A batch that prefetches loads every subject, in any order.
@@ -2013,8 +2044,10 @@ fn titled_parsed(titles: &DatabaseTitles, ordinal: usize) -> Option<&ParsedSubje
 /// the prefetch reads a subject, is `batches_prefetch`'s, with the Seq-aligns of a `gapped`
 /// search or not; `after`: what the formats do after a subject whose lookup throws
 /// (`after_throw`), for the one answer of the reports' loads, `hit_loads`, which the refusals
-/// take, with how the pairwise reports read them, `pairwise`, `pairwise_reading`). The records are made on
-/// `pool` (`x_reported_records`).
+/// take, with how the pairwise reports read them, `pairwise`, `pairwise_reading`, after the loads
+/// of the batches before that the run recorded, `BlastnDatabase::loaded_before_batch`, and of the
+/// calls before where `unrecorded_calls`). The records are made on `pool`
+/// (`x_reported_records`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
     database: &BlastnDatabase,
@@ -2022,9 +2055,10 @@ pub(super) fn reported_subjects(
     hit_lists: &mut [Option<BlastnHitList>],
     letters: bool,
     shown: ParsedShown,
-    (after, pairwise): (
+    (after, pairwise, unrecorded_calls): (
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
+        bool,
     ),
     batches: &[std::ops::Range<usize>],
     first_query: usize,
@@ -2059,9 +2093,18 @@ pub(super) fn reported_subjects(
             }),
     );
     // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below).
-    let loads = hit_loads(hit_lists, &prefetch, after, pairwise, |ordinal| {
-        titled_parsed(titles, ordinal)
-    });
+    let recorded = database
+        .loaded_before_batch
+        .lock()
+        .expect("the loads before the batch")
+        .clone();
+    let loads = hit_loads(
+        hit_lists,
+        &prefetch,
+        (after, pairwise),
+        crate::report::db_subject::LoadsBefore::new(&recorded, unrecorded_calls),
+        |ordinal| titled_parsed(titles, ordinal),
+    );
     let rank = |ordinal: u32| -> u32 {
         ordinals
             .binary_search(&ordinal)

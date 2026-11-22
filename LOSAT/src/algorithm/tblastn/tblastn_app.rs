@@ -2316,7 +2316,7 @@ fn search(
                         hard_masked,
                     ),
                     &outputs.formats,
-                    outputs.other_outfmts,
+                    (outputs.other_outfmts, args.first_query_ordinal > 0),
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                 )

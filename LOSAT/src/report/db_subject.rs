@@ -55,6 +55,12 @@ pub struct ParsedSubject {
     /// (`FoundInstead::Sequence`, `Nothing`): NCBI's scope can read it for this one where it has
     /// read it before (`also_held`, `pssm_read`).
     also_held: Option<DbSequence>,
+    /// The sequence of the database that this subject is (`in_database`; `None` for a `-subject`
+    /// record), by which the run's loads name it (`HitLoads`, `ScopeHolders`).
+    sequence: Option<DbSequence>,
+    /// Where the lookup of the Seq-align id fails on a file (`FoundInstead::Failed`): the other
+    /// sequences that hold an id NCBI's scope takes for it (`scope_holders`, `held_before`).
+    failed_holders: ScopeHolders,
     /// `-show_gis`: the outfmt 0 description line and heading show it (`description`, `heading`).
     show_gis: bool,
     /// The name of the organism of the subject Bioseq's first source, from which NCBI makes its
@@ -182,6 +188,123 @@ pub enum WeakMatch {
     /// The lookup of the sequences that could match weakly failed, with this message (LOSAT's
     /// lookup of the name alone; NCBI's scope makes none).
     Failed(String),
+}
+
+/// The other sequences of the database that hold an id NCBI's scope takes for the Seq-align id of
+/// a subject whose lookup fails on a file (`FoundInstead::Failed`), as
+/// `common::database::HeaderReader::found_instead` lists them, in the LMDB files that have the
+/// accession table (a file without it holds no text id), by the scan it makes for a lookup that
+/// does not fail (`AlsoHeld`): where the run loaded one of them before a load of the subject,
+/// NCBI's scope gives that one for it without the lookup (`ParsedSubject::held_before`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScopeHolders {
+    /// These sequences, in the order of their ordinal ids (none: no other sequence holds such an
+    /// id).
+    Listed(Vec<DbSequence>),
+    /// LOSAT's list fails on a file, for this reason (written only in LOSAT's refusal, as the
+    /// `why` of `FoundInstead::HoldersUnknown`).
+    Unknown(String),
+}
+
+impl Default for ScopeHolders {
+    fn default() -> Self {
+        ScopeHolders::Listed(Vec::new())
+    }
+}
+
+/// What a run loaded before the reports that [`HitLoads::of`] walks: the sequences of the
+/// database (ordinal ids, in their order) that the run's record of its loads holds
+/// (`common::database::TaxdbRun::note_loaded`: the batches, psiblast's rounds and their PSSM reads
+/// before; the record is kept where a lookup can fail on a file, `TaxdbRun::prefetch_can_stop`),
+/// and whether calls of the run before this one loaded sequences that no record here holds
+/// (`unrecorded`: `api::run_batches`' calls after the first).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LoadsBefore<'a> {
+    recorded: &'a [u32],
+    unrecorded: bool,
+}
+
+impl<'a> LoadsBefore<'a> {
+    /// Nothing loaded before: the reports are the run's first.
+    pub const NONE: LoadsBefore<'static> = LoadsBefore {
+        recorded: &[],
+        unrecorded: false,
+    };
+
+    /// The loads that the record `recorded` (ordinal ids, sorted) holds, after calls whose loads
+    /// no record holds where `unrecorded`.
+    pub fn new(recorded: &'a [u32], unrecorded: bool) -> Self {
+        debug_assert!(recorded.is_sorted());
+        LoadsBefore {
+            recorded,
+            unrecorded,
+        }
+    }
+}
+
+/// The sequences that a walk of [`HitLoads`] has seen loaded, from the run's start: those of the
+/// run's record before the walk ([`LoadsBefore`]) and those of the walk's own loads, in NCBI's
+/// order ([`ParsedSubject::held_before`] asks them).
+#[derive(Debug, Default)]
+struct SeenLoads {
+    /// The sequences (ordinal ids) with parsed Seq-ids loaded so far.
+    ordinals: std::collections::HashSet<u32>,
+    /// Whether a sequence with parsed Seq-ids was loaded so far (also one that names no
+    /// database sequence, `ParsedSubject::sequence`).
+    any: bool,
+    /// Whether calls of the run before loaded sequences that no record holds: any may be loaded.
+    unrecorded: bool,
+}
+
+impl SeenLoads {
+    /// The loads `before`, at the start of a walk.
+    fn of(before: LoadsBefore<'_>) -> Self {
+        SeenLoads {
+            ordinals: before.recorded.iter().copied().collect(),
+            any: !before.recorded.is_empty(),
+            unrecorded: before.unrecorded,
+        }
+    }
+
+    /// Adds the loads `before` (the run's record, which may hold loads seen already).
+    fn add(&mut self, before: LoadsBefore<'_>) {
+        self.ordinals.extend(before.recorded);
+        self.any |= !before.recorded.is_empty();
+        self.unrecorded |= before.unrecorded;
+    }
+
+    /// Records a load of the subject `subject` (nothing where it has no parsed Seq-ids: such a
+    /// sequence holds no id that a lookup can fail on).
+    fn note(&mut self, subject: Option<&ParsedSubject>) {
+        if let Some(subject) = subject {
+            self.any = true;
+            if let Some(sequence) = subject.sequence {
+                self.ordinals.insert(sequence.ordinal());
+            }
+        }
+    }
+
+    /// [`ParsedSubject::held_before`] of `subject` after these loads.
+    fn held(&self, subject: &ParsedSubject) -> Option<Option<DbSequence>> {
+        subject.held_before(
+            |holder| self.unrecorded || self.ordinals.contains(&holder.ordinal()),
+            self.any || self.unrecorded,
+        )
+    }
+}
+
+/// Records in `seen` and `loaded` the loads of the subjects `keys` (`parsed`: their parsed
+/// records) by a walk of [`HitLoads`].
+fn note_loads<'p>(
+    seen: &mut SeenLoads,
+    loaded: &mut std::collections::HashSet<usize>,
+    keys: impl IntoIterator<Item = usize>,
+    parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
+) {
+    for key in keys {
+        seen.note(parsed(key));
+        loaded.insert(key);
+    }
 }
 
 /// What NCBI's prefetch of a query batch reads for a subject that no report shows, by its
@@ -424,6 +547,8 @@ impl ParsedSubject {
             found_instead: None,
             weak_match: None,
             also_held: None,
+            sequence: None,
+            failed_holders: ScopeHolders::default(),
             show_gis: false,
             source: SourceTaxname::Unnamed,
             record: false,
@@ -459,6 +584,8 @@ impl ParsedSubject {
             found_instead: None,
             weak_match: None,
             also_held: None,
+            sequence: None,
+            failed_holders: ScopeHolders::default(),
             show_gis: false,
             source: SourceTaxname::Unnamed,
             record: true,
@@ -508,6 +635,74 @@ impl ParsedSubject {
     pub fn also_held(mut self, holder: Option<DbSequence>) -> Self {
         self.also_held = holder;
         self
+    }
+
+    /// The subject as the sequence `sequence` of its database, by which the run's loads name it
+    /// (`HitLoads`).
+    pub fn in_database(mut self, sequence: DbSequence) -> Self {
+        self.sequence = Some(sequence);
+        self
+    }
+
+    /// The subject with `holders`, the other sequences that hold an id NCBI's scope takes for the
+    /// Seq-align id where its lookup fails on a file (`held_before`).
+    pub fn scope_holders(mut self, holders: ScopeHolders) -> Self {
+        self.failed_holders = holders;
+        self
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-396 (cited
+    // at `common::database::stop_lookup_unsure`)
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:832-850 (cited at
+    // `common::database::HeaderReader::found_instead`)
+    // A load by the Seq-align id asks the scope first, which finds the Bioseq of a sequence loaded
+    // before that holds an id it takes for that id, then the BLAST database data loader, which
+    // keeps every Seq-id of each sequence it loaded (`RegisterIds`) and gives that sequence for the
+    // id before it looks the id up: a lookup that would fail on a file is not made, nothing throws,
+    // and NCBI 2.17.0 writes that sequence for the subject (review 1 of line DBID pfoff-4, H1 and
+    // H2: `gi|5001|ref|NP_100001.1|`, loaded in an earlier query's report, for `ref|NP_100001.1|`
+    // of a list with a database without the accession table, in outfmt 0, 5, 6, 7, 10, 13 to 16
+    // and 18; the same lookup before that load throws).
+    /// Where the lookup of the Seq-align id fails on a file with NCBI's exception
+    /// (`lookup_throws`), what NCBI's scope may give for this subject without the lookup at a load
+    /// after the loads before it, of which `loaded` tells whether they may hold a sequence and
+    /// `any` whether they may hold one with parsed Seq-ids: `Some(Some(holder))` for a holder that
+    /// the scope may hold (`ScopeHolders::Listed`; the first such), `Some(None)` where LOSAT cannot
+    /// list the holders and some sequence may have been loaded; `None` where NCBI makes the lookup
+    /// (it throws), also for every other subject.
+    pub fn held_before(
+        &self,
+        loaded: impl Fn(DbSequence) -> bool,
+        any: bool,
+    ) -> Option<Option<DbSequence>> {
+        self.lookup_throws()?;
+        match &self.failed_holders {
+            ScopeHolders::Listed(holders) => holders
+                .iter()
+                .copied()
+                .find(|&holder| loaded(holder))
+                .map(Some),
+            ScopeHolders::Unknown(_) => any.then_some(None),
+        }
+    }
+
+    /// The reason of LOSAT's refusal of a subject that NCBI's scope may find without its lookup,
+    /// which fails on a file (`HitLoad::Held` of `held_before`): the words of another sequence
+    /// that holds the Seq-align id (`FoundInstead::AlsoHeld`), as for a lookup that does not fail,
+    /// or of the holders that LOSAT cannot list (`FoundInstead::HoldersUnknown`).
+    fn held_reason(&self, holder: Option<DbSequence>) -> String {
+        let found = match (holder, &self.failed_holders) {
+            (Some(other), _) => FoundInstead::AlsoHeld(other),
+            (None, ScopeHolders::Unknown(why)) => FoundInstead::HoldersUnknown {
+                instead: None,
+                why: why.clone(),
+            },
+            (None, ScopeHolders::Listed(_)) => FoundInstead::HoldersUnknown {
+                instead: None,
+                why: "the sequences that hold it".to_owned(),
+            },
+        };
+        self.found_reason(&found, false, None).unwrap_or_default()
     }
 
     /// Whether NCBI's formatters find no Bioseq by the Seq-align id whatever its lookup gives
@@ -619,12 +814,17 @@ impl ParsedSubject {
     /// reports of outfmt 0 to 4) is not refused for what the lookup finds (it finds nothing: it
     /// throws before any definition line is read), and one that no report loads
     /// (`HitLoad::Unread`: shown only after such a `Hit`, or as a copy of the record in it) is not
-    /// refused at all; every other subject (`HitLoad::Loaded`, `HitLoad::Refused`) is refused as
-    /// above, a lookup that fails on a file among them (outfmt 17 here, before any byte is
-    /// written; the reason of a run whose formats refuse it, `HitLoad::Refused`).
+    /// refused at all; one whose lookup fails but that NCBI's scope may find without it, by
+    /// another sequence that holds an id it takes for the Seq-align id and that the run loaded
+    /// before (`HitLoad::Held`, `held_before`), is refused as such a holder is where the lookup
+    /// does not fail (`FoundInstead::AlsoHeld`); every other subject (`HitLoad::Loaded`,
+    /// `HitLoad::Refused`) is refused as above, a lookup that fails on a file among them (outfmt
+    /// 17 here, before any byte is written; the reason of a run whose formats refuse it,
+    /// `HitLoad::Refused`).
     pub fn fetched(&self, taxonomy: bool, one_by_one: bool, load: HitLoad) -> Result<(), String> {
         match load {
             HitLoad::Unread => return Ok(()),
+            HitLoad::Held(holder) => return Err(self.held_reason(holder)),
             HitLoad::Throws => {}
             HitLoad::Loaded => self.found_fetched(taxonomy, None)?,
             HitLoad::Refused(refused) => self.found_fetched(taxonomy, Some(refused))?,
@@ -2059,6 +2259,19 @@ impl RunThrow {
             rows: super::tabular::SubjectFetch::Every,
         }
     }
+
+    /// Whether NCBI's runs of a format that does `self` and of one that does `other` stop at
+    /// different places after a throw ([`FormatThrow::and`]): a pairwise report's run ends at an
+    /// alignment (`AfterThrow::alignment_end`), an `EndsRun` format's at the first row that loads
+    /// the subject (`rows`), and every other format's run goes on to its end.
+    fn stops_apart(self, other: Self) -> bool {
+        let ends = |run: Self| run.after.is_pairwise() || run.after == AfterThrow::EndsRun;
+        if self.after != other.after {
+            ends(self) || ends(other)
+        } else {
+            self.after == AfterThrow::EndsRun && self.rows != other.rows
+        }
+    }
 }
 
 /// Why LOSAT refuses a subject whose lookup throws where its batch's prefetch is off
@@ -2067,9 +2280,11 @@ impl RunThrow {
 /// a format that refuses it alone comes before a mix of formats (`FormatThrow::and`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ThrowRefusal {
-    /// A call of the library whose formats stop at different places after the throw: outfmt 0,
-    /// outfmt 1 to 4 and the other formats (`FormatThrow::and`), in one search or in one search
-    /// per hit list size (`FormatThrow::of_search`).
+    /// A call of the library whose formats NCBI's runs of each stop at different places after the
+    /// throw (`FormatThrow::and`): outfmt 0, outfmt 1 to 4, the formats that end the run there
+    /// (outfmt 13 and 14, and the tables that read the subject after its subject block, at the
+    /// rows that read it) and the other formats, in one search or in one search per hit list
+    /// size (`FormatThrow::of_search`).
     Mixed,
     /// A format whose writer LOSAT does not make write it as NCBI does (outfmt 17).
     Format,
@@ -2082,7 +2297,7 @@ impl ThrowRefusal {
     pub fn words(self) -> &'static str {
         match self {
             ThrowRefusal::Format => "LOSAT does not write that for outfmt 17",
-            ThrowRefusal::Mixed => "LOSAT does not write that in a call of its library that mixes outfmt 0, outfmt 1 to 4 and the other formats, also where the call searches once for each hit list size: NCBI BLAST+ writes each format in a run of its own, and those runs stop at different places with different exit statuses and standard errors, where the call has one result",
+            ThrowRefusal::Mixed => "LOSAT does not write that in a call of its library whose formats NCBI BLAST+ stops at different places after it (outfmt 0; outfmt 1 to 4; outfmt 13, 14 and the tables that read the subject after its subject block, each at the rows that read it; the other formats), also where the call searches once for each hit list size: NCBI BLAST+ writes each format in a run of its own, and those runs stop at different places with different exit statuses and standard errors, where the call has one result",
         }
     }
 }
@@ -2154,9 +2369,16 @@ impl FormatThrow {
     /// The answer of two formats of one run: a refusal by either refuses, a format that reads
     /// nothing leaves the other's answer, and of two that write, the one that loads more after the
     /// throw (a subject is loaded where some report loads it), at the rows that either loads at.
-    /// A pairwise report (outfmt 0 to 4, `AfterThrow::is_pairwise`) with a format of another
-    /// writer refuses (`ThrowRefusal::Mixed`): it loads in an order of its own (the library's
-    /// calls of several formats); of two refusals, a format's own comes first.
+    /// Two formats whose runs in NCBI BLAST+ stop at different places after the throw refuse
+    /// (`ThrowRefusal::Mixed`; the library's calls of several formats, which have one result): a
+    /// pairwise report (outfmt 0 to 4, `AfterThrow::is_pairwise`) with a format of another
+    /// writer (it loads in an order of its own, and its run ends at an alignment), a format whose
+    /// run ends at the throw (`AfterThrow::EndsRun`) with one whose run goes on, and two such
+    /// formats that end at different rows (`rows`; review 1 of line DBID pfoff-4, M1: outfmt 5
+    /// writes its whole document with exit status 0 where `-outfmt "6 qseqid slen"` stops at the
+    /// throw with exit status 2). Formats whose runs all go on (outfmt 5, 15, 16, the tables
+    /// that write the row and the organism report) agree; of two refusals, a format's own comes
+    /// first.
     pub fn and(self, other: Self) -> Self {
         use super::tabular::SubjectFetch;
         match (self, other) {
@@ -2167,10 +2389,7 @@ impl FormatThrow {
                 FormatThrow::Refused(why)
             }
             (FormatThrow::Unread, answer) | (answer, FormatThrow::Unread) => answer,
-            (FormatThrow::Writes(one), FormatThrow::Writes(other))
-                if one.after != other.after
-                    && (one.after.is_pairwise() || other.after.is_pairwise()) =>
-            {
+            (FormatThrow::Writes(one), FormatThrow::Writes(other)) if one.stops_apart(other) => {
                 FormatThrow::Refused(ThrowRefusal::Mixed)
             }
             (FormatThrow::Writes(one), FormatThrow::Writes(other)) => {
@@ -2357,6 +2576,13 @@ pub enum HitLoad {
     /// subject whose lookup throws (`FormatThrow::Refused`): such a lookup is refused there
     /// (`ParsedSubject::fetched`), for this reason.
     Refused(ThrowRefusal),
+    /// A report reaches the subject, whose lookup fails on a file (`lookup_throws`), after the run
+    /// loaded another sequence that NCBI's scope gives for it without the lookup
+    /// (`ParsedSubject::held_before`: that sequence; `None` where LOSAT cannot list the holders):
+    /// nothing throws there and NCBI writes that sequence's record for the subject, which LOSAT
+    /// refuses (`ParsedSubject::fetched`). Where the subject throws in one report and is held in
+    /// a later one, it is held.
+    Held(Option<DbSequence>),
 }
 
 /// [`HitLoad`] of each subject of a call's reports, by the key that the caller gives its subjects
@@ -2367,6 +2593,9 @@ pub enum HitLoad {
 #[derive(Debug, Default)]
 pub struct HitLoads {
     throws: std::collections::HashMap<usize, crate::ncbi_exception::NcbiException>,
+    /// The subjects whose lookup fails where NCBI's scope gives another sequence for them
+    /// (`HitLoad::Held`).
+    held: std::collections::HashMap<usize, Option<DbSequence>>,
     unread: std::collections::HashSet<usize>,
     /// Why the run's formats refuse a lookup that throws (`FormatThrow::Refused`).
     refused: Option<ThrowRefusal>,
@@ -2417,7 +2646,16 @@ impl HitLoads {
     ///
     /// NCBI's application ends at the report whose load ends the run (`CATCH_ALL`): no report,
     /// and no batch's prefetch, after it runs ([`HitLoads::reaches`]).
+    ///
+    /// A subject whose lookup fails on a file is reached where the run has loaded before, in
+    /// NCBI's order (the reports before it, the description lines and alignments before it in a
+    /// pairwise report, the rows and `Hit`s before it in its report), another sequence that
+    /// NCBI's scope gives for it without the lookup ([`ParsedSubject::held_before`]): it is held
+    /// there (`HitLoad::Held`), nothing throws, and the report goes on as after a load. The
+    /// reports come after the loads `before` of the run (its record of the batches, rounds and
+    /// calls before them; [`LoadsBefore::NONE`] for the run's first reports).
     pub fn of<'p, K: Into<ReportKeys>>(
+        before: LoadsBefore<'_>,
         run: impl Into<FormatThrow>,
         reports: impl IntoIterator<Item = (bool, K)>,
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
@@ -2425,6 +2663,7 @@ impl HitLoads {
     ) -> Self {
         Self::after(
             &std::cell::Cell::new(false),
+            &mut SeenLoads::of(before),
             run.into(),
             reports,
             parsed,
@@ -2434,9 +2673,10 @@ impl HitLoads {
 
     /// [`HitLoads::of`] of the reports `reports` that follow those whose loads ended the run where
     /// `ended` holds true (an `EndsRun` subject that threw), which it holds after these reports
-    /// too ([`RunLoads::loads`]).
+    /// too, and after the loads `seen`, to which it adds theirs ([`RunLoads::loads`]).
     fn after<'p, K: Into<ReportKeys>>(
         ended: &std::cell::Cell<bool>,
+        seen: &mut SeenLoads,
         run: FormatThrow,
         reports: impl IntoIterator<Item = (bool, K)>,
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
@@ -2468,7 +2708,7 @@ impl HitLoads {
                         run.after,
                         &reads,
                         &parsed,
-                        ended,
+                        (ended, &mut *seen),
                         (&mut loaded, &mut passed),
                     );
                     continue;
@@ -2483,7 +2723,7 @@ impl HitLoads {
                 if ended.get() {
                     passed.extend(keys);
                 } else {
-                    loaded.extend(keys);
+                    note_loads(seen, &mut loaded, keys, &parsed);
                 }
                 continue;
             }
@@ -2514,7 +2754,7 @@ impl HitLoads {
                     if thrown {
                         passed.extend(keys);
                     } else {
-                        loaded.extend(keys);
+                        note_loads(seen, &mut loaded, keys, &parsed);
                     }
                     continue;
                 };
@@ -2525,6 +2765,12 @@ impl HitLoads {
                     });
                 if !loads_it {
                     passed.extend(keys);
+                    continue;
+                }
+                // NCBI's scope gives a sequence loaded before for it: nothing throws.
+                if let Some(holder) = parsed(first).and_then(|subject| seen.held(subject)) {
+                    loads.held.insert(first, holder);
+                    loaded.extend(keys);
                     continue;
                 }
                 loads.throws.insert(first, exception);
@@ -2542,7 +2788,11 @@ impl HitLoads {
         }
         loads.unread = passed
             .into_iter()
-            .filter(|key| !loaded.contains(key) && !loads.throws.contains_key(key))
+            .filter(|key| {
+                !loaded.contains(key)
+                    && !loads.throws.contains_key(key)
+                    && !loads.held.contains_key(key)
+            })
             .collect();
         loads
     }
@@ -2558,42 +2808,85 @@ impl HitLoads {
     /// writer's own answers, `x_pairwise_par::QueryGroup::read_order`): unless the run ended
     /// before (`ended`), its description lines load the subjects of the hits that they show, then
     /// its alignments those of its first `reads.aligned` hits up to the one whose load ends the
-    /// run (`AfterThrow::alignment_end`, which `ended` then records). A subject whose lookup throws
-    /// (`lookup_throws`) loads nothing there, nor do the copies in its hit; every subject that
-    /// neither loads is passed.
+    /// run (`AfterThrow::alignment_end`, which `ended` then records), each in that order after
+    /// the loads `seen`, to which it adds its own. A subject whose lookup throws (`lookup_throws`)
+    /// loads nothing there, nor do the copies in its hit, unless NCBI's scope gives a sequence
+    /// loaded before for it at one of its reads (`held_before`: it is held, and an alignment of
+    /// it ends nothing); every subject that neither loads is passed.
     fn pairwise_report<'p>(
         &mut self,
         after: AfterThrow,
         reads: &PairwiseReads,
         parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
-        ended: &std::cell::Cell<bool>,
+        (ended, seen): (&std::cell::Cell<bool>, &mut SeenLoads),
         (loaded, passed): (
             &mut std::collections::HashSet<usize>,
             &mut std::collections::HashSet<usize>,
         ),
     ) {
+        /// What the report's reads of a hit gave so far.
+        #[derive(Clone, Copy)]
+        enum Read {
+            Loads,
+            Throws,
+            Held(Option<DbSequence>),
+        }
         let first = |hit: usize| reads.hits[hit].first().copied().and_then(parsed);
-        let throws = |hit: usize| first(hit).and_then(ParsedSubject::lookup_throws);
-        let mut reached = vec![false; reads.hits.len()];
+        let state = std::cell::RefCell::new(vec![None::<Read>; reads.hits.len()]);
+        let seen = std::cell::RefCell::new(seen);
+        // A read of the hit `hit` where the report reaches it, in the report's order: a hit that
+        // threw at a read before is looked up again (a holder may have been loaded since).
+        let read = |hit: usize| {
+            let mut state = state.borrow_mut();
+            if let Some(done @ (Read::Loads | Read::Held(_))) = state[hit] {
+                return done;
+            }
+            let mut seen = seen.borrow_mut();
+            let now = match first(hit) {
+                Some(subject) if subject.lookup_throws().is_some() => {
+                    seen.held(subject).map_or(Read::Throws, Read::Held)
+                }
+                _ => {
+                    for &key in &reads.hits[hit] {
+                        seen.note(parsed(key));
+                    }
+                    Read::Loads
+                }
+            };
+            state[hit] = Some(now);
+            now
+        };
         if !ended.get() {
+            for &hit in &reads.described {
+                read(hit);
+            }
             let end = after.alignment_end(
                 0..reads.aligned,
-                |hit| throws(hit).is_some(),
+                |hit| matches!(read(hit), Read::Throws),
                 |hit| first(hit).is_some_and(ParsedSubject::alignment_id_is_local),
             );
-            let aligned = 0..end.map_or(reads.aligned, |end| end + 1);
-            for hit in reads.described.iter().copied().chain(aligned) {
-                reached[hit] = true;
+            // The alignments that the report reaches, each read once more where the end above did
+            // not read it (`SkipsAlignment` reads the first alone there).
+            for hit in 0..end.map_or(reads.aligned, |end| end + 1) {
+                read(hit);
             }
             ended.set(end.is_some());
         }
         for (hit, keys) in reads.hits.iter().enumerate() {
-            match (reached[hit], throws(hit), keys.split_first()) {
-                (true, Some(exception), Some((&first, copies))) => {
+            let now = state.borrow()[hit];
+            match (now, keys.split_first()) {
+                (Some(Read::Throws), Some((&first, copies))) => {
+                    let exception = parsed(first)
+                        .and_then(ParsedSubject::lookup_throws)
+                        .expect("a subject that throws");
                     self.throws.insert(first, exception);
                     passed.extend(copies);
                 }
-                (true, None, _) => loaded.extend(keys),
+                (Some(Read::Held(holder)), Some((&first, _))) => {
+                    self.held.insert(first, holder);
+                    loaded.extend(keys);
+                }
+                (Some(Read::Loads), _) => loaded.extend(keys),
                 _ => passed.extend(keys),
             }
         }
@@ -2608,6 +2901,11 @@ impl HitLoads {
                 .into_iter()
                 .filter_map(|(old, exception)| Some((key(old)?, exception)))
                 .collect(),
+            held: self
+                .held
+                .into_iter()
+                .filter_map(|(old, holder)| Some((key(old)?, holder)))
+                .collect(),
             unread: self.unread.into_iter().filter_map(&key).collect(),
             refused: self.refused,
             reached: self.reached,
@@ -2616,7 +2914,9 @@ impl HitLoads {
 
     /// What the reports do at the `Hit` of the subject `key`.
     pub fn load(&self, key: usize) -> HitLoad {
-        if self.throws.contains_key(&key) {
+        if let Some(&holder) = self.held.get(&key) {
+            HitLoad::Held(holder)
+        } else if self.throws.contains_key(&key) {
             HitLoad::Throws
         } else if self.unread.contains(&key) {
             HitLoad::Unread
@@ -2627,9 +2927,13 @@ impl HitLoads {
         }
     }
 
-    /// Whether a report (or a batch's prefetch) loads the subject `key`.
+    /// Whether a report (or a batch's prefetch) loads the subject `key` (or a sequence that
+    /// NCBI's scope gives for it, `HitLoad::Held`).
     pub fn loaded(&self, key: usize) -> bool {
-        matches!(self.load(key), HitLoad::Loaded | HitLoad::Refused(_))
+        matches!(
+            self.load(key),
+            HitLoad::Loaded | HitLoad::Refused(_) | HitLoad::Held(_)
+        )
     }
 
     /// Whether NCBI's run reaches the report `report` of those given (counted from 0): false for
@@ -2642,6 +2946,9 @@ impl HitLoads {
 
     /// The exception that the `Hit` of the subject `key` throws (`HitLoad::Throws`).
     pub fn thrown(&self, key: usize) -> Option<&crate::ncbi_exception::NcbiException> {
+        if self.held.contains_key(&key) {
+            return None;
+        }
         self.throws.get(&key)
     }
 
@@ -2665,6 +2972,9 @@ impl HitLoads {
 pub struct RunLoads {
     answer: FormatThrow,
     ended: std::cell::Cell<bool>,
+    /// The loads of the run's reports so far, and of its record before them
+    /// ([`HitLoads::of`]).
+    seen: std::cell::RefCell<SeenLoads>,
 }
 
 impl RunLoads {
@@ -2674,6 +2984,7 @@ impl RunLoads {
         RunLoads {
             answer: answer.into(),
             ended: std::cell::Cell::new(false),
+            seen: std::cell::RefCell::new(SeenLoads::of(LoadsBefore::NONE)),
         }
     }
 
@@ -2689,14 +3000,25 @@ impl RunLoads {
     }
 
     /// [`HitLoads::of`] of the reports `reports` after those of the run before (none after its
-    /// end), which records where these reports end the run.
+    /// end) and the loads `before` (the run's record before them, [`HitLoads::of`]), which
+    /// records where these reports end the run and what they load.
     pub fn loads<'p, K: Into<ReportKeys>>(
         &self,
+        before: LoadsBefore<'_>,
         reports: impl IntoIterator<Item = (bool, K)>,
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
         identities: impl Fn(usize, usize) -> usize,
     ) -> HitLoads {
-        HitLoads::after(&self.ended, self.answer, reports, parsed, identities)
+        let mut seen = self.seen.borrow_mut();
+        seen.add(before);
+        HitLoads::after(
+            &self.ended,
+            &mut seen,
+            self.answer,
+            reports,
+            parsed,
+            identities,
+        )
     }
 }
 

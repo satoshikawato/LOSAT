@@ -587,7 +587,10 @@ impl ReportedSubjects {
     /// `FormatThrow::of_formats`, or a refusal with its reason), for `HitLoads::of` (where `one_by_one`, which subjects throw
     /// and which no report loads; the refusals, the names, the tables' rows, the taxonomy reads
     /// and the run's record of the loads, `note_loaded`, take that one answer), with how a
-    /// pairwise report reads the subjects (`pairwise_read_order`).
+    /// pairwise report reads the subjects (`pairwise_read_order`) and whether calls before this
+    /// one loaded what the run's record does not hold (`PrefetchQueries::unrecorded_calls`): the
+    /// batch's reports come after the loads of the record (the batches before,
+    /// `HitLoads::of`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -610,6 +613,7 @@ impl ReportedSubjects {
         after: (
             crate::report::db_subject::FormatThrow,
             Option<crate::report::pairwise::PairwiseReading>,
+            bool,
         ),
     ) -> Result<Self> {
         let BatchTitles {
@@ -682,7 +686,7 @@ impl ReportedSubjects {
             .collect();
         // A pairwise report's reads (`pairwise_read_order`), of the lists that the formatter's cut
         // keeps (`BatchResults::cut_lists`).
-        let (after, pairwise_reading) = after;
+        let (after, pairwise_reading, unrecorded_calls) = after;
         let pairwise_reading = pairwise_reading
             .filter(|_| one_by_one && after.run().is_some_and(|run| run.after.is_pairwise()));
         let mut pairwise_reads = Vec::new();
@@ -708,7 +712,9 @@ impl ReportedSubjects {
             }
         }
         let mut pairwise_reads = pairwise_reads.into_iter();
+        let recorded = database.taxdb.loaded();
         let loads = HitLoads::of(
+            crate::report::db_subject::LoadsBefore::new(&recorded, unrecorded_calls),
             after,
             report_lists.iter().map(|lists| {
                 let keys = match pairwise_reads.next() {

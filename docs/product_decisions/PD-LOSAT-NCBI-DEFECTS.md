@@ -335,8 +335,8 @@
   diagonals of the sequences searched before it (not for the first searched sequence) or after it
   (not for the last) (`StaleDiagonals`), of such a part whose seed's alignment NCBI's interval tree
   splits without end (`short_chunk_tree_refusal`), of a part between masks shorter than the word
-  whose one word NCBI reads past the sequence's end, for a BLASTP query with the gap letter
-  (`WordPastEnd`), of a mask that runs to the end after the part from the start with masks stored
+  whose one word NCBI reads past the sequence's end, only for a BLASTP query that holds residue 0,
+  which no query read from FASTA does (`WordPastEnd`), of a mask that runs to the end after the part from the start with masks stored
   after it (`TailMaskWithLaterMasks`, within exception 21's class) and of a mask that ends before it
   starts (`Inverted`); not yet ported, as the range longer than 5,000,000 letters: masks out of order
   whose parts NCBI merges across an overlap (`PartsOutOfOrder`) and such a short part whose
@@ -2452,16 +2452,18 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     offsets), BLASTP two-hit gapped: NCBI does not end (rc -11 at 60 s under a 4 GB limit); with
     `-ungapped` it ends, and LOSAT gives its rows; BLASTX's search of `g3` ends with no row, and so
     does LOSAT's.
-  - `HardMaskShape::WordPastEnd`, before the search, BLASTP only and only for a query with the gap
-    letter `-` (NCBIstdaa 0): a part between masks shorter than the word whose one word NCBI reads
-    past the sequence's end, from the next sequence's letters, where its hits can change the rows.
-    No other query can hit such a word: the matrices score residue 0 at `BLAST_SCORE_MIN`
-    (`blast_stat.c:1559-1578`), so no neighbouring word holds it, and the exact words that the lookup
-    table always adds are the query's (`blast_aalookup.c:503-509`); BLASTX's translation gives no
-    residue 0. Evidence: `ov_wpe` (`M/m4b3b/probe/fix1/wpe`): without `-` NCBI's rows of A then B are
-    B's alone, the same in every run; with `W-W` in the query and `-comp_based_stats 0` the rows did
-    not change with B's first letter (W or K). Counts for a query with `-`: TAIR10 36, the UniRef50
-    sample 78; none for other queries.
+  - `HardMaskShape::WordPastEnd`, before the search, BLASTP only and only for a query that holds
+    residue 0 (the gap letter `-`, NCBIstdaa 0): a part between masks shorter than the word whose one
+    word NCBI reads past the sequence's end, from the next sequence's letters, where its hits can
+    change the rows. No other query can hit such a word: the matrices score residue 0 at
+    `BLAST_SCORE_MIN` (`blast_stat.c:1559-1578`), so no neighbouring word holds it, and the exact words
+    that the lookup table always adds are the query's (`blast_aalookup.c:503-509`); BLASTX's
+    translation gives no residue 0. No query read from FASTA holds it: NCBI's `CFastaReader` drops
+    `-` with the warning "Hyphens are invalid and will be ignored", as LOSAT's reader does, so this
+    rejection does not occur with NCBI's query input. Evidence: `ov_wpe` (`M/m4b3b/probe/fix1/wpe`):
+    NCBI's rows of A then B are B's alone, the same in every run, also for a query file with `W-W`
+    (rows `db.pmask.bp.hard.ov_wpe.*`). Counts for a query that would hold residue 0: TAIR10 36, the
+    UniRef50 sample 78.
   - `HardMaskShape::TailMaskWithLaterMasks`, before the search: a mask that runs to the end after the
     part from the start, with masks stored after it. NCBI's chunk loop ends at that mask and searches
     the part past its end in the no-chunking branch (exception 21's class) without the later masks,

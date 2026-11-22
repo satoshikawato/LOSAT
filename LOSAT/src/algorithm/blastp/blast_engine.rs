@@ -6060,7 +6060,8 @@ fn search(
     // LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`) come where NCBI
     // starts the search, after its checks. The lookup table can hold a word with the residue 0
     // only where a query holds the gap `-` (`common::hard_chunk_walk::DiagonalWalk::new`; a
-    // query's masked letters are counted too, which can only refuse more).
+    // query's masked letters are counted too, which can only refuse more). The FASTA reader drops
+    // `-` with NCBI's warning, so a query read from FASTA never holds it.
     if let (Some(database), Some(mask)) = (database, args.db_mask_resolved.as_ref()) {
         mask.check_losat_limits(
             database.seqdb(),

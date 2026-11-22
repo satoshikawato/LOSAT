@@ -2323,7 +2323,9 @@ subject bounds that length sets, which splits its nodes without end, so those ru
 inside the previous one), `ov_big` (overlap 60 > the window 40), `ov_s2` (an inverted chunk, then a chunk of 2 letters shorter
 than the word: the seed of its one word, read from the stored letters past the chunk, extended with the chunk's length; NCBI
 writes the same rows in every run), `ov_tl` (`ov_s2`'s letters with the masks [65,240) then [55,64): a mask that runs to the
-end after the chunk from the start, with a mask stored after it, which LOSAT refuses before the search), `ov_r37` and
+end after the chunk from the start, with a mask stored after it, which LOSAT refuses before the search), `ov_wpe` (A, of 100
+letters with masks [10,60) [20,99) [30,40), whose one word at 99 covers A's sentinel and B's first letter, then B; searched
+for `qov2.faa` and for `qwpe.faa`, `qov2.faa`'s protein with `W-W`, whose `-` the FASTA reader drops), `ov_r37` and
 `ov_r36` (overlaps 37 = window - word and 36), `ov_nb` (consecutive inverted chunks with different words) and `ov_lk` (two
 subjects, A with masks [40,200) [60,238): diagonal entries that outlive A reach B; in the one-hit scan (`-window_size 0`)
 NCBI's rows depend on the thread order, and so at `-evalue 1000` and `-ungapped` do the rows at 4 threads (the row of B at

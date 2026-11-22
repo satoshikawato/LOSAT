@@ -24,7 +24,7 @@ named. The queries are random (no W) + WWW + random: `qov1.faa` / `qov1.fna` (th
   ov_tl:   s2's letters, masks [65,240) then [55,64): a mask that runs to the end with a mask stored after it (fix
            round 1 of M4b-3b, review L1; probe M/m4b3b/probe/fix1), which LOSAT refuses before the search.
   ov_wpe:  subjects A then B (probe3, fix round 1, review H2): A's masks [10,60) [20,99) [30,40), whose one word at 99
-           covers A's sentinel and B's first letter; searched for a query without `-`, refused for `qwpe.faa` (with `W-W`).
+           covers A's sentinel and B's first letter; searched, also for `qwpe.faa` (`W-W`: the FASTA reader drops `-`).
   ov_lk:   subjects A then B: A's masks [40,200) [60,238) (lengths 40, -140, 2), the query's first 33 letters ending at
            A's chunk end 40; B holds the same letters and the mask [230,235).
 Masks are `Blast-db-mask-info` ASN.1 text with `local id N` (N the 1-based order of the subject; no -parse_seqids, as the

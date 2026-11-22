@@ -207,19 +207,28 @@ fn soft_chunk_scan_ranges(
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321, 398-405 and
 // c++/src/algo/blast/core/blast_engine.c:757-762, 814-830, 476-486, 221-311
 // A database sequence of a search with `-db_soft_mask` or `-db_hard_mask` comes with the complement
-// of its stored masks as its ranges (one range, the whole sequence, where it has none) and the
-// mask kind. The frames of a translated subject map those ranges (`translated_frame_ranges`) and
-// each frame is cut by them as a protein subject is: with soft masks, the ranges are the scan
-// ranges of the frame's chunks of `MAX_DBSEQ_LEN`; with hard masks, each range is a chunk of its
-// own (cut again past `MAX_DBSEQ_LEN`) that scans its letters from its start, except NCBI's "no
-// chunking" branch, where the chunk from the frame's start scans the whole frame.
+// of its stored masks as its ranges (one range, the whole sequence, where it has none) and the mask
+// kind. The frames of a translated subject map those ranges (`translated_frame_ranges`) and each
+// frame is cut by them as a protein subject is: with soft masks, the ranges are the scan ranges of
+// the frame's chunks of `MAX_DBSEQ_LEN`; with hard masks, each range is a chunk of its own (cut
+// again past `MAX_DBSEQ_LEN`) that scans its letters from its start. NCBI's "no chunking" branch
+// scans the whole frame, `[0, frame_length)`, from the chunk at the frame's start
+// (blast_engine.c:150-152, 162, 264-268), so a whole frame one residue shorter than its strand's
+// first frame, whose one chunk ends on its end sentinel, scans no word there. Where that chunk ends
+// before the frame's end at a mask, LOSAT scans the chunk alone, as NCBI's normal chunks do for the
+// near input, the mask shortened by the fewest bases after which a letter follows the chunk in
+// every frame; the masked bases stay masked in the traceback and the statistics (an approved NCBI
+// defect, PD-LOSAT-NCBI-DEFECTS exception 21: the Owner's answers Q1 = B and Q2 = B of M4b,
+// 2026-11-21; NCBI's scan past the chunk gives rows that differ from the near input's, in TBLASTX
+// the same row once for each word it reads in the mask, or a crash).
 /// The chunks of frame `frame` (+1..+3, -1..-3, of `frame_length` residues) of a database sequence
 /// with the nucleotide ranges `nucleotide_ranges` (the complement of its stored masks,
 /// `core::subject_split::complement_masks`), each with its scan ranges, in a search with
 /// `-db_hard_mask` (`hard`) or `-db_soft_mask`. `negative_first_length` is the number of residues
 /// of frame -1; `split` is the chunker, whose buffer of ranges is reused. A chunk of a hard range
 /// may end one residue past a frame that is one residue shorter than its strand's first frame (the
-/// frame's end sentinel), as NCBI's does.
+/// frame's end sentinel), as NCBI's does. A hard chunk scans its own letters, `[0, length)`, and
+/// the chunk of a whole frame the frame's, `[0, frame_length)`.
 pub(crate) fn translated_db_mask_chunks(
     nucleotide_ranges: &[(i32, i32)],
     hard: bool,
@@ -239,9 +248,10 @@ pub(crate) fn translated_db_mask_chunks(
     }
     split.start(frame_length, frame_ranges, false);
     while let Some(chunk) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
-        // The protein programs' chunks have no residual: the scan starts at the chunk's start.
+        // The protein programs' chunks have no residual: the scan starts at the chunk's start. The
+        // "no chunking" chunk of a whole frame stops at the frame's end, not on its sentinel.
         let right = if chunk.full_range {
-            frame_length
+            chunk.length.min(frame_length)
         } else {
             chunk.length
         };
@@ -257,3 +267,7 @@ pub(crate) fn translated_db_mask_chunks(
     split.end();
     Ok(calls)
 }
+
+#[cfg(test)]
+#[path = "translated_chunks_tests.rs"]
+mod tests;

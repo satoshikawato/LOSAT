@@ -324,6 +324,12 @@ pub(super) fn prefetch_reported_subjects(
                     outputs.formats.iter().map(|format| format.outfmt),
                     crate::blastinput::app::Program::Blastp,
                     args.app.request_kind(),
+                )
+                // The call's refusal, over the formats of its other searches too.
+                .of_search(
+                    outputs.other_outfmts,
+                    crate::blastinput::app::Program::Blastp,
+                    args.app.request_kind(),
                 ),
                 |query| {
                     pairwise_reading.map_or_else(Default::default, |reading| {
@@ -339,6 +345,13 @@ pub(super) fn prefetch_reported_subjects(
                 },
             )
         });
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (cited at
+    // `db_subject::RunLoads`)
+    // A report whose load ends the run ends NCBI's application there: no batch after it is
+    // prefetched or read one by one, so a stop of a later batch's prefetch is never reached
+    // (`HitLoads::reaches`; review 3 of line DBID pfoff-3, N1). The writer ends the run at that
+    // report with its error.
+    let prefetch_stop = prefetch_stop.filter(|span| hit_loads.reaches(span.start));
     if let Some(titles) = listed_titles.as_ref() {
         titles.check_reported_titles(reported_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
@@ -572,6 +585,10 @@ pub(super) fn prefetch_reported_subjects(
                 Ok(())
             };
             for batch in query_batches {
+                // No batch after the run's end is prefetched, nor read one by one.
+                if !hit_loads.reaches(batch.searched.start) {
+                    break;
+                }
                 let lists = &hit_lists[batch.searched.clone()];
                 let seq_aligns = batch_seq_aligns(batch.searched.clone());
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
@@ -579,6 +596,9 @@ pub(super) fn prefetch_reported_subjects(
                         continue;
                     }
                     for query in batch.searched.clone() {
+                        if !hit_loads.reaches(query) {
+                            break;
+                        }
                         if rows != crate::report::tabular::SubjectFetch::Never {
                             let shown = std::slice::from_ref(&hit_lists[query]);
                             // Rows that read a subject only for its identities (`nident` alone)
@@ -629,7 +649,8 @@ pub(super) fn prefetch_reported_subjects(
                         // The query's PSSM reads after its report (psiblast_app.cpp:283-308):
                         // the blobs it loads first look their taxids up then, and NCBI writes
                         // their texts among the PSSM's warnings (`ListedTitles::pssm_load_texts`).
-                        if pssm_made {
+                        // A report that ends the run makes no PSSM (`HitLoads::reaches`).
+                        if pssm_made && hit_loads.reaches(query + 1) {
                             let texts = titles.pssm_load_texts(
                                 database,
                                 pssm_reads,

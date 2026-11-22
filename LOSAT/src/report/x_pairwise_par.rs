@@ -357,7 +357,9 @@ impl<'h> QueryGroup<'h> {
 /// hits of its description lines
 /// (`QueryGroup::described_subjects`) and of its alignments (`QueryGroup::aligned`). The tests of
 /// each program's `pairwise_read_order` compare their model with it (review 2 of line DBID
-/// pfoff-3, L5).
+/// pfoff-3, L5): the groups, their order and what the description lines and alignments show. The
+/// order of a hit's copies here is the model's rule copied, not the writer's, so those tests do
+/// not check it (review 3, L-4).
 #[cfg(test)]
 pub(crate) fn writer_reads(
     rows: &[PairwiseHit],
@@ -542,10 +544,10 @@ pub(crate) trait QuerySections: Sync {
     }
 
     /// `-sorthits` and `-sorthsps` of the report and whether it is TBLASTX's
-    /// (`QueryGroup::sort`); none by default.
-    fn sort(&self) -> (super::hit_sort::ReportSort, bool) {
-        (super::hit_sort::ReportSort::default(), false)
-    }
+    /// (`QueryGroup::sort`). Every program gives its own: the order of the hits, which the reads
+    /// of a batch whose prefetch is off follow (`read_order`), is the report's (review 3 of line
+    /// DBID pfoff-3, L-1).
+    fn sort(&self) -> (super::hit_sort::ReportSort, bool);
 
     /// `\n\n`, the query's header, then "No hits found" and the query's footer (`group` is
     /// `None`), or the description table and the blank line after it; `read` before each
@@ -570,10 +572,10 @@ pub(crate) trait QuerySections: Sync {
         part: std::ops::Range<usize>,
     ) -> io::Result<()>;
 
-    /// The report's view (`PairwiseView`; outfmt 0 by default).
-    fn view(&self) -> super::pairwise::PairwiseView {
-        super::pairwise::PairwiseView::Pairwise
-    }
+    /// The report's view (`PairwiseView`), which says what the report does after a subject whose
+    /// lookup throws (`alignment_end`): every program gives its own (review 3 of line DBID
+    /// pfoff-3, L-1).
+    fn view(&self) -> super::pairwise::PairwiseView;
 
     /// Whether the query's alignments are one section (`alignments`) in place of each subject's
     /// (`subject`): the query-anchored reports, outfmt 1 to 4 (`report::query_anchored`).

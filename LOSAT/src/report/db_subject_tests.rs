@@ -684,7 +684,11 @@ fn the_formats_say_what_loads_after_a_throw() {
     assert_eq!(of("15"), writes(AfterThrow::EndsReport));
     assert_eq!(of("8"), FormatThrow::Unread);
     for refused in ["5", "17"] {
-        assert_eq!(of(refused), FormatThrow::Refused, "{refused}");
+        assert_eq!(
+            of(refused),
+            FormatThrow::Refused(ThrowRefusal::Format),
+            "{refused}"
+        );
     }
     // Pairwise: the first shown alignment ends the run, a later one is skipped; query-anchored:
     // any shown alignment ends the run.
@@ -705,13 +709,23 @@ fn the_formats_say_what_loads_after_a_throw() {
         );
     }
     // A run's answer: a refusal refuses, a format that reads nothing leaves the other's.
-    let after = |outfmts: &[&str]| {
+    let answer = |outfmts: &[&str]| {
         FormatThrow::of_outfmts(
             outfmts.iter().copied(),
             Program::Blastp,
             RequestKind::Blastp,
         )
     };
+    let after = |outfmts: &[&str]| answer(outfmts).run();
+    // The reason of each refusal: a format of its own (outfmt 5, 17) before a mix.
+    assert_eq!(
+        answer(&["6", "0"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
+    );
+    assert_eq!(
+        answer(&["0", "5", "6"]),
+        FormatThrow::Refused(ThrowRefusal::Format)
+    );
     assert_eq!(
         after(&["6", "8"]),
         Some(RunThrow::every_row(AfterThrow::WritesRow))
@@ -801,6 +815,149 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     let none = RunLoads::new(None);
     assert!(none.loads(reports(), subject, identities).loaded(3));
     assert!(!none.ended());
+}
+
+// Review 3 of line DBID pfoff-3, N1 (probe `R/pfoff/p3/fix4`, `probe_n1.py`): a report whose load
+// ends the run ends NCBI's application there, so no report after it runs and no batch after it is
+// prefetched (`HitLoads::reaches`): BLASTP and TBLASTN, which model every batch's prefetch before
+// any byte, stop there, and a later batch's prefetch (its taxonomy reads, its stop) is never made.
+// The run reaches every report where no load ends it, none where an earlier call ended it, and up
+// to the report that ends it otherwise, at its last report too.
+#[test]
+fn the_run_reaches_no_report_after_the_one_that_ends_it() {
+    let throws = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let plain = |accession: &str| ParsedSubject::new(one_defline(vec![gb(accession, 1)])).unwrap();
+    // 1 throws; 0 and 2 are found.
+    let parsed: Vec<ParsedSubject> = vec![
+        plain("AAA00001"),
+        plain("AAA00002").found_instead(throws()),
+        plain("AAA00003"),
+    ];
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let every = |after| Some(RunThrow::every_row(after));
+    // Report 1 of three loads 1, which ends the run: reports 0 and 1 run, 2 does not.
+    let reports = || {
+        [
+            (true, vec![Some(0)]),
+            (true, vec![Some(2), Some(1)]),
+            (true, vec![Some(0), Some(2)]),
+        ]
+    };
+    let ended = HitLoads::of(every(AfterThrow::EndsRun), reports(), subject, none);
+    assert!(ended.reaches(0) && ended.reaches(1));
+    assert!(!ended.reaches(2) && !ended.reaches(3));
+    // A format that writes the row and goes on, one that ends its report, a refusal and a run
+    // whose formats read nothing: every report runs.
+    for loads in [
+        HitLoads::of(every(AfterThrow::WritesRow), reports(), subject, none),
+        HitLoads::of(every(AfterThrow::EndsReport), reports(), subject, none),
+        HitLoads::of(
+            FormatThrow::Refused(ThrowRefusal::Mixed),
+            reports(),
+            subject,
+            none,
+        ),
+        HitLoads::of(FormatThrow::Unread, reports(), subject, none),
+    ] {
+        assert!(loads.reaches(2) && loads.reaches(usize::MAX), "{loads:?}");
+    }
+    // The last report ends the run: every report runs, none after it.
+    let last = HitLoads::of(
+        every(AfterThrow::EndsRun),
+        [(true, vec![Some(0)]), (true, vec![Some(1)])],
+        subject,
+        none,
+    );
+    assert!(last.reaches(1) && !last.reaches(2));
+    // The reports made apart, one call each: a call after the end reaches none of its reports.
+    let run = RunLoads::new(every(AfterThrow::EndsRun));
+    let first = run.loads([(true, vec![Some(0), Some(1)])], subject, none);
+    assert!(first.reaches(0) && !first.reaches(1));
+    let later = run.loads([(true, vec![Some(2)])], subject, none);
+    assert!(!later.reaches(0));
+    // The keys renamed keep the reports reached.
+    assert!(!later.renamed(Some).reaches(0));
+}
+
+// Review 3 of line DBID pfoff-3, N2: a call of the library writes several formats with one
+// result, though `api::run` makes one search for each hit list size (`search_groups`): its
+// refusal of a subject whose lookup throws is the call's, over every format of the call
+// (`FormatThrow::of_search` with `ReportOutputs::other_outfmts`), so that the split by
+// `-num_descriptions` and `-num_alignments` does not change it; a search keeps its own answer
+// where the call does not refuse.
+#[test]
+fn the_call_refuses_a_throw_over_all_its_searches() {
+    use crate::blastinput::app::Program;
+    let search = |own: &[&str], others: &[&str]| {
+        FormatThrow::of_outfmts(own.iter().copied(), Program::Blastp, RequestKind::Blastp)
+            .of_search(others, Program::Blastp, RequestKind::Blastp)
+    };
+    let writes = |after| FormatThrow::Writes(RunThrow::every_row(after));
+    // One search: its own answer.
+    assert_eq!(search(&["6 qseqid slen"], &[]), writes(AfterThrow::EndsRun));
+    assert_eq!(
+        search(&["0", "6"], &[]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
+    );
+    // The table's search and outfmt 0's search of one call: both refuse, as one search of both.
+    assert_eq!(
+        search(&["6 qseqid slen"], &["0"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
+    );
+    assert_eq!(
+        search(&["0"], &["6 qseqid slen"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
+    );
+    // Outfmt 5 in another search: the call's refusal is outfmt 5's.
+    assert_eq!(
+        search(&["6"], &["5"]),
+        FormatThrow::Refused(ThrowRefusal::Format)
+    );
+    // Formats that agree: each search keeps its own answer (a table of fields that read nothing
+    // of the subject too).
+    assert_eq!(search(&["0"], &["8"]), writes(AfterThrow::SkipsAlignment));
+    assert_eq!(
+        search(&["6 qseqid slen"], &["15"]),
+        writes(AfterThrow::EndsRun)
+    );
+    assert_eq!(search(&["6 qseqid evalue"], &["6"]), FormatThrow::Unread);
+}
+
+// Review 3 of line DBID pfoff-3, L-2: the reason of a refusal of a subject whose lookup throws
+// says what NCBI does and why LOSAT refuses, one text for each situation
+// (`ThrowRefusal::words`): outfmt 5 and 17, which the command line meets too, say nothing of the
+// library; a call that mixes the formats says the library's reason.
+#[test]
+fn a_refused_throw_gives_the_reason_of_its_situation() {
+    let thrown = ParsedSubject::new(one_defline(vec![gb("AAA00002", 1)]))
+        .unwrap()
+        .found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        ))));
+    let reason = |load| thrown.fetched(false, true, load).unwrap_err();
+    let format = reason(HitLoad::Refused(ThrowRefusal::Format));
+    assert!(format.contains(LookupFailure::NCBI_THROWS), "{format}");
+    assert!(format.contains(ThrowRefusal::Format.words()), "{format}");
+    assert!(!format.contains("library"), "{format}");
+    let mixed = reason(HitLoad::Refused(ThrowRefusal::Mixed));
+    assert!(mixed.contains(ThrowRefusal::Mixed.words()), "{mixed}");
+    assert!(!mixed.contains(ThrowRefusal::Format.words()), "{mixed}");
+    // A throw that the formats write as NCBI does is not refused for what the lookup finds.
+    assert!(thrown.fetched(false, true, HitLoad::Throws).is_ok());
+    // The loads of a run whose formats refuse give each subject the reason.
+    let loads = HitLoads::of(
+        FormatThrow::Refused(ThrowRefusal::Format),
+        [(true, vec![Some(0)])],
+        |_| Some(&thrown),
+        |_, _| 0,
+    );
+    assert_eq!(loads.load(0), HitLoad::Refused(ThrowRefusal::Format));
+    assert!(loads.loaded(0));
 }
 
 // Review 1 of line DBID pfoff-2, H1 and M1 (probe `R/pfoff/p2/review1`, `*.H.*`, `*.H2.*`):
@@ -1757,12 +1914,12 @@ fn only_a_later_read_of_a_lookup_file_is_ncbis_crash() {
         path: path.clone(),
         source: std::io::Error::from_raw_os_error(5),
     });
-    assert_eq!(later.what_ncbi_does(), LookupFailure::NCBI_CRASHES);
+    assert_eq!(later.what_ncbi_does(None), LookupFailure::NCBI_CRASHES);
     assert_eq!(later.ncbi_message(), None);
     let without_text = |error: SeqDbError| {
         let failure = LookupFailure::of_error(&error);
         assert_eq!(
-            failure.what_ncbi_does(),
+            failure.what_ncbi_does(None),
             LookupFailure::NCBI_READS,
             "{error}"
         );
@@ -1787,8 +1944,10 @@ fn only_a_later_read_of_a_lookup_file_is_ncbis_crash() {
 // where `bp.U2.b1.dflt.0` does not; a local Seq-align id is not looked up there, and
 // `-num_alignments 0` shows none. The model of the loads (`HitLoads::of` of the reads that
 // `QueryGroup::read_order` makes before the rows) and the writer (`aligned_end` on its group
-// and the loads) end at the same alignment: the subjects aligned before it load, it throws,
-// those after it are never read (with `-num_descriptions 0`, no description line reads them).
+// and the subjects' own lookups, `lookup_throws`, not the model's loads; review 3 of the item,
+// L-4) end at the same alignment: the subjects aligned before it load, it throws, those after it
+// are never read (with `-num_descriptions 0`, no description line reads them), and no report
+// after it runs (`HitLoads::reaches`, N1).
 #[test]
 fn the_model_and_the_writer_end_the_run_at_the_same_alignment() {
     use crate::report::hit_sort::ReportSort;
@@ -1847,12 +2006,12 @@ fn the_model_and_the_writer_end_the_run_at_the_same_alignment() {
                 })
             })
             .collect();
-    let exception = LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO)
-        .exception()
-        .unwrap();
     // Where the model and the writer end the run, as the position among the shown alignments.
     let end = |after: AfterThrow, hits: Option<u8>, alignments: usize, local_first: bool| {
         let parsed = parsed(local_first);
+        // What the writer's lookups throw, from the subjects themselves.
+        let lookups: Vec<Option<crate::ncbi_exception::NcbiException>> =
+            parsed.iter().map(ParsedSubject::lookup_throws).collect();
         let reading = crate::report::pairwise::PairwiseReading {
             sort: ReportSort { hits, hsps: None },
             shown: Shown {
@@ -1879,12 +2038,14 @@ fn the_model_and_the_writer_end_the_run_at_the_same_alignment() {
             .map(|hit| writer.hits[hit][0] as u32)
             .collect();
         let writer_end = aligned_end(after, &aligned, |s_idx| {
-            loads
-                .thrown(s_idx as usize)
-                .map(|_| (&exception, parsed[s_idx as usize].alignment_id_is_local()))
+            lookups[s_idx as usize]
+                .as_ref()
+                .map(|exception| (exception, parsed[s_idx as usize].alignment_id_is_local()))
         })
         .map(|(at, _)| at);
         assert_eq!(run.ended(), writer_end.is_some());
+        // The report after it runs where the run did not end there.
+        assert_eq!(loads.reaches(1), writer_end.is_none());
         for (position, &s_idx) in aligned.iter().enumerate() {
             let expected = match writer_end {
                 Some(at) if position > at => HitLoad::Unread,

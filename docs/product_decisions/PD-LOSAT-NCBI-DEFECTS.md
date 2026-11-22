@@ -309,8 +309,12 @@
   where the first alignment shown is of such a sequence under a Seq-align id that is not local,
   else writes the skipped line for each of its HSPs; outfmt 1 to 4 stop where any alignment shown
   is; the description lines load the sequences that they show, in psiblast's rounds after the
-  first those of the two-part table of the first `-num_descriptions` HSPs; the refusal of 1.31
-  no longer covers outfmt 0 to 4; line DBID item pfoff-3, Owner-delegated, standing instruction
+  first those of the two-part table of the first `-num_descriptions` HSPs (at least the first:
+  `-num_descriptions 0` shows its sequence too; psiblast ignores `-sorthits` and `-sorthsps`, as
+  NCBI's does); a report that stops the run ends it there, and no later batch is prefetched; the
+  refusal of 1.31 no longer covers outfmt 0 to 4, but in a call of LOSAT's library that writes
+  them with a format of another writer it covers the whole call, also where the call searches
+  once for each hit list size; line DBID item pfoff-3, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.69; first 1.51 on the branch's own base, 1.68
   at the merge of dev that brought line NP's 1.67, 1.69 at the merge of dev that brought line NP
   item O2b's 1.68, 1.70 at the merge of dev that brought line NP item M4b-3's 1.69)
@@ -1527,7 +1531,8 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   Seq-align id that is not local, or at any alignment of outfmt 1 to 4 that loads one, or outfmt
   0's skipped line for each of its HSPs; the description lines load the sequences that they show,
   in psiblast's rounds after the first those of the two-part table of the first
-  `-num_descriptions` HSPs, then the alignments theirs up to the stop), a
+  `-num_descriptions` HSPs, at least the first, then the alignments theirs up to the stop, after
+  which no later batch is prefetched), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

@@ -7062,6 +7062,7 @@ pub(crate) fn repeat_search_hits(
     let result = {
         let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![crate::api::local_blast::FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -8164,8 +8165,10 @@ fn run_in_pool(
     // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
     // load throws, no report and no batch's prefetch after it loads anything
     // (`database::QueryFetches`).
-    let run_loads =
-        crate::report::db_subject::RunLoads::new(database::after_throw(&output_formats));
+    let run_loads = crate::report::db_subject::RunLoads::new(database::after_throw(
+        &output_formats,
+        outputs.other_outfmts,
+    ));
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
     // error ends the reading there; that comes in the batch being read when the records
@@ -9046,7 +9049,7 @@ fn run_in_pool(
                                 &titles,
                                 &hit_lists,
                                 &batch_spans,
-                                database::after_throw(&output_formats),
+                                run_loads.answer(),
                                 &batch_hit_lists,
                                 !args.ungapped,
                                 &prefetch_queries,
@@ -9704,7 +9707,7 @@ fn write_reports_untimed(
                 letters,
                 database::parsed_shown(output_formats),
                 (
-                    database::after_throw(output_formats),
+                    database::after_throw(output_formats, outputs.other_outfmts),
                     database::pairwise_reading(
                         output_formats,
                         args.formatting.report_sort(),

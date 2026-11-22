@@ -156,7 +156,10 @@ lines (some records carry a second one) stay as they are, the taxids come from t
   database); with 3 it is. `pfo_qm.faa` (review 2 of the item, L7) holds `mix2_qc.faa`'s `mix2_c` and then
   `pfo_q.faa`'s `P69905.2`, whose reports on `pa noacc_v5` have 13 and 12 Seq-aligns: with `BATCH_SIZE=1
   PRE_FETCH_SEQS_LIMIT=12` the first batch's prefetch is off and the second's on, and that prefetch throws.
-  `make_multidb.py --pfoff3-only MAKEBLASTDB` builds only these.
+  `pfo_qe.faa` (review 3 of the item, N1) holds `pfo_qr.faa`'s query, whose report on `pf3p pf3u` ends the run at
+  `XP_810001.1` where its batch's prefetch is off (`BATCH_SIZE=1 PRE_FETCH_SEQS_LIMIT=1`), then `bsub`'s letters, whose
+  batch has one Seq-align, so its prefetch is on and loads `bsub` (with `BLASTDB=btd_empty` NCBI crashes there): NCBI
+  never gets there. `make_multidb.py --pfoff3-only MAKEBLASTDB` builds only these.
 
 `.pjs` and `.njs` (the metadata with the build's paths and dates; no search reads them) are dropped.
 """
@@ -697,7 +700,8 @@ def make_pfoff2(binary):
 
 
 def make_pfoff3(binary):
-    """Builds pf3p and pf3u and writes pfo_qr.faa and pfo_qm.faa (line DBID pfoff-3, reviews 1 and 2 of the item)."""
+    """Builds pf3p and pf3u and writes pfo_qr.faa, pfo_qe.faa and pfo_qm.faa (line DBID pfoff-3, reviews 1 to 3 of the
+    item)."""
     query = ("IWVCGTEYVGHAEKMQHNPTFNQPWRLSAHCDYAQSMWQKPMTSECEELMWDMVKHMFIVHQEPSSGAHKPKKKQQLQGPWWWINPNWRWMRIPNIQTLTVIHD"
              "WWLNCHASYYTWFRYNVTKVDQQACCEEEYPPIRRFPWWHEELGPY")
     copies = ("MRIPWIQTLTVIHDWWLNCHASYYTWFRYNVTKVDQQACCEEENPPIRRFPWWHEELGPYHGAMVYYLNPTPLFSCGQYPERIDYRRPDTIWVCGTEYVVHAEKMQ"
@@ -717,6 +721,14 @@ def make_pfoff3(binary):
         f.write(">pfo_r a query whose second psiblast round shows two HSPs of pf3p before pf3u's bsub\n")
         for at in range(0, len(query), 60):
             f.write(query[at:at + 60] + "\n")
+    # Review 3 of the item, N1: pfo_r, whose report ends the run where a batch's prefetch is off, then bsub's letters,
+    # whose batch's prefetch is on and loads bsub (its taxid's lookup), which NCBI never makes.
+    with open(os.path.join(HERE, "pfo_qe.faa"), "w") as f:
+        for header, letters in ((">pfo_r a query whose report ends the run", query),
+                                (">pfo_e bsub's letters, a later batch whose prefetch is on", weak)):
+            f.write(header + "\n")
+            for at in range(0, len(letters), 60):
+                f.write(letters[at:at + 60] + "\n")
     records = []
     for name, which in (("mix2_qc.faa", 1), ("pfo_q.faa", 0)):
         with open(os.path.join(HERE, name)) as f:

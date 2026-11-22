@@ -812,12 +812,20 @@ fn parsed_shown(
 }
 
 /// What the formats `formats` do after a subject whose lookup throws where its batch's prefetch is
-/// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads).
+/// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads), with the call's refusal over
+/// the `-outfmt` values of its other searches, `others` (`FormatThrow::of_search`,
+/// `ReportOutputs::other_outfmts`).
 fn after_throw(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-) -> Option<crate::report::db_subject::RunThrow> {
+    others: &[&str],
+) -> crate::report::db_subject::FormatThrow {
     crate::report::db_subject::FormatThrow::of_outfmts(
         formats.iter().map(|format| format.outfmt),
+        crate::blastinput::app::Program::Tblastn,
+        crate::report::archive::options::RequestKind::Tblastn,
+    )
+    .of_search(
+        others,
         crate::blastinput::app::Program::Tblastn,
         crate::report::archive::options::RequestKind::Tblastn,
     )
@@ -875,9 +883,9 @@ fn pairwise_read_order<'l>(
 /// not write as NCBI (what they show, `parsed_shown`: `common::database::check_reported_parsed`,
 /// and where they join hits `refuse_joined_hits`; where only the prefetch reads a subject, a batch
 /// of `batches`, the query ranges of the batches of `hitlists`, whose prefetch is on reports it;
-/// whether every format writes a `Hit` that throws as NCBI does, `writes_thrown`, for the one
-/// answer of what the reports load, `hit_loads`, with how the pairwise reports read each query's
-/// subjects, `pairwise`). The packed
+/// what the formats do after a `Hit` that throws, `after_throw`, with the call's refusal over the
+/// `-outfmt` values of its other searches, `others`, for the one answer of what the reports load,
+/// `hit_loads`, with how the pairwise reports read each query's subjects, `pairwise`). The packed
 /// subjects are read from the database (`SubjectLetters::Stream`, one read each) instead of
 /// cloned from the copy.
 #[allow(clippy::too_many_arguments)]
@@ -888,6 +896,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
+    others: &[&str],
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
@@ -917,12 +926,12 @@ pub(super) fn reported_subjects(
         Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
         _ => None,
     };
-    let after = after_throw(formats);
+    let after = after_throw(formats, others);
     // A pairwise report's reads, of the subjects' lengths (`pairwise_read_order`), where its
     // batch reads them one by one.
     let pairwise_keys = |query: usize| -> Result<Option<crate::report::db_subject::PairwiseReads>> {
         let Some(reading) = pairwise
-            .filter(|_| after.is_some_and(|run| run.after.is_pairwise()))
+            .filter(|_| after.run().is_some_and(|run| run.after.is_pairwise()))
             .filter(|_| prefetch.reads_one_by_one(query))
         else {
             return Ok(None);
@@ -1080,7 +1089,7 @@ pub(super) fn reported_subjects(
 fn hit_loads<'p>(
     hitlists: &[KappaResultHitList],
     prefetch: &shared::BatchPrefetch,
-    after: Option<crate::report::db_subject::RunThrow>,
+    after: crate::report::db_subject::FormatThrow,
     pairwise_reads: Vec<Option<crate::report::db_subject::PairwiseReads>>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {

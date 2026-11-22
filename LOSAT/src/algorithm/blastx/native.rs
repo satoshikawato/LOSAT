@@ -1051,13 +1051,18 @@ impl ReportedAsks {
             })) || matches!(options.outfmt, 13..=16))
                 && !crate::algorithm::common::database::prefetch_always_off(),
             throw: crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
-                .map_or(crate::report::db_subject::FormatThrow::Refused, |format| {
-                    crate::report::db_subject::FormatThrow::of(
-                        format,
-                        options.tabular,
-                        crate::blastinput::app::Program::Blastx,
-                    )
-                }),
+                .map_or(
+                    crate::report::db_subject::FormatThrow::Refused(
+                        crate::report::db_subject::ThrowRefusal::Format,
+                    ),
+                    |format| {
+                        crate::report::db_subject::FormatThrow::of(
+                            format,
+                            options.tabular,
+                            crate::blastinput::app::Program::Blastx,
+                        )
+                    },
+                ),
             changed_by_load_throws: !crate::blastinput::app::ReportFormat::from_number(i32::from(
                 options.outfmt,
             ))
@@ -1073,11 +1078,18 @@ impl ReportedAsks {
 
     /// What the reports `options` of one call ask: each of them, with the batches' prefetch of
     /// the first, which NCBI's app runs for its one format
-    /// (`BlastFormatter_PreFetchSequenceData(..., GetFormattedOutputChoice())`).
-    pub(super) fn of_all(options: &[super::args::ResolvedOptions]) -> Self {
+    /// (`BlastFormatter_PreFetchSequenceData(..., GetFormattedOutputChoice())`), and the call's
+    /// refusal of a subject whose lookup throws over the `-outfmt` values of its other searches,
+    /// `others`, too (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
+    pub(super) fn of_all(options: &[super::args::ResolvedOptions], others: &[&str]) -> Self {
         let mut asks = options
             .iter()
             .fold(Self::default(), |asks, options| asks.or(Self::of(options)));
+        asks.throw = asks.throw.of_search(
+            others,
+            crate::blastinput::app::Program::Blastx,
+            crate::report::archive::options::RequestKind::Blastx,
+        );
         asks.prefetched = options
             .first()
             .is_some_and(|options| Self::of(options).prefetched);
@@ -1335,7 +1347,7 @@ pub(super) fn reported_batch(
         unfetched,
         options.shown_lists(),
         (
-            crate::report::db_subject::FormatThrow::of_run([asks.throw]),
+            asks.throw,
             // The pairwise report reads the subjects that it shows as its writer reads them.
             options.pairwise_reading(),
         ),

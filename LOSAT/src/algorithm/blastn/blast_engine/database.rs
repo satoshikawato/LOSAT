@@ -661,7 +661,7 @@ impl BlastnDatabase {
         titles: &DatabaseTitles,
         before: &[Option<BlastnHitList>],
         spans: &[std::ops::Range<usize>],
-        after: Option<crate::report::db_subject::RunThrow>,
+        after: crate::report::db_subject::FormatThrow,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
@@ -1758,11 +1758,11 @@ fn pairwise_read_order<'p>(
 /// report's reads (`pairwise_read_order`). `None` otherwise (the HSP lists' order).
 fn pairwise_keys<'p>(
     hit_list: &Option<BlastnHitList>,
-    after: Option<crate::report::db_subject::RunThrow>,
+    after: crate::report::db_subject::FormatThrow,
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     parsed: impl Fn(u32) -> Option<&'p ParsedSubject>,
 ) -> Option<crate::report::db_subject::ReportKeys> {
-    let reading = pairwise.filter(|_| after.is_some_and(|run| run.after.is_pairwise()))?;
+    let reading = pairwise.filter(|_| after.run().is_some_and(|run| run.after.is_pairwise()))?;
     Some(crate::report::db_subject::ReportKeys::Pairwise(
         pairwise_read_order(std::slice::from_ref(hit_list), reading, parsed),
     ))
@@ -1782,16 +1782,17 @@ fn report_loads(
     run.loads(
         hit_lists.iter().map(|hit_list| {
             let parsed = |oid: u32| titled_parsed(titles, oid as usize);
-            let keys = pairwise_keys(hit_list, run.run(), pairwise, parsed).unwrap_or_else(|| {
-                crate::report::db_subject::ReportKeys::Entries(
-                    shown_lists(hit_list)
-                        .iter()
-                        .map(|hsp_list| {
-                            (!hsp_list.hsps.is_empty()).then_some(hsp_list.oid as usize)
-                        })
-                        .collect(),
-                )
-            });
+            let keys =
+                pairwise_keys(hit_list, run.answer(), pairwise, parsed).unwrap_or_else(|| {
+                    crate::report::db_subject::ReportKeys::Entries(
+                        shown_lists(hit_list)
+                            .iter()
+                            .map(|hsp_list| {
+                                (!hsp_list.hsps.is_empty()).then_some(hsp_list.oid as usize)
+                            })
+                            .collect(),
+                    )
+                });
             (true, keys)
         }),
         |ordinal| titled_parsed(titles, ordinal),
@@ -1892,12 +1893,20 @@ impl QueryFetches<'_> {
 }
 
 /// What the formats `output_formats` do after a subject whose lookup throws where its batch's
-/// prefetch is off (`FormatThrow::of_run`, for `hit_loads` and the run's `RunLoads`).
+/// prefetch is off (`FormatThrow::of_formats`, for `hit_loads` and the run's `RunLoads`), with the
+/// call's refusal over the `-outfmt` values of its other searches, `others`
+/// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
 pub(super) fn after_throw(
     output_formats: &[BlastnOutputFormat],
-) -> Option<crate::report::db_subject::RunThrow> {
-    crate::report::db_subject::FormatThrow::of_run(
+    others: &[&str],
+) -> crate::report::db_subject::FormatThrow {
+    crate::report::db_subject::FormatThrow::of_formats(
         output_formats.iter().map(BlastnOutputFormat::format_throw),
+    )
+    .of_search(
+        others,
+        crate::blastinput::app::Program::Blastn,
+        crate::report::archive::options::RequestKind::Blastn,
     )
 }
 
@@ -1935,7 +1944,7 @@ pub(super) fn reports_unchanged_by_load_throws(output_formats: &[BlastnOutputFor
 pub(super) fn hit_loads<'p>(
     hit_lists: &[Option<BlastnHitList>],
     prefetch: &shared::BatchPrefetch,
-    after: Option<crate::report::db_subject::RunThrow>,
+    after: crate::report::db_subject::FormatThrow,
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
@@ -2008,7 +2017,7 @@ pub(super) fn reported_subjects(
     letters: bool,
     shown: ParsedShown,
     (after, pairwise): (
-        Option<crate::report::db_subject::RunThrow>,
+        crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
     ),
     batches: &[std::ops::Range<usize>],

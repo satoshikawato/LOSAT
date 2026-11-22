@@ -139,6 +139,7 @@ fn the_reported_sequences_are_read_only_for_reports_of_letters() {
             SubjectLetters::Stream(&stream),
             letters,
             &[],
+            &[],
             None,
             &[],
         )
@@ -194,6 +195,7 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             &mut hitlists,
             SubjectLetters::Stream(&stream),
             true,
+            &[],
             &[],
             None,
             &[],

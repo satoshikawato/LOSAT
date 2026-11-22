@@ -583,8 +583,8 @@ impl ReportedSubjects {
     /// following lists whose Seq-align ids match as one subject (`BatchResults::shown`, which
     /// every report that NCBI cuts reads, `ResolvedOptions::shown_lists`: BLAST XML, XML2 and
     /// JSON too, whose `Hit`s `HitLoads` reads from the same lists, `BatchResults::cut_lists`).
-    /// `after`: what the reports do after a subject whose lookup throws (`FormatThrow::of_run`;
-    /// `None`: a report refuses it), for `HitLoads::of` (where `one_by_one`, which subjects throw
+    /// `after`: what the reports do after a subject whose lookup throws (the run's answer,
+    /// `FormatThrow::of_formats`, or a refusal with its reason), for `HitLoads::of` (where `one_by_one`, which subjects throw
     /// and which no report loads; the refusals, the names, the tables' rows, the taxonomy reads
     /// and the run's record of the loads, `note_loaded`, take that one answer), with how a
     /// pairwise report reads the subjects (`pairwise_read_order`).
@@ -608,7 +608,7 @@ impl ReportedSubjects {
         one_by_one: bool,
         cut: usize,
         after: (
-            Option<crate::report::db_subject::RunThrow>,
+            crate::report::db_subject::FormatThrow,
             Option<crate::report::pairwise::PairwiseReading>,
         ),
     ) -> Result<Self> {
@@ -684,7 +684,7 @@ impl ReportedSubjects {
         // keeps (`BatchResults::cut_lists`).
         let (after, pairwise_reading) = after;
         let pairwise_reading = pairwise_reading
-            .filter(|_| one_by_one && after.is_some_and(|run| run.after.is_pairwise()));
+            .filter(|_| one_by_one && after.run().is_some_and(|run| run.after.is_pairwise()));
         let mut pairwise_reads = Vec::new();
         if let Some(reading) = pairwise_reading {
             for batch in batches.iter() {

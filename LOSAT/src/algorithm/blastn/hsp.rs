@@ -146,7 +146,9 @@ impl BlastnOutputFormat {
                 FormatThrow::Writes(RunThrow::every_row(view.after_throw()))
             }
             BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => FormatThrow::Unread,
-            BlastnOutputFormat::Xml | BlastnOutputFormat::Sam(_) => FormatThrow::Refused,
+            BlastnOutputFormat::Xml | BlastnOutputFormat::Sam(_) => {
+                FormatThrow::Refused(crate::report::db_subject::ThrowRefusal::Format)
+            }
         }
     }
 

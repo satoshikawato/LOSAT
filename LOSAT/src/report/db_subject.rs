@@ -252,13 +252,10 @@ impl LookupFailure {
     pub const NCBI_READS: &'static str = "NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error, and where the prefetch is off its formatters fail to read it";
 
     /// What NCBI does where it reads a subject whose lookup throws NCBI's exception at a place
-    /// LOSAT knows ([`LookupFailure::exception`]), and why LOSAT refuses it in this run: LOSAT
-    /// writes each format's failure as NCBI does (`FormatThrow::of`) but for the formats whose
-    /// writers it does not make so, and a call of the library that mixes formats that stop at
-    /// other places after it (`FormatThrow::and`): NCBI's reference for such a call is one run of
-    /// each format, which stop at different places with different exit statuses and standard
-    /// errors, where the call is one search with one result (review 2 of line DBID pfoff-3, M2).
-    pub const NCBI_THROWS: &'static str = "NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error, and where the prefetch is off its formatters fail to read it and stop or go on as each format does; LOSAT writes that for outfmt 0 to 4, 6, 7, 10, 13 to 16, 18 and 20, but not for outfmt 5 or 17, nor in a call of LOSAT's library that mixes outfmt 0, outfmt 1 to 4 and the other formats, which NCBI writes in runs of their own that stop at different places, where the call is one search with one result";
+    /// LOSAT knows ([`LookupFailure::exception`]): LOSAT writes each format's failure as NCBI does
+    /// (`FormatThrow::of`), and refuses it only for the reason that the run gives
+    /// ([`ThrowRefusal::words`], added by [`LookupFailure::what_ncbi_does`]).
+    pub const NCBI_THROWS: &'static str = "NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error, and where the prefetch is off its formatters fail to read it and stop or go on as each format does";
 
     /// What NCBI does where its lookup reads a file that it crashes on (an ISAM whose header does
     /// not fit its files, as an empty `.psi` or `.psd`: SIGSEGV; review 4 of line DBID loadord):
@@ -326,12 +323,17 @@ impl LookupFailure {
 
     /// What NCBI does where it reads the subject ([`LookupFailure::NCBI_READS`],
     /// [`LookupFailure::NCBI_THROWS`] where its exception is known,
-    /// [`LookupFailure::NCBI_CRASHES`]), for the reason of LOSAT's refusal.
-    pub fn what_ncbi_does(&self) -> &'static str {
-        match self.ncbi {
-            NcbiFailure::Message if self.exception().is_some() => Self::NCBI_THROWS,
-            NcbiFailure::Message | NcbiFailure::Other => Self::NCBI_READS,
-            NcbiFailure::Crashes => Self::NCBI_CRASHES,
+    /// [`LookupFailure::NCBI_CRASHES`]), for the reason of LOSAT's refusal: where its exception is
+    /// known and the run's formats refuse it (`refused`, [`FormatThrow::Refused`]), with the
+    /// words of that situation ([`ThrowRefusal::words`]), the one text of each situation.
+    pub fn what_ncbi_does(&self, refused: Option<ThrowRefusal>) -> std::borrow::Cow<'static, str> {
+        match (self.ncbi, refused) {
+            (NcbiFailure::Message, Some(refused)) if self.exception().is_some() => {
+                format!("{}; {}", Self::NCBI_THROWS, refused.words()).into()
+            }
+            (NcbiFailure::Message, None) if self.exception().is_some() => Self::NCBI_THROWS.into(),
+            (NcbiFailure::Message | NcbiFailure::Other, _) => Self::NCBI_READS.into(),
+            (NcbiFailure::Crashes, _) => Self::NCBI_CRASHES.into(),
         }
     }
 }
@@ -616,13 +618,15 @@ impl ParsedSubject {
     /// outfmt 6, 7, 10 and 20, the organism report of outfmt 18) is not refused for what the lookup
     /// finds (it finds nothing: it throws before any definition line is read), and one that no
     /// report loads (`HitLoad::Unread`: shown only after such a `Hit`) is not refused at all;
-    /// every other subject (`HitLoad::Loaded`) is refused as above, a lookup that fails on a file
-    /// among them (outfmt 5 here, before any byte is written).
+    /// every other subject (`HitLoad::Loaded`, `HitLoad::Refused`) is refused as above, a lookup
+    /// that fails on a file among them (outfmt 5 here, before any byte is written; the reason of
+    /// a run whose formats refuse it, `HitLoad::Refused`).
     pub fn fetched(&self, taxonomy: bool, one_by_one: bool, load: HitLoad) -> Result<(), String> {
         match load {
             HitLoad::Unread => return Ok(()),
             HitLoad::Throws => {}
-            HitLoad::Loaded => self.found_fetched(taxonomy)?,
+            HitLoad::Loaded => self.found_fetched(taxonomy, None)?,
+            HitLoad::Refused(refused) => self.found_fetched(taxonomy, Some(refused))?,
         }
         self.weakly_fetched(one_by_one)
     }
@@ -666,7 +670,7 @@ impl ParsedSubject {
                 | FoundInstead::HoldersUnknown { .. }
                 | FoundInstead::Failed(_)
                 | FoundInstead::CopyApart(_, CopyApart::TaxonomyTexts)),
-            ) => return Err(self.found_reason(found, false).unwrap_or_default()),
+            ) => return Err(self.found_reason(found, false, None).unwrap_or_default()),
             Some(FoundInstead::Sequence(_) | FoundInstead::Nothing) => {
                 if let Some(holder) = self.also_held {
                     return Err(format!(
@@ -730,7 +734,7 @@ impl ParsedSubject {
 
     /// `fetched` but for the weak matches: what the lookup of the Seq-align id finds
     /// (`found_instead`), whatever the batch's prefetch.
-    fn found_fetched(&self, taxonomy: bool) -> Result<(), String> {
+    fn found_fetched(&self, taxonomy: bool, refused: Option<ThrowRefusal>) -> Result<(), String> {
         if self.unfetchable {
             return Err(format!(
                 "has the Seq-align id {}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)",
@@ -739,14 +743,21 @@ impl ParsedSubject {
         }
         match &self.found_instead {
             None => Ok(()),
-            Some(found) => self.found_reason(found, taxonomy).map_or(Ok(()), Err),
+            Some(found) => self
+                .found_reason(found, taxonomy, refused)
+                .map_or(Ok(()), Err),
         }
     }
 
     /// The reason of a refusal of what the lookup of the Seq-align id finds, `found`, for a format
     /// that reads the Bioseq (`fetched`; `taxonomy` as there), or for psiblast's PSSM
     /// (`pssm_read`); `None` for a copy of the record that such a report shows as the subject.
-    fn found_reason(&self, found: &FoundInstead, taxonomy: bool) -> Option<String> {
+    fn found_reason(
+        &self,
+        found: &FoundInstead,
+        taxonomy: bool,
+        refused: Option<ThrowRefusal>,
+    ) -> Option<String> {
         let id = String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
         Some(match found {
             FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(_, CopyApart::Title)
@@ -774,7 +785,7 @@ impl ParsedSubject {
             ),
             FoundInstead::Failed(failure) => format!(
                 "has the Seq-align id {id}, whose lookup in the database fails ({failure}; {})",
-                failure.what_ncbi_does()
+                failure.what_ncbi_does(refused)
             ),
             FoundInstead::ThrowsOnId(message) => format!(
                 "has the Seq-align id {id}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)"
@@ -802,7 +813,7 @@ impl ParsedSubject {
         let reason = || {
             self.found_instead
                 .as_ref()
-                .and_then(|found| self.found_reason(found, false))
+                .and_then(|found| self.found_reason(found, false, None))
                 .unwrap_or_default()
         };
         match &self.found_instead {
@@ -821,7 +832,7 @@ impl ParsedSubject {
             Some(FoundInstead::Failed(failure)) => Prefetched::Failed(format!(
                 "has the Seq-align id {}, whose lookup in the database fails ({failure}; {})",
                 String::from_utf8_lossy(&self.alignment_fasta()),
-                failure.what_ncbi_does()
+                failure.what_ncbi_does(None)
             )),
             Some(FoundInstead::Sequence(other)) => Prefetched::Another {
                 other: Some(*other),
@@ -2037,13 +2048,40 @@ impl RunThrow {
     }
 }
 
+/// Why LOSAT refuses a subject whose lookup throws where its batch's prefetch is off
+/// ([`FormatThrow::Refused`]): the one owner of the words of each situation
+/// ([`ThrowRefusal::words`], in the refusal's reason, `LookupFailure::what_ncbi_does`). Ordered:
+/// a format that refuses it alone comes before a mix of formats (`FormatThrow::and`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ThrowRefusal {
+    /// A call of the library whose formats stop at different places after the throw: outfmt 0,
+    /// outfmt 1 to 4 and the other formats (`FormatThrow::and`), in one search or in one search
+    /// per hit list size (`FormatThrow::of_search`).
+    Mixed,
+    /// A format whose writer LOSAT does not make write it as NCBI does (outfmt 5, 17).
+    Format,
+}
+
+impl ThrowRefusal {
+    /// What LOSAT does not write, after NCBI's part of the reason
+    /// (`LookupFailure::NCBI_THROWS`): the command line meets `Format` alone (its one format),
+    /// a call of the library either.
+    pub fn words(self) -> &'static str {
+        match self {
+            ThrowRefusal::Format => "LOSAT does not write that for outfmt 5 or 17",
+            ThrowRefusal::Mixed => "LOSAT does not write that in a call of its library that mixes outfmt 0, outfmt 1 to 4 and the other formats, also where the call searches once for each hit list size: NCBI BLAST+ writes each format in a run of its own, and those runs stop at different places with different exit statuses and standard errors, where the call has one result",
+        }
+    }
+}
+
 /// What one format of a run does with a subject whose lookup throws where its batch's prefetch is
 /// off ([`RunThrow`]), as [`FormatThrow::of_run`] takes it for the run.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FormatThrow {
-    /// LOSAT refuses such a subject (`ParsedSubject::fetched`): a format whose writer LOSAT does
-    /// not make write it as NCBI does (outfmt 5, 17).
-    Refused,
+    /// LOSAT refuses such a subject (`ParsedSubject::fetched`), for the reason given: a format
+    /// whose writer LOSAT does not make write it as NCBI does (outfmt 5, 17), or a call whose
+    /// formats stop at different places after it (`and`, `of_search`).
+    Refused(ThrowRefusal),
     /// The format reads nothing of the subject (a table of fields that read nothing of it; the
     /// Seq-annots and the archive), so NCBI never looks it up there.
     #[default]
@@ -2081,7 +2119,7 @@ impl FormatThrow {
             | ReportFormat::AsnBinary
             | ReportFormat::ArchiveFormat
             | ReportFormat::JsonSeqalign => FormatThrow::Unread,
-            _ => FormatThrow::Refused,
+            _ => FormatThrow::Refused(ThrowRefusal::Format),
         }
     }
 
@@ -2095,7 +2133,7 @@ impl FormatThrow {
     ) -> Self {
         match parsed_outfmt(outfmt, app) {
             Some((format, spec)) => Self::of(format, spec.as_ref(), program),
-            None => FormatThrow::Refused,
+            None => FormatThrow::Refused(ThrowRefusal::Format),
         }
     }
 
@@ -2103,17 +2141,23 @@ impl FormatThrow {
     /// nothing leaves the other's answer, and of two that write, the one that loads more after the
     /// throw (a subject is loaded where some report loads it), at the rows that either loads at.
     /// A pairwise report (outfmt 0 to 4, `AfterThrow::is_pairwise`) with a format of another
-    /// writer refuses: it loads in an order of its own (the library's calls of several formats).
+    /// writer refuses (`ThrowRefusal::Mixed`): it loads in an order of its own (the library's
+    /// calls of several formats); of two refusals, a format's own comes first.
     pub fn and(self, other: Self) -> Self {
         use super::tabular::SubjectFetch;
         match (self, other) {
-            (FormatThrow::Refused, _) | (_, FormatThrow::Refused) => FormatThrow::Refused,
+            (FormatThrow::Refused(one), FormatThrow::Refused(other)) => {
+                FormatThrow::Refused(one.max(other))
+            }
+            (FormatThrow::Refused(why), _) | (_, FormatThrow::Refused(why)) => {
+                FormatThrow::Refused(why)
+            }
             (FormatThrow::Unread, answer) | (answer, FormatThrow::Unread) => answer,
             (FormatThrow::Writes(one), FormatThrow::Writes(other))
                 if one.after != other.after
                     && (one.after.is_pairwise() || other.after.is_pairwise()) =>
             {
-                FormatThrow::Refused
+                FormatThrow::Refused(ThrowRefusal::Mixed)
             }
             (FormatThrow::Writes(one), FormatThrow::Writes(other)) => {
                 FormatThrow::Writes(RunThrow {
@@ -2128,31 +2172,67 @@ impl FormatThrow {
         }
     }
 
-    /// What the reports of a run do after a subject whose lookup throws ([`FormatThrow::and`] of
-    /// its formats): `None` where a format refuses it or no format reads it, so that every subject
-    /// is loaded ([`HitLoads::of`]). The one answer of every program.
-    pub fn of_run(formats: impl IntoIterator<Item = Self>) -> Option<RunThrow> {
-        match formats
+    /// The answer of the formats `formats` of a run ([`FormatThrow::and`] of them; `Unread`
+    /// without one): the one answer of every program, which [`HitLoads::of`] takes.
+    pub fn of_formats(formats: impl IntoIterator<Item = Self>) -> Self {
+        formats
             .into_iter()
             .fold(FormatThrow::Unread, FormatThrow::and)
-        {
+    }
+
+    /// What the reports do after a subject whose lookup throws: `None` where a format refuses it
+    /// or no format reads it, so that every subject is loaded ([`HitLoads::of`]).
+    pub fn run(self) -> Option<RunThrow> {
+        match self {
             FormatThrow::Writes(run) => Some(run),
-            FormatThrow::Refused | FormatThrow::Unread => None,
+            FormatThrow::Refused(_) | FormatThrow::Unread => None,
         }
     }
 
-    /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run in `app`'s
+    /// [`FormatThrow::run`] of the answer of the formats `formats` ([`FormatThrow::of_formats`]).
+    pub fn of_run(formats: impl IntoIterator<Item = Self>) -> Option<RunThrow> {
+        Self::of_formats(formats).run()
+    }
+
+    /// [`FormatThrow::of_formats`] of the `-outfmt` values `outfmts` of `program`'s run in `app`'s
     /// application.
     pub fn of_outfmts<'a>(
         outfmts: impl IntoIterator<Item = &'a str>,
         program: crate::blastinput::app::Program,
         app: crate::report::archive::options::RequestKind,
-    ) -> Option<RunThrow> {
-        Self::of_run(
+    ) -> Self {
+        Self::of_formats(
             outfmts
                 .into_iter()
                 .map(|outfmt| Self::of_outfmt(outfmt, program, app)),
         )
+    }
+
+    /// The answer of one search of a call, whose own formats answer `self`: the call's refusal
+    /// where the formats of the whole call refuse the throw together, `self` with those that the
+    /// call's other searches write (`others`, their `-outfmt` values of `program` in `app`'s
+    /// application: `api::run`'s searches by hit list size, `ReportOutputs::other_outfmts`; none
+    /// on the command line), else `self`. A call has one result: the rule is the call's, so that
+    /// the split of its formats by `-num_descriptions` and `-num_alignments` does not change it
+    /// (review 3 of line DBID pfoff-3, N2). A search whose own formats read nothing keeps
+    /// `Unread` where the call does not refuse.
+    pub fn of_search(
+        self,
+        others: &[&str],
+        program: crate::blastinput::app::Program,
+        app: crate::report::archive::options::RequestKind,
+    ) -> Self {
+        match self.and(Self::of_outfmts(others.iter().copied(), program, app)) {
+            FormatThrow::Refused(why) => FormatThrow::Refused(why),
+            FormatThrow::Unread | FormatThrow::Writes(_) => self,
+        }
+    }
+}
+
+/// A run's answer given as [`FormatThrow::run`] gives it (`None`: every subject is loaded).
+impl From<Option<RunThrow>> for FormatThrow {
+    fn from(run: Option<RunThrow>) -> Self {
+        run.map_or(FormatThrow::Unread, FormatThrow::Writes)
     }
 }
 
@@ -2259,16 +2339,26 @@ pub enum HitLoad {
     /// reports end there, or only in rows that read nothing of it (a table of `nident` alone, HSPs
     /// of no identities) where its lookup would throw.
     Unread,
+    /// A report loads the subject, as `Loaded`, in a run whose formats LOSAT refuses after a
+    /// subject whose lookup throws (`FormatThrow::Refused`): such a lookup is refused there
+    /// (`ParsedSubject::fetched`), for this reason.
+    Refused(ThrowRefusal),
 }
 
 /// [`HitLoad`] of each subject of a call's reports, by the key that the caller gives its subjects
 /// (a rank, or an ordinal id): those whose lookup throws where a report reaches them, with the
 /// exception, and those that no report loads; every other subject is loaded. Empty (every subject
-/// loaded) where a format of the run refuses a lookup that throws, or no report reads one by one.
+/// loaded) where a format of the run refuses a lookup that throws (with the refusal's reason), or
+/// no report reads one by one. With the reports that NCBI's run reaches ([`HitLoads::reaches`]).
 #[derive(Debug, Default)]
 pub struct HitLoads {
     throws: std::collections::HashMap<usize, crate::ncbi_exception::NcbiException>,
     unread: std::collections::HashSet<usize>,
+    /// Why the run's formats refuse a lookup that throws (`FormatThrow::Refused`).
+    refused: Option<ThrowRefusal>,
+    /// The number of the reports given that NCBI's run reaches, where a report's load ended it
+    /// (`None`: the run reaches every one).
+    reached: Option<usize>,
 }
 
 impl HitLoads {
@@ -2303,17 +2393,22 @@ impl HitLoads {
     /// A report whose batch prefetches loads every subject (a lookup that throws stops the
     /// prefetch first, `common::database::batch_prefetch_stop`). A subject is loaded where some
     /// report loads it; one that throws in a report throws in every report that reaches it.
-    /// `run` `None`: a format of the run refuses the throw or none reads the subjects, and every
-    /// subject is loaded (`ParsedSubject::fetched` refuses such a subject where a format reads it).
+    /// `run` (the run's answer, [`FormatThrow::of_formats`]; `None` for `Unread`) that does not
+    /// write: a format of the run refuses the throw (`HitLoad::Refused`, with the reason) or none
+    /// reads the subjects, and every subject is loaded (`ParsedSubject::fetched` refuses such a
+    /// subject where a format reads it).
+    ///
+    /// NCBI's application ends at the report whose load ends the run (`CATCH_ALL`): no report,
+    /// and no batch's prefetch, after it runs ([`HitLoads::reaches`]).
     pub fn of<'p, K: Into<ReportKeys>>(
-        run: Option<RunThrow>,
+        run: impl Into<FormatThrow>,
         reports: impl IntoIterator<Item = (bool, K)>,
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
         identities: impl Fn(usize, usize) -> usize,
     ) -> Self {
         Self::after(
             &std::cell::Cell::new(false),
-            run,
+            run.into(),
             reports,
             parsed,
             identities,
@@ -2325,18 +2420,30 @@ impl HitLoads {
     /// too ([`RunLoads::loads`]).
     fn after<'p, K: Into<ReportKeys>>(
         ended: &std::cell::Cell<bool>,
-        run: Option<RunThrow>,
+        run: FormatThrow,
         reports: impl IntoIterator<Item = (bool, K)>,
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
         identities: impl Fn(usize, usize) -> usize,
     ) -> Self {
         let mut loads = HitLoads::default();
-        let Some(run) = run else {
-            return loads;
+        let run = match run {
+            FormatThrow::Writes(run) => run,
+            FormatThrow::Refused(why) => {
+                loads.refused = Some(why);
+                return loads;
+            }
+            FormatThrow::Unread => return loads,
         };
         let mut loaded = std::collections::HashSet::new();
         let mut passed = std::collections::HashSet::new();
+        // The reports given, of which the run reaches those before the first that comes after
+        // its end (`reached`).
+        let mut given = 0;
         for (report, (one_by_one, keys)) in reports.into_iter().enumerate() {
+            if ended.get() {
+                loads.reached.get_or_insert(report);
+            }
+            given = report + 1;
             let subjects = match keys.into() {
                 ReportKeys::Pairwise(reads) => {
                     debug_assert!(one_by_one && run.after.is_pairwise());
@@ -2411,6 +2518,9 @@ impl HitLoads {
                 passed.extend(keys.filter(|&key| key != first));
             }
         }
+        if ended.get() {
+            loads.reached.get_or_insert(given);
+        }
         loads.unread = passed
             .into_iter()
             .filter(|key| !loaded.contains(key) && !loads.throws.contains_key(key))
@@ -2480,6 +2590,8 @@ impl HitLoads {
                 .filter_map(|(old, exception)| Some((key(old)?, exception)))
                 .collect(),
             unread: self.unread.into_iter().filter_map(&key).collect(),
+            refused: self.refused,
+            reached: self.reached,
         }
     }
 
@@ -2489,6 +2601,8 @@ impl HitLoads {
             HitLoad::Throws
         } else if self.unread.contains(&key) {
             HitLoad::Unread
+        } else if let Some(why) = self.refused {
+            HitLoad::Refused(why)
         } else {
             HitLoad::Loaded
         }
@@ -2496,7 +2610,15 @@ impl HitLoads {
 
     /// Whether a report (or a batch's prefetch) loads the subject `key`.
     pub fn loaded(&self, key: usize) -> bool {
-        self.load(key) == HitLoad::Loaded
+        matches!(self.load(key), HitLoad::Loaded | HitLoad::Refused(_))
+    }
+
+    /// Whether NCBI's run reaches the report `report` of those given (counted from 0): false for
+    /// every report after the one whose load ended the run, and for every report where an earlier
+    /// call of the run ended it ([`RunLoads::loads`]). A batch whose first report the run does not
+    /// reach is not prefetched either (NCBI's application ends before it, `CATCH_ALL`).
+    pub fn reaches(&self, report: usize) -> bool {
+        self.reached.is_none_or(|reached| report < reached)
     }
 
     /// The exception that the `Hit` of the subject `key` throws (`HitLoad::Throws`).
@@ -2522,23 +2644,24 @@ impl HitLoads {
 /// pfoff-2, L1).
 #[derive(Debug, Default)]
 pub struct RunLoads {
-    run: Option<RunThrow>,
+    answer: FormatThrow,
     ended: std::cell::Cell<bool>,
 }
 
 impl RunLoads {
-    /// The record of a run whose reports do `run` after a throw, before any report.
-    pub fn new(run: Option<RunThrow>) -> Self {
+    /// The record of a run whose reports answer a throw with `answer` (the run's answer,
+    /// [`FormatThrow::of_formats`]), before any report.
+    pub fn new(answer: impl Into<FormatThrow>) -> Self {
         RunLoads {
-            run,
+            answer: answer.into(),
             ended: std::cell::Cell::new(false),
         }
     }
 
-    /// What the run's reports do after a subject whose lookup throws (`None`: a report refuses
-    /// it, or none reads one by one).
-    pub fn run(&self) -> Option<RunThrow> {
-        self.run
+    /// The run's answer to a subject whose lookup throws, as `new` took it (what its reports do
+    /// after it, `FormatThrow::run`, or why it refuses it).
+    pub fn answer(&self) -> FormatThrow {
+        self.answer
     }
 
     /// Whether a report's load ended the run (NCBI's application ends there).
@@ -2554,7 +2677,7 @@ impl RunLoads {
         parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
         identities: impl Fn(usize, usize) -> usize,
     ) -> HitLoads {
-        HitLoads::after(&self.ended, self.run, reports, parsed, identities)
+        HitLoads::after(&self.ended, self.answer, reports, parsed, identities)
     }
 }
 

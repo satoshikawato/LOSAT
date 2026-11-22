@@ -2119,15 +2119,16 @@ impl ListedTitles<'_> {
     /// call): `prefetch` tells by query whether its batch reads one by one
     /// (`BatchPrefetch::reads_one_by_one`); the `Hit`s are those that `blast_xml::write_blastp_xml`
     /// makes, of the lists with HSPs. `run`: what the run's formats do after a subject whose
-    /// lookup throws (`FormatThrow::of_outfmts`; `None`: every subject is loaded), at the rows
-    /// that load it (by the HSPs' identities, the Seq-align's `num_ident`, as `fetched_ranks`).
+    /// lookup throws (the call's answer, `FormatThrow::of_outfmts` and `FormatThrow::of_search`;
+    /// every subject is loaded where it writes nothing, `FormatThrow::run`), at the rows that load
+    /// it (by the HSPs' identities, the Seq-align's `num_ident`, as `fetched_ranks`).
     /// A pairwise run (outfmt 0 to 4) reads of query `query` what its writer reads,
     /// `pairwise_reads(query)` (by rank), asked where its batch reads one by one.
     pub(super) fn hit_loads(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
-        run: Option<crate::report::db_subject::RunThrow>,
+        run: crate::report::db_subject::FormatThrow,
         pairwise_reads: impl Fn(usize) -> crate::report::db_subject::PairwiseReads,
     ) -> HitLoads {
         let lists = |query: usize| {
@@ -2135,8 +2136,13 @@ impl ListedTitles<'_> {
                 &hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
             })
         };
-        let run = run.filter(|_| !self.parsed.is_empty());
-        let pairwise = run.is_some_and(|run| run.after.is_pairwise());
+        // Without a subject of parsed Seq-ids no lookup throws.
+        let run = if self.parsed.is_empty() {
+            crate::report::db_subject::FormatThrow::Unread
+        } else {
+            run
+        };
+        let pairwise = run.run().is_some_and(|run| run.after.is_pairwise());
         HitLoads::of(
             run,
             (0..hit_lists.len()).map(|query| {

@@ -3274,6 +3274,7 @@ fn run_batch_loop(
     // (`database::report_loads`).
     let run_loads = crate::report::db_subject::RunLoads::new(super::super::database::after_throw(
         outputs.formats.iter().map(|format| format.outfmt),
+        outputs.other_outfmts,
     ));
     // Whether the reports write the same where every load of a subject with a positive taxid throws
     // (`db_subject::unchanged_by_load_throws`).
@@ -3673,7 +3674,7 @@ fn run_batch_loop(
                     &done.hits,
                     done.searched.len(),
                     &done.spans,
-                    run_loads.run(),
+                    run_loads.answer(),
                     &|hsp| {
                         super::super::database::hit_identities(
                             &reports.stores.borrow(),
@@ -4130,6 +4131,7 @@ impl BatchReports<'_> {
                     (
                         super::super::database::after_throw(
                             outputs.formats.iter().map(|format| format.outfmt),
+                            outputs.other_outfmts,
                         ),
                         // The pairwise reports' reads (as `run_batch_loop`'s).
                         super::super::database::pairwise_reading(

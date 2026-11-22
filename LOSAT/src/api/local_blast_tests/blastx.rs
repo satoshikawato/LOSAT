@@ -58,6 +58,7 @@ fn try_run(
     let mut diagnostics = Vec::new();
     let result = {
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -425,6 +426,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
         let result = {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -448,6 +450,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
     let result = {
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,

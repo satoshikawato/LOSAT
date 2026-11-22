@@ -53,6 +53,10 @@ impl QuerySections for Marks {
         self.joined == Some((previous, s_idx))
     }
 
+    fn sort(&self) -> (crate::report::hit_sort::ReportSort, bool) {
+        (crate::report::hit_sort::ReportSort::default(), false)
+    }
+
     fn head<W: Write>(
         &self,
         writer: &mut W,

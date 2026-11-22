@@ -586,10 +586,10 @@ fn pairwise_read_order<'h>(
 fn pairwise_keys(
     hits: &[TblastxHsp],
     titles: &DatabaseTitles,
-    after: Option<crate::report::db_subject::RunThrow>,
+    after: crate::report::db_subject::FormatThrow,
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
 ) -> Option<crate::report::db_subject::ReportKeys> {
-    let reading = pairwise.filter(|_| after.is_some_and(|run| run.after.is_pairwise()))?;
+    let reading = pairwise.filter(|_| after.run().is_some_and(|run| run.after.is_pairwise()))?;
     Some(crate::report::db_subject::ReportKeys::Pairwise(
         pairwise_read_order(hits, titles, reading),
     ))
@@ -637,7 +637,7 @@ pub(crate) fn batch_prefetch_stop(
     before: &[TblastxHsp],
     before_queries: usize,
     before_spans: &[std::ops::Range<usize>],
-    after: Option<crate::report::db_subject::RunThrow>,
+    after: crate::report::db_subject::FormatThrow,
     identities: &dyn Fn(&TblastxHsp) -> usize,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
@@ -789,7 +789,7 @@ fn hit_loads(
     ordered: &[TblastxHsp],
     prefetch: &shared::BatchPrefetch,
     (after, pairwise): (
-        Option<crate::report::db_subject::RunThrow>,
+        crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
     ),
     titles: &DatabaseTitles,
@@ -856,12 +856,20 @@ pub(crate) fn hit_identities(
 /// What the formats of the run, `outfmts` as `-outfmt` gives them, do after a subject whose lookup
 /// throws where its batch's prefetch is off (`FormatThrow::of_outfmts`, for `hit_loads` and the
 /// run's `RunLoads`): the stop of a batch's prefetch (`batch_prefetch_stop`) and the reports
-/// (`reported_subjects`) ask it of the run's formats alike (review 2 of line DBID pfoff-1, N-M2).
+/// (`reported_subjects`) ask it of the run's formats alike (review 2 of line DBID pfoff-1, N-M2),
+/// with the call's refusal over the `-outfmt` values of its other searches, `others`
+/// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
 pub(crate) fn after_throw<'a>(
     outfmts: impl IntoIterator<Item = &'a str>,
-) -> Option<crate::report::db_subject::RunThrow> {
+    others: &[&str],
+) -> crate::report::db_subject::FormatThrow {
     crate::report::db_subject::FormatThrow::of_outfmts(
         outfmts,
+        crate::blastinput::app::Program::Tblastx,
+        crate::report::archive::options::RequestKind::Tblastx,
+    )
+    .of_search(
+        others,
         crate::blastinput::app::Program::Tblastx,
         crate::report::archive::options::RequestKind::Tblastx,
     )
@@ -901,7 +909,7 @@ pub(crate) fn report_loads(
     let subjects: Vec<&[TblastxHsp]> = ordered
         .chunk_by(|a, b| a.hit.s_idx == b.hit.s_idx)
         .collect();
-    let keys = pairwise_keys(ordered, titles, run.run(), pairwise).unwrap_or_else(|| {
+    let keys = pairwise_keys(ordered, titles, run.answer(), pairwise).unwrap_or_else(|| {
         crate::report::db_subject::ReportKeys::Entries(
             subjects
                 .iter()
@@ -975,7 +983,7 @@ pub(crate) fn reported_subjects(
     read_lengths: &ReportedLengths,
     shown: ParsedShown,
     after: (
-        Option<crate::report::db_subject::RunThrow>,
+        crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
     ),
     identities: &dyn Fn(&TblastxHsp) -> usize,

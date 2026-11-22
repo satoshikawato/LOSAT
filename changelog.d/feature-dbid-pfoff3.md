@@ -9,4 +9,9 @@
   `Sequence with id NP_100001 no longer exists in database...alignment skipped` for each of its alignments and goes
   on; `-outfmt 1` to `4` stop there where any alignment they show is of such a sequence. The taxonomy database's texts
   are those of the sequences that the report reads before it stops (in psiblast's rounds after the first, those of
-  the two-part description table, which counts the first `-num_descriptions` HSPs, not sequences).
+  the two-part description table, which counts the first `-num_descriptions` HSPs, not sequences, and shows at least
+  the first; psiblast ignores `-sorthits` and `-sorthsps` there, as NCBI BLAST+ does). A run that such a report stops
+  ends there, as NCBI BLAST+'s does: no later query batch is prefetched. LOSAT's library still refuses such a sequence
+  in a call that writes `-outfmt 0` to `4` with another format that reads it and stops at another place (`-outfmt 0`
+  with `1` to `4`, or either with a table, XML or JSON format), for the whole call, also where `-num_descriptions` or
+  `-num_alignments` make it search once for each hit list size.

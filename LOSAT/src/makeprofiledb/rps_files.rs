@@ -140,7 +140,7 @@ pub(super) fn open_volume(
 /// `(Int4) value` of a `double`: `None` where C's conversion is undefined (NaN, or a value whose
 /// integer part an `Int4` does not hold).
 pub(super) fn int4_of(value: f64) -> Option<i32> {
-    (value > f64::from(i32::MIN) - 1.0 && value < f64::from(i32::MAX) + 1.0).then(|| value as i32)
+    (value > f64::from(i32::MIN) - 1.0 && value < f64::from(i32::MAX) + 1.0).then_some(value as i32)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441
@@ -149,7 +149,9 @@ pub(super) fn int4_of(value: f64) -> Option<i32> {
 fn nint_int4(value: f64) -> Option<i32> {
     const LONG_LIMIT: f64 = 9_223_372_036_854_775_808.0;
     let x = value + if value >= 0.0 { 0.5 } else { -0.5 };
-    (x >= -LONG_LIMIT && x < LONG_LIMIT).then(|| x as i64 as i32)
+    (-LONG_LIMIT..LONG_LIMIT)
+        .contains(&x)
+        .then_some(x as i64 as i32)
 }
 
 /// C's `%e` (`ostream << scientific`): six digits after the point, the exponent with its sign

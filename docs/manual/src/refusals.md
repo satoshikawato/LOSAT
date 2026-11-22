@@ -96,8 +96,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-reward 0` with a penalty other than 0 | Refused (exit status 1). The message is shown below the table. `-reward 0 -penalty 0` (the scores of `-task rmblastn`) runs. |
 | `-reward 0 -penalty 0` with `-task megablast` and its greedy extension (without `-no_greedy`; also with `-ungapped` when the gap costs are 0 and 0) | Refused. NCBI divides by zero (exit status 136) or does not finish. |
 | `-gapopen` or `-gapextend` above 32767 with `-task megablast` | Refused. |
-| `-filtering_db` in LOSAT Web | Refused. LOSAT Web does not read BLAST databases yet. |
-| `-use_index true` with a MegaBLAST index (made by `makembindex`) that NCBI searches with, when the index covers only some volumes of `-db`, the search is two-hit (`-window_size` above 0), or `-db_hard_mask` is given | Refused. Other searches with an index give NCBI's output. When NCBI finds no index, cannot read the header of the first index volume, or the word size is below the index's minimum, LOSAT writes NCBI's error lines and warning and searches without the index, as NCBI does. |
+| `-filtering_db` in LOSAT Web's form | Refused until the form has an input for the database's files. The engine and the `losat` npm package run it (with `-db` or `-subject`), when the run directory holds the repeat database's files. |
+| `-use_index true` with a MegaBLAST index (made by `makembindex`) that NCBI searches with and `-db_hard_mask`; or with an index of only some volumes of `-db`, in a later query batch or query chunk where the scan of a volume without an index saves a second initial hit into the list that NCBI frees (NCBI crashes there or reads freed memory) | Refused, after the output of the query batches before. Other searches with an index give NCBI's output, two-hit searches (`-window_size` above 0) and indexes of only some volumes included (there a later query batch finds no seeds in the last index volume searched before each volume without an index that the search reaches, as in NCBI's `-num_threads 1`, at every thread count). When NCBI finds no index, cannot read the header of the first index volume, or the word size is below the index's minimum, LOSAT writes NCBI's error lines and warning and searches without the index, as NCBI does. |
 | `-use_index true` with a new-style index volume of 36 to 39 bytes or one without read access, an empty first index volume, or an `-index_name` volume range whose loop NCBI never ends (a first volume of 0 or more with a negative last one, such as `oidx,,0,-1`, or a last one of -1) | Refused. NCBI reads such a header undefined, crashes on the empty volume, or never finishes the loop. |
 | `-use_index true` with an index volume whose parts do not fit together (a list, offset or local id outside its sections, an Nmer length of 0, a stride of 32,768 or more), an index not made from the database (a sequence with more chunks than the index has), a seed of the index that starts at or past the last letter of its sequence, or an old-style index (`-index_name`) of fewer sequences than the database when the search runs more than one query batch or query chunk | Refused. NCBI reads past such an index's sections or past the sequence, crashes, or gives a result that depends on the order of its threads. With the old-style index NCBI stops with an error in its second search of the index (a later query batch or query chunk); LOSAT writes the same output of the batches before and refuses there. |
 | `-xdrop_gap` or `-xdrop_gap_final` so large that NCBI's 32-bit arithmetic overflows | Refused. See [Rare and pathological inputs](refusals-edge-cases.md#blastn) for the limits. |
@@ -137,7 +137,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-use_sw_tback` | Refused. |
 | `-query_gencode 32` | Refused (exit status 2). Code 32 is not one of NCBI's codes. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7; 5 is the default of `-task blastx-fast`), or a name that begins with `IDENTITY` | Refused. NCBI aborts. |
 | An `-evalue` that is not finite (`+inf`, `1e999`, `-nan`) | Refused. |
@@ -146,6 +145,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-query_loc` or `-subject_loc` with `-outfmt` 5, 8, 9 and 11 to 16 | Refused. Formats 0, 6, 7, 10 and 20 work. |
 | A protein subject of more than 5,000,000 residues, from `-subject` or from a database | Refused. NCBI searches it in overlapping parts, which LOSAT does not do yet. |
 | `-db_hard_mask` on a database with more than 5,000,000 letters between two masks, and the mask checks of `blastn` | Refused, as in `blastp`. |
+| `-use_sw_tback` with `-ungapped` (which only `-comp_based_stats 0` allows) | Refused at the first query batch that is searched. NCBI crashes there, whether the batch has hits or not. |
+| `-use_sw_tback` on a query batch that NCBI never finishes or crashes on | Refused, as in `blastp` and `tblastn`. See [Rare and pathological inputs](refusals-edge-cases.md#blastx). |
 
 The error names the sequence and exits with status 1: `Error: subject sequence N has M residues; a subject longer than 5000000 residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX` for the N-th record of `-subject` (counted from 1), and the same sentence starting with `database sequence N` for a database sequence (N is its position in the database, counted from 0).
 
@@ -217,7 +218,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
 | A `-subject` set whose sequences all have no letters | Refused. NCBI's `psiblast` crashes; `blastp` runs it. |
 | `-in_pssm` or `-in_msa` with a matrix or gap cost other than BLOSUM62 11/1 | Refused. |
-| `-in_pssm` with a binary or XML PSSM | Refused. |
+| `-in_pssm` with an XML PSSM | Refused. |
 | `-out_pssm` or `-out_ascii_pssm` with a file that cannot be written | Refused. |
 | `-out_pssm` or `-out_ascii_pssm` into the standard output, the standard error or the `-out` file | Refused. Where NCBI stops first with its own error of `-outfmt` (13 or 14 without `-out`, for example), you get that error. |
 | `-out_pssm` into a named pipe, a block device or a symbolic link to a missing file | Refused. |
@@ -356,7 +357,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-mk_counts` of an input without a unit of unambiguous letters (all `N`; or, with `-unit`, no sequence, as when `-ids` keeps none) | Refused. NCBI writes the percentages of the file as its C runtime prints 0/0 (`-nan` on Linux). |
 | `-mk_counts -infmt seqids` | Refused. NCBI fetches each sequence from NCBI's servers. |
 | `-mk_counts` or `-convert` of units of 1 to 3 letters to `oascii` or `obinary` with an `-smem` that is a multiple of 65536 | Refused. NCBI keeps the low 16 bits of `-smem` (0 megabytes); its search for a hash table is then undefined. With units of 4 letters or more NCBI's error is written as NCBI writes it. |
-| An `-ids` or `-exclude_ids` file matched as text (without `-text_match F`) with an empty id (a line that starts with a space or a tab, `>`, `\|` or `>\|`) | Refused. NCBI writes outside its list of ids and crashes. |
 | A counts file whose `##pct:` line holds a number that C++ libraries read differently (`inf`, `nan`, a hexadecimal number such as `0x10`, a number with letters after it such as `5x`, or a number beyond the range of a double), with a `-t_*_pct` option or `-convert` | Refused. Other lines are read as NCBI reads them: a value that is missing, or a word that does not start with a number, is 0. |
 | An `ascii` counts file with units of 17 letters or more | Refused. NCBI's result is undefined. |
 | A FASTA record or database sequence of 4,294,967,296 letters or more | Refused. NCBI counts positions in 32 bits. |

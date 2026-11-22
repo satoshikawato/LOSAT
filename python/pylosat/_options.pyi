@@ -308,6 +308,7 @@ class BlastxOptions(TypedDict, total=False):
     subject_besthit: bool
     ungapped: bool
     lcase_masking: bool
+    use_sw_tback: bool
     strand: Literal['both', 'plus', 'minus']
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""

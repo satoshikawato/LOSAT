@@ -123,6 +123,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **When.** A damaged `taxdb.btd` whose record ends past NCBI's mapping, where the output does not write the bytes read there. Output that would write those bytes is refused (see [What LOSAT refuses](refusals.md)).
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### `blastx -use_sw_tback` in e-value mode
+
+- **What you see.** LOSAT writes a report where NCBI BLAST+ 2.17.0 crashes, and the same report in every run and at every `-num_threads`. Where NCBI ends, LOSAT's report is NCBI's in the cases we ran, except that NCBI's rows can change from one run to the next.
+- **When.** `blastx -use_sw_tback` with `-sum_stats false` (or a `-max_intron_length` of 1 to 4), on a query batch with a hit in a frame whose number is the batch's number of queries or more. The number is 6 × the query's place in the batch (counted from 0) plus 0 to 5 for frames +1, +2, +3, -1, -2, -3. With one query in a batch (for example a search of a single query, or a query that fills a batch of 10,002 letters, BLASTX's batch size, by itself), every hit outside frame +1 is such a case.
+- **Why.** NCBI checks each new Smith-Waterman alignment against a list of kept alignments that it picks by that number, but it keeps one list per query. Past its lists it reads other memory: it crashes (with more than one thread, in every run we made), fails the batch with `Traceback failed`, or goes on with what it read. LOSAT checks such an alignment against an empty list. Its report equals NCBI's report of the same queries followed by enough queries without hits to keep NCBI inside its lists, in all 9 cases of our test in which NCBI ends.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### `-db` output does not depend on `-num_threads`
 
 - **What you see.** LOSAT's `-db` output is NCBI's output for `-num_threads 1` (apart from the version line, which names LOSAT), at every `-num_threads`. NCBI's own `-db` output can depend on the thread count (with composition-based statistics, `blastp` ends the redo of a query early by the hit lists of its batch, and with more threads NCBI keeps one set per thread: 42 rows differed in one test).
@@ -222,6 +229,13 @@ Records: [The decision record on NCBI BLAST+ defects](https://github.com/satoshi
 LOSAT writes correct output where NCBI's `blastdbcmd` writes letters or sequences that do not belong to the header or id you asked for. The six cases are `-long_seqids` with `-range` on the minus strand; `gnl|BL_ORD_ID|N` in a version 4 database of several volumes; `-mask_sequence_with` with `-strand minus`; two or more `%m` in one `-outfmt`; `-mask_sequence_with` on a protein without a range; a batch line without masks after a line with masks for the same sequence. In each, LOSAT's output is NCBI's own output for the neighbouring input that does not reach the defect.
 
 Record: [The decision record on blastdbcmd output that NCBI gets wrong](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-BLASTDBCMD-DEVIATIONS.md).
+
+### `windowmasker`: an empty id in `-ids` or `-exclude_ids`
+
+- **What you see.** LOSAT writes NCBI's error `bad id: ...: ignoring` for the line, skips it, and masks (or counts) as NCBI does for the file without that line. NCBI BLAST+ 2.17.0 writes the same error and then crashes (exit status 139) without output.
+- **When.** `windowmasker` with an `-ids` or `-exclude_ids` file matched as text (without `-text_match F`), in masking or with `-mk_counts`, when a line gives an empty id: a line that starts with a space or a tab, or a line `>`, `|`, `>|`, `>>` or `>>|` (alone or before a space or a tab).
+- **Why.** NCBI's error says that it ignores the id, but NCBI then stores the id far past the end of its list of ids, which is undefined in C++. LOSAT does what the error says.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ## The library
 

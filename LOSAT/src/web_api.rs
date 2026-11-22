@@ -289,6 +289,7 @@ fn parse_blastn_args(
         export_search_strategy: None,
         import_search_strategy: None,
         import: None,
+        given: Default::default(),
         strategy: None,
         command_line: None,
         // The command line's progress bar; a web search writes nothing to standard error.
@@ -424,6 +425,7 @@ fn parse_tblastx_args(
         export_search_strategy: None,
         import_search_strategy: None,
         import: None,
+        given: Default::default(),
         strategy: None,
         tabular_taxdb: None,
         subject_taxdb: None,
@@ -558,6 +560,7 @@ fn parse_blastp_args(
         export_search_strategy: None,
         import_search_strategy: None,
         import: None,
+        given: Default::default(),
         strategy: None,
         request_inputs: None,
         app: blastp::args::BlastpApp::Blastp,

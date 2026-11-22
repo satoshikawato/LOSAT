@@ -911,13 +911,6 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
     list.into_params()
 }
 
-/// The `Blast4-queue-search-request` service of a run: `megablast` for the megablast and
-/// dc-megablast tasks of BLASTN, `psi` for psiblast, `rpsblast` for the RPS searches (the handles'
-/// `SetRemoteProgramAndService_Blast3`, `RequestKind`), `plain` otherwise.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp (`x_Process_Query`
-/// callers set the service from the options: `blastn` task `megablast` and `dc-megablast`
-/// give "megablast", every other task "plain").
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3811-3828
 /// The options of an imported strategy: the handle `CBlastOptionsFactory::Create` makes for the
 /// strategy's program (`list`), each setter of the file replayed over it in the file's order,
@@ -937,11 +930,20 @@ fn replayed_options(mut list: ParamList, imported: &[Param], inputs: &OptionInpu
     }
     if let Some(name) = &inputs.mb_index_name {
         list.set(fields::FORCE_MB_INDEX, ParamValue::Boolean(false));
-        list.set(fields::MB_INDEX_NAME, ParamValue::Str(name.clone()));
+        if !name.is_empty() {
+            list.set(fields::MB_INDEX_NAME, ParamValue::Str(name.clone()));
+        }
     }
     list.into_params()
 }
 
+/// The `Blast4-queue-search-request` service of a run: `megablast` for the megablast and
+/// dc-megablast tasks of BLASTN, `psi` for psiblast, `rpsblast` for the RPS searches (the handles'
+/// `SetRemoteProgramAndService_Blast3`, `RequestKind`), `plain` otherwise.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp (`x_Process_Query`
+/// callers set the service from the options: `blastn` task `megablast` and `dc-megablast`
+/// give "megablast", every other task "plain").
 pub fn service(kind: impl Into<RequestKind>, task: &str) -> &'static str {
     match kind.into() {
         RequestKind::Blastn if matches!(task, "megablast" | "dc-megablast") => "megablast",

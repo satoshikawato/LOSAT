@@ -121,7 +121,7 @@ pub enum RecordInterval {
 /// The interval of a record of `length` letters.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:433-460
-/// The parser leaves `to > from`, so `Invalid sequence range` cannot occur; a strategy's range
+/// The parser leaves `to > from`, so the range error cannot occur; a strategy's range
 /// (`-import_search_strategy`) may lack its start or its end (`kEmptyRange`'s), and one whose end
 /// comes before its start is refused at the import. A start equal
 /// to the record's length passes the check and gives the interval `[seqlen, seqlen-1]`.

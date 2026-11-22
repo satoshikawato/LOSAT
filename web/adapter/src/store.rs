@@ -366,6 +366,10 @@ pub fn register_inputs(
     subject: &[u8],
 ) -> Result<(u32, u32, String), String> {
     let (program, command, supplied) = crate::run::parse_imported(words)?;
+    // The handles belong to the argv's program, whose run takes them (`losat_web2_run`); the
+    // records are read as the program of the arguments reads them (with a search strategy of
+    // another program that the argv's runs, the strategy's).
+    let owner = Program::parse(words.first().copied().unwrap_or(""))?;
     let data_loaders = crate::run::data_loaders(words)?;
     // An argv with `-import_search_strategy` takes the inputs that the strategy carries and the
     // argv does not override (`Supplied`), in place of the bytes that the host gives for them (it
@@ -462,7 +466,7 @@ pub fn register_inputs(
             handle,
             Registered {
                 role,
-                program,
+                program: owner,
                 records,
                 deflines: Vec::new(),
                 run: Some(run.clone()),

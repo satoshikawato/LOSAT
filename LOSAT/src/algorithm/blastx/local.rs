@@ -1260,7 +1260,7 @@ pub(super) fn check_filtering(args: &BlastxArgs) -> Result<()> {
 /// `-query_loc`, which the command line reads after the subjects, with the query options and
 /// before the formatting handler (`native::run_inner`).
 fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
-    // An imported strategy's query range stands for `-query_loc`'s (`archive::apply_strategy`).
+    // An imported strategy's query range stands for `-query_loc`'s (`import::apply`).
     match args.import.as_ref().and_then(|import| import.query_range) {
         Some(range) => Ok(Some(range)),
         None => parse_optional_range(args.query_loc.as_deref(), RangeRole::Query),

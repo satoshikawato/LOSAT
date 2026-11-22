@@ -6,8 +6,9 @@
 //! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:425-438
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3365-3371
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2727-2754
-//! The stream's flags are the constructor's, `fInstantiateGaps | fAssembleParts | fEnableGI`, with
-//! a width of 70 (sequence.cpp:2713-2720); `eAssembleParts` is a flag already set. Each entry is
+//! NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2713-2720
+//! The stream's flags are the constructor's (gaps instantiated, parts assembled, GIs enabled),
+//! with a width of 70; `eAssembleParts` is a flag already set. Each entry is
 //! added to a scope of its own, and its Bioseqs are written in the order of `CBioseq_CI`: depth
 //! first through nested sets (probe `n_nested`, `n_nested_deep`).
 //!
@@ -105,8 +106,9 @@ const DUPLICATE_SEQ_ID: ThrowSite = ThrowSite {
     function: Some("ncbi::objects::CFastaOstream::x_WriteSeqIds"),
 };
 
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:732
 /// `CSeq_inst::GetLength()` of a Bioseq without `length` (`CSerialObject::ThrowUnassigned`; the
-/// report names no function): the title's `GetInst_Length` (create_defline.cpp:732) reads it before
+/// report names no function): the title's `GetInst_Length` reads it before
 /// the sequence is written (`n_len_none`, `n_virtual0`).
 const UNASSIGNED_LENGTH: ThrowSite = ThrowSite {
     file: "src/serial/serialobject.cpp",
@@ -160,8 +162,9 @@ impl FastaOstream {
         };
         let title = title_descriptor(bioseq)?;
         if title.is_none() && matches!(inst.field("repr").int(), REPR_SEG | REPR_MAP) {
+            // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4022-4028
             // The generator's titles of segmented and map Bioseqs (`x_SetTitleFromSegSeq`,
-            // `x_SetTitleFromMap`, create_defline.cpp:4022-4028) are not modelled.
+            // `x_SetTitleFromMap`) are not modelled.
             return Err(RenderError::Unsupported(
                 "a segmented or map query Bioseq without a title".into(),
             ));
@@ -264,12 +267,15 @@ fn handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, RenderError> {
     mask_handle_key(id).map_err(|_| RenderError::Unsupported("a giim Seq-id in the queries".into()))
 }
 
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1410
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1977
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2055
 /// The Bioseqs of an entry in the order of `CBioseq_CI` (depth first, as the request's model
 /// walks them: `n_nested`, `n_nested_deep`). A nested set's own descriptors are refused: what the title generator takes
 /// of them is not probed past one case (`t_set_title`: a set's title is not its Bioseq's). So are
 /// annotations, of a set or a Bioseq: the generator names a Bioseq without a title from the
-/// features of its entry (a BioSource or Prot-ref feature, the CDS of a protein:
-/// create_defline.cpp:1410, 1977, 2055), which `report::defline` does not model.
+/// features of its entry (a BioSource or Prot-ref feature, the CDS of a protein), which
+/// `report::defline` does not model.
 fn entry_bioseqs(entry: V<'_>) -> Result<Vec<Bioseq<'_>>, RenderError> {
     let mut todo = vec![entry];
     while let Some(entry) = todo.pop() {
@@ -411,12 +417,12 @@ fn is_original_id_type(kind: &[u8]) -> bool {
     kind.eq_ignore_ascii_case(b"OriginalID") || kind.eq_ignore_ascii_case(b"OrginalID")
 }
 
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:840-1135
 /// The first `title` descriptor, which the title generator takes (`n_title_two`), after the
 /// refusal of the descriptors that would change the generated title in ways `report::defline`
 /// does not model: the generator reads `molinfo` (tech prefixes and suffixes: `n_molinfo_tsa`
 /// gives `TSA: tsa title, mRNA sequence`), `source`, `genbank` and `embl` (keywords), `comment`,
-/// `pdb`, and the `Unverified`, `Unreviewed` and `AutodefOptions` user objects
-/// (create_defline.cpp:840-1135). A user object whose type is a string other than `CFastaReader`
+/// `pdb`, and the `Unverified`, `Unreviewed` and `AutodefOptions` user objects. A user object whose type is a string other than `CFastaReader`
 /// (the reader's own, which NCBI's exports carry) or an original id is refused with them; one
 /// typed by a number is read by neither. The other descriptors are read by neither.
 fn title_descriptor(bioseq: Bioseq<'_>) -> Result<Option<&[u8]>, RenderError> {
@@ -468,8 +474,9 @@ const NO_SEGMENT: ThrowSite = ThrowSite {
     function: Some("ncbi::objects::CSeqVector_CI::x_UpdateSeg"),
 };
 
+// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3322-3361
 /// `WriteSequence` without a location: the letters of the Bioseq's `CSeqVector` in
-/// `eCoding_Iupac`, `Ncbieaa` for a protein (sequence.cpp:3322-3361), read through
+/// `eCoding_Iupac`, `Ncbieaa` for a protein, read through
 /// `CSeqVector_CI` up to the Bioseq's length, which is the vector's size (`GetBioseqLength`); gaps
 /// instantiated as `N` (`X` for a protein: `n_raw_nodata`, `p_virtual`, `p_delta_gap`). A segment
 /// that passes the length is read up to it, as if it ended there (`dl_sum_short`, `dl_cut_*`);
@@ -631,16 +638,16 @@ const NA4_TO_IUPACNA: &[u8; 16] = b"NACMGRSVTWYHKDBN";
 const NA2_TO_IUPACNA: &[u8; 4] = b"ACGT";
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:484-494
+// NCBI reference (598d8ae6): c++/include/objmgr/impl/seq_vector_cvt.hpp:47-131
 /// The letters of a segment of a Seq-data up to `length` letters (the segment's, cut at the
 /// Bioseq's length: `dl_cut_short` writes `ACGTA` where its second literal holds 2 of its 5
 /// letters), filled as `CSeqVector_CI` fills its cache: from the start of the segment, 1024
 /// letters at a time (`kCacheSize`). The fill converts the coding or throws (`Incompatible
 /// sequence codings`: a coding of the other molecule, NCBI8na, NCBIpna, NCBI8aa, NCBIpaa; probes
 /// `n_8na`, `n_pna`, `p_8aa`, `p_paa`, `n_mol_*`, `p_mol_*`); each fill checks its end against the
-/// data (`copy_8bit_any`, `copy_4bit_any`, `copy_2bit_any` of
-/// include/objmgr/impl/seq_vector_cvt.hpp:47-105: the end `e` of the fill throws when `e`, `e / 2`
-/// or `e / 4` passes the data's bytes). A packed coding's fill that ends inside the byte past the
-/// data reads memory the input does not decide: refused.
+/// data (`copy_8bit_any`, `copy_4bit_any`, `copy_2bit_any`: the end `e` of the fill throws when
+/// `e`, `e / 2` or `e / 4` passes the data's bytes). A packed coding's fill that ends inside the
+/// byte past the data reads memory the input does not decide: refused.
 fn data_letters(
     data: V<'_>,
     length: u32,
@@ -704,7 +711,8 @@ fn data_letters(
     Ok(())
 }
 
-/// `kCacheSize` of `CSeqVector_CI` (seq_vector_ci.cpp:56).
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:56
+/// `kCacheSize` of `CSeqVector_CI`.
 const KCACHE_SIZE: u64 = 1024;
 
 #[cfg(test)]

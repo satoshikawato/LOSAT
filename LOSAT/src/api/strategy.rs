@@ -2,13 +2,14 @@
 //! line RG item F2-4).
 //!
 //! The command line reads the file named by `-import_search_strategy` in `RecoverSearchStrategy`
-//! and each program's `apply_strategy` turns it into the program's arguments, with the queries
-//! and the subjects (or the database's name) that the strategy carries. The library API and LOSAT
-//! Web ABI v2 give the strategy as bytes and come through the same `apply_strategy`: one engine
-//! path (`apply`), then the program's `run_local` over records, as for any other search.
+//! and the engine's import (`import::apply`) turns it into the arguments of the strategy's
+//! program, with the queries and the subjects (or the database's name) that the strategy
+//! carries. The library API and LOSAT Web ABI v2 give the strategy as bytes and come through the
+//! same import: one engine path (`apply`), then the program's `run_local` over records, as for
+//! any other search.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:529-552
-//! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3836
+//! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
+//! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
 #![warn(missing_docs, unused)]
 
 use std::path::Path;
@@ -20,11 +21,13 @@ use super::search::Search;
 use crate::cli::Commands;
 use crate::record::FastaRecord;
 
-/// What a strategy file gives a search: the arguments as `apply_strategy` made them, and the
-/// queries and subjects that the strategy carries as FASTA bytes.
+/// What a strategy file gives a search: the arguments as the import made them, and the queries
+/// and subjects that the strategy carries as FASTA bytes.
 #[derive(Debug)]
 pub struct Applied {
-    /// The program's arguments with the strategy's options set (the engine's `apply_strategy`).
+    /// The arguments of the strategy's program with the strategy's options set (the engine's
+    /// import): the search's program's, or another's where the search's program runs another
+    /// program's strategy as the command line does.
     pub command: Commands,
     /// The strategy's queries (NCBI's temporary FASTA file), empty when it has none.
     pub queries: Vec<u8>,
@@ -50,58 +53,40 @@ pub fn import_name(command: &Commands) -> Option<&Path> {
     }
 }
 
-/// Gives the arguments the strategy's `bytes` for their `apply_strategy` to read, in place of the
-/// file that `-import_search_strategy` names (the name stays as the parser kept it, for the
-/// messages that quote it), and the running program's NCBI name for the warnings.
-fn set_source(command: &mut Commands, bytes: &[u8]) {
-    use crate::report::archive::read::import::ImportRun;
-    let source = std::sync::Arc::new(bytes.to_vec());
-    let run = |app: &'static str| ImportRun {
-        source: Some(source.clone()),
-        app,
-        ..ImportRun::default()
-    };
-    match command {
-        Commands::Blastp(args) => args.import = Some(run("blastp")),
-        Commands::Tblastn(args) => args.import = Some(run("tblastn")),
-        Commands::Blastn(args) => args.import = Some(run("blastn")),
-        Commands::Tblastx(args) => args.import = Some(run("tblastx")),
-        Commands::Blastx(args) => args.import = Some(run("blastx")),
-        Commands::Psiblast(_)
-        | Commands::Rpsblast(_)
-        | Commands::Rpstblastn(_)
-        | Commands::Makedb(_)
-        | Commands::Rpsbproc(_) => {}
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:128-133
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:529-552
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
 /// `RecoverSearchStrategy` of the arguments `command` (parsed with an `-import_search_strategy`
-/// of any name) over the strategy `bytes`: the engine's `apply_strategy` of the program, which
-/// the command line runs at the start of its run. The options the command line may give
-/// besides (`-outfmt`, `-num_threads`, `-query_loc` ...) are those that the strategy's import
-/// takes from them, as there.
+/// of any name) over the strategy `bytes`: the engine's import (`import::apply`), the one the
+/// command line runs at the start of its run. The options the command line may give besides
+/// (`-outfmt`, `-num_threads`, `-query_loc` ...) are those that the strategy's import takes from
+/// them, as there. A strategy of another program is that program's arguments where the command
+/// line runs it so (blastn and blastx running a TBLASTX strategy, tblastx a BLASTX or BLASTN one).
+/// The strategy's queries and subjects move out of the arguments into [`Applied`]: the search
+/// reads them as records and the arguments keep no copy.
 ///
-/// Errors are the command line's messages (after the warnings it posts before them): a file that is not a strategy is NCBI's `Failed to
-/// read search strategy`, a strategy of another program or with a PSSM query is refused as on the
-/// command line.
-pub fn apply(mut command: Commands, bytes: &[u8]) -> Result<Applied, Error> {
-    set_source(&mut command, bytes);
+/// Errors are the command line's messages (after the warnings it posts before them): a file
+/// that is not a strategy is NCBI's error that the strategy cannot be read, and a strategy of
+/// another program that the command line does not run or with a PSSM query is refused as there.
+pub fn apply(command: Commands, bytes: &[u8]) -> Result<Applied, Error> {
+    use crate::report::archive::read::import;
+    if !import::imports(&command) {
+        return Err(Error::Input(
+            b"-import_search_strategy is not supported by this program of LOSAT".to_vec(),
+        ));
+    }
     // The warnings that the command line posts before a failure (to its standard error) come
     // first in the error's text, as the two come on a terminal.
     let mut posted = Vec::new();
-    let command = apply_one(command, &mut posted).map_err(|error| {
+    let command = import::apply(command, Some(bytes), &mut posted).map_err(|error| {
         posted.extend_from_slice(format!("{error:#}").as_bytes());
         Error::Input(posted)
     })?;
-    let text =
-        |held: Option<&std::sync::Arc<Vec<u8>>>| held.map(|text| text.to_vec()).unwrap_or_default();
+    let text = |held: Option<&std::sync::Arc<import::StrategyText>>| {
+        held.map_or(Ok(Vec::new()), |text| text.take())
+            .map_err(|error| Error::Input(format!("{error:#}").into_bytes()))
+    };
     let run = import_run(&command);
-    let (queries, subjects) = (
-        text(run.and_then(|run| run.queries.as_ref())),
-        text(run.and_then(|run| run.subjects.as_ref())),
-    );
+    let queries = text(run.and_then(|run| run.queries.as_ref()))?;
+    let subjects = text(run.and_then(|run| run.subjects.as_ref()))?;
     let database = database_of(&command);
     Ok(Applied {
         command,
@@ -111,28 +96,16 @@ pub fn apply(mut command: Commands, bytes: &[u8]) -> Result<Applied, Error> {
     })
 }
 
-/// The program's `apply_strategy` (one engine path for the command line, the library and Web).
-fn apply_one(command: Commands, diagnostics: &mut dyn std::io::Write) -> anyhow::Result<Commands> {
-    use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
-    Ok(match command {
-        Commands::Blastp(args) => {
-            Commands::Blastp(blastp::archive::apply_strategy(args, diagnostics)?)
-        }
-        Commands::Tblastn(args) => {
-            Commands::Tblastn(tblastn::archive::apply_strategy(args, diagnostics)?)
-        }
-        Commands::Blastn(args) => {
-            Commands::Blastn(blastn::archive::apply_strategy(args, diagnostics)?)
-        }
-        Commands::Tblastx(args) => {
-            Commands::Tblastx(tblastx::archive::apply_strategy(args, diagnostics)?)
-        }
-        Commands::Blastx(args) => {
-            Commands::Blastx(blastx::archive::apply_strategy(args, diagnostics)?)
-        }
-        other => {
-            anyhow::bail!("-import_search_strategy is not available for this program: {other:?}")
-        }
+/// The program whose arguments `command` holds: after an import, the strategy's program
+/// ([`Applied::command`]).
+pub fn program_of(command: &Commands) -> Option<Program> {
+    Some(match command {
+        Commands::Blastp(_) => Program::Blastp,
+        Commands::Tblastn(_) => Program::Tblastn,
+        Commands::Blastn(_) => Program::Blastn,
+        Commands::Tblastx(_) => Program::Tblastx,
+        Commands::Blastx(_) => Program::Blastx,
+        _ => return None,
     })
 }
 
@@ -161,8 +134,8 @@ fn import_run_mut(
     }
 }
 
-/// The query range that the strategy gives (`-query_loc` of the command line's import comes from the
-/// strategy's `QueryRange`, `Start::query_range`): the search's range where the argv has none.
+/// The query range that the strategy gives (`-query_loc` of the command line's import comes from
+/// the strategy's `QueryRange`, `Start::run`): the search's range where the argv has none.
 pub(crate) fn query_range(
     command: &Commands,
 ) -> Option<crate::blastinput::seq_range::SequenceRange> {
@@ -248,8 +221,9 @@ impl Strategy {
                     .into(),
             ));
         }
-        // The engine's `apply_strategy` over the file again: `Commands` has no copy, and the
-        // arguments of a call are the import's of that call (its warnings, its files).
+        // The engine's import over the file again: `Commands` has no copy, and the arguments of
+        // a call are the import's of that call (its warnings); the strategy's sequence texts of
+        // the call are dropped here, as the call searches the records read once.
         let mut command = apply(search.strategy_command(None)?, &self.bytes)?.command;
         if let Some(path) = search.out_path() {
             set_out(&mut command, path);
@@ -271,6 +245,10 @@ impl Search {
     /// [`Inputs::strategy`](super::Inputs::strategy); a strategy with subjects is searched with
     /// one thread whatever `-num_threads` says, as on the command line.
     ///
+    /// A strategy of another program runs as that program where the command line runs it so
+    /// (blastn and blastx with a TBLASTX strategy, tblastx with a BLASTX or BLASTN one): the
+    /// records are read as that program reads them.
+    ///
     /// The error is the command line's: a file that is not a strategy, a strategy of a program the
     /// strategy of which is not run by this one, a strategy the engine does not run yet (a PSSM
     /// query, standard XML, a query by Seq-id), or `-import_search_strategy`'s refusal for
@@ -279,7 +257,7 @@ impl Search {
         let command = self.strategy_command(None)?;
         let applied = apply(command, strategy)?;
         let (queries, subjects) = read_search_inputs(
-            self.program(),
+            program_of(&applied.command).unwrap_or(self.program()),
             &applied.command,
             None,
             true,

@@ -519,6 +519,7 @@ fn make_blastp_args() -> BlastpArgs {
         export_search_strategy: None,
         import_search_strategy: None,
         import: None,
+        given: Default::default(),
         strategy: None,
         request_inputs: None,
         app: BlastpApp::Blastp,

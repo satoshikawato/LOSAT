@@ -224,9 +224,10 @@ enum Parsed {
 /// around it (`-out` too: line WQA's D14 review, 2026-11-20); any other argv with `-out` is refused.
 /// With an `-import_search_strategy NAME` the command line's import of the registered strategy file
 /// `NAME` (kind 3, `files::strategy`): the arguments are the import's
-/// (`losat::web_adapter::import_strategy`: the engine's `apply_strategy`, the path of the command
-/// line), and what the strategy carries as inputs comes with them. A file that is not registered
-/// is the command line's file that is not accessible.
+/// (`losat::web_adapter::import_strategy`: the engine's import, the path of the command line),
+/// and what the strategy carries as inputs comes with them; the program is the strategy's where
+/// the argv's program runs another program's strategy as the command line does. A file that is
+/// not registered is the command line's file that is not accessible.
 fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
     // The formats come from `Program::formats`, and every program accepts the CLI's
     // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
@@ -264,6 +265,11 @@ fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
     })?;
     let applied =
         losat::web_adapter::import_strategy(command, &bytes).map_err(|error| error.to_string())?;
+    // The strategy's program, which reads the inputs and runs (`losat::web_adapter::program_of`).
+    let program = match losat::web_adapter::program_of(&applied.command) {
+        Some(applied) => Program::parse(applied.name())?,
+        None => program,
+    };
     let supplied = Supplied {
         queries: applied.queries,
         subjects: applied.subjects,

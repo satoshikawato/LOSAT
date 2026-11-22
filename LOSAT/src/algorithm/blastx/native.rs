@@ -207,7 +207,7 @@ fn run_inner(
     };
     // `-subject -` is `cin` (ncbiargs.cpp:717-721, cited at `input_files::open_input`), the
     // stream that `-query -` names too: one owner opens both (`open_input`).
-    // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for `-subject`.
+    // An imported strategy's subject Bioseqs (`import::apply`) stand for `-subject`.
     let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
@@ -370,7 +370,7 @@ fn run_inner(
     // The filtering handler comes before the query options handler (blastx_args.cpp:87-107):
     // NCBI's error of `-seg` first (`local::check_filtering`).
     super::local::check_filtering(args)?;
-    // An imported strategy's query range stands for `-query_loc`'s (`archive::apply_strategy`).
+    // An imported strategy's query range stands for `-query_loc`'s (`import::apply`).
     let query_range = match args.import.as_ref().and_then(|import| import.query_range) {
         Some(range) => Some(range),
         None => crate::blastinput::seq_range::parse_optional_range(

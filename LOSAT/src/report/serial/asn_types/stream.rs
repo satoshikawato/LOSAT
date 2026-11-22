@@ -170,9 +170,10 @@ impl<R: IoRead> ObjectStream<R> {
 }
 
 impl<R: IoRead + Seek> ObjectStream<R> {
-    /// `in.seekg(0)` (remote_blast.cpp:2302, after a failed read of a strategy reply): the input
-    /// from its start, for a new guess and read; the error of an input that cannot seek (a
-    /// pipe), whose stream NCBI's `seekg` leaves failed.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2302
+    /// The seek to the start that follows a failed read of a strategy reply: the input from its
+    /// start, for a new guess and read; the error of an input that cannot seek (a pipe), whose
+    /// stream NCBI's `seekg` leaves failed.
     pub(crate) fn rewind(self) -> std::io::Result<R> {
         let (_, mut input) = self.into_rest();
         input.seek(SeekFrom::Start(0))?;

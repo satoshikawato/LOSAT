@@ -222,7 +222,7 @@ the WASI imports.
   the handles.
 - `-import_search_strategy <name>` (BLASTN, BLASTP, BLASTX, TBLASTN, TBLASTX; line RG item F2-4) runs
   the search strategy file registered under `<name>` (kind 3 of `file_begin`, §4), as the CLI runs
-  `-import_search_strategy FILE`: the engine's import (the CLI's own path, `apply_strategy`) reads the
+  `-import_search_strategy FILE`: the engine's import (the CLI's own path, `import::apply`) reads the
   bytes at the start of every `validate`, `register_inputs` and `run` of the argv, with the CLI's
   errors, and the options of the strategy become the search's, set on the program's defaults in the
   file's order; of the argv only what the CLI's import takes from the command line counts (the
@@ -238,9 +238,12 @@ the WASI imports.
   place and returns the *inputs* JSON of those records. A strategy with subjects is searched
   with one thread whatever `-num_threads` says, as the CLI's import does (the approved exception of
   DECISIONS F2-Q1). A strategy whose subject is a database is the CLI's `-db` run of the browser: it
-  fails with `-db (a database search) is not supported in the browser yet`. A strategy that the
-  engine does not run yet (a PSSM query, standard XML, a query by Seq-id, another program's
-  strategy) is refused as the CLI refuses it. The engine reads the strategy from the registered
+  fails with `-db (a database search) is not supported in the browser yet`. A strategy of another
+  program runs where the CLI runs it (BLASTN and BLASTX with a TBLASTX strategy, TBLASTX with a
+  BLASTX or BLASTN one): the search and the reading of its inputs are that program's, with the
+  argv's program's warnings; other pairs are refused as the CLI refuses them. A strategy that the
+  engine does not run yet (a PSSM query, standard XML, a query by Seq-id) is refused as the CLI
+  refuses it. The engine reads the strategy from the registered
   bytes (no file system is used, so the browser's WASI runs the option); the warnings that the CLI
   posts before an error of the import come first in that error's text.
 - `-out` is rejected: the adapter writes every format the program supports (`describe` lists

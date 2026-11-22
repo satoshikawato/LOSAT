@@ -95,7 +95,8 @@ def kind_of_args(args: str, aliases: dict[str, tuple[str, str]]) -> Optional[str
     if "(ENUM," in args:
         return "Enumerated|Integer"
     if re.search(r"\bBigInt\b", args):
-        # `SERIAL_TYPE_BigInt()` is `Int8` (serial/serialimpl.hpp:114-116).
+        # NCBI reference (598d8ae6): c++/include/serial/serialimpl.hpp:114-116
+        # The BigInt type of a generated member is an `Int8`.
         return "Integer"
     if re.search(r"\bC_\w+", args):
         return "class:anon"

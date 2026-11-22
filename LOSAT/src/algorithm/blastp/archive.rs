@@ -23,6 +23,8 @@ use crate::blastinput::seq_range::Placements;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::OptionInputs;
+use crate::report::archive::read::import;
+use crate::report::archive::read::options::{EProgram, Setter};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -354,151 +356,155 @@ pub(crate) fn write_blastp_archives(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:128-133
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3813-3826
-/// `-import_search_strategy` of BLASTP (`RecoverSearchStrategy`, `SetOptionsForSavedStrategy`):
-/// the arguments of a command line that gives nothing (the strategy task's defaults) with the
-/// strategy's options set on them in the file's order, and from `args` only what NCBI's
-/// re-read argument classes take: the query options, `-out`, the formatting options, the
-/// threads, and the database arguments when `-db` or `-subject` is given. The run then goes on
-/// as any other (one search path).
-pub(crate) fn apply_strategy(
-    args: BlastpArgs,
-    diagnostics: &mut dyn std::io::Write,
-) -> Result<BlastpArgs> {
-    use crate::report::archive::read::import::{self, Command, Start};
-    use crate::report::archive::read::options::{EProgram, Setter};
-    let program = Program::Blastp.name();
-    let path = args.import_search_strategy.clone().expect("an import");
-    let source = args.import.as_ref().and_then(|run| run.source.clone());
-    let start = import::start(
-        &Command {
-            path: &path,
-            bytes: source.as_deref().map(Vec::as_slice),
-            program,
-            override_query: args.query.as_os_str() != "-",
-            override_subject: args.db.is_some() || args.subject.is_some(),
-            use_index_set: false,
-        },
-        "blastp",
-        diagnostics,
-    )?;
-    if start.imported.program() != EProgram::Blastp {
-        return Err(start.unported_program(program));
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
+/// blastp's part of `-import_search_strategy` ([`import::apply`]): the arguments its command
+/// line keeps and its table of the strategy's setters over its own options.
+impl import::StrategyArgs for BlastpArgs {
+    const PROGRAM: Program = Program::Blastp;
+    const APP: &'static str = "blastp";
+
+    fn runs(program: EProgram) -> bool {
+        program == EProgram::Blastp
     }
-    let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "blastp"])?;
-    let crate::cli::Commands::Blastp(mut out) = cli.command else {
-        unreachable!("the arguments of blastp")
-    };
-    let mut run = start.run(args.parse_deflines, program)?;
-    run.query_range = start.query_range(args.query_loc.as_ref(), program)?;
-    // `CQueryOptionsArgs`, `CStdCmdLineArgs`, `CFormattingArgs`, `CMTArgs`.
-    out.query = args.query;
-    out.query_loc = args.query_loc;
-    out.lcase_masking = args.lcase_masking;
-    out.parse_deflines = args.parse_deflines;
-    out.out = args.out;
-    out.outfmt = args.outfmt;
-    out.show_gis = args.show_gis;
-    out.num_descriptions = args.num_descriptions;
-    out.num_alignments = args.num_alignments;
-    out.max_target_seqs = args.max_target_seqs;
-    out.formatting = args.formatting;
-    out.num_threads = args.num_threads;
-    out.mt_mode = args.mt_mode;
-    out.import_search_strategy = Some(path);
-    // `CBlastDatabaseArgs` when the command line gives the database or the subjects, else the
-    // strategy's.
-    // `-dbsize` with `-db` or `-subject` is set after the strategy's options, unless the
-    // strategy's search space trumps it (blast_args.cpp:2565-2572).
-    let mut cli_dbsize = None;
-    if args.db.is_some() || args.subject.is_some() {
-        out.db = args.db;
-        out.subject = args.subject;
-        out.subject_loc = args.subject_loc;
-        out.db_filter = args.db_filter;
-        cli_dbsize = args.dbsize;
-    } else if let Some(name) = start.database() {
-        out.db = Some(name.to_string());
-        out.db_filter = start.db_filter(program)?;
-        if start.db_mask().is_some() {
-            return Err(Start::unported(
-                "a search strategy with a database mask",
-                program,
-            ));
-        }
-    } else if start.has_subjects() {
-        // The Owner's decision F2-Q1 (2026-11-20 「Q1=C」): a strategy's subjects are searched
-        // once, as with `-num_threads 1`, whatever `-num_threads` says (NCBI searches them once per
-        // thread: its thread check reads only the command line's `-subject`).
-        out.num_threads = 1;
+
+    fn imports(&self) -> bool {
+        self.import_search_strategy.is_some()
+            && self.import.is_none()
+            && self.app == super::args::BlastpApp::Blastp
     }
-    let options = &start.imported.options.options;
-    out.task = start.imported.program().task_name().to_string();
-    let mut seg = import::SegSetters::default();
-    let (mut cbs, mut unified_p) = (None, 0);
-    for setter in &options.setters {
-        if seg.take(setter) {
-            continue;
+
+    fn defaults() -> Result<Self> {
+        match import::defaults_of("blastp")? {
+            crate::cli::Commands::Blastp(args) => Ok(args),
+            _ => unreachable!("the arguments of blastp"),
         }
+    }
+
+    fn kept(self) -> import::Kept {
+        let given = self.given.list().to_vec();
+        import::Kept {
+            path: self.import_search_strategy.expect("an import"),
+            given,
+            query: self.query,
+            query_loc: self.query_loc,
+            strand: None,
+            lcase_masking: self.lcase_masking,
+            parse_deflines: self.parse_deflines,
+            id_scope: self.id_scope,
+            out: self.out,
+            outfmt: self.outfmt,
+            show_gis: self.show_gis,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            max_target_seqs: self.max_target_seqs.map(|n| n as i64),
+            formatting: self.formatting,
+            num_threads: self.num_threads as i64,
+            mt_mode: self.mt_mode,
+            database: import::KeptDatabase::given(
+                self.db,
+                self.subject,
+                self.subject_loc,
+                self.db_filter,
+                self.db_mask,
+                self.dbsize,
+            ),
+            use_index: false,
+            mb_index: import::MbIndexRequest::None,
+        }
+    }
+
+    fn keep(&mut self, kept: import::Kept) -> Result<()> {
+        self.query = kept.query;
+        self.query_loc = kept.query_loc;
+        self.lcase_masking = kept.lcase_masking;
+        self.parse_deflines = kept.parse_deflines;
+        self.id_scope = kept.id_scope;
+        self.out = kept.out;
+        self.outfmt = kept.outfmt;
+        self.show_gis = kept.show_gis;
+        self.num_descriptions = kept.num_descriptions;
+        self.num_alignments = kept.num_alignments;
+        self.max_target_seqs = kept
+            .max_target_seqs
+            .map(|n| usize::try_from(n).unwrap_or(0));
+        self.formatting = kept.formatting;
+        self.num_threads = usize::try_from(kept.num_threads).unwrap_or(1);
+        self.mt_mode = kept.mt_mode;
+        Ok(())
+    }
+
+    fn fields(&mut self) -> import::Fields<'_> {
+        import::Fields {
+            import_search_strategy: &mut self.import_search_strategy,
+            db: &mut self.db,
+            subject: &mut self.subject,
+            subject_loc: &mut self.subject_loc,
+            db_filter: &mut self.db_filter,
+            db_mask: &mut self.db_mask,
+            dbsize: &mut self.dbsize,
+            searchsp: &mut self.searchsp,
+            formatting: &mut self.formatting,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            outfmt: &self.outfmt,
+            import: &mut self.import,
+        }
+    }
+
+    fn one_thread(&mut self) {
+        self.num_threads = 1;
+    }
+
+    fn set_task(&mut self, task: &str) {
+        self.task = task.to_string();
+    }
+
+    fn set(&mut self, setter: &Setter) -> Result<bool> {
         match setter {
-            Setter::EvalueThreshold(v) => out.evalue = Some(*v),
-            Setter::WordSize(n) => out.word_size = Some(*n),
-            Setter::WordThreshold(n) => out.threshold = Some(f64::from(*n)),
-            Setter::WindowSize(n) => out.window_size = Some(*n),
-            Setter::MatrixName(name) => out.matrix = Some(name.clone()),
-            Setter::GapOpeningCost(n) => out.gap_open = Some(*n),
-            Setter::GapExtensionCost(n) => out.gap_extend = Some(*n),
-            Setter::GapXDropoff(v) => out.xdrop_gap = Some(*v),
-            Setter::GapXDropoffFinal(v) => out.xdrop_gap_final = Some(*v),
-            Setter::GapTrigger(v) => out.gap_trigger = Some(*v),
-            Setter::CompositionBasedStats(n) => cbs = Some(*n),
-            Setter::UnifiedP(n) => unified_p = *n,
-            Setter::CullingLimit(n) => out.culling_limit = Some(*n),
-            Setter::EffectiveSearchSpace(n) => {
-                out.searchsp = Some(*n);
-                run.searchsp_from_strategy = true;
-            }
-            Setter::DbLength(n) => out.dbsize = Some(*n),
-            Setter::HitlistSize(n) => out.formatting.hitlist_start = usize::try_from(*n).ok(),
+            Setter::EvalueThreshold(v) => self.evalue = Some(*v),
+            Setter::WordSize(n) => self.word_size = Some(*n),
+            Setter::WordThreshold(n) => self.threshold = Some(f64::from(*n)),
+            Setter::WindowSize(n) => self.window_size = Some(*n),
+            Setter::MatrixName(name) => self.matrix = Some(name.clone()),
+            Setter::GapOpeningCost(n) => self.gap_open = Some(*n),
+            Setter::GapExtensionCost(n) => self.gap_extend = Some(*n),
+            Setter::GapXDropoff(v) => self.xdrop_gap = Some(*v),
+            Setter::GapXDropoffFinal(v) => self.xdrop_gap_final = Some(*v),
+            Setter::GapTrigger(v) => self.gap_trigger = Some(*v),
+            Setter::CullingLimit(n) => self.culling_limit = Some(*n),
             Setter::MaxHspsPerSubject(n) => {
-                out.max_hsps_per_subject = usize::try_from(*n).ok().filter(|n| *n > 0)
+                self.max_hsps_per_subject = usize::try_from(*n).ok().filter(|n| *n > 0)
             }
-            Setter::QueryCovHspPerc(v) => out.qcov_hsp_perc = Some(*v),
-            Setter::SubjectBestHit => out.subject_besthit = true,
-            Setter::BestHitOverhang(v) => out.best_hit_overhang = Some(*v),
-            Setter::BestHitScoreEdge(v) => out.best_hit_score_edge = Some(*v),
-            Setter::MaskAtHash(on) => out.soft_masking = Some(*on),
-            Setter::SmithWatermanMode(on) => out.use_sw_tback = *on,
-            Setter::GappedMode(gapped) => out.ungapped = !*gapped,
-            Setter::SumStatisticsMode(on) => out.sum_stats = *on,
-            Setter::DustFiltering(false) | Setter::RepeatFiltering(false) => {}
-            other => return Err(Start::unported_setter(other, program)),
+            Setter::QueryCovHspPerc(v) => self.qcov_hsp_perc = Some(*v),
+            Setter::SubjectBestHit => self.subject_besthit = true,
+            Setter::BestHitOverhang(v) => self.best_hit_overhang = Some(*v),
+            Setter::BestHitScoreEdge(v) => self.best_hit_score_edge = Some(*v),
+            Setter::MaskAtHash(on) => self.soft_masking = Some(*on),
+            Setter::SmithWatermanMode(on) => self.use_sw_tback = *on,
+            Setter::GappedMode(gapped) => self.ungapped = !*gapped,
+            Setter::SumStatisticsMode(on) => self.sum_stats = *on,
+            _ => return Ok(false),
         }
+        Ok(true)
     }
-    if let Some(value) = seg.value() {
-        out.seg = Some(value);
-    }
-    if let Some(mode) = cbs {
-        if !(0..=3).contains(&mode) {
-            return Err(anyhow::anyhow!(
-                "a search strategy with composition-based statistics {mode} is not supported by LOSAT's {program}"
-            ));
+
+    fn finish(&mut self, collected: import::Collected, _run: &import::ImportRun) -> Result<()> {
+        let program = Program::Blastp.name();
+        collected.no_dust(program)?;
+        collected.no_repeat(program)?;
+        collected.no_nucleotide_algorithms(program)?;
+        if let Some(value) = collected.seg.value() {
+            self.seg = Some(value);
         }
-        out.comp_based_stats = format!("{mode}{}", if unified_p != 0 { "u" } else { "" });
-    }
-    if out.searchsp.is_none() {
-        if let Some(size) = cli_dbsize {
-            out.dbsize = Some(size);
+        if let Some(value) = collected.composition_value(true, program)? {
+            self.comp_based_stats = value;
         }
+        Ok(())
     }
-    import::formatting_early_return(
-        &mut out.formatting,
-        out.num_descriptions.is_some(),
-        out.num_alignments.is_some(),
-        &out.outfmt,
-    );
-    out.import = Some(run);
-    Ok(out)
+
+    fn into_command(self) -> crate::cli::Commands {
+        crate::cli::Commands::Blastp(self)
+    }
 }
 
 #[cfg(test)]

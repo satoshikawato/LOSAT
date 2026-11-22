@@ -659,6 +659,7 @@ fn test_args_of(task: &str, matrix: Option<&str>) -> ResolvedBlastpArgs {
         export_search_strategy: None,
         import_search_strategy: None,
         import: None,
+        given: Default::default(),
         strategy: None,
         request_inputs: None,
         app: BlastpApp::Blastp,

@@ -2542,7 +2542,9 @@ the search itself is valid and its `-num_threads 1` result is deterministic).
     `I.blastn.sub.nt8.*`, `I.tblastx.sub.nt2.*` to `I.tblastx.sub.nt8.*`). The copies are rule 2's deterministic NCBI output, which this exception
     replaces by the Owner's decision; the aborts are rule 1. LOSAT searches a strategy's subjects
     once, whatever `-num_threads` says: one place sets the search's thread count to 1 when the
-    strategy carries subjects (each program's `apply_strategy`), with no warning and no refusal, and
+    strategy carries subjects (the engine's import, `import::apply`, which the command line, the
+    library API and LOSAT Web share, also where one program runs another's strategy), with no
+    warning and no refusal, and
     the output is NCBI's `-num_threads 1` output, frozen. `-mt_mode 1` gives the same bytes (its
     output is that of one thread, as for every search). NCBI's warning `Number of threads was reduced
     to N to match the number of available CPUs` is not printed, as for every search (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES). A strategy whose subject is a

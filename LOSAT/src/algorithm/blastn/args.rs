@@ -244,7 +244,7 @@ pub struct BlastnArgs {
     pub export_search_strategy: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
     // The search strategy to import (`report::archive::read::import`), read by `run` before the
-    // other options (`archive::apply_strategy`).
+    // other options (`import::apply`).
     #[arg(
         long,
         value_name = "filename",
@@ -252,9 +252,13 @@ pub struct BlastnArgs {
         help = "Search strategy to use"
     )]
     pub import_search_strategy: Option<PathBuf>,
-    /// The run state of an imported search strategy (`archive::apply_strategy`).
+    /// The run state of an imported search strategy (`import::apply`).
     #[arg(skip)]
     pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`).
+    #[command(flatten)]
+    pub(crate) given: crate::cli::GivenArguments<BlastnArgs>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:648-660,674-679
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:175-182,262-271
     // An omitted option keeps the default of the task (`coordination.rs`); a given one is
@@ -510,7 +514,7 @@ pub struct BlastnArgs {
 impl BlastnArgs {
     /// Whether the report cites the megablast paper: task megablast run by blastn. The program
     /// of the command line chooses its formatter's reference, so tblastx running a megablast
-    /// strategy cites Gapped BLAST (`import::RunAs`, probe `C.tblastx.from.blastn.db`).
+    /// strategy cites Gapped BLAST (`import::apply`, probe `C.tblastx.from.blastn.db`).
     pub(crate) fn megablast_reference(&self) -> bool {
         self.task == "megablast" && self.import.as_ref().is_none_or(|run| run.app == "blastn")
     }
@@ -531,10 +535,18 @@ impl BlastnArgs {
     /// The name of the MegaBLAST index that NCBI's handler asks for, and whether it is an
     /// old-style one: with `-use_index true`, task megablast and a database (with `-subject` or
     /// another task NCBI ignores `-use_index`; `blast_engine::mb_index`), the `-index_name` value
-    /// (old style) or else the `-db` value as given (new style first).
+    /// (old style) or else the `-db` value as given (new style first). A run of an imported
+    /// strategy asks for the import's index (`ImportRun::mb_index`: the strategy's, or the one
+    /// that the command line names over it).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3381-3414
     pub(crate) fn megablast_index_name(&self) -> Option<(&str, bool)> {
+        if let Some(run) = &self.import {
+            return run
+                .mb_index
+                .as_ref()
+                .map(|(name, old_style)| (name.as_str(), *old_style));
+        }
         if self.use_index != Some(true) || self.task != "megablast" {
             return None;
         }

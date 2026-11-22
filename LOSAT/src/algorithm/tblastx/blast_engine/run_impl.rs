@@ -819,11 +819,7 @@ pub fn run(
     mut args: TblastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    // `RecoverSearchStrategy` first (tblastx_app.cpp:106-111): the strategy's options and inputs
-    // become the run's arguments (`archive::apply_strategy`).
-    if args.import_search_strategy.is_some() {
-        args = crate::algorithm::tblastx::archive::apply_strategy(args, &mut std::io::stderr())?;
-    }
+    // An `-import_search_strategy` was imported by the caller (`import::apply`), before the run.
     args.id_scope = args.parse_deflines.then(Default::default);
     // NCBI's score block looks for the file of a `-matrix` that its tables do not have when it
     // sets up a batch (`TblastxArgs::find_matrix_file`); the run refuses it there, as the name
@@ -1076,7 +1072,7 @@ fn read_subject_set(
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2553-2557
     // The first handler opens and reads the subjects (an empty subject set fails there),
     // as BLASTN's `run`.
-    // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for `-subject`.
+    // An imported strategy's subject Bioseqs (`import::apply`) stand for `-subject`.
     let subject_file = match (
         args.import.as_ref().and_then(|run| run.subjects.as_ref()),
         &args.subject,
@@ -1188,7 +1184,7 @@ fn check_ncbi_options(
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
     // The query options handler comes after the filtering handler and before the
     // formatting handler (tblastx_args.cpp:44-125).
-    // An imported strategy's query range stands for `-query_loc`'s (`archive::apply_strategy`).
+    // An imported strategy's query range stands for `-query_loc`'s (`import::apply`).
     let query_range = match args.import.as_ref().and_then(|import| import.query_range) {
         Some(range) => Some(range),
         None => crate::blastinput::seq_range::parse_optional_range(

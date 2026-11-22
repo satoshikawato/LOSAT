@@ -89,7 +89,7 @@ pub struct TblastnArgs {
     pub export_search_strategy: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
     // The search strategy to import (`report::archive::read::import`), read by `run` before the
-    // other options (`archive::apply_strategy`).
+    // other options (`import::apply`).
     #[arg(
         long,
         value_name = "filename",
@@ -97,9 +97,13 @@ pub struct TblastnArgs {
         help = "Search strategy to use"
     )]
     pub import_search_strategy: Option<PathBuf>,
-    /// The run state of an imported search strategy (`archive::apply_strategy`).
+    /// The run state of an imported search strategy (`import::apply`).
     #[arg(skip)]
     pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`).
+    #[command(flatten)]
+    pub(crate) given: crate::cli::GivenArguments<TblastnArgs>,
     // An omitted value keeps the default of the task (10).
     #[arg(long, value_parser = tblastn_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
@@ -472,7 +476,7 @@ impl TblastnArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
         // The query options handler comes after the window size handler and before the
         // formatting handler (tblastn_args.cpp:44-135).
-        // An imported strategy's query range stands for `-query_loc`'s (`archive::apply_strategy`).
+        // An imported strategy's query range stands for `-query_loc`'s (`import::apply`).
         let query_range = match self.import.as_ref().and_then(|import| import.query_range) {
             Some(range) => Some(range),
             None => crate::blastinput::seq_range::parse_optional_range(

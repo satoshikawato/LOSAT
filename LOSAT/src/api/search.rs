@@ -115,7 +115,7 @@ impl Search {
     }
 
     /// The parsed arguments of the search's argv with an `-import_search_strategy` (the file
-    /// itself is the engine's `apply_strategy`'s, `Search::read_strategy`) and neither `-query`
+    /// itself is the engine's import's, `Search::read_strategy`) and neither `-query`
     /// nor `-subject`: the command line's import without overrides.
     pub(crate) fn strategy_command(
         &self,

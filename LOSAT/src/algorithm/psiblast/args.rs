@@ -391,6 +391,7 @@ impl PsiblastArgs {
             export_search_strategy: self.export_search_strategy,
             import_search_strategy: None,
             import: None,
+            given: Default::default(),
             strategy: None,
             request_inputs,
             app: BlastpApp::Psiblast,

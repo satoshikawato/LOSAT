@@ -1,19 +1,23 @@
 //! `-import_search_strategy <file>`: what NCBI's `RecoverSearchStrategy` and
-//! `s_ImportSearchStrategy` (blast_app_util.cpp:532-628) make of a strategy file before the
-//! running program takes it as its own options and inputs (`SetOptionsForSavedStrategy`,
-//! blast_args.cpp:3800-3836; each program's `apply_strategy`).
+//! `s_ImportSearchStrategy` make of a strategy file before the running program takes it as its
+//! own options and inputs (`SetOptionsForSavedStrategy`): [`apply`], the one import of the
+//! command line, the library API and LOSAT Web, over each program's table of the strategy's
+//! setters ([`StrategyArgs`]).
 //!
-//! The file is read as `ExtractBlast4Request` reads it (remote_blast.cpp:2257-2331): first as a
+//! The file is read as `ExtractBlast4Request` reads it: first as a
 //! `Blast4-get-search-strategy-reply`, then, from the start of the input, as a `Blast4-request`;
-//! a serial error of either read is NCBI's `Failed to read search strategy`. The options are the
-//! strategy's (`read::options::import_request`); the queries are the FASTA text NCBI writes and
-//! reads back (`read::queries`), handed to the program as an unnamed temporary file (NCBI's
-//! `CTmpFile`); the subject is the strategy's database or its Bioseqs.
+//! a serial error of either read is NCBI's error that the strategy cannot be read
+//! (`failed_to_read`). The options are the strategy's (`read::options::import_request`); the
+//! queries are the FASTA text NCBI writes and reads back (`read::queries`), handed to the program
+//! as an unnamed temporary file (NCBI's `CTmpFile`, [`StrategyText`]); the subject is the
+//! strategy's database or its Bioseqs.
 //!
 //! LOSAT refuses, as not yet ported, what it has no reader for: binary ASN.1 and XML strategies,
 //! `seq-loc-list` queries and subjects, PSSM queries in the programs that take them, and GI lists.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:609-628
+//! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:532-628
+//! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2257-2331
 
 use std::io::{Read as IoRead, Seek};
 use std::path::Path;
@@ -76,15 +80,17 @@ impl Imported {
         self.options.options.program
     }
 
-    /// `GetQueryRange()`, `None` when it is empty or `-query` overrides the queries (the range
-    /// is set only with the strategy's queries, blast_app_util.cpp:594-598).
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:594-598
+    /// `GetQueryRange()`, `None` when it is empty or `-query` overrides the queries (the import
+    /// sets the range only with the strategy's queries).
     pub(crate) fn query_range(&self) -> Option<SeqRange> {
         let range = self.options.options.query_range;
         (self.queries.is_some() && range != SeqRange::EMPTY).then_some(range)
     }
 }
 
-/// `s_ImportSearchStrategy`'s `CInputException` for a file that does not read as a request.
+/// `s_ImportSearchStrategy`'s `CInputException` for a file that does not read as a request
+/// (its message in LOSAT's words is NCBI's).
 fn failed_to_read() -> anyhow::Error {
     crate::blastinput::app::options_error("Failed to read search strategy")
 }
@@ -94,13 +100,15 @@ fn unported(what: &str, program: &str) -> anyhow::Error {
     anyhow::anyhow!("{what} is not supported by LOSAT's {program}")
 }
 
-/// What `CATCH_ALL` (blast_app_util.hpp:168-262) reports of an exception the import throws.
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:167-267
+/// What `CATCH_ALL` reports of an exception the import throws.
 fn caught(exception: &NcbiException) -> anyhow::Error {
     NativeError::exception(exception).into()
 }
 
-/// The error of a read of `ExtractBlast4Request`'s second attempt: a `CSerialException` is
-/// `Failed to read search strategy`; any other exception leaves the import for `CATCH_ALL`.
+/// The error of a read of `ExtractBlast4Request`'s second attempt: a `CSerialException` is the
+/// import's read failure (`failed_to_read`); any other exception leaves the import for
+/// `CATCH_ALL`.
 fn read_error(error: ReadError, program: &str) -> anyhow::Error {
     match error {
         ReadError::Serial(_) => failed_to_read(),
@@ -164,7 +172,7 @@ fn extract_request<R: IoRead + Seek>(input: R, program: &str) -> Result<Value> {
         }
         // Both types are a SEQUENCE (`Blast4-get-search-strategy-reply ::= Blast4-request`): a
         // binary stream whose first byte is not its tag (0x30) fails both reads, and NCBI's
-        // `s_ImportSearchStrategy` reports `Failed to read search strategy` (a text file with a
+        // `s_ImportSearchStrategy` reports its read failure (`failed_to_read`; a text file with a
         // byte order mark is guessed binary).
         Ok(Encoding::Binary) => {
             let (taken, _) = guessed.into_parts();
@@ -191,7 +199,8 @@ fn extract_request<R: IoRead + Seek>(input: R, program: &str) -> Result<Value> {
     let input = first.map_err(|_| failed_to_read())?;
     let guessed = guess_encoding(input);
     if !text_encoding(&guessed.encoding, program)? {
-        // `NCBI_THROW(CSerialException, eInvalidData, "Unrecognized input format ")`.
+        // NCBI's switch over the guessed format throws a serial exception for a format it does
+        // not read, which the import reports as its read failure.
         return Err(failed_to_read());
     }
     let mut stream = guessed.into_text();
@@ -339,12 +348,13 @@ fn import_queries(queries: &Queries, options: &ImportedOptions, program: &str) -
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:983-986
 /// The arguments of the running program's command line as NCBI's `CArgs` holds them: every
 /// argument given, with its text, and every argument with a default that is not given, with the
 /// default's text.
 pub(crate) struct NcbiArguments {
-    /// `(name, text)`, in `CArgs::GetAll`'s order (by name, `operator<` of the names,
-    /// ncbiargs.cpp:983-986).
+    /// `(name, text)`, in `CArgs::GetAll`'s order (by name, as the descriptions compare their
+    /// names).
     all: Vec<(String, String)>,
 }
 
@@ -481,21 +491,18 @@ pub(crate) fn ignored_option_warnings(
     warnings
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
 /// What a run that imports a strategy carries into the program's own flow (each program's
-/// `import` field): the files that stand for its query and subject inputs, and the warnings that
+/// `import` field): the texts that stand for its query and subject inputs, and the warnings that
 /// NCBI posts during the import.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ImportRun {
     /// The strategy's queries (the text of NCBI's temporary FASTA file), read in place of
-    /// `-query` (`queries_input`).
-    pub(crate) queries: Option<std::sync::Arc<Vec<u8>>>,
+    /// `-query` (`open_query`).
+    pub(crate) queries: Option<std::sync::Arc<StrategyText>>,
     /// The strategy's subject Bioseqs as FASTA text (`queries::render_subjects`), read in place
     /// of `-subject` and named in no report (`User specified sequence set.`).
-    pub(crate) subjects: Option<std::sync::Arc<Vec<u8>>>,
-    /// The strategy's bytes, which a caller without a file gives before the import reads them
-    /// (`apply_strategy` reads them in place of the file of `-import_search_strategy`); `None` on
-    /// the command line.
-    pub(crate) source: Option<std::sync::Arc<Vec<u8>>>,
+    pub(crate) subjects: Option<std::sync::Arc<StrategyText>>,
     /// `RecoverSearchStrategy`'s warnings, posted before the program's own.
     pub(crate) warnings: Vec<String>,
     /// `x_IssueWarningsForIgnoredOptions`' warnings, posted after the formatting handler's.
@@ -503,8 +510,12 @@ pub(crate) struct ImportRun {
     /// The running program's NCBI name (`Start::app`), the prefix of the warnings.
     pub(crate) app: &'static str,
     /// The effective search space is the strategy's `EffectiveSearchSpace`, which does not set
-    /// `OLD_FSC` as `-searchsp` does (blast_args.cpp:303-307).
+    /// `OLD_FSC` in the environment as the command line's `-searchsp` does.
     pub(crate) searchsp_from_strategy: bool,
+    /// blastn's MegaBLAST database index of the import (`import_into`): the strategy's
+    /// (`ForceMbIndex` with its name, a new-style index), or the one that the command line's
+    /// `-use_index true` names over it; the name and whether the index is old-style.
+    pub(crate) mb_index: Option<(String, bool)>,
     /// The strategy's query range (`Start::query_range`), which the program's query options
     /// take in place of `-query_loc`'s.
     pub(crate) query_range: Option<crate::blastinput::seq_range::SequenceRange>,
@@ -549,11 +560,9 @@ impl ImportRun {
     /// its sequences from a file opens in place of `-query` or `-subject`).
     pub(crate) fn input_of(
         role: &str,
-        text: &[u8],
+        text: &StrategyText,
     ) -> Result<crate::blastinput::input_files::InputFile> {
-        Ok(crate::blastinput::input_files::InputFile::from(
-            crate::blastinput::input_files::temporary_input(role, text)?,
-        ))
+        text.open(role)
     }
 
     /// `old_fsc` of a run: `-searchsp` sets it, the strategy's effective search space does not.
@@ -563,25 +572,96 @@ impl ImportRun {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:395-439
+/// The strategy's queries or subjects as FASTA text, held once: in memory until a run first
+/// opens it as an input, then only as the unnamed temporary file that the open wrote (NCBI writes
+/// the queries to a temporary file at the import and reads the queries from it), whose handle
+/// each later open reads from its start. A run holds no copy of the text beside the file, as the
+/// command line's `-query` holds none beside its file. A caller that reads records from bytes
+/// (the library API and LOSAT Web) takes the text itself (`take`).
+#[derive(Debug)]
+pub(crate) struct StrategyText(std::sync::Mutex<Held>);
+
+/// Where a [`StrategyText`] is.
+#[derive(Debug)]
+enum Held {
+    Text(Vec<u8>),
+    File(std::fs::File),
+    /// Taken by a caller that reads records (`take`).
+    Taken,
+}
+
+impl StrategyText {
+    pub(crate) fn new(text: Vec<u8>) -> Self {
+        Self(std::sync::Mutex::new(Held::Text(text)))
+    }
+
+    /// The text as an input file of the run (`role`: `query` or `subject`), positioned at its
+    /// start: the first open writes the text to the temporary file and drops it.
+    pub(crate) fn open(&self, role: &str) -> Result<crate::blastinput::input_files::InputFile> {
+        let mut held = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Held::Text(text) = &*held {
+            let file = crate::blastinput::input_files::temporary_input(role, text)?;
+            *held = Held::File(file);
+        }
+        match &*held {
+            Held::File(file) => {
+                let mut copy = file.try_clone()?;
+                copy.seek(std::io::SeekFrom::Start(0))?;
+                Ok(crate::blastinput::input_files::InputFile::from(copy))
+            }
+            Held::Text(_) | Held::Taken => {
+                anyhow::bail!("the search strategy's {role} sequences were taken as records")
+            }
+        }
+    }
+
+    /// The text, for a caller that reads records from it: what the strategy carries, read back
+    /// from the temporary file once a run has opened it.
+    pub(crate) fn take(&self) -> Result<Vec<u8>> {
+        let mut held = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match std::mem::replace(&mut *held, Held::Taken) {
+            Held::Text(text) => Ok(text),
+            Held::File(file) => {
+                let mut copy = file.try_clone()?;
+                copy.seek(std::io::SeekFrom::Start(0))?;
+                let mut text = Vec::new();
+                copy.read_to_end(&mut text)?;
+                *held = Held::File(file);
+                Ok(text)
+            }
+            Held::Taken => Ok(Vec::new()),
+        }
+    }
+}
+
 /// The start of an import: the strategy read, and the program's defaults to apply it to.
 pub(crate) struct Start {
     pub(crate) imported: Imported,
     /// The arguments of the command line as NCBI's `CArgs` holds them.
     pub(crate) arguments: NcbiArguments,
     /// The running program's NCBI name, the prefix of its warnings (`blastn`, ...): the program
-    /// of the command line, also when it runs another program's strategy ([`RunAs`]).
+    /// of the command line, also when it runs another program's strategy (`import`).
     pub(crate) app: &'static str,
 }
 
-/// `RecoverSearchStrategy` for the running program `ncbi_name` (`blastp` ...): the strategy, or
-/// the error after the warnings posted before it (written to `diagnostics` here, as NCBI posts
-/// them before its `CATCH_ALL` reports the error; the command line's are its standard error).
+/// `RecoverSearchStrategy` for the running program `ncbi_name` (`blastp` ...) whose command line
+/// gave the arguments `given` ([`crate::cli::GivenArguments`]): the strategy, or the error after
+/// the warnings posted before it (written to `diagnostics` here, as NCBI posts them before its
+/// `CATCH_ALL` reports the error; the command line's are its standard error).
 pub(crate) fn start(
     command: &Command<'_>,
     ncbi_name: &'static str,
+    given: &[(String, String)],
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<Start> {
-    let arguments = NcbiArguments::new(ncbi_name, &crate::cli::given_arguments());
+    let arguments = NcbiArguments::new(ncbi_name, given);
     match recover(command) {
         Ok(imported) => Ok(Start {
             imported,
@@ -596,10 +676,16 @@ pub(crate) fn start(
 }
 
 impl Start {
-    /// The run state of the import, its queries and subjects in place (the subjects rendered for
-    /// a reader with or without `-parse_deflines`), and the warnings of the options for the
+    /// The run state of the import: the subjects rendered for a reader with or without
+    /// `-parse_deflines`, the strategy's query range unless the command line gives `-query_loc`
+    /// (`query_loc`), the queries moved in (no copy), and the warnings of the options for the
     /// strategy's program and task.
-    pub(crate) fn run(&self, parse_deflines: bool, program: &str) -> Result<ImportRun> {
+    pub(crate) fn run(
+        &mut self,
+        parse_deflines: bool,
+        query_loc: Option<&String>,
+        program: &str,
+    ) -> Result<ImportRun> {
         let subjects = match &self.imported.subject {
             Some(ImportedSubject::Sequences(bioseqs)) => {
                 let values: Vec<V<'_>> = bioseqs
@@ -613,15 +699,19 @@ impl Start {
                             RenderError::Unsupported(part) => unported(&part, program),
                         }
                     })?;
-                Some(std::sync::Arc::new(text))
+                Some(std::sync::Arc::new(StrategyText::new(text)))
             }
             _ => None,
         };
+        let query_range = self.query_range(query_loc, program)?;
         let task = self.imported.program().task_name();
         Ok(ImportRun {
-            queries: self.imported.queries.clone().map(std::sync::Arc::new),
+            queries: self
+                .imported
+                .queries
+                .take()
+                .map(|text| std::sync::Arc::new(StrategyText::new(text))),
             subjects,
-            source: None,
             warnings: self.imported.warnings.clone(),
             option_warnings: ignored_option_warnings(
                 &self.arguments,
@@ -630,7 +720,7 @@ impl Start {
             ),
             app: self.app,
             searchsp_from_strategy: false,
-            query_range: None,
+            query_range,
             recorded: self
                 .imported
                 .options
@@ -651,14 +741,8 @@ impl Start {
         }
     }
 
-    /// Posts the import's warnings for an error that `SetOptionsForSavedStrategy` raises before
-    /// the run's diagnostics exist.
-    pub(crate) fn post_warnings(&self) {
-        use std::io::Write;
-        let _ = std::io::stderr().write_all(&ImportRun::lines(&self.imported.warnings, self.app));
-    }
-
-    /// The strategy's taxid lists over its database (`s_ImportDatabase`, blast_app_util.cpp:468-495):
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:468-496
+    /// The strategy's taxid lists over its database (`s_ImportDatabase`):
     /// the stored lists are the taxids themselves (the command line's expansion happened at the
     /// export), so a list is `-taxids` or `-negative_taxids` with `-no_taxid_expansion`. A
     /// strategy with both lists is not modelled.
@@ -694,8 +778,9 @@ impl Start {
         Ok(filter)
     }
 
-    /// The strategy's database mask (`s_ImportDatabase`, blast_app_util.cpp:497-511): the
-    /// algorithm's key before its id, and the masking type (soft when the strategy has none).
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:498-511
+    /// The strategy's database mask (`s_ImportDatabase`): the algorithm's key before its id, and
+    /// the masking type (soft when the strategy has none).
     pub(crate) fn db_mask(&self) -> Option<(DbMaskAlgorithm, i32)> {
         let options = &self.imported.options;
         let kind = if options.subject_masking_type == 0 {
@@ -722,14 +807,15 @@ impl Start {
         matches!(self.imported.subject, Some(ImportedSubject::Sequences(_)))
     }
 
-    /// The query range of the strategy (`strategy.GetQueryRange()`, set by
-    /// `s_ImportSearchStrategy`, blast_app_util.cpp:594-598, unless empty), as the closed range
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:594-598
+    /// The query range of the strategy (`GetQueryRange`, which `s_ImportSearchStrategy` sets
+    /// unless it is empty), as the closed range
     /// of `CQueryOptionsArgs`: `None` when the command line gives `-query_loc` (its
     /// `ExtractAlgorithmOptions` sets the range again) or the strategy has none. A range without
     /// a start or an end keeps `kEmptyRange`'s bound, which `record_interval` reads as NCBI's
-    /// reader does; a range whose end comes before its start (NCBI's `Invalid sequence range` at
-    /// the first query) is not modelled.
-    pub(crate) fn query_range(
+    /// reader does; a range whose end comes before its start (NCBI's error at the first query)
+    /// is not modelled.
+    fn query_range(
         &self,
         given: Option<&String>,
         program: &str,
@@ -764,39 +850,17 @@ impl Start {
         Ok(Some(range))
     }
 
-    /// LOSAT's refusal of a setter that the program does not take from a strategy.
-    pub(crate) fn unported_setter(setter: &super::options::Setter, program: &str) -> anyhow::Error {
+    /// LOSAT's refusal of a setter that the program does not take from a strategy, the option
+    /// named by its field in the strategy file and its value.
+    pub(crate) fn unported_setter(setter: &Setter, program: &str) -> anyhow::Error {
         unported(
-            &format!("a search strategy with the option {setter:?}"),
+            &format!("a search strategy with the option {}", option_text(setter)),
             program,
         )
     }
 
-    /// LOSAT's refusal of a strategy of another program.
-    /// A strategy of another program than the running one (`program`, LOSAT's name): the run of
-    /// the strategy's program with the arguments the command line keeps (`carried`), where
-    /// NCBI's output is that program's import ([`RunAs`]), else the refusal.
-    pub(crate) fn run_as(&self, program: &str, carried: impl FnOnce() -> Carried) -> anyhow::Error {
-        use EProgram::{Blastn, Blastx, DiscMegablast, Megablast, Tblastx};
-        let target = self.imported.program();
-        let command = match (self.app, target) {
-            ("blastn" | "blastx", Tblastx) => {
-                crate::algorithm::tblastx::archive::from_carried(carried()).map(Commands::Tblastx)
-            }
-            ("tblastx", Blastx) => {
-                crate::algorithm::blastx::archive::from_carried(carried()).map(Commands::Blastx)
-            }
-            ("tblastx", Blastn | Megablast | DiscMegablast) => {
-                crate::algorithm::blastn::archive::from_carried(carried()).map(Commands::Blastn)
-            }
-            _ => return self.unported_program(program),
-        };
-        match command {
-            Ok(command) => anyhow::Error::new(RunAs(Box::new(command))),
-            Err(error) => error,
-        }
-    }
-
+    /// LOSAT's refusal of a strategy of another program than the running one, where NCBI's
+    /// output is not that program's import.
     pub(crate) fn unported_program(&self, program: &str) -> anyhow::Error {
         unported(
             &format!(
@@ -805,6 +869,33 @@ impl Start {
             ),
             program,
         )
+    }
+}
+
+/// A setter as the strategy file names it: its field and its value (`recorded_params`).
+fn option_text(setter: &Setter) -> String {
+    match setter {
+        Setter::StrandOption(strand) => format!("StrandOption {strand}"),
+        Setter::UseIndex { index_name } => format!("MbIndexName \"{index_name}\""),
+        _ => match recorded_params(setter).first() {
+            Some(param) => {
+                let value = match &param.value {
+                    ParamValue::Boolean(true) => "TRUE".to_string(),
+                    ParamValue::Boolean(false) => "FALSE".to_string(),
+                    ParamValue::Integer(n) => n.to_string(),
+                    ParamValue::BigInteger(n) => n.to_string(),
+                    ParamValue::Real(v) | ParamValue::Evalue(v) => v.to_string(),
+                    ParamValue::Str(text) => format!("\"{text}\""),
+                    ParamValue::IntegerList(list) => list
+                        .iter()
+                        .map(i32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                };
+                format!("{} {value}", param.name())
+            }
+            None => String::new(),
+        },
     }
 }
 
@@ -995,47 +1086,79 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
         Setter::WindowSize(v) => one(f::WINDOW_SIZE, Integer(*v)),
         Setter::WordSize(v) => one(f::WORD_SIZE, Integer(*v)),
         Setter::WordThreshold(v) => one(f::WORD_THRESHOLD, Integer(*v)),
-        // `SetUseIndex(true, name, true)`, as `CMbIndexArgs` records it (`options::Class::MbIndex`).
+        // The builder's `SetUseIndex(true, name, true)` records the force flag true; the run's
+        // loader that uses no index sets it false again (`options::replayed_options`).
         Setter::UseIndex { index_name } => vec![
-            Param::new(f::FORCE_MB_INDEX, Boolean(false)),
+            Param::new(f::FORCE_MB_INDEX, Boolean(true)),
             Param::new(f::MB_INDEX_NAME, Str(index_name.clone())),
         ],
     }
 }
 
-/// One program running another program's strategy (survey F2 2.6): the strategy decides the
-/// engine, its options and the subjects; the command line's program its warnings (their prefix
-/// and NCBI's argument table, [`Start::app`]). NCBI's output of blastn and blastx running a
-/// TBLASTX strategy, and of tblastx running a BLASTX or BLASTN one, is that program's import
-/// with the running program's warnings, and tblastx's report of a BLASTN strategy cites the
-/// Gapped BLAST paper (probes `C.blastn.from.tblastx.db`, `C.blastx.from.tblastx.db`,
-/// `C.tblastx.from.blastx.db`, `C.tblastx.from.blastn.db`). The error that carries the
-/// strategy's program's arguments up to the dispatch (`cli::main_entry`), which runs them; no
-/// byte is written before it.
-#[derive(Debug)]
-pub(crate) struct RunAs(pub(crate) Box<Commands>);
-
-impl std::fmt::Display for RunAs {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("a search strategy of another program")
-    }
+/// One of the five search programs' arguments as the import of a search strategy sets them
+/// (`SetOptionsForSavedStrategy`): the arguments that the program's command line keeps, and the
+/// program's table of the strategy's setters over its own typed options, the options of its
+/// command line. Everything else of the import is [`apply`]'s, the same for every program and
+/// every caller (the command line, the library API, LOSAT Web).
+pub(crate) trait StrategyArgs: Sized {
+    /// The program, by LOSAT's name in its refusals.
+    const PROGRAM: crate::blastinput::app::Program;
+    /// NCBI's name of the program, the prefix of its warnings.
+    const APP: &'static str;
+    /// Whether a strategy of `program` is the program's own.
+    fn runs(program: EProgram) -> bool;
+    /// Whether the arguments give a strategy that is not imported yet.
+    fn imports(&self) -> bool;
+    /// The arguments of a command line that gives nothing (`losat <program>`).
+    fn defaults() -> Result<Self>;
+    /// What `SetOptionsForSavedStrategy` takes from the command line of these arguments.
+    fn kept(self) -> Kept;
+    /// The arguments that `kept` gives over these ones (the program's defaults).
+    fn keep(&mut self, kept: Kept) -> Result<()>;
+    /// The arguments that the import sets in the same way in every program.
+    fn fields(&mut self) -> Fields<'_>;
+    /// One search thread.
+    fn one_thread(&mut self);
+    /// `-task`.
+    fn set_task(&mut self, task: &str);
+    /// The program's table: `setter` set on the option of the command line that it stands for,
+    /// `false` for a setter that the program does not take.
+    fn set(&mut self, setter: &Setter) -> Result<bool>;
+    /// The options of the setters that act together (`collected`), after the table, with the
+    /// import's run state (`run`).
+    fn finish(&mut self, collected: Collected, run: &ImportRun) -> Result<()>;
+    fn into_command(self) -> Commands;
 }
 
-impl std::error::Error for RunAs {}
+/// The arguments of the program that [`StrategyArgs::fields`] gives the import.
+pub(crate) struct Fields<'a> {
+    pub(crate) import_search_strategy: &'a mut Option<std::path::PathBuf>,
+    pub(crate) db: &'a mut Option<String>,
+    pub(crate) subject: &'a mut Option<std::path::PathBuf>,
+    pub(crate) subject_loc: &'a mut Option<String>,
+    pub(crate) db_filter: &'a mut crate::blastinput::db_filter::DbFilterArgs,
+    pub(crate) db_mask: &'a mut crate::blastinput::db_mask::DbMaskArgs,
+    pub(crate) dbsize: &'a mut Option<i64>,
+    pub(crate) searchsp: &'a mut Option<i64>,
+    pub(crate) formatting: &'a mut crate::blastinput::report_counts::FormattingArgs,
+    pub(crate) num_descriptions: Option<usize>,
+    pub(crate) num_alignments: Option<usize>,
+    pub(crate) outfmt: &'a str,
+    pub(crate) import: &'a mut Option<ImportRun>,
+}
 
-/// The arguments that a run of an imported strategy keeps from the command line (the classes
-/// `SetOptionsForSavedStrategy` extracts again: query, formatting, threads, database or
-/// subjects), as one program hands them to the program whose strategy it runs ([`RunAs`]).
-pub(crate) struct Carried {
-    /// The running program's NCBI name ([`Start::app`]).
-    pub(crate) app: &'static str,
+/// The arguments that the import keeps from the running program's command line: the classes
+/// that `SetOptionsForSavedStrategy` extracts again (the query options, `-out`, the formatting
+/// options, the threads, the database or subjects when given, the MegaBLAST index), and the
+/// arguments the command line gave, for the warnings. One program hands them to the program
+/// whose strategy it runs.
+pub(crate) struct Kept {
     pub(crate) path: std::path::PathBuf,
-    /// The strategy's bytes of a caller without a file ([`ImportRun::source`]).
-    pub(crate) source: Option<std::sync::Arc<Vec<u8>>>,
+    pub(crate) given: Vec<(String, String)>,
     pub(crate) query: std::path::PathBuf,
     pub(crate) query_loc: Option<String>,
-    /// `-strand` (`both` when not given).
-    pub(crate) strand: String,
+    /// `-strand`, `None` for a program without it (a protein query).
+    pub(crate) strand: Option<String>,
     pub(crate) lcase_masking: bool,
     pub(crate) parse_deflines: bool,
     pub(crate) id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
@@ -1047,23 +1170,428 @@ pub(crate) struct Carried {
     /// `-max_target_seqs` as given (blastx keeps values below 1 for its own error).
     pub(crate) max_target_seqs: Option<i64>,
     pub(crate) formatting: crate::blastinput::report_counts::FormattingArgs,
-    pub(crate) num_threads: usize,
+    /// `-num_threads` as given (blastx keeps its own type).
+    pub(crate) num_threads: i64,
     pub(crate) mt_mode: Option<u8>,
+    /// `CBlastDatabaseArgs`, when the command line gives `-db` or `-subject` (`HasBeenSet`).
+    pub(crate) database: Option<KeptDatabase>,
+    /// `-use_index true` given: NCBI's warning that the strategy's index options are overridden.
+    pub(crate) use_index: bool,
+    /// What `CMbIndexArgs` of the command line asks for.
+    pub(crate) mb_index: MbIndexRequest,
+}
+
+/// `CBlastDatabaseArgs` of a command line that gives `-db` or `-subject`.
+pub(crate) struct KeptDatabase {
     pub(crate) db: Option<String>,
     pub(crate) subject: Option<std::path::PathBuf>,
     pub(crate) subject_loc: Option<String>,
     pub(crate) db_filter: crate::blastinput::db_filter::DbFilterArgs,
+    pub(crate) db_mask: crate::blastinput::db_mask::DbMaskArgs,
     pub(crate) dbsize: Option<i64>,
 }
 
-impl Carried {
-    /// The import run state that names the running program for the strategy's program
-    /// (`ImportRun::app`, read by its `apply_strategy`).
-    pub(crate) fn import_app(&self) -> Option<ImportRun> {
-        Some(ImportRun {
-            app: self.app,
-            source: self.source.clone(),
-            ..ImportRun::default()
+impl KeptDatabase {
+    /// The database arguments of a command line, `None` when it gives neither `-db` nor
+    /// `-subject`.
+    pub(crate) fn given(
+        db: Option<String>,
+        subject: Option<std::path::PathBuf>,
+        subject_loc: Option<String>,
+        db_filter: crate::blastinput::db_filter::DbFilterArgs,
+        db_mask: crate::blastinput::db_mask::DbMaskArgs,
+        dbsize: Option<i64>,
+    ) -> Option<Self> {
+        (db.is_some() || subject.is_some()).then_some(Self {
+            db,
+            subject,
+            subject_loc,
+            db_filter,
+            db_mask,
+            dbsize,
         })
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3377-3417
+/// What `CMbIndexArgs::ExtractAlgorithmOptions` of the command line does with an imported
+/// strategy (`SetOptionsForSavedStrategy` runs it for blastn, whose `-use_index` always has a
+/// value): with `-use_index true`, the command line's `-task` megablast and no `-subject`, it
+/// names the index by `-index_name` (old style) or `-db` (new style), or throws; otherwise the
+/// strategy's index options stay.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum MbIndexRequest {
+    None,
+    Index { name: String, old_style: bool },
+    NoName,
+}
+
+impl MbIndexRequest {
+    /// The request of blastn's command line.
+    pub(crate) fn of(
+        use_index: Option<bool>,
+        task: &str,
+        subject_given: bool,
+        index_name: Option<&String>,
+        db: Option<&String>,
+    ) -> Self {
+        if use_index != Some(true) || task != "megablast" || subject_given {
+            return Self::None;
+        }
+        match (index_name, db) {
+            (Some(name), _) => Self::Index {
+                name: name.clone(),
+                old_style: true,
+            },
+            (None, Some(db)) => Self::Index {
+                name: db.clone(),
+                old_style: false,
+            },
+            (None, None) => Self::NoName,
+        }
+    }
+}
+
+/// The repeat filter database of `SRepeatFilterOptionsNew` (`kDefaultRepeatFilterDb`).
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:246
+const DEFAULT_REPEAT_FILTER_DB: &str = "repeat/repeat_9606";
+
+/// The setters of a strategy that act together, collected in the file's order and applied by
+/// the program after its table ([`StrategyArgs::finish`]).
+#[derive(Default)]
+pub(crate) struct Collected {
+    pub(crate) dust: DustSetters,
+    pub(crate) seg: SegSetters,
+    pub(crate) composition: Option<i32>,
+    pub(crate) unified_p: Option<i32>,
+    pub(crate) extension: Option<i32>,
+    pub(crate) traceback: Option<i32>,
+    pub(crate) template_type: Option<u8>,
+    pub(crate) template_length: Option<u8>,
+    /// The repeat filter: untouched (`None`), off (`Some(None)`) or its database.
+    pub(crate) repeat: Option<Option<String>>,
+    /// The MegaBLAST index that the strategy forces (`ForceMbIndex`), by its name.
+    pub(crate) index: Option<String>,
+}
+
+impl Collected {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:925-959
+    /// Takes a setter that acts with others (`true`), or leaves it to the program's table. The
+    /// repeat filter's switch drops its options and, when on, makes them again with the default
+    /// database; its database setter makes them when absent and names the database.
+    fn take(&mut self, setter: &Setter) -> bool {
+        if self.dust.take(setter) || self.seg.take(setter) {
+            return true;
+        }
+        match setter {
+            Setter::CompositionBasedStats(n) => self.composition = Some(*n),
+            Setter::UnifiedP(n) => self.unified_p = Some(*n),
+            Setter::GapExtnAlgorithm(n) => self.extension = Some(*n),
+            Setter::GapTracebackAlgorithm(n) => self.traceback = Some(*n),
+            Setter::MbTemplateType(n) => self.template_type = Some(*n),
+            Setter::MbTemplateLength(n) => self.template_length = Some(*n),
+            Setter::RepeatFiltering(on) => {
+                self.repeat = Some(on.then(|| DEFAULT_REPEAT_FILTER_DB.to_string()))
+            }
+            Setter::RepeatFilteringDb(name) => self.repeat = Some(Some(name.clone())),
+            Setter::UseIndex { index_name } => self.index = Some(index_name.clone()),
+            _ => return false,
+        }
+        true
+    }
+
+    /// The refusal of a program that has none of `option` (the strategy's field) unless the
+    /// setters left it off or untouched (`off`).
+    fn refuse_unless(off: bool, option: &str, program: &str) -> Result<()> {
+        if off {
+            Ok(())
+        } else {
+            Err(unported(
+                &format!("a search strategy with the option {option}"),
+                program,
+            ))
+        }
+    }
+
+    /// DUST left off or untouched (a program of protein queries).
+    pub(crate) fn no_dust(&self, program: &str) -> Result<()> {
+        let off = self.dust.value().is_none_or(|value| value == "no");
+        Self::refuse_unless(off, "DustFiltering", program)
+    }
+
+    /// SEG left off or untouched (blastn).
+    pub(crate) fn no_seg(&self, program: &str) -> Result<()> {
+        let off = self.seg.value().is_none_or(|value| value == "no");
+        Self::refuse_unless(off, "SegFiltering", program)
+    }
+
+    /// No composition-based statistics and no unified P-value (blastn).
+    pub(crate) fn no_composition(&self, program: &str) -> Result<()> {
+        Self::refuse_unless(self.composition.is_none(), "CompositionBasedStats", program)?;
+        Self::refuse_unless(self.unified_p.is_none(), "UnifiedP", program)
+    }
+
+    /// The repeat filter left off or untouched (the programs other than blastn).
+    pub(crate) fn no_repeat(&self, program: &str) -> Result<()> {
+        let off = self.repeat.as_ref().is_none_or(Option::is_none);
+        Self::refuse_unless(off, "RepeatFilteringDB", program)
+    }
+
+    /// No gapped extension or traceback algorithm, no discontiguous template (the programs other
+    /// than blastn).
+    pub(crate) fn no_nucleotide_algorithms(&self, program: &str) -> Result<()> {
+        Self::refuse_unless(self.extension.is_none(), "GapExtnAlgorithm", program)?;
+        Self::refuse_unless(self.traceback.is_none(), "GapTracebackAlgorithm", program)?;
+        Self::refuse_unless(self.template_type.is_none(), "MBTemplateType", program)?;
+        Self::refuse_unless(self.template_length.is_none(), "MBTemplateLength", program)
+    }
+
+    /// The `-comp_based_stats` value of the setters (`None` when untouched): a mode 0 to 3,
+    /// with the unified P-value (`u`) where the program takes it (`unified`).
+    pub(crate) fn composition_value(&self, unified: bool, program: &str) -> Result<Option<String>> {
+        let unified_p = self.unified_p.unwrap_or(0);
+        let Some(mode) = self.composition else {
+            return Self::refuse_unless(unified_p == 0, "UnifiedP", program).map(|()| None);
+        };
+        if !(0..=3).contains(&mode) || (unified_p != 0 && !unified) {
+            return Err(unported(
+                &format!("a search strategy with composition-based statistics {mode} (unified P {unified_p})"),
+                program,
+            ));
+        }
+        Ok(Some(format!(
+            "{mode}{}",
+            if unified_p != 0 { "u" } else { "" }
+        )))
+    }
+}
+
+/// `-import_search_strategy` (`RecoverSearchStrategy`, `SetOptionsForSavedStrategy`): the
+/// arguments of the strategy's program for the strategy file named in `command` (or its bytes,
+/// `source`, for a caller without a file), which the run then searches as any other: the
+/// program's defaults with the strategy's options set on them in the file's order, and from the
+/// command line only what NCBI extracts again. A strategy of another program is that program's
+/// arguments where NCBI's output is that program's import with the running program's warnings
+/// (blastn and blastx running a TBLASTX strategy, tblastx a BLASTX or BLASTN one: probes
+/// `C.blastn.from.tblastx.db`, `C.blastx.from.tblastx.db`, `C.tblastx.from.blastx.db`,
+/// `C.tblastx.from.blastn.db`); other pairs are refused. Arguments without a strategy are
+/// returned as they are. The one import of the command line, the library API and LOSAT Web.
+pub(crate) fn apply(
+    command: Commands,
+    source: Option<&[u8]>,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<Commands> {
+    use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
+    match command {
+        Commands::Blastn(args) if args.imports() => {
+            import::<blastn::BlastnArgs>(args, source, diagnostics)
+        }
+        Commands::Blastp(args) if args.imports() => {
+            import::<blastp::BlastpArgs>(args, source, diagnostics)
+        }
+        Commands::Blastx(args) if args.imports() => {
+            import::<blastx::BlastxArgs>(args, source, diagnostics)
+        }
+        Commands::Tblastn(args) if args.imports() => {
+            import::<tblastn::TblastnArgs>(args, source, diagnostics)
+        }
+        Commands::Tblastx(args) if args.imports() => {
+            import::<tblastx::TblastxArgs>(args, source, diagnostics)
+        }
+        other => Ok(other),
+    }
+}
+
+/// Whether the arguments `command` give a strategy that is not imported yet ([`apply`] imports
+/// it).
+pub(crate) fn imports(command: &Commands) -> bool {
+    match command {
+        Commands::Blastn(args) => args.imports(),
+        Commands::Blastp(args) => args.imports(),
+        Commands::Blastx(args) => args.imports(),
+        Commands::Tblastn(args) => args.imports(),
+        Commands::Tblastx(args) => args.imports(),
+        _ => false,
+    }
+}
+
+/// The import of the running program `A`'s arguments.
+fn import<A: StrategyArgs>(
+    args: A,
+    source: Option<&[u8]>,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<Commands> {
+    use crate::algorithm::{blastn::BlastnArgs, blastx::BlastxArgs, tblastx::TblastxArgs};
+    use EProgram::{Blastn, Blastx, DiscMegablast, Megablast, Tblastx};
+    let kept = args.kept();
+    let program = A::PROGRAM.name();
+    let start = start(
+        &Command {
+            path: &kept.path,
+            bytes: source,
+            program,
+            override_query: kept.query.as_os_str() != "-",
+            override_subject: kept.database.is_some(),
+            use_index_set: kept.use_index,
+        },
+        A::APP,
+        &kept.given,
+        diagnostics,
+    )?;
+    let target = start.imported.program();
+    if A::runs(target) {
+        return import_as::<A>(start, kept, diagnostics);
+    }
+    match (A::APP, target) {
+        ("blastn" | "blastx", Tblastx) => import_as::<TblastxArgs>(start, kept, diagnostics),
+        ("tblastx", Blastx) => import_as::<BlastxArgs>(start, kept, diagnostics),
+        ("tblastx", Blastn | Megablast | DiscMegablast) => {
+            import_as::<BlastnArgs>(start, kept, diagnostics)
+        }
+        _ => {
+            let _ = diagnostics.write_all(&ImportRun::lines(&start.imported.warnings, start.app));
+            Err(start.unported_program(program))
+        }
+    }
+}
+
+/// The import as the arguments of the program `T` (the running program's or, for another
+/// program's strategy, that program's). An error comes after the import's warnings, which NCBI
+/// has posted by then.
+fn import_as<T: StrategyArgs>(
+    mut start: Start,
+    kept: Kept,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<Commands> {
+    let imported = import_into::<T>(&mut start, kept);
+    if imported.is_err() {
+        let _ = diagnostics.write_all(&ImportRun::lines(&start.imported.warnings, start.app));
+    }
+    imported
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2565-2572
+fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Commands> {
+    let program = T::PROGRAM.name();
+    let mut out = T::defaults()?;
+    let path = kept.path.clone();
+    let parse_deflines = kept.parse_deflines;
+    let query_loc = kept.query_loc.clone();
+    let database = kept.database.take();
+    let mb_index = std::mem::replace(&mut kept.mb_index, MbIndexRequest::None);
+    out.keep(kept)?;
+    let mut run = start.run(parse_deflines, query_loc.as_ref(), program)?;
+    let fields = out.fields();
+    *fields.import_search_strategy = Some(path);
+    // `CBlastDatabaseArgs` of the command line when it gives the database or the subjects, else
+    // the strategy's database, its filters and its mask, or its subjects. The command line's
+    // `-dbsize` is set after the strategy's options, unless the strategy's search space trumps
+    // it.
+    let mut cli_dbsize = None;
+    let mut one_thread = false;
+    match database {
+        Some(given) => {
+            *fields.db = given.db;
+            *fields.subject = given.subject;
+            *fields.subject_loc = given.subject_loc;
+            *fields.db_filter = given.db_filter;
+            *fields.db_mask = given.db_mask;
+            cli_dbsize = given.dbsize;
+        }
+        None => {
+            if let Some(name) = start.database() {
+                *fields.db = Some(name.to_string());
+                *fields.db_filter = start.db_filter(program)?;
+                if let Some((algorithm, kind)) = start.db_mask() {
+                    let value = match algorithm {
+                        DbMaskAlgorithm::Id(id) => id.to_string(),
+                        DbMaskAlgorithm::Key(key) => key,
+                    };
+                    match kind {
+                        1 => fields.db_mask.db_soft_mask = Some(value),
+                        2 => fields.db_mask.db_hard_mask = Some(value),
+                        _ => {
+                            return Err(unported(
+                                "a search strategy with this database masking type",
+                                program,
+                            ))
+                        }
+                    }
+                }
+            } else if start.has_subjects() {
+                // The Owner's decision F2-Q1 (2026-11-20 「Q1=C」, PD-LOSAT-NCBI-DEFECTS exception
+                // 22): a strategy's subjects are searched once, as with `-num_threads 1`, whatever
+                // `-num_threads` says (NCBI searches them once per thread or aborts: its thread
+                // check reads only the command line's `-subject`). The one place of the rule, for
+                // every program and caller.
+                one_thread = true;
+            }
+        }
+    }
+    if one_thread {
+        out.one_thread();
+    }
+    out.set_task(start.imported.program().task_name());
+    let mut collected = Collected::default();
+    for setter in &start.imported.options.options.setters {
+        if collected.take(setter) {
+            continue;
+        }
+        let fields = out.fields();
+        match setter {
+            Setter::EffectiveSearchSpace(n) => {
+                *fields.searchsp = Some(*n);
+                run.searchsp_from_strategy = true;
+            }
+            Setter::DbLength(n) => *fields.dbsize = Some(*n),
+            Setter::HitlistSize(n) => fields.formatting.hitlist_start = usize::try_from(*n).ok(),
+            other => {
+                if !out.set(other)? {
+                    return Err(Start::unported_setter(other, program));
+                }
+            }
+        }
+    }
+    // `CMbIndexArgs` of the command line, after the strategy's options: the index it names, else
+    // the strategy's (a new-style index by its name). The index is searched by blastn's loader
+    // of a database (`blast_engine::mb_index`), which LOSAT runs for blastn's searches of a
+    // database only.
+    let index = match mb_index {
+        MbIndexRequest::NoName => {
+            return Err(crate::blastinput::app::options_error(
+                "Can not deduce database index name",
+            ))
+        }
+        MbIndexRequest::Index { name, old_style } => Some((name, old_style)),
+        MbIndexRequest::None => collected.index.take().map(|name| (name, false)),
+    };
+    if index.is_some() && (T::APP != "blastn" || out.fields().db.is_none()) {
+        return Err(unported(
+            "a search strategy with a MegaBLAST database index (ForceMbIndex) outside a BLASTN search of a database",
+            program,
+        ));
+    }
+    run.mb_index = index;
+    out.finish(collected, &run)?;
+    let fields = out.fields();
+    if fields.searchsp.is_none() {
+        if let Some(size) = cli_dbsize {
+            *fields.dbsize = Some(size);
+        }
+    }
+    formatting_early_return(
+        fields.formatting,
+        fields.num_descriptions.is_some(),
+        fields.num_alignments.is_some(),
+        fields.outfmt,
+    );
+    *fields.import = Some(run);
+    Ok(out.into_command())
+}
+
+/// The arguments of `losat <name>` with nothing else given (a program's defaults).
+pub(crate) fn defaults_of(name: &str) -> Result<Commands> {
+    let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", name])?;
+    Ok(cli.command)
 }

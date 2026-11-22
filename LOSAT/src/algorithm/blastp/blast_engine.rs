@@ -4181,11 +4181,7 @@ pub fn run(
     mut args: BlastpArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    // `RecoverSearchStrategy` first (blastp_app.cpp:128-133): the strategy's options and inputs
-    // become the run's arguments (`archive::apply_strategy`).
-    if args.import_search_strategy.is_some() && args.app == BlastpApp::Blastp {
-        args = super::archive::apply_strategy(args, &mut std::io::stderr())?;
-    }
+    // An `-import_search_strategy` was imported by the caller (`import::apply`), before the run.
     args.id_scope = args.parse_deflines.then(Default::default);
     use crate::blastinput::app;
     use crate::blastinput::input_files;
@@ -4456,7 +4452,7 @@ fn read_cli_subjects(
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
     // The handler of the database arguments reads the subjects (an empty subject set
     // fails there), before the query and the output are opened.
-    // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for `-subject`.
+    // An imported strategy's subject Bioseqs (`import::apply`) stand for `-subject`.
     let subject_file = match args.import.as_ref().and_then(|run| run.subjects.as_ref()) {
         Some(text) => crate::report::archive::read::import::ImportRun::input_of("subject", text)?,
         None => {

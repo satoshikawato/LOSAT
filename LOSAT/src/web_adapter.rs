@@ -150,11 +150,12 @@ pub fn records_refused_options(program: crate::api::Program) -> &'static [&'stat
 }
 
 // A search strategy file given as bytes (`-import_search_strategy`, `file_begin` kind 3): the
-// engine's `apply_strategy` over them, the file that the parsed arguments name, and the warnings
-// of the import, which the run writes first (`api::strategy`; the same path as the library's
+// engine's import over them (the strategy's program's arguments, `program_of`), the file that the
+// parsed arguments name, and the warnings of the import, which the run writes first
+// (`api::strategy`; the same path as the command line's and the library's
 // `Search::read_strategy`).
 pub use crate::api::strategy::{
-    apply as import_strategy, import_name as strategy_file_name,
+    apply as import_strategy, import_name as strategy_file_name, program_of,
     take_warnings as take_strategy_warnings,
 };
 

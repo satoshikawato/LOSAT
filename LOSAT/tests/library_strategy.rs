@@ -3,7 +3,9 @@
 //! (`tests/fixtures/strategy/import/import_cases.tsv`, the rows named `.alone`: the strategy
 //! files are NCBI's own exports, `ss/`, and each output is stored once, `bytes/`): the report of
 //! outfmt 0 and the diagnostics of a library call are the command line's standard output and
-//! standard error.
+//! standard error. The rows `C.<program>.from.<program>` run another program's strategy as the
+//! command line does, and a strategy's subjects are searched once at any `-num_threads` (Owner
+//! 2026-11-20 F2-Q1 "Q1=C").
 
 use std::path::PathBuf;
 
@@ -22,7 +24,9 @@ struct Row {
     err: String,
 }
 
-fn rows() -> Vec<Row> {
+/// The rows of `import_cases.tsv` named as `named` says that import one strategy file alone and
+/// exit 0.
+fn rows_named(named: impl Fn(&str) -> bool) -> Vec<Row> {
     let table = std::fs::read_to_string(fixtures().join("import_cases.tsv")).expect("the table");
     table
         .lines()
@@ -31,7 +35,7 @@ fn rows() -> Vec<Row> {
             let cells: Vec<&str> = line.split('\t').collect();
             let program = Program::parse(cells[1]).ok()?;
             let file = cells[2].strip_prefix("-import_search_strategy {ss}/")?;
-            (cells[0].ends_with(".alone") && cells[3] == "0" && !file.contains(' ')).then(|| Row {
+            (named(cells[0]) && cells[3] == "0" && !file.contains(' ')).then(|| Row {
                 name: cells[0].to_string(),
                 program,
                 file: file.to_string(),
@@ -40,6 +44,10 @@ fn rows() -> Vec<Row> {
             })
         })
         .collect()
+}
+
+fn rows() -> Vec<Row> {
+    rows_named(|name| name.ends_with(".alone"))
 }
 
 /// NCBI's bytes of the file `name` of `bytes/` (`-`: none) in LOSAT's words.
@@ -55,13 +63,12 @@ fn strategy_bytes(file: &str) -> Vec<u8> {
     std::fs::read(fixtures().join("ss").join(file)).expect("a strategy file")
 }
 
-#[test]
-fn a_strategy_as_bytes_is_the_command_lines_import() {
-    let rows = rows();
-    assert!(rows.len() >= 100, "{} rows", rows.len());
+/// Runs each row through the library (a search of `argv` that reads the row's strategy file as
+/// bytes) and lists the rows whose report or diagnostics differ from NCBI's.
+fn differing(rows: &[Row], argv: &[&str]) -> Vec<String> {
     let mut failed = Vec::new();
-    for row in &rows {
-        let search = validate(row.program, &[]).unwrap();
+    for row in rows {
+        let search = validate(row.program, argv).unwrap();
         let outcome = (|| -> Result<(Vec<u8>, Vec<u8>), Error> {
             let strategy = search.read_strategy(&strategy_bytes(&row.file))?;
             let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
@@ -77,27 +84,56 @@ fn a_strategy_as_bytes_is_the_command_lines_import() {
             Ok((report, diagnostics)) => {
                 if report != frozen(&row.out) {
                     failed.push(format!(
-                        "{}: report differs: {}",
+                        "{} {argv:?}: report differs: {}",
                         row.name,
                         crate::outfmt11_blastx::first_difference(&report, &frozen(&row.out))
                     ));
                 } else if diagnostics != frozen(&row.err) {
                     failed.push(format!(
-                        "{}: diagnostics {:?}",
+                        "{} {argv:?}: diagnostics {:?}",
                         row.name,
                         String::from_utf8_lossy(&diagnostics)
                     ));
                 }
             }
-            Err(error) => failed.push(format!("{}: {error}", row.name)),
+            Err(error) => failed.push(format!("{} {argv:?}: {error}", row.name)),
         }
     }
+    failed
+}
+
+#[test]
+fn a_strategy_as_bytes_is_the_command_lines_import() {
+    let rows = rows();
+    assert!(rows.len() >= 100, "{} rows", rows.len());
+    let failed = differing(&rows, &[]);
     assert!(
         failed.is_empty(),
         "{} of {}: {failed:#?}",
         failed.len(),
         rows.len()
     );
+}
+
+/// blastn and blastx run a TBLASTX strategy, tblastx a BLASTX or a BLASTN one, as the command
+/// line does (NCBI's output is the strategy's program's import with the running program's
+/// warnings).
+#[test]
+fn a_strategy_of_another_program_runs_as_on_the_command_line() {
+    let rows = rows_named(|name| name.starts_with("C.") && name.contains(".from."));
+    assert_eq!(rows.len(), 4, "the rows C.*.from.*");
+    let failed = differing(&rows, &[]);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A strategy's subjects are searched once at `-num_threads 4` (Owner 2026-11-20 F2-Q1 "Q1=C"),
+/// as on the command line: NCBI's `-num_threads 1` bytes.
+#[test]
+fn a_strategys_subjects_are_searched_once_with_threads() {
+    let rows = rows_named(|name| name.starts_with("I.") && name.ends_with(".sub.alone"));
+    assert_eq!(rows.len(), 5, "the rows I.<program>.sub.alone");
+    let failed = differing(&rows, &["-num_threads", "4"]);
+    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 #[test]

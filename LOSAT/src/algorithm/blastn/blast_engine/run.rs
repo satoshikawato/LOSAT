@@ -6095,11 +6095,7 @@ pub fn run(
     // The command line's progress bar (`BlastnArgs::progress_bar`; no NCBI counterpart). The
     // library API and the web entries come through `run_local` and leave it off.
     args.progress_bar = true;
-    // `RecoverSearchStrategy` first (blastn_app.cpp:128-133): the strategy's options and inputs
-    // become the run's arguments (`archive::apply_strategy`).
-    if args.import_search_strategy.is_some() {
-        args = crate::algorithm::blastn::archive::apply_strategy(args, &mut std::io::stderr())?;
-    }
+    // An `-import_search_strategy` was imported by the caller (`import::apply`), before the run.
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:128-133
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
@@ -6373,7 +6369,7 @@ fn read_cli_subjects(
     diagnostics: &mut (dyn std::io::Write + Send),
     keep_deflines: bool,
 ) -> Result<CliSubjects> {
-    // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for `-subject`.
+    // An imported strategy's subject Bioseqs (`import::apply`) stand for `-subject`.
     let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
     let subject_path = match (imported, args.subject.as_deref()) {
         (Some(_), _) => None,
@@ -6752,7 +6748,7 @@ fn search_cli(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:100-102
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
-/// An imported strategy's query range stands for `-query_loc`'s (`archive::apply_strategy`).
+/// An imported strategy's query range stands for `-query_loc`'s (`import::apply`).
 fn parse_query_range(args: &BlastnArgs) -> Result<Option<SequenceRange>> {
     match args.import.as_ref().and_then(|import| import.query_range) {
         Some(range) => Ok(Some(range)),

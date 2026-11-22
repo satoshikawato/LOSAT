@@ -599,7 +599,6 @@ where
         },
         matches => matches?,
     };
-    record_given_arguments(&command, &matches);
     let parsed = T::from_arg_matches_mut(&mut matches)
         .map_err(|error| error.format(&mut command.clone()))?;
     match non_utf8_value {
@@ -608,46 +607,94 @@ where
     }
 }
 
-thread_local! {
-    /// The arguments that the last command line this thread read gave (`record_given_arguments`).
-    static GIVEN_ARGUMENTS: std::cell::RefCell<Vec<(String, String)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
+/// The arguments that a program's command line gave, by NCBI's names (the long names), each with
+/// the text of its first value (a flag's text is clap's), in the order of the program's
+/// definitions: what the import of a search strategy compares with NCBI's defaults
+/// (`report::archive::read::import::ignored_option_warnings`), as NCBI's `CArgs` holds them. The
+/// parser reads them with the program's other arguments (a flattened field of `A`, the program's
+/// arguments, whose definitions name them), only for an argv that gives
+/// `-import_search_strategy`: the only reader. Every parse of an argv makes its own (a default
+/// argument list parsed later does not replace them).
+pub struct GivenArguments<A> {
+    list: Vec<(String, String)>,
+    program: std::marker::PhantomData<fn() -> A>,
 }
 
-/// Keeps the arguments that the program's command line gave, by NCBI's names (the long names)
-/// with the text of their first value (a flag's text is clap's), for the import of a search
-/// strategy, whose warnings compare the texts with NCBI's defaults
-/// (`report::archive::read::import::ignored_option_warnings`).
-fn record_given_arguments(command: &clap::Command, matches: &clap::ArgMatches) {
-    let Some((name, program)) = matches.subcommand() else {
-        return;
-    };
-    let Some(definition) = command.find_subcommand(name) else {
-        return;
-    };
-    let given = definition
-        .get_arguments()
-        .filter(|arg| {
-            program.value_source(arg.get_id().as_str())
-                == Some(clap::parser::ValueSource::CommandLine)
-        })
-        .filter_map(|arg| {
-            let long = arg.get_long()?;
-            let text = program
-                .get_raw(arg.get_id().as_str())
-                .and_then(|mut values| values.next())
-                .map(|value| value.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            Some((long.to_string(), text))
-        })
-        .collect();
-    GIVEN_ARGUMENTS.with(|cell| *cell.borrow_mut() = given);
+impl<A> GivenArguments<A> {
+    /// The arguments given, as `(name, text)`.
+    pub(crate) fn list(&self) -> &[(String, String)] {
+        &self.list
+    }
 }
 
-/// The arguments that the last command line this thread read gave (`record_given_arguments`):
-/// NCBI's names and the texts of their values.
-pub(crate) fn given_arguments() -> Vec<(String, String)> {
-    GIVEN_ARGUMENTS.with(|cell| cell.borrow().clone())
+impl<A> Default for GivenArguments<A> {
+    fn default() -> Self {
+        Self {
+            list: Vec::new(),
+            program: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<A> Clone for GivenArguments<A> {
+    fn clone(&self) -> Self {
+        Self {
+            list: self.list.clone(),
+            program: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<A> std::fmt::Debug for GivenArguments<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("GivenArguments").field(&self.list).finish()
+    }
+}
+
+/// The id of `-import_search_strategy` in the programs' arguments.
+const IMPORT_SEARCH_STRATEGY: &str = "import_search_strategy";
+
+impl<A: clap::Args> clap::FromArgMatches for GivenArguments<A> {
+    fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
+        use clap::parser::ValueSource::CommandLine;
+        if matches.value_source(IMPORT_SEARCH_STRATEGY) != Some(CommandLine) {
+            return Ok(Self::default());
+        }
+        let definitions = A::augment_args(clap::Command::new("given"));
+        let list = definitions
+            .get_arguments()
+            .filter(|arg| matches.value_source(arg.get_id().as_str()) == Some(CommandLine))
+            .filter_map(|arg| {
+                let long = arg.get_long()?;
+                let text = matches
+                    .get_raw(arg.get_id().as_str())
+                    .and_then(|mut values| values.next())
+                    .map(|value| value.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                Some((long.to_string(), text))
+            })
+            .collect();
+        Ok(Self {
+            list,
+            program: std::marker::PhantomData,
+        })
+    }
+
+    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
+        *self = Self::from_arg_matches(matches)?;
+        Ok(())
+    }
+}
+
+/// The given arguments take no argument of their own: they read the program's.
+impl<A: clap::Args> clap::Args for GivenArguments<A> {
+    fn augment_args(command: clap::Command) -> clap::Command {
+        command
+    }
+
+    fn augment_args_for_update(command: clap::Command) -> clap::Command {
+        command
+    }
 }
 
 /// The value of a word `-name=value` that is not UTF-8: its bytes after the first `=`
@@ -1437,8 +1484,10 @@ impl NativeError {
     /// errors of those codes are `common::database::database_error`'s). The one producer of these
     /// reports: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
     pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
-        // `CATCH_ALL`'s `CBlastException` clause (blast_app_util.hpp:220-228), its
-        // `CRemoteBlastException` subclass included (remote_blast.hpp:64).
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-229
+        // NCBI reference (598d8ae6): c++/include/algo/blast/api/remote_blast.hpp:63-64
+        // `CATCH_ALL`'s clause of `CBlastException`, which also catches its subclass
+        // `CRemoteBlastException`.
         if e.kind().starts_with("CBlastException::")
             || e.kind().starts_with("CRemoteBlastException::")
         {

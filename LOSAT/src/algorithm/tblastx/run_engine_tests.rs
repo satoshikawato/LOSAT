@@ -71,6 +71,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         export_search_strategy: None,
         import_search_strategy: None,
         import: None,
+        given: Default::default(),
         strategy: None,
         tabular_taxdb: None,
         subject_taxdb: None,

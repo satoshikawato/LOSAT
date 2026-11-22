@@ -111,11 +111,8 @@ impl TblastnArgs {
         use crate::blastinput::input_files;
         use crate::blastinput::seq_range;
         let mut args = self;
-        // `RecoverSearchStrategy` first (tblastn_app.cpp:123-128): the strategy's options and
-        // inputs become the run's arguments (`archive::apply_strategy`).
-        if args.import_search_strategy.is_some() && matches!(io, RunIo::Files) {
-            args = super::archive::apply_strategy(args, &mut std::io::stderr())?;
-        }
+        // An `-import_search_strategy` was imported by the caller (`import::apply`), before the
+        // run.
         args.id_scope = args.parse_deflines.then(Default::default);
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
         // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
@@ -208,7 +205,7 @@ impl TblastnArgs {
             Ok(if args.db.is_some() {
             (Vec::new(), seq_range::Placements::default(), None)
         } else {
-            // An imported strategy's subject Bioseqs (`archive::apply_strategy`) stand for
+            // An imported strategy's subject Bioseqs (`import::apply`) stand for
             // `-subject`.
             let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
             let subject_path = match (&args.subject, imported) {

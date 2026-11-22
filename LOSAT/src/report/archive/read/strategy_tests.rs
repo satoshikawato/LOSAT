@@ -60,8 +60,9 @@ fn recorded_value(value: V<'_>) -> Recorded {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_builder.cpp:140-545
 /// The parameter whose value a setter takes, and that value: the field registry's name of each
-/// setter of the builder's switch (blast_options_builder.cpp:140-545).
+/// setter of the builder's switch.
 fn recorded(setter: &Setter) -> (&'static str, Recorded) {
     use Recorded::{Bool, Int, Real, Text};
     let int = |v: &i32| Int(i64::from(*v));

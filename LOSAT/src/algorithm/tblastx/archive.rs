@@ -36,6 +36,8 @@ use crate::blastinput::seq_range::Placements;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::read::import;
+use crate::report::archive::read::options::{EProgram, Setter};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -373,211 +375,176 @@ pub(super) fn write_tblastx_archives(
     })
 }
 
-/// The arguments a tblastx run keeps for another program's strategy (`import::RunAs`).
-fn carried(args: TblastxArgs) -> crate::report::archive::read::import::Carried {
-    crate::report::archive::read::import::Carried {
-        app: "tblastx",
-        path: args.import_search_strategy.expect("an import"),
-        source: args.import.as_ref().and_then(|run| run.source.clone()),
-        query: args.query,
-        query_loc: args.query_loc,
-        strand: "both".to_string(),
-        lcase_masking: args.lcase_masking,
-        parse_deflines: args.parse_deflines,
-        id_scope: args.id_scope,
-        out: args.out,
-        outfmt: args.outfmt,
-        show_gis: args.show_gis,
-        num_descriptions: args.num_descriptions,
-        num_alignments: args.num_alignments,
-        max_target_seqs: args.max_target_seqs.map(|n| n as i64),
-        formatting: args.formatting,
-        num_threads: args.num_threads,
-        mt_mode: None,
-        db: args.db,
-        subject: args.subject,
-        subject_loc: args.subject_loc,
-        db_filter: args.db_filter,
-        dbsize: args.dbsize,
-    }
-}
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:106-111
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
+/// tblastx's part of `-import_search_strategy` ([`import::apply`]): the arguments its command
+/// line keeps and its table of the strategy's setters over its own options. tblastx searches
+/// without gaps: the gap costs of its handle and the ungapped mode are its defaults, which the
+/// table takes without a change.
+impl import::StrategyArgs for TblastxArgs {
+    const PROGRAM: Program = Program::Tblastx;
+    const APP: &'static str = "tblastx";
 
-/// tblastx's arguments for a TBLASTX strategy that another program runs (`import::RunAs`): its
-/// defaults with the arguments the running program keeps. tblastx has no `-mt_mode` (whose
-/// output is that of one thread).
-pub(crate) fn from_carried(
-    carried: crate::report::archive::read::import::Carried,
-) -> Result<TblastxArgs> {
-    let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "tblastx"])?;
-    let crate::cli::Commands::Tblastx(mut out) = cli.command else {
-        unreachable!("the arguments of tblastx")
-    };
-    out.import = carried.import_app();
-    out.strand = carried.strand;
-    out.max_target_seqs = carried
-        .max_target_seqs
-        .map(|n| usize::try_from(n).unwrap_or(0));
-    out.import_search_strategy = Some(carried.path);
-    out.query = carried.query;
-    out.query_loc = carried.query_loc;
-    out.lcase_masking = carried.lcase_masking;
-    out.parse_deflines = carried.parse_deflines;
-    out.id_scope = carried.id_scope;
-    out.out = carried.out;
-    out.outfmt = carried.outfmt;
-    out.show_gis = carried.show_gis;
-    out.num_descriptions = carried.num_descriptions;
-    out.num_alignments = carried.num_alignments;
-    out.formatting = carried.formatting;
-    out.num_threads = carried.num_threads;
-    out.db = carried.db;
-    out.subject = carried.subject;
-    out.subject_loc = carried.subject_loc;
-    out.db_filter = carried.db_filter;
-    out.dbsize = carried.dbsize;
-    Ok(out)
-}
+    fn runs(program: EProgram) -> bool {
+        program == EProgram::Tblastx
+    }
 
-/// `-import_search_strategy` of TBLASTX (`RecoverSearchStrategy`, `SetOptionsForSavedStrategy`,
-/// blast_args.cpp:3800-3836, quoted at `blastp::archive::apply_strategy`): the arguments of a
-/// command line that gives nothing (the strategy task's defaults) with the strategy's options set
-/// on them in the file's order, and from `args` only what NCBI's re-read argument classes take:
-/// the query options, `-out`, the formatting options, the threads and the database arguments
-/// when `-db` or `-subject` is given. The run then goes on as any other (one search path).
-pub(crate) fn apply_strategy(
-    args: TblastxArgs,
-    diagnostics: &mut dyn std::io::Write,
-) -> Result<TblastxArgs> {
-    use crate::blastinput::app::Program;
-    use crate::report::archive::read::import::{self, Command, Start};
-    use crate::report::archive::read::options::{EProgram, Setter};
-    let program = Program::Tblastx.name();
-    let path = args.import_search_strategy.clone().expect("an import");
-    let source = args.import.as_ref().and_then(|run| run.source.clone());
-    let start = import::start(
-        &Command {
-            path: &path,
-            bytes: source.as_deref().map(Vec::as_slice),
-            program,
-            override_query: args.query.as_os_str() != "-",
-            override_subject: args.db.is_some() || args.subject.is_some(),
-            use_index_set: false,
-        },
-        args.import.as_ref().map_or("tblastx", |run| run.app),
-        diagnostics,
-    )?;
-    if start.imported.program() != EProgram::Tblastx {
-        return Err(start.run_as(program, || carried(args)));
+    fn imports(&self) -> bool {
+        self.import_search_strategy.is_some() && self.import.is_none()
     }
-    let cli: crate::cli::Cli = crate::cli::try_parse_from(["losat", "tblastx"])?;
-    let crate::cli::Commands::Tblastx(mut out) = cli.command else {
-        unreachable!("the arguments of tblastx")
-    };
-    let mut run = start.run(args.parse_deflines, program)?;
-    run.query_range = start.query_range(args.query_loc.as_ref(), program)?;
-    // `CQueryOptionsArgs`, `CStdCmdLineArgs`, `CFormattingArgs`, `CMTArgs`.
-    out.query = args.query;
-    out.query_loc = args.query_loc;
-    out.lcase_masking = args.lcase_masking;
-    out.parse_deflines = args.parse_deflines;
-    out.id_scope = args.id_scope;
-    out.out = args.out;
-    out.outfmt = args.outfmt;
-    out.show_gis = args.show_gis;
-    out.num_descriptions = args.num_descriptions;
-    out.num_alignments = args.num_alignments;
-    out.max_target_seqs = args.max_target_seqs;
-    out.formatting = args.formatting;
-    out.num_threads = args.num_threads;
-    out.strand = args.strand;
-    out.matrix_file = args.matrix_file;
-    out.import_search_strategy = Some(path);
-    // `CBlastDatabaseArgs` when the command line gives the database or the subjects, else the
-    // strategy's.
-    // `-dbsize` with `-db` or `-subject` is set after the strategy's options, unless the
-    // strategy's search space trumps it (blast_args.cpp:2565-2572).
-    let mut cli_dbsize = None;
-    if args.db.is_some() || args.subject.is_some() {
-        out.db = args.db;
-        out.subject = args.subject;
-        out.subject_loc = args.subject_loc;
-        out.db_filter = args.db_filter;
-        cli_dbsize = args.dbsize;
-    } else if let Some(name) = start.database() {
-        out.db = Some(name.to_string());
-        out.db_filter = start.db_filter(program)?;
-        if start.db_mask().is_some() {
-            return Err(Start::unported(
-                "a search strategy with a database mask",
-                program,
-            ));
+
+    fn defaults() -> Result<Self> {
+        match import::defaults_of("tblastx")? {
+            crate::cli::Commands::Tblastx(args) => Ok(args),
+            _ => unreachable!("the arguments of tblastx"),
         }
-    } else if start.has_subjects() {
-        // The Owner's decision F2-Q1 (2026-11-20 「Q1=C」): a strategy's subjects are searched
-        // once, as with `-num_threads 1`, whatever `-num_threads` says (NCBI aborts or searches
-        // them once per thread: its thread check reads only the command line's `-subject`).
-        out.num_threads = 1;
     }
-    let options = &start.imported.options.options;
-    let mut seg = import::SegSetters::default();
-    for setter in &options.setters {
-        if seg.take(setter) {
-            continue;
+
+    fn kept(self) -> import::Kept {
+        let given = self.given.list().to_vec();
+        import::Kept {
+            path: self.import_search_strategy.expect("an import"),
+            given,
+            query: self.query,
+            query_loc: self.query_loc,
+            strand: Some(self.strand),
+            lcase_masking: self.lcase_masking,
+            parse_deflines: self.parse_deflines,
+            id_scope: self.id_scope,
+            out: self.out,
+            outfmt: self.outfmt,
+            show_gis: self.show_gis,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            max_target_seqs: self.max_target_seqs.map(|n| n as i64),
+            formatting: self.formatting,
+            num_threads: self.num_threads as i64,
+            mt_mode: None,
+            database: import::KeptDatabase::given(
+                self.db,
+                self.subject,
+                self.subject_loc,
+                self.db_filter,
+                self.db_mask,
+                self.dbsize,
+            ),
+            use_index: false,
+            mb_index: import::MbIndexRequest::None,
         }
+    }
+
+    fn keep(&mut self, kept: import::Kept) -> Result<()> {
+        self.query = kept.query;
+        self.query_loc = kept.query_loc;
+        if let Some(strand) = kept.strand {
+            self.strand = strand;
+        }
+        self.lcase_masking = kept.lcase_masking;
+        self.parse_deflines = kept.parse_deflines;
+        self.id_scope = kept.id_scope;
+        self.out = kept.out;
+        self.outfmt = kept.outfmt;
+        self.show_gis = kept.show_gis;
+        self.num_descriptions = kept.num_descriptions;
+        self.num_alignments = kept.num_alignments;
+        self.max_target_seqs = kept
+            .max_target_seqs
+            .map(|n| usize::try_from(n).unwrap_or(0));
+        self.formatting = kept.formatting;
+        self.num_threads = usize::try_from(kept.num_threads).unwrap_or(1);
+        Ok(())
+    }
+
+    fn fields(&mut self) -> import::Fields<'_> {
+        import::Fields {
+            import_search_strategy: &mut self.import_search_strategy,
+            db: &mut self.db,
+            subject: &mut self.subject,
+            subject_loc: &mut self.subject_loc,
+            db_filter: &mut self.db_filter,
+            db_mask: &mut self.db_mask,
+            dbsize: &mut self.dbsize,
+            searchsp: &mut self.searchsp,
+            formatting: &mut self.formatting,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            outfmt: &self.outfmt,
+            import: &mut self.import,
+        }
+    }
+
+    fn one_thread(&mut self) {
+        self.num_threads = 1;
+    }
+
+    fn set_task(&mut self, _task: &str) {}
+
+    fn set(&mut self, setter: &Setter) -> Result<bool> {
+        let program = Program::Tblastx.name();
         match setter {
-            Setter::EvalueThreshold(v) => out.evalue = *v,
-            Setter::WordSize(n) => out.word_size = Some(*n),
-            Setter::WordThreshold(n) => out.threshold = Some(f64::from(*n)),
-            Setter::WindowSize(n) => out.window_size = Some(*n),
-            Setter::MatrixName(name) => out.matrix = Some(name.clone()),
-            Setter::CullingLimit(n) => out.culling_limit = Some(*n),
-            Setter::EffectiveSearchSpace(n) => out.searchsp = Some(*n),
-            Setter::DbLength(n) => out.dbsize = Some(*n),
-            Setter::HitlistSize(n) => out.formatting.hitlist_start = usize::try_from(*n).ok(),
+            Setter::EvalueThreshold(v) => self.evalue = *v,
+            Setter::WordSize(n) => self.word_size = Some(*n),
+            Setter::WordThreshold(n) => self.threshold = Some(f64::from(*n)),
+            Setter::WindowSize(n) => self.window_size = Some(*n),
+            Setter::MatrixName(name) => self.matrix = Some(name.clone()),
+            Setter::CullingLimit(n) => self.culling_limit = Some(*n),
             Setter::MaxHspsPerSubject(n) => {
-                out.max_hsps = usize::try_from(*n).ok().filter(|n| *n > 0)
+                self.max_hsps = usize::try_from(*n).ok().filter(|n| *n > 0)
             }
-            Setter::QueryCovHspPerc(v) => out.qcov_hsp_perc = Some(*v),
-            Setter::MaskAtHash(on) => out.soft_masking = Some(*on),
+            Setter::QueryCovHspPerc(v) => self.qcov_hsp_perc = Some(*v),
+            Setter::MaskAtHash(on) => self.soft_masking = Some(*on),
             Setter::QueryGeneticCode(n) => {
-                out.query_gencode = u8::try_from(*n).map_err(|_| {
-                    Start::unported("a search strategy with this query genetic code", program)
+                self.query_gencode = u8::try_from(*n).map_err(|_| {
+                    import::Start::unported(
+                        "a search strategy with this query genetic code",
+                        program,
+                    )
                 })?
             }
             Setter::DbGeneticCode(n) => {
-                out.db_gencode = u8::try_from(*n).map_err(|_| {
-                    Start::unported("a search strategy with this database genetic code", program)
+                self.db_gencode = u8::try_from(*n).map_err(|_| {
+                    import::Start::unported(
+                        "a search strategy with this database genetic code",
+                        program,
+                    )
                 })?
             }
-            // TBLASTX's search is ungapped and has no intron length (its options' defaults);
-            // the gap costs a matrix brings along are never used by an ungapped search.
+            Setter::SubjectBestHit => self.subject_besthit = true,
+            // A length other than 0 is NCBI's options error, as `-max_intron_length` gives it.
+            Setter::LongestIntronLength(n) => self.max_intron_length = Some(*n),
             Setter::GapOpeningCost(_)
             | Setter::GapExtensionCost(_)
             | Setter::GappedMode(false)
-            | Setter::LongestIntronLength(0)
-            | Setter::DustFiltering(false)
-            | Setter::RepeatFiltering(false)
-            | Setter::SmithWatermanMode(false)
-            | Setter::CompositionBasedStats(0) => {}
-            other => return Err(Start::unported_setter(other, program)),
+            | Setter::SmithWatermanMode(false) => {}
+            _ => return Ok(false),
         }
+        Ok(true)
     }
-    if let Some(value) = seg.value() {
-        out.seg = value;
-    }
-    if out.searchsp.is_none() {
-        if let Some(size) = cli_dbsize {
-            out.dbsize = Some(size);
+
+    fn finish(&mut self, collected: import::Collected, _run: &import::ImportRun) -> Result<()> {
+        let program = Program::Tblastx.name();
+        collected.no_dust(program)?;
+        collected.no_repeat(program)?;
+        collected.no_nucleotide_algorithms(program)?;
+        if let Some(value) = collected.seg.value() {
+            self.seg = value;
         }
+        // tblastx has no composition-based statistics: only mode 0 of a strategy runs.
+        if collected
+            .composition_value(false, program)?
+            .is_some_and(|value| value != "0")
+        {
+            return Err(import::Start::unported(
+                "a search strategy with composition-based statistics",
+                program,
+            ));
+        }
+        Ok(())
     }
-    import::formatting_early_return(
-        &mut out.formatting,
-        out.num_descriptions.is_some(),
-        out.num_alignments.is_some(),
-        &out.outfmt,
-    );
-    out.import = Some(run);
-    Ok(out)
+
+    fn into_command(self) -> crate::cli::Commands {
+        crate::cli::Commands::Tblastx(self)
+    }
 }
 
 #[cfg(test)]

@@ -9,8 +9,6 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:316-361
 #![warn(missing_docs, unused)]
 
-use std::io::Read;
-
 use super::error::Error;
 use super::program::Program;
 use super::search::Search;
@@ -18,7 +16,7 @@ use crate::blastinput::fasta_reader::{
     read_all, read_queries, FastaInputSource, FastaRecord, ParseErrorCode, QueryRecords, ReadError,
     ReaderConfig,
 };
-use crate::blastinput::input_files::open_file_input;
+use crate::blastinput::input_files::{open_file_input, read_to_failure};
 use crate::blastinput::query_batch::QueryReading;
 use crate::cli::Commands;
 
@@ -159,21 +157,19 @@ fn read_source<R: std::io::Read>(
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
-/// The bytes of the file `path`, as the command line opens its `-query` or `-subject` argument:
-/// the same message for a file that does not open (`Error::Input`), and a file named `.gz`,
-/// `.bz2` or `.zst` is inflated (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8). `read_fasta`
-/// and `read_inputs` read the bytes.
+/// The bytes of the file `path`, as the command line opens and reads its `-query` or `-subject`
+/// argument: the same message for a file that does not open (`Error::Input`), a file named `.gz`,
+/// `.bz2` or `.zst` is inflated (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8), and a read
+/// that fails ends the bytes, as it ends the command line's input: a directory gives no byte (the
+/// command line's query of a directory is empty). `read_fasta` and `read_inputs` read the bytes.
 pub fn read_input_file(role: Role, path: &std::path::Path) -> Result<Vec<u8>, Error> {
-    let input_error = |error: anyhow::Error| Error::Input(super::error::input_bytes(&error));
     let name = match role {
         Role::Query => "query",
         Role::Subject => "subject",
     };
-    let mut file = open_file_input(path, name).map_err(input_error)?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|error| input_error(error.into()))?;
-    Ok(bytes)
+    let mut file = open_file_input(path, name)
+        .map_err(|error| Error::Input(super::error::input_bytes(&error)))?;
+    Ok(read_to_failure(&mut file))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:188-213
@@ -260,7 +256,7 @@ pub enum QueryEnd {
     Input,
     /// Blank and comment lines where the reader expected a record (`eEOF`): the batch being read
     /// ends there. An input that has nothing else gives a first batch without a query, NCBI's
-    /// `BLAST engine error: Empty CBlastQueryVector`.
+    /// `Empty CBlastQueryVector` (`LOSAT engine error: Empty CBlastQueryVector`).
     BlankLines,
     /// The reader's error on the record after the records read: the run ends with it in that
     /// record's batch.

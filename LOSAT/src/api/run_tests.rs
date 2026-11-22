@@ -218,20 +218,22 @@ fn the_html_links_reach_outfmt_0_in_any_place() {
     }
 }
 
-/// The variable that makes `html_posts_child` run (`html_posts_reach_the_diagnostics`), and the
-/// formats of its calls (`0`, or `6,0`).
+/// The variable that makes `html_posts_child` run (`html_posts_reach_the_diagnostics`).
 const HTML_POSTS_CHILD: &str = "LOSAT_TEST_HTML_POSTS_CHILD";
 
 // Line RG T4a2 review B3: a `-html` report's reads of `./.ncbirc` post on the call's diagnostics
-// (`Outcome::diagnostics`), not on the process's standard error, also where the report is the
-// call's second format. A `./.ncbirc` with a repeated key posts at each read: NCBI BLAST+ 2.17.0
-// reads it at each reference of the prolog, at the description table and at the alignments of
-// each query with hits, and its id links' `InitConfig` reads it once (merged probes
-// `T/t4/fix1/merged/{bp_nd0,bn_mb,bx,tn,tx}.ncbi`: blastp 2 references, the others 1). A later
-// format's posts follow its program's rule for the lines of a later format's writer
-// (`ReportOutputs::later_warnings`): the diagnostics, and in BLASTX the format's receiver, which
-// `run_collect` does not give (so none). The file is read in the current directory, which a child
-// process of this test binary gets (the tests do not change their own).
+// (`Outcome::diagnostics`), not on the process's standard error. A `./.ncbirc` with a repeated key
+// posts at each read: NCBI BLAST+ 2.17.0 reads it at each reference of the prolog, at the
+// description table and at the alignments of each query with hits, and its id links' `InitConfig`
+// reads it once, with `GETURL_DEBUG`'s `REGISTRY:` line (merged probes
+// `T/t4/fix1/merged/{bp_nd0,bn_mb,bx,tn,tx}.ncbi`: blastp 2 references, the others 1). Fix round 2
+// (review c C3 = review d D5): one rule in the five programs, each format's report posts what a
+// call of that format alone posts, at any place among the call's formats (BLASTX's later formats
+// too), in each report of the same format (formats 0 and 0: `InitConfig`'s first call is each
+// report's) and in a call split into two searches (`search_groups`: formats 6 and 0 with
+// `-num_alignments 5`, whose second search's other texts repeat the first's), through `run_collect`
+// and `run`. The file is read in the current directory, which a child process of this test binary
+// gets (the tests do not change their own).
 #[cfg(not(target_family = "wasm"))]
 #[test]
 fn html_posts_reach_the_diagnostics() {
@@ -245,47 +247,43 @@ fn html_posts_reach_the_diagnostics() {
         b"[BLASTFMTUTIL]\nPROTOCOL=https:\nPROTOCOL=https:\n",
     )
     .unwrap();
-    for formats in ["0", "6,0"] {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "api::run::tests::html_posts_child",
-                "--exact",
-                "--nocapture",
-                "--test-threads",
-                "1",
-            ])
-            .env(HTML_POSTS_CHILD, formats)
-            .env_remove("GETURL_DEBUG")
-            .env_remove("FMTCFG")
-            .env_remove("NCBI")
-            .current_dir(&directory)
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            output.status.success(),
-            "{stdout}\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(stdout.contains("html posts checked"), "{stdout}");
-        // Nothing of the posts went to the process's standard error.
-        assert!(
-            !String::from_utf8_lossy(&output.stderr).contains("PROTOCOL"),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "api::run::tests::html_posts_child",
+            "--exact",
+            "--nocapture",
+            "--test-threads",
+            "1",
+        ])
+        .env(HTML_POSTS_CHILD, "1")
+        .env("GETURL_DEBUG", "1")
+        .env_remove("FMTCFG")
+        .env_remove("NCBI")
+        .current_dir(&directory)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("html posts checked"), "{stdout}");
+    // Nothing of the posts went to the process's standard error.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("PROTOCOL") && !stderr.contains("REGISTRY"),
+        "{stderr}"
+    );
     std::fs::remove_dir_all(&directory).unwrap();
 }
 
 /// The child of `html_posts_reach_the_diagnostics`: without `HTML_POSTS_CHILD` it does nothing.
 #[test]
 fn html_posts_child() {
-    let Some(formats) = std::env::var_os(HTML_POSTS_CHILD) else {
+    if std::env::var_os(HTML_POSTS_CHILD).is_none() {
         return;
-    };
-    let formats = formats.into_string().unwrap();
-    let formats: Vec<&str> = formats.split(',').collect();
+    }
     for (program, references) in [
         (Program::Blastn, 1),
         (Program::Blastp, 2),
@@ -294,22 +292,78 @@ fn html_posts_child() {
         (Program::Tblastx, 1),
     ] {
         let (query, subject) = self_pair(program);
-        let search = validate(program, &["-html"]).unwrap();
-        let outcome = run_collect(&search, Inputs::new(&query, &subject), &formats).unwrap();
+        let inputs = Inputs::new(&query, &subject);
+        let call = |options: &[&str], formats: &[&str]| {
+            let search = validate(program, options).unwrap();
+            run_collect(&search, inputs, formats).unwrap().diagnostics
+        };
         let post = format!(
             "Warning: (110.8) [{}] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3\n",
             program.name().to_ascii_lowercase()
         );
-        // The references, `InitConfig`, the query's description table and its alignments.
-        let posts = if program == Program::Blastx && formats.len() > 1 {
-            0
-        } else {
-            references + 3
+        // The references, the query's description table, `InitConfig` at its first id link (the
+        // post, then the line), and its alignments.
+        let report = format!("{}REGISTRY: .ncbirc\n{post}", post.repeat(references + 2));
+        let html = ["-html"];
+        let zero = call(&html, &["0"]);
+        assert_eq!(String::from_utf8_lossy(&zero), report, "{program} [0]");
+        // One search: each format's report posts what a call of its format alone posts. The
+        // reports interleave (each format's prolog, then each batch's reports in the call's
+        // order), and so do their posts: with one pairwise format, the call's posts are its own;
+        // with two, the same lines as the two calls.
+        let lines = |text: &[u8]| {
+            let mut lines: Vec<String> = String::from_utf8_lossy(text)
+                .lines()
+                .map(str::to_string)
+                .collect();
+            lines.sort();
+            lines
         };
+        for formats in [&["6", "0"][..], &["0", "6"], &["0", "0"], &["18", "0"]] {
+            let alone: Vec<u8> = formats
+                .iter()
+                .flat_map(|&outfmt| call(&html, &[outfmt]))
+                .collect();
+            let both = call(&html, formats);
+            if formats.contains(&"6") {
+                assert_eq!(
+                    String::from_utf8_lossy(&both),
+                    String::from_utf8_lossy(&alone),
+                    "{program} {formats:?}"
+                );
+            }
+            assert_eq!(lines(&both), lines(&alone), "{program} {formats:?}");
+        }
+        // The organism report after outfmt 0 takes `-html` alone (no id links).
+        assert!(
+            call(&html, &["0", "18"]).starts_with(&zero),
+            "{program} [0, 18]"
+        );
+        // Two searches: the first's diagnostics, then the second's report's posts.
+        let split = ["-html", "-num_alignments", "5"];
+        let search = validate(program, &split).unwrap();
         assert_eq!(
-            String::from_utf8_lossy(&outcome.diagnostics),
-            post.repeat(posts),
-            "{program} {formats:?}"
+            search_groups(&search.command(inputs).unwrap(), &[6, 0]).len(),
+            2
+        );
+        let expected = [call(&split, &["6"]), report.clone().into_bytes()].concat();
+        assert_eq!(
+            String::from_utf8_lossy(&call(&split, &["6", "0"])),
+            String::from_utf8_lossy(&expected),
+            "{program} [6, 0] split"
+        );
+        let (mut tabular, mut pairwise, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
+        run(
+            &search,
+            inputs,
+            &mut [("6", &mut tabular), ("0", &mut pairwise)],
+            &mut diagnostics,
+        )
+        .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&diagnostics),
+            String::from_utf8_lossy(&expected),
+            "{program} run [6, 0] split"
         );
     }
     println!("html posts checked");

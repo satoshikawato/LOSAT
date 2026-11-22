@@ -1179,6 +1179,7 @@ fn search(
             // whose lookup throws where the prefetch is off, which `other_outfmts` is for, needs
             // `PRE_FETCH_SEQS_LIMIT`, which LOSAT Web does not set.)
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(writers.iter_mut())

@@ -247,16 +247,17 @@ impl PairwiseConfig {
 }
 
 /// `write_prolog`'s `html` of a report of `-html` links `links` (`None`: the plain report): the
-/// links and the run's diagnostics, the sink of the report's warnings, which a `-html` pairwise
-/// report gets at any place among the run's formats (`query_warnings::report_posts`). One without
-/// them is LOSAT's internal error (its posts would be lost).
+/// links and the sink of the report's posts (`QueryWarnings::html_posts_sink`: the run's
+/// diagnostics), which a `-html` pairwise report gets at any place among the run's formats
+/// (`query_warnings::report_posts`). One without them is LOSAT's internal error (its posts would
+/// be lost).
 pub(crate) fn html_with_diagnostics<'w>(
     links: Option<&'w super::html_ids::HtmlLinks>,
     warnings: Option<&'w mut super::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<Option<(&'w super::html_ids::HtmlLinks, &'w mut dyn Write)>> {
     match (links, warnings) {
         (None, _) => Ok(None),
-        (Some(links), Some(warnings)) => Ok(Some((links, &mut *warnings.sink))),
+        (Some(links), Some(warnings)) => Ok(Some((links, warnings.html_posts_sink()))),
         (Some(_), None) => Err(io::Error::other(
             super::query_warnings::HTML_POSTS_WITHOUT_WARNINGS,
         )),
@@ -2131,6 +2132,21 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
     write!(writer, "{:>8} ", format_ncbi_ka_value(value))
 }
 
+/// Whether a report's writer is flushed after its prolog, before the search (`write_prolog`):
+/// `html`, the report is `-html`; `own_buffer`, the writer is a buffer that its sink opened for
+/// the prolog alone (`OutputSink::open` of a library call's `Stdout` or `File` sink), flushed so
+/// that its write errors show. A plain report keeps dev's flush points (the writers of blastn,
+/// blastx and tblastx flush there; blastp and tblastn write the prolog with the first report). An
+/// `-html` report does not flush there: NCBI's `cout` keeps the bytes after the prolog's `NcbiEndl`
+/// pair until a post (`cerr` is tied to `cout`) or its buffer writes them, so `GETURL_DEBUG`'s
+/// `REGISTRY:` line, which is not a post (`QueryWarnings::html_stderr_line`), comes before them
+/// where both streams go to one pipe (line RG T4a2 fix round 2, review c C4: NCBI BLAST+ 2.17.0
+/// after the version line's 159 bytes in every program, probes `T/t4/fix2/out/c4.*`). A write
+/// failure still shows before the search, at the version line (`write_prolog`).
+pub(crate) fn flushes_after_prolog(html: bool, own_buffer: bool) -> bool {
+    !html || own_buffer
+}
+
 /// `CBlastFormat::PrintProlog` of the reports of formats 0-4 of every program (the one place of
 /// the start of their output): the version line (`reference::write_version_line`), the `NcbiEndl`
 /// pair and the references (`reference::write_prolog_references`: the Gapped BLAST or, for
@@ -2161,7 +2177,7 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
 /// references with their links, each with its own read of `./.ncbirc`, whose posts go to the
 /// diagnostics (`HtmlLinks::ncbirc`); a malformed file ends the prolog after the version line and
 /// its two newlines with NCBI's exception (line RG T4 probes `bp.di.f0.rc_bad.h`,
-/// `rc_bad_dontuse.h`: exit status 255).
+/// `rc_bad_dontuse.h`: exit status 255). After the prolog, `flushes_after_prolog`.
 pub(crate) fn write_prolog<W: Write + ?Sized>(
     writer: &mut W,
     program: &str,

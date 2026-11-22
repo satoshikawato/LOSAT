@@ -157,6 +157,7 @@ fn unsupported_formats_fail_before_searching() {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -207,6 +208,7 @@ fn the_words_after_a_pairwise_format_are_dropped() {
         let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![FormatOutput {
                 outfmt,
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -266,6 +268,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -351,6 +354,7 @@ fn run_local_outputs(
     let result = {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -754,6 +758,7 @@ fn several_file_outputs_are_written_one_after_the_other() {
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -843,6 +848,7 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
     {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -943,6 +949,7 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
         let (mut six, mut zero, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![
                 FormatOutput {
                     outfmt: "6",

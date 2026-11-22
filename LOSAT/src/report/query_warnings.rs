@@ -29,6 +29,12 @@ pub struct QueryWarnings<'a> {
     /// The posts of each query whose later lines (`Posts::later`) this format's reports write,
     /// and the format's receiver of them (`with_later`).
     later: Option<(&'a [Posts], &'a mut Vec<u8>)>,
+    /// Where a `-html` report's own posts go apart from `sink` (`with_html_posts`), `None`: to
+    /// `sink`.
+    html_posts: Option<&'a mut dyn Write>,
+    /// The report's place among its search's formats (`for_report`), which keeps the first call
+    /// of each report's id links (`formatter_registry::InitConfig::call_posts`).
+    report: usize,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
@@ -883,21 +889,31 @@ impl<'a> QueryWarnings<'a> {
     }
 
     /// Writes `text`, what a read of NCBI's formatter registries posts in a `-html` report
-    /// (`ReportPlace::Html`), to the sink after the report written so far (`report`) is flushed.
+    /// (`ReportPlace::Html`), to the sink of the report's posts (`html_posts_sink`) after the
+    /// report written so far (`report`) is flushed (NCBI posts on `cerr`, tied to `cout`).
     pub fn html_post(&mut self, text: &[u8], report: &mut dyn Write) -> io::Result<()> {
-        write_after(report, &mut *self.sink, text)
+        write_after(report, self.html_posts_sink(), text)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3410-3412
     /// Writes `line`, what NCBI's formatter writes to the process's standard error itself in a
-    /// `-html` report (`InitConfig`'s `REGISTRY:` line, not a post), after the report written so
-    /// far (`report`) is flushed: to the terminal where the run's messages follow `-logfile`
-    /// (tblastx: `ncbi_environment::terminal_stderr`, the standard error before the command line
-    /// made it the file; NCBI's posts go to the file, its own line to the terminal), else to the
-    /// sink with the posts. A library call's messages have no terminal of their own: the sink.
-    pub fn html_stderr_line(&mut self, line: &[u8], report: &mut dyn Write) -> io::Result<()> {
+    /// `-html` report (`InitConfig`'s `REGISTRY:` line, not a post): with C's `fprintf` to
+    /// `stderr`, which does not flush `cout`, so the report written so far is not flushed (in a
+    /// pipe of both streams the line comes before the report's bytes since its last flush; line
+    /// RG T4a2 fix round 2, review c C4: NCBI BLAST+ 2.17.0 writes it after the prolog's last
+    /// `NcbiEndl`, probes `T/t4/fix2/out/c4.*`). It goes to the terminal where the run's messages
+    /// follow `-logfile` (tblastx: `ncbi_environment::terminal_stderr`, the standard error before
+    /// the command line made it the file; NCBI's posts go to the file, its own line to the
+    /// terminal), else to the sink of the report's posts (`html_posts_sink`). A library call's
+    /// messages have no terminal of their own: that sink.
+    pub fn html_stderr_line(&mut self, line: &[u8]) -> io::Result<()> {
         match crate::blastinput::ncbi_environment::terminal_stderr() {
-            Some(mut terminal) => write_after(report, &mut terminal, line),
-            None => write_after(report, &mut *self.sink, line),
+            Some(mut terminal) => terminal.write_all(line),
+            None => {
+                let sink = self.html_posts_sink();
+                sink.write_all(line)?;
+                sink.flush()
+            }
         }
     }
 
@@ -928,6 +944,46 @@ impl<'a> QueryWarnings<'a> {
             sink,
             reads: None,
             later: None,
+            html_posts: None,
+            report: 0,
+        }
+    }
+
+    /// These warnings for the report of the search's `report`th format (from 0), whose `-html`
+    /// id links call `InitConfig` as a run of that format alone calls it
+    /// (`formatter_registry::InitConfig::call_posts`): the first call of each report writes the
+    /// call's posts and its `GETURL_DEBUG` line (NCBI's `m_Reg` is a static of the process, which
+    /// a run of one format has; line RG T4a2 fix round 2, review c C3 = review d D5, a library
+    /// call of formats 0 and 0).
+    pub fn for_report(mut self, report: usize) -> Self {
+        self.report = report;
+        self
+    }
+
+    /// These warnings with `posts` (`Some`) as the sink of the posts of a `-html` report's reads
+    /// of NCBI's formatter registries (`html_post`, `html_stderr_line`, the prolog's references:
+    /// `pairwise::html_with_diagnostics`), where `sink` takes texts that the call writes elsewhere:
+    /// the repeats of a later search of a library call (`ReportOutputs::html_posts`) and the
+    /// standard error of a later format of BLASTX (`algorithm::blastx::local`), so that each
+    /// report posts what a run of its format alone posts, also in a call of several formats
+    /// (line RG T4a2 fix round 2, review c C3 = review d D5). `None` leaves them on `sink`.
+    pub fn with_html_posts(mut self, posts: Option<&'a mut dyn Write>) -> Self {
+        if posts.is_some() {
+            self.html_posts = posts;
+        }
+        self
+    }
+
+    /// The report's place among its search's formats (`for_report`).
+    pub(crate) fn report(&self) -> usize {
+        self.report
+    }
+
+    /// The sink of the `-html` report's own posts (`with_html_posts`, else `sink`).
+    pub(crate) fn html_posts_sink(&mut self) -> &mut dyn Write {
+        match &mut self.html_posts {
+            Some(posts) => &mut **posts,
+            None => &mut *self.sink,
         }
     }
 

@@ -813,9 +813,10 @@ fn alignment_start<S: QuerySections, W: Write>(
 
 /// What the report of query `query` writes to the run's diagnostics at `place`, after the report
 /// written so far (`writer`, flushed first): a load's text (`QueryWarnings::subject_read`) or what
-/// a `-html` read of NCBI's formatter registries posts (`HtmlLinks::posts_of` of the run's
-/// `links`). A report without warnings has no load texts; one that posts without them is LOSAT's
-/// internal error (`query_warnings::HTML_POSTS_WITHOUT_WARNINGS`).
+/// a `-html` read of NCBI's formatter registries posts (`html_at_place`). Inlined at each hook of
+/// the writers: the plain report's places are the loads that it reads alone (line RG T4a2 fix
+/// round 2, review c C5: an out-of-line call at each load of a plain run).
+#[inline]
 pub(crate) fn at_place<W: Write>(
     warnings: Option<&mut QueryWarnings<'_>>,
     links: Option<&super::html_ids::HtmlLinks>,
@@ -828,27 +829,40 @@ pub(crate) fn at_place<W: Write>(
             Some(warnings) => warnings.subject_read(query, s_idx, writer),
             None => Ok(()),
         },
-        ReportPlace::Html(post) => {
-            let Some((posts, line)) = links.map(|links| links.posts_of(post)) else {
-                return Ok(());
-            };
-            if posts.is_empty() && line.is_empty() {
-                return Ok(());
-            }
-            let Some(warnings) = warnings else {
-                return Err(io::Error::other(
-                    super::query_warnings::HTML_POSTS_WITHOUT_WARNINGS,
-                ));
-            };
-            if !posts.is_empty() {
-                warnings.html_post(&posts, writer)?;
-            }
-            if !line.is_empty() {
-                warnings.html_stderr_line(&line, writer)?;
-            }
-            Ok(())
-        }
+        ReportPlace::Html(post) => html_at_place(warnings, links, post, writer),
     }
+}
+
+/// `at_place` of a `-html` read `post`: what it writes (`HtmlLinks::posts_of` of the run's `links`
+/// for the report of `warnings`, `QueryWarnings::report`), the posts after the report written so
+/// far and the `GETURL_DEBUG` line. One that posts without warnings is LOSAT's internal error
+/// (`query_warnings::HTML_POSTS_WITHOUT_WARNINGS`).
+fn html_at_place<W: Write>(
+    warnings: Option<&mut QueryWarnings<'_>>,
+    links: Option<&super::html_ids::HtmlLinks>,
+    post: super::html_ids::HtmlPost,
+    writer: &mut W,
+) -> io::Result<()> {
+    let Some(links) = links else {
+        return Ok(());
+    };
+    let report = warnings.as_deref().map_or(0, QueryWarnings::report);
+    let (posts, line) = links.posts_of(post, report);
+    if posts.is_empty() && line.is_empty() {
+        return Ok(());
+    }
+    let Some(warnings) = warnings else {
+        return Err(io::Error::other(
+            super::query_warnings::HTML_POSTS_WITHOUT_WARNINGS,
+        ));
+    };
+    if !posts.is_empty() {
+        warnings.html_post(&posts, writer)?;
+    }
+    if !line.is_empty() {
+        warnings.html_stderr_line(&line)?;
+    }
+    Ok(())
 }
 
 /// The serial writer: each query's warnings and parts on `writer`, in order.

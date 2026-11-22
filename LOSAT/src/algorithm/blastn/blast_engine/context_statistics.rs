@@ -183,7 +183,10 @@ fn karlin_blocks<const UNGAPPED: bool>(
                         output_format,
                         intro,
                         shown,
-                        &mut *outputs.diagnostics,
+                        crate::api::local_blast::html_posts_sink(
+                            &mut outputs.html_posts,
+                            &mut *outputs.diagnostics,
+                        ),
                     )?;
                 }
             }

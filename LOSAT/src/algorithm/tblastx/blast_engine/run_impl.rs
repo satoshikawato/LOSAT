@@ -1959,6 +1959,10 @@ fn write_pairwise_prologs(
         if report::output_format(format.outfmt).is_pairwise()
             && prolog_before_search(&format.sink) == before_search
         {
+            let flush = crate::report::pairwise::flushes_after_prolog(
+                args.html_links.is_some(),
+                !format.sink.is_writer(),
+            );
             let mut writer = format.sink.open()?;
             match subjects {
                 ShownSubjects::Fasta { records, x_stored } => {
@@ -1977,7 +1981,11 @@ fn write_pairwise_prologs(
                         },
                         None,
                         args.html_links.as_deref().map(|links| {
-                            (links, &mut *outputs.diagnostics as &mut dyn std::io::Write)
+                            let posts = crate::api::local_blast::html_posts_sink(
+                                &mut outputs.html_posts,
+                                &mut *outputs.diagnostics,
+                            );
+                            (links, posts)
                         }),
                     )?
                 }
@@ -1990,12 +1998,18 @@ fn write_pairwise_prologs(
                         0,
                         Some(pairwise),
                         args.html_links.as_deref().map(|links| {
-                            (links, &mut *outputs.diagnostics as &mut dyn std::io::Write)
+                            let posts = crate::api::local_blast::html_posts_sink(
+                                &mut outputs.html_posts,
+                                &mut *outputs.diagnostics,
+                            );
+                            (links, posts)
                         }),
                     )?
                 }
             }
-            writer.flush()?;
+            if flush {
+                writer.flush()?;
+            }
         }
     }
     Ok(())
@@ -2365,7 +2379,14 @@ fn write_tblastx_outputs(
                 run.args.archive.as_ref(),
                 &mut *outputs.diagnostics,
             )
-            .with_later(run.warnings, later);
+            .with_later(run.warnings, later)
+            .for_report(format_index)
+            .with_html_posts(
+                outputs
+                    .html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn std::io::Write),
+            );
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`TblastxReportRun::query_reads`).
             match first {

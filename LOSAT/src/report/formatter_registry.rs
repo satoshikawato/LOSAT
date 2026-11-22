@@ -17,23 +17,54 @@
 
 use crate::blastinput::ncbi_registry::RegistryRead;
 
-/// `./.ncbirc` as NCBI's formatter reads it: `Ok(None)` without the file, `Err(what)` for a file
-/// that LOSAT refuses: one whose read throws (a syntax error: NCBI's organism report then fails,
-/// NCBI BLAST+ 2.17.0 exit 255 after the first query's `Query=` block, probe `T/t2/probe_rc`) and
-/// one that reads other files (`[NCBI] .Inherits`, which LOSAT's registry reads refuse elsewhere
-/// too). The caller words the refusal (`what` completes "the registry file ./.ncbirc ..."). The
-/// messages of a read that does not throw are `registry_posts`.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:171-177
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1615-1625
-/// One `Read` of the stream into a file layer (the byte order mark checked once), as the
-/// system-wide `.ncbirc` is read; flags 0 include no other `.ncbirc`.
-pub(crate) fn read_cwd_ncbirc() -> Result<Option<RegistryRead>, String> {
-    use crate::blastinput::ncbi_registry::{read_registry, Layer};
-    let Ok(bytes) = std::fs::read(".ncbirc") else {
+/// The name of the file in the current directory that NCBI's formatter opens by itself.
+const CWD_NCBIRC: &str = ".ncbirc";
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1615-1625
+// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:605-614 (a stream that has failed gives
+// no read)
+/// A registry file of NCBI's formatter read as NCBI reads it (`./.ncbirc` of the references, the
+/// description tables, the alignments and the organism report, and `InitConfig`'s file): a
+/// `CNcbiIfstream` of the file `path`, which `CNcbiRegistry` reads with one `Read` into a file
+/// layer (the byte order mark checked once; flags 0 include no other `.ncbirc`). `Ok(None)` where
+/// the stream does not open (no file, a broken link, a file the process may not read): the read
+/// returns at the failed stream, an empty registry and no post. A file that opens and whose first
+/// read fails (a directory) is a stream that fails before its first line
+/// (`ncbi_registry::read_failed_stream`), whose read posts `Error reading the registry after line
+/// 1` (`registry_posts`). NCBI BLAST+ 2.17.0 (line RG T4a2 fix round 2, `T/t4/fix2` probes `c1.*`,
+/// `./.ncbirc` a directory, mode 000, a broken link, an empty file) agrees at each of these reads.
+/// `Err(what)` (completing "the registry file `PATH` ...") for what LOSAT refuses: a read that
+/// fails after some bytes (the lines that NCBI reads before it follow its stream's buffer), and
+/// what `read_registry` refuses.
+fn read_stream(path: &std::path::Path) -> Result<Option<RegistryRead>, String> {
+    use crate::blastinput::ncbi_registry::{read_failed_stream, read_registry, Layer};
+    let Ok(mut file) = std::fs::File::open(path) else {
         return Ok(None);
     };
-    let read = read_registry(&bytes, Layer::SystemWide)?;
+    let mut bytes = Vec::new();
+    match std::io::Read::read_to_end(&mut file, &mut bytes) {
+        Ok(_) => read_registry(&bytes, Layer::SystemWide).map(Some),
+        Err(_) if bytes.is_empty() => Ok(Some(read_failed_stream(Layer::SystemWide))),
+        Err(error) => Err(format!(
+            "cannot be read after its first {} bytes ({error})",
+            bytes.len()
+        )),
+    }
+}
+
+/// `./.ncbirc` as NCBI's organism report reads it (`read_stream`): `Ok(None)` where it does not
+/// open, `Err(what)` for a file that LOSAT refuses: one whose read throws (a syntax error: NCBI's
+/// organism report then fails, NCBI BLAST+ 2.17.0 exit 255 after the first query's `Query=`
+/// block, probe `T/t2/probe_rc`) and one that reads other files (`[NCBI] .Inherits`, which LOSAT's
+/// registry reads refuse elsewhere too). The caller words the refusal (`what` completes "the
+/// registry file ./.ncbirc ..."). The messages of a read that does not throw are
+/// `registry_posts`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:171-177
+pub(crate) fn read_cwd_ncbirc() -> Result<Option<RegistryRead>, String> {
+    let Some(read) = read_stream(CWD_NCBIRC.as_ref())? else {
+        return Ok(None);
+    };
     if read.error.is_some() {
         return Err("cannot be read as a registry".to_string());
     }
@@ -175,8 +206,9 @@ fn init_config_path(
 /// pairwise report (`FormatterNcbirc`).
 #[derive(Debug, Default)]
 enum ConfigFile {
-    /// No file: `m_Reg` stays null and NCBI looks again at each call (a run's files and
-    /// environment do not change, so each look finds none again).
+    /// No file: for `InitConfig` none is found, `m_Reg` stays null and NCBI looks again at each
+    /// call (a run's files and environment do not change, so each look finds none again); for the
+    /// report's `./.ncbirc`, none that opens (each read makes an empty registry and posts nothing).
     #[default]
     Absent,
     /// The file `path` and its read (`m_Reg`), with the posts of the read (`registry_posts`).
@@ -214,14 +246,15 @@ impl ConfigFile {
         }
     }
 
-    /// The read of the file `path` of `bytes` while `program` (in lower case) runs, into a file
-    /// layer as `CNcbiRegistry`'s constructor reads a stream (`read_cwd_ncbirc`). `Err(what)`
-    /// for a file that LOSAT refuses (completing `the registry file <path> ...`): one that
-    /// `read_registry` does not read as NCBI does, and one with `[NCBI] .Inherits` (NCBI then reads
-    /// the files it names, which LOSAT's registry reads refuse elsewhere too).
-    fn of(program: &str, path: std::ffi::OsString, bytes: &[u8]) -> Result<Self, String> {
-        use crate::blastinput::ncbi_registry::{read_registry, Layer};
-        let mut registry = read_registry(bytes, Layer::SystemWide)?;
+    /// The file `path` of the read `registry` (`read_stream`) while `program` (in lower case)
+    /// runs. `Err(what)` for a file that LOSAT refuses (completing `the registry file <path>
+    /// ...`): one with `[NCBI] .Inherits` (NCBI then reads the files it names, which LOSAT's
+    /// registry reads refuse elsewhere too).
+    fn of(
+        program: &str,
+        path: std::ffi::OsString,
+        mut registry: RegistryRead,
+    ) -> Result<Self, String> {
         if registry.last_value("NCBI", ".Inherits").is_some() {
             return Err("sets [NCBI] .Inherits".to_string());
         }
@@ -260,26 +293,35 @@ pub(crate) struct FormatterNcbirc(ConfigFile);
 
 impl FormatterNcbirc {
     /// The read of `./.ncbirc` of the current directory for a run of `program` (in lower case, as
-    /// NCBI's posts name it); no file is the default (a file that does not open: the stream
-    /// fails, and the registry is empty, as `read_cwd_ncbirc` takes it). `Err(what)` for a file
-    /// that LOSAT refuses (`ConfigFile::of`): the message of the refusal, which the caller ends
-    /// with the program's name.
+    /// NCBI's posts name it, `read_stream`); a file that does not open is the default (an empty
+    /// registry without posts). `Err(what)` for a file that LOSAT refuses (`read_stream`,
+    /// `ConfigFile::of`): the message of the refusal, which the caller ends with the program's
+    /// name.
     pub(crate) fn read(program: &str) -> Result<Self, String> {
-        Self::of(program, std::fs::read(".ncbirc").ok())
+        Self::of_read(program, read_stream(CWD_NCBIRC.as_ref()))
     }
 
-    /// `read` of the file's bytes `bytes` (`None`: no file).
+    /// `read` of the file's read `read` (`read_stream`).
+    fn of_read(program: &str, read: Result<Option<RegistryRead>, String>) -> Result<Self, String> {
+        let file = read.and_then(|read| match read {
+            None => Ok(ConfigFile::Absent),
+            Some(registry) => ConfigFile::of(program, CWD_NCBIRC.into(), registry),
+        });
+        file.map(FormatterNcbirc).map_err(|what| {
+            format!(
+                "the registry file ./.ncbirc {what}, which NCBI BLAST+'s -html reports read; this is not supported by LOSAT"
+            )
+        })
+    }
+
+    /// `read` of the file's bytes `bytes` (`None`: a file that does not open).
+    #[cfg(test)]
     pub(crate) fn of(program: &str, bytes: Option<Vec<u8>>) -> Result<Self, String> {
-        let Some(bytes) = bytes else {
-            return Ok(Self::default());
-        };
-        ConfigFile::of(program, ".ncbirc".into(), &bytes)
-            .map(FormatterNcbirc)
-            .map_err(|what| {
-                format!(
-                    "the registry file ./.ncbirc {what}, which NCBI BLAST+'s -html reports read; this is not supported by LOSAT"
-                )
-            })
+        use crate::blastinput::ncbi_registry::{read_registry, Layer};
+        let read = bytes
+            .map(|bytes| read_registry(&bytes, Layer::SystemWide))
+            .transpose();
+        Self::of_read(program, read)
     }
 
     /// What each of NCBI's reads of the file writes to the run's diagnostics (standard error)
@@ -316,54 +358,61 @@ pub(crate) struct InitConfig {
     file: ConfigFile,
     /// `GETURL_DEBUG` is set (to any value, the empty one too).
     debug: bool,
-    /// Whether the report has written the posts and the `GETURL_DEBUG` line of a `Read`, those of
-    /// the run's first call (`call_posts`).
-    reported: std::sync::atomic::AtomicBool,
+    /// By the report's place among the search's formats, whether it has written the posts and the
+    /// `GETURL_DEBUG` line of a `Read`, those of its first call (`call_posts`).
+    reported: std::sync::Mutex<Vec<bool>>,
 }
 
 impl InitConfig {
     /// The registry of the run of `program` (in lower case, as NCBI's posts name it), from the
-    /// environment (`FMTCFG`, `NCBI`, `GETURL_DEBUG`) and the current directory. LOSAT refuses a
-    /// file that cannot be read and one with `[NCBI] .Inherits` (`CNcbiRegistry` reads the files
-    /// it names, which LOSAT's registry reads refuse elsewhere too); `what` completes `the
-    /// registry file <path> ...`.
+    /// environment (`FMTCFG`, `NCBI`, `GETURL_DEBUG`) and the current directory: the file that
+    /// `init_config_path` finds, read as NCBI's formatter reads its files (`read_stream`). A file
+    /// that does not open is read as an empty registry, which NCBI keeps (`m_Reg`) and names in the
+    /// `GETURL_DEBUG` line (NCBI BLAST+ 2.17.0, line RG T4a2 fix round 2, probes
+    /// `T/t4/fix2/out/c1.noperm.*`: mode 000, rc 0, `REGISTRY: .ncbirc`, the default links). LOSAT
+    /// refuses what `read_stream` refuses and a file with `[NCBI] .Inherits` (`CNcbiRegistry`
+    /// reads the files it names, which LOSAT's registry reads refuse elsewhere too); `what`
+    /// completes `the registry file <path> ...`.
     pub(crate) fn read(program: &str) -> Result<Self, String> {
         let path = init_config_path(
             std::env::var_os("FMTCFG").as_deref(),
             std::env::var_os("NCBI").as_deref(),
             &|path| path.is_file(),
         );
-        let file = match path {
-            None => None,
-            Some(path) => {
-                let bytes = std::fs::read(&path).map_err(|error| {
-                    format!(
-                        "the registry file {} ({error}), which NCBI BLAST+'s -html links read, cannot be read; this is not supported by LOSAT",
-                        std::path::Path::new(&path).display()
-                    )
-                })?;
-                Some((path, bytes))
-            }
-        };
-        Self::of(program, file, std::env::var_os("GETURL_DEBUG").is_some())
+        Self::read_file(program, path, std::env::var_os("GETURL_DEBUG").is_some())
     }
 
-    /// `read` of the file `file` (its path as NCBI names it and its bytes; `None`: no file),
-    /// `debug`: `GETURL_DEBUG` is set.
-    pub(super) fn of(
+    /// `read` of the file `path` that `init_config_path` found (`None`: none), `debug`:
+    /// `GETURL_DEBUG` is set.
+    fn read_file(
         program: &str,
-        file: Option<(std::ffi::OsString, Vec<u8>)>,
+        path: Option<std::ffi::OsString>,
+        debug: bool,
+    ) -> Result<Self, String> {
+        let file = path.map(|path| {
+            let read = read_stream(path.as_ref()).map(Option::unwrap_or_default);
+            (path, read)
+        });
+        Self::of_read(program, file, debug)
+    }
+
+    /// `read` of the file `file` (its path as NCBI names it and its read, `read_stream`; `None`:
+    /// no file), `debug`: `GETURL_DEBUG` is set.
+    fn of_read(
+        program: &str,
+        file: Option<(std::ffi::OsString, Result<RegistryRead, String>)>,
         debug: bool,
     ) -> Result<Self, String> {
         let file = match file {
             None => ConfigFile::Absent,
-            Some((path, bytes)) => {
+            Some((path, read)) => {
                 let shown = std::path::Path::new(&path).display().to_string();
-                ConfigFile::of(program, path, &bytes).map_err(|what| {
-                    format!(
-                        "the registry file {shown} {what}, which NCBI BLAST+'s -html links read (FMTCFG, NCBI); this is not supported by LOSAT"
-                    )
-                })?
+                read.and_then(|registry| ConfigFile::of(program, path, registry))
+                    .map_err(|what| {
+                        format!(
+                            "the registry file {shown} {what}, which NCBI BLAST+'s -html links read (FMTCFG, NCBI); this is not supported by LOSAT"
+                        )
+                    })?
             }
         };
         Ok(InitConfig {
@@ -371,6 +420,18 @@ impl InitConfig {
             debug,
             reported: Default::default(),
         })
+    }
+
+    /// `read` of the file `file` (its path as NCBI names it and its bytes; `None`: no file).
+    #[cfg(test)]
+    pub(super) fn of(
+        program: &str,
+        file: Option<(std::ffi::OsString, Vec<u8>)>,
+        debug: bool,
+    ) -> Result<Self, String> {
+        use crate::blastinput::ncbi_registry::{read_registry, Layer};
+        let file = file.map(|(path, bytes)| (path, read_registry(&bytes, Layer::SystemWide)));
+        Self::of_read(program, file, debug)
     }
 
     /// `InitConfig()` where `m_Reg` is null, then `m_Reg`: the registry (`None`: no file), or for a
@@ -381,23 +442,31 @@ impl InitConfig {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3410-3412
-    /// What one call of `InitConfig` (an id URL, `map_protocol`) writes, where the report reaches
-    /// it: the posts of the read, to the run's diagnostics, and with `GETURL_DEBUG` the line
-    /// `REGISTRY: <path>`, which NCBI writes to the process's standard error itself, not as a post
-    /// (`QueryWarnings::html_stderr_line`: with tblastx's `-logfile` the posts go to the file and
-    /// the line stays on the terminal). The first call of the run that reads a file writes both,
-    /// later calls nothing (`m_Reg` is set); a file whose read throws posts at every call (before
-    /// its exception, `registry`). The report's writer asks it in the report's order, so the first
-    /// call is the report's first id URL also where the parts of the report are formatted on
-    /// threads (`x_pairwise_par::write_parallel`).
-    pub(crate) fn call_posts(&self) -> (Vec<u8>, Vec<u8>) {
+    /// What one call of `InitConfig` (an id URL, `map_protocol`) by the report of the search's
+    /// `report`th format writes, where the report reaches it: the posts of the read, to the run's
+    /// diagnostics, and with `GETURL_DEBUG` the line `REGISTRY: <path>`, which NCBI writes to the
+    /// process's standard error itself, not as a post (`QueryWarnings::html_stderr_line`: with
+    /// tblastx's `-logfile` the posts go to the file and the line stays on the terminal). The first
+    /// call of a report that reads a file writes both, its later calls nothing (`m_Reg` is set); a
+    /// file whose read throws posts at every call (before its exception, `registry`). NCBI's
+    /// `m_Reg` is a static of the process, and each report writes what a run of its format alone
+    /// writes, so each report of a library call of several formats has its first call (line RG
+    /// T4a2 fix round 2, review c C3 = review d D5: formats 0 and 0); the command line has one. The
+    /// report's writer asks it in the report's order, so the first call is the report's first id
+    /// URL also where the parts of the report are formatted on threads
+    /// (`x_pairwise_par::write_parallel`).
+    pub(crate) fn call_posts(&self, report: usize) -> (Vec<u8>, Vec<u8>) {
         match &self.file {
             ConfigFile::Absent => Default::default(),
             ConfigFile::Read { path, posts, .. } => {
-                if self
+                let mut reported = self
                     .reported
-                    .swap(true, std::sync::atomic::Ordering::Relaxed)
-                {
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if reported.len() <= report {
+                    reported.resize(report + 1, false);
+                }
+                if std::mem::replace(&mut reported[report], true) {
                     return Default::default();
                 }
                 let mut line = Vec::new();

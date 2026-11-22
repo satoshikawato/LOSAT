@@ -739,7 +739,14 @@ pub(super) fn render(
                 archive.map(|render| render.handle),
                 &mut *outputs.diagnostics,
             )
-            .with_later(query_posts, later);
+            .with_later(query_posts, later)
+            .for_report(format_index)
+            .with_html_posts(
+                outputs
+                    .html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn std::io::Write),
+            );
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`query_reads`).
             match first {

@@ -35,13 +35,18 @@ impl HtmlLinks {
     /// report: the posts to the run's diagnostics (standard error, or the caller's diagnostics in
     /// the library API), and the line that NCBI writes to the process's standard error itself
     /// (empty but for `InitConfig`'s `REGISTRY:`): the posts of a read of `./.ncbirc`
-    /// (`FormatterNcbirc::posts`), or those of a call of `InitConfig` (`InitConfig::call_posts`:
-    /// the run's first call, or each call of a file whose read throws).
-    pub(crate) fn posts_of(&self, post: HtmlPost) -> (std::borrow::Cow<'_, [u8]>, Vec<u8>) {
+    /// (`FormatterNcbirc::posts`), or those of a call of `InitConfig` by the report of the
+    /// search's `report`th format (`InitConfig::call_posts`: the report's first call, or each call
+    /// of a file whose read throws).
+    pub(crate) fn posts_of(
+        &self,
+        post: HtmlPost,
+        report: usize,
+    ) -> (std::borrow::Cow<'_, [u8]>, Vec<u8>) {
         match post {
             HtmlPost::Ncbirc => (std::borrow::Cow::Borrowed(self.ncbirc.posts()), Vec::new()),
             HtmlPost::InitConfig => {
-                let (posts, line) = self.registry.call_posts();
+                let (posts, line) = self.registry.call_posts(report);
                 (std::borrow::Cow::Owned(posts), line)
             }
         }

@@ -326,6 +326,7 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
         {
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt: "0",
                     refusal: FormatRefusal::FailsCall,

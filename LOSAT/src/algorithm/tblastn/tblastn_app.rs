@@ -1402,7 +1402,13 @@ fn write_first_batch_prologs(
                 num_subjects as i64,
                 total,
                 database,
-                html.map(|links| (links, &mut *outputs.diagnostics as &mut dyn Write)),
+                html.map(|links| {
+                    let posts = crate::api::local_blast::html_posts_sink(
+                        &mut outputs.html_posts,
+                        &mut *outputs.diagnostics,
+                    );
+                    (links, posts)
+                }),
             )?;
             writer.flush()?;
         } else if let Some(kind) = super::stage_e_report::xml2_kind(format.outfmt) {

@@ -581,6 +581,13 @@ pub(super) struct LocalReport<'a, 'p> {
     /// What a refusal of the format's checks does (`FormatRefusal::check`); without a local
     /// report it fails the call.
     pub refusal: &'a mut crate::api::local_blast::FormatRefusal,
+    /// The format's place among the search's formats (`QueryWarnings::for_report`); 0 without a
+    /// local report (the command line's one format).
+    pub report: usize,
+    /// Where the format's `-html` posts go apart from its standard error
+    /// (`QueryWarnings::with_html_posts`: the diagnostics of a later format, the call's receiver
+    /// of a later search's, `local::write_run`).
+    pub html_posts: Option<&'a mut dyn Write>,
 }
 
 /// Sorts the HSPs of each list of `batches` by e-value, the order of every report: NCBI sorts each
@@ -668,14 +675,15 @@ pub(super) fn render_queries_with(
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
     sort_lists(batches);
-    let (probe, first_hsp, made_hits, mut refusal) = match local {
+    let (probe, first_hsp, made_hits, mut refusal, html_posts) = match local {
         Some(local) => (
             local.probe,
             local.first_hsp,
             local.hits,
             Some(local.refusal),
+            (local.report, local.html_posts),
         ),
-        None => (None, 0, None, None),
+        None => (None, 0, None, None, (0, None)),
     };
     // A check of the format's report before its rows: `false` where the format fails alone
     // (`FormatRefusal::check`), and writes nothing of the batch.
@@ -725,7 +733,7 @@ pub(super) fn render_queries_with(
     if options.pairwise_view().is_some() {
         return write_pairwise(
             writer, stderr, options, queries, subjects, shown, batches, made_hits, probe,
-            first_hsp, pool,
+            first_hsp, pool, html_posts,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
@@ -847,6 +855,7 @@ fn write_pairwise(
     probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
     first_hsp: crate::api::local_blast::HspIndex,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    (report_index, html_posts): (usize, Option<&mut dyn Write>),
 ) -> Result<()> {
     use crate::report::pairwise::{
         write_blastx_pairwise_report, BlastpPairwiseQuery, BlastxPairwiseOptions, PairwiseConfig,
@@ -1072,7 +1081,9 @@ fn write_pairwise(
     // (`QueryWarnings::before_query`, `subject_read`).
     let mut warnings =
         crate::report::query_warnings::QueryWarnings::of_posts(&warnings, None, stderr)
-            .with_subject_reads(&reads);
+            .with_subject_reads(&reads)
+            .for_report(report_index)
+            .with_html_posts(html_posts.map(|posts| posts as &mut dyn Write));
     // A subject set's subjects are all loaded.
     let every_loaded = crate::report::db_subject::HitLoads::default();
     write_blastx_pairwise_report(
@@ -1444,23 +1455,27 @@ fn pairwise_metadata(
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
+/// The prolog of a format (`options`), whose warnings go to `diagnostics` and the posts of its
+/// `-html` references to `html_posts` (`None`: `diagnostics`).
 pub(crate) fn write_prolog(
     writer: &mut impl Write,
     diagnostics: &mut dyn Write,
+    html_posts: Option<&mut dyn Write>,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
 ) -> Result<()> {
     if options.pairwise_view().is_some() {
+        let posts: &mut dyn Write = match html_posts {
+            Some(posts) => posts,
+            None => &mut *diagnostics,
+        };
         crate::report::pairwise::write_blastx_prolog(
             writer,
             options.program().upper,
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
-            match options.html.as_deref() {
-                Some(links) => Some((links, &mut *diagnostics)),
-                None => None,
-            },
+            options.html.as_deref().map(|links| (links, posts)),
         )?;
     }
     // Outfmt 20's line of the field names, after its formatter's warning

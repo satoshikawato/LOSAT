@@ -6376,6 +6376,7 @@ fn search(
             later_warnings,
             hits,
             observer,
+            html_posts,
         } = &mut *outputs;
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the outputs' `-outfmt` values, in request order.
         let outfmts: Vec<&str> = formats.iter().map(|format| format.outfmt).collect();
@@ -6587,6 +6588,9 @@ fn search(
                             .collect(),
                         diagnostics: &mut **diagnostics,
                         later_warnings: later_warnings.as_deref_mut(),
+                        html_posts: html_posts
+                            .as_deref_mut()
+                            .map(|posts| posts as &mut (dyn std::io::Write + Send)),
                         hits: x_want_records.then_some(
                             &mut x_collect as &mut crate::api::local_blast::HitsSink<'_>,
                         ),
@@ -7551,9 +7555,13 @@ fn write_pairwise_prologs(
                 num_sequences,
                 total_letters,
                 pairwise_database.as_ref(),
-                args.html
-                    .as_deref()
-                    .map(|links| (links, &mut *outputs.diagnostics as &mut dyn Write)),
+                args.html.as_deref().map(|links| {
+                    let posts = crate::api::local_blast::html_posts_sink(
+                        &mut outputs.html_posts,
+                        &mut *outputs.diagnostics,
+                    );
+                    (links, posts)
+                }),
             )?;
             writer.flush()?;
         } else if let Some(kind) = blastp_xml2_kind(format.outfmt) {
@@ -7698,6 +7706,12 @@ fn write_reports_without_queries(
                     &[],
                     None,
                     &mut *outputs.diagnostics,
+                )
+                .with_html_posts(
+                    outputs
+                        .html_posts
+                        .as_deref_mut()
+                        .map(|posts| posts as &mut dyn std::io::Write),
                 );
                 write_blastp_pairwise_report(
                     &[],
@@ -10768,7 +10782,14 @@ fn run_call(
                 args.archive.as_ref(),
                 &mut *outputs.diagnostics,
             )
-            .with_later(&query_posts, own);
+            .with_later(&query_posts, own)
+            .for_report(format_index)
+            .with_html_posts(
+                outputs
+                    .html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn std::io::Write),
+            );
             match first_lines {
                 Some(_) => warnings.with_subject_reads(prefetched.subject_reads.queries()),
                 None => warnings,

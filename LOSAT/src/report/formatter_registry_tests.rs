@@ -102,16 +102,28 @@ fn the_local_id_url_and_the_debug_line_are_ncbis() {
     // The run's first call writes the debug line, the others nothing (`call_posts`, which the
     // report's writer asks at each id URL in the report's order).
     assert_eq!(
-        config.call_posts(),
+        config.call_posts(0),
         (Vec::new(), b"REGISTRY: .ncbirc\n".to_vec())
     );
-    assert_eq!(config.call_posts(), Default::default());
+    assert_eq!(config.call_posts(0), Default::default());
+    // Each report of a call of several formats has its first call, as a run of its format alone
+    // (line RG T4a2 fix round 2, review c C3: formats 0 and 0).
+    assert_eq!(
+        config.call_posts(2),
+        (Vec::new(), b"REGISTRY: .ncbirc\n".to_vec())
+    );
+    assert_eq!(config.call_posts(2), Default::default());
+    assert_eq!(
+        config.call_posts(1),
+        (Vec::new(), b"REGISTRY: .ncbirc\n".to_vec())
+    );
+    assert_eq!(config.call_posts(0), Default::default());
     // Without a file: no URL, no line (`env_geturl_none`); `PROTOCOL` of the file, an empty one
     // too, else `https:`.
     let none = InitConfig::of("blastp", None, true).unwrap();
     assert_eq!(none.local_id_url(b"Subject_1", b"", 0).unwrap(), b"");
     assert_eq!(none.map_protocol(b"<@protocol@>//x").unwrap(), b"https://x");
-    assert_eq!(none.call_posts(), Default::default());
+    assert_eq!(none.call_posts(0), Default::default());
     let empty = InitConfig::of(
         "blastp",
         Some(("f".into(), b"[blastfmtutil]\nprotocol=\n".to_vec())),
@@ -119,7 +131,7 @@ fn the_local_id_url_and_the_debug_line_are_ncbis() {
     )
     .unwrap();
     assert_eq!(empty.map_protocol(b"<@protocol@>//x").unwrap(), b"//x");
-    assert_eq!(empty.call_posts(), Default::default());
+    assert_eq!(empty.call_posts(0), Default::default());
     assert!(InitConfig::of(
         "blastp",
         Some(("f".into(), b"[NCBI]\n.Inherits=g\n".to_vec())),
@@ -141,7 +153,7 @@ fn a_malformed_init_config_file_throws_at_each_id() {
     .unwrap();
     for _ in 0..2 {
         // Each call posts the read's posts (none for this file) and throws.
-        assert_eq!(config.call_posts(), Default::default());
+        assert_eq!(config.call_posts(0), Default::default());
         let error = config.map_protocol(b"<@protocol@>").unwrap_err();
         let exception = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();
         // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
@@ -171,4 +183,80 @@ fn a_registry_read_posts_as_ncbi() {
         registry_posts(&read, "blastp"),
         b"Error: (110.4) [blastp] Error reading the registry after line 1: \n".to_vec()
     );
+}
+
+// Line RG T4a2 fix round 2 (review c C1, C2): NCBI BLAST+ 2.17.0 with `./.ncbirc` a directory, a
+// file of mode 000, a broken link and an empty file (probes `T/t4/fix2/out/c1.*`, the five programs
+// with `-html` and outfmt 18 with and without it): a directory posts `Error reading the registry
+// after line 1` at every read of the formatter and is no file of `InitConfig` (`CFile::Exists`);
+// mode 000 posts nothing, and `InitConfig` names it in its `GETURL_DEBUG` line with the default
+// links (rc 0); a broken link is no file; an empty file posts nothing and is `InitConfig`'s file.
+// Mode 000 cannot be committed as a fixture: this test makes it (and skips it in a process that
+// reads such a file anyway, as root does).
+#[cfg(unix)]
+#[test]
+fn the_formatter_reads_its_files_as_ncbis_stream() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-formatter-stream-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = |name: &str| directory.join(name);
+    let failed = b"Error: (110.4) [blastp] Error reading the registry after line 1: \n".to_vec();
+    let line = |name: &str| {
+        let mut line = b"REGISTRY: ".to_vec();
+        line.extend_from_slice(path(name).as_os_str().as_encoded_bytes());
+        line.push(b'\n');
+        line
+    };
+    let init_config = |name: &str| {
+        let found = path(name).is_file().then(|| path(name).into_os_string());
+        InitConfig::read_file("blastp", found, true).unwrap()
+    };
+
+    // No file and a broken link: the stream does not open.
+    assert_eq!(read_stream(&path("none")), Ok(None));
+    std::os::unix::fs::symlink(path("missing"), path("broken")).unwrap();
+    assert_eq!(read_stream(&path("broken")), Ok(None));
+    assert_eq!(init_config("broken").call_posts(0), Default::default());
+
+    // An empty file: an empty registry, no posts; `InitConfig`'s file.
+    std::fs::write(path("empty"), b"").unwrap();
+    assert_eq!(
+        read_stream(&path("empty")),
+        Ok(Some(RegistryRead::default()))
+    );
+    assert_eq!(
+        init_config("empty").call_posts(0),
+        (Vec::new(), line("empty"))
+    );
+
+    // A directory opens and fails at its first read: each read of the formatter posts.
+    std::fs::create_dir(path("dir")).unwrap();
+    let dir = read_stream(&path("dir")).unwrap().unwrap();
+    assert!(dir.entries.is_empty() && dir.error.is_none());
+    assert_eq!(registry_posts(&dir, "blastp"), failed);
+    let ncbirc = FormatterNcbirc::of_read("blastp", Ok(Some(dir.clone()))).unwrap();
+    assert_eq!(ncbirc.posts(), failed);
+    assert_eq!(ncbirc.protocol().unwrap(), b"https:");
+    assert_eq!(init_config("dir").call_posts(0), Default::default());
+
+    // Mode 000: the stream does not open; `InitConfig` keeps an empty registry and names it.
+    std::fs::write(path("noperm"), b"[BLASTFMTUTIL]\nPROTOCOL=http:\n").unwrap();
+    std::fs::set_permissions(path("noperm"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(path("noperm")).is_err() {
+        assert_eq!(read_stream(&path("noperm")), Ok(None));
+        let config = init_config("noperm");
+        assert_eq!(
+            config.map_protocol(b"<@protocol@>//x").unwrap(),
+            b"https://x"
+        );
+        assert_eq!(config.call_posts(0), (Vec::new(), line("noperm")));
+        let ncbirc = FormatterNcbirc::of_read("blastp", read_stream(&path("noperm"))).unwrap();
+        assert!(ncbirc.posts().is_empty());
+    }
+    std::fs::set_permissions(path("noperm"), std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::remove_dir_all(&directory).unwrap();
 }

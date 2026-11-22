@@ -5735,7 +5735,14 @@ fn post_process_hits_and_write(
                 report.archive,
                 &mut *outputs.diagnostics,
             )
-            .with_later(query_warnings, later);
+            .with_later(query_warnings, later)
+            .for_report(format_index)
+            .with_html_posts(
+                outputs
+                    .html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut dyn std::io::Write),
+            );
             // The first format's writer also writes the texts of the subjects that the reports
             // read one by one (`BlastnReportInputs::query_reads`).
             match first {
@@ -7122,6 +7129,7 @@ pub(crate) fn repeat_search_hits(
         let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![crate::api::local_blast::FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -9439,7 +9447,10 @@ fn write_pairwise_prologs(
                 output_format,
                 intro,
                 shown,
-                &mut *outputs.diagnostics,
+                crate::api::local_blast::html_posts_sink(
+                    &mut outputs.html_posts,
+                    &mut *outputs.diagnostics,
+                ),
             )?;
         }
     }
@@ -9447,7 +9458,8 @@ fn write_pairwise_prologs(
 }
 
 /// Writes and flushes the prolog of one sink, for the formats that have one (outfmt 0, 15, 16,
-/// 20).
+/// 20); `diagnostics` takes the posts of a `-html` prolog's references
+/// (`local_blast::html_posts_sink`).
 fn write_format_prolog(
     format: &mut FormatOutput<'_>,
     output_format: BlastnOutputFormat,
@@ -9456,6 +9468,10 @@ fn write_format_prolog(
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<()> {
     if output_format.is_pairwise() {
+        let flush = crate::report::pairwise::flushes_after_prolog(
+            shown.html_links.is_some(),
+            !format.sink.is_writer(),
+        );
         let mut writer = format.sink.open()?;
         write_blastn_pairwise_prolog(
             &mut writer,
@@ -9471,7 +9487,9 @@ fn write_format_prolog(
                 .as_deref()
                 .map(|links| (links, diagnostics)),
         )?;
-        writer.flush()?;
+        if flush {
+            writer.flush()?;
+        }
     } else if let Some(kind) = output_format.xml2_kind() {
         let mut writer = format.sink.open()?;
         writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;

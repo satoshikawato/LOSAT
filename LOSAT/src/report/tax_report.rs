@@ -736,9 +736,11 @@ impl TaxLookups {
 
 /// `./.ncbirc` as NCBI's organism report reads it (`CTaxFormat::x_InitTaxFormat` and
 /// `CAlignFormatUtil::GetProtocol` read the file of the current directory each time a report is
-/// made: `formatter_registry::read_cwd_ncbirc`): `None` without the file. LOSAT refuses a file
-/// whose read throws (NCBI's report then fails) and one that reads other files; the messages of a
-/// read that does not throw are NCBI's posts of each report (`formatter_registry::registry_posts`).
+/// made: `formatter_registry::read_cwd_ncbirc`): `None` where the file does not open (no file, a
+/// file the process may not read: NCBI's registry of it is empty and posts nothing; a directory
+/// opens, and its read posts that the stream failed). LOSAT refuses a file whose read throws
+/// (NCBI's report then fails) and one that reads other files; the messages of a read that does not
+/// throw are NCBI's posts of each report (`formatter_registry::registry_posts`).
 fn read_ncbirc(program: &str) -> Result<Option<crate::blastinput::ncbi_registry::RegistryRead>> {
     super::formatter_registry::read_cwd_ncbirc().map_err(|what| {
         anyhow::Error::new(TaxReportRefusal(format!(

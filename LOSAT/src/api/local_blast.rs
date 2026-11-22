@@ -341,6 +341,21 @@ impl FormatOutput<'_> {
     }
 }
 
+/// The sink of the `-html` reports' posts of the outputs whose fields `html_posts` and
+/// `diagnostics` these are (`ReportOutputs::html_posts`, else the diagnostics), for the writers
+/// that post apart from a format's warnings (the prologs' references, before a search or with its
+/// first batch). A function of the two fields, so that a caller that holds the outputs' `formats`
+/// can ask it.
+pub(crate) fn html_posts_sink<'s>(
+    html_posts: &'s mut Option<&mut (dyn Write + Send)>,
+    diagnostics: &'s mut (dyn Write + Send),
+) -> &'s mut dyn Write {
+    match html_posts {
+        Some(posts) => &mut **posts,
+        None => diagnostics,
+    }
+}
+
 /// `ReportOutputs::open_out` of the outputs `formats` (for a caller that holds the diagnostics
 /// stream of the same outputs).
 pub(crate) fn open_out(formats: &mut [FormatOutput<'_>]) -> anyhow::Result<()> {
@@ -540,6 +555,13 @@ pub struct ReportOutputs<'a> {
     /// all of its formats (`report::db_subject::FormatThrow::of_search`; review 3 of line DBID
     /// pfoff-3, N2). Empty where the call is one search (the command line, every other caller).
     pub other_outfmts: &'a [&'a str],
+    /// Receives the posts of the `-html` reports' reads of NCBI's formatter registries
+    /// (`report::html_ids::HtmlPost`: `./.ncbirc` and `InitConfig`'s file) where `diagnostics`
+    /// takes the repeats of an earlier search of the same call (`api::run`'s searches after the
+    /// first, `search_groups`): such a report posts what a run of its format alone posts, and
+    /// only its search writes it (line RG T4a2 fix round 2, review c C3 = review d D5). `None`
+    /// writes them to `diagnostics` (the command line, every other caller).
+    pub html_posts: Option<&'a mut (dyn Write + Send)>,
 }
 
 impl ReportOutputs<'_> {
@@ -685,6 +707,7 @@ impl ReportOutputs<'_> {
             later_warnings,
             hits,
             observer,
+            html_posts,
         } = self;
         let mut tee = crate::report::archive::DiagTee::new(&mut **diagnostics, handle);
         let mut view = ReportOutputs {
@@ -709,6 +732,10 @@ impl ReportOutputs<'_> {
             diagnostics: &mut tee,
             // Not saved in the archive: the archive's run (outfmt 11 first) writes none of them.
             later_warnings: later_warnings.as_deref_mut(),
+            // A later search's `-html` posts go where they went (`ReportOutputs::html_posts`).
+            html_posts: html_posts
+                .as_deref_mut()
+                .map(|posts| posts as &mut (dyn Write + Send)),
             hits: hits.as_mut().map(|hits| &mut **hits as &mut HitsSink<'_>),
             observer: observer
                 .as_mut()
@@ -738,6 +765,7 @@ impl<'a> ReportOutputs<'a> {
     ) -> Self {
         Self {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![FormatOutput {
                 outfmt,
                 sink,

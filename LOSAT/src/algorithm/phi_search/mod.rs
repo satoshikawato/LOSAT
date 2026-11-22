@@ -13,3 +13,5 @@ pub(crate) mod scan;
 pub(crate) mod stats;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:85-906
 pub(crate) mod align;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:740-815
+pub(crate) mod engine;

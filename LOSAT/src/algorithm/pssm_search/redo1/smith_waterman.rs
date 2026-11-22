@@ -243,9 +243,9 @@ impl RedoMatch<'_> {
     /// that alignment (`s_GetComposition`, `window_composition`) and the adjustment
     /// (`Blast_AdjustScores`; a window without a true amino acid makes no alignment), the forbidden
     /// ranges cleared and the round loop on the window's letters (`subject.data` after the zero
-    /// byte that `frame_range` writes before the window, `subject.length` its `end - begin`, none
-    /// where the window ends before it begins). The alignments are shifted by the window's start
-    /// and take its frame (`s_NewAlignmentUsingXdrop`). All windows prepend to the match's one
+    /// byte that `frame_range` writes before the window, `subject.length` its `end - begin`).
+    /// The alignments are shifted by the window's start and take its frame
+    /// (`s_NewAlignmentUsingXdrop`). All windows prepend to the match's one
     /// list (`alignments[query_index]`), and the heap is asked only while that list is empty.
     #[inline(never)]
     #[allow(clippy::too_many_arguments)]
@@ -314,13 +314,15 @@ impl RedoMatch<'_> {
                 return Ok(None);
             }
             // A window that ends before it begins (`-strand plus|minus`, NCBI's six-frame
-            // arithmetic on the three-frame buffer; `frame_range`): the score-only scan's row of
-            // `end - begin` columns, a negative count converted to `size_t`, cannot be allocated,
-            // the scan returns -1 and the match's redo fails (as `SwWindowRedo::Failed`). The
-            // composition test above stops such a window first where its letters lie past the
-            // frame's copy (zero bytes, no true amino acid).
+            // arithmetic on the three-frame buffer; `frame_range`) does not get here: its end is
+            // the frame's translated length, it holds one HSP, and every letter its composition
+            // reads lies past the frame's copy (zero bytes, no true amino acid), so the test above
+            // skips it as NCBI's does. The check keeps `end - begin` from wrapping; were it
+            // reached, NCBI's scan could not allocate a row of a negative length and would fail
+            // the match (as `SwWindowRedo::Failed`).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:681-682
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1430
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:74-77
-            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1444-1454
             if window.end < window.begin {
                 return Ok(None);
             }

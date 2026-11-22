@@ -332,7 +332,8 @@
   of a Smith-Waterman redo that NCBI repeats without end extended from RPSBLAST to RPSTBLASTN, rule
   3, within the class of 1.30; Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07; numbered after 1.71; first 1.68, then 1.70 and 1.72 at the merges
-  of dev that brought line NP's 1.68 and 1.69, then lines RG's 1.70 and DBID's 1.71)
+  of dev that brought line NP's 1.68 and 1.69, then lines RG's 1.70 and DBID's 1.71; with it, under
+  rule 2, a Smith-Waterman alignment that starts with a gap, refused until line PS item PS12d)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1230,6 +1231,20 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
 
 ## Reproduced as NCBI (rule 2)
 
+- RPSTBLASTN `-use_sw_tback`: a Smith-Waterman alignment that starts with a gap (version 1.72,
+  2026-11-22, line PS item PS12c, review B1, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07): with forbidden ranges NCBI's redo can give a profile's second alignment that
+  starts with a gap in the profile's row (row `db.rpstbn.rej.swgap`: `nest.faa`, the profile's
+  source twice, nested, back-translated). Its Std-seg's first segment has no location in that row,
+  so `CSeq_align::GetSeqRange` takes no id from it and throws "Row seqids not consistent" on the
+  row (`Seq_align.cpp:171-191`). The output is deterministic: the prefetch warns (every format but
+  8, 9, 11 and 12; outfmt 6 not with `PRE_FETCH_SEQS_LIMIT=0`), outfmt 0 to 4 stop after the query's
+  `Length=` (the description table) with exit status 255, 13 and 14 too, BLAST XML, JSON and XML2
+  stop their document with the exception (exit status 0), and the tables and the Seq-aligns are
+  the alignments as made. rpsblast's Dense-seg has a location in every segment. LOSAT refuses such
+  a profile with the query batch that holds it, as 1.72's endless redo above, until line PS item
+  PS12d writes these reports (rule 2); the X-drop redo's alignments start with a substitution.
+
 - BLASTP unified P-values, `-comp_based_stats 1u`, `2u` and `3u` (version 1.54, 2026-11-20, line RG
   item X5, DECISIONS X5-1): for a query that has a next query in its query batch, NCBI adjusts the
   e-values with the next query's length, length adjustment and effective search space
@@ -1947,10 +1962,13 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   SEG) above 0. NCBI runs the loop of 1.30 (`Blast_RedoOneMatchSmithWaterman`,
   `redo_alignment.c:1438-1529`) on each window's letters, so it never ends either: NCBI BLAST+
   2.17.0's rpstblastn did not end within 120 and 300 seconds on the inputs of rows
-  `db.rpstbn.rej.swendless` and `db.rpstbn.rej.swendless.minus`, which it searches without
-  `-use_sw_tback` in 0.1 seconds. LOSAT refuses (exit 1, "a profile whose Smith-Waterman redo
+  `db.rpstbn.rej.swendless` and `db.rpstbn.rej.swendless.minus`, whose searches without
+  `-use_sw_tback` (`tks_m.fna`, and `nq.fna` on both strands) took 0.1 to 0.2 seconds. LOSAT refuses (exit 1, "a profile whose Smith-Waterman redo
   (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 ... is not supported by LOSAT's RPSTBLASTN")
-  where its refusal of 1.30 comes in RPSBLAST. Where that cell scores 0 or less, NCBI's redo fails
+  with the query batch that holds the profile, after the reports of the batches before it (in outfmt
+  0 after the prolog, which NCBI writes before it searches its first batch; the form of 1.40 and of
+  BLASTP's 1.53; rows `db.rpstbn.rej.swendless.0` and, on a later batch, the probe of PS12c's
+  review S2: the same bytes at 1, 4 and 8 threads). Where that cell scores 0 or less, NCBI's redo fails
   and drops the profile, which LOSAT reproduces (rule 2; rows `db.rpstbn.sw.*`, among them the
   `-strand minus` inputs on which NCBI ends, `db.rpstbn.sw.tksm.minus.6`,
   `db.rpstbn.sw.tksw.minus.6` and `db.rpstbn.sw.s5e.minus.*`).

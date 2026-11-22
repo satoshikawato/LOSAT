@@ -31,6 +31,7 @@ use crate::algorithm::pssm_search::evalue::EvalueStats;
 use crate::algorithm::pssm_search::redo1::smith_waterman::SwEndless;
 use crate::algorithm::pssm_search::redo1::{RedoMatch, RedoRun, RedoSubject, SCALING_FACTOR};
 use crate::algorithm::pssm_search::rows::QueryPssm;
+use crate::common::GapEditOp;
 use crate::core::composition_adjustment::compo_scale::{PosMatrixInfo, RedoInstance};
 use crate::core::psi::PsiScoreBlk;
 use crate::seqdb::rps::RpsVolumeFiles;
@@ -270,6 +271,21 @@ impl RpsTraceback<'_> {
             if hsp_list.hsps.is_empty() {
                 continue;
             }
+            // An alignment of the Smith-Waterman redo of a translated query that starts with a
+            // gap (series PR, item PS12c, review B1): the first segment of its Std-seg has no
+            // location in that row, so `CSeq_align::GetSeqRange` cannot take the row's id there
+            // and throws on the row; NCBI's prefetch warns and outfmt 0 to 5 and 13 to 16 stop
+            // there (PD-LOSAT-NCBI-DEFECTS, rule 2). LOSAT refuses such a profile until item
+            // PS12d writes those reports. The X-drop redo's alignments start with a substitution.
+            // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
+            if S::Instance::SUBJECT_IS_TRANSLATED
+                && redo.smith_waterman
+                && hsp_list.hsps.iter().any(starts_with_gap)
+            {
+                anyhow::bail!(
+                    "a profile whose Smith-Waterman redo (-use_sw_tback) gives an alignment that starts with a gap, of which NCBI BLAST+ 2.17.0's reports cannot take the range (they warn, and outfmt 0 to 5 and 13 to 16 stop there), is not supported by LOSAT's {program}"
+                );
+            }
             hit_list
                 .get_or_insert_with(|| BlastpHitList::new(self.hitlist_size))
                 .update(hsp_list);
@@ -279,4 +295,13 @@ impl RpsTraceback<'_> {
         }
         Ok(RpsTraced { hit_list, k_mark })
     }
+}
+
+/// Whether the alignment `hsp` starts with a gap in one of its rows (its edit script's first
+/// operation is not a substitution).
+fn starts_with_gap(hsp: &crate::algorithm::blastp::hsp::BlastpHsp) -> bool {
+    matches!(
+        hsp.gap_info.as_deref().and_then(<[GapEditOp]>::first),
+        Some(GapEditOp::Ins(_) | GapEditOp::Del(_))
+    )
 }

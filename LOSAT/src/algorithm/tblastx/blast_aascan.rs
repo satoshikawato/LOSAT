@@ -34,6 +34,55 @@ pub(super) fn determine_scanning_offsets(
     true
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:43-58 (the scan moves to the next
+// range of the list, never back) and c++/src/algo/blast/core/blast_aascan.c:75-127 (the words of a
+// range left to right). The first range starts the scan at its left even when it holds no word
+// (c++/src/algo/blast/core/aa_ungapped.c:495-500). The ranges of a database sequence with
+// `-db_soft_mask` are the complement of its masks in the order stored, unsorted
+// (c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2490-2506,
+// c++/include/objtools/blast/seqdb_reader/seqdb.hpp:276-282 and 302-306 (the layout of the ranges),
+// c++/src/algo/blast/api/seqsrc_seqdb.cpp:398-405, c++/src/algo/blast/core/blast_util.c:211-215).
+/// Where a word finder's scan of a chunk's `seq_ranges` has come, for the order check of its hits
+/// (debug builds): the range it scans and the subject offset of its last hit. The scan takes the
+/// ranges in list order and the words of each from left to right, so the subject offsets of the
+/// hits rise within a range and fall where a range starts before the words of one scanned before
+/// it: masks stored out of order (`[600, 700)` before `[300, 390)`) give the ranges `[0, 600)`,
+/// `[700, 300)` (no word) and `[390, ...)`, and the scan reads `[390, 600)` again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ScanOrder {
+    range: usize,
+    last: Option<i32>,
+}
+
+impl ScanOrder {
+    /// Whether the scan of `seq_ranges` (words of `word_length` letters) can give its next hit at
+    /// subject offset `s_off`: in the range it scans, at or after its last hit, or in a later
+    /// range that has a word there. The scan is then taken to the first such range. A range's
+    /// words start from its left to its right less a word; the first range's, at its left at
+    /// least.
+    pub(crate) fn takes(
+        &mut self,
+        seq_ranges: &[(i32, i32)],
+        word_length: i32,
+        s_off: i32,
+    ) -> bool {
+        for (range, &(left, right)) in seq_ranges.iter().enumerate().skip(self.range) {
+            let last_start = if range == 0 {
+                (right - word_length).max(left)
+            } else {
+                right - word_length
+            };
+            let after_last = range > self.range || self.last.is_none_or(|last| s_off >= last);
+            if after_last && (left..=last_start).contains(&s_off) {
+                self.range = range;
+                self.last = Some(s_off);
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// s_BlastAaScanSubject - scan subject sequence for k-mer hits
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:48-131 s_BlastAaScanSubject

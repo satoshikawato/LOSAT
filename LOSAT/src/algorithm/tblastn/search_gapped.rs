@@ -2038,6 +2038,10 @@ struct TargetFrameTranslation {
     /// starts at the first residue.
     base: isize,
     sequence: Vec<u8>,
+    /// The request (`get`'s window of bases and whether it is fenced) that made `sequence`. The
+    /// same request again (the report counts after the search's counts of one HSP) reads it as
+    /// it is: a translation depends only on its window. No NCBI counterpart.
+    made_from: Option<(usize, usize, bool)>,
 }
 
 /// The index in a translated window (`TargetTranslation::get`, whose subject position of the
@@ -2141,7 +2145,10 @@ impl<'a> TargetTranslation<'a> {
             let nucl_length = nucl_end - nucl_start;
             let translation_length = 1 + nucl_length / 3;
             let start_shift = nucl_start / 3;
-            if start_shift < target.start || start_shift + translation_length > target.stop {
+            let request = (nucl_start, nucl_end, offset >= 0);
+            if (start_shift < target.start || start_shift + translation_length > target.stop)
+                && target.made_from != Some(request)
+            {
                 let nucl_shift = if frame < 0 { n - nucl_end } else { nucl_start };
                 let window = (nucl_shift, nucl_shift + nucl_length);
                 let letters = match self.subject {
@@ -2176,6 +2183,7 @@ impl<'a> TargetTranslation<'a> {
                 target.sequence.push(if offset >= 0 { 201 } else { 0 });
                 target.start = start_shift;
                 target.stop = start_shift + aa_len;
+                target.made_from = Some(request);
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1224-1228
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1235:
                 // The Rust slice begins at the left fence and `base` restores NCBI's
@@ -2304,6 +2312,7 @@ impl<'a> TargetTranslation<'a> {
             target.sequence.push(if to == length { 0 } else { 201 });
             target.start = from;
             target.stop = to;
+            target.made_from = None;
             target.base = if from > 0 { from as isize - 1 } else { 0 };
         }
         Ok((&target.sequence, length, target.base))

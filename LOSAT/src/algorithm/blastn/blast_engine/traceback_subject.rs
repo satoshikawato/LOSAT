@@ -39,8 +39,9 @@ use indicatif::ProgressBar;
 /// (`BLAST_ComputeTraceback_MT`'s parameters)
 /// The schedule on the pool, the progress bar and the diagnostics have no NCBI counterpart.
 pub(super) struct TraceBatch<'a> {
-    /// The word size (a subject shorter than a word has no HSPs to trace).
-    pub(super) effective_word_size: usize,
+    /// The shortest subject that the preliminary stage searches (`prelim_subject::
+    /// shortest_subject`): a shorter one has no HSPs to trace.
+    pub(super) shortest_subject: usize,
     /// The queries: each context's letters with and without the query's masks, each query's
     /// length, the length of the concatenated query (the interval tree's bounds), the Karlin
     /// blocks by context and whether an e-value is rounded down from its score.
@@ -125,7 +126,7 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
     subject_hits: &mut Option<SubjectHits>,
 ) {
     let &TraceBatch {
-        effective_word_size,
+        shortest_subject,
         encoded_queries_blastna,
         encoded_queries_nomask,
         encoded_query_concat_blastna,
@@ -169,9 +170,9 @@ pub(super) fn traceback_subject<const UNGAPPED: bool>(
     let timing_enabled = timing_ref.is_some();
     // EXPERIMENT (LOSAT_X_BNTBRANGE): set when a traceback alignment met a fence.
     let x_fenced = subject.x_fenced;
-    // A subject shorter than a word kept nothing (the preliminary stage returned before its
-    // search); returning here keeps its debug line off, as before.
-    if s_len_full < effective_word_size {
+    // A subject that the preliminary stage did not search kept nothing; returning here keeps its
+    // debug line off, as before.
+    if s_len_full < shortest_subject {
         return;
     }
 

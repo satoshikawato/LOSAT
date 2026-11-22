@@ -106,7 +106,7 @@ fn the_html_free_text_writes_the_entity_as_a() {
 
 fn prolog_references(html: bool, protocol: &[u8], program: &str, megablast: bool) -> String {
     let mut out = Vec::new();
-    write_prolog_references(&mut out, html, protocol, program, megablast).unwrap();
+    write_prolog_references(&mut out, html, protocol, program, megablast, false).unwrap();
     String::from_utf8(out).unwrap()
 }
 

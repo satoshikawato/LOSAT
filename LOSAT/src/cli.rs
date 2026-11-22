@@ -1290,10 +1290,9 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
 // The options of NCBI tblastn 2.17.0+ (-help) that LOSAT's TBLASTN does not implement
-// (AGENTS.md rule 2: explicit unsupported errors).
+// (AGENTS.md rule 2: explicit unsupported errors). `-best_hit_overhang` / `-best_hit_score_edge`
+// are implemented (series NP O6a-3).
 const UNPORTED_TBLASTN_ARGS: &[&str] = &[
-    "best_hit_overhang",
-    "best_hit_score_edge",
     "entrez_query",
     "gilist",
     "html",
@@ -1308,10 +1307,9 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
 // The options of NCBI tblastx 2.17.0+ (-help) that LOSAT's TBLASTX does not implement
-// (AGENTS.md rule 2: explicit unsupported errors).
+// (AGENTS.md rule 2: explicit unsupported errors). `-best_hit_overhang` / `-best_hit_score_edge`
+// are implemented (series NP O6a-3).
 const UNPORTED_TBLASTX_ARGS: &[&str] = &[
-    "best_hit_overhang",
-    "best_hit_score_edge",
     "entrez_query",
     "gilist",
     "html",
@@ -1326,6 +1324,7 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
 // Named capabilities exist in NCBI but are explicitly outside the BLASTX product scope.
+// `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
 const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "html",
     "gilist",
@@ -1333,8 +1332,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "entrez_query",
     "ipglist",
     "negative_ipglist",
-    "best_hit_overhang",
-    "best_hit_score_edge",
     "import_search_strategy",
     "remote",
     "use_sw_tback",

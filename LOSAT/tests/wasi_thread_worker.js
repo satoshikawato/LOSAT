@@ -67,7 +67,10 @@ function initializeWasiThreadInstance(wasi, instance) {
   wasi.initialize({ exports: { memory: instance.exports.memory } });
 }
 
-function createWasi(args) {
+// `directory`: a LOSAT Web reactor's run directory, preopened as "/work" instead of "/" (docs/web/abi_v2.md
+// §3, web/adapter/src/run.rs RUN_DIRECTORY, which the reactor makes its current directory; a search of -db
+// opens its database there by the argv's names, line WQA D12a, 2026-11-20).
+function createWasi(args, directory) {
   return new WASI({
     version: "preview1",
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
@@ -79,7 +82,7 @@ function createWasi(args) {
 // Preserve lexical filenames at the recorded host cwd.
 // Root preopen permits absolute paths; PWD initializes the guest cwd for
 // relative filenames through std::env::set_current_dir, without rewriting argv.
-    preopens: { "/": "/" },
+    preopens: directory === undefined ? { "/": "/" } : { "/work": directory },
   });
 }
 
@@ -101,21 +104,22 @@ function hostImports(module, provided = {}) {
   return imports;
 }
 
-function createImports(wasi, memory, spawnThread, extra, files) {
+function createImports(wasi, memory, spawnThread, extra, files, directory) {
   const wasiImport = unsignedWasiImports(wasi.wasiImport);
   const local = { ...wasiImport, fd_write: blockingStdioWrite(wasiImport.fd_write) };
   return {
     ...extra,
     env: { memory },
     wasi: { "thread-spawn": spawnThread },
-    wasi_snapshot_preview1: files ? { ...local, ...sharedFileImports(files, memory, local) } : local,
+    wasi_snapshot_preview1: files ? { ...local, ...sharedFileImports(files, memory, local, directory) } : local,
   };
 }
 
-async function instantiateWithMemory(module, memory, args, spawnThread, provided, wasi = createWasi(args), files = null) {
+async function instantiateWithMemory(module, memory, args, spawnThread, provided, wasi, files = null, directory = undefined) {
+  wasi ??= createWasi(args, directory);
   const instance = await WebAssembly.instantiate(
     module,
-    createImports(wasi, memory, spawnThread, hostImports(module, provided), files),
+    createImports(wasi, memory, spawnThread, hostImports(module, provided), files, directory),
   );
   return { instance, wasi };
 }
@@ -130,7 +134,7 @@ if (!isMainThread && require.main === module) {
   const { control, fault, standby, recycle, early } = workerData;
   // An early worker (createThreadHost) boots before the module and the memory exist and gets
   // them in one message (`init`) from prespawnWorkers.
-  let { module: workerModule, wasmPath, args, memory, files } = workerData;
+  let { module: workerModule, wasmPath, args, memory, files, directory } = workerData;
   // A standby worker (LOSAT_WASI_PRESPAWN) learns its tid and startArg from its start order,
   // and so does a recycled worker (LOSAT_WASI_RECYCLE) for every thread after its first.
   let { startArg, tid } = workerData;
@@ -150,7 +154,7 @@ if (!isMainThread && require.main === module) {
       if (fault === "startup-timeout") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
       if (fault === "startup-error") throw new Error("injected worker startup error");
       if (early) {
-        ({ module: workerModule, wasmPath, args, memory, files } =
+        ({ module: workerModule, wasmPath, args, memory, files, directory } =
           await new Promise(resolve => parentPort.once("message", resolve)));
       }
       const module = workerModule || await require("./wasi_thread_host").compileThreadedModule(wasmPath);
@@ -163,7 +167,7 @@ if (!isMainThread && require.main === module) {
         // recycled worker keeps its one WASI context (bound once to the same shared memory): a
         // new context per thread would hold one more open preopen descriptor for each thread.
         const created = wasi === null;
-        const instantiated = await instantiateWithMemory(module, memory, args, spawnThread, undefined, wasi ?? undefined, files);
+        const instantiated = await instantiateWithMemory(module, memory, args, spawnThread, undefined, wasi ?? undefined, files, directory);
         const { instance } = instantiated;
         wasi = instantiated.wasi;
         if (created) initializeWasiThreadInstance(wasi, instance);

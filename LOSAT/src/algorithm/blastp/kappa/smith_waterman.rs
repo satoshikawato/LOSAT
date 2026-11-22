@@ -16,9 +16,7 @@ use crate::core::composition_adjustment::redo_alignment::{
 };
 // The match body, its memory and its two ends are core's, one owner for BLASTP's and TBLASTN's
 // redo (`core::composition_adjustment::smith_waterman_match`).
-pub(crate) use crate::core::composition_adjustment::smith_waterman_match::{
-    SwMatchScratch, SwRedoEndless, SwRedoFailed,
-};
+pub(crate) use crate::core::composition_adjustment::smith_waterman_match::SwMatchScratch;
 
 /// `Blast_RedoOneMatchSmithWaterman` with a square matrix for the protein windows of BLASTP
 /// (`s_WindowsFromProteinAligns`): core's match body

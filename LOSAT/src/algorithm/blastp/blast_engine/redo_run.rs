@@ -951,7 +951,7 @@ where
     Ok(())
 }
 
-/// NCBI's error of a query batch whose Smith-Waterman redo (`kappa::smith_waterman::SwRedoFailed`)
+/// NCBI's error of a query batch whose Smith-Waterman redo (`smith_waterman_match::SwRedoFailed`)
 /// fails at the batch's last redone match: NCBI's one-thread redo keeps the status of its last
 /// match (`status_code_tld[0]`; a failed earlier match is dropped and the next redone match sets
 /// the status again), a status other than 0 at the end fails the batch's traceback, and the
@@ -1002,7 +1002,7 @@ fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::
 }
 
 /// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI
-/// (`kappa::smith_waterman::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.53, rule 3, within the class of
+/// (`smith_waterman_match::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.53, rule 3, within the class of
 /// RPS-BLAST's refusal of 1.30). NCBI's search of the match's batch never ends after NCBI has
 /// printed the reports of the batches before (`blastp_app.cpp:257-276`, cited at
 /// [`sw_batch_failed`]): the refusal fails that batch as NCBI's own error of a batch's search

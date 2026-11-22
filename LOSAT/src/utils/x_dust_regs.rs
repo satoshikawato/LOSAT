@@ -21,7 +21,9 @@
 //! the counts, the score, the triplet and its threshold: `cnt > 0` and the score test are one
 //! comparison (`x_gate_limit`, a conditional move), `count < thresholds.len()` always holds (`count < len <=
 //! window - 2`), and the body of the condition, which holds on few iterations, is a function of
-//! its own (`x_merge_at`) that derives `pos` and `count` from the iteration's index.
+//! its own (`x_merge_at`) that derives `pos` and `count` from the iteration's index and walks the
+//! perfect list as one slice (`VecDeque::make_contiguous`), copying the intervals it passes in one
+//! piece.
 //!
 //! Why the result is the same. Every method below is the `XTripletWindow` method of the same name
 //! with the same statements in the same order on the same integers; only where the values live
@@ -281,6 +283,8 @@ fn find_perfect(
         count0: suffix_len,
         end: stop + 1,
     };
+    // The same elements in the same order, in one slice (the list is almost always one already).
+    let list: &[PerfectInterval] = perfect_list.make_contiguous();
     let triplets = &a.ring[h.head + suffix_len..h.head + h.len];
     let limits = &thresholds[suffix_len..h.len];
     for (i, (&triplet, &limit)) in triplets.iter().zip(limits).enumerate() {
@@ -288,11 +292,11 @@ fn find_perfect(
         let cnt = counts[idx];
         add_triplet(&mut score, &mut counts, triplet);
         if score * 10 > x_gate_limit(cnt, limit) {
-            x_merge_at(&mut m, i, score, merged, perfect_list);
+            x_merge_at(&mut m, i, score, merged, list);
         }
     }
     if m.inserted {
-        merged.extend(perfect_list.iter().skip(m.read).copied());
+        merged.extend_from_slice(&list[m.read..]);
         perfect_list.clear();
         perfect_list.extend(merged.drain(..));
     }
@@ -341,29 +345,34 @@ fn x_gate_limit(cnt: u8, limit: u32) -> u32 {
 
 /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:125-141
 /// The body of the score test of `XTripletWindow::find_perfect` for iteration `i` (its `pos` and
-/// `count` from `i`), in the same order.
+/// `count` from `i`), in the same order. `list` is the perfect list as one slice; the intervals the
+/// walk passes are copied to `merged` in one piece after the walk, in the order the C code moves
+/// them one by one (it reads them only, so copying them later gives the same list).
 #[inline(never)]
 fn x_merge_at(
     m: &mut XMerge,
     i: usize,
     score: u32,
     merged: &mut Vec<PerfectInterval>,
-    perfect_list: &VecDeque<PerfectInterval>,
+    list: &[PerfectInterval],
 ) {
     let pos = m.pos0.saturating_sub(i);
     let count = m.count0 + i;
-    while m.read < m.old_len && pos <= perfect_list[m.read].start {
-        let p = perfect_list[m.read];
+    let walk_start = m.read;
+    while let Some(p) = list.get(m.read) {
+        if pos > p.start {
+            break;
+        }
         if m.max_perfect_score == 0
             || m.max_len * p.score as usize > m.max_perfect_score as usize * p.len
         {
             m.max_perfect_score = p.score;
             m.max_len = p.len;
         }
-        if m.inserted {
-            merged.push(p);
-        }
         m.read += 1;
+    }
+    if m.inserted {
+        merged.extend_from_slice(&list[walk_start..m.read]);
     }
     if m.max_perfect_score == 0
         || score as usize * m.max_len >= m.max_perfect_score as usize * count
@@ -373,7 +382,7 @@ fn x_merge_at(
         if !m.inserted {
             m.inserted = true;
             merged.reserve(m.old_len + 8);
-            merged.extend(perfect_list.iter().take(m.read).copied());
+            merged.extend_from_slice(&list[..m.read]);
         }
         merged.push(PerfectInterval::new(pos, m.end, m.max_perfect_score, count));
     }

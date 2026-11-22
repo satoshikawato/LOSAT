@@ -52,6 +52,11 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   `-num_iterations 3 -inclusion_ethresh 0.005 -evalue 1` the first query takes two rounds (the second converges) and
   `rnd` one, so that the archive of three rounds and two queries stays small: a PSSM round's request carries a
   PSSM of 28 columns a letter.
+- `ps15b_lcmix.faa` and `ps15b_pd_pol.faa` (review fixes of PS15b-1, rows `db.ps15b.fix.*`): `tk.faa` with letters
+  31-70 and 151-175 in lower case (`-lcase_masking`: round 2 aligns across them, where psiblast's XML shows the
+  query's letters, not X); `pol.faa` under the made-up defline `>sp|P99998.1|POL_WSSV DNA polymerase test`, searched
+  against itself with `-parse_deflines -seg yes` (psiblast's outfmt 0 draws no query masks, so the record that is
+  both a query and a subject is written, where blastp refuses it).
 - `ps5c_big.faa` (PS5c): YP_009220597.1 of `tests/fasta/WSSV.faa` (capsid protein, 6,077 letters), searched
   against itself with `-searchsp 9223372036854775807 -evalue 1e-300`: a hit cutoff whose `K × searchsp / E`
   is past the double (`ncbi_cutoffs::cutoff_score_from_evalue`).

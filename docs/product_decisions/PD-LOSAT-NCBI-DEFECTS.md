@@ -1658,7 +1658,9 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   (since version 1.77, review 1 of item pfoff-4, H1 and H2: `gi|5001|ref|NP_100001.1|` loaded in
   the first query's report for `ref|NP_100001.1|` in the second's, also in outfmt 0, 6, 7, 10
   and 18, where versions 1.47 to 1.76 wrote `Unknown` or refused outfmt 10 for a crash that
-  NCBI does not have; a holder that loads after the throw leaves it thrown), and in a call of
+  NCBI does not have; a holder that loads after the throw leaves it thrown, and a report after
+  a table's first row that ends NCBI's run at the null pointer of `sacc` or `saccver` is not
+  reached), and in a call of
   LOSAT's library whose formats NCBI's runs of each stop at different places after such a
   sequence (outfmt 0, outfmt 1 to 4, the formats that end the run there, at their rows, and
   the others; since version 1.77, review 1 of item pfoff-4, M1: outfmt 5 with

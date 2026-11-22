@@ -312,7 +312,7 @@ unsafe fn x_fused_loop<const REVERSE: bool, const WIDE: bool>(
         let xdrop_score = if unit_divisor {
             raw
         } else {
-            super::x_ceil_quotient_i32(raw, divisor)
+            ((raw as f64) / divisor).ceil() as i32
         };
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:512-518

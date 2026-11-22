@@ -156,8 +156,8 @@ As of dev 6ecdb2bf2 (2026-11-06).
 ## Decisions cited by log entry
 
 The heading names the log (the work line's folder name, as the repository cites it); Entry is the
-entry's number in that log. 135 entries: 19 Owner, 3 Owner in part,
-107 Owner-delegated, 6 records.
+entry's number in that log. 135 entries: 20 Owner, 3 Owner in part,
+106 Owner-delegated, 6 records.
 
 ### `blastdb-ids-20261021`: line DBID
 
@@ -278,6 +278,7 @@ entry's number in that log. 135 entries: 19 Owner, 3 Owner in part,
 | 9 | 2026-10-20 | Owner-delegated |  | Refuse an alias whose volumes have differing algorithm sets or a missing mask-algorithm column, and a big-endian-only mask volume; NCBI reads uninitialised or wrong data there. | window-masker column reader (series M, M4); for blastdbcmd the big-endian-only part is superseded by swebok-improve SW8 DECISIONS 40 (2026-11-08): NCBI's reading there is deterministic and is reproduced; the searches' -db_soft_mask/-db_hard_mask (M4) keep the refusal (BLASTN's -db_soft_mask since M4a-2a, 2026-11-14, only where the search reads mask data of such a volume) | `LOSAT/src/blastdbcmd/retrieve.rs:185`; `LOSAT/src/seqdb/mask.rs` (`SeqDb::check_search_masks`) |
 | 14 | 2026-10-25 | Owner-delegated |  | Where NCBI exception reports are copied, write the official Linux x64 2.17.0 tarball build root; conda builds differ only in that root. | NCBI exception text, NCBI_BUILD_ROOT | `LOSAT/src/utils/winmask/ncbi_report.rs:30`, `LOSAT/tests/blastn_window_masker.rs:3` and 1 more |
 | 45 | 2026-11-15 | Owner | 「M4a Q1=B」 | The Owner chose option B of question Q1 of M4a-2b (PR #1173): with `-db_hard_mask`, a database sequence whose first mask runs to its end after the chunk from its start (masked whole, or a masked tail such as a poly-A tail), on which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk, is searched over the range before the mask at a scanned word of 11 or more (megablast, blastn, dc-megablast), an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exception 13, version 1.35); blastn-short (word 7) keeps the refusal. Not taken: A, refusing the shape for every task. | BLASTN `-db_hard_mask` tail masks (M4a-2c) | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:86`, `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:560` and 4 more |
+| 46 | 2026-11-21 | Owner | 「すべて推奨通りで」 | The Owner chose option B of questions Q1 and Q2 of M4b (and option A for overlapping masks): with `-db_hard_mask`, BLASTP, BLASTX, TBLASTN and TBLASTX search a database sequence whose first mask runs to its end (in TBLASTN and TBLASTX, a reading frame whose first part runs into such a mask) over the part before the mask, as NCBI's normal chunks search the input with the mask shortened until a letter follows that part (the masked letters staying masked), and write each HSP once where NCBI's TBLASTX writes it once per seed past the part; an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exception 21, version 1.69). Question Q3 stays decision D5; question Q4 (an empty first part of a frame) was not answered and stays refused. Not taken: A, refusing those databases. | BLASTP, BLASTX, TBLASTN and TBLASTX `-db_hard_mask` tail masks (M4b-3) | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:301`, `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:1049` and 2 more |
 
 ### `ncbi-parity-20261019/WW`: line NP, stage WW0 (the Wasm memory maximum on dev)
 

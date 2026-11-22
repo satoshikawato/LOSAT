@@ -24,14 +24,15 @@
 //! volume (the files `.?aa`, `.?ab`, `.?ac`, version 4 and 5 alike) from the mask files that
 //! `mask_info` reads (ASN.1 text or binary, as dustmasker, segmasker, windowmasker and
 //! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
-//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask`, `-gi_mask_name` and the other options
-//! of `makeblastdb::UNSUPPORTED_OPTIONS`; `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
+//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask` and `-gi_mask_name`
+//! (`makeblastdb::UNSUPPORTED_OPTIONS`); `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
 //! files of the metadata file (`metadata::metadata_user_path`).
 //!
 //! `-input_type blastdb` copies existing databases (`raw_source`, `CRawSeqDBSource`): each
 //! sequence in the form of the sequence file with its definition lines (and their PIG), the
 //! ranges of its masking algorithms and the blobs of its other columns, through the same
-//! `BuildDatabase` and `WriteDb` as a FASTA input.
+//! `BuildDatabase` and `WriteDb` as a FASTA input; with `-randomize`, in the order of NCBI's
+//! shuffle (`crate::utils::std_shuffle`).
 
 pub mod bioseq;
 pub mod build_db;

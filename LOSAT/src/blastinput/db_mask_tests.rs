@@ -726,38 +726,39 @@ fn shape_of(
 // (the "no chunking" branch of a chunk from 0 whose next range starts at the frame's end) and
 // :145-215 (the subject's list of ranges restored after the frame).
 // A mask is refused where, after the mapping, a frame's last range that starts at 0 (not cut at
-// `MAX_DBSEQ_LEN`, with no range after it or one at the frame's end) is not the frame's first
-// range (`FrameStartMask`: NCBI frees memory that it did not allocate and crashes) or is shorter
-// than the frame (`FrameTailMask`): a mask within the first two bases or within the one or two
-// bases after the last whole codon (with no other mask in the frame), a tail mask in frame +1, a
-// head mask in frame -1, a mask that ends 2 or 3 bases before the end in frame +2; a mask inside
-// and a sequence shorter than the shortest searched one are searched. The bounds of the length
-// are read where they agree, the length otherwise. The second block holds the cases of review
-// F2 of M4b PR 2, where the manual's earlier words (an only mask, of 3 bases or more, within 4
-// bases of the end) were wrong both ways (`M/m4b/scripts3/rule_check4.py`: the manual's rule and a
-// model of NCBI's chunks with the crash agree on every sorted set of 1 to 3 masks of sequences
-// of 9 to 44 bases; NCBI BLAST+ 2.17.0 crashed on [0, 1), [1, 2), [0, 2) of 1,200 bases,
-// [1200, 1202) and [1201, 1202) of 1,202, [0, 1) with [1199, 1200) of 1,200 and [0, 3) with
-// [1200, 1201) of 1,201, and searched [0, 1) with [600, 700) and [300, 400) with [1200, 1202)).
+// `MAX_DBSEQ_LEN`, with no range after it or one at the frame's end) is not the frame's first range
+// (`FrameStartMask`: NCBI frees memory that it did not allocate and crashes): a mask within the
+// first two bases or within the one or two bases after the last whole codon (with no other mask in
+// the frame). Where that range is the frame's first and shorter than the frame (a tail mask in
+// frame +1, a head mask in frame -1, a mask that ends 2 or 3 bases before the end in frame +2:
+// NCBI's "no chunking" branch) the chunk is searched alone since M4b-3 (the Owner's answers Q1 = B
+// and Q2 = B of M4b, 2026-11-21; the assertions of those masks give `None`); a mask inside and a
+// sequence shorter than the shortest searched one are searched. The bounds of the length are read
+// where they agree, the length otherwise. The second block holds the cases of review F2 of M4b PR
+// 2, where the manual's earlier words (an only mask, of 3 bases or more, within 4 bases of the end)
+// were wrong both ways (`M/m4b/scripts3/rule_check4.py`: the manual's rule and a model of NCBI's
+// chunks with the crash agree on every sorted set of 1 to 3 masks of sequences of 9 to 44 bases;
+// NCBI BLAST+ 2.17.0 crashed on [0, 1), [1, 2), [0, 2) of 1,200 bases, [1200, 1202) and [1201,
+// 1202) of 1,202, [0, 1) with [1199, 1200) of 1,200 and [0, 3) with [1200, 1201) of 1,201, and
+// searched [0, 1) with [600, 700) and [300, 400) with [1200, 1202)).
 #[test]
-fn translated_hard_masks_are_refused_where_a_frame_has_no_letter_after_one() {
+fn translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start() {
     use std::cell::Cell;
     let scan = HardScan::Translated { min_length: 17 };
     let shape = |masks: &[(u32, u32)], length: usize| {
         HardMaskShape::of_scan(masks, None, &|| Some(length), scan).unwrap()
     };
-    let frame = |frame, start, end| Some(HardMaskShape::FrameTailMask { frame, start, end });
     let crash = |frame, start, end| Some(HardMaskShape::FrameStartMask { frame, start, end });
     assert_eq!(shape(&[(300, 390)], 1200), None);
     assert_eq!(shape(&[(300, 390), (900, 960)], 1200), None);
     assert_eq!(shape(&[(600, 700), (700, 800)], 1200), None);
-    assert_eq!(shape(&[(1000, 1200)], 1200), frame(1, 1000, 1200));
-    assert_eq!(shape(&[(0, 1200)], 1200), frame(1, 0, 1200));
-    assert_eq!(shape(&[(0, 100)], 1200), frame(-1, 0, 100));
-    assert_eq!(shape(&[(0, 3)], 1200), frame(-1, 0, 3));
+    assert_eq!(shape(&[(1000, 1200)], 1200), None);
+    assert_eq!(shape(&[(0, 1200)], 1200), None);
+    assert_eq!(shape(&[(0, 100)], 1200), None);
+    assert_eq!(shape(&[(0, 3)], 1200), None);
     assert_eq!(shape(&[(0, 2)], 1200), crash(1, 0, 2));
-    assert_eq!(shape(&[(1000, 1198)], 1200), frame(2, 1000, 1198));
-    assert_eq!(shape(&[(1000, 1197)], 1200), frame(2, 1000, 1197));
+    assert_eq!(shape(&[(1000, 1198)], 1200), None);
+    assert_eq!(shape(&[(1000, 1197)], 1200), None);
     assert_eq!(shape(&[(1000, 1196)], 1200), None);
     // A mask that runs to the end, or a head mask, after other masks: the chunk from the start
     // ends at the first mask (plus frames) or the last (minus frames).
@@ -767,19 +768,19 @@ fn translated_hard_masks_are_refused_where_a_frame_has_no_letter_after_one() {
     // (an empty range at 0 before it: NCBI crashes, the mask between them named); in the minus
     // frames the empty ranges come last and the chunk from 0 is the first.
     assert_eq!(shape(&[(0, 0), (1000, 1200)], 1200), crash(1, 0, 0));
-    assert_eq!(shape(&[(0, 0), (0, 100)], 1200), frame(-1, 0, 100));
+    assert_eq!(shape(&[(0, 0), (0, 100)], 1200), None);
     // A subject shorter than `min_length` bases is not searched.
     assert_eq!(shape(&[(0, 16)], 16), None);
-    assert_eq!(shape(&[(0, 17)], 17), frame(1, 0, 17));
+    assert_eq!(shape(&[(0, 17)], 17), None);
     // Review F2: a mask of 1 or 2 bases at the start (frame -1); 3 bases within the first 6 that
     // leave the minus frames a letter after them; a mask at the end that leaves frame +1's last
     // codon; the minus frames one letter shorter than frame -1.
-    assert_eq!(shape(&[(2, 3)], 1200), frame(-1, 2, 3));
-    assert_eq!(shape(&[(1, 3)], 1200), frame(-1, 1, 3));
+    assert_eq!(shape(&[(2, 3)], 1200), None);
+    assert_eq!(shape(&[(1, 3)], 1200), None);
     assert_eq!(shape(&[(4, 7)], 1202), None);
-    assert_eq!(shape(&[(4, 6)], 1200), frame(-2, 4, 6));
-    assert_eq!(shape(&[(4, 6)], 1201), frame(-3, 4, 6));
-    assert_eq!(shape(&[(1196, 1200)], 1200), frame(1, 1196, 1200));
+    assert_eq!(shape(&[(4, 6)], 1200), None);
+    assert_eq!(shape(&[(4, 6)], 1201), None);
+    assert_eq!(shape(&[(1196, 1200)], 1200), None);
     // NCBI's crash: masks within the first two bases (the plus frames) or within the bases after
     // the last whole codon (the minus frames), alone or with a mask at the other end (frame +1
     // with [1199, 1200); frame -1 with [0, 3), which frame -1 also reads as its part from the
@@ -793,7 +794,7 @@ fn translated_hard_masks_are_refused_where_a_frame_has_no_letter_after_one() {
     assert_eq!(shape(&[(0, 1), (600, 700)], 1200), None);
     assert_eq!(shape(&[(300, 400), (1200, 1202)], 1202), None);
     // The shortest searched subject: `min_length` (17 bases here) and one base less.
-    assert_eq!(shape(&[(14, 17)], 17), frame(1, 14, 17));
+    assert_eq!(shape(&[(14, 17)], 17), None);
     assert_eq!(shape(&[(13, 16)], 16), None);
     // Masks out of order come first, as for the other programs.
     assert_eq!(
@@ -813,13 +814,13 @@ fn translated_hard_masks_are_refused_where_a_frame_has_no_letter_after_one() {
         |masks: &[(u32, u32)], bounds| HardMaskShape::of_scan(masks, Some(bounds), &read, scan);
     assert_eq!(of(&[(300, 390)], (1197, 1200)), Ok(None));
     assert_eq!(reads.get(), 0);
-    // Bounds whose lengths differ in shape: at 1197 frame +2 (398 residues) has no letter after
-    // the mask, at 1200 every frame has; the length is read.
+    // Bounds whose lengths differed in shape before M4b-3 (at 1197 frame +2, of 398 residues, has
+    // no letter after the mask, at 1200 every frame has): one shape now, the length is not read.
     assert_eq!(of(&[(1000, 1196)], (1197, 1200)), Ok(None));
-    assert_eq!(reads.get(), 1);
+    assert_eq!(reads.get(), 0);
     // A mask that ends past the shortest length: the length is read.
-    assert_eq!(of(&[(1000, 1198)], (1197, 1200)), Ok(frame(2, 1000, 1198)));
-    assert_eq!(reads.get(), 2);
+    assert_eq!(of(&[(1000, 1198)], (1197, 1200)), Ok(None));
+    assert_eq!(reads.get(), 1);
     // A mask that ends past the sequence (not written by makeblastdb) is refused as for the
     // protein programs, before the frames.
     let past = Some(HardMaskShape::PastEnd {
@@ -828,7 +829,7 @@ fn translated_hard_masks_are_refused_where_a_frame_has_no_letter_after_one() {
         length: 1200,
     });
     assert_eq!(of(&[(300, 1250)], (1197, 1200)), Ok(past));
-    assert_eq!(reads.get(), 3);
+    assert_eq!(reads.get(), 2);
     assert_eq!(
         shape(&[(0, 100), (300, 1250)], 1200),
         Some(HardMaskShape::PastEnd {
@@ -837,26 +838,12 @@ fn translated_hard_masks_are_refused_where_a_frame_has_no_letter_after_one() {
             length: 1200,
         })
     );
-    let text = HardMaskShape::FrameTailMask {
-        frame: -1,
-        start: 0,
-        end: 100,
-    }
-    .text(scan);
-    assert!(
-        text.starts_with(
-            "has a mask, [0, 100), after which NCBI BLAST+ 2.17.0 searches no other part of \
-             reading frame -1"
-        ),
-        "{text}"
-    );
-    assert!(!text.contains("/ 3") && !text.contains("chunk"), "{text}");
     let text = HardMaskShape::FrameStartMask {
         frame: 1,
         start: 0,
         end: 1,
     }
-    .text(scan);
+    .text();
     assert!(
         text.starts_with(
             "has a mask, [0, 1), that leaves reading frame +1 an empty part at its start"
@@ -885,14 +872,15 @@ fn protein_shapes_of_the_hard_masks() {
     assert_eq!(of(&[(1, 10)], 100, protein), None);
     // A mask that ends at the end after another chunk: the last chunk is not the first.
     assert_eq!(of(&[(10, 20), (50, 100)], 100, protein), None);
-    // A mask that runs to the end after the chunk from the start (Q1), at every word.
-    assert_eq!(
-        of(&[(10, 100)], 100, protein),
-        Some(HardMaskShape::TailMask {
-            start: 10,
-            end: 100
-        })
-    );
+    // A mask that runs to the end after the chunk from the start (Q1 = B of M4b): searched over
+    // that chunk, at every word; masked whole too.
+    assert_eq!(of(&[(10, 100)], 100, protein), None);
+    assert_eq!(of(&[(0, 100)], 100, protein), None);
+    // The same chunk after an empty mask at 0 (a hand mask `from 0, to 4294967295`), as in
+    // BLASTN: searched over that chunk (NCBI's "no chunking" branch after an allocated chunk
+    // frees memory that it did not allocate; the near input's normal chunks give the result).
+    assert_eq!(of(&[(0, 0), (10, 100)], 100, protein), None);
+    assert_eq!(of(&[(0, 0), (0, 0), (0, 100)], 100, protein), None);
     // A mask that ends past the sequence, or starts past it: its own shape, not a long range.
     let past = of(&[(10, 20), (90, 120)], 100, protein);
     assert_eq!(
@@ -905,7 +893,7 @@ fn protein_shapes_of_the_hard_masks() {
     );
     assert!(past
         .unwrap()
-        .text(protein)
+        .text()
         .starts_with("has a mask, [90, 120), ending past its 100 letters"));
     assert_eq!(
         of(&[(150, 160)], 100, protein),
@@ -927,7 +915,7 @@ fn protein_shapes_of_the_hard_masks() {
     );
     assert!(shape
         .unwrap()
-        .text(protein)
+        .text()
         .contains("longer than the 5,000,000 letters"));
     // At exactly MAX_DBSEQ_LEN letters the range is one chunk.
     assert_eq!(

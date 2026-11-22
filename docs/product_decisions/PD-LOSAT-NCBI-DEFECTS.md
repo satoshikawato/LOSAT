@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.73
+- Version: 1.75
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -344,7 +344,13 @@
   first match the redo reaches instead of before the search; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.55, line RG item X6, then after
   1.56 and 1.57, line RG item D1a-4, after 1.58, line RG item Q-BM, and after 1.59 to 1.72
-  at the merges of dev)
+  at the merges of dev);
+  1.75 2026-11-23 (BLAST XML, outfmt 5, of such a sequence is written as NCBI writes it: its
+  `Hit` is the Seq-align id's FASTA form, `Unknown` and length 0, each of its HSPs its number,
+  scores and E-value, the coordinates 0, the Seq-align's identities (-1 where it has none) and no
+  letters, and the report goes on (exit 0); the refusal of 1.31 no longer covers outfmt 5 (outfmt
+  17 alone, and in a call of LOSAT's library outfmt 5 with outfmt 0 to 4); line DBID item pfoff-4,
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.74)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1582,7 +1588,9 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   0's skipped line for each of its HSPs; the description lines load the sequences that they show,
   in psiblast's rounds after the first those of the two-part table of the first
   `-num_descriptions` HSPs, at least the first, then the alignments theirs up to the stop, after
-  which no later batch is prefetched), a
+  which no later batch is prefetched) or outfmt 5 (since version 1.75, line DBID item pfoff-4: each
+  `Hit` of such a sequence is the Seq-align id's FASTA form, `Unknown` and length 0, with HSPs of
+  its scores, coordinates 0, the Seq-align's identities and no letters, and the report goes on), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

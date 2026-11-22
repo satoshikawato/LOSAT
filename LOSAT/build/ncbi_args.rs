@@ -149,7 +149,8 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ("blastp", "negative_ipglist", Refused::Read(None)),
     ("blastp", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
-    // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
+    // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
+    // `-use_sw_tback` (line RG item X4b-2, #1500).
     ("blastx", "html", Refused::Read(None)),
     ("blastx", "gilist", Refused::Read(None)),
     ("blastx", "negative_gilist", Refused::Read(None)),
@@ -158,7 +159,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ("blastx", "negative_ipglist", Refused::Read(None)),
     ("blastx", "import_search_strategy", Refused::Read(None)),
     ("blastx", "remote", Refused::Read(None)),
-    ("blastx", "use_sw_tback", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:246-250
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:279-288
     // `-gi_mask` and `-gi_mask_name` make GI-indexed mask files, which LOSAT's writer does not

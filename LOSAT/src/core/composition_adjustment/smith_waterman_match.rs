@@ -1,6 +1,7 @@
 //! The Smith-Waterman redo of one match (`-use_sw_tback`; series RG, items X4 and X4b):
 //! NCBI's `Blast_RedoOneMatchSmithWaterman` with a square matrix, one body for BLASTP's protein
-//! windows and TBLASTN's translated subject windows, in place of the X-drop redo
+//! windows, TBLASTN's translated subject windows and BLASTX's translated query windows (item
+//! X4b-2), in place of the X-drop redo
 //! (`Blast_RedoOneMatch`, `redo_alignment::blast_redo_one_match_with_workspace_queries_and_matrix`).
 //! The windows (`s_WindowsFromAligns`), the subject range (`get_range`), the composition adjustment
 //! (`Blast_AdjustScores`) and the alignment list it returns are the X-drop redo's; the round loop of a
@@ -17,7 +18,8 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3622
 //! The steps after it (`s_HSPListFromDistinctAlignments`, the reap, `s_HitlistEvaluateAndPurge`,
 //! the normalization and the identities) are the X-drop redo's (blast_kappa.c:3654-3707): the
-//! callers' (BLASTP's `postprocess_preliminary_hits_smith_waterman`, TBLASTN's stage D).
+//! callers' (BLASTP's `postprocess_preliminary_hits_smith_waterman`, TBLASTN's stage D, BLASTX's
+//! `runtime::kappa_batch`).
 
 use anyhow::{bail, Result};
 
@@ -28,7 +30,8 @@ use crate::core::composition_adjustment::adjust_scores::{
 };
 use crate::core::composition_adjustment::redo_alignment::{
     blast_compo_alignment_new, preliminary_test_near_identical, redo_calc_lambda,
-    translated_subject_composition, windows_from_protein_aligns, windows_from_translated_aligns,
+    translated_query_composition, translated_subject_composition, windows_from_protein_aligns,
+    windows_from_translated_aligns, windows_from_translated_query_aligns,
     x_whole_subject_composition, BlastCompoAlignment, BlastCompoAlignmentContext,
     BlastCompoMatchingSequence, BlastCompoQueryInfo, BlastRedoAlignCallbacks, BlastRedoAlignParams,
     BlastRedoOneMatchResult, EMatrixAdjustRule, WINDOW_BORDER,
@@ -95,10 +98,12 @@ impl std::fmt::Display for SwRedoEndless {
 impl std::error::Error for SwRedoEndless {}
 
 /// `Blast_RedoOneMatchSmithWaterman` with a square matrix, for BLASTP's protein windows
-/// (`s_WindowsFromProteinAligns`) and TBLASTN's translated subject windows
-/// (`s_WindowsFromTranslatedAligns`, `params.subject_is_translated`): each window's alignments in
-/// NCBI's list order (the last one made first) in `alignments_by_query[query_index]`, as the X-drop
-/// redo returns them, with the composition p-value and lambda ratio of the last adjustment.
+/// (`s_WindowsFromProteinAligns`), TBLASTN's translated subject windows
+/// (`s_WindowsFromTranslatedAligns`, `params.subject_is_translated`) and BLASTX's translated query
+/// windows (`params.query_is_translated`: one query context per call, `query_infos` per context,
+/// `query_index` the context): each window's alignments in NCBI's list order (the last one made
+/// first) in `alignments_by_query[query_index]`, as the X-drop redo returns them, with the
+/// composition p-value and lambda ratio of the last adjustment.
 /// `lambda` and `log_k` are the match's scaled block (`kbp_gap[context_index]` of the redo's copy);
 /// `would_insert(query_index, evalue, score)` is NCBI's `BlastCompo_HeapWouldInsert` on the query's
 /// heap of significant matches, with the match's subject index, asked before the query's first
@@ -135,14 +140,12 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
     would_insert: &mut dyn FnMut(usize, f64, i32) -> Result<bool>,
     scratch: &mut SwMatchScratch,
 ) -> Result<BlastRedoOneMatchResult> {
-    // BLASTX's translated query windows (item X4b-2) and a PSSM's rows do not reach this redo:
-    // psiblast and blastx refuse `-use_sw_tback`, and tblastn `-in_pssm` refuses it at its first
-    // match before it calls this redo (`tblastn::match_redo::sw_pssm_refusal`; TBLASTN's redo
-    // parameters never set `position_based`, so this test guards other callers only).
-    if params.query_is_translated || params.position_based {
-        bail!(
-            "the Smith-Waterman redo of translated query or position-based windows is not ported"
-        );
+    // A PSSM's rows do not reach this redo: psiblast refuses `-use_sw_tback`, and tblastn
+    // `-in_pssm` refuses it at its first match before it calls this redo
+    // (`tblastn::match_redo::sw_pssm_refusal`; no program's redo parameters set `position_based`,
+    // so this test guards other callers only).
+    if params.position_based {
+        bail!("the Smith-Waterman redo of position-based windows is not ported");
     }
     let uses_composition = params.uses_composition_based_stats();
     let unadjusted = match unadjusted {
@@ -151,8 +154,18 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         None => bail!("the Smith-Waterman redo without composition-based statistics needs the search's matrix"),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:879-888
-    // Translated windows where the subject is translated, protein windows otherwise.
-    let windows = if params.subject_is_translated {
+    // Translated windows where the query or the subject is translated, protein windows otherwise.
+    // BLASTX's (the query translated) span the alignments' query context with the border and the
+    // whole subject (`s_WindowsFromTranslatedAligns` with its ranges swapped back), one context
+    // per call (NCBI calls the redo once per frame of the match).
+    let windows = if params.query_is_translated {
+        windows_from_translated_query_aligns(
+            incoming_aligns,
+            query_infos,
+            matching_seq.length,
+            WINDOW_BORDER,
+        )?
+    } else if params.subject_is_translated {
         if matching_seq.genetic_code_id.is_none() {
             bail!("the Smith-Waterman redo of a translated subject needs its genetic code");
         }
@@ -179,9 +192,10 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
 
     for window in &windows {
         let query_index = usize::try_from(window.query_range.context)?;
-        // The translated windows name each query of the call (`query_info[query_index]`); BLASTP
-        // passes its one query (`windows_from_protein_aligns`).
-        let query_info = if params.subject_is_translated {
+        // The translated windows name each query of the call (`query_info[query_index]`: TBLASTN's
+        // query, BLASTX's query context); BLASTP passes its one query (`windows_from_protein_aligns`).
+        let translated = params.subject_is_translated || params.query_is_translated;
+        let query_info = if translated {
             query_infos.get(query_index).ok_or_else(|| {
                 anyhow::anyhow!("the Smith-Waterman redo's query {query_index} is missing")
             })?
@@ -232,6 +246,21 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
                 EMatrixAdjustRule::DontAdjustMatrix
             }
             _ => {
+                // A translated query's composition is that of the window's query range around its
+                // first alignment (BLASTX; NCBI computes it for every window, in place of the query
+                // context's, which has none); the others' is the query's.
+                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1399-1405
+                let window_query_composition;
+                let query_composition = if params.query_is_translated {
+                    window_query_composition = translated_query_composition(
+                        &range.query,
+                        &window.query_range,
+                        window_align,
+                    )?;
+                    &window_query_composition
+                } else {
+                    &query_info.composition
+                };
                 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:923-936
                 let subject_composition = if params.subject_is_translated {
                     translated_subject_composition(
@@ -247,7 +276,7 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
                 // `None`, which owns the test).
                 let Some(adjusted) = blast_adjust_scores(
                     &params.matrix_info,
-                    &query_info.composition,
+                    query_composition,
                     range.query.length,
                     &subject_composition,
                     range.subject.length,

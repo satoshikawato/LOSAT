@@ -8,11 +8,15 @@
 //! step `write_query_to` and the hit-list loop `write_hit_list_seqaligns` that the programs share);
 //! `pssm` the `PssmWithParameters` of psiblast's `-out_pssm`; `bioseq` the Bioseq of an
 //! archive's FASTA record and of a database sequence (blastdbcmd `%b`); `blastdb` the definition
-//! lines of a database sequence (`Blast-def-line-set`, blastdbcmd `%d`); `asn_text_reader` the
-//! lexical layer of NCBI's ASN.1 text object stream, which LOSAT's readers of ASN.1 text share; `xml_reader` NCBI's
+//! lines of a database sequence (`Blast-def-line-set`, blastdbcmd `%d`); `asn_text_reader` the lexical layer of
+//! NCBI's ASN.1 text object stream, which LOSAT's readers of ASN.1 text share; `asn_input` the
+//! primitives of the ASN.1 text and binary (`asn_ber_reader`) object input streams that the
+//! object stacks of the table reader and the mask reader call; `xml_reader` NCBI's
 //! XML object stream for the types of an ASN.1 module (rpsbproc's BlastOutput input).
 
 pub mod asn_ber;
+pub(crate) mod asn_ber_reader;
+pub(crate) mod asn_input;
 pub mod asn_text;
 pub(crate) mod asn_text_reader;
 pub(crate) mod asn_types;

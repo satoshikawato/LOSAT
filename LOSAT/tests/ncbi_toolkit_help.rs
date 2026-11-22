@@ -192,8 +192,8 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             // refusal of LOSAT's table of refusals with them, `REFUSED` of
             // `build/ncbi_args.rs`). The arguments left in are read
             // (`ncbi_xmlhelp_tests`; blastp's `-use_sw_tback` runs with composition-based
-            // statistics, line RG item X4, tblastn's in every mode, item X4b; blastp's
-            // `-ungapped` runs, line NP item O4b).
+            // statistics, line RG item X4, tblastn's in every mode, item X4b, blastx's in every
+            // mode, item X4b-2; blastp's `-ungapped` runs, line NP item O4b).
             let kept = argument_names(&xml.stdout);
             for name in argument_names(&ncbi) {
                 if kept.contains(&name) {

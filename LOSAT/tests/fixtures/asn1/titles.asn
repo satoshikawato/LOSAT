@@ -1,0 +1,18 @@
+Bioseq-set ::= {
+  seq-set {
+    seq { id { local str "t1" }, descr { title "lower case title;,. " },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { local str "t2" }, descr { source { org { taxname "Escherichia coli", db { { db "taxon", tag id 562 } } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { local str "t3" }, descr { title "a  b &amp; c ( x )" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { local str "t4" }, descr { title "tsa thing", molinfo { biomol mRNA, tech tsa } },
+      inst { repr raw, mol rna, length 4, seq-data iupacna "ACGU" } },
+    seq { id { local str "t5" }, descr { title "two titles A", title "two titles B" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { local str "t6" }, descr { source { genome mitochondrion, org { taxname "Homo sapiens", db { { db "taxon", tag id 9606 } } }, subtype { { subtype clone, name "c1" } } }, molinfo { biomol genomic, completeness complete } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { local str "t7" }, descr { title "PREDICTED: model thing" , molinfo { biomol mRNA } },
+      inst { repr raw, mol rna, length 4, seq-data iupacna "ACGT" } }
+  }
+}

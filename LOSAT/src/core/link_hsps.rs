@@ -355,16 +355,12 @@ struct Helper {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:276-318
-/// `s_RevCompareHSPsTbn`, with the query frame (`frame1`, `frame2`: the context divided by
-/// `strand_factor`) in place of `context`: `s_RevCompareHSPsTbx` (link_hsps.c:331-375) for a
-/// translated query, whose `strand_factor` 3 is half of `NUM_FRAMES` (its subjects are not
-/// translated, so their frames are 0 and the sign test below changes nothing). Of two frames of
-/// different signs the larger frame has the larger sign, so the test is an ascending comparison of
-/// the signs.
-fn rev_compare_tbn(h1: &LinkHsp, frame1: usize, h2: &LinkHsp, frame2: usize) -> Ordering {
-    frame1
-        .cmp(&frame2)
-        .then(h1.subject_frame.signum().cmp(&h2.subject_frame.signum()))
+/// `s_RevCompareHSPsTbn`, with the HSPs' linking groups (`group1`, `group2`, `link_group`) in
+/// place of the context and the sign test of the subject frames: `s_RevCompareHSPsTbx`
+/// (link_hsps.c:331-375) for a translated query, whose `strand_factor` 3 is half of `NUM_FRAMES`.
+fn rev_compare_tbn(h1: &LinkHsp, group1: usize, h2: &LinkHsp, group2: usize) -> Ordering {
+    group1
+        .cmp(&group2)
         .then(h2.query_offset.cmp(&h1.query_offset))
         .then(h2.query_end.cmp(&h1.query_end))
         .then(h2.subject_offset.cmp(&h1.subject_offset))
@@ -384,6 +380,14 @@ fn fwd_compare(h1: &SortedHsp, h2: &SortedHsp) -> Ordering {
         .cmp(&h2.frame)
         .then(h1.hsp.query_offset.cmp(&h2.hsp.query_offset))
         .then(h1.hsp.subject_offset.cmp(&h2.hsp.subject_offset))
+}
+
+/// The group of the HSPs that the linking links together, ascending as `s_RevCompareHSPsTbn`
+/// orders them: the query frame (the context divided by `strand_factor`), then the sign of the
+/// subject frame (0 for an untranslated subject; of two frames of different signs the larger frame
+/// has the larger sign). Taken once for each HSP, so that the sort compares one number.
+fn link_group(query_frame: usize, subject_frame: i8) -> usize {
+    query_frame * 3 + (subject_frame.signum() + 1) as usize
 }
 
 /// An HSP in the order of the first sort, with what the linking reads of it on every pass: its
@@ -454,11 +458,12 @@ pub(crate) fn even_gap_link_hsps(
     let ignore_small_gaps = params.cutoff_small_gap == 0;
     // `link_hsp_array`: the input positions in the order of `s_RevCompareHSPsTbn` (`Tbx`).
     let frame = |h: &LinkHsp| params.query_frame(h.context);
+    let groups: Vec<usize> = hsps
+        .iter()
+        .map(|h| link_group(frame(h), h.subject_frame))
+        .collect();
     let mut order: Vec<usize> = (0..total_number_of_hsps).collect();
-    order.sort_by(|&a, &b| {
-        let (h1, h2) = (&hsps[a], &hsps[b]);
-        rev_compare_tbn(h1, frame(h1), h2, frame(h2))
-    });
+    order.sort_by(|&a, &b| rev_compare_tbn(&hsps[a], groups[a], &hsps[b], groups[b]));
     // Slot 0 is `hp_start`; the HSP at sorted position `i` is slot `i + 1`, read from a copy in that
     // order (one load where `hsps[order[i]]` takes two).
     let sorted: Vec<SortedHsp> = order
@@ -487,11 +492,7 @@ pub(crate) fn even_gap_link_hsps(
         frames.last_mut().expect("one frame").1 += 1;
         nodes[slot].prev = Link::from((index > 0).then_some(slot - 1));
         nodes[slot].next = Link::from((index + 1 < total_number_of_hsps).then_some(slot + 1));
-        if index > 0
-            && (sorted[index].frame != sorted[index - 1].frame
-                || sorted[index].hsp.subject_frame.signum()
-                    != sorted[index - 1].hsp.subject_frame.signum())
-        {
+        if index > 0 && groups[order[index]] != groups[order[index - 1]] {
             frames.last_mut().expect("one frame").1 -= 1;
             frames.push((slot, 1));
             nodes[slot - 1].next = Link::NONE;

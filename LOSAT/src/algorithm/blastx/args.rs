@@ -408,6 +408,21 @@ impl ResolvedOptions {
         crate::blastinput::app::ReportFormat::from_number(i32::from(self.outfmt))
             .and_then(crate::report::pairwise::PairwiseView::of)
     }
+
+    /// How the pairwise report reads each query's subjects, as its writer reads them
+    /// (`PairwiseView::reading` of `-sorthits`, `-sorthsps`, `-num_descriptions` and
+    /// `-num_alignments`), `None` for the other formats.
+    pub(crate) fn pairwise_reading(&self) -> Option<crate::report::pairwise::PairwiseReading> {
+        self.pairwise_view().map(|view| {
+            view.reading(
+                self.report_sort(),
+                crate::report::db_subject::Shown {
+                    descriptions: usize::try_from(self.num_descriptions).unwrap_or(0),
+                    alignments: usize::try_from(self.num_alignments).unwrap_or(0),
+                },
+            )
+        })
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:838-871

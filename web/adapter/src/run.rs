@@ -1137,6 +1137,11 @@ fn search(
     let outcome = {
         let mut on_hits = |hits| collected = Some(hits);
         let mut outputs = ReportOutputs {
+            // The run's formats besides the argv's fail alone, each as the CLI's run of it alone
+            // (`FormatRefusal::FailsAlone`): no search answers for another's formats. (A subject
+            // whose lookup throws where the prefetch is off, which `other_outfmts` is for, needs
+            // `PRE_FETCH_SEQS_LIMIT`, which LOSAT Web does not set.)
+            other_outfmts: &[],
             formats: formats
                 .iter()
                 .zip(writers.iter_mut())

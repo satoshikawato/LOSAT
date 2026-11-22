@@ -5293,6 +5293,26 @@ fn check_shown_subject_titles(
     Ok(())
 }
 
+/// The titles that a pairwise report shows, checked where the subjects are a database's
+/// (`ListedTitles::check_shown_titles`, which takes the subjects whose load throws from `loads`)
+/// or a FASTA set's (`check_shown_subject_titles`).
+fn check_pairwise_shown_titles(
+    listed_titles: Option<&database::ListedTitles<'_>>,
+    database: Option<&database::BlastpDatabase>,
+    shown: &std::collections::BTreeSet<usize>,
+    subject_records: &[FastaRecord],
+    loads: &crate::report::db_subject::HitLoads,
+) -> Result<()> {
+    match listed_titles {
+        Some(titles) => titles.check_shown_titles(
+            database.expect("listed titles are a database's"),
+            shown,
+            loads,
+        ),
+        None => check_shown_subject_titles(shown.iter().copied(), subject_records),
+    }
+}
+
 /// The subjects of a search as it searches them (each cut to its `-subject_loc` interval)
 /// and where each lies in its record.
 struct SubjectSet<'a> {
@@ -6319,6 +6339,7 @@ fn search(
         use super::x_query_blocks::{XBlockReport, XBlockSink, XOffsetObserver};
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
+            other_outfmts,
             formats,
             diagnostics,
             later_warnings,
@@ -6515,6 +6536,7 @@ fn search(
                         first_query: block.start,
                     });
                     let mut block_outputs = ReportOutputs {
+                        other_outfmts,
                         formats: sinks
                             .iter_mut()
                             .zip(&outfmts)
@@ -7662,6 +7684,7 @@ fn write_reports_without_queries(
                     true,
                     true,
                     None,
+                    &crate::report::db_subject::HitLoads::default(),
                 )?;
             }
             OutputFormat::TabularWithComments => {
@@ -10666,13 +10689,13 @@ fn run_call(
                     .flat_map(|hsp_list| &hsp_list.hsps)
                     .map(|hsp| hsp.s_idx as usize)
                     .collect();
-                let checked = match listed_titles.as_ref() {
-                    Some(titles) => titles.check_shown_titles(
-                        database.expect("listed titles are a database's"),
-                        &shown,
-                    ),
-                    None => check_shown_subject_titles(shown.iter().copied(), subject_records),
-                };
+                let checked = check_pairwise_shown_titles(
+                    listed_titles.as_ref(),
+                    database,
+                    &shown,
+                    subject_records,
+                    &prefetched.hit_loads,
+                );
                 if !format.refusal.check(checked)? {
                     continue;
                 }

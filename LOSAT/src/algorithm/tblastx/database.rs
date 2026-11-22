@@ -518,38 +518,16 @@ pub(crate) fn prefetch_messages<'h>(
 
 /// [`prefetch_messages`] by subject (`shared::subject_read_texts`): the text of the first read
 /// of each subject that writes one, with its ordinal id, where a query's report reads its
-/// subjects one by one: in report order, or, for the pairwise report (`pairwise`, its
-/// `-sorthits` and `-sorthsps`), in the order of its sorted groups (`QueryGroup::read_order` of
-/// the rows' hits, `report::PairwiseRows::hit`: the HSP's hit, whose `num_ident` is the engine's
-/// that the rows' Seq-align identities copy, `report::seqalign_identities`; the rows' shift to
-/// the records of a ranged query moves every HSP of the query alike, which no sort reads, and
-/// the rows name the subjects by rank, in the order of the ordinal ids).
-pub(crate) fn subject_read_texts<'h>(
+/// subjects one by one, the subjects `ordinals` in the order of its reads ([`read_ordinals`]).
+pub(crate) fn subject_read_texts(
     database: &TblastxDatabase,
-    ordered: impl IntoIterator<Item = &'h TblastxHsp>,
+    ordinals: Vec<u32>,
     titles: &DatabaseTitles,
     rows_open: bool,
-    pairwise: Option<crate::report::hit_sort::ReportSort>,
 ) -> Result<crate::report::query_warnings::QueryReads> {
     let parsed = |ordinal: u32| match titles.get(&ordinal) {
         Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
         _ => None,
-    };
-    let ordered = ordered.into_iter();
-    let ordinals: Vec<u32> = match pairwise {
-        Some(sort) => crate::report::x_pairwise_par::QueryGroup::read_order(
-            ordered.map(|hsp| (hsp.hit.s_idx, hsp)),
-            |hsp| crate::report::hit_sort::HspScores::of_hit(&hsp.hit, hsp.hit.num_ident),
-            |previous, ordinal| match (parsed(previous), parsed(ordinal)) {
-                (Some(earlier), Some(later)) => {
-                    crate::report::db_subject::joins_as_copy(earlier, later)
-                }
-                _ => false,
-            },
-            sort,
-            true,
-        ),
-        None => ordered.map(|hsp| hsp.hit.s_idx).collect(),
     };
     let subjects = ordinals
         .into_iter()
@@ -596,6 +574,73 @@ pub(crate) fn scope_utf8_hit_reads(
     }
 }
 
+/// The ordinal ids of the subjects that one query's report reads one by one, in the order of its
+/// reads: those of its rows that read them, `shown` (those that a report reaches, in report
+/// order), or for the pairwise report (`pairwise`: how it reads them) those that it shows of the
+/// query's hits `ordered` in the order that it reads them (`pairwise_read_order`,
+/// `PairwiseReads::subjects`), but those that no report reaches (`HitLoads::reached`: a load that
+/// throws has read the candidates' headers, `common::database::load_read_texts`).
+pub(crate) fn read_ordinals(
+    shown: &[&TblastxHsp],
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+    pairwise: Option<crate::report::pairwise::PairwiseReading>,
+    loads: &HitLoads,
+) -> Vec<u32> {
+    match pairwise {
+        Some(reading) => pairwise_read_order(ordered, titles, reading)
+            .subjects()
+            .into_iter()
+            .filter(|&ordinal| loads.reached(ordinal))
+            .map(|ordinal| ordinal as u32)
+            .collect(),
+        None => shown.iter().map(|hsp| hsp.hit.s_idx).collect(),
+    }
+}
+
+/// What one query's pairwise report (outfmt 0 to 4) of the hits `ordered` (in report order, by
+/// ordinal id) reads (`QueryGroup::read_order` of the rows' hits as the writer reads them,
+/// `reading`; a copy of a subject with parsed Seq-ids in `titles` joins the hit before; the rows'
+/// hits are `report::PairwiseRows::hit`: the HSP's hit, whose `num_ident` is the engine's that the
+/// rows' Seq-align identities copy, `report::seqalign_identities`; the rows' shift to the records
+/// of a ranged query moves every HSP of the query alike, which no sort reads, and the rows name
+/// the subjects by rank, in the order of the ordinal ids), for `read_ordinals` and `hit_loads`.
+fn pairwise_read_order<'h>(
+    ordered: impl IntoIterator<Item = &'h TblastxHsp>,
+    titles: &DatabaseTitles,
+    reading: crate::report::pairwise::PairwiseReading,
+) -> crate::report::db_subject::PairwiseReads {
+    let parsed = |ordinal: u32| titled_parsed(titles, ordinal as usize);
+    crate::report::x_pairwise_par::QueryGroup::read_order(
+        ordered.into_iter().map(|hsp| (hsp.hit.s_idx, hsp)),
+        |hsp| crate::report::hit_sort::HspScores::of_hit(&hsp.hit, hsp.hit.num_ident),
+        |previous, ordinal| match (parsed(previous), parsed(ordinal)) {
+            (Some(earlier), Some(later)) => {
+                crate::report::db_subject::joins_as_copy(earlier, later)
+            }
+            _ => false,
+        },
+        reading,
+        true,
+        None,
+    )
+}
+
+/// The subjects of one query's report of the hits `hits` for `HitLoads::of` where the run's
+/// formats are pairwise (`pairwise`: how the report reads them, with `after` a pairwise one): the
+/// report's reads (`pairwise_read_order`). `None` otherwise.
+fn pairwise_keys(
+    hits: &[TblastxHsp],
+    titles: &DatabaseTitles,
+    after: crate::report::db_subject::FormatThrow,
+    pairwise: Option<crate::report::pairwise::PairwiseReading>,
+) -> Option<crate::report::db_subject::ReportKeys> {
+    let reading = pairwise.filter(|_| after.run().is_some_and(|run| run.after.is_pairwise()))?;
+    Some(crate::report::db_subject::ReportKeys::Pairwise(
+        pairwise_read_order(hits, titles, reading),
+    ))
+}
+
 /// NCBI's prefetch of the query batch whose reported hits are `ordered` (in report order, by
 /// ordinal id) on standard error (`shared::batch_prefetch`): the taxonomy texts of
 /// [`prefetch_messages`], then the warning where the prefetch fails, at a subject whose lookup
@@ -640,14 +685,14 @@ pub(crate) fn batch_prefetch_stop(
     before: &[TblastxHsp],
     before_queries: usize,
     before_spans: &[std::ops::Range<usize>],
-    after: Option<crate::report::db_subject::RunThrow>,
+    after: crate::report::db_subject::FormatThrow,
     identities: &dyn Fn(&TblastxHsp) -> usize,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
 ) -> Result<Vec<u8>> {
     let prefetch = batches_prefetch(before, before_queries, before_spans);
-    let loads = hit_loads(before, &prefetch, after, titles, identities);
+    let loads = hit_loads(before, &prefetch, (after, None), titles, identities);
     shared::held_batch_prefetch_stop(
         &database.db,
         &database.taxdb,
@@ -786,11 +831,15 @@ pub(crate) struct ReportedSubjects {
 /// (`BatchPrefetch::reads_one_by_one`), `after` what the formats do after a subject whose lookup
 /// throws (`FormatThrow::of_outfmts`), `identities` the engine's identities of a hit
 /// (`hit_identities`), which tell whether a row of `nident` alone reads its subject; the `Hit`s
-/// are those that `blast_xml` makes (the HSPs of each query, a subject's following each other).
+/// are those that `blast_xml` makes (the HSPs of each query, a subject's following each other),
+/// or the pairwise reports' reads (`pairwise`: how they read them, `pairwise_keys`).
 fn hit_loads(
     ordered: &[TblastxHsp],
     prefetch: &shared::BatchPrefetch,
-    after: Option<crate::report::db_subject::RunThrow>,
+    (after, pairwise): (
+        crate::report::db_subject::FormatThrow,
+        Option<crate::report::pairwise::PairwiseReading>,
+    ),
     titles: &DatabaseTitles,
     identities: &dyn Fn(&TblastxHsp) -> usize,
 ) -> HitLoads {
@@ -800,12 +849,17 @@ fn hit_loads(
     HitLoads::of(
         after,
         reports.iter().map(|hits| {
-            (
-                prefetch.reads_one_by_one(hits[0].hit.q_idx as usize),
-                hits.iter()
-                    .map(|hsp| Some(hsp.hit.s_idx as usize))
-                    .collect(),
-            )
+            // A batch that prefetches loads every subject, in any order.
+            let one_by_one = prefetch.reads_one_by_one(hits[0].hit.q_idx as usize);
+            let keys = pairwise_keys(hits, titles, after, pairwise.filter(|_| one_by_one))
+                .unwrap_or_else(|| {
+                    crate::report::db_subject::ReportKeys::Entries(
+                        hits.iter()
+                            .map(|hsp| Some(hsp.hit.s_idx as usize))
+                            .collect(),
+                    )
+                });
+            (one_by_one, keys)
         }),
         |ordinal| titled_parsed(titles, ordinal),
         |report, hit| identities(&reports[report][hit]),
@@ -850,40 +904,69 @@ pub(crate) fn hit_identities(
 /// What the formats of the run, `outfmts` as `-outfmt` gives them, do after a subject whose lookup
 /// throws where its batch's prefetch is off (`FormatThrow::of_outfmts`, for `hit_loads` and the
 /// run's `RunLoads`): the stop of a batch's prefetch (`batch_prefetch_stop`) and the reports
-/// (`reported_subjects`) ask it of the run's formats alike (review 2 of line DBID pfoff-1, N-M2).
+/// (`reported_subjects`) ask it of the run's formats alike (review 2 of line DBID pfoff-1, N-M2),
+/// with the call's refusal over the `-outfmt` values of its other searches, `others`
+/// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
 pub(crate) fn after_throw<'a>(
     outfmts: impl IntoIterator<Item = &'a str>,
-) -> Option<crate::report::db_subject::RunThrow> {
+    others: &[&str],
+) -> crate::report::db_subject::FormatThrow {
     crate::report::db_subject::FormatThrow::of_outfmts(
         outfmts,
         crate::blastinput::app::Program::Tblastx,
         crate::report::archive::options::RequestKind::Tblastx,
     )
+    .of_search(
+        others,
+        crate::blastinput::app::Program::Tblastx,
+        crate::report::archive::options::RequestKind::Tblastx,
+    )
+}
+
+/// How the pairwise reports of the formats `formats` read each query's subjects, as the first
+/// pairwise format's writer reads them (`PairwiseView::reading` of `-sorthits` and `-sorthsps`
+/// `sort` and the run's numbers `counts`; the formats of a run whose loads they make share one
+/// view's order, `FormatThrow::and`); `None` without one.
+pub(crate) fn pairwise_reading(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+    sort: crate::report::hit_sort::ReportSort,
+    counts: crate::blastinput::report_counts::ReportCounts,
+) -> Option<crate::report::pairwise::PairwiseReading> {
+    let view = formats.iter().find_map(|format| {
+        format
+            .report_format()
+            .and_then(crate::report::pairwise::PairwiseView::of)
+    })?;
+    Some(view.reading(sort, counts.shown()))
 }
 
 /// What one query's report of the hits `ordered` (in report order) loads where its batch's
 /// prefetch is off (`RunLoads::loads` of that report alone, by ordinal id, after the reports
 /// before it in the run, `run`; `identities`: [`hit_identities`]): the subjects of its reads one
 /// by one (`run_impl`'s texts of a batch whose prefetch is off), not one whose load throws, nor
-/// one that no report reaches after it.
+/// one that no report reaches after it. `pairwise`: how a pairwise report reads them
+/// (`pairwise_keys`).
 pub(crate) fn report_loads(
     run: &crate::report::db_subject::RunLoads,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
+    pairwise: Option<crate::report::pairwise::PairwiseReading>,
     identities: impl Fn(&TblastxHsp) -> usize,
 ) -> HitLoads {
     // A subject's HSPs follow each other: one `Hit`.
     let subjects: Vec<&[TblastxHsp]> = ordered
         .chunk_by(|a, b| a.hit.s_idx == b.hit.s_idx)
         .collect();
-    run.loads(
-        [(
-            true,
+    let keys = pairwise_keys(ordered, titles, run.answer(), pairwise).unwrap_or_else(|| {
+        crate::report::db_subject::ReportKeys::Entries(
             subjects
                 .iter()
                 .map(|hsps| Some(hsps[0].hit.s_idx as usize))
                 .collect(),
-        )],
+        )
+    });
+    run.loads(
+        [(true, keys)],
         |ordinal| titled_parsed(titles, ordinal),
         |_, subject| subjects[subject].iter().map(&identities).max().unwrap_or(0),
     )
@@ -936,9 +1019,9 @@ fn batches_prefetch(
 /// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; where only the prefetch reads a subject, a batch whose
 /// prefetch is on reports it, `batches_prefetch` of the hits' `queries` queries and the queries of
-/// each batch `spans`; `after`: what the formats do after a subject whose lookup throws, for
-/// the one answer of what the reports load, `hit_loads`, with the hits' engine `identities`,
-/// `hit_identities`).
+/// each batch `spans`; `after`: what the formats do after a subject whose lookup throws and how
+/// the pairwise reports read the subjects, for the one answer of what the reports load, `hit_loads`, with the
+/// hits' engine `identities`, `hit_identities`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn reported_subjects(
     database: &TblastxDatabase,
@@ -947,7 +1030,10 @@ pub(crate) fn reported_subjects(
     stores: Option<&ReportedStores>,
     read_lengths: &ReportedLengths,
     shown: ParsedShown,
-    after: Option<crate::report::db_subject::RunThrow>,
+    after: (
+        crate::report::db_subject::FormatThrow,
+        Option<crate::report::pairwise::PairwiseReading>,
+    ),
     identities: &dyn Fn(&TblastxHsp) -> usize,
     queries: usize,
     spans: &[std::ops::Range<usize>],

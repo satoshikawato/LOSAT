@@ -296,7 +296,7 @@ impl ArchiveBatch<'_> {
                             false,
                             false,
                             usize::MAX,
-                            None,
+                            (crate::report::db_subject::FormatThrow::Unread, None),
                         )
                         .map_err(reported_error)?,
                     };

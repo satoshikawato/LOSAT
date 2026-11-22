@@ -5770,7 +5770,11 @@ fn post_process_hits_and_write(
                         anchored.as_ref().map(|sequences| {
                             sequences as &dyn crate::report::query_anchored::ReportSequences
                         }),
+                        report.database_loads,
                     )
+                    // A subject whose load throws may end the run there
+                    // (`x_pairwise_par::alignment_end`).
+                    .map_err(crate::cli::NativeError::of_writer)
                 };
                 match pairwise_hits.as_deref() {
                     Some(hits) => write(hits, 0..queries.len())?,
@@ -7079,6 +7083,7 @@ pub(crate) fn repeat_search_hits(
     let result = {
         let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![crate::api::local_blast::FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -8209,8 +8214,10 @@ fn run_in_pool(
     // Where a query's report of a batch whose prefetch is off ends the run at a subject whose
     // load throws, no report and no batch's prefetch after it loads anything
     // (`database::QueryFetches`).
-    let run_loads =
-        crate::report::db_subject::RunLoads::new(database::after_throw(&output_formats));
+    let run_loads = crate::report::db_subject::RunLoads::new(database::after_throw(
+        &output_formats,
+        outputs.other_outfmts,
+    ));
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
     // error ends the reading there; that comes in the batch being read when the records
@@ -8881,8 +8888,8 @@ fn run_in_pool(
                 // A query's own fetches where the batch's prefetch is off: the texts of the
                 // subjects its report reads, kept by subject where the first format writes them
                 // where it reads each (`ReportFormat::places_subject_reads`), else returned for the
-                // query's warnings; the pairwise report (outfmt 0 to 4) reads its subjects in the
-                // order of its `-sorthits`.
+                // query's warnings; the pairwise report (outfmt 0 to 4) reads those that it shows
+                // as its writer reads them (`database::pairwise_reading`).
                 let first_report = outputs
                     .formats
                     .first()
@@ -8894,9 +8901,14 @@ fn run_in_pool(
                     places: first_report
                         .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads),
                     plural_names,
-                    pairwise: first_report
+                    pairwise: database::pairwise_reading(
+                        &output_formats,
+                        args.formatting.report_sort(),
+                        args.report_counts,
+                    ),
+                    pairwise_first: first_report
                         .and_then(crate::report::pairwise::PairwiseView::of)
-                        .map(|view| view.report_sort(args.formatting.report_sort())),
+                        .is_some(),
                     gapped: !args.ungapped,
                 };
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
@@ -8998,7 +9010,7 @@ fn run_in_pool(
                     &titles,
                     &hit_lists,
                     &batch_spans,
-                    database::after_throw(&output_formats),
+                    run_loads.answer(),
                     &batch_hit_lists,
                     !args.ungapped,
                     &prefetch_queries,
@@ -9654,7 +9666,14 @@ fn write_reports_untimed(
                 &mut hit_lists,
                 letters,
                 database::parsed_shown(output_formats),
-                database::after_throw(output_formats),
+                (
+                    database::after_throw(output_formats, outputs.other_outfmts),
+                    database::pairwise_reading(
+                        output_formats,
+                        args.formatting.report_sort(),
+                        args.report_counts,
+                    ),
+                ),
                 results.batches,
                 written.queries,
                 !args.ungapped,

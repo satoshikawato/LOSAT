@@ -506,6 +506,7 @@ fn report_batches(mut run: RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> R
     // (`ReportOutputs::later_warnings`).
     let keeps_later = outputs.keeps_later_query_warnings();
     let ReportOutputs {
+        other_outfmts,
         formats,
         diagnostics,
         later_warnings,
@@ -584,6 +585,7 @@ fn report_batches(mut run: RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> R
         diagnostics,
         &mut later,
         observer,
+        other_outfmts,
     );
     // What the hold kept. A run that ends: every format, in order. A run that stops with an
     // error: nothing after one of the documents' refusals and the bytes of the batches before
@@ -655,6 +657,7 @@ fn write_run(
     diagnostics: &mut &mut (dyn Write + Send),
     later: &mut Option<&mut [Vec<u8>]>,
     observer: &mut Option<&mut (dyn crate::api::local_blast::FormatObserver + Send)>,
+    other_outfmts: &[&str],
 ) -> Result<(
     Vec<crate::report::pairwise::PairwiseHit>,
     Vec<ReportedSubject>,
@@ -771,7 +774,7 @@ fn write_run(
     let mut run_subjects: Vec<ReportedSubject> = Vec::new();
     let mut subject_places = std::collections::HashMap::new();
     let mut first_hsp = 0;
-    let asks = ReportedAsks::of_all(resolved);
+    let asks = ReportedAsks::of_all(resolved, other_outfmts);
     // NCBI's scope of the query records at each batch's prefetch (`native::BatchScopes`).
     let batch_scopes =
         super::native::BatchScopes::new(xml, database.as_ref().map(|run| run.database));

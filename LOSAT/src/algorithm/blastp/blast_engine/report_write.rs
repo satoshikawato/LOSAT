@@ -670,6 +670,7 @@ pub(super) fn write_pairwise(
         psi_found_before,
         rps_gapped_k,
         blastp_parallel_pool,
+        hit_loads,
         prolog_only,
         ..
     } = *report_view;
@@ -892,6 +893,7 @@ pub(super) fn write_pairwise(
                 subject_titles,
                 listed_parsed,
                 listed_sources,
+                hit_loads,
                 &pairwise_report,
                 pairwise_database.as_ref(),
                 probe.as_mut(),
@@ -903,7 +905,8 @@ pub(super) fn write_pairwise(
                         .as_ref()
                         .map(|found| found.found.as_slice()),
                 },
-            )?;
+            )
+            .map_err(crate::cli::NativeError::of_writer)?;
             continue;
         }
         write_blastp_pairwise_window(
@@ -928,7 +931,10 @@ pub(super) fn write_pairwise(
             anchored_sequences
                 .as_ref()
                 .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
-        )?;
+            hit_loads,
+        )
+        // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
+        .map_err(crate::cli::NativeError::of_writer)?;
     }
     Ok(())
 }

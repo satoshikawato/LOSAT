@@ -17,12 +17,6 @@ export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['completed', '
 export interface InputSnapshot {
   /** Name passed as -query / -subject (plan §5.3). */
   readonly name: string;
-  /**
-   * The name of the user's file where it differs from `name`: a file named `.gz`, `.bz2` or `.zst` is inflated under its plain
-   * name, which the argv gives the engine (the engine reads the name's extension to inflate), while the command that the user
-   * can run names the file as the user gave it (`shownArgv`; line WQA's D20, S3-3, 2026-11-23).
-   */
-  readonly fileName?: string;
   /** Exact FASTA bytes given to the engine. */
   readonly bytes: Uint8Array;
   /** Lower-case hex SHA-256 of `bytes`. */

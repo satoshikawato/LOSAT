@@ -12,7 +12,7 @@ import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputReader } from '../application/outputs';
 import { failedOutput, keptOutputs } from '../application/results';
-import { commandWords, shownArgv } from '../domain/argv';
+import { commandWords } from '../domain/argv';
 import { isBinaryOutput, outfmtOf } from '../domain/output-format';
 import CommandText from './CommandText.vue';
 import { placeParts } from './message-place-text';
@@ -119,7 +119,7 @@ watch(
     <div v-else :id="`${ids}-panel`" role="tabpanel" :aria-labelledby="`${ids}-tab-${format}`" class="outputs-panel">
       <p class="command">
         <!-- The command as Run details shows it: a line does not break after an option's leading hyphen (line WQA's sweep, D7, 2026-11-20). -->
-        Command: <code data-testid="result-command"><CommandText :words="commandWords(shownArgv(run.snapshot), format)" /></code>
+        Command: <code data-testid="result-command"><CommandText :words="commandWords(run.snapshot.argv, format)" /></code>
       </p>
       <p v-if="notWritten !== undefined" class="results-message" data-testid="outputs-not-written">
         outfmt {{ outfmtOf(run.snapshot.argv, format) }} could not be written: its error is <PlaceWords :parts="notWritten" />.

@@ -499,9 +499,10 @@ fn windowmasker_gives_ncbis_bytes() {
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
-/// The rows of `EMPTY_ID_ROWS` are what the table says: each row of one line is NCBI's crash (exit
-/// status 139, no output, its one `bad id` error), and each row is its near row with only its list
-/// changed, the list of the near row with the lines of the rows whose errors it takes, in order.
+/// The rows of `EMPTY_ID_ROWS` are what the table says: each row is NCBI's crash (exit status 139,
+/// no output) after the error of its first such line, the one `bad id` error of a row of one line;
+/// and each row is its near row with only its list changed, the list of the near row with the lines
+/// of the rows whose errors it takes, in order, one line each.
 #[test]
 fn the_empty_id_rows_are_ncbis_crash_and_near_input() {
     let rows = cases("windowmasker");
@@ -552,14 +553,14 @@ fn the_empty_id_rows_are_ncbis_crash_and_near_input() {
             })
             .collect();
         assert_eq!(added(case, near), lines, "{name}");
+        assert_eq!(lines.len(), posts.len(), "{name}");
+        // NCBI's own run: its crash after the error of the first such line.
+        let (out, err, status) = expected_row("windowmasker", name);
+        assert_eq!((out.len(), status), (0, 139), "{name}");
+        assert_eq!(err, expected_row("windowmasker", posts[0]).1, "{name}");
         if *posts == [name] {
-            let (out, err, status) = expected_row("windowmasker", name);
             let err = String::from_utf8(err).unwrap();
-            assert_eq!(
-                (out.len(), status, err.lines().count()),
-                (0, 139, 1),
-                "{name}"
-            );
+            assert_eq!(err.lines().count(), 1, "{name}");
             assert!(
                 err.starts_with("Error: CWinMaskConfig::CIdSet_TextMatch::insert(): bad id: ")
                     && err.ends_with(": ignoring\n"),

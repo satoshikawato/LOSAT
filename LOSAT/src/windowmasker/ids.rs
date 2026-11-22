@@ -26,8 +26,8 @@ pub(super) struct TextMatchIds {
 }
 
 /// An id of a list that NCBI cannot store, one of no words: `CIdSet_TextMatch::insert` posts
-/// `bad id` and then indexes its sets at -1 (undefined behaviour in C++; NCBI BLAST+ 2.17.0 dies
-/// with SIGSEGV). LOSAT posts the same error and skips the id, as the error says
+/// `bad id` and then stores the id at its `Uint4` count of words less 1, 4294967295, far past the
+/// end of its sets (undefined behaviour in C++; NCBI BLAST+ 2.17.0 dies with SIGSEGV). LOSAT posts the same error and skips the id, as the error says
 /// (`PD-LOSAT-NCBI-DEFECTS` approved exception 22).
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct EmptyId {
@@ -72,7 +72,8 @@ impl TextMatchIds {
     /// `CIdSet_TextMatch::insert` of `id`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:103-123
-    /// An id of no words (empty, `>`, `|`, `>|`) goes on to `nword_sets_[-1]`: `EmptyId`, the set
+    /// An id of no words (empty, `>`, `|`, `>|`) goes on to `nword_sets_[nwords - 1]` with `nwords`
+    /// 0, past the end of the sets: `EmptyId`, the set
     /// unchanged, as NCBI's of the list without that line (`resize` to 0 words changes nothing).
     pub(super) fn insert(&mut self, id: &[u8]) -> Result<(), EmptyId> {
         let nwords = split(id).len() - 1;
@@ -138,7 +139,7 @@ impl TextMatchIds {
 /// `CWinMaskConfig::FillIdList`: `insert` of each id of the file `name`,
 /// one per line, in order; a file that does not open gives none.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:471-484
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:467-482
 /// The lines are those of `NcbiGetlineEOL` on the host (`ncbi_app::files::input_lines`: on Linux
 /// a `\r` stays in the line, so a CRLF list matches nothing as text, as NCBI's Linux build), and
 /// the empty ones are skipped. A line that starts with a space or a tab gives an empty id; one

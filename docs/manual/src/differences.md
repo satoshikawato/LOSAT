@@ -227,7 +227,7 @@ Record: [The decision record on blastdbcmd output that NCBI gets wrong](https://
 
 - **What you see.** LOSAT writes NCBI's error `bad id: ...: ignoring` for the line, skips it, and masks (or counts) as NCBI does for the file without that line. NCBI BLAST+ 2.17.0 writes the same error and then crashes (exit status 139) without output.
 - **When.** `windowmasker` with an `-ids` or `-exclude_ids` file matched as text (without `-text_match F`), in masking or with `-mk_counts`, when a line gives an empty id: a line that starts with a space or a tab, or a line `>`, `|`, `>|`, `>>` or `>>|` (alone or before a space or a tab).
-- **Why.** NCBI's error says that it ignores the id, but NCBI then stores the id before the start of its list, which is undefined in C++. LOSAT does what the error says.
+- **Why.** NCBI's error says that it ignores the id, but NCBI then stores the id far past the end of its list of ids, which is undefined in C++. LOSAT does what the error says.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ## The library

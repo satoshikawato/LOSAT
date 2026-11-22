@@ -2726,13 +2726,15 @@ M5.
 
 22. **`losat windowmasker -ids` or `-exclude_ids`, matched as text: a line that gives an empty id.**
     `CWinMaskConfig::FillIdList` takes from each line that is not empty the text from its start
-    (after a `>` at 0) to its first space or tab (`win_mask_config.cpp:471-484`), and
+    (after a `>` at 0) to its first space or tab (`win_mask_config.cpp:467-482`), and
     `CIdSet_TextMatch::insert` stores it by its number of `|`-words (`win_mask_util.cpp:75-123`). An
-    id of no words, which is the empty id (a line that starts with a space or a tab, or `>` alone or
-    before a space or a tab), `|` (a line `|` or `>|`), `>` (a line `>>`) or `>|` (a line `>>|`),
-    makes `insert` post `Error: CWinMaskConfig::CIdSet_TextMatch::insert(): bad id: <id>: ignoring`
-    and then store the id at `nword_sets_[nwords - 1]` with no words, an index of -1 (undefined
-    behaviour in C++). NCBI BLAST+ 2.17.0 then stops with SIGSEGV (exit status 139, no output), in
+    id of no words, which is the empty id (a line that starts with a space or a tab, or whose first
+    word, up to a space, a tab or the line's end, is `>`), `|` (a first word `|` or `>|`), `>` (a
+    first word `>>`) or `>|` (a first word `>>|`), makes `insert` post `Error:
+    CWinMaskConfig::CIdSet_TextMatch::insert(): bad id: <id>: ignoring` and then store the id at
+    `nword_sets_[nwords - 1]` with `nwords` 0: the `Uint4` index wraps to 4294967295, far past the
+    end of the vector, and for the empty id the check of its last letter reads before the string
+    (undefined behaviour in C++). NCBI BLAST+ 2.17.0 then stops with SIGSEGV (exit status 139, no output), in
     masking (`-ustat`) and in `-mk_counts`, for either list. A list matched as Seq-ids (`-text_match
     false`, `CIdSet_SeqId`) is not concerned: NCBI's parse posts such an id as one it cannot read
     and skips it, as LOSAT's does. LOSAT posts NCBI's error for each such id as it reads the list,

@@ -107,6 +107,10 @@ pub(super) fn qs_ahead_on() -> bool {
 /// No NCBI counterpart (scheduling only, LOSAT_X_DCQSAHEAD): how many entries before its place an
 /// entry's `qs` line is brought in; its `offsets` element was brought in `16 - QS_AHEAD` entries
 /// before that.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(super) const QS_AHEAD: usize = 8;
 
 // No NCBI counterpart: counters of the summary lines.
@@ -117,6 +121,10 @@ static BUILDS_QS_AHEAD: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart (counters only, LOSAT_X_DCQSAHEAD): a build whose place pass brought in
 /// `qs` ahead.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(super) fn count_qs_ahead() {
     BUILDS_QS_AHEAD.fetch_add(1, Ordering::Relaxed);
 }

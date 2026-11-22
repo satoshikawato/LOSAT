@@ -217,13 +217,6 @@ export interface DraftState {
   /** The engine's `validate` of the argv that the draft makes now. */
   readonly validation: Validation;
   /**
-   * An edit came that the validation has not answered yet (it runs after the debounce): `validation` and `start` are those
-   * of an older argv. What the page says of the run that the argv makes (`printsKind`: the line under the button, the run
-   * count) waits for the answer; `validation.state` itself is left as it was, for the messages and for the tests and
-   * walks that read it (line WQA's D20 round 3, 2026-11-23).
-   */
-  readonly validationStale: boolean;
-  /**
    * Whether the run of the draft's argv reads its inputs with NCBI's data loaders on, as the latest
    * validation that the engine answered says (`[BLAST] DATA_LOADERS` of the argv's registry; on before
    * one): the engine's readers of the sources' index and check have them so (line WQA's D16, 2026-11-20).
@@ -329,7 +322,6 @@ export class SearchDraft {
       fetchSource: 'fastest',
       race: {},
       validation: { state: 'idle' },
-      validationStale: false,
       dataLoaders: true,
       submitting: false,
     });
@@ -960,7 +952,10 @@ export class SearchDraft {
 
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
     // Run never fetches, nor waits for a fetch that is running (fetchAccessions). A run that prints the command line's
-    // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20).
+    // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20): it is read once the
+    // validation of the draft's argv has answered (not `idle`, which waits for a fetch too), so that a word typed just before
+    // Run, or taken out, decides as the engine's answer for the argv says (line WQA's D20 round 4, 2026-11-23).
+    await this.validationSettled();
     for (const role of ROLES) {
       const problem = this.printsText() ? undefined : this.accessionProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
@@ -1037,18 +1032,19 @@ export class SearchDraft {
    * line reads none for it.
    */
   private printsText(): boolean {
-    const { start, validation } = this.state.get();
-    return validation.state === 'ok' && (start?.prints ?? null) !== null;
+    return this.printsKind() !== null;
   }
 
   /**
-   * What the run of the draft's argv prints in place of a search (`printsText`): help or version, or null for a search, and
-   * null while an edit is not answered yet (`validationStale`): the page then says nothing of a print that the older argv
-   * made. Run LOSAT waits for the answer before it starts (`idle`), and reads `printsText`.
+   * What the run of the draft's argv prints in place of a search (`printsText`): help or version, or null for a search, as the
+   * engine's latest answer says (`start.prints`, validation ok). The page reads it for the line under the button and the run
+   * count, and Run LOSAT reads it once the validation is idle. Between an edit and its answer the older answer stands (the
+   * app cannot know before the engine answers that a word makes the argv print or not); it is not set aside at every edit,
+   * which would flip the line on each edit of an ordinary search (line WQA's D20 round 4, 2026-11-23).
    */
   printsKind(): PrintedKind | null {
-    const { start, validation, validationStale } = this.state.get();
-    return validation.state === 'ok' && !validationStale ? (start?.prints ?? null) : null;
+    const { start, validation } = this.state.get();
+    return validation.state === 'ok' ? (start?.prints ?? null) : null;
   }
 
   /**
@@ -1571,7 +1567,6 @@ export class SearchDraft {
   private scheduleValidation(): void {
     // A validation of an older argv that is still running is not shown.
     this.nextGeneration('validate');
-    if (!this.state.get().validationStale) this.set({ validationStale: true });
     this.debounce('validate', () => this.track(this.validateInTurn()));
   }
 
@@ -1616,7 +1611,7 @@ export class SearchDraft {
       });
     } catch (error) {
       // No argv, so no start of one: the -conffile row goes with the words that named the file.
-      this.set({ validation: { state: 'invalid', message: messageOf(error) }, start: undefined, validationStale: false });
+      this.set({ validation: { state: 'invalid', message: messageOf(error) }, start: undefined });
       return;
     }
     this.set({ validation: { state: 'checking' } });
@@ -1655,7 +1650,7 @@ export class SearchDraft {
     }
     if (this.generations.get('validate') !== generation) return;
     this.validArgv = validation.state === 'ok' ? argv : undefined;
-    this.set({ validation, start, validationStale: false });
+    this.set({ validation, start });
     if (dataLoaders !== undefined) this.setDataLoaders(dataLoaders);
     this.prepareEngine();
     if (answered) void this.askOptionsAgain();

@@ -1273,9 +1273,9 @@ describe('SearchDraft submit', () => {
     expect(draft.printsKind()).toBeNull();
   });
 
-  // Line WQA's D20 round 3, F2: the validation answers after the debounce, so for that interval the page must not read the
-  // answer for the older argv: neither the line under the button nor the run count.
-  it('says nothing of a print that an edit has not been validated for', async () => {
+  // Line WQA's D20 round 4: the page reads the engine's latest answer; an edit that leaves the print word (a file added, another
+  // option edited) does not set it aside, so the line and the run count do not flip to a search and back.
+  it('keeps the print of the last answer across an edit that leaves the print word', async () => {
     const { draft } = setup({
       start: (argv) => ({
         ok: true,
@@ -1287,22 +1287,47 @@ describe('SearchDraft submit', () => {
     await draft.idle();
     draft.setMode('query', 'separate');
     draft.setExtra('-version');
-    // The edit is not answered yet: the draft still holds the answer for the older argv, which is no print.
-    expect(draft.state.get().validationStale).toBe(true);
-    expect(draft.printsKind()).toBeNull();
-    expect(draft.runCount()).toBe(2);
     await draft.idle();
-    expect(draft.state.get().validationStale).toBe(false);
     expect(draft.printsKind()).toBe('version');
     expect(draft.runCount()).toBe(1);
-    // The word goes: the older answer (a print) is not read for the new argv.
+    // An edit that leaves the word: nothing flips before the engine answers.
+    draft.setExtra('-version -outfmt 17');
+    draft.addFiles('query', [file('c.fa', '>c\nACGT\n')]);
+    expect(draft.printsKind()).toBe('version');
+    expect(draft.runCount()).toBe(1);
+    await draft.idle();
+    expect(draft.printsKind()).toBe('version');
+    expect(draft.runCount()).toBe(1);
+    // The word goes: the answer changes with the engine's.
     draft.setExtra('');
-    expect(draft.state.get().validation.state).toBe('ok');
-    expect(draft.printsKind()).toBeNull();
-    expect(draft.runCount()).toBe(2);
     await draft.idle();
     expect(draft.printsKind()).toBeNull();
-    expect(draft.runCount()).toBe(2);
+    expect(draft.runCount()).toBe(3);
+  });
+
+  // Line WQA's D20 round 4: Run LOSAT reads whether the argv prints after the validation is idle, so a word typed just before
+  // the press (a pasted accession is not refused with the accession message) or taken out (the accession check is not
+  // skipped) decides as the engine's answer for the argv says.
+  it('reads whether the argv prints after the validation has answered, for the accession check', async () => {
+    const { draft, requests } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.setPaste('query', 'NC_000913.3');
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    // Not answered yet for the word just typed: the accession box would be refused if the older answer were read.
+    draft.setExtra('-version');
+    const typed = await draft.submit();
+    expect(typed).toMatchObject({ ok: true });
+    expect(requests.at(-1)).toHaveLength(1);
+    // And the word taken out just before the press: the accession box is refused again.
+    draft.setExtra('');
+    const removed = await draft.submit();
+    expect(removed.ok).toBe(false);
+    expect((removed as { message: string }).message).toMatch(/accession/i);
   });
 
   // A pin of the current behaviour, not a regression test: runCount() and submit() both read `inputGroups()`, which leaves out a

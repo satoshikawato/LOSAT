@@ -278,7 +278,7 @@
 //! (last_hit - diag_offset)` whenever that fits in an `i32`. `XHitBf::new` (once per subject) makes
 //! it fit: with `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (`length` the
 //! subject's letters), every flag-0 `last_hit` the table holds is in `[-window, diag_offset +
-//! length)`: the cleared value (`DiagStruct::clear`, when the offset passes `INT4_MAX / 4`), 0 in a
+//! length)`: the cleared value (`DiagStruct::clear`, when the offset passes `INT4_MAX` divided by 4), 0 in a
 //! new or refilled table, or an `s + diag_offset` of this subject or of an earlier one. Every store
 //! with flag 0 is such an `s + diag_offset` (the test's, and the extension's for a hit outside its
 //! context or one that does not extend to the right; the extension's `s_last_off - (wordsize - 1) +
@@ -1131,7 +1131,7 @@ pub fn x_bp_hit_bf_print_summary() {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
 //
 // The sums and differences wrap (two's complement i32): that is what `+` and `-` do in release
-// builds (no overflow checks), and what NCBI's arithmetic on its `Uint4 subject_offset` gives.
+// builds (no overflow checks), and what NCBI's arithmetic on its `subject_offset` (a `Uint4`) gives.
 // LOSAT_X_BPDIAG's batches compute the same wrapping values per lane, and their tests compare
 // with this function on offsets whose sum passes 2^31 - 1.
 #[inline(always)]

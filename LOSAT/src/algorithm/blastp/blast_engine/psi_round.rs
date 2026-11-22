@@ -558,7 +558,7 @@ fn run_queries(
 /// the factory keeps its local query data, so every round's setup works on the same sequence
 /// block: the hard masks of a round (`BlastSetUp_MaskQuery`, not with `-soft_masking true`)
 /// write X over the letters that the next round filters again, the lower-case mask is taken
-/// out of the block by round 1's filtering (`seqloc_array[context] = NULL`), and the unmasked
+/// out of the block by round 1's filtering (`seqloc_array[context]` set to NULL), and the unmasked
 /// copy that the identities read is made again only by a round that masks letters. A query that
 /// NCBI splits into chunks is the exception: its block is made again from the record in every
 /// round (`RoundQuery::split`).
@@ -703,7 +703,7 @@ fn later_round_report_contexts<'a>(
     std::borrow::Cow::Owned(contexts)
 }
 
-/// `out_stream << NcbiEndl << "Search has CONVERGED!" << NcbiEndl` for every report that is not
+/// `NcbiEndl`, "Search has CONVERGED!" and `NcbiEndl` written to `out_stream` for every report that is not
 /// structured (psiblast's outfmt 0, 6, 7, 10 and 20).
 fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
     use crate::blastinput::app::ReportFormat;
@@ -772,7 +772,7 @@ fn write_round_epilogs(
             _ => continue,
         }
         let report = crate::report::BlastpPairwiseReport {
-            version: crate::NCBI_BLAST_VERSION.to_string(),
+            version: crate::wording::REPORT_VERSION.to_string(),
             database_name: blastp_database_name(args, subject_label).into(),
             database_num_sequences: num_sequences,
             database_total_letters: total_letters,
@@ -1012,7 +1012,8 @@ impl SubjectKeys<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:445-450
     /// NCBI's warning for each Seq-align whose letters the PSSM cannot read, by subject
     /// (`query_pssm`'s `unread`): the Seq-align id as a FASTA string, each with its subject. Only
-    /// subjects with parsed Seq-ids can fail to be read.
+    /// a database's subjects can fail to be read: one with parsed Seq-ids by that id, one without
+    /// them by its ordinal id `gnl|BL_ORD_ID|<oid>` where its load throws (`PssmReads`).
     pub(super) fn unread_warnings(
         &self,
         program: &str,
@@ -1020,18 +1021,26 @@ impl SubjectKeys<'_> {
         out: &mut crate::algorithm::psiblast::pssm::PssmReadMessages,
     ) {
         for &s_idx in unread {
-            if let Some(subject) = self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
-                let mut text = b"Failed to retrieve sequence ".to_vec();
-                text.extend_from_slice(&subject.alignment_fasta());
-                // A post of NCBI's main thread (`ncbi_exception::post_line`).
-                let line = crate::ncbi_exception::post_line(
-                    crate::ncbi_exception::Severity::Warning,
-                    None,
-                    Some(program),
-                    &text,
-                );
-                out.push(s_idx, line);
-            }
+            let id = match self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
+                Some(subject) => subject.alignment_fasta(),
+                None => match self.listed_ordinals {
+                    Some((ordinals, oids)) => {
+                        format!("gnl|BL_ORD_ID|{}", oids.oid(ordinals[s_idx as usize]).get())
+                            .into_bytes()
+                    }
+                    None => continue,
+                },
+            };
+            let mut text = b"Failed to retrieve sequence ".to_vec();
+            text.extend_from_slice(&id);
+            // A post of NCBI's main thread (`ncbi_exception::post_line`).
+            let line = crate::ncbi_exception::post_line(
+                crate::ncbi_exception::Severity::Warning,
+                None,
+                Some(program),
+                &text,
+            );
+            out.push(s_idx, line);
         }
     }
     pub(super) fn key(&self, s_idx: u32) -> SetKey {

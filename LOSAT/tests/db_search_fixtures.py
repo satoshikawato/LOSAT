@@ -21,7 +21,7 @@ xinclude_fixtures.py `query_argv`; a query cell `stdin:pipe:PATH`, `stdin:file:P
 standard input, `query_stdin`)
 (`blastp`, `blastn`, `tblastn`, `blastx`, `tblastx` or `psiblast`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
 argument `-db ""`, and a cell `subject:PATH` runs `-subject PATH` in place of `-db DB`: psiblast's refusal of a
-subject set whose sequences all have no letters, which only a subject set reaches; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
+subject set whose sequences all have no letters, which only a subject set reaches; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/; an RPS row's search path is its inflated database's directory, then DIR, `rps_env`); `outfmt` is one argument, so a custom
 `7 qseqid sseqid ...` spec stays whole). The databases are under LOSAT/tests/seqdb/db and
 LOSAT/tests/db_search (README.md there says how they were built).
 
@@ -30,11 +30,14 @@ LOSAT/tests/db_search (README.md there says how they were built).
   LOSAT/tests/fixtures/db_search/<row_id>.out and <row_id>.err (only when stderr is not empty).
 - a `ncbi` row whose `covers` cell has `ncbi-near: ROW_ID` (up to a ` | ` or the end of the cell): the expectation
   is the frozen bytes, exit status and hash columns of the `ncbi` row ROW_ID, NCBI's run of a near input (the same
-  search with the mask one letter shorter), where NCBI's own run of the row reaches an approved NCBI defect
-  (PD-LOSAT-NCBI-DEFECTS exception 13: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
-  2.17.0 crashes, adds rows from the masked letters or drops seeds of the next subject; exception 3: a one-hit gapped
-  start whose window reads past the end of a database volume's last memory page, where NCBI faults; exception 19: a
-  hit list size whose preliminary size passes NCBI's Int4, with the near size 1073741798). The row has no
+  search with the mask one letter shorter, in TBLASTN and TBLASTX the fewest bases after which every reading frame
+  keeps a letter after its part; for exception 21 the freed letters stored as `X`, or `N`, so that they stay masked
+  in the alignments and the statistics), where NCBI's own run of the row reaches an approved NCBI defect
+  (PD-LOSAT-NCBI-DEFECTS exceptions 13 and 21: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
+  2.17.0 crashes, adds rows from the masked letters, drops seeds of the next subject or writes an HSP many times;
+  exception 3: a one-hit gapped start whose window reads past the end of a database volume's last memory page, where
+  NCBI faults; exception 19: a hit list size whose preliminary size passes NCBI's Int4, with the near size
+  1073741798). The row has no
   frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row`). ROW_ID is
   an `ncbi` row of the same outfmt without a near row of its own, and an `ncbi` row takes all of its bytes.
 - a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind
@@ -96,7 +99,9 @@ LOSAT/tests/db_search (README.md there says how they were built).
   own (line RG item X4: the failed batch of a Smith-Waterman redo), the query batches before the batch that
   LOSAT refuses and NCBI searches on (X4: the negative CHUNK_SIZE pair whose chunks leave gaps; X5: a copy
   row whose query file holds the batches that LOSAT writes before it refuses, where NCBI's own run of the
-  row reads past its array there), the rounds before the one that LOSAT refuses (psiblast with
+  row reads past its array there; line WQA D10: two queries of one ID under `-parse_deflines`, the refused
+  one's letters in the near input a line that NCBI's reader refuses), the rounds before the one that LOSAT
+  refuses (psiblast with
   `-num_iterations 1`), or a search of the same database and
   output format whose first N bytes are the prolog that LOSAT writes before it refuses the report (line RG
   item T3c: the same search with a description table, which NCBI ends with an exception at an HSP of length
@@ -365,6 +370,16 @@ def rps_dir_token(row: dict[str, str]) -> bool:
     return "path: {db_dir}" in row["covers"]
 
 
+def rps_env(row: dict[str, str], env: dict[str, str], db_dir: Path) -> dict[str, str]:
+    """`row_env` of an RPS row whose database is inflated in `db_dir` (`inflate_rps`): BLASTDB is that
+    directory, then the row's own `BLASTDB=DIR` (the directory of a `taxdb.bti`) after it in the search
+    path."""
+    run_env = row_env(row, env)
+    own = run_env.get("BLASTDB") if any(token.startswith("BLASTDB=") for token in extra_tokens(row)) else None
+    run_env["BLASTDB"] = str(db_dir) if own is None else f"{db_dir}{os.pathsep}{own}"
+    return run_env
+
+
 def subjects_argv(cell: str) -> list[str]:
     """The arguments of a `db` cell: `-db DB`, `-subject PATH` for a cell `subject:PATH`, or `-db NAME`
     (`-db ALIAS` with `@ALIAS`) for an rpsblast cell `rps-gz:NAME...` (`rps_cell`; the run's BLASTDB is the
@@ -467,21 +482,28 @@ def is_sam_outfmt(outfmt: str) -> bool:
     return outfmt.split()[:1] == ["17"]
 
 
-_SAM_PG = b"\n@PG\tID:0\tVN:2.17.0+"
+# The @PG line's start before its CL tag: NCBI's version (frozen bytes) or LOSAT's (LOSAT's output and
+# NCBI's bytes in LOSAT's words, `losat_wording`).
+_SAM_PGS = tuple(b"\n@PG\tID:0\tVN:" + version for version in (losat_wording.NCBI_VERSION, losat_wording.LOSAT_VERSION))
 
 
 def strip_sam_cl(data: bytes) -> bytes:
     """The SAM document without the CL tag of its @PG line: the bytes from the `\tCL:` that follows
-    `\n@PG\tID:0\tVN:2.17.0+` up to, not including, the first following `\tPN:blastn\n`.
+    `\n@PG\tID:0\tVN:2.17.0+` (NCBI's) or `\n@PG\tID:0\tVN:LOSAT 0.2.0` (LOSAT's) up to, not including,
+    the first following `\tPN:blastn\n`.
 
-    The one rule that the SAM (outfmt 17) rows of every fixture compare with, on the frozen NCBI bytes and on
-    LOSAT's (DECISIONS 7 of the outfmt line): LOSAT writes its own command line (its program path, the `blastn`
-    sub-command word and the arguments a harness adds, such as `-num_threads N`) where NCBI writes its argv.
-    Every other byte must be equal. A document without the tag (no command line) is returned as it is."""
-    head = data.find(_SAM_PG + b"\tCL:")
-    if head < 0:
+    The one rule that the SAM (outfmt 17) rows of every fixture compare with, on the frozen NCBI bytes (as
+    frozen, or in LOSAT's words) and on LOSAT's (DECISIONS 7 of the outfmt line): LOSAT writes its own command
+    line (its program path, the `blastn` sub-command word and the arguments a harness adds, such as
+    `-num_threads N`) where NCBI writes its argv. Every other byte must be equal. A document without the tag
+    (no command line) is returned as it is."""
+    for pg in _SAM_PGS:
+        head = data.find(pg + b"\tCL:")
+        if head >= 0:
+            break
+    else:
         return data
-    start = head + len(_SAM_PG)
+    start = head + len(pg)
     end = data.find(b"\tPN:blastn\n", start + len(b"\tCL:"))
     return data if end < 0 else data[:start] + data[end:]
 
@@ -956,6 +978,15 @@ def freeze(args: argparse.Namespace) -> int:
             if xinclude.wants_pssm(row):
                 run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
                                              timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row)).run
+            elif rps_cell(row["db"]) is not None:
+                # An RPS row: NCBI's run with BLASTDB the inflated database (`freeze_rps`).
+                if rps_dir_token(row):
+                    raise SystemExit(f"{row['row_id']}: a rejection row with NCBI's stdout writes no {{db_dir}}")
+                db_dir = inflate_rps(row["db"], False)
+                try:
+                    run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=rps_env(row, env, db_dir))
+                finally:
+                    shutil.rmtree(db_dir, ignore_errors=True)
             else:
                 run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=row_env(row, env),
                                  preexec_fn=ncbi_stack(row))
@@ -1050,12 +1081,21 @@ def freeze(args: argparse.Namespace) -> int:
 
 
 def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> None:
-    """`freeze` of an rpsblast row: NCBI's run with BLASTDB the inflated database, its directory
-    written as `{db_dir}` where the row says so."""
+    """`freeze` of an rpsblast or rpstblastn row: NCBI's run with BLASTDB the inflated database, its
+    directory written as `{db_dir}` where the row says so; a row of outfmt 13 or 14 with its files
+    (`xinclude.wants_files`) freezes the master and the side files as other programs' rows."""
+    files = xinclude.wants_files(row)
+    if files and rps_dir_token(row):
+        raise SystemExit(f"{row['row_id']}: a row with files writes no {{db_dir}}")
     db_dir = inflate_rps(row["db"], rps_dir_token(row))
+    run_env = rps_env(row, env, db_dir)
     try:
-        run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
-                         env={**row_env(row, env), "BLASTDB": str(db_dir)})
+        if files:
+            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
+                                              timeout=TIMEOUT, env=run_env)
+            run = written.run
+        else:
+            run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=run_env)
     finally:
         shutil.rmtree(db_dir, ignore_errors=True)
     refuse_signal(row, run.returncode)
@@ -1063,7 +1103,10 @@ def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> 
     if rps_dir_token(row):
         stdout = stdout.replace(str(db_dir).encode(), b"{db_dir}")
         stderr = stderr.replace(str(db_dir).encode(), b"{db_dir}")
-    (FROZEN / f"{row['row_id']}.out").write_bytes(stdout)
+    if files:
+        xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
+    else:
+        (FROZEN / f"{row['row_id']}.out").write_bytes(stdout)
     err = FROZEN / f"{row['row_id']}.err"
     if stderr:
         err.write_bytes(stderr)
@@ -1071,7 +1114,10 @@ def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> 
         err.unlink(missing_ok=True)
     row.update(rc=str(run.returncode), stdout_sha256=sha256(stdout), stdout_bytes=str(len(stdout)),
                stderr_sha256=sha256(stderr) if stderr else "")
-    print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(stdout)}\tstderr={len(stderr)}")
+    if files:
+        row.update(xinclude.observed(written))
+    print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(stdout)}\tstderr={len(stderr)}"
+          + (f"\tsides={len(written.sides)}" if files else ""))
 
 
 def status_differs(observed: int, expected: int, library: bool) -> bool:
@@ -1107,31 +1153,42 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     if (files or pssm) and query_stdin(row):
         raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
+    # An RPS row runs with BLASTDB the inflated database (`inflate_rps`), its files rows as any other.
     db_dir = inflate_rps(row["db"], rps_dir_token(row)) if rps_cell(row["db"]) is not None else None
-    if db_dir is not None:
-        try:
-            run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
-                             env={**row_env(row, env), "BLASTDB": str(db_dir)})
-        finally:
+
+    def in_losat_words(ncbi: bytes, output: bool = True) -> bytes:
+        """NCBI's frozen bytes in LOSAT's words (AGENTS.md rule 8, `losat_wording`). A row that keeps the
+        database's directory as `{db_dir}` is mapped with this run's directory in the token's place, as
+        NCBI's run wrote it: the mapping re-wraps an ASN.1 text string by its length."""
+        words = losat_wording.losat_output_bytes if output else losat_wording.losat_bytes
+        if db_dir is None or not rps_dir_token(row):
+            return words(ncbi)
+        path = str(db_dir).encode()
+        return words(ncbi.replace(b"{db_dir}", path)).replace(path, b"{db_dir}")
+
+    run_env = row_env(row, env) if db_dir is None else rps_env(row, env, db_dir)
+    try:
+        if files:
+            written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
+                                              env=run_env, timeout=TIMEOUT)
+            run = written.run
+        elif pssm:
+            pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
+                                           env=run_env, timeout=TIMEOUT)
+            run = pssms.run
+        else:
+            run = run_search(command, row, cwd=ENGINE, env=run_env, timeout=TIMEOUT)
+    finally:
+        if db_dir is not None:
             shutil.rmtree(db_dir, ignore_errors=True)
-        if rps_dir_token(row):
-            run.stdout = run.stdout.replace(str(db_dir).encode(), b"{db_dir}")
-            run.stderr = run.stderr.replace(str(db_dir).encode(), b"{db_dir}")
-    elif files:
-        written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=ENGINE,
-                                          env=row_env(row, env), timeout=TIMEOUT)
-        run = written.run
-    elif pssm:
-        pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
-                                       env=row_env(row, env), timeout=TIMEOUT)
-        run = pssms.run
-    else:
-        run = run_search(command, row, cwd=ENGINE, env=row_env(row, env), timeout=TIMEOUT)
+    if db_dir is not None and rps_dir_token(row):
+        run.stdout = run.stdout.replace(str(db_dir).encode(), b"{db_dir}")
+        run.stderr = run.stderr.replace(str(db_dir).encode(), b"{db_dir}")
     if row["kind"] == "losat-rejection":
         # The library reads the whole query before it searches: a reader error ends the call before
         # the batch that the command line refuses, with the reader's message.
-        if library and run.returncode != 0 and run.stdout == b"" and run.stderr.startswith(b"BLAST query error:") \
-                and expected_text(row).encode() not in run.stderr:
+        if library and run.returncode != 0 and run.stdout == b"" \
+                and run.stderr.startswith(losat_wording.QUERY_ERROR) and expected_text(row).encode() not in run.stderr:
             return "library-input-error", ""
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
@@ -1139,13 +1196,14 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         # A refusal follows no byte in either path (the library holds its output where the command
         # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
         # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
-        # library skips.
+        # library skips, and the refusals at a later query batch (`ncbi-near:`), which the library
+        # writes as the command line does.
         if row["stdout_bytes"]:
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
                 problems.append("frozen .out does not match the manifest")
-            if run.stdout != out:
-                problems.append("stdout " + first_difference(out, run.stdout))
+            if run.stdout != in_losat_words(out):
+                problems.append("stdout " + first_difference(in_losat_words(out), run.stdout))
         elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
@@ -1156,13 +1214,12 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     out = (FROZEN / f"{frozen_id(row)}.out").read_bytes()
     err_path = FROZEN / f"{frozen_id(row)}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
-    # LOSAT's words in NCBI's frozen bytes (AGENTS.md rule 8, `losat_wording`).
-    expected_out_losat = losat_wording.losat_output_bytes(out)
-    expected_err_losat = losat_wording.losat_bytes(err)
+    expected_out_losat = in_losat_words(out)
+    expected_err_losat = in_losat_words(err, output=False)
     # The library reads the whole query before it searches: a reader error ends the call there,
     # with the command line's message of it, before the reports of the batches before it.
     if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \
-            and run.stderr.startswith(b"BLAST query error:") and run.stderr in expected_err_losat:
+            and run.stderr.startswith(losat_wording.QUERY_ERROR) and run.stderr in expected_err_losat:
         return "library-input-error", ""
     # A copy row's expectation is the cut of its frozen whole NCBI output (`copy_row_problems`).
     problems = copy_row_problems(row) if copies_cell(row) is not None else []

@@ -52,10 +52,6 @@ use query::{
 use segset::SegSet;
 use sites::{MotifError, MotifState};
 
-/// rpsbproc's version (`VERDEF`).
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:74-87
-pub const VERSION: &str = "0.5.1";
-
 /// `EErrorSubCode`: the exit codes.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:91-101
 const E_OK: i32 = 0;
@@ -69,7 +65,7 @@ const E_INPUT_DATA_ERROR: i32 = 5;
 const COORDSBASE: i64 = 1;
 
 /// `position + COORDSBASE`, the `int` sum of every coordinate that rpsbproc prints in `int`
-/// (`m_iFrom + COORDSBASE` and `m_iTo + COORDSBASE` of the DOMAINS and SUPERFAMILIES lines, the
+/// (`m_iFrom` and `m_iTo` plus `COORDSBASE`, of the DOMAINS and SUPERFAMILIES lines, the
 /// residues of the SITES and MOTIFS lines, the first base of a nucleotide query's codon and motif).
 /// NCBI's sum overflows at `INT_MAX` (undefined in C++; both 0.5.1 builds print -2147483648, PS16c
 /// review oracle `plusmax`): LOSAT adds in `i64`, so it prints 2147483648, as NCBI prints the
@@ -169,8 +165,8 @@ impl Report {
         self.write_blocks();
     }
 
-    /// An insertion of a `char` (`<< DELIMIT`: `put`), where a line can be cut by an exception
-    /// (the `SESSION` line; in the other lines it holds what `write` would).
+    /// An insertion of a `char` (a stream insertion of `DELIMIT`: `put`), where a line can be cut
+    /// by an exception (the `SESSION` line; in the other lines it holds what `write` would).
     fn put(&mut self, byte: u8) {
         if self.failed.is_some() {
             return;
@@ -262,8 +258,8 @@ impl Report {
     }
 }
 
-/// A line that rpsbproc writes to `cerr` (`cerr << text << endl`): standard error, whatever the
-/// `-logfile`.
+/// A line that rpsbproc writes to `cerr` (`text` streamed to `cerr`, then `endl`): standard error,
+/// whatever the `-logfile`.
 fn cerr_line(text: &str) {
     write_stderr(&format!("{text}\n"));
 }
@@ -379,12 +375,12 @@ fn report_exception(
     status
 }
 
-/// `CDir(path).Exists()`.
+/// `CDir`'s `Exists` on the path.
 fn dir_exists(path: &OsStr) -> bool {
     std::fs::metadata(path).is_ok_and(|meta| meta.is_dir())
 }
 
-/// `CFile(path).Exists()`.
+/// `CFile`'s `Exists` on the path.
 fn file_exists(path: &OsStr) -> bool {
     std::fs::metadata(path).is_ok_and(|meta| meta.is_file())
 }
@@ -397,7 +393,7 @@ fn join(a: &OsStr, b: &str) -> OsString {
     out
 }
 
-/// `CDirEntry::NormalizePath(path)` (`eIgnoreLinks`): the path's `.` and empty components
+/// `CDirEntry::NormalizePath` of the path (`eIgnoreLinks`): the path's `.` and empty components
 /// dropped and `..` taken back where possible, without its trailing `/`
 /// (`ncbi_environment::normalize_path`, the Unix form, on every target).
 // NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:501-502
@@ -496,12 +492,16 @@ fn find_data_path(diag: &mut Diagnostics, data_path: Option<&OsStr>) -> Option<O
     }
 }
 
-/// The 9 lines that rpsbproc writes to standard error first (also with `-q`).
+/// The 9 lines that rpsbproc writes to standard error first (also with `-q`); the first names
+/// LOSAT's version (`Post-RPSBLAST Processing Utility (LOSAT 0.2.0)`, `wording::RPSBPROC_TITLE`
+/// and `REPORT_VERSION`) where NCBI's names its own (`v0.5.1`, `VERDEF`; the Owner 2026-11-21
+/// 「Q1=B」).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:74-87 (`VERDEF`)
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:397-406
 // (`m_silent` is still false here: `-q` is read at main:677.)
 fn banner() {
     write_stderr(&format!(
-        "Post-RPSBLAST Processing Utility v{VERSION}\n\
+        "{} {}\n\
          -------------------------------------------------------\n\
          Download:\n\
          \tftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/\n\
@@ -509,7 +509,9 @@ fn banner() {
          Blast applications download:\n\
          \tftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/\n\
          \n\
-         For more information please refer to the README file\n"
+         For more information please refer to the README file\n",
+        crate::wording::RPSBPROC_TITLE,
+        crate::wording::REPORT_VERSION
     ));
 }
 
@@ -1444,15 +1446,15 @@ fn motif_error(error: MotifError, data: &CddData, site: &data::Site) -> PrintErr
     }
 }
 
-/// `(char)toupper(q.m_strSeqData[res])`: the residue at `res`. `std::string::operator[]` gives
-/// the terminating 0 at its size; beyond that, and before 0, NCBI reads bytes outside the
-/// string (undefined), which LOSAT refuses.
+/// `toupper` of `q.m_strSeqData[res]`, cast to `char`: the residue at `res`.
+/// `std::string::operator[]` gives the terminating 0 at its size; beyond that, and before 0, NCBI
+/// reads bytes outside the string (undefined), which LOSAT refuses.
 fn upper_residue(query: &DomQuery, res: i64) -> Result<u8, PrintError> {
     upper_at(&query.residues, res)
 }
 
-/// `(char)toupper(text[res])` of a `std::string` (the query's residues or the translation of
-/// one of its frames).
+/// `toupper` of `text[res]`, cast to `char`, for a `std::string` (the query's residues or the
+/// translation of one of its frames).
 fn upper_at(text: &[u8], res: i64) -> Result<u8, PrintError> {
     let len = text.len() as i64;
     if (0..len).contains(&res) {
@@ -1490,7 +1492,7 @@ fn write_source(report: &mut Report, data: &CddData, source: u32) {
     }
 }
 
-/// A site's positions as a set (`CSegSet featsegs(*iterFeat)`: `ori_from` is `from`).
+/// A site's positions as a set (`featsegs` is a `CSegSet` made from `*iterFeat`: `ori_from` is `from`).
 fn site_segset(data: &CddData, site: &data::Site) -> SegSet {
     let mut set = SegSet::new();
     for seg in data.site_segs(site) {
@@ -1499,7 +1501,8 @@ fn site_segset(data: &CddData, site: &data::Site) -> SegSet {
     set
 }
 
-/// `featsegs.GetTotalResidues() / (double)GetCompleteSize() > 0.8` of a mapped site.
+/// Whether `featsegs.GetTotalResidues()` divided by `GetCompleteSize()` (as a `double`) is above
+/// 0.8, for a mapped site.
 fn mostly_mapped(featsegs: &SegSet, site: &data::Site) -> bool {
     !featsegs.is_empty() && (featsegs.total_residues() as f64 / f64::from(site.complete_size)) > 0.8
 }
@@ -1713,7 +1716,7 @@ fn print_incomplete(report: &mut Report, n_missing: f64, c_missing: f64) {
 
 /// `PrintDomLine`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1807-1832
-// (`m_iFrom + COORDSBASE` is `int` arithmetic, which overflows at `INT_MAX` (undefined in C++):
+// (`m_iFrom` plus `COORDSBASE` is `int` arithmetic, which overflows at `INT_MAX` (undefined in C++):
 // `printed_position`, for protein and nucleotide queries alike.)
 fn print_dom_line(
     report: &mut Report,

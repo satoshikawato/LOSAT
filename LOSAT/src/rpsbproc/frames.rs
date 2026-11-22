@@ -187,8 +187,8 @@ fn codon_residue(b1: u8, b2: u8, b3: u8) -> u8 {
     AMINO_ACIDS[256 * i + 16 * j + k]
 }
 
-/// `CSeqTranslator::Translate(seq, prot, fIs5PrimePartial, code 1)` with rpsbproc's `*` to `X`:
-/// one residue per codon, then a last partial codon (1 or 2 bases) padded with `N` and kept
+/// `CSeqTranslator::Translate` (with `fIs5PrimePartial` and genetic code 1) with rpsbproc's `*` to
+/// `X`: one residue per codon, then a last partial codon (1 or 2 bases) padded with `N` and kept
 /// only when it is not `X`.
 // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:4108-4120
 // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3636-3730
@@ -264,8 +264,8 @@ pub(crate) fn complement(seq: &[u8]) -> Vec<u8> {
 /// then moves `SIZE_MAX` bytes (undefined, a crash).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:113-145
 // The genetic code is `TDocsum::m_iGenCode`, which the archive never sets (`basedata.cpp:431`,
-// `m_iGenCode = 1`; the `gcode` argument of `ProcessBlastResults` is not used), so rpsbproc
-// translates with the standard code whatever `-query_gencode` the search used.
+// which sets `m_iGenCode` to 1; the `gcode` argument of `ProcessBlastResults` is not used), so
+// rpsbproc translates with the standard code whatever `-query_gencode` the search used.
 pub(crate) fn translate_all(na: &[u8]) -> Option<[Vec<u8>; 6]> {
     let mut frames: [Vec<u8>; 6] = Default::default();
     if na.is_empty() {

@@ -50,7 +50,7 @@ fn find_last_not_of(hay: &[u8], set: &[u8], pos: usize) -> Option<usize> {
     (0..=end).rev().find(|&i| !set.contains(&hay[i]))
 }
 
-/// `NStr::FindNoCase(str, pattern)`.
+/// `NStr::FindNoCase` of `pattern` in `str`.
 fn find_no_case(hay: &[u8], pattern: &[u8]) -> Option<usize> {
     let hay = hay.to_ascii_lowercase();
     let pattern = pattern.to_ascii_lowercase();
@@ -412,7 +412,7 @@ impl Scanner {
                 if line.num != key_line {
                     end_pos = Some(0);
                 }
-                // `find_first_not_of(.., npos)` is npos.
+                // `find_first_not_of` from `npos` is npos.
                 let val_pos = end_pos.and_then(|from| find_first_not_of(&line.data, b" \t=", from));
                 if let Some(val_pos) = val_pos {
                     return match find_first_of(&line.data, b" \t\n;", val_pos) {
@@ -428,7 +428,7 @@ impl Scanner {
     /// `xProcessDimensions`.
     fn process_dimensions(&mut self, args: &Args) -> Scan<()> {
         if self.current_block.eq_ignore_ascii_case(b"characters") {
-            // `xGetArgPos(args, "ntax")`: the first line that holds `ntax` (lower case).
+            // `xGetArgPos` of `args` for "ntax": the first line that holds `ntax` (lower case).
             let found = args.iter().enumerate().find_map(|(at, line)| {
                 let lower = line.data.to_ascii_lowercase();
                 lower
@@ -489,7 +489,7 @@ impl Scanner {
     }
 }
 
-/// The tokens of a matrix line after the first, joined (`Join(tokens.begin()+1, tokens.end(), "")`).
+/// The tokens of a matrix line after the first, joined with no separator (`Join`).
 fn line_tokens_after_first(data: &[u8]) -> Vec<u8> {
     data.split(|c| matches!(c, b' ' | b'\t'))
         .filter(|token| !token.is_empty())

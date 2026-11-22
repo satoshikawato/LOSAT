@@ -28,7 +28,10 @@ authoritative, current guidance for agent behavior in LOSAT.
      behavior by calling out to NCBI.
 
 3. Bit-perfect output parity is required.
-   - Output must match NCBI BLAST+ exactly.
+   - Output must match NCBI BLAST+ exactly, apart from the statement of the
+     program's version, which names LOSAT (`BLASTP (LOSAT 0.2.0)` where NCBI
+     writes `BLASTP 2.17.0+`; `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 14):
+     comparisons map NCBI's freezes through `LOSAT/src/wording.rs` (rule 8).
    - Do not simplify algorithms if it changes output.
    - Use the same floating-point precision as NCBI.
    - Approved project exception: for TBLASTX local `-s/--subject` searches,
@@ -79,13 +82,23 @@ authoritative, current guidance for agent behavior in LOSAT.
      in place of `Please refer to the BLAST+ user manual.`, and NCBI's exception reports
      reduced to their messages (no `NCBI C++ Exception:`, thread, NCBI source path and line,
      `(<class>::<code>)` or C++ function; `(m_Pos = N)` reads `(position N)`), in standard
-     error and in an archive's messages, while the `BLAST ... error:` prefixes, NCBI's
-     diagnostic codes such as `(106.15)` and the message bodies stay NCBI's (exception 12;
-     one producer and one mapping, `LOSAT/src/wording.rs`). Errors raised after argument parsing, the outfmt 0 write
+     error and in an archive's messages, while NCBI's diagnostic codes such as `(106.15)`
+     and the message bodies stay NCBI's (exception 12); the error prefixes read
+     `LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`,
+     `LOSAT database creation error:`, `LOSAT options error:` and `LOSAT query error:`
+     (NCBI's `BLAST ... error:`, same length), and wherever LOSAT states the running
+     program's version it states LOSAT's: `BLASTP (LOSAT 0.2.0)` in a search output's
+     header (outfmt 0 line 1, outfmt 7 `# BLASTP (LOSAT 0.2.0)`, `BlastOutput_version`,
+     the XML2 and JSON `version`), `LOSAT 0.2.0` where NCBI writes `2.17.0+` alone (an
+     archive's or strategy's `ident`, SAM `@PG VN:`, `-version`), `0.2.0` in `-xmlhelp`'s
+     `<version>`, and in the descriptions of
+     NCBI's frozen `-help` and `-xmlhelp` texts and rpsbproc's banner; the XML and JSON
+     structure, DOCTYPE, namespaces and schema locations stay NCBI's (exception 14; one
+     producer and one mapping, `LOSAT/src/wording.rs`). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
-     every search result must still match NCBI. Non-UTF-8
+     every other byte of every search result must still match NCBI. Non-UTF-8
      file names and `.ncbirc` keys that change output are explicit rejections, not
-     exceptions. `-version` and `-version-full*` (NCBI's forms, LOSAT's package),
+     exceptions. `-version` and `-version-full*` (NCBI's forms, LOSAT's version and package),
      `-help-full` (the text of `-help`), and on the command line `-xmlhelp` (NCBI's XML
      without the options LOSAT refuses by name), `-logfile`, `-conffile` and `-dryrun`,
      run as in NCBI (README, NCBI C++ Toolkit options).
@@ -124,8 +137,12 @@ authoritative, current guidance for agent behavior in LOSAT.
      are explicit rejections. So are the results of a database with parsed
      Seq-ids that PD-LOSAT-NCBI-DEFECTS 1.10 lists, such as a reported sequence
      that NCBI's lookup by id finds as another sequence and following hits whose
-     ids NCBI takes for one sequence. A sequence that a seqid list keeps without a
-     definition line is reproduced, not rejected: NCBI drops its hits at the
+     ids NCBI takes for one sequence. One NCBI failure without a checkable valid result is an
+     approved exception all the same, by the Owner's decision of 2026-11-21: TBLASTX's linking of a
+     query batch whose average query length is 0 against one subject, where NCBI's `Int4` sums
+     overflow and it crashes, adds them in 64 bits (PD-LOSAT-NCBI-DEFECTS exception 20, version
+     1.68). A sequence that a seqid list keeps without a definition line is
+     reproduced, not rejected: NCBI drops its hits at the
      Seq-aligns (a positive list, PD-LOSAT-NCBI-DEFECTS 1.32) or where its search
      fetches the subject again (a negative list, 1.34). Approved
      difference: a `gb`, `emb` or `dbj` id prints the stored type, where NCBI's
@@ -185,12 +202,16 @@ authoritative, current guidance for agent behavior in LOSAT.
      (outfmt 0 wraps the path at 68 columns), and the run root in their output
      and stderr is replaced by that prefix before hashing
      (`LOSAT/tests/frozen_paths.py`). That is the one replacement of a
-     checkout-path prefix. LOSAT's words in messages (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-     exception 12) are compared through one mapping of the freeze, the function that makes
+     checkout-path prefix. LOSAT's words (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
+     exceptions 12 and 14: messages, error prefixes and the version statement of every
+     output) are compared through one mapping of the freeze, the function that makes
      them: `losat_output_bytes` / `losat_bytes` of `LOSAT/src/wording.rs` (Rust tests:
      `losat::wording`, `temp_support::expected_losat_bytes`; Python harnesses:
-     `LOSAT/tests/losat_wording.py`, which reads that file's constants and checks its
-     samples, `LOSAT/tests/fixtures/wording/samples.tsv`).
+     `LOSAT/tests/losat_wording.py`, which reads that file's constants, LOSAT's version
+     from `LOSAT/Cargo.toml` and checks its samples,
+     `LOSAT/tests/fixtures/wording/samples.tsv`; an ad-hoc comparison with an NCBI run:
+     `python3 -I LOSAT/tests/losat_wording.py map-output <ncbi-output>`). A comparison of
+     LOSAT's output with NCBI's, freeze or live run, without that mapping is a harness bug.
 
 9. Algorithmic fidelity over aesthetics.
    - Do not refactor for readability if it changes logic.
@@ -618,7 +639,8 @@ remains subject to all the requirements above.
 
 ## Project Summary
 
-LOSAT is a Rust reimplementation of NCBI BLAST targeting bit-perfect parity.
+LOSAT is a Rust reimplementation of NCBI BLAST targeting bit-perfect parity
+(the version statement names LOSAT; rule 3).
 Primary focus: TBLASTX and BLASTN. BLASTP support exists but remains secondary
 and must be treated as ongoing parity/performance work unless the touched path is
 covered by current comparison fixtures. The Rust crate root is `LOSAT/`.

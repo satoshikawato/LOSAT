@@ -623,28 +623,74 @@ impl SubjectPasses<'_> {
                 }
                 // The kernel, chosen once per call: the batch's statistics, the same with the
                 // finish of each list of an ungapped search, or the statistics of each subject
-                // apart (`special_subject`, which finishes on its copy of the batch).
-                let searched = match (self.special, ungapped.as_ref()) {
-                    (None, None) => database_prelim_blocks!(|ordinal, subject, state| self
-                        .search_subject::<UNGAPPED>(
-                            ordinal as usize,
-                            subject,
-                            state,
-                            Some(&scan),
-                            None
-                        )),
-                    (None, Some(stage)) => database_prelim_blocks!(|ordinal, subject, state| {
-                        let mut found = self.search_subject::<UNGAPPED>(
-                            ordinal as usize,
-                            subject,
-                            state,
-                            Some(&scan),
-                            None,
-                        );
-                        self.x_ungapped_database_stage(stage, ordinal, &mut found.1);
-                        found
-                    }),
-                    (Some(special), stage) => {
+                // apart (`special_subject`, which finishes on its copy of the batch). With a
+                // MegaBLAST database index, one kernel that searches only the sequences with
+                // seeds and chooses among those for each.
+                let searched = match (self.prelim_batch.mb_index, self.special, ungapped.as_ref()) {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1420-1423
+                    // NCBI neither reads nor searches a sequence that has no seeds in the index.
+                    (Some(index), special, stage) => {
+                        database_prelim_blocks!(|ordinal, subject, state| {
+                            if !index.has_seeds(ordinal) {
+                                return None;
+                            }
+                            match (special, stage) {
+                                (None, None) => self.search_subject::<UNGAPPED>(
+                                    ordinal as usize,
+                                    subject,
+                                    state,
+                                    Some(&scan),
+                                    None,
+                                ),
+                                (None, Some(stage)) => {
+                                    let mut found = self.search_subject::<UNGAPPED>(
+                                        ordinal as usize,
+                                        subject,
+                                        state,
+                                        Some(&scan),
+                                        None,
+                                    );
+                                    self.x_ungapped_database_stage(stage, ordinal, &mut found.1);
+                                    found
+                                }
+                                (Some(special), stage) => crate::stats::setup::apart(|| {
+                                    self.special_subject::<UNGAPPED>(
+                                        ordinal as usize,
+                                        subject,
+                                        state,
+                                        Some(&scan),
+                                        None,
+                                        special,
+                                        stage,
+                                    )
+                                }),
+                            }
+                        })
+                    }
+                    (None, None, None) => {
+                        database_prelim_blocks!(|ordinal, subject, state| self
+                            .search_subject::<UNGAPPED>(
+                                ordinal as usize,
+                                subject,
+                                state,
+                                Some(&scan),
+                                None
+                            ))
+                    }
+                    (None, None, Some(stage)) => {
+                        database_prelim_blocks!(|ordinal, subject, state| {
+                            let mut found = self.search_subject::<UNGAPPED>(
+                                ordinal as usize,
+                                subject,
+                                state,
+                                Some(&scan),
+                                None,
+                            );
+                            self.x_ungapped_database_stage(stage, ordinal, &mut found.1);
+                            found
+                        })
+                    }
+                    (None, Some(special), stage) => {
                         database_prelim_blocks!(|ordinal, subject, state| {
                             crate::stats::setup::apart(|| {
                                 self.special_subject::<UNGAPPED>(

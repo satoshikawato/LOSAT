@@ -325,6 +325,7 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
         let mut diagnostics: Vec<u8> = Vec::new();
         {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt: "0",
                     refusal: FormatRefusal::FailsCall,
@@ -351,7 +352,10 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
         &[("matrix", "FOO")][..],
     ] {
         let text = report(extra, true);
-        assert!(text.starts_with("BLASTP 2.17.0+\n"), "{extra:?}: {text}");
+        assert!(
+            text.starts_with(&format!("BLASTP (LOSAT {})\n", env!("CARGO_PKG_VERSION"))),
+            "{extra:?}: {text}"
+        );
         assert!(!text.contains("Gap Penalties:"), "{extra:?}: {text}");
     }
     let gapped = report(&[], false);
@@ -523,6 +527,7 @@ fn make_blastp_args() -> BlastpArgs {
         gap_trigger: None,
         sum_stats: false,
         first_query_ordinal: 0,
+        scope_refusal: None,
         psiblast_pssm: None,
         formatting: Default::default(),
         rps: None,

@@ -237,9 +237,13 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
     let tmp = TempDir::new("raw-errors");
     let dir = tmp.0.to_string_lossy().into_owned();
     let out = tmp.base("db");
-    let same_name = "BLAST options error: Cannot create a BLAST database from an existing one \
-                     without changing the output name, please provide a (different) database \
-                     name using -out\n";
+    // NCBI's message in LOSAT's words (AGENTS.md rule 8).
+    let same_name = crate::wording::losat_text(
+        "BLAST options error: Cannot create a BLAST database from an existing one without \
+         changing the output name, please provide a (different) database name using -out\n",
+    )
+    .into_owned();
+    let same_name = same_name.as_str();
     let words = ["-input_type", "blastdb", "-dbtype", "nucl"];
     let run = |more: &[&str]| {
         let mut all = words.to_vec();
@@ -261,7 +265,10 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
         (
             1,
             String::new(),
-            "BLAST options error: Please provide a title using -title\n".to_string()
+            crate::wording::losat_text(
+                "BLAST options error: Please provide a title using -title\n"
+            )
+            .into_owned()
         )
     );
     // e_missing
@@ -301,7 +308,10 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
         (
             1,
             log_head(&dir),
-            "BLAST options error: No valid input FASTA file or BLAST db is found.\n"
+            crate::wording::losat_text(
+                "BLAST options error: No valid input FASTA file or BLAST db is found.\n"
+            )
+            .as_ref()
         )
     );
     assert_eq!(files_of(&tmp.0), Vec::<String>::new());
@@ -338,6 +348,48 @@ fn oid_list_files_ncbi_cannot_read_are_refused() {
         );
         assert!(
             err.ends_with("this database is not supported as input by LOSAT's makeblastdb\n"),
+            "{name}: {err}"
+        );
+        assert_eq!(files_of(&tmp.0), Vec::<String>::new(), "{name}");
+    }
+}
+
+/// An alias file whose `OID_MASK_TYPE` leaves a sequence without a definition line (line RG
+/// D1b-2): NCBI's makeblastdb stops with a null pointer exception (exit status 255, probe mkbd of
+/// D1b-2, for `ompx`, `tall` and `omnx`), LOSAT refuses the input at that sequence, before any file is written. An
+/// alias whose sequences each keep a line is copied with the lines it keeps (case `B_al_om` of
+/// `blastdb_input_runs_as_makeblastdb`).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+fn a_sequence_the_mask_type_leaves_without_a_line_is_refused() {
+    let tmp = TempDir::new("raw-oidmask");
+    let out = tmp.base("db");
+    for (name, dbtype, oid) in [
+        ("ompx", "prot", 2),
+        ("tall", "prot", 1),
+        ("omnx", "nucl", 2),
+    ] {
+        let input = format!("tests/db_search/oidmask/{name}");
+        let (status, log, err) = makeblastdb(&[
+            "-in",
+            &input,
+            "-input_type",
+            "blastdb",
+            "-dbtype",
+            dbtype,
+            "-out",
+            &out,
+        ]);
+        // The refusal comes at the copy, after the lines makeblastdb writes first.
+        assert_eq!(status, 1, "{name}: {log}{err}");
+        assert!(log.contains("Building a new DB"), "{name}: {log}");
+        assert!(
+            err.contains(&format!(
+                "OID {oid} of the input database: the sequence has no definition line"
+            )),
             "{name}: {err}"
         );
         assert_eq!(files_of(&tmp.0), Vec::<String>::new(), "{name}");
@@ -473,4 +525,29 @@ fn masks_are_read_from_each_volume_s_first_column() {
         copied,
         ["copy.paa", "copy.pab", "copy.pac", "copy.pba", "copy.pbb"]
     );
+}
+
+/// NCBI's memory of its last algorithm lookup (`GetVolAlgo`): a failed lookup asked again at
+/// once answers with the id of another lookup; any other question in between (a volume that
+/// knows the algorithm, another volume, another algorithm) is asked anew. A sequence without
+/// mask data asks nothing, so it does not come between.
+#[test]
+fn the_memory_of_algorithm_lookups_is_ncbi_s() {
+    let mut memory = super::VolAlgoMemory::default();
+    // One algorithm: volume 0 does not know it, volume 1 does.
+    assert!(!memory.reads_a_kept_id(0, 0, false));
+    assert!(!memory.reads_a_kept_id(1, 0, true));
+    assert!(!memory.reads_a_kept_id(0, 0, false));
+    assert!(memory.reads_a_kept_id(0, 0, false));
+    assert!(memory.reads_a_kept_id(0, 0, false));
+    // Two algorithms: the questions alternate, so a failed lookup is always asked again.
+    let mut memory = super::VolAlgoMemory::default();
+    for _ in 0..3 {
+        assert!(!memory.reads_a_kept_id(0, 0, false));
+        assert!(!memory.reads_a_kept_id(0, 1, false));
+    }
+    // Repeated lookups that succeed answer from the memory with the right id.
+    let mut memory = super::VolAlgoMemory::default();
+    assert!(!memory.reads_a_kept_id(2, 0, true));
+    assert!(!memory.reads_a_kept_id(2, 0, true));
 }

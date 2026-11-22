@@ -17,7 +17,7 @@ const CASES: &[(&str, &[&str], &str)] = &[
 ("di6_dc_win0", &["-task", "dc-megablast", "-window_size", "0"], "EvalueThreshold=cutoff:e-value:10 MBTemplateType=integer:0 MBTemplateLength=integer:18 WordSize=integer:11 WindowSize=integer:0 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
 ("di6_anib", &["-task", "blastn", "-xdrop_gap_final", "150", "-dust", "no", "-evalue", "1e-15", "-max_target_seqs", "1"], "EvalueThreshold=cutoff:e-value:1e-15 GapXDropoffFinal=real:150 MaskAtHash=boolean:True DustFiltering=boolean:False UngappedMode=boolean:False HitlistSize=integer:1"),
 // DI-6b (the frozen archives minraw.*.11): the value is not recorded (the remote options'
-// eBlastOpt_CutoffScore is `if (0)`, api/blast_options_cxx.cpp:435-442).
+// eBlastOpt_CutoffScore sits under a condition that is always false, api/blast_options_cxx.cpp:435-442).
 ("di6b_minraw", &["-min_raw_gapped_score", "15"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
 ("e_n_badpair_fmt11", &["-reward", "2", "-penalty", "-7"], "EvalueThreshold=cutoff:e-value:10 MismatchPenalty=integer:-7 MatchReward=integer:2 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
 ("in_n_dust_minus_fmt11", &["-strand", "minus"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
@@ -206,14 +206,14 @@ fn error_lines_are_ncbis_error_texts_only() {
         })
     };
     let lines = error_lines(
-        &native("BLAST query/options error: bad  option\nPlease refer to the LOSAT user manual.\n"),
+        &native("LOSAT query/options error: bad  option\nPlease refer to the LOSAT user manual.\n"),
         false,
     )
     .unwrap();
     assert_eq!(
         lines,
         vec![
-            (ERROR, b"BLAST query/options error: bad option".to_vec()),
+            (ERROR, b"LOSAT query/options error: bad option".to_vec()),
             (ERROR, b"Please refer to the LOSAT user manual.".to_vec()),
         ]
     );

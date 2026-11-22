@@ -639,7 +639,7 @@ impl BlastCompressedAaLookupTable {
                         skip -= 1;
                         s += 1;
                     }
-                    // NCBI's `s--` is immediately balanced by the outer `for`
+                    // NCBI's decrement of `s` is immediately balanced by the outer `for`
                     // increment; this `while` loop already holds that resumed
                     // subject offset.
                     continue;
@@ -951,7 +951,7 @@ fn build_blosum62_compressed_lookup_with_capacity(
 }
 
 /// The table of `build_blosum62_compressed_lookup` for a threshold already in NCBI's
-/// matrix units (`(Int4)(kMatrixScale * opt->threshold)`, converted by the caller as the
+/// matrix units (`opt->threshold` times `kMatrixScale`, cast to `Int4`, converted by the caller as the
 /// x86-64 build does), built once for the queries of several of NCBI's tables: `locations`
 /// are the lookup segments of all queries in query order, and `tables` the ranges of
 /// `locations` (in order) of each table that NCBI builds (BLASTP's query batches). The

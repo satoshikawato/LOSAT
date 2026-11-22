@@ -4,8 +4,37 @@ use std::path::{Path, PathBuf};
 /// The samples that `LOSAT/tests/losat_wording.py` checks too: NCBI's text, then LOSAT's.
 pub(crate) const SAMPLES: &str = include_str!("../tests/fixtures/wording/samples.tsv");
 
+/// The samples of [`losat_output_bytes`] alone (`LOSAT/tests/losat_wording.py` checks them too).
+const OUTPUT_SAMPLES: &str = include_str!("../tests/fixtures/wording/output_samples.tsv");
+
+/// A field of the samples: `\\n` and `\\t` are a line feed and a tab, `\\xNN` the byte NN
+/// (below 0x80), `{version}` is the crate's version, `{verlen}` the byte of the length of
+/// `LOSAT <version>` and `{at<n>}` the number n + [`IDENT_GROWTH`].
 fn unescape(field: &str) -> String {
-    field.replace("\\n", "\n").replace("\\t", "\t")
+    let field = field
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("{version}", env!("CARGO_PKG_VERSION"))
+        .replace(
+            "{verlen}",
+            &char::from(LOSAT_VERSION.len() as u8).to_string(),
+        );
+    let mut field = field;
+    while let Some(at) = field.find("{at") {
+        let end = at + field[at..].find('}').expect("{at<n>}");
+        let n: usize = field[at + 3..end].parse().expect("{at<n>}");
+        field.replace_range(at..=end, &(n + IDENT_GROWTH).to_string());
+    }
+    let mut out = String::with_capacity(field.len());
+    let mut rest = field.as_str();
+    while let Some(at) = rest.find("\\x") {
+        out.push_str(&rest[..at]);
+        let byte = u8::from_str_radix(&rest[at + 2..at + 4], 16).expect("\\xNN");
+        out.push(char::from(byte));
+        rest = &rest[at + 4..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The `.rs` files below `dir`.
@@ -46,6 +75,11 @@ pub(crate) fn code_lines(text: &str) -> Vec<(usize, &str)> {
                 continue;
             }
         }
+        // A top-level test module under another attribute (`#[cfg(all(test, ...))]`).
+        if line == "mod tests {" {
+            in_tests = true;
+            continue;
+        }
         if !line.trim_start().starts_with("//") {
             lines.push((number + 1, line));
         }
@@ -80,7 +114,10 @@ fn test_file(path: &Path) -> bool {
         || stem.starts_with("tests_")
         || name.contains(".test.")
         || name.contains(".spec.")
-        || path.components().any(|part| part.as_os_str() == "tests")
+        || path.components().any(|part| {
+            let part = part.as_os_str().to_string_lossy();
+            part == "tests" || part.ends_with("_tests")
+        })
 }
 
 /// The files of `dir` with one of `extensions`, below it (`node_modules` and build outputs
@@ -126,10 +163,12 @@ fn has_tag(line: &str) -> bool {
     })
 }
 
-// NCBI's words in a user-facing string outside this module fail here (line NW, the Owner's
-// 2026-11-20 instruction): NCBI's user-manual footer, NCBI's exception header, the name of
-// NCBI's C++ Toolkit, a hand-written exception tag in the engine's Rust code, and BLAST+
-// named as the program that runs (in LOSAT Web's texts, where `NCBI BLAST+` names NCBI's).
+// NCBI's words in a user-facing string outside this module fail here (lines NW and NW2, the
+// Owner's 2026-11-20 and 2026-11-21 instructions): NCBI's user-manual footer, NCBI's
+// exception header, the name of NCBI's C++ Toolkit, a hand-written exception tag in the
+// engine's Rust code, BLAST+ named as the program that runs (in LOSAT Web's texts, where
+// `NCBI BLAST+` names NCBI's), NCBI's version `2.17.0+` stated as the program's (outside
+// NCBI's package names `ncbi-blast-2.17.0+-...`) and NCBI's `BLAST ... error:` prefixes.
 // Comment lines, test files and test modules are not read; `ncbi_exception.rs` builds NCBI's
 // report and maps it (its own test keeps it the one owner of that text).
 #[test]
@@ -146,6 +185,8 @@ fn ncbi_words_are_written_only_here() {
     }
     files(&repo.join("python/pylosat"), &["py"], &mut paths);
     assert!(paths.len() > rust + 20, "{} files", paths.len());
+    // NCBI's package names (`ncbi-blast-2.17.0+-x64-linux.tar.gz`) are not version statements.
+    let package = format!("ncbi-blast-{NCBI_VERSION}");
     let mut offenders = Vec::new();
     for path in paths {
         let relative = path.strip_prefix(repo).unwrap();
@@ -183,6 +224,8 @@ fn ncbi_words_are_written_only_here() {
             .any(|needle| line.contains(needle))
                 || (is_rust && has_tag(line))
                 || bare_blast_plus
+                || line.matches(NCBI_VERSION).count() > line.matches(&package).count()
+                || ERROR_PREFIXES.iter().any(|(ncbi, _)| line.contains(ncbi))
             {
                 offenders.push(format!("{}:{number}: {}", relative.display(), line.trim()));
             }
@@ -191,7 +234,7 @@ fn ncbi_words_are_written_only_here() {
     assert!(
         offenders.is_empty(),
         "write LOSAT's words with crate::wording (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES \
-             exception 12):\n{}",
+             exceptions 12 and 14):\n{}",
         offenders.join("\n")
     );
 }
@@ -277,10 +320,27 @@ fn the_samples_map_to_losats_text() {
 }
 
 #[test]
+fn the_output_samples_map_to_losats_bytes() {
+    let mut count = 0;
+    for line in OUTPUT_SAMPLES.lines().filter(|line| !line.starts_with('#')) {
+        let (ncbi, losat) = line.split_once('\t').expect("two fields");
+        let (ncbi, losat) = (unescape(ncbi), unescape(losat));
+        assert_eq!(
+            losat_output_bytes(ncbi.as_bytes()).as_ref(),
+            losat.as_bytes(),
+            "{ncbi:?}"
+        );
+        count += 1;
+    }
+    assert!(count >= 3, "{count} samples");
+}
+
+#[test]
 fn text_without_ncbis_words_is_borrowed() {
     for text in [
-        "BLAST query/options error: No hits are being saved\n",
+        "LOSAT query/options error: No hits are being saved\n",
         "Warning: (1.1) [blastn] x::y\n",
+        "ncbi-blast-2.17.0+-x64-linux.tar.gz, NCBI BLAST+ 2.17.0 aborts",
         "",
     ] {
         assert!(matches!(losat_text(text), Cow::Borrowed(_)), "{text:?}");

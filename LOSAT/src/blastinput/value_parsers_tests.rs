@@ -105,7 +105,7 @@ fn integer_arguments_name_what_failed() {
     );
 }
 
-// `CArgAllowGeneticCodeInteger::Verify` (`NStr::StringToInt(value)`, blast_args.cpp:998-1007):
+// `CArgAllowGeneticCodeInteger::Verify` (`NStr::StringToInt` of `value`, blast_args.cpp:998-1007):
 // LOSAT says "invalid" for what is not a number of 0 to 255 written without a minus sign and
 // "unsupported" for a number of that range that is not one of NCBI's codes.
 #[test]
@@ -144,8 +144,8 @@ fn genetic_codes_are_read_as_ncbi_reads_them() {
     }
 }
 
-// NCBI 2.17.0's `CArg_Double`: the bits of `NStr::StringToDouble(value,
-// fDecimalPosixOrLocal)` from NCBI's corelib (swebok-improve-20261105/sw8/nfix/probe/x87,
+// NCBI 2.17.0's `CArg_Double`: the bits of `NStr::StringToDouble` of `value`
+// with `fDecimalPosixOrLocal` from NCBI's corelib (swebok-improve-20261105/sw8/nfix/probe/x87,
 // `s2dp`), and `blastn -evalue <value>` (exit 0, or 1 with the usage for the errors).
 #[test]
 fn reals_are_read_as_ncbis_carg_double() {

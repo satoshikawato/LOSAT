@@ -314,6 +314,79 @@ fn hit_list(lists: Vec<(u32, f64)>, count: usize) -> Option<BlastnHitList> {
     Some(hit_list)
 }
 
+// Review 2 of line DBID pfoff-3, L5: BLASTN's model of what one query's pairwise report reads
+// (`pairwise_read_order` of its hit list) is the writer's group of the rows that
+// `pairwise::pairwise_hits` makes of that list (`x_pairwise_par::writer_reads`), for every
+// sort and count; the rows name each subject by its rank, here its ordinal id.
+#[test]
+fn the_pairwise_reads_are_those_of_the_writers_rows() {
+    use crate::algorithm::blastn::pairwise::{pairwise_hits, DisplayMasks, Rows};
+    use crate::blastinput::fasta_reader::FastaRecord;
+    let hsp = |s_idx: u32, bits: f64, e_value: f64, num_ident: usize, from: usize| {
+        let mut hsp = test_hsp(s_idx, (bits * 2.0) as i32);
+        (hsp.bit_score, hsp.e_value, hsp.num_ident) = (bits, e_value, num_ident);
+        (hsp.q_start, hsp.q_end) = (from + 1, from + 10);
+        (hsp.internal_q_offset_0, hsp.internal_q_end_0) = (from as i32, from as i32 + 10);
+        hsp
+    };
+    let list = |oid: u32, hsps: Vec<BlastnHsp>| BlastnHspList {
+        oid,
+        query_index: 0,
+        best_evalue: hsps[0].e_value,
+        hsps,
+    };
+    let mut hit_list = BlastnHitList::new(10);
+    hit_list.hsplist_array = vec![
+        list(0, vec![hsp(0, 40.0, 1e-9, 4, 6), hsp(0, 30.0, 1e-7, 9, 0)]),
+        list(1, vec![hsp(1, 60.0, 1e-12, 2, 3)]),
+        list(2, vec![hsp(2, 35.0, 1e-8, 10, 1), hsp(2, 20.0, 1e-3, 8, 9)]),
+    ];
+    hit_list.hsplist_count = 3;
+    let hit_lists = [Some(hit_list)];
+    let letters = b"ACGTACGTTGCAACGTTGCAAGGTCC";
+    let queries = [FastaRecord::new("q", b"q", letters)];
+    let subjects: Vec<FastaRecord> = (0..3)
+        .map(|_| FastaRecord::new("s", b"s", letters))
+        .collect();
+    let placements = crate::blastinput::seq_range::Placements::default();
+    let masks = DisplayMasks {
+        query: &[Vec::new()],
+        query_offsets: &placements,
+        subject: None,
+        database: None,
+    };
+    let rows = Rows::new(
+        &queries,
+        crate::algorithm::blastn::x_subject_store::SubjectLetters::new(&subjects, None),
+        &masks,
+    );
+    let rows = pairwise_hits(&hit_lists, &rows, None).unwrap();
+    for hits in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
+        for hsps in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
+            for (descriptions, alignments) in [(0, 0), (1, 2), (2, 1), (500, 500)] {
+                let reading = crate::report::pairwise::PairwiseReading {
+                    sort: crate::report::hit_sort::ReportSort { hits, hsps },
+                    shown: crate::report::db_subject::Shown {
+                        descriptions,
+                        alignments,
+                    },
+                };
+                assert_eq!(
+                    pairwise_read_order(&hit_lists, reading, |_| None),
+                    crate::report::x_pairwise_par::writer_reads(
+                        &rows,
+                        |_, _| false,
+                        reading,
+                        false,
+                        None
+                    ),
+                    "{reading:?}"
+                );
+            }
+        }
+    }
+}
+
 // NCBI BLAST+ 2.17.0 `blastdbcmd -info` of the fixture
 // (LOSAT/tests/seqdb/expected/nucl_mv.info.tsv), and align_format_util.cpp:385-391.
 #[test]
@@ -385,7 +458,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
         native(error),
         (
             2,
-            "BLAST Database error: Database name is required.\n".to_string()
+            "LOSAT database error: Database name is required.\n".to_string()
         )
     );
     // A protein database is not found as a nucleotide one.
@@ -397,7 +470,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
         assert_eq!(exit, 2);
         assert!(
             message.starts_with(
-                "BLAST Database error: No alias or index file found for nucleotide database ["
+                "LOSAT database error: No alias or index file found for nucleotide database ["
             ),
             "{message}"
         );
@@ -420,7 +493,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
     .expect("NCBI's error of the search stage");
     assert_eq!(
         read.to_string(),
-        "BLAST engine error: Database memory map file error"
+        "LOSAT engine error: Database memory map file error"
     );
 }
 
@@ -759,7 +832,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
     assert_eq!(
         String::from_utf8(native.message.clone()).unwrap(),
         format!(
-            "BLAST Database error: Error: File ({}) not found.\n",
+            "LOSAT database error: Error: File ({}) not found.\n",
             dir.canonicalize().unwrap().join(&missing[1]).display()
         )
     );
@@ -791,7 +864,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         &mut hit_lists,
         true,
         ParsedShown::default(),
-        None,
+        (crate::report::db_subject::FormatThrow::Unread, None),
         &[],
         0,
         true,
@@ -848,7 +921,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         &mut hit_lists,
         false,
         ParsedShown::default(),
-        None,
+        (crate::report::db_subject::FormatThrow::Unread, None),
         &[],
         0,
         true,
@@ -887,7 +960,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         &mut clean,
         false,
         ParsedShown::default(),
-        None,
+        (crate::report::db_subject::FormatThrow::Unread, None),
         &[],
         0,
         true,
@@ -903,7 +976,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         &mut bad,
         false,
         ParsedShown::default(),
-        None,
+        (crate::report::db_subject::FormatThrow::Unread, None),
         &[],
         0,
         true,

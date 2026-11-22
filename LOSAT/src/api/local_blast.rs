@@ -116,38 +116,53 @@ impl OutputSink<'_> {
 /// so an error after that point leaves the file empty and an error before it leaves no file, as on
 /// the command line. The first write makes it too: the error archive of an earlier error (outfmt
 /// 11, `ReportOutputs::finish_archive`), as NCBI's `PrintErrorArchive` opens `-out`. A making that
-/// failed is not tried again.
+/// failed is not tried again. The file is written through the command line's report stream
+/// (`cli::ReportStream::of_cli`: the organism report's is NCBI's buffer), and the call's run ends
+/// it as the command line's run ends its `-out` (`OutFile::finish`).
 pub struct OutFile {
     path: std::path::PathBuf,
     /// The program whose file names must be UTF-8 (`cli::create_out_file`).
     program: Option<&'static str>,
+    /// The report of the file's `-outfmt` (`report_format_of`).
+    format: Option<crate::blastinput::app::ReportFormat>,
     state: OutState,
 }
 
 /// Whether `OutFile` has been made.
 enum OutState {
     Unmade,
-    Made { file: BufWriter<File> },
+    Made { stream: crate::cli::ReportStream },
     Failed,
 }
 
 impl OutFile {
-    /// The file `path` of a search of `program` (`cli::create_out_file`), not made yet.
-    pub(crate) fn new(path: &Path, program: Option<&'static str>) -> Self {
+    /// The file `path` of a search of `program` (`cli::create_out_file`) that writes the report of
+    /// `outfmt`, not made yet.
+    pub(crate) fn new(path: &Path, program: Option<&'static str>, outfmt: &str) -> Self {
         OutFile {
             path: path.to_path_buf(),
             program,
+            format: report_format_of(outfmt),
             state: OutState::Unmade,
         }
     }
 
-    /// Makes the file as the command line makes `-out` (`cli::create_out_file`), once.
+    /// Makes the file as the command line makes `-out` (`cli::create_out_file`), once, behind the
+    /// command line's report stream of the format (`cli::ReportStream::of_cli`).
     fn make(&mut self) -> anyhow::Result<()> {
         match self.state {
             OutState::Unmade => match crate::cli::create_out_file(&self.path, self.program) {
                 Ok(file) => {
+                    let tax_report =
+                        self.format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
+                    // No strategy file holds the report: the library refuses
+                    // `-export_search_strategy` (`search::file_options`).
                     self.state = OutState::Made {
-                        file: BufWriter::new(file),
+                        stream: crate::cli::ReportStream::of_cli(
+                            Some(BufWriter::new(file)),
+                            tax_report,
+                            None,
+                        ),
                     };
                     Ok(())
                 }
@@ -160,6 +175,23 @@ impl OutFile {
             OutState::Failed => Err(anyhow::anyhow!("the -out file could not be made")),
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
+    /// The end of the call's run, `result` being its result, as the command line's run of the
+    /// format ends its `-out` stream (`cli::ReportStream::finish`): the stream of outfmt 0 to 4
+    /// (`report::pairwise::PairwiseView`) and the organism report's throw where a write failed. A
+    /// file not made has nothing to end.
+    pub(crate) fn finish(&mut self, result: anyhow::Result<()>) -> anyhow::Result<()> {
+        use crate::blastinput::app::ReportFormat;
+        let throws = self.format.is_some_and(|format| {
+            crate::report::pairwise::PairwiseView::of(format).is_some()
+                || format == ReportFormat::TaxFormat
+        });
+        match &mut self.state {
+            OutState::Made { stream } => stream.finish(result, throws),
+            OutState::Unmade | OutState::Failed => result,
+        }
+    }
 }
 
 impl Write for OutFile {
@@ -168,17 +200,25 @@ impl Write for OutFile {
             self.make().map_err(io::Error::other)?;
         }
         match &mut self.state {
-            OutState::Made { file, .. } => file.write(buf),
+            OutState::Made { stream } => stream.write(buf),
             _ => Err(io::Error::other("the -out file could not be made")),
         }
     }
 
     fn flush(&mut self) -> io::Result<()> {
         match &mut self.state {
-            OutState::Made { file, .. } => file.flush(),
+            OutState::Made { stream } => stream.flush(),
             _ => Ok(()),
         }
     }
+}
+
+/// The report of the `-outfmt` value `outfmt` (`None` for a value that NCBI's reading refuses).
+fn report_format_of(outfmt: &str) -> Option<crate::blastinput::app::ReportFormat> {
+    use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+    parse_formatting_string(outfmt)
+        .ok()
+        .and_then(|choice| ReportFormat::from_number(choice.number))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
@@ -263,10 +303,7 @@ impl FormatOutput<'_> {
 
     /// The report of this output's `-outfmt` (`None` for a value that NCBI's reading refuses).
     pub(crate) fn report_format(&self) -> Option<crate::blastinput::app::ReportFormat> {
-        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
-        parse_formatting_string(self.outfmt)
-            .ok()
-            .and_then(|choice| ReportFormat::from_number(choice.number))
+        report_format_of(self.outfmt)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452
@@ -497,6 +534,12 @@ pub struct ReportOutputs<'a> {
     /// format come in that format's write order; those of different formats may interleave in
     /// any order (blastp's query blocks write every format block by block).
     pub observer: Option<&'a mut (dyn FormatObserver + Send)>,
+    /// The `-outfmt` values of the call's other searches (`api::run`'s searches, one for each
+    /// hit list size, `search_groups`), which this search does not write: the refusal of a
+    /// subject whose lookup throws where its batch's prefetch is off is the call's, decided over
+    /// all of its formats (`report::db_subject::FormatThrow::of_search`; review 3 of line DBID
+    /// pfoff-3, N2). Empty where the call is one search (the command line, every other caller).
+    pub other_outfmts: &'a [&'a str],
 }
 
 impl ReportOutputs<'_> {
@@ -525,6 +568,18 @@ impl ReportOutputs<'_> {
     /// of `-db`) and before processing the options. The other sinks are not opened here.
     pub(crate) fn open_out(&mut self) -> anyhow::Result<()> {
         open_out(&mut self.formats)
+    }
+
+    /// The end of a run whose result is `result`: the `-out` file of `run_to_file`
+    /// (`OutputSink::Out`) ends as the command line's `-out` stream ends (`OutFile::finish`); the
+    /// other sinks are the caller's.
+    pub(crate) fn finish_out(&mut self, result: anyhow::Result<()>) -> anyhow::Result<()> {
+        self.formats
+            .iter_mut()
+            .fold(result, |result, format| match &mut format.sink {
+                OutputSink::Out(out) => out.finish(result),
+                _ => result,
+            })
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:887-899
@@ -624,6 +679,7 @@ impl ReportOutputs<'_> {
         f: impl FnOnce(&mut ReportOutputs<'_>) -> R,
     ) -> R {
         let ReportOutputs {
+            other_outfmts,
             formats,
             diagnostics,
             later_warnings,
@@ -632,6 +688,7 @@ impl ReportOutputs<'_> {
         } = self;
         let mut tee = crate::report::archive::DiagTee::new(&mut **diagnostics, handle);
         let mut view = ReportOutputs {
+            other_outfmts,
             formats: formats
                 .iter_mut()
                 .map(|format| FormatOutput {
@@ -680,6 +737,7 @@ impl<'a> ReportOutputs<'a> {
         diagnostics: &'a mut (dyn Write + Send),
     ) -> Self {
         Self {
+            other_outfmts: &[],
             formats: vec![FormatOutput {
                 outfmt,
                 sink,

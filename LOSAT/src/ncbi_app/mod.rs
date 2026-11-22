@@ -1,7 +1,8 @@
 //! NCBI's application (`CNcbiApplication::AppMain`, c++/src/corelib/ncbiapp.cpp) for the programs
-//! that LOSAT reads with NCBI's argument reader rather than clap's: `losat blastdbcmd` and `losat
-//! dustmasker`. Each program is a `Tool` (its name, version, frozen `-help` text and argument
-//! descriptions) and a body, its `Run`; `run_with` does what NCBI's application does around it,
+//! that LOSAT reads with NCBI's argument reader rather than clap's: `losat blastdbcmd`, `losat
+//! dustmasker`, `losat segmasker`, `losat convert2blastmask`, `losat makembindex` and `losat
+//! windowmasker`. Each program is a `Tool` (its name, version, frozen `-help` text; its argument
+//! XML is NCBI's) and a body, its `Run`; `run_with` does what NCBI's application does around it,
 //! in NCBI's order: the diagnostics of `-logfile`, the words taken before the reader (`-version`,
 //! `-conffile`, `-dryrun`), the configuration load, the arguments (`args`, NCBI's
 //! `CArgDescriptions`), the usage and the report of an argument error, and LOSAT's refusals of
@@ -18,43 +19,32 @@ use crate::blastinput::ncbi_environment::{
 };
 use crate::report::serial::encoder::ReplacedChar;
 
-use args::{ArgException, Args, ArgsError, Dep, Desc};
+use args::{ArgException, Args, ArgsError};
 
-/// A program run by NCBI's application and argument reader.
+/// A program run by NCBI's application and argument reader. Its arguments are those of its NCBI
+/// `-xmlhelp` XML (`args::arguments` of `program`).
 pub(crate) struct Tool {
     /// The program's name (`GetProgramBasename`): the start of its `-version` line, its usage,
     /// its `<program>.ini` and its settings (`ApplicationStart::settings`).
     pub(crate) program: &'static str,
     /// The program's name in LOSAT's refusals (`BLASTDBCMD`).
     pub(crate) refusal_name: &'static str,
-    /// The version that `-version` and the full versions print (`CVersionInfo::Print` of
-    /// `GetFullVersion`: `2.17.0+`, `1.0.0`; `ncbi_version::print`).
-    pub(crate) version: &'static str,
     /// NCBI's `-help` text (`CArgDescriptions::PrintUsage` of the descriptions with the details),
     /// frozen. Its part before the details (`REQUIRED ARGUMENTS` or `OPTIONAL ARGUMENTS`) is
-    /// the usage that `-h` and the argument errors print (`short_usage`).
+    /// the usage that `-h` and the argument errors print (`short_usage`); its synopsis lists the
+    /// arguments in the order of the program's `Init` (`args::usage_position`).
     pub(crate) help: &'static str,
-    /// The program's arguments in the order its `Init` describes them; the reader adds those
-    /// of every `CArgDescriptions` (`args::descs`).
-    pub(crate) descs: &'static [Desc],
-    /// The `SetDependency` calls of its `Init`, in their order (`args::dependencies` makes
-    /// NCBI's `multimap` of them).
-    pub(crate) dependencies: fn() -> Vec<(&'static str, Dep, &'static str)>,
     /// The prefix of the program's diagnostics (`SetDiagPostPrefix`), if it sets one.
     pub(crate) post_prefix: Option<&'static str>,
     /// The components of its full versions (`CVersionAPI::AddComponentVersion`; windowmasker's).
     pub(crate) components: &'static [crate::ncbi_version::Component],
 }
 
-/// `Tool::dependencies` of a program that sets none.
-pub(crate) fn no_dependencies() -> Vec<(&'static str, Dep, &'static str)> {
-    Vec::new()
-}
-
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
 /// The text of `-h`: the usage and the description of `help` (a `Tool::help`), then NCBI's
 /// pointer to `-help`. The details start with the mandatory arguments (`REQUIRED ARGUMENTS`,
-/// convert2blastmask's) or the optional ones.
+/// convert2blastmask's) or the optional ones. The description states LOSAT's version
+/// (`help_text`).
 pub(crate) fn short_usage(help: &str) -> String {
     let end = ["REQUIRED ARGUMENTS", "OPTIONAL ARGUMENTS"]
         .iter()
@@ -63,8 +53,14 @@ pub(crate) fn short_usage(help: &str) -> String {
         .unwrap_or(help.len());
     format!(
         "{}Use '-help' to print detailed descriptions of command line arguments\n",
-        &help[..end]
+        help_text(&help[..end])
     )
+}
+
+/// LOSAT's text of NCBI's frozen `-help` text `help`: its description states LOSAT's version
+/// (`BLAST database client, version LOSAT 0.2.0`; `wording::losat_text`).
+pub(crate) fn help_text(help: &str) -> std::borrow::Cow<'_, str> {
+    crate::wording::losat_text(help)
 }
 
 /// Where a program's diagnostics go: the target of `-logfile` (`stderr` for `cerr`), and the
@@ -94,8 +90,8 @@ impl Diag<'_> {
         self.target.write_text(text, self.stderr);
     }
 
-    /// Writes `text` to the standard error stream itself (`cerr << ...`), not to the target of
-    /// `-logfile`: segmasker's report of an exception its `Run` catches.
+    /// Writes `text` to the standard error stream itself (an insertion into `cerr`), not to the
+    /// target of `-logfile`: segmasker's report of an exception its `Run` catches.
     pub(crate) fn cerr(&mut self, text: &[u8]) {
         let _ = self.stderr.write_all(text);
         let _ = self.stderr.flush();
@@ -110,13 +106,14 @@ impl Diag<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
-    /// `ERR_POST(Error << message)` inside `Run`: the severity, the prefix of the application
-    /// (`Tool::post_prefix`), the message.
+    /// An `ERR_POST` of an `Error` with `message` inside `Run`: the severity, the prefix of the
+    /// application (`Tool::post_prefix`), the message.
     pub(crate) fn err_post(&mut self, message: &str) {
         self.err_post_bytes(message.as_bytes());
     }
 
-    /// `ERR_POST(Warning << message)` inside `Run`: as `err_post`, of severity `Warning`.
+    /// An `ERR_POST` of a `Warning` with `message` inside `Run`: as `err_post`, of severity
+    /// `Warning`.
     pub(crate) fn warning_post(&mut self, message: &str) {
         self.write_text(&crate::ncbi_exception::post_line(
             crate::ncbi_exception::Severity::Warning,
@@ -136,8 +133,8 @@ impl Diag<'_> {
     }
 
     /// The posts of the bytes that NCBI's object stream replaced while it wrote an object
-    /// (`ReplacedChar`: `ERR_POST_X(7, message)` of error code 803 for each byte, as
-    /// `Error: (803.7) <prefix> <message>`).
+    /// (`ReplacedChar`: an `ERR_POST_X` of subcode 7 with a message, of error code 803 for each
+    /// byte, as `Error: (803.7) <prefix> <message>`).
     pub(crate) fn post_replaced(&mut self, replaced: &[ReplacedChar]) {
         for byte in replaced {
             debug_assert!(!byte.trace.is_empty(), "a byte replaced through `Traced`");
@@ -293,13 +290,8 @@ fn run_app(
         // arguments are read, whatever their bytes.
         Preparsed::Version(request) => {
             let _ = out.write_all(
-                crate::ncbi_version::print_with_components(
-                    request,
-                    tool.program,
-                    tool.version,
-                    tool.components,
-                )
-                .as_bytes(),
+                crate::ncbi_version::print_with_components(request, tool.program, tool.components)
+                    .as_bytes(),
             );
             return 0;
         }
@@ -337,7 +329,7 @@ fn run_app(
             return 0;
         }
         Err(ArgsError::Help) => {
-            let _ = out.write_all(tool.help.as_bytes());
+            let _ = out.write_all(help_text(tool.help).as_bytes());
             return 0;
         }
         // NCBI's XML, which the command line's run writes (`ncbi_xml`); the library API writes
@@ -351,7 +343,6 @@ fn run_app(
         },
         // `eNoValue` (which prints no usage) is not raised by the reader.
         Err(ArgsError::Invalid(error)) => return diag.report_arg_exception(&error, None),
-        Err(ArgsError::Refused(reason)) => return diag.refuse(&reason),
     };
     let settings = match start.settings() {
         Ok(settings) => settings,

@@ -5,13 +5,14 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:841 (`s_BlastAaExtendRight`)
 //! and :897 (`s_BlastAaExtendLeft`)
 //! `query` is the batch's sequence block: `query->sequence` holds the letters of every context of
-//! the batch, `q_off` is an offset into it and `query->length` its length (`buflen - 2`,
+//! the batch, `q_off` is an offset into it and `query->length` its length (two less than `buflen`,
 //! api/blast_setup_cxx.cpp:654, with `QueryInfo_GetSeqBufLen` of blast_query_info.c:246-250: the
 //! end of the last context's letters). The contexts lie one after the other with one NULLB between
-//! two of them (api/blast_setup_cxx.cpp:65-88: `shift = prev_len ? prev_len + 1 : 0`, so a context
-//! without letters takes no room; LOSAT makes no such context, `translation::generate_frames`, and
-//! `QueryContext::frame_base` is NCBI's `query_offset`, lookup/backbone.rs). The NULLB's row scores
-//! `BLAST_SCORE_MIN` (-32768) against every letter (blast_stat.c:1559-1576, kept for `-`).
+//! two of them (api/blast_setup_cxx.cpp:65-88: `shift` is `prev_len` plus 1 when `prev_len` is not
+//! 0, else 0, so a context without letters takes no room; LOSAT makes no such context,
+//! `translation::generate_frames`, and `QueryContext::frame_base` is NCBI's `query_offset`,
+//! lookup/backbone.rs). The NULLB's row scores `BLAST_SCORE_MIN` (-32768) against every letter
+//! (blast_stat.c:1559-1576, kept for `-`).
 //!
 //! So a walk that reaches the end of its context without a break reads the NULLB next to it with
 //! the same tests (left: `(maxscore - score) >= dropoff`; right: `score <= 0 ||

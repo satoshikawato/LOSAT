@@ -1,0 +1,84 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: multidb pa; noacc_v5 (no parsed Seq-ids)
+           15 sequences; 1,920 total letters
+
+
+
+Query= mix2_c the letters of taxfilter/q.faa, then qp1
+
+Length=282
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qp1 query protein one                                                 302     3e-109
+P69905.2 Unknown                                                      286     4e-103
+P01923.1 Unknown                                                      283     2e-101
+Q9TS35.2 Unknown                                                      282     3e-101
+P63107.2 Unknown                                                      278     7e-100
+P67818.1 Unknown                                                      275     1e-98 
+P01935.1 Unknown                                                      265     1e-94 
+P01942.2 Unknown                                                      253     6e-90 
+P01966.2 Unknown                                                      253     6e-90 
+P07405.1 Unknown                                                      249     3e-88 
+P60529.1 Unknown                                                      243     9e-86 
+P01994.2 Unknown                                                      208     4e-72 
+P01946.3 Unknown                                                      207     8e-72 
+
+
+>qp1 query protein one
+Length=140
+
+ Score = 302 bits (774),  Expect = 3e-109, Method: Compositional matrix adjust.
+ Identities = 140/140 (100%), Positives = 140/140 (100%), Gaps = 0/140 (0%)
+
+Query  143  MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  202
+            MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  203  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  262
+            CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN
+Sbjct  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+
+Query  263  FEKLKIFHYMVGHGRTASEG  282
+            FEKLKIFHYMVGHGRTASEG
+Sbjct  121  FEKLKIFHYMVGHGRTASEG  140
+
+
+Sequence with id P69905 no longer exists in database...alignment skipped
+Sequence with id P01923 no longer exists in database...alignment skipped
+Sequence with id Q9TS35 no longer exists in database...alignment skipped
+Sequence with id P63107 no longer exists in database...alignment skipped
+Sequence with id P67818 no longer exists in database...alignment skipped
+Sequence with id P01935 no longer exists in database...alignment skipped
+Sequence with id P01942 no longer exists in database...alignment skipped
+Sequence with id P01966 no longer exists in database...alignment skipped
+Sequence with id P07405 no longer exists in database...alignment skipped
+Sequence with id P60529 no longer exists in database...alignment skipped
+Sequence with id P01994 no longer exists in database...alignment skipped
+Sequence with id P01946 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.322    0.133    0.441    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 334425

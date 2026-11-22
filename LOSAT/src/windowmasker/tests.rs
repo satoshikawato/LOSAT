@@ -23,13 +23,15 @@ fn the_short_usage_is_the_head_of_the_help() {
 }
 
 #[test]
-fn the_version_is_windowmasker_s() {
+fn the_version_is_losat_s() {
+    // LOSAT's version where NCBI's windowmasker states its own `1.0.0` (AGENTS.md rule 8).
     assert_eq!(
         run_words(&["-version"]),
         (
             0,
             format!(
-                "windowmasker: 1.0.0\n Package: LOSAT {}, output compatible with blast {}\n",
+                "windowmasker: LOSAT {}\n Package: LOSAT {}, output compatible with blast {}\n",
+                env!("CARGO_PKG_VERSION"),
                 env!("CARGO_PKG_VERSION"),
                 crate::NCBI_BLAST_RELEASE
             ),
@@ -109,12 +111,19 @@ fn the_keys_read_as_ncbi_s() {
     assert!(crate::ncbi_app::args::parse(&TOOL, &words(&["-dust", "maybe"])).is_err());
 }
 
-// The dependencies are NCBI's 38 `SetDependency` calls in order.
+// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:213-254
+// The dependencies are NCBI's 38 `SetDependency` calls, all exclusions, as its `multimap` holds
+// them (the XML's): each in both directions, ordered by the first name. Which of two exclusions
+// NCBI reports is checked against NCBI's outputs (`tests/windowmasker/ncbi/x_*.err`).
 #[test]
 fn the_dependencies_are_ncbi_s() {
-    let list = dependencies();
-    assert_eq!(list.len(), 38);
-    assert_eq!(list[0], ("mk_counts", Dep::Excludes, "outfmt"));
-    assert_eq!(list[10], ("ustat", Dep::Excludes, "checkdup"));
-    assert_eq!(list[37], ("convert", Dep::Excludes, "text_match"));
+    use crate::ncbi_app::args::Dep;
+    let list = crate::ncbi_app::args::dependencies("windowmasker");
+    assert_eq!(list.len(), 2 * 38);
+    for &(first, dep, second) in &list {
+        assert_eq!(dep, Dep::Excludes);
+        assert!(list.contains(&(second, dep, first)), "{first} {second}");
+    }
+    assert!(list.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+    assert_eq!(list[0], ("checkdup", Dep::Excludes, "ustat"));
 }

@@ -816,6 +816,7 @@ fn word7_uses_subject_set_cutoffs() {
         run_local(
             options.blastn,
             &reader_records(&query, ReaderConfig::query("BLASTN", false, false)),
+            &crate::api::QueryEnd::Input,
             &reader_records(&subject, ReaderConfig::subject("BLASTN", false, false)),
             &mut ReportOutputs::single("6", OutputSink::Writer(&mut output), &mut stderr),
         )
@@ -1119,7 +1120,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         (
             1,
             format!(
-                "BLAST query/options error: {text}\n{}\n",
+                "LOSAT query/options error: {text}\n{}\n",
                 crate::wording::USER_MANUAL_FOOTER
             ),
         )

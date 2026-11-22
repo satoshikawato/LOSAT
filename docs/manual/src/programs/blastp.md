@@ -81,8 +81,9 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 ## Differences from NCBI BLAST+
 
+- With `-db_hard_mask`, a database sequence whose first mask runs to its end (a masked tail, or a sequence masked entirely) is searched before its mask. NCBI BLAST+ 2.17.0 reads the masked letters there and can crash or report other alignments. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - With `-window_size 0` and a low `-threshold`, NCBI BLAST+ 2.17.0 can read memory past the end of a sequence and crash. LOSAT reads the letters past the end as the end marker, which gives NCBI BLAST+'s own output where its stray bytes are zero. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
-- With unified P-values (`-comp_based_stats 1u`, `2u` or `3u`), NCBI BLAST+ 2.17.0 adjusts the e-values of a query with the length and the search space of the query that follows it in the same batch of queries (it reads the queries in batches of about 10,000 residues; the environment variable `BATCH_SIZE` sets the size). LOSAT does the same, and writes what NCBI BLAST+ writes with `-num_threads 1`. For the last query of a batch, which includes a search with one query, NCBI BLAST+ reads past the end of its data, and its report can change from run to run. There LOSAT uses the query's own length and search space, which gives the report NCBI BLAST+ writes for that query when a copy of it follows in the same batch and does not change the pieces in which NCBI BLAST+ searches the batch (the environment variable `CHUNK_SIZE`). See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+- With unified P-values (`-comp_based_stats 1u`, `2u` or `3u`), NCBI BLAST+ 2.17.0 adjusts the e-values of a query with the length and the search space of the query that follows it in the same batch of queries (it reads the queries in batches of about 10,000 residues; the environment variable `BATCH_SIZE` sets the size). LOSAT does the same, and writes what NCBI BLAST+ writes with `-num_threads 1` (apart from the version line, which names LOSAT). For the last query of a batch, which includes a search with one query, NCBI BLAST+ reads past the end of its data, and its report can change from run to run. There LOSAT uses the query's own length and search space, which gives the report NCBI BLAST+ writes for that query when a copy of it follows in the same batch and does not change the pieces in which NCBI BLAST+ searches the batch (the environment variable `CHUNK_SIZE`). See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ## What LOSAT refuses
 
@@ -94,7 +95,6 @@ LOSAT stops with an error for these `blastp` settings instead of running somethi
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.
-- `-db_hard_mask` on a database with a sequence whose first mask runs to its end (a masked tail, for example).
 
 ## Examples
 

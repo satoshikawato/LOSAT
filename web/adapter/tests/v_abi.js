@@ -85,13 +85,27 @@ function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
+// The SHA-256 of LOSAT's output read back in NCBI's words, to compare with a frozen hash of NCBI's
+// bytes: LOSAT states its own version and error prefixes (AGENTS.md rule 8), which
+// LOSAT/tests/losat_wording.py `hash-form` (`ncbi_hash_form`) reads back exactly. An output that
+// still writes NCBI's words has no such form and matches no frozen hash.
+function ncbiHash(bytes) {
+  const read = require("node:child_process").spawnSync("python3", ["-I", path.join(ROOT, "LOSAT/tests/losat_wording.py"), "hash-form", "-"],
+                                                        { input: bytes, maxBuffer: 1 << 30 });
+  if (read.error) throw read.error;
+  return read.status === 0 ? sha256(read.stdout) : `ncbi-words:${read.stderr}`;
+}
+
 // A SAM document without the CL tag of its @PG line (LOSAT/tests/db_search_fixtures.py
-// `strip_sam_cl`: from the `\tCL:` after `\n@PG\tID:0\tVN:2.17.0+` up to the next `\tPN:blastn\n`).
+// `strip_sam_cl`: from the `\tCL:` after the version of `\n@PG\tID:0\tVN:<version>` up to the
+// next `\tPN:blastn\n`).
 function withoutCl(document) {
-  const head = Buffer.from("\n@PG\tID:0\tVN:2.17.0+\tCL:");
+  const head = Buffer.from("\n@PG\tID:0\tVN:");
   const at = document.indexOf(head);
   if (at < 0) return document;
-  const start = at + head.length - "\tCL:".length;
+  const tab = document.indexOf(Buffer.from("\t"), at + head.length);
+  if (tab < 0 || !document.subarray(tab, tab + 4).equals(Buffer.from("\tCL:"))) return document;
+  const start = tab;
   const end = document.indexOf(Buffer.from("\tPN:blastn\n"), start);
   if (end < 0) return document;
   return Buffer.concat([document.subarray(0, start), document.subarray(end)]);
@@ -568,6 +582,11 @@ function checkFailure(run, expected, search, label) {
   if (dropped.length > 0) assert.deepEqual(dropped, others, `${label}: the outputs that the failed run drops (stream 9)`);
   for (const format of others) assert.ok(!run.streams.has(format), `${label}: nothing of the dropped outfmt ${format}`);
   assert.ok(!run.streams.has(1), `${label}: no HSP records`);
+  // `"sends"`: the formats whose report of the batches before the failure is over the adapter's chunk (1 MiB), which the
+  // run sends before it fails (review L3, 2026-11-20).
+  for (const format of search.sends || []) {
+    assert.ok((run.streams.get(format) || Buffer.alloc(0)).length > 0, `${label}: outfmt ${format} sent before the failure`);
+  }
   if (search.prolog === false) {
     assert.equal(expected.outputs.get(0).length, 0, `${label}: the CLI writes no outfmt 0 before the failure`);
   } else {
@@ -699,9 +718,9 @@ function checkSurface(reactor, native) {
   const blastx = ["blastx", "-query", "q", "-subject", "s"];
   assert.equal(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "1-9", "-subject_loc", "2-5"].join("\0")).status, 0);
   assert.match(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "9-1", "-subject_loc", "5-2"].join("\0")).error,
-               /^BLAST engine error: Invalid specification of subject location/);
+               /^LOSAT engine error: Invalid specification of subject location/);
   assert.match(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "9-1"].join("\0")).error,
-               /^BLAST engine error: Invalid specification of query location/);
+               /^LOSAT engine error: Invalid specification of query location/);
   // The host validates the argv that it runs, with its -num_threads, so a -num_threads in
   // the user's words is a repeated option (abi_v2.md §7). The adapter parses the argv as the
   // CLI does, so the whole message (its usage line too) and an unknown program's are the CLI's.
@@ -738,7 +757,7 @@ function checkSurface(reactor, native) {
   }
   assert.match(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast",
                                                     "-word_size", "13"].join("\0")).error,
-               /^BLAST query\/options error: Invalid discontiguous template parameters: word size must be either 11 or 12/);
+               /^LOSAT query\/options error: Invalid discontiguous template parameters: word size must be either 11 or 12/);
   // BLASTN scores without a Karlin-Altschul table row (WA-FM-01). The CLI meets the tables only
   // when some query context has an ungapped Karlin-Altschul block, which depends on the query's
   // letters (a query of N only has none: a warning and rc 0). `validate` has no query, so it
@@ -1200,7 +1219,7 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor, close, waitForWorkers } = await engine.open();
-    assert.equal(reactor.exports.losat_web2_abi_version(), 10);
+    assert.equal(reactor.exports.losat_web2_abi_version(), 11);
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const logRows = await checkLogfileNames(reactor, options.native, scratch, engine.name, waitForWorkers);
@@ -1305,7 +1324,7 @@ async function main() {
           const want = expected.outputs.get(format);
           assert.equal(sha256(actual), sha256(want), `${label}: outfmt ${format}`);
           row.formats[format] = sha256(actual);
-          if (search.frozen[format]) row.frozen[format] = sha256(toFrozen(actual, search.frozen_prefix)) === search.frozen[format];
+          if (search.frozen[format]) row.frozen[format] = ncbiHash(toFrozen(actual, search.frozen_prefix)) === search.frozen[format];
         }
         if (search.files) {
           const sent = run.streams.get(CUSTOM_STREAM) || Buffer.alloc(0);
@@ -1323,8 +1342,8 @@ async function main() {
             assert.equal(sha256(bytes), sha256(cli[index][1]), `${label}: -outfmt ${search.outfmt} ${name}`);
           }
           row.formats.custom = sha256(sent);
-          const master = sha256(toFrozen(entries[entries.length - 1][1], search.frozen_prefix));
-          const sides = entries.slice(0, -1).map(([, bytes]) => sha256(toFrozen(bytes, search.frozen_prefix))).join(",");
+          const master = ncbiHash(toFrozen(entries[entries.length - 1][1], search.frozen_prefix));
+          const sides = entries.slice(0, -1).map(([, bytes]) => ncbiHash(toFrozen(bytes, search.frozen_prefix))).join(",");
           if (search.frozen.custom) row.frozen.custom = master === search.frozen.custom;
           if (search.frozen.sides !== undefined) row.frozen.sides = sides === search.frozen.sides;
         } else if (customStream(search)) {
@@ -1333,7 +1352,7 @@ async function main() {
           const cli = expected.outputs.get(CUSTOM_STREAM);
           assert.equal(sha256(actual), sha256(search.sam ? withoutCl(cli) : cli), `${label}: -outfmt ${search.outfmt}`);
           row.formats.custom = sha256(actual);
-          if (search.frozen.custom) row.frozen.custom = sha256(toFrozen(actual, search.frozen_prefix)) === search.frozen.custom;
+          if (search.frozen.custom) row.frozen.custom = ncbiHash(toFrozen(actual, search.frozen_prefix)) === search.frozen.custom;
         } else {
           assert.ok(!run.streams.has(CUSTOM_STREAM), `${label}: no stream ${CUSTOM_STREAM} without an -outfmt of its own`);
         }

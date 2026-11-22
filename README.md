@@ -19,7 +19,7 @@
 
 **LOSAT** runs the local search programs and database tools of NCBI BLAST+ 2.17.0 with their command lines and writes their output. It is one executable written in Rust: it needs no BLAST+ installation, and it does not call NCBI's programs or libraries. `losat --install-shims` puts it in place of BLAST+ in an existing pipeline, so scripts that call `blastn` or `makeblastdb` run unchanged. The same engine is also a Rust library, a Python package (`pylosat`) and a WebAssembly package for the browser.
 
-On the v0.2.0 release test set, LOSAT writes the same output as NCBI BLAST+ 2.17.0, apart from the [differences listed in the manual](docs/manual/src/differences.md), and the same output at every `-num_threads`. It searches FASTA subjects (`-subject`) on all the threads you give it, where NCBI BLAST+ uses one, reads gzip, bzip2 and Zstandard FASTA directly, and keeps its memory small on large databases: a search of `core_nt` (319.4 GB) peaked at 407 MiB of resident memory, where NCBI BLAST+ peaked at 257.4 GiB (LOSAT `095ff0c16`, an earlier development build; NCBI BLAST+ maps the database files into memory, so its figure includes file pages the system can drop).
+On the v0.2.0 release test set, LOSAT writes the same output as NCBI BLAST+ 2.17.0, apart from the [differences listed in the manual](docs/manual/src/differences.md) (among them the line that names the program's version, which says `BLASTN (LOSAT 0.2.0)` where NCBI writes `BLASTN 2.17.0+`), and the same output at every `-num_threads`. It searches FASTA subjects (`-subject`) on all the threads you give it, where NCBI BLAST+ uses one, reads gzip, bzip2 and Zstandard FASTA directly, and keeps its memory small on large databases: a search of `core_nt` (319.4 GB) peaked at 407 MiB of resident memory, where NCBI BLAST+ peaked at 257.4 GiB (LOSAT `095ff0c16`, an earlier development build; NCBI BLAST+ maps the database files into memory, so its figure includes file pages the system can drop).
 
 <p align="center">
   <picture>
@@ -83,7 +83,7 @@ cargo build --release
 
 ### Platforms
 
-Linux (x86_64, aarch64), macOS (arm64, x86_64), Windows (x86_64) and the WASI serial module are **Supported**: they match NCBI BLAST+ 2.17.0 on the release test set. The WASI threads module is **Supported** and tested in CI, outside that comparison. LOSAT Web, the search page that runs in the browser, is a **Preview**. Details, and the one macOS difference (the last digit of a full-precision E value): [Platforms](docs/manual/src/platforms.md).
+Linux (x86_64, aarch64), macOS (arm64, x86_64), Windows (x86_64) and the WASI serial module are **Supported**: they match NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT). The WASI threads module is **Supported** and tested in CI, outside that comparison. LOSAT Web, the search page that runs in the browser, is a **Preview**. Details, and the one macOS difference (the last digit of a full-precision E value): [Platforms](docs/manual/src/platforms.md).
 
 ---
 
@@ -126,8 +126,8 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `tblastn` | Protein or PSSM (`-in_pssm`) against translated nucleotide (`tblastn`, `tblastn-fast`) | `0`–`16`, `18`, `20` | [tblastn](docs/manual/src/programs/tblastn.md) |
 | `tblastx` | Translated nucleotide against translated nucleotide | `0`–`16`, `18`, `20` | [tblastx](docs/manual/src/programs/tblastx.md) |
 | `psiblast` | Iterated protein search with a PSSM (`-num_iterations`, `-in_pssm`, `-in_msa`, `-out_pssm`) | `0`, `6`, `7`, `10`, `20` (with `-in_pssm` or `-in_msa`: `0`, `6`, `7`) | [psiblast](docs/manual/src/programs/psiblast.md) |
-| `rpsblast` | Protein against a PSSM database such as CDD | `0`, `5`, `6`, `7`, `10`, `11` | [rpsblast](docs/manual/src/programs/rpsblast.md) |
-| `rpstblastn` | Translated nucleotide against a PSSM database | `0`–`7`, `10`, `11` | [rpstblastn](docs/manual/src/programs/rpstblastn.md) |
+| `rpsblast` | Protein against a PSSM database such as CDD | `0`–`16`, `18`, `20` | [rpsblast](docs/manual/src/programs/rpsblast.md) |
+| `rpstblastn` | Translated nucleotide against a PSSM database | `0`–`16`, `18`, `20` | [rpstblastn](docs/manual/src/programs/rpstblastn.md) |
 | `makeblastdb` | Builds BLAST databases (versions 5 and 4; `-parse_seqids`, `-taxid`, `-mask_data`) from FASTA, also compressed | | [makeblastdb](docs/manual/src/programs/makeblastdb.md) |
 | `blastdbcmd` | Prints sequences and information from a BLAST database (`-entry`, `-entry_batch`, `-info`, `-outfmt`) | | [blastdbcmd](docs/manual/src/programs/blastdbcmd.md) |
 | `dustmasker` | Masks low-complexity nucleotide regions | intervals, FASTA, mask files for `makeblastdb` | [dustmasker](docs/manual/src/programs/dustmasker.md) |
@@ -143,7 +143,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 
 ## Benchmarks and pipelines
 
-Published tools and workflow managers run unchanged with LOSAT under the NCBI names (`--install-shims`), and their BLAST steps wrote the same output in every case compared (where NCBI BLAST+'s own output changes with the thread count, as in BUSCO and QIIME 2, the same as its 1-thread output):
+Published tools and workflow managers run unchanged with LOSAT under the NCBI names (`--install-shims`), and their BLAST steps wrote the same output in every case compared (where NCBI BLAST+'s own output changes with the thread count, as in BUSCO and QIIME 2, the same as its 1-thread output), apart from the line that names the program's version in the formats that have one:
 
 <p align="center">
   <picture>

@@ -68,7 +68,8 @@ pub(super) fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
 }
 
 /// The local time that `LocalTime::index_date` formats as `date`
-/// ("Oct 12, 2026  3:22 PM").
+/// ("Oct 12, 2026  3:22 PM"), second 0, at the instant of that time in UTC (the seed of
+/// `-randomize`: the cases of `-randomize` ran makeblastdb at that instant, in the zone UTC).
 pub(super) fn time_of(date: &str) -> LocalTime {
     let months = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -86,8 +87,22 @@ pub(super) fn time_of(date: &str) -> LocalTime {
         hour: hour12 % 12 + if *half == "PM" { 12 } else { 0 },
         minute: minute.parse().unwrap(),
         second: 0,
+        unix_seconds: 0,
     };
     assert_eq!(time.index_date(), date);
+    // The days since 1970-01-01 of the date (Gregorian calendar, years from 1 March).
+    let year = i64::from(time.year) - i64::from(time.month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * ((i64::from(time.month) + 9) % 12) + 2) / 5 + i64::from(time.day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    let unix_seconds = days * 86_400 + i64::from(time.hour) * 3_600 + i64::from(time.minute) * 60;
+    let time = LocalTime {
+        unix_seconds,
+        ..time
+    };
+    assert_eq!(LocalTime::from_unix_seconds(unix_seconds), time);
     time
 }
 
@@ -530,6 +545,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             mask_data: None,
             mask_id: None,
             mask_desc: None,
+            randomize: false,
         };
         // A run that writes no database stores no date; any time will do.
         let now = time_of(if case.date.is_empty() {
@@ -631,6 +647,7 @@ fn makedb_version(
         mask_data: None,
         mask_id: None,
         mask_desc: None,
+        randomize: false,
     };
     let now = time_of("Oct 12, 2026  9:00 PM");
     let (mut log, mut messages) = (Vec::new(), Vec::new());
@@ -682,7 +699,7 @@ fn an_output_name_with_a_space_is_refused() {
         let (status, log, messages) = makedb(&fasta, &out, "3GB", b"");
         assert_eq!(status, 1, "{out:?}");
         assert_eq!(
-            messages, "BLAST options error: Please provide a database name using -out\n",
+            messages, "LOSAT options error: Please provide a database name using -out\n",
             "{out:?}"
         );
         assert_eq!(log, "", "{out:?}");
@@ -807,7 +824,7 @@ fn a_new_database_that_cannot_be_opened_is_an_error() {
     assert_eq!(
         messages,
         format!(
-            "BLAST Database error: Could not find volume or alias file (db.00) referenced in \
+            "LOSAT database error: Could not find volume or alias file (db.00) referenced in \
              alias file ({}).\n",
             logged_db_name(&log)
         )
@@ -908,7 +925,7 @@ fn a_late_error_removes_the_volumes_already_written() {
     assert_eq!(status, 1);
     assert_eq!(
         messages,
-        "BLAST Database creation error: Near line 30, there's a line that doesn't look like \
+        "LOSAT database creation error: Near line 30, there's a line that doesn't look like \
          plausible data, but it's not marked as defline or comment.\n"
     );
     assert_eq!(
@@ -989,7 +1006,7 @@ fn other_errors_end_with_status_255() {
     let (status, log, messages) = makedb(&fasta, &tmp.base("db"), "4GiB", b"");
     assert_eq!(
         (status, messages.as_str()),
-        (1, "BLAST options error: max_file_sz must be < 4 GiB\n")
+        (1, "LOSAT options error: max_file_sz must be < 4 GiB\n")
     );
     assert_eq!(log_with_markers(log.as_bytes()), LOG_HEAD.as_bytes());
     // An existing database of the same name is removed before the value is read, as
@@ -1110,7 +1127,7 @@ fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
         let (status, log, messages) = makedb_version(&two, &out, "3GB", b"", 5);
         assert_eq!(
             (status, messages),
-            (2, format!("BLAST Database error: {error}\n")),
+            (2, format!("LOSAT database error: {error}\n")),
             "{length}"
         );
         assert_eq!(
@@ -1121,7 +1138,7 @@ fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
         let (status, log, messages) = makedb_version(&one, &out, "3GB", b"", 5);
         assert_eq!(
             (status, messages),
-            (1, format!("BLAST Database creation error: {error}\n")),
+            (1, format!("LOSAT database creation error: {error}\n")),
             "{length}"
         );
         assert_eq!(
@@ -1139,15 +1156,15 @@ fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
     assert!(files_named(&tmp.0, "e").contains(&format!("{}.pdb", "e".repeat(246))));
 }
 
-/// makeblastdb removes the names of an existing database with `CFile(name).Remove()`, which
-/// removes a directory with its contents (`CDirEntry::Remove(eRecursive)`), and gives a volume
-/// file its final name with `CDirEntry::Rename(fRF_Overwrite)`, which removes what is there the
-/// same way (makeblastdb 2.17.0, the official Linux x64 release, probe of 2026-11-08, cases
-/// `*_dir_full_2seq`, `pdb_symlink_dir_2seq`): a directory with contents, read-only parts
-/// included, at the LMDB names `db.pdb`, `db.pdb-lock`, `db.ptf-lock` (removals that make the
-/// log say "Deleted existing ..."), at `db.00.pdb` (an LMDB name of a volume, not counted) or
-/// at the volume name `db.pin` (no database is found there; the rename removes it) is gone and
-/// the build ends normally. A symbolic link at `db.pdb` is removed and its target kept.
+/// makeblastdb removes the names of an existing database with `Remove` of a `CFile`, which
+/// removes a directory with its contents (`CDirEntry::Remove` with `eRecursive`), and gives a
+/// volume file its final name with `CDirEntry::Rename` with `fRF_Overwrite`, which removes what is
+/// there the same way (makeblastdb 2.17.0, the official Linux x64 release, probe of 2026-11-08,
+/// cases `*_dir_full_2seq`, `pdb_symlink_dir_2seq`): a directory with contents, read-only parts
+/// included, at the LMDB names `db.pdb`, `db.pdb-lock`, `db.ptf-lock` (removals that make the log
+/// say "Deleted existing ..."), at `db.00.pdb` (an LMDB name of a volume, not counted) or at the
+/// volume name `db.pin` (no database is found there; the rename removes it) is gone and the build
+/// ends normally. A symbolic link at `db.pdb` is removed and its target kept.
 #[test]
 fn a_directory_at_a_name_of_the_database_is_removed_with_its_contents() {
     let tail = "Maximum file size: 3000000000B\nAdding sequences from FASTA; added 2 sequences in \
@@ -1496,8 +1513,10 @@ fn run_v5_case(case: &V5Case) {
     let log = std::fs::read(tmp.0.join("mk.log"))
         .ok()
         .map(|log| v5_markers(&log, &dir));
+    // NCBI's log in LOSAT's words (`crate::wording::losat_bytes`).
+    let expected_log = case.log.map(crate::wording::losat_bytes);
     assert!(
-        log.as_deref() == case.log,
+        log.as_deref() == expected_log.as_deref(),
         "{name}: log file\n{:?}\nexpected\n{:?}",
         log.as_deref().map(show),
         case.log.map(show)
@@ -1646,6 +1665,20 @@ fn oid_masks_runs_as_makeblastdb() {
 )]
 fn blastdb_input_runs_as_makeblastdb() {
     run_v5_cases("B_");
+}
+
+/// `-randomize` as makeblastdb 2.17.0 has it, run at a fixed instant (the seed: the date stored,
+/// in UTC): the copies of `-input_type blastdb` in the order of NCBI's shuffle, of versions 5 and
+/// 4, protein and nucleotide, several definition lines, several volumes in and out, two names and
+/// mixed algorithms, `-hash_index` and `-oid_masks`, a PIG, alias files with an OID list and a
+/// range, 289 and 5,002 sequences, and the error for another input type (line RG item D3d).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+fn randomize_runs_as_makeblastdb() {
+    run_v5_cases("R_");
 }
 
 /// `-in` files that exist and cannot be opened, as makeblastdb 2.17.0 has them (also a compressed
@@ -2022,7 +2055,7 @@ fn version_5_inputs_makeblastdb_aborts_on_are_refused() {
     assert_eq!(status, 1, "{err}");
     assert_eq!(
         err,
-        "BLAST Database creation error: Input id list not in ascending oid order: the sequence \
+        "LOSAT database creation error: Input id list not in ascending oid order: the sequence \
          gi|42 (OID 1) has only GI ids and lies between sequences with other ids, which \
          makeblastdb 2.17.0 cannot write into the .pos file of a version 5 database (it \
          aborts); LOSAT refuses the database (-blastdb_version 4 writes it)\n"
@@ -2040,7 +2073,7 @@ fn version_5_inputs_makeblastdb_aborts_on_are_refused() {
     assert_eq!(status, 1, "{err}");
     assert_eq!(
         err,
-        "BLAST Database creation error: Error: Duplicate seq_ids are found: \nREF|NP_1.1\n\n"
+        "LOSAT database creation error: Error: Duplicate seq_ids are found: \nREF|NP_1.1\n\n"
     );
     let long_db = format!("E512{}", "z".repeat(505));
     let (status, _, err) = parse_seqids_v5_run(
@@ -2051,7 +2084,7 @@ fn version_5_inputs_makeblastdb_aborts_on_are_refused() {
     assert_eq!(status, 1, "{err}");
     assert!(
         err.starts_with(
-            "BLAST Database creation error: mdb_put: MDB_BAD_VALSIZE: Unsupported size of \
+            "LOSAT database creation error: mdb_put: MDB_BAD_VALSIZE: Unsupported size of \
              key/DB name/data, or wrong DUPFIXED size (the acc2oid key 'E512ZZZ"
         ) && err.ends_with(":T1', 512 bytes; makeblastdb 2.17.0 aborts here)\n"),
         "{err}"

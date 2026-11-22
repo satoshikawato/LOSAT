@@ -334,7 +334,7 @@ pub(super) fn prepare(
 
 /// The masked regions of a query in NCBI's form (`Blast_GetSeqLocInfoVector`): the SEG (and
 /// lower-case) intervals of the searched letters (half-open, not yet joined), joined where
-/// they overlap (`BlastSeqLocCombine(filter_out, 0)`, blast_filter.c:1256; adjacent intervals
+/// they overlap (`BlastSeqLocCombine` of `filter_out` with 0, blast_filter.c:1256; adjacent intervals
 /// stay apart), other than an empty one and the whole searched interval, as inclusive
 /// positions in the record (`offset` is the interval's start), frame 0.
 fn query_masks(
@@ -386,7 +386,7 @@ impl PreparedXml {
     ) -> Result<()> {
         let run = self.positives.as_ref().map(|positives| XmlRun {
             program: "tblastn",
-            version: concat!("TBLASTN ", crate::ncbi_blast_version!()),
+            version: concat!("TBLASTN ", crate::wording::report_version!()),
             reference: REFERENCE_GAPPED_BLAST,
             db_name: &self.db_name,
             matrix: Some(&self.matrix_name),

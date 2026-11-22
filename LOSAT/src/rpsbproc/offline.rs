@@ -139,8 +139,8 @@ impl OfflineQuery {
         Ok(())
     }
 
-    /// One HSP of a hit whose `Hit_accession` gives `pssm_id` (`(unsigned int)atoi`), read when
-    /// its element ends; nothing after a failure.
+    /// One HSP of a hit whose `Hit_accession` gives `pssm_id` (`atoi` cast to `unsigned int`), read
+    /// when its element ends; nothing after a failure.
     pub(crate) fn hsp(&mut self, pssm_id: u32, hsp: &Hsp, evcut: f64) {
         if self.failure.is_some() {
             return;
@@ -151,24 +151,24 @@ impl OfflineQuery {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:142-281
-    // The getters of OPTIONAL members without a default throw `CUnassignedMember` when the
-    // document lacks them (`unassigned_member`, cited there): `Hsp_align-len`,
-    // `Hsp_identity` and `Hsp_query-frame`, in this order, after the E-value test. What the
-    // types decide: `GetQuery_from() - COORDSBASE` (and `GetQuery_to()`'s, `GetHit_from()`'s)
-    // overflows `int` for `-2147483648` (undefined): computed as its value, `INT_MIN - 1`, which
-    // `m_iFrom`, `m_iTo` and `hfrom` keep (PD-LOSAT-NCBI-DEFECTS exception 12, as for an archive's
-    // coordinates; PS16-Q1 oracles `xqfmin`, `xqtmin`, `xhfmin` and their nearby inputs);
-    // `m_iTo / 3` is then an `int` again, and `(m_iTo / 3) << 2` is C++20's `int` shift (NCBI's
-    // builds are C++20: modulo 2^32), or-ed into the `unsigned int` frame; `rf - 1`,
-    // `MinusId2PlusRFIdx` and the frame conversions are `unsigned int` arithmetic (`frames`, of
-    // the values modulo 2^32); `m_iTo - m_iFrom + 1` is `int` (computed as its value where it
-    // overflows, exception 12) compared as `unsigned int` (modulo 2^32) with the `unsigned int`
-    // `aaRes`, which `t1 - t0` (a `size_t`) adds to modulo 2^32;
-    // `m_dimTranslated[rfidx].size() - alignedLen` is a `size_t` difference passed as the
+    // The getters of OPTIONAL members without a default throw `CUnassignedMember` when the document
+    // lacks them (`unassigned_member`, cited there): `Hsp_align-len`, `Hsp_identity` and
+    // `Hsp_query-frame`, in this order, after the E-value test. What the types decide:
+    // `GetQuery_from()` less `COORDSBASE` (and likewise `GetQuery_to()` and `GetHit_from()`)
+    // overflows `int` for `-2147483648` (undefined): computed as its value, one less than
+    // `INT_MIN`, which `m_iFrom`, `m_iTo` and `hfrom` keep (PD-LOSAT-NCBI-DEFECTS exception 12, as
+    // for an archive's coordinates; PS16-Q1 oracles `xqfmin`, `xqtmin`, `xhfmin` and their nearby
+    // inputs); `m_iTo` divided by 3 is then an `int` again, and that value shifted left by 2 is
+    // C++20's `int` shift (NCBI's builds are C++20: modulo 2^32), or-ed into the `unsigned int`
+    // frame; `rf` less 1, `MinusId2PlusRFIdx` and the frame conversions are `unsigned int` arithmetic
+    // (`frames`, of the values modulo 2^32); `m_iTo` less `m_iFrom` plus 1 is `int` (computed as
+    // its value where it overflows, exception 12) compared as `unsigned int` (modulo 2^32) with the
+    // `unsigned int` `aaRes`, which `t1` less `t0` (a `size_t`) adds to modulo 2^32; the size of
+    // `m_dimTranslated[rfidx]` less `alignedLen` is a `size_t` difference passed as the
     // `unsigned int` `qofs`. `hseq` is read at the indices of `qseq`: its terminating 0 at its
-    // length, past it undefined (refused). The values that nothing prints or compares are not
-    // kept: `m_uiAlignedLen`, `m_iScore` (whose `(int)` of a score out of `int`'s range or of
-    // NaN is a conversion that C++ leaves undefined; it is stored and never read), `m_iNumIdent`,
+    // length, past it undefined (refused). The values that nothing prints or compares are not kept:
+    // `m_uiAlignedLen`, `m_iScore` (whose cast to `int` of a score out of `int`'s range or of NaN is a
+    // conversion that C++ leaves undefined; it is stored and never read), `m_iNumIdent`,
     // `m_dSeqIdentity`, `m_bIsMinus` (the frame's bits decide the strand everywhere it is read,
     // `domains::rf_index`).
     fn parse_hsp(&mut self, pssm_id: u32, hsp: &Hsp, evcut: f64) -> Result<(), ProcessError> {
@@ -199,12 +199,13 @@ impl OfflineQuery {
             self.pr_commit()?;
         }
         let (qseq, hseq) = (&hsp.qseq[..], &hsp.hseq[..]);
-        // `SeqLen_t alnLen = qseq.size()`: the length modulo 2^32 (`size_t` to `unsigned int`).
+        // `alnLen` (a `SeqLen_t`) is the length of `qseq`: the length modulo 2^32 (`size_t` to
+        // `unsigned int`).
         let aln_len = qseq.len() as u32;
-        // `++alnResIdx` passes `INT_MAX` when the first 2^31 columns or more of an `Hsp_qseq` of
-        // 2^31 letters or more are gaps (undefined): computed as its value, compared with `alnLen`
-        // as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS exception 12, line PS `DECISIONS.md` 59). It
-        // stops at `alnLen`, so it reads `qseq` within its length.
+        // The increment of `alnResIdx` passes `INT_MAX` when the first 2^31 columns or more of an
+        // `Hsp_qseq` of 2^31 letters or more are gaps (undefined): computed as its value, compared
+        // with `alnLen` as an `unsigned int` (PD-LOSAT-NCBI-DEFECTS exception 12, line PS
+        // `DECISIONS.md` 59). It stops at `alnLen`, so it reads `qseq` within its length.
         let mut aln_res_idx: i64 = 0;
         while (aln_res_idx as u32) < aln_len
             && (qseq[aln_res_idx as usize] == b'-' || hseq_at(hseq, aln_res_idx)? == b'-')
@@ -281,19 +282,20 @@ impl OfflineQuery {
     /// query from residue `qf` (less `qofs`) and on the domain from `hf`, and the query's residues
     /// written into its string of frame `rfidx`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:50-122
-    // (`qf - qofs`, `qf += segLen`, `hf += segLen` and `start - segLen` are `unsigned int`
-    // arithmetic (of `qf`'s and `hf`'s values modulo 2^32), stored in an `int` or passed as a
-    // `size_t`; `++start` of an `Hsp_qseq` of 2^31 letters or more passes `INT_MAX` (undefined):
-    // computed as its value, compared with `n` as an `unsigned int` and used as the `size_t` index
-    // and the `unsigned int` `start - segLen` (line PS `DECISIONS.md` 59; it stops at `n`, within
-    // the string); `++qf`, `--qf`, `++hf` and `--hf` are `int`, undefined past its limits: computed
-    // as their values, which `qf`, `hf` and `m_vecSStarts` keep (`domains::SubjectStarts`;
-    // PD-LOSAT-NCBI-DEFECTS exception 12; PS16-Q1 oracles `xhfmax`, `xhfmin` and their nearby
-    // inputs). `hf` starts from `Hsp_hit-from` and passes them with a hit near `INT_MAX` or
-    // `INT_MIN`; `qf` starts from `m_iFrom` (`INT_MIN - 1` for an `Hsp_query-from` of
-    // `-2147483648`), a `size_t` far past the string's length that the first `replace` throws at.
-    // `replace` is libstdc++'s (`string_replace`); `operator[]` past the string's length is
-    // undefined (refused), at its length only a NUL is defined (`write_residue`).)
+    // (`qf` less `qofs`, `qf` and `hf` increased by `segLen`, and `start` less `segLen` are
+    // `unsigned int` arithmetic (of `qf`'s and `hf`'s values modulo 2^32), stored in an `int` or
+    // passed as a `size_t`; the increment of `start` for an `Hsp_qseq` of 2^31 letters or more
+    // passes `INT_MAX` (undefined): computed as its value, compared with `n` as an `unsigned int`
+    // and used as the `size_t` index and the `unsigned int` `start` less `segLen` (line PS
+    // `DECISIONS.md` 59; it stops at `n`, within the string); the increments and decrements of `qf`
+    // and `hf` are `int`, undefined past its limits: computed as their values, which `qf`, `hf` and
+    // `m_vecSStarts` keep (`domains::SubjectStarts`; PD-LOSAT-NCBI-DEFECTS exception 12; PS16-Q1
+    // oracles `xhfmax`, `xhfmin` and their nearby inputs). `hf` starts from `Hsp_hit-from` and
+    // passes them with a hit near `INT_MAX` or `INT_MIN`; `qf` starts from `m_iFrom` (one less than
+    // `INT_MIN` for an `Hsp_query-from` of `-2147483648`), a `size_t` far past the string's length
+    // that the first `replace` throws at. `replace` is libstdc++'s (`string_replace`); `operator[]`
+    // past the string's length is undefined (refused), at its length only a NUL is defined
+    // (`write_residue`).)
     #[allow(clippy::too_many_arguments)]
     fn parse_align_strings(
         &mut self,
@@ -307,7 +309,7 @@ impl OfflineQuery {
         dst: &mut DomAlign,
         rfidx: usize,
     ) -> Result<(), ProcessError> {
-        // `x += segLen` of an `int` `x`: an `unsigned int` sum, stored back in the `int`.
+        // Adding `segLen` to an `int` `x`: an `unsigned int` sum, stored back in the `int`.
         let add_seg_len = |x: i64, seg_len: u32| i64::from((x as u32).wrapping_add(seg_len) as i32);
         let mut seg_len: u32 = 0;
         let mut eff_seg = true;
@@ -459,13 +461,13 @@ impl AlignedQuery for [u8] {
 /// "see if NA" of `ParseBlastOutput` (cited at `OfflineQuery::parse_hsp`): `aaRes`, the letters of
 /// `qseq` from `alnResIdx` on, which `parse_hsp` compares with the hit's span.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:209-214
-// 								++t0;
-// (`offl_cd_align_proc.cpp`, `ParseBlastOutput`.) `t0 < alnLen` compares as `unsigned int` (`alnLen`
-// is the length modulo 2^32); `++t0` is computed as its value (exception 12, `DECISIONS.md` 59);
-// `aaRes += t1 - t0` adds modulo 2^32. `t0 = t1 + 1` stores a `size_t` in the `int` (modulo 2^32,
-// C++20): from 2^31 on a negative `t0`, whose `qseq[t0]` NCBI reads far past the string
-// (`qseq_at` refuses it), and at 2^32 a `t0` of 0 or another position the loop has passed, from
-// which NCBI's loop starts over and never ends (refused).
+// (`offl_cd_align_proc.cpp`, `ParseBlastOutput`.) The test of `t0` below `alnLen` compares as
+// `unsigned int` (`alnLen` is the length modulo 2^32); the increment of `t0` is computed as its
+// value (exception 12, `DECISIONS.md` 59); `aaRes` grows by `t1` less `t0`, modulo 2^32. `t0` is set to
+// `t1` plus 1, which stores a `size_t` in the `int` (modulo 2^32, C++20): from 2^31 on a negative
+// `t0`, whose `qseq[t0]` NCBI reads far past the string (`qseq_at` refuses it), and at 2^32 a `t0`
+// of 0 or another position the loop has passed, from which NCBI's loop starts over and never ends
+// (refused).
 fn see_if_na<Q: AlignedQuery + ?Sized>(qseq: &Q, aln_res_idx: i64) -> Result<u32, ProcessError> {
     let aln_len = qseq.size() as u32;
     let mut aa_res: u32 = 0;
@@ -512,9 +514,9 @@ fn string_at(s: &[u8], i: i64) -> Option<u8> {
     }
 }
 
-/// `m_dimTranslated[rfidx][qf] = c`: a write within the string; at its length, the write of the
-/// terminating `charT()` that the standard defines (a NUL residue: the string is unchanged); any
-/// other write at or past its length is undefined (refused).
+/// The assignment of `c` to `m_dimTranslated[rfidx][qf]`: a write within the string; at its length,
+/// the write of the terminating `charT()` that the standard defines (a NUL residue: the string is
+/// unchanged); any other write at or past its length is undefined (refused).
 // C++17 and C++20 [string.access]/2 (LWG 2475; NCBI's 0.5.1 builds are C++20): "Returns:
 // *(begin() + pos) if pos < size(). Otherwise, returns a reference to an object of type charT with
 // value charT(), where modifying the object to any value other than charT() leads to undefined
@@ -536,12 +538,19 @@ fn write_residue(text: &mut [u8], at: i64, c: u8) -> Result<(), ProcessError> {
     Ok(())
 }
 
-/// libstdc++'s `basic_string::replace(pos, n1, str, pos2, n2)`: `n1` bytes from `pos` (fewer at
-/// the end) replaced by `n2` bytes of `str` from `pos2` (fewer at its end); the string may grow.
+/// libstdc++'s `basic_string::replace` of `n1` bytes at `pos` by `n2` bytes of `str` from `pos2`:
+/// `n1` bytes from `pos` (fewer at the end) are replaced by `n2` bytes of `str` from `pos2`
+/// (fewer at its end); the string may grow.
 /// Its `std::out_of_range` when a position is past its string's length, `pos2` checked first.
-// libstdc++ (GCC 13): include/c++/13/bits/basic_string.h:395-402,2311-2316,2352-2358
-// (`_M_limit(pos, n)` is `min(n, size() - pos)`. `qf`, an `int` (its value past `int`'s range
-// where exception 12 took it there), is the `size_t` `pos`: a negative one is beyond any length.)
+// The C++ standard's `basic_string::replace` takes the lesser of `n1` and the bytes after `pos`,
+// and the lesser of `n2` and the bytes of `str` after `pos2`, and throws `out_of_range` for a
+// position past the string's length; `pos2` is checked first because C++17 defines this
+// overload as `replace` of `n1` bytes at `pos` by the `substr` of a `basic_string_view` of `str`
+// (`pos2`, `n2`). The texts are observed: NCBI's
+// rpsbproc printed `basic_string::replace: __pos (which is N) > this->size() (which is M)` and
+// exited with status 3, the fixtures `tests/fixtures/rpsbproc/oracle/x.h_ntqlen1500.both.err`,
+// `x.h_ntframe4.doms.err` and `x.h_qfmin1.doms.err`. `qf`, an `int` (its value past `int`'s range
+// where exception 12 took it there), is the `size_t` `pos`: a negative one is beyond any length.
 fn string_replace(
     text: &mut Vec<u8>,
     pos: i64,

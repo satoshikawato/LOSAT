@@ -4,7 +4,7 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c
 //!
 //! This module is a child of `run` for the preliminary HSP types that `run` keeps private.
-//! Nothing here runs without `-culling_limit` (a limit of 0 is NCBI's `SetCullingLimit(0)`,
+//! Nothing here runs without `-culling_limit` (a limit of 0 is NCBI's `SetCullingLimit` of 0,
 //! which is ignored): the choice is made once per search, where `run` picks the sink of the
 //! preliminary hit lists, and once per query where it finishes a final hit list.
 
@@ -189,7 +189,7 @@ pub(super) fn cull_traceback(
     // `s_BlastHSPCullingFinal`: the new hit list (as `PrelimCulling::finish`, with
     // `ScoreCompareHSPs` on the final HSPs).
     // `hsplist_max` is set from `prelim_hitlist_size` as NCBI's pipe Final sets it
-    // (`Blast_HitListNew(params->prelim_hitlist_size)`); nothing reads it afterwards: the hit
+    // (`Blast_HitListNew` of `params->prelim_hitlist_size`); nothing reads it afterwards: the hit
     // list is finished by `finish_query_hit_list`, which trims by `hitlist_size`, and neither
     // `HitList::update` nor the array growth runs on it.
     let mut new_list = BlastnHitList::new(prelim_hitlist_size);

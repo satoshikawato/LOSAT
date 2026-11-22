@@ -279,7 +279,7 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
         let stderr = String::from_utf8_lossy(&failed.stderr);
         assert_eq!(failed.status.code(), Some(1), "{stderr}");
         assert!(
-            stderr.starts_with("BLAST query error: CFastaReader: "),
+            stderr.starts_with("LOSAT query error: CFastaReader: "),
             "{stderr}"
         );
         let partial = String::from_utf8(failed.stdout).expect("ASCII");

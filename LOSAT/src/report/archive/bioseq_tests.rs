@@ -1,6 +1,6 @@
 use super::*;
 
-/// The `DefLine` field is `NStr::PrintableString(s)` of the raw line (fasta.cpp:601) in the
+/// The `DefLine` field is the raw line through `NStr::PrintableString` (fasta.cpp:601) in the
 /// default `fNewLine_Quote` mode: a line feed, which only a record the library builds can
 /// hold, is written as `\n`.
 #[test]

@@ -257,14 +257,14 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         )
         .map_err(|error| Error::search(&error))?;
     }
-    let command = search.command(inputs)?;
+    let command = start.command_ref();
     // A PSSM query is one batch, whose size NCBI does not read (`BATCH_SIZE`; tblastn_app.cpp:
     // 208-221 reads it for a FASTA query only).
     let sizes = match inputs.query_file {
         Some(_) => BatchSizes::Fixed(1),
-        None => batch_sizes(&command, inputs, &start).map_err(|error| Error::search(&error))?,
+        None => batch_sizes(command, inputs, &start).map_err(|error| Error::search(&error))?,
     };
-    let query_range = query_range_of(&command);
+    let query_range = query_range_of(command);
     let skipped = lengths
         .iter()
         .map(|&length| {
@@ -314,7 +314,7 @@ impl Batches<'_> {
                 ..self.inputs
             },
         };
-        let mut command = self.search.command(inputs)?;
+        let mut command = self.start.command();
         let query_range = query_range_of(&command);
         match &mut command {
             Commands::Blastn(args) => {

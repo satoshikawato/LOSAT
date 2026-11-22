@@ -17,6 +17,7 @@ use super::search::Search;
 use crate::blastinput::ncbi_environment::{
     log_file, run_messages_follow_log, ApplicationSettings, ApplicationStart, DiagTarget, TextPlace,
 };
+use crate::cli::Commands;
 use crate::report::run_files::RunFiles;
 
 /// A start whose `-logfile` file is open (`open`), before its configuration load (`load`).
@@ -126,6 +127,10 @@ pub(crate) struct CallStart {
     log: Option<DiagTarget>,
     /// Whether the argv has `-dryrun`.
     dry_run: bool,
+    /// The call's argv as the command line's parser read it with the call's kind of inputs
+    /// (`Search::command`), once per call as the command line parses once per run: the call's
+    /// steps take it from here (`CallStart::command`) instead of parsing the argv again.
+    command: Commands,
     /// The diagnostic stream of NCBI's main thread of the call's run (`ncbi_exception::MainDiag`),
     /// which the call's code reads where it runs (`CallStart::enter`).
     diag: std::sync::Arc<crate::ncbi_exception::MainDiag>,
@@ -158,7 +163,7 @@ impl CallStart {
         let _run = crate::ncbi_exception::MainDiag::enter(Some(diag.clone()));
         let program = search.program().name();
         let started = begin(program, search.argv(), diagnostics)?;
-        search.command(inputs)?;
+        let command = search.command(inputs)?;
         let settings = started
             .settings
             .map_err(|reason| Error::Search(reason.into()))?;
@@ -168,8 +173,24 @@ impl CallStart {
                 .then_some(started.target)
                 .filter(|target| !matches!(target, DiagTarget::Stderr)),
             dry_run: search.dry_run(),
+            command,
             diag,
         })
+    }
+
+    // No NCBI counterpart: NCBI's application parses its arguments once per run (cited at
+    // `cli::main_entry`); a library call's steps share the one parse of its start instead of
+    // parsing the argv again (the parse is deterministic: the same argv and inputs give the
+    // same arguments).
+    /// The call's parsed argv (`Search::command` with the call's inputs, read at the call's
+    /// start), for a step that reads it.
+    pub(super) fn command_ref(&self) -> &Commands {
+        &self.command
+    }
+
+    /// The call's parsed argv, for a step that takes its own (each group of `run`, each batch).
+    pub(super) fn command(&self) -> Commands {
+        self.command.clone()
     }
 
     /// Whether the call is a dry run, which ends here: the start, the parse with the call's kind

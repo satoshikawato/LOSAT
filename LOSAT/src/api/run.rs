@@ -800,6 +800,7 @@ fn searches(
     search: &Search,
     inputs: Inputs<'_>,
     formats: &[&str],
+    start: &CallStart,
     log: &mut RunLog,
 ) -> Result<(Vec<Vec<usize>>, usize), Error> {
     use crate::blastinput::app::output_format::ARCHIVE_FORMAT;
@@ -822,16 +823,16 @@ fn searches(
     if numbers.contains(&ARCHIVE_FORMAT) {
         check_archive_inputs(search.program(), inputs)?;
     }
-    let command = search.command(inputs)?;
-    let groups = search_groups(&command, &numbers);
+    let command = start.command_ref();
+    let groups = search_groups(command, &numbers);
     if groups.len() > 1 {
-        if let Some(option) = pssm_file_option(&command) {
+        if let Some(option) = pssm_file_option(command) {
             return Err(Error::Argv(format!(
                 "{option} is not accepted by the library API with formats of two hit list sizes, which take two searches: the PSSM files are one search's; search those formats in calls of their own"
             ).into()));
         }
     }
-    Ok((groups, num_threads(&command)))
+    Ok((groups, num_threads(command)))
 }
 
 // No NCBI counterpart: the command line writes one format per run, so one search writes its PSSM
@@ -876,14 +877,14 @@ pub fn run(
     }
     let mut log = start.take_log();
     let formats: Vec<&str> = reports.iter().map(|(outfmt, _)| *outfmt).collect();
-    let (groups, threads) = searches(search, inputs, &formats, &mut log)?;
+    let (groups, threads) = searches(search, inputs, &formats, &start, &mut log)?;
     let mut writers: Vec<Option<&mut (dyn Write + Send)>> = reports
         .iter_mut()
         .map(|(_, writer)| Some(&mut **writer))
         .collect();
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         for (ordinal, group) in groups.iter().enumerate() {
-            let command = search.command(inputs)?;
+            let command = start.command();
             // The warnings of the first search include the reader's and the queries' warnings
             // that the next searches repeat; the command line writes them once.
             let mut repeated = Vec::new();
@@ -955,9 +956,9 @@ pub fn run_to_file(
     let mut log = start.take_log();
     let threads = {
         let formats = [outfmt];
-        searches(search, inputs, &formats, &mut log)?.1
+        searches(search, inputs, &formats, &start, &mut log)?.1
     };
-    let command = search.command(inputs)?;
+    let command = start.command();
     let mut file = OutFile::new(path, out_file_program(search.program()), outfmt);
     with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
         let mut sink = log.sink(&mut *diagnostics, true);
@@ -1006,14 +1007,13 @@ struct Searched {
 
 /// One search of `run_collect`: the formats at `positions` of `formats`.
 fn collect_one(
-    search: &Search,
     inputs: Inputs<'_>,
     formats: &[&str],
     positions: &[usize],
     start: &mut CallStart,
     mut sink: RunSink<'_>,
 ) -> Result<Searched, Error> {
-    let command = search.command(inputs)?;
+    let command = start.command();
     let query_range = query_range_of(&command);
     let ordinals = searched_queries(query_range, inputs.query);
     let mut writers: Vec<CountingWriter> =
@@ -1222,7 +1222,7 @@ pub fn run_collect(
         });
     }
     let mut log = start.take_log();
-    let (groups, threads) = searches(search, inputs, formats, &mut log)?;
+    let (groups, threads) = searches(search, inputs, formats, &start, &mut log)?;
     let mut searched: Vec<Searched> = Vec::new();
     // The searches of one call share one thread pool (`with_run_pool`), as the command line's
     // one search has one.
@@ -1237,9 +1237,7 @@ pub fn run_collect(
             } else {
                 log.sink(&mut repeated, false)
             };
-            searched.push(collect_one(
-                search, inputs, formats, group, &mut start, sink,
-            )?);
+            searched.push(collect_one(inputs, formats, group, &mut start, sink)?);
         }
         Ok(())
     })?;

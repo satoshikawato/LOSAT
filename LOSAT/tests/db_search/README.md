@@ -2381,7 +2381,8 @@ LAST_OID 2), where B is the first searched sequence. Made as the other shapes (`
 forms; masks [10,300) [20,310)), which stores no entry and whose two-hit walk goes back, then B (`ov_zt`'s B with the query's
 letters 18-29 at 3, or in the `f` forms its letters 20-24, one run of three word hits; no masks). NCBI's one-thread search
 starts B on a new table at 10 (`thm20`: -20), within the window of the entries that no sequence wrote (below them at -20).
-The rows of `qzt.faa` / `qzt.fna` (one query) have NCBI's bytes at every thread count; `q1q.faa` / `q1q.fna` (q1, 60 letters,
+The rows of `qzt.faa` / `qzt.fna` (one query) are NCBI's one-thread bytes, and LOSAT gives them at every thread count
+(NCBI's own runs at 4 threads can differ: `ov_thm20f` gave 4 rows instead of 10); `q1q.faa` / `q1q.fna` (q1, 60 letters,
 then `qzt`'s query) are two NCBI query batches at `BATCH_SIZE=50` and one by default, and q's rows differ between the two in
 NCBI's runs (BLASTP: 5 and 4 rows of q in `ov_th10`), as NCBI searches each batch alone, its queries counted from the batch's
 start: the rows `.q1q.` (and `.q1q.b50.`) check both batchings, and `LOSAT/tests/blastp_prelim_blocks.rs` runs them with

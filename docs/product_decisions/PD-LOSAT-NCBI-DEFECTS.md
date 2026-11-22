@@ -1277,10 +1277,12 @@ entries that reach another sequence)". Line NP item M4b-3b.
     positions (of the UniRef50 sample 77,483). The search without `-db_hard_mask` is unchanged. The
     kernels count every one word of a chunk past a sequence's end as a hit (as for a query with the
     gap letter), so they also move the offset for a word that no query read from FASTA hits, which
-    changes no row. A sequence without masks that starts on a new table moves the offset after it
-    past the entries that no sequence wrote as well as past its own (`DiagonalWalk::plain`), so the
-    next sequence that the thread's table searches, not always the next one in the database, meets
-    none of them (review 3 of M4b-3b, M1).
+    changes no row. In BLASTX, which keeps a worker's table across subjects that are not consecutive,
+    a sequence without masks that starts on a new table moves the offset after it past the entries
+    that no sequence wrote as well as past its own (`DiagonalWalk::plain`), so the next sequence that
+    the worker's table searches, not always the next one in the database, meets none of them; BLASTP
+    searches such a sequence on a table of its own and leaves the worker's table as it was (review 3
+    of M4b-3b, M1).
     NCBI searches each query batch of a query file alone (`blastp_app.cpp:216, 257`; 10,000 letters
     a batch in BLASTP, `BATCH_SIZE` overrides it): its table is the batch's own, of the power of two
     just at least the batch's length plus the window (`blast_extend.c:46-65`), and a hit's diagonal

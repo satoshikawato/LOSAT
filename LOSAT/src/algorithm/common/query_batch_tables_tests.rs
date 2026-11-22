@@ -1,8 +1,9 @@
 use super::*;
 use crate::algorithm::common::diag_entry::batch_context_distance;
 
-/// Two batches as `q1q.faa` lays them out (fixture `th10` of M/m4b3b/review/probe_r3): `q1` of 60
-/// letters, the sentinel, then `q` of 240 letters at 61.
+/// Two batches laid out as `q1q.faa` lays them out (fixture `th10` of M/m4b3b/review/probe_r3): `q1` of 60
+/// letters, the sentinel, then a second query at 61, here of 240 letters (the fixture's `q` has 48) so
+/// that the two batches get tables of different sizes.
 const LAYOUT: [(i32, i32); 2] = [(0, 60), (61, 240)];
 
 #[test]
@@ -122,7 +123,7 @@ fn the_context_test_reads_the_batchs_offsets() {
     assert_eq!(batch_context_distance(20, 30, 0), 30);
     assert_eq!(batch_context_distance(20, 10, 0), 10);
     for (q, diff, start) in [
-        (77, 30, 61),
+        (77_i32, 30_i32, 61_i32),
         (77, 16, 61),
         (20, 30, 61),
         (5, 3, 0),

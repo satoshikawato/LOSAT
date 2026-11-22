@@ -35,7 +35,7 @@ fn exceptions_end_the_run_as_catch_all_s_branches() {
     let invalid = (
         1,
         format!(
-            "BLAST query/options error: Invalid input format for BLAST Archive.\n{}\n",
+            "LOSAT query/options error: Invalid input format for BLAST Archive.\n{}\n",
             crate::wording::USER_MANUAL_FOOTER
         ),
     );
@@ -62,14 +62,14 @@ fn exceptions_end_the_run_as_catch_all_s_branches() {
             "CRemoteBlastException::eServiceNotAvailable",
             "no"
         ))),
-        (3, "BLAST engine error: no\n".to_string())
+        (3, "LOSAT engine error: no\n".to_string())
     );
     assert_eq!(
         native(exception_error(&exception(
             "CBlastException::eInvalidOptions",
             "bad"
         ))),
-        (1, "BLAST options error: bad\n".to_string())
+        (1, "LOSAT options error: bad\n".to_string())
     );
     assert_eq!(
         native(exception_error(&exception(
@@ -83,7 +83,7 @@ fn exceptions_end_the_run_as_catch_all_s_branches() {
             "CSeqDBException::eFileErr",
             "gone"
         ))),
-        (2, "BLAST Database error: gone\n".to_string())
+        (2, "LOSAT database error: gone\n".to_string())
     );
     assert_eq!(
         native(exception_error(&exception(
@@ -158,7 +158,7 @@ fn the_other_formats_are_refused_after_ncbi_s_checks() {
         (
             1,
             format!(
-                "BLAST query/options error: Please provide a file name for outfmt 13.\n{}\n",
+                "LOSAT query/options error: Please provide a file name for outfmt 13.\n{}\n",
                 crate::wording::USER_MANUAL_FOOTER
             )
         )

@@ -19,7 +19,8 @@ fn run_words(line: &[&str], input: &[u8]) -> (i32, String, String) {
 #[test]
 fn the_short_usage_is_the_head_of_the_help() {
     let usage = crate::ncbi_app::short_usage(HELP);
-    assert_eq!(usage.len(), 482);
+    // NCBI's 482 bytes, its version replaced by LOSAT's.
+    assert_eq!(usage.len(), 482 + crate::wording::IDENT_GROWTH);
     assert!(usage.starts_with("USAGE\n  blast_formatter [-h] [-help] [-rid BLAST_RID]"));
     assert_eq!(HELP.len(), 6306);
 }
@@ -119,7 +120,7 @@ fn an_empty_rid_is_ncbi_s_engine_error() {
         (
             3,
             String::new(),
-            "BLAST engine error: Empty RID string specified\n".to_string()
+            "LOSAT engine error: Empty RID string specified\n".to_string()
         )
     );
 }
@@ -184,7 +185,7 @@ fn an_archive_that_does_not_open_is_ncbi_s_argument_error() {
 #[test]
 fn an_archive_that_opens_is_formatted() {
     let invalid = format!(
-        "BLAST query/options error: Invalid input format for BLAST Archive.\n{}\n",
+        "LOSAT query/options error: Invalid input format for BLAST Archive.\n{}\n",
         crate::wording::USER_MANUAL_FOOTER
     );
     assert_eq!(

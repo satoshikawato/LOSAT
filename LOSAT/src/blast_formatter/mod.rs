@@ -8,6 +8,7 @@
 mod archive;
 mod formatting;
 pub(crate) mod refusals;
+mod search_program;
 
 use std::ffi::OsString;
 use std::io::{Read, Write};

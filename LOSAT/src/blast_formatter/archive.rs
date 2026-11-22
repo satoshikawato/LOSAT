@@ -19,6 +19,7 @@ use std::path::Path;
 
 use super::formatting::{extract_formatting, sam_check};
 use super::refusals::{self, Refusal};
+use super::search_program::{search_program, SearchProgram};
 use super::{Options, PROGRAM};
 use crate::algorithm::common::database::{
     database_error, database_error_of, open_search_database, pairwise_database, refusal,
@@ -34,7 +35,8 @@ use crate::cli::{command_line_argument_error, NativeError};
 use crate::ncbi_app::files::{self, ends_like_sigpipe, OutputFile};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::NcbiException;
-use crate::report::archive::read::request::{Queries, SearchOptions, SearchProgram, Subject};
+use crate::report::archive::read::options::{archive_request, BuiltOptions};
+use crate::report::archive::read::request::{Queries, Subject};
 use crate::report::archive::read::{
     seq_align_id, Archive, ArchiveReader, Message, Search, Severity, Stop,
 };
@@ -126,7 +128,7 @@ struct Run<'r, 'o> {
     output: Output<'o>,
     /// The options of the first search object (`m_CBOH`, `m_TaxidList`,
     /// `m_DbFilteringAlgorithmId`, `m_Task`), which every later object is formatted with.
-    search_options: Option<SearchOptions>,
+    search_options: Option<BuiltOptions>,
     /// The options' hit list size: the first object's, then what `ExtractAlgorithmOptions` set
     /// for the last formatted object (`opts.SetHitlistSize` on the kept options).
     hitlist: i32,
@@ -269,8 +271,8 @@ impl<'r, 'o> Run<'r, 'o> {
             self.database = Some((name.clone(), search.request.db_is_protein()));
         }
         if self.search_options.is_none() {
-            let options = search.request.search_options().map_err(stop_error)?;
-            self.hitlist = options.hitlist_size;
+            let options = archive_request(&search.request).map_err(|e| exception_error(&e))?;
+            self.hitlist = options.hitlist_size();
             self.search_options = Some(options);
         }
         self.print(&search, diag)
@@ -391,7 +393,7 @@ impl<'r, 'o> Run<'r, 'o> {
             .search_options
             .as_ref()
             .expect("the options of the first search object");
-        let program = search_options.program;
+        let program = search_program(search_options.program);
         sam_check(
             &formatting.choice,
             matches!(program, SearchProgram::Named(program) if program.blastn),
@@ -827,7 +829,7 @@ fn opened_database<'d>(
     opened: &'d mut Option<OpenedDatabase>,
     name: &[u8],
     protein: bool,
-    options: &SearchOptions,
+    options: &BuiltOptions,
     settings: &ApplicationSettings,
 ) -> (anyhow::Result<&'d OpenedDatabase>, Vec<u8>) {
     let reused = opened
@@ -856,7 +858,7 @@ fn opened_database<'d>(
 fn open_database(
     name: &[u8],
     protein: bool,
-    options: &SearchOptions,
+    options: &BuiltOptions,
     settings: &ApplicationSettings,
     warnings: &mut Vec<u8>,
 ) -> anyhow::Result<Vec<u8>> {
@@ -872,7 +874,11 @@ fn open_database(
         Err(DatabaseOpenError::Registry(reason)) => return Err(refusal(&reason, PROGRAM)),
         Err(DatabaseOpenError::Reader(error)) => return Err(remote_database(&error, text)),
     };
-    if let Some(taxids) = options.taxids.as_ref().filter(|taxids| !taxids.is_empty()) {
+    if let Some(taxids) = options
+        .taxid_list
+        .as_ref()
+        .filter(|taxids| !taxids.is_empty())
+    {
         let list = DbList::Taxids(TaxidList::Positive(taxids.iter().copied().collect()));
         let mut posted = Vec::new();
         let restricted = db.restrict(&list, &mut posted);
@@ -883,9 +889,12 @@ fn open_database(
     }
     db.check_alias_values()
         .map_err(|error| remote_database(&error, text))?;
-    db.read_name_records(text, options.db_filtering_algorithm.is_some())
+    // `GetSearchOptions` keeps the filtering algorithm of the options only when it is not -1
+    // (remote_blast.cpp:2056-2059).
+    let filtering = options.db_filtering_algorithm_id.filter(|&id| id != -1);
+    db.read_name_records(text, filtering.is_some())
         .map_err(|error| database_error(error, PROGRAM))?;
-    if let Some(id) = options.db_filtering_algorithm {
+    if let Some(id) = filtering {
         db.name_mask_details(id)
             .map_err(|error| name_mask_error(&error, PROGRAM))?;
     }

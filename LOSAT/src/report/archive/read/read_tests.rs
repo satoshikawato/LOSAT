@@ -7,6 +7,7 @@
 use std::ops::Range;
 use std::path::Path;
 
+use super::options::archive_request;
 use super::request::{ParamSet, Queries, Request, Subject};
 use super::results::{KarlinBlocks, MaskRange, Results, SearchStats};
 use super::{seq_align_id, seq_loc_id, Archive, ArchiveReader, Message, Search, Severity, Stop};
@@ -106,7 +107,41 @@ const EDITED: [&str; 6] = [
 /// whole, object by object, and its values written back are its bytes. Left out: the malformed
 /// archives of rpsbproc's tests (`fixtures/rpsbproc/arch/bad`), its copies edited by hand
 /// (`EDITED`), and the `.merged` files of `archive_replaced` (a run's stdout and stderr in one
-/// file, with NCBI's messages inside the archive's text).
+/// file, with NCBI's messages inside the archive's text). An archive whose paths the tests
+/// replaced by a placeholder (`has_placeholder`) is compared without the line breaks inside its
+/// strings: NCBI broke those lines where the real path put them.
+/// Whether a fixture holds a placeholder that its test replaces by a path (`@CWD@`,
+/// `{db_dir}`: an upper-case name between `@`, a lower-case one between braces).
+fn has_placeholder(text: &[u8]) -> bool {
+    let between = |open: u8, close: u8, letter: fn(&u8) -> bool| {
+        text.iter().enumerate().any(|(at, &b)| {
+            b == open
+                && text[at + 1..]
+                    .iter()
+                    .position(|&b| b == close)
+                    .is_some_and(|len| {
+                        let name = &text[at + 1..at + 1 + len];
+                        !name.is_empty() && name.iter().all(|b| *b == b'_' || letter(b))
+                    })
+        })
+    };
+    between(b'@', b'@', u8::is_ascii_uppercase) || between(b'{', b'}', u8::is_ascii_lowercase)
+}
+
+/// The text without the line breaks inside its strings (a doubled quote toggles twice).
+fn unwrapped(text: &[u8]) -> Vec<u8> {
+    let mut inside = false;
+    text.iter()
+        .copied()
+        .filter(|&b| {
+            if b == b'"' {
+                inside = !inside;
+            }
+            !(inside && b == b'\n')
+        })
+        .collect()
+}
+
 #[test]
 fn every_archive_of_the_fixtures_is_written_back_as_read() {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -158,7 +193,11 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
                     }
                 }
             }
-            if error.is_none() && out != text {
+            let placeholder = has_placeholder(&text);
+            if error.is_none()
+                && out != text
+                && (!placeholder || unwrapped(&out) != unwrapped(&text))
+            {
                 let at = out
                     .iter()
                     .zip(&text)
@@ -469,7 +508,7 @@ fn the_request_is_read_as_stored() {
             (ParamSet::Program, "LCaseMask".to_string()),
         ]
     );
-    assert_eq!(request.hitlist_size(), Ok(500));
+    assert_eq!(hitlist(&request), Ok(500));
 
     // The database of a search, as stored, and the residue type `x_SetDatabase` gives it.
     for (name, program, protein, translated) in [
@@ -674,21 +713,48 @@ fn the_queries_of_each_form_are_read() {
     );
 }
 
+/// The hit list size of the options built for an archive's request.
+fn hitlist(request: &Request) -> Result<i32, String> {
+    archive_request(request)
+        .map(|options| options.hitlist_size())
+        .map_err(|e| String::from_utf8_lossy(e.get_msg()).into_owned())
+}
+
 /// `HitlistSize`: the last one of the algorithm and program options (the format options are
-/// not read), else 500; `GetParamByName` the first of a list; another type of value stops
-/// NCBI's option builder.
+/// not read), else 500; `GetParamByName` the first of a list; another
+/// type of value stops NCBI's option builder.
 #[test]
 fn the_hitlist_size_is_the_last_one_stored() {
     let locs = "seq-loc-list { int { from 0, to 9, id local str \"q\" } }";
     let db = "database \"db\"";
-    assert_eq!(request(locs, db, "").hitlist_size(), Ok(500));
+    assert_eq!(hitlist(&request(locs, db, "")), Ok(500));
     let options = ", algorithm-options { { name \"HitlistSize\", value integer 5 }, \
                    { name \"EvalueThreshold\", value cutoff e-value { 1, 10, 1 } }, \
                    { name \"HitlistSize\", value integer 6 } }, \
                    program-options { { name \"HitlistSize\", value integer 7 } }, \
                    format-options { { name \"HitlistSize\", value integer 9 } }";
     let stored = request(locs, db, options);
-    assert_eq!(stored.hitlist_size(), Ok(7));
+    assert_eq!(hitlist(&stored), Ok(7));
+    // The format options reach the builder only where the service is psi, and only for the
+    // program's adjustment: a PHI pattern there stops a PSI-BLAST request, and its hit list
+    // size is still not read.
+    let phi = ", program-options { { name \"HitlistSize\", value integer 7 } }, \
+               format-options { { name \"HitlistSize\", value integer 9 }, \
+               { name \"PHIPattern\", value string \"LLL\" } }";
+    let blastp = |service: &str| {
+        let text = format!(
+            "Blast4-request ::= {{ ident \"x\", body queue-search {{ program \"blastp\", \
+             service \"{service}\", queries {locs}, subject {db}{phi} }} }}"
+        );
+        Request::from_value(value(named::BLAST4_REQUEST, &text))
+            .expect("a search")
+            .expect("not an error request")
+    };
+    assert_eq!(hitlist(&blastp("plain")), Ok(7));
+    assert_eq!(
+        hitlist(&blastp("psi")),
+        Err("Incorrect combination of option (PHIPattern) and program (blastp)".to_string())
+    );
     let params: Vec<_> = stored
         .params()
         .iter()
@@ -719,16 +785,20 @@ fn the_hitlist_size_is_the_last_one_stored() {
     );
     let algorithm_only = ", algorithm-options { { name \"HitlistSize\", value integer 5 }, \
                           { name \"HitlistSize\", value integer 6 } }";
-    assert_eq!(request(locs, db, algorithm_only).hitlist_size(), Ok(6));
+    assert_eq!(hitlist(&request(locs, db, algorithm_only)), Ok(6));
     let mistyped = ", algorithm-options { { name \"HitlistSize\", value string \"5\" } }";
+    let error = archive_request(&request(locs, db, mistyped)).unwrap_err();
     assert_eq!(
-        exception(request(locs, db, mistyped).hitlist_size().unwrap_err()),
+        (error.site().file, error.site().line, error.kind()),
         (
             "src/algo/blast/api/blast_options_builder.cpp",
             541,
             "CRemoteBlastException::eServiceNotAvailable",
-            "Internal: Error processing option [HitlistSize] type [12].".to_string()
         )
+    );
+    assert_eq!(
+        hitlist(&request(locs, db, mistyped)),
+        Err("Internal: Error processing option [HitlistSize] type [12].".to_string())
     );
 }
 

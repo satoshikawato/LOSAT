@@ -2059,7 +2059,7 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
 // (blast_traceback.c:429-440,509-512), the identities after the composition-based redo
 // (blast_kappa.c:527-528, after its E-value purge, :3677-3700), the ungapped re-evaluation
 // (blast_hits.c:2700-2705; LOSAT's TBLASTN `-ungapped` and TBLASTX refuse there,
-// PD-LOSAT-NCBI-DEFECTS 1.78 and 1.51). NCBI BLAST+ 2.17.0 dies there with
+// PD-LOSAT-NCBI-DEFECTS 1.79 and 1.51). NCBI BLAST+ 2.17.0 dies there with
 // SIGSEGV (probes on ws, 2026-11-17: `-subject`, `-subject_loc` and `-db`, frames + and -, a matrix
 // query at `-comp_based_stats` 0 to 3, `-in_pssm`): no result is defined (PD-LOSAT-NCBI-DEFECTS
 // 1.46, rule 3). A subject that leaves no HSP to that point (cut by a cutoff, the redo's purge or

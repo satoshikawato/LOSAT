@@ -240,7 +240,7 @@ pub(super) fn match_outcome<R: MatchRedo, T>(
 /// LOSAT's refusal of `-use_sw_tback` with `-ungapped`, on which NCBI crashes at every query batch
 /// it searches, with IDENTITY too (`smith_waterman_match::sw_ungapped_error`; NCBI BLAST+ 2.17.0
 /// with hits and without, `-subject` and `-db`, line NP item O4c, 2026-11-23;
-/// PD-LOSAT-NCBI-DEFECTS 1.78). The caller refuses at the traceback of the first query batch that
+/// PD-LOSAT-NCBI-DEFECTS 1.79). The caller refuses at the traceback of the first query batch that
 /// is searched, after the reports of the batches before it (`ErrorAfterBatchReports`): batches
 /// without a valid context, which NCBI reports with a warning and does not search (rows
 /// `db.tn.rej.ungapped.sw.*`).

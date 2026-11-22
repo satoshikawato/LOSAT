@@ -207,7 +207,7 @@ pub(crate) fn target_translation_never_made(subject_length: usize) -> bool {
 /// The refusal of `program`'s `step` (the NCBI step that reads the translation) of an alignment
 /// on a subject whose frames NCBI never translates (`target_translation_never_made`): NCBI BLAST+
 /// 2.17.0 reads from address 1 on (NULL + 1) and dies with SIGSEGV (PD-LOSAT-NCBI-DEFECTS 1.46 for
-/// TBLASTN, 1.78 for TBLASTN `-ungapped`, 1.51 for TBLASTX, rule 3).
+/// TBLASTN, 1.79 for TBLASTN `-ungapped`, 1.51 for TBLASTX, rule 3).
 #[cold]
 #[inline(never)]
 pub(crate) fn x_untranslated_frame_refusal(program: &str, step: &str) -> anyhow::Error {

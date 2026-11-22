@@ -49,7 +49,9 @@ Query files (`tests/fasta/x4b2/`):
   - `big2.fna` (m_fam and m_mix, `big12.fna` without its ten queries without a hit: 10600 letters, one batch at the
     default 10002) and `big2_pad.fna` (with BATCH_SIZE=12040): m_fam, m_mix and ten pads (12040 letters). NCBI splits
     a BLASTX batch of more than one query into no chunks, so both runs search each batch whole.
-  - Neither pair has a batch of queries without a hit only: NCBI warns about such a batch's queries (`Could not
+  - `bh3_pad.fna` (the merge of dev's `-best_hit_*` for BLASTX, #1473): dev's `tests/fasta/outfmt0/bh3_q.fna` (dq0,
+    dq1 and dq2, 4,655 letters, one batch at the default 10002) and fifteen pads (6,815 letters, still one batch).
+  - No pair has a batch of queries without a hit only: NCBI warns about such a batch's queries (`Could not
     calculate ungapped Karlin-Altschul parameters`) by their numbers in the file, which the pads before them would
     shift.
 
@@ -129,7 +131,8 @@ slices = read_fasta(os.path.join(TESTS, "db_search", "bslice_q.fna"))
 w = ("tks_W_nt tks_W in frame +1", nt(TKS_W))
 pre20 = ("pre20_nt the first 20 letters of qok1 in frame +1", nt(PRE20))
 nohit = [(f"nohit{i:02d} CCCCGGGGAACC repeated", NOHIT) for i in range(1, 17)]
-pad = [(f"pad{i:03d} CCCCGGGGAACC repeated", NOHIT) for i in range(1, 11)]
+pad = [(f"pad{i:03d} CCCCGGGGAACC repeated", NOHIT) for i in range(1, 16)]
+bh3 = list(read_fasta(os.path.join(TESTS, "fasta", "outfmt0", "bh3_q.fna")).items())
 qok1 = ("qok1_nt qok1 in frame +1", nt(QOK1))
 qok1_rc = ("qok1_rc qok1 in frame -1", rc(nt(QOK1)))
 w_rc = ("tks_W_rc tks_W in frame -1", rc(nt(TKS_W)))
@@ -169,6 +172,7 @@ queries = {
     "big2.fna": [m_fam, m_mix],
     "q2_b1_pad.fna": [m_fam_1k] + pad[:5] + [m_mix_1k] + pad[5:10],
     "big2_pad.fna": [m_fam, m_mix] + pad[:10],
+    "bh3_pad.fna": bh3 + pad[:15],
     "q240.fna": [("m_fam_240 bases 1-240 of m_fam", slices["m_fam"][:240])],
     "q120.fna": [("m_fam_120 bases 1-120 of m_fam", slices["m_fam"][:120])],
     "ok_fail.faa": [("sok1 BDT63546.1 of PajaWSV", SOK1),
@@ -195,10 +199,12 @@ def batches(records, size):
 
 # Each padded batch is an as-is batch followed by pads (none for the last, whose queries have no hit), enough to keep
 # every context of its queries with a hit inside the batch's array of heaps (5N pads keep all 6N contexts inside).
+known = {**queries, "bh3_q.fna": bh3}
 for as_is, as_size, padded, pad_size in [("q2.fna", 1, "q2_b1_pad.fna", 1720),
                                          ("big2.fna", 10002, "big2_pad.fna", 12040),
+                                         ("bh3_q.fna", 10002, "bh3_pad.fna", 10002),
                                          ("pre20_pad_wrc.fna", 1644, "pre20_pad_wrc_pad.fna", 1644)]:
-    own, oracle = batches(queries[as_is], as_size), batches(queries[padded], pad_size)
+    own, oracle = batches(known[as_is], as_size), batches(known[padded], pad_size)
     stripped = [[name for name in batch if not name.startswith("pad")] for batch in oracle]
     hits = [batch for batch in own if not all(name.startswith("nohit") for name in batch)]
     assert stripped[:len(hits)] == hits, (as_is, own, oracle)

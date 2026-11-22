@@ -491,8 +491,9 @@ fn refusals_by_name_have_one_form_and_the_hint_says_help() {
             format!("error: the NCBI BLAST+ option {option} is not supported by LOSAT's PROGRAM\n");
         assert!(forms.iter().all(|form| *form == expected), "{forms:?}");
     }
-    // blastx's other refusals by name (`-gilist`, `-use_sw_tback`) have the same form.
-    for option in ["-gilist", "-use_sw_tback"] {
+    // blastx's other refusals by name (`-gilist`, `-ipglist`) have the same form
+    // (`-use_sw_tback` runs since line RG item X4b-2).
+    for option in ["-gilist", "-ipglist"] {
         let output = run(losat(), &["blastx", "-query", "q.fa", option]);
         assert_eq!(output.status.code(), Some(2), "{option} {output:?}");
         assert_eq!(

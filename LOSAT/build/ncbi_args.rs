@@ -123,7 +123,7 @@ enum Refused {
 /// `-xmlhelp`, which leaves them out of NCBI's XML (`cli::xml_help_text`), read it. Un-refusing an
 /// argument is deleting its row. The build checks that each row names an argument of its program's
 /// XML, once.
-const REFUSED: [(&str, &str, Refused); 58] = [
+const REFUSED: [(&str, &str, Refused); 57] = [
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:63-70
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
     // `-db` and `-dbsize` are implemented (`blastn/args.rs`), as are the X-drops,
@@ -210,14 +210,14 @@ const REFUSED: [(&str, &str, Refused); 58] = [
         Refused::Run("NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search"),
     ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
-    // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
+    // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
+    // `-use_sw_tback` (line RG item X4b-1, #1481).
     ("tblastn", "entrez_query", Refused::Read(None)),
     ("tblastn", "gilist", Refused::Read(None)),
     ("tblastn", "html", Refused::Read(None)),
     ("tblastn", "import_search_strategy", Refused::Read(None)),
     ("tblastn", "negative_gilist", Refused::Read(None)),
     ("tblastn", "remote", Refused::Read(None)),
-    ("tblastn", "use_sw_tback", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918
     // tblastn's `-ungapped` with composition-based statistics: NCBI's
     // `Composition-adjusted searched are not supported with an ungapped search` comes first.

@@ -1,7 +1,8 @@
 //! No NCBI counterpart: a guard that the user manual's page "What LOSAT refuses"
-//! (docs/manual/src/refusals.md, the one list of refusals that users read) names every option that
-//! this parser refuses by name, per program, and every NCBI BLAST+ 2.17.0 executable that LOSAT
-//! does not provide.
+//! (docs/manual/src/refusals.md) names every option and run-time refusal per program and every
+//! NCBI BLAST+ 2.17.0 executable that LOSAT does not provide, while rare and pathological inputs
+//! live on the linked page docs/manual/src/refusals-edge-cases.md (not counted toward CLI option
+//! coverage).
 //!
 //! The page is read at compile time. The list under test is the one list of the arguments that
 //! LOSAT refuses by name or at the run (`ncbi_app::args::refusals`, the rows of `REFUSED` in
@@ -84,16 +85,24 @@ const NCBI_EXECUTABLES: [&str; 28] = [
     "windowmasker",
 ];
 
-/// The lines of the page with the heading of the section each belongs to ("" before the first).
-fn refusal_lines() -> Vec<(&'static str, &'static str)> {
-    let mut heading = "";
+/// The lines of one manual page with the heading of the section each belongs to
+/// ("" before the first `## ` heading).
+fn page_lines(page: &'static str) -> Vec<(&'static str, &'static str)> {
     let mut lines = Vec::new();
-    for line in PAGE.lines() {
+    let mut heading = "";
+    for line in page.lines() {
         if let Some(rest) = line.strip_prefix("## ") {
             heading = rest.trim();
         }
         lines.push((heading, line));
     }
+    lines
+}
+
+/// The lines of `docs/manual/src/refusals.md` (primary refused options, run refusals, and
+/// non-provided executable list; `refusals-edge-cases.md` is intentionally excluded).
+fn primary_refusal_lines() -> Vec<(&'static str, &'static str)> {
+    let lines = page_lines(PAGE);
     assert!(
         lines.iter().any(|&(heading, _)| heading == FIVE_SECTION),
         "refusals.md has no section `## {FIVE_SECTION}`"
@@ -143,12 +152,26 @@ fn documented(lines: &[(&str, &str)], program: &str, name: &str) -> bool {
 
 #[test]
 fn every_refused_option_is_in_the_manual_for_its_program() {
-    let lines = refusal_lines();
+    let lines = primary_refusal_lines();
     let mut missing = Vec::new();
-    for (program, name, _) in crate::ncbi_app::args::refusals() {
-        if !documented(&lines, program, name) {
+    for (program, name, refusal) in crate::ncbi_app::args::refusals() {
+        if matches!(refusal, Refusal::Read(_)) && !documented(&lines, program, name) {
             missing.push(format!(
-                "{program}: the option -{name} is refused by LOSAT but the manual's refusals.md does not name it for {program}"
+                "{program}: the option -{name} is refused by LOSAT but docs/manual/src/refusals.md does not name it for {program} (rare inputs in refusals-edge-cases.md do not count)"
+            ));
+        }
+    }
+    assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));
+}
+
+#[test]
+fn every_run_refusal_is_in_the_manual_for_its_program() {
+    let lines = primary_refusal_lines();
+    let mut missing = Vec::new();
+    for (program, name, refusal) in crate::ncbi_app::args::refusals() {
+        if matches!(refusal, Refusal::Run(_)) && !documented(&lines, program, name) {
+            missing.push(format!(
+                "{program}: the run refusal -{name} is refused by LOSAT's run but docs/manual/src/refusals.md does not name it for {program} (rare inputs in refusals-edge-cases.md do not count)"
             ));
         }
     }
@@ -177,7 +200,7 @@ fn the_versions_are_answered_by_every_program() {
 
 #[test]
 fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
-    let lines = refusal_lines();
+    let lines = primary_refusal_lines();
     let listed: Vec<&str> = lines
         .iter()
         .filter(|(heading, _)| {
@@ -201,7 +224,7 @@ fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
         .collect();
     assert!(
         !not_provided.is_empty(),
-        "refusals.md's \"Programs LOSAT does not provide\" lists nothing"
+        "docs/manual/src/refusals.md's \"Programs LOSAT does not provide\" lists nothing"
     );
     let mut wrong = Vec::new();
     for executable in NCBI_EXECUTABLES {

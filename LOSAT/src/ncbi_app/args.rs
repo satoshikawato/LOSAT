@@ -446,7 +446,7 @@ impl Args {
     /// reads as text (`value`), which `ncbi_app::run_app` writes where the body would start, so
     /// that NCBI's errors of the reader come first: NCBI's `Run` reads the bytes. The values read
     /// by their bytes are not refused: an `eOutputFile` key, which the programs open by its name's
-    /// bytes (`output_file`), and the file arguments of every application (`-logfile`,
+    /// bytes (`output_file`, `os_value`), and the file arguments of every application (`-logfile`,
     /// `-conffile`), which the application reads before the reader (`ncbi_environment`).
     pub(crate) fn text_values_refusal(&self, tool: &Tool) -> Option<String> {
         let read_as_bytes = |name: &str| {
@@ -515,12 +515,19 @@ impl Args {
         name: &str,
         stdout: &'a mut dyn Write,
     ) -> Result<OutputFile<'a>, ArgException> {
-        let value = match self.values.get(name) {
-            Some(Some(Value::Text(text))) => OsStr::new(text.as_str()),
-            Some(Some(Value::Bytes(bytes))) => bytes.as_os_str(),
-            _ => return Err(no_value(name)),
-        };
+        let value = self.os_value(name).ok_or_else(|| no_value(name))?;
         files::open_output_file(name, value, stdout)
+    }
+
+    /// The value of the key `name` as its bytes (`AsString` of a name that a program opens):
+    /// given, or its default, UTF-8 or not. The programs open an `eOutputFile` key's file by it
+    /// (`output_file`, windowmasker's counts), which `text_values_refusal` leaves to them.
+    pub(crate) fn os_value(&self, name: &str) -> Option<&OsStr> {
+        match self.values.get(name) {
+            Some(Some(Value::Text(text))) => Some(OsStr::new(text.as_str())),
+            Some(Some(Value::Bytes(bytes))) => Some(bytes.as_os_str()),
+            _ => None,
+        }
     }
 }
 

@@ -1,5 +1,7 @@
 # LOSAT ライブラリ化計画（公開面の設計メモ）
 
+> ユーザー向けの利用手順は [ユーザーマニュアル（Using LOSAT as a library）](manual/src/library.md) を参照してください。
+
 状態：**LIB-1 は `dev` に入った（#845）。段階 1（公開面を固める）は `dev` に入った（#846）。段階 2（結果と実行制御）と段階 3（`pylosat`）は `dev` に入った（#851）。§13（全機能をライブラリに）も `dev` に入り（#852、#859、#860、#861）、今の段は §14（公開の準備）で、公開はその後（保守者の決定、2026-11-05、2026-11-06）。** 設計メモは LIB-0（2026-10-31、保守者「OK」）。v0.2.0 自体は crates.io に出さない（release の決定 5、2026-10-25）。LIB-1 で決めたことは §9、順番の変更と段階 1 で決めたことは §10、段階 2 は §11、段階 3 は §12、全機能の段は §13、公開の準備は §14。
 
 | 項目 | 内容 |
@@ -438,7 +440,7 @@ engine の変更は 2 つで、どちらも CLI の出力に触れない：統�
 |---|---|---|
 | 入力 | `Inputs::database(&query, name)`。`name` は `-db` の値（空白区切りの複数名も同じ）で、CLI と同じく `BLASTDB` の探索で開く | 開く処理は engine の中にあり、順番（リスト → オプション → 開く → `Query is Empty!`）が NCBI の順である。開いたものを渡す形は順番を呼び出し側に出す |
 | `validate` | `-subject` で解析し、失敗したら `-db` で解析する。`Search::command(inputs)` が入力の種類で解析し直す | argv は入力より先に検査する。`-subject_loc` と `-taxids` は片方の種類でしか解析を通らない |
-| 入口 | 各 program の `run_local_database(args, query, settings, outputs)`。`run_local` はブラウザの入口のままで、`-db` を拒否する | `settings` は呼び出しの application start のもの（`api::start::CallStart`、線 RG の E1w-2: argv に `-logfile`・`-conffile`・`-dryrun` があれば呼び出しの始めに、なければ設定を初めて読む所で走らせ、NCBI の文を diagnostics と `-logfile` の file に書く。CLI は起動の `ApplicationStart::settings`）。レコードの検索はこの 3 語が無ければ NCBI の設定を読まない（§9）が、データベースは `BLASTDB` と `.ncbirc` で見つかる |
+| 入口 | 各 program の `run_local_database(args, query, settings, outputs)`。`run_local` はブラウザの入口のままで、`-db` を拒否する | `settings` は呼び出しの application start のもの（`api::start::CallStart`、線 RG の E1w-2: 検索の呼び出しの始めに必ず走らせ（2026-11-21 の線 LIB E1 から。それまでは argv に `-logfile`・`-conffile`・`-dryrun` があれば始めに、なければ設定を初めて読む所だった）、NCBI の文を diagnostics と `-logfile` の file に書く。CLI は起動の `ApplicationStart::settings`）。レコードの検索も CLI と同じく始めに NCBI の設定を読み、CLI が断る設定（usage report の `maybe` など）で止まる（線 LIB E1。それまでは 3 語が無ければ読まなかった、§9）。データベースは `BLASTDB` と `.ncbirc` で見つかる |
 | 共有 | データベースを開く塊を `open_search_database` に切り出し、`search_cli` と共有する。BLASTX は `reported_batch`、`database_search_error`、`ReportedAsks` を `native.rs` に切り出す | 重ねて書くと CLI との差が生まれる |
 | BLASTX の複数形式 | `report_batches`：`-subject` と `-db` が同じ batch loop を通る。1 回の検索で全形式を書き、`for_batch` の引数は全形式の和（`ReportedAsks::or`） | CLI の `run_inner` は 1 形式で、ライブラリは 1 回の検索で全形式を書く |
 | HSP の subject | `FormatObserver::database_subjects`（`ReportedSubject`：OID、`saccver`、長さ）。`HspRecord::s_idx` は database の順序 ID（`gnl\|BL_ORD_ID\|n` の n） | engine の `Hit::s_idx` は報告の rank で、バッチごとに意味が変わる。ID は表形式の報告が拒否するときも検索を失敗させない（`library_subject`） |

@@ -150,7 +150,8 @@ These cases are about what the program prints around the search, not the search 
 ### Threads with `-subject`
 
 - **What you see.** With `-subject`, NCBI BLAST+ ignores `-num_threads` and writes `'num_threads' is currently ignored when 'subject' is specified.` on the standard error. LOSAT uses the threads you ask for and does not print the line. Above the CPU count NCBI also writes `Number of threads was reduced to N to match the number of available CPUs`; LOSAT does not.
-- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's, apart from the version line and the error prefixes, which name LOSAT, and `blastn`'s progress bar on a terminal (next section).
+- **Why.** The output is the same at every thread count, so using the threads makes the search faster without changing its output. Every other byte of standard output and standard error equals NCBI's, apart from the version line and the error prefixes, which name LOSAT, and `blastn`'s progress bar on a terminal (next section).
+- **Memory with more than 64 threads.** LOSAT's memory grows with each thread, while NCBI BLAST+'s does not grow with `-num_threads` in a `-subject` search, which it runs on one thread. Above 64 threads LOSAT can then use more memory than NCBI BLAST+: in the v0.2.0 tests (development build `ff07c6a7d`, 64 logical CPUs), up to 1.21 times NCBI's peak memory at 96 threads and up to 1.44 times at 128 threads (`tblastn -subject`; also `blastx`, `blastn` and `blastp` with `-subject`, and `tblastn` with a database of one sequence), while LOSAT finished 8 to 69 times sooner.
 
 ### `blastn`'s progress bar on a terminal
 
@@ -161,7 +162,7 @@ These cases are about what the program prints around the search, not the search 
 ### Argument errors and help
 
 - **What you see.** An error found while reading the arguments (an unknown option, a missing value, a value outside its range such as `-word_size 3`) prints LOSAT's message and exits with status 2. NCBI prints its USAGE text and the argument exception, and exits with status 1. `-help`, `-help-full` and `-h` print LOSAT's help; `-xmlhelp` prints NCBI's XML for the arguments LOSAT runs, with LOSAT's name and version in its description line.
-- **What does not change.** Errors that NCBI raises after it has read the arguments (`BLAST query/options error: ...`, input errors, engine errors) keep NCBI's condition, message and exit status. Their prefix names LOSAT (`LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT options error:`); see [the version line and the error prefixes](#the-version-line-and-the-error-prefixes-name-losat).
+- **What does not change.** Errors that NCBI raises after it has read the arguments (where NCBI writes `BLAST query/options error: ...`, input errors and engine errors) keep NCBI's condition, message and exit status. Their prefix names LOSAT (`LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT options error:`); see [the version line and the error prefixes](#the-version-line-and-the-error-prefixes-name-losat).
 
 ### Wording of messages
 

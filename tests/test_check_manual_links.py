@@ -109,5 +109,53 @@ class CheckManualLinks(unittest.TestCase):
         self.assertIn("says 'Verified'", joined)
 
 
+    def test_manual_checks_html_img_and_srcset(self):
+        src = book(
+            {
+                "SUMMARY.md": "- [Intro](intro.md)\n",
+                "intro.md": (
+                    "# Intro\n\n"
+                    '<source media="(prefers-color-scheme: dark)" srcset="images/fig_dark.png">\n'
+                    '<img src="images/fig.png" alt="ok">\n'
+                    '<img src="images/missing.png" alt="bad">\n'
+                ),
+            }
+        )
+        (src / "images").mkdir()
+        (src / "images" / "fig.png").write_bytes(b"a")
+        (src / "images" / "fig_dark.png").write_bytes(b"b")
+        problems = check_manual_links.check(src)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("intro.md:5: images/missing.png does not exist", problems[0])
+
+    def test_check_figure_sync(self):
+        root = Path(tempfile.mkdtemp())
+        figs = root / "benchmarks" / "v0.2.0" / "figures"
+        imgs = root / "docs" / "manual" / "src" / "images"
+        figs.mkdir(parents=True)
+        imgs.mkdir(parents=True)
+        (figs / "fig1.png").write_bytes(b"same-bytes")
+        (imgs / "fig1.png").write_bytes(b"same-bytes")
+        self.assertEqual(check_manual_links.check_figure_sync(root), [])
+
+        (imgs / "fig1.png").write_bytes(b"stale-bytes")
+        (figs / "fig2.png").write_bytes(b"only-in-bench")
+        (imgs / "fig9.png").write_bytes(b"orphan")
+        problems = "\n".join(check_manual_links.check_figure_sync(root))
+        self.assertIn("fig1.png: differs", problems)
+        self.assertIn("fig2.png: missing copy", problems)
+        self.assertIn("fig9.png: stale figure", problems)
+
+    def test_summary_rejects_duplicate_page(self):
+        src = book(
+            {
+                "SUMMARY.md": "- [Intro](intro.md)\n- [Intro again](intro.md)\n",
+                "intro.md": "# Intro\n",
+            }
+        )
+        problems = "\n".join(check_manual_links.check(src))
+        self.assertIn("SUMMARY.md:2: lists intro.md more than once", problems)
+
+
 if __name__ == "__main__":
     unittest.main()

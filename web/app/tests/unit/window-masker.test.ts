@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { instantiateSerial, sha256Hex } from 'losat';
+import { instantiateSerial, RunDirectory, sha256Hex } from 'losat';
 import { WINDOW_MASKER_FLAG } from 'losat/domain';
 import type { EngineRunRequest } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
@@ -267,7 +267,7 @@ function fakeAbi(options: { failEnd?: boolean; stopOnBegin?: boolean } = {}) {
       calls.push('validate');
       return { ok: true, dataLoaders: true };
     },
-    start: () => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+    start: () => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
     memoryBytes: () => 1,
     register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);
@@ -321,6 +321,7 @@ function runtimeWith(abi: ReactorAbi) {
   (runtime as unknown as { loaded: unknown }).loaded = {
     path: 'serial',
     instance: { abi, wasi: { clear: () => undefined } },
+    directory: new RunDirectory(),
     runs: 0,
     retained: undefined,
     counts: undefined,

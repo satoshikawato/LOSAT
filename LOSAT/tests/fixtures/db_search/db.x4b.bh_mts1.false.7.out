@@ -1,0 +1,25 @@
+# TBLASTN 2.17.0+
+# Query: q0
+# Database: tests/db_search/bh3n
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+q0	ds7	79.667	300	61	0	8	307	1310	411	2.47e-161	488
+q0	ds7	50.000	10	5	0	272	281	224	253	10.0	18.9
+# TBLASTN 2.17.0+
+# Query: q1
+# Database: tests/db_search/bh3n
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+q1	ds10	55.328	488	61	4	1	446	1023	2141	9.02e-152	474
+q1	ds10	67.308	52	17	0	2	53	72	227	7.05e-16	72.0
+q1	ds10	59.259	54	22	0	418	471	840	1001	3.44e-11	57.0
+# TBLASTN 2.17.0+
+# Query: q2
+# Database: tests/db_search/bh3n
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+q2	ds10	84.324	185	29	0	133	317	72	626	1.36e-103	324
+q2	ds10	80.645	155	30	0	63	217	816	1280	8.24e-78	250
+q2	ds10	81.481	54	10	0	2	55	840	1001	2.21e-23	92.0
+q2	ds10	75.000	32	8	0	283	314	711	806	6.60e-11	54.3
+# BLAST processed 3 queries

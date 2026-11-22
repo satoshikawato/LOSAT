@@ -107,6 +107,28 @@ pub fn program_name() -> &'static str { "blastn" }
 
         self.assertEqual(report.findings, [])
 
+    def test_clap_command_builder_is_not_a_subprocess(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_fixture(
+                root,
+                """
+fn parser() -> clap::Command {
+    let _ = clap::builder::Command::new("alone");
+    clap::Command::new("losat")
+}
+fn launch() {
+    let _ = std::process::Command::new("blastn");
+}
+""",
+            )
+            report = boundary.audit_repository(root, metadata=empty_metadata())
+
+        keys = {finding.key for finding in report.findings}
+        self.assertEqual(
+            keys, {("rust.production_subprocess", "LOSAT/src/lib.rs", "Command::new@launch")}
+        )
+
     def test_removed_qsort_adapter_names_and_paths_are_zero_state_findings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

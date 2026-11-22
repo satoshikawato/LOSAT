@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.78
+- Version: 1.79
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -381,15 +381,21 @@
   2026-10-07; numbered after 1.76; first 1.71, then 1.72, 1.74, 1.76 and 1.77 at the merges of dev that brought line DBID item
   pfoff-3's 1.71, line NP items M5a and M5b's 1.72 and line RG item X4b-1's 1.73, then line RG item D5b-3's 1.74 and
   line NP item M5's 1.75, then line RG item X4b-2's 1.76);
-  1.78 2026-11-22 (approved exception 24, makeprofiledb's word table past `Int4`, psiblast line item
+  1.78 2026-11-23 (approved exception 24, the Owner's answer of 2026-11-22 「Q5=C」 to line RG's
+  question Q-HARDIDX: `losat blastn -use_index true` with `-db_hard_mask` searches the MegaBLAST
+  index with the masked letters matching nothing and each seed in the hard range that holds it,
+  where NCBI BLAST+ 2.17.0 takes for each hard chunk the index's list of the chunk with the same
+  number; the refusal that LOSAT made from line RG item D5b-2 until this version removed; line
+  RG item D5b-5; first 1.77, then 1.78 at the merge of dev that brought line RG item D3c-3a's 1.77);
+  1.79 2026-11-22 (approved exception 25, makeprofiledb's word table past `Int4`, psiblast line item
   PS10a: the scaled word score threshold and the neighbouring-word score sums of `-dbtype rps` computed
   in 64 bits; proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's
   rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; pending the
   maintainer's acceptance; and the explicit rejections, rule 3, of `losat makeprofiledb`, Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.77; first
-  1.72, then 1.73, 1.74, 1.75, 1.76, 1.77 and 1.78 at the merges of dev that brought line NP items M5a and M5b's 1.72,
-  then line RG item X4b-1's 1.73, line RG item D5b-3's 1.74, line NP item M5's 1.75, line RG item X4b-2's 1.76 and
-  line RG item D3c-3a's 1.77, and after exception 23)
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.78; first
+  1.72, then 1.73, 1.74, 1.75, 1.76, 1.77, 1.78 and 1.79 at the merges of dev that brought line NP items M5a and
+  M5b's 1.72, then line RG item X4b-1's 1.73, line RG item D5b-3's 1.74, line NP item M5's 1.75, line RG item
+  X4b-2's 1.76, line RG item D3c-3a's 1.77 and line RG item D5b-5's 1.78, and after exception 24)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2678,7 +2684,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     checks uninitialised; an `obinary` file with units of 1 or 2 letters, whose empty array NCBI
     reads past; a FASTA record or database sequence of 4,294,967,296 letters or more, whose
     positions NCBI counts in 32 bits.
-- `losat makeprofiledb -dbtype rps` (version 1.78, 2026-11-22, psiblast line item PS10a, Owner-delegated,
+- `losat makeprofiledb -dbtype rps` (version 1.79, 2026-11-22, psiblast line item PS10a, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): where NCBI's makeprofiledb 2.17.0 crashes,
   aborts, never ends or reads memory that is not its data. LOSAT refuses each (exit 1, "... is not
   supported by LOSAT's MAKEPROFILEDB") where NCBI's run meets it; the rows are those of the line's
@@ -3015,14 +3021,91 @@ test, so most searches with hits in this mode were refused). Numbered after exce
     `a_context_past_the_batch_tests_an_empty_heap` (`LOSAT/src/algorithm/blastx/results_boundary_tests.rs`) and
     `a_heap_test_past_the_batch_reads_an_empty_heap` (`LOSAT/tests/blastx_sw_tback.rs`).
 
-## Approved exception 24 (makeprofiledb's word table past `Int4`, psiblast line item PS10a, version 1.78)
+## Approved exception 24 (BLASTN `-use_index true` with `-db_hard_mask`, the seeds in their hard ranges, version 1.78)
 
-Version 1.78, proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's
+Version 1.78, line RG item D5b-5. The Owner decided on 2026-11-22 22:3x JST: the answer 「Q5=C」
+(the whole answer 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A Q10=A Q11=A Q12=A Q13=OK」) to
+question Q5 of that day's batch, line RG's question Q-HARDIDX, whose option C read 「種を正しい範囲に置く
+（NCBI が出さない正しい結果、どの thread 数でも同じ）」 (place the seeds in their right ranges: a correct
+result that NCBI does not give, the same at every thread count). Not taken: option A, NCBI's
+one-thread result at every thread count through a pass over the sequences in OID order that
+decides which list each range takes (the line's recommendation before the answer), and option B,
+the refusal (`-use_index true with a MegaBLAST database index (...) and -db_hard_mask`) that LOSAT
+made from item D5b-2 (PR #1472) until this version. Owner-delegated (standing instruction
+2026-09-29, restated 2026-10-07; P2, P3): what the right range of a seed means, below (in the
+index's search a masked letter matches no query letter, and two hits of a diagonal with a masked
+letter between them do not pair). Not taken: NCBI's lists cut at the masked letters after the
+search (the item's first version), under which a masked letter could still qualify a two-hit
+seed (6 of 400 random databases). Also delegated: the masks of sequences that an OID list leaves
+out of the search are not read.
+
+24. **BLASTN `-use_index true` with `-db_hard_mask`.** NCBI's indexed word finder
+    (`MB_IndexedWordFinder`, `na_ungapped.c:1697-1782`) takes the seeds of `GetResults` of the
+    sequence and `subject->chunk` (`blast_dbindex.cpp:869-875`): the list of the index's chunk
+    whose number is the number of the chunk being searched. The index numbers each sequence's
+    chunks over its whole range (5,000,000 letters that overlap by 100), while with
+    `-db_hard_mask` each hard range starts chunks of its own (`s_GetNextSubjectChunk`,
+    `blast_engine.c:221-262`). So NCBI extends the seeds of a masked sequence at the offsets of
+    another range's chunk, and a sequence with more hard ranges than index chunks takes the lists
+    of the sequences after it, which the word finder moves out, so that what each sequence finds
+    depends on which thread reaches it first: in the survey's probe g_f (dustmasker's masks,
+    `-db_hard_mask 11`) NCBI wrote 5 rows at `-num_threads 1`, 7 or 8 rows from run to run at 4
+    threads, where its search without the index wrote 12. LOSAT searches the index with each letter of the
+    `-db_hard_mask` masks matching no query letter (`dbindex::search`): a root whose Nmer holds a
+    masked letter is no root, the extensions (`ExtendLeft`, `ExtendRight`) stop before a masked
+    letter, and the two-hit search takes no earlier hit of a diagonal with a masked letter between
+    it and the seed. (NCBI's search reads the index's letters, masked or not, and its two-hit
+    search can qualify a seed by masked letters.) So each seed lies in one unmasked stretch, and
+    no masked letter decides one. Each seed then goes to the hard range that holds its left end,
+    into the last chunk of the range that starts at or before it (the index's own rule where
+    chunks overlap), in the order of the lists and of each list (`mb_index_seeds::HardSeeds`).
+    The refusals of the search without the masks still apply: a chunk that is a later sequence's
+    in the index, and a seed at or past its chunk's last letter. The word finder, the ungapped
+    and gapped stages and the traceback are those of every hard chunk. A local id of the index
+    (its group of sequences) without masked letters is searched as without `-db_hard_mask`. A
+    sequence without masked letters keeps NCBI's seeds, unless one of its exact runs reaches past
+    its end into masked letters of the next sequence of its local id (NCBI's index search reads on
+    there). The result depends neither on `-num_threads` nor on the masked letters. The masks of a
+    sequence that an OID list leaves out of the search are not read: its letters count as
+    unmasked, and only a run past the end of the sequence before it reads them. The refusals of
+    `HardMaskShape` and approved exception 13 (a mask that runs to the end) apply as they do
+    without the index. Evidence: the rows `plain NAME` of `LOSAT/tests/blastn_mb_index/cases.tsv` (`hm_i*`,
+    `sm_i_hard`; database hm of `gen_d5b5.py`: masks inside, at the start and at the end of
+    sequences and hard ranges of 1 and 2 letters; nmer 8, 9 with stride 3, and 11; word sizes 16
+    and 28; `-dust no`; 1 and 4 threads; an old-style index; database hmr of `gen_d5b5_r.py`, hm with every masked
+    letter replaced at random), whose output is NCBI's one-hit search without the index with the
+    same `-db_hard_mask` (hm: 32 rows, where NCBI's search with the index writes 5). The two-hit
+    search (`-window_size`) of NCBI's index pairs other hits than its scan even without masks, so
+    no NCBI search gives its result: the rows `expect hm_i_win` (`-window_size 20` at 1 and 4
+    threads, and on hmr) give LOSAT's 31 rows, NCBI's 28 rows without the index and 3 of the
+    index's pairs (`the_two_hit_index_search_adds_the_index_s_pairs`: the row of qhm7 in hm4 is in
+    NCBI's own indexed search without the mask, `hm_iu_win`; the other two are runs that a mask
+    ends, paired within the window); and NCBI's own two-hit search with the index of the database
+    of hm's unmasked stretches, each its own sequence (`hm_win_stretches.out`), gives each of
+    LOSAT's rows but for three that NCBI's search without the index and LOSAT's carry across a
+    7-letter mask (the traceback reads the whole sequence with the masked letters as B, where the
+    stretches end). Random comparison `remaining-gaps-20261112/D/d5/probe/d5b5/rand_d5b5.py` (400
+    databases of dustmasker's masks with queries across the masked stretches; NCBI 2.17.0): the
+    308 one-hit searches give NCBI's rows without the index; of the 92 two-hit searches, 61 give
+    them, and 31 are of databases where NCBI's index and scan pair other hits even without the
+    mask. For those 31, NCBI's indexed search of the database of unmasked stretches
+    (`st_oracle.py`, `st_explain.py`) gives LOSAT's rows in 17; in 12 the only differences are
+    alignments carried across a short mask as above, and in the last 2 (indexes that store every
+    19th and every 2nd position, `-legacy false`) the stretch database moves the stored positions,
+    after which NCBI's two-hit rule pairs other hits (traced: a root 7 letters later drops the earlier
+    hit). No run depended on `-num_threads` (1 and 4) or on the masked letters (the same database
+    with every masked letter replaced at random). Unit tests `a_masked_letter_ends_a_run_and_pairs_no_hits` and
+    `the_masks_are_of_their_own_sequence` (`LOSAT/src/dbindex/search_tests.rs`), and the placement
+    tests of `LOSAT/src/algorithm/blastn/blast_engine/mb_index_seeds_tests.rs`.
+
+## Approved exception 25 (makeprofiledb's word table past `Int4`, psiblast line item PS10a, version 1.79)
+
+Version 1.79, proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's
 rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; pending the
 maintainer's acceptance. Its version is in the list at the top; elsewhere it is cited by its number and
-name, "approved exception 24 (makeprofiledb's word table past `Int4`)". Psiblast line item PS10a.
+name, "approved exception 25 (makeprofiledb's word table past `Int4`)". Psiblast line item PS10a.
 
-24. **A word score threshold that, times the profile's scaling factor, does not fit `Int4`, and
+25. **A word score threshold that, times the profile's scaling factor, does not fit `Int4`, and
     neighbouring-word score sums past `Int4`.** makeprofiledb indexes the words of every profile of a
     volume with `s_AddPSSMNeighboringWords` (`blast_aalookup.c:623-748`), whose threshold is the
     double `scale_factor * wordScoreThreshold` stored in an `Int4` (`makeprofiledb.cpp:928-937`,

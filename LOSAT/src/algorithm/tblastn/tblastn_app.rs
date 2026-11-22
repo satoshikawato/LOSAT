@@ -534,19 +534,10 @@ impl TblastnArgs {
                 }
             }
         }
-        let flushed = std::io::Write::flush(&mut stream);
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
         // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI
-        // aborts and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-        if stream.failed && (pairwise || tax_report) {
-            return Err(crate::cli::NativeError {
-                exit: 6,
-                message: "BLAST failed to write output\n".into(),
-            }
-            .into());
-        }
-        result?;
-        flushed.context("failed to write the output")
+        // aborts and LOSAT reports the error (`cli::ReportStream::finish`).
+        stream.finish(result, pairwise || tax_report)
     }
 }
 

@@ -10,8 +10,10 @@
 //! `win_mask_config.cpp:336-343`). The `-t_*_pct` settings are read from the `##pct:` lines
 //! that NCBI's writers print (`pct`).
 
+mod gen_counts;
 mod istat;
 mod ncbi_report;
+mod ostat;
 mod pct;
 mod score;
 mod taxid;
@@ -26,10 +28,12 @@ use std::sync::Arc;
 
 use crate::ncbi_exception::NcbiException;
 
+pub use gen_counts::{generate, GenCountsSettings, GenError, GenomeSource, DEFAULT_TH};
 pub use istat::{
     discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
 };
-pub use pct::PctSettings;
+pub use ostat::{convert_counts, CountsFormat, CountsWriter, FinalizeError};
+pub use pct::{PctSettings, PctWhy};
 pub use taxid::taxid_stat_file;
 
 use score::ScoreMean;
@@ -107,9 +111,9 @@ pub enum WinMaskError {
     SequenceTooLong { length: usize },
     /// `CSeqMaskerUsetHash::eBadIndex` (`seq_masker_uset_hash.cpp:95-99`).
     BadIndex { key: u32, value: u32 },
-    /// A `##pct:` line that the windowmasker application's `-t_*_pct` settings read and whose
-    /// words NCBI reads by the C++ runtime's number parser (`pct::count_map`): LOSAT refuses it.
-    PctLine { line: String },
+    /// A `##pct:` line whose reading by NCBI (`pct::count_map`) depends on the C++ library or
+    /// is undefined, `why` (a verb phrase): LOSAT refuses it.
+    PctLine { line: String, why: PctWhy },
 }
 
 impl WinMaskError {
@@ -153,10 +157,13 @@ impl fmt::Display for WinMaskError {
             ),
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:95-99
             Self::BadIndex { key, value } => write!(f, "bad index at key {key} : {value}"),
-            Self::PctLine { line } => write!(
-                f,
-                "the percentage line '{line}' of the counts file is not one that WindowMasker writes (counts of digits, then decimal percentages), so LOSAT does not read it for the -t_*_pct settings"
-            ),
+            Self::PctLine { line, why } => {
+                write!(
+                    f,
+                    "the percentage line '{line}' of the counts file {}",
+                    why.text()
+                )
+            }
         }
     }
 }

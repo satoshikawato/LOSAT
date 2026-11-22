@@ -319,8 +319,9 @@
   query holds a redone match, extended to BLASTX, rule 3, within the class of 1.30, after the
   reports of the query batches before; approved exception 22, the Owner's decision of 2026-11-21
   on line RG's question Q-HEAP, 「Q-HEAP=B」: the heap test of NCBI's redo in e-value mode that
-  reads past its array of the batch's heaps tests an empty heap, NCBI's result for the batch
-  followed by queries without a hit; a new explicit rejection, rule 3: `-ungapped
+  reads past its array of the batch's heaps tests an empty heap (NCBI's run as is with an empty
+  heap's answer there, which NCBI's run of the batch followed by queries without a hit checks
+  where it searches the batch alike); a new explicit rejection, rule 3: `-ungapped
   -comp_based_stats 0 -use_sw_tback`, on which NCBI crashes at every query batch it searches;
   otherwise Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after
   1.70, line RG item X4b-1, and after exception 21)
@@ -2634,11 +2635,12 @@ request that added it.
     both strands, so the sets and their e-values differ: with `-searchsp 1000000` in both runs, 6
     of NCBI's 9 rows, 3 of 17 and 9 of 26 are LOSAT's byte for byte. Until PR #1401 LOSAT raised an
     average of 0 to 1 and wrote the rows of other cutoffs here.
+
 ## Approved exception 22 (BLASTX `-use_sw_tback`, a heap test past the batch's heaps in e-value mode, version 1.71)
 
-Version 1.71, line RG item X4b-2 (line RG `DECISIONS.md` X4b-9). The Owner decided on 2026-11-21
-(words 「O2b-Q1=A Q-HEAP=B Q-CAP=A」, whose Q-HEAP was this question) question Q-HEAP: option B, a
-heap test that NCBI makes past its array of the batch's heaps tests an empty heap. Until this version
+Version 1.71, line RG item X4b-2 (line RG `DECISIONS.md` X4b-9). On 2026-11-21 (21:1x JST) the
+Owner answered line RG's question Q-HEAP with option B (「O2b-Q1=A Q-HEAP=B Q-CAP=A」): a heap test
+that NCBI makes past its array of the batch's heaps tests an empty heap. Until this version
 LOSAT refused such a batch under rule 3 (line RG `DECISIONS.md` X4b-0 (a), 2026-11-20). Not taken:
 keeping that refusal (option A; with one query in a batch every hit outside frame +1 reaches the
 test, so most searches with hits in this mode were refused). Numbered after exception 21 (version
@@ -2646,22 +2648,24 @@ test, so most searches with hits in this mode were refused). Numbered after exce
 
 22. **BLASTX `-use_sw_tback` in e-value mode: the heap test past the batch's heaps.** In e-value
     mode (`-sum_stats false`, or a `-max_intron_length` of 1 to 4, `blast_parameters.c:793-805`)
-    NCBI's Smith-Waterman redo tests each window against the heap of redone matches that the
-    window's query context indexes (`redo_alignment.c:1465-1474`), in an array of one heap per query
+    NCBI's Smith-Waterman redo tests the first significant window of each query context of a match
+    against the heap of redone matches that the context indexes (`redo_alignment.c:1465-1474`), in an array of one heap per query
     of the batch (`blast_kappa.c:3282-3296`). A BLASTX query has six contexts, 6 x q + f for the
     batch's query q and its frame f (0 to 5 for frames +1, +2, +3, -1, -2, -3). Below the batch's
     query count the index names another query's heap, which LOSAT reproduces (rule 2, the 1.71
     entry of the rule-3 list above); at or above it the index lies past the array's end, in NCBI's
-    other allocations. With one query in a batch (a query of 10,002 letters or more, BLASTX's
-    batch size, or `BATCH_SIZE=1`) that is every hit outside frame +1. There NCBI BLAST+ 2.17.0
+    other allocations. With one query in a batch (a search of a single query, as most are, the
+    last query of a file after a full batch, or a query that fills BLASTX's batch of 10,002 letters
+    by itself) that is every hit outside frame +1. There NCBI BLAST+ 2.17.0
     crashes (SIGSEGV; at every thread count above 1 in our runs), fails the batch (`Traceback
     failed`, exit status 3), or ends with rows that depend on what lies there: in the runs of the
     evidence below one query with a hit in frame -1 wrote 2 rows in one run and 3 in others, and
     a query that NCBI crashed on wrote 6 rows with `MALLOC_PERTURB_=165`. LOSAT tests such a
     window against an empty heap, which takes every window: an empty heap holds fewer matches than
     its hit list size (`compo_heap.c:252-275`). One function owns the lookup of a heap by context,
-    `CompoHeap::would_insert_at` (`LOSAT/src/algorithm/blastx/results.rs`). That result is NCBI's:
-    in NCBI's search of the same batch followed by 5 x N queries without a hit (N the batch's query
+    `CompoHeap::would_insert_at` (`LOSAT/src/algorithm/blastx/results.rs`). That is NCBI's run as
+    is with an empty heap's answer there, and NCBI's own runs check it: in NCBI's search of the
+    same batch followed by 5 x N queries without a hit (N the batch's query
     count; each `CCCCGGGGAACC` twelve times), every context of the batch's queries indexes a heap
     in the array, and the heap of a query without a hit is empty. The added queries write no row
     in outfmt 6, and no byte in a batch that fails. In all 8 cases of the evidence in which NCBI's
@@ -2671,7 +2675,11 @@ test, so most searches with hits in this mode were refused). Numbered after exce
     (`redo_alignment.c:1560-1580`, `compo_heap.c:405-409`) reads only the batch's own heaps, inside
     the array, and LOSAT keeps it; the padded run's empty heaps would turn it off, so the padded run
     is the check where the batch's heaps do not all fill (every row of the evidence has the default
-    hit list size, 500, which none fills). Where the padded batch reaches the clean-up crash of
+    hit list size, 500, which none fills). Nor is a batch of one query that NCBI splits for its
+    preliminary search (19,410 letters or more: `split_query_aux_priv.cpp:73-95` splits BLASTX only
+    for a batch of one query, in chunks of 10,002 letters that overlap by 297, `local_blast.cpp:54-99`)
+    split with the pads, so the padded run checks only shorter queries (the longest of the evidence
+    has 5,600 letters); LOSAT splits such a query as NCBI does as is. Where the padded batch reaches the clean-up crash of
     1.30's class (its last redone match fails after its first query kept one), NCBI crashes with the
     pads too, and LOSAT refuses the batch (rule 3, the 1.71 entry above).
     Evidence: the `ncbi` rows `db.x4b2.past.*.pad.*` of

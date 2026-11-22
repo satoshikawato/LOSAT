@@ -13,8 +13,8 @@
 //! heaps (one per query): a context below the batch's query count reads another query's heap,
 //! which LOSAT reproduces (`q12.fna`: two queries with hits, ten without); at or past it NCBI
 //! reads past the array, where LOSAT tests an empty heap (approved exception 22 of
-//! PD-LOSAT-NCBI-DEFECTS): NCBI's result for the batch followed by five queries without a hit
-//! per query (`*_pad.fna`).
+//! PD-LOSAT-NCBI-DEFECTS); for these inputs that is NCBI's result for the batch followed by five
+//! queries without a hit per query (`*_pad.fna`).
 //! `-ungapped -comp_based_stats 0 -use_sw_tback` crashes NCBI at the redo's set-up of every batch
 //! it searches. That the bytes equal NCBI's is the business of the fixture rows `db.x4b2.*`; these
 //! tests pin LOSAT's decisions and their independence of `-num_threads`.
@@ -175,8 +175,8 @@ fn a_failed_last_match_after_a_kept_first_query_is_refused() {
 
 // A window whose query context is at or past the batch's query count, where NCBI's heap test reads
 // past its array of the batch's heaps: LOSAT tests an empty heap there (approved exception 22 of
-// PD-LOSAT-NCBI-DEFECTS), so a batch gives the rows of the same batch followed by five queries
-// without a hit per query (`*_pad.fna`, whose NCBI runs are the rows `db.x4b2.past.*.pad.*`), at
+// PD-LOSAT-NCBI-DEFECTS), so for these inputs a batch gives the rows of the same batch followed by
+// five queries without a hit per query (`*_pad.fna`, whose NCBI runs are the rows `db.x4b2.past.*.pad.*`), at
 // every thread count.
 #[test]
 fn a_heap_test_past_the_batch_reads_an_empty_heap() {

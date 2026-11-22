@@ -729,8 +729,10 @@ impl CompoHeap {
     /// the batch's query number `context` (the window's own query only for context 0), whose
     /// answer this is. At or past it NCBI reads its other memory; LOSAT tests an empty heap there,
     /// which takes the window (approved exception 22 of PD-LOSAT-NCBI-DEFECTS, the Owner's
-    /// decision Q-HEAP=B of 2026-11-21): NCBI's result for the batch followed by five queries
-    /// without a hit per query, whose heaps are empty and inside the array.
+    /// decision Q-HEAP=B of 2026-11-21). NCBI's run of the batch followed by five queries without
+    /// a hit per query, whose heaps are empty and inside the array, gives the same result where it
+    /// searches the batch as the input as is: no heap of the batch fills to its cutoff (the early
+    /// termination) and no lone query is split.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
     /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1465-1474

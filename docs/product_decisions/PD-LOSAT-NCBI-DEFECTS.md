@@ -1265,7 +1265,7 @@ next on purpose and makes the search depend on the order of the sequences. Its v
 list at the top; elsewhere it is cited by its number and name, "approved exception 24 (diagonal
 entries that reach another sequence)". Line NP item M4b-3b.
 
-23. **`-db_hard_mask` in BLASTP and BLASTX: overlapping masks after which NCBI's word hits reach
+24. **`-db_hard_mask` in BLASTP and BLASTX: overlapping masks after which NCBI's word hits reach
     the table of diagonals of another sequence.** NCBI's protein scan keeps one table of diagonals
     per thread (made at `blast_extend.c:40-66`, cleared at `:87-107`) and moves its offset after
     each chunk of a sequence by the chunk's length plus the window (`Blast_ExtendWordExit`,

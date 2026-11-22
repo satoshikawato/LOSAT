@@ -718,3 +718,72 @@ fn replace_takes_occurrences_from_the_left() {
     assert_eq!(r(b"b\x01\x01\x01", b"\x01", b" "), b"b   ");
     assert_eq!(r(b"a", b"ab", b"X"), b"a");
 }
+
+/// `NStr::PrintableString` as dev had it before `find_first` (the loop looks at every byte), the
+/// reference of the test below.
+fn printable_string_byte_by_byte(str_: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (i, &byte) in str_.iter().enumerate() {
+        let mut c = byte;
+        match byte {
+            0x07 => c = b'a',
+            0x08 => c = b'b',
+            0x0c => c = b'f',
+            b'\r' => c = b'r',
+            b'\t' => c = b't',
+            0x0b => c = b'v',
+            b'\n' => c = b'n',
+            b'\\' | b'\'' | b'"' => {}
+            b'?' => {
+                let after_one = i > 0 && str_[i - 1] == b'?';
+                let before_one = i + 1 < str_.len() && str_[i + 1] == b'?';
+                if !after_one && !before_one {
+                    out.push(byte);
+                    continue;
+                }
+            }
+            0x20..=0x7e => {
+                out.push(byte);
+                continue;
+            }
+            _ => {
+                out.push(b'\\');
+                let mut reduce = i == str_.len() - 1 || !(b'0'..=b'7').contains(&str_[i + 1]);
+                for (shift, last) in [(6, false), (3, false), (0, true)] {
+                    let v = (c >> shift) & 7;
+                    if last || v != 0 || !reduce {
+                        out.push(b'0' + v);
+                        reduce = false;
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(b'\\');
+        out.push(c);
+    }
+    out
+}
+
+#[test]
+fn printable_string_skips_only_what_it_passes_over() {
+    let mut texts = search_texts();
+    texts.extend([
+        b"a?b??c???d?".to_vec(),
+        b"?".to_vec(),
+        b"??".to_vec(),
+        b"x\x01".to_vec(),
+        b"\x017".to_vec(),
+        (0..=255).collect(),
+    ]);
+    for text in texts {
+        let got = printable_string(&text);
+        let expected = printable_string_byte_by_byte(&text);
+        assert_eq!(*got, expected, "{text:?}");
+        assert_eq!(
+            matches!(got, Cow::Borrowed(_)),
+            expected == text,
+            "{text:?}"
+        );
+    }
+}

@@ -36,7 +36,7 @@ pub(crate) use double::{
 use std::borrow::Cow;
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::utils::byte_search::{find, find_byte};
+use crate::utils::byte_search::{find, find_byte, find_first};
 
 /// `NStr::TStringToNumFlags`, of the flags LOSAT's callers pass.
 pub(crate) type Flags = u32;
@@ -140,11 +140,22 @@ const fn convert_site(line: u32, function: &'static str) -> ThrowSite {
 /// (so `fNewLine_Passthru`, `fNonAscii_Quote`, `fPrintable_Full` and `eLanguage_Javascript` are
 /// not ported). `isprint` is the C locale's (0x20 to 0x7E), so every byte of the result is
 /// printable ASCII; it borrows `str_` when nothing is escaped (NCBI returns a copy of it).
+///
+/// NCBI's loop looks at each byte; the bytes it passes over at once (`continue`: the printable
+/// ones but the backslash, the quotes and `?`) are skipped here by [`find_first`], a block at a
+/// time, and the loop looks at the others.
 pub(crate) fn printable_string(str_: &[u8]) -> Cow<'_, [u8]> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3736-3742
     let mut out: Option<Vec<u8>> = None;
     let mut j = 0;
-    for (i, &byte) in str_.iter().enumerate() {
+    let looked_at = |b: u8| {
+        !(0x20..=0x7e).contains(&b) | (b == b'\\') | (b == b'\'') | (b == b'"') | (b == b'?')
+    };
+    let mut from = 0;
+    while let Some(offset) = find_first(&str_[from..], looked_at) {
+        let i = from + offset;
+        from = i + 1;
+        let byte = str_[i];
         let mut octal = false;
         let mut c = byte;
         match byte {

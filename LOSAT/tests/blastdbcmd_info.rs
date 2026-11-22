@@ -153,6 +153,8 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
         1,
     ),
     ("B52", &["-db", "db/p5", "-info", "-line_length", "60"], 0),
+    // A hexadecimal value of a key with a constraint (line RG item K4i-1, 2026-11-18).
+    ("G11", &["-db", "db/p5", "-info", "-line_length", "0x10"], 0),
     ("B57", &["-db", "\"db/p5\"", "-info"], 0),
     ("B58", &["-db", "db/p5", "-info", "-out", ""], 1),
     (

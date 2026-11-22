@@ -360,12 +360,14 @@ pub(crate) struct NcbiArguments {
 
 impl NcbiArguments {
     /// The arguments of `program` (NCBI's name, `blastn` ...) given as `given` (name and text, a
-    /// flag's text empty), over the defaults of NCBI's argument descriptions.
+    /// flag's text empty), over the defaults of NCBI's argument descriptions (the tables of the
+    /// program's `-xmlhelp` XML, `ncbi_app::args::arguments`).
     pub(crate) fn new(program: &str, given: &[(String, String)]) -> Self {
         let mut all: std::collections::BTreeMap<String, String> =
-            crate::ncbi_xmlhelp::ncbi_argument_defaults(program)
+            crate::ncbi_app::args::arguments(program)
                 .into_iter()
-                .map(|(name, text)| (name.to_string(), text))
+                .flat_map(crate::ncbi_app::args::Arguments::defaults)
+                .map(|(name, text)| (name.to_string(), text.to_string()))
                 .collect();
         for (name, text) in given {
             all.insert(name.clone(), text.clone());

@@ -26,6 +26,12 @@ pub(crate) const TBLASTN_TASK: TaskParser =
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct TblastnArgs {
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`). The first field: the
+    /// parser takes each later field's values out of the matches as it reads them
+    /// (`from_arg_matches_mut`), so this one reads the matches whole.
+    #[command(flatten)]
+    pub(crate) given: crate::cli::GivenArguments<TblastnArgs>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427:
     // The default `-` is standard input.
     #[arg(long, value_parser = ncbi_input_path(), value_name = "PATH", default_value = "-")]
@@ -100,10 +106,6 @@ pub struct TblastnArgs {
     /// The run state of an imported search strategy (`import::apply`).
     #[arg(skip)]
     pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
-    /// The arguments that the command line gave, for the import of a search strategy
-    /// (`cli::GivenArguments`; read only with `-import_search_strategy`).
-    #[command(flatten)]
-    pub(crate) given: crate::cli::GivenArguments<TblastnArgs>,
     // An omitted value keeps the default of the task (10).
     #[arg(long, value_parser = tblastn_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,

@@ -161,6 +161,12 @@ pub(crate) const BLASTP_TASK: TaskParser =
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct BlastpArgs {
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`). The first field: the
+    /// parser takes each later field's values out of the matches as it reads them
+    /// (`from_arg_matches_mut`), so this one reads the matches whole.
+    #[command(flatten)]
+    pub(crate) given: crate::cli::GivenArguments<BlastpArgs>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     // `-` (the default) is standard input.
     #[arg(long, default_value = "-", value_parser = ncbi_input_path(), value_name = "PATH")]
@@ -257,10 +263,6 @@ pub struct BlastpArgs {
     /// The run state of an imported search strategy (`import::apply`).
     #[arg(skip)]
     pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
-    /// The arguments that the command line gave, for the import of a search strategy
-    /// (`cli::GivenArguments`; read only with `-import_search_strategy`).
-    #[command(flatten)]
-    pub(crate) given: crate::cli::GivenArguments<BlastpArgs>,
     // An omitted value keeps the default hit list size (500) and NCBI's numbers of
     // descriptions and alignments of the pairwise report (500, 250).
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]

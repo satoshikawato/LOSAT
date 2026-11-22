@@ -639,7 +639,7 @@ impl<'a> Inputs<'a> {
             database: strategy.database().is_some(),
             query_file: None,
             strategy: Some(strategy),
-            query_end: None,
+            query_end: Some(strategy.query_end()),
         }
     }
 

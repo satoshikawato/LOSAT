@@ -193,6 +193,9 @@ pub struct Strategy {
     /// The strategy file's bytes, applied again for each of the search's calls (`command`).
     bytes: Vec<u8>,
     queries: Vec<FastaRecord>,
+    /// How the reading of the strategy's queries ended (`InputRecords::query_end`), which the
+    /// search meets where the command line's query batches meet it.
+    query_end: super::QueryEnd,
     subjects: Vec<FastaRecord>,
     database: Option<String>,
 }
@@ -201,6 +204,11 @@ impl Strategy {
     /// The records of the strategy's queries.
     pub(crate) fn queries(&self) -> &[FastaRecord] {
         &self.queries
+    }
+
+    /// How the reading of the strategy's queries ended.
+    pub(crate) fn query_end(&self) -> &super::QueryEnd {
+        &self.query_end
     }
 
     /// The records of the strategy's subjects, none for a database.
@@ -256,7 +264,7 @@ impl Search {
     pub fn read_strategy(&self, strategy: &[u8]) -> Result<Strategy, Error> {
         let command = self.strategy_command(None)?;
         let applied = apply(command, strategy)?;
-        let (queries, subjects) = read_search_inputs(
+        let records = read_search_inputs(
             program_of(&applied.command).unwrap_or(self.program()),
             &applied.command,
             None,
@@ -268,8 +276,9 @@ impl Search {
             program: self.program(),
             argv: self.argv().to_vec(),
             bytes: strategy.to_vec(),
-            queries,
-            subjects,
+            queries: records.query,
+            query_end: records.query_end,
+            subjects: records.subject,
             database: applied.database,
         })
     }

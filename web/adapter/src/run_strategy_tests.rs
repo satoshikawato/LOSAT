@@ -78,7 +78,7 @@ fn run_imported(
         subject_handle,
         words,
         crate::run::data_loaders(words).ok(),
-        |queries, subjects| run(words, queries, subjects),
+        |queries, query_end, subjects| run(words, queries, query_end, subjects),
     );
     crate::store::release(query_handle).unwrap();
     crate::store::release(subject_handle).unwrap();

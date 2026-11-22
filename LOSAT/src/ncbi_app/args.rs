@@ -164,6 +164,15 @@ impl Arguments {
         aliases.map(|&(alias, name)| (alias.get(), name.get()))
     }
 
+    /// The keys of `AddDefaultKey` with their defaults, in the order of `m_Args`: the values that
+    /// NCBI's `CArgs` holds for those the command line does not give (the import of a search
+    /// strategy compares them with the strategy's, `report::archive::read::import`).
+    pub(crate) fn defaults(self) -> impl Iterator<Item = (&'static str, &'static str)> {
+        self.descs()
+            .iter()
+            .filter_map(|desc| Some((desc.name(), desc.default()?)))
+    }
+
     /// The entries of `m_Dependencies`: (first name, dependency, second name).
     fn dependencies(self) -> impl Iterator<Item = (&'static str, Dep, &'static str)> {
         let dependencies = self.dependencies.of(&DEPENDENCIES).iter();

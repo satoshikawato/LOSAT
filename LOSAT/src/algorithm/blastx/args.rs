@@ -28,6 +28,12 @@ pub(crate) const BLASTX_TASK: crate::blastinput::value_parsers::TaskParser =
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:49-62
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:72-78
 pub struct BlastxArgs {
+    /// The arguments that the command line gave, for the import of a search strategy
+    /// (`cli::GivenArguments`; read only with `-import_search_strategy`). The first field: the
+    /// parser takes each later field's values out of the matches as it reads them
+    /// (`from_arg_matches_mut`), so this one reads the matches whole.
+    #[command(flatten)]
+    pub(crate) given: crate::cli::GivenArguments<BlastxArgs>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     // The default `-` is standard input (`input_files::open_input`).
     #[arg(long, value_name = "PATH", default_value = "-", value_parser = ncbi_input_path())]
@@ -107,10 +113,6 @@ pub struct BlastxArgs {
     /// The run state of an imported search strategy (`import::apply`).
     #[arg(skip)]
     pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
-    /// The arguments that the command line gave, for the import of a search strategy
-    /// (`cli::GivenArguments`; read only with `-import_search_strategy`).
-    #[command(flatten)]
-    pub(crate) given: crate::cli::GivenArguments<BlastxArgs>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:99-100
     #[arg(long, default_value = "blastx", value_parser = BLASTX_TASK)]
     pub task: String,

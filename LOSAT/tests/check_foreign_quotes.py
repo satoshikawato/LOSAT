@@ -1752,12 +1752,17 @@ def unbackticked_findings(
             known.append(code_names(style, lines, texts) | functions)
         return known[0]
 
-    def record(number: int, raw: str, outside: str, is_cited: bool) -> None:
+    def record(number: int, raw: str, outside: str, is_cited: bool | None = None) -> None:
         if number in seen_lines:
             return
-        if unbackticked_c_code(outside, raw, style=style, names=names, cited_line=is_cited):
+        cited_flag = (number in cited_lines) if is_cited is None else is_cited
+        if unbackticked_c_code(outside, raw, style=style, names=names, cited_line=cited_flag):
             seen_lines.add(number)
             findings.append(Finding(rel, number, "QUOTE", UNBACKTICKED_QUOTE, raw))
+
+    def record_run(items: Sequence[tuple[int, str]], is_cited: bool | None = None) -> None:
+        for number, raw, outside in strip_backticks_in_run(items):
+            record(number, raw, outside, is_cited)
 
     def check_run_spans(run_items: Sequence[tuple[int, str]]) -> None:
         joined, starts = "", []
@@ -1782,8 +1787,7 @@ def unbackticked_findings(
     def check_single(number: int, raw: str, check_backticks: bool = False) -> None:
         if check_backticks and "`" in raw:
             check_run_spans([(number, raw)])
-        _, _, outside = strip_backticks_in_run([(number, raw)])[0]
-        record(number, raw, outside, number in cited_lines)
+        record_run([(number, raw)])
 
     run: list[tuple[int, str]] = []
     in_fence = False
@@ -1791,8 +1795,7 @@ def unbackticked_findings(
     def flush() -> None:
         if not run:
             return
-        for number, raw, outside in strip_backticks_in_run(run):
-            record(number, raw, outside, number in cited_lines)
+        record_run(run)
         run.clear()
 
     for number, text in enumerate(texts, start=1):
@@ -1817,8 +1820,7 @@ def unbackticked_findings(
     if style == "slash":
         for bc_run in block_comments(lines):
             check_run_spans(bc_run)
-            for number, raw, outside in strip_backticks_in_run(bc_run):
-                record(number, raw, outside, False)
+            record_run(bc_run, is_cited=False)
 
     return findings
 

@@ -22,7 +22,7 @@
 //! the fill's presence vector and helper counters from the counts: the fill sets the bit of a
 //! cell at its first word (`hashtable[ecode1] == 0`) and adds 1 to the cell's counter at every
 //! further word, i.e. bit `ecode1 & 31` of word `ecode1 >> pv_array_bts` for every non-empty
-//! cell and `count - 1` on counter `ecode1 / kCompressionFactor` (wrapping, as the fill's
+//! cell and `count - 1` on counter `ecode1` divided by `kCompressionFactor` (wrapping, as the fill's
 //! `wrapping_add`); so `pv_array`, `helper_array` and `longest_chain` are the fill's. A scan
 //! that reads `qs[offsets[c] .. offsets[c + 1]]` after the same presence test visits the same
 //! query offsets in the same order as the chain walk, so the offset pairs, and everything made

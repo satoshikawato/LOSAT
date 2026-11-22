@@ -275,7 +275,7 @@ pub struct SubjectNumbers {
     /// (`SeqDb::min_length`), a FASTA set's shortest record raised to `BLAST_SEQSRC_MINLENGTH`.
     pub shortest: usize,
     /// `BlastSeqSrcGetAvgSeqLen` (blast_engine.c:1372-1374, the word parameters): a database's
-    /// `GetTotalLength / MAX(1, GetNumSeqs)` (`SeqDb::average_length`, no `STATS_*` key), a
+    /// `GetTotalLength` divided by the larger of 1 and `GetNumSeqs` (`SeqDb::average_length`, no `STATS_*` key), a
     /// FASTA set's total over its records.
     pub average: i32,
     /// The number of sequences of the preliminary stage's option spaces (`STATS_NSEQ` or

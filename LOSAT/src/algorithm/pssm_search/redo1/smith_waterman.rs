@@ -145,8 +145,8 @@ impl RedoMatch<'_> {
             return Ok(Some(Vec::new()));
         }
         // The subject's letters after one sentinel and before another (NCBI's
-        // `seqData->buffer`, `seqData->data = buffer + 1`, blast_kappa.c:1601-1606 and 1640-1643):
-        // `ALIGN_EX` reads `subject->data - 1`.
+        // `seqData->buffer`, with `seqData->data` set one past it, blast_kappa.c:1601-1606 and
+        // 1640-1643): `ALIGN_EX` reads from one byte before `subject->data`.
         let subject_buffer = &mut sw.window;
         subject_buffer.clear();
         subject_buffer.push(0);

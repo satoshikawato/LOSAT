@@ -156,9 +156,14 @@ mod x_rpt_stream;
 #[path = "database.rs"]
 mod database;
 // `-use_index true`: NCBI's loader of the MegaBLAST database index, its error lines and its
-// warning, and LOSAT's refusal of an index that NCBI searches with (line RG item D5b).
+// warning, the index that the search uses, and LOSAT's refusals of the indexed searches it does
+// not run (line RG item D5b).
 #[path = "mb_index.rs"]
 mod mb_index;
+// The search of a query batch with a MegaBLAST database index (`-use_index true`): the index's
+// seeds and the indexed word finder (line RG item D5b-2).
+#[path = "mb_index_seeds.rs"]
+mod mb_index_seeds;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c (whole file)
 // BLASTN `-culling_limit`: the culling writer of the preliminary stage and the culling pipe of
@@ -2950,7 +2955,7 @@ impl UngappedHit {
     /// `ungapped` (offsets in the concatenated query), and whose offsets
     /// `s_AdjustInitialHSPOffsets` makes context-relative. NCBI's extensions run on the
     /// concatenated query (na_ungapped.c:164-206 and 284-310), so a saved hit can start left of
-    /// its context: where the exact walk passes two sentinels (`INT4_MIN / 2` each,
+    /// its context: where the exact walk passes two sentinels (half of `INT4_MIN` each,
     /// blast_stat.c:1124-1127) and its `Int4` sum wraps above 0 (a raw X-drop of 2^30 or more,
     /// such as the `INT_MIN` of `-xdrop_ungap 1e10`, does not stop the walk at the first one),
     /// or where the approximate walk, which reads the sentinel as bases, keeps a hit below the
@@ -3383,7 +3388,7 @@ fn prelim_subject_best_hit(combined: &mut Vec<PrelimHit>, query_lengths: &[usize
 
 /// Where the second of two preliminary HSP lists continues the first: the start of a subject
 /// chunk, or the offsets of a query chunk's contexts (plus and minus strand; `Blast_HSPListsMerge`
-/// takes `contexts_per_query < 0` for the subject).
+/// takes a negative `contexts_per_query` for the subject).
 #[derive(Clone, Copy)]
 enum HspListSplit {
     Subject { offset: usize },
@@ -4790,6 +4795,8 @@ struct BlastnReportInputs<'a> {
     /// `-strand minus`, else 0 (`context 2 * q + first_context`).
     first_context: usize,
     megablast: bool,
+    /// The search used a MegaBLAST database index (`BlastnIntro::indexed_megablast`).
+    indexed_megablast: bool,
     /// Matrix-only scoring (reward 0 and penalty 0, `TaskConfig::matrix_only`): the outfmt 0
     /// report shows raw scores only (`BlastnIntro`).
     matrix_only: bool,
@@ -4970,6 +4977,7 @@ fn blastn_pairwise_report(
         version: crate::wording::REPORT_VERSION.to_string(),
         intro: BlastnIntro {
             megablast: report.megablast,
+            indexed_megablast: report.indexed_megablast,
             matrix_only: report.matrix_only,
         },
         database_name: subject_title.as_bytes().to_vec(),
@@ -7272,7 +7280,10 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    megablast_index.check()?;
+    args.megablast_index_loaded = megablast_index.check(&args)?;
+    if args.megablast_index_loaded.is_some() {
+        mb_index::note_index_use(args.archive.as_ref(), args.strategy.as_ref())?;
+    }
     if let (Subjects::Database(database), Some(mask)) = (subjects, args.db_mask_resolved.as_ref()) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1625-1633
         // The words that the scan reads: the discontiguous template's, else the word size.
@@ -7594,8 +7605,8 @@ enum Subjects<'a> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2609-2737
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2694-2697
-/// The HSP is read in the concatenated query (`query_concat`) from NCBI's start, `query_start +
-/// hsp->query.offset`, which lies outside the context for an HSP whose ungapped hit passes an end
+/// The HSP is read in the concatenated query (`query_concat`) from NCBI's start, `query_start` plus
+/// `hsp->query.offset`, which lies outside the context for an HSP whose ungapped hit passes an end
 /// of it (a negative `PrelimHit::prelim_qs`, or a `prelim_qe` past the context's length); the
 /// context's letters are the same bytes. Where the re-evaluation keeps a piece outside the
 /// context, NCBI's HSP keeps those offsets, and so does LOSAT's through the later stages, which may
@@ -8079,12 +8090,12 @@ fn run_in_pool(
         if total_length > 0 {
             mixer.set_target_hits((total_length / 3000) as i32);
         }
-        // `input.SetBatchSize(mixer.GetBatchSize())` converts the `Int4` to `TSeqPos`.
+        // `SetBatchSize` of the input, given `GetBatchSize` of the mixer, converts the `Int4` to `TSeqPos`.
         batching.batch_size = mixer.batch_size(None) as u32;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-280
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // A reader at the end of its input reads no batch (`!input.End()`): the report of no
+    // A reader at the end of its input reads no batch (its `End()` is true): the report of no
     // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
     if queries.input_count() == 0 && matches!(reading, QueryReading::End) {
         return write_batch_reports(
@@ -9353,6 +9364,7 @@ fn blastn_intro(args: &BlastnArgs) -> BlastnIntro {
     let (reward, penalty, _, _) = super::super::coordination::determine_scoring_params(args);
     BlastnIntro {
         megablast: args.task == "megablast",
+        indexed_megablast: args.megablast_index_loaded.is_some(),
         matrix_only: super::super::coordination::matrix_only_scoring(reward, penalty),
     }
 }
@@ -9794,6 +9806,7 @@ fn write_reports_untimed(
         query_eff_searchsp: results.query_eff_searchsp,
         first_context: QueryStrand::from_option(&args.strand).first_context(),
         megablast,
+        indexed_megablast: args.megablast_index_loaded.is_some(),
         matrix_only: config.matrix_only,
         reward: config.reward,
         penalty: config.penalty,
@@ -10583,6 +10596,9 @@ fn search_query_batch<const UNGAPPED: bool>(
         db_num_seqs,
     };
 
+    // Whether the batch is searched with a MegaBLAST database index (`index_seeds` below; only a
+    // database search keeps one, `mb_index::MegablastIndex::check`).
+    let index_search = args.megablast_index_loaded.is_some() && split_prelim_lists.is_none();
     // Build lookup tables
     let (lookup_tables, scan_step, offset_array_size) =
         batch_setup::batch_lookup_tables(&batch_setup::LookupInputs {
@@ -10596,7 +10612,9 @@ fn search_query_batch<const UNGAPPED: bool>(
             approx_table_entries,
             x_keep,
             subjects,
-            split: split_prelim_lists.is_some(),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:110-114
+            // A search with a MegaBLAST database index has no lookup table.
+            split: split_prelim_lists.is_some() || index_search,
         });
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:654 (cutoff_score_min computed per subject)
@@ -10744,6 +10762,23 @@ fn search_query_batch<const UNGAPPED: bool>(
         .filter(|&(_, _, kind)| kind == crate::blastinput::db_mask::MaskKind::Hard)
         .map(|(_, algo_id, _)| algo_id);
     let db_mask_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> = std::sync::Mutex::new(None);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:302-306
+    // The seeds of the MegaBLAST database index for the batch's query (`mb_index_seeds`), each
+    // index volume searched when the preliminary stage first reaches it; a batch split into
+    // query chunks has none (each chunk searched its own above).
+    let index_seeds = match (subjects, args.megablast_index_loaded.as_deref()) {
+        (SubjectSource::Database(database), Some(index)) if index_search => {
+            Some(mb_index_seeds::IndexSeeds::new(
+                index,
+                database.oid_map(),
+                encoded_query_concat_blastna,
+                &query_contexts,
+                &context_valid,
+                effective_word_size,
+            ))
+        }
+        _ => None,
+    };
     // What the preliminary search of a subject reads of the batch
     // (`prelim_subject::PrelimBatch`), built once: the preliminary stage's cutoffs and
     // spaces (the setup's, or its own where they differ, `prelim_eff_searchsp`). With the
@@ -10806,6 +10841,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         lcase_masking,
         db_mask,
         db_mask_error: &db_mask_error,
+        mb_index: index_seeds.as_ref(),
         encoded_query_concat_nomask,
         search_karlin_ref,
         round_down_evalue_score,
@@ -10832,7 +10868,11 @@ fn search_query_batch<const UNGAPPED: bool>(
         (&x_batch_cutoffs, query_eff_searchsp_ref)
     };
     let trace_batch = traceback_subject::TraceBatch {
-        effective_word_size,
+        // A batch split into query chunks traces what its chunks' indexed searches kept.
+        shortest_subject: prelim_subject::shortest_subject(
+            effective_word_size,
+            args.megablast_index_loaded.is_some(),
+        ),
         encoded_queries_blastna: &encoded_queries_blastna,
         encoded_queries_nomask,
         encoded_query_concat_blastna,
@@ -10935,6 +10975,11 @@ fn search_query_batch<const UNGAPPED: bool>(
             intro,
             &shown,
         ));
+    }
+    // An index volume that did not read or search is LOSAT's refusal, after the preliminary
+    // stage's read errors.
+    if let Some(index_seeds) = &index_seeds {
+        index_seeds.check()?;
     }
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).

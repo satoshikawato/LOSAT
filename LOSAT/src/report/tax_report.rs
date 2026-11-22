@@ -26,7 +26,7 @@ use crate::report::query_warnings::ReadCursor;
 use crate::report::tabular::TabularNames;
 use crate::seqdb::taxdb::TaxNames;
 
-/// `max(kMinTaxFormatLineLength, kFormatLineLength)`: the report's line length (`m_LineLength`).
+/// The greater of `kMinTaxFormatLineLength` and `kFormatLineLength`: the report's line length (`m_LineLength`).
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/align_format/taxFormat.hpp:58
 const LINE_LENGTH: u32 = 100;
@@ -98,7 +98,7 @@ impl Text {
         })
     }
 
-    /// `CAlignFormatUtil::MapTemplate(text, name, value)`: every `<@name@>` replaced by `value`,
+    /// `CAlignFormatUtil::MapTemplate` of `text`, `name` and `value`: every `<@name@>` replaced by `value`,
     /// left to right; the text put in is not searched again by this call.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3593-3599
@@ -149,7 +149,7 @@ impl Text {
             .sum()
     }
 
-    /// `out << text`: one insertion of NCBI's, streamed (`cli::insert_streamed`), so that a run
+    /// The insertion of `text` into `out`: one insertion of NCBI's, streamed (`cli::insert_streamed`), so that a run
     /// of spaces is never held whole.
     fn insert_into(&self, out: &mut crate::cli::NcbiOstream<'_>) -> io::Result<()> {
         crate::cli::insert_streamed(out, self.len(), |insertion| {
@@ -181,7 +181,7 @@ enum Place {
     Center,
 }
 
-/// `CAlignFormatUtil::AddSpaces(value, width, place)` with `eAddEOLAtLineStart` (`eol_start`)
+/// `CAlignFormatUtil::AddSpaces` of `value`, `width` and `place` with `eAddEOLAtLineStart` (`eol_start`)
 /// and `eAddEOLAtLineEnd` (`eol_end`). `width` is NCBI's `size_t`: a width of 0 to 2 cuts
 /// nothing (`width - 3` wraps) and still adds `...`.
 ///
@@ -672,7 +672,7 @@ impl TaxLookups {
     // exception at every lookup (and, with `-db`, at every load of a subject with a positive taxid
     // before it), which the report's `catch` takes as it takes a taxid that is not found: it leaves
     // the HSP out and writes nothing (review 1 of line WQA D18b, L1).
-    /// `GetTaxInfo(taxid)`: what it finds (`None`: it throws, also where a file of the database
+    /// `GetTaxInfo` of `taxid`: what it finds (`None`: it throws, also where a file of the database
     /// does not open). The database is opened at the
     /// run's first lookup (the texts of opening, with those of an open by earlier rows, go before
     /// the batch's first lookup's), each taxid is read once per batch. An open or a lookup that
@@ -890,9 +890,9 @@ impl TaxReport {
         title: &[u8],
         length: usize,
     ) -> Result<()> {
-        // The report's insertions are NCBI's (`cli::insert`, `Text::insert_into`): `m_Outfile <<
-        // reportCaption`, `m_Outfile << "\n"` (module docs), the `Query=` block's and
-        // `out << orgReportData` (`organism_report`).
+        // The report's insertions are NCBI's (`cli::insert`, `Text::insert_into`): `reportCaption`
+        // and a line feed into `m_Outfile` (module docs), the `Query=` block's and `orgReportData`
+        // into `out` (`organism_report`).
         add_spaces(
             b"Tax BLAST report",
             u64::from(LINE_LENGTH),
@@ -1043,7 +1043,7 @@ fn organism_report(
         if previous.is_some_and(|previous| subjects.same(previous, hsp.subject)) {
             continue;
         }
-        // `m_Scope.GetBioseqHandle(*subid)` (taxFormat.cpp:997), before the definition lines; a
+        // `m_Scope.GetBioseqHandle` of the id `subid` (taxFormat.cpp:997), before the definition lines; a
         // load that throws goes to the `catch`, `continue`, and reads nothing.
         if subjects.throws(hsp.subject) {
             continue;

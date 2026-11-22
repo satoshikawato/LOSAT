@@ -53,6 +53,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
 | `-window_size` | 40 | Two-hit window; 0 selects the one-hit method |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+| `-best_hit_overhang`, `-best_hit_score_edge` | off (0.1 for the one not given) | Keep only the best alignments for each region of the query (the Best Hit algorithm). Values above 0 and below 0.5; not with `-culling_limit` |
 
 For every option: `losat blastx -help`.
 
@@ -87,7 +88,6 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `blastx` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-best_hit_overhang` and `-best_hit_score_edge`.
 - With `-use_sw_tback`, a query batch on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
 - `-query_gencode 32`; `blastx` does not accept code 32.
 - An `-evalue` that is not a finite number.

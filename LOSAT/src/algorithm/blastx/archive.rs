@@ -77,6 +77,8 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     // An archive is written only for a `-seg` that `resolve` read.
     inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
+    inputs.best_hit_overhang = args.best_hit_overhang;
+    inputs.best_hit_score_edge = args.best_hit_score_edge;
     inputs.subject_besthit = args.subject_besthit;
     inputs.max_intron_length = args.max_intron_length;
     inputs.query_gencode = i32::from(args.query_gencode);

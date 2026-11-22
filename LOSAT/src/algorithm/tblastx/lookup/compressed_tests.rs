@@ -585,8 +585,9 @@ fn compressed_block_table_scans_the_whole_tables_hits_per_subject_offset() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:782-849
-// `(Int4)(kMatrixScale * opt->threshold)` past `Int4` is `INT_MIN` (every word is a
-// neighbor); words past the overflow banks make the table `Err` (NCBI writes past its banks).
+// The cast to `Int4` of `opt->threshold` times `kMatrixScale`, when past `Int4`, is `INT_MIN`
+// (every word is a neighbor); words past the overflow banks make the table `Err` (NCBI writes past
+// its banks).
 #[test]
 fn a_threshold_past_int4_takes_every_word_up_to_the_banks() {
     assert_eq!(

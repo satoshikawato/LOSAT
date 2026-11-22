@@ -463,7 +463,7 @@ fn x_search_core(
             // their own and keep `score_block`.
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:243-246
             // NCBI computes the query's score block once in setup, and a chunk's own only for a
-            // split query (the loop this is in runs only `if (query_splitter->IsQuerySplit())`).
+            // split query (the loop this is in runs only when `query_splitter->IsQuerySplit()` is true).
             let mut params = match x_raw_params.take() {
                 Some(raw) if !is_split => {
                     crate::utils::xreach::x_reach!("LOSAT_X_BXKAONCE", true);

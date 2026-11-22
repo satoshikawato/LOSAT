@@ -251,7 +251,7 @@ Query_1  45  CYYAPVPCSELFC  7
     );
 }
 
-// s1.d.nd0.f1: a section of one HSP of length 0, an alignment of no columns (`(int)GetAlnStop()` is -1): the section's blank line only.
+// s1.d.nd0.f1: a section of one HSP of length 0, an alignment of no columns (`GetAlnStop()` cast to `int` is -1): the section's blank line only.
 #[test]
 fn blastx_hsp_of_length_0_alone_writes_no_line() {
     let probe = Probe {
@@ -307,8 +307,8 @@ fn blastx_hsp_of_length_0_at_a_codon_of_frame_plus_one_frees_the_segment() {
 // Review 3 of T3c, D1 (the 8 differences of its seed-11 fuzz: cases r11_001 and r11_019, `-strand minus -num_descriptions 0`,
 // formats 1 to 4): the first frame group holds the HSPs of length 0 alone (in f3147 below the frame +1 HSPs too), each a
 // segment of length 0 of the query's row of its own frame (`x_SetSeqFrame`). `FillUnalignedRegions`
-// fills a row from the end of its previous segment, the own start of a segment of length 0, so `row->SetStarts()[new_start]
-// = seg` (alnsegments.cpp:323) replaces the row's `CRef` of it. Official NCBI BLAST+ 2.17.0 exits 139 (SIGSEGV) where that
+// fills a row from the end of its previous segment, the own start of a segment of length 0, so `seg` stored in `row->SetStarts()`
+// at `new_start` (alnsegments.cpp:323) replaces the row's `CRef` of it. Official NCBI BLAST+ 2.17.0 exits 139 (SIGSEGV) where that
 // was the last `CRef` and `m_Segments` still lists the segment (valgrind: invalid reads in `x_CreateDenseg` of a block
 // "free'd by `FillUnalignedRegions`"): in r11_001 the segment of the HSP at qstart 86, the second of its frame 2 row (the
 // first, of the HSP at 59, is `x_Merge`'s last), in r11_019 that of the HSP at 136. NCBI exits 0 where the replaced
@@ -437,7 +437,7 @@ fn blastx_fill_after_a_segment_of_length_0_frees_its_last_reference() {
 // (`Mix::held` scans every row's map, not only `x_Merge`'s `seg`): where a run of `x_MinimizeGaps` ends at a segment
 // that shares a row with an earlier one, each new segment is bound at the starts of both on that row
 // (alnsegments.cpp:478-480, :526), and `FillUnalignedRegions` can write at the earlier one (:317, :323). Here one frame +1
-// HSP whose subject has inserted letters on either side of a query letter that it lacks (BTOP `-KA--K`, an insertion
+// HSP whose subject has inserted letters on either side of a query letter that it lacks (BTOP "-KA--K", an insertion
 // next to a deletion): the subject row's two one-letter segments, in one run, become one segment bound at subject
 // offsets 29 and 30, and the fill of the subject row writes at 29. A synthetic HSP: about 26,000 searches of the
 // probe sets of reviews 3 and 4 and the outfmt 1 to 4 fixture rows met no such replacement.

@@ -179,7 +179,7 @@ pub fn cutoff_score_from_evalue(
     // `ln K + ln searchsp - ln E`, a finite cutoff that every HSP of e-value at most E reaches.
     // A finite quotient keeps NCBI's order of operations. That gives NCBI's rows where each hit is
     // judged as one HSP (blastp, psiblast, blastx, tblastn). TBLASTX's rows differ there: its word
-    // cutoff `MIN(update, gap trigger, cutoff_score_max)` is the gap trigger with LOSAT's finite
+    // cutoff, the smallest of the update, the gap trigger and `cutoff_score_max`, is the gap trigger with LOSAT's finite
     // value (as with the `i32::MAX` before), while NCBI's x86-64 `cutoff_score_max` of 1 makes its
     // word cutoff 1, so more ungapped HSPs reach its sum statistics (NCBI 2.17.0 320 rows, LOSAT
     // 262 for a 6,077-codon sequence against itself with `-searchsp 9223372036854775807 -evalue

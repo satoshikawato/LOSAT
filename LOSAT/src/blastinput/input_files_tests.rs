@@ -290,8 +290,8 @@ fn a_stream_copied_for_a_second_read_has_a_position_and_keeps_its_kind() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-859 (`tellg() < 0` is piped
-// input). A regular file has a position; a pipe has none, on Linux because `lseek`
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-859 (a negative `tellg()` is
+// piped input). A regular file has a position; a pipe has none, on Linux because `lseek`
 // fails and on Windows because `GetFileType` is not `FILE_TYPE_DISK`.
 #[test]
 fn a_regular_file_has_a_position_and_a_pipe_has_none() {

@@ -26,8 +26,8 @@ pub(crate) struct SeqData {
     /// `mask_locs_` that are packed intervals (the only ones `CMaskHelper::Add` keeps), in their
     /// order: each one's intervals `(from, to)`, `to` inclusive.
     pub(crate) masks: Vec<Vec<(u32, u32)>>,
-    /// The first word of `sequence::GetTitle(bsh)` (`extractSeqVector`), when the stream was
-    /// asked for titles (`-idmap`; nothing else reads it).
+    /// The first word of `sequence::GetTitle` of the Bioseq handle (`extractSeqVector`), when the
+    /// stream was asked for titles (`-idmap`; nothing else reads it).
     pub(crate) id: Option<Vec<u8>>,
     /// The messages that NCBI's `GetBioseq` posts while it makes the sequence (taxonomy
     /// lookups), to be posted before it is used.
@@ -37,8 +37,8 @@ pub(crate) struct SeqData {
 /// The bit of `CODES` that marks a letter other than A, C, G or T.
 const INVALID: u8 = 4;
 
-/// `base_value(r) - 1` of each IUPACna letter `r` as the index packs it: the NCBI2na value of
-/// `A`, `C`, `G`, `T`, and 0 with `INVALID` for any other letter (`base_value` 0).
+/// One less than `base_value` of each IUPACna letter `r` as the index packs it: the NCBI2na value
+/// of `A`, `C`, `G`, `T`, and 0 with `INVALID` for any other letter (`base_value` 0).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:103-112
 const CODES: [u8; 256] = {
     let mut codes = [INVALID; 256];
@@ -218,18 +218,18 @@ fn bdb_error(error: BdbError) -> StreamError {
     }
 }
 
-/// How a filtering algorithm is named: by its id (`CSequenceIStreamBlastDB(dbname, use_filter,
-/// int)`) or by the text of `-db_mask` (the `string` constructor).
+/// How a filtering algorithm is named: by its id (the `CSequenceIStreamBlastDB` constructor with
+/// an `int`) or by the text of `-db_mask` (the `string` constructor).
 pub(crate) enum Filter<'a> {
     None,
     Name(&'a str),
 }
 
 impl BlastDbStream {
-    /// `CSequenceIStreamBlastDB(dbname, use_filter, filter)`: opens the database (`CSeqDB(dbname,
-    /// eNucleotide)`), then checks the filtering algorithm (`CheckBlastDBMaskAlgorithmId`), or
-    /// finds the id of its name (`GetMaskAlgorithmId`): a name that is a number
-    /// (`NStr::StringToNumeric`, base 10) is an id.
+    /// `CSequenceIStreamBlastDB` with `dbname`, `use_filter` and `filter`: opens the database
+    /// (`CSeqDB` with `dbname` and `eNucleotide`), then checks the filtering algorithm
+    /// (`CheckBlastDBMaskAlgorithmId`), or finds the id of its name (`GetMaskAlgorithmId`): a name
+    /// that is a number (`NStr::StringToNumeric`, base 10) is an id.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:48-57
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:62-96
     pub(crate) fn open(
@@ -258,7 +258,7 @@ impl BlastDbStream {
         Ok(stream)
     }
 
-    /// `FindVolumePaths(paths, true)` of the database opened as `dbname`.
+    /// `FindVolumePaths` (with `paths` and true) of the database opened as `dbname`.
     pub(crate) fn volume_paths(&self, dbname: &str) -> Result<Vec<String>, StreamError> {
         self.reader.volume_paths(dbname).map_err(bdb_error)
     }
@@ -269,7 +269,7 @@ impl BlastDbStream {
     }
 
     /// `GetAvailableMaskAlgorithmDescriptions()` of the database: the descriptions of its
-    /// filtering algorithms, empty when it has none (also `ShowSupportedFilters(dbname)`).
+    /// filtering algorithms, empty when it has none (also `ShowSupportedFilters` of `dbname`).
     // NCBI reference (598d8ae6): c++/include/algo/blast/dbindex/sequence_istream_bdb.hpp:53-57
     pub(crate) fn descriptions(&self) -> Result<String, StreamError> {
         self.reader
@@ -279,7 +279,7 @@ impl BlastDbStream {
             .map_err(|error| bdb_error(self.reader.database_error(error)))
     }
 
-    /// `CheckBlastDBMaskAlgorithmId(db, id)`: `id` when the database has that algorithm.
+    /// `CheckBlastDBMaskAlgorithmId` with `db` and `id`: `id` when the database has that algorithm.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:48-57
     fn checked_id(&self, id: i32) -> Result<i32, StreamError> {
         let ids = self
@@ -302,8 +302,8 @@ impl BlastDbStream {
         )))
     }
 
-    /// `seqdb_->GetMaskAlgorithmId(name)`; its `CSeqDBException` is thrown again as a
-    /// `CSequenceIStream_Exception`.
+    /// `GetMaskAlgorithmId` of the database (`seqdb_`) with `name`; its `CSeqDBException` is thrown
+    /// again as a `CSequenceIStream_Exception`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:78-94
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2266
     fn named_id(&self, name: &str) -> Result<i32, StreamError> {
@@ -425,7 +425,7 @@ pub(crate) struct FastaStream<'a> {
 }
 
 impl<'a> FastaStream<'a> {
-    /// `CSequenceIStreamFasta(input)` over the opened input.
+    /// `CSequenceIStreamFasta` over the opened input (`input`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:55-87
     pub(crate) fn new(input: Box<dyn Read + 'a>, titles: bool) -> Self {
         FastaStream {

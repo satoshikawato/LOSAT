@@ -1,18 +1,18 @@
 //! `CDirEntry::Remove` of NCBI's corelib (`c++/src/corelib/ncbifile.cpp`) with its default flags
-//! `eRecursive`: how makeblastdb removes a name of an existing database (`CFile(name).Remove()`
-//! in `DeleteBlastDb`) and `CDirEntry::Rename(..., fRF_Overwrite)`, with which it gives a volume
+//! `eRecursive`: how makeblastdb removes a name of an existing database (`Remove` of a `CFile`
+//! in `DeleteBlastDb`) and `CDirEntry::Rename` with `fRF_Overwrite`, with which it gives a volume
 //! file its final name (`rename_overwrite`). A directory is removed with its contents.
 
 use std::path::Path;
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:707-741,772
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:2595-2603
-// `CFile` does not override `Remove`, so `CFile(name).Remove()` is this function with
+// `CFile` does not override `Remove`, so `Remove` of a `CFile` is this function with
 // `eRecursive`. A failure is not reported: the file API logs only with `FileAPILogging`, whose
 // default is false (ncbifile.cpp:176-180, 221-230), and `DeleteBlastDb` only counts the names
 // removed.
-/// `CDirEntry(path).Remove(eRecursive)`: removes `path`, a directory with its contents; `true`
-/// when it is removed.
+/// `Remove` with `eRecursive` of a `CDirEntry` of `path`: removes `path`, a directory with its
+/// contents; `true` when it is removed.
 pub(crate) fn remove(path: &Path) -> bool {
     if is_dir_ignore_links(path) {
         return remove_dir(path);
@@ -21,9 +21,9 @@ pub(crate) fn remove(path: &Path) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:2203-2241
-// `IsDir(eIgnoreLinks)`: a symbolic link is not a directory, whatever it points to, so the link
-// is removed and its target is kept. On Windows NCBI's `GetType` calls `stat` for both values of
-// `follow` (ncbifile.cpp:2208-2209); LOSAT does not follow a link there either (not compared
+// `IsDir` with `eIgnoreLinks`: a symbolic link is not a directory, whatever it points to, so the
+// link is removed and its target is kept. On Windows NCBI's `GetType` calls `stat` for both values
+// of `follow` (ncbifile.cpp:2208-2209); LOSAT does not follow a link there either (not compared
 // with a makeblastdb run on Windows).
 fn is_dir_ignore_links(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir())
@@ -41,10 +41,11 @@ fn remove_entry(path: &Path) -> bool {
 // `eRecursive` has no `fProcessAll`: the first entry that cannot be removed stops the removal,
 // and the entries before it are gone (makeblastdb 2.17.0 on Linux x64, 2026-11-08: a directory
 // holding a file and an unreadable directory loses the file and keeps the other).
-/// `CDir::Remove(eRecursive)` of the directory `path`.
+/// `CDir::Remove` with `eRecursive` of the directory `path`.
 fn remove_dir(path: &Path) -> bool {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1061-1084 (CDirEntry::SetModeEntry)
-    // `SetMode(fWrite | fModeAdd, fModeNoChange, fModeNoChange)` with the default special bits
+    // `SetMode` that adds `fWrite` to the user's mode and leaves the group's and the others' modes
+    // unchanged, with the default special bits
     // 0 (`CDir::SetMode` of the top entry only, ncbifile.hpp:2040-2044): the permissions of the
     // user, the group and the others are kept, the user's write permission is added, and the
     // set-user-ID, set-group-ID and sticky bits are cleared. Its result is not checked.
@@ -99,9 +100,9 @@ fn remove_dir(path: &Path) -> bool {
 // names of a volume file are in one directory, so a cross-device `rename()` is not expected;
 // its `Copy()` is ported for a file only (the mode is copied, the owner and the times of
 // `fCF_PreserveAll` are not), and a source that is a directory fails there.
-/// `CDirEntry(src).Rename(dst, CDirEntry::fRF_Overwrite)`: `true` when `src` got the name
-/// `dst`. An existing destination is removed first (`remove`, a directory with its contents);
-/// one that stays makes the rename fail, and `src` keeps its name.
+/// `Rename` of a `CDirEntry` of `src` to `dst` with `CDirEntry::fRF_Overwrite`: `true` when `src`
+/// got the name `dst`. An existing destination is removed first (`remove`, a directory with its
+/// contents); one that stays makes the rename fail, and `src` keeps its name.
 pub(crate) fn rename_overwrite(src: &Path, dst: &Path) -> bool {
     let Some(src_type) = entry_type(src) else {
         return false;
@@ -134,8 +135,8 @@ pub(crate) fn rename_overwrite(src: &Path, dst: &Path) -> bool {
     remove(src)
 }
 
-/// `CDirEntry(path).GetType()` (`eIgnoreLinks`) when it is not `eUnknown`: `lstat` on Unix,
-/// `stat` elsewhere.
+/// `GetType` with `eIgnoreLinks` of a `CDirEntry` of `path`, when it is not `eUnknown`: `lstat` on
+/// Unix, `stat` elsewhere.
 fn entry_type(path: &Path) -> Option<std::fs::Metadata> {
     #[cfg(unix)]
     let meta = std::fs::symlink_metadata(path);

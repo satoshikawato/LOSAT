@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use arrow_array::RecordBatch;
-use losat::api::{self, FastaRecord, HspRecord, Inputs, Program, Role, Search};
+use losat::api::{self, FastaRecord, HspRecord, Inputs, Program, QueryEnd, Role, Search};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedBytes;
 use pyo3::types::{PyBytes, PyList, PySlice, PyTuple};
@@ -72,7 +72,12 @@ pub struct Loaded {
     search: Search,
     /// The PSSM or alignment file of a query that a file holds; the query records are then none.
     file: Option<QueryFile>,
+    /// The query records read before the end of the query input (`query_end`).
     query: Vec<FastaRecord>,
+    /// How the reading of the query input ended after `query` (`api::read_input_records`): a
+    /// search of the records meets a reader error, or blank lines where a record should be, in
+    /// the query batch that reads it, after the batches before, as the command line does.
+    query_end: QueryEnd,
     subject: Vec<FastaRecord>,
     query_name: String,
     subject_name: String,
@@ -102,6 +107,7 @@ impl Loaded {
                 search,
                 file,
                 query: Vec::new(),
+                query_end: QueryEnd::Input,
                 subject: Vec::new(),
                 query_name,
                 subject_name,
@@ -118,12 +124,16 @@ impl Loaded {
             Some(subject) => subject.bytes(Role::Subject)?,
             None => Cow::Borrowed(&[][..]),
         };
-        let (query, subject) = api::read_inputs(&search, &query_bytes, &subject_bytes)?;
+        // A query record that the reader refuses ends the search in its batch, not here: the
+        // command line reads its queries one batch at a time (line WQA's D10). A subject's
+        // error fails here, as the command line reads every subject before the first query.
+        let records = api::read_input_records(&search, &query_bytes, &subject_bytes)?;
         Ok(Self {
             search,
             file,
-            query,
-            subject,
+            query: records.query,
+            query_end: records.query_end,
+            subject: records.subject,
             query_name,
             subject_name,
             database,
@@ -138,8 +148,10 @@ impl Loaded {
                 Inputs::msa_database(msa, &self.subject_name)
             }
             (false, Some(QueryFile::Alignment(msa))) => Inputs::msa(msa, &self.subject),
-            (true, None) => Inputs::database(&self.query, &self.subject_name),
-            (false, None) => Inputs::new(&self.query, &self.subject),
+            (true, None) => {
+                Inputs::database(&self.query, &self.subject_name).query_end(&self.query_end)
+            }
+            (false, None) => Inputs::new(&self.query, &self.subject).query_end(&self.query_end),
         };
         inputs.named(&self.query_name, &self.subject_name)
     }

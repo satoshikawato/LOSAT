@@ -4,7 +4,7 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c
 //!
 //! This module is a child of `blast_engine` for the subject result type that it keeps private.
-//! Nothing here runs without `-culling_limit` (a limit of 0 is NCBI's `SetCullingLimit(0)`,
+//! Nothing here runs without `-culling_limit` (a limit of 0 is NCBI's `SetCullingLimit` of 0,
 //! which is ignored): the choice is made once per search call, where `blast_engine` picks the
 //! sink of the preliminary hit lists, and once per query where it finishes a final hit list.
 

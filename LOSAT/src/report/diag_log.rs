@@ -316,7 +316,7 @@ impl DiagLog {
     }
 }
 
-/// `NStr::Sanitize(str)` with its default flags (`fSS_print`): a printable ASCII byte stays,
+/// `NStr::Sanitize` of `str` with its default flags (`fSS_print`): a printable ASCII byte stays,
 /// any other byte becomes a space, runs of spaces become one, and the spaces at both ends
 /// go.
 ///

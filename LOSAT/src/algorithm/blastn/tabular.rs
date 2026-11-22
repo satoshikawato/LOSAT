@@ -11,7 +11,7 @@
 //! (frames `1/-1`), the score, e-value and bit score, the alignment's lengths and gaps, and for
 //! `qseq`, `sseq`, `btop`, `positive` and `ppos` the two rows, from which it counts the
 //! identities again (`report::tabular::TabularWriter::row`). BLASTN's formatter reads no other
-//! sequence data (`SetNoFetch(true)`) and has no scoring matrix: positives are identities.
+//! sequence data (`SetNoFetch` of true) and has no scoring matrix: positives are identities.
 
 use std::io::Write;
 use std::sync::Arc;
@@ -357,7 +357,7 @@ fn uniq_subject_coverage(hsps: &[BlastnHsp], query_length: usize) -> i32 {
     if query_length == 0 {
         return -1;
     }
-    // `int uniq_coverage` of the `TSeqPos` length.
+    // `uniq_coverage`, an `int`, of the `TSeqPos` length.
     let covered = uniq_seq_coverage(hsps) as i32;
     if covered == 0 {
         return -1;
@@ -377,7 +377,8 @@ struct SeqRange {
 }
 
 impl SeqRange {
-    /// `CRange(from, to)` (`Set`: `SetFrom(from).SetTo(to)`, `SetToOpen(to + 1)`).
+    /// `CRange` from `from` to `to` (`Set` calls `SetFrom` with `from` and `SetTo` with `to`,
+    /// which is `SetToOpen` with `to` plus 1).
     fn new(from: u32, to: u32) -> Self {
         SeqRange {
             from,
@@ -441,7 +442,7 @@ impl RangeCollection {
         lower_bound_by(start, self.0.len(), |i| self.0[i].to_open <= pos)
     }
 
-    /// `x_CombineWith(const TRange&)`.
+    /// `x_CombineWith` of a `TRange`.
     ///
     /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:321-346
     fn combine_with(&mut self, r: SeqRange) {
@@ -464,7 +465,7 @@ impl RangeCollection {
         }
     }
 
-    /// `x_Subtract(const TRange&)`.
+    /// `x_Subtract` of a `TRange`.
     ///
     /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:348-376
     fn subtract(&mut self, r: SeqRange) {
@@ -500,21 +501,22 @@ impl RangeCollection {
     }
 }
 
-/// The subject range of an HSP's Seq-align (`GetSeqRange(1)`, record coordinates, 0-based).
+/// The subject range of an HSP's Seq-align (`GetSeqRange` of row 1, record coordinates, 0-based).
 fn subject_range(hsp: &BlastnHsp) -> SeqRange {
     let (low, high) = (hsp.s_start.min(hsp.s_end), hsp.s_start.max(hsp.s_end));
     SeqRange::new(low as u32 - 1, high as u32 - 1)
 }
 
-/// The query range of an HSP's Seq-align (`GetSeqRange(0)`: the query always ascending).
+/// The query range of an HSP's Seq-align (`GetSeqRange` of row 0: the query always ascending).
 fn query_range(hsp: &BlastnHsp) -> SeqRange {
     SeqRange::new(hsp.q_start as u32 - 1, hsp.q_end as u32 - 1)
 }
 
 /// The query position (record coordinates, 0-based) in the column of the HSP's alignment that
 /// holds subject position `subject_pos`, -1 where the query has a gap there: `CAlnMap`'s
-/// `GetSeqPosFromAlnPos(0, GetAlnPosFromSeqPos(1, subject_pos))` on the HSP's Dense-seg, whose
-/// subject row ascends and whose query row descends for a minus-strand HSP
+/// `GetSeqPosFromAlnPos` in row 0 of the column that `GetAlnPosFromSeqPos` gives for
+/// `subject_pos` in row 1, on the HSP's Dense-seg, whose subject row ascends and whose query row
+/// descends for a minus-strand HSP
 /// (`s_CollectSeqAlignData`; the columns are the edit script's).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:663-686

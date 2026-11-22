@@ -15,7 +15,7 @@ fn key(u: UngappedData) -> (usize, usize, usize, i32) {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:197 and
 // blast_stat.c:1124-1127
 /// `-xdrop_ungap 1e10` (X-drop `INT_MIN`, which negates to itself): the left walk from the hit
-/// at 3 passes the two sentinels (`INT4_MIN / 2` each: `INT_MIN`) and the mismatch A/C (-3),
+/// at 3 passes the two sentinels (half of `INT4_MIN` each: `INT_MIN`) and the mismatch A/C (-3),
 /// where the `Int4` sum wraps to 2^31 - 3, above 0, as in NCBI's x86-64 build; the right walk
 /// adds the two matches: `i32::MAX`. A build with overflow checks gives the same.
 #[test]
@@ -101,4 +101,46 @@ fn every_offset_matches_the_ported_loops() {
         }
     }
     assert!(calls > 100_000, "{calls}");
+}
+
+/// A seed of a MegaBLAST database index can start in its sequence's last 3 letters (the seed runs
+/// on into the next sequence of the index's local id): for a sequence of 22 letters in 6 bytes
+/// and a seed at 21, the approximate extension's blocks start at 24, past the last letter, and
+/// NCBI's `Int4` length gives no block to the right (a `usize` one wrapped and read past the 6
+/// bytes); its exact pass gives the exact extension's result.
+#[test]
+fn a_seed_in_the_last_three_letters_takes_no_block_to_the_right() {
+    use super::super::extension::{build_nucl_score_table, extend_hit_ungapped_approx_ncbi};
+    let matrix = crate::algorithm::blastn::alignment::build_blastna_matrix(1, -2);
+    let score_table = build_nucl_score_table(1, -2);
+    let mut state = 0x5eed_d5b2_u64;
+    let letters: Vec<u8> = (0..22).map(|_| (next(&mut state) & 3) as u8).collect();
+    let mut packed = vec![0u8; 6];
+    for (p, &letter) in letters.iter().enumerate() {
+        packed[p / 4] |= letter << (2 * (3 - p % 4));
+    }
+    // The query: the sequence's letters, then other letters (the next sequence's).
+    let mut query = letters.clone();
+    query.extend([1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3]);
+    for s_off in 17..22 {
+        let exact =
+            extend_hit_ungapped_exact_counted(&query, &packed, s_off, s_off, 22, 20, &matrix);
+        let approx = |reduced_cutoff| {
+            extend_hit_ungapped_approx_ncbi(
+                &query,
+                &packed,
+                s_off,
+                s_off,
+                s_off + 12,
+                22,
+                20,
+                &score_table,
+                reduced_cutoff,
+                &matrix,
+            )
+        };
+        assert_eq!(key(approx(0)), key(exact));
+        let blocks = approx(i32::MAX);
+        assert!(blocks.score > 0 && blocks.q_start + blocks.length <= s_off + 12);
+    }
 }

@@ -20,7 +20,7 @@
 //! # What a search returns
 //!
 //! NCBI scans the remaining HSPs before H in list order, nearest first, and
-//! keeps a candidate when `sum > H_hsp_sum` (link_hsps.c:738; at index 1 the
+//! keeps a candidate when `sum` exceeds `H_hsp_sum` (link_hsps.c:738; at index 1 the
 //! `b0` test of line 838 and the keep of lines 852-860). The result is the
 //! candidate with the largest sum and, among equal sums, the one nearest to
 //! H: the largest post-sort list index. A key (`LinkKey`: the value, then the
@@ -110,7 +110,7 @@
 //! found in a uniform grid of W x W cells over the trimmed starts of the HSPs
 //! with `score > cutoff[0]`; each cell lists its HSPs by increasing list
 //! index, and the walk of a cell stops at H. NCBI's early `break` (lines
-//! 733-734) only skips HSPs that fail `q_off_t > H_q_et_gap` (the list is
+//! 733-734) only skips HSPs whose `q_off_t` is not above `H_q_et_gap` (the list is
 //! sorted by decreasing query offset, and the trimmed start differs from the
 //! offset by at most `trim_size`) and has no counterpart.
 //!
@@ -994,7 +994,7 @@ fn link_group<'g, K: LinkKey>(
 }
 
 // No NCBI counterpart for the struct and the function boundary: link_group's locals that its
-// round loop uses (s_BlastEvenGapLinkHSPs' `while (number_of_hsps > 0)`, link_hsps.c:589),
+// round loop uses (s_BlastEvenGapLinkHSPs' loop while `number_of_hsps` is above 0, link_hsps.c:589),
 // borrowed for one round, so that a round is one call of `round`. On wasm32 (LOSAT Web) `round`
 // is a function of its own: V8 runs the first calls of a freshly compiled function in its baseline
 // code (Liftoff) and switches to its optimized code (TurboFan) only at a later call, never inside a
@@ -1529,7 +1529,7 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                 addback_hsps.push(bi as u32);
                 // NCBI's Int2 count: a wrapped (negative) count is not "> 1" (c++/src/algo/blast/core/link_hsps.c:918).
                 // BLAST_GapDecayDivisor takes it as an unsigned and raises the rate to the Int4
-                // `nsegs - 1`; `as usize` sign-extends and gap_decay_divisor truncates
+                // `nsegs` less 1; `as usize` sign-extends and gap_decay_divisor truncates
                 // `num_segments - 1` to the same i32.
                 let k = num[0][bi];
                 let divisor = gap_decay_divisor(gap_decay_rate, k as usize);

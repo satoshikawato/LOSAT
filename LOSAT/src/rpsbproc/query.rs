@@ -90,7 +90,7 @@ pub(crate) fn unassigned_member(module: &str, type_name: &str, member: &str) -> 
 // NCBI reference (598d8ae6): c++/src/serial/datatool/classstr.cpp:849-855
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:805-810
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:836-842
-// The generated getters call `ThrowUnassigned(index)`, so the place is the `NCBI_THROW` of
+// The generated getters call `ThrowUnassigned` with the index, so the place is the `NCBI_THROW` of
 // serialobject.cpp:306 (`file_name` and `file_line` are 0). Its function is a `const` method,
 // whose `__PRETTY_FUNCTION__` ends with `const`, not `)`: `ParseCurrFunctName` names no
 // function then.
@@ -163,7 +163,7 @@ pub(crate) fn check_masks(masks: &[Mask]) -> Result<(), ProcessError> {
     Ok(())
 }
 
-/// `CSeq_id::GetStringDescr(bioseq, eFormat_BestWithVersion)` and the clean-up of
+/// `CSeq_id::GetStringDescr` of the bioseq with `eFormat_BestWithVersion`, and the clean-up of
 /// `FillSequenceFromBioseq`: the label of the best id, the text after its first `:` and then
 /// after its first `|`.
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2292-2345
@@ -442,7 +442,7 @@ fn process_cd_query(
     Ok(())
 }
 
-/// `CSeq_align::GetSeq_id(0)`: the id of the query row of an alignment, or what LOSAT refuses
+/// `CSeq_align::GetSeq_id` for index 0: the id of the query row of an alignment, or what LOSAT refuses
 /// (NCBI's exceptions when no segment names one, and the location variants whose id LOSAT does
 /// not look up).
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:317-358
@@ -496,8 +496,8 @@ fn query_row_id(align: &Align) -> Result<&ParsedSeqId, ProcessError> {
 /// `ProcessBlastResults`: each query with the alignments that follow in the list while their
 /// first id matches the query's local id (else its first id).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_biodata.cpp:308-366
-// (`CSeq_id::Match` is `Compare(...) == e_YES`, `seqid::defline_set::compare`. The masks of
-// each query are not printed. `query_row_id` is `GetSeq_id(0)` of a `Dense-seg`, of the
+// (`CSeq_id::Match` is true when `Compare` gives `e_YES`, `seqid::defline_set::compare`. The masks of
+// each query are not printed. `query_row_id` is `GetSeq_id` for index 0 of a `Dense-seg`, of the
 // `Std-seg`s of a translated search and of a `Packed-seg` (NCBI's exception); the other
 // segments are refused there.)
 pub(crate) fn process_blast_results(

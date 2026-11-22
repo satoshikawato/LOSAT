@@ -1,0 +1,27 @@
+Bioseq ::= {
+  id {
+    local id 12345
+  },
+  descr {
+    title "numeric local",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0D6E756D65726963206C6F63616C0000A1803080A080A0800202
+30390000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 14,
+    seq-data ncbistdaa '0C0A12011609010A0F100F091106'H
+  }
+}

@@ -20,7 +20,7 @@ const NUMERIC: i32 = 0;
 const NUMERIC_LONG_ID: i32 = 5;
 /// `MEMORY_ONLY_PAGE_SIZE`: an index without a data file, which makeblastdb does not write.
 const MEMORY_ONLY_PAGE_SIZE: i32 = 1;
-/// `10 * sizeof(Int4)`: the header `x_InitSearch` needs.
+/// Ten times the size of an `Int4`: the header `x_InitSearch` needs.
 const HEADER_BYTES: u64 = 40;
 /// `m_KeySampleOffset`.
 const KEY_SAMPLE_OFFSET: u64 = 9 * 4;

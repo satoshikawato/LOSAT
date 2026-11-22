@@ -94,7 +94,7 @@ impl Env {
         k.ki[k.top] = v as u16;
     }
 
-    /// The `MDB_page *` of the data of a node (`NODEDATA(node)` taken as a sub-page).
+    /// The `MDB_page *` of the data of a node (`NODEDATA` of the node taken as a sub-page).
     fn sub_ref(&self, page: PageRef, off: usize) -> PageRef {
         match page {
             PageRef::Pg(h) => PageRef::Sub(h, off as u16),
@@ -153,7 +153,7 @@ impl Env {
     }
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:8214-8234 (mdb_cursor_copy)
-    /// `mdb_cursor_copy` into a new cursor without an xcursor (`mn.mc_xcursor = NULL`).
+    /// `mdb_cursor_copy` into a new cursor without an xcursor (`mn.mc_xcursor` is set to `NULL`).
     fn cursor_copy(&mut self, src: usize) -> usize {
         let mut k = self.cursors[src].clone();
         k.xc = None;
@@ -255,7 +255,8 @@ impl Env {
 
     /// Entry `k` (from the head) of `txn->mt_cursors[dbi]`, as the `m2` and `m3` of a fixup
     /// loop: `m2`'s flags, `m2` (None for the dummy of `WITH_CURSOR_TRACKING`), and
-    /// `m3 = (mc->mc_flags & C_SUB) ? &m2->mc_xcursor->mx_cursor : m2`.
+    /// `m3`, which is `mx_cursor` of `m2->mc_xcursor` when `mc->mc_flags` has `C_SUB` set, else
+    /// `m2`.
     fn tracked_at(&self, dbi: usize, k: usize, sub: bool) -> Option<(u32, Option<usize>, usize)> {
         let list = &self.tracked[dbi];
         match list[list.len() - 1 - k] {
@@ -552,7 +553,7 @@ impl Env {
     }
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5860-5939 (mdb_cursor_next)
-    /// `mdb_cursor_next(mc, key, data, MDB_NEXT)` on a database without dups.
+    /// `mdb_cursor_next` of `mc`, `key` and `data` with `MDB_NEXT`, on a database without dups.
     pub(super) fn cursor_next(
         &mut self,
         c: usize,
@@ -1127,7 +1128,8 @@ impl Env {
                 let mut stage_new_sub = true;
                 if leaf_flags & F_DUPDATA == 0 {
                     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6733-6769
-                    // `fp+1` is `me_pbuf + sizeof(MDB_page)`, 24 bytes on 64-bit hosts.
+                    // One `MDB_page` past `fp` is `me_pbuf` plus the `sizeof` of `MDB_page`, 24
+                    // bytes on 64-bit hosts.
                     let dbytes = match data {
                         Val::Bytes(b) => b,
                         Val::Reserve(_) => {
@@ -2213,8 +2215,9 @@ impl Env {
                 }
             }
             // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:8956-8995
-            // `new_root` is the depth before a root split (`new_root = mc->mc_db->md_depth++`),
-            // so at least 1 when the root was split; `None` stands for the C value 0.
+            // `new_root` is the depth before a root split (`md_depth` of `mc->mc_db` is incremented
+            // and `new_root` takes the old value), so at least 1 when the root was split; `None`
+            // stands for the C value 0.
             {
                 let dbi = self.cursors[mc].dbi;
                 let sub = self.cursors[mc].flags & C_SUB != 0;
@@ -2469,7 +2472,7 @@ impl Env {
     }
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:9730-9847 (mdb_dbi_open, named DB)
-    /// `mdb_dbi_open(txn, name, flags)` (lmdb++ `dbi::open`).
+    /// `mdb_dbi_open` of `txn`, `name` and `flags` (lmdb++ `dbi::open`).
     pub(crate) fn dbi_open(&mut self, name: &str, flags: u32) -> Result<Dbi, LmdbError> {
         let valid = MDB_REVERSEKEY
             | MDB_DUPSORT

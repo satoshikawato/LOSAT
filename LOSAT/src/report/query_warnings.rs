@@ -1245,7 +1245,7 @@ pub fn replaced_o_message(sequence: &[u8]) -> Option<String> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:905-917
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-651 and 650-651
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1020-1022 (`ToString`) and
-/// c++/include/algo/blast/api/blast_types.hpp:180-184 (`GetMessage(true)`)
+/// c++/include/algo/blast/api/blast_types.hpp:180-184 (`GetMessage` with true)
 pub fn invalid_residues_error(positions: &[usize]) -> Option<String> {
     let list = residue_positions(positions)?;
     Some(format!(

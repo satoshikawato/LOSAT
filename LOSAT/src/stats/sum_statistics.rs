@@ -792,10 +792,11 @@ pub fn uneven_gap_sum_e(
     sum_e
 }
 
-/// The e-value of alignments with arbitrarily large gaps, in NCBI's order of evaluation: `xsum -= num*log(...) - lnfact`
-/// subtracts the difference, which rounds differently from subtracting the product and
-/// adding the factorial (the HSP order of TBLASTX depends on the last bit, and BLASTX's sum
-/// e-values differ from NCBI's in the last digits otherwise). TBLASTX and BLASTX use it.
+/// The e-value of alignments with arbitrarily large gaps, in NCBI's order of evaluation: `xsum`
+/// is reduced by the difference of `num` times a logarithm and `lnfact`, which rounds
+/// differently from subtracting the product and adding the factorial (the HSP order of TBLASTX
+/// depends on the last bit, and BLASTX's sum e-values differ from NCBI's in the last digits
+/// otherwise). TBLASTX and BLASTX use it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4560-4561
 pub fn ncbi_large_gap_sum_e(

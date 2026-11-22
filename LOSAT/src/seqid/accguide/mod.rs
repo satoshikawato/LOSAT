@@ -53,8 +53,8 @@ pub mod parse_flags {
 use parse_flags::RAW_GI;
 use parse_flags::RAW_TEXT;
 
-/// A diagnostic that NCBI's Seq-id code posts (`ERR_POST_X(subcode, Warning << message)`
-/// of Seq_id.cpp, whose error code is `NCBI_ERRCODE_X` 1306): the caller writes it as
+/// A diagnostic that NCBI's Seq-id code posts (`ERR_POST_X` with a subcode, as a warning carrying
+/// the message, in Seq_id.cpp, whose error code is `NCBI_ERRCODE_X` 1306): the caller writes it as
 /// `Warning: (1306.<subcode>) [<application>] <message>`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeqIdWarning {
@@ -199,16 +199,16 @@ const BV_SIZES: [u32; 10] = [
     1_000_000_000,
 ];
 
-/// `SAccGuide::s_Key(letters, digits)`.
+/// `SAccGuide::s_Key`, given the number of `letters` and of `digits`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:952-953
 fn format_key(letters: usize, digits: usize) -> u32 {
     ((letters as u32 & 0xffff) << 16) | (digits as u32 & 0xffff)
 }
 
-/// `NStr::StringToUInt(str, NStr::fConvErr_NoThrow)` (`ncbi_str::string_to_uint`, 0 for an
+/// `NStr::StringToUInt` with `NStr::fConvErr_NoThrow` (`ncbi_str::string_to_uint`, 0 for an
 /// error) of the guide's numbers (`version`, the `<letters>+<digits>` of a rule) and of a bit
-/// position (`NStr::StringToNumeric(str, &value)`, `x_SplitSpecial`). These are ASCII digits
+/// position (`NStr::StringToNumeric` into a value, `x_SplitSpecial`). These are ASCII digits
 /// alone: the guide is compiled in (`rules.txt`), and the bit positions of an accession are cut
 /// from the digits after its letters (`x_IdentifyAccession` keys the rules by their counts); on
 /// such text NCBI's throwing `StringToNumeric` forms read the same values.
@@ -218,7 +218,7 @@ fn bit_number(digits: &[u8]) -> u32 {
     crate::ncbi_str::string_to_uint(digits).unwrap_or(0)
 }
 
-/// `SAccGuide::x_SplitSpecial(acc, fmt)`: the length of the prefix that keys the special
+/// `SAccGuide::x_SplitSpecial` of `acc` and `fmt`: the length of the prefix that keys the special
 /// and the number that is its bit.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1596-1629
@@ -246,7 +246,7 @@ fn split_special(acc: &[u8], fmt: u32) -> (usize, u32) {
     }
 }
 
-/// `NStr::MatchesMask(str, mask)` (case-sensitive) for the masks of the guide, which are
+/// `NStr::MatchesMask` of `str` against `mask` (case-sensitive) for the masks of the guide, which are
 /// letters, `_` and `?` (any one character); a NUL character of `str` matches nothing.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:291-307,359-386
@@ -270,7 +270,7 @@ fn matches_mask(text: &[u8], mask: &[u8]) -> bool {
 }
 
 impl AccGuide {
-    /// `SAccGuide::Find(fmt, acc_or_pfx, key_used)`: the value of an accession (or of a
+    /// `SAccGuide::Find` (with `fmt`, `acc_or_pfx` and `key_used`): the value of an accession (or of a
     /// prefix) of the format `fmt`. `key_used` gets the wildcard or the prefix that gave
     /// it, as NCBI's (for the loading's diagnostics).
     ///
@@ -341,7 +341,7 @@ impl AccGuide {
         result
     }
 
-    /// `SHints::FindAccInfo(name)`.
+    /// `SHints::FindAccInfo` of `name`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:974-989
     /// `None` is `kUnrecognized`.
@@ -356,7 +356,7 @@ impl AccGuide {
         Some(value)
     }
 
-    /// `SHints::FindSpecial(guide, fmt, acc_or_range)`.
+    /// `SHints::FindSpecial` of the guide, `fmt` and an accession or range.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:991-1010
     fn find_special(&self, hints: &mut Hints, fmt: u32, acc_or_range: &[u8]) -> AccInfo {
@@ -376,7 +376,7 @@ impl AccGuide {
         hints.prev_special_base_type
     }
 
-    /// `SHints::FindSubMap(rules, fmt)`: the rules of `fmt`, made if absent.
+    /// `SHints::FindSubMap` of the rules and `fmt`: the rules of `fmt`, made if absent.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1012-1028
     fn find_sub_map(&mut self, hints: &mut Hints, fmt: u32) -> u32 {
@@ -388,8 +388,8 @@ impl AccGuide {
         fmt
     }
 
-    /// `SAccGuide::x_AddSpecial(submap, hints, fmt, from, to, value, old_name, new_name)`
-    /// for a known type name (`old_name` null).
+    /// `SAccGuide::x_AddSpecial` with a submap, hints, `fmt`, `from`, `to`, `value`, `old_name`
+    /// and `new_name`, for a known type name (`old_name` null).
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1513-1597
     /// A bit vector needs no size here (`BitRanges`); `x_SplitSpecial` never gives a bit
@@ -437,7 +437,7 @@ impl AccGuide {
         hints.prev_small_special = Some((from_pfx.to_vec(), index));
     }
 
-    /// `SAccGuide::AddRule(rule, hints)` for the lines of `rules.txt`; `ranges` gives the
+    /// `SAccGuide::AddRule` (with a rule and `hints`) for the lines of `rules.txt`; `ranges` gives the
     /// tokens of each `:` line of a `special2` block.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1030-1053
@@ -747,11 +747,11 @@ pub fn guide() -> &'static AccGuide {
     GUIDE.get_or_init(AccGuide::built_in)
 }
 
-/// `CSeq_id::IdentifyAccession(acc, flags)`: the type of a bare accession. `warn` gets the
+/// `CSeq_id::IdentifyAccession` of `acc` with `flags`: the type of a bare accession. `warn` gets the
 /// diagnostic of an accession with a protein flag and an unexpected division.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1634-1663
-/// (`acc.size() - 1` of an empty accession wraps to `NPOS`, which no `find` result passes.)
+/// (For an empty accession, `acc.size()` less 1 wraps to `NPOS`, which no `find` result passes.)
 pub fn identify_accession(acc: &[u8], flags: u32, warn: &mut dyn FnMut(SeqIdWarning)) -> AccInfo {
     let (main_size, has_version) = match acc.iter().position(|&c| c == b'.') {
         None => (acc.len(), false),
@@ -775,7 +775,7 @@ pub fn identify_accession(acc: &[u8], flags: u32, warn: &mut dyn FnMut(SeqIdWarn
     }
 }
 
-/// `CSeq_id::x_IdentifyAccession(main_acc, flags, has_version)`.
+/// `CSeq_id::x_IdentifyAccession` of `main_acc`, with `flags` and `has_version`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1665-1772
 /// In NCBI, cases 7, 6 and 5 of this `switch` are commented out, so only case 4 is live.
@@ -930,8 +930,8 @@ pub fn x_identify_accession(
     ai
 }
 
-/// `CSeq_id::IdentifyAccession(flags)` of a Seq-id (the member function; its default flags
-/// are `fParse_AnyRaw | fParse_AnyLocal`).
+/// `CSeq_id::IdentifyAccession` with `flags`, on a Seq-id (the member function; its default
+/// flags are `fParse_AnyRaw` and `fParse_AnyLocal` together).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1832-1876
 pub fn identify_seq_id(

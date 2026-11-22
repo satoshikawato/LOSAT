@@ -665,7 +665,7 @@ fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Mes
 /// the output by then (`Traced::posting`; NCBI's `cerr` is tied to `cout`).
 ///
 /// The archive is one object of NCBI's object stream on the report's stream
-/// (`ostream::Site::Serial`, `CBlastFormat::PrintArchive`: `out << MSerial_AsnText << *archive`),
+/// (`ostream::Site::Serial`, `CBlastFormat::PrintArchive`: the archive inserted with `MSerial_AsnText`),
 /// then `~CObjectOStream`'s flush. LOSAT inserts it in large parts; where one fails at the device,
 /// NCBI's pieces of the archive (a second encoding of it through `Traced`, `archive_pieces`)
 /// decide NCBI's end.

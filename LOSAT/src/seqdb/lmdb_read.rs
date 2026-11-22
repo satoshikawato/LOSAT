@@ -318,7 +318,7 @@ impl Db {
         })
     }
 
-    /// True when the tree has no page (`md_root == P_INVALID`).
+    /// True when the tree has no page (`md_root` is `P_INVALID`).
     #[cfg(test)]
     pub fn is_empty_tree(&self) -> bool {
         self.root == P_INVALID
@@ -603,8 +603,8 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
         self.psize
     }
 
-    /// Number of pages that can be read: `mm_last_pg + 1` of the meta page in use, at most the
-    /// whole pages of the file.
+    /// Number of pages that can be read: one more than `mm_last_pg` of the meta page in use, at
+    /// most the whole pages of the file.
     pub fn num_pages(&self) -> u64 {
         self.npages
     }
@@ -693,7 +693,7 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6032-6047
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6148-6153
-    /// `mdb_cursor_set(MDB_SET)`: leaf page and node of an exact key match.
+    /// `mdb_cursor_set` in mode `MDB_SET`: leaf page and node of an exact key match.
     fn find(&self, db: &Db, key: &[u8]) -> Result<Option<(Page, Node)>, ReadError> {
         if key.is_empty() {
             return Err(bad_valsize().into());
@@ -711,10 +711,10 @@ impl<'r, R: ReadAt + ?Sized> Env<'r, R> {
 
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:6148-6160
     // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:5821-5845
-    /// `mdb_cursor_set(MDB_SET_RANGE)`: the first key of `db` that is not before `key` in its
-    /// order (`None`: every key is before it). Past the last node of the leaf that covers `key`,
-    /// the first key of the next leaf (`mdb_cursor_sibling`: the deepest branch with a node to the
-    /// right of the one taken, then the first node of each page down).
+    /// `mdb_cursor_set` in mode `MDB_SET_RANGE`: the first key of `db` that is not before `key` in
+    /// its order (`None`: every key is before it). Past the last node of the leaf that covers
+    /// `key`, the first key of the next leaf (`mdb_cursor_sibling`: the deepest branch with a node
+    /// to the right of the one taken, then the first node of each page down).
     pub fn first_key_at_least(&self, db: &Db, key: &[u8]) -> Result<Option<Vec<u8>>, ReadError> {
         if key.is_empty() {
             return Err(bad_valsize().into());

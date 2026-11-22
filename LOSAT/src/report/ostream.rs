@@ -6,16 +6,16 @@
 use crate::cli::{NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:116-119
-/// NCBI's region of the report where an insertion is made: what NCBI's code does where the
-/// stream's exception (`exceptions(badbit)`, which `CBlastFormat` sets) is thrown. The formatter
-/// declares it (`ReportWrite::site`) before it writes there; a report starts in `Report`.
+/// NCBI's region of the report where an insertion is made: what NCBI's code does where the stream's
+/// exception (the `badbit` of its `exceptions` mask, which `CBlastFormat` sets) is thrown. The
+/// formatter declares it (`ReportWrite::site`) before it writes there; a report starts in `Report`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Site {
     /// The exception reaches the application's `CATCH_ALL`: "BLAST failed to write output", exit
     /// 6 (`blast_app_util.hpp:252-255`).
     Report,
     /// The alignments of outfmt 0-4 (`CDisplaySeqalign::DisplaySeqalign`), from the flush of
-    /// `"\nAlignments" << endl` to the flush at their end: the vestigial `out2`, a
+    /// the `Alignments` heading's `endl` to the flush at their end: the vestigial `out2`, a
     /// `CObjectOStream` on the report's stream (`showalign.cpp:1931`), flushes the stream again
     /// in its destructor and posts 802.4 (`objostr.cpp:317-324`), then as `Report`. On standard
     /// output the post's `cerr` flushes the failed `cout` first (the tie, `ncbidiag.cpp:6476-6493`)
@@ -39,20 +39,20 @@ pub enum Site {
     /// there (no later `Hit` is made). On standard output the post's tie throws
     /// (`std::terminate`).
     XmlIteration,
-    /// One object that an object stream of NCBI's writes on the report's stream (`m_Outfile <<
-    /// MSerial_AsnText << obj`, `WriteObject`, serialobject.cpp:815-827: the Seq-annot of a query in
-    /// outfmt 8, 9 and 12): its buffer (`COStreamBuffer`) inserts the object in pieces
-    /// (`FlushBuffer`, at the end `EndOfWrite`), and `~CObjectOStream`'s `Close` flushes the
-    /// stream (`ReportWrite::ncbi_flush`). A failed insertion throws `ios_base::failure` through
-    /// the object's frames (they catch `CException`s only, objstack.hpp:201-214); `Close`, which
-    /// clears the stream's state for its flush (`STemporarilyClearStreamState`), fails again on a
-    /// file (whose buffer keeps the bytes it could not write, as NCBI BLAST+ 2.17.0's `-out` runs
-    /// show) and posts 802.4, and the exception ends the run at
-    /// `CATCH_ALL`. Where only `Close`'s flush fails, its destructor's catch posts 802.4 and the run
-    /// goes on with a bad stream, whose next insertion throws. On standard output each post's tie
-    /// throws (`std::terminate`). `whole`: LOSAT inserts the object in one insertion, and a failure
-    /// of its device write is decided by NCBI's pieces (`ReportWrite::resolve_object`, which the
-    /// writer calls after an `is_undecided_report_write_failure`); else it inserts NCBI's pieces.
+    /// One object that an object stream of NCBI's writes on the report's stream (`m_Outfile` with
+    /// `MSerial_AsnText` and the object, `WriteObject`, serialobject.cpp:815-827: the Seq-annot of
+    /// a query in outfmt 8, 9 and 12): its buffer (`COStreamBuffer`) inserts the object in pieces
+    /// (`FlushBuffer`, at the end `EndOfWrite`), and `~CObjectOStream`'s `Close` flushes the stream
+    /// (`ReportWrite::ncbi_flush`). A failed insertion throws `ios_base::failure` through the
+    /// object's frames (they catch `CException`s only, objstack.hpp:201-214); `Close`, which clears
+    /// the stream's state for its flush (`STemporarilyClearStreamState`), fails again on a file
+    /// (whose buffer keeps the bytes it could not write, as NCBI BLAST+ 2.17.0's `-out` runs show)
+    /// and posts 802.4, and the exception ends the run at `CATCH_ALL`. Where only `Close`'s flush
+    /// fails, its destructor's catch posts 802.4 and the run goes on with a bad stream, whose next
+    /// insertion throws. On standard output each post's tie throws (`std::terminate`). `whole`:
+    /// LOSAT inserts the object in one insertion, and a failure of its device write is decided by
+    /// NCBI's pieces (`ReportWrite::resolve_object`, which the writer calls after an
+    /// `is_undecided_report_write_failure`); else it inserts NCBI's pieces.
     Serial { whole: bool },
     /// One query's report of outfmt 16 or 15 (`json`), written by an object stream of NCBI's on
     /// the report's stream inside the `try` of `BlastXML2_FormatReport` / `BlastJSON_FormatReport`
@@ -1232,12 +1232,12 @@ pub trait ReportWrite: std::io::Write {
         Ok(())
     }
 
-    /// An insertion of the report that sets the stream's `badbit` itself (a null `const char*`:
-    /// the epilog's matrix name, `report::pairwise::write_matrix_line`), which throws on NCBI's
-    /// stream (`exceptions(NcbiBadbit)`, blast_format.cpp:118-119): the bytes the stream holds
-    /// are written, the run stops, and the application reports "BLAST failed to write output",
-    /// exit status 6 (blast_app_util.hpp:252-255). A writer that is no stream of NCBI's gives the
-    /// error of a failed write.
+    /// An insertion of the report that sets the stream's `badbit` itself (a null `const char*`: the
+    /// epilog's matrix name, `report::pairwise::write_matrix_line`), which throws on NCBI's stream
+    /// (its `exceptions` mask holds `NcbiBadbit`, blast_format.cpp:118-119): the bytes the stream
+    /// holds are written, the run stops, and the application reports "BLAST failed to write
+    /// output", exit status 6 (blast_app_util.hpp:252-255). A writer that is no stream of NCBI's
+    /// gives the error of a failed write.
     fn badbit(&mut self) -> std::io::Result<()> {
         Err(write_failure())
     }
@@ -1683,16 +1683,16 @@ impl DisplaySeqalign {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:456
-/// `out << NcbiEndl` (`endl`): a line feed, then NCBI's flush (`ReportWrite::ncbi_flush`), as at
-/// the start of each query's footer and twice at the start of a pairwise report's epilog.
+/// An insertion of `NcbiEndl` (`endl`): a line feed, then NCBI's flush (`ReportWrite::ncbi_flush`),
+/// as at the start of each query's footer and twice at the start of a pairwise report's epilog.
 pub fn ncbi_endl<W: ReportWrite + ?Sized>(out: &mut W) -> std::io::Result<()> {
     out.write_all(b"\n")?;
     out.ncbi_flush()
 }
 
-/// `out << value` in NCBI's report: one insertion (a string or a number) of `bytes`, one write
-/// call, which the command line's report stream takes as one (`ReportStream`); other writers just
-/// take the bytes. A string that LOSAT streams is `insert_streamed`.
+/// A stream insertion (`operator<<`) in NCBI's report: one insertion (a string or a number) of
+/// `bytes`, one write call, which the command line's report stream takes as one (`ReportStream`);
+/// other writers just take the bytes. A string that LOSAT streams is `insert_streamed`.
 pub fn insert(out: &mut (impl std::io::Write + ?Sized), bytes: &[u8]) -> std::io::Result<()> {
     out.write_all(bytes)
 }
@@ -1779,8 +1779,8 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
 /// The stream of a report as NCBI's formatter writes to it (`CBlastFormat::m_Outfile`), with
-/// nothing of a program's before it: each write is one insertion of NCBI's (`out << value`,
-/// `insert`, `insert_streamed`), passed on as one write. A writer becomes one only through the
+/// nothing of a program's before it: each write is one insertion (`operator<<`) of NCBI's
+/// (`insert`, `insert_streamed`), passed on as one write. A writer becomes one only through the
 /// constructors below, one per destination, each saying what comes after it: they are the only
 /// places where a buffer or hold could come between the report's insertions and NCBI's buffer
 /// (`ReportStream`, which counts each write as one insertion). A format's sink (`sink`: the

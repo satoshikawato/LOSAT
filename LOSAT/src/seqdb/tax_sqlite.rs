@@ -68,8 +68,8 @@ const TABLE_NAME: &str = "TaxidInfo";
 // BLAST+ 2.17.0 with the reads of the file failing with EIO from its second page or its third:
 // line WQA D18b round 2, probe L3). The step's error leaves `GetLeafNodeTaxids`, whose statement's
 // destructor finalizes it, which gives the error again; the destructor posts that one
-// (`STD_CATCH_ALL_X(3, ...)` of the module `Db_Sqlite`, error code 1010) before the caller sees
-// the step's.
+// (`STD_CATCH_ALL_X` with subcode 3 of the module `Db_Sqlite`, error code 1010) before the caller
+// sees the step's.
 /// What NCBI writes where a read of the file fails while `GetLeafNodeTaxids` steps its query
 /// ([`TaxonomySqlite::descendants`]'s [`ReadError::Unreadable`]): the step's exception
 /// ([`QueryReadFailure::step`]), which the caller catches or ends the run with, and the post of
@@ -390,8 +390,8 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp:77-106
     // The `map` iterates in key order, so the index is checked before the table.
-    // `SELECT COUNT(*)` always returns a row, so the "Failed to check" branch cannot
-    // happen. `db_name` is the resolved path NCBI puts in the message. The header
+    // The count query on `sqlite_master` always returns a row, so the "Failed to check" branch
+    // cannot happen. `db_name` is the resolved path NCBI puts in the message. The header
     // checks are SQLite's for the first statement (file format section 1.3,
     // "The Database Header"); a failure there reads "[26] file is not a database"
     // as in the wrapper's `Error preparing statement for "<sql>": [26] ...`.
@@ -454,10 +454,10 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
             };
             // SQLite reference (version-3.51.1): src/btree.c:3401-3408 (lockBtree)
             // `nPageFile` is the file size in pages rounded up (src/pager.c:3303). SQLite makes
-            // this check after the bytes 21..24 and the page size and before `usableSize<480`
-            // (btree.c:3361-3412). A larger size in the header would also set the page budget
-            // of the tree walks, which then no longer ends a tree whose pages are shared many
-            // times over.
+            // this check after the bytes 21..24 and the page size and before the check that
+            // `usableSize` is not below 480 (btree.c:3361-3412). A larger size in the header would
+            // also set the page budget of the tree walks, which then no longer ends a tree whose
+            // pages are shared many times over.
             if page_count > len.div_ceil(ps as u64) {
                 return Err(corrupt("the header gives more pages than the file holds").into());
             }
@@ -779,8 +779,8 @@ impl<'r, R: ReadAt + ?Sized> TaxonomySqlite<'r, R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp:40-48
-    // The recursive step `T.parent = D.taxid` is answered by the index
-    // `TaxidInfoCompositeIdx_parent (parent, taxid)`: all entries whose first
+    // The recursive step, a join of `T.parent` with `D.taxid`, is answered by the index
+    // `TaxidInfoCompositeIdx_parent` on `parent` and `taxid`: all entries whose first
     // column equals `x` are adjacent, ordered by taxid. The scan seeks the first
     // entry not below `(x)` and walks in order while the first column equals `x`;
     // in an index b-tree the cells of interior pages are entries too (file format

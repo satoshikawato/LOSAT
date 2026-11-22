@@ -60,8 +60,8 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
     true
 }
 
-/// `value` as one document of its type (`MSerial_AsnText << object`: `WriteFileHeader`, the
-/// object, `EndOfWrite` and the separator), for the named type `ty`.
+/// `value` as one document of its type (an object written to a stream after `MSerial_AsnText`:
+/// `WriteFileHeader`, the object, `EndOfWrite` and the separator), for the named type `ty`.
 #[cfg(test)]
 pub(crate) fn write_document<E: Encoder>(enc: &mut E, ty: u16, value: &Value) {
     write_document_until(enc, ty, value, |_| false);
@@ -82,12 +82,12 @@ fn write_document_until<E: Encoder>(
 }
 
 /// What an output stream that has failed gets of `value` written as a document of the named type
-/// `ty` (`MSerial_AsnText << object` in a message of NCBI's diagnostic stream after it failed,
-/// `pssm_search::annot_index`): the bytes that NCBI's buffer held when it first wrote to the
-/// stream, which throws (`out_buffer::OutBuffer::first_write`): the document without the end of
-/// line after it when it fits the buffer of 4096 bytes, else its start, cut where the buffer
-/// first flushed. NCBI's writing stops there: the first pass follows its buffer to find how many
-/// bytes it held (`Traced`), the second writes those bytes as they were then
+/// `ty` (an object written after `MSerial_AsnText` in a message of NCBI's diagnostic stream after
+/// it failed, `pssm_search::annot_index`): the bytes that NCBI's buffer held when it first wrote to
+/// the stream, which throws (`out_buffer::OutBuffer::first_write`): the document without the end of
+/// line after it when it fits the buffer of 4096 bytes, else its start, cut where the buffer first
+/// flushed. NCBI's writing stops there: the first pass follows its buffer to find how many bytes it
+/// held (`Traced`), the second writes those bytes as they were then
 /// (`AsnTextEncoder::failed_after`: a string's wrap that would come later inserts no end of line
 /// before the cut). Both stop at the cut, so the text in memory is the cut and at most one step
 /// more.

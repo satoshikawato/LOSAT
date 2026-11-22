@@ -9,7 +9,9 @@
 
 pub(crate) mod factory;
 pub(crate) mod format;
+pub(crate) mod search;
 pub(crate) mod stream;
+pub(crate) mod volume;
 
 use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
 
@@ -84,7 +86,7 @@ impl Options {
     }
 }
 
-/// `GetCodeBits(stride)`: the bits of `stride`, at least 1.
+/// `GetCodeBits` of `stride`: the bits of `stride`, at least 1.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:438-443
 pub(crate) fn code_bits(stride: u64) -> u64 {
     let mut stride = stride;
@@ -98,7 +100,7 @@ pub(crate) fn code_bits(stride: u64) -> u64 {
     }
 }
 
-/// `GetMinOffset(stride)`: 4 to the power `code_bits(stride)`, which NCBI computes by shifting
+/// `GetMinOffset` of `stride`: 4 to the power `code_bits(stride)`, which NCBI computes by shifting
 /// an `int`; defined for a stride below 32768 (`code_bits` 15 or less), which `makembindex`
 /// checks first (`MAX_STRIDE`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:446-447
@@ -109,3 +111,47 @@ pub(crate) fn min_offset(stride: u64) -> u64 {
 /// The strides below this one are those of a defined `GetMinOffset`: for larger ones NCBI
 /// shifts an `int` by 32 bits or more, which C++ leaves undefined.
 pub(crate) const MAX_STRIDE: u64 = 1 << 15;
+
+/// The index volume `<dir>/<name>.00.idx` of the FASTA text `fasta`, made with `options` by
+/// LOSAT's writer (the tests of `volume` and `search`).
+#[cfg(test)]
+pub(crate) fn test_volume(name: &str, fasta: &str, options: &Options) -> std::path::PathBuf {
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-dbindex-{name}-{}-{:?}",
+        crate::utils::test_dir::process_id(),
+        std::thread::current().id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let base = dir.join(name).to_string_lossy().into_owned();
+    let mut input = stream::FastaStream::new(
+        Box::new(std::io::Cursor::new(fasta.as_bytes().to_vec())),
+        false,
+    );
+    let path = format::volume_name(&base, 0);
+    let mut stop = SeqNum::MAX;
+    let made = factory::make_index(
+        &mut input,
+        &path,
+        0,
+        &mut stop,
+        options,
+        &mut |_| {},
+        &mut |_| {},
+    );
+    assert!(made.is_ok(), "the test index was not made");
+    std::path::PathBuf::from(path)
+}
+
+/// Letters `A`, `C`, `G`, `T` from a fixed generator (the tests' sequences).
+#[cfg(test)]
+pub(crate) fn test_letters(len: usize, seed: u64) -> String {
+    let mut state = seed | 1;
+    (0..len)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            b"ACGT"[(state >> 20) as usize % 4] as char
+        })
+        .collect()
+}

@@ -470,9 +470,10 @@ def damaged_binary(dust):
         ber_mem(0, ber_int(5)), ber_mem(1, ber_int(14)), ber_mem(3, ber_mem(11, ber_int(123456789012, 5)))))])
     c["small_missing_options"] = ber_seq(ber_mem(0, ber_int(0)), ber_mem(1, ber_int(30)),
                                          ber_mem(3, ber_seq(ber_mem(0, ber_seq()), ber_mem(1, b"\x01\x01\x00"))))
-    # A long-form definite length whose limit, `GetStreamPosAsInt8() + ReadLengthLong(len)` (the
-    # position of the first length byte plus the length), wraps in 64 bits: a limit of 0 is an
-    # indefinite length, a negative one ends the members at once.
+    # A long-form definite length whose limit, the stream position (`GetStreamPosAsInt8`) plus the
+    # length that `ReadLengthLong` reads (the position of the first length byte plus the length),
+    # wraps in 64 bits: a limit of 0 is an indefinite length, a negative one ends the members at
+    # once.
     body = ber_info([ber_mem(3, one)])[2:-2]
     for name, length in (("zero", (1 << 64) - 2), ("2_63", 1 << 63), ("2_63_less_1", (1 << 63) - 1)):
         c["length_long_wrap_" + name] = b"\x30\x88" + length.to_bytes(8, "big") + body + b"\x00\x00"

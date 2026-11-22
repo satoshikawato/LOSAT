@@ -1091,7 +1091,7 @@ impl ReportedAsks {
 
     /// What the reports `options` of one call ask: each of them, with the batches' prefetch of
     /// the first, which NCBI's app runs for its one format
-    /// (`BlastFormatter_PreFetchSequenceData(..., GetFormattedOutputChoice())`), and the call's
+    /// (`BlastFormatter_PreFetchSequenceData` with `GetFormattedOutputChoice()`), and the call's
     /// refusal of a subject whose lookup throws over the `-outfmt` values of its other searches,
     /// `others`, too (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
     pub(super) fn of_all(options: &[super::args::ResolvedOptions], others: &[&str]) -> Self {

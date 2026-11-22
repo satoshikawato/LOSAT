@@ -31,7 +31,7 @@ pub(crate) fn adaptive_cbs_close(composition_based_stats: bool, hitlist_size: us
 }
 
 /// The test of `BlastHSPCBSStreamClose` before it sorts one query's preliminary hit list: the
-/// list holds more than `REF_HIT_NUM + 700` HSP lists (`hitlist_size` is the traceback's hit
+/// list holds more than `REF_HIT_NUM` plus 700 HSP lists (`hitlist_size` is the traceback's hit
 /// list size, below 1000; `cbs_trim_count` follows).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-838
@@ -46,11 +46,11 @@ pub(crate) fn cbs_trim_sorts(hsplist_count: usize, hitlist_size: usize) -> bool 
 /// HSP list in the sorted order.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:806-864
-/// `mag = log10(...)` converts the `double` to `int` toward zero, and `mag*pct/100` and `mag/2`
-/// are C's `int` divisions (toward zero), as Rust's `as i32` and `/` are. `max_index` is taken
-/// before the sort, whose purge could only shorten a list that held empty HSP lists (the
-/// preliminary stage keeps none); the loop also stops at the sorted count, where NCBI would read
-/// past it.
+/// `mag` takes a `log10` (a `double`) converted to `int` toward zero, and `mag` times `pct` over
+/// 100 and `mag` over 2 are C's `int` divisions (toward zero), as Rust's `as i32` and `/` are.
+/// `max_index` is taken before the sort, whose purge could only shorten a list that held empty HSP
+/// lists (the preliminary stage keeps none); the loop also stops at the sorted count, where NCBI
+/// would read past it.
 pub(crate) fn cbs_trim_count(
     count: usize,
     sorted: usize,

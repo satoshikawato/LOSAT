@@ -89,17 +89,16 @@ impl BatchSizes {
 }
 
 /// The batch sizes of `command`, as each program's application reads them (`GetQueryBatchSize`);
-/// BLASTN's of a database reads the call's settings (`start`, its messages on `diagnostics`).
+/// BLASTN's of a database reads the call's settings (`start`).
 fn batch_sizes(
     command: &Commands,
     inputs: Inputs<'_>,
-    start: &mut CallStart,
-    diagnostics: &mut dyn io::Write,
+    start: &CallStart,
 ) -> anyhow::Result<BatchSizes> {
     Ok(match command {
         Commands::Blastn(args) => BatchSizes::Blastn(match args.database_name() {
             Some(name) => {
-                let settings = start.settings(diagnostics)?;
+                let settings = start.settings();
                 QueryBatchSizes::of_database(args, name, &settings)?
             }
             None => QueryBatchSizes::new(args, inputs.subject)?,
@@ -253,15 +252,14 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         });
     }
     check_inputs(search, inputs)?;
-    let command = search.command(inputs)?;
+    let command = start.command_ref();
     // A PSSM query is one batch, whose size NCBI does not read (`BATCH_SIZE`; tblastn_app.cpp:
     // 208-221 reads it for a FASTA query only).
     let sizes = match inputs.query_file {
         Some(_) => BatchSizes::Fixed(1),
-        None => batch_sizes(&command, inputs, &mut start, &mut start_messages)
-            .map_err(|error| Error::search(&error))?,
+        None => batch_sizes(command, inputs, &start).map_err(|error| Error::search(&error))?,
     };
-    let query_range = query_range_of(&command);
+    let query_range = query_range_of(command);
     let skipped = lengths
         .iter()
         .map(|&length| {
@@ -385,7 +383,7 @@ impl Batches<'_> {
         if ends_reading {
             self.end_pending = false;
         }
-        let mut command = self.search.command(inputs)?;
+        let mut command = self.start.command();
         let query_range = query_range_of(&command);
         // The batch joins the run's scope of the queries before its call (`run_scopes`).
         let scope_refusal = match self.run_scopes.as_mut().map(|scopes| {

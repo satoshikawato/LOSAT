@@ -5,10 +5,10 @@ use std::cmp::Ordering;
 
 /// No NCBI counterpart (memory only): sorts `v` by `compare` into the order of a stable sort
 /// (comparator-equal elements keep their input order) without a scratch copy of the elements.
-/// NCBI sorts arrays of pointers to its HSPs (`qsort(hsp_array, hspcnt, sizeof(BlastHSP*), ...)`,
-/// blast_hits.c:1379-1381), so its sorts move pointers. `slice::sort_by` on the elements
-/// themselves allocates a scratch for 21 or more elements: a copy of the whole slice up to 8 MB
-/// (43,478 HSPs of 184 bytes), half of the slice above that (Sakai x EDL933 `-subject` blastn:
+/// NCBI sorts arrays of pointers to its HSPs (`qsort` of `hsp_array`, `hspcnt` elements of the size
+/// of a `BlastHSP*`, blast_hits.c:1379-1381), so its sorts move pointers. `slice::sort_by` on the
+/// elements themselves allocates a scratch for 21 or more elements: a copy of the whole slice up to
+/// 8 MB (43,478 HSPs of 184 bytes), half of the slice above that (Sakai x EDL933 `-subject` blastn:
 /// 38,579 HSPs, 6.8 MiB, at the end of the traceback, while the traceback's buffers are still
 /// held). Here the positions are sorted instead (ties broken by the position, which is the stable
 /// order and lets the in-place unstable sort run), and the sorted order is then applied with

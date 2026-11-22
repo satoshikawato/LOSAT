@@ -1,5 +1,5 @@
 // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
-// The expected values are the results of the x87 unit itself (gcc `long double` on x86-64
+// The expected values are the results of the x87 unit itself (gcc long double on x86-64
 // Linux, control word 0x037F): `fmul`, `fdiv`, `fadd` of two doubles and `fstpl`.
 use super::X87;
 
@@ -32,9 +32,9 @@ fn mul_rounds_ties_to_even_and_carries() {
     );
 }
 
-// gcc `long double` on x86-64 (swebok-improve-20261105/sw8/nfix/probe/x87add/add.c): `fadd`
+// gcc long double on x86-64 (swebok-improve-20261105/sw8/nfix/probe/x87add/add.c): `fadd`
 // of nonnegative values with ties to even, a carry, bits far below the last place, and the
-// infinity of an overflow (`None`); `StringToDoublePosix`'s `third * 10 + c`.
+// infinity of an overflow (`None`); `StringToDoublePosix`'s `third` times 10 plus `c`.
 #[test]
 fn checked_add_and_mul_round_as_fadd_and_fmul_and_overflow() {
     let add = |a: X87, b: X87| a.checked_add(b).map(X87::parts);

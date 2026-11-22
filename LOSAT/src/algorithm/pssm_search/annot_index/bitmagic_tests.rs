@@ -51,7 +51,8 @@ fn fail(size: u32, data: &[u8]) -> Fail {
     }
 }
 
-/// A stream with neither byte order nor GAP levels in the header (`BM_HM_NO_BO | BM_HM_NO_GAPL`).
+/// A stream with neither byte order nor GAP levels in the header (the flags `BM_HM_NO_BO` and
+/// `BM_HM_NO_GAPL`).
 fn stream(tokens: &[u8]) -> Vec<u8> {
     let mut data = vec![0x18];
     data.extend_from_slice(tokens);
@@ -266,7 +267,7 @@ fn the_interpolative_value_is_a_bijection_onto_its_range() {
         }
         assert_eq!(count, u64::from(r) + 1, "r {r}");
     }
-    // `r + 1 == 0`: `bit_scan_reverse32(0)`
+    // `r + 1 == 0`: `bit_scan_reverse32` of 0
     let data = [0u8; 8];
     let mut bytes = reader(&data);
     assert_eq!(
@@ -1077,8 +1078,8 @@ fn big_endian_streams() {
     let vector = ok(0, &[0x10, 0x00, 18, 0, 1, 0, 5, 0]);
     assert_eq!(vector.ranges(), [(5, 5)]);
     // a GAP block of length 1 into a null block reads nothing; into a block that exists the
-    // big-endian `get_16(p, 0)` reads two bytes (the little-endian one none), and the GAP of all
-    // ones ORed into a GAP block makes it the full block
+    // big-endian `get_16` at offset 0 of `p` reads two bytes (the little-endian one none), and the
+    // GAP of all ones ORed into a GAP block makes it the full block
     let vector = ok(0, &[0x10, 0x00, 14, 0x00, 0x09, 0]);
     assert_eq!(vector.ranges(), [(0, 65535)]);
     let vector = ok(
@@ -1099,7 +1100,7 @@ fn big_endian_streams() {
 /// or `-`); each line of `BM_DIFF_OUT` is `ID ok SIZE COUNT CONSUMED HASH RUNS QUERIES`,
 /// `ID invalid` or `ID refuse RULE`, where HASH is FNV-1a 64 over the runs of set bits (first
 /// and last as little-endian 32-bit values) and each query is `ROW:BIT:RANK` (`get_bit`,
-/// `count_range(0, ROW)` as NCBI's 32-bit `size_type`).
+/// `count_range` from 0 to `ROW` as NCBI's 32-bit `size_type`).
 #[test]
 fn differential() {
     let Ok(input) = std::env::var("BM_DIFF_IN") else {
@@ -1150,7 +1151,8 @@ fn differential() {
                     .filter(|row| *row != "-")
                     .map(|row| {
                         let row = row.parse::<u32>().unwrap();
-                        // `count_range` counts to `bm::id_max - 1` at most (BitMagic 8.0.1: bm.h:3251-3252)
+                        // `count_range` counts to one less than `bm::id_max` at most
+                        // (BitMagic 8.0.1: bm.h:3251-3252)
                         format!(
                             "{row}:{}:{}",
                             answer(vector.get_bit(row).map(u64::from)),

@@ -160,9 +160,9 @@ pub(crate) enum Segs {
 }
 
 /// The `Std-seg`s of a Seq-align as far as rpsbproc reads them: the query row's id that
-/// `CSeq_align::GetSeq_id(0)` finds, the second id of the first segment (`ParseAlignSegs`'s hit
-/// id) and the first two locations of each segment. The ids of the other places are read and
-/// left (an archive of a genome holds hundreds of thousands of segments).
+/// `CSeq_align::GetSeq_id` finds for index 0, the second id of the first segment
+/// (`ParseAlignSegs`'s hit id) and the first two locations of each segment. The ids of the other
+/// places are read and left (an archive of a genome holds hundreds of thousands of segments).
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:94-98
 #[derive(Debug)]
 pub(crate) struct StdAlign {
@@ -172,7 +172,7 @@ pub(crate) struct StdAlign {
     pub(crate) segs: Vec<StdPair>,
 }
 
-/// What `CSeq_align::GetSeq_id(0)` finds in the segments, in order: the first id of the first
+/// What `CSeq_align::GetSeq_id` finds for index 0 in the segments, in order: the first id of the first
 /// segment with ids, else the id of a first location of a single id (`null` has none and goes
 /// on to the next segment).
 #[derive(Debug)]

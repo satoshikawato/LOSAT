@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.72
+- Version: 1.74
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -328,16 +328,24 @@
   them with a format of another writer it covers the whole call, also where the call searches
   once for each hit list size; line DBID item pfoff-3, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07);
-  1.72 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
+  1.72 2026-11-22 (`losat windowmasker`, line NP items M5a and M5b: NCBI's defined results of
+  `-mk_counts`, `-convert` and `-checkdup` reproduced, rule 2, and the explicit rejections, rule 3,
+  of the masking and counts inputs whose result NCBI leaves undefined, takes from the C runtime or
+  the host's memory, or fetches from NCBI's servers; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.71; first 1.68, then 1.70 and 1.72 at the merges
+  of dev that brought line NP items O2b's 1.68 and M4b-3's 1.69, then line RG item D1b-2's 1.70 and line
+  DBID item pfoff-3's 1.71)
+  1.74 2026-11-18 (TBLASTN, line RG item X-short-bat: the rejections of a step where NCBI's search
   of a query batch crashes, does not finish or stops come after the reports of the query
   batches before, as NCBI's crash does and as TBLASTX's rejections do (the form of 1.40, the
   Owner's decision of 2026-11-16 on line RG's question Q-X2c), also D13's where NCBI stops (also
   on a database left without a subject, whose batch LOSAT reported before) and, with `-in_pssm`,
   that of a query whose letters give no Karlin-Altschul parameters, which came before the run's
   first byte, and D13's of a negative `CHUNK_SIZE` whose wrapped ranges leave gaps between them,
-  as BLASTP's (1.53); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
-  after 1.71, line DBID item pfoff-3, at the merge of dev of 2026-11-22; first 1.52, then 1.53 at
-  the merge of dev of 2026-11-18)
+  as BLASTP's (1.53); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  numbered after 1.72, line NP items M5a and M5b, at the second merge of dev of 2026-11-22, past
+  1.73, which line RG item X4b-1's open pull request #1481 holds; first 1.52, then 1.53 at the
+  merge of dev of 2026-11-18, then 1.72 at the first merge of dev of 2026-11-22)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -523,9 +531,9 @@ Explicit rejections (rule 3):
   hits and exits 0; LOSAT refuses at every thread count, as NCBI does at `-num_threads 1`); also on
   a database left without a subject: a seqid list that keeps none, an alias over volumes without
   sequences) after the reports of the batches before, in NCBI's order with the setup of each
-  chunk's search and its read of the database (version 1.72), and so does the rejection of a
+  chunk's search and its read of the database (version 1.74), and so does the rejection of a
   negative `CHUNK_SIZE` whose wrapped ranges leave gaps between them, which NCBI searches on: at
-  the first chunk that NCBI searches, as BLASTP's (version 1.72; before, before the run's first
+  the first chunk that NCBI searches, as BLASTP's (version 1.74; before, before the run's first
   byte; row `db.xs.tblastn.bat.gap.6`, whose bytes are NCBI's report of the batch before, row
   `db.xs.tblastn.bat.qa.6`).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
@@ -1478,6 +1486,29 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   conversion (INT_MIN), and the catch in `BlastSetupPreliminarySearchEx` that never
   matches.
 
+- `losat windowmasker -mk_counts`, `-convert` and `-checkdup` (version 1.72, 2026-11-22, line NP
+  item M5b, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): NCBI's defined
+  but surprising results are written byte for byte (fixture rows of `LOSAT/tests/windowmasker`):
+  - `-smem` passes through `atoi` into a `Uint2` (`seq_masker_ostat_factory.cpp:63-72`): 65536 is
+    0 megabytes, which gives the insufficient-memory error (exit status 3) after an empty output
+    file; 70000 is 4464; -1 is 65535.
+  - The `-t_*_pct` options apply only when `-out` names a file (`win_mask_gen_counts.cpp:216-219`).
+  - Binary counts written to the standard output start with an extra 0 word
+    (`seq_masker_ostat_bin.cpp:62-67`), which NCBI's own reader then rejects (`wrong length`).
+  - An `-out` that cannot be opened gives exit status 0, no file and no message (NCBI's writer
+    writes to a failed `ofstream`).
+  - Counts above 511 in the optimized formats run into the check bits (`Uint2` counts, 9-bit
+    fields, `seq_masker_ostat_opt.cpp:82-99, 311-325`); counts above 65,535 keep their low 16 bits.
+  - `-t_high_pct 0` gives `t_high` 0 and every count 0 (the ascii file then fails to load, the
+    obinary one masks nothing); `-t_high_pct 100` and `-t_low_pct 100` keep the counts NCBI keeps.
+  - A negative `-genome_size` wraps as a `Uint8` and gives units of 16 letters.
+  - The FASTA reader's warnings are written once per read of the input, so their number follows
+    `-mem` (one read per prefix and pass).
+  - `-convert` of an ascii counts file whose unit size line is 0 (or a multiple of 256) to `ascii`
+    or `binary`; a `##pct:` line whose value is missing, or whose word does not start a number,
+    reads as 0, as NCBI's `istringstream` stores it.
+  - A `-checkdup` interval whose start falls below 0 is printed as NCBI's `size_t` wrap.
+
 ## Explicit rejections (rule 3)
 
 - A scoring system without Karlin-Altschul values when an invalid query (such as all N)
@@ -2156,7 +2187,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   before, as NCBI's crash does (`tblastn_app.cpp:275-304` prints each batch before it searches the
   next): LOSAT writes them whole (with `-subject`, outfmt 15 and 16 hold each query's report until
   the next query's results arrive, as NCBI's do, so the last query before the refused batch is left
-  out), for the first batch the prologs, and leaves the epilog out (version 1.72, 2026-11-18, line
+  out), for the first batch the prologs, and leaves the epilog out (version 1.74, 2026-11-18, line
   RG item X-short-bat, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
   `tests/tblastn_batch_refusal.rs`, rows `db.xs.tblastn.bat.*`). TBLASTN's other rejections of a
   step where NCBI's search of a batch crashes, does not finish or stops take the same form,
@@ -2225,11 +2256,11 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   output ended a few bytes into that report's footer (50,001 bytes), and in one batch it wrote
   nothing with `-outfmt 6` and the first 18 bytes of the prolog with `-outfmt 0`. Those cuts are
   NCBI's buffer, not a result: LOSAT writes the reports and prologs whole. LOSAT's TBLASTN refusal
-  of the same read (the item above) comes after the same reports (version 1.72, line RG item
+  of the same read (the item above) comes after the same reports (version 1.74, line RG item
   X-short-bat): NCBI's TBLASTN searches and prints each query batch before it reads the next
   (`tblastn_app.cpp:275-304`, as TBLASTX's `tblastx_app.cpp:176-207`) and so has formatted the
   reports of the batches before when it dies (line RG X-short review 1: with `BATCH_SIZE=1`, NCBI
-  wrote the first query's 43-byte row before its SIGSEGV, LOSAT nothing before version 1.72). With `-subject`
+  wrote the first query's 43-byte row before its SIGSEGV, LOSAT nothing before version 1.74). With `-subject`
   and a `-db_gencode` other than 1, LOSAT translates in the selected code
   (PD-TBLASTX-LOCAL-SUBJECT-GENCODE) and refuses where those HSPs reach the re-evaluation. TBLASTX
   translates the query whole before the search, so a short query reaches no such read; but in our
@@ -2436,6 +2467,40 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     is not: NCBI's loop over the volume numbers never ends (row `old_endless`). Other ranges,
     negative ones too, end and are reproduced.
 
+- `losat windowmasker` (version 1.72, 2026-11-22, line NP items M5a and M5b, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07). LOSAT refuses each (exit status 1, the
+  manual's `refusals.md`) where NCBI meets it:
+  - `-mk_counts` of an input without a unit of unambiguous letters (all `N`, or an empty input
+    with `-unit`): NCBI writes the percentages of the file as its C runtime prints 0/0 (`-nan` on
+    x86-64 Linux), a text that depends on the runtime.
+  - `-mk_counts -infmt seqids`: NCBI fetches each sequence from NCBI's servers, as masking with
+    `-infmt seqids` is refused.
+  - `-mk_counts` or `-convert` to `oascii` or `obinary` with units of 1 to 3 letters and an
+    `-smem` whose low 16 bits are 0: NCBI's `Uint1` key size wraps below 0 to 253
+    (`seq_masker_ostat_opt.cpp:222-242`), and NCBI then allocates 8 GiB and shifts by 253 bits
+    (undefined behaviour in C++). Units of 4 letters or more give NCBI's insufficient-memory
+    error, which LOSAT writes.
+  - `-mk_counts` whose counters (4^suffix `Uint4`) or cache bit array (4^unit/32 words) cannot be
+    allocated on the host: NCBI's result then depends on the memory of the computer
+    (`std::bad_alloc`, or a file without the cache bit array after a warning).
+  - `-convert` of an ascii counts file with units of 17 letters or more: the converter's reverse
+    complement shifts the 32-bit unit past its width (undefined behaviour), as masking with such a
+    file is refused.
+  - `-convert` of an ascii counts file whose unit size line is 0 (or a multiple of 256) to `oascii`
+    or `obinary`: NCBI's search for the size of its hash table never ends
+    (`seq_masker_ostat_opt.cpp:217-223`).
+  - A counts file whose `##pct:` line holds a number that C++ libraries read differently (`inf`,
+    `nan`, a hexadecimal number, a number with letters after it, a number past the range of a
+    double), with `-convert` or a `-t_*_pct` option; and a `binary` or `obinary` file whose
+    `##pct:` line names 4294967295 or more as its largest count, where NCBI's table has no room for
+    it and its loop reads past the table.
+  - An `-ids` or `-exclude_ids` file matched as text with an empty id: NCBI indexes its id sets at
+    -1 and crashes (SIGSEGV after its own `bad id` post).
+  - An optimized ascii counts file whose hash-parameter line leaves a value unread, which NCBI then
+    checks uninitialised; an `obinary` file with units of 1 or 2 letters, whose empty array NCBI
+    reads past; a FASTA record or database sequence of 4,294,967,296 letters or more, whose
+    positions NCBI counts in 32 bits.
+
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 
 `CSeqDBTaxInfo::GetTaxNames` maps `taxdb.btd` and reads a record from its offset to the next
@@ -2562,7 +2627,9 @@ accepted by the maintainer on 2026-11-21 by marking PR #1448 ready for review, a
     (`2*(2*h+50)`) and 2^30 for an ungapped search. NCBI BLAST+ 2.17.0 then rebuilds the list from
     its first HSP on and keeps HSPs that the best-hit test removes at the size below (line O1c's
     probe: BLASTN 69 lines where 1073741773 gives 56, ungapped BLASTN 69 where 1073741823 gives 57,
-    BLASTP and PSIBLAST 11 where 536870886 gives 10, each a superset). LOSAT computes that count in
+    BLASTP and PSIBLAST 11 where 536870886 gives 10; line O6a-3's probe: BLASTX 85 where 536870886
+    gives 72, TBLASTN 62 where 536870886 gives 49, TBLASTX 252 where 1073741823 gives 214; each a
+    superset). LOSAT computes that count in
     64 bits too (`core/hspfilter_besthit.rs`, since line O6a), so with these options such a size
     gives NCBI's output at 1073741773, 536870886 or 1073741823 (the rows `hitlist.*.bh*` with those
     contracts). Every smaller size gives NCBI's bytes. Before version 1.66 LOSAT

@@ -191,9 +191,9 @@ fn numbers() {
         assert!(value.is_nan() && value.is_sign_negative(), "{text}");
     }
     // More than 18 significant digits: NCBI's `StringToDoublePosix` adds the digits after the
-    // 18th in `long double` (line SW, SW8 B28; NCBI's corelib with `fDecimalPosixFinite`,
-    // swebok-improve-20261105/sw8/nfix/probe/x87 `s2dp`: 0x3f847ae147ae147b, 0x3ff0000000000000,
-    // 0x3f8eb851eb851eb8).
+    // 18th in 80-bit extended precision (line SW, SW8 B28; NCBI's corelib with
+    // `fDecimalPosixFinite`, swebok-improve-20261105/sw8/nfix/probe/x87 `s2dp`: 0x3f847ae147ae147b,
+    // 0x3ff0000000000000, 0x3f8eb851eb851eb8).
     for (text, bits) in [
         ("0.0100000000000000002", 0x3f84_7ae1_47ae_147b_u64),
         ("1.000000000000000001", 0x3ff0_0000_0000_0000),

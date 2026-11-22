@@ -8,8 +8,9 @@ use crate::utils::dust::{DustMasker, NcbiLfgRandom};
 pub(super) type Interval = (u32, u32);
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:184-215
-/// `s_FindSegmentWithLongNs(max_ns, seq)`: the runs of `N` that start the sequence, end it,
-/// or are longer than `max_ns` (dustmasker's `-window` as given, as an unsigned 32-bit number).
+/// `s_FindSegmentWithLongNs` (with `max_ns` and `seq`): the runs of `N` that start the sequence,
+/// end it, or are longer than `max_ns` (dustmasker's `-window` as given, as an unsigned 32-bit
+/// number).
 fn long_n_runs(max_ns: u32, seq: &[u8]) -> Vec<Interval> {
     let mut runs = Vec::new();
     let mut pos: u32 = 0;
@@ -35,8 +36,9 @@ fn long_n_runs(max_ns: u32, seq: &[u8]) -> Vec<Interval> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:212-225
-/// `s_InsertMerge(list, mask, linker)`: `mask` extends the last interval when it starts exactly
-/// `linker` (the `-linker` as given, unsigned 32-bit, the sum wrapping as NCBI's) after its end.
+/// `s_InsertMerge` (of `list`, `mask` and `linker`): `mask` extends the last interval when it
+/// starts exactly `linker` (the `-linker` as given, unsigned 32-bit, the sum wrapping as NCBI's)
+/// after its end.
 fn insert_merge(list: &mut Vec<Interval>, mask: Interval, linker: u32) {
     if let Some(last) = list.last_mut() {
         if last.1.wrapping_add(linker) == mask.0 {
@@ -63,12 +65,12 @@ fn dust(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:222-276
-/// `GetDustMasks_SkipNs(seq, level, window, linker)`: the masks of the IUPAC letters `seq`
-/// (not empty). The masker clamps `level`, `window` and `linker` to its ranges
+/// `GetDustMasks_SkipNs` (of `seq`, `level`, `window` and `linker`): the masks of the IUPAC letters
+/// `seq` (not empty). The masker clamps `level`, `window` and `linker` to its ranges
 /// (`DustMasker::new`, as `CSymDustMasker`'s constructor), while the runs of `N` and the merges
 /// take `window` and `linker` as given (`Uint4` of the integer arguments, so `-1` is
-/// 4,294,967,295). One masker, and so one sequence of random numbers for `N`, serves every
-/// piece of the sequence.
+/// 4,294,967,295). One masker, and so one sequence of random numbers for `N`, serves every piece of
+/// the sequence.
 pub(super) fn dust_masks_skip_ns(
     seq: &[u8],
     level: u32,

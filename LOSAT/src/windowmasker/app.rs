@@ -1,7 +1,8 @@
 //! windowmasker's `Run` (`CWinMaskApplication::Run`) on the arguments that NCBI's reader read:
-//! the mode (`CWinMaskConfig::s_DetermineAppType`; LOSAT refuses the making and the conversion
-//! of counts), then the configuration in NCBI's order (`CWinMaskConfig::CWinMaskConfig`: the
-//! input, its reader, the writer, the id lists) and the masking (`work::run`).
+//! the mode (`CWinMaskConfig::s_DetermineAppType`), then the configuration in NCBI's order
+//! (`CWinMaskConfig::CWinMaskConfig`: for the masking the input, its reader, the writer and the
+//! id lists; for `-mk_counts` the id lists alone; for `-convert` nothing) and the work of the
+//! mode (`counts::mk_counts`, `counts::convert`, `work::run`).
 
 use std::io::Write;
 
@@ -11,6 +12,7 @@ use crate::ncbi_app::files::{open_input_file, Cin};
 use crate::ncbi_app::Diag;
 use crate::utils::winmask::{MaskerParams, PctSettings};
 
+use super::counts;
 use super::ids::{fill_id_list, EmptyId, IdLists, IdSet, SeqIdSet, TextMatchIds};
 use super::work::{
     self, config_exception, report, unsupported, Failure, Options, CONFIG, INCONSISTENT,
@@ -28,14 +30,14 @@ pub(super) fn run(
     diag: &mut Diag,
 ) -> i32 {
     if args.flag("mk_counts") {
-        return diag.refuse(&unsupported(
-            "-mk_counts (the making of a unit counts file)",
-        ));
+        let infmt = args.value("infmt").expect("-infmt has a default");
+        return match id_lists(args, infmt, true, diag) {
+            Ok(lists) => counts::mk_counts(args, settings, &lists, out, diag),
+            Err(failure) => report(failure, diag),
+        };
     }
     if args.flag("convert") {
-        return diag.refuse(&unsupported(
-            "-convert (the conversion of a unit counts file)",
-        ));
+        return counts::convert(args, out, diag);
     }
     if !args.given("ustat") {
         let exception = config_exception(
@@ -122,7 +124,10 @@ fn masking_run(
     let mut source = work::reader(options, input)?;
     let mut output = args.output_file("out", out).map_err(Failure::Arg)?;
     let writer = work::writer(options.outfmt);
-    let lists = id_lists(args, options.infmt, diag)?;
+    let text_match = args
+        .boolean("text_match")
+        .expect("-text_match has a default");
+    let lists = id_lists(args, options.infmt, text_match, diag)?;
     if lists.match_titles() {
         if let Some(source) = source.as_mut() {
             source.make_titles();
@@ -132,12 +137,18 @@ fn masking_run(
 }
 
 /// The id lists of `-ids` and `-exclude_ids` (`CIdSet_TextMatch`, or `CIdSet_SeqId` with
-/// `-text_match false`), or the configuration's exception.
+/// `-text_match false`), or the configuration's exception. `text_match` is `-text_match`, which
+/// `-mk_counts` sets to true.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:405-445
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:374-376,405-445
 /// An id of no words in a list matched as text is NCBI's crash (`ids::EmptyId`): refused. The
 /// ids that `CSeq_id` cannot read are posted as they are read (`SeqIdSet::insert`).
-fn id_lists(args: &Args, infmt: &str, diag: &mut Diag) -> Result<IdLists, Failure> {
+fn id_lists(
+    args: &Args,
+    infmt: &str,
+    text_match: bool,
+    diag: &mut Diag,
+) -> Result<IdLists, Failure> {
     let ids = args.value("ids").unwrap_or_default();
     let exclude_ids = args.value("exclude_ids").unwrap_or_default();
     if !ids.is_empty() && !exclude_ids.is_empty() {
@@ -148,9 +159,6 @@ fn id_lists(args: &Args, infmt: &str, diag: &mut Diag) -> Result<IdLists, Failur
             "only one of -ids or -exclude_ids can be specified",
         )));
     }
-    let text_match = args
-        .boolean("text_match")
-        .expect("-text_match has a default");
     let mut list = |name: &str, line: u32| -> Result<Option<IdSet>, Failure> {
         if name.is_empty() {
             return Ok(None);

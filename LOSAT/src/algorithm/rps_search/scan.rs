@@ -658,8 +658,8 @@ pub(crate) struct RpsReadCursor {
     block: usize,
 }
 
-/// `ComputeTableIndex(wordsize - 1, charsize, s_first)`: the index of the first `wordsize - 1`
-/// letters of the word at `s_first`, which `next_word_index` completes.
+/// `ComputeTableIndex` with `charsize` at `s_first`: the index of the letters of the word at
+/// `s_first` but its last, which `next_word_index` completes.
 #[inline(always)]
 fn word_index_start(subject: &[u8], s_first: i32) -> i32 {
     let charsize = crate::seqdb::rps::RPS_CHARSIZE as i32;
@@ -704,7 +704,7 @@ pub(crate) fn scan_subject(
     let s_first = *offset;
     let s_last = subject.len() as i32 - RPS_WORDSIZE as i32;
     let mut totalhits = 0i32;
-    // `ComputeTableIndex(wordsize - 1, charsize, s_first)`.
+    // `ComputeTableIndex` of the letters of the word at `s_first` but its last.
     let mut index = word_index_start(subject, s_first);
     let mut s = s_first;
     while s <= s_last {

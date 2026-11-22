@@ -32,7 +32,7 @@
 //! NCBI's that it does not port (`Fail::Refuse`): a read past the data, an XOR reference token, a
 //! step that NCBI runs with undefined behaviour or a write past its buffers, or a read of memory
 //! that NCBI did not write in this decoding. NCBI's own checks throw
-//! `std::logic_error("BM::Invalid serialization format")` (`Fail::Invalid`).
+//! `std::logic_error` with the text "BM::Invalid serialization format" (`Fail::Invalid`).
 //!
 //! The decoded vector keeps the size and the set bits, which is all that NCBI's index asks of it
 //! (`BitVector`: the size, a bit, and the count of set bits up to a bit; `bm/SPEC.md` §1.3). A GAP
@@ -70,8 +70,8 @@ const RUNS_MAX: usize = 2048;
 /// Why the data is not decoded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Fail {
-    /// NCBI's `std::logic_error("BM::Invalid serialization format")` (bmserial.h:620): the header
-    /// flag of a 64-bit vector, the tokens 25 and 26, a sync mark that does not match, a
+    /// NCBI's `std::logic_error` with the text "BM::Invalid serialization format" (bmserial.h:620):
+    /// the header flag of a 64-bit vector, the tokens 25 and 26, a sync mark that does not match, a
     /// super-block of length 0, an unknown token.
     Invalid,
     /// An event that LOSAT does not port (`Rule`).
@@ -88,7 +88,7 @@ pub(crate) enum Rule {
     Xor,
     /// 32 or more zero bits before an Elias gamma value (U3).
     GammaZeros,
-    /// `bit_scan_reverse32(0)` in the interpolative decoder (U4).
+    /// `bit_scan_reverse32` of 0 in the interpolative decoder (U4).
     BicScan,
     /// A value of the interpolative decoder past the 65536 bits of a block (U4).
     BicWrite,
@@ -228,8 +228,8 @@ impl BitVector {
         }
     }
 
-    /// `bvector<>::count_range(0, n)` (BitMagic 8.0.1: bm.h:3244-3254) of NCBI's three builds:
-    /// the set bits of `[0, n]`.
+    /// `bvector<>::count_range` from 0 to `n` (BitMagic 8.0.1: bm.h:3244-3254) of NCBI's three
+    /// builds: the set bits of `[0, n]`.
     pub(crate) fn count_to(&self, n: u32) -> Result<u64, Fail> {
         match &self.builds {
             Builds::One(one) => one.count_to(n, &BUILDS),
@@ -294,12 +294,12 @@ impl Decoded {
     }
 
     // BitMagic 8.0.1: bm.h:3258-3330
-    // (`count_range_no_check(0, right)`: the first block whole by `block_bitcount` when `right`
-    // is past it, else by `gap_bit_count_range`; the blocks between by `block_bitcount`; the
+    // (`count_range_no_check` from 0 to `right`: the first block whole by `block_bitcount` when
+    // `right` is past it, else by `gap_bit_count_range`; the blocks between by `block_bitcount`; the
     // last by `gap_bit_count_to`; summed as `unsigned`)
-    /// `count_range(0, n)` of the builds `builds`: each build's total, its sum of the blocks that
-    /// are not one kept apart from the others' (they may differ by multiples of 2^16 per block
-    /// and still end equal).
+    /// `count_range` from 0 to `n` of the builds `builds`: each build's total, its sum of the
+    /// blocks that are not one kept apart from the others' (they may differ by multiples of 2^16
+    /// per block and still end equal).
     #[inline]
     fn count_to(&self, n: u32, builds: &[Build]) -> Result<u64, Fail> {
         let block = n >> 16;
@@ -393,8 +393,8 @@ impl Seg {
     }
 }
 
-/// `bm::deserialize(bv, data)` (bmserial.h:4085-4125) of a `bm::bvector<>(size)`
-/// (BVector_data.cpp:77-78).
+/// `bm::deserialize` of `data` into a vector (bmserial.h:4085-4125), a `bm::bvector<>` made with
+/// the size `size` (BVector_data.cpp:77-78).
 pub(crate) fn decode(size: u32, data: &[u8]) -> Result<BitVector, Fail> {
     decode_to_end(size, data).map(|(vector, _)| vector)
 }
@@ -547,10 +547,10 @@ impl Bytes<'_> {
         Ok(u64::from_be_bytes([b1, b2, b3, b4, b5, b6, b7, 0]) | u64::from(b0))
     }
 
-    // BitMagic 8.0.1: encoding.h:1103-1130 (`get_16(s, count)`:
+    // BitMagic 8.0.1: encoding.h:1103-1130 (`get_16`:
     // a `memcpy` of `count` values), :1276-1295 (big-endian: a do-while loop that writes at least
     // one value, each from `buf_[0]` and `buf_[1]`, and moves 2 bytes for each)
-    /// `get_16(out, count)`.
+    /// `get_16` of `count` values into `out`.
     fn u16s(&mut self, out: &mut [u16], count: u32) -> Result<(), Fail> {
         let count = count as usize;
         if self.beq {
@@ -573,10 +573,10 @@ impl Bytes<'_> {
         Ok(())
     }
 
-    // BitMagic 8.0.1: encoding.h:1003-1027 (`get_32(w, count)`),
+    // BitMagic 8.0.1: encoding.h:1003-1027 (`get_32` of `count` words into `w`),
     // :1219-1236 (big-endian: a do-while loop that writes at least one word; the bit interval,
     // the one caller whose count may be 0, passes that count)
-    /// `get_32(block + first, count)`, ORed into the block.
+    /// `get_32` of `count` words into the block from word `first`, ORed into the block.
     fn words(&mut self, block: &mut Block, first: usize, count: usize) -> Result<(), Fail> {
         let bytes = self
             .data
@@ -779,7 +779,7 @@ impl<'r, 'a> BitIn<'r, 'a> {
     // BitMagic 8.0.1: encoding.h:2177-2190 (the same lines in
     // each `bic_decode_*_cm*`)
     /// The centered minimal value of a range of `r + 1` values (always at most `r`; `r + 1 == 0`
-    /// asks `bit_scan_reverse32(0)`, undefined).
+    /// asks `bit_scan_reverse32` of 0, undefined).
     fn bic_value(&mut self, r: u32) -> Result<u32, Fail> {
         if r == 0 {
             return Ok(0);
@@ -803,8 +803,8 @@ impl<'r, 'a> BitIn<'r, 'a> {
 
     // BitMagic 8.0.1: encoding.h:336-341 (`bic_decode_u16`:
     // nothing for `sz` 0), :2209-2247 (`bic_decode_u16_cm`)
-    /// `bic_decode_u16(arr, sz, lo, hi)`: the decoder writes `arr[0..sz]` (an array of NCBI's
-    /// that is shorter is written past, U4).
+    /// `bic_decode_u16` of `sz` values between `lo` and `hi`: the decoder writes `arr[0..sz]` (an
+    /// array of NCBI's that is shorter is written past, U4).
     fn bic_u16(&mut self, arr: &mut [u16], sz: u32, lo: u16, hi: u16) -> Result<(), Fail> {
         if sz == 0 {
             return Ok(());
@@ -843,9 +843,9 @@ impl<'r, 'a> BitIn<'r, 'a> {
 
     // BitMagic 8.0.1: encoding.h:343-348
     // (`bic_decode_u16_bitset`), :2251-2290 (`bic_decode_u16_cm_bitset`)
-    /// `bic_decode_u16_bitset(block, sz, lo, hi)`: each value sets its bit (a value past the
-    /// block's 65536 bits writes past it, U4); `dry`: `bic_decode_u16_dry` (encoding.h:352-357,
-    /// 2306-2345), which NCBI runs for a full block: the same reads, no write.
+    /// `bic_decode_u16_bitset` of `sz` values between `lo` and `hi`: each value sets its bit (a
+    /// value past the block's 65536 bits writes past it, U4); `dry`: `bic_decode_u16_dry`
+    /// (encoding.h:352-357, 2306-2345), which NCBI runs for a full block: the same reads, no write.
     fn bic_u16_bitset(
         &mut self,
         block: &mut Block,
@@ -908,7 +908,8 @@ impl<'r, 'a> BitIn<'r, 'a> {
     // BitMagic 8.0.1: encoding.h:2167-2205
     // (`bic_decode_u32_cm`, called without the wrapper's check of `sz`: with `sz` 0 the loop's
     // body runs once and writes `arr[0]`)
-    /// `bic_decode_u32_cm(arr, sz, lo, hi)`: writes `arr[0..max(sz, 1)]`.
+    /// `bic_decode_u32_cm` of `sz` values between `lo` and `hi`: writes `sz` entries of `arr`, at
+    /// least one.
     fn bic_u32(&mut self, arr: &mut [u32], sz: u32, lo: u32, hi: u32) -> Result<(), Fail> {
         if sz.max(1) as usize > arr.len() {
             return Err(refuse(Rule::Bounds));
@@ -946,7 +947,7 @@ impl<'r, 'a> BitIn<'r, 'a> {
     }
 
     // BitMagic 8.0.1: encoding.h:2698-2798 (`decode_array`)
-    /// `decode_array(arr, tb_wflags, &sz, default_sz)` into `arr` (`ex0_arr_` or `ex1_arr_`, of
+    /// `decode_array` with `tb_wflags` and `default_sz`, into `arr` (`ex0_arr_` or `ex1_arr_`, of
     /// `EX_ENTRIES`): the header flags and the size. The forms write `arr[0..sz]` (delta-gamma
     /// also `arr[0]` with `sz` 0; a single value `arr[0]`); a window reads the array up to its
     /// width, which may pass `sz` into entries that an earlier token wrote.
@@ -1309,7 +1310,8 @@ fn gap_add_to_bitset(gap: &[u16], len: usize, block: &mut Block) -> Result<(), F
     Ok(())
 }
 
-/// `gap_convert_to_bitset(block, gap)`: the bits of the GAP block by its header's length.
+/// `gap_convert_to_bitset` of a block and a GAP block: the bits of the GAP block by its header's
+/// length.
 fn gap_bitmap(gap: &[u16]) -> Result<Box<Block>, Fail> {
     let mut block = Box::new([0; 1024]);
     gap_add_to_bitset(gap, gap_last(gap)?, &mut block)?;
@@ -1321,7 +1323,7 @@ const GAP_LEVELS: [usize; 4] = [128, 256, 512, 1280];
 
 // BitMagic 8.0.1: bmfunc.h:5409-5418 (`gap_calc_level` with
 // the default `gap_len_table`: -1 above 1276)
-/// `gap_calc_level(len, glevel_len)`: the level of a GAP block of `len` entries (`gap_length`,
+/// `gap_calc_level`: the level of a GAP block of `len` entries (`gap_length`,
 /// one more than its last index).
 fn gap_calc_level(len: usize) -> Option<u16> {
     GAP_LEVELS
@@ -1340,14 +1342,14 @@ fn gap_level(head: u16) -> u16 {
     (head >> 1) & 3
 }
 
-/// `set_gap_level(buf, level)` (bmfunc.h:5387-5393).
+/// `set_gap_level` of a header to `level` (bmfunc.h:5387-5393).
 fn with_level(head: u16, level: u16) -> u16 {
     (head & !6) | (level << 1)
 }
 
 // BitMagic 8.0.1: bmfunc.h:7414-7422 (`gap_operation_or`: the
 // AND of both inverted, inverted), :3736-3790 (`gap_buff_op`)
-/// `gap_operation_or(a, b, tmp_buf, dlen)`: NCBI's merge of the two GAP blocks, which walks each to
+/// `gap_operation_or`: NCBI's merge of the two GAP blocks, which walks each to
 /// the first place where both read 65535 (whatever their headers say), into the result buffer of
 /// `OR_BUF` entries. The result's entries `[0..=dlen]`.
 fn gap_or(a: &[u16], b: &[u16]) -> Result<Vec<u16>, Fail> {
@@ -1480,7 +1482,7 @@ fn gap_test_scalar(gap: &[u16], pos: u32) -> Result<u16, Fail> {
 
 // BitMagic 8.0.1: bmfunc.h:1835-1886 (`gap_bfind` without
 // `VECT_GAP_BFIND`: the binary part of `gap_narrow`, then a linear scan)
-/// `gap_bfind(buf, pos, &is_set)` of NCBI's scalar build: the entry of the run that holds `pos`.
+/// `gap_bfind` of NCBI's scalar build: the entry of the run that holds `pos`.
 fn gap_bfind_scalar(gap: &[u16], pos: u32) -> Result<usize, Fail> {
     let len = gap_len(gap)?;
     let (mut start, _) = gap_narrow(gap, pos, 1, len, 2)?;
@@ -1496,7 +1498,7 @@ fn gap_bfind_scalar(gap: &[u16], pos: u32) -> Result<usize, Fail> {
 // `gap_narrow`, a count that grows by one unless the end is the array's end, then `sse2_gap_find`
 // on the rest), :1501-1507
 // (`sse2_gap_test`: its `is_set`)
-/// `sse2_gap_bfind(buf, pos, &is_set)` of NCBI's SSE2 build.
+/// `sse2_gap_bfind` of NCBI's SSE2 build.
 fn gap_bfind_sse2(gap: &[u16], pos: u32) -> Result<usize, Fail> {
     let len = gap_len(gap)?;
     let arr_end = 1 + len;
@@ -1584,7 +1586,7 @@ fn gap_bfind_sse42(gap: &[u16], pos: u32, step16: usize) -> Result<usize, Fail> 
     })
 }
 
-/// `gap_test_unr(buf, pos)` (BitMagic 8.0.1: bmfunc.h:1943-1955) of `build`: `gap_test`,
+/// `gap_test_unr` (BitMagic 8.0.1: bmfunc.h:1943-1955) of `build`: `gap_test`,
 /// `sse2_gap_test`, `sse42_gap_test`.
 fn gap_test(gap: &[u16], pos: u32, build: Build) -> Result<u16, Fail> {
     match build {
@@ -1594,7 +1596,7 @@ fn gap_test(gap: &[u16], pos: u32, build: Build) -> Result<u16, Fail> {
     }
 }
 
-/// `gap_bfind(buf, pos, &is_set)` of `build` (`VECT_GAP_BFIND`, BitMagic 8.0.1:
+/// `gap_bfind` of `build` (`VECT_GAP_BFIND`, BitMagic 8.0.1:
 /// bmfunc.h:1840-1841): the entry of the run that holds `pos`.
 fn gap_bfind(gap: &[u16], pos: u32, build: Build) -> Result<usize, Fail> {
     match build {
@@ -1612,7 +1614,7 @@ fn gap_diff(to: u16, from: u32) -> u32 {
 // BitMagic 8.0.1: bmfunc.h:3097-3150 (`gap_bit_count_unr`; the
 // scalar build's unrolled loop adds the same differences as its last loop), bmsse_util.h:1070-1091
 // (`sse2_gap_sum_arr`, the SSE2 and SSE4.2 builds above 18 entries)
-/// `gap_bit_count_unr(buf)` of the scalar build (`sse` false) or of the SSE2 and SSE4.2 builds,
+/// `gap_bit_count_unr` of the scalar build (`sse` false) or of the SSE2 and SSE4.2 builds,
 /// whose 16-bit lanes add the differences of 16 entries a wave modulo 2^16 in four sums.
 fn gap_count_unr(gap: &[u16], sse: bool) -> Result<u32, Fail> {
     let len = gap_len(gap)?;
@@ -1651,7 +1653,7 @@ fn gap_count(gap: &[u16], build: Build) -> Result<u32, Fail> {
 }
 
 // BitMagic 8.0.1: bmfunc.h:3163-3200 (`gap_bit_count_range`)
-/// `gap_bit_count_range(buf, left, right)` of `build` (its `gap_bfind`).
+/// `gap_bit_count_range` from `left` to `right` of `build` (its `gap_bfind`).
 fn gap_count_range(gap: &[u16], left: u32, right: u32, build: Build) -> Result<u32, Fail> {
     let mut p = gap_bfind(gap, left, build)?;
     let mut mask = 0u32.wrapping_sub(u32::from(gap_value_at(gap, p)));
@@ -1675,7 +1677,7 @@ fn gap_count_range(gap: &[u16], left: u32, right: u32, build: Build) -> Result<u
 
 // BitMagic 8.0.1: bmfunc.h:3488-3517 (`gap_bit_count_to`, the
 // same in every build)
-/// `gap_bit_count_to(buf, right)`.
+/// `gap_bit_count_to` up to `right`.
 fn gap_count_to(gap: &[u16], right: u32) -> Result<u32, Fail> {
     gap_len(gap)?;
     let mut mask = 0u32.wrapping_sub(u32::from(gap[0] & 1));
@@ -2242,7 +2244,7 @@ fn gap_restore_mins(gap: &mut [u16], min0: u16, min1: u16) {
 // The vector being decoded.
 
 /// A block of NCBI's vector while it decodes (`blocks_manager`, bmblocks.h); NCBI's null block is
-/// no slot. The deserializer makes new blocks as GAP blocks (`set_new_blocks_strat(BM_GAP)`,
+/// no slot. The deserializer makes new blocks as GAP blocks (`set_new_blocks_strat` with `BM_GAP`,
 /// bmserial.h:5604).
 enum Slot {
     /// A GAP block: the entries of its buffer that NCBI wrote (its header's level is the
@@ -2300,7 +2302,7 @@ fn or_into(block: &mut Block, bits: &Block) {
     }
 }
 
-/// `clone_gap_block(gap, gap_res)` (bmblocks.h:838-858): a new GAP block of the GAP's
+/// `clone_gap_block` of `gap` (bmblocks.h:838-858): a new GAP block of the GAP's
 /// `gap_length` entries (those that NCBI wrote; the rest of the copy is memory it did not write)
 /// at the level of that length, or a bitmap above the last level.
 fn clone_gap(gap: &[u16]) -> Result<Slot, Fail> {
@@ -2313,9 +2315,10 @@ fn clone_gap(gap: &[u16]) -> Result<Slot, Fail> {
     Ok(Slot::gap(block))
 }
 
-/// `assign_gap(res, res_len, blk)` (bmblocks.h:985-1030) into a GAP block of level `level`: a
-/// bitmap above the last level (`convert_gap2bitset` with the result's length), a new block at
-/// the result's level where it reaches the block's limit, else the block keeps its level.
+/// `assign_gap` of a result `res` of `res_len` entries (bmblocks.h:985-1030) into a GAP block of
+/// level `level`: a bitmap above the last level (`convert_gap2bitset` with the result's length), a
+/// new block at the result's level where it reaches the block's limit, else the block keeps its
+/// level.
 fn assign_gap(mut res: Vec<u16>, level: u16) -> Result<Slot, Fail> {
     let len = res.len() - 1;
     let Some(new_level) = gap_calc_level(len + 1) else {
@@ -2332,7 +2335,7 @@ fn assign_gap(mut res: Vec<u16>, level: u16) -> Result<Slot, Fail> {
     Ok(Slot::gap(res))
 }
 
-/// `extend_gap_block(nb, blk)` (bmblocks.h:1810-1836): a GAP block past its level's limit moves
+/// `extend_gap_block` of block `nb` (bmblocks.h:1810-1836): a GAP block past its level's limit moves
 /// to the next level (`allocate_gap_block` copies its `gap_length` entries and remakes the header),
 /// or becomes a bitmap from the last level or at 1280 entries (`deoptimize_block`).
 fn extend_gap(gap: &[u16]) -> Result<Slot, Fail> {
@@ -2355,12 +2358,12 @@ impl Store {
         }
     }
 
-    /// `blk != 0`.
+    /// Whether the block pointer `blk` is not null.
     fn exists(&self, nb: u32) -> bool {
         self.get(nb).is_some()
     }
 
-    /// `IS_FULL_BLOCK(blk)`.
+    /// `IS_FULL_BLOCK` of the block.
     fn is_full(&self, nb: u32) -> bool {
         matches!(self.get(nb), Some(Slot::Full))
     }
@@ -2384,8 +2387,8 @@ impl Store {
     // bmblocks.h:1076-1118 (`check_allocate_block`: a null block becomes the empty GAP block of
     // `gap_set_all`), bm.h:2119-2132 (`gap_block_set_no_ret`: `gap_set_value`, then above the
     // level's limit `extend_gap_block`, bmblocks.h:1810-1836)
-    /// `bvector<>::set_bit_no_check(nb * 65536 + p)` as the build `build` runs it, or all three
-    /// (`None`, `gap_set_value`).
+    /// `bvector<>::set_bit_no_check` of bit `p` of block `nb` (bit number `nb` times 65536 plus
+    /// `p`) as the build `build` runs it, or all three (`None`, `gap_set_value`).
     fn set_bit(&mut self, nb: u32, p: u16, build: Option<Build>) -> Result<(), Fail> {
         if self.is_full(nb) {
             return Ok(());
@@ -2467,7 +2470,7 @@ impl Store {
     }
 
     // BitMagic 8.0.1: bm.h:7835-7905 (`set_range_no_check`)
-    /// `set_range_no_check(left, right)`, `left <= right`.
+    /// `set_range_no_check` from `left` to `right`, with `left` at most `right`.
     fn set_range(&mut self, left: u32, right: u32) -> Result<(), Fail> {
         let (nb_left, nb_right) = (left >> 16, right >> 16);
         let nbit_left = (left & 0xFFFF) as u16;
@@ -2863,8 +2866,8 @@ struct Decoder<'a> {
     build: Option<Build>,
 }
 
-/// What the main loop does after a token: the next block (`++nb_i`), the same (`continue`), or
-/// the end (`nb_i = bm::set_total_blocks`).
+/// What the main loop does after a token: the next block (`nb_i` plus one), the same (`continue`),
+/// or the end (`nb_i` set to `bm::set_total_blocks`).
 enum Go {
     Next,
     Stay,
@@ -2916,7 +2919,7 @@ impl Decoder<'_> {
                 self.grow(id);
                 ids.push(id);
             }
-            // `bv.set` comes before `set_new_blocks_strat(BM_GAP)` and makes bitmaps; the
+            // `bv.set` comes before `set_new_blocks_strat` with `BM_GAP` and makes bitmaps; the
             // decoding ends here, so only the bits count.
             ids.sort_unstable();
             for group in ids.chunk_by(|a, b| a >> 16 == b >> 16) {
@@ -3436,8 +3439,8 @@ impl Decoder<'_> {
     // The forms decode into the block or into `temp_block_`, ORed into the block (the inverted
     // forms invert it first). A null block becomes an empty bitmap and a GAP block a bitmap
     // first; a full block stays, and the forms that would write into it read their data without
-    // a write (`IS_VALID_ADDR(blk)` false), except the inverted ones, which make it a bitmap of
-    // ones (`deoptimize_block`) and decode into `temp_block_`.
+    // a write (`IS_VALID_ADDR` false for the block), except the inverted ones, which make it a
+    // bitmap of ones (`deoptimize_block`) and decode into `temp_block_`.
     fn bit_block(&mut self, token: u8, nb: u32) -> Result<(), Fail> {
         let full = self.store.bit_target(nb)?;
         let inverted = matches!(token, 30 | 32 | 64 | 66);

@@ -111,7 +111,7 @@ fn push_lowercase_runs(query: &[u8], out: &mut Vec<(usize, usize)>) {
 
 /// The SEG intervals of `query` and, with `mask_lowercase`, its lower-case runs (half-open,
 /// unsorted, not joined), for the masks of the BLAST XML report, which joins them as NCBI's
-/// `BlastSeqLocCombine(filter_out, 0)` does: overlapping intervals only. The search's list
+/// `BlastSeqLocCombine` of `filter_out` with 0 does: overlapping intervals only. The search's list
 /// (`encode_tblastn_lookup_query`) also joins adjacent ones; that changes no masked letter,
 /// but NCBI's XML mask loop (`s_MaskQuerySeq`) leaves a letter unmasked where one interval
 /// ends on the second-last column of an alignment segment and the next begins on its last.
@@ -844,7 +844,7 @@ pub(super) fn x_scan_plan(
 // caller in scan order, as the loop at line 506 consumes it.
 /// Scan one unit and hand every filled offset
 /// array to `on_pairs` in scan order, as NCBI c++/src/algo/blast/core/
-/// aa_ungapped.c:492-516 consumes it (`for (i = 0; i < hits; ++i)`).
+/// aa_ungapped.c:492-516 consumes it (a loop of `i` from 0 while it is below `hits`).
 /// `subject` holds the unit's frame from the chunk's first residue on (the frame's `aa_seq`
 /// from `1 + chunk.offset`, or the residues the unit translated, `x_unit_residues`).
 #[inline(always)]

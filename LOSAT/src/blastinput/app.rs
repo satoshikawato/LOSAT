@@ -640,9 +640,9 @@ pub fn read_seg_option(value: &str) -> Result<SegSpec, &'static str> {
         return Err("Invalid number of arguments to filtering option");
     }
     let invalid = || "Invalid input for filtering parameters";
-    // `NStr::StringToInt(tokens[0])`, flags 0.
+    // `NStr::StringToInt` of the first token, flags 0.
     let window = crate::ncbi_str::string_to_int(tokens[0].as_bytes(), 0).map_err(|_| invalid())?;
-    // NCBI reads the values with `NStr::StringToDouble(token)` (default flags,
+    // NCBI reads the values with `NStr::StringToDouble` of the token (default flags,
     // `ncbi_str::string_to_double`: glibc's `strtod`, decimal or hexadecimal, which must end at
     // the end of the token).
     let mut cuts = [0.0; 2];
@@ -708,7 +708,7 @@ pub fn parse_comp_based_stats(
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.hpp:104-106
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:98-103
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:78-111
-/// `SplitQuery_CalculateNumChunks` reads the overlap (`getenv("OVERLAP_CHUNK_SIZE")` in
+/// `SplitQuery_CalculateNumChunks` reads the overlap (`getenv` of `OVERLAP_CHUNK_SIZE` in
 /// `SplitQuery_GetOverlapChunkSize`) only after `SplitQuery_ShouldSplit` is true, and that is
 /// false for RPS-BLAST (`Blast_SubjectIsPssm`, "do not split RPS-BLAST"), so `rpsblast` reads
 /// `CHUNK_SIZE` (the constructor above) but never `OVERLAP_CHUNK_SIZE`: `reads_overlap` is false
@@ -748,7 +748,7 @@ pub(crate) fn read_query_split_variable(variable: &str) -> anyhow::Result<Option
     }
 }
 
-/// An environment variable's value as NCBI's search converts it, `NStr::StringToInt(str)` with
+/// An environment variable's value as NCBI's search converts it, `NStr::StringToInt` with
 /// flags 0 (`ncbi_str::string_to_int`: an optional sign and decimal digits within the range of an
 /// `int`, no spaces). A value that it cannot convert (an empty one too) throws its
 /// `CStringException`, which ends the program through `CATCH_ALL` (`NativeError::exception`: `Error:
@@ -769,7 +769,7 @@ pub(crate) fn environment_int(value: &std::ffi::OsStr) -> anyhow::Result<i32> {
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:206-210
 /// `BL2SEQ_LEGACY` (any value, also an empty one) turns off the scan of the subjects as a
 /// database: `CLocalBlast` then searches each subject on its own (local_blast.cpp:189,289)
-/// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`).
+/// and `CBlastFormat` writes the legacy bl2seq report (when `m_IsBl2Seq` is set and `m_IsDbScan` is not).
 ///
 /// LOSAT refuses before the search, so the refusal is wider than NCBI's: a `-subject` search
 /// with `BL2SEQ_LEGACY` whose report would not change (no hits, or one subject record in outfmt

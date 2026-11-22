@@ -102,7 +102,7 @@ pub struct QueryChunk {
 pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize) -> (usize, usize) {
     let overlap_size = sizes.overlap;
     let length = concatenated_query_length as u64;
-    // `Uint4 num_chunks` (split_query_aux_priv.cpp:112).
+    // `num_chunks` is a `Uint4` (split_query_aux_priv.cpp:112).
     let mut num_chunks: u32 = 0;
     if sizes.chunk_size > overlap_size {
         num_chunks = (length / (sizes.chunk_size - overlap_size)) as u32;
@@ -137,7 +137,7 @@ pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
 /// The queries of a chunk, and their parts in it:
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:223-247
-/// (`TChunkRange` is a `COpenRange`, so `GetTo() + 1` is the end of the previous query.)
+/// (`TChunkRange` is a `COpenRange`, so `GetTo()` plus 1 is the end of the previous query.)
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:196-210
 /// The query location of a FASTA query starts at 0, so `query_offset` is 0.
@@ -353,7 +353,7 @@ pub fn restrict_masks(
             if left >= right_open {
                 return None;
             }
-            // `BlastSeqLoc_RestrictToInterval(mask, interval_from, interval_to)`.
+            // `BlastSeqLoc_RestrictToInterval` of `mask` to `interval_from` and `interval_to`.
             let restricted_left = left.saturating_sub(interval_from);
             let restricted_right = right_open.min(interval_to) as isize - interval_from as isize;
             (restricted_left as isize <= restricted_right)

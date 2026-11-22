@@ -198,6 +198,12 @@ impl FastaRecord {
         self.source.as_ref()?.believed.as_deref()
     }
 
+    /// `believed`, shared (for a reader of the records that does not hold them:
+    /// `query_batch::BatchCount::next_batch`).
+    pub fn believed_shared(&self) -> Option<std::sync::Arc<believed::BelievedIds>> {
+        self.source.as_ref()?.believed.clone()
+    }
+
     /// The record of the Bioseq whose Seq-ids are `ids` (at least one), shown as `-parse_deflines`
     /// shows the ids it read, whose Seq-aligns take the first (`BelievedIds::of_bioseq`): the query
     /// of psiblast's and tblastn's `-in_pssm`, the PSSM's Bioseq (`pssm_search::PsiSearch::

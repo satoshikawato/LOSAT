@@ -255,6 +255,12 @@ impl BlastpDatabase {
         self.db.first_oid_read_fails()
     }
 
+    /// The error of the preliminary search's first read of the sequences after a batch's set-up
+    /// checks, where a sequence file cannot be opened (`shared::sequence_file_read_error`).
+    pub(super) fn sequence_file_read_error(&self, program: &str) -> Option<anyhow::Error> {
+        shared::sequence_file_read_error(&self.db, program)
+    }
+
     /// What the `Database:` lines of the pairwise report show
     /// (`algorithm::common::database::pairwise_database`): the title (the name as given
     /// for an empty title), the date and the real totals, also with `-dbsize`.
@@ -1156,18 +1162,25 @@ impl ListedTitles<'_> {
         scope_of: impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
         described: impl FnMut(usize) -> Result<Vec<u32>>,
     ) -> Result<()> {
-        self.refuse_generated_ids(hit_lists, &scope_of, shared::QUERY_ANCHORED_EFFECT)?;
+        self.refuse_generated_ids(
+            hit_lists,
+            &scope_of,
+            |_, _, _| true,
+            shared::QUERY_ANCHORED_EFFECT,
+        )?;
         self.refuse_display_ids(hit_lists, scope_of, true, described)
     }
 
     /// The Seq-align ids of the final hit lists `hit_lists` that are the generated id of a query
     /// of the batch that reports them (`scope_of`, `refuse_generated_query_ids`), refused with
     /// `effect` (what NCBI does with them in the formats asked for, `shared::XML_EFFECT` for
-    /// rpsblast's BLAST XML).
+    /// rpsblast's BLAST XML) where the formats differ for them: `differs(query, list index,
+    /// subject)` (the index among the query's reported lists, `EngineCounts`' key).
     pub(super) fn refuse_generated_ids<'s>(
         &self,
         hit_lists: &[Option<BlastpHitList>],
         scope_of: &impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
+        differs: impl Fn(usize, usize, &crate::report::db_subject::ParsedSubject) -> bool,
         effect: &str,
     ) -> Result<()> {
         if self.parsed.is_empty() {
@@ -1178,11 +1191,14 @@ impl ListedTitles<'_> {
                 continue;
             };
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-            for hsp_list in &hit_list.hsplist_array[..count] {
+            for (list_index, hsp_list) in hit_list.hsplist_array[..count].iter().enumerate() {
                 let rank = hsp_list.oid as usize;
                 let Some(subject) = &self.parsed[rank] else {
                     continue;
                 };
+                if !differs(query, list_index, subject) {
+                    continue;
+                }
                 shared::refuse_generated_query_id(
                     subject,
                     self.oids.oid(self.listed.ordinals[rank]),

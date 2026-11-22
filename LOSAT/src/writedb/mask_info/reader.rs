@@ -42,7 +42,7 @@ use super::{MaskInfo, MaskInterval, MaskList, MaskLoc, MaskPart, NullElement};
 use crate::ncbi_exception::{NcbiException, Severity};
 use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{
-    throw_error, utf8_tag_message, Fail, Input, StringKind, StringPost, TextInput, R,
+    throw_error, utf8_tag_message, Fail, Input, Names, StringKind, StringPost, TextInput, R,
 };
 use crate::report::serial::asn_text_reader::{PointerType, StreamSource};
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep};
@@ -106,10 +106,10 @@ impl std::error::Error for MaskFileError {}
 /// A message that NCBI's reader posts while it reads a mask file.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MaskPost {
-    /// `ERR_POST_X(7)` of a byte read as `#`.
+    /// The post 803.7 of a byte read as `#`.
     BadChar(ReplacedChar),
-    /// `ERR_POST_X_ONCE(10, Warning << ...)` of a UTF8String tag for the VisibleString member at
-    /// the stack trace: once per process.
+    /// The warning 803.10 of a UTF8String tag for the VisibleString member at the stack trace
+    /// (makeblastdb writes the first of its run, `asn_input::Utf8TagOnce`).
     Utf8Tag(String),
 }
 
@@ -1306,7 +1306,7 @@ fn mandatory<T>(value: Option<T>) -> T {
 #[cfg(test)]
 pub(super) fn seq_id_from_binary(data: &[u8]) -> R<ParsedSeqId> {
     use crate::report::serial::asn_text_reader::SliceSource;
-    let mut rd = Rd::new(BerReader::new(SliceSource::new(data)));
+    let mut rd = Rd::new(BerReader::new(SliceSource::new(data), Names::MASK));
     rd.frame(FrameKind::Named, Some("Seq-id"), |s| s.read_seq_id())
 }
 
@@ -1315,11 +1315,7 @@ pub(super) fn seq_id_from_binary(data: &[u8]) -> R<ParsedSeqId> {
 #[cfg(test)]
 pub(super) fn seq_id_from_text(data: &[u8]) -> R<ParsedSeqId> {
     use crate::report::serial::asn_text_reader::SliceSource;
-    let mut rd = Rd::new(TextInput::new(
-        SliceSource::new(data),
-        "mask data",
-        "mask data reader",
-    ));
+    let mut rd = Rd::new(TextInput::new(SliceSource::new(data), Names::MASK));
     rd.frame(FrameKind::Named, Some("Seq-id"), |s| s.read_seq_id())
 }
 
@@ -1420,12 +1416,12 @@ impl MaskFileReader {
         };
         let src = StreamSource::new(input, &sample);
         let source = match format {
-            MaskFileFormat::TextAsn => Source::Text(Box::new(Rd::new(TextInput::new(
-                src,
-                "mask data",
-                "mask data reader",
-            )))),
-            MaskFileFormat::BinaryAsn => Source::Binary(Box::new(Rd::new(BerReader::new(src)))),
+            MaskFileFormat::TextAsn => {
+                Source::Text(Box::new(Rd::new(TextInput::new(src, Names::MASK))))
+            }
+            MaskFileFormat::BinaryAsn => {
+                Source::Binary(Box::new(Rd::new(BerReader::new(src, Names::MASK))))
+            }
         };
         Ok(MaskFileReader {
             path: path.to_path_buf(),

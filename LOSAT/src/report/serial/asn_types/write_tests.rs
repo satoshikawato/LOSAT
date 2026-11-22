@@ -7,11 +7,12 @@ use super::read::read_document;
 use super::table::named;
 use super::write::{write_document, write_value};
 use super::Value;
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::{Encoder, SerialError};
 
 fn read(root: u16, text: &str) -> Value {
-    let (value, posts) = read_document(text.as_bytes(), root);
+    let (value, posts) = read_document(text.as_bytes(), root, Names::TEST);
     assert!(posts.is_empty(), "{posts:?}");
     value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
 }
@@ -215,6 +216,18 @@ fn a_delayed_member_read_from_binary_is_written_by_its_values() {
     let mut bad = bytes.to_vec();
     bad[10] = 0xe9;
     assert!(matches!(write(&bad).1, Some(SerialError::Unwritten(_))));
+    // A UTF8String tag for the name's VisibleString: the read that kept the bytes posts 803.10
+    // (once per run, `Utf8TagOnce`), so the re-read before the write posts nothing and the name
+    // is written as NCBI's `CDelayBuffer::Update` writes it.
+    let mut utf8 = bytes.to_vec();
+    utf8[8] = 0x0c;
+    let (value, posts) = super::read::read_ber_document(&utf8, named::AUTH_LIST, Names::TEST);
+    assert!(value.is_ok(), "{value:?}");
+    assert!(
+        matches!(posts.as_slice(), [super::read::Post::Utf8Tag(_)]),
+        "{posts:?}"
+    );
+    assert_eq!(write(&utf8), write(bytes));
 }
 
 /// The writer writes a value from a list on the heap: 100,000 nested Seq-loc mixes (whose text

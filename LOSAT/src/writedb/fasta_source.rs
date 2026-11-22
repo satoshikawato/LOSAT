@@ -56,7 +56,7 @@ impl SourceError {
     // either reaches this clause (after `AddFasta` has ended the build).
     fn out_of_memory() -> Self {
         Self {
-            message: b"BLAST ran out of memory".to_vec(),
+            message: crate::wording::OUT_OF_MEMORY.as_bytes().to_vec(),
             kind: SourceErrorKind::OutOfMemory,
         }
     }

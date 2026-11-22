@@ -1065,6 +1065,51 @@ fn a_binary_string_past_the_end_is_reserved_as_ncbi_reserves_it() {
     assert!(what.starts_with("a string whose length (1073741"), "{what}");
 }
 
+// Line RG D3c-3a, review B1: a byte block (the query's ncbistdaa OCTET STRING, or a BIT STRING)
+// whose length passes the end of a binary PSSM, as NCBI's `vector<char>` reader reserves the
+// block's length before its bytes: 2^62 and 2^63 - 1 bytes, `std::bad_alloc` ("BLAST ran out of
+// memory", rc 4); 2^63 bytes and a BIT STRING of length 0 (2^64 - 1 bytes), `std::length_error`
+// ("Error: vector::reserve", rc 255), each after the post (803.4) unended byte block; 1 GiB, a
+// reservation that succeeds or fails by the host's memory, which LOSAT refuses; a BIT STRING of
+// the letters is read as them. Inputs: the rows `db.ber.ps.block_*` of
+// `tests/db_search_manifest/psiblast.ber.tsv`.
+#[test]
+fn a_binary_byte_block_past_the_end_is_reserved_as_ncbi_reserves_it() {
+    use crate::blastinput::pssm_text::read_pssm_binary;
+    use crate::report::serial::asn_types::Post;
+    for (case, error) in [
+        ("2p62", ReadError::OutOfMemory),
+        ("2p63m1", ReadError::OutOfMemory),
+        ("2p63", ReadError::Std("vector::reserve")),
+        ("bit0", ReadError::Std("vector::reserve")),
+    ] {
+        let read = read_pssm_binary(&fixture(&format!("pssm/ps9_ber_block_{case}.asnb")));
+        assert_eq!(read.posts, vec![Post::UnendedByteBlock], "{case}");
+        assert_eq!(
+            read.result.err(),
+            Some(PssmReadError::Ncbi(error)),
+            "{case}"
+        );
+    }
+    let read = read_pssm_binary(&fixture("pssm/ps9_ber_block_1g.asnb"));
+    assert!(read.posts.is_empty());
+    let what = match read.result {
+        Err(PssmReadError::Refused(what)) => what,
+        other => panic!("{:?}", other.err()),
+    };
+    assert!(
+        what.starts_with(
+            "an OCTET STRING or BIT STRING whose length (1073741824 bytes) passes the end of the \
+             input: NCBI's reader allocates 1073741824 bytes for it"
+        ),
+        "{what}"
+    );
+    let bit = read_pssm_binary(&fixture("pssm/ps9_ber_block_bit.asnb"));
+    let base = read_pssm_binary(&fixture("pssm/ps9_ber_base.asnb"));
+    assert!(bit.posts.is_empty());
+    assert_eq!(bit.result, base.result);
+}
+
 // Line RG D3c-3a: Karlin-Altschul values that are not finite numbers, in ASN.1 text and in its
 // binary twins (`ps9_ber_real_*`: `lambda` of PLUS-INFINITY `09 01 40`, MINUS-INFINITY `09 01 41`,
 // NOT-A-NUMBER `09 01 42`, the NR text `INF`). NCBI BLAST+ 2.17.0 goes on with each (probes

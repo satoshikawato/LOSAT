@@ -365,7 +365,9 @@ fn literal_walk<S: AsnSource>(src: S, mode: usize, ops: &'static str) -> Vec<Str
 /// Texts, string rules and operations, with the steps that the reader gave for them before its
 /// position moved into locals (recorded from dev's reader, not from this one): line ends of every form in white space, comments and
 /// strings, a comment and a `-` at the end of the text, the stop positions of the overflows,
-/// errors at their positions, and the readers of members, variants, enumerated values, pointer
+/// errors at their positions (those of the numbers since the readers of numbers became one, at
+/// NCBI's: `GetInt4` and `GetUint4` take the byte after a sign, the byte that is no digit and the
+/// digit that overflows before they throw), and the readers of members, variants, enumerated values, pointer
 /// types, type names and lists. Each step is `what was read @position:line`.
 const LITERAL_WALKS: &[(&[u8], usize, &str, &[&str])] = &[
     (
@@ -430,7 +432,7 @@ const LITERAL_WALKS: &[(&[u8], usize, &str, &[&str])] = &[
         "int4 int4",
         &[
             "int4 -5 @4:2",
-            "error AsnTextError { line: 2, message: \"bad number\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 574, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::BadNumber\") })) } refusal None @6:2",
+            "error AsnTextError { line: 2, message: \"bad number\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 574, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::BadNumber\") })) } refusal None @7:2",
         ],
     ),
     (
@@ -484,7 +486,7 @@ const LITERAL_WALKS: &[(&[u8], usize, &str, &[&str])] = &[
         "int4 int4",
         &[
             "int4 -2147483648 @11:1",
-            "error AsnTextError { line: 2, message: \"number overflow\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") })) } refusal None @22:2",
+            "error AsnTextError { line: 2, message: \"number overflow\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 583, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::NumberOverflow\") })) } refusal None @23:2",
         ],
     ),
     (
@@ -502,7 +504,7 @@ const LITERAL_WALKS: &[(&[u8], usize, &str, &[&str])] = &[
         0,
         "uint4",
         &[
-            "error AsnTextError { line: 2, message: \"bad number\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 574, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::BadNumber\") })) } refusal None @1:2",
+            "error AsnTextError { line: 2, message: \"bad number\", kind: Format, ncbi: Some(Buffer(ThrowSite { file: \"src/util/strbuffer.cpp\", line: 574, kind: \"CUtilException::eWrongData\", function: Some(\"ncbi::CIStreamBuffer::BadNumber\") })) } refusal None @2:2",
         ],
     ),
     (
@@ -722,4 +724,25 @@ fn literal_walks() {
         read += &format!("walk {k}: {slice:?}\n");
     }
     assert!(differ.is_empty(), "walks {differ:?} differ; read:\n{read}");
+}
+
+/// `StreamSource::read_into` past what the source keeps reads the bytes straight from the input
+/// into `out`, reserved at their count first as NCBI reserves them (one block of their size, not
+/// one that doubles as it fills): 100,000 bytes, more than a block of the source
+/// (`STREAM_BLOCK`), through a reader that gives one byte per call; a count past the end of the
+/// input reads what there is.
+#[test]
+fn a_long_read_comes_from_the_input_into_one_block_of_its_size() {
+    let data: Vec<u8> = (0..100_000u32).map(|i| (i % 251) as u8).collect();
+    assert!(data.len() > STREAM_BLOCK);
+    let mut src = StreamSource::new(OneByte(&data), &[]);
+    let mut out = Vec::new();
+    assert_eq!(src.read_into(0, 100_000, &mut out), 100_000);
+    assert_eq!(out, data);
+    assert_eq!(out.capacity(), 100_000);
+    let mut src = StreamSource::new(OneByte(&data), &data[..10]);
+    let mut out = Vec::new();
+    assert_eq!(src.read_into(0, 200_000, &mut out), 100_010);
+    assert_eq!(out[..10], data[..10]);
+    assert_eq!(out[10..], data[..]);
 }

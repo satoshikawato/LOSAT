@@ -15,6 +15,7 @@
 //! step, for a run that goes on (`pssm_search::in_pssm::psi_search_and_object`). Only the
 //! readers' own limits are refused here (`PssmReadError::Refused`).
 
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::{
     member_index, members, read_ber_document, read_document, resolved, Kind, Post, ReadError, Value,
@@ -43,12 +44,16 @@ pub(crate) struct PssmRead {
 /// Reads the `PssmWithParameters` document at the start of `text` (what follows it is not read,
 /// as `stream >> object` reads one object), its values nested to any depth.
 pub(crate) fn read_pssm(text: &[u8]) -> PssmRead {
-    pssm_read(read_document(text, named::PSSMWITHPARAMETERS))
+    pssm_read(read_document(text, named::PSSMWITHPARAMETERS, Names::PSSM))
 }
 
 /// [`read_pssm`] of the `PssmWithParameters` object in ASN.1 binary at the start of `bytes`.
 pub(crate) fn read_pssm_binary(bytes: &[u8]) -> PssmRead {
-    pssm_read(read_ber_document(bytes, named::PSSMWITHPARAMETERS))
+    pssm_read(read_ber_document(
+        bytes,
+        named::PSSMWITHPARAMETERS,
+        Names::PSSM,
+    ))
 }
 
 fn pssm_read((value, posts): (Result<Value, ReadError>, Vec<Post>)) -> PssmRead {

@@ -16,8 +16,8 @@
 //! its data limits count from the object's first byte (`BerReader::new_object`).
 
 use super::asn_input::{
-    invalid_enum, reserve_string, throw_error, Encoding, EnumItems, Fail, Input, Items, StringKind,
-    StringPost, R,
+    invalid_enum, reserve, throw_error, Encoding, EnumItems, Fail, Input, Items, Names, Reserve,
+    StringKind, StringPost, R,
 };
 use super::asn_text_reader::{AsnSource, PointerType, FIND_NAME};
 use super::encoder::StreamPosition;
@@ -147,7 +147,7 @@ pub(crate) struct BerReader<S: AsnSource> {
     pub(crate) src: S,
     /// The position in `src` of the first byte of the object being read (`new_object`).
     base: usize,
-    /// The bytes of the object read so far (`m_Input.GetStreamPosAsInt8()`).
+    /// The bytes of the object read so far (the position of NCBI's input buffer).
     pos: usize,
     /// `m_CurrentTagLength`: the bytes of the tag that was peeked, before its length.
     tag_len: usize,
@@ -156,10 +156,13 @@ pub(crate) struct BerReader<S: AsnSource> {
     limit: i64,
     /// `m_DataLimits`
     limits: Vec<i64>,
+    /// What LOSAT's refusal of a length calls the input (`asn_input::reserve`).
+    names: Names,
 }
 
 impl<S: AsnSource> BerReader<S> {
-    pub(crate) fn new(src: S) -> Self {
+    /// The binary input over `src`, which LOSAT's own messages call by `names`.
+    pub(crate) fn new(src: S, names: Names) -> Self {
         BerReader {
             src,
             base: 0,
@@ -167,6 +170,7 @@ impl<S: AsnSource> BerReader<S> {
             tag_len: 0,
             limit: 0,
             limits: Vec::new(),
+            names,
         }
     }
 
@@ -189,7 +193,8 @@ impl<S: AsnSource> BerReader<S> {
         throw_error(site, self.position(), message.to_string())
     }
 
-    /// `m_Input.PeekChar(i)`: the end of the data throws `CEofException`.
+    /// `PeekChar` of the input buffer, `i` bytes ahead: the end of the data throws
+    /// `CEofException`.
     #[inline]
     fn peek(&mut self, i: usize) -> R<u8> {
         match self.src.byte_at(self.base + self.pos + i) {
@@ -198,7 +203,7 @@ impl<S: AsnSource> BerReader<S> {
         }
     }
 
-    /// `m_Input.GetChar()`
+    /// `GetChar` of the input buffer.
     fn byte(&mut self) -> R<u8> {
         let b = self.peek(0)?;
         self.pos += 1;
@@ -321,8 +326,8 @@ impl<S: AsnSource> BerReader<S> {
         self.limit = if len == 0x80 {
             0
         } else if len > 0x80 {
-            // `m_Input.GetStreamPosAsInt8() + ReadLengthLong(len)`: C++ does not say which
-            // operand is evaluated first. The compiler of the 2.17.0 binaries evaluates the
+            // NCBI adds the stream position and the length that the length bytes give, and C++
+            // does not say which operand is evaluated first. The compiler of the 2.17.0 binaries evaluates the
             // position first, so the limit is counted from the first length byte: the item ends
             // `n` bytes (the length of the length) before where its length says. makeblastdb 2.17.0
             // fails with "EndOfContentsByte expected" on such an item (checked on the
@@ -513,7 +518,7 @@ impl<S: AsnSource> BerReader<S> {
         }
     }
 
-    /// `m_Input.GetChars(count)` into `out`: the bytes of the source are appended as they come
+    /// `GetChars` of `count` bytes into `out`: the bytes of the source are appended as they come
     /// (`AsnSource::read_into`: a long value is not held twice); the end of the data before them is
     /// a `CEofException`.
     fn read_bytes(&mut self, count: u64, out: &mut Vec<u8>) -> R<()> {
@@ -760,7 +765,7 @@ impl<S: AsnSource> Input for BerReader<S> {
         }
         let mut text = Vec::with_capacity(length as usize);
         self.read_bytes(length - 1, &mut text)?;
-        // `buffer[length] = 0`: the number ends at the first 0 byte.
+        // NCBI ends the text with a 0 byte after its length: the number ends at the first 0 byte.
         let end = text.iter().position(|&c| c == 0).unwrap_or(text.len());
         let read = string_to_double_posix(&text[..end], true);
         if read.end != end {
@@ -810,7 +815,7 @@ impl<S: AsnSource> Input for BerReader<S> {
         let start = out.len();
         if let Err(fail) = self.read_bytes(length, out) {
             // The end of the data inside the string: the reserve of its length came first.
-            reserve_string(length)?;
+            reserve(length, Reserve::String, self.names)?;
             return Err(fail);
         }
         if kind == StringKind::Visible {
@@ -827,11 +832,12 @@ impl<S: AsnSource> Input for BerReader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:1448-1490
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1612-1630
-    // (`CObjectIStream::ReadBytes` of a `vector<char>` reads the block 4096 bytes at a time: no
-    // reserve, the end of the data inside it is a `CEofException`.)
+    // NCBI reference (598d8ae6): c++/src/serial/stdtypes.cpp:1538-1548
+    // (`BeginBytes` gives the block its length, so the `vector<char>` reader reserves it before
+    // the bytes; the end of the data inside them is a `CEofException`.)
     /// An OCTET STRING (`BeginBytes`, the bytes, `EndBytes`); a BIT STRING is read as its bytes
-    /// after the byte of its unused bits.
+    /// after the byte of its unused bits. The reserve of the length is the error when the data
+    /// ends inside the bytes and NCBI's reserve throws (`asn_input::reserve`).
     fn read_octets(&mut self) -> R<Vec<u8>> {
         let length = match self.peek(0)? {
             TAG_OCTET_STRING => {
@@ -840,8 +846,8 @@ impl<S: AsnSource> Input for BerReader<S> {
             }
             TAG_BIT_STRING => {
                 self.tag_len = 1;
-                // `ReadLength() - 1` in `size_t`: a length of 0 wraps, and the bytes after the
-                // byte of the unused bits are read to the end of the data.
+                // The length less 1, in `size_t`: a length of 0 wraps to 2^64 - 1 bytes, which
+                // pass the end of the data and every reserve.
                 let length = self.read_length()?.wrapping_sub(1);
                 self.byte()?;
                 length
@@ -851,7 +857,10 @@ impl<S: AsnSource> Input for BerReader<S> {
             }
         };
         let mut out = Vec::new();
-        self.read_bytes(length, &mut out)?;
+        if let Err(fail) = self.read_bytes(length, &mut out) {
+            reserve(length, Reserve::Bytes, self.names)?;
+            return Err(fail);
+        }
         Ok(out)
     }
 

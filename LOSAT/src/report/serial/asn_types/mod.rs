@@ -141,8 +141,6 @@ pub(crate) enum Kind {
 #[derive(Debug)]
 pub(crate) struct Member {
     name: Name,
-    /// The tag (NCBI's automatic tags: the position from 0), which `[n]` names in ASN.1 text.
-    pub(crate) tag: u8,
     /// The type's index in `table::TYPES`.
     pub(crate) ty: u16,
     /// `OPTIONAL`, `DEFAULT`, `DELAYED`.

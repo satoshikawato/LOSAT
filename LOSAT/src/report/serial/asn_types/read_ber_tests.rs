@@ -4,11 +4,11 @@
 //! posts are NCBI BLAST+ 2.17.0's (makeblastdb probes of line RG D3c and D3c-3a; the files are
 //! `tests/fixtures/asn1`, whose README names their origin).
 
-use super::read::{read_ber_document, read_document, Names, ObjectStream, Post, ReadError};
+use super::read::{read_ber_document, read_document, ObjectStream, Post, ReadError};
 use super::table::named;
 use super::Value;
 use crate::ncbi_exception::NCBI_BUILD_ROOT;
-use crate::report::serial::asn_input::Input;
+use crate::report::serial::asn_input::{Input, Names};
 use crate::report::serial::asn_text_reader::{SliceSource, StreamSource};
 use crate::report::serial::encoder::StreamPosition;
 
@@ -41,8 +41,9 @@ fn text_and_binary_twins_read_the_same_values() {
         ("ptitles", named::BIOSEQ_SET),
         ("seqdata", named::BIOSEQ_SET),
     ] {
-        let (text, text_posts) = read_document(&fixture(&format!("{name}.asn")), root);
-        let (binary, binary_posts) = read_ber_document(&fixture(&format!("{name}.asnb")), root);
+        let (text, text_posts) = read_document(&fixture(&format!("{name}.asn")), root, Names::TEST);
+        let (binary, binary_posts) =
+            read_ber_document(&fixture(&format!("{name}.asnb")), root, Names::TEST);
         let text = text.unwrap_or_else(|e| panic!("{name}.asn: {e:?}"));
         let binary = binary.unwrap_or_else(|e| panic!("{name}.asnb: {e:?}"));
         assert_eq!(text, binary, "{name}");
@@ -75,19 +76,22 @@ fn the_objects_of_one_stream_are_read_one_after_another() {
     let text = fixture("multi.asn");
     let binary = fixture("multi.asnb");
     let from_text = objects(
-        ObjectStream::text(SliceSource::new(&text), Names::PSSM),
+        ObjectStream::text(SliceSource::new(&text), Names::TEST),
         &roots,
     );
-    let from_binary = objects(ObjectStream::binary(SliceSource::new(&binary)), &roots);
+    let from_binary = objects(
+        ObjectStream::binary(SliceSource::new(&binary), Names::TEST),
+        &roots,
+    );
     assert_eq!(from_text.len(), 3);
     assert_eq!(from_text, from_binary);
     let streamed = objects(
-        ObjectStream::binary(StreamSource::new(&binary[..], &[])),
+        ObjectStream::binary(StreamSource::new(&binary[..], &[]), Names::TEST),
         &roots,
     );
     assert_eq!(streamed, from_binary);
     let streamed = objects(
-        ObjectStream::text(StreamSource::new(&text[..], &[]), Names::PSSM),
+        ObjectStream::text(StreamSource::new(&text[..], &[]), Names::TEST),
         &roots,
     );
     assert_eq!(streamed, from_text);
@@ -100,9 +104,11 @@ fn the_objects_of_one_stream_are_read_one_after_another() {
 fn a_later_object_counts_its_own_bytes_and_lines() {
     let e1 = fixture("e1.asnb");
     let cut = &e1[..e1.len() - 3];
-    let alone = read_ber_document(cut, named::SEQ_ENTRY).0.unwrap_err();
+    let alone = read_ber_document(cut, named::SEQ_ENTRY, Names::TEST)
+        .0
+        .unwrap_err();
     let both = [&e1[..], cut].concat();
-    let mut stream = ObjectStream::binary(SliceSource::new(&both));
+    let mut stream = ObjectStream::binary(SliceSource::new(&both), Names::TEST);
     assert!(stream.read_object(named::SEQ_ENTRY).0.is_ok());
     assert_eq!(
         stream.input().position(),
@@ -113,11 +119,37 @@ fn a_later_object_counts_its_own_bytes_and_lines() {
     let first = fixture("e1.asn");
     let first = first.trim_ascii_end();
     let truncated = fixture("trunc.asn");
-    let alone = read_document(&truncated, named::SEQ_ENTRY).0.unwrap_err();
+    let alone = read_document(&truncated, named::SEQ_ENTRY, Names::TEST)
+        .0
+        .unwrap_err();
     let text = [first, &truncated].concat();
-    let mut stream = ObjectStream::text(SliceSource::new(&text), Names::PSSM);
+    let mut stream = ObjectStream::text(SliceSource::new(&text), Names::TEST);
     assert!(stream.read_object(named::SEQ_ENTRY).0.is_ok());
     assert_eq!(stream.read_object(named::SEQ_ENTRY).0.unwrap_err(), alone);
+}
+
+/// A string longer than a block of the stream comes from the input straight into the value
+/// (`StreamSource::read_into`): an Object-id `str` of 102,400 bytes (`a1 80 1a 83 01 90 00`, the
+/// bytes, then the end of the CHOICE) read through a reader that gives one byte per call is the
+/// value read from memory.
+#[test]
+fn a_long_string_comes_from_the_stream_as_from_memory() {
+    use crate::report::serial::asn_text_reader::tests::OneByte;
+    let mut bytes = vec![0xa1, 0x80, 0x1a, 0x83, 0x01, 0x90, 0x00];
+    bytes.extend((0..0x19000u32).map(|i| b'a' + (i % 26) as u8));
+    bytes.extend([0, 0]);
+    let from_memory =
+        ObjectStream::binary(SliceSource::new(&bytes), Names::TEST).read_object(named::OBJECT_ID);
+    let from_stream = ObjectStream::binary(StreamSource::new(OneByte(&bytes), &[]), Names::TEST)
+        .read_object(named::OBJECT_ID);
+    assert!(from_memory.1.is_empty(), "{:?}", from_memory.1);
+    match &from_memory.0 {
+        Ok(Value::Choice(1, value)) => {
+            assert!(matches!(&**value, Value::Str(text) if text[..] == bytes[7..bytes.len() - 2]))
+        }
+        other => panic!("{:?}", other.as_ref().err()),
+    }
+    assert_eq!(from_stream, from_memory);
 }
 
 /// NCBI's report of an exception (`what()`, NCBI's text before LOSAT's words) of the official
@@ -152,7 +184,7 @@ fn errors_are_ncbis() {
             text,
         )
     };
-    let read = read_ber_document(&fixture("bioseq.asnb"), named::BIOSEQ_SET);
+    let read = read_ber_document(&fixture("bioseq.asnb"), named::BIOSEQ_SET, Names::TEST);
     assert_eq!(
         serial_report(read.0.unwrap_err()),
         unexpected(
@@ -160,7 +192,7 @@ fn errors_are_ncbis() {
              contextspecific/constructed/0 (160) ( at Bioseq-set.id)"
         )
     );
-    let read = read_ber_document(&fixture("e1.asn"), named::SEQ_ENTRY);
+    let read = read_ber_document(&fixture("e1.asn"), named::SEQ_ENTRY, Names::TEST);
     assert_eq!(
         serial_report(read.0.unwrap_err()),
         unexpected(
@@ -168,7 +200,7 @@ fn errors_are_ncbis() {
              contextspecific/constructed/0 (160) ( at Seq-entry)"
         )
     );
-    let read = read_ber_document(&fixture("f.fa"), named::SEQ_ENTRY);
+    let read = read_ber_document(&fixture("f.fa"), named::SEQ_ENTRY, Names::TEST);
     assert_eq!(
         serial_report(read.0.unwrap_err()),
         unexpected(
@@ -176,7 +208,7 @@ fn errors_are_ncbis() {
              contextspecific/constructed/0 (160) ( at Seq-entry)"
         )
     );
-    let read = read_document(&fixture("e1.asnb"), named::SEQ_ENTRY);
+    let read = read_document(&fixture("e1.asnb"), named::SEQ_ENTRY, Names::TEST);
     assert_eq!(
         serial_report(read.0.unwrap_err()),
         ncbi_report(
@@ -187,7 +219,7 @@ fn errors_are_ncbis() {
             "line 1: '::=' expected ( at Seq-entry)"
         )
     );
-    let read = read_document(&fixture("bioseq.asn"), named::BIOSEQ_SET);
+    let read = read_document(&fixture("bioseq.asn"), named::BIOSEQ_SET, Names::TEST);
     assert_eq!(
         serial_report(read.0.unwrap_err()),
         ncbi_report(
@@ -200,7 +232,7 @@ fn errors_are_ncbis() {
     );
     // The end of the text quotes the `CEofException` of the stream buffer; LOSAT's report of it is
     // NCBI's in LOSAT's words.
-    let read = read_document(&fixture("trunc.asn"), named::SEQ_ENTRY);
+    let read = read_document(&fixture("trunc.asn"), named::SEQ_ENTRY, Names::TEST);
     let ReadError::Serial(e) = read.0.unwrap_err() else {
         panic!("a CSerialException")
     };
@@ -360,12 +392,15 @@ const BER_PROBES: &[(&str, Probe, &str)] = &[
 // string).
 #[test]
 fn the_binary_probes_are_read_as_ncbi_reads_them() {
-    let base = read_ber_document(&fixture("ber/base.asnb"), named::SEQ_ENTRY)
+    let base = read_ber_document(&fixture("ber/base.asnb"), named::SEQ_ENTRY, Names::TEST)
         .0
         .unwrap();
     for (case, probe, posted) in BER_PROBES {
-        let (value, posts) =
-            read_ber_document(&fixture(&format!("ber/{case}.asnb")), named::SEQ_ENTRY);
+        let (value, posts) = read_ber_document(
+            &fixture(&format!("ber/{case}.asnb")),
+            named::SEQ_ENTRY,
+            Names::TEST,
+        );
         let lines: Vec<u8> = posts
             .iter()
             .flat_map(|post| post.line("makeblastdb"))

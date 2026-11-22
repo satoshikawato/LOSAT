@@ -7,7 +7,7 @@ use super::read::{Frame, Post};
 use super::table::named;
 use super::{member_index, Value};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::serial::asn_input::{Fail, R};
+use crate::report::serial::asn_input::{Fail, R, VECTOR_RESERVE_LENGTH_ERROR};
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId,
@@ -53,7 +53,7 @@ pub(super) fn pre_read_member(ty: u16, member: usize, read: &[(u16, Value)]) -> 
         _ => return Ok(()),
     };
     if size > max_size {
-        return Err(Fail::Std("vector::reserve"));
+        return Err(Fail::Std(VECTOR_RESERVE_LENGTH_ERROR));
     }
     Ok(())
 }
@@ -102,7 +102,7 @@ pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> R<(
         }
         if depth >= 2 && frame.ty() == Some(named::SEQ_TABLE) {
             if frame.num_rows().is_some_and(|rows| rows < 0) {
-                return Err(Fail::Std("vector::reserve"));
+                return Err(Fail::Std(VECTOR_RESERVE_LENGTH_ERROR));
             }
             return Ok(());
         }

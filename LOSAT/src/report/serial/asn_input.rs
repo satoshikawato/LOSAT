@@ -17,9 +17,8 @@
 //! caller in order (`StringPost`), which adds the stack trace that NCBI's message names.
 
 use super::asn_text_reader::{
-    AsnSource, AsnTextError, AsnTextErrorKind, MemberId, NcbiThrow, PointerType, Reader,
-    BAD_NUMBER, FILL_BUFFER_EOF, FIND_NAME, FIND_VALUE, NUMBER_OVERFLOW, SKIP_WHITE_SPACE_EOF,
-    UNEXPECTED_MEMBER,
+    AsnSource, AsnTextError, AsnTextErrorKind, EnumWord, MemberId, NcbiThrow, PointerType, Reader,
+    FILL_BUFFER_EOF, FIND_NAME, FIND_VALUE, SKIP_WHITE_SPACE_EOF, UNEXPECTED_MEMBER,
 };
 use super::encoder::StreamPosition;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
@@ -110,39 +109,115 @@ pub(crate) fn invalid_enum(site: ThrowSite, value: String) -> Fail {
 /// `max_size()` (`rpsbproc::prosite::CxxString`).
 pub(crate) const STRING_CREATE_LENGTH_ERROR: &str = "basic_string::_M_create";
 
-/// The bytes of the input that one string of `length` bytes asks NCBI for (`GetChars`:
-/// `str.reserve(count)` before the bytes are read, when they are not all in the input buffer):
-/// a length over `max_size()` (2^63 - 1, `rpsbproc::prosite::CxxString`) is `std::length_error`;
-/// an allocation of [`USER_SPACE_BYTES`] or more `std::bad_alloc` on every host; one of
-/// [`HOST_DEPENDENT_BYTES`] or more succeeds or fails by the host's memory, which LOSAT refuses
-/// (DECISIONS 40 of line PS: memory that NCBI builds from a length field of the input, as
-/// `losat rpsbproc` does). Below that the allocation succeeds and the read goes on to the end of
-/// the input. The readers ask it when the input ends inside the string: a string whose bytes are
-/// there costs what they cost, whatever NCBI reserved first.
+/// `what()` of the `std::length_error` that libstdc++'s `vector::reserve` throws for a capacity
+/// over `max_size()` (2^63 - 1 bytes for a `vector<char>`): a byte block's reserve, a reserve hook
+/// (`asn_types::hooks`), `losat rpsbproc`'s tables.
+pub(crate) const VECTOR_RESERVE_LENGTH_ERROR: &str = "vector::reserve";
+
+/// What LOSAT's own messages call the document that a reader reads, the reader, the input that a
+/// length can pass the end of, and the part of NCBI's program that allocates what a length asks
+/// for (the lexical layer's refusals, `asn_text_reader::Reader::new`, and [`reserve`]'s): the one
+/// owner of those words for each caller.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Names {
+    pub(crate) document: &'static str,
+    pub(crate) reader: &'static str,
+    pub(crate) input: &'static str,
+    pub(crate) allocator: &'static str,
+}
+
+impl Names {
+    /// The PSSM file of `-in_pssm`.
+    pub(crate) const PSSM: Names = Names {
+        document: "PSSM",
+        reader: "PSSM reader",
+        input: "input",
+        allocator: "NCBI's reader",
+    };
+    /// A mask data file of makeblastdb's `-mask_data`.
+    pub(crate) const MASK: Names = Names {
+        document: "mask data",
+        reader: "mask data reader",
+        input: "file",
+        allocator: "makeblastdb",
+    };
+    /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
+    /// that kept them took them whole, so no length passes their end.
+    pub(crate) const DELAYED: Names = Names {
+        document: "delayed member",
+        reader: "delayed member reader",
+        input: "member's bytes",
+        allocator: "NCBI's reader",
+    };
+    /// The documents of the tests of the readers.
+    #[cfg(test)]
+    pub(crate) const TEST: Names = Names {
+        document: "test document",
+        reader: "test reader",
+        input: "input",
+        allocator: "NCBI's reader",
+    };
+}
+
+/// What NCBI reserves for a length before it reads the bytes ([`reserve`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Reserve {
+    /// A string: `GetChars` reserves the count in the string when the bytes are not all in the
+    /// input buffer (a capacity of the length and its terminating 0).
+    String,
+    /// A byte block of known length (a binary OCTET STRING or BIT STRING) read into a
+    /// `vector<char>`: `reserve(length)` before its bytes.
+    Bytes,
+}
+
+/// The reserve that NCBI makes for `length` bytes of `what` before it reads them, the one owner
+/// of its outcome for strings and byte blocks: a capacity over `max_size()` (2^63 - 1) is
+/// `std::length_error`; an allocation of [`USER_SPACE_BYTES`] or more `std::bad_alloc` on every
+/// host; one of [`HOST_DEPENDENT_BYTES`] or more succeeds or fails by the host's memory, which
+/// LOSAT refuses in the words of `names` (DECISIONS 40 of line PS: memory that NCBI builds from a
+/// length field of the input, as `losat rpsbproc` does). Below that the allocation succeeds and
+/// the read goes on to the end of the input. The readers ask it when the input ends inside the
+/// bytes: bytes that are there cost what they cost, whatever NCBI reserved first.
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:496-523
-// (checked with makeblastdb 2.17.0 on lengths 2^62 - 1, 2^62, 2^63 - 2 and 2^63 - 1: "BLAST ran
-// out of memory", status 4; 2^63: "Error: basic_string::_M_create", status 255.)
-pub(crate) fn reserve_string(length: u64) -> R<()> {
+// NCBI reference (598d8ae6): c++/src/serial/stdtypes.cpp:1538-1548
+// (checked with makeblastdb 2.17.0 on string lengths 2^62 - 1, 2^62, 2^63 - 2 and 2^63 - 1: "BLAST
+// ran out of memory", status 4; 2^63: "Error: basic_string::_M_create", status 255; with psiblast
+// 2.17.0 on byte blocks of 2^62 and 2^63 - 1 bytes: status 4; of 2^63 and 2^64 - 1 bytes: "Error:
+// vector::reserve", status 255.)
+pub(crate) fn reserve(length: u64, what: Reserve, names: Names) -> R<()> {
     if length > (1 << 63) - 1 {
-        return Err(Fail::Std(STRING_CREATE_LENGTH_ERROR));
+        return Err(Fail::Std(match what {
+            Reserve::String => STRING_CREATE_LENGTH_ERROR,
+            Reserve::Bytes => VECTOR_RESERVE_LENGTH_ERROR,
+        }));
     }
-    let bytes = length + 1;
+    let bytes = match what {
+        Reserve::String => length + 1,
+        Reserve::Bytes => length,
+    };
     if bytes >= USER_SPACE_BYTES {
         return Err(Fail::OutOfMemory);
     }
     if bytes >= HOST_DEPENDENT_BYTES {
-        return Err(host_dependent_string(length));
+        return Err(host_dependent(length, bytes, what, names));
     }
     Ok(())
 }
 
-/// The refusal of a string of `length` bytes that `reserve_string` leaves to the host.
+/// The refusal of `length` bytes of `what` (an allocation of `bytes`) that [`reserve`] leaves to
+/// the host.
 #[cold]
 #[inline(never)]
-fn host_dependent_string(length: u64) -> Fail {
-    let bytes = length + 1;
+fn host_dependent(length: u64, bytes: u64, what: Reserve, names: Names) -> Fail {
+    let what = match what {
+        Reserve::String => "a string",
+        Reserve::Bytes => "an OCTET STRING or BIT STRING",
+    };
+    let Names {
+        input, allocator, ..
+    } = names;
     Fail::unsupported(format!(
-        "a string whose length ({length} bytes) passes the end of the input: NCBI's reader \
+        "{what} whose length ({length} bytes) passes the end of the {input}: {allocator} \
          allocates {bytes} bytes for it, which succeeds or fails by the host's memory"
     ))
 }
@@ -163,14 +238,35 @@ pub(crate) enum StringPost {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:296-310
-/// The message of `ERR_POST_X_ONCE(10, Warning << ...)` of a UTF8String tag for the VisibleString
-/// member at the stack trace `trace` (error 803.10, once per process): the one owner of its text,
-/// for the mask reader's and the table reader's posts.
+/// The message of the warning 803.10 of a UTF8String tag for the VisibleString member at the
+/// stack trace `trace` (once per run, [`Utf8TagOnce`]): the one owner of its text, for the mask
+/// reader's and the table reader's posts.
 pub(crate) fn utf8_tag_message(trace: &str) -> String {
     format!(
         "CObjectIStreamAsnBinary: UTF8String data for VisibleString member {trace}, ASN.1 \
          specification may need an update"
     )
+}
+
+/// `ERR_POST_X_ONCE` of the UTF8String tag warning ([`utf8_tag_message`]): NCBI posts it at the
+/// first such tag its process reads and never again, whichever file or object holds the tag. The
+/// one owner of that rule, for the table reader (`asn_types::read`) and makeblastdb's mask files.
+/// One LOSAT run is one NCBI process, so the flag lives as long as the run's reader, not in a
+/// static: a library that runs LOSAT twice, and the tests, run in one process.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Utf8TagOnce {
+    posted: bool,
+}
+
+impl Utf8TagOnce {
+    /// The flag of a run that has posted the warning. `CDelayBuffer::Update` re-reads bytes that
+    /// the read before it passed, so the tags it meets were posted for (or after an earlier one).
+    pub(crate) const POSTED: Self = Utf8TagOnce { posted: true };
+
+    /// Whether this tag is the run's first, whose warning is posted; the next ones are not.
+    pub(crate) fn first(&mut self) -> bool {
+        !std::mem::replace(&mut self.posted, true)
+    }
 }
 
 /// The kind of a string, which decides its tag in binary and what is done with its bytes.
@@ -352,8 +448,6 @@ const SKIP_U_NUMBER: ThrowSite =
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1076-1091
 const SKIP_F_NUMBER: ThrowSite =
     asn_site(1090, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::SkipFNumber");
-// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857 (cited at `Reader::real`)
-const READ_DOUBLE: ThrowSite = asn_site(836, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadDouble");
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1170-1197
 const SKIP_BYTE_BLOCK: ThrowSite =
     asn_site(1192, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::SkipByteBlock");
@@ -361,11 +455,10 @@ const SKIP_BYTE_BLOCK: ThrowSite =
 const EXPECT_CHOICE: ThrowSite = asn_site(203, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::Expect");
 
 impl<S: AsnSource> TextInput<S> {
-    /// The text input over `src`; `document` and `reader` name the text and the reader in
-    /// LOSAT's own messages (`Reader::new`).
-    pub(crate) fn new(src: S, document: &'static str, reader: &'static str) -> Self {
+    /// The text input over `src`, which LOSAT's own messages call by `names` (`Reader::new`).
+    pub(crate) fn new(src: S, names: Names) -> Self {
         TextInput {
-            r: Reader::new(src, document, reader),
+            r: Reader::new(src, names.document, names.reader),
             block_start: false,
             depth: 0,
         }
@@ -456,76 +549,6 @@ impl<S: AsnSource> TextInput<S> {
             message.extend_from_slice(format!("\"{}\" ", items.name(i)).as_bytes());
         }
         self.throw(UNEXPECTED_MEMBER, message)
-    }
-
-    /// `CIStreamBuffer::BadNumber` / `NumberOverflow`: a `CUtilException`, ` in line N`.
-    #[cold]
-    #[inline(never)]
-    fn util_error(&self, site: ThrowSite, what: &str) -> Fail {
-        Fail::exception(NcbiException::new(
-            site,
-            format!("{what} in line {}", self.r.line),
-        ))
-    }
-
-    /// `GetInt4`, `GetUint4` (`signed` false: no `-`) and `GetInt8` after `SkipWhiteSpace`, the
-    /// digits checked against `max` as NCBI checks them.
-    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
-    // (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
-    fn get_number(&mut self, max: u64, signed: bool) -> R<i64> {
-        // The position is kept in a local and written once (`Reader::white_space_at`).
-        let (pos, c) = match self.r.white_space_at(self.r.pos) {
-            Ok(found) => found,
-            Err(e) => return Err(self.fail(e)),
-        };
-        // `SkipWs` then `GetChar`: the first byte that is not C's `isspace`, taken.
-        let (pos, mut c) = match self.r.ws_at(pos, c) {
-            Ok(found) => found,
-            Err(e) => return Err(self.fail(e)),
-        };
-        let mut pos = pos + 1;
-        let mut negative = false;
-        if (signed && c == b'-') || c == b'+' {
-            negative = c == b'-';
-            c = match self.r.char_at(pos) {
-                Ok(c) => c,
-                Err(e) => return Err(self.fail(e)),
-            };
-            pos += 1;
-        }
-        let r = &mut self.r;
-        if !c.is_ascii_digit() {
-            r.pos = pos;
-            return Err(self.util_error(BAD_NUMBER, "bad number"));
-        }
-        let mut n = u64::from(c - b'0');
-        let before_mul = max / 10;
-        let limit_add = max % 10 + u64::from(negative);
-        let mut overflow = false;
-        let (end, _) = r.src.scan(pos, |d| {
-            if !d.is_ascii_digit() {
-                return false;
-            }
-            let d = u64::from(d - b'0');
-            if n > before_mul || (n == before_mul && d > limit_add) {
-                overflow = true;
-                return false;
-            }
-            n = n * 10 + d;
-            true
-        });
-        if overflow {
-            // `GetInt4` takes the digit before it checks the overflow.
-            r.pos = end + 1;
-            return Err(self.util_error(NUMBER_OVERFLOW, "number overflow"));
-        }
-        r.pos = end;
-        // `-Int4(n)` of n = 2^31 is the least Int4 (and likewise in 64 bits).
-        Ok(if negative {
-            (n as i64).wrapping_neg()
-        } else {
-            n as i64
-        })
     }
 
     /// The end of the text inside a number that starts at `start`: `PeekChar`'s, at `start`.
@@ -651,17 +674,17 @@ impl<S: AsnSource> Input for TextInput<S> {
 
     #[inline]
     fn read_i32(&mut self) -> R<i32> {
-        Ok(self.get_number(i32::MAX as u64, true)? as i32)
+        self.r.int4().map_err(|e| self.fail(e))
     }
 
     #[inline]
     fn read_i64(&mut self) -> R<i64> {
-        self.get_number(i64::MAX as u64, true)
+        self.r.int8().map_err(|e| self.fail(e))
     }
 
     #[inline]
     fn read_u32(&mut self) -> R<u32> {
-        Ok(self.get_number(u64::from(u32::MAX), false)? as u32)
+        self.r.uint4().map_err(|e| self.fail(e))
     }
 
     /// `SkipSNumber` (`signed`) and `SkipUNumber`: an optional sign (`+` only for the unsigned)
@@ -710,23 +733,10 @@ impl<S: AsnSource> Input for TextInput<S> {
         value.map_err(|e| self.fail(e))
     }
 
-    /// `ReadDouble`: a word, or `{ mantissa, base, exponent }` whose base is read with
-    /// `ReadUint4` (a `CUtilException` for a `-`) and exponent with `ReadInt4`.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857 (cited at `Reader::real`)
+    /// `ReadDouble` (`Reader::real`).
     fn read_real(&mut self) -> R<f64> {
-        let word = self.r.real_word();
-        if let Some(word) = word.map_err(|e| self.fail(e))? {
-            return Ok(word);
-        }
-        let mantissa = self.r.real_mantissa();
-        let (mantissa, is_negative) = mantissa.map_err(|e| self.fail(e))?;
-        self.expect(b',')?;
-        let base = self.read_u32()?;
-        self.expect(b',')?;
-        let exp = self.read_i32()?;
-        self.expect(b'}')?;
-        super::asn_text_reader::real_of_parts(mantissa, is_negative, base, exp)
-            .ok_or_else(|| self.throw(READ_DOUBLE, "illegal REAL base (must be 2 or 10)"))
+        let value = self.r.real();
+        value.map_err(|e| self.fail(e))
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1076-1091
@@ -805,20 +815,20 @@ impl<S: AsnSource> Input for TextInput<S> {
     /// `ReadEnum(values)`: a lower-case name of the list, or a number (one of the list for an
     /// ENUMERATED).
     fn read_enum(&mut self, values: &(impl EnumItems + ?Sized)) -> R<i32> {
-        let c = self.skip_white_space()?;
-        let id = self.r.scan_end_of_id(c.is_ascii_lowercase());
-        let id = id.map_err(|e| self.fail(e))?;
-        if !id.is_empty() {
-            let name = self.r.bytes(id);
-            return match values.value_of(name) {
-                Some(value) => Ok(value),
-                None => Err(invalid_enum(
-                    FIND_VALUE,
-                    String::from_utf8_lossy(name).into_owned(),
-                )),
-            };
-        }
-        let value = self.read_i32()?;
+        let word = self.r.enum_word();
+        let value = match word.map_err(|e| self.fail(e))? {
+            EnumWord::Name(id) => {
+                let name = self.r.bytes(id);
+                return match values.value_of(name) {
+                    Some(value) => Ok(value),
+                    None => Err(invalid_enum(
+                        FIND_VALUE,
+                        String::from_utf8_lossy(name).into_owned(),
+                    )),
+                };
+            }
+            EnumWord::Number(value) => value,
+        };
         if !values.integer() && !values.has_value(value) {
             return Err(invalid_enum(FIND_NAME, value.to_string()));
         }

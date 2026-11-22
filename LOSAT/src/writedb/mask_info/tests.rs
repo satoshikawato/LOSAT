@@ -1271,6 +1271,38 @@ fn a_text_file_is_read_in_blocks() {
     assert!(r.next_info().unwrap().is_none());
 }
 
+/// A binary file is read in blocks too (`StreamSource` under `BerReader`): the elements of
+/// `b_small_int.asnb`'s mask list, 100,000 of them, each with its own interval.
+#[test]
+fn a_binary_file_is_read_in_blocks() {
+    let count = 100_000u32;
+    let small = std::fs::read(parse_dir().join("b_small_int.asnb")).unwrap();
+    // The mask list's one element (a Seq-loc `int`: from 5, to 14, id local id 3) starts at
+    // byte 31 and takes 37 bytes; `from` and `to` are its bytes 8 and 15.
+    let (head, element, tail) = (&small[..31], &small[31..68], &small[68..]);
+    assert_eq!((element[8], element[15]), (5, 14));
+    let mut data = head.to_vec();
+    for i in 0..count {
+        let mut copy = element.to_vec();
+        copy[8] = (i % 100) as u8;
+        copy[15] = (i % 100 + 1) as u8;
+        data.extend_from_slice(&copy);
+    }
+    data.extend_from_slice(tail);
+    let size = data.len();
+    let mut r = MaskFileReader::from_bytes(Path::new("big.asnb"), data).unwrap();
+    assert_eq!(r.format(), MaskFileFormat::BinaryAsn);
+    let info = r.next_info().unwrap().unwrap();
+    assert_eq!(info.masks.masks.len(), count as usize);
+    assert_eq!(info.masks.masks[7].intervals(), vec![interval(7, 8)]);
+    assert!(
+        r.buffered() < size / 4,
+        "{} of {size} bytes kept",
+        r.buffered()
+    );
+    assert!(r.next_info().unwrap().is_none());
+}
+
 // ---------------------------------------------------------------------------------------------
 // NCBI's pointer syntax: what LOSAT refuses (the files that makeblastdb reads or fails on are the
 // h_pointer_* and b_pointer_* fixtures)

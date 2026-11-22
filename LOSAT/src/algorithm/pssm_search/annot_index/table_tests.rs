@@ -5,12 +5,14 @@
 use super::super::view::V;
 use super::super::{Indexer, Stop};
 use super::{Caches, Column, Want};
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::{read_document, table::named, Value};
 
 fn column_value(text: &str) -> Value {
     let (value, posts) = read_document(
         format!("SeqTable-column ::= {{ header {{ field-id 3 }}, {text} }}").as_bytes(),
         named::SEQTABLE_COLUMN,
+        Names::PSSM,
     );
     assert!(posts.is_empty());
     value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
@@ -441,7 +443,8 @@ fn nested_multi_data_are_read_without_recursion() {
         .stack_size(256 << 10)
         .spawn(|| {
             let read = |text: String| {
-                let (value, posts) = read_document(text.as_bytes(), named::SEQTABLE_COLUMN);
+                let (value, posts) =
+                    read_document(text.as_bytes(), named::SEQTABLE_COLUMN, Names::PSSM);
                 assert!(posts.is_empty());
                 value.expect("read")
             };

@@ -13,7 +13,7 @@
 //! - INTEGER by the C++ storage of its member (`ReadInt4`, `ReadUint4`, `ReadInt8`, `ReadInt2`);
 //!   ENUMERATED by name (text) or by a number that has a name, INTEGER with named values by name or
 //!   any number;
-//! - a VisibleString byte outside 0x20..0x7E as `#`, with NCBI's `ERR_POST_X(7)`
+//! - a VisibleString byte outside 0x20..0x7E as `#`, with NCBI's post 803.7
 //!   (`Post::BadChar`), a UTF8String as it is; a StringStore as a VisibleString in text and as it
 //!   is in binary; a UTF8String tag for a VisibleString in binary with NCBI's warning
 //!   (`Post::Utf8Tag`, once per process);
@@ -35,8 +35,8 @@ use super::{resolved, EnumValue, Kind, Member, Storage, Value};
 use crate::ncbi_exception::{NcbiException, Severity};
 use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{
-    throw_error, utf8_tag_message, EnumItems, Fail, Input, Items, StringKind, StringPost,
-    TextInput, R,
+    throw_error, utf8_tag_message, EnumItems, Fail, Input, Items, Names, StringKind, StringPost,
+    TextInput, Utf8TagOnce, R,
 };
 use crate::report::serial::asn_text_reader::{AsnSource, SliceSource};
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep};
@@ -45,16 +45,23 @@ use crate::report::serial::object_frame::{
     SKIP_FILE_HEADER,
 };
 
+/// The text of the byte block's post ([`Post::UnendedByteBlock`]).
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1554-1565
+const UNENDED_BYTE_BLOCK: &str = "unended byte block";
+
 /// A message that NCBI's reader posts while it reads, in the order posted.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Post {
-    /// `ReplaceVisibleChar`'s `ERR_POST_X(7, message)` of a byte read as `#`.
+    /// `ReplaceVisibleChar`'s post (803.7) of a byte read as `#`.
     BadChar(ReplacedChar),
-    /// `ERR_POST(Error << text)` of a class's `PostRead` (`CVariation_ref::PostRead`).
+    /// The error that a class's `PostRead` posts with its text (`CVariation_ref::PostRead`).
     Error(&'static str),
-    /// `ERR_POST_X_ONCE(10, Warning << ...)` of a UTF8String tag for the VisibleString member at
-    /// the stack trace (binary; `asn_input::utf8_tag_message`).
+    /// The warning (803.10, once per run: `asn_input::Utf8TagOnce`) of a UTF8String tag for the
+    /// VisibleString member at the stack trace (binary; `asn_input::utf8_tag_message`).
     Utf8Tag(String),
+    /// The error post 803.4 of a byte block that a `std::exception` left with the stream in a
+    /// good state (`TypedReader::octets`).
+    UnendedByteBlock,
 }
 
 impl Post {
@@ -73,6 +80,12 @@ impl Post {
                 Some(program),
                 utf8_tag_message(trace).as_bytes(),
             ),
+            Post::UnendedByteBlock => crate::ncbi_exception::post_line(
+                Severity::Error,
+                Some("803.4"),
+                Some(program),
+                UNENDED_BYTE_BLOCK.as_bytes(),
+            ),
         }
     }
 
@@ -80,7 +93,7 @@ impl Post {
     pub(crate) fn severity(&self) -> Severity {
         match self {
             Post::Utf8Tag(_) => Severity::Warning,
-            Post::BadChar(_) | Post::Error(_) => Severity::Error,
+            Post::BadChar(_) | Post::Error(_) | Post::UnendedByteBlock => Severity::Error,
         }
     }
 }
@@ -97,10 +110,10 @@ pub(crate) enum ReadError {
     /// A `CEofException` that leaves the reader: the input ends directly in the root object.
     Eof,
     /// A `std::exception` that leaves the reader (its `what()`): `std::length_error` of a reserve
-    /// hook (`hooks::pre_read_member`) or of a string's reserve.
+    /// hook (`hooks::pre_read_member`) or of the reserve of a string or byte block.
     Std(&'static str),
-    /// `std::bad_alloc` of a string whose length passes every allocation
-    /// (`asn_input::reserve_string`).
+    /// `std::bad_alloc` of a string or byte block whose length passes every allocation
+    /// (`asn_input::reserve`).
     OutOfMemory,
     /// What LOSAT's readers do not take (LOSAT's own limit, not an NCBI error): the caller refuses
     /// the input with this text.
@@ -122,22 +135,6 @@ impl From<Fail> for ReadError {
 
 /// What the reader read, and the messages it posted before it stopped or finished.
 pub(crate) type Read<T> = (std::result::Result<T, ReadError>, Vec<Post>);
-
-/// What a text reader calls its document and itself in LOSAT's own messages (the lexical layer's
-/// refusals, `asn_text_reader::Reader::new`).
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Names {
-    pub(crate) document: &'static str,
-    pub(crate) reader: &'static str,
-}
-
-impl Names {
-    /// The PSSM file of `-in_pssm`.
-    pub(crate) const PSSM: Names = Names {
-        document: "PSSM",
-        reader: "PSSM reader",
-    };
-}
 
 impl Items for [Member] {
     fn count(&self) -> usize {
@@ -219,14 +216,14 @@ impl Frame {
 /// Reads the ASN.1 text document at the start of `text` as the root type `root` (an object of
 /// `CObjectIStream::Read`: its file header, then the value; what follows it is not read), with
 /// the messages posted.
-pub(crate) fn read_document(text: &[u8], root: u16) -> Read<Value> {
-    ObjectStream::text(SliceSource::new(text), Names::PSSM).read_object(root)
+pub(crate) fn read_document(text: &[u8], root: u16, names: Names) -> Read<Value> {
+    ObjectStream::text(SliceSource::new(text), names).read_object(root)
 }
 
 /// [`read_document`] of the ASN.1 binary object at the start of `bytes` (`in >> MSerial_AsnBinary
 /// >> object`: no file header).
-pub(crate) fn read_ber_document(bytes: &[u8], root: u16) -> Read<Value> {
-    ObjectStream::binary(SliceSource::new(bytes)).read_object(root)
+pub(crate) fn read_ber_document(bytes: &[u8], root: u16, names: Names) -> Read<Value> {
+    ObjectStream::binary(SliceSource::new(bytes), names).read_object(root)
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
@@ -234,7 +231,9 @@ pub(crate) fn read_ber_document(bytes: &[u8], root: u16) -> Read<Value> {
 /// (`CDelayBuffer::Update`: a new binary stream over the bytes kept, `Value::Delayed`), which a
 /// writer reads before it writes it (`write`).
 pub(super) fn read_ber_value(bytes: &[u8], ty: u16) -> Read<Value> {
-    let mut reader = TypedReader::new(BerReader::new(SliceSource::new(bytes)));
+    let mut reader = TypedReader::new(BerReader::new(SliceSource::new(bytes), Names::DELAYED));
+    // The read that kept the bytes met their UTF8String tags (and posted for the first).
+    reader.utf8_once = Utf8TagOnce::POSTED;
     let value = reader.value(ty, false).map_err(ReadError::from);
     (value, reader.posts)
 }
@@ -252,16 +251,16 @@ impl<S: AsnSource> ObjectStream<TextInput<S>> {
     /// Objects in ASN.1 text from `src`, which LOSAT's messages call by `names`.
     pub(crate) fn text(src: S, names: Names) -> Self {
         ObjectStream {
-            reader: TypedReader::new(TextInput::new(src, names.document, names.reader)),
+            reader: TypedReader::new(TextInput::new(src, names)),
         }
     }
 }
 
 impl<S: AsnSource> ObjectStream<BerReader<S>> {
-    /// Objects in ASN.1 binary from `src`.
-    pub(crate) fn binary(src: S) -> Self {
+    /// Objects in ASN.1 binary from `src`, which LOSAT's messages call by `names`.
+    pub(crate) fn binary(src: S, names: Names) -> Self {
         ObjectStream {
-            reader: TypedReader::new(BerReader::new(src)),
+            reader: TypedReader::new(BerReader::new(src, names)),
         }
     }
 }
@@ -299,9 +298,9 @@ struct TypedReader<I: Input> {
     /// The values being read, outermost first (`Open`): NCBI's recursion of `ReadObject` as a list
     /// on the heap, so that a value nested to any depth is read in LOSAT's own stack.
     open: Vec<Open>,
-    /// Whether the warning of a UTF8String tag was posted (`ERR_POST_X_ONCE`: once per process,
-    /// and one stream is all a process of LOSAT reads with it).
-    utf8_posted: bool,
+    /// Whether the warning of a UTF8String tag was posted (`Utf8TagOnce`; one stream is all a
+    /// run of LOSAT reads with it).
+    utf8_once: Utf8TagOnce,
 }
 
 /// A value being read that waits for a value inside it (`TypedReader::value`).
@@ -342,7 +341,7 @@ impl<I: Input> TypedReader<I> {
             frames: Vec::new(),
             posts: Vec::new(),
             open: Vec::new(),
-            utf8_posted: false,
+            utf8_once: Utf8TagOnce::default(),
         }
     }
 
@@ -857,21 +856,31 @@ impl<I: Input> TypedReader<I> {
                 position,
                 string: string.into(),
             })),
-            StringPost::Utf8Tag if !self.utf8_posted => {
-                self.utf8_posted = true;
-                self.posts.push(Post::Utf8Tag(self.stack_trace()));
+            StringPost::Utf8Tag => {
+                if self.utf8_once.first() {
+                    self.posts.push(Post::Utf8Tag(self.stack_trace()));
+                }
             }
-            StringPost::Utf8Tag => {}
         }
     }
 
-    /// `ReadBytes` / `SkipByteBlock` of an OCTET STRING.
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:610-614
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1554-1565
+    // (A `std::exception` changes no state of the stream; the end of the data inside the bytes
+    // and the stream's own errors leave it failed, and the block then posts nothing.)
+    /// `ReadBytes` / `SkipByteBlock` of an OCTET STRING. A `std::exception` that leaves the byte
+    /// block (its reserve, `asn_input::reserve`) passes its destructor with the stream in a good
+    /// state, which posts that the block was not ended before the exception goes on.
     fn octets(&mut self, skip: bool) -> R<Value> {
         if skip {
             self.inp.skip_octets()?;
             return Ok(Value::Null);
         }
-        Ok(Value::Octets(self.inp.read_octets()?))
+        let value = self.inp.read_octets();
+        if matches!(value, Err(Fail::OutOfMemory | Fail::Std(_))) {
+            self.posts.push(Post::UnendedByteBlock);
+        }
+        Ok(Value::Octets(value?))
     }
 }
 

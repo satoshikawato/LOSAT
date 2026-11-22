@@ -193,16 +193,17 @@ pub(crate) fn read_in_pssm(
     // `CSerialException` is the handler's "Unrecognized format"; a `CUtilException` of a number
     // or a `CStringException` of a tag leaves the handler and `CATCH_ALL` reports it with the
     // lines of the reader's stack (exit status 255), and so does a `std::length_error` of
-    // Dense-seg's reserve hook (`Error: vector::reserve`) or of a binary string's reserve; a
-    // `bad_alloc` of a binary string's reserve is "BLAST ran out of memory" (exit status 4); a
+    // Dense-seg's reserve hook (`Error: vector::reserve`) or of the reserve of a binary string or
+    // byte block; a `bad_alloc` of such a reserve is "BLAST ran out of memory" (exit status 4),
+    // each after the byte block's post 803.4 where a byte block's reserve threw; a
     // `CEofException` (a `CIOException`, the input ending directly in the root object) is caught
     // without a word and the run ends with exit status 0 (NCBI BLAST+ 2.17.0, `PssmWithParameters
     // ::=` alone; line RG D3-1 probe e01; a binary file cut after its last byte, line RG D3c-3a).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
     // (`CBlastAppDiagHandler::Post`, cited in `report::diag_log`): the BLAST archive saves each post as one message of its
-    // severity; the reader's posts are errors (`ERR_POST_X(7, ...)` of a replaced byte, whose text
-    // has three lines, and `ERR_POST(Error << ...)` of `PostRead`; NCBI BLAST+ 2.17.0 tblastn
-    // -outfmt 11 of a PSSM whose title has a control byte and whose ratios overflow: `code 2`), and
+    // severity; the reader's posts are errors (the post 803.7 of a replaced byte, whose text has
+    // three lines, the error post of `PostRead` and 803.4 of a byte block; NCBI BLAST+ 2.17.0
+    // tblastn -outfmt 11 of a PSSM whose title has a control byte and whose ratios overflow: `code 2`), and
     // the binary reader's warning of a UTF8String tag for a VisibleString.
     // NCBI's reader recurses once per value on the main thread's stack and crashes when a PSSM's
     // values nest deeper than that stack holds (NCBI BLAST+ 2.17.0 with 8 MiB: from a few thousand

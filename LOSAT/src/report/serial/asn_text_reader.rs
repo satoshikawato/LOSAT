@@ -18,6 +18,7 @@
 
 use crate::ncbi_exception::ThrowSite;
 use crate::ncbi_str::{is_space, string_to_double_posix, NCBI_NAN};
+use crate::rpsbproc::HOST_DEPENDENT_BYTES;
 use std::io::Read;
 use std::ops::Range;
 
@@ -110,6 +111,7 @@ const READ_DOUBLE_OVERFLOW: ThrowSite = asn_site(
 );
 const READ_DOUBLE_BAD: ThrowSite =
     asn_site(828, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadDouble");
+const READ_DOUBLE: ThrowSite = asn_site(836, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::ReadDouble");
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1482-1508
 const GET_HEX_CHAR: ThrowSite = asn_site(1504, FORMAT_ERROR, "ncbi::CObjectIStreamAsn::GetHexChar");
 /// `UnexpectedMember` (objistrasn.cpp:1306-1314).
@@ -229,8 +231,8 @@ pub(crate) trait AsnSource {
     fn hold(&mut self, _start: Option<usize>) {}
     /// Appends the `count` bytes from `pos` on to `out` (fewer when the text ends first) and
     /// returns how many it appended. `out` grows as the bytes come, so a length that the input
-    /// does not hold costs no memory, and a source may read a long value straight into `out`
-    /// instead of keeping it as well.
+    /// does not hold costs no more than what NCBI reserves for it on every host, and a source may
+    /// read a long value straight into `out` instead of keeping it as well.
     fn read_into(&mut self, pos: usize, count: u64, out: &mut Vec<u8>) -> u64 {
         read_kept(self, pos, count, out)
     }
@@ -412,6 +414,15 @@ impl<R: Read> AsnSource for StreamSource<R> {
         let pos = pos + kept;
         self.buf.clear();
         self.base = pos;
+        // NCBI reserves the count before it reads the bytes (`asn_input::reserve`); below the
+        // allocations that depend on the host, so does LOSAT, and the bytes come into one block of
+        // that size, not into one that doubles as it fills.
+        if let Ok(wanted) = usize::try_from(count - done) {
+            if (wanted as u64) < HOST_DEPENDENT_BYTES {
+                // A reserve that fails leaves `out` to grow as the bytes come.
+                let _ = out.try_reserve_exact(wanted);
+            }
+        }
         let before = out.len();
         // `take` stops at `count`; a read error ends the text, as in `fill_to`.
         let ended = std::io::Read::by_ref(&mut self.input)
@@ -479,6 +490,15 @@ pub(crate) struct Reader<S: AsnSource> {
 pub(crate) enum MemberId {
     Name(Range<usize>),
     Tag(Range<usize>),
+}
+
+/// What `ReadEnum` reads ([`Reader::enum_word`]).
+#[derive(Debug)]
+pub(crate) enum EnumWord {
+    /// An identifier: its positions in the text.
+    Name(Range<usize>),
+    /// A number.
+    Number(i32),
 }
 
 /// `CObjectIStream::EPointerType`: what `ReadPointerType` finds where NCBI's object stream reads a
@@ -1109,46 +1129,57 @@ impl<S: AsnSource> Reader<S> {
         self.end_block()
     }
 
-    /// `GetInt8` after `SkipWhiteSpace` (`ReadInt4` / `ReadInt8`): an optional sign and digits,
-    /// in `min..=max`.
+    /// `GetInt4`, `GetUint4` (`signed` false: only `+`, a `-` is "bad number" even for `-0`) and
+    /// `GetInt8` after `SkipWhiteSpace` (`ReadInt4`, `ReadUint4`, `ReadInt8`): the digits checked
+    /// against `max` as NCBI checks them (the digit that overflows is taken first). The one port
+    /// of NCBI's text numbers, for the archive reader and the object streams (`asn_input`).
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
-    pub(crate) fn integer(&mut self, min: i128, max: i128) -> Result<i128> {
+    // (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:783-787
+    pub(crate) fn get_number(&mut self, max: u64, signed: bool) -> Result<i64> {
+        // The position is kept in a local and written once (`white_space_at`).
         let (pos, c) = self.white_space_at(self.pos)?;
-        let (mut pos, mut c) = self.ws_at(pos, c)?;
-        let negative = c == b'-';
-        if c == b'-' || c == b'+' {
-            pos += 1;
+        // `SkipWs` then `GetChar`: the first byte that is not C's `isspace`, taken.
+        let (pos, mut c) = self.ws_at(pos, c)?;
+        let mut pos = pos + 1;
+        let mut negative = false;
+        if (signed && c == b'-') || c == b'+' {
+            negative = c == b'-';
             c = self.char_at(pos)?;
+            pos += 1;
         }
         if !c.is_ascii_digit() {
             self.pos = pos;
             return Err(self.bad_number());
         }
-        let limit = max.max(-min);
-        let mut n: i128 = 0;
+        let mut n = u64::from(c - b'0');
+        let before_mul = max / 10;
+        let limit_add = max % 10 + u64::from(negative);
         let mut overflow = false;
-        let (end, _) = self.src.scan(pos, |c| {
-            if !c.is_ascii_digit() {
+        let (end, _) = self.src.scan(pos, |d| {
+            if !d.is_ascii_digit() {
                 return false;
             }
-            let next = n * 10 + i128::from(c - b'0');
-            if next > limit {
+            let d = u64::from(d - b'0');
+            if n > before_mul || (n == before_mul && d > limit_add) {
                 overflow = true;
                 return false;
             }
-            n = next;
+            n = n * 10 + d;
             true
         });
-        // An overflow stops at the digit that makes it, not taken.
-        self.pos = end;
         if overflow {
+            // The digit that overflows is taken before the check.
+            self.pos = end + 1;
             return Err(self.number_overflow());
         }
-        let n = if negative { -n } else { n };
-        if n < min || n > max {
-            return Err(self.number_overflow());
-        }
-        Ok(n)
+        self.pos = end;
+        // `-Int4(n)` of n = 2^31 is the least Int4 (and likewise in 64 bits).
+        Ok(if negative {
+            (n as i64).wrapping_neg()
+        } else {
+            n as i64
+        })
     }
 
     /// `PeekChar()` at `pos`: the end of the text is [`AsnTextErrorKind::Eof`] at `pos`.
@@ -1203,56 +1234,19 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
+    /// `ReadInt4` ([`get_number`](Self::get_number)).
     pub(crate) fn int4(&mut self) -> Result<i32> {
-        Ok(self.integer(i32::MIN.into(), i32::MAX.into())? as i32)
+        Ok(self.get_number(i32::MAX as u64, true)? as i32)
     }
 
-    /// `ReadUint4`: `GetUint4` after `SkipWhiteSpace`, an optional `+` and digits; a `-` is not a
-    /// sign there (`'-' - '0'` is more than 9: "bad number", even for `-0`).
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:783-787
-    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:672-700
+    /// `ReadUint4` ([`get_number`](Self::get_number)).
     pub(crate) fn uint4(&mut self) -> Result<u32> {
-        let (pos, c) = self.white_space_at(self.pos)?;
-        let (mut pos, mut c) = self.ws_at(pos, c)?;
-        if c == b'+' {
-            pos += 1;
-            c = self.char_at(pos)?;
-        }
-        if !c.is_ascii_digit() {
-            self.pos = pos;
-            return Err(self.bad_number());
-        }
-        let mut n: u32 = 0;
-        let mut overflow = false;
-        let (end, _) = self.src.scan(pos, |c| {
-            if !c.is_ascii_digit() {
-                return false;
-            }
-            match n
-                .checked_mul(10)
-                .and_then(|n| n.checked_add(u32::from(c - b'0')))
-            {
-                Some(next) => {
-                    n = next;
-                    true
-                }
-                None => {
-                    overflow = true;
-                    false
-                }
-            }
-        });
-        if overflow {
-            // `GetUint4` takes the digit before it checks the overflow.
-            self.pos = end + 1;
-            return Err(self.number_overflow());
-        }
-        self.pos = end;
-        Ok(n)
+        Ok(self.get_number(u64::from(u32::MAX), false)? as u32)
     }
 
+    /// `ReadInt8` ([`get_number`](Self::get_number)).
     pub(crate) fn int8(&mut self) -> Result<i64> {
-        Ok(self.integer(i64::MIN.into(), i64::MAX.into())? as i64)
+        self.get_number(i64::MAX as u64, true)
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:739-764
@@ -1327,6 +1321,21 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
+    /// The name or number that `ReadEnum` reads after `SkipWhiteSpace`: an identifier when the
+    /// byte there is a lower-case letter, else a number (`ReadInt4`). The one reader of both for
+    /// the archive reader and the object streams (`asn_input`), which look it up in their values.
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
+    pub(crate) fn enum_word(&mut self) -> Result<EnumWord> {
+        let (pos, c) = self.white_space_at(self.pos)?;
+        if !c.is_ascii_lowercase() {
+            self.pos = pos;
+            return Ok(EnumWord::Number(self.int4()?));
+        }
+        let end = self.end_of_id_at(pos)?;
+        self.pos = end;
+        Ok(EnumWord::Name(pos..end))
+    }
+
     /// `ReadEnum` of an ENUMERATED type with the values `values`: a name or a number.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
     pub(crate) fn enumerated(
@@ -1348,22 +1357,16 @@ impl<S: AsnSource> Reader<S> {
         &mut self,
         values: &[(&'static str, i32)],
     ) -> Result<std::result::Result<(&'static str, i32), i32>> {
-        let (pos, c) = self.white_space_at(self.pos)?;
-        let end = if c.is_ascii_lowercase() {
-            self.end_of_id_at(pos)?
-        } else {
-            pos
+        let id = match self.enum_word()? {
+            EnumWord::Name(id) => id,
+            EnumWord::Number(value) => {
+                return Ok(values
+                    .iter()
+                    .find(|&&(_, number)| number == value)
+                    .copied()
+                    .ok_or(value));
+            }
         };
-        self.pos = end;
-        let id = pos..end;
-        if id.is_empty() {
-            let value = self.int4()?;
-            return Ok(values
-                .iter()
-                .find(|&&(_, number)| number == value)
-                .copied()
-                .ok_or(value));
-        }
         let text = self.bytes(id);
         match values.iter().find(|&&(name, _)| name.as_bytes() == text) {
             Some(&item) => Ok(Ok(item)),
@@ -1635,7 +1638,8 @@ impl<S: AsnSource> Reader<S> {
         })
     }
 
-    /// `CObjectIStreamAsn::ReadDouble`.
+    /// `CObjectIStreamAsn::ReadDouble`: a word, or `{ mantissa, base, exponent }` whose base is
+    /// read with `ReadUint4` (a `CUtilException` for a `-`) and exponent with `ReadInt4`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:801-857
     pub(crate) fn real(&mut self) -> Result<f64> {
         if let Some(word) = self.real_word()? {
@@ -1647,13 +1651,17 @@ impl<S: AsnSource> Reader<S> {
         self.expect(b',')?;
         let exp = self.int4()?;
         self.expect(b'}')?;
-        real_of_parts(mantissa, is_negative, base, exp)
-            .ok_or_else(|| self.error("illegal REAL base (must be 2 or 10)"))
+        real_of_parts(mantissa, is_negative, base, exp).ok_or_else(|| {
+            self.error_at(
+                NcbiThrow::Stream(READ_DOUBLE),
+                "illegal REAL base (must be 2 or 10)",
+            )
+        })
     }
 
     /// The word form of `ReadDouble` (`PLUS-INFINITY`, `MINUS-INFINITY`, `NOT-A-NUMBER` or a
     /// decimal number), or `None` at a `{` (not taken).
-    pub(crate) fn real_word(&mut self) -> Result<Option<f64>> {
+    fn real_word(&mut self) -> Result<Option<f64>> {
         if self.skip_white_space()? == b'{' {
             return Ok(None);
         }
@@ -1673,7 +1681,7 @@ impl<S: AsnSource> Reader<S> {
 
     /// The `{` (at the reader's position) and the mantissa of `ReadDouble`: its value and whether
     /// it starts with `-`.
-    pub(crate) fn real_mantissa(&mut self) -> Result<(f64, bool)> {
+    fn real_mantissa(&mut self) -> Result<(f64, bool)> {
         self.pos += 1;
         let is_negative = self.skip_white_space()? == b'-';
         let mantissa_range = self.number()?;
@@ -1745,12 +1753,7 @@ impl<S: AsnSource> Reader<S> {
 /// The end of `ReadDouble` (cited at `Reader::real`): the value of the mantissa `mantissa` (read
 /// with its sign; `is_negative` whether it had a `-`), `base` and `exp`; `None` for a base other
 /// than 2 and 10 ("illegal REAL base").
-pub(crate) fn real_of_parts(
-    mut mantissa: f64,
-    is_negative: bool,
-    base: u32,
-    exp: i32,
-) -> Option<f64> {
+fn real_of_parts(mut mantissa: f64, is_negative: bool, base: u32, exp: i32) -> Option<f64> {
     if base != 2 && base != 10 {
         return None;
     }

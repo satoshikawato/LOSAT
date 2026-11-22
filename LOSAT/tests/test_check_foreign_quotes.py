@@ -343,6 +343,76 @@ class StatementTest(unittest.TestCase):
         self.assertEqual(self.quoted("// ```text\n// `q++;`\n// ```\n"), [])
         self.assertEqual(self.quoted("Prose `q++;` here.\n", "text"), [])
 
+    def expressions(self, text: str, rel: str = "x.rs", style: str = "slash") -> list[str]:
+        return [
+            f.text
+            for f in checker.check_text(rel, text.split("\n"), style, TABLE)
+            if f.source == checker.INLINE_EXPRESSION
+        ]
+
+    def test_c_and_cxx_expressions_in_backticks_are_quoted_and_left_to_the_writer(self) -> None:
+        # The Rust below reads into `text`, so `buffer` and `str` are the cited code's names.
+        code = "fn read(text: &mut Vec<u8>, count: usize) { let length = count; }\n"
+        for span in (
+            "m_Input.GetChars(count)",
+            "buffer[length] = 0",
+            "ReadLength() - 1",
+            "m_Input.GetStreamPosAsInt8() + ReadLengthLong(len)",
+            "str.reserve(count)",
+            "ERR_POST_X_ONCE(10, Warning << ...)",
+            "NStr::StringToInt8(str, flags)",
+            "hsp_list->best_evalue = s_BlastGetBestEvalue(hsp_list)",
+            "query_blk->length + 1",
+            "(Int4)opt->threshold",
+            "m_DsCnt++",
+            "out << value",
+            "SetToOpen(to + 1)",
+            "if (hrmaps.size() < dim)",
+            "SeqLen_t alnLen = qseq.size()",
+        ):
+            text = self.CITE + f"// The reader: `{span}` first.\n" + code
+            self.assertEqual(self.expressions(text), [f"`{span}`"], span)
+            lines = text.split("\n")
+            found = checker.check_text("x.rs", lines, "slash", TABLE)
+            self.assertEqual(checker.fix_lines(list(lines), "slash", found), lines, span)
+        # A mark of C or C++ decides without a citation, in Python too.
+        self.assertEqual(self.expressions("// NCBI's `m_Pos += n` here.\n"), ["`m_Pos += n`"])
+        self.assertEqual(
+            self.expressions('"""NCBI calls `GetChars(count)`."""\n', "x.py", "python"), ["`GetChars(count)`"]
+        )
+
+    def test_names_values_messages_and_rust_in_backticks_pass(self) -> None:
+        code = "fn read(source: &mut Source, query: &[u8], subject: &[u8]) {}\n"
+        for span in (
+            "(m_Pos = <n>)",
+            "Cannot convert string '12x' to Uint8 (m_Pos = 2)",
+            "read_all(&mut source)",
+            "Inputs::new(&query, &subject)",
+            "QueryEnd::Error(e)",
+            "a->b[c].d",
+            "hsp_list->hsp_array[0]->score",
+            "GetMsg()",
+            "NStr::StringToInt",
+            "std::string::operator==",
+            "c++/src/algo/blast/core/blast_hits.c:2",
+            "-evalue 1e-5",
+            "LOSAT_X_BPQBLOCK=1",
+            "NCBI C++ Exception:",
+            "Query= ",
+            "[X_STATS] TBNLUTLEAN lean= chain=",
+            "0x7f",
+        ):
+            text = self.CITE + f"// The reader: `{span}` first.\n" + code
+            self.assertEqual(self.expressions(text), [], span)
+        # Without a mark, arithmetic and comparisons are reasoning about values, and a statement
+        # with the file's own names is LOSAT's; uncited, a statement without a mark is LOSAT's too.
+        code = "fn f(last_hit: i32, diag_offset: i32) { let d = last_hit; }\n"
+        for span in ("last_hit <= diag_offset - window", "diff >= 0", "ceil(threads / K)", "d = last_hit"):
+            self.assertEqual(self.expressions(self.CITE + f"// So `{span}` holds.\n" + code), [], span)
+        self.assertEqual(self.expressions("// LOSAT: `buffer[length] = 0` here.\n" + code), [])
+        # JavaScript and TypeScript are of C's family: their comments show their own code.
+        self.assertEqual(self.expressions("// `new BroadcastChannel()` here.\n", "x.ts"), [])
+
     def test_an_indented_block_after_a_blank_docstring_line_is_quoted(self) -> None:
         text = (
             'def f():\n    """Chunks.\n\n'

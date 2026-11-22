@@ -119,7 +119,7 @@ pub(super) struct ReportView<'a> {
     pub(super) rps_gapped_k: &'a Option<Vec<f64>>,
     /// Whether NCBI's result of each query has no alignment set: a query of a batch that NCBI did
     /// not search, but for rpsblast's search of several volumes, whose merge makes a set for every
-    /// query (`blast_engine::no_alignment_set`). Outfmt 7's hit count, the XML2 and JSON `hits`
+    /// query (`blast_engine::no_alignment_sets`). Outfmt 7's hit count, the XML2 and JSON `hits`
     /// and message, and the organism report read it.
     pub(super) no_alignment_set: &'a [bool],
     pub(super) context: &'a ReportContext,

@@ -1438,6 +1438,7 @@ fn link_redone(
         redone,
         |hsp| LinkHsp {
             context: 0,
+            subject_frame: 0,
             query_offset: hsp.align.query_start,
             query_end: hsp.align.query_end,
             subject_offset: hsp.align.match_start,

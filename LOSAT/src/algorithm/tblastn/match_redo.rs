@@ -28,7 +28,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastRedoOneMatchResult,
 };
 use crate::core::composition_adjustment::smith_waterman_match::{
-    redo_one_match_smith_waterman, sw_batch_failed_error, sw_endless_error,
+    redo_one_match_smith_waterman, sw_batch_failed_error, sw_endless_error, sw_ungapped_error,
     unadjusted_square_matrix, SwBatchStatus, SwMatchScratch,
 };
 use crate::sequence::packed_subject::SubjectNt;
@@ -235,6 +235,19 @@ pub(super) fn match_outcome<R: MatchRedo, T>(
     Ok(status
         .redone(result, || sw_endless(do_link_hsps))?
         .flatten())
+}
+
+/// LOSAT's refusal of `-use_sw_tback` with `-ungapped`, on which NCBI crashes at every query batch
+/// it searches, with IDENTITY too (`smith_waterman_match::sw_ungapped_error`; NCBI BLAST+ 2.17.0
+/// with hits and without, `-subject` and `-db`, line NP item O4c, 2026-11-23;
+/// PD-LOSAT-NCBI-DEFECTS 1.79). The caller refuses at the traceback of the first query batch that
+/// is searched, after the reports of the batches before it (`ErrorAfterBatchReports`): batches
+/// without a valid context, which NCBI reports with a warning and does not search (rows
+/// `db.tn.rej.ungapped.sw.*`).
+#[cold]
+#[inline(never)]
+pub(super) fn sw_ungapped_refusal() -> anyhow::Error {
+    ErrorAfterBatchReports(sw_ungapped_error("tblastn")).into()
 }
 
 /// The error of a query batch whose last redone match failed its Smith-Waterman redo: NCBI's

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.79
+- Version: 1.80
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -387,12 +387,20 @@
   where NCBI BLAST+ 2.17.0 takes for each hard chunk the index's list of the chunk with the same
   number; the refusal that LOSAT made from line RG item D5b-2 until this version removed; line
   RG item D5b-5; first 1.77, then 1.78 at the merge of dev that brought line RG item D3c-3a's 1.77);
-  1.79 2026-11-21 (RPSTBLASTN `-use_sw_tback`, line PS item PS12c: the explicit rejection of 1.30
+  1.79 2026-11-23 (TBLASTN `-ungapped` runs, line NP item O4c: the explicit rejection of 1.46
+  extended to the ungapped re-evaluation of an alignment on a subject of fewer than 12 bases,
+  which reads the same translation that NCBI never makes, rule 3; the explicit rejection of 1.76,
+  `-ungapped -comp_based_stats 0 -use_sw_tback`, on which NCBI crashes at every query batch it
+  searches, extended from BLASTX to TBLASTN, rule 3; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.78; first 1.72, then 1.78 and 1.79 at the merges of
+  dev that brought 1.72 to 1.77 (line NP items M5a, M5b and M5, line RG items X4b-1, D5b-3, X4b-2
+  and D3c-3a), then line RG item D5b-5's 1.78);
+  1.80 2026-11-21 (RPSTBLASTN `-use_sw_tback`, line PS item PS12c: the explicit rejection of 1.30
   of a Smith-Waterman redo that NCBI repeats without end extended from RPSBLAST to RPSTBLASTN, rule
   3, within the class of 1.30; Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07; numbered after 1.78; first 1.68, then 1.70, 1.72, 1.74, 1.77 and 1.79 at the merges
+  2026-10-07; numbered after 1.79; first 1.68, then 1.70, 1.72, 1.74, 1.77, 1.79 and 1.80 at the merges
   of dev that brought line NP's 1.68 and 1.69, lines RG's 1.70 and DBID's 1.71, line NP's 1.72
-  and line RG's 1.73, then 1.74 to 1.76, then 1.77 and 1.78; with it, under
+  and line RG's 1.73, then 1.74 to 1.76, then 1.77 and 1.78, then 1.79; with it, under
   rule 2, a Smith-Waterman alignment that starts with a gap, refused until line PS item PS12d)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -1226,7 +1234,8 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     the tail mask (NCBI's own run, LOSAT the same) but 1-60 with the near input's mask of one letter.
     TBLASTN with `-window_size 0` on `th2`'s tail (`db.tmask.tn.hard.th2.13.w0.6`): NCBI's own
     bytes, the same as its run of the near input (with `-ungapped -comp_based_stats 0` too, 4,951
-    bytes, no row repeated; LOSAT refuses TBLASTN `-ungapped` for every database, so no row);
+    bytes, no row repeated; LOSAT's the same since TBLASTN `-ungapped` runs, line NP item O4c,
+    row `db.tmask.tn.hard.th2.13.ung.6`);
     BLASTP with `-window_size 0` on `pe_tail` (`db.pmask.bp.hard.tail.pe_tail.w0.6`): the near
     input's. Unit tests `protein_shapes_of_the_hard_masks` and
     `translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start`
@@ -1291,7 +1300,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
 
 ## Reproduced as NCBI (rule 2)
 
-- RPSTBLASTN `-use_sw_tback`: a Smith-Waterman alignment that starts with a gap (version 1.79,
+- RPSTBLASTN `-use_sw_tback`: a Smith-Waterman alignment that starts with a gap (version 1.80,
   2026-11-22, line PS item PS12c, review B1, Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07): with forbidden ranges NCBI's redo can give a profile's second alignment that
   starts with a gap in the profile's row (row `db.rpstbn.rej.swgap`: `nest.faa`, the profile's
@@ -1302,7 +1311,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   `Length=` (the description table) with exit status 255, 13 and 14 too, BLAST XML, JSON and XML2
   stop their document with the exception (exit status 0), and the tables and the Seq-aligns are
   the alignments as made. rpsblast's Dense-seg has a location in every segment. LOSAT refuses such
-  a profile with the query batch that holds it, as the endless redo of 1.79 (below), until line PS
+  a profile with the query batch that holds it, as the endless redo of 1.80 (below), until line PS
   item PS12d writes these reports (rule 2); the X-drop redo's alignments start with a substitution.
 
 - BLASTP unified P-values, `-comp_based_stats 1u`, `2u` and `3u` (version 1.54, 2026-11-20, line RG
@@ -2145,13 +2154,20 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   the reports of the batches without a valid context before it, which NCBI reports with a warning
   and does not search (rows `db.x4b2.rej.ungapped.ac.b1.*`) (exit 1, "-use_sw_tback with -ungapped,
   on which NCBI BLAST+ 2.17.0's blastx crashes at every query batch it searches, is not supported by
-  LOSAT's BLASTX"; rows `db.x4b2.rej.ungapped.*`). With `-use_sw_tback` LOSAT searches a query batch
+  LOSAT's BLASTX"; rows `db.x4b2.rej.ungapped.*`). TBLASTN `-ungapped` (version 1.79, line NP item
+  O4c) crashes there in the same way, with `-matrix IDENTITY` too, before the redo's frequency ratios
+  that fail a gapped batch (NCBI BLAST+ 2.17.0 from Bioconda, 2026-11-23: hits and none, `-subject` and
+  `-db`, a first batch without a valid context reported before the crash); LOSAT refuses it as BLASTX
+  does (exit 1, "-use_sw_tback with -ungapped, on which NCBI BLAST+ 2.17.0's tblastn crashes at every
+  query batch it searches, is not supported by LOSAT's TBLASTN"; one producer of the text,
+  `smith_waterman_match::sw_ungapped_error`; rows `db.tn.rej.ungapped.sw.*`, anchor
+  `db.tn.ungapped.ac.b1.nosw.7`). With `-use_sw_tback` LOSAT's BLASTX searches a query batch
   of NCBI's reader as one unit (the batch's status, its first query's heap and the contexts that
   index the heaps are per batch), and gives the outcome of `-num_threads 1` at every thread count.
   Fixture rows `db.x4b2.*`; `LOSAT/tests/blastx_sw_tback.rs`; inputs `LOSAT/tests/fasta/x4b2` and
   the databases `LOSAT/tests/db_search/x4b2` (`make_x4b2.py`).
 
-- RPSTBLASTN `-use_sw_tback` with composition-based statistics (version 1.79, 2026-11-21, line PS
+- RPSTBLASTN `-use_sw_tback` with composition-based statistics (version 1.80, 2026-11-21, line PS
   item PS12c, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the
   class of 1.30; P2: no checkable result exists, P3: the round loop of 1.30 and 1.53 decides it,
   `core::composition_adjustment::smith_waterman::smith_waterman_redo_window`): a profile with two
@@ -2397,8 +2413,8 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   (`:1234-1235`), and every caller reads from that address on next: the traceback's gapped start
   and `ALIGN_EX` (`blast_traceback.c:429-440,509-512`), the identities after the composition-based
   redo (`blast_kappa.c:527-528`, which run only for an alignment left by the redo's E-value purge,
-  `:3677-3700`), the ungapped re-evaluation (`blast_hits.c:2700-2705`; LOSAT's TBLASTN refuses
-  `-ungapped`; TBLASTX reaches it in every search, version 1.51 below). NCBI BLAST+ 2.17.0 dies
+  `:3677-3700`), the ungapped re-evaluation (`blast_hits.c:2700-2705`; TBLASTN with `-ungapped`,
+  refused there since version 1.79; TBLASTX reaches it in every search, version 1.51 below). NCBI BLAST+ 2.17.0 dies
   with SIGSEGV in every such run of ours (ws and the local
   official binary, 2026-11-17: 11 bases in frames +1 and -1, `-subject`, `-subject_loc` and `-db`,
   a matrix query at `-comp_based_stats` 0 to 3, `-in_pssm`, `-outfmt` 0, 5 and 6, a second query, a

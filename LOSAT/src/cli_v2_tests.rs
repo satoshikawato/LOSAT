@@ -1877,8 +1877,10 @@ fn tblastx_takes_a_database_and_its_size() {
 
 #[test]
 fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
-    // Decision D12 (AUTHORITY.md): an -evalue of DBL_MAX or more crashes NCBI's blastp and
-    // tblastn on some inputs. blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
+    // Decision D12 (AUTHORITY.md): an infinite -evalue, and DBL_MAX with the composition-based
+    // redo, which crashes NCBI's blastp and tblastn on some inputs
+    // (`protein_options_check::check_evalue_limit`); without the redo NCBI runs DBL_MAX (line
+    // O4c's review D1). blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
     // NCBI's int wraps or crashes NCBI; LOSAT computes the size without the overflow and runs
     // (PD-LOSAT-NCBI-DEFECTS exception 19).
     let blastp = |words: &[&str]| {
@@ -1896,6 +1898,7 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     for words in [
         &["-evalue", "+inf"][..],
         &["-evalue", "1e999"],
+        &["-evalue", "1e999", "-comp_based_stats", "0"],
         &["-evalue", "1.7976931348623157e308"],
     ] {
         let error = format!("{:#}", blastp(words).unwrap_err());
@@ -1907,6 +1910,12 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     for words in [
         &["-evalue", "1e308"][..],
         &["-evalue", "1.7976931348623156e308"],
+        &[
+            "-evalue",
+            "1.7976931348623157e308",
+            "-comp_based_stats",
+            "0",
+        ],
         &["-max_target_seqs", "2147483647"],
         &["-max_target_seqs", "1073741798"],
         // Past NCBI's `int` overflow of the preliminary hit list size (LOSAT computes it without).
@@ -1928,6 +1937,30 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
         "{error}"
     );
     tblastn(&["-evalue", "1e308"]).unwrap();
+    for words in [
+        &[
+            "-evalue",
+            "1.7976931348623157e308",
+            "-comp_based_stats",
+            "0",
+        ][..],
+        &[
+            "-evalue",
+            "1.7976931348623157e308",
+            "-ungapped",
+            "-comp_based_stats",
+            "0",
+        ],
+    ] {
+        tblastn(words).unwrap();
+    }
+    for words in [
+        &["-evalue", "+inf", "-comp_based_stats", "0"][..],
+        &["-evalue", "1e999", "-ungapped", "-comp_based_stats", "0"],
+    ] {
+        let error = format!("{:#}", tblastn(words).unwrap_err());
+        assert!(error.contains("an infinite -evalue"), "{words:?}: {error}");
+    }
 }
 
 #[test]

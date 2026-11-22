@@ -3686,7 +3686,7 @@ mod tests {
     /// BLASTP's ungapped search in 8 and 11 (Dense-diag Seq-aligns, line NP item O4b) and with an HSP
     /// of length 0 in 5, 8 and 15 (`-window_size 0`, also item O4b), and BLASTN's ungapped search in
     /// SAM (one record per subject, item O4a-2).
-    const FORMAT_ROWS: [(&str, &[&str]); 61] = [
+    const FORMAT_ROWS: [(&str, &[&str]); 62] = [
         (
             "sm1.blastp.x16.soft.5",
             &[
@@ -4019,6 +4019,21 @@ mod tests {
                 "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
                 "-subject_loc",
                 "2-470",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "x5.tblastn.ungapped_cbs0",
+            &[
+                "tblastn",
+                "-query",
+                "tests/db_search/of1/tnq.fa",
+                "-subject",
+                "tests/db_search/of1/tns.fa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
                 "-outfmt",
                 "5",
             ],

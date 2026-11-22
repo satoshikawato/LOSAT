@@ -5519,8 +5519,13 @@ fn resolve_for_formats(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no output format was requested"))?;
     let first_options = search_options(&first);
-    if resolved_formats.any(|resolved| search_options(&resolved) != first_options) {
-        bail!("the requested output formats resolve to different search options");
+    for resolved in resolved_formats {
+        if search_options(&resolved) != first_options {
+            bail!("the requested output formats resolve to different search options");
+        }
+        // The run's `-html` links are those of the format that reads them (outfmt 0, in any
+        // place among the formats).
+        first.html = first.html.or(resolved.html);
     }
     first.num_descriptions = shared.num_descriptions;
     first.num_alignments = shared.num_alignments;

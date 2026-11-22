@@ -1543,10 +1543,14 @@ impl<'a> FetchExcluded<'a> {
 /// like any other's; where the test does not stop the list, the fetch excludes the subject and
 /// NCBI sets the status of the thread back to 0 and goes on with the next list, with no redo and
 /// no heap insert, so a failed Smith-Waterman redo before it no longer fails the batch; where
-/// the test stops the list, nothing changes. BLASTP's `exclude_fetched` reads them: it removes
-/// those lists and keeps their places for the Smith-Waterman redo's status
-/// (`blastp::blast_engine::database::FetchExcludedMatch`). The other programs remove such lists
-/// with `FetchExcluded::retain`.
+/// the test stops the list, nothing changes (core's `SwBatchStatus::reaches_redo`, the order of
+/// the two steps for every program's redo loop). One owner of the question "is this list's
+/// subject excluded at the fetch", with two readers: TBLASTN's `stage_d_pipeline` keeps the marked
+/// lists in its stream and asks `SwBatchStatus::reaches_redo` at each (the X-drop redo has no
+/// status, so a marked list is a list skipped there); BLASTP's `exclude_fetched` removes them and
+/// keeps their places (`blastp::blast_engine::database::FetchExcludedMatch`), which its redo loop
+/// reads after each query's loop through the same rule. The other programs remove such lists with
+/// `FetchExcluded::retain`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575

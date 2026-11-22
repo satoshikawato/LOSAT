@@ -585,6 +585,32 @@ impl<'a> CallReads<'a> {
             })
     }
 
+    /// The batch of the queries `range` failed after its fetches with `check_oid_exclusion`
+    /// (a failed Smith-Waterman redo of the batch's last match, `stage_d_pipeline::note_redo_fetched`):
+    /// the first of them that read a header with a UTF8String where a VisibleString is expected is
+    /// the call's read of this batch, where none came before, so that its warning comes before the
+    /// batch's error (`write_failed`).
+    pub(super) fn fetched_before_failure(&self, range: &std::ops::Range<usize>) {
+        let Some(database) = self.database else {
+            return;
+        };
+        let Some(note) = self
+            .notes
+            .get(&range.start)
+            .and_then(crate::seqdb::Utf8Reads::take)
+        else {
+            return;
+        };
+        let read = database
+            .db
+            .utf8_string_path_at(note.at)
+            .map(|path| shared::Utf8Read {
+                query: range.start,
+                path,
+            });
+        self.utf8.note(range.start, read.as_ref());
+    }
+
     /// `-db`: the definition lines of the final hit lists `hitlists` of the batch of the queries
     /// `range`, read where NCBI makes the batch's Seq-aligns ([`read_titles`], after the batch's
     /// fetches and Seq-aligns that read a UTF8String header, [`drop_unaligned`]), into `titles`;

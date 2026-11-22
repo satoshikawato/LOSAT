@@ -95,11 +95,13 @@ With `--dup-only` (fix 3 of line RG item T5d) it writes the databases of NCBI's 
 sequence that holds a reported sequence's Seq-align id (`dup_main`); with `--dup5-only` (fix 5) those of the
 order of such a load to a lookup that throws on its id and to another such load (`dup5_main`). With
 `--sw-only` (merge 6 of T5d) it writes the databases of the reads of the composition-based redo's fetches
-before its Smith-Waterman redo fails a batch (`sw_main`).
+before its Smith-Waterman redo fails a batch (`sw_main`); with `--nsw-only` (merge 12) TBLASTN's copies of
+line RG item X4b-1's `../x4b/excl` with a UTF8String title (`nsw_main`, no makeblastdb).
 
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -641,6 +643,54 @@ def sw_main(ncbi_bin):
     os.rmdir(work)
 
 
+def nsw_main(ncbi_bin):
+    """`--nsw-only` (merge 12 of line RG item T5d, with the rows of line RG item X4b-1): copies of
+    `../x4b/excl` (sok1_nt, sfail_rc and sx_rc, which `../x4b/neg.txt` keeps without a definition line, so the
+    fetch of TBLASTN's redo excludes it after sfail_rc's match and clears the failure of sfail_rc's
+    Smith-Waterman redo) in `nsw_first`, `nsw_kept` and `nsw_excl`, the title of OID 0, 1 or 2 a UTF8String:
+    NCBI's redo reads the header of each subject it fetches, kept or excluded, so the first of them posts its
+    warning, in the stream's order of the redo (by score with composition-based statistics, by OID
+    without). The copies keep the database's name (`excl`, which the index names its LMDB file by). And
+    `nsw_fail`: the same three records with sx_rc first (OID 0, its title a UTF8String), so that without
+    composition-based statistics (the redo's stream in OID order) its fetch, which excludes it, comes before
+    sfail_rc's failed redo at the batch's last match: the warning, then NCBI's `Traceback failed`."""
+    here = os.path.join("tests", "db_search", "t5")
+    source = os.path.join("tests", "db_search", "x4b")
+    utf8 = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    for name, oid in (("nsw_first", 0), ("nsw_kept", 1), ("nsw_excl", 2)):
+        out = os.path.join(here, name)
+        os.makedirs(out, exist_ok=True)
+        for file in sorted(os.listdir(source)):
+            if file.startswith("excl."):
+                shutil.copyfile(os.path.join(source, file), os.path.join(out, file))
+        patch_record_any(os.path.join(out, "excl"), "n", oid, utf8)
+    # make_x4b.py's records: its constants and functions, read from its source (it runs makeblastdb when
+    # imported).
+    import ast
+    tree = ast.parse(open(os.path.join(source, "make_x4b.py")).read())
+    names = {"CODON", "COMP", "BODY", "SOK1", "SFAIL"}
+    nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+             or (isinstance(node, ast.Assign) and {getattr(t, "id", "") for t in node.targets} <= names)]
+    x4b = {}
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), "make_x4b.py", "exec"), x4b)
+    nt, rc = x4b["nt"], x4b["rc"]
+    records = [("gnl|ti|9003 sx_rc sfail's first half with 8 substitutions in frame -1",
+                rc(nt(x4b["weaker"]("D" + x4b["BODY"])))),
+               ("dbj|AB300001.1| sok1_nt sok1 in frame +1", nt(x4b["SOK1"])),
+               ("dbj|AB300002.1| sfail_rc sfail in frame -1", rc(nt(x4b["SFAIL"])))]
+    fasta = os.path.join(here, "nsw_fail.fna")
+    with open(fasta, "w") as f:
+        for name, seq in records:
+            f.write(f">{name}\n{seq}\n")
+    out = os.path.join(here, "nsw_fail")
+    cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "nucl", "-parse_seqids",
+           "-blastdb_version", "5", "-title", "nsw_fail", "-out", out]
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+    os.remove(fasta)
+    patch_record_any(out, "n", 0, utf8)
+
+
 def dup_main(ncbi_bin):
     """`--dup-only` (line RG item T5d fix 3): databases whose lists hold `gb|DUP00001.1|` twice. `pds` and
     `pda` (version 5, protein, `-parse_seqids`): the subject `gb|DUP00001.1| subject record`, hd0 of `hd.faa`
@@ -1020,6 +1070,8 @@ if __name__ == "__main__":
         fetch_main(sys.argv[1])
     elif "--sw-only" in sys.argv[2:]:
         sw_main(sys.argv[1])
+    elif "--nsw-only" in sys.argv[2:]:
+        nsw_main(sys.argv[1])
     elif "--dup-only" in sys.argv[2:]:
         dup_main(sys.argv[1])
     elif "--dup5-only" in sys.argv[2:]:

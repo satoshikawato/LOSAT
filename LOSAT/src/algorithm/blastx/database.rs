@@ -238,9 +238,13 @@ impl BlastxDatabase {
         mask.check_losat_limits(
             &self.db,
             self.program,
+            // LOSAT's translation gives no residue 0 (a codon with a base it does not know is
+            // X, `utils::genetic_code::GeneticCode::get`), so the lookup table holds no word
+            // with it.
             crate::blastinput::db_mask::HardScan::Protein {
                 word: options.word_size,
                 window: options.window_size,
+                zero_words: false,
             },
         )
     }

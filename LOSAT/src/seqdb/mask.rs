@@ -21,6 +21,16 @@ use super::column::{Blob, MASK_DATA_TITLE};
 use super::volume::Volume;
 use super::{BlockRange, SeqDb, SeqDbError, SeqLocation};
 
+/// A searched sequence's place among the sequences that the search reads, in the order of their
+/// ordinal ids (`SeqDb::first_searched_masks`): the first one (NCBI's search reads it first, with
+/// the diagonal table that its thread has just made) and the last one (none follows it in any
+/// thread).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SearchedPlace {
+    pub first: bool,
+    pub last: bool,
+}
+
 /// A filtering algorithm of the database (`GetMaskAlgorithmDetails`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaskAlgorithm {
@@ -696,7 +706,8 @@ impl SeqDb {
     /// The first sequence that the search reads (by ordinal id: those the list and the alias
     /// files' ranges include) whose masks of the filtering algorithm `algo_id`, as stored, `test`
     /// finds a refusal in, with its NCBI OID (as `blastdbcmd`'s `%o`) and its volume's path.
-    /// `test` gets the masks (never empty), the bounds of the sequence's length that the index
+    /// `test` gets the masks (never empty), the sequence's place in the search ([`SearchedPlace`]),
+    /// the bounds of the sequence's length that the index
     /// gives (`Volume::nucleotide_length_bounds`, or a protein's exact length,
     /// `Volume::x_protein_lengths`, read once per block at its first sequence with
     /// masks; `None` where they give none or cannot be read) and a function that reads the
@@ -713,6 +724,7 @@ impl SeqDb {
         algo_id: i32,
         mut test: impl FnMut(
             &[(u32, u32)],
+            SearchedPlace,
             Option<(usize, usize)>,
             &dyn Fn() -> Option<usize>,
         ) -> Result<Option<T>, ()>,
@@ -773,7 +785,11 @@ impl SeqDb {
                         self.nucleotide_length(seq_ordinal).ok()
                     }
                 };
-                match test(masks, length_bounds, &length) {
+                let place = SearchedPlace {
+                    first: seq_ordinal == 0,
+                    last: seq_ordinal + 1 == end_ordinal,
+                };
+                match test(masks, place, length_bounds, &length) {
                     Ok(None) => {}
                     Ok(Some(found)) => {
                         return Some((

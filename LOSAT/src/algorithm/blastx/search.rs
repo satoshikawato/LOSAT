@@ -1214,6 +1214,45 @@ fn subject_hits_with<S: super::seed::BxScoring>(
             scoring, batch, params, options, encoded, lookup, diagonals, x_sent,
         )?
     };
+    let subject_length = (encoded.len() - 1) as i32;
+    match hits_of_initial(
+        scoring,
+        batch,
+        params,
+        options,
+        encoded,
+        subject_length,
+        &initial,
+        xdrop,
+        x_containment,
+        containment,
+    )? {
+        Some(hits) => Ok(hits),
+        // The HSPs of a subject's letters lie inside the tree's bounds and are in order.
+        None => anyhow::bail!("BLASTX: an interval tree insertion of a whole subject never ends"),
+    }
+}
+
+/// The preliminary HSPs of the initial hits `initial` of a subject (`subject_hits_with`) or of a
+/// hard chunk shorter than the word (`search_db_masked.rs`): `encoded` is its letters and the
+/// sentinel after them, `subject_length` its length (NCBI's `subject->length`, the chunk's
+/// `Int4`), and the gapped or ungapped HSPs, before (`raw`) and after the purge of the HSPs with
+/// common endpoints and the sort by score (`purged`); `None` where NCBI's insertion of an HSP into
+/// the interval tree never ends (`preliminary::gapped_observed`).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn hits_of_initial<S: super::seed::BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    encoded: &[u8],
+    subject_length: i32,
+    initial: &[super::seed::InitHsp],
+    xdrop: i32,
+    x_containment: bool,
+    containment: &mut Vec<(PreliminaryHsp, bool)>,
+) -> Result<Option<(Vec<PreliminaryHsp>, Vec<PreliminaryHsp>)>> {
     let raw = if options.gapped {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3916-3921
         let mut observe = |h: &super::preliminary::PreliminaryHsp, contained: bool| {
@@ -1223,13 +1262,14 @@ fn subject_hits_with<S: super::seed::BxScoring>(
                 containment.push((h.clone(), contained))
             }
         };
-        if S::BLOSUM62 {
+        let gapped = if S::BLOSUM62 {
             super::preliminary::gapped_observed(
                 batch,
                 params,
                 options,
                 encoded,
-                &initial,
+                subject_length,
+                initial,
                 xdrop,
                 &mut observe,
             )?
@@ -1240,13 +1280,18 @@ fn subject_hits_with<S: super::seed::BxScoring>(
                 params,
                 options,
                 encoded,
-                &initial,
+                subject_length,
+                initial,
                 xdrop,
                 &mut observe,
             )?
-        }
+        };
+        let Some(raw) = gapped else {
+            return Ok(None);
+        };
+        raw
     } else {
-        ungapped(batch, &initial)
+        ungapped(batch, initial)
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:552-563
     let mut purged = raw.clone();
@@ -1255,7 +1300,53 @@ fn subject_hits_with<S: super::seed::BxScoring>(
     } else {
         sort_by_score(&mut purged);
     }
-    Ok((raw, purged))
+    Ok(Some((raw, purged)))
+}
+
+/// [`hits_of_initial`] of a hard chunk shorter than the word by the search's matrix
+/// (`search_db_masked.rs`): the seeds `initial` of its one word, on its stored letters `letters`
+/// (the word's and the sentinel after them) with the chunk's length `length`.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn one_word_hits(
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    letters: &[u8],
+    length: i32,
+    initial: &[super::seed::InitHsp],
+    xdrop: i32,
+    x_containment: bool,
+    containment: &mut Vec<(PreliminaryHsp, bool)>,
+) -> Result<Option<(Vec<PreliminaryHsp>, Vec<PreliminaryHsp>)>> {
+    if options.scoring == crate::config::ScoringMatrix::Blosum62 {
+        hits_of_initial(
+            super::seed::Blosum62Bx,
+            batch,
+            params,
+            options,
+            letters,
+            length,
+            initial,
+            xdrop,
+            x_containment,
+            containment,
+        )
+    } else {
+        hits_of_initial(
+            super::seed::MatrixBx::of(options.scoring),
+            batch,
+            params,
+            options,
+            letters,
+            length,
+            initial,
+            xdrop,
+            x_containment,
+            containment,
+        )
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664

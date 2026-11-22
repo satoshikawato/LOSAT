@@ -238,24 +238,16 @@ impl Diagonals {
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// [`Diagonals::finish_chunk`] after a subject of `length` letters.
     pub fn finish_subject(&mut self, length: usize) -> Result<()> {
-        if self.offset >= i32::MAX / 4 {
-            self.offset = self.window;
-            self.entries.fill(DiagStruct::clear(self.window));
-        } else {
-            self.offset = self
-                .offset
-                .checked_add(i32::try_from(length)?)
-                .and_then(|v| v.checked_add(self.window))
-                .ok_or_else(|| anyhow::anyhow!("BLASTX diagonal offset exceeds Int4"))?;
-        }
-        Ok(())
+        self.finish_chunk(i32::try_from(length)?)
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
-    /// [`Diagonals::finish_subject`] of a hard chunk of a `-db_hard_mask` sequence that the word
-    /// finder does not search as a subject of its own (`search_db_masked.rs`), whose length is
-    /// NCBI's `Int4` (`core::subject_split::HardChunk::length`: negative between overlapping
-    /// masks).
+    /// `Blast_ExtendWordExit` after a subject, or a hard chunk of a `-db_hard_mask` sequence
+    /// (`search_db_masked.rs`), whose length is NCBI's `Int4` (`core::subject_split::HardChunk::
+    /// length`: negative between overlapping masks): the table cleared where the offset reached
+    /// INT4_MAX / 4, else the offset moved by the length and the window. The one owner of that
+    /// update.
     pub(crate) fn finish_chunk(&mut self, length: i32) -> Result<()> {
         if self.offset >= i32::MAX / 4 {
             self.clear();
@@ -269,10 +261,22 @@ impl Diagonals {
         Ok(())
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
-    /// Clears the table and sets the offset to the window (`s_BlastDiagClear`).
+    /// Clears the table and sets the offset to the window (`s_BlastDiagClear`): where the offset
+    /// reached INT4_MAX / 4 (`finish_chunk`), and after the last searched sequence of a
+    /// `-db_hard_mask` search whose entries lie past its end, which no sequence reads in NCBI's
+    /// search (`search_db_masked.rs`).
     pub(crate) fn clear(&mut self) {
         self.offset = self.window;
         self.entries.fill(DiagStruct::clear(self.window));
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 135-150
+    /// The table as NCBI's thread makes it (`BlastExtendWordNew`: every entry 0 without the flag,
+    /// the offset the window), for the first searched sequence of a `-db_hard_mask` search
+    /// (`search_db_masked.rs`), whose chunks can go back below its start onto those entries
+    /// (`common::hard_chunk_walk::DiagonalWalk::start_on_new_table`).
+    pub(crate) fn new_table(&mut self) {
+        self.offset = self.window;
+        self.entries.fill(DiagStruct::default());
     }
     /// The diagonal offset of the next subject.
     pub(crate) fn offset(&self) -> i32 {
@@ -1084,6 +1088,15 @@ pub(super) fn word_finder_over<S: BxScoring>(
     };
     scan(&mut each);
     diagonals.finish_subject(subject.len().saturating_sub(1))?;
+    sort_initial_hits(&mut hits);
+    Ok(hits)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
+/// The order of a subject's initial hits for its gapped stage (by score, then the subject's start,
+/// the length and the query's start): the reference word finder's (`word_finder`) and a hard
+/// chunk's one word's (`search_db_masked.rs`).
+pub(crate) fn sort_initial_hits(hits: &mut [InitHsp]) {
     hits.sort_by(|a, b| {
         b.score
             .cmp(&a.score)
@@ -1091,7 +1104,6 @@ pub(super) fn word_finder_over<S: BxScoring>(
             .then(b.length.cmp(&a.length))
             .then(a.q_start.cmp(&b.q_start))
     });
-    Ok(hits)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107

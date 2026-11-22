@@ -1901,10 +1901,13 @@ fn test_rebuild_preliminary_interval_tree_drops_only_retried_query_hsps() {
     let mut preliminary_hsp_list = vec![query0_hsp, query1_hsp];
     let mut interval_tree = BlastIntervalTree::new(0, 2000, 0, 200);
 
-    rebuild_preliminary_interval_tree_from_list(
-        &mut interval_tree,
-        &preliminary_hsp_list,
-        &contexts,
+    assert_eq!(
+        rebuild_preliminary_interval_tree_from_list(
+            &mut interval_tree,
+            &preliminary_hsp_list,
+            &contexts,
+        ),
+        Some(2)
     );
 
     let query0_contained = TreeHsp {
@@ -1936,10 +1939,13 @@ fn test_rebuild_preliminary_interval_tree_drops_only_retried_query_hsps() {
     preliminary_hsp_list[0].q_idx = 99;
     preliminary_hsp_list[1].q_idx = 77;
     remove_preliminary_hits_for_query(&mut preliminary_hsp_list, 0, &contexts);
-    rebuild_preliminary_interval_tree_from_list(
-        &mut interval_tree,
-        &preliminary_hsp_list,
-        &contexts,
+    assert_eq!(
+        rebuild_preliminary_interval_tree_from_list(
+            &mut interval_tree,
+            &preliminary_hsp_list,
+            &contexts,
+        ),
+        Some(1)
     );
 
     assert!(!interval_tree.contains_hsp(&query0_contained, contexts[0].frame_base, 0));

@@ -41,7 +41,7 @@ use super::{
     BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpTiming, InitHSP,
     BLASTP_RESTRICTED_MULT,
 };
-use crate::algorithm::blastn::interval_tree::{IndexMethod, TreeHsp};
+use crate::algorithm::blastn::interval_tree::TreeHsp;
 use crate::algorithm::blastp;
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::extension::{
@@ -98,12 +98,15 @@ pub(super) struct BlastpPrelimKernel<'a> {
 }
 
 /// One subject with letters as `search_subject` hands it to its gapped half (`gapped_subject`): the
-/// subject and its preliminary statistics, with the two values that `search_subject` made of them,
-/// the subject's letters after the sentinel byte and the word cutoffs (one producer each).
+/// subject and its preliminary statistics, with the values that `search_subject` made of them,
+/// the subject's letters after the sentinel byte, its length (NCBI's `subject->length`) and the
+/// word cutoffs (one producer each). A hard chunk shorter than the word (`one_word_gapped`) has the
+/// stored letters of its one word and the chunk's length.
 #[derive(Clone, Copy)]
 struct ScannedSubject<'a> {
     subject: BlastpSubjectRef<'a>,
     subject_sequence: &'a [u8],
+    subject_length: i32,
     values: &'a BlastpPrelimValues<'a>,
     word_cutoff_scores: &'a [i32],
 }
@@ -744,14 +747,101 @@ impl BlastpPrelimKernel<'_> {
         let scanned = ScannedSubject {
             subject,
             subject_sequence,
+            subject_length: subject.aa_len as i32,
             values,
             word_cutoff_scores,
         };
         if args.ungapped {
             self.ungapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
         } else {
-            self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
+            let ends =
+                self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
+            // The HSPs of a subject's letters lie inside the tree's bounds and are in order.
+            debug_assert!(
+                ends,
+                "an interval tree insertion of a whole subject never ends"
+            );
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500, 560-562
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4745-4776
+    // A hard chunk shorter than the word goes through the word finder and its ungapped hits
+    // become its HSP list, as for any chunk.
+    /// The HSPs of a hard chunk shorter than the word in an ungapped search (`-ungapped`,
+    /// `db_masked.rs`): the seeds `init_hsps` that its one word saved
+    /// (`hard_chunk_scan::OneWord`) become the chunk's HSPs as in `ungapped_subject`, left in the
+    /// scratch's HSP list, sorted by score, for the merge of the sequence's chunks (`values` and
+    /// `subject_result` as `search_subject_in`'s; the list of hits goes back to the scratch).
+    #[cold]
+    #[inline(never)]
+    pub(super) fn one_word_hsps(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject_result: &mut BlastpSubjectResult,
+        values: &BlastpPrelimValues<'_>,
+        init_hsps: Vec<InitHSP>,
+    ) {
+        // The subject of a chunk's HSPs is not read: they stay in the scratch for the merge.
+        let scanned = ScannedSubject {
+            subject: BlastpSubjectRef {
+                aa_seq: &[0, 0],
+                aa_len: 0,
+            },
+            subject_sequence: &[0],
+            subject_length: 0,
+            values,
+            word_cutoff_scores: values.word_cutoff_scores,
+        };
+        self.ungapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, true);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-545
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3820-3831
+    // A hard chunk shorter than the word goes through the gapped stage as any chunk: its interval
+    // tree ends one past the chunk's length (`Int4`, negative between overlapping masks) and its
+    // extensions take that length, over the stored letters of its one word.
+    /// The HSPs of a hard chunk shorter than the word in a gapped search (`db_masked.rs`): the
+    /// seeds `init_hsps` that its one word saved (`hard_chunk_scan::OneWord`) through the gapped
+    /// stage (`gapped_subject`) on the subject of the stored letters `letters` (the word's and the
+    /// sentinel after them) and of the chunk's length `length`, left in the scratch's HSP list,
+    /// sorted by score, for the merge of the sequence's chunks (`values` and `subject_result` as
+    /// `search_subject_in`'s). `false` where NCBI's insertion of an HSP into the tree never ends
+    /// (`BlastIntervalTree::try_add_hsp`; LOSAT's refusal,
+    /// `hard_chunk_scan::short_chunk_tree_refusal`).
+    #[cold]
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn one_word_gapped(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject_result: &mut BlastpSubjectResult,
+        values: &BlastpPrelimValues<'_>,
+        init_hsps: Vec<InitHSP>,
+        letters: &[u8],
+        length: i32,
+    ) -> bool {
+        scratch.preliminary_interval_tree.reset_with_bounds_cells(
+            0,
+            self.total_query_span,
+            0,
+            length.saturating_add(1),
+            x_bp_tree_max_cells(),
+        );
+        // The subject's own letters are not read: the chunk's HSPs stay in the scratch.
+        let scanned = ScannedSubject {
+            subject: BlastpSubjectRef {
+                aa_seq: &[0, 0],
+                aa_len: 0,
+            },
+            subject_sequence: letters,
+            subject_length: length,
+            values,
+            word_cutoff_scores: values.word_cutoff_scores,
+        };
+        self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, true)
     }
 
     /// The ungapped half of the kernel for one subject with letters (`-ungapped`, in place of
@@ -941,6 +1031,10 @@ impl BlastpPrelimKernel<'_> {
     /// the scratch here), and the subject's HSP lists go into `subject_result`. The arrays that the method
     /// takes of the scratch (the restricted alignment's flags, the HSP list and its counts per query,
     /// the lists per query) go back to it before the method returns; no statement leaves it early.
+    /// Returns `false` where NCBI's insertion of an HSP into the interval tree never ends
+    /// (`BlastIntervalTree::try_add_hsp`: an HSP of a hard chunk shorter than the word out of the
+    /// tree's bounds, `one_word_gapped`), after which the stage stops; a whole subject's HSPs lie
+    /// inside its bounds.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3664-3666
     fn gapped_subject(
@@ -951,7 +1045,7 @@ impl BlastpPrelimKernel<'_> {
         subject_result: &mut BlastpSubjectResult,
         mut init_hsps: Vec<InitHSP>,
         chunk: bool,
-    ) {
+    ) -> bool {
         // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
         // each.
         let Self {
@@ -972,10 +1066,12 @@ impl BlastpPrelimKernel<'_> {
         let ScannedSubject {
             subject,
             subject_sequence,
+            subject_length,
             values,
             word_cutoff_scores,
         } = scanned;
         let hit_cutoff_scores = values.hit_cutoff_scores;
+        let mut ends = true;
         let interval_tree = &mut scratch.preliminary_interval_tree;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
         ncbi_qsort_init_hsps_by_score(&mut init_hsps);
@@ -1125,6 +1221,7 @@ impl BlastpPrelimKernel<'_> {
                 ctx,
                 query_sequence,
                 subject_sequence,
+                subject_length,
                 args.scoring.matrix,
                 args.scoring.gap_open,
                 args.scoring.gap_extend,
@@ -1176,7 +1273,7 @@ impl BlastpPrelimKernel<'_> {
                     // With no accepted HSP for this query, NCBI's rebuild
                     // would copy every existing non-query HSP back into the
                     // tree. The current tree already contains exactly that set.
-                    (0, 0)
+                    (0, Some(0))
                 } else {
                     let removed_hsps = remove_preliminary_hits_for_query(
                         &mut preliminary_hsp_list,
@@ -1196,6 +1293,10 @@ impl BlastpPrelimKernel<'_> {
                         contexts,
                     );
                     (removed_hsps, rebuild_nodes)
+                };
+                let Some(rebuild_nodes) = rebuild_nodes else {
+                    ends = false;
+                    break;
                 };
                 if let Some(timing) = timing.as_ref() {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3975-3977,4007-4008
@@ -1264,11 +1365,15 @@ impl BlastpPrelimKernel<'_> {
                 );
                 continue;
             }
-            interval_tree.add_hsp(
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:510-795 (cited at
+            // `BlastIntervalTree::try_add_hsp`)
+            if !interval_tree.try_add_hsp(
                 preliminary_tree_hsp(&preliminary_hsp, ctx.frame_base),
                 ctx.frame_base,
-                IndexMethod::QueryAndSubject,
-            );
+            ) {
+                ends = false;
+                break;
+            }
             preliminary_hsp_list.push(preliminary_hsp);
             if let Some(count) = preliminary_hsp_counts_by_query.get_mut(query_index) {
                 *count += 1;
@@ -1317,6 +1422,7 @@ impl BlastpPrelimKernel<'_> {
         scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
         scratch.preliminary_hsp_counts_by_query.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
+        ends
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591

@@ -3,166 +3,6 @@ use crate::algorithm::blastp::extension::extend_two_hit;
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::{ncbistdaa, protein_score_rows};
 
-/// The work, the margins, the end and the first word past the end of a walk over `chunks`
-/// (`(offset, length)`) of a sequence of `length` letters.
-fn walk(
-    chunks: &[(usize, i32)],
-    length: usize,
-    word: i32,
-    window: i32,
-) -> (Vec<ChunkWork>, DiagonalMargins, i64, Option<usize>) {
-    let mut walk = DiagonalWalk::new(word, window, length);
-    let works = chunks
-        .iter()
-        .map(|&(offset, length)| walk.chunk(offset, length))
-        .collect();
-    (works, walk.margins(), walk.end(), walk.word_past_end())
-}
-
-const WORDS: ChunkWork = ChunkWork::Words { reference: false };
-const WORDS_BACK: ChunkWork = ChunkWork::Words { reference: true };
-
-/// The chunks of probe 2 of M/m4b3b/NOTES_M4B3B.md (a sequence of 240 letters, word 3, window 40
-/// or 0): the offsets `D_i` and what each chunk's scan reads, and the margins of the sequence.
-#[test]
-fn walks_of_overlapping_and_nested_masks() {
-    // e3: masks [40, 60) [55, 70). Two-hit: D = 0, 80, 115; the last chunk starts past every
-    // entry of the earlier ones.
-    let e3 = [(0, 40), (60, -5), (70, 170)];
-    let (works, margins, end, past) = walk(&e3, 240, 3, 40);
-    assert_eq!(works, [WORDS, ChunkWork::OneWord, WORDS]);
-    assert_eq!(margins, DiagonalMargins::default());
-    assert_eq!((end, past), (325, None));
-    // One-hit: D = 0, 40, 35; the short chunk reads nothing, the last goes back below the first
-    // chunk's entries (38 at most) but stays above the start.
-    let (works, margins, end, _) = walk(&e3, 240, 3, 0);
-    assert_eq!(works, [WORDS, ChunkWork::Nothing, WORDS_BACK]);
-    assert_eq!(margins, DiagonalMargins::default());
-    assert_eq!(end, 205);
-    // nest: masks [40, 100) [50, 60). Two-hit: D = 0, 80, 70, the last chunk below the one word's
-    // entries (81 with the flag).
-    let nest = [(0, 40), (100, -50), (60, 180)];
-    let (works, margins, end, _) = walk(&nest, 240, 3, 40);
-    assert_eq!(works, [WORDS, ChunkWork::OneWord, WORDS_BACK]);
-    assert_eq!(margins, DiagonalMargins::default());
-    assert_eq!(end, 290);
-    // One-hit: D = 0, 40, -10: the last chunk's hits reach 10 positions below the start.
-    let (_, margins, _, _) = walk(&nest, 240, 3, 0);
-    assert_eq!(
-        margins,
-        DiagonalMargins {
-            below_start: 10,
-            past_end: 0
-        }
-    );
-    assert!(margins.stale());
-    // big: masks [40, 120) [60, 130), an overlap longer than the window. Two-hit: D = 0, 80, 60.
-    let big = [(0, 40), (120, -60), (130, 110)];
-    let (works, margins, _, _) = walk(&big, 240, 3, 40);
-    assert_eq!(works, [WORDS, ChunkWork::OneWord, WORDS_BACK]);
-    assert!(!margins.stale());
-    // lk: masks [40, 200) [60, 238). Two-hit: D = 0, 80, -20 and the end 22: the last chunk reaches
-    // 20 below the start, and the one word at 80 leaves an entry 98 past the end less the window.
-    let lk = [(0, 40), (200, -140), (238, 2)];
-    let (works, margins, end, _) = walk(&lk, 240, 3, 40);
-    assert_eq!(works, [WORDS, ChunkWork::OneWord, ChunkWork::OneWord]);
-    assert_eq!(
-        margins,
-        DiagonalMargins {
-            below_start: 20,
-            past_end: 98
-        }
-    );
-    assert_eq!(end, 22);
-    // One-hit: D = 0, 40, -100 and the end -98: the first chunk's entries (38) lie 136 past it.
-    let (works, margins, end, _) = walk(&lk, 240, 3, 0);
-    assert_eq!(works, [WORDS, ChunkWork::Nothing, ChunkWork::Nothing]);
-    assert_eq!(
-        margins,
-        DiagonalMargins {
-            below_start: 0,
-            past_end: 136
-        }
-    );
-    assert_eq!(end, -98);
-}
-
-/// Masks apart in the order of their start: every offset is at least the window past the
-/// entries before it, so no chunk goes back, and the margins are 0, at every word and window.
-#[test]
-fn walks_of_masks_apart_stay_within_the_sequence() {
-    let mut state = 0x2545_f491_4f6c_dd1d_u64;
-    let mut next = |below: u64| {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        state % below
-    };
-    for _ in 0..20_000 {
-        let length = 1 + next(300) as usize;
-        let mut chunks = Vec::new();
-        let mut left = 0usize;
-        while left < length {
-            let right = (left + next(40) as usize).min(length);
-            chunks.push((left, (right - left) as i32));
-            left = right + next(30) as usize;
-        }
-        let word = 1 + next(7) as i32;
-        let window = [0, 1, 2, 40, 1000][next(5) as usize];
-        let (works, margins, _, past) = walk(&chunks, length, word, window);
-        assert_eq!(
-            margins,
-            DiagonalMargins::default(),
-            "{chunks:?} {word} {window}"
-        );
-        assert_eq!(past, None, "{chunks:?} {word} {window}");
-        assert!(
-            works
-                .iter()
-                .all(|&work| work != ChunkWork::Words { reference: true }),
-            "{chunks:?} {word} {window}"
-        );
-    }
-}
-
-/// The one word of a chunk at the sequence's last letter runs past its sentinel: refused where an
-/// earlier entry within the window behind it would extend its hits (masks [10, 60) [20, 99)
-/// [30, 40) of a sequence of 100 letters), not where none does.
-#[test]
-fn words_past_the_end_that_can_change_a_result() {
-    let chunks = [(0, 10), (60, -40), (99, -69), (40, 60)];
-    let (works, margins, _, past) = walk(&chunks, 100, 3, 40);
-    assert_eq!(
-        works,
-        [WORDS, ChunkWork::OneWord, ChunkWork::OneWord, WORDS_BACK]
-    );
-    assert!(!margins.stale());
-    assert_eq!(past, Some(99));
-    // The same word with no entry within the window behind it and no chunk after it.
-    let (_, _, _, past) = walk(&[(0, 10), (99, -69)], 100, 3, 40);
-    assert_eq!(past, None);
-    // A word that ends at the sentinel reads no other sequence.
-    let (_, _, _, past) = walk(&[(0, 10), (60, -40), (98, -68), (40, 60)], 100, 3, 40);
-    assert_eq!(past, None);
-}
-
-/// The table is cleared before the sequence where the offset of a chunk that is not the last
-/// reaches `INT4_MAX / 4`, never for the last chunk (whose exit clears it as after any subject).
-#[test]
-fn clears_before_a_sequence_whose_inner_chunk_reaches_the_limit() {
-    let limit = i32::MAX / 4;
-    let mut lk = DiagonalWalk::new(3, 40, 240);
-    for (offset, length) in [(0, 40), (200, -140), (238, 2)] {
-        lk.chunk(offset, length);
-    }
-    // The inner chunks are at 0 and 80.
-    assert!(lk.clears_inside(limit - 80));
-    assert!(!lk.clears_inside(limit - 81));
-    let mut one = DiagonalWalk::new(3, 40, 240);
-    one.chunk(0, 240);
-    assert!(!one.clears_inside(i32::MAX));
-}
-
 /// The query of the one-word tests: `W W W` at query offset 4 among `A`s.
 fn query() -> Vec<u8> {
     let (a, w) = (ncbistdaa::A, ncbistdaa::W);
@@ -196,6 +36,21 @@ fn entry_behind(diff: i32, offset: i32) -> DiagStruct {
     entry
 }
 
+/// The seeds that `test` saves of the hits `hits` on `entries` (mask 63, offset 1000), with the
+/// query offset of each.
+fn saved_seeds(
+    test: &OneWord<'_>,
+    hits: &[i32],
+    entries: &mut [DiagStruct],
+    context: impl Fn(i32) -> WordContext,
+) -> Vec<(i32, OneWordSeed)> {
+    let mut saved = Vec::new();
+    test.test(hits, entries, 63, 1000, context, |q, seed| {
+        saved.push((q, seed))
+    });
+    saved
+}
+
 /// The hit at query offset 4 on the diagonal table (mask 63, offset 1000) with `entry` on its
 /// diagonal: whether it saved a seed, and the entry after it.
 fn test_hit(entry: DiagStruct, cutoff: i32) -> (bool, DiagStruct) {
@@ -203,9 +58,24 @@ fn test_hit(entry: DiagStruct, cutoff: i32) -> (bool, DiagStruct) {
     let letters = [ncbistdaa::W; 3];
     let mut entries = vec![DiagStruct::default(); 64];
     entries[4] = entry;
-    let saved = one_word(&query, &letters).test(&[4], &mut entries, 63, 1000, context(cutoff));
-    (saved, entries[4])
+    let saved = saved_seeds(
+        &one_word(&query, &letters),
+        &[4],
+        &mut entries,
+        context(cutoff),
+    );
+    (!saved.is_empty(), entries[4])
 }
+
+/// The seed of `W W W` at query offset 4 and subject offset 0 (`one_word_extension`).
+const WWW_SEED: OneWordSeed = OneWordSeed {
+    score: 33,
+    right_extend: false,
+    s_last_off: 3,
+    q_start: 4,
+    s_start: 0,
+    length: 3,
+};
 
 #[test]
 fn one_word_hits_on_the_diagonal_table() {
@@ -222,8 +92,28 @@ fn one_word_hits_on_the_diagonal_table() {
     let (saved, entry) = test_hit(entry_behind(10, 1000), 34);
     assert!(!saved);
     assert_eq!((entry.last_hit(), entry.flag()), (1000, 0));
-    // At the cutoff the seed is saved: LOSAT's refusal.
-    assert!(test_hit(entry_behind(10, 1000), 33).0);
+    // At the cutoff the seed is saved (the chunk's ungapped hit, for its gapped stage), and the
+    // hit becomes the last hit as after any extension that stayed left.
+    let query = query();
+    let letters = [ncbistdaa::W; 3];
+    let mut entries = vec![DiagStruct::default(); 64];
+    entries[4] = entry_behind(10, 1000);
+    let saved = saved_seeds(&one_word(&query, &letters), &[4], &mut entries, context(33));
+    assert_eq!(saved, [(4, WWW_SEED)]);
+    assert_eq!((entries[4].last_hit(), entries[4].flag()), (1000, 0));
+    // A saved seed does not end the test of the word's hits: the next hit, on its own diagonal,
+    // is tested too (here 10 behind as well).
+    entries[4] = entry_behind(10, 1000);
+    entries[5] = entry_behind(10, 1000);
+    let saved = saved_seeds(
+        &one_word(&query, &letters),
+        &[4, 5],
+        &mut entries,
+        context(1),
+    );
+    assert_eq!(saved.len(), 2);
+    assert_eq!(saved[0], (4, WWW_SEED));
+    assert_eq!(saved[1].0, 5);
     // A first hit 3 behind: the left walk reaches it, the right walk reads nothing of a chunk of
     // one letter (its start is past the chunk), and the entry takes the flag at the walk's last
     // offset less the word plus one.
@@ -258,34 +148,31 @@ fn one_word_context_test_is_unsigned() {
     // 3 behind: query offset 1, before the context's start: the hit becomes the last hit.
     let mut entries = vec![DiagStruct::default(); 64];
     entries[4] = entry_behind(3, 1000);
-    assert!(!test.test(&[4], &mut entries, 63, 1000, in_context));
+    assert!(saved_seeds(&test, &[4], &mut entries, in_context).is_empty());
     assert_eq!((entries[4].last_hit(), entries[4].flag()), (1000, 0));
     // 10 behind: query offset -6, a large unsigned offset: extended, and the seed is saved.
     entries[4] = entry_behind(10, 1000);
-    assert!(test.test(&[4], &mut entries, 63, 1000, in_context));
+    assert_eq!(
+        saved_seeds(&test, &[4], &mut entries, in_context),
+        [(4, WWW_SEED)]
+    );
 }
 
 /// The extension of the one word: NCBI's two-hit extension with the chunk's length as the bound
-/// of the right walk; the first hit's end is signed.
+/// of the right walk; the first hit's end is signed. The ungapped hit is the word's three letters
+/// (the left walk's best start, at the chunk's offset, to the first walk's best end, past the
+/// chunk of one letter: the right walk reads nothing).
 #[test]
 fn one_word_extension() {
     let query = query();
     let letters = [ncbistdaa::W; 3];
     let test = one_word(&query, &letters);
-    assert_eq!(
-        test.extend(-7, 4, 16),
-        OneWordSeed {
-            score: 33,
-            right_extend: false,
-            s_last_off: 3,
-        }
-    );
+    assert_eq!(test.extend(-7, 4, 16), WWW_SEED);
     assert_eq!(
         test.extend(0, 4, 16),
         OneWordSeed {
-            score: 33,
             right_extend: true,
-            s_last_off: 3,
+            ..WWW_SEED
         }
     );
 }
@@ -334,9 +221,15 @@ fn one_word_extension_is_the_reference_two_hit_extension() {
             word as usize,
         )
         .expect("the word lies within both sequences");
+        let data = want.ungapped_data;
         assert_eq!(
             (got.score, got.right_extend, got.s_last_off),
-            (want.ungapped_data.score, want.right_extend, want.s_last_off),
+            (data.score, want.right_extend, want.s_last_off),
+            "{query:?} {letters:?} q={q} s_left_off={s_left_off} x_drop={x_drop}"
+        );
+        assert_eq!(
+            (got.q_start, got.s_start, got.length),
+            (data.q_start, data.s_start, data.length),
             "{query:?} {letters:?} q={q} s_left_off={s_left_off} x_drop={x_drop}"
         );
         extended += usize::from(got.right_extend);
@@ -345,13 +238,61 @@ fn one_word_extension_is_the_reference_two_hit_extension() {
 }
 
 #[test]
-fn short_chunk_seed_refusal_names_the_oid_and_passes_as_is() {
-    let error = short_chunk_seed_refusal(17, "BLASTX");
+fn short_chunk_refusals_name_the_oid_and_pass_as_is() {
+    let error = short_chunk_tree_refusal(17, "BLASTX", -5);
     assert!(error.is::<ShortChunkSeedRefusal>());
     let text = error.to_string();
     assert!(
-        text.starts_with("-db_hard_mask: the sequence of OID 17 has a part between overlapping"),
+        text.starts_with(
+            "-db_hard_mask: the sequence of OID 17 has a part shorter than the word after \
+             overlapping masks, of -5 letters to NCBI BLAST+ 2.17.0"
+        ),
         "{text}"
     );
     assert!(text.ends_with("LOSAT's BLASTX does not search such a database with -db_hard_mask"));
+    let error = short_chunk_merge_refusal(17, "BLASTP");
+    assert!(error.is::<ShortChunkSeedRefusal>());
+    let text = error.to_string();
+    assert!(
+        text.starts_with(
+            "-db_hard_mask: the sequence of OID 17 has a part shorter than the word after \
+             overlapping masks, whose alignments"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("which LOSAT's BLASTP does not do yet"),
+        "{text}"
+    );
+}
+
+/// NCBI's merge after a chunk runs its joins where an HSP of the joined list ends past the
+/// chunk's offset and one of the chunk's starts before its offset plus the overlap (any start
+/// where the overlap is read past the list of ranges).
+#[test]
+fn merges_that_join_a_chunk_with_the_list() {
+    let chunk = |overlap, overlap_past_list| crate::core::subject_split::HardChunk {
+        offset: 100,
+        length: 2,
+        residual: 0,
+        full_range: false,
+        range: 2,
+        overlap,
+        overlap_past_list,
+    };
+    let joins = |chunk: crate::core::subject_split::HardChunk, ends: &[i32], starts: &[i32]| {
+        merge_joins(&chunk, ends.iter().copied(), starts.iter().copied())
+    };
+    // Earlier HSPs that end at the offset or before it: no join.
+    assert!(!joins(chunk(100, false), &[40, 100], &[100]));
+    // One that ends past it, with a start within the overlap: a join; past the overlap: none.
+    assert!(joins(chunk(100, false), &[40, 101], &[150]));
+    assert!(!joins(chunk(100, false), &[101], &[200]));
+    // No overlap: the chunk's HSPs start at its offset or after it.
+    assert!(!joins(chunk(0, false), &[101], &[100]));
+    // The overlap read past the list: any start.
+    assert!(joins(chunk(0, true), &[101], &[10_000]));
+    // No HSP on one side.
+    assert!(!joins(chunk(100, false), &[], &[100]));
+    assert!(!joins(chunk(100, false), &[101], &[]));
 }

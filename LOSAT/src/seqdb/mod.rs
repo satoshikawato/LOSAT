@@ -82,7 +82,9 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 pub use alias::SearchPath;
 pub use column::ColumnBlock;
 pub use header::Defline;
-pub use mask::{BlockMasks, MaskAlgorithm, MaskAlgorithms, MaskBlock, MaskRanges, NameMaskError};
+pub use mask::{
+    BlockMasks, MaskAlgorithm, MaskAlgorithms, MaskBlock, MaskRanges, NameMaskError, SearchedPlace,
+};
 pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader};
 #[cfg(test)]
 pub use volume::{BLASTNA_SENTINEL, FENCE_SENTRY};

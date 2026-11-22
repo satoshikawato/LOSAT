@@ -18,7 +18,7 @@ use std::sync::{
 use std::time::Instant;
 
 use crate::algorithm::blastn::blast_engine::QueryReading;
-use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, TreeHsp};
 use crate::algorithm::common::db_mask_search::SearchMask;
 use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
@@ -535,6 +535,29 @@ impl BlastpSubjectScratch {
         self.preliminary_interval_tree.reset();
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 135-150
+    /// The diagonal table as NCBI's thread makes it (`BlastExtendWordNew`: every entry 0 without
+    /// the flag, the offset the window), for the first searched sequence of a `-db_hard_mask`
+    /// search (`db_masked.rs`), whose chunks can go back below its start onto those entries
+    /// (`common::hard_chunk_walk::DiagonalWalk::start_on_new_table`).
+    fn new_table(&mut self, window: i32) {
+        self.diag_offset = window;
+        self.diag_array.fill(DiagStruct::default());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// The table cleared (`s_BlastDiagClear`: every entry the window less than 0, the offset the
+    /// window): by `Blast_ExtendWordExit` where the offset reached INT4_MAX / 4 (`finish_chunk`),
+    /// and after the last searched sequence of a `-db_hard_mask` search whose entries lie past its
+    /// end, which no other sequence reads in NCBI's search (`db_masked.rs`).
+    #[cold]
+    fn clear_table(&mut self, window: i32) {
+        self.diag_offset = window;
+        for diag in &mut self.diag_array {
+            *diag = DiagStruct::clear(window);
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:152-172
     fn finish_subject(&mut self, subject_length: usize, window: i32) {
         self.finish_chunk(subject_length as i32, window);
@@ -546,21 +569,9 @@ impl BlastpSubjectScratch {
     #[inline(always)]
     fn finish_chunk(&mut self, length: i32, window: i32) {
         if self.diag_offset >= i32::MAX / 4 {
-            self.clear_diagonals(window);
+            self.clear_table(window);
         } else {
             self.diag_offset += length + window;
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
-    /// The diagonal table cleared and its offset set to `window`, as `Blast_ExtendWordExit` does at
-    /// INT4_MAX / 4 (also before a masked sequence in whose chunks that clear would fall,
-    /// `hard_chunk_scan::DiagonalWalk::clears_inside`).
-    #[inline(always)]
-    fn clear_diagonals(&mut self, window: i32) {
-        self.diag_offset = window;
-        for diag in &mut self.diag_array {
-            *diag = DiagStruct::clear(window);
         }
     }
 }
@@ -4077,24 +4088,30 @@ pub(super) fn preliminary_hit_from_local_match_hsp(local_hsp: &BlastpHsp) -> Bla
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3975-4000
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:510-795 (cited at
+// `BlastIntervalTree::try_add_hsp`)
+/// The interval tree rebuilt from the HSPs `preliminary_hits` that the exact retry keeps: their
+/// count, or `None` where NCBI's insertion of one of them never ends (an HSP out of the tree's
+/// bounds, of a hard chunk shorter than the word: `BlastpPrelimKernel::one_word_gapped`).
 fn rebuild_preliminary_interval_tree_from_list(
     interval_tree: &mut BlastIntervalTree,
     preliminary_hits: &[BlastpPreliminaryHsp],
     contexts: &[QueryContext],
-) -> usize {
+) -> Option<usize> {
     interval_tree.reset();
     let mut inserted = 0usize;
     for preliminary_hsp in preliminary_hits {
         let context_idx = usize::try_from(preliminary_hsp.query_context)
             .expect("preliminary blastp query context must be non-negative");
-        interval_tree.add_hsp(
+        if !interval_tree.try_add_hsp(
             preliminary_tree_hsp(preliminary_hsp, contexts[context_idx].frame_base),
             contexts[context_idx].frame_base,
-            IndexMethod::QueryAndSubject,
-        );
+        ) {
+            return None;
+        }
         inserted += 1;
     }
-    inserted
+    Some(inserted)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3777-3786
@@ -4140,6 +4157,17 @@ fn blastp_get_start_for_gapped_alignment_int4_length(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4246-4258, 4262-4295
+// The left extension reads the subject's letters from its start to the gapped start, the right one
+// runs only where the gapped start lies before the subject's last letter, over the rest of its
+// length; a subject shorter than 90,000 letters (MAX_SUBJECT_OFFSET) is not shifted.
+/// The preliminary gapped alignment of `init_hsp` on the subject whose letters after the leading
+/// sentinel are `subject_sequence` (the sentinel after them included) and whose length is
+/// `subject_length` (NCBI's `subject->length`: the subject's letters, or the length of a hard chunk
+/// shorter than the word, `Int4`, whose seed lies in the stored letters past it,
+/// `BlastpPrelimKernel::one_word_gapped`). The alignment reads the letters up to the larger of
+/// that length and one past the gapped start, which gives NCBI's two extensions in both cases.
+#[allow(clippy::too_many_arguments)]
 fn extend_preliminary_blastp_hit(
     init_hsp: &mut InitHSP,
     s_idx: u32,
@@ -4147,6 +4175,7 @@ fn extend_preliminary_blastp_hit(
     ctx: &QueryContext,
     query_sequence: &[u8],
     subject_sequence: &[u8],
+    subject_length: i32,
     matrix: ScoringMatrix,
     gap_open: i32,
     gap_extend: i32,
@@ -4155,7 +4184,6 @@ fn extend_preliminary_blastp_hit(
     scratch: &mut GapAlignScratch,
 ) -> BlastpPreliminaryHsp {
     let query_raw = &query_sequence[..ctx.aa_len];
-    let subject_raw = &subject_sequence[..subject_sequence.len() - 1];
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3900-3905
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3900-3945
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3945
@@ -4174,6 +4202,10 @@ fn extend_preliminary_blastp_hit(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3943-3945
     init_hsp.s_seed += gapped_q_start - init_hsp.q_seed_absolute;
     init_hsp.q_seed_absolute = gapped_q_start;
+    let s_seed = usize::try_from(init_hsp.s_seed)
+        .expect("NCBI BLAST preliminary gapped subject start must be non-negative");
+    let subject_raw =
+        &subject_sequence[..usize::try_from(subject_length).unwrap_or(0).max(s_seed + 1)];
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3943-3949
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3949-3978
     let aligned = blastp_score_only_gapped_alignment_with_scratch(
@@ -4181,8 +4213,7 @@ fn extend_preliminary_blastp_hit(
         subject_raw,
         usize::try_from(gapped_q_start)
             .expect("NCBI BLAST preliminary gapped query start must be non-negative"),
-        usize::try_from(init_hsp.s_seed)
-            .expect("NCBI BLAST preliminary gapped subject start must be non-negative"),
+        s_seed,
         matrix,
         gap_open,
         gap_extend,
@@ -6027,7 +6058,9 @@ fn search(
         ),
     };
     // LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`) come where NCBI
-    // starts the search, after its checks.
+    // starts the search, after its checks. The lookup table can hold a word with the residue 0
+    // only where a query holds the gap `-` (`common::hard_chunk_walk::DiagonalWalk::new`; a
+    // query's masked letters are counted too, which can only refuse more).
     if let (Some(database), Some(mask)) = (database, args.db_mask_resolved.as_ref()) {
         mask.check_losat_limits(
             database.seqdb(),
@@ -6035,6 +6068,9 @@ fn search(
             crate::blastinput::db_mask::HardScan::Protein {
                 word: args.word_size as i32,
                 window: args.window_size as i32,
+                zero_words: searched_queries
+                    .iter()
+                    .any(|record| record.sequence.contains(&b'-')),
             },
         )?;
     }

@@ -12,15 +12,17 @@
 //!   the whole sequence's length (`Runtime::subject`), as NCBI does after the chunks. Every chunk
 //!   is walked, whatever its length (masks may overlap or nest, or be out of the order of their
 //!   start; series NP, M4b-3b): a chunk shorter than the word gives the two-hit search its one word
-//!   (`blastp::hard_chunk_scan::OneWord`) and the one-hit search nothing, and the diagonal offset
-//!   moves by each chunk's length plus the window.
+//!   (`blastp::hard_chunk_scan::OneWord`), whose seeds go through the chunk's gapped stage or are
+//!   its ungapped HSPs, and the one-hit search nothing, and the diagonal offset moves by each
+//!   chunk's length plus the window.
 //!
 //! The masks come from `SeqDb::read_mask_block` a window of sequences at a time
 //! (`algorithm::common::db_mask_search::SubjectMasks`, one reader per worker's diagonal table); a
-//! read error is the reader's error of the search (`x_db_stream::XReadError`). LOSAT's refusal of
-//! a sequence whose short chunk saves a seed is the search's error of that sequence
-//! (`blastp::hard_chunk_scan::short_chunk_seed_refusal`, passed on as it is by
-//! `native::search_error_as_is`).
+//! read error is the reader's error of the search (`x_db_stream::XReadError`). LOSAT's refusals
+//! of a sequence whose short chunk's HSPs NCBI's interval tree splits without end or its merge
+//! joins with another chunk's are the search's errors of that sequence
+//! (`blastp::hard_chunk_scan::short_chunk_tree_refusal`, `short_chunk_merge_refusal`, passed on
+//! as they are by `native::search_error_as_is`).
 
 use anyhow::Result;
 
@@ -29,15 +31,16 @@ use super::super::parameters::ContextParameters;
 use super::super::preliminary::{sort_by_score, PreliminaryHsp};
 use super::super::query_setup::PreparedQueryBatch;
 use super::super::results::subject_besthit_preliminary;
-use super::super::seed::{BxLookup, Diagonals};
+use super::super::seed::{sort_initial_hits, BxLookup, Diagonals, InitHsp};
 use super::super::subjects::Subjects;
 use super::super::x_db_stream::XReadError;
-use super::{compute_subject, compute_subject_of, SubjectComputation, SubjectPiece};
+use super::{compute_subject, compute_subject_of, one_word_hits, SubjectComputation, SubjectPiece};
 use crate::algorithm::blastp::hard_chunk_scan::{
-    short_chunk_seed_refusal, ChunkWork, DiagonalWalk, OneWord, WordContext,
+    merge_joins, short_chunk_merge_refusal, short_chunk_tree_refusal, OneWord, WordContext,
 };
 use crate::algorithm::common::database::search_read_error_of;
 use crate::algorithm::common::db_mask_search::{SearchMask, SubjectPlan};
+use crate::algorithm::common::hard_chunk_walk::{ChunkWork, DiagonalWalk};
 use crate::core::subject_split::HardChunk;
 use crate::seqdb::{SeqDb, SeqDbError};
 
@@ -196,15 +199,19 @@ impl Masked<'_> {
     /// The sequence's computation: the link cutoffs of its whole length (`compute_subject_with`),
     /// and its HSPs over the soft ranges or the hard chunks, each piece searched by the default
     /// path's bodies (`masked_piece`). Every hard chunk is walked in order
-    /// (`hard_chunk_scan::DiagonalWalk`): a chunk that holds a word is searched over its own
-    /// letters (over the scan range of the whole chunk, the reference scan, where its diagonal
-    /// offset went back below an entry of an earlier chunk); a shorter one gives the two-hit
-    /// search its one word ([`Masked::one_word`]; LOSAT's refusal of the sequence where that word
-    /// saves a seed) and the one-hit search nothing. The sequences that LOSAT refuses before the
-    /// search never come here (`blastinput::db_mask::HardMaskShape`: masks out of the order of
-    /// their start, past the end, a range longer than `MAX_DBSEQ_LEN`, word hits that reach other
-    /// sequences' diagonal entries, a one word past the sentinel that can change a result), so the
-    /// sequence's result does not depend on the sequences the table searched before it.
+    /// (`common::hard_chunk_walk::DiagonalWalk`): a chunk that holds a word is searched over its
+    /// own letters (over the scan range of the whole chunk, the reference scan, where its diagonal
+    /// offset went back below an entry of the table); a shorter one gives the two-hit search its
+    /// one word ([`Masked::one_word`]), whose seeds go through the chunk's gapped stage, or are its
+    /// HSPs in an ungapped search (LOSAT's refusal of the sequence where NCBI's interval tree
+    /// splits without end or its merge joins them with another chunk's), and the one-hit search
+    /// nothing. The first searched sequence starts on NCBI's new table, and the table is cleared
+    /// after the last one where its entries lie past its end. The sequences that LOSAT refuses
+    /// before the search never come here (`blastinput::db_mask::HardMaskShape`: masks out of the
+    /// order of their start, past the end, a range longer than `MAX_DBSEQ_LEN`, a tail mask with
+    /// masks stored after it, word hits that reach other sequences' diagonal entries, a one word
+    /// past the sentinel that can change a result), so the sequence's result does not depend on
+    /// the sequences the table searched before or after it.
     fn compute(&self, diagonals: &mut Diagonals) -> Result<SubjectComputation> {
         let Masked {
             db,
@@ -271,56 +278,99 @@ impl Masked<'_> {
         plan.start_hard(stored, length);
         let mut chunks = Vec::new();
         plan.hard_chunks(&mut chunks);
-        let walk = || DiagonalWalk::new(options.word_size, options.window_size, length);
-        let mut ahead = walk();
-        for chunk in &chunks {
-            ahead.chunk(chunk.offset, chunk.length);
+        let (first, last) = (oid == 0, oid + 1 == db.num_seqs() as usize);
+        // The search's walk takes a one word that covers the sentinel to store entries (its lookup
+        // finds no hit: BLASTX's translation has no residue 0), so `reference` is exact or more.
+        let mut walk = DiagonalWalk::new(options.word_size, options.window_size, length, true);
+        if first {
+            diagonals.new_table();
+            walk.start_on_new_table();
         }
-        if ahead.clears_inside(diagonals.offset()) {
-            diagonals.clear();
-        }
-        let mut walk = walk();
         let mut raw = Vec::new();
         let mut purged = Vec::new();
         let mut containment = Vec::new();
         let mut letters = Vec::new();
         for &chunk in &chunks {
-            let reference = match walk.chunk(chunk.offset, chunk.length) {
-                ChunkWork::Words { reference } => reference,
-                ChunkWork::OneWord => {
-                    if self.one_word(diagonals, residues, chunk) {
-                        return Err(short_chunk_seed_refusal(db.oid(oid as u32), PROGRAM));
+            // The exit of this chunk's word finder clears the table (`Diagonals::finish_chunk`).
+            let clears = diagonals.offset() >= i32::MAX / 4;
+            let work = walk.chunk(chunk.offset, chunk.length);
+            let found = match work {
+                ChunkWork::Words { reference } => {
+                    // The chunk's letters between the sentinels that the sequence has.
+                    letters.clear();
+                    if x_lead {
+                        letters.push(0);
                     }
+                    letters
+                        .extend_from_slice(&residues[chunk.offset..chunk.offset + chunk.letters()]);
+                    letters.push(0);
+                    let whole = [(0, chunk.length)];
+                    let SubjectComputation {
+                        raw: chunk_raw,
+                        purged: chunk_purged,
+                        containment: chunk_containment,
+                        ..
+                    } = piece(
+                        diagonals,
+                        SubjectPiece {
+                            buffer: &letters,
+                            ranges: reference.then_some(&whole[..]),
+                        },
+                    )?;
+                    Some((chunk_raw, chunk_purged, chunk_containment))
+                }
+                ChunkWork::OneWord => {
+                    let seeds = self.one_word(diagonals, residues, chunk, &mut letters);
                     diagonals.finish_chunk(chunk.length)?;
-                    continue;
+                    if seeds.is_empty() {
+                        None
+                    } else {
+                        let mut chunk_containment = Vec::new();
+                        let Some((chunk_raw, chunk_purged)) = one_word_hits(
+                            batch,
+                            params,
+                            options,
+                            &letters,
+                            chunk.length,
+                            &seeds,
+                            xdrop,
+                            x_containment,
+                            &mut chunk_containment,
+                        )?
+                        else {
+                            return Err(short_chunk_tree_refusal(
+                                db.oid(oid as u32),
+                                PROGRAM,
+                                chunk.length,
+                            ));
+                        };
+                        Some((chunk_raw, chunk_purged, chunk_containment))
+                    }
                 }
                 ChunkWork::Nothing => {
                     diagonals.finish_chunk(chunk.length)?;
-                    continue;
+                    None
                 }
             };
-            // The chunk's letters between the sentinels that the sequence has.
-            letters.clear();
-            if x_lead {
-                letters.push(0);
+            if clears {
+                walk.clear();
             }
-            letters.extend_from_slice(&residues[chunk.offset..chunk.offset + chunk.letters()]);
-            letters.push(0);
-            let whole = [(0, chunk.length)];
-            let SubjectComputation {
-                raw: chunk_raw,
-                purged: chunk_purged,
-                containment: chunk_containment,
-                ..
-            } = piece(
-                diagonals,
-                SubjectPiece {
-                    buffer: &letters,
-                    ranges: reference.then_some(&whole[..]),
-                },
-            )?;
+            let Some((chunk_raw, chunk_purged, chunk_containment)) = found else {
+                continue;
+            };
             let offset = chunk.offset as i32;
             let chunk_hits = !chunk_purged.is_empty();
+            // Only the HSPs of a chunk shorter than the word can meet another chunk's
+            // (`HardMaskShape::PartsOutOfOrder` refuses chunks that hold words and meet).
+            if chunk_hits
+                && merge_joins(
+                    &chunk,
+                    purged.iter().map(|hsp: &PreliminaryHsp| hsp.s_end),
+                    chunk_purged.iter().map(|hsp| hsp.s_start + offset),
+                )
+            {
+                return Err(short_chunk_merge_refusal(db.oid(oid as u32), PROGRAM));
+            }
             raw.extend(chunk_raw.into_iter().map(|hsp| shifted(hsp, offset)));
             purged.extend(chunk_purged.into_iter().map(|hsp| shifted(hsp, offset)));
             containment.extend(
@@ -333,6 +383,10 @@ impl Masked<'_> {
                 sort_by_score(&mut purged);
                 subject_besthit_preliminary(&mut purged);
             }
+        }
+        // Past the last searched sequence's end no sequence reads its entries.
+        if last && walk.margins().past_end > 0 {
+            diagonals.clear();
         }
         // The merge's order: by score.
         sort_by_score(&mut purged);
@@ -352,8 +406,16 @@ impl Masked<'_> {
     /// sequence's; zeros past its end, which only a word whose hits change nothing reads:
     /// `HardMaskShape::WordPastEnd`), their lookup hits by the reference scan of one word, and
     /// NCBI's two-hit test of each on the diagonal table with the contexts' X-drops and cutoffs.
-    /// Returns whether a hit saved a seed.
-    fn one_word(&self, diagonals: &mut Diagonals, residues: &[u8], chunk: HardChunk) -> bool {
+    /// Returns the seeds that it saved, in the order of the gapped stage (`seed::
+    /// sort_initial_hits`), with the chunk's subject offsets; `letters` keeps the word's letters
+    /// and the sentinel after them, the subject of the chunk's gapped stage.
+    fn one_word(
+        &self,
+        diagonals: &mut Diagonals,
+        residues: &[u8],
+        chunk: HardChunk,
+        letters: &mut Vec<u8>,
+    ) -> Vec<InitHsp> {
         let Masked {
             batch,
             params,
@@ -364,8 +426,9 @@ impl Masked<'_> {
         let word = options.word_size;
         let size = usize::try_from(word).unwrap_or(0);
         // The word and the sentinel after it, as the scan reads a subject.
-        let mut letters =
-            residues[chunk.offset..(chunk.offset + size).min(residues.len())].to_vec();
+        letters.clear();
+        letters
+            .extend_from_slice(&residues[chunk.offset..(chunk.offset + size).min(residues.len())]);
         letters.resize(size + 1, 0);
         let mut hits = Vec::new();
         let range = [(0, word)];
@@ -373,13 +436,13 @@ impl Masked<'_> {
         match lookup {
             BxLookup::Wide(lookup) => super::super::x_soft_subject::x_scan(
                 lookup,
-                &letters,
+                letters,
                 &range,
                 options.window_size,
                 &mut each,
             ),
             BxLookup::Narrow(lookup) => {
-                lookup.x_scan(&letters, size, Some(&range), options.window_size, &mut each)
+                lookup.x_scan(letters, size, Some(&range), options.window_size, &mut each)
             }
         }
         let test = OneWord {
@@ -402,7 +465,19 @@ impl Masked<'_> {
             }
         };
         let (entries, mask, offset) = diagonals.table();
-        test.test(&hits, entries, mask, offset, context)
+        let mut seeds = Vec::new();
+        test.test(&hits, entries, mask, offset, context, |q, seed| {
+            seeds.push(InitHsp {
+                q_seed: q,
+                s_seed: 0,
+                q_start: seed.q_start,
+                s_start: seed.s_start,
+                length: seed.length,
+                score: seed.score,
+            })
+        });
+        sort_initial_hits(&mut seeds);
+        seeds
     }
 }
 

@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use super::*;
-use crate::seqdb::SeqType;
+use crate::seqdb::{SearchedPlace, SeqType};
 
 fn dbmask(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -718,7 +718,13 @@ fn shape_of(
     length: &dyn Fn() -> Option<usize>,
     scanned_word: usize,
 ) -> Result<Option<HardMaskShape>, ()> {
-    HardMaskShape::of_scan(masks, bounds, length, HardScan::Nucleotide { scanned_word })
+    HardMaskShape::of_scan(
+        masks,
+        bounds,
+        length,
+        HardScan::Nucleotide { scanned_word },
+        SearchedPlace::default(),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-830 (the frames' ranges
@@ -746,7 +752,14 @@ fn translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start() {
     use std::cell::Cell;
     let scan = HardScan::Translated { min_length: 17 };
     let shape = |masks: &[(u32, u32)], length: usize| {
-        HardMaskShape::of_scan(masks, None, &|| Some(length), scan).unwrap()
+        HardMaskShape::of_scan(
+            masks,
+            None,
+            &|| Some(length),
+            scan,
+            SearchedPlace::default(),
+        )
+        .unwrap()
     };
     let crash = |frame, start, end| Some(HardMaskShape::FrameStartMask { frame, start, end });
     assert_eq!(shape(&[(300, 390)], 1200), None);
@@ -810,8 +823,9 @@ fn translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start() {
         reads.set(reads.get() + 1);
         Some(1200)
     };
-    let of =
-        |masks: &[(u32, u32)], bounds| HardMaskShape::of_scan(masks, Some(bounds), &read, scan);
+    let of = |masks: &[(u32, u32)], bounds| {
+        HardMaskShape::of_scan(masks, Some(bounds), &read, scan, SearchedPlace::default())
+    };
     assert_eq!(of(&[(300, 390)], (1197, 1200)), Ok(None));
     assert_eq!(reads.get(), 0);
     // Bounds whose lengths differed in shape before M4b-3 (at 1197 frame +2, of 398 residues, has
@@ -863,9 +877,17 @@ fn protein_shapes_of_the_hard_masks() {
     let protein = HardScan::Protein {
         word: 3,
         window: 40,
+        zero_words: false,
     };
     let of = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
-        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan).unwrap()
+        HardMaskShape::of_scan(
+            masks,
+            Some((length, length)),
+            &|| Some(length),
+            scan,
+            SearchedPlace::default(),
+        )
+        .unwrap()
     };
     // Masks within the sequence: searched, also where a chunk is shorter than the word (NCBI's
     // one-hit scan reads no word of it, its two-hit scan one word that extends nothing).
@@ -943,10 +965,28 @@ fn protein_shapes_of_overlapping_masks() {
     let two_hit = HardScan::Protein {
         word: 3,
         window: 40,
+        zero_words: false,
     };
-    let one_hit = HardScan::Protein { word: 3, window: 0 };
+    let one_hit = HardScan::Protein {
+        word: 3,
+        window: 0,
+        zero_words: false,
+    };
+    // A query with the gap `-`, whose lookup table can hold a word with the residue 0 (review H2).
+    let gap_query = HardScan::Protein {
+        word: 3,
+        window: 40,
+        zero_words: true,
+    };
     let of = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
-        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan).unwrap()
+        HardMaskShape::of_scan(
+            masks,
+            Some((length, length)),
+            &|| Some(length),
+            scan,
+            SearchedPlace::default(),
+        )
+        .unwrap()
     };
     let stale = |below_start, past_end| {
         Some(HardMaskShape::StaleDiagonals {
@@ -964,8 +1004,10 @@ fn protein_shapes_of_overlapping_masks() {
     assert_eq!(of(&[(40, 120), (60, 130)], 240, one_hit), stale(20, 0));
     // Masks with the same start.
     assert_eq!(of(&[(40, 100), (40, 60)], 240, two_hit), None);
-    // lk: refused in both searches.
-    let lk = of(&[(40, 200), (60, 238)], 240, two_hit);
+    // lk: refused in both searches. The one word at 238 covers the sentinel: it reaches below the
+    // start only with a query that can hit a word with the residue 0 (review H2).
+    assert_eq!(of(&[(40, 200), (60, 238)], 240, two_hit), stale(0, 98));
+    let lk = of(&[(40, 200), (60, 238)], 240, gap_query);
     assert_eq!(lk, stale(20, 98));
     assert_eq!(
         lk.unwrap().text(),
@@ -974,23 +1016,28 @@ fn protein_shapes_of_overlapping_masks() {
          thread keeps for the sequences it searches: its rows then depend on the sequences \
          searched next to this one, which vary by run with threads"
     );
+    // One-hit: the first chunk's entries reach 0 + 40 - 3 + 2 = 39 (a word whose letters score 0
+    // at most, review L2), 137 past the end -98.
     let lk = of(&[(40, 200), (60, 238)], 240, one_hit);
-    assert_eq!(lk, stale(0, 136));
+    assert_eq!(lk, stale(0, 137));
     assert!(lk
         .unwrap()
         .text()
-        .contains("word hits of the sequence reach 136 positions past its end on its table"));
+        .contains("word hits of the sequence reach 137 positions past its end on its table"));
     // A short chunk at the last letter, whose one word reads past the sentinel, after a chunk that
     // went back within the window of its entries.
-    let past = of(&[(10, 60), (20, 99), (30, 40)], 100, two_hit);
+    // Only a query that can hit a word with the residue 0, the sentinel's, finds a hit there
+    // (review H2).
+    let past = of(&[(10, 60), (20, 99), (30, 40)], 100, gap_query);
     assert_eq!(past, Some(HardMaskShape::WordPastEnd { offset: 99 }));
     assert!(past
         .unwrap()
         .text()
         .starts_with("has a part between masks at 99 shorter than the word, whose one word"));
+    assert_eq!(of(&[(10, 60), (20, 99), (30, 40)], 100, two_hit), None);
     assert_eq!(
         of(&[(10, 60), (20, 99), (30, 40)], 100, one_hit),
-        stale(99, 47)
+        stale(99, 48)
     );
     // Out of the order of their start: searched where the chunks that can hold alignments do not
     // meet, as the seg masks of UniRef50_A0A835SUY3 (segmasker 2.17.0), whose third mask starts a
@@ -1017,7 +1064,7 @@ fn protein_shapes_of_overlapping_masks() {
         shape.unwrap().text(),
         "has masks out of order ([100, 130) after [250, 280)): its part after [100, 130) starts \
          before the end of its part before [250, 280), and NCBI BLAST+ 2.17.0 joins the two parts' \
-         alignments by a merge across that overlap"
+         alignments by a merge across that overlap, which LOSAT does not do yet"
     );
     assert_eq!(
         of(&[(250, 280), (100, 130)], 300, one_hit),
@@ -1053,6 +1100,95 @@ fn protein_shapes_of_overlapping_masks() {
     }
 }
 
+/// The place of a sequence among the searched ones (`SearchedPlace`): the first searched
+/// sequence's hits below its start meet the entries of NCBI's new table, which every run gives,
+/// and the entries past the last one's end are read by no sequence, so neither margin refuses
+/// them (the rows db.pmask.*.ov_nest.w0 and db.pmask.*.ov_big.w0 of a database of one sequence);
+/// the other margin still does (the walk on the new table:
+/// `hard_chunk_walk::tests::a_new_table_holds_entries_the_window_below_the_start`).
+#[test]
+fn protein_shapes_at_the_first_and_last_searched_sequence() {
+    let of = |masks: &[(u32, u32)], length: usize, window: i32, place: SearchedPlace| {
+        let scan = HardScan::Protein {
+            word: 3,
+            window,
+            zero_words: true,
+        };
+        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan, place)
+            .unwrap()
+    };
+    let (first, last) = (
+        SearchedPlace {
+            first: true,
+            last: false,
+        },
+        SearchedPlace {
+            first: false,
+            last: true,
+        },
+    );
+    let only = SearchedPlace {
+        first: true,
+        last: true,
+    };
+    let stale = |below_start, past_end| {
+        Some(HardMaskShape::StaleDiagonals {
+            below_start,
+            past_end,
+        })
+    };
+    // nest, one-hit: 10 below the start.
+    let nest = [(40, 100), (50, 60)];
+    assert_eq!(of(&nest, 240, 0, SearchedPlace::default()), stale(10, 0));
+    assert_eq!(of(&nest, 240, 0, first), None);
+    assert_eq!(of(&nest, 240, 0, last), stale(10, 0));
+    assert_eq!(of(&nest, 240, 0, only), None);
+    // lk, two-hit with the residue 0: 20 below the start and 98 past the end.
+    let lk = [(40, 200), (60, 238)];
+    assert_eq!(of(&lk, 240, 40, first), stale(0, 98));
+    assert_eq!(of(&lk, 240, 40, last), stale(20, 0));
+    assert_eq!(of(&lk, 240, 40, only), None);
+}
+
+/// A mask that runs to the end after the chunk from the start, with masks stored after it (review
+/// L1, probe M/m4b3b/probe/fix1): refused in the protein programs, after a mask before it and
+/// one inside it too; without the later masks searched as before (PD-LOSAT-NCBI-DEFECTS exception
+/// 21).
+#[test]
+fn tail_masks_with_masks_stored_after_them() {
+    let of = |masks: &[(u32, u32)], window: i32| {
+        let scan = HardScan::Protein {
+            word: 3,
+            window,
+            zero_words: false,
+        };
+        HardMaskShape::of_scan(
+            masks,
+            Some((240, 240)),
+            &|| Some(240),
+            scan,
+            SearchedPlace::default(),
+        )
+        .unwrap()
+    };
+    let refused = Some(HardMaskShape::TailMaskWithLaterMasks {
+        start: 65,
+        end: 240,
+    });
+    for window in [0, 40] {
+        assert_eq!(of(&[(65, 240)], window), None);
+        assert_eq!(of(&[(65, 240), (55, 64)], window), refused);
+        assert_eq!(of(&[(65, 240), (100, 120)], window), refused);
+        assert_eq!(of(&[(55, 64), (65, 240)], window), None);
+    }
+    assert_eq!(
+        refused.unwrap().text(),
+        "has a mask, [65, 240), running to its end after the part from its start, and masks \
+         stored after it, which NCBI BLAST+ 2.17.0 does not apply when it searches that part past \
+         its end but applies to the letters of its alignments"
+    );
+}
+
 /// Masks at random, apart in the order of their start, overlapping in that order, or out of it:
 /// masks apart are never refused, and bounds that give one shape at both ends give it at every
 /// length between them (the chunks change only with the last chunk's length;
@@ -1068,14 +1204,23 @@ fn protein_shapes_of_random_masks() {
         state % below
     };
     let shape = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
-        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan).unwrap()
+        HardMaskShape::of_scan(
+            masks,
+            Some((length, length)),
+            &|| Some(length),
+            scan,
+            SearchedPlace::default(),
+        )
+        .unwrap()
     };
     let (mut bounded, mut refused) = (0, 0);
     let (mut out_of_order, mut searched, mut parts) = (0, 0, 0);
     for _ in 0..20_000 {
+        let window = [0, 1, 40, 100][next(4) as usize];
         let scan = HardScan::Protein {
             word: 2 + next(5) as i32,
-            window: [0, 1, 40, 100][next(4) as usize],
+            window,
+            zero_words: window == 100,
         };
         // 0: apart; 1: in the order of their start; 2: each start back by up to 29 letters.
         let order = next(3);
@@ -1105,7 +1250,13 @@ fn protein_shapes_of_random_masks() {
                 );
             }
         }
-        let Ok(found) = HardMaskShape::of_scan(&masks, Some((low, high)), &|| None, scan) else {
+        let Ok(found) = HardMaskShape::of_scan(
+            &masks,
+            Some((low, high)),
+            &|| None,
+            scan,
+            SearchedPlace::default(),
+        ) else {
             continue;
         };
         bounded += 1;

@@ -25,7 +25,7 @@ use anyhow::Result;
 use crate::cli::NativeError;
 use crate::core::subject_split::HardSplitState;
 use crate::report::archive::options::{Param, ParamValue};
-use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
+use crate::seqdb::{MaskAlgorithm, NameMaskError, SearchedPlace, SeqDb, SeqDbError};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2342-2356
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2226-2229,2367-2382
@@ -277,8 +277,8 @@ impl ResolvedMask {
         db.check_search_masks(self.id)
             .map_err(|error| crate::algorithm::common::database::database_error(error, program))?;
         if self.kind == MaskKind::Hard {
-            let found = db.first_searched_masks(self.id, |masks, bounds, length| {
-                HardMaskShape::of_scan(masks, bounds, length, scan)
+            let found = db.first_searched_masks(self.id, |masks, place, bounds, length| {
+                HardMaskShape::of_scan(masks, bounds, length, scan, place)
             });
             if let Some((oid, volume, shape)) = found {
                 anyhow::bail!(
@@ -349,21 +349,29 @@ pub enum HardScan {
     /// M4b-3b: the Owner's answer of 2026-11-21 on overlapping masks): every chunk is searched as
     /// NCBI searches it, those between overlapping masks of a negative length too, and the
     /// diagonal offset moves by each chunk's length plus the window
-    /// (`algorithm::blastp::hard_chunk_scan::DiagonalWalk`); the one-hit scan reads no word of a
+    /// (`algorithm::common::hard_chunk_walk::DiagonalWalk`); the one-hit scan reads no word of a
     /// chunk shorter than the word, the two-hit scan the one word at its start. Refused: a mask
     /// that ends before it starts (`HardMaskShape::Inverted`), a part between masks that can hold
     /// alignments and starts before the end of an earlier such part, whose alignments NCBI's
-    /// merge joins (`HardMaskShape::PartsOutOfOrder`), a hard range longer than `MAX_DBSEQ_LEN`,
-    /// which NCBI cuts into chunks that its merge joins across their overlap
-    /// (`HardMaskShape::LongRange`), a mask that ends past the sequence (`HardMaskShape::PastEnd`),
-    /// chunks whose word hits reach the diagonal entries of other sequences
-    /// (`HardMaskShape::StaleDiagonals`), and the one word of a chunk that runs past the
-    /// sequence's sentinel where it can change a result (`HardMaskShape::WordPastEnd`).
+    /// merge joins (`HardMaskShape::PartsOutOfOrder`, not yet ported), a hard range longer than
+    /// `MAX_DBSEQ_LEN`, which NCBI cuts into chunks that its merge joins across their overlap
+    /// (`HardMaskShape::LongRange`, not yet ported), a mask that ends past the sequence
+    /// (`HardMaskShape::PastEnd`), a mask that runs to the end after the chunk from the start with
+    /// masks stored after it (`HardMaskShape::TailMaskWithLaterMasks`), chunks whose word hits
+    /// reach the diagonal entries of other sequences (`HardMaskShape::StaleDiagonals`: not for
+    /// the hits of the first searched sequence below its start, which meet the entries of a new
+    /// table, nor for the entries past the end of the last one, which no sequence reads), and the
+    /// one word of a chunk that runs past the sequence's sentinel where it can change a result
+    /// (`HardMaskShape::WordPastEnd`).
     Protein {
         /// The letters of a word.
         word: i32,
         /// The two-hit window (0: the one-hit search).
         window: i32,
+        /// Whether the query's lookup table can hold a word with the residue 0, the sequence's
+        /// sentinel byte (BLASTP: a query that holds the gap `-`; BLASTX never, its translation
+        /// gives `X` for a codon with a gap): `common::hard_chunk_walk::DiagonalWalk::new`.
+        zero_words: bool,
     },
     /// tblastn and tblastx (translated nucleotide subjects; series NP, M4b PR 2): the complement
     /// of a sequence's stored masks is mapped to each of its six frames (`x / 3`, the minus
@@ -456,12 +464,14 @@ pub enum HardMaskShape {
     /// that they read as cleared): NCBI's table is the thread's, so its rows of these sequences
     /// depend on which sequences its thread searches next to them, which varies by run with
     /// threads (probe 2 of M/m4b3b/NOTES_M4B3B.md, `lk400`). The margins of
-    /// `algorithm::blastp::hard_chunk_scan::DiagonalWalk::margins`.
+    /// `algorithm::common::hard_chunk_walk::DiagonalWalk::margins`, less those that no other
+    /// sequence meets: below the start of the first searched sequence (NCBI's thread searches it
+    /// first, with a new table, `BlastExtendWordNew`) and past the end of the last one.
     StaleDiagonals { below_start: i64, past_end: i64 },
     /// A chunk at `offset` shorter than the word, of a two-hit search in a protein program
     /// (`HardScan::Protein`; series NP, M4b-3b), whose one word runs past the sequence's sentinel
     /// where its hits can change a result: NCBI reads the last letters of that word from the next
-    /// sequence of the database file (`algorithm::blastp::hard_chunk_scan::DiagonalWalk::
+    /// sequence of the database file (`algorithm::common::hard_chunk_walk::DiagonalWalk::
     /// word_past_end`).
     WordPastEnd { offset: usize },
     /// A mask `[start, end)` that ends before it starts, in a protein program
@@ -475,12 +485,24 @@ pub enum HardMaskShape {
     /// that `mask` ends before `before` starts though it is stored after it. NCBI's merge after the
     /// later chunk takes the earlier chunks' HSPs that end past its offset to join them with its
     /// own (`Blast_HSPListsMerge`, blast_hits.c:2888-2911), which LOSAT's protein programs do not
-    /// port. Masks out of the order of their start whose chunks do not meet so are searched (the
-    /// chunks between them shorter than the word, or apart: segmasker writes such masks).
+    /// do yet (with `LongRange`'s merge, item M4b-3d of series NP). Masks out of the order of
+    /// their start whose chunks do not meet so are searched (the chunks between them shorter
+    /// than the word, or apart: segmasker writes such masks); where the HSPs of a chunk shorter
+    /// than the word meet another chunk's so, the search refuses the sequence when it finds them
+    /// (`blastp::hard_chunk_scan::short_chunk_merge_refusal`).
     PartsOutOfOrder {
         before: (u32, u32),
         mask: (u32, u32),
     },
+    /// A mask `[start, end)` that runs to the end after the chunk from the start, with masks
+    /// stored after it, in a protein program (`HardScan::Protein`; series NP, M4b-3b, review L1):
+    /// NCBI's chunk loop ends at that chunk (its "no chunking" branch scans the full range past
+    /// it, PD-LOSAT-NCBI-DEFECTS exception 21) and never applies the later masks in its search,
+    /// while its alignments read their letters as masked (probe of M/m4b3b/probe/fix1: rows that
+    /// differ from those of the masks without the later one, and searches that never end in the
+    /// one-hit search). Exception 21 defines LOSAT's result of a tail mask by the input with that
+    /// mask one letter shorter, whose chunks differ here, so no near input defines it.
+    TailMaskWithLaterMasks { start: u32, end: u32 },
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268 (cited at
@@ -526,7 +548,8 @@ impl HardMaskShape {
     // A protein database is never fetched in part.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1326-1333
     /// The shape of the stored masks `masks` (`[start, end)`, as stored, not empty) of a sequence
-    /// whose length `length` gives, that `-db_hard_mask` refuses in a search whose scan is `scan`
+    /// whose length `length` gives, at the place `place` among the searched sequences, that
+    /// `-db_hard_mask` refuses in a search whose scan is `scan`
     /// (BLASTN's `HardScan::Nucleotide`, whose words have `scanned_word` letters: the word size,
     /// or the discontiguous template's length), or
     /// `None`; `Err(())` when the length cannot be read (`SeqDb::first_searched_masks`). With
@@ -584,6 +607,7 @@ impl HardMaskShape {
         bounds: Option<(usize, usize)>,
         length: &dyn Fn() -> Option<usize>,
         scan: HardScan,
+        place: SearchedPlace,
     ) -> Result<Option<HardMaskShape>, ()> {
         if masks.is_empty() {
             return Ok(None);
@@ -634,24 +658,26 @@ impl HardMaskShape {
             .max()
             .unwrap_or(0);
         if let Some((low, high)) = bounds.filter(|&(low, _)| last_end < low) {
-            let shape = Self::of_chunks(masks, low, scan, &mut split);
-            if Self::of_chunks(masks, high, scan, &mut split) == shape {
+            let shape = Self::of_chunks(masks, low, scan, place, &mut split);
+            if Self::of_chunks(masks, high, scan, place, &mut split) == shape {
                 return Ok(shape);
             }
         }
         let length = length().ok_or(())?;
-        Ok(Self::of_chunks(masks, length, scan, &mut split))
+        Ok(Self::of_chunks(masks, length, scan, place, &mut split))
     }
 
     /// The shape of the masks `masks` of a sequence of `length` letters (sorted and apart except in
-    /// a protein program), read off its chunks (`HardMaskShape::of_scan`); `split` is the chunker,
-    /// whose buffer of ranges is reused.
+    /// a protein program) at the place `place`, read off its chunks (`HardMaskShape::of_scan`);
+    /// `split` is the chunker, whose buffer of ranges is reused.
     fn of_chunks(
         masks: &[(u32, u32)],
         length: usize,
         scan: HardScan,
+        place: SearchedPlace,
         split: &mut HardSplitState,
     ) -> Option<HardMaskShape> {
+        use crate::algorithm::common::hard_chunk_walk::DiagonalWalk;
         use crate::core::subject_split::{
             complement_masks, HardChunk, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN,
         };
@@ -679,8 +705,13 @@ impl HardMaskShape {
             HardScan::Nucleotide { scanned_word } => {
                 (scanned_word, scanned_word < TAIL_MASK_SEARCHED_WORD)
             }
-            HardScan::Protein { word, window } => {
-                return Self::of_protein_chunks(masks, length, word, window, split);
+            HardScan::Protein {
+                word,
+                window,
+                zero_words,
+            } => {
+                let walk = DiagonalWalk::new(word, window, length, zero_words);
+                return Self::of_protein_chunks(masks, length, walk, place, split);
             }
             HardScan::Translated { .. } => (0, false),
         };
@@ -717,36 +748,49 @@ impl HardMaskShape {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276 (cited at
     // `core::subject_split::HardSplitState::next_chunk`)
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173 (cited at
-    // `algorithm::blastp::hard_chunk_scan::DiagonalWalk`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 110-155, 162-173
+    // (cited at `algorithm::common::hard_chunk_walk::DiagonalWalk`): a thread's table is made with
+    // its entries 0 and its offset the window, and the exit of each chunk's word finder moves it.
     /// The shape of a protein program's chunks of a sequence of `length` letters (`split`, started
-    /// on the hard ranges of its masks `masks`) in a search with the word `word` and the window
-    /// `window`: refused where a chunk that can hold alignments starts before the end of an
-    /// earlier one (`PartsOutOfOrder`, the first such chunk), else by the walk of their diagonal
-    /// offsets that the search runs (`DiagonalWalk`), where the sequence's word hits reach beyond
-    /// it (`StaleDiagonals`) or where the one word of a short chunk runs past its sentinel with an
-    /// effect (`WordPastEnd`). The chunks start at their range's left, so that `ShortLastMask`
-    /// never occurs. Only the last chunk's length changes with the sequence's length, and it can
-    /// hold alignments from some length on, so the first chunk that starts before an earlier
-    /// one's end is the same at every length between two that name the same one, and none
-    /// between two that name none (`HardMaskShape::of_scan` reads the shape at two lengths).
+    /// on the hard ranges of its masks `masks`) at the place `place`, walked with `walk` (a new
+    /// walk of the search's word and window): refused where the chunk from the start before a
+    /// mask that runs to the end has masks stored after that mask (`TailMaskWithLaterMasks`),
+    /// where a chunk that can hold alignments starts before the end of an earlier one
+    /// (`PartsOutOfOrder`, the first such chunk), else by the walk of their diagonal offsets that
+    /// the search runs (`DiagonalWalk`), where the sequence's word hits reach beyond it
+    /// (`StaleDiagonals`: below the start of the first searched sequence they meet the entries of
+    /// a new table, so the walk starts after them, and past the end of the last one no sequence
+    /// reads them) or where the one word of a short chunk runs past its sentinel with an effect
+    /// (`WordPastEnd`). The chunks start at their range's left, so that `ShortLastMask` never
+    /// occurs. Only the last chunk's length changes with the sequence's length, and it can hold
+    /// alignments from some length on, so the first chunk that starts before an earlier one's end
+    /// is the same at every length between two that name the same one, and none between two that
+    /// name none (`HardMaskShape::of_scan` reads the shape at two lengths).
     fn of_protein_chunks(
         masks: &[(u32, u32)],
         length: usize,
-        word: i32,
-        window: i32,
+        mut walk: crate::algorithm::common::hard_chunk_walk::DiagonalWalk,
+        place: SearchedPlace,
         split: &mut HardSplitState,
     ) -> Option<HardMaskShape> {
-        use crate::algorithm::blastp::hard_chunk_scan::DiagonalWalk;
         use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
-        let mut walk = DiagonalWalk::new(word, window, length);
+        let word = walk.word();
+        if place.first {
+            walk.start_on_new_table();
+        }
         // The farthest end of the earlier chunks that can hold alignments (the first of them on a
-        // tie) and its range. A chunk's HSPs end within its letters, and those of a chunk shorter
-        // than the word are only the seed of its one word, which LOSAT refuses
-        // (`hard_chunk_scan::short_chunk_seed_refusal`); NCBI's merge after a chunk with HSPs
+        // tie) and its range. A chunk's HSPs end within its letters; those of a chunk shorter
+        // than the word come from its one word and the search checks them as it finds them
+        // (`hard_chunk_scan::short_chunk_merge_refusal`). NCBI's merge after a chunk with HSPs
         // takes those of the earlier chunks that end past its offset.
         let mut held: Option<(usize, usize)> = None;
         while let Some(chunk) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
+            // The chunk's range ends where the mask of the same index starts: a mask that runs to
+            // the end, after which the loop ends.
+            if chunk.full_range && chunk.letters() < length && chunk.range + 1 < masks.len() {
+                let (start, end) = masks[chunk.range];
+                return Some(HardMaskShape::TailMaskWithLaterMasks { start, end });
+            }
             if chunk.length >= word {
                 let end = chunk.offset + chunk.letters();
                 match held {
@@ -765,10 +809,12 @@ impl HardMaskShape {
             walk.chunk(chunk.offset, chunk.length);
         }
         let margins = walk.margins();
-        if margins.stale() {
+        let below_start = if place.first { 0 } else { margins.below_start };
+        let past_end = if place.last { 0 } else { margins.past_end };
+        if below_start > 0 || past_end > 0 {
             return Some(HardMaskShape::StaleDiagonals {
-                below_start: margins.below_start,
-                past_end: margins.past_end,
+                below_start,
+                past_end,
             });
         }
         walk.word_past_end()
@@ -918,8 +964,13 @@ impl HardMaskShape {
             HardMaskShape::PartsOutOfOrder { before, mask } => format!(
                 "has masks out of order ([{}, {}) after [{}, {})): its part after [{}, {}) starts \
                  before the end of its part before [{}, {}), and NCBI BLAST+ 2.17.0 joins the two \
-                 parts' alignments by a merge across that overlap",
+                 parts' alignments by a merge across that overlap, which LOSAT does not do yet",
                 mask.0, mask.1, before.0, before.1, mask.0, mask.1, before.0, before.1
+            ),
+            HardMaskShape::TailMaskWithLaterMasks { start, end } => format!(
+                "has a mask, [{start}, {end}), running to its end after the part from its start, \
+                 and masks stored after it, which NCBI BLAST+ 2.17.0 does not apply when it \
+                 searches that part past its end but applies to the letters of its alignments"
             ),
         }
     }

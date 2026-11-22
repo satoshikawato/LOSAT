@@ -1,0 +1,36 @@
+Blast-def-line ::= {
+  title "gi of digits",
+  seqid {
+    gi 1914,
+    other {
+      accession "NP_191400",
+      version 1
+    }
+  },
+  taxid 0
+}
+
+Blast-def-line ::= {
+  title "gi of digits",
+  seqid {
+    gi 1914,
+    other {
+      accession "NP_191400",
+      version 1
+    }
+  },
+  taxid 0
+}
+
+Blast-def-line ::= {
+  title "pdb chain A",
+  seqid {
+    pdb {
+      mol "1914",
+      chain 65,
+      chain-id "A"
+    }
+  },
+  taxid 0
+}
+

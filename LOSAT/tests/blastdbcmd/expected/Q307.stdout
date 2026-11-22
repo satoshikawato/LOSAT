@@ -1,0 +1,27 @@
+Blast-def-line-set ::= {
+  {
+    title "alpha-like protein",
+    seqid {
+      swissprot {
+        name "TEST_HUMAN",
+        accession "P99999",
+        release "reviewed",
+        version 2
+      }
+    },
+    taxid 10090
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gi plus ref protein",
+    seqid {
+      gi 123456,
+      other {
+        accession "NP_000002",
+        version 1
+      }
+    },
+    taxid 10116
+  }
+}

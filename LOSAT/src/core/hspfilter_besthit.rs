@@ -63,11 +63,29 @@ impl BestHitParams {
     }
 }
 
+/// `BlastQueryInfoGetQueryLength` of a translated query (blastx, tblastx), the `qlen` over which
+/// the best hit key folds a minus-frame HSP: 2 plus the lengths of the query's three plus-strand
+/// contexts, or of its three minus-strand contexts when the first plus context is empty (only the
+/// minus strand searched). `context_lengths` are the query's six contexts in NCBI's order (the
+/// frames 1, 2, 3, -1, -2, -3), each the length of its translation as the query information holds
+/// it (0 for a strand that is not searched). The result is the length of the searched DNA for one
+/// of 2 or more letters, in the units of neither offset of the key, as NCBI's.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:141-161
+pub(crate) fn translated_query_length(context_lengths: &[i32]) -> i32 {
+    let start = if context_lengths[0] == 0 { 3 } else { 0 };
+    let length: i64 = 2 + context_lengths[start..start + 3]
+        .iter()
+        .map(|&length| i64::from(length))
+        .sum::<i64>();
+    i32::try_from(length).unwrap_or(i32::MAX)
+}
+
 /// What `s_BlastHSPBestHitRun` reads of an HSP: its range on the plus strand of the query
 /// (`begin`, already folded for a minus context by the caller, and `len`, the query extent of
 /// the HSP), its raw score and its e-value.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:233-243
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BestHitKey {
     pub(crate) begin: i32,
@@ -76,7 +94,35 @@ pub(crate) struct BestHitKey {
     pub(crate) evalue: f64,
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:42-49
+impl BestHitKey {
+    /// The key of an HSP of a query that has strands or frames: a minus context folds the HSP's
+    /// range in its context (`query_offset`, `query_end`) over `qlen`, the query's
+    /// `BlastQueryInfoGetQueryLength` (for a translated query a length of nucleotides while the
+    /// offsets are residues of the frame: NCBI mixes the two units, and so does the key).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266
+    pub(crate) fn new(
+        minus: bool,
+        qlen: i32,
+        query_offset: i32,
+        query_end: i32,
+        score: i32,
+        evalue: f64,
+    ) -> Self {
+        Self {
+            begin: if minus {
+                qlen - query_end
+            } else {
+                query_offset
+            },
+            len: query_end - query_offset,
+            score,
+            evalue,
+        }
+    }
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:43-50
 /// `hsp` is the slot of the payload in the arena. `begin` and `end` are the range with the
 /// overhang of the stage (or without it after the list was rebuilt, `s_ImportFromHitlist`);
 /// `key_begin` is the range's start without it, which a rebuild reads again from the HSP.
@@ -131,7 +177,7 @@ impl<H> BestHitLists<H> {
         Self::new(params.overhang, params.score_edge, prelim_hitlist_size)
     }
 
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:65-78
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:67-80
     fn new(overhang: f64, score_edge: f64, prelim_hitlist_size: usize) -> Self {
         let size = i64::try_from(prelim_hitlist_size).unwrap_or(i64::MAX);
         Self {
@@ -167,7 +213,7 @@ impl<H> BestHitLists<H> {
     /// must come in the order NCBI writes them (the subjects in OID order, each subject's HSPs
     /// in the order of its list), because the result depends on it.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:228-332
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:237-352
     pub(crate) fn save(&mut self, query: usize, sid: u32, key: BestHitKey, hsp: H) {
         if self.lists.len() <= query {
             self.lists.resize_with(query + 1, Vec::new);
@@ -181,7 +227,7 @@ impl<H> BestHitLists<H> {
         let param_s = self.param_s;
         let den_a = f64::from(score_a) / f64::from(len_a) / param_s;
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:245-262
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:271-288
         // Is the new HSP bad: does an HSP of the list hold it with a better e-value and score?
         let list = &self.lists[query];
         let mut at = 0;
@@ -197,7 +243,7 @@ impl<H> BestHitLists<H> {
             at += 1;
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:264-294
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:290-323
         // The HSPs of the list that the new HSP makes bad are removed.
         let param_overhang = self.overhang;
         let overhang = i64::from(ncbi_int4_from_double(
@@ -237,7 +283,7 @@ impl<H> BestHitLists<H> {
             }
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:296-320
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:325-345
         // The new HSP goes before the first HSP whose start is not smaller.
         let slot = self.store(hsp);
         let list = &mut self.lists[query];
@@ -268,7 +314,7 @@ impl<H> BestHitLists<H> {
     /// dropped (an HSP list of NCBI's applications holds any number of HSPs, `BlastHspNumMax`),
     /// and the next rebuild waits for twice as many HSPs.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:85-182
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:88-186
     fn rebuild(&mut self, query: usize) {
         let list = std::mem::take(&mut self.lists[query]);
         let mut grouped: Vec<Vec<LinkedHspBh>> = Vec::new();
@@ -302,7 +348,7 @@ impl<H> BestHitLists<H> {
     /// the lists by e-value and saves them into a hit list of `prelim_hitlist_size`
     /// (`Blast_HitListSortByEvalue`, `Blast_HitListUpdate`).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231
     pub(crate) fn finalize(
         mut self,
         mut cmp: impl FnMut(&H, &H) -> Ordering,

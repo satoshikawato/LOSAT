@@ -41,7 +41,7 @@ The values come from UCRT itself: Windows PowerShell calls `_wputenv_s`, `_tzset
 
 Rows (tab-separated; a `TZ` value is written with `\\` for a backslash and `\\u{XXXX}` for a
 UTF-16 unit outside printable ASCII):
-    space <hex unit> <0|1>          `GetStringTypeW(CT_CTYPE1)` has `C1_SPACE` (UCRT's `iswspace`
+    space <hex unit> <0|1>          `GetStringTypeW` with `CT_CTYPE1` has `C1_SPACE` (UCRT's `iswspace`
                                     above U+00FF)
     zone  <TZ> <_timezone> <_daylight> <_dstbias>   after `_tzset`
     time  <TZ> <unix seconds> <offset|none>         `_localtime64_s`: local minus UTC seconds,

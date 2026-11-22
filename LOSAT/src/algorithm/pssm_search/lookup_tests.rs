@@ -107,12 +107,12 @@ fn debruijn3() -> Vec<u8> {
 }
 
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:310-421 testDebruijnPSSM
-// NCBI compiles the case out (`#if 0`, "Needs to be fixed to actually use a PSSM"); this port
-// runs it on the PSSM table: the query is the de Bruijn sequence of order 3 (every word once),
-// the PSSM row of each position BLOSUM62's column of its letter (`posMatrix[i][j] =
-// matrix[j][sequence[i+1]]`), threshold 11, word size 3. Every word's cell holds exactly the
-// query words whose score with it reaches 11 (the brute-force count of the test): the PSSM
-// table has no exact-word rule.
+// NCBI compiles the case out (`#if 0`, "Needs to be fixed to actually use a PSSM"); this port runs
+// it on the PSSM table: the query is the de Bruijn sequence of order 3 (every word once), the PSSM
+// row of each position BLOSUM62's column of its letter (row `i` of `posMatrix`, column `j`, is the
+// entry of `matrix` at row `j` and at the column of the letter of `sequence` at position one past
+// `i`), threshold 11, word size 3. Every word's cell holds exactly the query words whose score with
+// it reaches 11 (the brute-force count of the test): the PSSM table has no exact-word rule.
 #[test]
 fn debruijn_pssm_cells_hold_the_brute_force_neighbours() {
     let sequence = debruijn3();

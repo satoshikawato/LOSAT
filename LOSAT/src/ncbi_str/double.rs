@@ -1,10 +1,10 @@
-//! `NStr::StringToDouble(str)` with its default flags (corelib/ncbistr.cpp), which rpsbproc's
+//! `NStr::StringToDouble` with its default flags (corelib/ncbistr.cpp), which rpsbproc's
 //! data loader calls (`NStr::StringToNumeric<double>`, ncbistr.hpp:3632-3637) for the bit score
 //! thresholds of `bitscore_specific.txt`, the BLAST programs' argument readers for the SEG locut
 //! and hicut (`blastinput::app::read_seg_option`) and the constraints of the arguments
 //! (`blastinput::value_parsers`), and glibc's `strtod` that it reads the number with.
 //!
-//! Also `NStr::StringToDouble(str, NStr::fDecimalPosixOrLocal)`, which NCBI's argument reader
+//! Also `NStr::StringToDouble` with `NStr::fDecimalPosixOrLocal`, which NCBI's argument reader
 //! calls for an `eDouble` key (`CArg_Double`: every real argument of the BLAST programs and
 //! rpsbproc, `blastinput::value_parsers::ncbi_double`, and segmasker's `-locut` and `-hicut`,
 //! `ncbi_app::args`): [`string_to_double_posix_or_local`]; and NCBI's own decimal reader
@@ -24,11 +24,11 @@ use crate::utils::x87::X87;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1312-1319
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1342-1349
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1367-1375
-// The errors are thrown in `s_StringToDouble` (`double ncbi::s_StringToDouble(const char*,
-// size_t, ...)`, whose class part is `ncbi` for `CDiagCompileInfo::ParseCurrFunctName`,
-// ncbidiag.cpp:826-888) at lines 1317 (the first byte), 1343 (no number) and 1374
-// (`CHECK_ENDPTR`); glibc's `strtod` sets no errno other than `ERANGE`, so line 1348 is not
-// reached.
+// The errors are thrown in `s_StringToDouble` (a function of the `ncbi` namespace that takes a
+// `const char*`, a `size_t` and more, whose class part is `ncbi` for
+// `CDiagCompileInfo::ParseCurrFunctName`, ncbidiag.cpp:826-888) at lines 1317 (the first byte),
+// 1343 (no number) and 1374 (`CHECK_ENDPTR`); glibc's `strtod` sets no errno other than `ERANGE`,
+// so line 1348 is not reached.
 const STRING_TO_DOUBLE_INVAL: ThrowSite = convert_site(1317, "ncbi::s_StringToDouble");
 const STRING_TO_DOUBLE_NO_NUMBER: ThrowSite = convert_site(1343, "ncbi::s_StringToDouble");
 const STRING_TO_DOUBLE_ENDPTR: ThrowSite = convert_site(1374, "ncbi::s_StringToDouble");
@@ -37,9 +37,9 @@ const STRING_TO_DOUBLE_ENDPTR: ThrowSite = convert_site(1374, "ncbi::s_StringToD
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1283-1285
 // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:422-433
 // `str` of `s_StringToDouble` is the C string, so `strtod` and the end check (`str[pos]`) stop
-// at its first 0 byte ("12\0x" is 12), and the message of an error, `Message(str, ...)`, quotes
+// at its first 0 byte ("12\0x" is 12), and the message of an error, `Message`, quotes
 // the text before that byte (the other conversions quote the whole `CTempString`).
-/// `NStr::StringToDouble(str)` with the default flags: the first byte must be a digit, the
+/// `NStr::StringToDouble` with the default flags: the first byte must be a digit, the
 /// decimal point or a sign; `strtod` reads the number, which must end the C string.
 pub(crate) fn string_to_double(s: &[u8]) -> Result<f64, NcbiException> {
     let c_string = &s[..s.iter().position(|&b| b == 0).unwrap_or(s.len())];
@@ -68,7 +68,7 @@ pub(crate) fn string_to_double(s: &[u8]) -> Result<f64, NcbiException> {
 // `strtod` reads neither). A comma is never its decimal point; its other `inf` and its `nan` end
 // where `strtod`'s do or before. Its `errno` (`EINVAL` without digits, `ERANGE`) never turns a
 // number of `strtod` into an error: it is `EINVAL` only where `strtod` reads nothing either.
-/// `NStr::StringToDouble(str, NStr::fDecimalPosixOrLocal)`: as [`string_to_double`], but a comma
+/// `NStr::StringToDouble` with `NStr::fDecimalPosixOrLocal`: as [`string_to_double`], but a comma
 /// passes the check of the first byte (no number then starts there, and the error is that of
 /// no number), and NCBI's own reader `StringToDoublePosix` ([`string_to_double_posix`]) reads the
 /// text too; its number is taken where it reads further than `strtod`.
@@ -96,7 +96,7 @@ pub(crate) fn string_to_double_posix_or_local(s: &[u8]) -> Result<f64, NcbiExcep
 }
 
 /// What [`string_to_double_posix`] read: NCBI's number, and the bytes of the text that NCBI's
-/// reader took (`*endptr - ptr`), which do not depend on the number.
+/// reader took (from `ptr` to `*endptr`), which do not depend on the number.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PosixDouble {
     pub(crate) value: f64,
@@ -116,7 +116,7 @@ pub(crate) struct PosixDouble {
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:810-811
 pub(crate) const NCBI_NAN: f64 = f64::from_bits(0xfff8_0000_0000_0000);
 
-/// The x87 `long double` constant `1e<n>L` of `StringToDoublePosix` (`NCBI_CONST_LONGDOUBLE`):
+/// The x87 long double constant `1e<n>L` of `StringToDoublePosix` (`NCBI_CONST_LONGDOUBLE`):
 /// `1e-15` to `1e15` and the multiples of 16 up to 256 of either sign.
 fn long_double_pow10(n: i64) -> X87 {
     i32::try_from(n)
@@ -126,14 +126,14 @@ fn long_double_pow10(n: i64) -> X87 {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:985-1278
-/// `NStr::StringToDoublePosix(text, &endptr, flags)`, `finite` for `fDecimalPosixFinite`: NCBI's
-/// own reader of a decimal number, for the C string `text` (its first 0 byte, or its end, ends
-/// it). The `long double` arithmetic of NCBI's x86-64 build is the x87 unit's (`X87`, rounded to
-/// 64 bits each time); a mantissa of more than 18 digits goes through `third` and `second_mul`,
-/// whose x87 values pass the largest 80-bit value from some 4,900 digits on and become the
-/// infinity (`None` here). The `errno` it sets is not kept: no result depends on it
-/// (`string_to_double_posix_or_local` reads it, where it is `EINVAL` only if `strtod` read nothing
-/// too; `CObjectIStreamAsn::ReadDouble` and `CObjectIStreamXml::ReadDouble` do not).
+/// `NStr::StringToDoublePosix` with `text`, an end pointer and `flags`, `finite` for
+/// `fDecimalPosixFinite`: NCBI's own reader of a decimal number, for the C string `text` (its first
+/// 0 byte, or its end, ends it). The long double arithmetic of NCBI's x86-64 build is the x87
+/// unit's (`X87`, rounded to 64 bits each time); a mantissa of more than 18 digits goes through
+/// `third` and `second_mul`, whose x87 values pass the largest 80-bit value from some 4,900 digits
+/// on and become the infinity (`None` here). The `errno` it sets is not kept: no result depends on
+/// it (`string_to_double_posix_or_local` reads it, where it is `EINVAL` only if `strtod` read
+/// nothing too; `CObjectIStreamAsn::ReadDouble` and `CObjectIStreamXml::ReadDouble` do not).
 ///
 /// NCBI's `int` counters and exponent (`digits`, `dot_position`, `expvalue`, `exponent`) are
 /// `i64` here, and `expvalue * 10 + digit` and `exponent ± expvalue` saturate at its ends: where
@@ -187,7 +187,7 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
         return PosixDouble { value, end: ptr };
     }
     let (mut dot, mut expn, mut anydigits) = (false, false, false);
-    // NCBI's `int digits, dot_position`, widened (see above).
+    // NCBI's `digits` and `dot_position`, both `int`, widened (see above).
     let (mut digits, mut dot_position): (i64, i64) = (0, 0);
     let (mut first, mut second, mut first_mul): (u32, u32, u32) = (0, 0, 1);
     // `second_mul` and `third`, nonnegative; `None` is the x87 infinity.
@@ -261,7 +261,7 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
     if !anydigits {
         return PosixDouble { value: 0.0, end: 0 };
     }
-    // `int exponent`, widened: both counters are at most the length of the text.
+    // NCBI's `exponent`, an `int`, widened: both counters are at most the length of the text.
     let mut exponent: i64 = if dot { dot_position - digits } else { 0 };
     if expn && at(ptr) != 0 {
         let (mut expvalue, mut expsign, mut expnegate, mut expdigits) = (0i64, false, false, 0u64);
@@ -361,13 +361,14 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
                     e -= 1;
                 }
             }
-            // `ret < DBL_MIN`: the infinity is not.
+            // `ret` below `DBL_MIN`: the infinity is not.
             if finite && ret.is_some_and(|ret| ret.lt(X87::from_f64(f64::MIN_POSITIVE))) {
                 ret = Some(X87::from_f64(f64::MIN_POSITIVE));
             }
         }
     }
-    // `ret = -ret` (`fchs`) and `(double)ret` (the store to a double); the infinity keeps its sign.
+    // The negation of `ret` (`fchs`) and `ret` cast to `double` (the store to a double); the
+    // infinity keeps its sign.
     let value = match ret {
         Some(ret) if sign < 0 => ret.neg().to_f64(),
         Some(ret) => ret.to_f64(),

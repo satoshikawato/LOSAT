@@ -381,7 +381,7 @@ fn std_segs_of_a_translated_search() {
     assert!(matches!(masks[0].first, Some(MaskLocation::PackedInt(_))));
 }
 
-// `CSeq_align::GetSeq_id(0)` (Seq_align.cpp:339-358, cited at `std_segs`) as read: segments
+// `CSeq_align::GetSeq_id` for index 0 (Seq_align.cpp:339-358, cited at `std_segs`) as read: segments
 // without ids give the id of their first location, `null` going on to the next segment; a first
 // location of another variant is named; no id at all is `Missing`.
 #[test]

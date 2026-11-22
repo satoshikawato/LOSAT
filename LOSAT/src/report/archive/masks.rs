@@ -75,8 +75,8 @@ pub fn write_mask<E: Encoder>(enc: &mut E, mask: &MaskEntry) {
 }
 
 /// A `Seq-loc` `packed-int` value: one `Seq-interval` (`from`, `to`, `id`; no strand) for each
-/// interval of `intervals` (0-based, inclusive), each with the Seq-id `id` (`CSeq_loc(id,
-/// ranges)`, as the Blast4 masks and the mask writers of dustmasker build it).
+/// interval of `intervals` (0-based, inclusive), each with the Seq-id `id` (the `CSeq_loc` of `id`
+/// and the ranges, as the Blast4 masks and the mask writers of dustmasker build it).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:65-79
 pub fn write_packed_int<E: Encoder>(
@@ -96,7 +96,7 @@ pub fn write_packed_int<E: Encoder>(
     enc.end_variant();
 }
 
-/// `CSeq_loc(id, ranges)`: a Seq-loc `int` for one interval, else `packed-int`
+/// The `CSeq_loc` of `id` and the ranges: a Seq-loc `int` for one interval, else `packed-int`
 /// (`write_packed_int`); the mask writers of dustmasker build their Seq-locs so.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:173-182

@@ -271,9 +271,10 @@ impl<'a> RedoRun<'a> {
         }
     }
 
-    /// `MAX(gap_x_dropoff_final * NCBIMATH_LN2 / min_lambda, extendParams->gap_x_dropoff_final)`
-    /// before NCBI's `(Int4)` conversion (blast_kappa.c:2381-2383, cited at `new`): `new`'s
-    /// value with the final X-drop `bits` and the redo's Lambda `lambda`.
+    /// The larger of `gap_x_dropoff_final` times `NCBIMATH_LN2` over `min_lambda` and
+    /// `extendParams->gap_x_dropoff_final`, before NCBI's conversion to `Int4`
+    /// (blast_kappa.c:2381-2383, cited at `new`): `new`'s value with the final X-drop `bits` and
+    /// the redo's Lambda `lambda`.
     pub(crate) fn x_dropoff_of(bits: f64, lambda: f64, x_drop_final: i32) -> f64 {
         (bits * std::f64::consts::LN_2 / lambda).max(x_drop_final as f64)
     }
@@ -680,8 +681,9 @@ impl RedoMatch<'_> {
         redone.retain(|hsp| hsp.e_value <= self.expect_value);
         let first = redone.first()?;
         let best_score = first.align.score;
-        // NCBI's `best_evalue <= hitParams->options->expect_value` holds: the list keeps an HSP,
-        // whose e-value is at most `-evalue`, and `best_evalue` is the smallest of all.
+        // NCBI's test that `best_evalue` is at most `hitParams->options->expect_value` passes: the
+        // list keeps an HSP, whose e-value is at most `-evalue`, and `best_evalue` is the smallest
+        // of all.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-116
         let template = &hsps[0];
         let mut hsp_list = BlastpHspList {
@@ -952,7 +954,7 @@ impl RedoMatch<'_> {
                 raw_score: score,
                 query_context: template.q_idx as i32,
                 query_frame: template.query_frame,
-                // (`Blast_HSPInit(.., (Int2) align->frame, ..)`, blast_kappa.c:326-330.)
+                // (`Blast_HSPInit` takes `align->frame` cast to `Int2`, blast_kappa.c:326-330.)
                 subject_frame: if C::SUBJECT_IS_TRANSLATED {
                     align.frame
                 } else {
@@ -1288,8 +1290,8 @@ fn frame_windows<C: RedoInstance>(
         .collect()
 }
 
-/// `s_SequenceGetProteinRange` of a translated subject (`self->index < 0`, `align->frame !=
-/// 0`) for the window `window` whose first alignment is `window_align`: NCBI's buffer of the
+/// `s_SequenceGetProteinRange` of a translated subject (`self->index` below 0, `align->frame`
+/// not 0) for the window `window` whose first alignment is `window_align`: NCBI's buffer of the
 /// translation buffer's length plus 2 bytes (`calloc`), whose second byte on holds the frame's
 /// letters as NCBI finds them in `subject` (`GET_TRANSLATED_LENGTH` letters of `GET_NUCL_LENGTH`
 /// of the buffer's length, after the earlier frames' lengths plus a sentinel each), masked by SEG
@@ -1298,11 +1300,11 @@ fn frame_windows<C: RedoInstance>(
 /// `1 + window.begin`).
 ///
 /// Every read is inside `subject` and the buffer, also where NCBI's frame arithmetic does not
-/// match the buffer (`-strand plus|minus`, whose buffer holds three frames): with `nl =
-/// GET_NUCL_LENGTH(l)` the three lengths `GET_TRANSLATED_LENGTH(nl, f)` of `f` = 0, 1, 2 add up
-/// to `nl - 2`, so the copy of frame index 5 ends at `2 * (nl - 2) + 5 = 2 * ((l - 5) / 2) + 5 <=
-/// l`; a frame has letters only where `nl >= 3`, `l >= 7`. The window's alignments end inside
-/// their frame, so before `l`.
+/// match the buffer (`-strand plus|minus`, whose buffer holds three frames): with `nl` the
+/// `GET_NUCL_LENGTH` of `l`, the three lengths `GET_TRANSLATED_LENGTH` of `nl` and `f` for `f` =
+/// 0, 1, 2 add up to `nl - 2`, so the copy of frame index 5 ends at
+/// `2 * (nl - 2) + 5 = 2 * ((l - 5) / 2) + 5 <= l`; a frame has letters only where `nl >= 3`,
+/// `l >= 7`. The window's alignments end inside their frame, so before `l`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1597-1643
 /// `C`, the redo's instance, keeps each instance's own copy (`translation_buffer_counts`).

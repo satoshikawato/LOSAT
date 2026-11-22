@@ -343,6 +343,179 @@ class StatementTest(unittest.TestCase):
         self.assertEqual(self.quoted("// ```text\n// `q++;`\n// ```\n"), [])
         self.assertEqual(self.quoted("Prose `q++;` here.\n", "text"), [])
 
+    def expressions(
+        self, text: str, rel: str = "x.rs", style: str = "slash", losat: frozenset[str] = frozenset()
+    ) -> list[str]:
+        """The expressions found in `text`; `losat` stands for the names of LOSAT's code."""
+        return [
+            f.text
+            for f in checker.check_text(rel, text.split("\n"), style, TABLE, None, frozenset(), losat)
+            if f.source == checker.INLINE_EXPRESSION
+        ]
+
+    def test_c_and_cxx_expressions_in_backticks_are_quoted_and_left_to_the_writer(self) -> None:
+        # The Rust below reads into `text`, so `buffer` and `str` are the cited code's names.
+        code = "fn read(text: &mut Vec<u8>, count: usize) { let length = count; }\n"
+        for span in (
+            "m_Input.GetChars(count)",
+            "buffer[length] = 0",
+            "ReadLength() - 1",
+            "m_Input.GetStreamPosAsInt8() + ReadLengthLong(len)",
+            "str.reserve(count)",
+            "ERR_POST_X_ONCE(10, Warning << ...)",
+            "NStr::StringToInt8(str, flags)",
+            "hsp_list->best_evalue = s_BlastGetBestEvalue(hsp_list)",
+            "query_blk->length + 1",
+            "(Int4)opt->threshold",
+            "m_DsCnt++",
+            "out << value",
+            "SetToOpen(to + 1)",
+            "if (hrmaps.size() < dim)",
+            "SeqLen_t alnLen = qseq.size()",
+        ):
+            text = self.CITE + f"// The reader: `{span}` first.\n" + code
+            # Marks, and a statement's name foreign to the file under a citation, decide even
+            # when LOSAT's code elsewhere has the names.
+            self.assertEqual(self.expressions(text, losat=self.LOSAT), [f"`{span}`"], span)
+            lines = text.split("\n")
+            found = checker.check_text("x.rs", lines, "slash", TABLE)
+            self.assertEqual(checker.fix_lines(list(lines), "slash", found), lines, span)
+        # A mark of C or C++ decides without a citation, in Python too.
+        self.assertEqual(self.expressions("// NCBI's `m_Pos += n` here.\n"), ["`m_Pos += n`"])
+        self.assertEqual(
+            self.expressions('"""NCBI calls `GetChars(count)`."""\n', "x.py", "python"), ["`GetChars(count)`"]
+        )
+
+    # Names that LOSAT's code has elsewhere in the tree.
+    LOSAT = frozenset(
+        "Inputs new QueryEnd Error buffer length reserve count value out threshold opt size dim qseq"
+        " window diff threads from to text flags info".split()
+    )
+
+    def test_names_values_messages_and_rust_in_backticks_pass(self) -> None:
+        code = "fn read(source: &mut Source, query: &[u8], subject: &[u8]) {}\n"
+        for span in (
+            "(m_Pos = <n>)",
+            "Cannot convert string '12x' to Uint8 (m_Pos = 2)",
+            "read_all(&mut source)",
+            "Inputs::new(&query, &subject)",
+            "QueryEnd::Error(e)",
+            "a->b[c].d",
+            "hsp_list->hsp_array[0]->score",
+            "GetMsg()",
+            "NStr::StringToInt",
+            "std::string::operator==",
+            "c++/src/algo/blast/core/blast_hits.c:2",
+            "-evalue 1e-5",
+            "LOSAT_X_BPQBLOCK=1",
+            "NCBI C++ Exception:",
+            "Query= ",
+            "[X_STATS] TBNLUTLEAN lean= chain=",
+            "0x7f",
+        ):
+            text = self.CITE + f"// The reader: `{span}` first.\n" + code
+            self.assertEqual(self.expressions(text, losat=self.LOSAT), [], span)
+        # Without a mark, arithmetic and comparisons on LOSAT's names are reasoning about values,
+        # and a statement with the file's own names is LOSAT's; uncited, a statement with LOSAT's
+        # names is LOSAT's too.
+        code = "fn f(last_hit: i32, diag_offset: i32) { let d = last_hit; }\n"
+        for span in ("last_hit <= diag_offset - window", "diff >= 0", "ceil(threads / K)", "d = last_hit"):
+            found = self.expressions(self.CITE + f"// So `{span}` holds.\n" + code, losat=self.LOSAT)
+            self.assertEqual(found, [], span)
+        self.assertEqual(self.expressions("// LOSAT: `buffer[length] = 0` here.\n" + code, losat=self.LOSAT), [])
+        # JavaScript and TypeScript are of C's family: their comments show their own code.
+        self.assertEqual(self.expressions("// `new BroadcastChannel()` here.\n", "x.ts"), [])
+
+    CALLED = frozenset("listed warning subject_offset hits".split())
+
+    def test_text_rust_and_losats_calls_in_backticks_pass(self) -> None:
+        code = (
+            "fn f(mut visit: impl FnMut(i32) -> bool, w: Warning) { if let Warning::SeqId(x) = w {} }\n"
+        )
+        for span in (
+            "'x' to Int8 (m_Pos = 0)",
+            "Post-RPSBLAST Processing Utility (LOSAT 0.2.0)",
+            "basic_string::replace: __pos (which is N) > this->size() (which is M)",
+            "FnMut(ReaderWarning<'_>)",
+            "SeqId(warning)",
+            "visit(subject_offset, hits)",
+            "listed(n)",
+            "-KA--K",
+            "long double",
+            "unsigned int",
+        ):
+            text = self.CITE + f"// The reader: `{span}` first.\n" + code
+            found = [
+                f.text
+                for f in checker.check_text(
+                    "x.rs", text.split("\n"), "slash", TABLE, None, frozenset({"listed"}), self.CALLED
+                )
+                if f.source == checker.INLINE_EXPRESSION
+            ]
+            self.assertEqual(found, [], span)
+        # A cast written as a call, and a call in camel case without arguments, are C++'s.
+        for span in ("char(chain)", "ReadLength() - 1"):
+            self.assertEqual(self.expressions(self.CITE + f"// So `{span}` here.\n" + code), [f"`{span}`"])
+
+    def test_expressions_with_names_losats_code_never_uses_are_quoted(self) -> None:
+        code = "fn f(text: &str, buf: &mut [u8]) {}\n"
+        losat = frozenset("x y n from time text flags p i MDB_VALID std CSymDustMasker seq to start len min".split())
+        for span in (
+            # no mark: a name that LOSAT's code nowhere uses, cited or not
+            "*fff != '\\0'",
+            "rem == 4",
+            "lineCount == 1",
+            "getcwd(buf, 4095)",
+            "maxStartLen - startLen + k_StartSequenceMargin",
+            'std::length_error("vector::reserve")',
+            "TSeqAlignment::MapSegSet(segset)",
+            # marks of C or C++, whatever the names
+            "( (x) < (y) ? -1 : (x) > (y) )",
+            "((n) + 1U) & -2",
+            "(Uint4)-1",
+            "from--",
+            "time(nullptr)",
+            "CSeqDBVol::m_TaxCache(256)",
+            "CFastaDeflineReader::x_ProcessIDs(text, info)",
+            "NStr::StringToNumeric<Int8>(text, fConvErr_NoThrow)",
+            "flags^fGenerateLocalIDs",
+            "NODEPTR(p, i)",
+            "(0xffff & ~(MDB_VALID))",
+            "CSymDustMasker::operator()(seq)",
+            "i == min<int>(to, start+len)",
+        ):
+            for text in (self.CITE + f"// NCBI: `{span}` first.\n" + code, f"// So `{span}` first.\n" + code):
+                self.assertEqual(self.expressions(text, losat=losat), [f"`{span}`"], span)
+        # Python names its own things: there only marks and cited statements decide.
+        self.assertEqual(self.expressions('"""Run `losat_output_bytes(freeze)`."""\n', "x.py", "python"), [])
+
+    def test_formulas_definitions_and_other_text_in_backticks_pass(self) -> None:
+        for span in (
+            "Seq-descr ::= SET OF Seqdesc",
+            "|RN(x) - RN(y)| <= |x - y| + ulp",
+            "F[i] = max(max_{j<i} (v[j] - g), carry)",
+            "sum_i matrix[w[i]][c_i] >= threshold",
+            "[a_j - d, b_j - d)",
+            "num / den ~ significand * 2^(exponent - 63)",
+            "--AB-CDE",
+            "lcl|UniRef50_<10>",
+            "unlink(2)",
+            "DATA_LOADERS = none",
+            "set LOSAT_X_BPSUBJRUN=0 && ...",
+            "map<CSeq_id_Handle, CConstRef<CSeq_loc>>",
+            "core::hint::select_unpredictable(a < b, b, a)",
+        ):
+            self.assertEqual(self.expressions(self.CITE + f"// So `{span}` here.\n"), [], span)
+
+    def test_code_lines_under_a_label_with_the_path_in_backticks_are_quoted(self) -> None:
+        text = (
+            "    // NCBI `c++/src/algo/blast/core/blast_hits.c` lines 918-922:\n"
+            "    //   if( num > 1 ) {\n"
+            "    //   ++t0;\n"
+            "    let x = 1;\n"
+        )
+        self.assertEqual(self.quoted(text), [2, 3])
+
     def test_an_indented_block_after_a_blank_docstring_line_is_quoted(self) -> None:
         text = (
             'def f():\n    """Chunks.\n\n'

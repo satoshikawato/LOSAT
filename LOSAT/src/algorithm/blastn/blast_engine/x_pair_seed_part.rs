@@ -522,7 +522,7 @@ const SPIN_TURNS: u32 = 64;
 /// `pause`) the helper reads the stage's progress, and it leaves once the progress has not
 /// changed for `HELPER_STALL` by the clock. It looks on every such turn, not on every 64th: a
 /// turn that yields can take up to a scheduler quantum on a loaded machine (macOS's
-/// `sched_yield`, libpthread's `swtch_pri(0)`, lowers the thread's priority for up to
+/// `sched_yield`, libpthread's `swtch_pri` with 0, lowers the thread's priority for up to
 /// `thread_depress_time`, one quantum of 10 ms: XNU osfmk/kern/syscall_subr.c `swtch_pri`,
 /// osfmk/kern/sched_prim.c `sched_timeshare_timebase_init`), so 64 turns can take longer than
 /// a stall, the next look finds the stage moving again, and a stall of many times

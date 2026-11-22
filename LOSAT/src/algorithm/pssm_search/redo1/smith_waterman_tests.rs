@@ -272,7 +272,7 @@ fn the_window_copy_is_the_x_drop_redo() {
     assert_eq!(found[2], 0);
 }
 
-// One preliminary HSP: the redo stops after its first alignment (`window->hspcnt > 1`).
+// One preliminary HSP: the redo stops after its first alignment (`window->hspcnt` above 1).
 #[test]
 fn one_hsp_gives_one_alignment() {
     let consensus = encode(PROFILE);

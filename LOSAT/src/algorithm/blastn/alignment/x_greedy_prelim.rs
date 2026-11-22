@@ -1,23 +1,23 @@
 //! No NCBI counterpart: the preliminary (score-only) greedy gapped alignment of megablast run on
-//! the packed ncbi2na subject widened to one base per byte, with `compressed_subject = false`, so
+//! the packed ncbi2na subject widened to one base per byte, with `compressed_subject` off, so
 //! that the uncompressed scans of `BLAST_GreedyAlign` serve the preliminary stage too. A
 //! score-only call on those bytes runs `x_greedy_fused`, and `x_greedy_row` only where the fused
 //! loop declines the call.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4019-4025
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2786-2794,2833-2834
-//! NCBI runs the preliminary greedy alignment on the compressed subject (`rem` = `s_off % 4`
-//! to the right, 0 to the left) and the traceback on the uncompressed one (`rem` = 4). LOSAT
-//! gives the preliminary call the uncompressed form too, and has no packed form of the call
-//! (it was checked against the packed form when the copy was introduced and deleted at
-//! graduation, switch-tidy D2): byte `i` of the copy is `NCBI2NA_UNPACK_BASE(packed[i / 4],
-//! 3 - i % 4)`, the base the compressed scan reads. The scan predicate is the same (a query byte
-//! `>= 4` never matches, a byte below 4 matches iff it equals the base); the copy holds only
-//! 0..3, so it never reports a fence, and the compressed scan has none. To the right the call
-//! starts at base `s_off` of the chunk (the chunk starts at a multiple of 4, `next_chunk` in
-//! `run.rs`), to the left it reads base `s_off - 1 - i` of the whole chunk slice. The
-//! traceback blocks and `reduce_gaps`, which read subject bytes, run only with `do_traceback`,
-//! which is false here.
+//! NCBI runs the preliminary greedy alignment on the compressed subject (`rem` = `s_off % 4` to the
+//! right, 0 to the left) and the traceback on the uncompressed one (`rem` = 4). LOSAT gives the
+//! preliminary call the uncompressed form too, and has no packed form of the call (it was checked
+//! against the packed form when the copy was introduced and deleted at graduation, switch-tidy D2):
+//! byte `i` of the copy is the base that `NCBI2NA_UNPACK_BASE` takes from the packed byte at index
+//! `i` divided by 4 (rounded down), at position 3 minus the remainder of `i` divided by 4: the base
+//! the compressed scan reads. The scan predicate is the same (a query byte `>= 4` never matches, a
+//! byte below 4 matches iff it equals the base); the copy holds only 0..3, so it never reports a
+//! fence, and the compressed scan has none. To the right the call starts at base `s_off` of the
+//! chunk (the chunk starts at a multiple of 4, `next_chunk` in `run.rs`), to the left it reads base
+//! `s_off - 1 - i` of the whole chunk slice. The traceback blocks and `reduce_gaps`, which read
+//! subject bytes, run only with `do_traceback`, which is false here.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:516-520
 //! A call widens only the bases around its ungapped hit (`X_WINDOW_MARGIN` on each side, into
@@ -85,8 +85,10 @@ const X_UNPACKED: [[u8; COMPRESSION_RATIO]; 256] = {
 
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:52-55
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:365-368
-/// Byte `i` of the result is `NCBI2NA_UNPACK_BASE(packed[i / 4], 3 - i % 4)` for the first
-/// `len` bases (the remainder count in the last packed byte is not a base and is not copied).
+/// Byte `i` of the result is the base that `NCBI2NA_UNPACK_BASE` takes from the packed byte at
+/// index `i` divided by 4 (rounded down), at position 3 minus the remainder of `i` divided by 4,
+/// for the first `len` bases (the remainder count in the last packed byte is not a base and is
+/// not copied).
 pub(crate) fn x_unpack_ncbi2na(packed: &[u8], len: usize) -> Vec<u8> {
     let bytes = len.div_ceil(COMPRESSION_RATIO);
     assert!(
@@ -279,7 +281,7 @@ impl<'a> XPrelimSubject<'a> {
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2794
 /// The preliminary greedy alignment (the call at blast_gapalign.c:4019-4025), on the one-byte
-/// copy of the chunk (`XPrelimSubject::chunk`) with `compressed_subject = false` (module doc:
+/// copy of the chunk (`XPrelimSubject::chunk`) with `compressed_subject` false (module doc:
 /// same result as the packed call). LOSAT has no packed form of this call. `score_only` runs it
 /// on a window first.
 #[allow(clippy::too_many_arguments)]

@@ -150,8 +150,8 @@ impl RedoMatch<'_> {
             return Ok(Some(Vec::new()));
         }
         // The subject's letters after one sentinel and before another (NCBI's
-        // `seqData->buffer`, `seqData->data = buffer + 1`, blast_kappa.c:1601-1606 and 1640-1643):
-        // `ALIGN_EX` reads `subject->data - 1`.
+        // `seqData->buffer`, with `seqData->data` set one past it, blast_kappa.c:1601-1606 and
+        // 1640-1643): `ALIGN_EX` reads from one byte before `subject->data`.
         let subject_buffer = &mut sw.window;
         subject_buffer.clear();
         subject_buffer.push(0);
@@ -345,9 +345,9 @@ impl RedoMatch<'_> {
                 searchsp: self.stats.search_space as f64,
                 cutoff_e: self.expect_value,
             };
-            // NCBI asks the heap only for the match's first alignment (`alignments[query_index]
-            // == NULL`): the round loop asks at its window's first round, so a window after one
-            // that made alignments passes.
+            // NCBI asks the heap only for the match's first alignment, while
+            // `alignments[query_index]` is still `NULL`: the round loop asks at its window's first
+            // round, so a window after one that made alignments passes.
             let match_has_alignments = !made.is_empty();
             let (matrix, gap, x_dropoff) = (&run.matrix, &mut run.scratch, run.x_dropoff);
             let (gap_open, gap_extend) = (run.gap_open, run.gap_extend);

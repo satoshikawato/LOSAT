@@ -2168,22 +2168,41 @@ fn blastp_seqalign_format(outfmt: &str) -> Option<crate::report::serial::SerialF
     )?)
 }
 
+/// Whether NCBI's result of each query has no alignment set: a query of a batch that was not
+/// searched (`query_batch_skipped`), but the merge of several volumes gives each query a set, empty
+/// for such a batch, so outfmt 7 counts `# 0 hits found` there (review A of PS12a, S2's rpsblast
+/// half), XML2 and JSON write `hits` and the plain message, the organism report its header
+/// (PS15a-2 review B1).
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-180
+fn no_alignment_sets(
+    query_batch_skipped: &[bool],
+    rps_multi_volume: bool,
+) -> std::borrow::Cow<'_, [bool]> {
+    if rps_multi_volume {
+        std::borrow::Cow::Owned(vec![false; query_batch_skipped.len()])
+    } else {
+        std::borrow::Cow::Borrowed(query_batch_skipped)
+    }
+}
+
 /// Whether rpsblast recounts the identities of its HSPs for the reports of the call: none of them is
-/// a custom table, whose spec reads them its own way, or the BLAST archive, whose Seq-aligns show
-/// the traceback's count (`PrelimRun::rps_recount_identities`).
+/// a custom table, whose spec reads them its own way, or the BLAST archive or a Seq-annot (outfmt 8,
+/// 9, 12), whose Seq-aligns show the traceback's count (`PrelimRun::rps_recount_identities`;
+/// `ReportFormat::writes_seqaligns`, item PS15a-2).
 fn recounts_rps_identities(reports: &[BlastpReport]) -> bool {
     reports.iter().all(|report| {
         !matches!(
             report,
-            BlastpReport::CustomTabular(_) | BlastpReport::Archive
+            BlastpReport::CustomTabular(_) | BlastpReport::Archive | BlastpReport::Seqalign(_)
         )
     })
 }
 
 /// The pairwise view (`PairwiseView::of`) of the format number `number` where `app` writes it:
-/// outfmt 0, and BLASTP's query-anchored 1 to 4 (`Program::writes`; psiblast and rpsblast refuse
-/// those, line RG PS15). NCBI's application writes 0 to 4 through one frame (`PrintProlog`, the
-/// query batches, `PrintOneResultSet`), and so does LOSAT; `None` for the other formats.
+/// outfmt 0, and the query-anchored 1 to 4 of BLASTP and RPSBLAST (`Program::writes`; psiblast
+/// refuses those, item PS15b). NCBI's application writes 0 to 4 through one frame
+/// (`PrintProlog`, the query batches, `PrintOneResultSet`), and so does LOSAT; `None` for the
+/// other formats.
 fn blastp_pairwise_view_of(
     app: BlastpApp,
     number: i32,
@@ -2191,7 +2210,7 @@ fn blastp_pairwise_view_of(
     crate::blastinput::app::ReportFormat::from_number(number)
         .and_then(crate::report::pairwise::PairwiseView::of)
         .filter(|view| {
-            *view == crate::report::pairwise::PairwiseView::Pairwise || app == BlastpApp::Blastp
+            *view == crate::report::pairwise::PairwiseView::Pairwise || app != BlastpApp::Psiblast
         })
 }
 
@@ -4307,8 +4326,8 @@ pub fn run(
         }
     };
     let out_file = open_out_file(&args)?;
-    // Outfmt 0 to 4 (`blastp_pairwise_view_of`; psiblast and rpsblast refuse 1 to 4 before their
-    // search): the stream of NCBI's `CBlastFormat`.
+    // Outfmt 0 to 4 (`blastp_pairwise_view_of`; psiblast refuses 1 to 4 before its search): the
+    // stream of NCBI's `CBlastFormat`.
     let pairwise =
         format.is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
     // The organism report's `-out` file is written as NCBI's buffer writes it.
@@ -9606,17 +9625,7 @@ fn run_call(
             outputs,
         )?,
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-180
-    // The merge of several volumes gives each query an alignment set, empty for a batch
-    // that was not searched, so outfmt 7 counts `# 0 hits found` there (review A of
-    // PS12a, S2's rpsblast half).
-    let merged_unsearched;
-    let tabular_unsearched: &[bool] = if rps_multi_volume {
-        merged_unsearched = vec![false; query_batch_skipped.len()];
-        &merged_unsearched
-    } else {
-        &query_batch_skipped
-    };
+    let no_alignment_set = no_alignment_sets(&query_batch_skipped, rps_multi_volume);
 
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
     // trees (hspfilter_culling.c:516-581; `culling.rs`), where the collector's lists were
@@ -10492,7 +10501,7 @@ fn run_call(
         psiblast_hits_found: &psiblast_hits_found,
         psi_found_before: &psi_found_before,
         rps_gapped_k: &rps_gapped_k,
-        tabular_unsearched,
+        no_alignment_set: &no_alignment_set,
         context: &context,
         call_batches: &call_batches,
         filtered_empty,

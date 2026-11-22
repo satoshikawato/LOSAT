@@ -1,0 +1,4 @@
+q1	ref|NP_000001.1|	ref|NP_000001.1|	normal protein one	normal protein one	1.06e-105	286
+q1	ref|NP_000004.1|	ref|NP_000004.1|	normal four	normal four	1.77e-102	278
+q1	loc5	loc5	local five	local five	5.30e-101	275
+q1	sp|P00007.1|NAME_HUMAN	sp|P00007.1|NAME_HUMAN	swissprot seven	swissprot seven	2.82e-92	253

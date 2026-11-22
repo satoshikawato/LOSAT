@@ -1,0 +1,175 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "rpsblast",
+      "version": "RPSBLAST 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini3v"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-05,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "allx a query of X only",
+          "query_len": 60,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 0,
+            "eff_space": 0,
+            "kappa": -1,
+            "lambda": -1,
+            "entropy": -1
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "rpsblast",
+      "version": "RPSBLAST 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini3v"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-05,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "oj_tk TK-TMK with an O at 30 and a J at 60",
+          "query_len": 398,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|CDD|101",
+                  "accession": "101",
+                  "title": "f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190"
+                }
+              ],
+              "len": 190,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 312.471,
+                  "score": 800,
+                  "evalue": 3.09392e-111,
+                  "identity": 188,
+                  "positive": 188,
+                  "query_from": 1,
+                  "query_to": 190,
+                  "hit_from": 1,
+                  "hit_to": 190,
+                  "align_len": 190,
+                  "gaps": 0,
+                  "qseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYOKNIYQQENGGNKHCLFVKHSLETRYGCGTJTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "hseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "midline": "MQLILSHHLTMAGRVELVTGPMFAGKSTY KNIYQQENGGNKHCLFVKHSLETRYGCGT TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 32,
+            "eff_space": 169824,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "rpsblast",
+      "version": "RPSBLAST 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini3v"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-05,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "rr_part ribonucleotide reductase residues 281-520",
+          "query_len": 240,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|CDD|102",
+                  "accession": "102",
+                  "title": "f102 ribonucleotide reductase large subunit [White spot syndrome virus] residues 301-480"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 346.345,
+                  "score": 888,
+                  "evalue": 2.63017e-127,
+                  "identity": 180,
+                  "positive": 180,
+                  "query_from": 21,
+                  "query_to": 200,
+                  "hit_from": 1,
+                  "hit_to": 180,
+                  "align_len": 180,
+                  "gaps": 0,
+                  "qseq": "IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSARIETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY",
+                  "hseq": "IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSARIETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY",
+                  "midline": "IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSARIETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 29,
+            "eff_space": 99803,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

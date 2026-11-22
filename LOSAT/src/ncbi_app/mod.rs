@@ -15,8 +15,9 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::{
-    diag_target, log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed,
+    log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed,
 };
+use crate::report::run_files::RunFiles;
 use crate::report::serial::encoder::ReplacedChar;
 
 use args::{ArgException, Args, ArgsError};
@@ -66,7 +67,7 @@ pub(crate) fn help_text(help: &str) -> std::borrow::Cow<'_, str> {
 /// Where a program's diagnostics go: the target of `-logfile` (`stderr` for `cerr`), and the
 /// standard error stream, on which the usage of an argument error is printed.
 pub(crate) struct Diag<'a> {
-    target: DiagTarget,
+    target: &'a mut DiagTarget,
     stderr: &'a mut dyn Write,
     tool: &'static Tool,
     /// A copy of the texts written since `start_record` (`take_record`).
@@ -225,6 +226,7 @@ pub(crate) fn run(
         (&mut std::io::stdin(), &mut out, &mut err),
         body,
         (start, Some(ncbi_xml)),
+        &RunFiles::Disk,
     );
     let _ = out.flush();
     let _ = err.flush();
@@ -277,7 +279,46 @@ pub(crate) fn run_with(
             return 1;
         }
     }
-    run_app(tool, words, (input, out, err), body, (&start, None))
+    run_app(
+        tool,
+        words,
+        (input, out, err),
+        body,
+        (&start, None),
+        &RunFiles::Disk,
+    )
+}
+
+/// `run_with` of a run whose files (`-logfile`, the files that the program opens by name for
+/// writing) go to `files`, and which writes NCBI's XML of `-xmlhelp` as the command line does:
+/// LOSAT Web's run of a tool (`web_adapter::run_windowmasker`, line NP WW3a, 2026-11-22), which
+/// reads its input files in the run's working directory and gives the files that it writes to its
+/// host (`RunFiles::Receiver`).
+pub(crate) fn run_in(
+    tool: &'static Tool,
+    words: &[OsString],
+    files: &RunFiles,
+    (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
+    body: Body,
+) -> i32 {
+    let start = ApplicationStart::of_process(tool.program, words);
+    match start.usage_report() {
+        Ok(text) => {
+            let _ = err.write_all(text.as_bytes());
+        }
+        Err(reason) => {
+            let _ = writeln!(err, "Error: {reason}");
+            return 1;
+        }
+    }
+    run_app(
+        tool,
+        words,
+        (input, out, err),
+        body,
+        (&start, Some(ncbi_xml)),
+        files,
+    )
 }
 
 /// NCBI's XML of `program`'s arguments, whole: the readers of `ncbi_app` refuse no argument of
@@ -286,21 +327,25 @@ fn ncbi_xml(program: &str) -> Option<String> {
     crate::ncbi_xmlhelp::print(program, |_| false)
 }
 
-/// The run of `run` and `run_with` after the application start `start` (whose usage report's
-/// messages the caller has written), with the writer of NCBI's XML of `-xmlhelp` that the command
-/// line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
-/// (`cli::xml_help_refusal`, line RG DECISIONS E2x-1), so the library does not carry the XML.
+/// The run of `run`, `run_with` and `run_in` after the application start `start` (whose usage
+/// report's messages the caller has written), with the writer of NCBI's XML of `-xmlhelp` that the
+/// command line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
+/// (`cli::xml_help_refusal`, line RG DECISIONS E2x-1), so the library does not carry the XML. The
+/// run's files go to `files`: the file of `-logfile` (`RunFiles::log_target`, given to `files` when
+/// the run ends, `LogFile`) and the files that the program opens by name (`Args::files`).
 fn run_app(
     tool: &'static Tool,
     words: &[OsString],
     (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
     body: Body,
     (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
+    files: &RunFiles,
 ) -> i32 {
     // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
     // gets the usage report's messages when NCBI opens it, before `-version`.
-    let mut target = diag_target(log_file(words));
-    start.write_log_setup(&mut target, err);
+    let mut log = LogFile::open(files, words);
+    let target = &mut log.target;
+    start.write_log_setup(target, err);
     let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
         // arguments are read, whatever their bytes.
@@ -334,7 +379,7 @@ fn run_app(
     };
     // The configuration (the file of `-conffile` in place of `<program>.ini`,
     // `ApplicationStart::of_process`).
-    match start.write_config_load(&mut diag.target, diag.stderr) {
+    match start.write_config_load(diag.target, diag.stderr) {
         Ok(None) => {}
         Ok(Some(status)) => return status,
         Err(reason) => return diag.refuse(&reason),
@@ -374,12 +419,41 @@ fn run_app(
         return 0;
     }
     body(
-        &args,
+        &args.with_files(files),
         &settings,
         &mut files::Cin::new(input),
         out,
         &mut diag,
     )
+}
+
+/// The file of `-logfile` of a run (`RunFiles::log_target` of its name, `log_file`), which goes to
+/// the run's files when the run ends (`RunFiles::deliver_log`, when the run drops it; on `Disk` the
+/// file was written as it came): LOSAT Web's host gets the file also from a run that ends before its
+/// arguments, as the command line's file then holds what it wrote.
+struct LogFile<'f> {
+    files: &'f RunFiles,
+    name: Option<&'f std::ffi::OsStr>,
+    target: DiagTarget,
+}
+
+impl<'f> LogFile<'f> {
+    fn open(files: &'f RunFiles, words: &'f [OsString]) -> Self {
+        let name = log_file(words);
+        LogFile {
+            files,
+            name,
+            target: files.log_target(name),
+        }
+    }
+}
+
+impl Drop for LogFile<'_> {
+    fn drop(&mut self) {
+        let target = std::mem::replace(&mut self.target, DiagTarget::Discard);
+        // LOSAT Web's receiver keeps every file that it gets (it fails for none).
+        let _ = self.files.deliver_log(self.name, target);
+    }
 }
 
 #[cfg(test)]

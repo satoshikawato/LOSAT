@@ -1,6 +1,8 @@
 use super::*;
 use std::sync::Mutex;
 
+use crate::blastinput::ncbi_environment::TextPlace as Place;
+
 #[derive(Default)]
 struct Kept(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
 
@@ -355,4 +357,235 @@ fn the_standard_error_file_writes_to_the_standard_error() {
         unreachable!()
     };
     assert_eq!(bytes.into_inner().unwrap(), b"collected\n");
+}
+
+/// The output file names of a receiver (`RunFiles::create`, `output_name`; line NP WW3a,
+/// 2026-11-22): a file in the run's working directory, also in a folder that the run's directory
+/// has; no file in a folder that it does not have or in a file of it, for a directory, a name in a
+/// directory of root's or one past a directory that a user cannot search; the standard output's
+/// names; the lost writes of the null device, of `/dev/zero`, of the random devices and of the
+/// standard input (the null device of LOSAT Web's run), and the failed ones of `/dev/full`; the
+/// names that LOSAT Web does not write (the standard error, the other devices that a user opens, the
+/// files of procfs and the queues of `/dev/mqueue`) and an existing file of the run's directory,
+/// which the command line empties; a file of that name outside the working directory where a user
+/// makes files.
+#[test]
+fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
+    let entry = |path: &[u8]| match path {
+        b"sub" | b"sub/deep" => Entry::Directory,
+        b"in.fa" | b"sub/f" => Entry::File,
+        _ => Entry::Missing,
+    };
+    let name = |name: &str| output_name(name.as_bytes(), &entry);
+    let long = "a".repeat(256);
+    for (given, expected) in [
+        ("c.counts", OutputName::File),
+        (" c.counts", OutputName::File),
+        ("sub/c.counts", OutputName::File),
+        ("sub/deep/c.counts", OutputName::File),
+        ("sub/../c.counts", OutputName::File),
+        ("./sub/./c.counts", OutputName::File),
+        ("../c.counts", OutputName::File),
+        ("/proc/self/cwd/c.counts", OutputName::File),
+        ("/tmp/c.counts", OutputName::File),
+        ("/home/me/c.counts", OutputName::File),
+        ("/etc/default/../../tmp/c.counts", OutputName::File),
+        ("nodir/c.counts", OutputName::Unopened),
+        ("nodir/../c.counts", OutputName::Unopened),
+        ("in.fa/c.counts", OutputName::Unopened),
+        ("/proc/self/cwd/nodir/c.counts", OutputName::Unopened),
+        ("sub", OutputName::Unopened),
+        ("sub/", OutputName::Unopened),
+        (".", OutputName::Unopened),
+        ("..", OutputName::Unopened),
+        ("sub/..", OutputName::Unopened),
+        ("/proc/self/cwd", OutputName::Unopened),
+        ("/tmp", OutputName::Unopened),
+        ("/c.counts", OutputName::Unopened),
+        ("/etc/c.counts", OutputName::Unopened),
+        ("/data/c.counts", OutputName::Unopened),
+        ("/root/../tmp/c.counts", OutputName::Unopened),
+        ("/proc/self/status", OutputName::Unopened),
+        ("/dev/fd/3", OutputName::Unopened),
+        ("/dev/kmsg", OutputName::Unopened),
+        ("", OutputName::Unopened),
+        (long.as_str(), OutputName::Unopened),
+        ("in.fa", OutputName::Existing),
+        ("sub/f", OutputName::Existing),
+        ("/proc/self/cwd/in.fa", OutputName::Existing),
+        ("/dev/stdout", OutputName::Stdout),
+        ("/dev/fd/1", OutputName::Stdout),
+        ("/proc/self/fd/1", OutputName::Stdout),
+        ("/proc/thread-self/fd/1", OutputName::Stdout),
+        ("/dev/stdin", OutputName::Discard),
+        ("/dev/null", OutputName::Discard),
+        ("//dev/null", OutputName::Discard),
+        ("/dev/zero", OutputName::Discard),
+        ("/dev/urandom", OutputName::Discard),
+        ("/dev/full", OutputName::Full),
+        ("/dev/stderr", OutputName::Special),
+        ("/dev/fd/2", OutputName::Special),
+        ("/dev/ptmx", OutputName::Special),
+        ("/proc/self/comm", OutputName::Special),
+        ("/dev/mqueue/q", OutputName::Special),
+    ] {
+        assert_eq!(name(given), expected, "{given:?}");
+    }
+}
+
+/// A receiver's output files (`RunFiles::create`) in the working directory of this test (the
+/// crate's): a new name is a file in memory, which goes to the receiver under its whole name when
+/// it is dropped; a file of the directory is refused and a folder of it does not open, nor does a
+/// name in a folder that it does not have; the standard output's name is the run's, the null
+/// device's writes are lost and `/dev/full`'s fail. `Disk` makes the file on the file system.
+#[test]
+fn a_receiver_s_output_file_goes_to_the_receiver_when_it_is_closed() {
+    let kept = Arc::new(Kept::default());
+    let files = RunFiles::Receiver(kept.clone());
+    let name = "ww3a-receiver-test.counts";
+    assert!(!std::path::Path::new(name).exists());
+    let Ok(Created::File(mut file)) = files.create(name) else {
+        panic!("a file in memory");
+    };
+    file.write_all(b"counts ").unwrap();
+    file.write_all(b"bytes").unwrap();
+    file.flush().unwrap();
+    assert!(
+        kept.0.lock().unwrap().is_empty(),
+        "nothing before the file is closed"
+    );
+    drop(file);
+    assert_eq!(
+        *kept.0.lock().unwrap(),
+        vec![(name.as_bytes().to_vec(), b"counts bytes".to_vec())]
+    );
+    assert!(!std::path::Path::new(name).exists(), "no file on the disk");
+    assert!(matches!(
+        files.create("Cargo.toml"),
+        Ok(Created::Refused(_))
+    ));
+    assert_eq!(files.create("src").err(), Some(Unopened));
+    assert_eq!(files.create("ww3a-no-such-folder/c").err(), Some(Unopened));
+    assert!(matches!(files.create("/dev/stdout"), Ok(Created::Stdout)));
+    let Ok(Created::File(mut null)) = files.create("/dev/null") else {
+        panic!("the null device");
+    };
+    assert_eq!(null.write(b"lost").unwrap(), 4);
+    let Ok(Created::File(mut full)) = files.create("/dev/full") else {
+        panic!("/dev/full");
+    };
+    assert_eq!(
+        full.write_all(b"x").unwrap_err().kind(),
+        io::ErrorKind::StorageFull
+    );
+    drop((null, full));
+    assert_eq!(kept.0.lock().unwrap().len(), 1, "no file of the devices");
+    // The command line's and the library's files are the file system's.
+    let directory = std::env::temp_dir().join(format!("ww3a-disk-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("c.counts");
+    let Ok(Created::File(mut disk)) = RunFiles::Disk.create(path.to_str().unwrap()) else {
+        panic!("a file of the file system");
+    };
+    disk.write_all(b"on disk").unwrap();
+    drop(disk);
+    assert_eq!(std::fs::read(&path).unwrap(), b"on disk");
+    assert_eq!(
+        RunFiles::Disk
+            .create(directory.join("no/c.counts").to_str().unwrap())
+            .err(),
+        Some(Unopened)
+    );
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+/// A receiver that takes its files as they are written (`FileReceiver::open`): the events of each
+/// file in order, `open`, each write, `close` (line NP WW3a, D-WW3-6, 2026-11-22).
+#[derive(Default)]
+struct Streamed(Arc<Mutex<Vec<String>>>);
+
+struct StreamedFile(String, Arc<Mutex<Vec<String>>>);
+
+impl Write for StreamedFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let text = String::from_utf8_lossy(buf);
+        self.1.lock().unwrap().push(format!("{} {text}", self.0));
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for StreamedFile {
+    fn drop(&mut self) {
+        self.1.lock().unwrap().push(format!("{} closed", self.0));
+    }
+}
+
+impl FileReceiver for Streamed {
+    fn receive(&self, name: &[u8], _bytes: &[u8]) -> io::Result<()> {
+        panic!("a whole file: {}", String::from_utf8_lossy(name));
+    }
+
+    fn open(&self, name: &[u8]) -> Option<Box<dyn Write + Send>> {
+        let name = String::from_utf8_lossy(name).into_owned();
+        self.0.lock().unwrap().push(format!("{name} opened"));
+        Some(Box::new(StreamedFile(name, self.0.clone())))
+    }
+}
+
+/// A receiver that opens its files takes the bytes of an output file and of the file of
+/// `-logfile` as they are written, and the file is complete when it is closed (dropped; for the
+/// log, `deliver_log`); the names that open no file stay as they are. A receiver that does not
+/// open them gets each whole (the files of a search, unchanged).
+#[test]
+fn a_receiver_that_opens_its_files_takes_them_as_they_are_written() {
+    let streamed = Streamed::default();
+    let events = streamed.0.clone();
+    let files = RunFiles::Receiver(Arc::new(streamed));
+    let Ok(Created::File(mut file)) = files.create("ww3a-streamed.counts") else {
+        panic!("a streamed file");
+    };
+    file.write_all(b"one").unwrap();
+    let log = files.log_target(Some(OsStr::new("ww3a-streamed.log")));
+    assert!(matches!(log, DiagTarget::Stream(_)));
+    assert_eq!(log.place(), Place::LogFile);
+    log.write_text(b"message", &mut io::sink());
+    file.write_all(b"two").unwrap();
+    drop(file);
+    files
+        .deliver_log(Some(OsStr::new("ww3a-streamed.log")), log)
+        .unwrap();
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "ww3a-streamed.counts opened",
+            "ww3a-streamed.counts one",
+            "ww3a-streamed.log opened",
+            "ww3a-streamed.log message",
+            "ww3a-streamed.counts two",
+            "ww3a-streamed.counts closed",
+            "ww3a-streamed.log closed",
+        ]
+    );
+    assert!(!std::path::Path::new("ww3a-streamed.counts").exists());
+    assert!(matches!(files.create("/dev/stdout"), Ok(Created::Stdout)));
+    assert_eq!(files.create("src").err(), Some(Unopened));
+    assert!(matches!(
+        files.log_target(Some(OsStr::new("-"))),
+        DiagTarget::Stderr
+    ));
+    assert_eq!(events.lock().unwrap().len(), 7, "no other file");
+    // The default: whole files, from memory.
+    let kept = RunFiles::Receiver(Arc::new(Kept::default()));
+    assert!(matches!(
+        kept.create("ww3a-kept.counts"),
+        Ok(Created::File(OpenedFile::Memory(_)))
+    ));
+    assert!(matches!(
+        kept.log_target(Some(OsStr::new("ww3a-kept.log"))),
+        DiagTarget::Memory(_)
+    ));
 }

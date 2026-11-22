@@ -7,6 +7,8 @@
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 
+use crate::report::run_files::{Created, OpenedFile, RunFiles};
+
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{input_lines, LineEnds, Ostream};
@@ -30,9 +32,9 @@ use super::work::{
 enum Sink {
     /// The standard output (`-out -`).
     Stdout,
-    /// A file opened by name; after a failed write the rest is lost, as NCBI's `ofstream`
-    /// loses it.
-    File(Option<BufWriter<File>>),
+    /// A file opened by name (`RunFiles::create`); after a failed write the rest is lost, as
+    /// NCBI's `ofstream` loses it.
+    File(Option<BufWriter<OpenedFile>>),
     /// A name that did not open: NCBI's writer writes to its failed `ofstream`, which loses
     /// everything without a message.
     Lost,
@@ -80,20 +82,29 @@ impl Write for SinkStream<'_, '_> {
 /// (`CSeqMaskerOstatFactory::create`): the stream constructor for `-`, which the binary
 /// format starts with an extra word on (written to `stdout`, where the next post brings it
 /// out); otherwise the name constructor, whose `ofstream` makes or empties the file at once
-/// (an ascii writer given an empty name writes to the standard output).
+/// (an ascii writer given an empty name writes to the standard output), a file of the run's
+/// files (`RunFiles::create`; LOSAT Web's name of the standard output writes there, without the
+/// stream's extra word). `Err` with LOSAT's refusal of a name that LOSAT Web does not write.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_ascii.cpp:69-77
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_bin.cpp:55-67
-fn open_sink(name: &str, format: CountsFormat, stdout: &mut Ostream<'_>) -> Sink {
+fn open_sink(
+    name: &str,
+    format: CountsFormat,
+    stdout: &mut Ostream<'_>,
+    files: &RunFiles,
+) -> Result<Sink, Failure> {
     if name == "-" || (name.is_empty() && format == CountsFormat::Ascii) {
         if name == "-" {
             let _ = stdout.write_all(format.stream_prefix());
         }
-        return Sink::Stdout;
+        return Ok(Sink::Stdout);
     }
-    match File::create(name) {
-        Ok(file) => Sink::File(Some(BufWriter::with_capacity(1 << 16, file))),
-        Err(_) => Sink::Lost,
+    match files.create(name) {
+        Ok(Created::File(file)) => Ok(Sink::File(Some(BufWriter::with_capacity(1 << 16, file)))),
+        Ok(Created::Stdout) => Ok(Sink::Stdout),
+        Ok(Created::Refused(reason)) => Err(Failure::Refused(unsupported(&reason))),
+        Err(_) => Ok(Sink::Lost),
     }
 }
 
@@ -363,7 +374,7 @@ fn make_counts(
     }
     let output = args.value("out").expect("-out has a default");
     let format = counts_format(args);
-    let mut sink = open_sink(output, format, stdout);
+    let mut sink = open_sink(output, format, stdout, args.files())?;
     let mut writer = CountsWriter::new(format, args.value("meta").unwrap_or_default().as_bytes());
     let mut source = GenomeInput {
         files,
@@ -474,7 +485,7 @@ fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Resul
     };
     let format = counts_format(args);
     let mut writer = CountsWriter::new(format, metadata);
-    let mut sink = open_sink(output, format, stdout);
+    let mut sink = open_sink(output, format, stdout, args.files())?;
     // The messages come after the output written so far (the binary format's extra word); a
     // closed pipe ends the run at the first, as SIGPIPE ends NCBI's.
     let mut closed = false;

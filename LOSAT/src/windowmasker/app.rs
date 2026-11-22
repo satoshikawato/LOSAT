@@ -40,19 +40,39 @@ pub(super) fn run(
         return counts::convert(args, out, diag);
     }
     if !args.given("ustat") {
-        let exception = config_exception(
-            273,
-            INCONSISTENT,
-            "ncbi::CWinMaskConfig::s_DetermineAppType",
-            "one of '-mk_counts', '-convert' or '-ustat <stat_file>' must be specified",
-        );
-        return report(Failure::Ncbi(exception), diag);
+        return report(no_mode(), diag);
     }
     let options = options(args, settings);
     match masking_run(args, &options, stdin, out, diag) {
         Ok(status) => status,
         Err(failure) => report(failure, diag),
     }
+}
+
+/// The check of `run` before it opens a file: the mode (`s_DetermineAppType`), as `run` reports
+/// it; 0 for an argv of a mode. LOSAT Web's validation of the words (`super::check_in`).
+pub(super) fn check(
+    args: &Args,
+    _settings: &ApplicationSettings,
+    _stdin: &mut Cin<'_>,
+    _out: &mut dyn Write,
+    diag: &mut Diag,
+) -> i32 {
+    if args.flag("mk_counts") || args.flag("convert") || args.given("ustat") {
+        0
+    } else {
+        report(no_mode(), diag)
+    }
+}
+
+/// The error of an argv of no mode (`CWinMaskConfig::s_DetermineAppType`).
+fn no_mode() -> Failure {
+    Failure::Ncbi(config_exception(
+        273,
+        INCONSISTENT,
+        "ncbi::CWinMaskConfig::s_DetermineAppType",
+        "one of '-mk_counts', '-convert' or '-ustat <stat_file>' must be specified",
+    ))
 }
 
 /// The masking settings of `CWinMaskConfig` (`eGenerateMasks` or `eGenerateMasksWithDuster`).
@@ -123,6 +143,10 @@ fn masking_run(
     };
     let mut source = work::reader(options, input)?;
     let mut output = args.output_file("out", out).map_err(Failure::Arg)?;
+    // LOSAT Web's refusal of an output that it does not write (`RunFiles::create`).
+    if let Some(reason) = output.refusal() {
+        return Err(Failure::Refused(unsupported(reason)));
+    }
     let writer = work::writer(options.outfmt);
     let text_match = args
         .boolean("text_match")

@@ -14,6 +14,7 @@ use std::io::Write;
 
 use super::files::{self, OutputFile};
 use super::Tool;
+use crate::report::run_files::RunFiles;
 
 #[path = "constraint.rs"]
 mod constraint;
@@ -308,6 +309,9 @@ pub(crate) struct Args {
     numbers: BTreeMap<&'static str, Number>,
     /// The names given on the command line, in their order.
     given: Vec<&'static str>,
+    /// Where the files that the program opens by name for writing go (`output_file`): the file
+    /// system, or LOSAT Web's files (`RunFiles`), which the application gives the arguments.
+    files: RunFiles,
 }
 
 impl Args {
@@ -358,8 +362,21 @@ impl Args {
         }
     }
 
+    /// The run's files, where the files that the program opens by name for writing go.
+    pub(crate) fn files(&self) -> &RunFiles {
+        &self.files
+    }
+
+    /// The arguments of a run whose files go to `files` (the application's: `ncbi_app::run_in`).
+    pub(crate) fn with_files(self, files: &RunFiles) -> Self {
+        Args {
+            files: files.clone(),
+            ..self
+        }
+    }
+
     /// `args[name].AsOutputFile()`: the stream of the `eOutputFile` key `name`, `stdout` for
-    /// `-`, or NCBI's exception when it does not open. A `CArgException` thrown in `Run` is
+    /// `-`, a file of the run's files (`files`), or NCBI's exception when it does not open. A `CArgException` thrown in `Run` is
     /// reported by the application as one of the reader's (`Diag::run_arg_exception`). The
     /// stream of an `eInputFile` key is `files::open_input_file` of its value, which the
     /// programs open where NCBI's `Run` reads it.
@@ -369,7 +386,7 @@ impl Args {
         stdout: &'a mut dyn Write,
     ) -> Result<OutputFile<'a>, ArgException> {
         match self.value(name) {
-            Some(value) => files::open_output_file(name, value, stdout),
+            Some(value) => files::open_output_file(name, value, stdout, &self.files),
             None => Err(no_value(name)),
         }
     }
@@ -443,6 +460,7 @@ pub(crate) fn parse(tool: &Tool, words: &[String]) -> Result<Args, ArgsError> {
         values,
         numbers,
         given,
+        files: RunFiles::Disk,
     })
 }
 

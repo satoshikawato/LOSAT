@@ -92,5 +92,37 @@ pub(crate) fn run_with(
     crate::ncbi_app::run_with(&TOOL, words, input, out, err, app::run)
 }
 
+/// `run_with` of LOSAT Web's run (`ncbi_app::run_in`): the files that the run writes (`-out FILE`,
+/// `-logfile FILE`) go to `files`, and `-xmlhelp` prints NCBI's XML, as on the command line.
+pub(crate) fn run_in(
+    words: &[OsString],
+    files: &crate::report::run_files::RunFiles,
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_in(&TOOL, words, files, (input, out, err), app::run)
+}
+
+/// The checks of a windowmasker run that read no file (LOSAT Web's validation of the words,
+/// `web_adapter::check_windowmasker`; line NP WW3a, D-WW3-7, 2026-11-22): `run_in` with the body
+/// `app::check`, which ends after the mode, before `Run` opens a file. The standard input is
+/// empty and the standard output dropped (a help or a version is printed in place of a run, which
+/// is valid); the exit status, with the standard error on `err` and the file of `-logfile` to
+/// `files`.
+pub(crate) fn check_in(
+    words: &[OsString],
+    files: &crate::report::run_files::RunFiles,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_in(
+        &TOOL,
+        words,
+        files,
+        (&mut std::io::empty(), &mut std::io::sink(), err),
+        app::check,
+    )
+}
+
 #[cfg(test)]
 mod tests;

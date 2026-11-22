@@ -4825,36 +4825,29 @@ pub fn run_local(
         .formats
         .iter()
         .any(|format| blastp_is_archive(format.outfmt));
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     if archive_requested {
         args.archive = super::archive::handle_for(
             &args,
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let no_query = query_records.is_empty() && !pssm_query(&args);
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(
-                    args,
-                    query_records,
-                    subject_records,
-                    query_label,
-                    subject_label,
-                    view,
-                )
-            });
-            return outputs.finish_archive(&handle, no_query, result);
-        }
     }
-    run_local_formats(
-        args,
-        query_records,
-        subject_records,
-        query_label,
-        subject_label,
-        outputs,
-    )
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && !pssm_query(&args);
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        run_local_formats(
+            args,
+            query_records,
+            subject_records,
+            query_label,
+            subject_label,
+            outputs,
+        )
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-543

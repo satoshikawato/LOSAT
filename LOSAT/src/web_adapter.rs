@@ -53,6 +53,175 @@ pub use crate::blastinput::ncbi_environment::{
 };
 pub use crate::report::run_files::{FileReceiver, RunFiles};
 
+// The search strategy file of a run (`-export_search_strategy`, line RG item F1w): made through the
+// run's files where the command line makes it, and given to each search of the run.
+pub use crate::report::archive::strategy::StrategyFile;
+
+/// The `-export_search_strategy` file of the arguments `command` (`words`: the arguments after the
+/// program's name) of a run whose files go to `run_files` (LOSAT Web: `RunFiles::Receiver`), made
+/// where the command line makes it (`strategy::open_strategy_file_in`, as the command line's
+/// `open_strategy_file`): after the settings and a dry run's end, before `-outfmt` is read. `None`
+/// without the option. The error is the command line's (NCBI's `File is not accessible` for a name
+/// that the command line cannot open); the run's other files that the name may be are its `-query`,
+/// `-subject`, `-logfile` and BLASTN's `-window_masker_db`.
+pub fn open_strategy_file(
+    command: &Commands,
+    words: &[&str],
+    run_files: &RunFiles,
+) -> anyhow::Result<Option<StrategyFile>> {
+    use crate::report::run_files::RunFileName;
+    use std::path::Path;
+    let (path, label, query, subject, masker): (Option<&Path>, &str, &Path, _, Option<&str>) =
+        match command {
+            Commands::Blastp(args) => (
+                args.export_search_strategy.as_deref(),
+                args.app.name(),
+                args.query.as_path(),
+                args.subject.as_deref(),
+                None,
+            ),
+            Commands::Blastn(args) => (
+                args.export_search_strategy.as_deref(),
+                "BLASTN",
+                args.query.as_path(),
+                args.subject.as_deref(),
+                args.window_masker_db.as_deref(),
+            ),
+            Commands::Tblastn(args) => (
+                args.export_search_strategy.as_deref(),
+                "TBLASTN",
+                args.query.as_path(),
+                args.subject.as_deref(),
+                None,
+            ),
+            Commands::Tblastx(args) => (
+                args.export_search_strategy.as_deref(),
+                "TBLASTX",
+                args.query.as_path(),
+                args.subject.as_deref(),
+                None,
+            ),
+            Commands::Blastx(args) => (
+                args.export_search_strategy.as_deref(),
+                "BLASTX",
+                args.query.as_path(),
+                args.subject.as_deref(),
+                None,
+            ),
+            _ => return Ok(None),
+        };
+    let mut others = vec![RunFileName {
+        option: "query",
+        name: query.as_os_str(),
+    }];
+    others.extend(subject.map(|subject| RunFileName {
+        option: "subject",
+        name: subject.as_os_str(),
+    }));
+    others.extend(log_file(words).map(|name| RunFileName {
+        option: "logfile",
+        name,
+    }));
+    others.extend(masker.map(|masker| RunFileName {
+        option: "window_masker_db",
+        name: std::ffi::OsStr::new(masker),
+    }));
+    crate::report::archive::strategy::open_strategy_file_in(run_files, path, None, label, &others)
+}
+
+/// Gives the search of `command` (a search of LOSAT Web's run of the argv, `run_local`) the export
+/// of its requests into `file` (`open_strategy_file`), as the command line's run makes it
+/// (`StrategyExport::for_run`): the recorded options of the arguments, with the `HitlistSize` of
+/// the argv's format numbered `outfmt` (the archive's request shares the export's options handle,
+/// `run_local`). LOSAT Web searches no database.
+pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
+    use crate::report::archive::strategy::{HitlistArgs, StrategyExport};
+    let options = crate::report::archive::OptionsHandle::default();
+    let export = |inputs, counts| {
+        Some(StrategyExport::for_run(
+            file,
+            inputs,
+            Some(outfmt),
+            counts,
+            None,
+            &options,
+        ))
+    };
+    match command {
+        Commands::Blastp(args) => {
+            let counts = HitlistArgs {
+                max_target_seqs: args.max_target_seqs,
+                num_descriptions: args.num_descriptions,
+                num_alignments: args.num_alignments,
+            };
+            args.strategy = export(
+                crate::algorithm::blastp::archive::option_inputs(args),
+                counts,
+            );
+        }
+        Commands::Blastn(args) => {
+            let counts = HitlistArgs {
+                max_target_seqs: args.max_target_seqs,
+                num_descriptions: args.num_descriptions,
+                num_alignments: args.num_alignments,
+            };
+            let inputs = crate::algorithm::blastn::archive::option_inputs(
+                args,
+                args.dust_filtering.as_deref(),
+            );
+            args.strategy = export(inputs, counts);
+        }
+        Commands::Tblastn(args) => {
+            let counts = HitlistArgs {
+                max_target_seqs: args.max_target_seqs,
+                num_descriptions: args.num_descriptions,
+                num_alignments: args.num_alignments,
+            };
+            args.strategy = export(
+                crate::algorithm::tblastn::archive::option_inputs(args),
+                counts,
+            );
+        }
+        Commands::Tblastx(args) => {
+            let counts = HitlistArgs {
+                max_target_seqs: args.max_target_seqs,
+                num_descriptions: args.num_descriptions,
+                num_alignments: args.num_alignments,
+            };
+            args.strategy = export(
+                crate::algorithm::tblastx::archive::option_inputs(args),
+                counts,
+            );
+        }
+        Commands::Blastx(args) => {
+            let counts = HitlistArgs {
+                max_target_seqs: args.max_target_seqs.map(|count| count as usize),
+                num_descriptions: args.num_descriptions,
+                num_alignments: args.num_alignments,
+            };
+            args.strategy = export(
+                crate::algorithm::blastx::archive::option_inputs(args),
+                counts,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// The `-export_search_strategy` name of the arguments `command`, if any: a run that writes the file
+/// reads its records as the command line's reader then reads them (their deflines kept, LOSAT
+/// Web's `store`).
+pub fn export_search_strategy_of(command: &Commands) -> Option<&std::path::Path> {
+    match command {
+        Commands::Blastp(args) => args.export_search_strategy.as_deref(),
+        Commands::Blastn(args) => args.export_search_strategy.as_deref(),
+        Commands::Tblastn(args) => args.export_search_strategy.as_deref(),
+        Commands::Tblastx(args) => args.export_search_strategy.as_deref(),
+        Commands::Blastx(args) => args.export_search_strategy.as_deref(),
+        _ => None,
+    }
+}
+
 /// The NCBI application start of a run of `program` with the arguments `words` (after the
 /// program's name), as the command line's (`cli::main_entry`) in an environment of the
 /// `variables` alone, with the registry files of `files` (`ApplicationStart::with_files`) and the
@@ -138,14 +307,15 @@ pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX
 pub use crate::blastinput::input_files::is_blank;
 
 /// The options of `program`'s command line that the browser's searches of records do not take:
-/// the search strategy file, which the library API refuses too (`api::search::file_options`), and
 /// tblastn's `-in_pssm` (the query as a PSSM file), which the browser refuses until line PS's PSW1
 /// (`tblastn::refuse_browser_pssm_query`; the library API's records take it, `api::Inputs::pssm`).
-/// The adapter's `describe` leaves them out.
+/// The adapter's `describe` leaves them out. The search strategy file, which the library API
+/// refuses (`api::search::file_options`), is a file of the run in the browser
+/// (`open_strategy_file`, line RG item F1w).
 pub fn records_refused_options(program: crate::api::Program) -> &'static [&'static str] {
     match program {
-        crate::api::Program::Tblastn => &["in_pssm", "export_search_strategy"],
-        program => crate::api::file_options(program),
+        crate::api::Program::Tblastn => &["in_pssm"],
+        _ => &[],
     }
 }
 

@@ -58,6 +58,7 @@ use super::options::OptionInputs;
 use super::writer::{write_strategy_request, RequestInputs};
 use super::{ArchiveRequest, HandleCarry, OptionsHandle, SearchedContext0};
 use crate::report::diag_log::{Posts, ERROR};
+use crate::report::run_files::{FileReceiver, RunFileName, RunFiles, StrategyTarget as Target};
 
 /// A writer that counts the bytes written through it to `inner` (the strategy file's ends of
 /// requests, `State::unreached`).
@@ -126,6 +127,58 @@ impl StrategySink for std::io::BufWriter<std::fs::File> {
     }
 }
 
+/// The strategy file of a caller without files (LOSAT Web, `RunFiles::Receiver`): the file in
+/// memory under the name that the command line writes it to, a regular file that can be cut, which
+/// the receiver gets whole when it is dropped (No NCBI counterpart: NCBI writes a file). That is
+/// when the run's export ends (`StrategyExport`, held by the run's arguments), or, for a run that
+/// stops before its export is made, when the made file is dropped: the receiver gets the file
+/// that the command line leaves then, empty (`create_strategy_file`).
+pub struct ReceivedFile {
+    name: Vec<u8>,
+    bytes: Vec<u8>,
+    receiver: Arc<dyn FileReceiver>,
+}
+
+impl std::fmt::Debug for ReceivedFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedFile")
+            .field("name", &String::from_utf8_lossy(&self.name))
+            .field("len", &self.bytes.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Write for ReceivedFile {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl StrategySink for ReceivedFile {
+    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+        self.bytes
+            .truncate(usize::try_from(len).unwrap_or(usize::MAX));
+        Ok(())
+    }
+
+    fn can_cut(&self) -> bool {
+        true
+    }
+}
+
+impl Drop for ReceivedFile {
+    fn drop(&mut self) {
+        // The receiver keeps the file (LOSAT Web's run files, emitted after the run): a failure of
+        // its own has no run to fail any more, as a file that the command line cannot close.
+        let _ = self.receiver.receive(&self.name, &self.bytes);
+    }
+}
+
 struct State {
     sink: Box<dyn StrategySink>,
     /// The requests made for a sink that cannot be cut (`StrategySink::can_cut`), by the run's
@@ -182,13 +235,26 @@ impl std::fmt::Debug for StrategyExport {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3560-3569
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
-/// A strategy file made where NCBI's `SetOptions` makes it (`create_strategy_file`): the file
-/// (`None` for `-`, NCBI's standard output) and LOSAT's refusal of it, if any, which the run
-/// raises where NCBI writes its first request (`check_report_stream`).
+/// A strategy file made where NCBI's `SetOptions` makes it (`create_strategy_file`,
+/// `open_strategy_file_in`): the file and LOSAT's refusal of it, if any, which the run raises
+/// where NCBI writes its first request (`check_report_stream`).
 #[derive(Debug)]
 pub struct StrategyFile {
-    file: Option<std::fs::File>,
+    target: StrategyTarget,
     refusal: Option<String>,
+}
+
+/// Where the requests of a `StrategyFile` go.
+#[derive(Debug)]
+enum StrategyTarget {
+    /// Nowhere: a file that LOSAT refuses before any request (`-`, NCBI's standard output; the
+    /// standard output of LOSAT Web's run, or a file there that is not one of the run's), or the
+    /// null device of LOSAT Web's run (`run_files::StrategyTarget::Nowhere`).
+    None,
+    /// The file on the file system (the command line).
+    Disk(std::fs::File),
+    /// The file in memory that the caller's receiver gets (LOSAT Web).
+    Received(ReceivedFile),
 }
 
 /// Creates (and empties) the strategy file where NCBI's `SetOptions` does: after the argument
@@ -208,23 +274,94 @@ pub struct StrategyFile {
 /// until then the run goes on as NCBI's, its report stream held back (`hold_report`).
 pub fn create_strategy_file(path: &Path, out: Option<&Path>, label: &str) -> Result<StrategyFile> {
     if path.as_os_str() == "-" {
-        return Ok(StrategyFile {
-            file: None,
-            refusal: Some(format!(
-                "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's {label}; give a file name"
-            )),
-        });
+        return Ok(standard_output_refusal(label));
     }
     let file = std::fs::File::create(path)
         .map_err(|_| crate::cli::inaccessible("export_search_strategy", path))?;
-    let refusal = is_same_as_output(&file, path, out).then(|| {
-        format!(
-            "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's {label}: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"
-        )
-    });
+    let refusal = is_same_as_output(&file, path, out).then(|| same_as_output(label));
     Ok(StrategyFile {
-        file: Some(file),
+        target: StrategyTarget::Disk(file),
         refusal,
+    })
+}
+
+/// `-` (`create_strategy_file`): no file, and LOSAT's refusal.
+fn standard_output_refusal(label: &str) -> StrategyFile {
+    StrategyFile {
+        target: StrategyTarget::None,
+        refusal: Some(format!(
+            "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's {label}; give a file name"
+        )),
+    }
+}
+
+/// LOSAT's refusal of a strategy file that is the output's (`create_strategy_file`).
+fn same_as_output(label: &str) -> String {
+    format!(
+        "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's {label}: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"
+    )
+}
+
+/// The strategy file `path` of a run whose files go to `files` (`RunFiles`): on `Disk` the
+/// command line's (`create_strategy_file`); for a `Receiver` (LOSAT Web, which has no file system
+/// and no `-out`), the file that the command line on Linux makes of the name
+/// (`RunFiles::strategy_target`, the model of `-logfile`'s names), in the run's file in memory
+/// (`ReceivedFile`) under the name as typed, with the command line's error and refusals: NCBI's
+/// error at once for a name that the command line cannot open; `-` and the standard output
+/// (`/dev/stdout`) refused as the command line refuses them, at NCBI's first request; no file for
+/// the null device (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name whose
+/// command line run writes where the run has no file: the standard error, a device whose writes
+/// fail or wait for a reader, a file of the system (procfs, a message queue), or the file of
+/// another option of the run (`others`: `-query`, `-subject`, `-logfile`, `-window_masker_db`),
+/// whose bytes the command line's strategy file replaces or mixes with its own.
+pub fn create_strategy_file_in(
+    files: &RunFiles,
+    path: &Path,
+    out: Option<&Path>,
+    label: &str,
+    others: &[RunFileName<'_>],
+) -> Result<StrategyFile> {
+    let RunFiles::Receiver(receiver) = files else {
+        return create_strategy_file(path, out, label);
+    };
+    if path.as_os_str() == "-" {
+        return Ok(standard_output_refusal(label));
+    }
+    let browser = |what: &str| {
+        StrategyFile {
+        target: StrategyTarget::None,
+        refusal: Some(format!(
+            "-export_search_strategy {} ({what}) is not supported in the browser; give a file name of the run's own",
+            path.display()
+        )),
+    }
+    };
+    Ok(match RunFiles::strategy_target(path.as_os_str(), others) {
+        Target::File => StrategyFile {
+            target: StrategyTarget::Received(ReceivedFile {
+                name: path.as_os_str().as_encoded_bytes().to_vec(),
+                bytes: Vec::new(),
+                receiver: receiver.clone(),
+            }),
+            refusal: None,
+        },
+        Target::Nowhere => StrategyFile {
+            target: StrategyTarget::None,
+            refusal: None,
+        },
+        Target::Inaccessible => {
+            return Err(crate::cli::inaccessible("export_search_strategy", path))
+        }
+        Target::StandardOutput => StrategyFile {
+            target: StrategyTarget::None,
+            refusal: Some(same_as_output(label)),
+        },
+        Target::System => {
+            browser("a device or a file of the system, where the run has no file")
+        }
+        Target::OtherFile(option) => browser(&format!(
+            "the file of -{option} too, whose bytes the command line's strategy file replaces or mixes with its own"
+        )),
     })
 }
 
@@ -378,10 +515,10 @@ pub(crate) fn hold_report<'a>(
 }
 
 /// `hold_report` of a destination that can move between threads.
-pub(crate) fn hold_report_send(
+pub(crate) fn hold_report_send<'a>(
     strategy: Option<&StrategyExport>,
-    inner: Box<dyn Write + Send>,
-) -> Box<dyn Write + Send> {
+    inner: Box<dyn Write + Send + 'a>,
+) -> Box<dyn Write + Send + 'a> {
     match strategy.and_then(|strategy| strategy.0.hold.clone()) {
         Some(hold) => Box::new(HeldReport { inner, hold }),
         None => inner,
@@ -474,11 +611,31 @@ pub fn open_strategy_file(
     out: Option<&Path>,
     label: &str,
 ) -> Result<Option<StrategyFile>> {
+    open_strategy_file_in(&RunFiles::Disk, path, out, label, &[])
+}
+
+/// `open_strategy_file` of a run whose files go to `files` (`create_strategy_file_in`), whose
+/// other files are `others`: LOSAT Web's adapter opens the file here, where the command line does.
+pub fn open_strategy_file_in(
+    files: &RunFiles,
+    path: Option<&Path>,
+    out: Option<&Path>,
+    label: &str,
+    others: &[RunFileName<'_>],
+) -> Result<Option<StrategyFile>> {
     let Some(path) = path else {
         return Ok(None);
     };
     crate::blastinput::input_files::check_utf8_file_name(path, "export_search_strategy", label)?;
-    create_strategy_file(path, out, label).map(Some)
+    create_strategy_file_in(files, path, out, label, others).map(Some)
+}
+
+/// The options handle of a run with the search strategy `strategy` (its archive's too,
+/// `StrategyExport::options`), or a new one without it.
+pub fn options_of(strategy: Option<&StrategyExport>) -> OptionsHandle {
+    strategy
+        .map(|strategy| strategy.options().clone())
+        .unwrap_or_default()
 }
 
 impl StrategyExport {
@@ -540,9 +697,10 @@ impl StrategyExport {
             inputs.hitlist_size = hitlist_size(outfmt, counts);
         }
         // A refused file gets no request (`check_report_stream`, `write_with`); `-` has none.
-        let sink: Box<dyn StrategySink> = match file.file {
-            Some(file) => Box::new(std::io::BufWriter::new(file)),
-            None => Box::new(NoSink),
+        let sink: Box<dyn StrategySink> = match file.target {
+            StrategyTarget::Disk(file) => Box::new(std::io::BufWriter::new(file)),
+            StrategyTarget::Received(file) => Box::new(file),
+            StrategyTarget::None => Box::new(NoSink),
         };
         Self::with_refusal(sink, &inputs, database, options.clone(), file.refusal)
     }
@@ -550,6 +708,12 @@ impl StrategyExport {
     /// The run's options handle.
     pub fn options(&self) -> &OptionsHandle {
         &self.0.options
+    }
+
+    /// Whether the run's report streams are held until NCBI's first request (`hold_report`): the
+    /// file has LOSAT's refusal.
+    pub(crate) fn holds_report(&self) -> bool {
+        self.0.hold.is_some()
     }
 
     fn with_state<R>(&self, f: impl FnOnce(&mut State) -> R) -> R {

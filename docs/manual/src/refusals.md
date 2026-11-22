@@ -59,7 +59,8 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-export_search_strategy` with a file that cannot be written to the end | Refused. NCBI writes a message and exits with status 0. |
 | `-export_search_strategy` with a file name that is not UTF-8 | Refused. |
 | `-export_search_strategy` with `-dbsize` and a list that keeps no sequence of the database | Refused. |
-| `-export_search_strategy` in the library API and pylosat | Refused. The command line writes the file. |
+| `-export_search_strategy` in the library API and pylosat | Refused. The command line and LOSAT Web write the file. |
+| `-export_search_strategy` in LOSAT Web with the standard error stream (`/dev/stderr`, `/dev/fd/2`), a device or a file of the system (`/dev/full`, `/proc/self/status`), or the file of `-query`, `-subject`, `-logfile` or `-window_masker_db` | Refused where NCBI writes its first request, as `-export_search_strategy -` is. The command line writes the requests into that stream, device or file. LOSAT Web gives the file of any other name among the run's files, with the command line's bytes. |
 | `-parse_deflines` with two subjects of one id | Refused. NCBI cannot report it correctly. |
 | `-parse_deflines` with two queries of one id in one query batch | Refused. |
 | `-parse_deflines` with a query and a subject of one id that are not the same record | Refused. |

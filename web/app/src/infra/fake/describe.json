@@ -181,6 +181,11 @@
     "takes_value": true
    },
    {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
+   },
+   {
     "flag": "-reward",
     "help": "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast, 0 for rmblastn; 0 needs penalty 0)",
     "takes_value": true
@@ -588,6 +593,11 @@
    {
     "flag": "-word_size",
     "help": "Word size for wordfinder algorithm [default: 3; 2 for blastp-short; 5 for blastp-fast]",
+    "takes_value": true
+   },
+   {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
     "takes_value": true
    },
    {
@@ -1198,6 +1208,11 @@
     "takes_value": true
    },
    {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
+   },
+   {
     "flag": "-task",
     "help": "",
     "takes_value": true,
@@ -1760,6 +1775,11 @@
      "tblastn",
      "tblastn-fast"
     ]
+   },
+   {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
    },
    {
     "flag": "-evalue",
@@ -2331,6 +2351,11 @@
    {
     "flag": "-word_size",
     "help": "Word size for wordfinder algorithm [default: 3]",
+    "takes_value": true
+   },
+   {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
     "takes_value": true
    },
    {

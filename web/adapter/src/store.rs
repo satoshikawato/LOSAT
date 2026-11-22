@@ -371,7 +371,7 @@ pub fn register_inputs(
         losat::web_adapter::read_search_inputs(
             program.api(),
             &command,
-            Some(crate::run::writes_archive(words)),
+            Some(crate::run::keeps_whole_records(words)),
             data_loaders,
             query,
             subject,
@@ -498,12 +498,12 @@ pub fn release(handle: u32) -> Result<(), String> {
 }
 
 /// Calls `work` with the records of a query handle and a subject handle registered for
-/// `program`, for the run of the argv `words`. For a run that writes the BLAST archive
-/// (`run::writes_archive`), every record of `register` has a source while
-/// `work` runs, as the CLI's reader gives each record when the run writes the archive
+/// `program`, for the run of the argv `words`. For a run that writes the BLAST archive or a search
+/// strategy file (`run::keeps_whole_records`), every record of `register` has a source while
+/// `work` runs, as the CLI's reader gives each record when the run writes either
 /// (`ReaderConfig::with_defline`): its defline where `>` and the title do not give it
-/// (`read_deflines`), and a record that a range cuts keeps its whole letters for the archive's
-/// Bioseq (`FastaRecord::cut`, `archive_letters`). Afterwards the records have no source again, as
+/// (`read_deflines`), and a record that a range cuts keeps its whole letters for the Bioseq of the
+/// archive and of the strategy's request (`FastaRecord::cut`, `archive_letters`). Afterwards the records have no source again, as
 /// every other run sees them.
 ///
 /// The handles of `register_inputs` are the inputs of the run of their argv alone, both of them,
@@ -559,7 +559,7 @@ pub fn with_inputs<R>(
             ))
         }
     };
-    let whole = !read_together && crate::run::writes_archive(words);
+    let whole = !read_together && crate::run::keeps_whole_records(words);
     if whole {
         set_sources(&mut store, [query, subject], true);
     }

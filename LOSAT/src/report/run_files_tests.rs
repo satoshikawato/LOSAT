@@ -356,3 +356,147 @@ fn the_standard_error_file_writes_to_the_standard_error() {
     };
     assert_eq!(bytes.into_inner().unwrap(), b"collected\n");
 }
+
+/// The names of `-export_search_strategy` of a receiver (LOSAT Web, line RG's F1w), read as the
+/// command line on Linux opens them for writing, the name as typed (`strategy_name`), on the host
+/// and as the user of the `-logfile` model: a file of the run where the user makes files, NCBI's
+/// error where the command line cannot open the name (a directory, a name ending in `/`, a name in
+/// a directory of root's, a component of 256 bytes), the standard output's refusal, no file for the
+/// null device and the standard input, and LOSAT Web's refusal of the standard error, of the
+/// devices whose writes fail or wait for a reader, and of procfs's and mqueue's files.
+#[test]
+fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
+    use StrategyTarget as T;
+    let target = |name: &str| RunFiles::strategy_target(OsStr::new(name), &[]);
+    let long_component = "a".repeat(256);
+    let component_255 = "a".repeat(255);
+    for (name, read) in [
+        ("s.asn", T::File),
+        ("out/s.asn", T::File),
+        ("./s.asn", T::File),
+        (" s.asn", T::File),
+        ("../s.asn", T::File),
+        ("a/b/../s.asn", T::File),
+        ("/tmp/s.asn", T::File),
+        ("/dev/shm/s.asn", T::File),
+        ("/var/lock/s.asn", T::File),
+        ("/home/me/s.asn", T::File),
+        ("/proc/self/cwd/s.asn", T::File),
+        ("/proc/thread-self/cwd/s.asn", T::File),
+        (component_255.as_str(), T::File),
+        ("", T::Inaccessible),
+        (".", T::Inaccessible),
+        ("..", T::Inaccessible),
+        ("out/", T::Inaccessible),
+        ("out/.", T::Inaccessible),
+        ("/tmp", T::Inaccessible),
+        ("/tmp/", T::Inaccessible),
+        ("/s.asn", T::Inaccessible),
+        ("//s.asn", T::Inaccessible),
+        ("/etc/s.asn", T::Inaccessible),
+        ("/data/s.asn", T::Inaccessible),
+        ("/root/s.asn", T::Inaccessible),
+        ("/root/../tmp/s.asn", T::Inaccessible),
+        ("/dev/s.asn", T::Inaccessible),
+        ("/dev/kmsg", T::Inaccessible),
+        ("/dev/null/", T::Inaccessible),
+        ("/dev/null/s.asn", T::Inaccessible),
+        ("/proc/self/status", T::Inaccessible),
+        ("/proc/self/cwd", T::Inaccessible),
+        ("/sys/s.asn", T::Inaccessible),
+        (long_component.as_str(), T::Inaccessible),
+        ("/dev/stdout", T::StandardOutput),
+        ("/dev/fd/1", T::StandardOutput),
+        ("/proc/self/fd/1", T::StandardOutput),
+        ("/proc/thread-self/fd/1", T::StandardOutput),
+        ("/dev/null", T::Nowhere),
+        ("//dev/null", T::Nowhere),
+        ("/dev/zero", T::Nowhere),
+        ("/dev/random", T::Nowhere),
+        ("/dev/urandom", T::Nowhere),
+        ("/dev/stdin", T::Nowhere),
+        ("/proc/self/fd/0", T::Nowhere),
+        ("/dev/stderr", T::System),
+        ("/dev/fd/2", T::System),
+        ("/dev/full", T::System),
+        ("/dev/ptmx", T::System),
+        ("/dev/fuse", T::System),
+        ("/dev/net/tun", T::System),
+        ("/proc/self/comm", T::System),
+        ("/dev/mqueue/q", T::System),
+    ] {
+        assert_eq!(target(name), read, "{name:?}");
+    }
+}
+
+/// A strategy name that is the file of another option of the run, as the system resolves both
+/// (`-query`, `-subject` and `-window_masker_db` as typed, `-logfile` as NCBI reads it), with
+/// either name climbing more: LOSAT Web's refusal names the option. The standard input (`-`) and
+/// NCBI's special log names are no file of the run.
+#[test]
+fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
+    use StrategyTarget as T;
+    let target = |name: &str, others: &[(&'static str, &str)]| {
+        let others: Vec<RunFileName<'_>> = others
+            .iter()
+            .map(|&(option, name)| RunFileName {
+                option,
+                name: OsStr::new(name),
+            })
+            .collect();
+        RunFiles::strategy_target(OsStr::new(name), &others)
+    };
+    for (name, others, read) in [
+        ("q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
+        ("./q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
+        (
+            "/proc/self/cwd/q.fa",
+            vec![("query", "q.fa")],
+            T::OtherFile("query"),
+        ),
+        ("q.fa", vec![("query", "../x/../w/q.fa")], T::File),
+        (
+            "../w/q.fa",
+            vec![("query", "../x/../w/q.fa")],
+            T::OtherFile("query"),
+        ),
+        (
+            "../../a/q.fa",
+            vec![("query", "../../a/q.fa")],
+            T::OtherFile("query"),
+        ),
+        ("../a/q.fa", vec![("query", "../../a/q.fa")], T::File),
+        ("q.fa.asn", vec![("query", "q.fa")], T::File),
+        (
+            "/tmp/s.fa",
+            vec![("query", "q.fa"), ("subject", "/tmp/s.fa")],
+            T::OtherFile("subject"),
+        ),
+        ("./-", vec![("query", "-")], T::File),
+        (
+            "run.log",
+            vec![("logfile", "run.log")],
+            T::OtherFile("logfile"),
+        ),
+        (
+            "run.log",
+            vec![("logfile", " run.log")],
+            T::OtherFile("logfile"),
+        ),
+        ("logs", vec![("logfile", "logs/")], T::OtherFile("logfile")),
+        (
+            "../run.log",
+            vec![("logfile", "../run.log")],
+            T::OtherFile("logfile"),
+        ),
+        ("run.log", vec![("logfile", "../run.log")], T::File),
+        ("./-", vec![("logfile", "-")], T::File),
+        (
+            "wm.obinary",
+            vec![("window_masker_db", "wm.obinary")],
+            T::OtherFile("window_masker_db"),
+        ),
+    ] {
+        assert_eq!(target(name, &others), read, "{name:?} {others:?}");
+    }
+}

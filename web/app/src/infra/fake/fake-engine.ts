@@ -57,7 +57,7 @@ export class FakeEngine implements EngineGateway {
    * or version printed (`validate` refuses their words, which `describe` does not list either).
    */
   async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } };
+    return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null } };
   }
 
   /**

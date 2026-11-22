@@ -45,12 +45,14 @@ export type ValidationResult =
  * `losat_web2_start`, §9 *start*; line RG item E1w-3b): the name of the last `-conffile` (the
  * registry file that `validate` and `run` read, which the host registers under that name), the
  * name of `-logfile` (NCBI's scan of it: a run gives the file of a name that makes a file among its
- * `runFiles`), and whether the argv has `-dryrun` (a run reads the arguments and the settings and
- * searches nothing). Null where the argv names none.
+ * `runFiles`), the name of `-export_search_strategy` (the search strategy file, which a run gives
+ * among its `runFiles` too; line RG item F1w), and whether the argv has `-dryrun` (a run reads the
+ * arguments and the settings and searches nothing). Null where the argv names none.
  */
 export interface StartInfo {
   readonly conffile: string | null;
   readonly logFile: string | null;
+  readonly strategyFile: string | null;
   readonly dryRun: boolean;
   /**
    * Whether a run of the argv takes its query and subject read together for it

@@ -33,9 +33,9 @@ const ADAPTER_OWNED: [&str; 6] = [
 const GENETIC_CODE_PROBE: u32 = 64;
 
 /// The options of `program` that the browser's searches of records take none of (tblastn's
-/// `-in_pssm`, which the browser refuses until line PS's PSW1; the search strategy file
-/// `-export_search_strategy`, until line RG's F1w gives it as a side file): the browser's list
-/// (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out.
+/// `-in_pssm`, which the browser refuses until line PS's PSW1): the browser's list
+/// (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out. The
+/// search strategy file `-export_search_strategy` is a file of the run (line RG's F1w), described.
 fn records_refused(program: Program) -> &'static [&'static str] {
     losat::web_adapter::records_refused_options(program.api())
 }
@@ -185,22 +185,19 @@ mod tests {
         }
     }
 
-    // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1; the
-    // search strategy file of the five programs: until line RG's F1w. The adapter's `describe`
-    // lists neither (the browser's list, `records_refused`).
+    // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1, and
+    // the adapter's `describe` does not list it (the browser's list, `records_refused`). The search
+    // strategy file of the five programs is a file of the run (line RG's F1w): listed.
     #[test]
     fn options_a_search_of_records_does_not_take_are_not_described() {
-        assert_eq!(
-            records_refused(Program::Tblastn),
-            ["in_pssm", "export_search_strategy"]
-        );
+        assert_eq!(records_refused(Program::Tblastn), ["in_pssm"]);
         for program in [
             Program::Blastn,
             Program::Blastp,
             Program::Blastx,
             Program::Tblastx,
         ] {
-            assert_eq!(records_refused(program), ["export_search_strategy"]);
+            assert!(records_refused(program).is_empty());
         }
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let described = describe(program).unwrap();
@@ -210,6 +207,10 @@ mod tests {
                     "{program} lists -{flag}"
                 );
             }
+            assert!(
+                described.contains("\"-export_search_strategy\""),
+                "{program} does not list -export_search_strategy"
+            );
         }
     }
 }

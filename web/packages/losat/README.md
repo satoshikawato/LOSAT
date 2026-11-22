@@ -103,11 +103,13 @@ of that output, whose error is at `error`: `'diagnostics'`, `'logfile'` or `'now
 A host that keeps every chunk would keep output that the command line does not write.
 
 `engine.start(argv)` reads what the command line reads before its arguments: the file that
-`-conffile` names, the file that `-logfile` names, and whether the argv has `-dryrun`. Give the
+`-conffile` names, the file that `-logfile` names, the search strategy file that
+`-export_search_strategy` names (`StartInfo.strategyFile`), and whether the argv has `-dryrun`. Give the
 file of `-conffile` under that name to `engine.validate(argv, registry)` and as
 `EngineRunRequest.conffile`; `reactorControl` validates it on an instance of its own, opened with its
-second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
-run fails, `runFilesOf(error)` returns it. A run that the engine failed after it began to write ends
+second argument. A run returns the `-logfile` file and the search strategy file in
+`RuntimeInfo.runFiles`, each `RunFile` with the option that names it (`runFileOption(file)`:
+`'logfile'` or `'export_search_strategy'`). When a run fails, `runFilesOf(error)` returns them. A run that the engine failed after it began to write ends
 its output with `fail` in place of `end` (`runOutputFailedOf(error)` is then true): the stream 3 that
 arrived holds the warnings that the command line writes to its standard error before the error. The engine reads a `-logfile` name as the command line on
 Linux reads it where the name's directories exist: the file's name is the whole name, which may
@@ -123,6 +125,15 @@ that a user cannot enter (`/root/../tmp/run.log`). `/dev/fd/2` and
 `/proc/self/fd/2` give no file and send the messages that go to the file nowhere, as `/dev/null`
 does: the command line writes nothing to a log on a file system without free space, which these
 are.
+
+The search strategy file holds the command line's bytes for the argv. Its name is read as the
+`-logfile` name is, as the command line opens it for writing: a name the command line cannot open
+(`""`, a directory, `/etc/s.asn`) is the command line's `File is not accessible` error at once;
+`/dev/null` and the devices whose writes are lost give no file; `-` and the standard output are the
+command line's refusals, and the standard error, the other devices and files of the system, and the
+file of `-query`, `-subject`, `-logfile` or `-window_masker_db` are LOSAT Web's, raised where the
+command line writes its first request. A run that fails after the file is made keeps it, empty or cut
+back as the command line leaves it.
 
 `RuntimeInfo.messages` says where the run's messages went (the warnings that the command line writes
 to its standard error without `-logfile`): `'diagnostics'` (stream 3), `'logfile'` (the file of

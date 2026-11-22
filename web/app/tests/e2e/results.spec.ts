@@ -2251,8 +2251,8 @@ test('narrow screens: the results are no wider than the screen; "Run LOSAT" open
 test('long option names: from 320 to 1280 px the results are no wider than the window, and a name is whole where its line holds it', async ({
   page,
 }) => {
-  // -export_search_strategy and -logfile are not in the FakeEngine's description. The file of -logfile is shown under its
-  // option's name, with its own (long) name.
+  // -export_search_strategy and -logfile make files of the run, which the FakeEngine does not make. Each file is shown
+  // under its option's name, with its own (long) name (the strategy file since line RG item F1w).
   const extra = `-min_raw_gapped_score 20 -off_diagonal_range 0${BUILD_HAS_ENGINE ? ' -export_search_strategy strategy.asn -logfile a_log_file_name_longer_than_a_line.log' : ''}`;
   await program(page, 'blastn');
   await paste(page, 'query', `>q1\n${A}\n`);

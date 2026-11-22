@@ -6863,23 +6863,26 @@ pub fn run_local(
         app::parse_formatting_string(format.outfmt)
             .is_ok_and(|choice| choice.number == app::output_format::ARCHIVE_FORMAT)
     });
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     if archive_requested && args.db.is_none() {
         QueryStrand::parse(&args.strand)?;
         args.archive = archive::handle_for(
             &args,
             args.dust_filtering.as_deref(),
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(args, query_records, subject_records, view)
-            });
-            return outputs.finish_archive(&handle, query_records.is_empty(), result);
-        }
     }
-    run_local_formats(args, query_records, subject_records, outputs)
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    outputs.run_records(
+        strategy.as_ref(),
+        archive.as_ref(),
+        query_records.is_empty(),
+        |outputs| run_local_formats(args, query_records, subject_records, outputs),
+    )
 }
 
 fn run_local_formats(

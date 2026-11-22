@@ -267,7 +267,7 @@ function fakeAbi(options: { failEnd?: boolean; stopOnBegin?: boolean } = {}) {
       calls.push('validate');
       return { ok: true, dataLoaders: true };
     },
-    start: () => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
+    start: () => ({ ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null } }),
     memoryBytes: () => 1,
     register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);

@@ -1,4 +1,4 @@
-import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type PrintedKind, type RunOutput } from 'losat/domain';
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type PrintedKind, type RunFileOption, type RunOutput } from 'losat/domain';
 // The compatibility outputs that LOSAT Web stores and exports byte for byte: the formats that every
 // run writes, and the output of the argv's own -outfmt: any other format that the CLI writes, and
 // 6 or 7 with fields (WA2-OP-03 and W11, Owner 2026-11-05; docs/web/abi_v2.md §5, §7).
@@ -196,15 +196,17 @@ export function printedFileName(run: ExportedRun, kind: PrintedKind, bytes: Uint
 
 /**
  * The file name of a file that a run made besides its outputs (the file of `-logfile NAME`; line RG
- * E1w-3b): the run's start of the names of its outputs, `logfile`, then the file's own name
- * (`losat-run3-tblastx-20261104T111530Z.logfile.run.log`), so that the files of two runs get other
- * names, and no file of a run gets the name of one of its outputs (`-logfile outfmt6.txt`). A name
- * with a directory (`logs/run.log`, `/tmp/run.log`) is saved with each `/` as `_`
- * (`…logfile.logs_run.log`): a saved file has a name and no directory, and the page names it the
- * same in every browser, where browsers would each replace the `/` in their own way (line WQA's
- * sweep, D11, 2026-11-20). The `/`s at the end go first: the command line makes the file `logs` for
- * `-logfile logs/`, as NCBI reads the name (its round 2), so it is saved as `…logfile.logs`.
+ * E1w-3b; and of `-export_search_strategy NAME`, line RG F1w): the run's start of the names of its
+ * outputs, the option that named the file (`option`: `logfile`, `export_search_strategy`), then the
+ * file's own name (`losat-run3-tblastx-20261104T111530Z.logfile.run.log`), so that the files of two
+ * runs get other names, and no file of a run gets the name of one of its outputs (`-logfile
+ * outfmt6.txt`) or of its other file. A name with a directory (`logs/run.log`, `/tmp/run.log`) is
+ * saved with each `/` as `_` (`…logfile.logs_run.log`): a saved file has a name and no directory,
+ * and the page names it the same in every browser, where browsers would each replace the `/` in
+ * their own way (line WQA's sweep, D11, 2026-11-20). The `/`s at the end go first: the command line
+ * makes the file `logs` for `-logfile logs/`, as NCBI reads the name (its round 2), so it is saved
+ * as `…logfile.logs` (a strategy file's name never ends in `/`: the command line cannot open it).
  */
-export function runFileName(run: ExportedRun, name: string): string {
-  return `${exportPrefix(run)}.logfile.${name.replace(/\/+$/, '').replaceAll('/', '_')}`;
+export function runFileName(run: ExportedRun, name: string, option: RunFileOption = 'logfile'): string {
+  return `${exportPrefix(run)}.${option}.${name.replace(/\/+$/, '').replaceAll('/', '_')}`;
 }

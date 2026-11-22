@@ -524,10 +524,10 @@ fn the_file_is_created_and_its_refusal_kept() {
     let path = dir.join("s.asn");
     std::fs::write(&path, b"old").unwrap();
     let made = create_strategy_file(&path, None, "BLASTP").unwrap();
-    assert!(made.file.is_some() && made.refusal.is_none());
+    assert!(matches!(made.target, StrategyTarget::Disk(_)) && made.refusal.is_none());
     assert_eq!(std::fs::read(&path).unwrap(), b"");
     let dash = create_strategy_file(Path::new("-"), None, "BLASTP").unwrap();
-    assert!(dash.file.is_none());
+    assert!(matches!(dash.target, StrategyTarget::None));
     assert!(dash.refusal.as_deref().unwrap().contains("standard output"));
     std::fs::write(&path, b"old").unwrap();
     let same = create_strategy_file(&path, Some(&path), "BLASTP").unwrap();
@@ -623,4 +623,118 @@ fn held_report_stream_waits_for_the_request_point() {
     hold.end(true);
     drop(stream);
     assert_eq!(&*sink.0.lock().unwrap(), b"prolog\n");
+}
+
+/// The files that a receiver got (LOSAT Web's run files).
+#[derive(Default)]
+struct Received(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
+
+impl FileReceiver for Received {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        self.0.lock().unwrap().push((name.to_vec(), bytes.to_vec()));
+        Ok(())
+    }
+}
+
+impl Received {
+    fn files(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// LOSAT Web's strategy file (`RunFiles::Receiver`, line RG's F1w): the receiver gets it under
+/// the name as typed when the export ends, with the bytes that the command line writes to the file;
+/// a made file dropped before its export (an error after it is made) is the empty file that the
+/// command line leaves; NCBI's error cuts it back as it cuts the command line's file
+/// (`end_run`).
+#[test]
+fn a_receiver_gets_the_file_when_the_export_ends() {
+    let received = Arc::new(Received::default());
+    let files = RunFiles::Receiver(received.clone());
+    let open = |name: &str| create_strategy_file_in(&files, Path::new(name), None, "BLASTP", &[]);
+    let export = |file| {
+        StrategyExport::for_run(
+            file,
+            OptionInputs::new(Program::Blastp, "blastp"),
+            None,
+            HitlistArgs::default(),
+            Some("in/db/bp"),
+            &OptionsHandle::default(),
+        )
+    };
+    let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+    let made = export(open("out/s.asn").unwrap());
+    assert!(!made.holds_report());
+    assert!(made.write_request(0..1, &request(&queries, &[])).unwrap());
+    let kept = made.clone();
+    drop(made);
+    assert!(
+        received.files().is_empty(),
+        "a clone of the export holds the file"
+    );
+    drop(kept);
+    assert_eq!(
+        received.files(),
+        [(b"out/s.asn".to_vec(), FIRST.as_bytes().to_vec())]
+    );
+    // An error after the file is made: the file, empty.
+    received.0.lock().unwrap().clear();
+    drop(open("s.asn").unwrap());
+    assert_eq!(received.files(), [(b"s.asn".to_vec(), Vec::new())]);
+    // NCBI's error before the batch's start was reached: the request is cut away.
+    received.0.lock().unwrap().clear();
+    let cut = export(open("s.asn").unwrap());
+    assert!(cut.write_request(0..1, &request(&queries, &[])).unwrap());
+    let native = crate::cli::inaccessible("query", Path::new("q"));
+    assert!(end_run(Some(&cut), Err(native)).is_err());
+    drop(cut);
+    assert_eq!(received.files(), [(b"s.asn".to_vec(), Vec::new())]);
+}
+
+/// The names that LOSAT Web reads otherwise than as a file of the run (`RunFiles::strategy_target`):
+/// NCBI's error at once where the command line cannot open the name; the command line's refusals of
+/// `-` and of the standard output, raised at NCBI's first request with the report held; no file for
+/// the null device; LOSAT Web's refusal, at the same point, of the standard error and of the file of
+/// another option of the run, which names that option.
+#[test]
+fn a_receiver_refuses_what_the_command_line_refuses_or_has_no_file_for() {
+    let received = Arc::new(Received::default());
+    let files = RunFiles::Receiver(received.clone());
+    let query = [RunFileName {
+        option: "query",
+        name: std::ffi::OsStr::new("q.fa"),
+    }];
+    let open =
+        |name: &str| create_strategy_file_in(&files, Path::new(name), None, "BLASTX", &query);
+    let error = open("/etc/s.asn").unwrap_err();
+    let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
+    assert_eq!(native.exit, 1);
+    assert_eq!(
+        native.message,
+        b"Command line argument error: Argument \"export_search_strategy\". File is not accessible:  `/etc/s.asn'\n"
+    );
+    for (name, refusal) in [
+        ("-", "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's BLASTX; give a file name"),
+        ("/dev/stdout", "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's BLASTX: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"),
+        ("/dev/stderr", "-export_search_strategy /dev/stderr (a device or a file of the system, where the run has no file) is not supported in the browser; give a file name of the run's own"),
+        ("./q.fa", "-export_search_strategy ./q.fa (the file of -query too, whose bytes the command line's strategy file replaces or mixes with its own) is not supported in the browser; give a file name of the run's own"),
+    ] {
+        let file = open(name).unwrap();
+        assert_eq!(file.refusal.as_deref(), Some(refusal), "{name}");
+        let export = StrategyExport::for_run(
+            file,
+            OptionInputs::new(Program::Blastx, "blastx"),
+            Some(0),
+            HitlistArgs::default(),
+            None,
+            &OptionsHandle::default(),
+        );
+        assert!(export.holds_report(), "{name}");
+        let error = check_report_stream(Some(&export)).unwrap_err();
+        assert_eq!(error.to_string(), refusal);
+    }
+    let null = open("/dev/null").unwrap();
+    assert!(matches!(null.target, StrategyTarget::None) && null.refusal.is_none());
+    drop(null);
+    assert!(received.files().is_empty());
 }

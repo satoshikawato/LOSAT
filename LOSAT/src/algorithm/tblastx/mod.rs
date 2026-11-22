@@ -7,7 +7,7 @@
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198 (`WriteArchive`): TBLASTX's BLAST archive (outfmt 11),
 // one Blast4-archive per query batch.
 mod anchored;
-mod archive;
+pub(crate) mod archive;
 pub mod args;
 pub mod blast_aascan;
 pub mod blast_engine;

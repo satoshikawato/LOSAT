@@ -689,6 +689,21 @@ describe('ResultsBrowser', () => {
     expect(logged.results.state.get().message).toBe(
       'Run 1 failed: LOSAT engine error: The average subject length is too short. It keeps the file of its -logfile, run.log.',
     );
+    // ...and its search strategy file, each under its option (line RG item F1w).
+    const both = setup({
+      status: 'failed',
+      error: 'LOSAT engine error: x',
+      record: {
+        runFiles: [
+          { name: 'out/s.asn', bytes: new Uint8Array(), option: 'export_search_strategy' },
+          { name: 'run.log', bytes: new Uint8Array([65]) },
+        ],
+      },
+    });
+    await both.results.open('r1');
+    expect(both.results.state.get().message).toBe(
+      'Run 1 failed: LOSAT engine error: x. It keeps the file of its -export_search_strategy, out/s.asn. It keeps the file of its -logfile, run.log.',
+    );
     // A failed run keeps the warnings written before its error (line WQA's sweep, D3, 2026-11-19); white space alone is none.
     const warned = setup({
       status: 'failed',
@@ -815,6 +830,18 @@ describe('ResultsBrowser', () => {
     const emptyRun = empty.results.state.get().loaded!.run;
     expect(warningsPlaceText('logfile', '', emptyRun)).toBe(NO_WARNINGS);
     expect(warningsPlaceText('logfile', 'Error: x\n', emptyRun)).toBeUndefined();
+    // The search strategy file is not the file of -logfile: an empty one beside a log that holds warnings says nothing,
+    // and its name is not the log's (line RG item F1w).
+    const strategy = { name: 's.asn', bytes: new Uint8Array(0), option: 'export_search_strategy' } as const;
+    const withStrategy = setup({ record: { messages: 'logfile', runFiles: [strategy, { name: 'run.log', bytes: warning }] } });
+    await withStrategy.results.open('r1');
+    const strategyRun = withStrategy.results.state.get().loaded!.run;
+    expect(warningsPlaceText('logfile', '', strategyRun)).toBe("The run's warnings are in the file of the run's -logfile, run.log, under Outputs.");
+    const strategyOnly = setup({ record: { messages: 'logfile', runFiles: [strategy] } });
+    await strategyOnly.results.open('r1');
+    expect(warningsPlaceText('logfile', '', strategyOnly.results.state.get().loaded!.run)).toBe(
+      "The run's warnings are in the file of the run's -logfile under Outputs.",
+    );
     // Files that are not kept say nothing of what they held.
     const unkept = setup({ record: { messages: 'logfile' } });
     await unkept.results.open('r1');

@@ -4,7 +4,7 @@
 // rank), never by a row number of a table, and a detail that arrives after the selection
 // moved on is dropped. Values shown come from the stored outputs and the HSP records
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
-import type { MessagePlace, OutputPlace, ProgramId, RecordKey, RunOutput, SequenceKind } from 'losat/domain';
+import { runFileOption, type MessagePlace, type OutputPlace, type ProgramId, type RecordKey, type RunOutput, type SequenceKind } from 'losat/domain';
 import type { ProgramDescription } from 'losat/ports';
 import { recordName } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
@@ -772,7 +772,7 @@ export function unavailableMessage(run: RunView): string {
       const files = run.record.runFiles ?? [];
       const written = keptOutputsWritten(run) ? ' It keeps the outputs written before the error.' : '';
       const warned = run.record.diagnostics?.trim() ? ' It keeps the warnings written before the error.' : '';
-      const kept = files.length === 0 ? '' : ` It keeps the file of its -logfile, ${files.map((file) => file.name).join(', ')}.`;
+      const kept = files.map((file) => ` It keeps the file of its -${runFileOption(file)}, ${file.name}.`).join('');
       const nothing = `${written}${warned}${kept}` === '' ? ' It keeps no outputs.' : '';
       return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')}${written}${warned}${kept}${nothing}`;
     }

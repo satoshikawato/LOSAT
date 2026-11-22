@@ -668,6 +668,138 @@ impl ReportOutputs<'_> {
         }
         result
     }
+
+    /// A run of records (each program's `run_local`) as the command line's run of the argv ends:
+    /// with the search strategy file of the arguments (`strategy`, `with_strategy`), and with
+    /// the BLAST archive (outfmt 11) of `archive`, whose diagnostics stream saves the messages
+    /// (`with_archive_diagnostics`) and whose error archive ends the run (`finish_archive`;
+    /// `no_query`: the run has no query, NCBI's `Query is Empty!`). `run` searches and reports.
+    pub(crate) fn run_records(
+        &mut self,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+        no_query: bool,
+        run: impl FnOnce(&mut ReportOutputs<'_>) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        self.with_strategy(
+            strategy,
+            |outputs| match archive {
+                Some(handle) => outputs.with_archive_diagnostics(handle.clone(), run),
+                None => run(outputs),
+            },
+            |outputs, result| match archive {
+                Some(handle) => outputs.finish_archive(handle, no_query, result),
+                None => result,
+            },
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:250-262 (cited at
+    // `strategy::check_report_stream`): the report stream before NCBI's first request.
+    /// A run of records with the search strategy file `strategy` (`-export_search_strategy`, LOSAT
+    /// Web's: `strategy::open_strategy_file_in`), as the command line's run of the argv: `run`
+    /// searches and reports, then the run ends as the command line's ends (`strategy::end_run`),
+    /// and `finish` writes what the command line writes after it (an archive's error archive,
+    /// `finish_archive`). Where LOSAT refuses the file at NCBI's first request
+    /// (`StrategyExport::holds_report`), each format's writer is held as the command line holds
+    /// its report stream (`strategy::hold_report_send`), through `finish`: a run that NCBI ends
+    /// before that request writes what it held, and the refusal drops it. Without a strategy,
+    /// `run` and `finish` alone.
+    fn with_strategy(
+        &mut self,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+        run: impl FnOnce(&mut ReportOutputs<'_>) -> anyhow::Result<()>,
+        finish: impl FnOnce(&mut ReportOutputs<'_>, anyhow::Result<()>) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        use crate::report::archive::strategy::{end_run, hold_report_send};
+        let Some(held_by) = strategy.filter(|strategy| strategy.holds_report()) else {
+            let result = end_run(strategy, run(self));
+            return finish(self, result);
+        };
+        /// A format's sink behind the hold: a writer of the caller held, or another sink as it
+        /// is (the command line's and the library's, which make no such run).
+        enum Held<'b> {
+            Writer(
+                Box<dyn Write + Send + 'b>,
+                Option<crate::report::blast_xml2::SideFileSink>,
+            ),
+            Sink(OutputSink<'b>),
+        }
+        let ReportOutputs {
+            formats,
+            diagnostics,
+            later_warnings,
+            hits,
+            observer,
+        } = self;
+        let mut held: Vec<(&str, Held<'_>, FormatRefusal)> = formats
+            .iter_mut()
+            .map(|format| {
+                let sink = match &mut format.sink {
+                    OutputSink::Writer(writer) => Held::Writer(
+                        hold_report_send(Some(held_by), Box::new(&mut **writer)),
+                        None,
+                    ),
+                    OutputSink::Files(writer, side) => Held::Writer(
+                        hold_report_send(Some(held_by), Box::new(&mut **writer)),
+                        Some(side.clone()),
+                    ),
+                    OutputSink::Stdout => Held::Sink(OutputSink::Stdout),
+                    OutputSink::File(path) => Held::Sink(OutputSink::File(path)),
+                    OutputSink::Out(out) => Held::Sink(OutputSink::Out(out)),
+                };
+                // Moved into the view and back after it (a format that fails alone).
+                (format.outfmt, sink, std::mem::take(&mut format.refusal))
+            })
+            .collect();
+        let result = {
+            let mut view = ReportOutputs {
+                formats: held
+                    .iter_mut()
+                    .map(|(outfmt, sink, refusal)| FormatOutput {
+                        outfmt: *outfmt,
+                        sink: match sink {
+                            Held::Writer(writer, None) => OutputSink::Writer(&mut **writer),
+                            Held::Writer(writer, Some(side)) => {
+                                OutputSink::Files(&mut **writer, side.clone())
+                            }
+                            Held::Sink(OutputSink::Stdout) => OutputSink::Stdout,
+                            Held::Sink(OutputSink::File(path)) => OutputSink::File(path),
+                            Held::Sink(OutputSink::Out(out)) => OutputSink::Out(out),
+                            Held::Sink(OutputSink::Writer(writer)) => {
+                                OutputSink::Writer(&mut **writer)
+                            }
+                            Held::Sink(OutputSink::Files(writer, side)) => {
+                                OutputSink::Files(&mut **writer, side.clone())
+                            }
+                        },
+                        refusal: std::mem::take(refusal),
+                    })
+                    .collect(),
+                diagnostics: &mut **diagnostics,
+                later_warnings: later_warnings.as_deref_mut(),
+                hits: hits.as_mut().map(|hits| &mut **hits as &mut HitsSink<'_>),
+                observer: observer
+                    .as_mut()
+                    .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),
+            };
+            let result = end_run(strategy, run(&mut view));
+            let result = finish(&mut view, result);
+            let refusals: Vec<FormatRefusal> = view
+                .formats
+                .into_iter()
+                .map(|format| format.refusal)
+                .collect();
+            (result, refusals)
+        };
+        let (result, refusals) = result;
+        // The held bytes that the end released reach the writers (`HeldReport`'s drop).
+        drop(held);
+        for (format, refusal) in formats.iter_mut().zip(refusals) {
+            format.refusal = refusal;
+        }
+        result
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-226

@@ -1485,20 +1485,33 @@ pub fn run_local(
         .formats
         .iter()
         .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Archive);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     if archive_requested && args.archive.is_none() {
         args.archive = super::super::archive::handle_for(
             &args,
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local(args, query_records, subject_records, view)
-            });
-            return outputs.finish_archive(&handle, query_records.is_empty(), result);
-        }
     }
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    outputs.run_records(
+        strategy.as_ref(),
+        archive.as_ref(),
+        query_records.is_empty(),
+        |outputs| run_local_formats(args, query_records, subject_records, outputs),
+    )
+}
+
+/// `run_local` from the thread count on, with its archive and its search strategy set up.
+fn run_local_formats(
+    mut args: TblastxArgs,
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
     // The thread count is checked before the inputs are read, as on the command line (`run`).
     crate::utils::threading::validate_threads(args.num_threads)?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):

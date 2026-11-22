@@ -63,35 +63,30 @@ pub fn run_local(
     let (choices, resolutions) = read_options(&args, &requested)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line
+    // (`native::RunSetup::open`).
     let archive = archive::handle_for(
         &args,
         archive_requested,
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
-    match archive {
-        Some(handle) => {
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_records(
-                    &args,
-                    query_records,
-                    subject_records,
-                    (choices, resolutions),
-                    Some(&handle),
-                    view,
-                )
-            });
-            outputs.finish_archive(&handle, query_records.is_empty(), result)
-        }
-        None => search_records(
-            &args,
-            query_records,
-            subject_records,
-            (choices, resolutions),
-            None,
-            outputs,
-        ),
-    }
+    outputs.run_records(
+        args.strategy.as_ref(),
+        archive.as_ref(),
+        query_records.is_empty(),
+        |outputs| {
+            search_records(
+                &args,
+                query_records,
+                subject_records,
+                (choices, resolutions),
+                archive.as_ref(),
+                outputs,
+            )
+        },
+    )
 }
 
 /// `run_local` from the reading of the subjects on.
@@ -119,8 +114,9 @@ fn search_records(
             let (from, to_exclusive) = record_cut(range, subject.sequence.len())?;
             // The lower case of the whole record, which outfmt 0's Sbjct rows and the hits show
             // (`x_soft_subject::x_masked_subject_rows`), and the archive's Bioseqs.
-            let keep_whole =
-                archive.is_some() || (args.lcase_masking && !subject.lowercase_masks.is_empty());
+            let keep_whole = archive.is_some()
+                || args.strategy.is_some()
+                || (args.lcase_masking && !subject.lowercase_masks.is_empty());
             subject.cut_in_place(from, to_exclusive, keep_whole);
         }
         subjects.push(subject);
@@ -153,7 +149,7 @@ fn search_records(
         args.lcase_masking,
         query_range,
         batch_size,
-        archive.is_some(),
+        archive.is_some() || args.strategy.is_some(),
         true,
         xml_matrix,
     )?;
@@ -210,6 +206,7 @@ fn search_records(
             parse_deflines: args.parse_deflines,
             database: None,
             archive,
+            strategy: args.strategy.as_ref(),
             out: args.out.as_deref(),
             search_error: &search_error,
             xml_scan,
@@ -272,6 +269,8 @@ struct RunReports<'a> {
     database: Option<DatabaseReports<'a>>,
     /// The BLAST archive (outfmt 11), when it is requested.
     archive: Option<&'a crate::report::archive::ArchiveHandle>,
+    /// The search strategy file (`-export_search_strategy`, LOSAT Web's), when it is requested.
+    strategy: Option<&'a crate::report::archive::strategy::StrategyExport>,
     /// The file of `api::run_to_file`, next to which outfmt 13 and 14 write their side files.
     out: Option<&'a std::path::Path>,
     search_error: &'a dyn Fn(anyhow::Error) -> anyhow::Error,
@@ -599,6 +598,7 @@ fn write_run(
         parse_deflines,
         ref database,
         archive,
+        strategy,
         search_error,
         ref xml_scan,
         xml_matrix,
@@ -653,8 +653,10 @@ fn write_run(
     // The search's options are those of every format; the formats differ only in the counts of
     // the pairwise report (`run_report_counts`).
     let search_options = &resolved[0];
-    // The archive's Bioseq of a cut record holds its whole letters (`FastaRecord::cut_in_place`).
-    let keep_whole = archive.is_some();
+    // The Bioseq of a cut record in the archive and the search strategy's request holds its whole
+    // letters (`FastaRecord::cut_in_place`), as the command line's reader keeps them
+    // (`native::run_inner`).
+    let keep_whole = archive.is_some() || strategy.is_some();
     // With `-subject`, the letters around each `-query_loc` interval that the Seq-loc mapper can
     // read into a query row (`empty_rows::query_letters_around`), as the command line's reader.
     let around = match database {
@@ -704,6 +706,14 @@ fn write_run(
                       queries_before: usize,
                       pool: Option<&crate::utils::threading::SearchPool<'_>>|
      -> Result<()> {
+        // The batch's set-up has written its `EffectiveSearchSpace` option, which the next batch's
+        // search strategy request holds (`take` below; `native::run_inner`).
+        if let Some(strategy) = strategy {
+            strategy.note_searched(
+                queries_before..queries_before + queries.len(),
+                archive::batch_searched_space(results, search_options),
+            )?;
+        }
         if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
             scopes.add_batch_ids(
                 queries.iter().filter_map(|record| record.believed()),
@@ -943,6 +953,28 @@ fn write_run(
         }
         Ok(())
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264 (cited at
+    // `native::run_inner`'s `take`)
+    // The search strategy's request of a reader batch (LOSAT Web's `-export_search_strategy`; the
+    // library refuses the option, `api::search::file_options`), which the loop takes before it
+    // looks at the batch's search, as the command line's (`native::run_inner`), and NCBI's posts
+    // of the bytes that its stream replaced in it.
+    let requests = strategy.map(|_| archive::requests(database.is_none().then_some(subjects)));
+    let mut take = |diagnostics: &mut dyn Write,
+                    queries: &[FastaRecord],
+                    queries_before: usize|
+     -> Result<()> {
+        let (Some(strategy), Some(requests)) = (strategy, &requests) else {
+            return Ok(());
+        };
+        requests.write(
+            strategy,
+            queries_before,
+            queries,
+            queries.first().map(FastaRecord::placement),
+        )?;
+        Ok(strategy.write_posts(diagnostics, archive)?)
+    };
     let processed = run_query_batches(
         search_options,
         search_subjects,
@@ -951,8 +983,7 @@ fn write_run(
         &mut **diagnostics,
         search_error,
         &mut render,
-        // The library and LOSAT Web write no search strategy (`api::search::file_options`).
-        &mut |_, _, _| Ok(()),
+        &mut take,
     )
     .map_err(input_error)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
@@ -1203,6 +1234,8 @@ fn search_database(
                 unrecorded_calls: args.first_query_ordinal > 0,
             }),
             archive,
+            // The library writes no search strategy (`api::search::file_options`).
+            strategy: None,
             out: args.out.as_deref(),
             search_error: &search_error,
             xml_scan,

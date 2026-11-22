@@ -74,5 +74,5 @@ The numbers of an HSP record are the engine's, not rounded: each field that name
 
 ## Differences from the command line
 
-- The library does not write a search strategy file: it refuses `-export_search_strategy`. The command line writes it.
+- The library does not write a search strategy file: it refuses `-export_search_strategy`. The command line and LOSAT Web write it.
 - Records that you build yourself with `FastaRecord::new` carry no definition line as read. In `-outfmt 11`, their definition line is `>` and the title. Records from `read_fasta` keep it, as the command line does (see [Differences from NCBI BLAST+](../differences.md#the-library)).

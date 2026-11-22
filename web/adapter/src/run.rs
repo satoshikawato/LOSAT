@@ -9,7 +9,7 @@ use losat::web_adapter::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
     ApplicationSettings, CallerSink, CallerStart, Cli, Commands, CountsSource, ErrorSource,
     FormatObserver, FormatOutput, FormatRefusal, HspIndex, OutputSink, PairwiseHit, ReportOutputs,
-    RunFiles,
+    RunFiles, StrategyFile,
 };
 
 use crate::emit::{
@@ -349,14 +349,16 @@ pub fn inputs_together(words: &[&str]) -> bool {
             .is_ok_and(|(_, command)| losat::web_adapter::parse_deflines_of(&command))
 }
 
-/// Whether the run of `words` writes the BLAST archive (outfmt 11), whose Bioseqs show the whole
-/// records (`store::with_inputs`).
-pub fn writes_archive(words: &[&str]) -> bool {
-    parse_run(words).is_ok_and(|(_, _, requested)| {
-        requested.custom.is_some_and(|outfmt| {
-            losat::web_adapter::parse_formatting_string(&outfmt)
-                .is_ok_and(|choice| choice.number == losat::web_adapter::ARCHIVE_FORMAT)
-        })
+/// Whether the run of `words` writes the BLAST archive (outfmt 11) or a search strategy file
+/// (`-export_search_strategy`), whose Bioseqs show the whole records, as the command line's reader
+/// keeps them for either (`store::with_inputs`).
+pub fn keeps_whole_records(words: &[&str]) -> bool {
+    parse_run(words).is_ok_and(|(_, command, requested)| {
+        losat::web_adapter::export_search_strategy_of(&command).is_some()
+            || requested.custom.is_some_and(|outfmt| {
+                losat::web_adapter::parse_formatting_string(&outfmt)
+                    .is_ok_and(|choice| choice.number == losat::web_adapter::ARCHIVE_FORMAT)
+            })
     })
 }
 
@@ -410,17 +412,24 @@ enum Next {
     Prints(String),
     /// It ends, exit status 0: a dry run.
     Ends,
-    /// It searches (boxed: the arguments are far larger than a text).
-    Search(Box<(Program, Commands, Requested)>),
+    /// It searches (boxed: the arguments are far larger than a text), with the file of
+    /// `-export_search_strategy` that the run made (`losat::web_adapter::open_strategy_file`).
+    Search(Box<(Program, Commands, Requested)>, Option<StrategyFile>),
 }
 
 /// The argv `words` after the run's start `started`, in the command line's order (`cli::main_entry`):
 /// the version that the start printed (`CallerStart::version`), the arguments parsed
 /// (`parse_printing`: the help that stops the reader is printed), the settings that LOSAT refuses
-/// (`start.settings()?`), the end of a dry run (rc 0), then `-outfmt`, which NCBI reads in `Run`
+/// (`start.settings()?`), the end of a dry run (rc 0), the file of `-export_search_strategy`, made
+/// through the run's files `run_files` (`losat::web_adapter::open_strategy_file`, NCBI's
+/// `GetExportSearchStrategyStream` in `Run`), then `-outfmt`, which NCBI reads after it
 /// (`read_outfmt`: a dry run does not read it), with the error of an argv without subjects.
 /// `validate` and `run` take the argv here.
-fn started_command(words: &[&str], started: &CallerStart) -> Result<Next, String> {
+fn started_command(
+    words: &[&str],
+    started: &CallerStart,
+    run_files: &RunFiles,
+) -> Result<Next, String> {
     if let Some(text) = started.version() {
         return Ok(Next::Prints(text.to_string()));
     }
@@ -432,7 +441,12 @@ fn started_command(words: &[&str], started: &CallerStart) -> Result<Next, String
     if started.dry_run() {
         return Ok(Next::Ends);
     }
-    read_outfmt(words, program, command).map(|parsed| Next::Search(Box::new(parsed)))
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627 (cited at
+    // `strategy::open_strategy_file`): the file is made before `-outfmt` is read; an error after it
+    // leaves it empty (the receiver gets the file when it is dropped).
+    let strategy = losat::web_adapter::open_strategy_file(&command, &words[1..], run_files)
+        .map_err(|error| format!("{error:#}"))?;
+    read_outfmt(words, program, command).map(|parsed| Next::Search(Box::new(parsed), strategy))
 }
 
 /// A receiver of the files of a run that keeps none (`validate`, which emits nothing).
@@ -448,7 +462,9 @@ impl losat::web_adapter::FileReceiver for NoFiles {
 /// reads of the argv `words` (program name first) before its arguments (`preparse`): the file of
 /// the last `-conffile` (which the host registers as kind 2 before it validates; none for a
 /// version word, which the command line prints before it loads the file), the file of `-logfile`
-/// (NCBI's scan of it, `log_file`: a run gives it on `STREAM_RUN_FILES`), whether the run is a dry
+/// (NCBI's scan of it, `log_file`: a run gives it on `STREAM_RUN_FILES`), the file of
+/// `-export_search_strategy` (the name as the argv's parser reads it, `strategy_file`: a run gives
+/// it on `STREAM_RUN_FILES` too; none for an argv that the parser rejects), whether the run is a dry
 /// run, whether the run takes its inputs from `losat_web2_register_inputs` (`inputs_together`: an
 /// argv with `-parse_deflines`), and whether it prints a text in place of a search (`prints`:
 /// `"help"` or `"version"`, `STREAM_PRINTED`), which needs no inputs. An unknown program is an
@@ -471,6 +487,8 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
         &mut out,
         losat::web_adapter::log_file(arguments).and_then(|name| name.to_str()),
     );
+    out.push_str(",\"strategy_file\":");
+    json::optional_string(&mut out, strategy_file(words).as_deref());
     // A run that prints its help ends before the end of a dry run (the reader stops first).
     let _ = write!(
         out,
@@ -481,6 +499,17 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
     json::optional_string(&mut out, prints);
     out.push('}');
     Ok(out)
+}
+
+/// The name of the file of `-export_search_strategy` of the argv `words` (program name first), as
+/// the run gives the file (`losat::web_adapter::open_strategy_file`): the name as the argv's parser
+/// reads it. `None` without the option, for a name that is not UTF-8 (which the run refuses) and
+/// for an argv that the parser rejects or that prints a text.
+fn strategy_file(words: &[&str]) -> Option<String> {
+    let (_, command) = parse_words(words).ok()?;
+    losat::web_adapter::export_search_strategy_of(&command)
+        .and_then(|path| path.to_str())
+        .map(str::to_string)
 }
 
 /// `losat_web2_start`: emits the *start* JSON (`start_json`) on stream 2.
@@ -530,17 +559,13 @@ pub fn validate(words: &[&str]) -> Result<bool, String> {
 /// (line WQA's D13 round 3, L1, 2026-11-20). Not called when the start or the settings fail.
 pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool, String> {
     use losat::web_adapter::{parse_optional_range, RangeRole};
-    let started = start(
-        words,
-        &RunFiles::Receiver(Arc::new(NoFiles)),
-        &mut std::io::sink(),
-    )
-    .map_err(|(message, _)| message)?;
+    let no_files = RunFiles::Receiver(Arc::new(NoFiles));
+    let started = start(words, &no_files, &mut std::io::sink()).map_err(|(message, _)| message)?;
     if let Ok(settings) = started.settings() {
         known(settings.data_loaders);
     }
-    let (program, command, requested) = match started_command(words, &started)? {
-        Next::Search(parsed) => *parsed,
+    let (program, command, requested) = match started_command(words, &started, &no_files)? {
+        Next::Search(parsed, _) => *parsed,
         // A run that prints reads no input; the command line prints before it refuses settings.
         Next::Prints(_) => {
             return Ok(started
@@ -1494,7 +1519,14 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
     let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
     let (result, started) = match start(words, &run_files, &mut diagnostics) {
         Ok(mut started) => (
-            run_started(words, query, subject, &mut started, &mut diagnostics),
+            run_started(
+                words,
+                query,
+                subject,
+                &mut started,
+                &run_files,
+                &mut diagnostics,
+            ),
             Some(started),
         ),
         Err((message, started)) => (Err(message), started.map(|started| *started)),
@@ -1565,13 +1597,14 @@ fn run_started(
     query: &[FastaRecord],
     subject: &[FastaRecord],
     started: &mut CallerStart,
+    run_files: &RunFiles,
     diagnostics: &mut StreamWriter,
 ) -> Result<(), String> {
     // Where the messages written to the sink end up, which the host is told first (stream 10; line
     // WQA's sweep, D7, 2026-11-20).
     crate::emit::messages(crate::emit::place(started.messages_place()));
-    let parsed = match started_command(words, started)? {
-        Next::Search(parsed) => *parsed,
+    let (parsed, strategy) = match started_command(words, started, run_files)? {
+        Next::Search(parsed, strategy) => (*parsed, strategy),
         // The command line's text on the stream of its standard output (line WQA's D14,
         // 2026-11-20); no search.
         Next::Prints(text) => {
@@ -1590,6 +1623,7 @@ fn run_started(
         let mut sink = started.sink(diagnostics);
         search_all(
             parsed,
+            strategy,
             words,
             query,
             subject,
@@ -1631,15 +1665,21 @@ struct Done {
     records: Option<HitRecords>,
 }
 
-/// The searches of a run of the parsed argv `parsed` (`run`): the messages that the command line
+/// The searches of a run of the parsed argv `parsed` (`run`), whose file of
+/// `-export_search_strategy` is `strategy` (`started_command`): the argv's own search writes it as
+/// the command line's run of the argv does (`losat::web_adapter::give_strategy`), and each other
+/// search writes one of the same name whose bytes no one keeps, so that it reads its records and
+/// refuses the file as the argv's search does. The messages that the command line
 /// writes to its standard error for the argv go to `diagnostics`, and what the other formats'
 /// standard error adds to them goes to stream 3 after them (`CallerSink::add`); for an error that
 /// ends the run, `posted` gets the NCBI message that the command line writes for it
 /// (`Failed::native`). Each output stream that fails while the run goes on (a format that failed
 /// alone, the formats of the other search when it failed) is signalled to the host with the place
 /// where the sink wrote its error (`CallerSink::error`, `emit::discard`).
+#[allow(clippy::too_many_arguments)]
 fn search_all(
     parsed: (Program, Commands, Requested),
+    mut strategy: Option<StrategyFile>,
     words: &[&str],
     query: &[FastaRecord],
     subject: &[FastaRecord],
@@ -1684,6 +1724,18 @@ fn search_all(
                 None => parse(words)?.1,
             };
             give_counts(&mut command, counts.as_ref(), settings);
+            let file = match position == own {
+                true => strategy.take(),
+                false => losat::web_adapter::open_strategy_file(
+                    &command,
+                    &words[1..],
+                    &RunFiles::Receiver(Arc::new(NoFiles)),
+                )
+                .map_err(|error| format!("{error:#}"))?,
+            };
+            if let Some(file) = file {
+                losat::web_adapter::give_strategy(&mut command, file, requested.number as i32);
+            }
             let mut warnings = Vec::new();
             let result = match streamed && position == 0 {
                 true => search(
@@ -1983,6 +2035,10 @@ fn emit_hit_records(hits: &[PairwiseHit], recorder: &RangeRecorder, ordinals: Op
 #[cfg(test)]
 #[path = "run_start_tests.rs"]
 mod start_tests;
+
+#[cfg(test)]
+#[path = "run_strategy_tests.rs"]
+mod strategy_tests;
 
 #[cfg(test)]
 mod tests {

@@ -768,6 +768,7 @@ fn word7_uses_subject_set_cutoffs() {
         #[command(flatten)]
         blastn: BlastnArgs,
     }
+    impl crate::cli::ProgramParser for Options {}
     let sequence: String = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fasta/small_test.fasta"
@@ -838,6 +839,7 @@ fn speculative_traceback_preserves_ordered_gapped_hsps() {
         #[command(flatten)]
         blastn: BlastnArgs,
     }
+    impl crate::cli::ProgramParser for Options {}
     let mut state = 0x12345678_u32;
     let query: Vec<u8> = (0..512)
         .map(|_| {
@@ -1104,6 +1106,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         #[command(flatten)]
         blastn: BlastnArgs,
     }
+    impl crate::cli::ProgramParser for Options {}
     let args = |words: &[&str]| {
         let mut argv = vec!["test", "-query", "q", "-subject", "s"];
         argv.extend_from_slice(words);

@@ -431,6 +431,7 @@ fn inline_value_starts_after_the_first_equals_sign() {
         #[arg(long = "q\u{fffd}")]
         q: Option<String>,
     }
+    impl ProgramParser for Own {}
     let argv = vec![
         OsString::from("losat"),
         OsString::from("blastn"),
@@ -459,4 +460,140 @@ fn file_names_keep_their_bytes_in_both_spellings() {
         panic!("not blastn");
     };
     assert_eq!(args.query.into_os_string(), OsString::from_vec(name));
+}
+
+// No NCBI counterpart: a run builds the clap command of its program only (`ProgramParser`).
+/// The programs of `Cli`, in the order of its subcommands.
+fn program_names() -> Vec<String> {
+    Cli::command()
+        .get_subcommands()
+        .map(|program| program.get_name().to_string())
+        .collect()
+}
+
+/// What clap writes where it stops at `words` with `command` (a help, or an error), or the
+/// program that it parsed.
+fn stopped_text(command: &clap::Command, words: &[&str]) -> String {
+    match command.clone().try_get_matches_from(words) {
+        Err(error) => format!("{:?} {error}", error.kind()),
+        Ok(matches) => format!("parsed {:?}", matches.subcommand_name()),
+    }
+}
+
+// The command that the parser reads a program's command line with has that program's arguments
+// and no other's: each option of another program costs a run nothing.
+#[test]
+fn a_command_line_builds_the_arguments_of_its_program_only() {
+    let names = program_names();
+    for name in &names {
+        for words in [
+            vec!["losat", name.as_str()],
+            vec!["losat", "-help", name.as_str(), "-h"],
+            vec!["losat", "--version", name.as_str()],
+        ] {
+            let words: Vec<OsString> = words.into_iter().map(OsString::from).collect();
+            let command = Cli::program_command(&words);
+            for program in command.get_subcommands() {
+                let built = program.get_arguments().next().is_some();
+                assert_eq!(built, program.get_name() == name, "{words:?}: {program:?}");
+            }
+        }
+    }
+    for words in [
+        &["losat"][..],
+        &["losat", "-help"],
+        &["losat", "nosuch", "blastp"],
+    ] {
+        let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let program = Cli::program_command(&words)
+            .get_subcommands()
+            .find(|program| program.get_arguments().next().is_some())
+            .map(|program| program.get_name().to_string());
+        let expected = (words.len() == 3).then(|| "blastp".to_string());
+        assert_eq!(program, expected, "{words:?}");
+    }
+}
+
+// The program's command is the one that `Cli::command()` has, every byte (its arguments with the
+// toolkit's file arguments that the parser adds, its description and help template), and clap
+// writes the same help and errors with it: the parser's texts do not depend on the other
+// programs' arguments.
+#[test]
+fn the_command_of_one_program_is_its_command_among_every_program() {
+    let every = with_toolkit_file_args(Cli::command(), |_| true);
+    for name in program_names() {
+        let words = [OsString::from("losat"), OsString::from(&name)];
+        let one = with_toolkit_file_args(Cli::program_command(&words), |program| program == name);
+        assert_eq!(
+            format!("{:?}", one.find_subcommand(&name)),
+            format!("{:?}", every.find_subcommand(&name)),
+            "{name}"
+        );
+        for words in [
+            vec!["losat", name.as_str(), "-h"],
+            vec!["losat", name.as_str(), "--help"],
+            vec!["losat", "--help", name.as_str(), "-h"],
+            vec!["losat", name.as_str(), "--no_such_option"],
+            vec!["losat", name.as_str()],
+        ] {
+            assert_eq!(stopped_text(&one, &words), stopped_text(&every, &words));
+        }
+    }
+    let top = Cli::program_command(&[OsString::from("losat")]);
+    for words in [
+        &["losat"][..],
+        &["losat", "--help"],
+        &["losat", "-h"],
+        &["losat", "nosuch"],
+    ] {
+        assert_eq!(
+            stopped_text(&top, words),
+            stopped_text(&Cli::command(), words)
+        );
+    }
+}
+
+// `program_args` adds the arguments that clap's derive defers for each variant of `Commands`
+// (`PROGRAM_ARGS` is in the variants' order), and keeps the variant's description, which clap's
+// deferred `Args` replaces where a doc comment of an `Args` gives one.
+#[test]
+fn program_args_are_the_arguments_that_commands_defers() {
+    let mut deferred = Commands::augment_subcommands(clap::Command::new("losat"));
+    let descriptions: Vec<_> = deferred
+        .get_subcommands()
+        .map(|program| {
+            (
+                program.get_about().cloned(),
+                program.get_long_about().cloned(),
+            )
+        })
+        .collect();
+    deferred.build();
+    let mut ours = Cli::command();
+    ours.build();
+    assert_eq!(
+        deferred.get_subcommands().count(),
+        ours.get_subcommands().count()
+    );
+    for ((by_clap, by_us), (about, long_about)) in deferred
+        .get_subcommands()
+        .zip(ours.get_subcommands())
+        .zip(descriptions)
+    {
+        assert_eq!(by_clap.get_name(), by_us.get_name());
+        let arguments = |program: &clap::Command| -> Vec<String> {
+            program
+                .get_arguments()
+                .map(|arg| format!("{arg:?}"))
+                .collect()
+        };
+        assert_eq!(arguments(by_clap), arguments(by_us), "{}", by_us.get_name());
+        assert_eq!(by_us.get_about(), about.as_ref(), "{}", by_us.get_name());
+        assert_eq!(
+            by_us.get_long_about(),
+            long_about.as_ref(),
+            "{}",
+            by_us.get_name()
+        );
+    }
 }

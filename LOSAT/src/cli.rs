@@ -192,9 +192,15 @@ fn top_level_after_help() -> &'static str {
     })
 }
 
-#[derive(Parser, Debug)]
+// No NCBI counterpart: `losat <program>` names the program, and a run builds the clap command of
+// that program only (`ProgramParser`).
+// LOSAT's command line, `losat <program> <words>` (`Commands`). Its command (`CommandFactory`) is
+// `cli_command`'s: `Cli::command()` has every program's arguments, which the readers of the
+// definitions walk (`api::describe`, LOSAT Web's `describe`, `render_message`), and the parser
+// reads a command line with only its program's arguments (`ProgramParser::program_command`). A
+// doc comment here would be clap's description of the top level (`long_about`).
+#[derive(clap::Args, Debug)]
 #[command(
-    name = "losat",
     version,
     about = "Pure-Rust pairwise alignment that matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions",
     help_template = LOSAT_HELP_TEMPLATE,
@@ -205,48 +211,181 @@ pub struct Cli {
     pub command: Commands,
 }
 
-#[derive(Subcommand, Debug)]
-pub enum Commands {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
-    /// Translated nucleotide query vs protein subject (blastx)
-    #[command(help_template = NCBI_HELP_TEMPLATE)]
-    Blastx(blastx::BlastxArgs),
-    /// Pairwise nucleotide alignment (megablast [default], blastn, dc-megablast, blastn-short)
-    #[allow(rustdoc::broken_intra_doc_links, reason = "clap prints it as help")]
-    #[command(help_template = NCBI_HELP_TEMPLATE)]
-    Blastn(blastn::BlastnArgs),
-    /// Pairwise protein alignment (blastp)
-    #[command(help_template = NCBI_HELP_TEMPLATE)]
-    Blastp(blastp::BlastpArgs),
-    /// Pairwise 6-frame translated nucleotide alignment (tblastx)
-    #[command(help_template = NCBI_HELP_TEMPLATE)]
-    Tblastx(tblastx::TblastxArgs),
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
-    /// Protein query vs translated nucleotide subject (tblastn)
-    #[command(help_template = NCBI_HELP_TEMPLATE)]
-    Tblastn(tblastn::TblastnArgs),
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
-    /// Position-Specific Iterated BLAST (psiblast)
-    #[command(help_template = NCBI_HELP_TEMPLATE)]
-    Psiblast(psiblast::PsiblastArgs),
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
-    /// Reverse Position Specific BLAST (rpsblast)
-    #[command(help_template = NCBI_HELP_TEMPLATE)]
-    Rpsblast(rpsblast::RpsblastArgs),
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-51
-    // `-h`, `-help` and `-help-full` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the
-    // reader stops at them, `try_parse_from_command`).
-    /// Translated Reverse Position Specific BLAST (rpstblastn)
-    #[command(help_template = NCBI_HELP_TEMPLATE)]
-    Rpstblastn(rpstblastn::RpstblastnArgs),
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
-    /// makeblastdb: create a BLAST database from a FASTA file (format version 5 by default, 4 with -blastdb_version 4)
-    #[command(name = "makeblastdb", help_template = NCBI_HELP_TEMPLATE)]
-    Makedb(crate::writedb::makeblastdb::MakedbArgs),
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65
-    /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide queries)
-    #[command(name = "rpsbproc", help_template = NCBI_HELP_TEMPLATE)]
-    Rpsbproc(crate::rpsbproc::RpsbprocArgs),
+// The `Parser` that `#[derive(Parser)]` writes (clap_derive 4.6.7: src/derives/parser.rs:85-107,
+// src/derives/into_app.rs:21-64): `Command::new("losat")` with `Cli`'s `Args`, its program
+// arguments added by `cli_command`.
+impl CommandFactory for Cli {
+    fn command() -> clap::Command {
+        cli_command::<false>(|_| true)
+    }
+
+    fn command_for_update() -> clap::Command {
+        cli_command::<true>(|_| true)
+    }
+}
+
+impl Parser for Cli {}
+
+/// The type that LOSAT's parser reads a command line into (`try_parse_from` and the readers
+/// beside it): a `Parser`, read with its whole command unless it builds less for one command line.
+pub trait ProgramParser: Parser {
+    /// The command that reads `words` (`losat <program> <words>`): `Self::command()`.
+    fn program_command(_words: &[OsString]) -> clap::Command {
+        Self::command()
+    }
+}
+
+/// `Cli` reads a command line with the arguments of its program only: the first word that names a
+/// program (`program_word`; the words before it are the top level's help and version flags), so
+/// that each option of another program costs a run nothing.
+impl ProgramParser for Cli {
+    fn program_command(words: &[OsString]) -> clap::Command {
+        let program = program_word(words, <Commands as Subcommand>::has_subcommand);
+        cli_command::<false>(|name| Some(name) == program)
+    }
+}
+
+/// `Cli`'s command with the arguments of `program` only (`cli_command`).
+pub(crate) fn command_of(program: &str) -> clap::Command {
+    cli_command::<false>(|name| name == program)
+}
+
+/// The word of `words` (`losat <words>`) that names the program whose arguments the parser reads
+/// (`parse_command`): the first that `is_program` takes. The top level has no option of its own
+/// but its help and version flags, so a word before the program's name that is neither ends the
+/// parse there, with no program's arguments.
+fn program_word(words: &[OsString], is_program: impl Fn(&str) -> bool) -> Option<&str> {
+    words
+        .iter()
+        .skip(1)
+        .filter_map(|word| word.to_str())
+        .find(|word| is_program(word))
+}
+
+/// `Cli`'s command (`augment_args`, or `augment_args_for_update` with `UPDATE`) where the programs
+/// whose names `selected` takes have their arguments (`program_args`). The others have their
+/// names, descriptions and help template, which the top level's help lists; clap adds their
+/// arguments if it builds them (`#[command(defer = true)]` on `Commands`). `UPDATE` is a constant
+/// so that a program that never calls `command_for_update` carries none of its code.
+fn cli_command<const UPDATE: bool>(selected: impl Fn(&str) -> bool) -> clap::Command {
+    let command = clap::Command::new("losat");
+    let (mut command, program_args) = if UPDATE {
+        (
+            <Cli as clap::Args>::augment_args_for_update(command),
+            PROGRAM_ARGS_FOR_UPDATE,
+        )
+    } else {
+        (<Cli as clap::Args>::augment_args(command), PROGRAM_ARGS)
+    };
+    debug_assert_eq!(command.get_subcommands().count(), program_args.len());
+    for (program, &args) in command.get_subcommands_mut().zip(program_args) {
+        let deferred = std::mem::take(program);
+        *program = if selected(deferred.get_name()) {
+            args(deferred.defer(no_args))
+        } else {
+            deferred.defer(args)
+        };
+    }
+    command
+}
+
+/// What clap builds of a program whose arguments `cli_command` has added: nothing more.
+fn no_args(command: clap::Command) -> clap::Command {
+    command
+}
+
+/// What `Commands` defers for a program (`#[command(defer = true)]`): the arguments that
+/// `cli_command` adds for `CommandFactory::command` (`PROGRAM_ARGS`) or for `command_for_update`
+/// (`PROGRAM_ARGS_FOR_UPDATE`).
+type ProgramArgs = fn(clap::Command) -> clap::Command;
+
+// clap_derive 4.6.7: src/derives/subcommand.rs:288-350 (a variant's command: its description and
+// help template, `final_from_attrs`, after its `Args`, or before them when deferred)
+/// The arguments of the program whose command is `command` (`A::augment_args`, or
+/// `augment_args_for_update` with `UPDATE`), as clap's derive adds them where it does not defer
+/// them: the description stays the variant's. A deferred `Args` comes after the variant's
+/// description, and the doc comment of an `Args` (`RpsbprocArgs`, `MakedbArgs` and the groups that
+/// the programs flatten) is a description to clap.
+fn program_args<A: clap::Args, const UPDATE: bool>(command: clap::Command) -> clap::Command {
+    use clap::builder::Resettable;
+    let about = Resettable::from(command.get_about().cloned());
+    let long_about = Resettable::from(command.get_long_about().cloned());
+    let command = if UPDATE {
+        A::augment_args_for_update(command)
+    } else {
+        A::augment_args(command)
+    };
+    command.about(about).long_about(long_about)
+}
+
+/// `Commands`, `PROGRAM_ARGS` and `PROGRAM_ARGS_FOR_UPDATE` from one list of the programs (a
+/// program is added in one place).
+macro_rules! programs {
+    (
+        $(#[$($attr:tt)*])*
+        $vis:vis enum $name:ident {
+            $( $(#[$($variant_attr:tt)*])* $variant:ident($($args:tt)+), )+
+        }
+    ) => {
+        $(#[$($attr)*])*
+        $vis enum $name {
+            $( $(#[$($variant_attr)*])* $variant($($args)+), )+
+        }
+
+        /// Each program's arguments (`program_args` of its variant's type), in the order of
+        /// `Commands`' variants: the order of `Cli`'s subcommands.
+        const PROGRAM_ARGS: &[ProgramArgs] = &[ $( program_args::<$($args)+, false>, )+ ];
+
+        /// `PROGRAM_ARGS` for `command_for_update` (`augment_args_for_update`).
+        const PROGRAM_ARGS_FOR_UPDATE: &[ProgramArgs] = &[ $( program_args::<$($args)+, true>, )+ ];
+    };
+}
+
+programs! {
+    #[derive(Subcommand, Debug)]
+    #[command(defer = true)]
+    pub enum Commands {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
+        /// Translated nucleotide query vs protein subject (blastx)
+        #[command(help_template = NCBI_HELP_TEMPLATE)]
+        Blastx(blastx::BlastxArgs),
+        /// Pairwise nucleotide alignment (megablast [default], blastn, dc-megablast, blastn-short)
+        #[allow(rustdoc::broken_intra_doc_links, reason = "clap prints it as help")]
+        #[command(help_template = NCBI_HELP_TEMPLATE)]
+        Blastn(blastn::BlastnArgs),
+        /// Pairwise protein alignment (blastp)
+        #[command(help_template = NCBI_HELP_TEMPLATE)]
+        Blastp(blastp::BlastpArgs),
+        /// Pairwise 6-frame translated nucleotide alignment (tblastx)
+        #[command(help_template = NCBI_HELP_TEMPLATE)]
+        Tblastx(tblastx::TblastxArgs),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
+        /// Protein query vs translated nucleotide subject (tblastn)
+        #[command(help_template = NCBI_HELP_TEMPLATE)]
+        Tblastn(tblastn::TblastnArgs),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
+        /// Position-Specific Iterated BLAST (psiblast)
+        #[command(help_template = NCBI_HELP_TEMPLATE)]
+        Psiblast(psiblast::PsiblastArgs),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
+        /// Reverse Position Specific BLAST (rpsblast)
+        #[command(help_template = NCBI_HELP_TEMPLATE)]
+        Rpsblast(rpsblast::RpsblastArgs),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-51
+        // `-h`, `-help` and `-help-full` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the
+        // reader stops at them, `try_parse_from_command`).
+        /// Translated Reverse Position Specific BLAST (rpstblastn)
+        #[command(help_template = NCBI_HELP_TEMPLATE)]
+        Rpstblastn(rpstblastn::RpstblastnArgs),
+        // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
+        /// makeblastdb: create a BLAST database from a FASTA file (format version 5 by default, 4 with -blastdb_version 4)
+        #[command(name = "makeblastdb", help_template = NCBI_HELP_TEMPLATE)]
+        Makedb(crate::writedb::makeblastdb::MakedbArgs),
+        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65
+        /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide queries)
+        #[command(name = "rpsbproc", help_template = NCBI_HELP_TEMPLATE)]
+        Rpsbproc(crate::rpsbproc::RpsbprocArgs),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-170,203-207,332-349
@@ -259,11 +398,12 @@ pub enum Commands {
 /// and `-xmlhelp` (`xml_help_refusal`).
 pub fn try_parse_from<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
-    T: Parser + CommandFactory,
+    T: ProgramParser,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    try_parse_from_command(T::command(), argv)
+    let words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    try_parse_from_command(T::program_command(&words), words)
 }
 
 /// `try_parse_from` for a caller whose calls run an NCBI application start of their own and return
@@ -272,11 +412,12 @@ where
 /// (`version_word_error`, `xml_help_refusal`).
 pub(crate) fn try_parse_with_own_start<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
-    T: Parser + CommandFactory,
+    T: ProgramParser,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(T::command(), argv, Reader::OwnStart)
+    let words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    parse_command(T::program_command(&words), words, Reader::OwnStart)
 }
 
 /// `try_parse_from` for LOSAT Web's ABI v2, whose runs make their own NCBI application start
@@ -288,11 +429,12 @@ where
 /// this reader is refused (`version_word_error`).
 pub(crate) fn try_parse_with_printing_start<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
-    T: Parser + CommandFactory,
+    T: ProgramParser,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(T::command(), argv, Reader::PrintingStart)
+    let words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    parse_command(T::program_command(&words), words, Reader::PrintingStart)
 }
 
 /// `try_parse_from` after the command line's application start `start` of the program that
@@ -304,16 +446,22 @@ pub(crate) fn try_parse_from_start<T, I, S>(
     start: &crate::blastinput::ncbi_environment::ApplicationStart,
 ) -> Result<T, clap::Error>
 where
-    T: Parser + CommandFactory,
+    T: ProgramParser,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(T::command(), argv, Reader::CommandLine(start))
+    let words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    parse_command(
+        T::program_command(&words),
+        words,
+        Reader::CommandLine(start),
+    )
 }
 
 /// `try_parse_from` with `command`, one of `T`'s commands whose arguments a caller changed
 /// (Web ABI v1's BLASTX keeps its own `-outfmt` values, `blastx/web.rs`), read as clap's
-/// `Parser::try_parse_from` reads `T::command()`.
+/// `Parser::try_parse_from` reads `T::command()`. The program that `argv` names has its arguments
+/// in `command` (`program_command`).
 pub(crate) fn try_parse_from_command<T, I, S>(
     command: clap::Command,
     argv: I,
@@ -364,7 +512,12 @@ where
             "the start of another program"
         );
     }
-    let command = with_toolkit_file_args(command);
+    // The toolkit's file arguments of the program that the reader reads (the program of `tokens`,
+    // `program_word`), the only one whose arguments it reads.
+    let program = program_word(&tokens, |word| command.find_subcommand(word).is_some())
+        .and_then(|word| command.find_subcommand(word))
+        .map(|program| program.get_name().to_string());
+    let command = with_toolkit_file_args(command, |name| Some(name) == program.as_deref());
     // NCBI's application reads its own toolkit words before the program's arguments; the
     // argument reader gets the words that are left (`ncbi_environment::preparse`).
     if let Some(program) = tokens
@@ -686,7 +839,9 @@ pub fn render_message(error: &clap::Error) -> String {
         .to_string()
         .replace("-h, --help", "-help")
         .replace("-V, --version", "--version");
-    let command = with_toolkit_file_args(Cli::command());
+    // Every program's option names, whatever the program of the message: a word of the command
+    // line that names another program's option is written with one dash too.
+    let command = with_toolkit_file_args(Cli::command(), |_| true);
     for scope in std::iter::once(&command).chain(command.get_subcommands()) {
         for arg in scope.get_arguments() {
             // rpsbproc's one-letter arguments are left to `render_rpsbproc_message`: replacing
@@ -754,7 +909,7 @@ fn render_rpsbproc_text(text: &str) -> String {
     let mut message = text
         .replace("-h, --help", "-help")
         .replace("-V, --version", "--version");
-    let command = Cli::command();
+    let command = command_of("rpsbproc");
     if let Some(scope) = command.find_subcommand("rpsbproc") {
         for name in scope.get_arguments().filter_map(clap::Arg::get_long) {
             if name.len() == 1 {
@@ -853,7 +1008,7 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     })
 }
 
-/// Whether the reader of the program `scope` (of `with_toolkit_file_args(Cli::command())`)
+/// Whether the reader of the program `scope` (`with_toolkit_file_args` of its command)
 /// refuses NCBI's argument `-name` by name (`named_refusal`, for a name the program does not
 /// define): the arguments that its `-xmlhelp` leaves out of NCBI's XML (`xml_help_text`).
 fn refuses_option(scope: &clap::Command, name: &str) -> bool {
@@ -978,7 +1133,8 @@ where
     S: Into<OsString>,
 {
     let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    let command = Cli::command();
+    // The programs' names, none of their arguments.
+    let command = cli_command::<false>(|_| false);
     let program = command.find_subcommand(tokens.get(1)?.to_str()?)?;
     let name = match program.get_name() {
         "blastn" => "blastn",
@@ -1238,7 +1394,7 @@ pub fn printed_text(error: &clap::Error, rpsbproc: bool) -> Option<String> {
 /// What `losat <program> -xmlhelp` prints: NCBI's XML of `program` without the arguments that its
 /// reader refuses by name (`refuses_option`, `ncbi_xmlhelp::print`).
 pub(crate) fn xml_help_text(program: &str) -> Option<String> {
-    let command = with_toolkit_file_args(Cli::command());
+    let command = with_toolkit_file_args(command_of(program), |name| name == program);
     let scope = command.find_subcommand(program)?;
     crate::ncbi_xmlhelp::print(program, |name| refuses_option(scope, name))
 }
@@ -1247,15 +1403,20 @@ pub(crate) fn xml_help_text(program: &str) -> Option<String> {
 // every NCBI application's arguments have `-logfile` and `-conffile`; the BLAST programs hide
 // them from their `-help`, `HideStdArgs(fHideLogfile | fHideConffile | ...)`, blastn_app.cpp:92)
 /// `command` with NCBI's two toolkit file arguments, `-logfile` and `-conffile`, in each NCBI
-/// application that runs them (the BLAST programs and makeblastdb), hidden as NCBI hides them.
+/// application that runs them (the BLAST programs and makeblastdb) and `selected` takes, hidden as
+/// NCBI hides them. The program's own arguments are in `command` (`cli_command`).
 /// Their values are read by the application start (`ncbi_environment::log_file` and
 /// `ApplicationStart::of_process`), before the arguments: the argument reader only checks them
 /// (one of each, as NCBI's `Argument with this name is defined already`).
-fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
+fn with_toolkit_file_args(
+    mut command: clap::Command,
+    selected: impl Fn(&str) -> bool,
+) -> clap::Command {
     let names: Vec<String> = command
         .get_subcommands()
         .map(|sub| sub.get_name().to_string())
         .filter(|name| TOOLKIT_PROGRAMS.contains(&name.as_str()) || name == "makeblastdb")
+        .filter(|name| selected(name.as_str()))
         .collect();
     for name in names {
         command = command.mut_subcommand(name, |mut sub| {

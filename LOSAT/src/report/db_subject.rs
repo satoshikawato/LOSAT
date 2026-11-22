@@ -949,7 +949,7 @@ impl ParsedSubject {
 
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:131-141
     // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2743-2757 (`GetAccVer`, which
-    // `GetId(eGetId_ForceAcc)` calls: the id itself where it is an accession with a version,
+    // `GetId` with `eGetId_ForceAcc` calls: the id itself where it is an accession with a version,
     // else `x_GetAccVer` of the Bioseq's ids)
     // NCBI reference (598d8ae6): c++/src/objmgr/scope.cpp:425-445
     /// The Seq-id that NCBI's SAM formatter (outfmt 17) names the subject by
@@ -1538,7 +1538,7 @@ impl ParsedSubject {
         if self.use_this_seqid.is_empty() {
             return true;
         }
-        // `CAlignFormatUtil::GetLabel`: the tag of a `general` id, else `GetSeqIdString(true)`.
+        // `CAlignFormatUtil::GetLabel`: the tag of a `general` id, else `GetSeqIdString` with true.
         let mut label_of_id = Vec::new();
         match defline.display_id() {
             Some(id @ ParsedSeqId::General(_)) => {
@@ -1547,8 +1547,8 @@ impl ParsedSubject {
             Some(id) => label::content(id, true, &mut label_of_id),
             None => {}
         }
-        // `NStr::StringToNumeric<TGi>(useThisSeq)` (`NStr::StringToInt8`, flags 0) of a GI
-        // that `under_positive_list` wrote in decimal.
+        // `NStr::StringToNumeric` for a `TGi`, of `useThisSeq` (`NStr::StringToInt8`, flags 0), of
+        // a GI that `under_positive_list` wrote in decimal.
         let gi = defline.gi();
         self.use_this_seqid
             .iter()
@@ -1858,8 +1858,8 @@ pub fn wrap_title(title: &[u8], out: &mut Vec<u8>) {
 }
 
 /// Whether NCBI's XML and outfmt 0 reports join the hits of `a` and `b` when they follow each
-/// other in a hit list: their Seq-align ids match (`CSeq_id::Match`, which is
-/// `Compare(..) == e_YES`).
+/// other in a hit list: their Seq-align ids match (`CSeq_id::Match`, which holds
+/// when `Compare` gives `e_YES`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:478-487
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1750-1757

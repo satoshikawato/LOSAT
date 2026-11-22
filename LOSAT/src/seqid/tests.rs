@@ -1004,9 +1004,9 @@ fn text_id(name: Option<&str>, acc: Option<&str>, version: Option<i32>) -> Texts
     }
 }
 
-/// `GetLabel(eDefault, fLabel_Default | fLabel_UpperCase)`, the label of makeblastdb's
-/// duplicate check: the labels makeblastdb 2.17.0 printed in "Duplicate seq_ids are found"
-/// (makedb-v5 survey B pd01-pd18, n06; S3b extra fixtures x_dup_*, x_hashvol_dup).
+/// `GetLabel` of `eDefault` with `fLabel_Default` and `fLabel_UpperCase`, the label of
+/// makeblastdb's duplicate check: the labels makeblastdb 2.17.0 printed in "Duplicate seq_ids are
+/// found" (makedb-v5 survey B pd01-pd18, n06; S3b extra fixtures x_dup_*, x_hashvol_dup).
 #[test]
 fn duplicate_check_labels_are_makeblastdb_s() {
     let label = |id: &ParsedSeqId| with(|out| super::label::both_upper_version(id, out));
@@ -1117,8 +1117,8 @@ fn duplicate_check_labels_are_makeblastdb_s() {
     assert_eq!(out, b"LCL|\xe9ABC");
 }
 
-/// `GetLabel(eContent, fLabel_GeneralDbIsContent)`: a general id's tag without its database,
-/// the accession without its version (the keys of `-taxid_map`).
+/// `GetLabel` of `eContent` with `fLabel_GeneralDbIsContent`: a general id's tag without its
+/// database, the accession without its version (the keys of `-taxid_map`).
 #[test]
 fn taxid_map_keys_drop_the_general_database_and_the_version() {
     let key = |id: &ParsedSeqId| with(|out| super::label::content_general_db_is_content(id, out));
@@ -1557,7 +1557,7 @@ const NCBI_HEADER_FAILURES: [(&str, &str, &str, &str, &str); 57] = [
         "byte 4: tag number is too big: 33554431",
     ),
     // RG-T5d fix 1 le1-le7: the record ends inside a tag in the long form (after its first byte,
-    // or after a byte with the high bit): `byte N` at the tag's first byte (`PeekTagByte(i)` does
+    // or after a byte with the high bit): `byte N` at the tag's first byte (`PeekTagByte` does
     // not move NCBI's stream), in the frame of the tag; in the outer two frames the
     // `CEofException` that `HandleEOF` rethrows.
     (

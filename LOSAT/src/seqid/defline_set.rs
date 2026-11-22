@@ -202,7 +202,7 @@ impl DeflineSet {
     /// `x_GetTaxDefline`): the first line that holds `target` (`s_SeqDB_SeqIdIn`, without the
     /// local form that `bioseq_defline` also takes) first, then the others in their stored order;
     /// a taxid of several lines comes once for each (each is a lookup of the volume's cache).
-    /// Without a target (`GetBioseq(oid)`: blastdbcmd without `-target_only`, the maskers, a
+    /// Without a target (`GetBioseq` of the oid: blastdbcmd without `-target_only`, the maskers, a
     /// sequence read by its ordinal id) the stored order.
     pub fn taxonomy_lookups(&self, target: Option<&ParsedSeqId>) -> Vec<i32> {
         self.taxonomy_order(target).collect()
@@ -261,7 +261,7 @@ impl DeflineSet {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:266-304
-    // `PutTargetGiFirst(-1)` (the default `this_gi_first`) leaves the set as it is
+    // `PutTargetGiFirst` with -1 (the default `this_gi_first`) leaves the set as it is
     // (Blast_def_line_set.cpp:212-237).
     /// `CShowBlastDefline::GetBioseqHandleDeflineAndId` (outfmt 5 `Hit_id` and `Hit_def`):
     /// the id list (`seqid_list_string`) of the first definition line with a title (of the
@@ -327,14 +327,13 @@ pub fn tabular_id(ids: &[ParsedSeqId], kind: TabularId, out: &mut Vec<u8>) {
 // 522-532; its `s_ReplaceLocalId` keeps a local id's own text for a `-db` search, where
 // `m_ParseSubjectDefline` is false) and for every definition line (`x_SetSubjectIds`).
 /// `CShowBlastDefline::GetSeqIdList`: `ids` with each `general` id whose FASTA form holds
-/// `gnl|BL_ORD_ID`, and each id whose FASTA form holds `lcl|Subject_`, replaced by
-/// `local str "<title_word>"`; with an empty `title_word` the ids stay. `title_word` is the
-/// first word (the bytes before the first space) of the subject Bioseq's generated title,
-/// `CDeflineGenerator().GenerateDefline(bh)`, which the caller makes: the Bioseq's title is
-/// its definition line's (seqdbvol.cpp:1445-1463; `unnamed protein product` for an empty
-/// protein title, empty for an empty nucleotide one), and its Seq-ids can add a prefix
-/// (`TPA: ` for a `tpg`, `tpe` or `tpd` id) or a generated title (a `patent` or `pdb` id
-/// with an empty title).
+/// `gnl|BL_ORD_ID`, and each id whose FASTA form holds `lcl|Subject_`, replaced by `local str
+/// "<title_word>"`; with an empty `title_word` the ids stay. `title_word` is the first word (the
+/// bytes before the first space) of the subject Bioseq's generated title, `GenerateDefline` of a
+/// `CDeflineGenerator` on the Bioseq handle, which the caller makes: the Bioseq's title is its
+/// definition line's (seqdbvol.cpp:1445-1463; `unnamed protein product` for an empty protein title,
+/// empty for an empty nucleotide one), and its Seq-ids can add a prefix (`TPA: ` for a `tpg`, `tpe`
+/// or `tpd` id) or a generated title (a `patent` or `pdb` id with an empty title).
 pub fn seq_id_list<'a>(ids: &'a [ParsedSeqId], title_word: &[u8]) -> Cow<'a, [ParsedSeqId]> {
     let replaced = |id: &ParsedSeqId| {
         let mut fasta_form = Vec::new();
@@ -360,8 +359,8 @@ pub fn seq_id_list<'a>(ids: &'a [ParsedSeqId], title_word: &[u8]) -> Cow<'a, [Pa
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2417-2437
 // `seqID` is the `WorstRank`-best id of the definition line, `gi` its first GI, `label`
-// `CAlignFormatUtil::GetLabel(seqID, CSeq_id::eContent)` (the enum is the `bool
-// with_version` parameter: true) (showalign.cpp:2205-2209). `m_UseLongSeqIds` is the
+// `CAlignFormatUtil::GetLabel` of `seqID` with `CSeq_id::eContent` (the enum is the `bool`
+// parameter `with_version`: true) (showalign.cpp:2205-2209). `m_UseLongSeqIds` is the
 // `[BLAST] LONG_SEQID` registry value, false by default.
 /// The id that an outfmt 0 alignment block prints for `defline` (after `>` or ` `, before
 /// ` <title>`; `CDisplaySeqalign::x_PrintDefLine`): `gi|N|` and the FASTA form with
@@ -744,7 +743,7 @@ fn object_id_match(a: &ObjectId, b: &ObjectId) -> bool {
 }
 
 /// The value of an Object-id that `GetIdType` reads as an integer: an `id`, or a `str` that
-/// `NStr::StringToInt8(str, fConvErr_NoThrow | fConvErr_NoErrMessage)` reads
+/// `NStr::StringToInt8` with `fConvErr_NoThrow` and `fConvErr_NoErrMessage` reads
 /// (`ncbi_str::string_to_int8` with no flags: no spaces, and the string ends at a 0 byte;
 /// `NoThrow` gives 0 with `errno` set for an error, which is `e_Str`), without a `+` or leading
 /// zeros; a 0 only as the whole string.

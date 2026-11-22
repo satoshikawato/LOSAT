@@ -20,8 +20,8 @@ pub(crate) trait RunFailure: Sized {
     /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`): the
     /// run ends at once, exit status 0, no message.
     fn closed_pipe() -> Self;
-    /// A `std::exception` that leaves NCBI's `Run` (`AppMain`'s `ERR_POST_X(7, ...)`, exit
-    /// status 3), with its `what()`.
+    /// A `std::exception` that leaves NCBI's `Run` (`AppMain`'s error post `ERR_POST_X` with
+    /// subcode 7, exit status 3), with its `what()`.
     fn std_exception(what: String) -> Self;
     /// Whether the run stops writing at this failure: LOSAT's refusal comes before NCBI's run
     /// would end, and a closed pipe ends it where SIGPIPE ends NCBI's.

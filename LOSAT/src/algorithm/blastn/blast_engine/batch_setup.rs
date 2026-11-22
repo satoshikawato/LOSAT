@@ -457,10 +457,10 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
     // depend on the subject, so they are computed once for the batch instead of in every subject
     // (`search_subject`): the cutoff scores, the hit-saving cutoff scores, the X-dropoffs and the
     // reduced cutoff scores of each context.
-    // The subject length that NCBI's word cutoff of an ungapped search takes: the average
-    // length of the subjects (a `-subject` set's `(Uint4)(total / count)`, a database's
-    // `(Int4)(total / MAX(1, count))`); the dbscan mode of the command line holds the total
-    // of a `-subject` set, so `BlastInitialWordParametersUpdate` runs once for the batch.
+    // The subject length that NCBI's word cutoff of an ungapped search takes: the average length of
+    // the subjects (a `-subject` set's total over the count as a `Uint4`, a database's total over
+    // the larger of 1 and the count as an `Int4`); the dbscan mode of the command line holds the
+    // total of a `-subject` set, so `BlastInitialWordParametersUpdate` runs once for the batch.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1445,
     // c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266, seqsrc_seqdb.cpp:203-209
     let x_avg_subject_length: u64 =

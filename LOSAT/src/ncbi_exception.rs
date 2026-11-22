@@ -1,13 +1,13 @@
 //! NCBI's exception reports: the text of `CException::what()` that NCBI's applications print
-//! after `Error: ` (their last `catch (const CException&)` clause), and the warnings that quote
-//! an exception, with one `T0` line per exception of the chain; and the lines that
-//! `NCBI_REPORT_EXCEPTION_X` posts with NCBI's default diagnostic flags
-//! ([`NcbiException::report_default_ex`]: rpsbproc's application handler, `rpsbproc::report_exception`).
-//! This module is the one owner of that text; each place NCBI throws from keeps its
-//! [`ThrowSite`] next to the port of the code that throws (`ncbi_str`, `writedb::data_size`,
-//! `writedb::build_db`, `utils::winmask`, `seqid::parse`, `blastinput::db_filter`, BLASTN's
-//! `-use_index` warning in `blastn::blast_engine::run`, the serial objects' exceptions of
-//! rpsbproc in `rpsbproc::query`).
+//! after `Error: ` (their last `catch` clause, which takes a `CException` by reference), and the
+//! warnings that quote an exception, with one `T0` line per exception of the chain; and the lines
+//! that `NCBI_REPORT_EXCEPTION_X` posts with NCBI's default diagnostic flags
+//! ([`NcbiException::report_default_ex`]: rpsbproc's application handler,
+//! `rpsbproc::report_exception`). This module is the one owner of that text; each place NCBI throws
+//! from keeps its [`ThrowSite`] next to the port of the code that throws (`ncbi_str`,
+//! `writedb::data_size`, `writedb::build_db`, `utils::winmask`, `seqid::parse`,
+//! `blastinput::db_filter`, BLASTN's `-use_index` warning in `blastn::blast_engine::run`, the
+//! serial objects' exceptions of rpsbproc in `rpsbproc::query`).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:370-384
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:397-406
@@ -97,7 +97,7 @@ pub struct NcbiException {
 }
 
 impl NcbiException {
-    /// `NCBI_THROW(class, code, message)` at `site`.
+    /// `NCBI_THROW` with a class, a code and a message, at `site`.
     pub fn new(site: ThrowSite, message: impl Into<Vec<u8>>) -> Self {
         NcbiException {
             site,
@@ -111,8 +111,8 @@ impl NcbiException {
     // `CStringException` derives from `CParseTemplException<CCoreException>` (ncbistr.hpp:4499),
     // whose `ReportExtra` prints the position.
     // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:4435-4439
-    /// `NCBI_THROW2(CStringException, code, message, pos)` at `site`: the report adds the
-    /// position.
+    /// `NCBI_THROW2` with `CStringException`, a code, a message and `pos`, at `site`: the report
+    /// adds the position.
     pub fn with_pos(site: ThrowSite, message: impl Into<Vec<u8>>, pos: usize) -> Self {
         let mut exception = Self::new(site, message);
         exception.extra = Some(format!("m_Pos = {pos}").into_boxed_str());
@@ -188,7 +188,7 @@ impl NcbiException {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/exception.cpp:47-61
-    /// `CSerialException::AddFrameInfo(frame_info)`, which the object stack's `END_OBJECT_FRAME`
+    /// `CSerialException::AddFrameInfo` with `frame_info`, which the object stack's `END_OBJECT_FRAME`
     /// calls with `GetFrameName()` of each frame a `CSerialException` leaves: the frame stack is
     /// the extra text of the exception's report (`ReportExtra`, ` at <stack>`; a
     /// `CSerialException` has no other). `NCBI_RETHROW_SAME` (`rethrow_same`) keeps the stack in
@@ -255,10 +255,10 @@ impl NcbiException {
         crate::wording::losat_bytes(&self.ncbi_what_in(root)).into_owned()
     }
 
-    /// `<text><what()>`, as NCBI posts an exception after a text (`ERR_POST(e.GetMsg() << e.what())`,
-    /// `"... Q(0/1" << e.what()`), in LOSAT's words: the joined text is mapped as a whole, so the
-    /// report is set off from the text before it as in the mapping of NCBI's post
-    /// (`crate::wording::losat_text`).
+    /// `<text><what()>`, as NCBI posts an exception after a text (an `ERR_POST` of `e.GetMsg()` and
+    /// `e.what()`, or of the text "... Q(0/1" and `e.what()`), in LOSAT's words: the joined text is
+    /// mapped as a whole, so the report is set off from the text before it as in the mapping of
+    /// NCBI's post (`crate::wording::losat_text`).
     pub(crate) fn what_after(&self, text: &[u8]) -> Vec<u8> {
         crate::wording::losat_bytes(&[text, &self.ncbi_what_in(NCBI_BUILD_ROOT)].concat())
             .into_owned()
@@ -323,14 +323,14 @@ impl NcbiException {
     // severity is the exceptions' `Error` (`sm_DefEnabled` is true and `sm_DefHandler` null
     // unless an application changes them, ncbiexpt.cpp:603-605). The main text is the newest
     // exception of the chain, from the newest, that has it (`HasMainText`), else the oldest: an
-    // exception that `rethrow` makes has it (the constructor's `m_MainText(true)`,
+    // exception that `rethrow` makes has it (the constructor sets `m_MainText` to true,
     // ncbiexpt.cpp:179), one that `rethrow_same` makes has not, so the main text is then its
     // predecessor's (the exception of NCBI's object stream under a member's
     // `error while reading <member>`).
-    /// `NCBI_REPORT_EXCEPTION_X(err_subcode, title, e)` in a source file whose
-    /// `NCBI_USE_ERRCODE_X` is `err_code`, as an application with NCBI's default diagnostic
-    /// flags posts it: `Error: (<class>::<code>) <message>` for each exception of the chain,
-    /// oldest first, then `Error: (<err_code>.<err_subcode>) <title> (<class>::<code>)
+    /// `NCBI_REPORT_EXCEPTION_X` with `err_subcode`, `title` and the exception `e`, in a source
+    /// file whose `NCBI_USE_ERRCODE_X` is `err_code`, as an application with NCBI's default
+    /// diagnostic flags posts it: `Error: (<class>::<code>) <message>` for each exception of the
+    /// chain, oldest first, then `Error: (<err_code>.<err_subcode>) <title> (<class>::<code>)
     /// <message>` of the exception with the main text, each line ending with a line feed; in
     /// LOSAT's words (`crate::wording::losat_text`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception
     /// 12).
@@ -377,7 +377,7 @@ impl NcbiException {
 
     // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:580-584, 755-757
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:670-674
-    /// `NCBI_CATCH(title)` of this exception in an application whose diagnostic prefix is
+    /// `NCBI_CATCH` with `title`, of this exception in an application whose diagnostic prefix is
     /// `prefix` (`ReportDefaultEx` without an error code, cited at `report_default_ex`): `Error:
     /// (<class>::<code>) [<prefix>] <message>` for each exception of the chain, oldest first, then
     /// `Error: [<prefix>] <title> (<class>::<code>) <message>` of the exception with the main text
@@ -502,7 +502,7 @@ fn post_error_bytes(id: &str, message: &[u8]) -> Vec<u8> {
 /// `[<prefix>] ` when it set one (`SetDiagPostPrefix`), the message as it is, and a line feed.
 /// The one place that makes this line: the exception reports here, the posts of the bytes that
 /// NCBI's object streams replace (`report::serial::encoder::ReplacedChar::post`) and the
-/// applications' `ERR_POST(Error << ...)` (`ncbi_app::Diag::err_post_bytes`).
+/// applications' `ERR_POST` of an `Error` (`ncbi_app::Diag::err_post_bytes`).
 pub(crate) fn error_post_line(id: Option<&str>, prefix: Option<&str>, message: &[u8]) -> Vec<u8> {
     post_line(Severity::Error, id, prefix, message)
 }
@@ -556,7 +556,7 @@ pub(crate) fn post_line_in(
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:676-697
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4389-4435 (`CDiagBuffer::Flush`)
-// `s` is an output string stream: its buffer gives nothing to read, so `<< s.rdbuf()` inserts no
+// `s` is an output string stream: its buffer gives nothing to read, so inserting `s.rdbuf()` adds no
 // character and sets `failbit` on the thread's diagnostic stream (`CDiagBuffer::m_Stream`), which
 // `Flush` empties and gives its flags back but never `clear()`s. Every later message of that
 // thread is lost: its post prints the header alone, and `CATCH_ALL`'s `LOG_POST` (no header) its
@@ -646,12 +646,12 @@ impl Drop for MainDiagGuard {
     }
 }
 
-/// Whether the diagnostic stream of NCBI's main thread has failed in this run (`ERR_POST_X(6,
-/// "Failed to parse location of " << s.rdbuf() ...)` of the object manager,
+/// Whether the diagnostic stream of NCBI's main thread has failed in this run (`ERR_POST_X` of
+/// the object manager, subcode 6, with "Failed to parse location of " and `s.rdbuf()`,
 /// `algorithm::pssm_search::annot_index`): the run's later posts print their header only
-/// (`post_line`) and `CATCH_ALL` its line feeds (`cli::catch_all_text`). False unless a psiblast
-/// or tblastn `-in_pssm` run posted it: the command line's, or a library call's (`Inputs::pssm`;
-/// each call is a run with a stream of its own, `MainDiag`); LOSAT Web refuses `-in_pssm`.
+/// (`post_line`) and `CATCH_ALL` its line feeds (`cli::catch_all_text`). False unless a psiblast or
+/// tblastn `-in_pssm` run posted it: the command line's, or a library call's (`Inputs::pssm`; each
+/// call is a run with a stream of its own, `MainDiag`); LOSAT Web refuses `-in_pssm`.
 pub(crate) fn main_diag_failbit() -> bool {
     MainDiag::with_current(MainDiag::failed)
 }
@@ -665,7 +665,7 @@ pub(crate) fn set_main_diag_failbit() {
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:550-551, 564-567
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:252-256
 // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:934-938
-/// `ERR_POST_X(err_subcode, message)` in a source file whose `NCBI_USE_ERRCODE_X` is
+/// `ERR_POST_X` with `err_subcode` and `message` in a source file whose `NCBI_USE_ERRCODE_X` is
 /// `err_code`, as an application with NCBI's default diagnostic flags writes it (a `CNcbiDiag`
 /// is of severity `Error`): `Error: (<err_code>.<err_subcode>) <message>` and a line feed. The
 /// application's report of an exception's title line, and of a `std::exception`

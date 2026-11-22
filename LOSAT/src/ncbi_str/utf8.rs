@@ -24,7 +24,8 @@ pub enum Utf8Error {
 }
 
 impl Utf8Error {
-    /// Where NCBI throws the exception (`NCBI_THROW2(CStringException, code, message, 0)`).
+    /// Where NCBI throws the exception (`NCBI_THROW2` with `CStringException`, a code, a message
+    /// and 0).
     pub(crate) fn site(self) -> ThrowSite {
         let (line, kind, function) = match self {
             Utf8Error::DecodeFirst => (
@@ -51,7 +52,7 @@ impl Utf8Error {
         }
     }
 
-    /// The exception, at position 0 (`m_Pos = 0`).
+    /// The exception, at position 0 (`m_Pos` is 0).
     pub(crate) fn exception(self) -> NcbiException {
         let message = match self {
             Utf8Error::DecodeFirst | Utf8Error::DecodeNext => "Source string is not in UTF8 format",
@@ -61,7 +62,7 @@ impl Utf8Error {
     }
 }
 
-/// `CUtf8::Decode(src)` followed by `CUtf8::SymbolToChar(sym, eEncoding_Ascii)`: the character
+/// `CUtf8::Decode` of `src` followed by `CUtf8::SymbolToChar` with `eEncoding_Ascii`: the character
 /// that the sequence at the start of `src` (a byte >= 0x80 first) stands for, and how many bytes
 /// it takes. The end of `src` reads as the string's terminating NUL.
 ///

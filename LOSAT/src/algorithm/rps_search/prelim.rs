@@ -358,17 +358,17 @@ impl RpsPrelim<'_> {
             };
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:603-657,703-712
             // and :102-109 (s_IntervalNodeInit)
-            // The tree's root is `[0, R]`, `R = Lc + 1`. A region (the HSP's profile offset plus
-            // its query range) that starts past `R` goes right at every node `[l, R]` of the
-            // right spine (its middle is at most `R`) and becomes the leaf at the spine's end; a
-            // second one in the same tree (a query's, a frame's for RPSTBLASTN) meets that leaf,
-            // and the split makes `[R + 1, R]`, whose middle is `R` again: both go right, and
-            // `BlastIntervalTreeAddHSP` splits that node without end while its node pool doubles
-            // (memory runs out). A region that starts at or before `R` and ends past it straddles
-            // a middle of the spine and ends in a subject tree. Below `R = 0` (an `Lc` of -2 or
-            // less) every middle of the spine is below the regions' starts. `try_add_hsp` finds the
-            // insertion that makes such a node, after NCBI's end-point checks (which may drop the
-            // HSP or the leaf it would meet): only an `Lc` below the rows (an alias file's
+            // The tree's root is `[0, R]`, where `R` is one more than `Lc`. A region (the HSP's
+            // profile offset plus its query range) that starts past `R` goes right at every node
+            // `[l, R]` of the right spine (its middle is at most `R`) and becomes the leaf at the
+            // spine's end; a second one in the same tree (a query's, a frame's for RPSTBLASTN)
+            // meets that leaf, and the split makes `[R + 1, R]`, whose middle is `R` again: both go
+            // right, and `BlastIntervalTreeAddHSP` splits that node without end while its node pool
+            // doubles (memory runs out). A region that starts at or before `R` and ends past it
+            // straddles a middle of the spine and ends in a subject tree. Below `R = 0` (an `Lc` of
+            // -2 or less) every middle of the spine is below the regions' starts. `try_add_hsp`
+            // finds the insertion that makes such a node, after NCBI's end-point checks (which may
+            // drop the HSP or the leaf it would meet): only an `Lc` below the rows (an alias file's
             // `LENGTH` and `NSEQ` over one volume) leaves regions past the end, and the search
             // stops there (LOSAT's refusal of the query batch; at most one region past the end in
             // a tree is NCBI's search).

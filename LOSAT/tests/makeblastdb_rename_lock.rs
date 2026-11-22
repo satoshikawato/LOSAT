@@ -2,15 +2,15 @@
 //! where it creates and leaves LMDB's lock files, against the files and messages of makeblastdb
 //! 2.17.0 (the official Linux x64 release; probes of 2026-11-11).
 //!
-//! makeblastdb gives a volume file its final name with `CDirEntry::Rename(fRF_Overwrite)` and does
-//! not look at the result: a name that holds a directory the removal cannot delete (it holds a
+//! makeblastdb gives a volume file its final name with `CDirEntry::Rename` and `fRF_Overwrite`, and
+//! does not look at the result: a name that holds a directory the removal cannot delete (it holds a
 //! directory that cannot be read) keeps the volume file under its numbered name, the build goes on
 //! and ends where the database is read (`No alias or index file found ...`, `Could not find volume
-//! or alias file ...`, exit status 2) or normally (exit status 0) when the missing file is not
-//! one the reader opens. A file that is already there under the numbered name of a file the
-//! writer never created is renamed as well. LMDB's `mdb_env_open` creates `NAME.pdb-lock` and
-//! `NAME.ptf-lock`; the destructors of the writers remove them; one whose environment did not
-//! open stays.
+//! or alias file ...`, exit status 2) or normally (exit status 0) when the missing file is not one
+//! the reader opens. A file that is already there under the numbered name of a file the writer
+//! never created is renamed as well. LMDB's `mdb_env_open` creates `NAME.pdb-lock` and
+//! `NAME.ptf-lock`; the destructors of the writers remove them; one whose environment did not open
+//! stays.
 //!
 //! Each case runs the `losat` binary in a directory of its own, with the setup of the case made
 //! before it. A case lists the top-level entries of the output directory with their sizes

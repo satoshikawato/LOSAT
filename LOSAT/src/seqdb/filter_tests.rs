@@ -279,7 +279,7 @@ fn list_of(text: &[u8], negative: bool) -> SeqidList {
     }
 }
 
-/// The Seq-id strings (`GetSeqIdString(true)`) of the definition lines the restricted
+/// The Seq-id strings (`GetSeqIdString` with true) of the definition lines the restricted
 /// database keeps, per ordinal id.
 fn kept_ids(db: &SeqDb) -> Vec<Vec<String>> {
     (0..db.num_seqs())

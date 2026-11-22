@@ -974,7 +974,7 @@ where
 /// NCBI ends such a batch by `Traceback failed` only when the batch's first query holds no redone
 /// match (`first_query`, the heap of `batch_start`). With a status other than 0 the clean-up frees
 /// the arrays of every query's heap, leaving each heap's count, and then empties the heap of the
-/// first query alone (`s_ClearHeap(redoneMatches_tld[i])`, the address of its element 0):
+/// first query alone (`s_ClearHeap` of `redoneMatches_tld[i]`, the address of its element 0):
 /// `BlastCompo_HeapPop` converts nothing (`array` is NULL) and, when the count is above 0, reads
 /// `heapArray[1]` through the NULL `heapArray` (SIGSEGV, at address 0x28 on ws, 2026-11-18). A
 /// heap's count is above 0 once `BlastCompo_HeapInsert` (blast_kappa.c:3705-3719) has put a match

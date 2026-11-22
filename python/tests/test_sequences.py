@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from conftest import fasta
-from pylosat import InputError, Search, Sequences
+from pylosat import InputError, Search, SearchError, Sequences
 
 RECORDS = [
     ("q1 a nucleotide query", "ACGTTGCAACGGATTACAGGCTTAGCATCGATCGGATCCTAGCTAGGATCGATTACG"),
@@ -72,7 +72,9 @@ def test_a_path_is_not_an_input_until_it_is_named_one():
 
 
 def test_a_fasta_error_is_the_readers():
-    with pytest.raises(InputError, match="LOSAT query error"):
+    # The command line reads its queries one batch at a time: a query record that its reader
+    # refuses ends the search in that record's batch (here the first), a failure of the search.
+    with pytest.raises(SearchError, match="LOSAT query error"):
         hsps(Sequences.from_text("xyz{}[]|~`^&*()=+\n"), Sequences.from_text(FASTA_TEXT))
 
 

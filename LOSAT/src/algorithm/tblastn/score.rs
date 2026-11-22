@@ -260,7 +260,7 @@ impl TbnScore for MatrixScore {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4171-4189,4257-4258,4295
     // NCBI's `subject->length` enters the alignment only through `AdjustSubjectRange` and the
-    // test of the right extension. With `s_off >= subject->length`, the alignment on the letters
+    // test of the right extension. With `s_off` at or past `subject->length`, the alignment on the letters
     // up to `s_off` (a `subject->length` of `s_off + 1`) gives NCBI's values whenever both lengths
     // are on the same side of MAX_SUBJECT_OFFSET: the same shift (it depends on `s_offset` alone),
     // a right extension that does not run in either case (`s_length` is not below the adjusted

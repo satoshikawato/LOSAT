@@ -57,8 +57,8 @@ enum Checked {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/multisource_util.cpp:108-155
-// `CSeq_id(acc)` parses with its default flags, `fParse_AnyRaw` (Seq_id.hpp:135-136); a
-// `TGi` is an `Int8`, whose conversion of too many digits throws a `CStringException` that
+// A `CSeq_id` made from `acc` parses with its default flags, `fParse_AnyRaw` (Seq_id.hpp:135-136);
+// a `TGi` is an `Int8`, whose conversion of too many digits throws a `CStringException` that
 // nothing catches (makeblastdb: exit status 255).
 /// `CheckAccession`: `Ok(None)` when `acc` is not a Seq-id.
 fn check_accession(
@@ -96,7 +96,7 @@ pub fn accession_to_key(
             temp_id.extend_from_slice(acc);
             match check_accession(&temp_id, warn)? {
                 Some(Checked::SeqId(id)) => seq_id_key(&id),
-                // `GetSeqIdKey(*seqid)` of a GI: the retried id is a local id.
+                // `GetSeqIdKey` of `*seqid`, for a GI: the retried id is a local id.
                 Some(Checked::Gi(gi)) => gi.to_string().into_bytes(),
                 None => Vec::new(),
             }
@@ -105,7 +105,7 @@ pub fn accession_to_key(
 }
 
 impl TaxIdSet {
-    /// `CTaxIdSet(global_taxid)`.
+    /// `CTaxIdSet` of `global_taxid`.
     pub fn with_global(global_taxid: i32) -> Self {
         Self {
             global_taxid,

@@ -710,7 +710,7 @@ impl SegMasker {
     }
 
     /// Mask a sequence and return the list of masked intervals, the overlapping segments merged:
-    /// `SeqBufferSeg` as BLAST's filters call it (`sparamsp->overlaps = TRUE`, blast_filter.c
+    /// `SeqBufferSeg` as BLAST's filters call it (`sparamsp->overlaps` set to `TRUE`, blast_filter.c
     /// and the composition adjustment's `s_DoSegSequenceData`).
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2030-2116 (s_SegSeq)
     pub fn mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
@@ -777,7 +777,7 @@ impl SegMasker {
                             let rend = leftend - 1;
                             if rend < seq.len() && lend <= rend {
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2086-2101
-                                // `leftsegs->next = *segs` overwrites the link of the head of
+                                // The assignment of `*segs` to `leftsegs->next` overwrites the link of the head of
                                 // the recursion's list, so when the recursion found more than
                                 // one segment only its head (the one found last) is kept; the
                                 // others are dropped (and leaked). This deterministic result

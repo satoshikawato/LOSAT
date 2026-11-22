@@ -1,5 +1,5 @@
-//! Unit tests of `real` (NCBI's serial real-number digits) and `x87` (the 80-bit `long double`
-//! operations behind them).
+//! Unit tests of `real` (NCBI's serial real-number digits) and `x87` (the 80-bit
+//! extended-precision x87 operations behind them).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2447-2654
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2658-2744
@@ -189,7 +189,8 @@ fn round_ratio_to_x87(num: &Big, den: &Big) -> (u64, i32) {
     (q as u64, e)
 }
 
-/// Every `__NLG(1.e<n>)` literal of DoubleToString_Ecvt is the correctly rounded 80-bit value.
+/// Every `__NLG` literal (ten to the power n) of DoubleToString_Ecvt is the correctly rounded
+/// 80-bit value.
 #[test]
 fn long_double_literals_are_correctly_rounded() {
     let table = long_double_pow10_table();

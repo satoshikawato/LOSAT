@@ -36,11 +36,12 @@ use crate::report::serial::object_frame::{frame_info, frame_name, FrameKind};
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:70-130
 const TAG_INTEGER: u8 = 2;
-/// `MakeTagByte(eApplication, ePrimitive, eInteger)`, which `ExpectIntegerTag` also takes.
+/// `MakeTagByte` of `eApplication`, `ePrimitive` and `eInteger`, which `ExpectIntegerTag` also
+/// takes.
 const TAG_APPLICATION_INTEGER: u8 = (1 << 6) | TAG_INTEGER;
 const TAG_UTF8_STRING: u8 = 12;
 const TAG_VISIBLE_STRING: u8 = 26;
-/// `MakeTagClassAndConstructed(eUniversal, eConstructed)`.
+/// `MakeTagClassAndConstructed` of the class `eUniversal` with `eConstructed`.
 const TAG_CONSTRUCTED: u8 = 1 << 5;
 pub(crate) const TAG_SEQUENCE: u8 = TAG_CONSTRUCTED | 16;
 pub(crate) const TAG_CONTEXT_CONSTRUCTED: u8 = (2 << 6) | (1 << 5);
@@ -197,7 +198,7 @@ enum Frame {
     /// `eFrameNamed`: the root, `Blast-def-line-set`.
     Root,
     /// `eFrameArray` of the set, the second frame of the stack: there `HandleEOF` rethrows the
-    /// `CEofException` (`GetStackDepth() < 2` after the frame is left).
+    /// `CEofException` (a `GetStackDepth` below 2 after the frame is left).
     SetArray,
     /// `eFrameArray` of a member's container (its type has no name).
     Array,
@@ -270,7 +271,7 @@ enum Failure {
     /// `CIStreamBuffer::FillBuffer`), not yet in a frame: the innermost frame makes it NCBI's
     /// exception (`HandleEOF`), with the position of NCBI's stream then: the record's length
     /// where a byte is read, the tag's first byte where a byte after it is peeked
-    /// (`PeekTagByte(i)` of a tag in the long form leaves the stream where it is).
+    /// (`PeekTagByte` of a later byte of a tag in the long form leaves the stream where it is).
     Eof { pos: usize },
     /// The `CEofException` that `HandleEOF` rethrows in the outer two frames (the end of the
     /// record where the set's container is read, outside its elements): no frames, and a
@@ -492,7 +493,7 @@ pub(crate) struct Tag {
 
 impl Tag {
     /// The identifier whose first byte is `first` in the short form (`PeekTag`'s one byte,
-    /// `m_CurrentTagLength = 1`); `None` in the long form (`PeekLongTag`).
+    /// `m_CurrentTagLength` set to 1); `None` in the long form (`PeekLongTag`).
     #[inline(always)]
     fn short(first: u8) -> Option<Tag> {
         (first & TAG_NUMBER_MASK != TAG_NUMBER_MASK).then_some(Tag {
@@ -606,7 +607,7 @@ impl<'a> Reader<'a> {
 
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrasnb.inl:175-189
     /// `PeekTag` of the identifier whose first byte `first` is at the position, which stays
-    /// (`PeekTagByte(i)` does not move the stream): the one tag reader of both decoders.
+    /// (`PeekTagByte` does not move the stream): the one tag reader of both decoders.
     #[inline]
     fn peek_tag(&self, first: u8) -> Result<Tag, BerError> {
         match Tag::short(first) {
@@ -856,7 +857,8 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
-    /// `UnexpectedSysTagByte(expected)` with the tag byte `got` at the position.
+    /// `UnexpectedSysTagByte` of the expected byte `expected`, with the tag byte `got` at the
+    /// position.
     #[cold]
     #[inline(never)]
     fn unexpected_sys_tag_byte(&self, got: u8, expected: u8) -> BerError {
@@ -1007,7 +1009,7 @@ impl<'a> Reader<'a> {
         Ok(tag.number)
     }
 
-    /// `UnexpectedMember(tag, items)` of the type whose members (or variants) are `names`.
+    /// `UnexpectedMember` of `tag` in the type whose members (or variants) are `names`.
     #[cold]
     #[inline(never)]
     fn unexpected_member(&self, tag: u32, names: &[&str]) -> BerError {
@@ -1086,8 +1088,8 @@ pub(crate) enum StdSignedError<E> {
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:475-512
 /// NCBI's `ReadStdSigned` after its `ReadShortLength`: the INTEGER of `length` content bytes,
-/// taken one at a time from `byte`, read into a signed type of `width` bytes (`sizeof(T)`: 4 for
-/// `Int4`, 8 for `Int8`, whose `Uint8` holds the same bits) and widened to `i64`. Content bytes
+/// taken one at a time from `byte`, read into a signed type of `width` bytes (the size of `T`: 4
+/// for `Int4`, 8 for `Int8`, whose `Uint8` holds the same bits) and widened to `i64`. Content bytes
 /// beyond the width are taken only as the sign extension of the value; anything else is an
 /// overflow. The one port of the function: the header reader (`Reader::int`) and the mask-file
 /// reader (`writedb::mask_info::ber`) read their INTEGERs with it.
@@ -1231,8 +1233,8 @@ fn read_class<'a>(
     ber.end_of_content(end).map_err(|e| e.left(frame))
 }
 
-/// `BeginClassMember(classType, pos)` of a class with the members `names` whose next member
-/// is `next`: the member's tag and end, `None` at the end of the members.
+/// `BeginClassMember` of a class with the members `names` whose next member is `next` (NCBI's
+/// `pos`): the member's tag and end, `None` at the end of the members.
 fn begin_class_member(
     ber: &mut Reader<'_>,
     end: End,

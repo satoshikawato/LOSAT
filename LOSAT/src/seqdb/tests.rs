@@ -1034,7 +1034,7 @@ fn alias_oid_ranges_select_ncbis_oids() {
     assert_eq!(db.included_length().unwrap(), lengths(&db));
     assert_eq!(db.oid_walk().unwrap().collect::<Vec<u32>>(), [0, 4, 8]);
     // The loop passes the OID at the range's end when the list holds it and not the OID before
-    // it (`x_CheckOrFindOID` tests `next_oid > m_RestrictEnd`).
+    // it (`x_CheckOrFindOID` tests whether `next_oid` is above `m_RestrictEnd`).
     write("b.pal", "DBLIST prot_old\nFIRST_OID 1\nLAST_OID 5\n");
     write("t.pal", "DBLIST b\nFIRST_OID 1\nLAST_OID 10\n");
     let db = SeqDb::open(&names("t", "prot_v4"), SeqType::Protein).unwrap();
@@ -1059,7 +1059,7 @@ fn alias_oid_ranges_select_ncbis_oids() {
     assert_eq!((db.num_seqs(), db.oid_walk().unwrap().count()), (0, 0));
     write("nest.pal", "DBLIST f3l3g\n");
     assert_eq!(oids(&open("nest").unwrap()), [2, 3, 4, 5, 6, 7, 8, 9]);
-    // FIRST_OID 2^31: NCBI's `INT_MIN--` gives INT_MAX, the range [N, N).
+    // FIRST_OID 2^31: NCBI's decrement of `INT_MIN` gives INT_MAX, the range [N, N).
     write("f31.pal", "DBLIST prot_old\nFIRST_OID 2147483648\n");
     let db = SeqDb::open(&names("f31", "prot_v4"), SeqType::Protein).unwrap();
     assert_eq!(oids(&db), Vec::<u32>::new());
@@ -1493,7 +1493,7 @@ fn alias_lines_are_read_as_ncbi_reads_them() {
         test_split_quoted(b"\"open quote", false),
         [b"open quote".as_slice()]
     );
-    // The reports keep the quotes (`SeqDB_SplitQuoted(..., true)`), and NCBI's `i++` past a
+    // The reports keep the quotes (`SeqDB_SplitQuoted` with true), and NCBI's step of `i` past a
     // closing quote also skips the byte after it.
     assert_eq!(
         test_split_quoted(b"\"a b\" \"c\"", true),

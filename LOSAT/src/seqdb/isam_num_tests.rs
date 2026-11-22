@@ -104,3 +104,65 @@ fn missing_files_are_silent_and_a_bad_header_is_refused() {
     ));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+fn list(keys: &[i64]) -> Vec<NumOid> {
+    keys.iter().map(|&key| NumOid { key, oid: None }).collect()
+}
+
+fn opened(base: &Path) -> NumericIsam {
+    match NumericIsam::open_for_list(base, SeqType::Protein, ListIsam::Gi, 1).unwrap() {
+        Some(Opened::Ready(isam)) => isam,
+        other => panic!("not ready: {other:?}"),
+    }
+}
+
+#[test]
+fn a_list_is_translated_against_every_page_of_the_volume() {
+    for long_id in [false, true] {
+        let dir = temp_dir(if long_id { "batch_long" } else { "batch_short" });
+        let rows: Vec<(i64, i32)> = (1..=23).map(|i| (i * 7, i as i32)).collect();
+        let base = write_isam(&dir, &rows, long_id, 4);
+        let isam = opened(&base);
+        let mut ids = list(&[1, 7, 8, 28, 28, 70, 161, 162]);
+        isam.ids_to_oids(100, &mut ids).unwrap();
+        let oids: Vec<Option<u32>> = ids.iter().map(|id| id.oid).collect();
+        assert_eq!(
+            oids,
+            vec![None, Some(101), None, Some(104), Some(104), Some(110), Some(123), None]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[test]
+fn an_id_translated_by_an_earlier_volume_keeps_its_oid() {
+    let dir = temp_dir("batch_kept");
+    let base = write_isam(&dir, &[(5, 0), (9, 1), (12, 2)], false, 2);
+    let isam = opened(&base);
+    let mut ids = list(&[5, 9, 12]);
+    ids[1].oid = Some(3);
+    isam.ids_to_oids(10, &mut ids).unwrap();
+    let oids: Vec<Option<u32>> = ids.iter().map(|id| id.oid).collect();
+    assert_eq!(oids, vec![Some(10), Some(3), Some(12)]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_list_isam_needs_oids_and_an_index_of_the_data_length() {
+    let dir = temp_dir("batch_open");
+    let base = write_isam(&dir, &[(5, 0), (9, 1)], false, 256);
+    assert!(NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Gi, 0)
+        .unwrap()
+        .is_none());
+    assert!(NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Ti, 2)
+        .unwrap()
+        .is_none());
+    let nd = with_extension(&base, SeqType::Protein, "nd");
+    let data = std::fs::read(&nd).unwrap();
+    std::fs::write(&nd, &data[..8]).unwrap();
+    assert!(matches!(
+        NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Gi, 2).unwrap(),
+        Some(Opened::Uninitialized)
+    ));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

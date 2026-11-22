@@ -42,6 +42,7 @@ pub mod date;
 pub mod file;
 pub mod filter;
 pub mod header;
+pub(crate) mod id_list;
 pub mod index;
 pub mod isam;
 pub mod isam_num;

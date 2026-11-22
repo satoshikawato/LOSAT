@@ -6,6 +6,8 @@
 //! Only the types that a `Blast-db-mask-info` reaches are described: `Blast-mask-list`, `Seq-loc`
 //! with everything below it (`Seq-id` and the types of its variants, `Int-fuzz`, `Date`, ...).
 
+use crate::report::serial::asn_input::{EnumItems, Items};
+
 /// How the C++ class of a type stores a number: this decides the range that the reader accepts.
 #[derive(Clone, Copy)]
 pub(super) enum Ty {
@@ -80,6 +82,43 @@ pub(super) struct ChoiceDef {
     /// SEQUENCE (`Id-pat.id`).
     pub(super) name: &'static str,
     pub(super) variants: &'static [Variant],
+}
+
+impl Items for ClassDef {
+    fn count(&self) -> usize {
+        self.members.len()
+    }
+
+    fn name(&self, index: usize) -> &'static str {
+        self.members[index].name
+    }
+}
+
+impl Items for ChoiceDef {
+    fn count(&self) -> usize {
+        self.variants.len()
+    }
+
+    fn name(&self, index: usize) -> &'static str {
+        self.variants[index].name
+    }
+}
+
+impl EnumItems for EnumDef {
+    fn integer(&self) -> bool {
+        self.integer
+    }
+
+    fn value_of(&self, name: &[u8]) -> Option<i32> {
+        self.values
+            .iter()
+            .find(|&&(n, _)| n.as_bytes() == name)
+            .map(|&(_, value)| value)
+    }
+
+    fn has_value(&self, value: i32) -> bool {
+        self.values.iter().any(|&(_, v)| v == value)
+    }
 }
 
 const fn req(name: &'static str, ty: &'static Ty) -> Member {

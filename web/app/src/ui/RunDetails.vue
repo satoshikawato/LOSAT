@@ -7,7 +7,7 @@ import { computed } from 'vue';
 import { CUSTOM_OUTPUT } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 import { optionGrammar, type LoadedRun } from '../application/results';
-import { commandWords } from '../domain/argv';
+import { commandWords, userArgv } from '../domain/argv';
 import { COUNTS_FILE } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
 import { customOutfmt } from '../domain/output-format';
@@ -61,7 +61,8 @@ const inputs = computed(() => [
     </template>
 
     <div class="details-grid">
-      <h3>Search (fixed when the run was submitted)</h3>
+      <!-- A printed run is a command, not a search (line WQA's D20, 2026-11-23). -->
+      <h3>{{ searched ? 'Search' : 'Command' }} (fixed when the run was submitted)</h3>
       <dl class="details-list" data-testid="run-snapshot">
         <dt>Run</dt>
         <dd>
@@ -70,7 +71,7 @@ const inputs = computed(() => [
         <dt>Mode</dt>
         <dd>{{ programById(snapshot.program).label }}</dd>
         <dt>Arguments</dt>
-        <dd><code data-testid="run-argv"><CommandText :words="snapshot.argv" :takes-value="takesValue" /></code></dd>
+        <dd><code data-testid="run-argv"><CommandText :words="userArgv(snapshot)" :takes-value="takesValue" /></code></dd>
         <template v-for="{ role, input } in searched ? inputs : []" :key="role">
           <dt>{{ role }}</dt>
           <dd :data-testid="`run-input-${role.toLowerCase()}`">

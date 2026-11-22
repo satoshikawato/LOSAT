@@ -24,6 +24,7 @@ import {
   type FastaParserKind,
   type FastaReader,
   type InputRole,
+  type PrintedKind,
   type ProgramId,
   type RegistryFile,
   type SequenceKind,
@@ -1028,8 +1029,13 @@ export class SearchDraft {
    * line reads none for it.
    */
   private printsText(): boolean {
+    return this.printsKind() !== null;
+  }
+
+  /** What the run of the draft's argv prints in place of a search (`printsText`): help or version, or null for a search. */
+  printsKind(): PrintedKind | null {
     const { start, validation } = this.state.get();
-    return validation.state === 'ok' && (start?.prints ?? null) !== null;
+    return validation.state === 'ok' ? (start?.prints ?? null) : null;
   }
 
   /**

@@ -174,9 +174,11 @@ watch(
 );
 
 function runLabel(run: RunView): string {
-  const { number, program, query, subject } = run.snapshot;
+  const { number, program, query, subject, prints } = run.snapshot;
   const status = run.status === 'completed' ? '' : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
-  return `Run ${number} · ${programById(program).label} · ${query.name} vs ${subject.name}${status}`;
+  // A run that printed the command line's help or version read no input (line WQA's D20, 2026-11-23).
+  const inputs = prints === undefined ? ` · ${query.name} vs ${subject.name}` : '';
+  return `Run ${number} · ${programById(program).label}${inputs}${status}`;
 }
 
 /**

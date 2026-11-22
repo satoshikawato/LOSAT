@@ -1229,27 +1229,54 @@ describe('SearchDraft submit', () => {
   });
 
   // Line WQA's D20, S3-2, 2026-11-23: the button's count is the number of runs that Run LOSAT starts (one `inputGroups`).
-  it("counts one run for a help or version word whatever the inputs, as Run LOSAT starts one", async () => {
-    const { draft, requests } = setup({
+  it("counts one run for every help or version word whatever the inputs, as Run LOSAT starts one", async () => {
+    const kinds = {
+      '-h': 'help',
+      '-help': 'help',
+      '-help-full': 'help',
+      '--help': 'help',
+      '-xmlhelp': 'help',
+      '-version': 'version',
+      '-version-full': 'version',
+      '-version-full-xml': 'version',
+      '-version-full-json': 'version',
+    } as const;
+    const { draft, requests, coordinator } = setup({
       useCoordinator: true,
-      start: (argv) => ({
-        ok: true,
-        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
-      }),
+      start: (argv) => {
+        const word = argv.find((w) => w in kinds) as keyof typeof kinds | undefined;
+        return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: word === undefined ? null : kinds[word], database: false } };
+      },
     });
     draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
     draft.setPaste('subject', '>s\nACGT\n');
     await draft.idle();
     draft.setMode('query', 'separate');
     expect(draft.runCount()).toBe(2);
-    draft.setExtra('-version');
+    expect(draft.printsKind()).toBeNull();
+    for (const [word, kind] of Object.entries(kinds)) {
+      draft.setExtra(word);
+      await draft.idle();
+      expect(draft.runCount(), word).toBe(1);
+      expect(draft.printsKind(), word).toBe(kind);
+      const before = requests.length;
+      const result = await draft.submit();
+      expect(result, word).toMatchObject({ ok: true });
+      expect(requests.length, word).toBe(before + 1);
+      expect(requests.at(-1), word).toHaveLength(1);
+      const runId = (result as { runIds: readonly string[] }).runIds[0]!;
+      expect(coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)!.snapshot.prints, word).toBe(kind);
+    }
+    draft.setExtra('');
     await draft.idle();
-    expect(draft.runCount()).toBe(1);
-    expect(await draft.submit()).toMatchObject({ ok: true });
-    expect(requests.at(-1)).toHaveLength(1);
+    expect(draft.runCount()).toBe(2);
+    expect(draft.printsKind()).toBeNull();
   });
 
-  it('counts the runs that Run LOSAT starts when a query file has no record left in separate mode', async () => {
+  // A pin of the current behaviour, not a regression test: runCount() and submit() both read `inputGroups()`, which leaves out a
+  // query file whose records are all excluded, so the label and the runs agreed before line WQA's D20 too (the Open case of
+  // sweep 3, Firefox seed 31 walk 1).
+  it('pins that the count and the runs agree when a query file has no record left in separate mode', async () => {
     const { draft, requests } = setup();
     draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
     draft.setPaste('subject', '>s\nACGT\n');

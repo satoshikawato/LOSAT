@@ -18,14 +18,29 @@ test.beforeEach(async ({ page }) => {
 /** Words that Run details and the results header say only of a search (S3-1). */
 const SEARCH_WORDS = [/Support status/, /Supported/, /not compared/, /outfmt \d+:/, /Engine memory/, /after the search/, /read for this search/, /kept from the previous search/];
 
+/** Every word with which the command line prints its help or version (line WQA's D14), and what it prints. */
+const WORDS = [
+  ['-h', 'help'],
+  ['-help', 'help'],
+  ['-help-full', 'help'],
+  ['--help', 'help'],
+  ['-xmlhelp', 'help'],
+  ['-version', 'version'],
+  ['-version-full', 'version'],
+  ['-version-full-xml', 'version'],
+  ['-version-full-json', 'version'],
+] as const;
+
 test('a run that printed help or version says nothing of options compared, outfmt command lines or a search (S3-1)', async ({ page }) => {
-  for (const [index, word] of ['-version', '-help'].entries()) {
+  for (const [index, [word, kind]] of WORDS.entries()) {
     const run = index + 1;
     if (run > 1) await page.getByTestId('tab-search').click();
     await program(page, 'blastn');
     await openParameters(page);
     await page.getByTestId('param-extra').fill(word);
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+    // The line under the button says that the command line's text is printed, not that a search runs.
+    await expect(page.getByTestId('search-summary-line')).toHaveText(`Print the command line's ${kind} for BLASTN. No search runs.`);
     await submit(page);
     await waitStatus(page, run, 'completed');
     await chooseRun(page, run);
@@ -33,7 +48,12 @@ test('a run that printed help or version says nothing of options compared, outfm
     await expect(page.getByTestId('results-program')).toBeVisible();
     await expect(page.getByTestId('verification-badge')).toHaveCount(0);
     await expect(page.getByTestId('results-subjects')).toHaveCount(0);
+    // The run picker names no input: a printed run read none.
+    const label = (await page.getByTestId(`run-${run}-option`).textContent()) ?? '';
+    expect(label.trim(), word).toBe(`Run ${run} · BLASTN`);
     await page.getByTestId('results-view-details').click();
+    await expect(page.getByRole('heading', { name: 'Command (fixed when the run was submitted)' })).toBeVisible();
+    await expect(page.getByTestId('run-argv')).toHaveText(`blastn ${word}`);
     const details = page.getByTestId('run-details');
     await expect(details).toBeVisible();
     await expect(page.getByTestId('run-printed')).toBeVisible();
@@ -51,11 +71,14 @@ test('a run that printed help or version says nothing of options compared, outfm
   await page.getByTestId('param-extra').fill('');
   await paste(page, 'query', '>q\nACGTACGTACGTACGTACGTAAAC\n');
   await paste(page, 'subject', '>s\nACGTACGTACGTACGTACGTAAAC\n');
+  await expect(page.getByTestId('search-summary-line')).toHaveText('Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences).');
   await submit(page);
-  await waitStatus(page, 3, 'completed');
-  await chooseRun(page, 3);
+  await waitStatus(page, WORDS.length + 1, 'completed');
+  await chooseRun(page, WORDS.length + 1);
   await expect(page.getByTestId('results-summary').getByTestId('verification-badge')).toBeVisible();
+  expect(((await page.getByTestId(`run-${WORDS.length + 1}-option`).textContent()) ?? '').trim()).toBe(`Run ${WORDS.length + 1} · BLASTN · query.fa vs subject.fa`);
   await page.getByTestId('results-view-details').click();
+  await expect(page.getByRole('heading', { name: 'Search (fixed when the run was submitted)' })).toBeVisible();
   await expect(page.getByTestId('verification-details')).toBeVisible();
   await expect(page.getByTestId('run-command-6')).toBeVisible();
   await expect(page.getByTestId('run-input-query')).toBeVisible();
@@ -73,7 +96,13 @@ test('the button counts the runs that Run LOSAT starts: a help or version word, 
   await expect(page.getByTestId('run-losat')).toHaveText('Run LOSAT (2 runs)');
   await expect(page.getByTestId('run-losat-bottom')).toHaveText('Run LOSAT (2 runs)');
 
-  // The word prints once, as the CLI prints it: one run, and the button says so.
+  // Each word prints once, as the CLI prints it: one run, and the button says so.
+  for (const [word] of WORDS) {
+    await page.getByTestId('param-extra').fill(word);
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+    await expect(page.getByTestId('run-losat'), word).toHaveText('Run LOSAT');
+    await expect(page.getByTestId('run-losat-bottom'), word).toHaveText('Run LOSAT');
+  }
   await page.getByTestId('param-extra').fill('-version-full');
   await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
   await expect(page.getByTestId('run-losat')).toHaveText('Run LOSAT');

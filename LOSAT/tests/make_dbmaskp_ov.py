@@ -50,11 +50,24 @@ Masks are `Blast-db-mask-info` ASN.1 text with `local id N` (N the 1-based order
            those entries). `ov_th10f`, `ov_thm20f`: the same with B holding the query's letters 20-24 at 3 (one run
            of three word hits). `q1q.faa` / `q1q.fna`: the query q1 of the review (60 letters) then qzt's query, two
            NCBI query batches at BATCH_SIZE=50 (q1's back-translation drawn with seed 20261124).
+  ov_m1:   600 subjects `s0` to `s599` of review 4 of M4b-3b (L1; the database `M/m4b3b/review/probe_r4/m1`, no draw
+           of its own), each one `X` (no word hit) but: s62, 5,000 `X` with masks [10,4990) [20,4995) (its walk goes
+           about 4,955 back); s63 (P), 50 `X` without masks, the last of the first 64 subjects, which NCBI's one-thread
+           search starts on a new table far below the entries that no sequence wrote; s64, 5,000 `X` without masks;
+           and ov_zt's B without masks at s128, s192, ..., s512, the first subject of each later group of 64. BLASTX
+           with two or more threads in waves of 64 subjects per worker (LOSAT_X_BXSUBJFLOW=0) or tasks of 64 subjects
+           (LOSAT_X_BXTASKRES=0) searches a B right after P on P's table, so B's rows are NCBI's only where P's
+           search ends past those entries. `qzt.faa` / `qzt.fna` its query.
+  Query batches (review 4 of M4b-3b, L2; no database of their own): `q4.faa`, q1, qzt's query, q1, qzt's query (q1,
+           q, q1b, qb: three NCBI query batches at BATCH_SIZE=50, of 60, 108 and 48 letters), and `qbig10000.faa`, a
+           random query of 10,000 letters without W (seed 20261125) then qzt's query: two batches at BLASTP's default
+           BATCH_SIZE of 10,000.
 
     python3 make_dbmaskp_ov.py [--out DIR] [--ncbi-bin DIR]
 
 writes DIR/ov_*.faa, DIR/ov_*.asnt, DIR/qov1.faa, DIR/qov1.fna, DIR/qov2.faa, DIR/qov2.fna, DIR/qwpe.faa, DIR/qzt.faa,
-DIR/qzt.fna, DIR/q1q.faa, DIR/q1q.fna, DIR/ov_zto.pal (DIR defaults to db_search/dbmaskp next to this script), and with --ncbi-bin runs
+DIR/qzt.fna, DIR/q1q.faa, DIR/q1q.fna, DIR/q4.faa, DIR/qbig10000.faa, DIR/ov_zto.pal (DIR defaults to db_search/dbmaskp
+next to this script), and with --ncbi-bin runs
 `makeblastdb -dbtype prot -out DIR/ov_X -title "overlapping masks X" -mask_data ov_X.asnt` (BLAST_USAGE_REPORT=false)
 and removes the .pjs files; ov_lkn as `near_db` says, ov_lkx as `blank_db` says.
 """
@@ -197,6 +210,32 @@ def probe5():
     return dbs, f">q1 query\n{Q1}\n>q query\n{q}\n", f">q1x query back-translated\n{q1x}\n>qx query back-translated\n{qx}\n"
 
 
+def probe6():
+    """Review 4 of M4b-3b, the database m1 (`ncbi-parity-20261019/M/m4b3b/review/probe_r4/m1`, L1): probe 4's B, no
+    draw of its own. Returns ({db: [(seq, masks)]}, the query file q4.faa's text, qbig10000.faa's)."""
+    q, _, dbs4 = probe4()
+    b = dbs4["zt"][1][0]
+    subjects = [("X", [])] * 600
+    subjects[62] = ("X" * 5000, [(10, 4990), (20, 4995)])
+    subjects[63] = ("X" * 50, [])
+    subjects[64] = ("X" * 5000, [])
+    for at in range(128, 513, 64):
+        subjects[at] = (b, [])
+    r = random.Random(20261125)
+    big = "".join(r.choice(AA) for _ in range(10000))
+    lines = "\n".join(big[i:i + 60] for i in range(0, len(big), 60))
+    q4 = f">q1 query\n{Q1}\n>q query\n{q}\n>q1b query again\n{Q1}\n>qb query again\n{q}\n"
+    return {"m1": subjects}, q4, f">r10000 random query of 10000 letters\n{lines}\n>q query\n{q}\n"
+
+
+def subject_id(name, index, count):
+    """The id of subject `index` of a database of `count` subjects: the shape's name for one, A and B after it for
+    two, `s<index>` for more."""
+    if count == 1:
+        return name
+    return f"{name}{'AB'[index]}" if count == 2 else f"s{index}"
+
+
 def walk_stores(length, masks, word, window):
     """The walk of a sequence's hard chunks in NCBI's word finder, as LOSAT's walk reads it
     (`algorithm::common::hard_chunk_walk::DiagonalWalk`, every one word taken to hit), relative to the offset before its
@@ -317,8 +356,11 @@ def main():
     dbs5, q1q, q1qx = probe5()
     (out / "q1q.faa").write_text(q1q)
     (out / "q1q.fna").write_text(q1qx)
+    dbs6, q4, qbig = probe6()
+    (out / "q4.faa").write_text(q4)
+    (out / "qbig10000.faa").write_text(qbig)
     for tag, (q, qx, dbs) in (("qov1", probe1()), ("qov2", probe2()), (None, (None, None, probe3())),
-                              ("qzt", probe4()), (None, (None, None, dbs5))):
+                              ("qzt", probe4()), (None, (None, None, dbs5)), (None, (None, None, dbs6))):
         if tag is not None:
             (out / f"{tag}.faa").write_text(f">q query\n{q}\n")
             (out / f"{tag}.fna").write_text(f">qx query back-translated\n{qx}\n")
@@ -326,8 +368,7 @@ def main():
             db = "ov_" + name
             with open(out / f"{db}.faa", "w") as f:
                 for i, (seq, _) in enumerate(subjects):
-                    sid = name if len(subjects) == 1 else f"{name}{'AB'[i]}"
-                    f.write(f">{sid} probe\n{seq}\n")
+                    f.write(f">{subject_id(name, i, len(subjects))} probe\n{seq}\n")
             (out / f"{db}.asnt").write_text(asnt([(i + 1, m) for i, (_, m) in enumerate(subjects) if m],
                                                  "overlap " + name))
             if args.ncbi_bin:

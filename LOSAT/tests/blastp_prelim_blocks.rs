@@ -723,44 +723,97 @@ fn a_database_that_cannot_be_read_fails_as_with_one_table() {
 // written in blocks of one batch each (`LOSAT_X_BPQBLOCK=1`), at one thread and four.
 #[test]
 fn the_frozen_ncbi_rows_of_several_batches_are_written_in_blocks() {
-    let rows = frozen_rows_with_blocks(
+    let (rows, block_runs) = frozen_rows_with_blocks(
         "blastp.tsv",
         |row| row.starts_with("db.of18.bp.batch."),
         &[Some("1")],
-        true,
     );
-    assert_eq!(rows, 1);
+    assert_eq!((rows, block_runs), (1, 2));
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:216, 257
-// NCBI searches each query batch alone (review 3 of M4b-3b, H1): a `-db_hard_mask` sequence on a
-// new table whose entries that no sequence wrote a query's hits reach (`ov_th10`, `ov_thm20`,
-// `ov_th10f` of `db_search/dbmaskp`, queries q1 then q) has NCBI's one-thread bytes in one batch and
-// in two (BATCH_SIZE=50), with one table of all queries (`LOSAT_X_BPQBLOCK=0`), a block per batch
-// (`1`) and the switch's default, at 1 and 4 threads.
+// NCBI searches each query batch alone (reviews 3 and 4 of M4b-3b, H1, L2, L3): `-db_hard_mask`
+// sequences that LOSAT searches on NCBI's table of each batch (`db_search/dbmaskp`: `ov_th10`,
+// `ov_thm20`, `ov_th10f`, sequences on a new table whose entries that no sequence wrote a query's
+// hits reach; `ov_s2`, `ov_nb`, kept apart because their walks read back; `ov_zt`, `ov_ztl` in the
+// one-hit scan, NCBI's ring of each batch) have NCBI's one-thread bytes in one batch and in
+// several: q1 then q (`q1q.faa`) in one batch and in two (BATCH_SIZE=50), q1, q, q1b, qb (`q4.faa`)
+// in three (BATCH_SIZE=50), and a query of 10,000 letters then q (`qbig10000.faa`) in two at
+// BLASTP's default batch size. With one table of all queries (`LOSAT_X_BPQBLOCK=0`), a block per
+// batch (`1`), blocks of 120 letters (two batches of `q4.faa`, then one) and the switch's default,
+// at 1 and 4 threads; each arm's blocks ran exactly where it plans two or more.
 #[test]
 fn hard_mask_rows_of_several_batches_have_ncbis_bytes_with_and_without_blocks() {
-    let rows = frozen_rows_with_blocks(
+    let (rows, block_runs) = frozen_rows_with_blocks(
         "blastp.pmask.tsv",
-        |row| row.starts_with("db.pmask.bp.hard.ov_th") && row.contains(".q1q."),
-        &[None, Some("0"), Some("1")],
-        false,
+        |row| {
+            row.starts_with("db.pmask.bp.hard.ov_")
+                && [".q1q.", ".q4.", ".qbig10000."]
+                    .iter()
+                    .any(|queries| row.contains(queries))
+        },
+        &[None, Some("0"), Some("1"), Some("120")],
     );
-    assert_eq!(rows, 4);
+    // The arms with blocks, at each thread count: `1` in the 11 rows of two or more batches,
+    // `120` in the 3 rows of `q4.faa` and in `qbig10000.faa`'s.
+    assert_eq!((rows, block_runs), (15, 2 * (11 + 4)));
+}
+
+/// The letters of each of NCBI's query batches of the FASTA file `query` (relative to `LOSAT/`)
+/// at `batch_size`: a batch takes queries while it holds fewer letters, and the query that brings
+/// it to `batch_size` or more is its last (`db_search_fixtures.py` `query_batches`).
+fn batch_letters(query: &Path, batch_size: usize) -> Vec<usize> {
+    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(query)).unwrap();
+    let (mut batches, mut letters, mut open) = (Vec::new(), 0, false);
+    for record in text.split('>').filter(|record| !record.is_empty()) {
+        letters += record
+            .lines()
+            .skip(1)
+            .map(|line| line.trim().len())
+            .sum::<usize>();
+        open = true;
+        if letters >= batch_size {
+            batches.push(letters);
+            (letters, open) = (0, false);
+        }
+    }
+    if open {
+        batches.push(letters);
+    }
+    batches
+}
+
+/// Whether `LOSAT_X_BPQBLOCK` `block` (`None`: unset, the default of 50,000 letters; `0`: off)
+/// plans blocks for queries in the batches `batches` (`batch_letters`): a block of whole batches
+/// closes at the first batch end where it holds `block` letters or more (`x_query_blocks`), and one
+/// block is the search of all queries with one table.
+fn plans_blocks(batches: &[usize], block: Option<&str>) -> bool {
+    let block: usize = block.map_or(50_000, |value| value.parse().unwrap());
+    if block == 0 {
+        return false;
+    }
+    let (mut blocks, mut held) = (0, 0);
+    for &letters in batches {
+        held += letters;
+        if held >= block {
+            (blocks, held) = (blocks + 1, 0);
+        }
+    }
+    blocks + usize::from(held > 0) > 1
 }
 
 /// Runs the frozen `ncbi` rows of the manifest file `file` (in `tests/db_search_manifest`) whose ids
 /// `select` takes at 1 and 4 threads with each `LOSAT_X_BPQBLOCK` of `blocks` (`None`: unset, the
-/// switch's default), and asserts NCBI's frozen bytes, standard error and exit status; with
-/// `reach_blocks` also that the blocks ran (a row of several batches, `BATCH_SIZE`, whose report the
-/// block search does not write).
-/// Returns the number of rows.
+/// switch's default), and asserts NCBI's frozen bytes, standard error and exit status, and from
+/// `LOSAT_X_REACH` that the blocks ran in each arm that plans two or more for the row's query
+/// batches (`plans_blocks`; `BATCH_SIZE` among the row's variables, else BLASTP's 10,000) and in no
+/// other: a row of one batch plans none, and `0` searches all queries with one table.
+/// Returns the number of rows and of runs in which the blocks ran.
 fn frozen_rows_with_blocks(
     file: &str,
     select: impl Fn(&str) -> bool,
     blocks: &[Option<&str>],
-    reach_blocks: bool,
-) -> usize {
+) -> (usize, usize) {
     let manifest = std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/db_search_manifest")
@@ -779,7 +832,7 @@ fn frozen_rows_with_blocks(
         column("rc"),
     );
     let frozen = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/db_search");
-    let mut rows = 0;
+    let (mut rows, mut block_runs) = (0, 0);
     for line in lines {
         let cells: Vec<&str> = line.split('\t').collect();
         let row = cells[id];
@@ -800,10 +853,11 @@ fn frozen_rows_with_blocks(
             .iter()
             .map(|token| token.split_once('=').unwrap())
             .collect();
-        assert!(
-            !reach_blocks || variables.iter().any(|(name, _)| *name == "BATCH_SIZE"),
-            "{row}: several batches"
-        );
+        let batch_size = variables
+            .iter()
+            .find(|(name, _)| *name == "BATCH_SIZE")
+            .map_or(10_000, |(_, value)| value.parse().unwrap());
+        let batches = batch_letters(Path::new(cells[query]), batch_size);
         let mut args = arguments.clone();
         args.extend(["-outfmt", cells[format]]);
         for threads in [1, 4] {
@@ -828,17 +882,18 @@ fn frozen_rows_with_blocks(
                     "{what}: the bytes of NCBI differ"
                 );
                 assert_eq!(run.stderr, expected_err, "{what}: standard error differs");
-                if reach_blocks {
-                    assert!(
-                        reach.sides("LOSAT_X_BPQBLOCK").0,
-                        "{what}: the blocks did not run"
-                    );
-                }
+                let planned = plans_blocks(&batches, *block);
+                assert_eq!(
+                    reach.sides("LOSAT_X_BPQBLOCK").0,
+                    planned,
+                    "{what}: batches of {batches:?} letters, blocks planned: {planned}"
+                );
+                block_runs += usize::from(planned);
             }
         }
         rows += 1;
     }
-    rows
+    (rows, block_runs)
 }
 
 /// `blastp` without the `-evalue 0.001` it adds (a frozen row's arguments are its own).

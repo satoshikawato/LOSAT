@@ -1421,13 +1421,18 @@ entries that reach another sequence)". Line NP item M4b-3b.
     `db.pmask.{bp,bx}.hard.near.ov_lkn.*`, otherwise), `db.pmask.{bp,bx}.hard.near.ov_lkx.21.w0.6`,
     `db.pmask.{bp,bx}.hard.ov_zt.*`, `.ov_ztl.*`, `.ov_zto.*`, `.ov_th10.*`, `.ov_thm20.*`,
     `.ov_th10f.*` and `.ov_thm20f.*` (NCBI's one-thread bytes; the `.q1q.` rows of two queries in
-    one batch and, `BATCH_SIZE=50`, in two, also with LOSAT_X_BPQBLOCK 0 and 1 in
-    `LOSAT/tests/blastp_prelim_blocks.rs`) and
+    one batch and, `BATCH_SIZE=50`, in two, with those of `ov_s2`, `ov_nb`, `ov_zt` and `ov_ztl`,
+    the `.q4.` rows of four queries in three batches and `.ov_th10.qbig10000.` of two batches at
+    BLASTP's default size, also with LOSAT_X_BPQBLOCK 0, 1 and 120 in
+    `LOSAT/tests/blastp_prelim_blocks.rs`), `db.pmask.{bp,bx}.hard.ov_m1.*` (NCBI's one-thread bytes;
+    BLASTX also in waves and in tasks of 64 subjects at 2 and 4 threads,
+    `LOSAT/tests/blastx_subject_flow.rs`: the subject after a sequence on a new table in the same
+    worker, review 4 of M4b-3b, L1) and
     `db.pmask.{bp,bx}.hard.ov_atha.21.w0.6` (NCBI's bytes) of
     `LOSAT/tests/db_search_manifest/{blastp,blastx}.pmask.tsv`, checked at 1 and 4 threads; the
     databases `ov_lkn`, `ov_lkx`, `ov_zt`, `ov_ztl`, the alias `ov_zto.pal`, `ov_th10`, `ov_thm20`,
-    `ov_th10f` and `ov_thm20f` of `LOSAT/tests/db_search/dbmaskp/` (`make_dbmaskp_ov.py`: `near_db`,
-    `blank_db`, `probe4`, `probe5`). Unit tests `each_sequence_is_searched_on_its_own`,
+    `ov_th10f`, `ov_thm20f` and `ov_m1` of `LOSAT/tests/db_search/dbmaskp/` (`make_dbmaskp_ov.py`:
+    `near_db`, `blank_db`, `probe4`, `probe5`, `probe6`). Unit tests `each_sequence_is_searched_on_its_own`,
     `a_new_table_holds_entries_below_the_start`,
     `ncbi_walk_names_the_sequences_that_meet_unwritten_entries`, `ncbi_walk_follows_the_clears`,
     `hard_starts_by_ordinal`, `starts_and_ends_apply_to_the_table`,

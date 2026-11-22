@@ -2405,6 +2405,27 @@ NCBI's runs (BLASTP: 5 and 4 rows of q in `ov_th10`), as NCBI searches each batc
 start: the rows `.q1q.` (and `.q1q.b50.`) check both batchings, and `LOSAT/tests/blastp_prelim_blocks.rs` runs them with
 LOSAT_X_BPQBLOCK 0 and 1 too.
 
+The other batch rows of BLASTP (fix round 4 of M4b-3b, review 4's L2, `probe6` of `make_dbmaskp_ov.py`): `q1q.faa` on
+`ov_s2` and `ov_nb` (sequences kept apart because their walks read back; q's rows 1 and 3, 2 and 4 in one batch and in two),
+`ov_zt` and `ov_ztl` with `-window_size 0` (the one-hit rings; q1's rows 15 and 14, and 22 in two batches of `ov_ztl`);
+`q4.faa` (q1, q, q1b, qb: three batches at `BATCH_SIZE=50`, of 60, 108 and 48 letters) on `ov_th10`, `ov_s2` and `ov_zt`
+(`-window_size 0`), which LOSAT_X_BPQBLOCK=120 searches in two blocks, the first of two batches; and `qbig10000.faa` (a
+random query of 10,000 letters without `W`, seed 20261125, then q) on `ov_th10`, two batches at BLASTP's default batch
+size (q's rows 5, as in a batch of its own). All are NCBI's one-thread bytes; `blastp_prelim_blocks.rs` runs every
+`.q1q.`, `.q4.` and `.qbig10000.` row with LOSAT_X_BPQBLOCK unset, 0, 1 and 120 at 1 and 4 threads and reads from
+LOSAT_X_REACH that the blocks ran exactly where an arm plans two or more.
+
+`ov_m1` (fix round 4 of M4b-3b, review 4's L1 and its database `M/m4b3b/review/probe_r4/m1`, `probe6`, no draw of its
+own; rows `db.pmask.{bp,bx}.hard.ov_m1.*`, `qzt.faa` / `qzt.fna`): 600 subjects `s0` to `s599`, each one `X` but `s62`
+(5,000 `X`, masks [10,4990) [20,4995): its walk goes about 4,955 back), `s63` (P, 50 `X` without masks, the last of the
+first 64 subjects, which NCBI's one-thread search starts on a new table below the entries that no sequence wrote), `s64`
+(5,000 `X`) and `ov_zt`'s B without masks at `s128`, `s192`, ..., `s512`, the first subject of each later group of 64.
+BLASTX at two threads or more in waves of 64 subjects per worker (LOSAT_X_BXSUBJFLOW=0) or in tasks of 64 subjects
+(LOSAT_X_BXTASKRES=0) searches one of those B right after P on P's table, so its rows are NCBI's only where P's search
+moves the offset past those entries; `LOSAT/tests/blastx_subject_flow.rs` runs the two BLASTX rows so at 2 and 4
+threads (before that move, CI's build of 5fcc98420 lost the rows of one to four B there). Made as the other shapes
+(`makeblastdb -in ov_m1.faa -dbtype prot -out ov_m1 -title "overlapping masks m1" -mask_data ov_m1.asnt`).
+
 6 of `ov_atha`'s 40 proteins (AT1G02550.1, AT1G02800.1, AT1G04080.2, AT1G04080.5, AT1G06760.1, AT1G09460.1) scan below
 their starts or leave diagonal entries past the next subject's start in the one-hit scan, which LOSAT refused before
 exception 24 (decision 52); NCBI's rows of `ov_atha` at `-window_size 0` equal those of its near input with a spacer of `X`

@@ -15,6 +15,7 @@ use crate::seqid::parse::parse_ids;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
+use super::bioseq::DbBioseq;
 use super::letters::{apply_masks, reverse_complement};
 use super::retrieve::{numeric_target, parse_target, Config, Output, Source, Stop};
 
@@ -49,52 +50,28 @@ impl FastaFormatter {
         target: Option<&str>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
-        let set = source.deflines(oid)?;
-        // `GetBioseq` looks the taxids up for a Bioseq it gives, one with definition lines and
-        // letters (seqdbvol.cpp:1362-1386), the first call for `oid` and the second for the
-        // target or `oid` again.
-        let length = if set.deflines.is_empty() {
-            0
-        } else {
-            source.length(oid)?
-        };
-        let bioseq = length >= 1;
-        if bioseq {
-            source.post_bioseq_texts(oid, &set, None, out)?;
-        }
-        // `GetBioseq(oid, gi, seqid)`: the target's line for the ids and the title, every line
-        // the filter keeps for the sources (`x_GetTaxonomy` of `x_GetTaxDefline`, the target's
-        // line first).
-        let target_seqid = match target {
-            Some(target) => Some(target_id(target)?),
-            None => None,
-        };
-        let kept = match &target_seqid {
-            Some(target_seqid) => Some(target_set(&set, target_seqid)?),
-            None => None,
-        };
-        if bioseq {
-            source.post_bioseq_texts(oid, &set, target_seqid.as_ref(), out)?;
-        }
-        let shown = kept.as_ref().unwrap_or(&set);
-        let Some(defline) = shown.deflines.first() else {
-            return Ok(());
-        };
-        if defline.ids.is_empty() {
-            return Err(Stop::Refused(format!(
-                "a definition line without Seq-ids is not supported by LOSAT's {}",
-                super::PROGRAM
-            )));
-        }
-        if !bioseq {
-            return Ok(());
-        }
+        DbBioseq::with(source, oid, false, target, target_id, out, |bioseq, out| {
+            self.write_bioseq(source, oid, config, bioseq, out)
+        })
+    }
+
+    /// The FASTA of the Bioseq `bioseq` of sequence `oid` (`write`).
+    fn write_bioseq(
+        &mut self,
+        source: &Source,
+        oid: u32,
+        config: &Config,
+        bioseq: &DbBioseq,
+        out: &mut Output<'_, '_>,
+    ) -> Result<(), Stop> {
+        let (set, shown, length) = (&bioseq.set, bioseq.shown(), bioseq.length);
+        let target_seqid = bioseq.target.as_ref();
         let range = config.range.clipped(length);
         let mut text = Vec::new();
         if self.long_seqids {
             // The Bioseq's first source, from every line the filter keeps (the target's first),
             // names the organism of a title made from it: the long header's alone.
-            let source_taxid = set.first_source_taxid(target_seqid.as_ref());
+            let source_taxid = set.first_source_taxid(target_seqid);
             self.long_header(source, shown, source_taxid, range, config, &mut text)?;
         } else {
             short_header(shown, range, config, &mut text)?;
@@ -183,20 +160,6 @@ fn target_id(target: &str) -> Result<ParsedSeqId, Stop> {
         Some(number) => Ok(ParsedSeqId::Gi(number)),
         None => parse_target(target),
     }
-}
-
-/// The definition lines NCBI's `GetBioseq` keeps for `-target_only` (the Bioseq's ids and
-/// title): the first that holds the target id `target_id` (`s_SeqDB_SeqIdIn`), or the local id
-/// of its label.
-fn target_set(set: &DeflineSet, target_id: &ParsedSeqId) -> Result<DeflineSet, Stop> {
-    let Some(index) = set.bioseq_defline(target_id) else {
-        return Err(Stop::Ncbi(
-            "Error: oid headers do not contain target gi/seq_id.".to_string(),
-        ));
-    };
-    Ok(DeflineSet {
-        deflines: vec![set.deflines[index].clone()],
-    })
 }
 
 /// The ids `CSeq_id::ParseIDs(ids, text, fParse_PartialOK)` gives (none when it throws).

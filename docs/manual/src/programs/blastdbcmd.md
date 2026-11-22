@@ -50,12 +50,14 @@ For every option: `losat blastdbcmd -help`.
 
 ### Output specifiers
 
-`-outfmt` takes a text in which these specifiers are replaced for each sequence (one line per sequence). `%f` (FASTA) is the default; if you give `%f`, other specifiers are ignored.
+`-outfmt` takes a text in which these specifiers are replaced: one line for each definition line of a sequence (with `-target_only`, the target's line), or one line per sequence when no specifier reads the definition lines. `%f`, `%b` and `%d` write a FASTA record or an ASN.1 text document per sequence instead. `%f` (FASTA) is the default; if you give `%f`, `%b` or `%d`, other specifiers are ignored, and two of these three together are an error, as in NCBI.
 
 | Specifier | Meaning |
 | --- | --- |
 | `%f` | Sequence in FASTA format. |
 | `%s` | Sequence letters, without the definition line. |
+| `%b` | The sequence as an ASN.1 text Bioseq (ids, title, definition lines, taxonomy, letters). `-range` and `-strand` do not change it. |
+| `%d` | The definition lines as ASN.1 text (`Blast-def-line-set`; with `-target_only`, the target's `Blast-def-line`). |
 | `%a` | Accession. |
 | `%g` | GI. |
 | `%o` | Ordinal id (position in the database, from 0). |
@@ -70,7 +72,7 @@ For every option: `losat blastdbcmd -help`.
 | `%e`, `%P` | Membership integer; PIG. |
 | `%m<id>` | Masking data of algorithm `<id>`, as `N-M` ranges separated by `;`, or `none`. |
 
-The names (`%S`, `%L`, `%C`, `%N`, `%B`, `%K`) and `-tax_info` names need NCBI's taxonomy database files; without them LOSAT prints `N/A`, as NCBI does (see [BLAST databases](../databases.md)). `%d` and `%b` (ASN.1 texts) are refused.
+The names (`%S`, `%L`, `%C`, `%N`, `%B`, `%K`) and `-tax_info` names need NCBI's taxonomy database files; without them LOSAT prints `N/A`, as NCBI does (see [BLAST databases](../databases.md)).
 
 `-list DIRECTORY` prints one line per database in the directory. `-list_outfmt` changes the line: `%f` path, `%p` molecule type, `%t` title, `%d` date, `%l` letters, `%n` sequences, `%U` bytes, `%v` format version. `-recursive` goes into subdirectories and `-remove_redundant_dbs` hides databases that an alias file already names.
 
@@ -100,7 +102,6 @@ See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawat
 
 ## What LOSAT refuses
 
-- `-outfmt` with `%d` or `%b`.
 - A `-db` list in which an alias file and another name give the same volume.
 - A taxonomy lookup that reads a record of an empty `taxdb.btd`, or a name from a damaged `taxdb.btd` whose record reaches past the end of NCBI's mapping of the file (NCBI crashes or reads memory there). `-info` and formats that look up nothing (`-outfmt "%a %T"`) still work.
 - A failed write of `-metadata` output.

@@ -36,16 +36,24 @@
 //! optional member unset; `@n` is NCBI's error ("invalid object index: NO_COLLECT defined");
 //! `:Type value` naming the declared type is the value, read in a frame of its own.
 //!
-//! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): objects
-//! nested more than 400 levels deep; a string whose length passes the end of the file by an amount
-//! that makeblastdb may or may not be able to allocate on the host (1 GiB to 128 TiB); `:Type`
-//! naming a type other than the declared one, which makeblastdb reads or not by the types its
-//! process has met before; and an element of a list stated as `NULL` that makeblastdb dereferences
-//! (`NullElement`), whose `CCoreException` report holds the run's memory addresses and the path of
-//! the binary. That last one is refused where makeblastdb dereferences it (`process`), after the
-//! masks before it and after any error of the reader in the rest of its object.
+//! A Seq-loc holds Seq-locs (`mix`, `equiv`) to any depth: NCBI reads them by recursion, and with
+//! its default stack of 8 MiB a nest of about 6,500 levels overflows it, which crashes makeblastdb;
+//! with a stack large enough it reads every depth. The reader keeps the frames of such a nest on
+//! the heap (`reader.rs`, `Rd::read_seq_loc_parts`) and reads every depth as far as memory allows,
+//! writing what makeblastdb writes with a stack large enough (PD-LOSAT-NCBI-DEFECTS exception 24).
+//!
+//! What is refused (`MaskFileError::Unsupported`, "mask data that LOSAT does not read"): a string
+//! whose length passes the end of the file by an amount that makeblastdb may or may not be able to
+//! allocate on the host (1 GiB to 128 TiB); `:Type` naming a type other than the declared one,
+//! which makeblastdb reads or not by the types its process has met before; and an element of a list
+//! stated as `NULL` that makeblastdb dereferences (`NullElement`), whose `CCoreException` report
+//! holds the run's memory addresses and the path of the binary. That last one is refused where
+//! makeblastdb dereferences it (`process`), after the masks before it and after any error of the
+//! reader in the rest of its object.
 
 mod ber;
+#[cfg(test)]
+mod depth_tests;
 mod guess;
 mod reader;
 mod schema;

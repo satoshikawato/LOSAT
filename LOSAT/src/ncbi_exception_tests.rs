@@ -249,3 +249,49 @@ fn exception_reports_are_formatted_only_here() {
         offenders.join("\n")
     );
 }
+
+/// `add_frame_infos` of a list of names is `CSerialException::AddFrameInfo` of each in turn
+/// (serial/exception.cpp: a name that is not empty goes in front of the stack, after a `.` when the
+/// stack has one; an empty one changes nothing), also on a stack that a rethrow kept.
+#[test]
+fn frame_names_are_added_as_ncbi_adds_them_one_by_one() {
+    fn one_by_one(stack: &mut String, name: &str) {
+        if !name.is_empty() && !stack.is_empty() {
+            stack.insert(0, '.');
+        }
+        stack.insert_str(0, name);
+    }
+    let site = ThrowSite::generated("CSerialException");
+    let names = [
+        "E",
+        "",
+        "strand",
+        "",
+        "[]",
+        "[]",
+        "mix",
+        "",
+        "masks",
+        "Blast-db-mask-info",
+    ];
+    for kept in [None, Some("x.y")] {
+        for split in 0..=names.len() {
+            let mut e = NcbiException::new(site, "m");
+            let mut stack = String::new();
+            if let Some(kept) = kept {
+                e.add_frame_infos(&[kept]);
+                one_by_one(&mut stack, kept);
+            }
+            e.add_frame_infos(&names[..split]);
+            e.add_frame_infos(&names[split..]);
+            for name in names {
+                one_by_one(&mut stack, name);
+            }
+            let expected = (!stack.is_empty()).then(|| format!(" at {stack}"));
+            assert_eq!(e.extra, expected, "{kept:?} {split}");
+        }
+    }
+    let mut e = NcbiException::new(site, "m");
+    e.add_frame_infos(&["", ""]);
+    assert_eq!(e.extra, None);
+}

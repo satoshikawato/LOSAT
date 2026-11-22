@@ -23,6 +23,9 @@ Files written into `<out>/mask_parse/`:
                            the script also makes, is the lower-case input of the c2m_ps files)
   h_*.asnt                 hand-written text cases
   b_*.asnb                 damaged binary files (made from dust.asnb)
+  n_<kind>_<depth>.asnt/.asnb  masks whose Seq-locs nest <depth> levels (docs/evidence/mask_nest_depth/
+                           gen_mask_nests.py); makeblastdb reads them with no stack limit, the output it
+                           writes with a stack large enough (PD-LOSAT-NCBI-DEFECTS exception 24)
   expected.tsv             what makeblastdb does with each file
   expected_stdout.tsv      `<file> <log>`: makeblastdb's log (standard output) of each RUN, escaped as
                            below, with the build time as <T>, the database path as <OUT> and the
@@ -43,8 +46,10 @@ and `\e` for an empty field.
 Rerunning writes the same files (the tools and the corpus are deterministic).
 """
 import argparse
+import importlib.util
 import random
 import re
+import resource
 import shutil
 import subprocess
 from pathlib import Path
@@ -58,8 +63,14 @@ def write_fasta(path, records, width=70):
                 f.write(seq[i:i + width] + "\n")
 
 
-def run(cmd, cwd, check=True):
-    result = subprocess.run([str(c) for c in cmd], cwd=cwd, capture_output=True)
+def no_stack_limit():
+    """`ulimit -s unlimited` in the child (NCBI reads a nested Seq-loc by recursion)."""
+    resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+
+
+def run(cmd, cwd, check=True, unlimited_stack=False):
+    result = subprocess.run([str(c) for c in cmd], cwd=cwd, capture_output=True,
+                            preexec_fn=no_stack_limit if unlimited_stack else None)
     if check and result.returncode != 0:
         raise SystemExit(f"{' '.join(map(str, cmd))}\n{result.stdout!r}{result.stderr!r}")
     return result
@@ -509,6 +520,25 @@ def damaged_binary(dust):
     return c
 
 
+# The nests: (kind, depth); every kind in text and binary. 401 levels pass the 400 object frames that
+# LOSAT refused before line NP item M (b); 20000 is deeper than NCBI's default stack of 8 MiB holds.
+NESTS = [(kind, 401) for kind in ("mix", "equiv", "alt", "ptr", "wide", "wideid", "badvar", "badstrand", "cut")]
+NESTS += [("bignum", 101), ("mix", 20000)]
+
+
+def nest_cases():
+    """The nested masks: file name -> bytes, from the generator of docs/evidence/mask_nest_depth."""
+    path = Path(__file__).resolve().parents[3] / "docs" / "evidence" / "mask_nest_depth" / "gen_mask_nests.py"
+    spec = importlib.util.spec_from_file_location("gen_mask_nests", path)
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    c = {}
+    for kind, depth in NESTS:
+        c[f"n_{kind}_{depth}.asnt"] = gen.text(kind, depth)
+        c[f"n_{kind}_{depth}.asnb"] = gen.binary(kind, depth)
+    return c
+
+
 def escape(s):
     """Backslash escapes; a byte outside printable ASCII is `\\xNN`."""
     out = []
@@ -581,7 +611,7 @@ def expected_rows(bin_dir, work, committed, files):
         fasta_path = work / fasta if (work / fasta).exists() else Path(committed) / fasta
         shutil.copyfile(fasta_path, run_dir / fasta)
         result = run([bin_dir / "makeblastdb", "-in", fasta, "-dbtype", dbtype, "-out", "db",
-                      "-mask_data", name], run_dir, check=False)
+                      "-mask_data", name], run_dir, check=False, unlimited_stack=name.startswith("n_"))
         stderr = result.stderr.decode("latin-1")
         stdout_rows.append(name + "\t" + escape(masked_log(result.stdout.decode("latin-1"))))
         run_row = ["RUN", name, dbtype, fasta, str(result.returncode), escape(stderr), escape("")]
@@ -628,6 +658,9 @@ def main():
     dust = (work / "mask_parse" / "dust.asnb").read_bytes()
     for name, content in damaged_binary(dust).items():
         file = f"b_{name}.asnb"
+        (work / "mask_parse" / file).write_bytes(content)
+        files.append((file, "mask_nucl.fna", "nucl"))
+    for file, content in nest_cases().items():
         (work / "mask_parse" / file).write_bytes(content)
         files.append((file, "mask_nucl.fna", "nucl"))
     rows, stdout_rows = expected_rows(bin_dir, work, out, files)

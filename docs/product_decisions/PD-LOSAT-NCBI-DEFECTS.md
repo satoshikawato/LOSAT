@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.75
+- Version: 1.77
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -357,7 +357,12 @@
   question Q10: `losat windowmasker` posts NCBI's `bad id` error for each line of an `-ids` or
   `-exclude_ids` list matched as text that gives an empty id, and skips the id, where NCBI crashes; the
   explicit rejection of 1.72 removed; line NP item M5; numbered after 1.74; first 1.73, then 1.74 and 1.75
-  at the merges of dev that brought line RG item X4b-1's 1.73, then line RG item D5b-3's 1.74)
+  at the merges of dev that brought line RG item X4b-1's 1.73, then line RG item D5b-3's 1.74);
+  1.77 2026-11-23 (makeblastdb `-mask_data`, line NP item M (b): exception 24, a mask file whose
+  Seq-locs nest deeper than NCBI's stack holds, read to any depth, rule 1, as approved exception 15
+  reads a PSSM; its approval pending the Owner's answer to question Q-MDEPTH (asked 2026-11-23); the
+  refusal of nests deeper than 400 object frames removed; numbered after 1.76 of line NP item M4c-1,
+  whose pull request is open)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1039,6 +1044,51 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `a_nest_of_any_depth_is_written_without_recursion` (`write_tests.rs`),
     `nests_of_any_depth_are_walked_without_recursion` and `nested_multi_data_are_read_without_recursion`
     (`LOSAT/src/algorithm/pssm_search/annot_index/tests.rs`, `table_tests.rs`).
+
+## Exception 24 (makeblastdb `-mask_data`, Seq-locs nested deeper than NCBI's stack holds, version 1.77), pending
+
+pending: question Q-MDEPTH, ad-M4a-15 2026-11-22
+
+Version 1.77, line NP item M (b). Approval: pending the Owner's answer to question Q-MDEPTH (asked
+2026-11-23). Built under the maintainer's standing delegation (standing instruction 2026-09-29,
+restated 2026-10-07) as that question's recommended option B, the form of approved exception 15, in
+a pull request that stays a draft until the Owner answers. Not taken: option A, refusing the depths
+at which NCBI may crash: NCBI's crash depth moves by some dozen levels from run to run and differs
+between text and binary files, so any limit refuses files that NCBI reads at every start or reads
+files on which NCBI crashes at every start. Until this version LOSAT refused nests deeper than 400
+object frames, 97 levels of `mix` and more, which NCBI reads at every start.
+
+24. **A mask file whose Seq-locs nest deeper than NCBI's stack holds.** makeblastdb's reader of the
+    `-mask_data` files (`CObjectIStreamAsn` for text, `CObjectIStreamAsnBinary` for binary) reads
+    a Seq-loc, the one type of a mask file that holds values of its own type (`mix` and `equiv`,
+    and a value written as `:Seq-loc` in NCBI's pointer syntax), by recursion: each level opens the
+    choice, its variant, the list and the list's element (`ReadChoiceSimple`,
+    `src/serial/objistr.cpp:1482-1500`; `ReadContainer`, `src/serial/objistrasn.cpp:1245-1274`),
+    about 1.3 KB of the main thread's stack for each level. With the default stack limit of 8 MiB
+    NCBI BLAST+ 2.17.0 overflows its stack and ends with SIGSEGV (exit status 139; the log's first
+    lines, nothing on standard error, no database): in a minimal environment, 5 runs at each
+    depth, it read every nest of 6,449 levels and crashed on every nest of 6,473 levels in binary
+    files, and read 6,610 levels and crashed from 6,634 in text files, crashing in some runs only
+    at the depths between; `mix`, `equiv`, the two alternating and the pointer syntax alike. As in
+    exception 15 the depth is not the input's: the stack limit, the lengths of the command line and
+    of the environment and the stack's random start at each run move it. With no stack limit
+    (`ulimit -s unlimited`) NCBI reads every depth tried, to 100,000 levels (205 MB of memory), and
+    writes its normal database, or for a file damaged deep inside its report, which names every
+    frame of the nest (at 100,000 levels about 25 s and 2 MB; a number too large for `int` in a text
+    file, whose report gives each frame a line of its own, took 245 s at 5,000 levels and did not
+    end within 20 minutes of CPU at 20,000). LOSAT keeps the levels and the frames on the heap
+    (`writedb::mask_info::reader`, `Rd::read_seq_loc_parts`), so it reads every depth as far as
+    memory allows and writes NCBI's output with a stack large enough, its reports in time linear
+    in the depth. No mask file that dustmasker, segmasker, windowmasker or convert2blastmask writes
+    nests this way (their locations are `int` and `packed-int`).
+    Evidence: `docs/evidence/mask_nest_depth/` (for each kind of nest and depth, NCBI's runs with
+    8 MiB and with no stack limit, LOSAT's runs and the generator of the inputs). Fixture rows
+    `n_*` of `LOSAT/tests/seqdb/mask_parse/expected.tsv`, frozen from NCBI's run with no stack
+    limit (`LOSAT/tests/seqdb/make_mask_parse_fixtures.py`). Unit tests
+    `a_nest_of_a_million_levels_is_read_without_recursion`, `every_nesting_path_is_read_at_depth`,
+    `a_null_element_deep_inside_is_found_where_ncbi_dereferences_it` and
+    `an_error_deep_inside_leaves_every_frame_of_the_nest`
+    (`LOSAT/src/writedb/mask_info/depth_tests.rs`).
 
 ## Approved exception 16 (BLASTP unified P-values, the last query of a query batch, version 1.54)
 

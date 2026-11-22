@@ -72,6 +72,8 @@ A mask finds its sequence by the same id as in NCBI BLAST+. Build with `-parse_s
 
 A mask file that is damaged stops with makeblastdb's own error and exit status. A text in it with a byte outside the visible ASCII range is stored with `#` in the byte's place, and the run reports it, as makeblastdb does.
 
+Locations nested inside each other (`mix` and `equiv`) are read at any depth. NCBI's makeblastdb crashes on nests of about 6,500 levels and more with the usual 8 MiB stack limit; LOSAT writes the database that it writes with no stack limit.
+
 ### Hash index
 
 `-hash_index` writes the sequence hash index (`.phi`/`.phd`, `.nhi`/`.nhd`). `blastdbcmd -outfmt %h` prints the hash of each sequence.

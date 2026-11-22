@@ -199,9 +199,9 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:161-184
-// (quoted at `Constraint::usage`). NCBI BLAST+ 2.17.0 blast_formatter `-sorthits 5` and
-// `-sorthsps 5` (line RG item F3, probes P2.055 and P2.073): `Illegal value, expected (>=0 and
-// =<4):  `5'`.
+// (cited at `Constraint::usage`). NCBI BLAST+ 2.17.0 blast_formatter `-sorthits 5` and
+// `-sorthsps 5` (line RG item F3, probes P2.055 and P2.073) print the illegal value error with
+// the range 0 to 4 written as below.
 #[test]
 fn a_key_between_two_numbers_takes_both_ends() {
     for (text, number) in [("0", 0), ("4", 4), ("+2", 2), ("004", 4)] {

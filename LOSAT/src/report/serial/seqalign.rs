@@ -700,7 +700,7 @@ fn write_desc<E: Encoder>(enc: &mut E, desc: &AnnotDesc<'_>) {
 /// and its database (quoted at `write_desc`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AnnotDesc<'a> {
-    /// `EProgramToTaskName(program)` and the number of `program` (`EProgram`): the label and
+    /// The task name of `program` (`EProgramToTaskName`) and its number (`EProgram`): the label and
     /// value of the "Blast Type" user object.
     pub(crate) task: &'static str,
     pub(crate) program: i32,

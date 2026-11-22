@@ -302,7 +302,7 @@ impl ResolvedMask {
 }
 
 /// The error of `SeqDb::name_mask_details`, as the formatter's `GetBlastDbInfo` ends the run with
-/// it (`CATCH_ALL`, quoted at `DbMaskOption::resolve`): NCBI's `Filtering algorithm ID ... is not
+/// it (`CATCH_ALL`, cited at `DbMaskOption::resolve`): NCBI's `Filtering algorithm ID ... is not
 /// supported.` of a name's database that lacks the id, or the error of reading its table, as
 /// `LOSAT database error: <text>` with exit status 2 (`common::database::database_error_of`).
 /// The one mapping of these errors: the search programs' database masking (`resolve`) and

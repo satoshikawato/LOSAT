@@ -188,7 +188,7 @@ fn the_counts_start_from_the_object_s_hit_list_size() {
     assert_eq!(counts(&tabular, 500), (0, 0, 0));
 }
 
-// blast_args.cpp:2894-2908 (quoted at `report_counts::kept_hitlist_counts`): above 500, the
+// blast_args.cpp:2894-2908 (cited at `report_counts::kept_hitlist_counts`): above 500, the
 // formats up to 4 keep the object's size and read nothing else.
 #[test]
 fn a_hit_list_above_500_is_kept_for_the_pairwise_formats() {
@@ -216,7 +216,7 @@ fn a_hit_list_above_500_is_kept_for_the_pairwise_formats() {
     assert_eq!(counts(&options("6"), 1000), (1000, 1000, 1000));
 }
 
-// P2.088-P2.117 and blast_args.cpp:2947-2989 (quoted at `ReportCounts::warnings_with`).
+// P2.088-P2.117 and blast_args.cpp:2947-2989 (cited at `ReportCounts::warnings_with`).
 #[test]
 fn the_formatting_options_are_kept_where_ncbi_reads_them() {
     let mut given = options("0");

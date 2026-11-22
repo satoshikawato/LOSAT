@@ -1181,7 +1181,7 @@ fn a_location_has_one_id_or_none() {
     }
 }
 
-/// `CSeq_align::GetSeq_id(row)` of an alignment as a FASTA label, or the place, class and
+/// `CSeq_align::GetSeq_id` of a row of an alignment as a FASTA label, or the place, class and
 /// message of NCBI's exception.
 fn align_id(segs: &str, row: usize) -> Result<String, (&'static str, u32, &'static str, String)> {
     let align = value(
@@ -1193,7 +1193,7 @@ fn align_id(segs: &str, row: usize) -> Result<String, (&'static str, u32, &'stat
         .map_err(exception)
 }
 
-/// `CSeq_align::GetSeq_id(row)` of each kind of segments, and NCBI's exceptions.
+/// `CSeq_align::GetSeq_id` of a row of each kind of segments, and NCBI's exceptions.
 #[test]
 fn an_alignment_row_has_the_id_of_its_segments() {
     let invalid = |file: &'static str, line: u32, class: &str| {

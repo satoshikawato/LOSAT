@@ -248,9 +248,8 @@ impl Results {
     }
 }
 
-/// `NStr::Find(text, search) != NPOS`, then `NStr::ReplaceInPlace(text, search, kEmptyStr)`:
-/// every `search` removed, each search going on from where the last was removed. Whether one
-/// was found.
+/// `NStr::Find`, then `NStr::ReplaceInPlace` with the empty string: every `search` removed, each
+/// search going on from where the last was removed. Whether one was found.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3401-3428
 // (`start_pos` 0 and `max_replace` 0 by default; the search was found, so the first test
 // does not return.)

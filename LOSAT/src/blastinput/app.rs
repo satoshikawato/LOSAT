@@ -537,8 +537,8 @@ pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyh
 }
 
 /// `formatting_handler_check` of formatting arguments made with `eIsSAM` (`is_sam`) or without:
-/// the search programs' (`Program::is_sam`) and blast_formatter's (`CFormattingArgs(false,
-/// CFormattingArgs::eIsSAM)`, blast_formatter.cpp:131, `blast_formatter::formatting`).
+/// the search programs' (`Program::is_sam`) and blast_formatter's, whose formatting arguments
+/// are made for SAM and not for a query (blast_formatter.cpp:131, `blast_formatter::formatting`).
 pub fn formatting_handler_check_with(choice: &FormatChoice, is_sam: bool) -> anyhow::Result<()> {
     match choice.number {
         SAM if !is_sam => Err(options_error("SAM format is only applicable to blastn")),

@@ -122,8 +122,9 @@ impl Request {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2683-2693
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:62-75
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:164-168
-    // NCBI reference (598d8ae6): c++/include/objects/blast/Blast4_request_.hpp:191-198
-    // (`GetProgram` and `GetService` read mandatory members of the `queue-search`.)
+    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:156-158
+    // (`GetProgram` and `GetService` read the mandatory members `program` and `service` of the
+    // `queue-search`.)
     pub(crate) fn from_value(request: Value) -> Result<Option<Request>, Stop> {
         Request::read(request, Reader::Archive)
     }
@@ -222,7 +223,7 @@ impl Request {
         &self.params
     }
 
-    /// `GetParamByName(name)` of the list `set`: its first parameter named `name`.
+    /// `GetParamByName` of the list `set`: its first parameter named `name`.
     // NCBI reference (598d8ae6): c++/src/objects/blast/Blast4_parameters.cpp:186-198
     #[cfg(test)]
     pub(crate) fn param(&self, set: ParamSet, name: &[u8]) -> Option<&Param> {
@@ -240,9 +241,9 @@ impl Request {
             || (program == b"tblastn" && self.service == b"rpsblast")
     }
 
-    /// Whether the program translates the query (`Blast_QueryIsTranslated` of
-    /// `NetworkProgram2BlastProgramType(program, service)`), which decides the frames of the
-    /// masks; NCBI aborts on the `rpsblast` service with a program other than `blastp`,
+    /// Whether the program translates the query (`Blast_QueryIsTranslated` of the program type that
+    /// `NetworkProgram2BlastProgramType` gives the program and service), which decides the frames
+    /// of the masks; NCBI aborts on the `rpsblast` service with a program other than `blastp`,
     /// `tblastn` and `blastx`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1933-1962
     // (`BlastProgram2Number`, blast_util.c:278-310, compares the names without case; the
@@ -404,8 +405,8 @@ impl<'a> Bioseq<'a> {
         self.0.field("id").items().map(|id| id.seq_id())
     }
 
-    /// `FindBestChoice(GetId(), CSeq_id::BestRank)`: the first id of the best rank, `None` when
-    /// every id ranks `kMax_Int` or there is none.
+    /// `FindBestChoice` of the ids by `CSeq_id::BestRank`: the first id of the best rank, `None`
+    /// when every id ranks `kMax_Int` or there is none.
     pub(crate) fn best_id(self) -> Option<&'a ParsedSeqId> {
         find_best(self.ids(), best_rank_score)
     }

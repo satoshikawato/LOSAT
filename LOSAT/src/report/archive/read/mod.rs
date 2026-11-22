@@ -111,8 +111,8 @@ pub(crate) struct Search {
     pub(crate) results: Results,
 }
 
-/// The objects of an archive stream (`CRemoteBlast(istr)` with its object stream), one at a
-/// time.
+/// The objects of an archive stream (the `CRemoteBlast` made of a stream, with its object
+/// stream), one at a time.
 pub(crate) struct ArchiveReader<R: Read> {
     objects: ObjectStream<R>,
 }
@@ -235,8 +235,8 @@ pub(crate) fn seq_loc_id(loc: V<'_>) -> Option<&ParsedSeqId> {
     total
 }
 
-/// `x_UpdateId(total, id)` without its exception: whether `id` agrees with the id found so far
-/// (the first is taken).
+/// `x_UpdateId` without its exception: whether `id` agrees with the id found so far (the first
+/// is taken).
 fn update_id<'a>(total: &mut Option<&'a ParsedSeqId>, id: &'a ParsedSeqId) -> bool {
     match total {
         None => {
@@ -266,7 +266,7 @@ fn seqalign_exception(file: &'static str, line: u32, kind: &'static str, text: &
     ))
 }
 
-/// `CSeq_align::GetSeq_id(row)`: the Seq-id of the row `row` of an alignment, or NCBI's
+/// `CSeq_align::GetSeq_id` of a row: the Seq-id of the row `row` of an alignment, or NCBI's
 /// `CSeqalignException` when the segments name none.
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:317-400
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:154-162

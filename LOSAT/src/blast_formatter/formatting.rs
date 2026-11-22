@@ -1,6 +1,6 @@
 //! What blast_formatter makes of its formatting arguments for one archive object: NCBI's
-//! `CFormattingArgs(false, CFormattingArgs::eIsSAM)::ExtractAlgorithmOptions` on the object's
-//! options (blast_args.cpp:2870-2990), then blast_formatter's own check of SAM
+//! `CFormattingArgs::ExtractAlgorithmOptions` (of arguments made for SAM, not for a query) on the
+//! object's options (blast_args.cpp:2870-2990), then blast_formatter's own check of SAM
 //! (blast_formatter.cpp:351-355). NCBI runs both in `PrintFormattedOutput`, after the object was
 //! read, so `-outfmt` is checked there and not with the other arguments. The readers are the
 //! search programs': `-outfmt` is `blastinput::app::parse_formatting_string` and
@@ -32,45 +32,14 @@ pub(crate) struct Formatting {
     /// `-show_gis` and `-html` (`m_ShowGis`, `m_Html`).
     pub(crate) show_gis: bool,
     pub(crate) html: bool,
-    /// The handler's warnings (`ERR_POST(Warning << ...)`), in NCBI's order, without a prefix.
+    /// The handler's warnings (posts at the level `Warning`), in NCBI's order, without a prefix.
     pub(crate) warnings: Vec<u8>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2870-2894
-// ```c++
-// void
-// CFormattingArgs::ExtractAlgorithmOptions(const CArgs& args,
-//                                          CBlastOptions& opt)
-// {
-//     ParseFormattingString(args, m_OutputFormat, m_CustomOutputFormatSpec,m_CustomDelim);
-//     if((m_OutputFormat == eSAM) && !(m_FormatFlags & eIsSAM) ){
-//     		NCBI_THROW(CInputException, eInvalidInput,
-//     		                        "SAM format is only applicable to blastn" );
-//     }
-//     ...
-//     s_ValidateCustomDelim(m_CustomOutputFormatSpec,m_CustomDelim);
-//     m_ShowGis = static_cast<bool>(args[kArgShowGIs]);
-//     if(m_IsIgBlast){
-//         m_Html = false;
-//     } else {
-//         m_Html = static_cast<bool>(args[kArgProduceHtml]);
-//     }
-//     // Default hitlist size 500, value can be changed if import search strategy is used
-//     int hitlist_size = opt.GetHitlistSize();
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2938-2945
-// ```c++
-//     	if (args[kArgLineLength]) {
-//     	    m_LineLength = args[kArgLineLength].AsInteger();
-//     	}
-//         if(args.Exist(kArgSortHits) && args[kArgSortHits])
-//         {
-//        	    m_HitsSortOption = args[kArgSortHits].AsInteger();
-//         }
-//     }
-// ```
 // (the branch of the formats up to 4; the other formats keep the defaults; the sort of the HSPs
-// is kept for format 0 alone, quoted at `ReportCounts::warnings_with`.)
+// is kept for format 0 alone, cited at `ReportCounts::warnings_with`.)
 /// `ExtractAlgorithmOptions` of the command line `options` for an archive object whose options
 /// hold the hit list size `hitlist_size` (`opt.GetHitlistSize()`, the request's; 500 when it has
 /// none): NCBI's errors of `-outfmt` (`'x' is not a valid output format`, the delimiter's, the
@@ -132,14 +101,6 @@ pub(crate) fn extract_formatting(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:350-355
-// ```c++
-//     const EBlastProgramType p = opts.GetProgramType();
-//     if((fmt_args.GetFormattedOutputChoice() == CFormattingArgs::eSAM) &&
-//        (p != eBlastTypeBlastn )) {
-// 		NCBI_THROW(CInputException, eInvalidInput,
-// 		                        "SAM format is only applicable to blastn results" );
-//     }
-// ```
 /// blast_formatter's check of SAM (17) for an archive object of a program that is blastn
 /// (`blastn`, its tasks megablast and dc-megablast included) or not (`is_blastn`), after
 /// `extract_formatting` (probes P2.197 and P2.199: blastp archives).

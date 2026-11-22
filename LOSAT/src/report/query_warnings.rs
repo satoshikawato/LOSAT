@@ -1233,8 +1233,8 @@ pub fn few_matches_warning(prefix: Option<&str>) -> Vec<u8> {
     formatting_warning(prefix, "Examining 5 or more matches is recommended")
 }
 
-/// `ERR_POST(Warning << message)` of the formatting handler (`blastinput::report_counts`) in an
-/// application whose posts have the prefix `prefix` (none: no `[...] `): the post's line
+/// The formatting handler's post of a message at the level `Warning` (`blastinput::report_counts`)
+/// in an application whose posts have the prefix `prefix` (none: no `[...] `): the post's line
 /// (`ncbi_exception::post_line_in`) with its message, which these warnings always keep.
 pub fn formatting_warning(prefix: Option<&str>, message: &str) -> Vec<u8> {
     crate::ncbi_exception::post_line_in(

@@ -25,84 +25,13 @@ use refusals::Refusal;
 const PROGRAM: &str = "BLAST_FORMATTER";
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:112-120
-// ```c++
-// void CBlastFormatterApp::Init()
-// {
-//     HideStdArgs(fHideLogfile | fHideConffile | fHideFullVersion | fHideXmlHelp | fHideDryRun);
-//
-//     unique_ptr<CArgDescriptions> arg_desc(new CArgDescriptions);
-//
-//     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
-//                   "Stand-alone BLAST formatter client, version "
-//                   + CBlastVersion().Print());
-// ```
 /// The text of `blast_formatter -help` (NCBI 2.17.0's, frozen; line RG item F3, probe P2.201):
 /// `-logfile`, `-conffile`, `-version-full`, `-xmlhelp` and `-dryrun` are hidden. Its part before
 /// `OPTIONAL ARGUMENTS` is the usage that `-h` and the argument errors print (probe P2.202).
 const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:122-141
-// ```c++
-//     arg_desc->SetCurrentGroup("Input options");
-//     arg_desc->AddOptionalKey(kArgRid, "BLAST_RID", "BLAST Request ID (RID)",
-//                      CArgDescriptions::eString);
-//
-//     // add input file for seq-align here?
-//     arg_desc->AddOptionalKey(kArgArchive, "ArchiveFile", "File containing BLAST Archive format in ASN.1 (i.e.: output format 11)",
-//                      CArgDescriptions::eInputFile);
-//     arg_desc->SetDependency(kArgRid, CArgDescriptions::eExcludes, kArgArchive);
-//
-//     CFormattingArgs fmt_args(false, CFormattingArgs::eIsSAM);
-//     fmt_args.SetArgumentDescriptions(*arg_desc);
-//
-//     arg_desc->SetCurrentGroup("Output configuration options");
-//     arg_desc->AddDefaultKey(kArgOutput, "output_file", "Output file name",
-//                             CArgDescriptions::eOutputFile, "-");
-//
-//     arg_desc->SetCurrentGroup("Miscellaneous options");
-//     arg_desc->AddFlag(kArgParseDeflines,
-//                  "Should the query and subject defline(s) be parsed?", true);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2656-2737
-// ```c++
-//     arg_desc.AddDefaultKey(kArgOutputFormat, "format",
-//                            kOutputFormatDescription,
-//                            CArgDescriptions::eString,
-//                            NStr::IntToString(dft_outfmt));
-//     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
-//     arg_desc.AddOptionalKey(kArgNumDescriptions, "int_value", ...
-//                  CArgDescriptions::eInteger);
-//     arg_desc.SetConstraint(kArgNumDescriptions,
-//                            new CArgAllowValuesGreaterThanOrEqual(0));
-//     arg_desc.AddOptionalKey(kArgNumAlignments, "int_value", ...
-//     arg_desc.SetConstraint(kArgNumAlignments,
-//                            new CArgAllowValuesGreaterThanOrEqual(0));
-//     arg_desc.AddOptionalKey(kArgLineLength, "line_length", ...
-//     arg_desc.SetConstraint(kArgLineLength,
-//                            new CArgAllowValuesGreaterThanOrEqual(1));
-//     if(!m_IsIgBlast){
-//         arg_desc.AddFlag(kArgProduceHtml, "Produce HTML output?", true);
-//         arg_desc.AddOptionalKey(kArgSortHits, "sort_hits", ...
-//         arg_desc.SetConstraint(kArgSortHits,
-//                            new CArgAllowValuesBetween(CAlignFormatUtil::eEvalue,
-//                                                       CAlignFormatUtil::eQueryCoverage,
-//                                                       true));
-//         arg_desc.AddOptionalKey(kArgSortHSPs, "sort_hsps", ...
-//         arg_desc.SetConstraint(kArgSortHSPs,
-//                            new CArgAllowValuesBetween(CAlignFormatUtil::eHspEvalue,
-//                                                       CAlignFormatUtil::eSubjectStart,
-//                                                       true));
-//         arg_desc.AddOptionalKey(kArgMaxTargetSequences, "num_sequences", ...
-//         arg_desc.SetConstraint(kArgMaxTargetSequences,
-//                            new CArgAllowValuesGreaterThanOrEqual(1));
-//         arg_desc.SetDependency(kArgMaxTargetSequences,
-//                            CArgDescriptions::eExcludes,
-//                            kArgNumDescriptions);
-//         arg_desc.SetDependency(kArgMaxTargetSequences,
-//                            CArgDescriptions::eExcludes,
-//                            kArgNumAlignments);
-//     }
-// ```
 // `CDebugArgs::SetArgumentDescriptions` (blast_formatter.cpp:143-144) adds nothing to a release
 // build (its `-help` lists no debug option).
 /// The arguments of `CBlastFormatterApp::Init` in the order it describes them: `-sorthits` and
@@ -164,19 +93,6 @@ fn dependencies() -> Vec<(&'static str, Dep, &'static str)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:57-69
-// ```c++
-//     CBlastFormatterApp() {
-//         CRef<CVersion> version(new CVersion());
-//         version->SetVersionInfo(new CBlastVersion());
-//         SetFullVersion(version);
-//         m_LoadFromArchive = false;
-//         m_StopWatch.Start();
-//         if (m_UsageReport.IsEnabled()) {
-//         	m_UsageReport.AddParam(CBlastUsageReport::eVersion, GetVersion().Print());
-//         	m_UsageReport.AddParam(CBlastUsageReport::eProgram, (string) "blast_formatter");
-//         }
-//     }
-// ```
 /// blast_formatter as NCBI's application runs it (`ncbi_app`): BLAST's version, BLAST's usage
 /// report (`ncbi_environment`), its dependencies and no prefix on its diagnostics (its `Run` sets
 /// none: `Warning: ...`, line RG item F3 probe P2.002).
@@ -191,12 +107,6 @@ static TOOL: Tool = Tool {
 };
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592
-// ```c++
-// int main(int argc, const char* argv[] /*, const char* envp[]*/)
-// {
-//     return CBlastFormatterApp().AppMain(argc, argv);
-// }
-// ```
 /// Runs `blast_formatter` with `words` (the command line after `losat blast_formatter`), after
 /// its application start `start`, on the process's standard streams; the exit status.
 pub(crate) fn run(
@@ -269,37 +179,7 @@ impl Options {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:499-545
-// ```c++
-// int CBlastFormatterApp::Run(void)
-// {
-//     int status = 0;
-//     const CArgs& args = GetArgs();
-//
-//     try {
-//         SetDiagPostLevel(eDiag_Warning);
-//         if (args[kArgArchive].HasValue()) {
-//             CNcbiIstream& istr = args[kArgArchive].AsInputFile();
-//             try { m_RmtBlast.Reset(new CRemoteBlast(istr)); }
-//             ...
-//             return status;
-//         }
-//
-//         const string kRid = args[kArgRid].AsString();
-//         m_RmtBlast.Reset(new CRemoteBlast(kRid));
-//         ...
-//         switch (m_RmtBlast->CheckStatus()) {
-//         ...
-//     } CATCH_ALL(status)
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:879-884
-// ```c++
-// void CRemoteBlast::x_Init(const string & RID)
-// {
-//     if (RID.empty()) {
-//         NCBI_THROW(CBlastException, eInvalidArgument,
-//                    "Empty RID string specified");
-//     }
-// ```
 /// blast_formatter's `Run`: the archive of `-archive` (`-` is the standard input `input`), read
 /// and formatted by `format_archive`; without `-archive`, `-rid`'s value: none is NCBI's error of
 /// the argument without a value (NCBI BLAST+ 2.17.0 `blast_formatter` alone, probe P2.205), the
@@ -342,22 +222,6 @@ fn run_body(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:166-180
-// ```c++
-// #define CATCH_ALL(exit_code)                                                \
-//     catch (const CInvalidDataException& e) {                                \
-//         LOG_POST(Error << "BLAST options error: " << e.GetMsg());           \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-//     catch (const blast::CInputException& e) {                               \
-//         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
-//         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-//     catch (const CArgException& e) {                                        \
-//         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
 /// `CATCH_ALL` of `Run` for `error`: the text of a `NativeError` (made by the shared producers:
 /// `cli::command_line_argument_error`, `blastinput::app::options_error`, `engine_error`) posted
 /// where the diagnostics go (`-logfile`), and its exit status; any other error is LOSAT's refusal.

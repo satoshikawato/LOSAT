@@ -1,0 +1,18 @@
+BLAST engine error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbiobj.cpp", line 1010: Critical: (CCoreException::eNullPtr) ncbi::CObject::ThrowNullPointerException() - Attempt to access NULL pointer.
+     Stack trace:
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 ncbi::CObject::ThrowNullPointerException() offset=0x92 addr=0x19f68c2
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn() [0xfdab68] offset=0x0 addr=0xfdab68
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 BLAST_PreliminarySearchEngine offset=0x377 addr=0xeedb97
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 Blast_RunPreliminarySearchWithInterrupt offset=0x112 addr=0xeeea22
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 ncbi::blast::CBlastPrelimSearch::Run() offset=0x10BA addr=0xfb5d7a
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 ncbi::blast::CLocalBlast::Run() offset=0x129B addr=0xf8037b
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 CBlastnApp::x_RunMTBySplitDB() offset=0x1B75 addr=0xc0e665
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 CBlastnApp::Run() offset=0x630 addr=0xc10800
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 ncbi::CNcbiApplicationAPI::x_TryMain(ncbi::EAppDiagStream, char const*, int*, bool*) offset=0x233 addr=0x194c483
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 ncbi::CNcbiApplicationAPI::AppMain(int, char const* const*, char const* const*, ncbi::EAppDiagStream, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) offset=0x4CB addr=0x194eb7b
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 main offset=0x66 addr=0xbe44f6
+      /lib/x86_64-linux-gnu/libc.so.6 ???:0  offset=0x2A1CA addr=0x7f739da0b1ca
+      /lib/x86_64-linux-gnu/libc.so.6 ???:0 __libc_start_main offset=0x8B addr=0x7f739da0b28b
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn ???:0 _start offset=0x2E addr=0xc04aae
+

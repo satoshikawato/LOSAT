@@ -66,7 +66,7 @@ pub(super) fn midl_search(ids: &[u64], id: u64) -> usize {
     cursor
 }
 
-/// `CMP(x,y)`: `( (x) < (y) ? -1 : (x) > (y) )`.
+/// `CMP` of `x` and `y`: -1 when `x` is less than `y`, 1 when it is greater, else 0.
 #[inline]
 pub(super) fn cmp_u64(x: u64, y: u64) -> i32 {
     if x < y {
@@ -136,7 +136,7 @@ pub(super) fn midl_sort(ids: &mut [u64]) {
     ids[1..=n].sort_unstable_by(|a, b| b.cmp(a));
 }
 
-/// `MDB_IDL_SIZEOF(ids)`: `(ids[0] + 1) * sizeof(MDB_ID)`.
+/// `MDB_IDL_SIZEOF` of `ids`: the `sizeof` of `MDB_ID` times one more than `ids[0]`.
 pub(super) fn midl_sizeof(ids: &[u64]) -> usize {
     (ids[0] as usize + 1) * 8
 }

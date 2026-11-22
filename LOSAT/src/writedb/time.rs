@@ -1,9 +1,11 @@
-//! The local time of a build (`CTime(CTime::eCurrent)`) and its two text
-//! forms: the creation date of an index file and the time of the log.
+//! The local time of a build (`CTime` with `CTime::eCurrent`) and its two text
+//! forms: the creation date of an index file and the time of the log; and the
+//! same instant as `time` gives it when called with a null pointer (the seed of makeblastdb's
+//! `-randomize`).
 
 use super::local_offset::local_utc_offset;
 
-/// A local calendar time.
+/// A local calendar time, and the instant it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalTime {
     pub year: i32,
@@ -15,6 +17,9 @@ pub struct LocalTime {
     pub hour: u32,
     pub minute: u32,
     pub second: u32,
+    /// What `time` gives with a null pointer: the instant, in seconds since 1970-01-01 00:00:00
+    /// UTC.
+    pub unix_seconds: i64,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:102-105
@@ -24,7 +29,7 @@ const MONTH_ABBR: [&str; 12] = [
 
 impl LocalTime {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1722-1734
-    // `CTime(CTime::eCurrent)` is the local time of the C library. LOSAT
+    // `CTime` with `CTime::eCurrent` is the local time of the C library. LOSAT
     // calls no C library: the zone's offset from UTC comes from
     // `local_offset`, which finds the zone where the C library finds it
     // (glibc on Unix and on WASI, from the environment and the directories
@@ -40,11 +45,12 @@ impl LocalTime {
         if offset.leap_second {
             time.second = 60;
         }
+        time.unix_seconds = seconds;
         Some(time)
     }
 
     /// The calendar time `seconds` after 1970-01-01 00:00:00 (Gregorian
-    /// calendar, days of 86,400 seconds).
+    /// calendar, days of 86,400 seconds): the time in UTC of the instant `seconds`.
     pub fn from_unix_seconds(seconds: i64) -> Self {
         let days = seconds.div_euclid(86_400);
         let second_of_day = seconds.rem_euclid(86_400);
@@ -71,6 +77,7 @@ impl LocalTime {
             hour: (second_of_day / 3_600) as u32,
             minute: (second_of_day % 3_600 / 60) as u32,
             second: (second_of_day % 60) as u32,
+            unix_seconds: seconds,
         }
     }
 

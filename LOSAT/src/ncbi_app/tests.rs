@@ -11,8 +11,6 @@ fn the_versions_come_before_the_refusal_of_a_word_that_is_not_utf8() {
         program: "p",
         refusal_name: "P",
         help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
-        descs: &[],
-        dependencies: no_dependencies,
         post_prefix: None,
         components: &[],
     };
@@ -72,8 +70,6 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         program: "p",
         refusal_name: "P",
         help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
-        descs: &[],
-        dependencies: no_dependencies,
         post_prefix: None,
         components: &[],
     };
@@ -82,6 +78,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         target: DiagTarget::Stderr,
         stderr: &mut stderr,
         tool: &TOOL,
+        record: None,
     };
     let error = ArgException::new("eNoFile", "Argument \"in\". X".to_string());
     assert_eq!(diag.run_arg_exception(error), 1);
@@ -101,6 +98,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         target: DiagTarget::Stderr,
         stderr: &mut stderr,
         tool: &TOOL,
+        record: None,
     };
     diag.run_arg_exception(ArgException::new("eNoValue", "m".to_string()));
     assert_eq!(

@@ -11,30 +11,29 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 | `-outfmt` | Format | Written by |
 | --- | --- | --- |
 | `0` | Pairwise | all eight search programs |
-| `1` | Query-anchored, showing identities | the five programs, `rpstblastn` |
-| `2` | Query-anchored, no identities | the five programs, `rpstblastn` |
-| `3` | Flat query-anchored, showing identities | the five programs, `rpstblastn` |
-| `4` | Flat query-anchored, no identities | the five programs, `rpstblastn` |
-| `5` | BLAST XML | the five programs |
+| `1` | Query-anchored, showing identities | all but `psiblast` |
+| `2` | Query-anchored, no identities | all but `psiblast` |
+| `3` | Flat query-anchored, showing identities | all but `psiblast` |
+| `4` | Flat query-anchored, no identities | all but `psiblast` |
+| `5` | BLAST XML | all but `psiblast` |
 | `6` | Tabular | all eight |
 | `7` | Tabular with comment lines | all eight |
-| `8` | Seqalign, ASN.1 text | the five programs |
-| `9` | Seqalign, ASN.1 binary | the five programs |
+| `8` | Seqalign, ASN.1 text | all but `psiblast` |
+| `9` | Seqalign, ASN.1 binary | all but `psiblast` |
 | `10` | Comma-separated values | all eight |
-| `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | the five programs |
-| `12` | Seqalign, JSON | the five programs |
-| `13` | Multiple-file BLAST JSON (needs `-out`) | the five programs |
-| `14` | Multiple-file BLAST XML2 (needs `-out`) | the five programs |
-| `15` | Single-file BLAST JSON | the five programs |
-| `16` | Single-file BLAST XML2 | the five programs |
+| `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all but `psiblast` |
+| `12` | Seqalign, JSON | all but `psiblast` |
+| `13` | Multiple-file BLAST JSON (needs `-out`) | all but `psiblast` |
+| `14` | Multiple-file BLAST XML2 (needs `-out`) | all but `psiblast` |
+| `15` | Single-file BLAST JSON | all but `psiblast` |
+| `16` | Single-file BLAST XML2 | all but `psiblast` |
 | `17` | SAM | `blastn` only |
-| `18` | Organism report | the five programs |
-| `20` | Comma-separated values with header lines | the five programs, `psiblast` |
+| `18` | Organism report | all but `psiblast` |
+| `20` | Comma-separated values with header lines | all eight |
 
 "All eight" is the five programs, `psiblast`, `rpsblast` and `rpstblastn`. Some programs write fewer formats than the table shows:
 
 - `psiblast` writes `0`, `6`, `7`, `10` and `20`; with `-in_pssm`, `0`, `6` and `7`.
-- `rpsblast` writes `0`, `5`, `6`, `7`, `10` and `11`; `rpstblastn` writes `0` to `7`, `10` and `11`.
 - `tblastn` with `-in_pssm` writes `0` to `4`, `6`, `7` and `10`.
 
 `rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` have their own formats, listed on their pages.

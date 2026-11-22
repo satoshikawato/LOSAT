@@ -73,8 +73,8 @@ pub struct UngappedHit {
     /// number of HSPs in the chain). Read only for chain heads.
     pub hsp_link_num: i16,
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:135-138
-    /// NCBI `BlastHSP::num`. The pairwise report prints it as `Expect(n)` and in the `N`
-    /// column (the Seq-align score "sum_n").
+    /// NCBI `BlastHSP::num`. The pairwise report prints it in parentheses after `Expect` and in
+    /// the `N` column (the Seq-align score "sum_n").
     pub num: i32,
 }
 
@@ -84,7 +84,7 @@ pub struct UngappedHit {
 // `s_BlastAaExtendOneHit`)
 // No NCBI counterpart: where LOSAT keeps the `Int4` ends of an HSP whose length is 0 or negative.
 // The one-hit word finder of TBLASTX (`-window_size 0`) can save such an HSP (a word whose
-// running sum is reset after its best part), and NCBI's `end = offset + length` is then at or
+// running sum is reset after its best part), and NCBI's `end`, `offset` plus `length`, is then at or
 // before the offset, and below 0 near a frame's start. The fields `q_aa_end` and `s_aa_end` hold
 // that `Int4` in two's complement; a positive length leaves every end non-negative, where the
 // `Int4` and the `u32` are the same number. These methods are the one reader and writer of the

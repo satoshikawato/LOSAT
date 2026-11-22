@@ -1,0 +1,8 @@
+Blast-def-line ::= {
+  title "numeric local",
+  seqid {
+    local id 12345
+  },
+  taxid 0
+}
+

@@ -19,7 +19,8 @@
 //! index `i` (0 = newest) is `ring[head + i]` for every `i < 64` without the `& 63`, and the part
 //! of the window `find_perfect` reads is one contiguous slice. `find_perfect`'s loop keeps only
 //! the counts, the score, the triplet and its threshold: `cnt > 0` and the score test are one
-//! comparison (`x_gate_limit`, a conditional move), `count < thresholds.len()` always holds (`count < len <=
+//! comparison (`x_gate_limit`, a conditional move, against the thresholds divided by ten),
+//! `count < thresholds.len()` always holds (`count < len <=
 //! window - 2`), and the body of the condition, which holds on few iterations, is a function of
 //! its own (`x_merge_at`) that derives `pos` and `count` from the iteration's index and walks the
 //! perfect list as one slice (`VecDeque::make_contiguous`), copying the intervals it passes in one
@@ -29,7 +30,7 @@
 //! holds two or more distinct triplets, `x_run_full` takes the letters with only the scalars that
 //! change (`head`, the suffix length, `r_w`, `r_v`, `num_diff`): `start` rises with `pos`, `L`
 //! follows from the suffix length, and `needs_processing` is one comparison with a table of
-//! thresholds that has `u32::MAX` past its end (`x_padded_thresholds`). The window's first letters,
+//! thresholds that has `u32::MAX` past its end (`x_tenth_thresholds`). The window's first letters,
 //! the rare `shift_high` branch and the run after a uniform window go through `XHot`, as before.
 //!
 //! Why the result is the same. Every method below is the `XTripletWindow` method of the same name
@@ -37,9 +38,10 @@
 //! changes. The ring holds the same triplet at `head + i` as `XTripletWindow` holds at
 //! `(head + i) & 63` for every `i` below `len` (each push writes both copies, `head` stays in
 //! `0..64` and `len` is at most `window - 2 <= 62`, so `head + i < 128`). The combined condition
-//! is the C condition: where `cnt` is 0 the threshold is `u32::MAX`, which ten times the score
-//! never exceeds (at most 18,910), and otherwise it is the C threshold; the third test is always
-//! true. `pos` of iteration `i` is the start value lowered `i` times with
+//! is the C condition: the score exceeds a threshold divided by ten (rounded down) exactly when
+//! ten times the score exceeds the threshold (`x_tenth_thresholds`); where `cnt` is 0 the
+//! threshold is `u32::MAX`, which the score never exceeds (at most 1,891), and otherwise it is the
+//! C threshold divided by ten; the third test is always true. `pos` of iteration `i` is the start value lowered `i` times with
 //! `saturating_sub(1)`, which is `saturating_sub(i)`; `count` rises by one per iteration. The loop in `x_mask_range_regs` is `DustMasker::x_mask_range` statement by
 //! statement. The unit tests compare it with `mask_range_reference` and with `x_mask_range` on
 //! random sequences of every kind the masker distinguishes.
@@ -261,14 +263,15 @@ struct XMerge {
 /// `XTripletWindow::find_perfect`, reading the window as one slice of the doubled ring. The loop
 /// keeps only the counts, the score, the triplet and its threshold; the body of the score test,
 /// which holds on few iterations, is `x_merge_at` (not inlined, so its state does not take the
-/// loop's registers). `count < thresholds.len()` always holds: `count` runs from the suffix length
-/// to `len - 1`, and `len <= window - 2 = thresholds.len()`, so the thresholds of the iterations
-/// are the slice `thresholds[suffix_len..len]`.
+/// loop's registers). `tenths` holds the thresholds divided by ten (`x_tenth_thresholds`), so the
+/// score test compares the score itself. `count < tenths.len()` always holds: `count` runs from the
+/// suffix length to `len - 1`, and `len <= window - 2 = tenths.len()`, so the thresholds of the
+/// iterations are the slice `tenths[suffix_len..len]`.
 #[inline(never)]
 fn find_perfect(
     h: XHot,
     a: &XArrays,
-    thresholds: &[u32],
+    tenths: &[u32],
     merged: &mut Vec<PerfectInterval>,
     perfect_list: &mut VecDeque<PerfectInterval>,
 ) {
@@ -293,12 +296,12 @@ fn find_perfect(
     // The same elements in the same order, in one slice (the list is almost always one already).
     let list: &[PerfectInterval] = perfect_list.make_contiguous();
     let triplets = &a.ring[h.head + suffix_len..h.head + h.len];
-    let limits = &thresholds[suffix_len..h.len];
+    let limits = &tenths[suffix_len..h.len];
     for (i, (&triplet, &limit)) in triplets.iter().zip(limits).enumerate() {
         let idx = (triplet & 63) as usize;
         let cnt = counts[idx];
         add_triplet(&mut score, &mut counts, triplet);
-        if score * 10 > x_gate_limit(cnt, limit) {
+        if score > x_gate_limit(cnt, limit) {
             x_merge_at(&mut m, i, score, merged, list);
         }
     }
@@ -310,9 +313,9 @@ fn find_perfect(
 }
 
 /// No NCBI counterpart: the threshold of one `find_perfect` iteration whose triplet had the count
-/// `cnt` in the suffix before it was added: `limit` where `cnt > 0`, otherwise `u32::MAX`, which
-/// ten times a window's score never exceeds (the score of 62 triplets is at most 1,891). So
-/// `score * 10 > x_gate_limit(cnt, limit)` is NCBI's two tests (`cnt > 0` and the score above
+/// `cnt` in the suffix before it was added: `limit` (a threshold divided by ten) where `cnt > 0`,
+/// otherwise `u32::MAX`, which a window's score never exceeds (the score of 62 triplets is at most
+/// 1,891). So `score > x_gate_limit(cnt, limit)` is NCBI's two tests (`cnt > 0` and the score above
 /// the threshold) as one comparison. Whether `cnt` is 0 follows the data (the first time a
 /// triplet appears in the scanned part of the window), and a branch on it is mispredicted on
 /// about every fifth iteration in cDNA queries (line FR s1, H1 §1.2: 0.19 to 0.22 per
@@ -407,17 +410,23 @@ fn x_code(base: u8, rng: &mut NcbiLfgRandom) -> u8 {
     }
 }
 
-/// No NCBI counterpart: the thresholds of a full window with one more entry, `u32::MAX`, at the
-/// index of a suffix as long as the window. In a full window the suffix length `sl` (the distance
-/// from NCBI's `L` up to its `stop_`) is at most the window's length `max_size`, and `needs_processing`'s three tests
-/// (the suffix shorter than the window, shorter than the table, ten times the window's score above
-/// its threshold) are one comparison with this table: the table has `max_size` entries, so for
-/// `sl < max_size` the entry is the C threshold and both length tests hold, and for `sl == max_size`
-/// the entry is `u32::MAX`, which ten times a score never exceeds (at most 18,910).
-fn x_padded_thresholds(k: XConst) -> [u32; X_RING] {
+/// No NCBI counterpart: the thresholds divided by ten (rounded down), with one more entry,
+/// `u32::MAX`, at the index of a suffix as long as the window. For a score `x` and a threshold
+/// `t`, ten times `x` exceeds `t` exactly when `x` exceeds `t / 10` rounded down (if `x` is above
+/// it, `10 * x` is at least ten times it plus ten, which is above `t`; if not, `10 * x` is at most
+/// ten times it, at most `t`), so the comparisons need no multiplication. In a full window the
+/// suffix length `sl` (the distance from NCBI's `L` up to its `stop_`) is at most the window's
+/// length `max_size`, and `needs_processing`'s three tests (the suffix shorter than the window,
+/// shorter than the table, ten times the window's score above its threshold) are one comparison
+/// with this table: the C table has `max_size` entries, so for `sl < max_size` the entry is the C
+/// threshold divided by ten and both length tests hold, and for `sl == max_size` the entry is
+/// `u32::MAX`, which a score never exceeds (at most 1,891).
+fn x_tenth_thresholds(k: XConst) -> [u32; X_RING] {
     debug_assert_eq!(k.thresholds.len(), k.max_size);
     let mut thr = [u32::MAX; X_RING];
-    thr[..k.thresholds.len()].copy_from_slice(k.thresholds);
+    for (t, &c) in thr.iter_mut().zip(k.thresholds) {
+        *t = c / 10;
+    }
     thr
 }
 
@@ -433,9 +442,6 @@ struct XRun {
 enum XFullExit {
     /// No letters left (`pos` is the end).
     End,
-    /// The window holds at most one distinct triplet before the next letter: `shift_window` takes
-    /// its rare branch (`shift_high`), so the loop's own step runs that letter.
-    Generic,
     /// The letter's `shift_window` returned false (the window became uniform): the run of
     /// `x_run_uniform` comes next, as in the loop.
     Uniform,
@@ -485,9 +491,9 @@ impl DustMasker {
             if pos >= end {
                 break XFullExit::End;
             }
-            if num_diff <= 1 {
-                break XFullExit::Generic;
-            }
+            // A letter that leaves the window with at most one distinct triplet ends the run
+            // (`Uniform`), and the run starts with two or more.
+            debug_assert!(num_diff > 1);
             if !perfect_list.is_empty() {
                 self.save_masked_regions(result, pos - delta, current_start, perfect_list);
             }
@@ -500,11 +506,17 @@ impl DustMasker {
             a.c_w[old] -= 1;
             r_w -= a.c_w[old] as u32;
             num_diff -= (a.c_w[old] == 0) as u32;
-            let at_start = (sl == max) as u8;
-            let suffix_count = a.c_v[old] - at_start;
-            a.c_v[old] = suffix_count;
-            r_v -= suffix_count as u32 * at_start as u32;
-            sl += 1 - at_start as usize;
+            // `L` is `start` (the suffix is the whole window): NCBI moves `L` up with `start` and
+            // takes the triplet out of the suffix's counts, and the suffix keeps its length.
+            // Otherwise the suffix gains the pushed triplet. Which case holds changes on about 3 %
+            // of the letters (line FR s1, H1 §1.1: 2.44 M of 91.2 M steps in cDNA), so this is a
+            // branch, not the selects of `XHot::shift_window`.
+            if sl == max {
+                a.c_v[old] -= 1;
+                r_v -= a.c_v[old] as u32;
+            } else {
+                sl += 1;
+            }
 
             head = (head + X_RING - 1) & (X_RING - 1);
             a.ring[head] = triplet;
@@ -525,15 +537,16 @@ impl DustMasker {
                 }
             }
 
-            let start = pos - delta;
             if num_diff <= 1 {
+                let start = pos - delta;
                 perfect_list.clear();
                 perfect_list.push_front(PerfectInterval::new(start, start + max + 1, 0, 0));
                 break XFullExit::Uniform;
             }
 
-            // `XHot::needs_processing` (`x_padded_thresholds`).
-            if 10 * r_w > thr[sl & (X_RING - 1)] {
+            // `XHot::needs_processing` (`x_tenth_thresholds`).
+            if r_w > thr[sl & (X_RING - 1)] {
+                let start = pos - delta;
                 let h = XHot {
                     head,
                     len: max,
@@ -543,7 +556,7 @@ impl DustMasker {
                     r_v,
                     num_diff,
                 };
-                find_perfect(h, a, k.thresholds, merged, perfect_list);
+                find_perfect(h, a, &thr[..max], merged, perfect_list);
             }
         };
         let start = pos - delta;
@@ -615,7 +628,7 @@ impl DustMasker {
             low_k: self.low_k,
             thresholds: &self.thresholds,
         };
-        let thr = x_padded_thresholds(k);
+        let thr = x_tenth_thresholds(k);
         let mut merged: Vec<PerfectInterval> = Vec::new();
 
         while stop > current_start + 2 {
@@ -656,7 +669,6 @@ impl DustMasker {
                     (pos, current_triplet, h) = (run.pos, run.current_triplet, run.h);
                     match exit {
                         XFullExit::End => break,
-                        XFullExit::Generic => {}
                         XFullExit::Uniform => {
                             let mut run = XRun {
                                 pos,
@@ -694,7 +706,7 @@ impl DustMasker {
 
                 if h.shift_window(&mut a, k, new_triplet, &mut perfect_list) {
                     if h.needs_processing(k) {
-                        find_perfect(h, &a, k.thresholds, &mut merged, &mut perfect_list);
+                        find_perfect(h, &a, &thr[..k.max_size], &mut merged, &mut perfect_list);
                     }
                 } else {
                     let mut run = XRun {

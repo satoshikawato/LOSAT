@@ -6,7 +6,7 @@
 //! The search is tblastn's (the translation of the subjects, the units, chunks and threads, the
 //! containment trees, the fence retry, the `-db` stream, the hit lists and the reports): only the
 //! source of the scores (`score::PssmScore`), the Karlin-Altschul blocks and the lookup table are
-//! the PSSM's, as NCBI's `eBlastTypePsiTblastn` (`PSSM_QUERY_MASK | eBlastTypeTblastn`) takes
+//! the PSSM's, as NCBI's `eBlastTypePsiTblastn` (`PSSM_QUERY_MASK` OR-ed with `eBlastTypeTblastn`) takes
 //! tblastn's code everywhere except where `Blast_QueryIsPssm` selects the PSSM.
 //!
 //! NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:82-83

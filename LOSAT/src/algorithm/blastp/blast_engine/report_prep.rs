@@ -161,6 +161,37 @@ pub(super) fn query_warning_lines(
     (lines, later.then_some(later_lines))
 }
 
+/// What query `query`'s pairwise report (outfmt 0 to 4) of its hit list `shown` reads, by rank
+/// (`QueryGroup::read_order` of the rows' hits as the writer reads them, `reading`; psiblast's
+/// later round's two-part table, `found_before`).
+fn pairwise_read_order(
+    titles: &database::ListedTitles<'_>,
+    shown: &[Option<BlastpHitList>],
+    query: usize,
+    engine_counts: &EngineCounts,
+    reading: crate::report::pairwise::PairwiseReading,
+    found_before: Option<&[bool]>,
+) -> crate::report::db_subject::PairwiseReads {
+    let hits = collect_hits_and_methods_from_hit_lists(shown, query, engine_counts);
+    crate::report::x_pairwise_par::QueryGroup::read_order(
+        hits.into_iter()
+            .map(|(hit, _, seqalign_num_ident, _)| (hit.s_idx, (hit, seqalign_num_ident))),
+        |(hit, seqalign_num_ident)| {
+            crate::report::hit_sort::HspScores::of_hit(hit, *seqalign_num_ident)
+        },
+        |previous, s_idx| {
+            crate::report::db_subject::rank_joins_as_copy(
+                &titles.parsed,
+                previous as usize,
+                s_idx as usize,
+            )
+        },
+        reading,
+        false,
+        found_before,
+    )
+}
+
 /// What the prefetch of the reported subjects gives the reports (`prefetch_reported_subjects`).
 pub(super) struct ReportedPrefetch {
     /// The texts of the subjects that a query's report reads one by one where its batch's
@@ -213,6 +244,7 @@ pub(super) fn prefetch_reported_subjects(
         pssm_made,
         pssm_reads,
         query_records,
+        psi_found_before,
         ..
     } = *prep;
     // Whether the reports write the same where every load of a subject with a positive taxid throws
@@ -225,6 +257,23 @@ pub(super) fn prefetch_reported_subjects(
             crate::blastinput::app::Program::Blastp,
             args.app.request_kind(),
         );
+    // How the call's pairwise reports (outfmt 0 to 4) read each query's subjects, as their
+    // writers read them (`PairwiseView::reading`; the formats of a run whose loads they make share
+    // one view's order, `FormatThrow::and`), and psiblast's later round's previous set (its
+    // two-part table, `psiblast_round`).
+    let pairwise_reading = format_plans.iter().find_map(|outfmt| match outfmt {
+        BlastpReport::Pairwise(view) => Some(view.reading(
+            args.sort,
+            crate::report::db_subject::Shown {
+                descriptions: args.num_descriptions,
+                alignments: args.num_alignments,
+            },
+        )),
+        _ => None,
+    });
+    let found_before = psi_found_before
+        .as_ref()
+        .map(|found| found.found.as_slice());
     // A database title that LOSAT does not report as NCBI does is an error before any
     // format is written.
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
@@ -275,9 +324,34 @@ pub(super) fn prefetch_reported_subjects(
                     outputs.formats.iter().map(|format| format.outfmt),
                     crate::blastinput::app::Program::Blastp,
                     args.app.request_kind(),
+                )
+                // The call's refusal, over the formats of its other searches too.
+                .of_search(
+                    outputs.other_outfmts,
+                    crate::blastinput::app::Program::Blastp,
+                    args.app.request_kind(),
                 ),
+                |query| {
+                    pairwise_reading.map_or_else(Default::default, |reading| {
+                        pairwise_read_order(
+                            titles,
+                            std::slice::from_ref(&reported_lists[query]),
+                            query,
+                            engine_counts,
+                            reading,
+                            found_before,
+                        )
+                    })
+                },
             )
         });
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (cited at
+    // `db_subject::RunLoads`)
+    // A report whose load ends the run ends NCBI's application there: no batch after it is
+    // prefetched or read one by one, so a stop of a later batch's prefetch is never reached
+    // (`HitLoads::reaches`; review 3 of line DBID pfoff-3, N1). The writer ends the run at that
+    // report with its error.
+    let prefetch_stop = prefetch_stop.filter(|span| hit_loads.reaches(span.start));
     if let Some(titles) = listed_titles.as_ref() {
         titles.check_reported_titles(reported_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
@@ -511,6 +585,10 @@ pub(super) fn prefetch_reported_subjects(
                 Ok(())
             };
             for batch in query_batches {
+                // No batch after the run's end is prefetched, nor read one by one.
+                if !hit_loads.reaches(batch.searched.start) {
+                    break;
+                }
                 let lists = &hit_lists[batch.searched.clone()];
                 let seq_aligns = batch_seq_aligns(batch.searched.clone());
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
@@ -518,14 +596,18 @@ pub(super) fn prefetch_reported_subjects(
                         continue;
                     }
                     for query in batch.searched.clone() {
+                        if !hit_loads.reaches(query) {
+                            break;
+                        }
                         if rows != crate::report::tabular::SubjectFetch::Never {
                             let shown = std::slice::from_ref(&hit_lists[query]);
                             // Rows that read a subject only for its identities (`nident` alone)
                             // read none of a query whose HSPs have none, which looks no taxid up.
                             // A subject whose load throws loads nothing, nor does one that no
                             // report reaches after it (`HitLoads::loaded`).
+                            let loaded = |rank: &usize| hit_loads.loaded(*rank);
                             let mut fetched = database::ListedTitles::fetched_ranks(shown, rows)
-                                .filter(|&rank| hit_loads.loaded(rank))
+                                .filter(loaded)
                                 .peekable();
                             if rows == crate::report::tabular::SubjectFetch::Every
                                 || fetched.peek().is_some()
@@ -533,43 +615,26 @@ pub(super) fn prefetch_reported_subjects(
                                 // The first format writes the texts where it reads each
                                 // subject (`places_subject_reads`), else before the report.
                                 if places_reads {
-                                    // The pairwise report reads its subjects in the order of
-                                    // its sorted groups (`QueryGroup::read_order` of the rows'
-                                    // hits, `-sorthits`), the other formats in their rows' order.
-                                    let ranks: Vec<usize> = if pairwise_first {
-                                        let hits = collect_hits_and_methods_from_hit_lists(
-                                            shown,
-                                            query,
-                                            engine_counts,
-                                        );
-                                        crate::report::x_pairwise_par::QueryGroup::read_order(
-                                            hits.into_iter().map(
-                                                |(hit, _, seqalign_num_ident, _)| {
-                                                    (hit.s_idx, (hit, seqalign_num_ident))
-                                                },
-                                            ),
-                                            |(hit, seqalign_num_ident)| {
-                                                crate::report::hit_sort::HspScores::of_hit(
-                                                    hit,
-                                                    *seqalign_num_ident,
-                                                )
-                                            },
-                                            |previous, s_idx| {
-                                                crate::report::db_subject::rank_joins_as_copy(
-                                                    &titles.parsed,
-                                                    previous as usize,
-                                                    s_idx as usize,
-                                                )
-                                            },
-                                            args.sort,
-                                            false,
-                                        )
-                                        .into_iter()
-                                        .map(|rank| rank as usize)
-                                        .collect()
-                                    } else {
-                                        fetched.collect()
-                                    };
+                                    // The pairwise report reads the subjects that it shows as
+                                    // its writer reads them (`QueryGroup::read_order`,
+                                    // `PairwiseReads::subjects`), the other formats in their
+                                    // rows' order.
+                                    let ranks: Vec<usize> =
+                                        match pairwise_reading.filter(|_| pairwise_first) {
+                                            Some(reading) => pairwise_read_order(
+                                                titles,
+                                                shown,
+                                                query,
+                                                engine_counts,
+                                                reading,
+                                                found_before,
+                                            )
+                                            .subjects()
+                                            .into_iter()
+                                            .filter(loaded)
+                                            .collect(),
+                                            None => fetched.collect(),
+                                        };
                                     subject_reads.set(
                                         query,
                                         titles.subject_read_texts(database, ranks, plural_names)?,
@@ -584,7 +649,8 @@ pub(super) fn prefetch_reported_subjects(
                         // The query's PSSM reads after its report (psiblast_app.cpp:283-308):
                         // the blobs it loads first look their taxids up then, and NCBI writes
                         // their texts among the PSSM's warnings (`ListedTitles::pssm_load_texts`).
-                        if pssm_made {
+                        // A report that ends the run makes no PSSM (`HitLoads::reaches`).
+                        if pssm_made && hit_loads.reaches(query + 1) {
                             let texts = titles.pssm_load_texts(
                                 database,
                                 pssm_reads,
@@ -711,6 +777,7 @@ pub(super) fn refuse_unreportable(
         hit_lists,
         pairwise_hits,
         psi_found_before,
+        engine_counts,
         ..
     } = *prep;
     // Outfmt 1 to 4 of a `-subject` search: a query whose own record is one of the subjects
@@ -818,7 +885,9 @@ pub(super) fn refuse_unreportable(
             }
             for s_idx in crate::report::pairwise::blastp_described_subjects(
                 view.report_sort(args.sort),
-                psi_found_before.is_some(),
+                psi_found_before
+                    .as_ref()
+                    .map(|found| found.found.as_slice()),
                 args.num_descriptions,
                 q_idx,
                 &rows,
@@ -857,17 +926,42 @@ pub(super) fn refuse_unreportable(
     // search never takes a database with them (`database::x_titles_allow_blocks`). Were a block
     // search to reach it, it would refuse in the call of the query's block as the abort above,
     // after the reports of the blocks before (NCBI's bytes for their queries).
-    // rpsblast's BLAST XML (outfmt 5): the same collision of an entry's generated id with a query
-    // of its batch, where NCBI's XML takes the query's title for the entry (the archive,
-    // outfmt 11, is NCBI's bytes with it): refused here before any byte, for the reported
-    // entries only (`ListedTitles::refuse_generated_ids`; PS15a-1, followup
-    // `rps_lcl_query_title.md`). Outfmt 0, 6 and 7 are line RG item X7's.
+    // rpsblast's BLAST XML, XML2 and JSON (outfmt 5, 13 to 16): the same collision of an entry's
+    // generated id with a query of its batch, where NCBI's documents take the query's title for
+    // the entry (the archive, outfmt 11, and the Seq-annots, 8, 9 and 12, are NCBI's bytes with
+    // it): refused here before any byte, for the reported entries only
+    // (`ListedTitles::refuse_generated_ids`; PS15a-1 and PS15a-2, followup
+    // `rps_lcl_query_title.md`). Outfmt 0, 6, 7 and 10 are line RG item X7's.
     let rps_xml = args.rps_search.is_some()
         && format_plans
             .iter()
-            .any(|outfmt| matches!(outfmt, BlastpReport::Xml));
+            .any(|outfmt| matches!(outfmt, BlastpReport::Xml | BlastpReport::Xml2(_)));
+    // rpsblast's organism report (outfmt 18) and comma-separated values with a header line
+    // (outfmt 20) where NCBI's rows show what its formatter finds by such an id, the query
+    // (`TabularSpec::refuses_generated_id`, PS15a-2): refused as the documents above; a table of
+    // other fields, and the organism report of a profile without a taxid, are NCBI's bytes.
+    // The reports that can refuse (an HSP with identities, a profile with a taxid).
+    let rps_tables: Vec<&crate::report::tabular::TabularSpec> = if args.rps_search.is_some() {
+        format_plans
+            .iter()
+            .filter_map(|outfmt| match outfmt {
+                BlastpReport::CustomTabular(spec)
+                    if spec.refuses_generated_id(
+                        crate::blastinput::app::Program::Blastp,
+                        1,
+                        true,
+                    ) =>
+                {
+                    Some(*spec)
+                }
+                _ => None,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     if let (true, false, Some(titles)) = (
-        anchored_view.is_some() || rps_xml,
+        anchored_view.is_some() || rps_xml || !rps_tables.is_empty(),
         args.parse_deflines,
         listed_titles.as_ref(),
     ) {
@@ -894,7 +988,39 @@ pub(super) fn refuse_unreportable(
             titles.refuse_generated_ids(
                 hit_lists,
                 &scope_of,
+                |_, _, _| true,
                 crate::algorithm::common::database::XML_EFFECT,
+            )?;
+        }
+        if !rps_tables.is_empty() {
+            titles.refuse_generated_ids(
+                hit_lists,
+                &scope_of,
+                |query, list_index, subject| {
+                    let taxid = subject.first_source_taxid().is_some();
+                    let Some(Some(hit_list)) = hit_lists.get(query) else {
+                        return false;
+                    };
+                    hit_list.hsplist_array[list_index]
+                        .hsps
+                        .iter()
+                        .enumerate()
+                        .any(|(index_in_list, hsp)| {
+                            // The Seq-align's `num_ident` (`EngineCounts`).
+                            let num_ident = engine_counts.num_ident(
+                                (query as u32, list_index as u32, index_in_list as u32),
+                                hsp.num_ident,
+                            );
+                            rps_tables.iter().any(|spec| {
+                                spec.refuses_generated_id(
+                                    crate::blastinput::app::Program::Blastp,
+                                    num_ident,
+                                    taxid,
+                                )
+                            })
+                        })
+                },
+                crate::algorithm::common::database::TABLE_EFFECT,
             )?;
         }
         if anchored_view.is_some() {

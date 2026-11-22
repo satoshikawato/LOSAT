@@ -10,16 +10,23 @@
 //! hit list per query as NCBI's one thread does, at every thread count (NCBI's merge of the
 //! threads' capped results can keep more lists for `-culling_limit` and `-qcov_hsp_perc` with
 //! several threads; LOSAT's output is that of NCBI's `-num_threads 1`).
+//!
+//! The steps after any traceback on each query's final hit list (`finish_hit_lists`) are here too.
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
+use super::super::args::ResolvedBlastpArgs;
 use super::super::gapalign::{
     adjust_subject_range, blast_gapped_alignment_with_traceback_with_scratch, BlastpPreliminaryHsp,
     GapAlignScratch,
 };
-use super::super::hsp::{reap_hsplist_by_evalue, BlastpHitList, BlastpHsp, BlastpHspList};
+use super::super::hsp::{
+    reap_hsplist_by_evalue, trim_by_max_hsps, update_best_evalue, BlastpHitList, BlastpHsp,
+    BlastpHspList,
+};
 use super::super::x_prelim_compact::XPrelimHsp;
 use super::super::x_redo_subjects::XRedoSubjects;
+use super::{besthit, culling};
 // The preliminary stage's helpers that this module calls are inlined everywhere or have other
 // callers; it does not call `preliminary_hit_from_local_match_hsp`,
 // `purge_preliminary_hits_with_common_endpoints` or `kappa::recompute_num_identities`, whose one
@@ -33,6 +40,7 @@ use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod};
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
+use crate::core::blast_hits::reap_by_query_coverage;
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::standard_score;
 
@@ -40,7 +48,7 @@ use crate::utils::matrix::standard_score;
 /// hit-saving options.
 pub(super) struct OrdinaryTraceback<'a> {
     pub(super) contexts: &'a [QueryContext],
-    /// `query_blk->length + 1`, the query bound of NCBI's containment tree.
+    /// One more than `query_blk->length`, the query bound of NCBI's containment tree.
     pub(super) total_query_span: i32,
     pub(super) subjects: XRedoSubjects<'a>,
     pub(super) matrix: ScoringMatrix,
@@ -197,7 +205,7 @@ impl OrdinaryTraceback<'_> {
             });
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:634-692
-        // For BLASTP the purge deletes (`purge |= (program != eBlastTypeBlastn)`,
+        // For BLASTP the purge deletes (`purge` is set when `program` is not `eBlastTypeBlastn`,
         // blast_hits.c:2464) and returns the HSP count, so the re-evaluation loop from
         // `extra_start` (blast_traceback.c:647-665) has nothing to do.
         purge_hsps_with_common_endpoints(&mut traced);
@@ -671,6 +679,89 @@ fn get_offsets_for_gapped_alignment(
         hsp.query_end - HSP_MAX_WINDOW / 2,
         hsp.subject_end - HSP_MAX_WINDOW / 2,
     ))
+}
+
+/// The steps after the traceback on each query's final hit list (`run_call`, after the redo or
+/// the ordinary traceback), in the order that the comments below cite: `-culling_limit`'s or
+/// `-best_hit_*`'s pipe, `-max_hsps`, `-qcov_hsp_perc` and `-subject_besthit`, then the e-value
+/// sort (not when `sorts_results` is false) and the cut to the traceback's hit list size (neither
+/// for rpsblast over several volumes, `rps_multi_volume`).
+pub(super) fn finish_hit_lists(
+    args: &ResolvedBlastpArgs,
+    hit_lists: &mut [Option<BlastpHitList>],
+    prelim_hitlist_size: usize,
+    rps_multi_volume: bool,
+    sorts_results: bool,
+) {
+    for hit_list_opt in hit_lists.iter_mut() {
+        if let Some(hit_list) = hit_list_opt.as_mut() {
+            // `-culling_limit`: the culling pipe is the first step after the traceback
+            // (`BlastHSPStreamTBackClose`, blast_traceback.c:1721), before `-max_hsps` and
+            // `-qcov_hsp_perc` (blast_traceback.c:1763-1766), before the e-value sort and the
+            // prune, and before the `-query_loc` shift of the coordinates (`run_call`). The best
+            // hit pipe of `-best_hit_*` is in the same place (the options exclude each other).
+            if args.culling_limit > 0 {
+                culling::cull_traceback(hit_list, args.culling_limit);
+            } else if let Some(params) = args.best_hit {
+                besthit::best_hit_traceback(hit_list, params, prelim_hitlist_size);
+            }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:845-865
+            // The e-value sort below reads the best e-value and the first HSP of each list,
+            // which `-max_hsps` keeps, so it follows the cut as NCBI's does.
+            if args.max_hsps_per_subject > 0
+                || args.query_cov_hsp_perc > 0.0
+                || args.subject_besthit
+            {
+                for hsp_list in hit_list
+                    .hsplist_array
+                    .iter_mut()
+                    .take(hit_list.hsplist_count)
+                {
+                    trim_by_max_hsps(hsp_list, args.max_hsps_per_subject);
+                    if reap_by_query_coverage(&mut hsp_list.hsps, args.query_cov_hsp_perc, |hsp| {
+                        (
+                            hsp.q_start as i64 - 1,
+                            hsp.q_end as i64,
+                            hsp.query_length as i64,
+                        )
+                    }) {
+                        update_best_evalue(hsp_list);
+                    }
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:858-861
+                    // `-subject_besthit` (one context per query; the best e-value stays).
+                    if args.subject_besthit {
+                        crate::core::blast_hits::subject_besthit(
+                            &mut hsp_list.hsps,
+                            false,
+                            |hsp| crate::core::blast_hits::BestHitExtent {
+                                context: 0,
+                                query_frame: 0,
+                                offset: hsp.q_start as i64 - 1,
+                                end: hsp.q_end as i64,
+                                query_length: 0,
+                            },
+                        );
+                    }
+                }
+                if args.query_cov_hsp_perc > 0.0 {
+                    hit_list.purge_empty_hsp_lists();
+                }
+            }
+            // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order
+            // and the formatter cuts them, `psiblast_hits_found` in `run_call`.)
+            if !rps_multi_volume {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772
+                // (cited at `DbStatistics::sorts_results`): not for a database length of 0 or of
+                // 2^63 or more, whose lists keep the traceback's order (by OID with
+                // `-comp_based_stats 0`, the composition heap's otherwise; rpsblast's engine
+                // sorted by the same gate, `RpsUnit::sorts_results`).
+                if sorts_results {
+                    hit_list.sort_by_evalue();
+                }
+                hit_list.prune_by_size(args.traceback_hitlist_size());
+            }
+        }
+    }
 }
 
 #[cfg(test)]

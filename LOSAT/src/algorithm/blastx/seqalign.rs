@@ -70,6 +70,7 @@ pub(super) fn write_blastx_seqalign(
     let run = RunRecord {
         pssm_type: None,
         program: Program::Blastx,
+        rps: options.rpstblastn.is_some(),
         db_title: match names {
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),

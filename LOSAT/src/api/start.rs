@@ -4,11 +4,9 @@
 //! loads its configuration (`<program>.ini` or the file of `-conffile`, then `.ncbirc`) and,
 //! after the arguments, ends a `-dryrun` (`ncbi_environment::ApplicationStart`, cited there).
 //! The command line's entry runs one start per process (`cli::main_entry`); the library runs one
-//! per call that needs it: at the call's beginning when its argv has `-logfile`, `-conffile` or
-//! `-dryrun` (`Search::starts`), else when the call first reads NCBI's settings, where NCBI's
-//! library looks them up itself (a database search, blastn's `-window_masker_taxid`, the organism
-//! report of outfmt 18, the file of a `-matrix` that NCBI's tables do not have). A search of
-//! records without those reads no NCBI setting (the contract of `api`).
+//! per search call, at its beginning (`CallStart::new`), so that a call refuses what the command
+//! line refuses there (a usage report setting that NCBI aborts on, a registry entry that LOSAT
+//! does not read), whatever its inputs and options.
 
 use std::ffi::OsStr;
 use std::io::Write;
@@ -19,6 +17,7 @@ use super::search::Search;
 use crate::blastinput::ncbi_environment::{
     log_file, run_messages_follow_log, ApplicationSettings, ApplicationStart, DiagTarget, TextPlace,
 };
+use crate::cli::Commands;
 use crate::report::run_files::RunFiles;
 
 /// A start whose `-logfile` file is open (`open`), before its configuration load (`load`).
@@ -116,19 +115,26 @@ pub(super) fn begin<S: AsRef<OsStr> + Clone>(
     open(program, words, diagnostics)?.load(diagnostics)
 }
 
-/// The application start of one search call of the library: made at the call's beginning when its
-/// argv has a word that the start reads (`Search::starts`), else the first time the call reads
-/// NCBI's settings (`CallStart::settings`). The searches of a call share it (two of `run`'s
-/// groups, the batches of `run_batches`).
+/// The application start of one search call of the library, made at the call's beginning. The
+/// searches of a call share it (two of `run`'s groups, the batches of `run_batches`).
 pub(crate) struct CallStart {
-    program: &'static str,
-    /// The start's settings, once it has run.
-    settings: Option<Result<ApplicationSettings, String>>,
+    /// The start's settings (`ApplicationStart::settings`), which LOSAT does not refuse.
+    settings: ApplicationSettings,
     /// The `-logfile` target of a program whose run's messages go there
-    /// (`run_messages_follow_log`: tblastx).
+    /// (`run_messages_follow_log`: tblastx), where it is not `cerr`: the file of `-logfile`, or
+    /// nowhere. With `cerr` the call's diagnostics take the run's messages, as every other
+    /// program's.
     log: Option<DiagTarget>,
     /// Whether the argv has `-dryrun`.
     dry_run: bool,
+    /// The call's argv as the command line's parser read it with the call's kind of inputs
+    /// (`Search::command`), once per call as the command line parses once per run: the call's
+    /// steps take it from here (`CallStart::command`) instead of parsing the argv again.
+    /// `AssertUnwindSafe` keeps `Batches`, which holds the start, unwind safe as it was before
+    /// the start kept the parse: the only fields of `Commands` that are not are LOSAT Web's
+    /// hooks (`BlastnArgs::window_masker_counts`, `BlastxArgs::rpstblastn`), which the parser
+    /// skips, so a parse holds `None` there, and the start only reads its parse or clones it.
+    command: std::panic::AssertUnwindSafe<Commands>,
     /// The diagnostic stream of NCBI's main thread of the call's run (`ncbi_exception::MainDiag`),
     /// which the call's code reads where it runs (`CallStart::enter`).
     diag: std::sync::Arc<crate::ncbi_exception::MainDiag>,
@@ -145,12 +151,11 @@ impl CallStart {
     // `cli::main_entry`: the BLAST programs keep the default `DryRun`, which returns 0 after the
     // arguments have passed their definitions)
     /// The start of a call of `search` with `inputs`, in the command line's order
-    /// (`cli::main_entry`): the start, run now with its messages on `diagnostics` when the argv
-    /// has `-logfile`, `-conffile` or `-dryrun`; the parse of the argv with the kind of the call's
-    /// subject (`Search::command`: `-subject_loc` with a database fails here, dry run or not; it
-    /// reads no record); then the settings that LOSAT refuses (`ApplicationStart::settings`), the
-    /// call's error when the start has run, as the command line refuses them after its parse
-    /// (`start.settings()?`).
+    /// (`cli::main_entry`): the start, with its messages on `diagnostics`; the parse of the argv
+    /// with the kind of the call's subject (`Search::command`: `-subject_loc` with a database fails
+    /// here, dry run or not; it reads no record); then the settings that LOSAT refuses
+    /// (`ApplicationStart::settings`), the call's error, as the command line refuses them after its
+    /// parse (`start.settings()?`).
     pub(super) fn new(
         search: &Search,
         inputs: Inputs<'_>,
@@ -158,30 +163,38 @@ impl CallStart {
     ) -> Result<CallStart, Error> {
         // The call is a run of its own: NCBI's application of it starts with a diagnostic stream
         // that no other run in the process fails or reads.
+        let diag: std::sync::Arc<crate::ncbi_exception::MainDiag> = Default::default();
+        let _run = crate::ncbi_exception::MainDiag::enter(Some(diag.clone()));
         let program = search.program().name();
-        let mut call = CallStart {
-            program,
-            settings: None,
-            log: None,
+        let started = begin(program, search.argv(), diagnostics)?;
+        let command = search.command(inputs)?;
+        let settings = started
+            .settings
+            .map_err(|reason| Error::Search(reason.into()))?;
+        Ok(CallStart {
+            settings,
+            log: run_messages_follow_log(program)
+                .then_some(started.target)
+                .filter(|target| !matches!(target, DiagTarget::Stderr)),
             dry_run: search.dry_run(),
-            diag: Default::default(),
-        };
-        let _run = call.enter();
-        let started = match search.starts() {
-            true => Some(begin(program, search.argv(), diagnostics)?),
-            false => None,
-        };
-        search.command(inputs)?;
-        if let Some(started) = started {
-            if let Err(reason) = &started.settings {
-                return Err(Error::Search(reason.clone().into()));
-            }
-            call.settings = Some(started.settings);
-            if run_messages_follow_log(program) {
-                call.log = Some(started.target);
-            }
-        }
-        Ok(call)
+            command: std::panic::AssertUnwindSafe(command),
+            diag,
+        })
+    }
+
+    // No NCBI counterpart: NCBI's application parses its arguments once per run (cited at
+    // `cli::main_entry`); a library call's steps share the one parse of its start instead of
+    // parsing the argv again (the parse is deterministic: the same argv and inputs give the
+    // same arguments).
+    /// The call's parsed argv (`Search::command` with the call's inputs, read at the call's
+    /// start), for a step that reads it.
+    pub(super) fn command_ref(&self) -> &Commands {
+        &self.command.0
+    }
+
+    /// The call's parsed argv, for a step that takes its own (each group of `run`, each batch).
+    pub(super) fn command(&self) -> Commands {
+        self.command.0.clone()
     }
 
     /// Whether the call is a dry run, which ends here: the start, the parse with the call's kind
@@ -192,28 +205,14 @@ impl CallStart {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:345-347
-    /// The application settings of the call, after running the start now (its messages on
-    /// `diagnostics`) when it has not run. The records of a library call are read before its
-    /// start, with NCBI's data loaders (`read_fasta`, `read_inputs`); settings that turn them off
-    /// (`[BLAST] DATA_LOADERS`) read the same records: the loaders only make NCBI's reader take a
-    /// record's first line as a Seq-id, which LOSAT's reader refuses
-    /// (`fasta_reader::FastaReader::read_one_seq`), so a record that it read is read the same without
-    /// them.
-    pub(crate) fn settings(
-        &mut self,
-        diagnostics: &mut dyn Write,
-    ) -> anyhow::Result<ApplicationSettings> {
-        if self.settings.is_none() {
-            // The start's messages are made from text (`ApplicationStart`'s `String`s), so the
-            // engine's error, which is text, holds them whole.
-            let started = begin(self.program, &[] as &[&str], diagnostics)
-                .map_err(|error| anyhow::Error::msg(error.to_string_lossy().into_owned()))?;
-            self.settings = Some(started.settings);
-        }
-        self.settings
-            .clone()
-            .expect("the start has run")
-            .map_err(anyhow::Error::msg)
+    /// The application settings of the call's start. The records of a library call are read before
+    /// its start, with NCBI's data loaders (`read_fasta`, `read_inputs`); settings that turn them
+    /// off (`[BLAST] DATA_LOADERS`) read the same records: the loaders only make NCBI's reader take
+    /// a record's first line as a Seq-id, which LOSAT's reader refuses
+    /// (`fasta_reader::FastaReader::read_one_seq`), so a record that it read is read the same
+    /// without them.
+    pub(crate) fn settings(&self) -> ApplicationSettings {
+        self.settings.clone()
     }
 
     /// The `-logfile` target of the call's run messages (tblastx's), which the caller holds for

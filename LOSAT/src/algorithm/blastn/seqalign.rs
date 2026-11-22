@@ -48,6 +48,7 @@ pub(crate) fn write_blastn_seqalign(
     let run = RunRecord {
         pssm_type: None,
         program: Program::Blastn,
+        rps: false,
         db_title: subjects.db_title(),
         gapped,
     };

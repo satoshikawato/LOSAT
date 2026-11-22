@@ -57,8 +57,8 @@ pub(crate) enum ParseError {
 
 const NEGATIVE_FILTER: u32 = 0x1;
 const LAZY_MATCH: u32 = 0x2;
-/// `(size_t)-1`: the biggest possible count. The counts are NCBI's `size_t` of x86-64, `u64`
-/// on every target.
+/// A `size_t` cast from -1: the biggest possible count. The counts are NCBI's `size_t` of x86-64,
+/// `u64` on every target.
 const INFINITE: u64 = u64::MAX;
 
 /// `CProSite::TPatternPos`.
@@ -159,7 +159,7 @@ impl Matcher<'_> {
     }
 }
 
-/// The bytes of `sizeof(size_t)`, one match record.
+/// The bytes of one match record, the size of `size_t`.
 const RECORD_BYTES: u64 = 8;
 
 /// What NCBI holds at once while its `Match` runs: the capacity of `curr.flex` (the one vector
@@ -241,7 +241,7 @@ impl Record {
         self.start + (self.len - 1 - self.still) as usize
     }
 
-    /// `rMatchRec.push_back(start_pos)` of the first visit.
+    /// `push_back` of `start_pos` on `rMatchRec`, at the first visit.
     fn begin(&mut self, start: usize) {
         *self = Record {
             len: 1,
@@ -540,7 +540,7 @@ enum Status {
     Range,
 }
 
-/// `(size_t)atol(text)` of digits: glibc's `strtol` saturates at `LONG_MAX`.
+/// `atol` of the digits, cast to `size_t`: glibc's `strtol` saturates at `LONG_MAX`.
 fn atol(digits: &[u8]) -> u64 {
     let mut value: i64 = 0;
     for &digit in digits {
@@ -575,7 +575,7 @@ impl ProSite {
                 return Err(($error, at))
             };
         }
-        // `emplace(end, __dummy)` and `iterCurr = ...`.
+        // `emplace` of `__dummy` at the end, and the assignment to `iterCurr` that follows.
         macro_rules! new_pos {
             () => {{
                 pattern.push(PatternPos::new());
@@ -958,7 +958,7 @@ impl ProSite {
     // 610-620 (a step returns 0, 1 or `npos`; `text[pos]` is read only below `tlen`)
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/prosite.cpp:678-683 (an
     // aggressive position steps up to `m_ulMaxCount` times; a lazy one adds a step per revisit
-    // while `matched <= m_ulMaxCount`, :659)
+    // while `matched` is at most `m_ulMaxCount`, :659)
     fn max_read(&self, tlen: usize, start_pos: usize) -> u64 {
         let advance = self
             .pattern

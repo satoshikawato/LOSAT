@@ -17,10 +17,10 @@
 //! this port works on bytes.
 //!
 //! The guess is the one port of `CFormatGuess` (`utils::format_guess`), which the `-in_pssm` reader and makeblastdb's
-//! mask files share. `TestFormatFasta`'s `NStr::Find(m_pTestBuffer, "|")` reads past the sample when it holds 10 bytes
-//! or fewer without a NUL or `|`: this port searches the sample only there (the answer is false). A file that cannot
-//! be opened is the caller's error, where LOSAT stops and makeblastdb goes on with an empty stream and exits with
-//! status 0.
+//! mask files share. `TestFormatFasta`'s `NStr::Find` of `"|"` in `m_pTestBuffer` reads past the
+//! sample when it holds 10 bytes or fewer without a NUL or `|`: this port searches the sample only
+//! there (the answer is false). A file that cannot be opened is the caller's error, where LOSAT
+//! stops and makeblastdb goes on with an empty stream and exits with status 0.
 
 use std::io::Read;
 

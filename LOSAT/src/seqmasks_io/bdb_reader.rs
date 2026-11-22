@@ -6,7 +6,7 @@
 //! # API
 //!
 //! - [`MaskBdbReader::open`]`(name, molecule, registry, title_printed, program)`:
-//!   `CMaskBDBReader(name, is_nucl)` (`new CSeqDB(name, eNucleotide or eProtein)`).
+//!   `CMaskBDBReader` of `name` and `is_nucl` (a new `CSeqDB` of `name`, nucleotide or protein).
 //! - [`MaskBdbReader::next_record`]`()`: `GetNextSequence`, `Ok(None)` after the last OID.
 //! - [`BdbRecord`]: the Seq-ids of the first definition line, the title joined from all of them
 //!   (`CSeqDB::GetBioseq`), and the residues: IUPACna letters of a nucleotide
@@ -38,11 +38,11 @@ pub(crate) struct BdbRecord {
     /// (`report::defline::BioseqFacts::has_source`); asked only for a title as `taxname` (else
     /// `false`, which writes the same title).
     pub has_source: bool,
-    /// `sequence::GetTitle` of the Bioseq (`sequence::title::get_title`) of a sequence with letters,
-    /// when the reader was asked for it (`MaskBdbReader::ask_get_title`: windowmasker's `-ids` matched as text,
-    /// makembindex's `-idmap`). An empty title is made from the Bioseq's first source, which it
-    /// has for a definition line with a positive taxid whatever the taxonomy database holds
-    /// (seqdbvol.cpp:1126-1176).
+    /// `sequence::GetTitle` of the Bioseq (`sequence::title::get_title`) of a sequence with
+    /// letters, when the reader was asked for it (`MaskBdbReader::ask_get_title`: windowmasker's
+    /// `-ids` matched as text, makembindex's `-idmap`). An empty title is made from the Bioseq's
+    /// first source, which it has for a definition line with a positive taxid whatever the taxonomy
+    /// database holds (seqdbvol.cpp:1126-1176).
     pub get_title: Option<Vec<u8>>,
     /// IUPACna letters of a nucleotide, NCBIstdaa codes of a protein.
     pub residues: Vec<u8>,
@@ -95,9 +95,10 @@ pub(crate) fn prints_title(outfmt: &str) -> bool {
 }
 
 impl MaskBdbReader {
-    /// `new CSeqDB(name, molecule)` on the search path of the environment and `registry` (the
-    /// `[BLAST] BLASTDB` of the configuration: `ApplicationSettings::blastdb`, `Err` when LOSAT
-    /// does not read the entry as NCBI does). `program` names LOSAT's program in a refusal.
+    /// A new `CSeqDB` of `name` and the molecule, on the search path of the environment and
+    /// `registry` (the `[BLAST] BLASTDB` of the configuration: `ApplicationSettings::blastdb`,
+    /// `Err` when LOSAT does not read the entry as NCBI does). `program` names LOSAT's program in a
+    /// refusal.
     pub(crate) fn open(
         name: &str,
         molecule: SeqType,
@@ -150,7 +151,7 @@ impl MaskBdbReader {
         &self.db
     }
 
-    /// `FindVolumePaths(paths, true)` of the database opened as `name`: the paths of its
+    /// `FindVolumePaths` (with its flag true) of the database opened as `name`: the paths of its
     /// volumes (without extension), each once, in NCBI's order.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-966
     pub(crate) fn volume_paths(&self, name: &str) -> Result<Vec<String>, BdbError> {
@@ -206,6 +207,26 @@ impl MaskBdbReader {
                 "sequence {oid} of the database: a definition line with bytes NCBI reads as '#' \
                  (it writes an error each time it reads them)"
             )));
+        }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1362-1366
+        // `GetBioseq` gives no Bioseq for a sequence whose every definition line the alias files'
+        // `OID_MASK_TYPE` erased (line RG D1b-2), before it reads the letters: the record of a
+        // sequence without letters, which segmasker and windowmasker skip (probe S2_seg_walk of
+        // line RG D1b), dustmasker stops at (probes dust_omnx_int, dust_ntall_fasta of D1b-2) and
+        // makembindex refuses.
+        if set.deflines.is_empty() {
+            let record = BdbRecord {
+                ids: Vec::new(),
+                title: Vec::new(),
+                taxname: None,
+                has_source: false,
+                get_title: None,
+                residues: Vec::new(),
+                texts: Vec::new(),
+            };
+            let ambiguity =
+                (self.molecule == SeqType::Nucleotide && !letters).then(NucleotideAmbiguity::none);
+            return Ok(Some((record, ambiguity)));
         }
         let ids = set
             .deflines

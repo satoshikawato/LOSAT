@@ -222,8 +222,8 @@ impl LabelSet {
         self.table.clear();
     }
 
-    /// `m_IdSet.insert(label).second`: `true` when the label was not in the set and is
-    /// now.
+    /// The `second` of the result of `m_IdSet.insert` of `label`: `true` when the label was not in
+    /// the set and is now.
     pub(crate) fn insert(&mut self, label: &[u8]) -> bool {
         self.table.insert(label, &[]).is_ok()
     }
@@ -256,7 +256,8 @@ impl KeyMap {
         self.table.len
     }
 
-    /// `m_TaxIdMap[key] = value`: a key already there takes the new value.
+    /// The entry of `key` in `m_TaxIdMap` is set to `value`: a key already there takes the new
+    /// value.
     pub(crate) fn set(&mut self, key: &[u8], value: i32) {
         if let Err(pos) = self.table.insert(key, &value.to_le_bytes()) {
             self.table
@@ -265,7 +266,7 @@ impl KeyMap {
         }
     }
 
-    /// `m_TaxIdMap.find(key)`.
+    /// `find` of `key` in `m_TaxIdMap`.
     pub(crate) fn get(&self, key: &[u8]) -> Option<i32> {
         let pos = self.table.find(key).ok()?;
         Some(i32::from_le_bytes(

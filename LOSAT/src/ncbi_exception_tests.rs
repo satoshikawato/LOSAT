@@ -139,8 +139,8 @@ fn a_rethrow_reports_the_chain_oldest_first() {
 }
 
 // blastn 2.17.0 (the official Linux x64 release) with a `blastn.ini` of the line `garbage`
-// (env parity g_reg probe `x_ini`, 2026-11-11): `NCBI_REPORT_EXCEPTION_X(15, "Application's
-// initialization failed", e)` of the application layer (error code 106), and of a chain.
+// (env parity g_reg probe `x_ini`, 2026-11-11): `NCBI_REPORT_EXCEPTION_X` (subcode 15, title
+// "Application's initialization failed") of the application layer (error code 106), and of a chain.
 #[test]
 fn a_report_with_a_title_has_a_line_per_exception_then_the_title() {
     let site = ThrowSite {

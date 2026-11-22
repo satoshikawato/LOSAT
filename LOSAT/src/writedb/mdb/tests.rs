@@ -83,7 +83,8 @@ fn keys_over_511_bytes_fail_as_in_makeblastdb() {
         .is_err());
 }
 
-// `mdb_page_alloc` fails with MDB_MAP_FULL when `pgno + num >= me_maxpg` (mdb.c:2290-2294).
+// `mdb_page_alloc` fails with MDB_MAP_FULL when the page number plus `num` is at least `me_maxpg`
+// (mdb.c:2290-2294).
 #[test]
 fn a_full_map_fails_where_lmdb_fails() {
     let f = TempFile::new("mapfull");
@@ -173,7 +174,8 @@ fn page_copy_keeps_the_middle_of_the_destination() {
     assert!(dst[..24].iter().skip(16).all(|&b| b == 0xAA));
     assert!(dst[24..4000].iter().all(|&b| b == 0x55));
     assert!(dst[4000..].iter().all(|&b| b == 0xAA));
-    // A LEAF2 page (or a gap under 8 bytes) is copied up to `psize - (gap & ~7)`.
+    // A LEAF2 page (or a gap under 8 bytes) is copied up to `psize` less the gap rounded down to a
+    // multiple of 8.
     set_flags(&mut src, P_LEAF | P_LEAF2);
     let mut dst = vec![0x55u8; psize];
     Env::page_copy(&mut dst, &src, psize);

@@ -117,6 +117,7 @@ fn megablast_documents(format: SerialFormat) -> Vec<u8> {
     let run = RunRecord {
         pssm_type: None,
         program: Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: true,
     };
@@ -189,6 +190,7 @@ fn blastp_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     let run = RunRecord {
         pssm_type: None,
         program: Program::Blastp,
+        rps: false,
         db_title,
         gapped: true,
     };
@@ -376,6 +378,7 @@ fn score_list_follows_ncbi_conditions() {
     let run = RunRecord {
         pssm_type: None,
         program: Program::Blastp,
+        rps: false,
         db_title: None,
         gapped: true,
     };
@@ -424,6 +427,7 @@ fn score_zero_hsps_write_nothing() {
     let run = RunRecord {
         pssm_type: None,
         program: Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: true,
     };
@@ -545,6 +549,7 @@ fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> V
     let run = RunRecord {
         pssm_type: None,
         program: Program::Blastp,
+        rps: false,
         db_title,
         gapped: false,
     };
@@ -721,6 +726,7 @@ fn blastn_ungapped_dendiag_documents_equal_ncbi() {
     let run = RunRecord {
         pssm_type: None,
         program: Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: false,
     };
@@ -786,6 +792,7 @@ fn an_ungapped_query_without_hsps_writes_nothing() {
     let run = RunRecord {
         pssm_type: None,
         program: Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: false,
     };
@@ -960,6 +967,7 @@ fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, V
     let run = RunRecord {
         pssm_type: None,
         program: Program::Blastp,
+        rps: false,
         db_title: Some(title),
         gapped: true,
     };
@@ -1078,6 +1086,7 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
         let run = RunRecord {
             pssm_type: None,
             program: Program::Blastx,
+            rps: false,
             db_title,
             gapped: true,
         };
@@ -1113,6 +1122,7 @@ fn ungapped_translated_hsps_are_diags_seq_aligns() {
     let run = RunRecord {
         pssm_type: None,
         program: Program::Tblastx,
+        rps: false,
         db_title: None,
         gapped: false,
     };
@@ -1184,6 +1194,7 @@ fn a_subject_with_strings_writes_the_use_this_seqid_ext() {
             } else {
                 Program::Tblastx
             },
+            rps: false,
             db_title: Some(b"db"),
             gapped,
         };
@@ -1273,6 +1284,7 @@ fn pssm_searches_name_their_type_and_psiblast_omits_zero_identities() {
         let run = RunRecord {
             pssm_type,
             program,
+            rps: false,
             db_title: None,
             gapped: true,
         };

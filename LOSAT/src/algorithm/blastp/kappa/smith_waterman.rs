@@ -55,7 +55,7 @@ impl Default for SquareWindow {
 pub(crate) type SwMatchScratch = SwRedoScratch<SquareWindow>;
 
 /// NCBI's failed Smith-Waterman redo of a match: a significant alignment of score 0 whose X-drop
-/// traceback has no operation (`GapEditScriptNew(0)` is NULL, `s_NewAlignmentUsingXdrop` returns
+/// traceback has no operation (`GapEditScriptNew` of 0 is NULL, `s_NewAlignmentUsingXdrop` returns
 /// -1). NCBI frees the match's alignments and keeps the status -1 (`*pStatusCode`) until the next
 /// match that it redoes sets it again; a status left by the last match of a query batch fails the
 /// traceback (`Traceback failed`, traceback_stage.cpp:251-252), or crashes NCBI's clean-up when
@@ -92,7 +92,7 @@ impl std::error::Error for SwRedoEndless {}
 /// (`s_WindowsFromProteinAligns`): each window's alignments in NCBI's list order (the last one
 /// made first) in `alignments_by_query[query_index]`, as the X-drop redo returns them, with the
 /// composition p-value and lambda ratio of the last adjustment. `would_insert(query_index, evalue,
-/// score)` is `BlastCompo_HeapWouldInsert(&significantMatches[query_index], ...)` with the match's
+/// score)` is `BlastCompo_HeapWouldInsert` on the heap `significantMatches[query_index]` with the match's
 /// subject index; `cutoff_e` is `-evalue` (`params->cutoff_e`). The errors `SwRedoFailed` and
 /// `SwRedoEndless` are NCBI's failed and endless redos (see there).
 ///
@@ -200,7 +200,7 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         let rows = &*rows;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3261-3264
         // The round loop (`smith_waterman_redo_window`, redo_alignment.c:1438-1529) on the
-        // subject's range from NCBI's `subject->data - 1`, which `ALIGN_EX` reads from
+        // subject's range from NCBI's position one before `subject->data`, which `ALIGN_EX` reads from
         // (`s_SWFindFinalEndsUsingXdrop`): the sentinel before the window's letters
         // (`s_SequenceGetProteinRange`). `Lambda` and `logK` are the redo's scaled block (`kbp_gap`
         // of NCBI's copy), `searchsp` the query's `eff_search_space`, `cutoff_s` the redo's cutoff
@@ -254,7 +254,7 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
             SwWindowRedo::Endless => return Err(SwRedoEndless.into()),
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1856-1873
-        // Each alignment prepended in the order made (`newAlign->next = alignments[query_index]`).
+        // Each alignment prepended in the order made (`newAlign->next` is set to `alignments[query_index]`).
         for align in made {
             let mut new_align = blast_compo_alignment_new(
                 align.score,

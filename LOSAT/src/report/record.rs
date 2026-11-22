@@ -120,6 +120,11 @@ pub struct SubjectRecord<'a> {
 pub struct RunRecord<'a> {
     /// The program, which names the "Blast Type" and selects the segment form.
     pub program: Program,
+    /// Whether the search is the RPS search of `program` (rpsblast: BLASTP's, rpstblastn:
+    /// BLASTX's), whose subjects are the profiles of an RPS database: the Seq-annot's "Blast
+    /// Type" (outfmt 8, 9, 12) names the RPS program. Nothing else reads it (the archive's
+    /// Seq-aligns carry no Blast Type).
+    pub rps: bool,
     /// The database title (`-db`), or `None` for a `-subject` search.
     pub db_title: Option<&'a [u8]>,
     /// Whether the search is gapped (`BLASTHspListToSeqAlign`) or ungapped

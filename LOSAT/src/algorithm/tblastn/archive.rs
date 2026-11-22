@@ -62,6 +62,8 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
     inputs.culling_limit = args.culling_limit;
+    inputs.best_hit_overhang = args.best_hit_overhang;
+    inputs.best_hit_score_edge = args.best_hit_score_edge;
     inputs.subject_besthit = args.subject_besthit;
     inputs.sum_stats = args.sum_stats;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`), converted
@@ -372,6 +374,7 @@ pub(super) fn write_tblastn_archives(
     let run = RunRecord {
         pssm_type: None,
         program: Program::Tblastn,
+        rps: false,
         db_title: data.shown.db_title(),
         gapped: true,
     };
@@ -384,6 +387,7 @@ pub(super) fn write_tblastn_archives(
             run: RunRecord {
                 pssm_type: None,
                 program: run.program,
+                rps: run.rps,
                 db_title: run.db_title,
                 gapped: run.gapped,
             },

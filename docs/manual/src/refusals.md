@@ -58,7 +58,7 @@ There is one section for each program, and one for the five search programs toge
 | `-ungapped` | `tblastn`, `rpstblastn` (without CBS) | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run; refused for partial-volume indexes, two-hit (`-window_size` above 0), `-db_hard_mask`, or damaged/mismatched index volumes |
 | `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (`0, 6, 7, 10, 20`; `-in_pssm` / `-in_msa`: `0, 6, 7`) |
-| `-mk_counts`, `-convert` | `windowmasker` | Not yet supported (`-ustat` supported) |
+| `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
 | `deltablast`, `makeprofiledb`, `blast_formatter` | Standalone executables | Not yet provided |
 
 ## All five search programs
@@ -349,13 +349,15 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## windowmasker
 
-`windowmasker` masks with a counts file (`-ustat`) and runs every option of its `-help` for that (`-xmlhelp` on the command line only). The options that only make or convert counts files (`-checkdup`, `-fa_list`, `-mem`, `-unit`, `-genome_size`, `-sformat`, `-smem`) are refused with `-ustat` by NCBI's own argument check, as in NCBI's; `-meta` is accepted and does nothing, as in NCBI's.
+`windowmasker` runs NCBI's three modes, making counts files (`-mk_counts`, with `-checkdup`), converting them (`-convert`) and masking with them (`-ustat`), and every option of its `-help` (`-xmlhelp` on the command line only). Options of another mode are refused by NCBI's own argument check, as in NCBI's; `-meta` is accepted with `-ustat` and does nothing, as in NCBI's.
 
 | Option or input | What happens |
 | :--- | :--- |
-| `-mk_counts`, `-convert` | Refused. LOSAT does not make or convert counts files yet. |
+| `-mk_counts` of an input without a unit of unambiguous letters (all `N`; or, with `-unit`, no sequence, as when `-ids` keeps none) | Refused. NCBI writes the percentages of the file as its C runtime prints 0/0 (`-nan` on Linux). |
+| `-mk_counts -infmt seqids` | Refused. NCBI fetches each sequence from NCBI's servers. |
+| `-mk_counts` or `-convert` of units of 1 to 3 letters to `oascii` or `obinary` with an `-smem` that is a multiple of 65536 | Refused. NCBI keeps the low 16 bits of `-smem` (0 megabytes); its search for a hash table is then undefined. With units of 4 letters or more NCBI's error is written as NCBI writes it. |
 | An `-ids` or `-exclude_ids` file matched as text (without `-text_match F`) with an empty id (a line that starts with a space or a tab, `>`, `\|` or `>\|`) | Refused. NCBI writes outside its list of ids and crashes. |
-| A counts file whose `##pct:` line holds a word that NCBI reads as a number with the C++ runtime, such as `inf` or `0x10`, with a `-t_*_pct` option | Refused. Plain decimal numbers are read as NCBI reads them. |
+| A counts file whose `##pct:` line holds a number that C++ libraries read differently (`inf`, `nan`, a hexadecimal number such as `0x10`, a number with letters after it such as `5x`, or a number beyond the range of a double), with a `-t_*_pct` option or `-convert` | Refused. Other lines are read as NCBI reads them: a value that is missing, or a word that does not start with a number, is 0. |
 | An `ascii` counts file with units of 17 letters or more | Refused. NCBI's result is undefined. |
 | A FASTA record or database sequence of 4,294,967,296 letters or more | Refused. NCBI counts positions in 32 bits. |
 
@@ -405,9 +407,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 ## On the list for a later release
 
 - The programs `deltablast`, `makeprofiledb` and `blast_formatter`.
-- `windowmasker -mk_counts` and `-convert`, which make and convert counts files.
 - `psiblast -phi_pattern`.
-- The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
+- The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm` or `-in_msa`: `0`, `6`, `7`).
 - `-html`.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases

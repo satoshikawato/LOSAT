@@ -1,0 +1,3 @@
+../winmask/fasta/dm2L_3k.fa
+
+in/multi.fa

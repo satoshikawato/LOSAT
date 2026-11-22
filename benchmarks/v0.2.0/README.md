@@ -208,9 +208,9 @@ python3 -I benchmarks/v0.2.0/scripts/render_figures.py
 ```
 
 `build_snapshot.py` takes the input paths (defaulting under `$LOSAT_BASELINES_DIR` / `~/losat-baselines`,
-stored in `metadata.json` without user home prefixes), `--losat-commit`, and `--wasm-paired` as options
-(`--help`). The figures were rendered with Matplotlib 3.10.3 and NumPy 2.2.5; the same snapshot and
-versions give the same PNG files, and `render_figures.py` writes both `figures/` and
-`docs/manual/src/images/` for the user manual.
+stored in `metadata.json` without user home prefixes), `--losat-commit`, `--wasm-paired`, and
+`--wasm-derived-from` as options (`--help`). The figures were rendered with Matplotlib 3.10.3 and
+NumPy 2.2.5; the same snapshot and versions give the same PNG files, and `render_figures.py` writes
+both `figures/` and `docs/manual/src/images/` for the user manual.
 
 [All benchmark sets](../README.md)

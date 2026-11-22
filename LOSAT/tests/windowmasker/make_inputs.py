@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes the FASTA, id-list and counts inputs of tests/windowmasker/in from
+"""Writes the FASTA, id-list, file-list and counts inputs of tests/windowmasker/in from
 tests/winmask/fasta/dm2L_60k.fa (2L:1-60,000) and tests/winmask/counts/mg1655_u9.ascii.
 Deterministic; run from anywhere: python3 -I make_inputs.py"""
 import os
@@ -74,6 +74,25 @@ def main():
     write("ids_cr.txt", "rec1\rrec4\n".encode(), "wb")
     write("ids_none.txt", "nosuchid\n")
     write("ids_db.txt", "AB000001.1\nrec1\nNC_000099.1\n")
+    # -mk_counts: lists of files for -fa_list (names relative to this directory; an empty line, a
+    # CRLF line), an all-N genome, and the records of -checkdup: a part of 2L:5,004-56,000, and
+    # 3,000 letters of a fixed pseudo-random sequence before 2L:10,001-60,000 (sequences of 50,000
+    # letters or more, whose samples of 100 letters every 10,000 match those of dm2L_60k.fa
+    # and of each other at offsets that are not multiples of 10,000).
+    write("falist.txt", "../winmask/fasta/dm2L_3k.fa\n\nin/multi.fa\n")
+    write("falist_crlf.txt", "../winmask/fasta/dm2L_3k.fa\r\n".encode(), "wb")
+    write("alln.fa", ">alln\n" + "N" * 100 + "\n")
+    state = 12345
+    filler = []
+    for _ in range(3000):
+        state = (state * 1103515245 + 12345) % 2 ** 31
+        filler.append("ACGT"[(state >> 16) & 3])
+    write("cd.fa", f">cd_part\n{wrap(dm[5003:56000])}\n>cd_shift\n{wrap(''.join(filler) + dm[10000:60000])}\n")
+    write("ids_cd.txt", "cd_part\n")
+    # A sequence whose first four samples of dm2L_60k.fa (offsets 0 to 30,000) follow each other
+    # 9,995 letters apart from its start: the run's start in it falls 15 letters before 0, which
+    # NCBI prints as a size_t that wraps (review of M5b, 2026-11-21).
+    write("cd_wrap.fa", f">cd_wrap\n{wrap(dm[0:9995] + dm[10000:19995] + dm[20000:29995] + dm[30000:50100])}\n")
     # Id lists of -text_match F (CIdSet_SeqId: each id read as a Seq-id; the first six are those of
     # probe s1 of line NP M5, 2026-11-21): bare words, versions, case, forms, ordinal ids, ids that
     # CSeq_id cannot read (empty, a byte of 0x80 or more, too many parts, ...), a CRLF list.

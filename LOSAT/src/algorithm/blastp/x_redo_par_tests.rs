@@ -1979,6 +1979,68 @@ fn a_deferred_heap_test_that_turns_true_is_finished_by_a_continuation_in_the_nex
     );
 }
 
+/// At a stop, a carried deferred test that `x_sw_continued` leaves to the replay because the
+/// early termination test may end its match still counts as one that may insert a list, so the
+/// bound continues no later match of the query once the heap may be filled before it (review 2 of
+/// X4-mt, N-5: the bound reads only the heap's count). A continuation's result is replayed without
+/// its heap test, so a later match continued by mistake would insert a list that NCBI's loop does
+/// not keep.
+#[test]
+fn a_carried_test_that_the_early_termination_test_may_end_counts_toward_the_bound() {
+    // One query, two lists to keep. The first two matches ask no test (no insert); the third's
+    // deferred test is TRUE, so the replay stops there; the fourth's preliminary E-value lets the
+    // early termination test end it once the heap is filled, which it is not yet when its
+    // deferred test is TRUE (the second stop); the fifth's deferred test turns FALSE after the
+    // third's and fourth's lists are kept, and its result after a TRUE would be kept before them.
+    let lists = || {
+        vec![hit_list(vec![
+            list(0, 1e-9, false),
+            list(1, 1e-9, false),
+            list(2, 1e-9, false),
+            list(3, 0.5, false),
+            list(4, 1e-9, false),
+        ])]
+    };
+    let kept = |final_evalue| SwCase {
+        evalue: 0.5,
+        score: 40,
+        final_evalue,
+        final_score: 40,
+        kind: SwKind::Kept,
+    };
+    let cases = vec![vec![
+        sw_case(0.5, SwKind::NotAsked),
+        sw_case(0.5, SwKind::NotAsked),
+        kept(1e-5),
+        kept(1e-5),
+        kept(1e-30),
+    ]];
+    let one_window = XWindowLimits {
+        jobs: 8,
+        at_risk_jobs: 8,
+    };
+    let mut heaps = heaps_of(1, 2);
+    let (counts, computed) = sw_drive(&mut lists(), &cases, &mut heaps, &alone(1), one_window);
+    let counts = counts.expect("no error");
+    let mut model = heaps_of(1, 2);
+    sw_one_thread(&lists(), &cases, &mut model, &alone(1)).expect("no error");
+    assert_eq!(heap_contents(&heaps), heap_contents(&model));
+    assert_eq!(heaps[0].n, 2, "the third's and fourth's lists");
+    // Two stops, each continued in the next window, nothing by the bound; the fifth's test
+    // turned FALSE. Five matches in the first window and two continuations.
+    assert_eq!(
+        (
+            counts.turned,
+            counts.continued,
+            counts.continued_by.stop,
+            counts.continued_by.bound,
+            counts.windows,
+            computed
+        ),
+        (Some(1), 2, 2, 0, 3, 7)
+    );
+}
+
 /// A continuation is replayed before the end of its batch: its redo sets the batch's status
 /// (clearing a failure before it, or failing the batch) or ends the search (an endless redo),
 /// before any match of a later batch.

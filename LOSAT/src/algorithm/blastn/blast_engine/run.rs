@@ -10597,8 +10597,13 @@ fn search_query_batch<const UNGAPPED: bool>(
     };
 
     // Whether the batch is searched with a MegaBLAST database index (`index_seeds` below; only a
-    // database search keeps one, `mb_index::MegablastIndex::check`).
+    // database search keeps one, `mb_index::MegablastIndex::check`), and whether the index leaves
+    // database volumes to the scan (a mixed search).
     let index_search = args.megablast_index_loaded.is_some() && split_prelim_lists.is_none();
+    let index_mixed = args
+        .megablast_index_loaded
+        .as_deref()
+        .is_some_and(crate::dbindex::search::LoadedIndex::mixed);
     // Build lookup tables
     let (lookup_tables, scan_step, offset_array_size) =
         batch_setup::batch_lookup_tables(&batch_setup::LookupInputs {
@@ -10612,9 +10617,13 @@ fn search_query_batch<const UNGAPPED: bool>(
             approx_table_entries,
             x_keep,
             subjects,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:110-114
-            // A search with a MegaBLAST database index has no lookup table.
-            split: split_prelim_lists.is_some() || index_search,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:110-163
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:460-462
+            // A search with a MegaBLAST database index has no lookup table, except a mixed
+            // one (`eMixedMBLookupTable`: the table without an index). (NCBI also builds the
+            // table for an old-style index found after the new style left a database volume
+            // without an index, `partial`, and never reads it: every OID is the index's.)
+            split: split_prelim_lists.is_some() || (index_search && !index_mixed),
         });
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:654 (cutoff_score_min computed per subject)
@@ -10774,8 +10783,13 @@ fn search_query_batch<const UNGAPPED: bool>(
                 encoded_query_concat_blastna,
                 &query_contexts,
                 &context_valid,
-                effective_word_size,
-            ))
+                crate::dbindex::search::SearchOptions {
+                    word_size: effective_word_size as u64,
+                    two_hits: crate::algorithm::blastn::coordination::determine_window_size(args)
+                        as u64,
+                },
+                args.num_threads,
+            )?)
         }
         _ => None,
     };

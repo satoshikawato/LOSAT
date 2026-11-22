@@ -9,11 +9,12 @@
 //! (`masker_fixtures::take_variables`).
 //!
 //! A row with a refusal is one where NCBI searches with an index in a way that LOSAT does not
-//! (a mixed search, a two-hit search, `-db_hard_mask`), or reads the index in a way that leaves
-//! the search undefined or fails: LOSAT refuses it with that text, and NCBI's output is kept for
-//! the lines that take these searches. LOSAT writes nothing where NCBI's run succeeds; where NCBI
-//! exits with its error in a later query batch, LOSAT first writes NCBI's output of the batches
-//! before; where NCBI crashes or never ends, LOSAT writes at most a beginning of NCBI's output.
+//! (`-db_hard_mask`), or in a way that its threads decide, or reads the index in a way that
+//! leaves the search undefined or fails: LOSAT refuses it with that text, and NCBI's output is
+//! kept for the lines that take these searches. Where NCBI exits with its error in a later query
+//! batch, LOSAT first writes NCBI's output of the batches before; elsewhere (NCBI's run succeeds,
+//! crashes or never ends) LOSAT writes at most a beginning of NCBI's output: nothing when it
+//! refuses before the search, the batches before when it refuses a later batch.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -225,8 +226,8 @@ fn rows_that_differ() -> Vec<String> {
                     "-use_index true with {} is not supported by LOSAT's BLASTN",
                     here(refusal, &dir)
                 );
-                // Where NCBI fails (its search of a later query batch), LOSAT writes NCBI's
-                // output of the batches before and refuses there; elsewhere it writes nothing.
+                // Where NCBI exits with its error (its search of a later query batch), LOSAT
+                // writes NCBI's output of the batches before and refuses there.
                 let ncbi = |extension: &str| {
                     fs::read(
                         fixtures()
@@ -240,15 +241,15 @@ fn rows_that_differ() -> Vec<String> {
                     .trim()
                     .parse()
                     .unwrap();
-                let want_out = if ncbi_rc != 0 {
+                let want_out = {
                     let out = here(&String::from_utf8(ncbi("out")).unwrap(), &dir);
                     losat::wording::losat_output_bytes(out.as_bytes()).into_owned()
-                } else {
-                    Vec::new()
                 };
-                // NCBI's run ended by a signal or the time limit (124): what it wrote up to its
-                // crash is no result, and LOSAT may refuse before it.
-                let out_ok = if ncbi_rc == 124 || ncbi_rc >= 128 {
+                // NCBI's run succeeded, or ended by a signal or the time limit (124): LOSAT
+                // refuses before the search or at a later query batch whose result NCBI's
+                // threads decide or that NCBI's crash leaves without one, and writes the
+                // batches before.
+                let out_ok = if ncbi_rc == 0 || ncbi_rc == 124 || ncbi_rc >= 128 {
                     want_out.starts_with(&output.stdout)
                 } else {
                     output.stdout == want_out

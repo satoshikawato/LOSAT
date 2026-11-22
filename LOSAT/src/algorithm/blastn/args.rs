@@ -173,8 +173,9 @@ pub struct BlastnArgs {
     /// `-subject` and for a task other than megablast; with `-db` and megablast, NCBI loads the
     /// database's index. When it loads none, or the word size is below the index's, NCBI warns
     /// and searches without it; otherwise it searches with the index. LOSAT does both, and
-    /// refuses an index of only some database volumes, a two-hit search and `-db_hard_mask`
-    /// with an index (line RG items D5b-3 and D5b-5).
+    /// refuses `-db_hard_mask` with an index (line RG item D5b-5) and the later searches of an
+    /// index of only some database volumes where NCBI frees its list or its threads decide
+    /// (`blast_engine::mb_index_seeds`).
     #[arg(long, value_name = "boolean", value_parser = ncbi_boolean, help = "Use MegaBLAST database index [default: false]")]
     pub use_index: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3359-3362

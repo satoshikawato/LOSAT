@@ -1619,6 +1619,31 @@ fn sw_drive_excluded(
     excluded: &[FetchExcludedMatch],
     mut window_seen: impl FnMut(&XWindow),
 ) -> (Result<XCounts>, usize) {
+    sw_drive_expanding(
+        lists,
+        cases,
+        heaps,
+        batches,
+        limits,
+        None,
+        excluded,
+        |_, window| window_seen(window),
+    )
+}
+
+/// `sw_drive_excluded` with the compact lists of `expand` expanded ahead of the windows, each
+/// window given to `window_seen` with the lists as they are while its jobs run.
+#[allow(clippy::too_many_arguments)]
+fn sw_drive_expanding(
+    lists: &mut [Option<BlastpHitList>],
+    cases: &[Vec<SwCase>],
+    heaps: &mut [BlastCompoHeap],
+    batches: &[Range<usize>],
+    limits: XWindowLimits,
+    expand: Option<&mut XExpandAhead<'_>>,
+    excluded: &[FetchExcludedMatch],
+    mut window_seen: impl FnMut(&[Option<BlastpHitList>], &XWindow),
+) -> (Result<XCounts>, usize) {
     let mut computed = 0;
     let counts = x_redo_windows::<true>(
         lists,
@@ -1626,10 +1651,10 @@ fn sw_drive_excluded(
         batches,
         limits,
         false,
-        None,
+        expand,
         excluded,
         &mut |lists, heaps, window| {
-            window_seen(window);
+            window_seen(lists, window);
             window
                 .jobs
                 .iter()
@@ -2347,7 +2372,7 @@ fn smith_waterman_windows_give_the_one_thread_heaps_and_error_on_random_searches
             && batch_failures > 50
             && endless > 20
             && clean > 300
-            && changed_by_excluded > 10,
+            && changed_by_excluded > 15,
         "turned {turned} continued {continued} {continued_by:?} ended {ended} failed batches \
              {batch_failures} endless {endless} clean {clean} changed by excluded lists \
              {changed_by_excluded}"
@@ -2381,21 +2406,11 @@ fn stopping_query(stops: u32) -> (Option<BlastpHitList>, Vec<SwCase>) {
     )
 }
 
-/// The carry of a stopped replay is bounded (review 1 of X4-mt, S1). Query 0, alone in its batch
-/// with `-max_target_seqs 1`, stops the replay at each of its 40 matches after the first; 2,000
-/// queries of four matches within the cutoff follow. A window takes at most `jobs` new jobs, and
-/// with the carried matches (in jobs of four) at most `2 x jobs`, so it holds at most
-/// `2 x X_JOB_MATCHES x jobs` matches with the carried ones, and a carry at most one fewer; where
-/// the carried matches did not count, the carry grew by about `X_JOB_MATCHES x (jobs - 1)` matches
-/// per stopped window (2,329 matches here, with every carried match's result and its query's list
-/// held).
-#[test]
-fn a_carry_counts_toward_the_window_budget_and_stays_within_one_window() {
+/// The carry-growth order of review 1 of X4-mt (S1), at a budget of 16 jobs: query 0, alone in its
+/// batch with `-max_target_seqs 1`, stops the replay at each of its 40 matches after the first;
+/// 2,000 queries of four matches within the cutoff follow (one job each).
+fn carry_growth_order() -> (Vec<Option<BlastpHitList>>, Vec<Vec<SwCase>>, XWindowLimits) {
     const QUERIES: usize = 1 + 2000;
-    let limits = XWindowLimits {
-        jobs: 16,
-        at_risk_jobs: 8,
-    };
     let (first, first_cases) = stopping_query(40);
     let mut lists = vec![first];
     let mut cases = vec![first_cases];
@@ -2403,8 +2418,25 @@ fn a_carry_counts_toward_the_window_budget_and_stays_within_one_window() {
         lists.push(hit_list((0..4).map(|oid| list(oid, 1e-9, false)).collect()));
         cases.push(vec![sw_case(1e-9, SwKind::Kept); 4]);
     }
-    let batches = alone(QUERIES);
-    let mut heaps = heaps_of(QUERIES, 1);
+    let limits = XWindowLimits {
+        jobs: 16,
+        at_risk_jobs: 8,
+    };
+    (lists, cases, limits)
+}
+
+/// The carry of a stopped replay is bounded (review 1 of X4-mt, S1), in the carry-growth order. A
+/// window takes at most `jobs` new jobs (the first clause of the budget: review 2's mutant S1b,
+/// which drops it, takes 32 in the first window), and with the carried matches (in jobs of four)
+/// at most `2 x jobs`, so it holds at most `2 x X_JOB_MATCHES x jobs` matches with the carried
+/// ones, and a carry at most one fewer; where the carried matches did not count, the carry grew by
+/// about `X_JOB_MATCHES x (jobs - 1)` matches per stopped window (2,329 matches here, with every
+/// carried match's result and its query's list held).
+#[test]
+fn a_carry_counts_toward_the_window_budget_and_stays_within_one_window() {
+    let (lists, cases, limits) = carry_growth_order();
+    let batches = alone(lists.len());
+    let mut heaps = heaps_of(lists.len(), 1);
     let mut held = Vec::new();
     let (counts, _) = sw_drive_excluded(
         &mut lists.clone(),
@@ -2413,16 +2445,23 @@ fn a_carry_counts_toward_the_window_budget_and_stays_within_one_window() {
         &batches,
         limits,
         &[],
-        |window| held.push((window.carried, window.matches.len())),
+        |window| held.push((window.carried, window.matches.len(), window.stream_jobs())),
     );
     let counts = counts.expect("no error");
-    let mut model = heaps_of(QUERIES, 1);
+    let mut model = heaps_of(lists.len(), 1);
     sw_one_thread(&lists, &cases, &mut model, &batches).expect("no error");
     assert_eq!(heap_contents(&heaps), heap_contents(&model));
     let bound = 2 * X_JOB_MATCHES * limits.jobs;
-    assert_eq!(held.iter().map(|&(_, matches)| matches).max(), Some(bound));
     assert_eq!(
-        held.iter().map(|&(carried, _)| carried).max(),
+        held.iter().map(|&(_, _, new_jobs)| new_jobs).max(),
+        Some(limits.jobs)
+    );
+    assert_eq!(
+        held.iter().map(|&(_, matches, _)| matches).max(),
+        Some(bound)
+    );
+    assert_eq!(
+        held.iter().map(|&(carried, _, _)| carried).max(),
         Some(bound - 1)
     );
     assert_eq!(counts.carried_max, bound - 1);
@@ -2437,6 +2476,66 @@ fn a_carry_counts_toward_the_window_budget_and_stays_within_one_window() {
             }
         )
     );
+}
+
+/// The expanded lists that a carry holds (review 2 of X4-mt, S-3): the carry-growth order with its
+/// compact lists expanded ahead of the windows (BPREDOWINEXPAND). After each window its reads and
+/// the next match lie within the expanded lists (`XExpandAhead::check`, which `x_redo_windows`
+/// asserts; review 2's mutant S1b, a window of up to two budgets of new jobs, reads past them);
+/// the heaps are the one-thread loop's, and a window takes at most one budget of new jobs. While a
+/// window's jobs run, the lists held besides query 0's (each list whole) are, without a carry, those
+/// of one budget and the next job read ahead (`X_JOB_MATCHES x (jobs + 1)` matches), and with a
+/// carry also those of the queries of the carried matches, up to the carry's bound: three budgets
+/// here (31 queries carried behind the window's start, with query 0's last three matches, and 17
+/// read ahead).
+#[test]
+fn a_carry_holds_the_expanded_lists_of_about_three_budgets() {
+    let (lists, cases, limits) = carry_growth_order();
+    let count = lists.len();
+    let batches = alone(count);
+    let mut compact: Vec<_> = lists.iter().map(compact_of).collect();
+    let mut ahead_lists: Vec<Option<BlastpHitList>> = vec![None; count];
+    let mut expand = XExpandAhead::new(&ahead_lists, &mut compact);
+    let mut heaps = heaps_of(count, 1);
+    // Per window: whether it has a carry, its new jobs, and the matches of the lists held after
+    // query 0's.
+    let mut seen = Vec::new();
+    let (counts, _) = sw_drive_expanding(
+        &mut ahead_lists,
+        &cases,
+        &mut heaps,
+        &batches,
+        limits,
+        Some(&mut expand),
+        &[],
+        |lists, window| {
+            let held: usize = lists[1..].iter().flatten().map(x_list_matches).sum();
+            seen.push((window.carried > 0, window.stream_jobs(), held));
+        },
+    );
+    let counts = counts.expect("no error");
+    let mut model = heaps_of(count, 1);
+    sw_one_thread(&lists, &cases, &mut model, &batches).expect("no error");
+    assert_eq!(heap_contents(&heaps), heap_contents(&model));
+    assert_eq!(counts.continued, 40);
+    drop(expand);
+    assert!(compact.iter().all(Option::is_none), "every list expanded");
+    assert!(
+        ahead_lists.iter().all(Option::is_none),
+        "every list released"
+    );
+    assert_eq!(
+        seen.iter().map(|&(_, new_jobs, _)| new_jobs).max(),
+        Some(limits.jobs)
+    );
+    let most_held = |carry: bool| {
+        seen.iter()
+            .filter(|&&(carried, _, _)| carried == carry)
+            .map(|&(_, _, held)| held)
+            .max()
+    };
+    assert_eq!(most_held(false), Some(X_JOB_MATCHES * (limits.jobs + 1)));
+    assert_eq!(most_held(true), Some(3 * X_JOB_MATCHES * limits.jobs));
 }
 
 /// The results at risk that stopped replays carry on are bounded per stopped window (review 1 of

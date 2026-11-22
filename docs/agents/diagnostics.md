@@ -1933,7 +1933,7 @@ Rebuilding less:
   same heaps (`blastp/x_redo_par.rs`, exactness argument in its header). The jobs run in windows of
   consecutive jobs, one `pool.install` each, that may end inside a query: at most 64 jobs per thread
   (`LOSAT_X_BPREDOPARWINDOW` below), so at most 4 x 64 x threads redone results are held before their
-  replay. A job builds its query's workspace once per window (`OnceLock`; a query that spans windows has it
+  replay (two budgets with a `-use_sw_tback` carry, below). A job builds its query's workspace once per window (`OnceLock`; a query that spans windows has it
   built again from the same inputs, a small cost that grows with the query's length) and its own
   parameters, prefetches the first Newton problems of its own matches with the Newton lanes (one vector
   of four, against the heaps as the window's start left them), and redoes its matches with per-worker
@@ -1963,7 +1963,8 @@ Rebuilding less:
   batch's status with the one-thread loop's own rule (`redo_run::SwBatchStatus`). A window with a carry
   takes at most a budget of new jobs, as one without, and the carried matches (in jobs of four) and the new
   jobs together are at most two budgets, so a window holds at most 2 x 4 x 64 x threads results before their
-  replay, carried ones included, and a stop's serial work is linear in the carry (at most a window's). One
+  replay, carried ones included, and a stop's serial work is linear in the carry (at most a window's; it
+  reads no heap's root). One
   window drops results of q there too (a replay never stops within q after dropping a result of q), and
   cap(q) grows only by q's jobs at risk of a window whose replay passed all of q's matches in it, so each
   stopped window before it carries at most cap(q) new jobs at risk of q on to it: it drops at most
@@ -2048,8 +2049,10 @@ Rebuilding less:
   expansion. The match counts that the early termination bound (`x_end_above`) and the choice of the path read are
   counted from the compact lists. Where the path does not run after all (fewer than two matches), every list is expanded before
   the other paths (the only expansion before the previous switch existed). The expanded lists held at a time are those of the queries of about one
-  window (with `-use_sw_tback` also those of the matches that a stopped replay carries behind the window's
-  start, which count toward its second budget: at most two windows' with the new jobs), and each query's
+  window (with `-use_sw_tback` also those of the queries of the matches that a stopped replay carries behind
+  the window's start, fewer than two budgets' results, while the lists read ahead stay one budget's: about
+  three budgets, two with the carry and one read ahead, with the lists of the first carried query and of the
+  last query read ahead whole; unit test `a_carry_holds_the_expanded_lists_of_about_three_budgets`), and each query's
   compact list is freed
   when it is expanded.
   Evidence 2026-10-20 (v4-D12 s3 probe, workstation): in `blastp -db` UniRef50 q100 at 32 threads the expansion of all

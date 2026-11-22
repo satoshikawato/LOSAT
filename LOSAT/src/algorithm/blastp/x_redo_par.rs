@@ -21,7 +21,8 @@
 //! 2. windows of consecutive jobs, each computed on the pool (one `pool.install`) and then
 //!    replayed. A window holds at most 64 jobs per thread (`LOSAT_X_BPREDOPARWINDOW` sets another
 //!    number, for tests) and at most a cap of jobs at risk per query (below), and it may end inside
-//!    a query, so it holds at most 4 x 64 x threads results before their replay. A window boundary
+//!    a query, so it holds at most 4 x 64 x threads results before their replay (two budgets with a
+//!    `-use_sw_tback` carry, below). A window boundary
 //!    changes nothing: the replay is in stream order and the heaps carry over;
 //! 3. a job builds its query's workspace (`build_query_workspace`) if no other job of the window has
 //!    (one `OnceLock` per query and window, read only afterwards; a query that spans two windows
@@ -125,7 +126,7 @@
 //! matches, in jobs of four, and the new jobs together are at most two budgets, so a window holds
 //! at most 2 x 4 x 64 x threads results before their replay with the carried ones, and a carry
 //! fewer than that; the serial work of a stop (`x_sw_continued`, the carry's copy) is linear in
-//! the carry, at most that of a window's replay. The replay also keeps
+//! the carry (it reads no heap's root), at most that of a window's replay. The replay also keeps
 //! the batch's status of NCBI's one-thread redo (`XSwBatch`, with the one-thread loop's
 //! `redo_run::SwBatchStatus`): a match that the redo reaches sets it, failed or not; a match the
 //! early termination test ends leaves it; a list whose subject the redo's fetch excludes (line RG
@@ -171,8 +172,11 @@
 //! budget and then reads the next job (one query's), so the window and the first match after it
 //! lie within expanded lists (asserted after each window). The windows, the replay and the lists released are
 //! therefore those of the full expansion, and the expanded lists held at a time are those of the
-//! queries of about one window instead of all queries (with `-use_sw_tback`, also those of the
-//! matches carried behind the window's start, at most two windows' with the new jobs).
+//! queries of about one window instead of all queries. With `-use_sw_tback` they are also those of
+//! the queries of the matches carried behind the window's start, fewer than two budgets' results;
+//! the lists read ahead stay one budget's (a window whose carry fills its second budget takes no
+//! new job), so the lists held span about three budgets: two with the carry and one read ahead,
+//! with the lists of the first carried query and of the last query read ahead whole.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3421,3447-3449
 
@@ -508,9 +512,15 @@ struct XCarry {
 ///   replay (`end_above`), or a redo that would end the search there;
 /// - after that, and in the stopped match's query, a test is TRUE for certain where the heap (the
 ///   copy, or the heap as the replay left it) holds fewer lists than its threshold minus the
-///   matches since that may insert one: those with alignments, those continued, and those whose
-///   deferred test the heap without its side effect does not answer FALSE (a FALSE stays FALSE,
-///   `x_sw_heap_test`). A match ended before its window inserts none.
+///   matches since that may insert one: those with alignments, those continued, and those with a
+///   deferred test. A match ended before its window inserts none.
+///
+/// A deferred test that the rule does not continue counts as one that may insert a list, without
+/// asking the heap: below the threshold the test without its side effect is TRUE whatever the key,
+/// and at or past it the rule continues no later match of the query, whatever the count. So the
+/// rule reads only the heap's count and threshold, never its root (in the array form a scan of its
+/// lists, which a stop would otherwise make once per carried match; review 2 of X4-mt, N-5), and
+/// the serial work is linear in the carry.
 ///
 /// A match that the early termination test may end is not continued (its continuation could be
 /// computed in vain); nor is any match after a redo that would end the search.
@@ -591,9 +601,8 @@ fn x_sw_continued(
                 by.bound += 1;
                 may_insert += 1;
             }
-            Some((evalue, score)) => {
-                may_insert += usize::from(heap.would_insert_view(evalue, score, local_match.oid));
-            }
+            // It may insert a list (the doc above: no heap test needed).
+            Some(_) => may_insert += 1,
             None => may_insert += usize::from(inserts),
         }
     }
@@ -678,7 +687,8 @@ fn x_next_job(lists: &[Option<BlastpHitList>], cursor: &mut XMatch, job: &mut Ve
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
 /// The window that starts at `start`, on the heaps as the replay of the windows before left them:
-/// the jobs from there while it holds fewer than `jobs` jobs and, for a job at risk of query q,
+/// the jobs from there while it holds fewer than `jobs` jobs (new jobs, with the carried matches
+/// within two budgets, where a `SW` window has a carry: below) and, for a job at risk of query q,
 /// fewer than `caps[q]` jobs at risk of q. A match whose test is already true is marked ended;
 /// the test stays true until its replay. A match may be ended later only if all of these hold
 /// (each is necessary for the test to be true at its replay; a job with such a match, not ended,
@@ -1616,6 +1626,20 @@ fn x_redo_windows<const SW: bool>(
         if let Some(expand) = expand.as_deref_mut() {
             expand.check(lists, cursor, &window);
         }
+        // No NCBI counterpart: a check of the window's bounds (module header, `x_window`); it
+        // changes no value NCBI computes. At most `jobs` new jobs; at most one budget of matches,
+        // and with `SW` two with the carried ones; a carry fewer than two.
+        debug_assert!(
+            window.stream_jobs() <= limits.jobs
+                && window.matches.len()
+                    <= (X_JOB_MATCHES << usize::from(SW)).saturating_mul(limits.jobs)
+                && window.carried < (2 * X_JOB_MATCHES).saturating_mul(limits.jobs),
+            "a window over its bounds: {} new jobs, {} matches, {} carried (budget {} jobs)",
+            window.stream_jobs(),
+            window.matches.len(),
+            window.carried,
+            limits.jobs
+        );
         if !window.jobs.is_empty() {
             counts.windows += 1;
             counts.matches += window.matches.len() - window.carried;

@@ -66,11 +66,11 @@ pub(crate) fn eff_lengths_database(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:778-848
 // `db_num_seqs` is NCBI's `Int4`, negative for an alias file's negative `NSEQ` (or one of 2^31
-// or more): the length adjustment is computed with it as a double, and `(Int8)db_num_seqs *
-// length_adjustment` cannot overflow. The subtraction (a negative product with a length near
-// 2^63) and the product (a database of about 10^17 letters and more) can: that signed overflow
-// is LOSAT's refusal (`SearchSpaceOverflow`; NCBI BLAST+ 2.17.0 prints a wrapped space, probe
-// p5_big of line RG D1a-3).
+// or more): the length adjustment is computed with it as a double, and the product of `db_num_seqs`
+// (cast to `Int8`) and `length_adjustment` cannot overflow. The subtraction (a negative product
+// with a length near 2^63) and the product (a database of about 10^17 letters and more) can: that
+// signed overflow is LOSAT's refusal (`SearchSpaceOverflow`; NCBI BLAST+ 2.17.0 prints a wrapped
+// space, probe p5_big of line RG D1a-3).
 /// `BLAST_CalcEffLengths` for one valid query context of `query_length` (> 0) letters, after
 /// `eff_lengths_database`: the length adjustment for the Karlin-Altschul block `ka` (`K`,
 /// `Lambda` and the context's `alpha` and `beta`) and the effective search space, which is
@@ -255,7 +255,7 @@ pub(crate) const SUBJECT_LENGTH_TOO_SHORT: &str = "The average subject length is
 // 2^31 as NCBI's `int`, or a `LENGTH` of 2^32 times the count; probes p5_ns_*, p5_avg_* of line
 // RG D1a-3). The Gumbel block's shortest length is divided as a `Uint4` too.
 /// The subject length of `BLAST_GapAlignSetUp` that the hit-saving parameters read (their
-/// `Int4 avg_subj_length`), or `None` where the setup fails with `The average subject length is
+/// `avg_subj_length`, an `Int4`), or `None` where the setup fails with `The average subject length is
 /// too short`: with the Gumbel block (`gumbel_min`: `GetMinLength`, and whether the subject is
 /// translated) the shortest length (divided by 3 for a translated subject), else the statistics'
 /// total `total_length` over their number `num_seqs` as NCBI's `Int4`. A `num_seqs` of 0 (NCBI

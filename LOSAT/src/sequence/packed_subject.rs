@@ -134,8 +134,8 @@ const NCBI4NA_TO_BASE: [u8; 16] = {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
 /// The packed bases of a `-subject` record are those NCBI's subject set-up makes: an ambiguous
-/// base is resolved by `CRandom(length)` in order (`encode_subject_ncbi2na_packed`). The runs keep
-/// the real codes, which the traceback and the reports read.
+/// base is resolved by a `CRandom` made with `length`, in order (`encode_subject_ncbi2na_packed`).
+/// The runs keep the real codes, which the traceback and the reports read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackedNucleotide {
     packed: Box<[u8]>,

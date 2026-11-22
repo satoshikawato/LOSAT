@@ -57,6 +57,7 @@ pub(super) fn write_tblastn_seqalign(
     // An ungapped search's alignments are Std-seg diagonals (`report::serial::seqalign`).
     let run = RunRecord {
         program: Program::Tblastn,
+        rps: false,
         db_title: shown.db_title(),
         gapped,
     };

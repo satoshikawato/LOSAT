@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from conftest import CASES, fasta
 from pylosat import Search, SearchError, Sequences
@@ -210,3 +212,48 @@ def test_the_pssm_files_are_the_command_lines(command_line, tmp_path):
     for name in names:
         assert (api / name).read_bytes() == (cli / name).read_bytes()
     assert search.run(*inputs, outfmt="6").reports[0].bytes == stdout
+
+
+def test_a_query_record_that_the_reader_refuses_ends_the_search_in_its_batch(
+    many_batches, losat_fails, tmp_path
+):
+    # The command line reads its queries one batch at a time: a record that its reader refuses
+    # ends the run in the batch that reads it, after the reports of the batches before (line WQA's
+    # D10). The binding reads the inputs as the command line does (`api::read_input_records`).
+    query_file, subject_file = many_batches
+    query = tmp_path / "query.faa"
+    query.write_bytes(Path(query_file).read_bytes() + b">bad\nACGTAC%%%%\n")
+    out = tmp_path / "command_line.tsv"
+    stderr = losat_fails(
+        "blastp", "-query", str(query), "-subject", subject_file, "-outfmt", "6", "-out", str(out)
+    )
+    rows = out.read_bytes()
+    assert rows, "the reports of the batches before the error"
+    search = Search("blastp")
+    inputs = (Sequences.from_fasta(query), Sequences.from_fasta(subject_file))
+    with pytest.raises(SearchError) as written:
+        search.run_to_file(*inputs, outfmt="6", path=tmp_path / "library.tsv")
+    assert (tmp_path / "library.tsv").read_bytes() == rows
+    assert written.value.message_bytes == stderr
+    found = []
+    with pytest.raises(SearchError) as batches:
+        for batch in search.batches(*inputs):
+            found.extend(batch.hsps)
+    assert len(found) == rows.count(b"\n")
+    assert batches.value.message_bytes == written.value.message_bytes
+    with pytest.raises(SearchError) as run:
+        search.run(*inputs)
+    assert run.value.message_bytes == written.value.message_bytes
+
+
+def test_a_query_of_comment_lines_only_fails_as_the_command_line(losat_fails, tmp_path):
+    # Blank and comment lines only are not NCBI's `Query is Empty!` (white space only): the first
+    # query batch has no query, which the command line refuses.
+    query = tmp_path / "query.faa"
+    query.write_bytes(b"\n; a comment\n\n")
+    subject = fasta("outfmt0/e2e_many_subject.faa")
+    stderr = losat_fails("blastp", "-query", str(query), "-subject", subject, "-outfmt", "6")
+    assert b"Empty CBlastQueryVector" in stderr
+    with pytest.raises(SearchError) as caught:
+        Search("blastp").run(Sequences.from_fasta(query), Sequences.from_fasta(subject), outfmt="6")
+    assert caught.value.message_bytes == stderr

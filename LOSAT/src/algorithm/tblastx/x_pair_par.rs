@@ -89,7 +89,7 @@
 //!    earlier, weaker argument (`guard`: max context length <= slack, or longest subject chunk
 //!    <= slack) sends the other batches to the reference path ("fallback: guard"). That argument
 //!    bounded `s_last_off - s0` by `len_c` and `s' - s0` by `slack + 3` apart, and so needed
-//!    `len_c <= slack`.
+//!    that `len_c` is at most `slack`.
 //! 4. Same list. Within a unit the saved InitHSPs are the reference's saved InitHSPs of that
 //!    context, in the same order. The reference sorts the chunk list with the stable
 //!    `score_compare_match` (score, s_start, length, absolute q_start; blast_extend.c:274-310,
@@ -212,7 +212,7 @@
 //! group: raw diagonals d > d' of the unit share a masked cell when d - d' = m P (m >= 1); every hit
 //! of the group has q in [a, a + G), so for hits (q, s) on d and (q', s') on d',
 //! s' - s = m P - (q - q') >= P - G + 1 > window, and the cell sees all hits of d before those of
-//! d'. Flag 0: the cell holds `s_d + D` of a hit on d and diff = s' - s_d > window, too far, the
+//! d'. Flag 0: the cell holds `s_d` plus `D` of a hit on d and diff = s' - s_d > window, too far, the
 //! state of a fresh cell after its first hit. Flag 1: the last right extension of d, from (q0, s0),
 //! stopped at the end of q0's context at the latest, at most a + G, so s_last_off - s0 <= a + G -
 //! q0, while s' - s0 = q' - q0 + m P >= a - q0 + P: s' >= s_last_off + window, the hit is not masked,

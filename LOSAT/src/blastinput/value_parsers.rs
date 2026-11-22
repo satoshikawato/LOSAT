@@ -53,7 +53,7 @@ pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
     if tokens.len() != 3 {
         return Err("Invalid number of arguments to filtering option".into());
     }
-    // `NStr::StringToInt(tokens[i])`, flags 0.
+    // `NStr::StringToInt` of each token, flags 0.
     let number = |token: &str| {
         crate::ncbi_str::string_to_int(token.as_bytes(), 0)
             .map_err(|_| "Invalid input for filtering parameters".to_string())
@@ -85,34 +85,28 @@ pub fn ncbi_integer(value: &str) -> Result<i32, String> {
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:351-360
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:118-129
-/// `NStr::StringToInt8(value)` and `NStr::StringToInt8(value, 0, 16)` are
-/// `ncbi_str::string_to_int8` and `ncbi_str::string_to_int8_base`. LOSAT's messages: "expected
-/// an integer" for a value that neither reads (a byte after `0x` that is not a hexadecimal
-/// digit included, which is tested first: NCBI's base 16 conversion throws on an overflow
-/// before it reaches such a byte, ncbistr.cpp:852), "Integer value is out of range" for a
-/// hexadecimal number beyond `Int8`.
+/// `s_StringToInt8` is `ncbi_app::args::string_to_int8` (the one reading of NCBI's integer
+/// arguments). LOSAT's messages: "Integer value is out of range" for a hexadecimal number beyond
+/// `Int8` (every byte after `0x` a hexadecimal digit), "expected an integer" for any other value
+/// that does not read (a byte after `0x` that is not a hexadecimal digit included: NCBI's base
+/// 16 conversion throws on an overflow before it reaches such a byte, ncbistr.cpp:852).
 pub fn ncbi_int8(value: &str) -> Result<i64, String> {
-    use crate::ncbi_str::{string_to_int8, string_to_int8_base};
-    let value = value.as_bytes();
-    match string_to_int8(value, 0) {
-        Ok(n) => Ok(n),
-        Err(_)
-            if value
-                .get(..2)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"0x")) =>
-        {
-            if !value[2..].iter().all(u8::is_ascii_hexdigit) {
-                return Err("expected an integer".into());
-            }
-            string_to_int8_base(value, 0, 16)
-                .map_err(|_| "Integer value is out of range".to_string())
+    crate::ncbi_app::args::string_to_int8(value).map_err(|_| {
+        let bytes = value.as_bytes();
+        let hexadecimal = bytes
+            .get(..2)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"0x"))
+            && bytes[2..].iter().all(u8::is_ascii_hexdigit);
+        if hexadecimal {
+            "Integer value is out of range".to_string()
+        } else {
+            "expected an integer".to_string()
         }
-        Err(_) => Err("expected an integer".into()),
-    }
+    })
 }
 
-/// A real argument as NCBI reads it (`CArg_Double`): `NStr::StringToDouble(value,
-/// fDecimalPosixOrLocal)` (`ncbi_str::string_to_double_posix_or_local`): the first byte is a
+/// A real argument as NCBI reads it (`CArg_Double`): `NStr::StringToDouble` of `value`
+/// with `fDecimalPosixOrLocal` (`ncbi_str::string_to_double_posix_or_local`): the first byte is a
 /// digit, a point, a comma or a sign, glibc's `strtod` reads the number (decimal, hexadecimal,
 /// the infinities, NaN with its sign and `n-char-sequence`) or NCBI's own `StringToDoublePosix`
 /// where it reads further (a mantissa that ends in `e` or `E`, in x87 extended precision, and an
@@ -139,7 +133,7 @@ fn ncbi_constrained_integer(value: &str) -> Result<i32, String> {
     Ok(n)
 }
 
-/// Whether the constraint's `NStr::StringToDouble(value)` (default flags) reads `value`
+/// Whether the constraint's `NStr::StringToDouble` of `value` (default flags) reads `value`
 /// (`ncbi_constrained_integer`).
 fn reads_as_double(value: &str) -> bool {
     crate::ncbi_str::string_to_double(value.as_bytes()).is_ok()
@@ -155,7 +149,7 @@ pub fn ncbi_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> 
     Ok(n)
 }
 
-/// A non-negative `Int8` argument (`CArg_Int8` with `CArgAllowValuesGreaterThanOrEqual(0)`):
+/// A non-negative `Int8` argument (`CArg_Int8` with `CArgAllowValuesGreaterThanOrEqual` of 0):
 /// `-searchsp`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
@@ -171,7 +165,7 @@ pub fn nonnegative_ncbi_int8(value: &str) -> Result<i64, String> {
     Ok(n)
 }
 
-/// A non-negative integer argument (`CArg_Integer` with `CArgAllowValuesGreaterThanOrEqual(0)`),
+/// A non-negative integer argument (`CArg_Integer` with `CArgAllowValuesGreaterThanOrEqual` of 0),
 /// such as `-culling_limit`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3302
@@ -194,7 +188,7 @@ pub fn report_count(value: &str) -> Result<usize, String> {
 /// hexadecimal value that the integer argument reads fails it.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-222,239
-/// `NStr::StringToInt(value)` (flags 0) is `ncbi_str::string_to_int`.
+/// `NStr::StringToInt` of `value` (flags 0) is `ncbi_str::string_to_int`.
 pub fn blastn_template_length(value: &str) -> Result<u8, String> {
     ncbi_constrained_integer(value)?;
     match crate::ncbi_str::string_to_int(value.as_bytes(), 0) {
@@ -316,14 +310,14 @@ pub fn best_hit_value(value: &str) -> Result<f64, String> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:995-1006
 pub fn genetic_code(value: &str) -> Result<u8, String> {
     let n = genetic_code_number(value).ok_or("invalid genetic code")?;
-    if !matches!(n, 1..=6 | 9..=16 | 21..=31 | 33) {
+    if !crate::ncbi_app::args::is_genetic_code(i32::from(n)) {
         return Err("unsupported genetic code".into());
     }
     Ok(n)
 }
 
 /// The number of a genetic code argument as `CArgAllowGeneticCodeInteger` converts it
-/// (`NStr::StringToInt(value)`, flags 0: `ncbi_str::string_to_int`), when it is 0 to 255 and
+/// (`NStr::StringToInt` of `value`, flags 0: `ncbi_str::string_to_int`), when it is 0 to 255 and
 /// written without a minus sign; `None` for the other values, for which LOSAT's message says
 /// "invalid" (`genetic_code`, TBLASTN's `tblastn_genetic_code`) where it says "unsupported" for
 /// a number of that range outside NCBI's codes. NCBI refuses both alike.
@@ -345,41 +339,11 @@ pub(crate) fn genetic_code_number(value: &str) -> Option<u8> {
 pub fn blastn_output_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
     use clap::builder::TypedValueParser;
     clap::builder::OsStringValueParser::new().try_map(|value| {
-        if ncbi_file_name_length(value.as_encoded_bytes()) >= 256 {
+        if crate::ncbi_app::args::file_name_length(value.as_encoded_bytes()) >= 256 {
             return Err("Illegal value, expected file name length < 256".to_string());
         }
         Ok(PathBuf::from(value))
     })
-}
-
-/// The length of NCBI's `CDirEntry::GetName` of a path: the text after the last separator
-/// once the trailing directory separators are removed (a path of one separator has none).
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-312
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:465-472
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-363
-/// On Unix, `DIR_SEPARATORS` and `ALL_SEPARATORS` are `/` (ncbifile.cpp:110-115); on
-/// Windows they are `/\` and `:/\`, with the disk name `C:`.
-fn ncbi_file_name_length(path: &[u8]) -> usize {
-    let (dir_separators, all_separators): (&[u8], &[u8]) = if cfg!(windows) {
-        (b"/\\", b":/\\")
-    } else {
-        (b"/", b"/")
-    };
-    let root = path.len() == 1 && dir_separators.contains(&path[0]);
-    let disk = cfg!(windows) && matches!(path.len(), 2 | 3) && path[1] == b':';
-    let path = if root || disk {
-        path
-    } else {
-        let end = path
-            .iter()
-            .rposition(|byte| !dir_separators.contains(byte))
-            .map_or(0, |pos| pos + 1);
-        &path[..end]
-    };
-    path.iter()
-        .rposition(|byte| all_separators.contains(byte))
-        .map_or(path.len(), |pos| path.len() - pos - 1)
 }
 
 /// A BLASTN input file: any value, as NCBI's `eInputFile` argument; `-` is standard input
@@ -451,7 +415,7 @@ pub fn blastn_real(value: &str) -> Result<f64, String> {
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1231-1243
 fn ncbi_threshold(value: &str) -> Result<f64, String> {
     let threshold = ncbi_double(value)?;
-    // `value >= m_MinValue` (a NaN fails it).
+    // The check that `value` is at least `m_MinValue` (a NaN fails it).
     let allowed =
         crate::ncbi_str::string_to_double(value.as_bytes()).is_ok_and(|checked| checked >= 0.0);
     if !allowed {
@@ -494,7 +458,7 @@ pub fn ncbi_boolean(value: &str) -> Result<bool, String> {
         .ok_or_else(|| format!("Argument cannot be converted: `{value}'"))
 }
 
-/// A `-mt_mode` value: an integer from 0 to 2 (`CArgAllowValuesBetween(0, 2, true)`).
+/// A `-mt_mode` value: an integer from 0 to 2 (`CArgAllowValuesBetween` from 0 to 2, with `true`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3176-3177
 pub fn ncbi_mt_mode(value: &str) -> Result<u8, String> {
@@ -505,7 +469,7 @@ pub fn ncbi_mt_mode(value: &str) -> Result<u8, String> {
         .ok_or_else(|| "Illegal value: expected an integer from 0 to 2".to_string())
 }
 
-/// A protein `-word_size` (`CArgAllowValuesGreaterThanOrEqual(2)` for a protein query).
+/// A protein `-word_size` (`CArgAllowValuesGreaterThanOrEqual` of 2 for a protein query).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-170
 pub fn protein_word_size(value: &str) -> Result<i32, String> {
@@ -658,7 +622,7 @@ pub const fn task_parser(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:211-255
-/// The tasks of NCBI's options factory (`GetTasks(eAll)`).
+/// The tasks of NCBI's options factory (`GetTasks` with `eAll`).
 const NCBI_TASKS: &[&str] = &[
     "blastn",
     "blastn-short",

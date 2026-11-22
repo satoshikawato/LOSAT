@@ -102,8 +102,8 @@ impl XAlignIndex {
     }
 }
 
-/// `s_IsContained(in_align, alignments[query_index], lambda)`: from the query's index if it has
-/// one, else from NCBI's list `list`.
+/// `s_IsContained` (with `in_align`, `alignments[query_index]` and `lambda`): from the query's
+/// index if it has one, else from NCBI's list `list`.
 #[inline]
 pub(crate) fn x_contains(
     indexes: &XAlignIndexes,
@@ -118,9 +118,10 @@ pub(crate) fn x_contains(
     }
 }
 
-/// `s_WithDistinctEnds(&newAlign, &alignments[query_index], ..., is_same_adjustment)`: into the
-/// query's index if it has one, else into NCBI's list `list`, which moves into a new index (and
-/// `list` becomes `None`) once it holds `index_from` alignments (`None`: never, the switch off).
+/// `s_WithDistinctEnds` (with the new alignment `newAlign`, `alignments[query_index]` and
+/// `is_same_adjustment`): into the query's index if it has one, else into NCBI's list `list`, which
+/// moves into a new index (and `list` becomes `None`) once it holds `index_from` alignments
+/// (`None`: never, the switch off).
 #[inline]
 pub(crate) fn x_add_distinct(
     indexes: &mut XAlignIndexes,

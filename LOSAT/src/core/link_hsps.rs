@@ -150,9 +150,9 @@ impl EvenGapLinkParams {
         }
     }
 
-    /// The query frame of the linking a context belongs to: `context / strand_factor`
-    /// (link_hsps.c:513; `strand_factor` is 3 for a translated query, else 1), with the division
-    /// by a constant.
+    /// The query frame of the linking a context belongs to: the context divided by `strand_factor`
+    /// (link_hsps.c:513; `strand_factor` is 3 for a translated query, else 1), with the division by
+    /// a constant.
     fn query_frame(&self, context: usize) -> usize {
         if self.query_translated {
             context / 3
@@ -177,13 +177,13 @@ pub(crate) struct LinkCutoffs {
 /// `gap_decay_rate` `BLAST_GAP_DECAY_RATE`, blast_parameters.c:609-617).
 /// `kbp` is the Karlin block of the context with the smallest positive Lambda
 /// (`s_BlastFindSmallestLambda` on `sbp->kbp`); `avg_query_length` NCBI's average of the
-/// contexts' lengths, `(contexts[last].query_offset + contexts[last].query_length - 1) /
-/// (last_context + 1)`; `subject_length` the subject's length as the search gives it
+/// contexts' lengths: the last context's `query_offset` plus its `query_length`, less 1, divided
+/// by one more than `last_context`; `subject_length` the subject's length as the search gives it
 /// (`seq_arg.seq->length`, in nucleotides for a translated subject); `db_length`
 /// `BlastSeqSrcGetTotLen`; `subject_translated` `Blast_SubjectIsTranslated` (or RPS-TBLASTN);
 /// `cutoff_score_min` gives `word_params->cutoff_score_min`, which NCBI reads only for a search
 /// space of more than 8 windows. NCBI then multiplies both cutoffs by
-/// `(Int4)sbp->scale_factor`, which is 1 in the searches that call this (BLASTX and TBLASTX;
+/// `sbp->scale_factor` cast to `Int4`, which is 1 in the searches that call this (BLASTX and TBLASTX;
 /// only an RPS search scales its matrix), so the factor is left out.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1011-1081
@@ -288,10 +288,10 @@ const LARGE: usize = 1;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-97 (LinkHSPStruct, BlastHSPLink)
 /// `LinkHSPStruct`; the links are slots of `even_gap_link_hsps`'s `nodes` (slot 0 is `hp_start`, the HSP of
 /// sorted position `i` is slot `i + 1`). `num` is NCBI's `Int2`: a set of more than 32,767 HSPs
-/// wraps on the store `H->hsp_link.num[index] = H_hsp_num+1` (an `Int4` converted to `Int2`,
-/// deterministic, so kept as NCBI's; the sums are `i64`, Owner 2026-10-10, as their `Int4`
-/// overflow is undefined), and every later reading takes the wrapped value: the sum statistics
-/// then give a set of a count below 1 the E-value 0 (`s_BlastSumP` returns 0 for `r < 1`).
+/// wraps on the store of `H_hsp_num` plus 1 into `H->hsp_link.num[index]` (an `Int4` converted to
+/// `Int2`, deterministic, so kept as NCBI's; the sums are `i64`, Owner 2026-10-10, as their `Int4`
+/// overflow is undefined), and every later reading takes the wrapped value: the sum statistics then
+/// give a set of a count below 1 the E-value 0 (`s_BlastSumP` returns 0 for `r < 1`).
 #[derive(Debug, Clone, Default)]
 struct Node {
     link: [Link; 2],
@@ -343,7 +343,8 @@ impl From<Option<usize>> for Link {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:100-109
-/// `LinkHelpStruct` (`maxsum1` is read only in NCBI's disabled `if(0)` test, so it is not kept).
+/// `LinkHelpStruct` (`maxsum1` is read only in a test that NCBI disables with the constant 0 as
+/// its condition, so it is not kept).
 #[derive(Debug, Clone, Copy, Default)]
 struct Helper {
     ptr: usize,
@@ -354,11 +355,12 @@ struct Helper {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:276-318
-/// `s_RevCompareHSPsTbn`, with the query frame (`frame1`, `frame2`: `context / strand_factor`) in
-/// place of `context`: `s_RevCompareHSPsTbx` (link_hsps.c:331-375) for a translated query, whose
-/// `NUM_FRAMES / 2` is the `strand_factor` 3 (its subjects are not translated, so their frames
-/// are 0 and the sign test below changes nothing). Of two frames of different signs the larger
-/// frame has the larger sign, so the test is an ascending comparison of the signs.
+/// `s_RevCompareHSPsTbn`, with the query frame (`frame1`, `frame2`: the context divided by
+/// `strand_factor`) in place of `context`: `s_RevCompareHSPsTbx` (link_hsps.c:331-375) for a
+/// translated query, whose `strand_factor` 3 is half of `NUM_FRAMES` (its subjects are not
+/// translated, so their frames are 0 and the sign test below changes nothing). Of two frames of
+/// different signs the larger frame has the larger sign, so the test is an ascending comparison of
+/// the signs.
 fn rev_compare_tbn(h1: &LinkHsp, frame1: usize, h2: &LinkHsp, frame2: usize) -> Ordering {
     frame1
         .cmp(&frame2)
@@ -385,9 +387,9 @@ fn fwd_compare(h1: &SortedHsp, h2: &SortedHsp) -> Ordering {
 }
 
 /// An HSP in the order of the first sort, with what the linking reads of it on every pass: its
-/// query frame (`context / strand_factor`) and the terms its score adds to a set's `xsum`,
-/// `score * kbp[context]->Lambda` and `kbp[context]->logK` (the same values NCBI computes on each
-/// pass, so the sums keep their bits).
+/// query frame (the context divided by `strand_factor`) and the terms its score adds to a set's
+/// `xsum`, the score times `kbp[context]->Lambda` and `kbp[context]->logK` (the same values NCBI
+/// computes on each pass, so the sums keep their bits).
 #[derive(Debug, Clone, Copy)]
 struct SortedHsp {
     hsp: LinkHsp,
@@ -591,7 +593,7 @@ struct LinkConstants {
     subject_translated: bool,
 }
 
-/// The linking of one query frame (`for (frame_index=0; ...)` of `s_BlastEvenGapLinkHSPs`).
+/// The linking of one query frame (the loop of `s_BlastEvenGapLinkHSPs` over `frame_index`, from 0).
 #[allow(clippy::too_many_arguments)]
 fn link_frame(
     nodes: &mut [Node],
@@ -647,8 +649,9 @@ fn link_frame(
     }
 
     let score_of = |slot: usize| hsp_of(slot).score as i64;
-    // `H_hsp_xsum + score*kbp[H->hsp->context]->Lambda - kbp[H->hsp->context]->logK`, added in
-    // C's order: the score's term first, then logK subtracted.
+    // `H_hsp_xsum` plus the score times `kbp[H->hsp->context]->Lambda`, minus
+    // `kbp[H->hsp->context]->logK`, added in C's order: the score's term first, then logK
+    // subtracted.
     let add_xsum = |h_hsp_xsum: f64, slot: usize| {
         let s = &sorted[slot - 1];
         h_hsp_xsum + s.score_lambda - s.log_k

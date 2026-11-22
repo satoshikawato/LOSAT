@@ -32,7 +32,7 @@ impl RangeRole {
 }
 
 /// A range as given on the command line, 0-based and closed (`TSeqRange` after
-/// `from--, to--`); it is not limited to the length of any record.
+/// one is taken from each of `from` and `to`); it is not limited to the length of any record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SequenceRange {
     pub from: usize,
@@ -90,7 +90,8 @@ pub fn parse_sequence_range(value: &str, role: RangeRole) -> Result<SequenceRang
     })
 }
 
-/// Parses the range of a role when it was given (`args.Exist(...) && args[...]`).
+/// Parses the range of a role when it was given (`args.Exist` is true for the argument and `args`
+/// holds a value for it).
 pub fn parse_optional_range(value: Option<&str>, role: RangeRole) -> Result<Option<SequenceRange>> {
     value
         .map(|value| parse_sequence_range(value, role))
@@ -298,9 +299,13 @@ impl QueryInput {
     }
 
     /// The query batches of the input with a fixed batch size: NCBI reads batches while
-    /// records remain (`!input.End()`), so a batch can hold only skipped records (NCBI then
+    /// records remain (`End` of the input is false), so a batch can hold only skipped records (NCBI then
     /// stops with `Empty CBlastQueryVector`, and no batch follows). A batch size of 0
-    /// reads no record: one empty batch.
+    /// reads no record: one empty batch. Each record counts its own letters: under
+    /// `-parse_deflines` NCBI's reader counts a record otherwise only where it repeats an id of
+    /// its scope (`query_batch::BatchCount`), and the run stops at the batch of the first such
+    /// record (`query_batch::QueryScopes::add_batch`), so the batches before it are NCBI's and the
+    /// program's loop (`query_batch::read_query_batches`) cuts that batch as NCBI does.
     pub fn batches(&self, batch_size: u32) -> Vec<RangedBatch> {
         let mut batches = Vec::new();
         let mut start = 0;
@@ -404,12 +409,29 @@ pub fn next_ranged_batch(
     start: usize,
     batch_size: u32,
 ) -> (usize, bool) {
+    next_counted_batch(input_lengths.len(), start, batch_size, &mut |record| {
+        if skipped[record] {
+            0
+        } else {
+            input_lengths[record]
+        }
+    })
+}
+
+/// `next_ranged_batch` of `records` input records, each counted by `count` (of its index, every
+/// record read in turn): 0 for a skipped record, else NCBI's `sequence::GetLength` of the
+/// record's id in the scope, which is the record's own length but for a repeated id under
+/// `-parse_deflines` (`query_batch::BatchCount`).
+pub fn next_counted_batch(
+    records: usize,
+    start: usize,
+    batch_size: u32,
+    count: &mut dyn FnMut(usize) -> usize,
+) -> (usize, bool) {
     let mut end = start;
     let mut size_read: u32 = 0;
-    while end < input_lengths.len() && size_read < batch_size {
-        if !skipped[end] {
-            size_read = size_read.wrapping_add(input_lengths[end] as u32);
-        }
+    while end < records && size_read < batch_size {
+        size_read = size_read.wrapping_add(count(end) as u32);
         end += 1;
     }
     (end, size_read >= batch_size)

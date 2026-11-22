@@ -4,7 +4,7 @@
 //! a port of zlib's inflate, for deflate; bzip2's libbz2-rs-sys backend; ruzstd), as the pure-Rust
 //! runtime boundary requires.
 //!
-//! A `.gz` file is read as makeblastdb's `CDecompressIStream(f, eGZipFile)` reads it
+//! A `.gz` file is read as makeblastdb's `CDecompressIStream` on the file with `eGZipFile` reads it
 //! (`GzipMembers`, a port of `CZipDecompressor` with the flags `fGZip`): each member's header is
 //! looked for in the next 4 KiB of the file and skipped by makeblastdb's own parser (its header
 //! CRC is not checked), the deflate data is inflated raw, and the 8-byte trailer is skipped
@@ -170,7 +170,7 @@ impl Progress {
 ///
 /// NCBI reference (598d8ae6): c++/include/util/compress/compress.hpp:510-521, 532-540
 /// `step` is `Process` (`at_end` false) and `Finish` (`at_end` true, after the last input) in
-/// one: `Progress::taken` is `in_len - *in_avail`, `Progress::written` is `*out_avail`,
+/// one: `Progress::taken` is `in_len` less `*in_avail`, `Progress::written` is `*out_avail`,
 /// `Progress::ended` is `eStatus_EndOfData`, and an error is `eStatus_Error`.
 pub struct Inflater {
     core: Core,
@@ -441,8 +441,8 @@ enum GzipState {
 }
 
 /// The inflated bytes of a `.gz` file, read as makeblastdb reads them: a port of NCBI's
-/// `CZipDecompressor` with the flags of `CDecompressIStream::eGZipFile` (`fGZip` =
-/// `fCheckFileHeader | fWriteGZipFormat | fAllowConcatenatedGZip`, of which `fWriteGZipFormat`
+/// `CZipDecompressor` with the flags of `CDecompressIStream::eGZipFile` (`fGZip` is
+/// `fCheckFileHeader`, `fWriteGZipFormat` and `fAllowConcatenatedGZip` together, of which `fWriteGZipFormat`
 /// concerns only the compressor; not `fAllowTransparentRead` nor `fAllowEmptyData`), as
 /// `CCompressionStreambuf` drives it. Where makeblastdb's stream gives bytes, this gives the same
 /// bytes; where it fails, the read fails, with LOSAT's message (line GZ, DECISIONS 5, narrowed for
@@ -797,7 +797,7 @@ enum ZstdState {
 /// The input is pushed (`step`); ruzstd reads from a `Read`. Each call of ruzstd is made on a
 /// slice that holds its whole unit: a frame header (`FrameDecoder::reset`) or a block with,
 /// after the frame's last block, the frame's `Content_Checksum` (`FrameDecoder::decode_blocks`
-/// with `UptoBlocks(1)`), sized from their first bytes (`frame_header_len`, `block_len`). The
+/// up to one block, `UptoBlocks`), sized from their first bytes (`frame_header_len`, `block_len`). The
 /// slice is the piece of input itself where it holds the whole unit, else the unit gathered in
 /// `unit` from the pieces (`gather`, `decode_unit`). At the end of the input a unit that is
 /// not whole is given as it is, so that ruzstd fails on it as it failed on a source at its end.
@@ -827,12 +827,13 @@ struct ZstdFrames {
     /// 270.6 MiB where the window is 91.7 MiB). The first frame's header is therefore read a
     /// second time, with the `reset` of a decoder that has its state, which reserves what every
     /// later frame reserves. Every frame and input, no size rule.
-    /// ruzstd 0.9.1 reference: src/decoding/frame_decoder.rs:200-210 (`FrameDecoder::reset`:
-    /// ), 103-119 (`FrameDecoderState::new`: `DecoderScratch::new(window_size)`, whose
+    /// ruzstd 0.9.1 reference: src/decoding/frame_decoder.rs:200-210 (`FrameDecoder::reset`: the
+    /// reset of a decoder that has its state, a new state otherwise), 103-119
+    /// (`FrameDecoderState::new`: `DecoderScratch::new` with `window_size`, whose
     /// `DecodeBuffer::new` reserves nothing, src/decoding/decode_buffer.rs:35-44), 121-134
-    /// (`FrameDecoderState::reset`: `decoder_scratch.reset(window_size)`), decode_buffer.rs:46-49
-    /// (`DecodeBuffer::reset`: `self.buffer.reserve(self.window_size)`), ringbuffer.rs:64-100
-    /// (`reserve`, `reserve_amortized`: the doubling).
+    /// (`FrameDecoderState::reset`: the reset of `decoder_scratch` with `window_size`),
+    /// decode_buffer.rs:46-49 (`DecodeBuffer::reset`: the reserve of `self.window_size` in
+    /// `self.buffer`), ringbuffer.rs:64-100 (`reserve`, `reserve_amortized`: the doubling).
     reserved: bool,
 }
 
@@ -885,7 +886,7 @@ const ZSTD_MAX_BLOCK_SIZE: usize = 128 * 1024;
 /// ruzstd 0.9.1 reference: src/decoding/block_decoder.rs:214-260 (`read_block_header`:
 /// `content_size` = Block_Size for raw and compressed, 1 for RLE), 224-231 (the 3 bytes read,
 /// then the reserved type and `block_content_size` refused), 283-290 (`block_content_size`:
-/// `val > MAX_BLOCK_SIZE`), src/common/mod.rs:21 (`MAX_BLOCK_SIZE: u32 = 128 * 1024`),
+/// `val` above `MAX_BLOCK_SIZE`), src/common/mod.rs:21 (`MAX_BLOCK_SIZE: u32 = 128 * 1024`),
 /// src/decoding/frame_decoder.rs:347-358 (the checksum after the last block, in the same
 /// `decode_blocks`); RFC 8878 3.1.1.2.
 fn block_len(unit: &[u8], checksum: bool) -> usize {

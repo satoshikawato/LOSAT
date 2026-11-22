@@ -12,8 +12,8 @@ use super::params::LinkHspCutoffs;
 /// with a translated subject: the subject's and the database's lengths in nucleotides
 /// are divided by 3). The small-gap cutoff is 0 (`LinkHspCutoffs::ignore_small_gaps`) only in
 /// the branch of a search space of at most 8 windows, the one that sets `gap_prob` to 0: otherwise
-/// it is at least `cutoff_score_min`, the smallest context cutoff `MIN(e-value cutoff, gap_trigger,
-/// cutoff_score_max)`, each at least 1 (BLAST_Cutoffs raises a cutoff from 1 only,
+/// it is at least `cutoff_score_min`, the smallest context cutoff (the least of the e-value cutoff, `gap_trigger`
+/// and `cutoff_score_max`), each at least 1 (BLAST_Cutoffs raises a cutoff from 1 only,
 /// blast_stat.c:4090-4130; the 22-bit gap trigger of TBLASTX's matrices is positive).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455

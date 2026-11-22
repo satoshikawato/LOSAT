@@ -111,6 +111,11 @@ pub struct BlastnArgs {
     /// (`DbMaskOption::resolve`, in `run::search`); `None` before, and for a search without it.
     #[arg(skip)]
     pub db_mask_resolved: Option<crate::blastinput::db_mask::ResolvedMask>,
+    /// The MegaBLAST database index that the search uses (`-use_index true` that NCBI's loader
+    /// kept, `blast_engine::mb_index`, set in `run::search`); `None` before, and for a search
+    /// without one.
+    #[arg(skip)]
+    pub(crate) megablast_index_loaded: Option<std::sync::Arc<crate::dbindex::search::LoadedIndex>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // No constraint and no dependency: read with `-db` and with `-subject`
     // (`BlastnArgs::db_length`).
@@ -167,9 +172,10 @@ pub struct BlastnArgs {
     /// `-use_index` as NCBI's handler reads it (`blast_engine::mb_index`): ignored with
     /// `-subject` and for a task other than megablast; with `-db` and megablast, NCBI loads the
     /// database's index. When it loads none, or the word size is below the index's, NCBI warns
-    /// and searches without it, which LOSAT does; LOSAT refuses an index that NCBI searches with
-    /// (it has no indexed search yet, line RG item D5b).
-    #[arg(long, value_name = "boolean", value_parser = ncbi_boolean, help = "Use MegaBLAST database index (an index that would be used is not supported) [default: false]")]
+    /// and searches without it; otherwise it searches with the index. LOSAT does both, and
+    /// refuses an index of only some database volumes, a two-hit search and `-db_hard_mask`
+    /// with an index (line RG items D5b-3 and D5b-5).
+    #[arg(long, value_name = "boolean", value_parser = ncbi_boolean, help = "Use MegaBLAST database index [default: false]")]
     pub use_index: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3359-3362
     /// `-index_name`: the old-style index of `-use_index true` (`megablast_index_name`); without
@@ -337,7 +343,7 @@ pub struct BlastnArgs {
     #[arg(skip)]
     pub window_masker_registry:
         Option<Result<crate::blastinput::ncbi_environment::WindowMaskerRegistry, String>>,
-    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath` of `taxdb.bti`), asked
     /// before the search where a tabular field list looks every taxid up (the plural names of the
     /// taxonomy database, the organism report; `algorithm::blastn::tabular`), by the command line
     /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no
@@ -492,6 +498,13 @@ pub struct BlastnArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
+    /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
+    /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
+    /// stops in the command line's form (line WQA D10 round 5, 2026-11-20). `None` on the command
+    /// line. Not a public option.
+    #[arg(skip)]
+    pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
 }
 
 impl BlastnArgs {

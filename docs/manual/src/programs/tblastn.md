@@ -75,6 +75,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-window_size` | 40 | Two-hit window; 0 selects the one-hit method |
 | `-ungapped` | off | Search without gaps (with `-comp_based_stats 0`) |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+| `-best_hit_overhang`, `-best_hit_score_edge` | off (0.1 for the one not given) | Keep only the best alignments for each region of the query (the Best Hit algorithm). Values above 0 and below 0.5; not with `-culling_limit` |
 | `-subject_besthit` | off | Keep only the best alignment of each subject for each part of the query |
 
 For every option: `losat tblastn -help`.
@@ -116,7 +117,6 @@ LOSAT stops with an error for these `tblastn` settings instead of running someth
 
 - `-use_sw_tback`.
 - With `-ungapped`, a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`, or a matrix file that NCBI BLAST+ finds.
-- `-best_hit_overhang` and `-best_hit_score_edge`.
 - An infinite `-evalue` (`+inf`, `1e999`), and an `-evalue` of 1.7976931348623157e308 with composition-based statistics (`-comp_based_stats` 1 to 3).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.

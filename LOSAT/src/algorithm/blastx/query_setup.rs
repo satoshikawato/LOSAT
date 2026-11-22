@@ -70,7 +70,7 @@ impl PreparedQueryBatch {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:123-136
 pub const BATCH_SIZE: usize = 10002;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:134-139
-/// The letters of RPSTBLASTN's query batch (`GetQueryBatchSize(eRPSTblastn)`, the `default:`
+/// The letters of RPSTBLASTN's query batch (`GetQueryBatchSize` of `eRPSTblastn`, the `default:`
 /// case; DECISIONS 38 D10): its batches are read with it, never split (`rps_search::translated`).
 pub const RPSTBLASTN_BATCH_SIZE: usize = 10000;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:139-165
@@ -332,7 +332,7 @@ pub(crate) fn prepare_unit_queries(
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
             }
         }
-        // SEG's intervals first, as `BlastSeqLocAppend(filter_out, lcase_mask_slp)`: the sort of
+        // SEG's intervals first, as `BlastSeqLocAppend` of `lcase_mask_slp` to `filter_out`: the sort of
         // `BlastSeqLocCombine` compares only the left ends, and a one-letter run on the first letter
         // of a SEG interval is merged only in this order (the results' masks).
         masks.extend_from_slice(&context.lowercase_masks);

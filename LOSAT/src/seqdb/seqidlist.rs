@@ -1,10 +1,10 @@
 //! A seqid list file (line DI-8b: `-seqidlist`, `-negative_seqidlist`), read as NCBI's
-//! `CSeqDBFileGiList(fname, eSiList)` reads it (`SeqDB_ReadSiList`): a binary list made by
-//! `blastdb_aliastool -seqid_file_in` (its first byte is NUL; `CSeqidlistRead`), else text
+//! `CSeqDBFileGiList` with `fname` and `eSiList` reads it (`SeqDB_ReadSiList`): a binary list made
+//! by `blastdb_aliastool -seqid_file_in` (its first byte is NUL; `CSeqidlistRead`), else text
 //! (`SeqDB_ReadMemorySiList`: white-space separated tokens, a leading `>` skipped, `#` to
 //! the end of the line a comment). The ids of a text list are then parsed and rewritten
 //! for a version 5 database as `s_ProcessSeqIDsForV5` rewrites them: `gi|N` dropped, `pir`
-//! and `prf` ids in FASTA form, every other id as `CSeq_id::GetSeqIdString(true)` (the
+//! and `prf` ids in FASTA form, every other id as `CSeq_id::GetSeqIdString` with true (the
 //! upper-cased accession with its version when given), sorted and unique.
 
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, PARTIAL_OK, RAW_TEXT};
@@ -18,7 +18,7 @@ use crate::seqid::ParsedSeqId;
 /// list carries its header.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeqidListInfo {
-    /// A text list (`is_v4 = true`, the constructor's default); `false` for a binary list.
+    /// A text list (`is_v4` is true, the constructor's default); `false` for a binary list.
     pub is_v4: bool,
     pub file_size: u64,
     pub num_ids: u64,
@@ -241,12 +241,12 @@ pub fn process_for_v5(
     Ok(out)
 }
 
-/// `fParse_RawText | fParse_AnyLocal | fParse_PartialOK`, the flags of a list id's `CSeq_id`.
+/// `fParse_RawText`, `fParse_AnyLocal` and `fParse_PartialOK`, the flags of a list id's `CSeq_id`.
 const LIST_ID_FLAGS: u32 = RAW_TEXT | ANY_LOCAL | PARTIAL_OK;
 
-/// `CSeq_id(text, fParse_RawText | fParse_AnyLocal | fParse_PartialOK)`, the parse of a
-/// list id where nothing is posted: the lookup files' ids and the processed ids, one part
-/// each ([`process_for_v5`] posts the warnings of the list's tokens).
+/// `CSeq_id` of `text` with the flags `fParse_RawText`, `fParse_AnyLocal` and `fParse_PartialOK`,
+/// the parse of a list id where nothing is posted: the lookup files' ids and the processed ids, one
+/// part each ([`process_for_v5`] posts the warnings of the list's tokens).
 pub fn parse_list_id(text: &[u8]) -> Result<ParsedSeqId, SeqIdError> {
     seq_id_from_text(text, LIST_ID_FLAGS, &mut |_| {})
 }

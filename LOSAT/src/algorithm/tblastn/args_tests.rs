@@ -605,3 +605,34 @@ fn an_ungapped_search_keeps_a_matrix_of_no_table_for_its_setup() {
         );
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328,3341-3346
+// `-best_hit_overhang` / `-best_hit_score_edge`: above 0 and below 0.5, the one not given takes
+// 0.1, neither given is no filter, and `-culling_limit` excludes both (NCBI refuses the command
+// line; LOSAT's parser too).
+#[test]
+fn best_hit_options_are_read_as_ncbi_reads_them() {
+    use crate::core::hspfilter_besthit::BestHitParams;
+    let best_hit = |extra: &[&str]| parse(extra).unwrap().resolve().unwrap().best_hit;
+    assert_eq!(best_hit(&[]), None);
+    assert_eq!(
+        best_hit(&["-best_hit_overhang", "0.25"]),
+        Some(BestHitParams {
+            overhang: 0.25,
+            score_edge: 0.1
+        })
+    );
+    assert_eq!(
+        best_hit(&["-best_hit_score_edge", "0.05", "-best_hit_overhang", "0.3"]),
+        Some(BestHitParams {
+            overhang: 0.3,
+            score_edge: 0.05
+        })
+    );
+    for value in ["0", "0.5", "-0.1", "nan", "x"] {
+        assert!(parse(&["-best_hit_overhang", value]).is_err(), "{value}");
+        assert!(parse(&["-best_hit_score_edge", value]).is_err(), "{value}");
+    }
+    assert!(parse(&["-culling_limit", "1", "-best_hit_overhang", "0.1"]).is_err());
+    assert!(parse(&["-culling_limit", "0", "-best_hit_score_edge", "0.1"]).is_err());
+}

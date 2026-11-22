@@ -63,7 +63,7 @@ pub(crate) struct FastaStream<R: Read> {
     /// Whether lines are copied from the buffered input at once while no pushback buffer
     /// is active (LOSAT's speed). Tests turn it off to compare with one byte at a time.
     pub(crate) bulk: bool,
-    /// Whether the input has no stream position, as a pipe has none (`tellg() < 0` of
+    /// Whether the input has no stream position, as a pipe has none (a negative `tellg()` in
     /// `IsIStreamEmpty`; `input_files::has_stream_position`): then it is never empty.
     no_position: bool,
 }
@@ -241,7 +241,7 @@ impl<R: Read> FastaStream<R> {
     }
 
     /// `getline` with the one delimiter `eol`, which also gives the first position of
-    /// `watch` in the line (the `m_Line.find(alt_eol)` of `x_AdvanceEOLSimple`, found while
+    /// `watch` in the line (the `find` of `alt_eol` in `m_Line` in `x_AdvanceEOLSimple`, found while
     /// the line is read: LOSAT's speed only).
     fn getline_watching(&mut self, eol: u8, watch: u8, line: &mut Vec<u8>) -> Option<usize> {
         line.clear();
@@ -613,7 +613,7 @@ impl<R: Read> LineReader<R> {
         self.unget_line = true;
     }
 
-    /// `++reader` followed by `*reader`: the next line (the ungot line again after
+    /// An increment of the reader followed by its dereference: the next line (the ungot line again after
     /// `UngetLine`, an empty line at the end).
     ///
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:154-175
@@ -654,7 +654,7 @@ impl<R: Read> LineReader<R> {
     }
 
     /// `FastaReader::x_start_at`: a line reader that has read nothing counts its lines from `lines`.
-    /// No NCBI counterpart: `CStreamLineReader` starts at `m_LineNumber(0)` (line_reader.cpp:86-92,
+    /// No NCBI counterpart: `CStreamLineReader` starts with `m_LineNumber` at 0 (line_reader.cpp:86-92,
     /// `LineReader`); a reader of a part of the file starts where the file's one reader is.
     #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
     pub(crate) fn x_start_at(&mut self, lines: u64) {

@@ -67,7 +67,8 @@ mod db_masked;
 // extensions, then its gapped half, from the subject's letters to its HSP lists.
 mod prelim_kernel;
 // The preliminary stage of a call after its kernel (`run_call`): the choice of the pool and the
-// call's branch (RPS-BLAST, PSSM, query blocks, a database's blocks, a subject set).
+// call's branch (RPS-BLAST, PSSM, query blocks, a database's blocks, a subject set); the close of
+// its stream and the sort of its preliminary lists.
 mod prelim_run;
 // EXPERIMENT (LOSAT_X_BPIHPOOL): the arrays of initial hits past NCBI's first size in one pool
 // shared by the threads.
@@ -85,7 +86,8 @@ mod x_subject_runs;
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects' tabular IDs and titles of the block search made
 // once for all blocks (held by `x_query_blocks::XBlockSubjects`).
 pub(super) mod x_subject_meta;
-// `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo.
+// `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo; the
+// steps after any traceback on the final hit lists.
 mod traceback;
 // The composition-based redo: its parameters of each query, its plan and its paths (`run_call`).
 mod redo_run;
@@ -131,8 +133,8 @@ use super::gapalign::{
 };
 use super::hsp::{
     collect_hits_and_methods_from_hit_lists, fill_results_from_compo_heaps,
-    hit_list_to_seqalign_order, reap_hsplist_by_evalue, trim_by_max_hsps, update_best_evalue,
-    BlastCompoHeap, BlastpHitList, BlastpHsp, BlastpHspList,
+    hit_list_to_seqalign_order, reap_hsplist_by_evalue, BlastCompoHeap, BlastpHitList, BlastpHsp,
+    BlastpHspList,
 };
 use super::kappa::{
     blastp_kappa_range_counters_env_enabled, print_blastp_kappa_range_counters,
@@ -140,7 +142,6 @@ use super::kappa::{
 };
 use super::protein_query_split::protein_query_split_sizes;
 use super::x_prelim_compact::{x_expanded_lists, x_finish_compact_lists, XPrelimHsp};
-use crate::core::blast_hits::reap_by_query_coverage;
 // No NCBI counterpart: matches per Newton lanes prefetch in the BLASTP redo loops; it does not
 // change any value NCBI computes.
 const X_NEWTON_LANES_MATCHES: usize = 16;
@@ -8951,6 +8952,26 @@ impl PrelimOnly<'_> {
     fn is_chunk(&self) -> bool {
         matches!(self, PrelimOnly::Chunk(_))
     }
+
+    /// Hands the call's hit lists to its caller where its preliminary stage ends (`run_call`).
+    fn hand_off(
+        self,
+        mut preliminary_hit_lists: Vec<Option<BlastpHitList>>,
+        mut x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>>,
+    ) {
+        match self {
+            PrelimOnly::Chunk(chunk_lists) => {
+                // A chunk's lists leave as `BlastpHitList`s of full HSPs, so the chunk merge
+                // (`query_split.rs`) reads what it reads from a search without chunks.
+                x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
+                *chunk_lists = preliminary_hit_lists;
+            }
+            // EXPERIMENT (LOSAT_X_BPQBLOCK): a block's lists leave compact, to the search of all
+            // queries, which moves them to their queries (`x_blocks`); the block's table and
+            // scratch are freed when `run_call` returns right after this.
+            PrelimOnly::Block { lists, .. } => *lists = x_compact_hit_lists,
+        }
+    }
 }
 
 /// A call of the batches of `query_records` (`run_call`), and, with `-export_search_strategy`, the
@@ -9581,18 +9602,7 @@ fn run_call(
     // A query chunk's preliminary stage ends here, before its stream is closed: its hit
     // lists merge into the batch's (`search_split_query_batches`).
     if let Some(prelim) = prelim {
-        match prelim {
-            PrelimOnly::Chunk(chunk_lists) => {
-                // A chunk's lists leave as `BlastpHitList`s of full HSPs, so the chunk merge
-                // (`query_split.rs`) reads what it reads from a search without chunks.
-                x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
-                *chunk_lists = preliminary_hit_lists;
-            }
-            // EXPERIMENT (LOSAT_X_BPQBLOCK): a block's lists leave compact, to the search of all
-            // queries, which moves them to their queries (`x_blocks`); the block's table and
-            // scratch are freed here.
-            PrelimOnly::Block { lists, .. } => *lists = x_compact_hit_lists,
-        }
+        prelim.hand_off(preliminary_hit_lists, x_compact_hit_lists);
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Search, t_search);
         return Ok(());
     }
@@ -9627,52 +9637,14 @@ fn run_call(
         reports.x_prolog,
         reports.call_requests,
     )?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846
-    // `ADAPTIVE_CBS`: the stream's close trims each query's preliminary hit list
-    // (`core::blast_hspstream`) before the subjects of the lists are read. RPSBLAST's engine
-    // trims each volume's lists itself (`rps_search::engine`); PSIBLAST's traceback size is its
-    // preliminary size, 1500 or more here, so it never trims.
-    if args.rps_search.is_none()
-        && crate::core::blast_hspstream::adaptive_cbs_close(
-            args.comp_based_stats.is_enabled(),
-            args.traceback_hitlist_size(),
-        )
-    {
-        let hitlist_size = args.traceback_hitlist_size();
-        for hit_list in preliminary_hit_lists.iter_mut().flatten() {
-            hit_list.cbs_close_trim(hitlist_size);
-        }
-        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
-            hit_list.cbs_close_trim(hitlist_size);
-        }
-    }
-
+    prelim_run::close_stream(&args, &mut preliminary_hit_lists, &mut x_compact_hit_lists);
     let t_search = crate::utils::xtiming::clock();
-    // The lists in the order in which the redo reads them, before a database's subjects are
-    // listed: the lists that its fetch excludes keep their place in that order as marks
-    // (`database::exclude_fetched`, line RG item X4-excl). The sort's last key, the subject, gives
-    // the same order by ordinal id as by rank (ranks are the listed ordinal ids in order).
-    let merge_sort_start = blastp_timing_start(timing_enabled);
-    // (rpsblast: the RPS engine sorted its lists, `rps_search::engine::finish_volume_list`; over
-    // several volumes the merged lists keep `s_MergeAlignSet`'s order, which NCBI sorts nowhere.)
-    if args.rps_search.is_none() {
-        for hit_list_opt in &mut preliminary_hit_lists {
-            if let Some(hit_list) = hit_list_opt.as_mut() {
-                hit_list.sort_by_evalue();
-            }
-        }
-        // The same sort of the compact lists.
-        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
-            hit_list.sort_by_evalue();
-        }
-    }
-    if let Some(timing) = timing.as_ref() {
-        BlastpTiming::record_call(
-            &timing.prelim_merge_sort_ns,
-            &timing.prelim_merge_sort_calls,
-            merge_sort_start,
-        );
-    }
+    prelim_run::sort_preliminary_lists(
+        &args,
+        &mut preliminary_hit_lists,
+        &mut x_compact_hit_lists,
+        timing.as_deref(),
+    );
 
     // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
     // and stand for the subject set in the redo; the hit lists name them by their rank
@@ -9935,75 +9907,13 @@ fn run_call(
     }
 
     let final_traceback_start = blastp_timing_start(timing_enabled);
-    for hit_list_opt in &mut hit_lists {
-        if let Some(hit_list) = hit_list_opt.as_mut() {
-            // `-culling_limit`: the culling pipe is the first step after the traceback
-            // (`BlastHSPStreamTBackClose`, blast_traceback.c:1721), before `-max_hsps` and
-            // `-qcov_hsp_perc` (blast_traceback.c:1763-1766), before the e-value sort and the
-            // prune, and before the `-query_loc` shift of the coordinates below. The best hit
-            // pipe of `-best_hit_*` is in the same place (the options exclude each other).
-            if args.culling_limit > 0 {
-                culling::cull_traceback(hit_list, args.culling_limit);
-            } else if let Some(params) = args.best_hit {
-                besthit::best_hit_traceback(hit_list, params, prelim_hitlist_size);
-            }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:845-865
-            // The e-value sort below reads the best e-value and the first HSP of each list,
-            // which `-max_hsps` keeps, so it follows the cut as NCBI's does.
-            if args.max_hsps_per_subject > 0
-                || args.query_cov_hsp_perc > 0.0
-                || args.subject_besthit
-            {
-                for hsp_list in hit_list
-                    .hsplist_array
-                    .iter_mut()
-                    .take(hit_list.hsplist_count)
-                {
-                    trim_by_max_hsps(hsp_list, args.max_hsps_per_subject);
-                    if reap_by_query_coverage(&mut hsp_list.hsps, args.query_cov_hsp_perc, |hsp| {
-                        (
-                            hsp.q_start as i64 - 1,
-                            hsp.q_end as i64,
-                            hsp.query_length as i64,
-                        )
-                    }) {
-                        update_best_evalue(hsp_list);
-                    }
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:858-861
-                    // `-subject_besthit` (one context per query; the best e-value stays).
-                    if args.subject_besthit {
-                        crate::core::blast_hits::subject_besthit(
-                            &mut hsp_list.hsps,
-                            false,
-                            |hsp| crate::core::blast_hits::BestHitExtent {
-                                context: 0,
-                                query_frame: 0,
-                                offset: hsp.q_start as i64 - 1,
-                                end: hsp.q_end as i64,
-                                query_length: 0,
-                            },
-                        );
-                    }
-                }
-                if args.query_cov_hsp_perc > 0.0 {
-                    hit_list.purge_empty_hsp_lists();
-                }
-            }
-            // (rpsblast over several volumes: the merged lists keep `s_MergeAlignSet`'s order
-            // and the formatter cuts them, `psiblast_hits_found` below.)
-            if !rps_multi_volume {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1772
-                // (cited at `DbStatistics::sorts_results`): not for a database length of 0 or of
-                // 2^63 or more, whose lists keep the traceback's order (by OID with
-                // `-comp_based_stats 0`, the composition heap's otherwise; rpsblast's engine
-                // sorted by the same gate, `RpsUnit::sorts_results`).
-                if sorts_results {
-                    hit_list.sort_by_evalue();
-                }
-                hit_list.prune_by_size(args.traceback_hitlist_size());
-            }
-        }
-    }
+    traceback::finish_hit_lists(
+        &args,
+        &mut hit_lists,
+        prelim_hitlist_size,
+        rps_multi_volume,
+        sorts_results,
+    );
     // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a
     // subject that the seqid list keeps without a definition line (line DBID item lineless).
     // psiblast's lists are cut to the preliminary size here; the formatter's cut to

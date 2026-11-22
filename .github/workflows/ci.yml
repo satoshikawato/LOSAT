@@ -199,6 +199,14 @@ jobs:
       # request (changelog.d/README.md), so two pull requests never conflict in CHANGELOG.md.
       - name: Changelog fragments
         run: python3 scripts/changelog_fragments.py check
+      # No NCBI counterpart: maintainer bookkeeping. Pull requests take the next Product Decision
+      # version and exception number by hand; when two take the same one, Git stops the second with
+      # a conflict, and a conflict resolved by keeping both entries leaves one number twice (#1451
+      # and #1460 both wrote PD-LOSAT-NCBI-DEFECTS 1.68 = approved exception 20, 2026-11-21).
+      - name: Product Decision numbers
+        run: python3 -I LOSAT/tests/check_pd_numbers.py --root .
+      - name: Product Decision number check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_pd_numbers.py'
       # No NCBI counterpart: maintainer bookkeeping. Line and stage IDs cited in CHANGELOG.md,
       # changelog.d/ and docs/ that have no row in docs/decisions/LINE_IDS.md, as warnings only.
       - name: Line IDs

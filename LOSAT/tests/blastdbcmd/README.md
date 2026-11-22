@@ -19,7 +19,7 @@ machine) run in this directory on the alias files of `db/ak/` (`NSEQ`, `LENGTH`,
 `MIN_SEQ_LENGTH`, `FIRST_OID`, `LAST_OID`, `VDBLIST`, values that do not convert) over `p5`, `n5`, the volumes of `dv4` and
 `j/lst/p5`, and on `-db "db/palias db/p5"` (a volume that an alias and a name both give):
 `LOSAT/tests/blastdbcmd_alias_keys.rs`, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py`.
-`A33`-`A58` (D1a-2, 2026-11-13; `A37` and `A38` are LOSAT's refusals of `%d` and `%b`, not frozen) are the same
+`A33`-`A58` (D1a-2, 2026-11-13; `A37` and `A38`, `%d` and `%b`, frozen on 2026-11-21 from the run of `Q127` and `Q228`) are the same
 build on `-ipg` and `-ipg_batch` (`in/ak_pig.txt`, `in/ak_pigm.txt`) through the ranges `db/ak/m_r`, `m_s` and `m_t`
 over `db/m/pmg`, whose PIGs' OIDs the ranges leave out (`A52`: approved difference 5, NCBI's header with the letters of
 its `%s` run): `make_d1a2_blastdbcmd.py`. `A59`-`A65` (D1a-2) are `-info` and `-entry all` on alias files with `NSEQ`,
@@ -41,6 +41,35 @@ developer machine, run with the words of the tests from the `blastdbcmd` directo
 this layout whose `seqdb/db` held the five files of `user-column-db`
 (`LOSAT/tests/seqdb/README.md`); `{T}` replaces that copy's root. NCBI's whole file set (`-db
 uc/user-column-db -dbtype prot`, with its ISAM files) gave the same bytes but for the path.
+`Q101`-`Q144` (`-outfmt %d`), `Q201`-`Q244` (`-outfmt %b`) and `Q301`-`Q331` (both; line RG, item Dbc,
+2026-11-21) are NCBI BLAST+ 2.17.0 blastdbcmd (the release build on the developer machine) run in a copy of this
+directory beside copies of `../db_search/t5`, `../seqdb/taxdb/t5`, `../seqdb/taxdb/k5` and `../seqid/db`, with
+`BLASTDB` set for the taxonomy names where `LOSAT/tests/blastdbcmd_retrieve.rs` sets it: the definition lines and
+Bioseqs of the databases of version 4 and 5 here, with `-entry`, `-entry_batch`, `-ipg`, `-taxids`, `-target_only`,
+`-get_dups`, `-ctrl_a`, `-range`, `-strand`, `-mask_sequence_with`, `-long_seqids`, `-out`, and `%d` and `%b` beside
+other specifiers. The probe (`remaining-gaps-20261112/D/dbc/probe/`) also ran NCBI's distributed
+`18S_fungal_sequences` (memberships, stored bits after the last base of a sequence), whose bytes LOSAT gives but
+which is not copied here.
+`db/pl4` (`Q330`, `Q331`) is NCBI makeblastdb's version 4 database (`-parse_seqids`; its `.pin .phr .psq`) of two
+proteins read as ASN.1 text Bioseqs whose `ASN1_BlastDefLine` user objects hold definition lines with memberships and
+other-info (makeblastdb drops their links): `remaining-gaps-20261112/D/dbc/probe/mk/make_links.py`.
+`db/pe4`, `db/pz4` (`Q332`-`Q340`, with its `.pni .pnd`) and `db/pz5/pl5` (`Q341`-`Q343`, version 5, with taxids) are
+`db/pl4` and its version 5 build with a header changed by hand, which makeblastdb never writes (it refuses a
+set without lines: "No deflines provided."): `pe4` holds a set of no lines at OID 1, `pz4` a header of no bytes at
+OID 1, `pz5/pl5` one at OID 0. NCBI writes an empty `Blast-def-line-set` for the first and nothing for the second, and
+its read of a target's line, or of any line with `-taxids` and `-target_only`, stops on the second with
+`Attempt to access NULL pointer.`.
+`db/lc/lc4`, `db/lc/lc5` (`Q344`-`Q383`) are makeblastdb `-parse_seqids` databases (version 4 and 5) of `db/lc/lc.fa`, four
+proteins with local ids (`lcl|myprot9`, the bare `myprot13`, `lcl|12345`) and one RefSeq id, read with `-target_only`
+in `%b`, `%d`, `%f` and `%a`.
+`db/pzm.pal`, `db/pzm2.pal`, `db/pzm0.pal` (`Q384`-`Q396`) are hand-written alias files over `db/pz4` with the OID list
+`db/pzm.msk` (both OIDs) and `OID_MASK_TYPE` 1, 2 and 0: under a type other than 0 NCBI's header read filters the set
+it read, so the header of no bytes at OID 1 stops every read of it with `Attempt to access NULL pointer.`, as a
+`-taxids` list does; under 0 it writes nothing for it.
+`db/pzlg.pal`, `db/pzln.pal` (a `GILIST` of `pzl5001.txt` and `pzl9.txt`), `db/pzlr.pal` (OID 1 by its range) and
+`db/pzlrg.pal`, `db/pzlrn.pal`, `db/pzlgs.pal` over them (`tests/blastdbcmd_alias_keys.rs`, `A367`-`A377`, line RG D1c-1,
+2026-11-22): an alias file's list attached to the volume filters its header reads too, so OID 1, kept by the range
+beside the list, stops the same way; `pzlgs` names `pz4` itself, so NCBI reads no list below it and filters nothing.
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
   are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /

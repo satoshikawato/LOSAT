@@ -21,6 +21,7 @@ Databases (the `.pjs`/`.njs` metadata, with the build's paths and dates, are dro
   writes no TI ISAM. NCBI's lists find no OID through it (survey D1c section 2.4), while its single
   lookups (`-entry 'gnl|ti|1020'`) find OID 2.
 - `n`: version 5 of n.fna, `n4`: version 4 of it.
+- `tz`: version 4 of tz.faa (gi 7001, then the general ids ti|abc and ti|77).
 
 The list files and alias files are written below (`LISTS`, `ALIASES`). The rows of the -db manifests
 that use them are db.il.*; the blastdbcmd cases A272 on (D/fixtures/make_d1c_blastdbcmd.py).
@@ -33,7 +34,7 @@ import sys
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent / "idlist"
-SOURCES = {"g.faa", "g.map", "n.fna", "n.map", "q.faa", "nq.fna"}
+SOURCES = {"g.faa", "g.map", "n.fna", "n.map", "q.faa", "nq.fna", "tz.faa"}
 
 # An absolute path that is not a file: printed as it is, the same on every machine.
 MISSING = "/losat-idlist-fixture-missing/none.txt"
@@ -58,6 +59,7 @@ LISTS = {
     "u_np103.txt": b"np_000103.1\n",
     # GIs of g: OIDs 0 (its second line), 2 (its second line), 5 (its first line), 12.
     "gi_a.txt": b"102\n105\n108\n117\n",
+    "tz7001.txt": b"7001\n",
     "gi_a.bin": gi_bin([102, 105, 108, 117]),
     # OIDs 0 (its first line), 1, 2 (its first line and its second).
     "gi_b.txt": b"101\n103\n104\n105\n",
@@ -147,6 +149,11 @@ ALIASES = {
     "g4_gi.pal": "TITLE gi a v4\nDBLIST g4\nGILIST gi_a.txt\n",
     "g4_tx.pal": "TITLE tx v4\nDBLIST g4\nTAXIDLIST tx_a.txt\n",
     "g4_txm.pal": f"TITLE tx v4 missing\nDBLIST g4\nTAXIDLIST {MISSING}\n",
+    # tz: the general id ti|abc (OID 1), whose tag NCBI's filtered header read converts to a number and
+    # throws on, read where the range beside the GI list keeps OIDs 1 and 2.
+    "tz_g.pal": "TITLE tz g\nDBLIST tz\nGILIST tz7001.txt\n",
+    "tz_r.pal": "TITLE tz r\nDBLIST tz\nFIRST_OID 2\nLAST_OID 3\n",
+    "tz_rg.pal": "TITLE tz rg\nDBLIST tz_r tz_g\n",
     # Two volumes: the list over both, over one volume only, and each volume's own list.
     "gm_gi.pal": "TITLE gi a two volumes\nDBLIST gm\nGILIST gi_a.txt\n",
     "gm_v0.pal": "TITLE gi a volume 0\nDBLIST gm.00\nGILIST gi_a.txt\n",
@@ -195,6 +202,8 @@ def main():
          "-blastdb_version", "4"])
     ti_isam(OUT / "gt", 14)
     run([mk, "-in", "n.fna", "-dbtype", "nucl", "-out", "n", "-title", "n", *common, "n.map"])
+    run([mk, "-in", "tz.faa", "-dbtype", "prot", "-out", "tz", "-title", "tz", "-parse_seqids",
+         "-blastdb_version", "4"])
     run([mk, "-in", "n.fna", "-dbtype", "nucl", "-out", "n4", "-title", "n4", *common, "n.map",
          "-blastdb_version", "4"])
     for path in list(OUT.glob("*.pjs")) + list(OUT.glob("*.njs")):

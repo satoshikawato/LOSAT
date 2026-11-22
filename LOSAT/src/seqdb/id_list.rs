@@ -4,6 +4,7 @@
 //! a carriage return). The one owner of their layout, and of the lists the alias files attach to
 //! the volumes they reach for NCBI's filtered header read (`AliasIdList`).
 
+use crate::ncbi_exception::NcbiException;
 use crate::seqid::model::ObjectId;
 use crate::seqid::ParsedSeqId;
 
@@ -63,20 +64,19 @@ pub(crate) struct AliasIdList {
 
 impl AliasIdList {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1633-1665
-    // A `ti` general id's string tag is converted by `NStr::StringToInt8`, which throws for a tag
-    // that is not a number: LOSAT refuses the line (`Err`). The Seq-id strings are looked up in
-    // the forms of `filter::find_si_forms`.
-    /// `FindId`: whether the list holds `id`; `Err` for a `ti` id whose tag NCBI's conversion
-    /// throws on.
-    pub(crate) fn find_id(&self, id: &ParsedSeqId) -> Result<bool, Vec<u8>> {
+    // A `ti` general id's string tag is converted by `NStr::StringToInt8`, whose exception for a
+    // tag that is not a number ends NCBI's read (probe ti of line RG D1c-1: blastdbcmd's
+    // `Cannot convert string 'abc' to Int8`, rc 1; blastp's exception trace, rc 255). The Seq-id
+    // strings are looked up in the forms of `filter::find_si_forms`.
+    /// `FindId`: whether the list holds `id`; NCBI's exception for a `ti` id whose tag is no
+    /// number.
+    pub(crate) fn find_id(&self, id: &ParsedSeqId) -> Result<bool, NcbiException> {
         match id {
             ParsedSeqId::Gi(gi) => Ok(self.gis.binary_search(gi).is_ok()),
             ParsedSeqId::General(dbtag) if dbtag.db == b"ti" => {
                 let ti = match &dbtag.tag {
                     ObjectId::Id(value) => i64::from(*value),
-                    ObjectId::Str(text) => {
-                        crate::ncbi_str::string_to_int8(text, 0).map_err(|_| text.clone())?
-                    }
+                    ObjectId::Str(text) => crate::ncbi_str::string_to_int8(text, 0)?,
                 };
                 Ok(self.tis.binary_search(&(ti as u64)).is_ok())
             }
@@ -87,12 +87,12 @@ impl AliasIdList {
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:957-968
 /// `have_vol` of NCBI's id test of a definition line with the Seq-ids `ids`: one of `lists` holds
-/// one of them, asked in the order of the ids; `Err` with the tag of a `ti` id whose conversion
-/// throws before one is found.
+/// one of them, asked in the order of the ids; NCBI's exception of a `ti` id whose tag is no
+/// number, reached before one is found.
 pub(crate) fn lists_hold(
     lists: &[std::sync::Arc<AliasIdList>],
     ids: &[ParsedSeqId],
-) -> Result<bool, Vec<u8>> {
+) -> Result<bool, NcbiException> {
     for id in ids {
         for list in lists {
             if list.find_id(id)? {

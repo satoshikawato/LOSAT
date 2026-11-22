@@ -1608,7 +1608,9 @@ pub(crate) fn final_hit_order(
     }
     let mut lists = QueryLists::new(hitlist_size);
     for ((q_idx, oid), hsps) in pairs {
-        lists.add(q_idx, oid, hsps, filters);
+        if let Some(hsps) = super::hit_collector::subject_list(q_idx, hsps, filters) {
+            lists.add(q_idx, oid, hsps);
+        }
     }
     lists.finish(filters, true)
 }

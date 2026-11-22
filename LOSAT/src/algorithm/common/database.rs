@@ -962,10 +962,12 @@ pub(crate) fn keep_source(
 }
 
 /// A reader error of the header of a reported sequence where the hit list of query `query`
-/// reaches it: NCBI's own is a `HeaderReadError` that names the query; LOSAT's refusals are
-/// errors of their own.
+/// reaches it: NCBI's own (a database error, `SeqDbError::ncbi_message`, or another exception
+/// of NCBI's, `SeqDbError::ncbi_exception`: the conversion of a `ti` tag under an alias file's
+/// id list, line RG D1c-1) is a `HeaderReadError` that names the query, so the batch fails
+/// after the outfmt 0 prolog as NCBI's does; LOSAT's refusals are errors of their own.
 fn header_read_error(error: SeqDbError, query: usize, program: &str) -> anyhow::Error {
-    if error.ncbi_message().is_some() {
+    if error.ncbi_message().is_some() || error.ncbi_exception().is_some() {
         anyhow::Error::new(HeaderReadError {
             query,
             error: database_error(error, program),

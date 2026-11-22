@@ -1728,6 +1728,7 @@ fn write_blastp_pairwise_intro<W: Write>(
         super::reference::DEFAULT_PROTOCOL,
         program,
         false,
+        false,
     )
 }
 
@@ -2984,14 +2985,16 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
 // =============================================================================
 
 /// What the BLASTN prolog's program line and references follow: `-task megablast` (NCBI's
-/// `m_Megablast`; the program name stays `blastn`) and matrix-only scoring (the option reward and
-/// penalty both 0, NCBI's `m_DisableKAStats`), which also leaves out the description table, the
-/// query footers and the bit scores and e-values of the HSP headers.
+/// `m_Megablast`; the program name stays `blastn`), a search with a MegaBLAST database index
+/// (`m_IndexedMegablast`, the `-use_index true` that NCBI's loader kept), and matrix-only scoring
+/// (the option reward and penalty both 0, NCBI's `m_DisableKAStats`), which also leaves out the
+/// description table, the query footers and the bit scores and e-values of the HSP headers.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:168-177
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BlastnIntro {
     pub megablast: bool,
+    pub indexed_megablast: bool,
     pub matrix_only: bool,
 }
 
@@ -3463,10 +3466,14 @@ fn write_blastn_description_table<W: Write>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-407
-// The prolog of a megablast search: the reference is the megablast one
-// (`reference::write_prolog_references`); the layout is that of
-// `write_translated_pairwise_intro`.
-fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io::Result<()> {
+// The prolog of a megablast search: the reference is the megablast one, with the database
+// indexing one after it for a search with an index (`reference::write_prolog_references`); the
+// layout is that of `write_translated_pairwise_intro`.
+fn write_megablast_pairwise_intro(
+    writer: &mut impl Write,
+    version: &str,
+    indexed_megablast: bool,
+) -> io::Result<()> {
     super::reference::write_version_line(writer, false, "blastn", version)?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -3476,6 +3483,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
         super::reference::DEFAULT_PROTOCOL,
         "blastn",
         true,
+        indexed_megablast,
     )
 }
 
@@ -3487,7 +3495,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
 fn write_matrix_only_pairwise_intro(
     writer: &mut impl Write,
     version: &str,
-    megablast: bool,
+    intro: BlastnIntro,
 ) -> io::Result<()> {
     super::reference::write_version_line(writer, false, "rmblastn", version)?;
     writer.write_all(
@@ -3503,7 +3511,8 @@ fn write_matrix_only_pairwise_intro(
         false,
         super::reference::DEFAULT_PROTOCOL,
         "blastn",
-        megablast,
+        intro.megablast,
+        intro.indexed_megablast,
     )
 }
 
@@ -3613,9 +3622,9 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     if intro.matrix_only {
-        write_matrix_only_pairwise_intro(writer, version, intro.megablast)?;
+        write_matrix_only_pairwise_intro(writer, version, intro)?;
     } else if intro.megablast {
-        write_megablast_pairwise_intro(writer, version)?;
+        write_megablast_pairwise_intro(writer, version, intro.indexed_megablast)?;
     } else {
         write_translated_pairwise_intro(writer, "BLASTN", version)?;
     }
@@ -4927,6 +4936,7 @@ fn write_translated_pairwise_intro(
         false,
         super::reference::DEFAULT_PROTOCOL,
         program,
+        false,
         false,
     )
 }

@@ -813,6 +813,28 @@ impl<L: HitListEntry> HitList<L> {
         }
     }
 
+    /// The hit list that the best hit filter's final step (`s_BlastHSPBestHitFinal`) makes of one
+    /// query's kept lists: the lists (with their best e-values) sorted by e-value, then saved into
+    /// a hit list of `prelim_hitlist_size` subjects, which keeps the lists of the best e-values
+    /// when there are more (`Blast_HitListUpdate`). The writer and the pipe of every program whose
+    /// lists are these hit lists (blastn, tblastx) end here.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:207-221
+    pub(crate) fn best_hit_final(mut lists: Vec<L>, prelim_hitlist_size: usize) -> Self {
+        for list in &mut lists {
+            list.update_best_evalue();
+        }
+        // `Blast_HitListSortByEvalue`: no list is empty.
+        if lists.len() > 1 {
+            lists.sort_by(compare_hsp_lists);
+        }
+        let mut hit_list = Self::new(prelim_hitlist_size);
+        for list in lists {
+            hit_list.update(list);
+        }
+        hit_list
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3172-3187
     fn purge(&mut self) {
         let mut index = 0usize;

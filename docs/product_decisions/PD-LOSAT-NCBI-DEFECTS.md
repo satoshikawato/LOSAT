@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.71
+- Version: 1.72
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -328,6 +328,9 @@
   them with a format of another writer it covers the whole call, also where the call searches
   once for each hit list size; line DBID item pfoff-3, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07)
+  1.72 2026-11-22 (alias files with `GILIST`, `TILIST` and `SEQIDLIST`, line RG item D1c-1: two
+  explicit rejections of a `SEQIDLIST`, kept under rule 2 until the maintainer chooses (line RG
+  question Q-D1c-R2); numbered after 1.71)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2372,6 +2375,17 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
   first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
 
+- An alias file's `SEQIDLIST` over a version 4 database (version 1.72, 2026-11-22, line RG item
+  D1c-1; rule 2, the maintainer's choice pending, line RG question Q-D1c-R2), in two shapes whose
+  NCBI result is deterministic but has no known use: a token of the list that NCBI warns about and
+  drops (a token of form feeds and vertical tabs alone: `WARNING:  <token> is not a valid seqid
+  string.` when NCBI reads the list, at its constructor's scan or at the search's first read under
+  `NSEQ` and `LENGTH`), and a list that two volumes or more translate, with an id that NCBI's
+  `SeqDB_SimplifyAccession` changes when applied to its own result: NCBI simplifies the sorted ids
+  again for each later volume (`PreprocessIdsForISAMSiLookup`, `seqdbgilistset.cpp:457-461`) and
+  does not sort them again (`InsureOrder` keeps its order flag), so its lookups and its filtered
+  header reads walk and search an unsorted list. LOSAT refuses (exit 1) where NCBI reads the list.
+
 - `losat blastn -use_index true` of a megablast search (version 1.65, 2026-11-21, line RG item
   D5b-1, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07), where NCBI's
   loader of the MegaBLAST database index meets one of these. LOSAT refuses each (exit 1) before
@@ -2517,7 +2531,9 @@ accepted by the maintainer on 2026-11-21 by marking PR #1448 ready for review, a
     (`2*(2*h+50)`) and 2^30 for an ungapped search. NCBI BLAST+ 2.17.0 then rebuilds the list from
     its first HSP on and keeps HSPs that the best-hit test removes at the size below (line O1c's
     probe: BLASTN 69 lines where 1073741773 gives 56, ungapped BLASTN 69 where 1073741823 gives 57,
-    BLASTP and PSIBLAST 11 where 536870886 gives 10, each a superset). LOSAT computes that count in
+    BLASTP and PSIBLAST 11 where 536870886 gives 10; line O6a-3's probe: BLASTX 85 where 536870886
+    gives 72, TBLASTN 62 where 536870886 gives 49, TBLASTX 252 where 1073741823 gives 214; each a
+    superset). LOSAT computes that count in
     64 bits too (`core/hspfilter_besthit.rs`, since line O6a), so with these options such a size
     gives NCBI's output at 1073741773, 536870886 or 1073741823 (the rows `hitlist.*.bh*` with those
     contracts). Every smaller size gives NCBI's bytes. Before version 1.66 LOSAT

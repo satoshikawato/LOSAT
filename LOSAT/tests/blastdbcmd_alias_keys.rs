@@ -10,7 +10,8 @@
 //! of a `-db`, as each sub-command reads NCBI's OID list (`make_d1a2a_fixtures.py`), and (D1b-1)
 //! `OIDLIST` (`make_d1b_blastdbcmd.py`, 2026-11-21) and (D1b-2) `OID_MASK_TYPE`
 //! (`make_d1b2_blastdbcmd.py`, 2026-11-21), and (D1c-1) `GILIST`, `TILIST` and `SEQIDLIST`
-//! over the databases of `tests/db_search/idlist` (`make_d1c_blastdbcmd.py`, 2026-11-22). The
+//! over the databases of `tests/db_search/idlist` and the lists over `db/pz4`'s header of no
+//! bytes (`db/pzl*`, `make_d1c_blastdbcmd.py`, 2026-11-22). The
 //! expected bytes are NCBI BLAST+ 2.17.0 blastdbcmd's (the release build on the developer machine,
 //! 2026-11-12 and 2026-11-13, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py` and
 //! `make_d1a2_blastdbcmd.py`); the alias files are in `tests/blastdbcmd/db/ak/`, the batch files
@@ -164,6 +165,8 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A34", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%o|%a|%g|%t|%l|%P|%T|%L|%e|%n|%h|%i"], 0),
     ("A35", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%s"], 0),
     ("A36", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%m21"], 0),
+    ("A37", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%d"], 0),
+    ("A38", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%b"], 0),
     ("A39", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%f"], 0),
     ("A40", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%X|%K|%S|%B|%C|%N"], 0),
     ("A41", &["-db", "db/ak/m_r", "-ipg", "1002", "-outfmt", "%o|%a|%l"], 0),
@@ -527,30 +530,22 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A364", &["-db", "../db_search/idlist/g4_sqm", "-dbtype", "prot", "-info"], 2),
     ("A365", &["-db", "../db_search/idlist/g_multil", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 2),
     ("A366", &["-db", "../db_search/idlist/g_hashl", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 1),
+    ("A367", &["-db", "db/pzlg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 0),
+    ("A368", &["-db", "db/pzlgs", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 0),
+    ("A369", &["-db", "db/pzlgs", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o"], 0),
+    ("A370", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 1),
+    ("A371", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o"], 0),
+    ("A372", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 1),
+    ("A373", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "all"], 1),
+    ("A374", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%b"], 1),
+    ("A375", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "5001", "-outfmt", "%o|%a"], 0),
+    ("A376", &["-db", "db/pzlrn", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 1),
+    ("A377", &["-db", "db/pzlrn", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o"], 0),
+    ("A378", &["-db", "../db_search/idlist/tz_rg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 1),
+    ("A379", &["-db", "../db_search/idlist/tz_rg", "-dbtype", "prot", "-entry", "all"], 1),
+    ("A380", &["-db", "../db_search/idlist/tz_g", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A381", &["-db", "../db_search/idlist/tz_rg", "-dbtype", "prot", "-entry", "gnl|ti|77", "-outfmt", "%o|%a"], 0),
 ];
-
-/// The cases of probe p4c_c that LOSAT's BLASTDBCMD refuses: `-outfmt %d` and `%b` (the ASN.1
-/// texts, line BDC DECISIONS 9), which NCBI writes for the OID of a PIG outside the range too.
-#[rustfmt::skip]
-const REFUSALS: &[(&str, &[&str])] = &[
-    ("A37", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%d"]),
-    ("A38", &["-db", "db/ak/m_r", "-ipg", "1001", "-outfmt", "%b"]),
-];
-
-#[test]
-fn asn1_texts_of_a_pig_outside_the_range_are_refused() {
-    let config = TestDir::new("refusals");
-    for &(id, words) in REFUSALS {
-        let (stdout, stderr, code) = blastdbcmd(words, &config.0);
-        let stderr = String::from_utf8_lossy(&stderr);
-        assert_eq!(stdout, b"", "{id} {words:?}");
-        assert_eq!(code, 1, "{id} {words:?}: {stderr}");
-        assert!(
-            stderr.ends_with("is not supported by LOSAT's BLASTDBCMD\n"),
-            "{id} {words:?}: {stderr}"
-        );
-    }
-}
 
 /// A range outside the bit array of the union of the ranges below it, where NCBI clears bits
 /// outside the array where it builds its OID list (line RG D1b-1), which LOSAT refuses there:

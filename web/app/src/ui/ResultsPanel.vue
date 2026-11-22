@@ -176,9 +176,10 @@ watch(
 function runLabel(run: RunView): string {
   const { number, program, query, subject, prints } = run.snapshot;
   const status = run.status === 'completed' ? '' : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
-  // A run that printed the command line's help or version read no input (line WQA's D20, 2026-11-23).
-  const inputs = prints === undefined ? ` · ${query.name} vs ${subject.name}` : '';
-  return `Run ${number} · ${programById(program).label}${inputs}${status}`;
+  // The inputs are named as the user gave them (a compressed file by its own name). A run that prints the command line's help
+  // or version reads none, so it names none (line WQA's D21, the review of D20's F2, 2026-11-23).
+  const files = prints === undefined ? ` · ${query.name} vs ${subject.name}` : '';
+  return `Run ${number} · ${programById(program).label}${files}${status}`;
 }
 
 /**

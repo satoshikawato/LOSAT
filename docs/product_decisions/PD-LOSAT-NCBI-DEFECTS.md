@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.70
+- Version: 1.71
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -316,6 +316,18 @@
   2026-10-07; numbered after 1.69; first 1.65, then 1.66, 1.68 and 1.69 at the merges of dev that brought
   line RG item D5b-1's 1.65, then line NP's 1.66 and line LIB-S's 1.67, then line NP's 1.68, then
   line NP's 1.69)
+  1.71 2026-11-22 (outfmt 0 to 4 of such a sequence are written as NCBI writes them: its
+  description line is the Seq-align id and `Unknown`; outfmt 0 stops with `BLAST Database error`
+  where the first alignment shown is of such a sequence under a Seq-align id that is not local,
+  else writes the skipped line for each of its HSPs; outfmt 1 to 4 stop where any alignment shown
+  is; the description lines load the sequences that they show, in psiblast's rounds after the
+  first those of the two-part table of the first `-num_descriptions` HSPs (at least the first:
+  `-num_descriptions 0` shows its sequence too; psiblast ignores `-sorthits` and `-sorthsps`, as
+  NCBI's does); a report that stops the run ends it there, and no later batch is prefetched; the
+  refusal of 1.31 no longer covers outfmt 0 to 4, but in a call of LOSAT's library that writes
+  them with a format of another writer it covers the whole call, also where the call searches
+  once for each hit list size; line DBID item pfoff-3, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1523,7 +1535,14 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   pfoff-2: the row that the `catch` of the subject block leaves, or the stop at a row that reads the
   sequence after that block; the organism report leaves its HSPs out; a throwing row loads nothing,
   and the names and tax ids are looked up only for the sequences that a report loads; refused at
-  the first row of a query's report with `sacc`, `saccver` or `staxid`, below), a
+  the first row of a query's report with `sacc`, `saccver` or `staxid`, below) or outfmt 0 to 4
+  (since version 1.71, line DBID item pfoff-3: the description line of the Seq-align id and
+  `Unknown`, then the stop at outfmt 0's first alignment that loads such a sequence under a
+  Seq-align id that is not local, or at any alignment of outfmt 1 to 4 that loads one, or outfmt
+  0's skipped line for each of its HSPs; the description lines load the sequences that they show,
+  in psiblast's rounds after the first those of the two-part table of the first
+  `-num_descriptions` HSPs, at least the first, then the alignments theirs up to the stop, after
+  which no later batch is prefetched), a
   stopping batch where a load whose order to the stop NCBI takes from the addresses of its
   handles (the same packed number as the stopping id's, or neither packed, which changes from
   one command line to another; a Seq-align id of two sequences; every load of a batch of more

@@ -156,6 +156,7 @@ fn unsupported_formats_fail_before_searching() {
     for outfmt in ["17", "6 delim=; qseqid staxids", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -205,6 +206,7 @@ fn the_words_after_a_pairwise_format_are_dropped() {
     let report_of = |outfmt: &str| {
         let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![FormatOutput {
                 outfmt,
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -263,6 +265,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -347,6 +350,7 @@ fn run_local_outputs(
     let mut diagnostics = Vec::new();
     let result = {
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -749,6 +753,7 @@ fn several_file_outputs_are_written_one_after_the_other() {
     let call = |first: &Path, second: &Path| {
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -837,6 +842,7 @@ fn the_hit_records_of_the_block_search_are_those_of_the_search_of_all_queries() 
         move |hits: Arc<Vec<PairwiseHit>>| sink.lock().unwrap().extend_from_slice(&hits);
     {
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -936,6 +942,7 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
     for fails_alone in [true, false] {
         let (mut six, mut zero, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![
                 FormatOutput {
                     outfmt: "6",

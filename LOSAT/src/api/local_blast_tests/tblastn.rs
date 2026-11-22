@@ -108,6 +108,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
         let result = {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -351,6 +352,7 @@ fn unsupported_formats_fail_before_searching() {
     for outfmt in ["17", "6 delim=; qseqid staxids"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -399,6 +401,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())

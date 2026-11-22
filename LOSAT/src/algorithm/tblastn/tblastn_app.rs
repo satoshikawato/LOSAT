@@ -1464,6 +1464,29 @@ fn filter_final_hitlists(
 /// limits and the environment, then the query batches (`read_query_batches`), the search of
 /// the batches that NCBI searches and their reports.
 #[allow(clippy::too_many_arguments)]
+/// How the pairwise reports of `formats` read each query's subjects, as the first pairwise
+/// format's writer reads them (`PairwiseView::reading` of `-sorthits`, `-sorthsps`,
+/// `-num_descriptions` and `-num_alignments`; the formats of a run whose loads they make share
+/// one view's order, `FormatThrow::and`), for the loads of a subject whose lookup throws and the
+/// texts of its reads (line DBID item pfoff-3); `None` without one.
+fn pairwise_reading(
+    resolved: &ResolvedTblastnArgs,
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+) -> Option<crate::report::pairwise::PairwiseReading> {
+    let view = formats.iter().find_map(|format| {
+        format
+            .report_format()
+            .and_then(crate::report::pairwise::PairwiseView::of)
+    })?;
+    Some(view.reading(
+        resolved.formatting.report_sort(),
+        crate::report::db_subject::Shown {
+            descriptions: resolved.num_descriptions,
+            alignments: resolved.num_alignments,
+        },
+    ))
+}
+
 fn search(
     args: &TblastnArgs,
     resolved: ResolvedTblastnArgs,
@@ -2269,6 +2292,8 @@ fn search(
                         hard_masked,
                     ),
                     &outputs.formats,
+                    outputs.other_outfmts,
+                    pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                 )
                 // A read of a reported sequence that
@@ -2287,6 +2312,18 @@ fn search(
             observer.database_subjects(reported.library_subjects(database));
         }
         drop(database_stores);
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (cited at
+        // `db_subject::RunLoads`)
+        // A report whose load ends the run ends NCBI's application there: no batch after it is
+        // prefetched, so a stop of a later batch's prefetch is never reached
+        // (`HitLoads::reaches`; review 3 of line DBID pfoff-3, N1). The writer ends the run at
+        // that report with its error, before `failed` (the stop's, above) is asked.
+        let reaches = |query: usize| {
+            reported
+                .as_ref()
+                .is_none_or(|reported| reported.loads.reaches(query))
+        };
+        let prefetch_stop = prefetch_stop.filter(|(span, _)| reaches(span.start));
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:298-302
         // Before the reports of a batch NCBI fetches every subject that the batch reports, and
         // with `taxdb.bti` on the search path the taxonomy database writes its messages there
@@ -2341,7 +2378,7 @@ fn search(
                 // `-sorthits`.
                 let pairwise = first_report
                     .and_then(crate::report::pairwise::PairwiseView::of)
-                    .map(|view| view.report_sort(resolved.formatting.report_sort()));
+                    .and(pairwise_reading(&resolved, &outputs.formats));
                 let plural_names = taxdb_found
                     && first_spec
                         .as_ref()
@@ -2353,6 +2390,10 @@ fn search(
                     Ok::<(), anyhow::Error>(())
                 };
                 for span in &batch_spans {
+                    // No batch after the run's end is prefetched, nor read one by one.
+                    if !reaches(span.start) {
+                        break;
+                    }
                     let hitlists = &results[span.clone()];
                     // The batch's Seq-aligns, one for each HSP (`database::seq_aligns_of`).
                     let seq_aligns = super::database::seq_aligns_of(hitlists);
@@ -2373,6 +2414,9 @@ fn search(
                         }
                         let rows = first_rows;
                         for (query, hitlist) in span.clone().zip(hitlists) {
+                            if !reaches(query) {
+                                break;
+                            }
                             let shown = std::slice::from_ref(hitlist);
                             if hitlist
                                 .lists()

@@ -12,22 +12,25 @@
 //! instructions and 22.1 cycles per letter on the Sakai query). Here the scalars are a `Copy`
 //! value (`XHot`) that never has its address taken: `find_perfect` receives it by value, and the
 //! rare `shift_high` works on a copy that is written back. Only the three arrays (`XArrays`) stay
-//! in memory, as they must (they are indexed by the data).
+//! in memory, as they must (they are indexed by the data). `stop` is not kept: it is always
+//! `start + len` (`XHot::stop`), one register fewer in the loop.
 //!
 //! The ring of triplets is also written twice (`ring[head]` and `ring[head + 64]`), so the deque
 //! index `i` (0 = newest) is `ring[head + i]` for every `i < 64` without the `& 63`, and the part
-//! of the window `find_perfect` reads is one contiguous slice. In `find_perfect` the three tests
-//! of the C condition (`cnt > 0`, `count < thresholds.len()`, the score test) are combined
-//! without short-circuit, as `XTripletWindow::needs_processing` already does: the table is read at
-//! a clamped index, and that value is ignored when the second test fails.
+//! of the window `find_perfect` reads is one contiguous slice. `find_perfect`'s loop keeps only
+//! the counts, the score, the triplet and its threshold: `cnt > 0` and the score test are one
+//! condition without short-circuit, `count < thresholds.len()` always holds (`count < len <=
+//! window - 2`), and the body of the condition, which holds on few iterations, is a function of
+//! its own (`x_merge_at`) that derives `pos` and `count` from the iteration's index.
 //!
 //! Why the result is the same. Every method below is the `XTripletWindow` method of the same name
 //! with the same statements in the same order on the same integers; only where the values live
 //! changes. The ring holds the same triplet at `head + i` as `XTripletWindow` holds at
 //! `(head + i) & 63` for every `i` below `len` (each push writes both copies, `head` stays in
 //! `0..64` and `len` is at most `window - 2 <= 62`, so `head + i < 128`). The combined condition
-//! is the C condition: `&` of three `bool`s is true exactly when all three are, and the clamped
-//! read is in bounds. The loop in `x_mask_range_regs` is `DustMasker::x_mask_range` statement by
+//! is the C condition: `&` of two `bool`s is true exactly when both are, and the third test is
+//! always true. `pos` of iteration `i` is the start value lowered `i` times with
+//! `saturating_sub(1)`, which is `saturating_sub(i)`; `count` rises by one per iteration. The loop in `x_mask_range_regs` is `DustMasker::x_mask_range` statement by
 //! statement. The unit tests compare it with `mask_range_reference` and with `x_mask_range` on
 //! random sequences of every kind the masker distinguishes.
 
@@ -41,7 +44,6 @@ struct XHot {
     head: usize,
     len: usize,
     start: usize,
-    stop: usize,
     l: usize,
     r_w: u32,
     r_v: u32,
@@ -86,12 +88,20 @@ impl XHot {
             head: 0,
             len: 0,
             start: 0,
-            stop: 0,
             l: 0,
             r_w: 0,
             r_v: 0,
             num_diff: 0,
         }
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:40-48
+    /// `stop_` of the C class, which is always `start_` plus the deque's length: both start at 0,
+    /// a push adds one to the length and to `stop_`, a pop takes one from the length and adds one
+    /// to `start_` (`shift_window`, `shift_high`).
+    #[inline(always)]
+    fn stop(&self) -> usize {
+        self.start + self.len
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:54-55
@@ -116,7 +126,7 @@ impl XHot {
     /// `XTripletWindow::needs_processing`.
     #[inline(always)]
     fn needs_processing(&self, k: XConst) -> bool {
-        let count = self.stop - self.l;
+        let count = self.stop() - self.l;
         let last = k.thresholds.len() - 1;
         (count < self.len)
             & (count < k.thresholds.len())
@@ -177,11 +187,11 @@ impl XHot {
             }
         }
 
-        self.stop += 1;
+        // `++stop_`: `stop()` already counts the push.
 
         if self.len >= k.max_size && self.num_diff <= 1 {
             perfect_list.clear();
-            perfect_list.push_front(PerfectInterval::new(self.start, self.stop + 1, 0, 0));
+            perfect_list.push_front(PerfectInterval::new(self.start, self.stop() + 1, 0, 0));
             return false;
         }
 
@@ -210,18 +220,39 @@ fn shift_high(
         h.num_diff += 1;
     }
     add_triplet(&mut h.r_w, &mut a.c_w, triplet);
-    h.stop += 1;
+    // `++stop_`: `stop()` already counts the push.
 
     if h.num_diff <= 1 {
-        perfect_list.push_front(PerfectInterval::new(h.start, h.stop + 1, 0, 0));
+        perfect_list.push_front(PerfectInterval::new(h.start, h.stop() + 1, 0, 0));
         return false;
     }
 
     true
 }
 
+/// No NCBI counterpart: the state of the merge `find_perfect` makes when the score test of an
+/// iteration holds (the body of that `if` in `XTripletWindow::find_perfect`).
+struct XMerge {
+    max_perfect_score: u32,
+    max_len: usize,
+    read: usize,
+    inserted: bool,
+    old_len: usize,
+    /// `pos` of the first iteration (`L - 1`, or 0); iteration `i` has `pos0.saturating_sub(i)`.
+    pos0: usize,
+    /// `count` of the first iteration (the suffix length); iteration `i` has `count0 + i`.
+    count0: usize,
+    /// `stop_ + 1`, the end of every interval this call adds.
+    end: usize,
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:123-141,161-163
-/// `XTripletWindow::find_perfect`, reading the window as one slice of the doubled ring.
+/// `XTripletWindow::find_perfect`, reading the window as one slice of the doubled ring. The loop
+/// keeps only the counts, the score, the triplet and its threshold; the body of the score test,
+/// which holds on few iterations, is `x_merge_at` (not inlined, so its state does not take the
+/// loop's registers). `count < thresholds.len()` always holds: `count` runs from the suffix length
+/// to `len - 1`, and `len <= window - 2 = thresholds.len()`, so the thresholds of the iterations
+/// are the slice `thresholds[suffix_len..len]`.
 #[inline(never)]
 fn find_perfect(
     h: XHot,
@@ -230,59 +261,78 @@ fn find_perfect(
     merged: &mut Vec<PerfectInterval>,
     perfect_list: &mut VecDeque<PerfectInterval>,
 ) {
-    let suffix_len = h.stop - h.l;
+    let stop = h.stop();
+    let suffix_len = stop - h.l;
     if suffix_len >= h.len {
         return;
     }
     let mut counts = a.c_v;
     let mut score = h.r_v;
-    let mut max_perfect_score = 0u32;
-    let mut max_len = 0usize;
-    let mut pos = h.l.saturating_sub(1);
-    let mut count = suffix_len;
-    let mut read = 0usize;
     merged.clear();
-    let mut inserted = false;
-    let old_len = perfect_list.len();
-    let tl = thresholds.len();
-    let last = tl - 1;
-    for &triplet in &a.ring[h.head + suffix_len..h.head + h.len] {
-        let cnt = counts[(triplet & 63) as usize];
+    let mut m = XMerge {
+        max_perfect_score: 0,
+        max_len: 0,
+        read: 0,
+        inserted: false,
+        old_len: perfect_list.len(),
+        pos0: h.l.saturating_sub(1),
+        count0: suffix_len,
+        end: stop + 1,
+    };
+    let triplets = &a.ring[h.head + suffix_len..h.head + h.len];
+    let limits = &thresholds[suffix_len..h.len];
+    for (i, (&triplet, &limit)) in triplets.iter().zip(limits).enumerate() {
+        let idx = (triplet & 63) as usize;
+        let cnt = counts[idx];
         add_triplet(&mut score, &mut counts, triplet);
-        if (cnt > 0) & (count < tl) & (score * 10 > thresholds[count.min(last)]) {
-            while read < old_len && pos <= perfect_list[read].start {
-                let p = perfect_list[read];
-                if max_perfect_score == 0
-                    || max_len * p.score as usize > max_perfect_score as usize * p.len
-                {
-                    max_perfect_score = p.score;
-                    max_len = p.len;
-                }
-                if inserted {
-                    merged.push(p);
-                }
-                read += 1;
-            }
-            if max_perfect_score == 0
-                || score as usize * max_len >= max_perfect_score as usize * count
-            {
-                max_perfect_score = score;
-                max_len = count;
-                if !inserted {
-                    inserted = true;
-                    merged.reserve(old_len + 8);
-                    merged.extend(perfect_list.iter().take(read).copied());
-                }
-                merged.push(PerfectInterval::new(pos, h.stop + 1, max_perfect_score, count));
-            }
+        if (cnt > 0) & (score * 10 > limit) {
+            x_merge_at(&mut m, i, score, merged, perfect_list);
         }
-        count += 1;
-        pos = pos.saturating_sub(1);
     }
-    if inserted {
-        merged.extend(perfect_list.iter().skip(read).copied());
+    if m.inserted {
+        merged.extend(perfect_list.iter().skip(m.read).copied());
         perfect_list.clear();
         perfect_list.extend(merged.drain(..));
+    }
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:125-141
+/// The body of the score test of `XTripletWindow::find_perfect` for iteration `i` (its `pos` and
+/// `count` from `i`), in the same order.
+#[inline(never)]
+fn x_merge_at(
+    m: &mut XMerge,
+    i: usize,
+    score: u32,
+    merged: &mut Vec<PerfectInterval>,
+    perfect_list: &VecDeque<PerfectInterval>,
+) {
+    let pos = m.pos0.saturating_sub(i);
+    let count = m.count0 + i;
+    while m.read < m.old_len && pos <= perfect_list[m.read].start {
+        let p = perfect_list[m.read];
+        if m.max_perfect_score == 0
+            || m.max_len * p.score as usize > m.max_perfect_score as usize * p.len
+        {
+            m.max_perfect_score = p.score;
+            m.max_len = p.len;
+        }
+        if m.inserted {
+            merged.push(p);
+        }
+        m.read += 1;
+    }
+    if m.max_perfect_score == 0
+        || score as usize * m.max_len >= m.max_perfect_score as usize * count
+    {
+        m.max_perfect_score = score;
+        m.max_len = count;
+        if !m.inserted {
+            m.inserted = true;
+            merged.reserve(m.old_len + 8);
+            merged.extend(perfect_list.iter().take(m.read).copied());
+        }
+        merged.push(PerfectInterval::new(pos, m.end, m.max_perfect_score, count));
     }
 }
 

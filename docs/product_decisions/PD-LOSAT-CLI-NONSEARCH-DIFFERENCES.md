@@ -424,8 +424,8 @@ BLAST+.
   only the run reads (the XML input, the archive) do not apply, as NCBI's `DryRun` reads no
   archive (line RG DECISIONS E1c-2). Since version 1.17 `-help-full` is no longer refused: every
   program writes its `-help` text (exception 1), as NCBI's programs write the bytes of `-help`
-  (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`, which LOSAT refuses, so
-  LOSAT's text has no hidden option to add). The reader stops at `-h`, `-help` and `-help-full` as
+  (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`, which LOSAT's text, its
+  own, does not list). The reader stops at `-h`, `-help` and `-help-full` as
   NCBI's (`ncbiargs.cpp:2840-2852`): an argument after one is not read. `-xmlhelp` (in an option's
   place) and the full versions stay refused, in makeblastdb too (line RG item E2); since version
   1.20 `-xmlhelp` is not refused on the command line (exception 1): it stops the reader as `-help`

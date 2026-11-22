@@ -458,11 +458,12 @@ pub(crate) fn even_gap_link_hsps(
     let ignore_small_gaps = params.cutoff_small_gap == 0;
     // `link_hsp_array`: the input positions in the order of `s_RevCompareHSPsTbn` (`Tbx`).
     let frame = |h: &LinkHsp| params.query_frame(h.context);
-    let groups: Vec<usize> = hsps
-        .iter()
-        .map(|h| link_group(frame(h), h.subject_frame))
-        .collect();
-    let mut order: Vec<usize> = (0..total_number_of_hsps).collect();
+    // The groups and the order in one allocation, as many subjects of few HSPs link one by one.
+    let mut groups_and_order: Vec<usize> = Vec::with_capacity(2 * total_number_of_hsps);
+    groups_and_order.extend(hsps.iter().map(|h| link_group(frame(h), h.subject_frame)));
+    groups_and_order.extend(0..total_number_of_hsps);
+    let (groups, order) = groups_and_order.split_at_mut(total_number_of_hsps);
+    let groups: &[usize] = groups;
     order.sort_by(|&a, &b| rev_compare_tbn(&hsps[a], groups[a], &hsps[b], groups[b]));
     // Slot 0 is `hp_start`; the HSP at sorted position `i` is slot `i + 1`, read from a copy in that
     // order (one load where `hsps[order[i]]` takes two).

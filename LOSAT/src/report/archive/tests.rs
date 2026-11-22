@@ -506,3 +506,47 @@ fn a_psiblast_round_writes_its_step_and_composition_mode() {
     let subject = archive(None, Some(pssm_round));
     assert!(!subject.contains("Web_StepNumber"), "{subject}");
 }
+
+// Review fixes of line PS item PS15b-1, XA (2026-11-23): what LOSAT's XML and ASN.1 binary archives
+// do not write yet of a PSSM file's members, which NCBI BLAST+ 2.17.0's psiblast writes with
+// `-outfmt 11` (`pssm_unwritten`: the run is refused before any output). ASN.1 text writes them all.
+#[test]
+fn the_archive_streams_gaps_of_a_pssm_files_members() {
+    let read = |path: &str| {
+        let bytes = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(path),
+        )
+        .unwrap();
+        let mut text = Vec::new();
+        if path.ends_with(".gz") {
+            std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut text)
+                .unwrap();
+        } else {
+            text = bytes;
+        }
+        crate::blastinput::pssm_text::read_pssm_with_parameters(&text).unwrap()
+    };
+    const ANONYMOUS: Option<&str> = Some("an anonymous SEQUENCE or CHOICE");
+    const DELAYED: Option<&str> = Some("a member read into a delay buffer");
+    for (path, xml, binary) in [
+        // A title only.
+        ("db_search/db.ps.asn.rnd.6.asn", None, None),
+        // A User-object (`User-field.data`, an anonymous CHOICE; a UTF8String).
+        ("pssm/d3a_c10_user.asn.gz", ANONYMOUS, Some("a UTF8String")),
+        // A Pubdesc whose `Auth-list.names` the reader keeps in a delay buffer.
+        ("pssm/d3a_c11_delay.asn.gz", DELAYED, DELAYED),
+        // Seq-annot `locs` (`Seq-annot.data`, an anonymous CHOICE) with a NULL Seq-loc.
+        ("pssm/d3a_c17_locs.asn.gz", ANONYMOUS, None),
+    ] {
+        let pssm = read(path);
+        assert_eq!(pssm_unwritten(ArchiveEncoding::Xml, &pssm), xml, "{path}");
+        assert_eq!(
+            pssm_unwritten(ArchiveEncoding::Binary, &pssm),
+            binary,
+            "{path}"
+        );
+        assert_eq!(pssm_unwritten(ArchiveEncoding::Text, &pssm), None, "{path}");
+    }
+}

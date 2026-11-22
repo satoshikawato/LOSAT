@@ -731,6 +731,92 @@ pub(crate) fn seq_id_written_as_is(
     check.as_is
 }
 
+/// An encoder that writes nothing and finds the first value of a PSSM file's members (the values
+/// of the generic reader, `report::serial::asn_types::write`) that LOSAT's XML or ASN.1 binary
+/// stream of the archive does not write as NCBI's does yet: in XML an anonymous SEQUENCE or
+/// CHOICE (`User-field.data`, `Seq-annot.data`; LOSAT's object mode writes `<>` for its tag), a
+/// NULL, a UTF8String or a member read into a delay buffer (`Auth-list.names`, which NCBI parses
+/// first); in ASN.1 binary the last two. NCBI BLAST+ 2.17.0 writes them all (probe XA of the
+/// review fixes of line PS item PS15b-1, 2026-11-23); ASN.1 text writes them as NCBI does.
+struct PssmGaps {
+    encoding: ArchiveEncoding,
+    gap: Option<&'static str>,
+}
+
+impl PssmGaps {
+    fn note(&mut self, gap: &'static str, streams: &[ArchiveEncoding]) {
+        if self.gap.is_none() && streams.contains(&self.encoding) {
+            self.gap = Some(gap);
+        }
+    }
+
+    fn named(&mut self, type_name: &str) {
+        if type_name.is_empty() {
+            self.note("an anonymous SEQUENCE or CHOICE", &[ArchiveEncoding::Xml]);
+        }
+    }
+}
+
+impl crate::report::serial::encoder::Encoder for PssmGaps {
+    fn begin_document(&mut self, _: &str) {}
+    fn end_document(&mut self) {}
+    fn begin_sequence(&mut self, type_name: &str) {
+        self.named(type_name);
+    }
+    fn end_sequence(&mut self) {}
+    fn member(&mut self, _: &str, _: u8) {}
+    fn end_member(&mut self) {}
+    fn begin_list(&mut self, _: bool) {}
+    fn element(&mut self) {}
+    fn end_list(&mut self) {}
+    fn variant(&mut self, type_name: &str, _: &str, _: u8) {
+        self.named(type_name);
+    }
+    fn end_variant(&mut self) {}
+    fn int(&mut self, _: i32) {}
+    fn big_int(&mut self, _: i64) {}
+    fn enumerated(&mut self, _: &str, _: i32) {}
+    fn named_int(&mut self, _: &str, _: i32) {}
+    fn boolean(&mut self, _: bool) {}
+    fn visible_str(&mut self, _: &[u8]) {}
+    fn real(&mut self, _: f64) {}
+    fn octets(&mut self, _: &[u8]) {}
+    fn null(&mut self) {
+        self.note("a NULL", &[ArchiveEncoding::Xml]);
+    }
+    fn utf8_str(&mut self, _: &[u8]) {
+        self.note(
+            "a UTF8String",
+            &[ArchiveEncoding::Xml, ArchiveEncoding::Binary],
+        );
+    }
+    fn delayed(&mut self, _: &[u8]) {
+        self.note(
+            "a member read into a delay buffer",
+            &[ArchiveEncoding::Xml, ArchiveEncoding::Binary],
+        );
+    }
+    fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
+        None
+    }
+}
+
+/// What the archive's stream of `encoding` does not write yet of `pssm`, the PSSM that a
+/// request holds (`queries pssm`, `report::serial::pssm::write_value`; `PssmGaps`): `None` when
+/// it writes all of it as NCBI's does. The PSSMs that LOSAT makes (a FASTA query's later rounds,
+/// `-in_msa`) have none; a PSSM file's members can.
+pub(crate) fn pssm_unwritten(
+    encoding: ArchiveEncoding,
+    pssm: &crate::report::serial::pssm::PssmWithParameters,
+) -> Option<&'static str> {
+    let mut check = PssmGaps {
+        encoding,
+        gap: None,
+    };
+    crate::report::serial::pssm::write_value(&mut check, pssm);
+    check.gap
+}
+
 /// The error lines of a run that stopped with `error`, when NCBI writes an error archive for
 /// it (`PrintErrorArchive` after its `CATCH_ALL`): the errors of the application's `Run`,
 /// i.e. NCBI's own error texts, one message per diagnostic, severity `eDiag_Error`. LOSAT's own

@@ -57,7 +57,7 @@ There is one section for each program, and one for the five search programs toge
 | `-use_sw_tback` | `blastx`, `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY` / `-ungapped`), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `tblastn`, `rpstblastn` (without CBS) | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run; refused for partial-volume indexes, two-hit (`-window_size` above 0), `-db_hard_mask`, or damaged/mismatched index volumes |
-| `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (`0, 6, 7, 10, 20`; `-in_pssm` / `-in_msa`: `0, 6, 7`) |
+| `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0`, `5` to `11` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
 | `deltablast`, `makeprofiledb`, `blast_formatter` | Standalone executables | Not yet provided |
 
@@ -219,10 +219,11 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A `-subject` set whose sequences all have no letters | Refused. NCBI's `psiblast` crashes; `blastp` runs it. |
 | `-in_pssm` or `-in_msa` with a matrix or gap cost other than BLOSUM62 11/1 | Refused. |
 | `-in_pssm` with an XML PSSM | Refused. |
+| `-outfmt 11` with `ARCHIVE_FORMAT=xml` or `ARCHIVE_FORMAT=bin` and an `-in_pssm` file holding what that archive does not write yet: with `xml` an unnamed SEQUENCE or CHOICE (a User-object descriptor, annotations), a NULL, a UTF8String or an author list's names (a Pubdesc's authors) read from ASN.1 text; with `bin` a UTF8String (a User-object's text) or such author names | Refused: not yet supported. The ASN.1 text archive (no `ARCHIVE_FORMAT`) is written, and so are XML and binary archives of the other PSSM files, of `-in_msa` and of a FASTA query. |
 | `-out_pssm` or `-out_ascii_pssm` with a file that cannot be written | Refused. |
 | `-out_pssm` or `-out_ascii_pssm` into the standard output, the standard error or the `-out` file | Refused. Where NCBI stops first with its own error of `-outfmt` (13 or 14 without `-out`, for example), you get that error. |
 | `-out_pssm` into a named pipe, a block device or a symbolic link to a missing file | Refused. |
-| The library calls `run` or `run_collect` with formats that take two searches, `-num_descriptions` or `-num_alignments`, and PSSM files | Refused. One call per format writes the command line's output. |
+| The library calls `run` or `run_collect` with formats that take two searches (two hit list sizes under `-num_descriptions` or `-num_alignments`, or `psiblast`'s outfmt 5 or 11 with other formats) and PSSM files | Refused. One call per format writes the command line's output. |
 
 `-matrix IDENTITY` gives NCBI's own error.
 

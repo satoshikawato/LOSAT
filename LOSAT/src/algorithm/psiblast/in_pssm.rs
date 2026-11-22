@@ -115,5 +115,22 @@ pub(crate) fn check_in_pssm_options(
         let option = if psi.from_msa { "-in_msa" } else { "-in_pssm" };
         bail!("output format {number} with {option} is not supported by LOSAT's PSIBLAST yet");
     }
+    // The archive's request holds the PSSM that the search holds (`PsiSearch::archive_pssm`):
+    // `-in_pssm`'s object, whose members the XML and ASN.1 binary streams do not all write yet
+    // (`report::archive::pssm_unwritten`; the later rounds' PSSMs keep its query). Lifted where
+    // those streams write them (line RG item F3's encoder, for XML).
+    if outfmts.contains(&crate::blastinput::app::output_format::ARCHIVE_FORMAT) {
+        if let (Some(handle), Some(pssm)) = (args.archive.as_ref(), psi.archive_pssm.as_deref()) {
+            if let Some(what) = crate::report::archive::pssm_unwritten(handle.encoding(), pssm) {
+                let stream = match handle.encoding() {
+                    crate::report::archive::ArchiveEncoding::Xml => "XML (ARCHIVE_FORMAT=xml)",
+                    _ => "ASN.1 binary (ARCHIVE_FORMAT=bin)",
+                };
+                bail!(
+                    "-outfmt 11 in {stream} with a PSSM whose members hold {what} is not supported by LOSAT's PSIBLAST yet"
+                );
+            }
+        }
+    }
     Ok(())
 }

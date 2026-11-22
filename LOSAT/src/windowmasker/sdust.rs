@@ -17,7 +17,7 @@ const DUST_WINDOW: u32 = 64;
 const DUST_LINKER: usize = 1;
 
 impl SDustMasker {
-    /// `new CSDustMasker( aConfig.DustWindow(), aConfig.DustLevel(), aConfig.DustLinker() )`:
+    /// A new `CSDustMasker` of the `DustWindow()`, `DustLevel()` and `DustLinker()` of `aConfig`:
     /// the level is the `Uint4` of `-dust_level` (a negative value wraps, and `CSymDustMasker`
     /// takes 20 for a level outside 2..64, `DustMasker::new`).
     ///
@@ -29,8 +29,8 @@ impl SDustMasker {
         }
     }
 
-    /// `(*duster)( data, *mask_info )`: the DUST intervals of `data` (IUPACna) outside the
-    /// WindowMasker intervals `exclude` longer than the window, both ends included.
+    /// `duster` called on `data` and the mask info: the DUST intervals of `data` (IUPACna) outside
+    /// the WindowMasker intervals `exclude` longer than the window, both ends included.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_sdust_masker.cpp:76-116
     /// `CSeqVector_CI::operator+` sets the position through `SetPos`, which stops at the
@@ -77,8 +77,8 @@ impl SDustMasker {
     }
 }
 
-/// `CSeqMasker::MergeMaskInfo( dest, src )`: the intervals of `dest` and `src` (each in order),
-/// those that overlap or touch merged, into `dest`.
+/// `CSeqMasker::MergeMaskInfo` of `dest` and `src`: the intervals of `dest` and `src` (each in
+/// order), those that overlap or touch merged, into `dest`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:507-554
 /// (`seg.second + 1` is a `TSeqPos` sum; positions are below 2^32 - 1, so it does not wrap.)

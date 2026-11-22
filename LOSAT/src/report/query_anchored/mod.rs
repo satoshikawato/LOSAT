@@ -337,7 +337,7 @@ impl HspAlnVec {
     /// `strands` (two per segment, `report::serial::seqalign::Segments`), its rows of widths
     /// `widths` (the query's and the subject's: 3 for a row of nucleotides translated against
     /// proteins, `CreateDensegFromStdseg`; `[1, 1]` for a Dense-seg without widths), and its rows'
-    /// per-line coordinates for lines of `line_length` columns (`(int)m_LineLen`).
+    /// per-line coordinates for lines of `line_length` columns (`m_LineLen` cast to `int`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1281-1283
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1272
@@ -386,7 +386,7 @@ impl HspAlnVec {
     }
 
     /// `GetAlnStop()` of the HSP (`x_DisplayRowData`'s `aln_stop`): `u32::MAX` for an HSP of
-    /// length 0 (BLASTX's empty rows), whose lines `j <= (int)aln_stop` are none.
+    /// length 0 (BLASTX's empty rows), whose lines up to `aln_stop` cast to `int` are none.
     pub(crate) fn aln_stop(&self) -> u32 {
         self.aln_stop
     }
@@ -705,8 +705,8 @@ pub(crate) fn write_section<W: Write + ?Sized>(
             aln_mix::MixError::NcbiFreesSegment => {
                 internal("a section whose merge NCBI BLAST+ frees a segment in")
             }
-            // NCBI's exception, before the section's first byte (`Merge` comes before `out <<
-            // "\n"`): the program's report ends with it (`cli::NativeError::of_writer`).
+            // NCBI's exception, before the section's first byte (`Merge` comes before the line feed
+            // written to `out`): the program's report ends with it (`cli::NativeError::of_writer`).
             aln_mix::MixError::NcbiThrows(exception) => exception.into_io_error(),
         })?;
         if let Some(denseg) = denseg {
@@ -841,10 +841,10 @@ struct RowData {
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1269-1283
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:411-422 (`s_GetFrame`)
 /// A row of width 3 has a frame of 1 to 3 or -1 to -3, every other row 0. The query's row of a
-/// translated query (BLASTX, TBLASTX) has the frame of its group (`query_frame`: its first and
-/// last positions are those of the group's HSPs, all in that frame of the record), and shows the
-/// query's masks of that frame. The subjects' masks have none (`Mask`), so `x_OutputSeq`
-/// (`locFrame == frame`) shows none on a subject's row of width 3 (TBLASTN's, TBLASTX's).
+/// translated query (BLASTX, TBLASTX) has the frame of its group (`query_frame`: its first and last
+/// positions are those of the group's HSPs, all in that frame of the record), and shows the query's
+/// masks of that frame. The subjects' masks have none (`Mask`), so `x_OutputSeq` (where `locFrame`
+/// equals `frame`) shows none on a subject's row of width 3 (TBLASTN's, TBLASTX's).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1363-1370
 /// (`maxStartLen` is the width of the largest 0-based position, which the 1-based numbers
@@ -1063,7 +1063,7 @@ fn display_row_data_set(
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1594-1627
 /// (`k_IdStartMargin`, `k_StartSequenceMargin` and `k_SeqStopMargin` are 2, showalign.cpp:96-98;
-/// the `size_t` sum `maxStartLen - startLen + 2` is at least 1.)
+/// the `size_t` sum of `maxStartLen` less `startLen`, plus 2, is at least 1.)
 #[allow(clippy::too_many_arguments)]
 fn display_sequence_line(
     out: &mut Vec<u8>,
@@ -1147,9 +1147,9 @@ fn output_seq(
 }
 
 /// `eachSeqloc` of a mask of the columns `from..=to` on the line of columns `start..start + len`
-/// (`x_OutputSeq` under `eHtml`, cited at `output_seq`): its first column on the line, and its
-/// last where the mask ends on the line, else 0 (the `GetTo()` of `CRange<int>(0, 0)`); `None` for
-/// a mask that does not meet the line and for the range `(0, 0)` that NCBI drops: a mask that
+/// (`x_OutputSeq` under `eHtml`, cited at `output_seq`): its first column on the line, and its last
+/// where the mask ends on the line, else 0 (the `GetTo()` of a `CRange<int>` of 0 and 0); `None`
+/// for a mask that does not meet the line and for the range `(0, 0)` that NCBI drops: a mask that
 /// starts at the alignment's first column and does not end on the first line (its letters are in
 /// lower case, without a span), or that covers that column alone.
 fn mask_span(from: i64, to: i64, start: i64, len: i64) -> Option<(i64, i64)> {
@@ -1158,8 +1158,8 @@ fn mask_span(from: i64, to: i64, start: i64, len: i64) -> Option<(i64, i64)> {
     if lo > hi {
         return None;
     }
-    // `i == min<int>(to, start+len)`: only the mask's own last column, `to`, when it lies on the
-    // line (`hi` is below `start + len`).
+    // NCBI's test that `i` equals the smaller (as `int`) of `to` and `start` plus `len`: only the
+    // mask's own last column, `to`, when it lies on the line (`hi` is below `start + len`).
     let last = if to <= hi { to } else { 0 };
     (!(lo == 0 && last == 0)).then_some((lo, last))
 }

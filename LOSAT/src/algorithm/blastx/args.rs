@@ -759,7 +759,7 @@ impl BlastxArgs {
         let word_size = self.word_size.unwrap_or(if fast { 5 } else { 3 });
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:288-300
         // (BLASTX's query is protein for these arguments: blastx_args.cpp:74 passes
-        // `!kQueryIsProtein`.) A word size given on the command line above 4 is the compressed
+        // the negation of `kQueryIsProtein`.) A word size given on the command line above 4 is the compressed
         // table with its own threshold (19.3, 21 or 20.25), and one of 4 or less leaves the task's:
         // `-task blastx-fast -word_size 3` is the standard table with threshold 20
         // (api/blast_options_local_priv.hpp:612-619).

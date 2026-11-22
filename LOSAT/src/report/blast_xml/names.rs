@@ -30,7 +30,7 @@ impl Refusal {
     }
 }
 
-/// `CDeflineGenerator().GenerateDefline(bh)` of a record with the FASTA title `title` (no
+/// `GenerateDefline` of a `CDeflineGenerator` for a record with the FASTA title `title` (no
 /// flags): the definition line, or `None` where it throws (`NStr::HtmlDecode` cannot guess the
 /// title's encoding, `report::defline::UnknownEncoding`), which NCBI's XML writers catch
 /// (`QueryText::id`, `SubjectNames::of_unknown`).

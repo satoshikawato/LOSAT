@@ -24,8 +24,9 @@
 //! match `lcl|5`; `seqid::mask_handle` has the table. With `-parse_seqids` a sequence has the
 //! Seq-ids of its defline (those of the other molecule type turned into `local str`,
 //! build_db.cpp:837-851), without it `local id N`. The ranges of several Seq-ids are combined as
-//! `CSeq_loc::Add(fMerge_All | fSort)` does (Seq_loc.cpp:4283-4693), empty and whole ranges
-//! included; `giim` Seq-ids find their masks in the order of the mask files, as NCBI's Giim tree.
+//! `CSeq_loc::Add` with the flags `fMerge_All` and `fSort` does (Seq_loc.cpp:4283-4693), empty and
+//! whole ranges included; `giim` Seq-ids find their masks in the order of the mask files, as NCBI's
+//! Giim tree.
 //!
 //! What is refused (`WriteDbError::Unsupported`: "losat makeblastdb: ...", status 1, naming the
 //! Seq-ids and the sequence; `range_set` has the rule and NCBI's lines): only what NCBI orders by
@@ -77,7 +78,7 @@ pub(crate) struct MaskWriter {
     /// `m_MaskAlgoRegistry`.
     registry: MaskInfoRegistry,
     /// `m_ColumnMetas[m_MaskDataColumn]`: the metadata of the mask column,
-    /// `Some` once the column exists (`m_MaskDataColumn != -1`).
+    /// `Some` once the column exists (`m_MaskDataColumn` is not -1).
     column_meta: Option<ColumnMeta>,
     /// `m_Blobs` of the mask column for the sequence being written, `Some`
     /// once `SetMaskData` has filled both (`m_HaveBlob`).
@@ -105,7 +106,7 @@ impl MaskWriter {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1436-1462
     // LOSAT writes no GI masks (`-gi_mask` needs `-parse_seqids`).
-    /// `RegisterMaskAlgorithm(program, options, name)`.
+    /// `RegisterMaskAlgorithm` of a program, its options and a name.
     pub(crate) fn register_program(
         &mut self,
         program: i32,
@@ -132,7 +133,7 @@ impl MaskWriter {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1464-1480
-    /// `RegisterMaskAlgorithm(id, description, options)`: the `-mask_id`
+    /// `RegisterMaskAlgorithm` of an id, a description and options: the `-mask_id`
     /// form.
     pub(crate) fn register_id(
         &mut self,
@@ -162,7 +163,7 @@ impl MaskWriter {
     // `seq_length` is `x_ComputeSeqLength()` for the sequence being written,
     // `None` when there is none ("Need sequence data."). All lengths and
     // offsets are 4-byte integers; every size is a multiple of 4, so
-    // `WritePadBytes(4, eSimple)` adds nothing.
+    // `WritePadBytes` to a multiple of 4 bytes with `eSimple` adds nothing.
     /// `SetMaskData` (without the GI-mask path): the blobs of the sequence
     /// being written.
     pub(crate) fn set_mask_data(

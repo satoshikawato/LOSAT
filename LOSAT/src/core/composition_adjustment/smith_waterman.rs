@@ -859,7 +859,7 @@ pub(crate) fn evalue_from_score(score: i32, lambda: f64, log_k: f64, searchsp: f
 /// `smith_waterman_redo_window`).
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SwSignificance {
-    /// With linked HSPs (`do_link_hsps`): `aSwScore >= params->cutoff_s`.
+    /// With linked HSPs (`do_link_hsps`): `aSwScore` is at least `params->cutoff_s`.
     CutoffScore(i32),
     /// Otherwise the e-value of the score (`s_EvalueFromScore` with the redo's scaled `Lambda`,
     /// `logK` and the query's `eff_search_space`) below `params->cutoff_e` (`-evalue`), and before
@@ -937,8 +937,8 @@ pub(crate) enum SwWindowRedo {
     /// `alignments[query_index]`, so its list starts with the last).
     Alignments(Vec<SwAlignment>),
     /// NCBI's failed redo: a significant alignment whose X-drop traceback has no operation
-    /// (`GapEditScriptNew(0)` is NULL, `s_NewAlignmentUsingXdrop` returns -1); NCBI frees the
-    /// match's alignments and returns -1 (redo_alignment.c:1542-1548).
+    /// (`GapEditScriptNew` of 0 operations gives NULL, `s_NewAlignmentUsingXdrop` returns -1); NCBI
+    /// frees the match's alignments and returns -1 (redo_alignment.c:1542-1548).
     Failed,
     /// NCBI's redo that does not end: a significant score of 0 in a window of two or more HSPs
     /// whose first query position scores the subject's first letter above 0 (see
@@ -965,22 +965,23 @@ pub(crate) enum SwWindowRedo {
 /// none.
 ///
 /// The regime of a significant score of 0 is decided at the window's first significant round. When
-/// the score of 0 passes the threshold (`s_EvalueFromScore(0, ..) = searchsp * K < cutoff_e`, or
-/// `0 >= cutoff_s`) and the window has two or more HSPs, every round is significant (a later score
-/// is at least 0, its e-value at most that of 0, and the heap is asked at the first round only),
-/// and every round of a positive score forbids its start cell, which was free and whose diagonal
-/// step is positive (the reverse scan's first best comes from the diagonal), so the loop makes
-/// every positive alignment and comes to a round of score 0. That round's score-only scan ends at
-/// (0, 0) (`bestQueryPos = bestMatchSeqPos = 0`, a best only for `>`), its find-start stops at
-/// (0, 0) (`bestScore >= score_in` with 0), and `s_SWFindFinalEndsUsingXdrop` aligns the 1 x 1
-/// rectangle there: the first query position's row against the subject's first letter (after
-/// SEG). A positive score makes one substitution, prepends it and pushes `[0, 1]` onto row 0 again,
-/// which changes no score the scan sees (every cell scores 0 already): the next round is the same,
-/// and NCBI makes it until an allocation fails (`Endless`). Otherwise `ALIGN_EX` makes no
-/// operation, `GapEditScriptNew(0)` is NULL, the X-drop callback returns -1 and NCBI frees the
-/// match's alignments (`Failed`). Both outcomes follow from the cell, so they are answered at the
-/// first round, without the rounds. With one HSP the loop makes one round, whose score of 0 (all
-/// cells 0 or less) also fails, at its traceback.
+/// the score of 0 passes the threshold (the e-value of 0 from `s_EvalueFromScore`, `searchsp` times
+/// `K`, is below `cutoff_e`, or 0 is at least `cutoff_s`) and the window has two or more HSPs,
+/// every round is significant (a later score is at least 0, its e-value at most that of 0, and the
+/// heap is asked at the first round only), and every round of a positive score forbids its start
+/// cell, which was free and whose diagonal step is positive (the reverse scan's first best comes
+/// from the diagonal), so the loop makes every positive alignment and comes to a round of score 0.
+/// That round's score-only scan ends at (0, 0) (`bestQueryPos` and `bestMatchSeqPos` are 0, a best
+/// only for `>`), its find-start stops at (0, 0) (its test that `bestScore` is at least `score_in`,
+/// here 0), and `s_SWFindFinalEndsUsingXdrop` aligns the 1 x 1 rectangle there: the first query
+/// position's row against the subject's first letter (after SEG). A positive score makes one
+/// substitution, prepends it and pushes `[0, 1]` onto row 0 again, which changes no score the scan
+/// sees (every cell scores 0 already): the next round is the same, and NCBI makes it until an
+/// allocation fails (`Endless`). Otherwise `ALIGN_EX` makes no operation, `GapEditScriptNew` of 0
+/// operations gives NULL, the X-drop callback returns -1 and NCBI frees the match's alignments
+/// (`Failed`). Both outcomes follow from the cell, so they are answered at the first round, without
+/// the rounds. With one HSP the loop makes one round, whose score of 0 (all cells 0 or less) also
+/// fails, at its traceback.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1438-1529
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:437-446
@@ -1026,8 +1027,8 @@ where
         }
         // The regime of a significant score of 0 (see above), at the first round.
         if alignments.is_empty() && window.hspcnt > 1 && significance.test(0).1 {
-            // `ALIGN_EX`'s cell (1, 1): row 0 (`query_offset = queryStart - 1`) against `B[1]`, the
-            // subject's first letter (the sentinel when it has none).
+            // `ALIGN_EX`'s cell (1, 1): row 0 (`query_offset` is `queryStart` less 1) against
+            // `B[1]`, the subject's first letter (the sentinel when it has none).
             let first_letter = window.subject_from_sentinel.get(1).copied().unwrap_or(0);
             let first_cell = if window.query_length == 0 {
                 0
@@ -1056,8 +1057,8 @@ where
             (start.match_start, end.match_end),
             end.score,
         );
-        // An X-drop alignment without operations has no edit script (`GapEditScriptNew(0)` is
-        // NULL): the redo of the match fails and frees the match's alignments.
+        // An X-drop alignment without operations has no edit script (`GapEditScriptNew` of 0
+        // operations gives NULL): the redo of the match fails and frees the match's alignments.
         if traced.edit_script.is_empty() {
             return SwWindowRedo::Failed;
         }

@@ -5,14 +5,15 @@
 //! rejection. A line that NCBI's `CSeq_id` parser rejects as a malformatted ID is read as
 //! FASTA data, as NCBI does.
 //!
-//! The parse is `CSeq_id::Set` (Seq_id.cpp:2457-2551) with `fParse_AnyRaw |
-//! fParse_ValidLocal`, then the retry with `fParse_AnyRaw` when the result is a local ID.
+//! The parse is `CSeq_id::Set` (Seq_id.cpp:2457-2551) with `fParse_AnyRaw`
+//! and `fParse_ValidLocal`, then the retry with `fParse_AnyRaw` when the result is a local ID.
 //! Every branch is ported except the accession guide (`SAccGuide::Find` over the 1458
 //! prefix rules and the special ranges of `accguide2.inc`): a line in one of the guide's
 //! formats is rejected without the lookup (`SeqIdLine::GuideFormat`), which also rejects
 //! some lines that the guide does not know and NCBI reads as FASTA (`ZZ123456`).
 
-/// What `CSeq_id(line, fParse_AnyRaw | fParse_ValidLocal)` and its retry make of a line.
+/// What the `CSeq_id` constructor with `fParse_AnyRaw` and `fParse_ValidLocal`, and its retry,
+/// make of a line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SeqIdLine {
     /// `Malformatted ID`: `CFastaReader` reads the line as data.
@@ -156,7 +157,7 @@ fn identify_accession(acc: &[u8]) -> Option<SeqIdLine> {
 }
 
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1665-1677
-/// The flags are `fParse_AnyRaw | fParse_ValidLocal | fParse_FallbackOK`
+/// The flags are `fParse_AnyRaw`, `fParse_ValidLocal` and `fParse_FallbackOK`
 /// (`fParse_RawText` and `fParse_RawGI` set).
 fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
     let digit_pos = main.iter().position(|&byte| digit(byte))?;
@@ -269,9 +270,10 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
 /// at that throw, so a line is FASTA exactly when it is neither tagged, an identified
 /// accession, nor a whitelisted general ID.
 pub(super) fn classify(line: &[u8]) -> SeqIdLine {
-    // `NStr::TruncateSpaces_Unsafe(the_id_in, NStr::eTrunc_Both)` (Seq_id.cpp:2459).
+    // `NStr::TruncateSpaces_Unsafe` of `the_id_in` with `NStr::eTrunc_Both` (Seq_id.cpp:2459).
     let line = crate::ncbi_str::truncate_spaces(line);
-    // blast_fasta_input.cpp:132: `!line.empty() && isalnum(line.data()[0]&0xff)`.
+    // blast_fasta_input.cpp:132: the line is not empty and its first byte (masked to 8 bits) is
+    // alphanumeric (`isalnum`).
     if line.first().is_none_or(|&first| !alnum(first)) {
         return SeqIdLine::Fasta;
     }

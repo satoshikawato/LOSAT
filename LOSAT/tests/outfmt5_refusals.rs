@@ -9,7 +9,8 @@
 //! `tests/xml_dbname.rs`.
 //!
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:219-314
-//! (`CDeflineGenerator::x_CleanAndCompress`, `size_t left` wraps where a separator reaches the end).
+//! (`CDeflineGenerator::x_CleanAndCompress`, `left`, a `size_t`, wraps where a separator reaches
+//! the end).
 
 use std::fs;
 use std::path::{Path, PathBuf};

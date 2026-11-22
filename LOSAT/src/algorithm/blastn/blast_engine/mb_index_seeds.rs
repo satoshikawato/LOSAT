@@ -164,9 +164,9 @@ impl<'a> IndexSeeds<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:869-875
-    /// `GetResults(oid, chunk)`: the seeds of chunk `chunk` of the database sequence `ordinal`,
-    /// the word size and the volume, or `None` (NCBI's word size 0). A chunk that is a later
-    /// sequence's in the index is refused (`VolumeSeeds::chunk_of_a_later_sequence`).
+    /// `GetResults` of `oid` and `chunk`: the seeds of chunk `chunk` of the database sequence
+    /// `ordinal`, the word size and the volume, or `None` (NCBI's word size 0). A chunk that is a
+    /// later sequence's in the index is refused (`VolumeSeeds::chunk_of_a_later_sequence`).
     fn chunk_seeds(&self, ordinal: u32, chunk: u32) -> Option<(&[Seed], u32, usize)> {
         let (at, subj) = self.locate(ordinal);
         let seeds = self.volume(at)?;
@@ -278,9 +278,9 @@ impl IrHash {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/index_ungapped.h:42-73
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/index_ungapped.c:120-153
-    /// `IR_LOCATE(hash, diag, key)`: the key's first entry when it is empty or holds `diag`;
-    /// else the entry after it that holds `diag`, whose values it swaps with the first's, which
-    /// it returns; else a new entry for `diag` after the first.
+    /// `IR_LOCATE` of `hash`, `diag` and `key`: the key's first entry when it is empty or holds
+    /// `diag`; else the entry after it that holds `diag`, whose values it swaps with the first's,
+    /// which it returns; else a new entry for `diag` after the first.
     fn locate(&mut self, diag: u32) -> &mut IrEntry {
         let key = diag % IR_HASH_SIZE;
         let head = self.heads[key as usize];
@@ -343,7 +343,7 @@ fn indexed_word_finder(
         let mut found = Ok(());
         for seed in seeds {
             let (q_off, s_off) = (seed.q_off, seed.s_off);
-            // `IR_DIAG(q_off, s_off)`.
+            // `IR_DIAG` of `q_off` and `s_off`.
             let diag = 0x1000_0000u32.wrapping_add(s_off).wrapping_sub(q_off);
             let entry = hash.locate(diag);
             if q_off.wrapping_add(word_size).wrapping_sub(1) <= entry.qend {

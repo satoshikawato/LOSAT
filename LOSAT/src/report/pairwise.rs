@@ -5028,6 +5028,10 @@ pub fn write_blastx_pairwise_report<W: crate::report::ostream::ReportWrite>(
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
     loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
+    // The report's insertions reach the stream in chunks, as in the other pairwise writers: each
+    // region change of a pairwise report is at a flush of NCBI's, which writes the chunk through.
+    let mut buffered = io::BufWriter::new(writer);
+    let writer = &mut buffered;
     let sections = BlastxSections {
         config,
         options,

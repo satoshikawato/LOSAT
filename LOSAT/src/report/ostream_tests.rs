@@ -54,7 +54,7 @@ impl std::io::Write for Writes {
 }
 
 #[test]
-fn the_organism_reports_standard_output_writes_where_glibc_writes() {
+fn the_organism_reports_standard_output_writes_where_ncbis_writes() {
     // `std::cout` on a file of `st_blksize` 4096 (observed, glibc 2.35 and 2.39,
     // `tests/fixtures/stdio_buffer/cout_file.tsv`): the writes end at multiples of the block
     // and the rest stays held; the first insertion has no buffer yet; a flush empties the
@@ -121,7 +121,7 @@ fn written_after(stream: NcbiStdio, steps: &[Result<Vec<u8>, ()>]) -> (Vec<usize
 }
 
 #[test]
-fn a_terminals_standard_output_writes_at_its_newlines_as_glibc_does() {
+fn a_terminals_standard_output_writes_at_its_newlines_as_ncbis_does() {
     // `std::cout` on a pty of `st_blksize` 1024 (observed, glibc 2.35 and 2.39,
     // `tests/fixtures/stdio_buffer/cout_tty.tsv`): `N` is an insertion of N bytes, `N:K` with
     // a newline at K, `f` a flush.
@@ -307,7 +307,7 @@ fn the_alignments_post_802_4_in_a_file_and_on_standard_output_at_their_flush() {
     assert!(left.is_err());
     drop(ostream);
     assert_eq!(native(stream.finish(Ok(()))), (6, post.to_string()));
-    // Standard output: a failed insertion leaves glibc's buffer empty (no post); the flush
+    // Standard output: a failed insertion leaves the buffer empty (no post); the flush
     // at the end of the alignments posts, and the post's tie terminates.
     let mut stream = ReportStream::new(
         Box::new(FailAt(5)),
@@ -361,7 +361,7 @@ fn a_failure_after_the_formatter_or_of_sam_is_not_reported() {
 /// The posts of `stream` go to a buffer, which is returned.
 fn posts_of(stream: &ReportStream) -> std::sync::Arc<std::sync::Mutex<Vec<u8>>> {
     let posts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    lock(&stream.0).diagnostics = Some(Box::new(Writes2(posts.clone())));
+    lock(&stream.0).diagnostics = Some((Box::new(Writes2(posts.clone())), Cerr::new()));
     posts
 }
 
@@ -441,7 +441,7 @@ fn an_xml_iteration_that_fails_is_posted_once_and_the_run_goes_on_to_the_epilog(
 
 #[test]
 fn a_report_held_to_its_epilogs_flush_fails_there() {
-    // A small BLAST XML report that `basic_filebuf` holds: `endl` at the epilog flushes it
+    // A small BLAST XML report that NCBI's file buffer holds: `endl` at the epilog flushes it
     // while the formatter lives (exit 6); without that flush the bytes would reach the device
     // after `~CBlastFormat`, unreported.
     let mut stream = ReportStream::file(Box::new(FailAt(0)), "blastp", Site::Report);
@@ -483,7 +483,7 @@ fn a_serial_object_that_fails_inside_ends_the_run_and_one_that_fails_at_close_go
                     basic_ios::clear: iostream error\n";
     let failed = "BLAST failed to write output\n";
     let pieces = [4096, 4096, 1808];
-    // `basic_filebuf` holds the first piece and writes 8,192 bytes at the second: past 8,000
+    // The file buffer holds the first piece and writes 8,192 bytes at the second: past 8,000
     // bytes that write fails inside the object (802.4 at `Close`, then `CATCH_ALL`).
     let mut stream = ReportStream::file(Box::new(FailAt(8000)), "blastn", Site::Report);
     let posts = posts_of(&stream);
@@ -852,4 +852,35 @@ fn a_post_while_standard_output_failed_terminates() {
     // `cerr`'s tie writes what `cout` holds and fails inside the post's destructor.
     assert!(lock(&stream.0).tie().is_err());
     assert_eq!(native(stream.finish(Ok(()))).0, -6);
+}
+
+#[test]
+fn a_failed_standard_error_is_bad_and_the_run_goes_on_without_its_tie() {
+    // review 2 D2: a post that standard error does not take makes `cerr` bad; the run goes on,
+    // a later post writes nothing and makes none of standard output's writes before it.
+    use std::io::Write;
+    let took = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut stream = ReportStream::new(
+        Box::new(Limited {
+            took: took.clone(),
+            limit: usize::MAX,
+        }),
+        Some(NcbiBuffer::new(NcbiStdio::Cout {
+            block: 4096,
+            lines: false,
+        })),
+        true,
+        "blastn",
+        Site::Report,
+    );
+    lock(&stream.0).diagnostics = Some((Box::new(FailAt(0)), Cerr::new()));
+    stream.write_all(b"first").unwrap();
+    // The first post's tie writes what standard output holds; standard error fails.
+    lock(&stream.0).post("Warning: [blastn] w1\n").unwrap();
+    assert_eq!(lock(&took).as_slice(), b"first");
+    stream.write_all(b"second").unwrap();
+    lock(&stream.0).post("Warning: [blastn] w2\n").unwrap();
+    assert_eq!(lock(&took).as_slice(), b"first");
+    assert!(stream.finish(Ok(())).is_ok());
+    assert_eq!(lock(&took).as_slice(), b"firstsecond");
 }

@@ -52,8 +52,9 @@
   too, and LOSAT's error prefixes; the Owner's 「Q1=B Q2=B」 of 2026-11-21, line NW2, NW2
   DECISIONS 1; the forms, NW2 DECISIONS 2-4, Owner-delegated, the same standing instruction); 1.26 2026-11-21 (exception 3
   withdrawn: a failed write of outfmt 6, 7 or 10 aborts as NCBI's; exception 7
-  withdrawn: a failed write of a side file of outfmt 13 or 14 ends as NCBI's; exception 5 for every
-  format of the search programs, the Owner's answer A to line RG's T6-Q1 of 2026-11-17; line RG item
+  withdrawn: a failed write of a side file of outfmt 13 or 14 ends as NCBI's; a failed write to
+  standard error is NCBI's, the run goes on; exception 5 for every format of the search programs
+  and for their standard error, its timing of 1.2 restated, the Owner's answer A to line RG's T6-Q1 of 2026-11-17; line RG item
   T6a, RG DECISIONS T6-1, T6-2 and T6-3 of 2026-11-17, Owner-delegated, the same standing
   instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
@@ -117,12 +118,12 @@ BLAST+.
    no message), in every format. The Rust runtime ignores SIGPIPE; restoring it needs a
    native `signal` call that the project's pure-Rust runtime boundary check rejects. LOSAT
    reports the failed outfmt 0 write as NCBI reports other outfmt 0 write failures:
-   `BLAST failed to write output`, exit code 6 (outfmt 6/7: exception 3).
+   `BLAST failed to write output`, exit code 6 (outfmt 6/7: exception 3, withdrawn in 1.26).
    Version 1.2: whether a write to a pipe fails depends on when the reader closes it. When
    LOSAT's writes have completed before the reader closes (for example a short outfmt 6 or
    7 report read by `head -c 100`), LOSAT exits with code 0, where NCBI, which writes later
    (at its flushes), is ended by SIGPIPE (141). This timing is part of exceptions 3 and 5
-   (round-3 audit of Session S07+++b).
+   (round-3 audit of Session S07+++b; exception 3 withdrawn in 1.26, the timing restated below).
    Version 1.26: every format of the search programs (the Owner's answer A to line RG's
    question T6-Q1, 2026-11-17: no crate and no native call; RG DECISIONS T6-3). A write to a
    closed pipe (`EPIPE`; the Rust runtime ignores SIGPIPE) is a failed write of the report's
@@ -135,6 +136,19 @@ BLAST+.
    libstdc++'s `terminate` text and an abort (exit status 134); SAM (17) with exit code 0. A pipe
    that only the writes after the formatter reach (`~CBlastFormat`'s flush and the exit's) is not
    reported (exit code 0), as NCBI does not report a failed device there.
+   The timing of version 1.2, as it happens since version 1.26: a write to the pipe fails only
+   when it comes after the reader has closed, in LOSAT as in NCBI. LOSAT keeps up to 8,192 bytes
+   of NCBI's writes before it makes them together (where one fails, the run ends where NCBI's
+   failed write ends it), so a short report reaches the pipe in one write at the end of the run;
+   when that write lands before the reader closes, the run sees no failure and exits with code
+   0 (`head -c 0` on a one-query BLASTN outfmt 0 report: LOSAT 0 in 2 of 40 runs, code 6 in the
+   others; NCBI 2.17.0 141 in 40 of 40; line RG item T6a, review 2 N1, 2026-11-18).
+   A closed pipe on standard error (version 1.26) is a failed write of standard error, which
+   NCBI's run survives: NCBI's `cerr` that cannot write (`2>/dev/full`) takes no later message,
+   and the run goes on to the end of its report and its exit code (0 for a search that ends
+   well; NCBI 2.17.0 observed, line RG item T6a, review 2 D2). LOSAT does the same where NCBI
+   is ended by SIGPIPE at its first message (exit status 141 from the shell): the report is
+   whole and the messages are lost.
 6. **Standard output closed at the start** (version 1.3, accepted by the maintainer on
    2026-10-03 in Session S08b, plan DW-17). When a program starts with its standard output
    closed (`>&-`), NCBI's first write to `cout` fails: outfmt 0 reports `BLAST failed to
@@ -223,8 +237,10 @@ BLAST+.
    reader has closed ends it by SIGPIPE (exit status 141 from the shell, no message;
    exception 5). LOSAT stops at the first failed write of the report (a closed pipe is such a
    write) with `rpsbproc failed to write output: <error>` on standard error and exit code 4,
-   rpsbproc's own code for its output file (`e_OutputFileOpenError`, main:91-101), as the
-   search programs use their output-error code 6 for a failed write (exception 3). As in
+   rpsbproc's own code for its output file (`e_OutputFileOpenError`, main:91-101), as NCBI's
+   search programs use their output-error code 6 for a failed report write (`BLAST failed to
+   write output`; exception 3, which had LOSAT's search programs do so in every format, is
+   withdrawn in 1.26). As in
    exception 5 (version 1.2), a closed pipe that LOSAT's completed writes never reach ends
    with exit code 0. Nothing is written to standard error after the failure (no progress
    line). A failed write to standard error (its reader has closed: NCBI's rpsbproc ends by

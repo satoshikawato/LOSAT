@@ -703,10 +703,17 @@ fn later_round_report_contexts<'a>(
     std::borrow::Cow::Owned(contexts)
 }
 
-/// `out_stream << NcbiEndl << "Search has CONVERGED!" << NcbiEndl` for every report that is not
-/// structured (psiblast's outfmt 0, 6, 7, 10 and 20).
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:525-528
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:556-558
+/// The line `Search has CONVERGED!` between two `NcbiEndl`s, for every report that is not
+/// structured (psiblast's outfmt 0, 6, 7, 10 and 20), on the report's one stream: the
+/// application writes it after the query's rounds, outside the formatter's regions (`Site::Report`:
+/// no `CBlastTabularInfo` lives there, so a failed write there is the application's "BLAST failed
+/// to write output", exit 6), each `NcbiEndl` a line feed and a flush (`ostream::ncbi_endl`). The
+/// next query's report starts in the format's region again (`Site::of_format`).
 fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
     use crate::blastinput::app::ReportFormat;
+    use crate::report::ostream::{ncbi_endl, ReportWrite, Site};
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
         if matches!(
@@ -719,8 +726,12 @@ fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
                     | ReportFormat::CommaSeparatedValuesWithHeader
             )
         ) {
-            let mut writer = format.sink.open()?;
-            writer.write_all(b"\nSearch has CONVERGED!\n")?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
+            writer.site(Site::Report)?;
+            ncbi_endl(&mut writer)?;
+            writer.write_all(b"Search has CONVERGED!")?;
+            ncbi_endl(&mut writer)?;
+            writer.site(Site::of_format(number))?;
             writer.flush()?;
         }
     }

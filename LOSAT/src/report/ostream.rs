@@ -46,7 +46,8 @@ pub enum Site {
     /// stream (`ReportWrite::ncbi_flush`). A failed insertion throws `ios_base::failure` through
     /// the object's frames (they catch `CException`s only, objstack.hpp:201-214); `Close`, which
     /// clears the stream's state for its flush (`STemporarilyClearStreamState`), fails again on a
-    /// file (`basic_filebuf` keeps the bytes) and posts 802.4, and the exception ends the run at
+    /// file (whose buffer keeps the bytes it could not write, as NCBI BLAST+ 2.17.0's `-out` runs
+    /// show) and posts 802.4, and the exception ends the run at
     /// `CATCH_ALL`. Where only `Close`'s flush fails, its destructor's catch posts 802.4 and the run
     /// goes on with a bad stream, whose next insertion throws. On standard output each post's tie
     /// throws (`std::terminate`). `whole`: LOSAT inserts the object in one insertion, and a failure
@@ -203,14 +204,15 @@ fn iteration_post(program: &str) -> String {
 }
 
 /// The command line's report stream (`-out` or standard output) as NCBI's writes it: NCBI's
-/// buffer of the stream (`NcbiBuffer`: the `-out` file's `basic_filebuf`, standard output's glibc
-/// buffer, line-buffered on a terminal) before the file or device, so that a write reaches the
+/// buffer of the stream (`NcbiBuffer`: the buffers of the `-out` file and of standard output that
+/// NCBI BLAST+ 2.17.0's Linux build is observed to keep, line-buffered on a terminal) before the
+/// file or device, so that a write reaches the
 /// device where NCBI's buffer writes (each `write` is one insertion of NCBI's, `insert`; a flush
 /// of NCBI's is `ReportWrite::ncbi_flush`, LOSAT's flushes hold), and NCBI's stream state:
 /// - a failed write of the device sets `badbit`; while the formatter lives (`CBlastFormat` sets
 ///   `exceptions(badbit)` and `~CBlastFormat` resets it, `finish`), that insertion and every later
-///   one fail (`ReportWriteFailure`: libstdc++'s sentry sets `failbit` on a bad stream, which
-///   throws), and what NCBI does then is the region's (`Site`, `finish`);
+///   one fail (`ReportWriteFailure`: an insertion into a bad stream throws, as NCBI's runs show),
+///   and what NCBI does then is the region's (`Site`, `finish`);
 /// - after `~CBlastFormat` a bad stream drops the insertions, and a failed write is not reported
 ///   (the exit flushes C's `stdout` without a check).
 ///
@@ -253,9 +255,9 @@ struct Core {
     /// Whether the failure of the caught region being written was posted (`Site::XmlIteration`:
     /// one post per `Iteration`).
     region_posted: bool,
-    /// Where NCBI's posts during the report go (`post`): the process's standard error, or a
-    /// test's writer.
-    diagnostics: Option<Box<dyn std::io::Write + Send>>,
+    /// Where NCBI's posts during the report go (`post`): the process's standard error
+    /// (`PROCESS_CERR`), or a test's writer and its `cerr`.
+    diagnostics: Option<(Box<dyn std::io::Write + Send>, Cerr)>,
     /// The bytes inserted so far (the stream's position).
     inserted: u64,
     /// The bytes that the device took.
@@ -359,6 +361,30 @@ fn write_device2(
         }
     }
     Ok(())
+}
+
+/// NCBI's insertions `pieces` of an object (an object stream's buffer writes) into NCBI's buffer
+/// `buffer`, from the stream's position `position`, against a device that took the stream's first
+/// `landed` bytes: the first piece at which the buffer writes past them (the write that fails), by
+/// its index and the stream's position at its end; `None` where every write of the buffer inside
+/// the object succeeds (`Core::resolve_object`, `side_file_failure`).
+fn failed_piece(
+    mut buffer: NcbiBuffer,
+    mut position: u64,
+    pieces: &[usize],
+    landed: u64,
+) -> Option<(usize, u64)> {
+    for (k, &piece) in pieces.iter().enumerate() {
+        position += piece as u64;
+        let held = buffer.held();
+        // The pieces' bytes are not read: a file's buffer counts them.
+        buffer.sputn(piece, &[]);
+        let writes = piece > 0 && buffer.held() < held + piece;
+        if writes && position - buffer.held() as u64 > landed {
+            return Some((k, position));
+        }
+    }
+    None
 }
 
 impl Core {
@@ -708,24 +734,17 @@ impl Core {
     /// the object succeeds, only `Close`'s flush fails (802.4 posted, the run goes on).
     #[cold]
     fn resolve_object(&mut self, pieces: &[usize]) -> std::io::Result<()> {
-        let Some((mut buffer, mut position)) = self.undecided.take() else {
+        let Some((buffer, position)) = self.undecided.take() else {
             return Ok(());
         };
-        for &piece in pieces {
-            position += piece as u64;
-            let held = buffer.held();
-            // The pieces' bytes are not read: a file's buffer counts them.
-            buffer.sputn(piece, &[]);
-            let writes = piece > 0 && buffer.held() < held + piece;
-            if writes && position > self.landed {
-                if let Site::Xml2Report { json } = self.site {
-                    return self.xml2_caught(json);
-                }
-                self.failure.get_or_insert(Failure::Thrown {
-                    posts: cannot_close_post(self.program),
-                });
-                return Err(write_failure());
+        if failed_piece(buffer, position, pieces, self.landed).is_some() {
+            if let Site::Xml2Report { json } = self.site {
+                return self.xml2_caught(json);
             }
+            self.failure.get_or_insert(Failure::Thrown {
+                posts: cannot_close_post(self.program),
+            });
+            return Err(write_failure());
         }
         self.post(&cannot_close_post(self.program))
     }
@@ -739,11 +758,12 @@ impl Core {
             Site::Report => Failure::Thrown {
                 posts: String::new(),
             },
-            // glibc empties `stdout`'s buffer after a failed write (`new_do_write`), so `out2`'s
-            // flush during the unwinding of an insertion's exception, which clears the stream's
-            // state first, writes nothing and succeeds: no post. Its own flush at the end of the
-            // alignments fails and posts, and the post's tie throws. `basic_filebuf` keeps the
-            // bytes: the second flush fails too.
+            // On standard output a failed write leaves nothing held (NCBI BLAST+ 2.17.0 posts no
+            // 802.4 there, line RG survey T6 D3), so `out2`'s flush during the unwinding of an
+            // insertion's exception, which clears the stream's state first, writes nothing and
+            // succeeds: no post. Its own flush at the end of the alignments fails and posts, and
+            // the post's tie throws. A file keeps the bytes it could not write: the second flush
+            // fails too (the 802.4 of NCBI's `-out` runs).
             Site::Alignments if self.standard_output && !flushing => Failure::Thrown {
                 posts: String::new(),
             },
@@ -816,24 +836,25 @@ impl Core {
     /// (`std::terminate`) and the text is not written (`tie`). Before a post on a report in a
     /// file NCBI's writes before it are made (`sync`): where one failed, NCBI's run ended there,
     /// without the post.
+    /// A failed `cerr` takes no text and flushes no tie (`Cerr`).
     fn post(&mut self, text: &str) -> std::io::Result<()> {
+        let cerr = match &self.diagnostics {
+            Some((_, cerr)) => cerr,
+            None => &PROCESS_CERR,
+        };
+        if text.is_empty() || cerr.failed() {
+            return Ok(());
+        }
         if self.standard_output {
             self.tie()?;
         } else {
             self.sync()?;
         }
         match &mut self.diagnostics {
-            Some(diagnostics) => {
-                diagnostics.write_all(text.as_bytes())?;
-                diagnostics.flush()
-            }
-            None => {
-                use std::io::Write;
-                let mut stderr = std::io::stderr();
-                stderr.write_all(text.as_bytes())?;
-                stderr.flush()
-            }
+            Some((diagnostics, cerr)) => cerr.write(&mut **diagnostics, text.as_bytes()),
+            None => PROCESS_CERR.write_process(text.as_bytes()),
         }
+        Ok(())
     }
 
     /// The region of the insertions from here on (`ReportWrite::site`): each declaration starts a
@@ -877,7 +898,7 @@ impl Core {
     /// (`std::terminate`); the text is not written.
     fn tie(&mut self) -> std::io::Result<()> {
         if self.bad {
-            // `cout.flush()` of a bad stream: its sentry throws while the formatter lives.
+            // A flush of a bad `cout` throws while the formatter lives (NCBI's runs terminate).
             if self.throws {
                 self.failure = Some(Failure::Terminate);
                 return Err(write_failure());
@@ -1000,9 +1021,8 @@ impl ReportStream {
 
     /// The command line's report stream of `program` (the application's name in NCBI's posts)
     /// for the report of `-outfmt` `outfmt` (`Site::of_format`): the `-out` file `out_file`
-    /// (NCBI's `basic_filebuf`, `NcbiStdio::File`: `BUFSIZ - 2` bytes held, the 8191st written
-    /// with them) or, with `None`, standard output (glibc's buffer, `NcbiStdio::cout`, tied to
-    /// standard error).
+    /// (NCBI's file buffer, `NcbiStdio::File`: 8,190 bytes held, the 8,191st written with them)
+    /// or, with `None`, standard output (`NcbiStdio::cout`, tied to standard error).
     ///
     /// Nearest the device is the hold of a run whose strategy file `strategy` LOSAT refuses
     /// (`strategy::hold_report`): until NCBI's first request the stream's device writes are
@@ -1485,26 +1505,36 @@ impl CutCursor<'_> {
         from: usize,
         to: usize,
     ) -> std::io::Result<()> {
+        self.write_until(writer, report, from, to, usize::MAX)
+    }
+
+    /// `write` with the cuts before the `cuts_end`th alone: those after it, at `to`, come after
+    /// what is written between (a text on standard error that the formatter made after them,
+    /// `blastx::blast_xml::HeldOutput`).
+    pub fn write_until(
+        &mut self,
+        writer: &mut dyn ReportWrite,
+        report: &[u8],
+        from: usize,
+        to: usize,
+        cuts_end: usize,
+    ) -> std::io::Result<()> {
+        let cuts = &self.cuts[..cuts_end.min(self.cuts.len())];
         let mut at = from;
         loop {
             // The run of insertions up to the next region or flush (or `to`), in one call.
             let run = self.next;
             let mut next = run;
-            while self
-                .cuts
+            while cuts
                 .get(next)
                 .is_some_and(|&(cut_at, cut)| cut_at <= to && cut == Cut::Insertion)
             {
                 next += 1;
             }
-            let other = self
-                .cuts
-                .get(next)
-                .copied()
-                .filter(|&(cut_at, _)| cut_at <= to);
+            let other = cuts.get(next).copied().filter(|&(cut_at, _)| cut_at <= to);
             let stop = other.map_or(to, |(cut_at, _)| cut_at).max(at);
             if !self.skipping && (stop > at || next > run) {
-                if let Err(error) = writer.insert_cut_run(report, at, &self.cuts[run..next], stop) {
+                if let Err(error) = writer.insert_cut_run(report, at, &cuts[run..next], stop) {
                     self.failed(writer, report, error)?;
                 }
             }
@@ -1529,7 +1559,7 @@ impl CutCursor<'_> {
                     if let Err(error) = writer.site(site) {
                         // The region's writes, made at its end, failed where NCBI's formatter
                         // catches it: that region is done, and the new one has started.
-                        self.failed(writer, report, error)?;
+                        self.region_failed(writer, report, error)?;
                         self.skipping = false;
                     }
                     self.region = (cut_at, site);
@@ -1543,13 +1573,22 @@ impl CutCursor<'_> {
         }
     }
 
-    /// A failed insertion of the region being written. A report of outfmt 16 or 15 is inserted
-    /// whole (`Site::Xml2Report`): where its write fails at the device, NCBI's pieces of the
-    /// report (`out_buffer::xml_pieces`, `json_pieces`, from its bytes) decide NCBI's end
-    /// (`ReportWrite::resolve_object`); where only its `Close` fails, the rest of the region
-    /// (`Close`'s flush) is done.
-    /// A failure that NCBI's formatter catches (`is_caught_report_write_failure`) ends the region:
-    /// the rest of it is skipped, and what follows it is written (`caught`).
+    /// Whether the rest of the region being written is not written (`failed`).
+    pub fn skipping(&self) -> bool {
+        self.skipping
+    }
+
+    /// A failure of the region being written outside its bytes (the tie of a text on standard
+    /// error that NCBI's formatter catches, `is_caught_report_write_failure`): the rest of the
+    /// region is skipped, and the formatter's next insertions are in `Site::Report` (`failed`).
+    pub fn caught_outside(&mut self, writer: &mut dyn ReportWrite) -> std::io::Result<()> {
+        self.skipping = true;
+        writer.site(Site::Report)
+    }
+
+    /// A failed insertion or flush of the region being written (`region_failed`). Where NCBI's
+    /// formatter catches it, the catch returns to the formatter, whose next insertions are in
+    /// `Site::Report` until it declares another region.
     #[cold]
     fn failed(
         &mut self,
@@ -1557,6 +1596,27 @@ impl CutCursor<'_> {
         report: &[u8],
         error: std::io::Error,
     ) -> std::io::Result<()> {
+        if self.region_failed(writer, report, error)? {
+            writer.site(Site::Report)?;
+        }
+        Ok(())
+    }
+
+    /// A failed write of the region being written. A report of outfmt 16 or 15 is inserted
+    /// whole (`Site::Xml2Report`): where its write fails at the device, NCBI's pieces of the
+    /// report (`out_buffer::xml_pieces`, `json_pieces`, from its bytes) decide NCBI's end
+    /// (`ReportWrite::resolve_object`); where only its `Close` fails, the rest of the region
+    /// (`Close`'s flush) is done.
+    /// A failure that NCBI's formatter catches (`is_caught_report_write_failure`) ends the region:
+    /// the rest of it is skipped, and what follows it is written (`caught`); returns whether it
+    /// was caught.
+    #[cold]
+    fn region_failed(
+        &mut self,
+        writer: &mut dyn ReportWrite,
+        report: &[u8],
+        error: std::io::Error,
+    ) -> std::io::Result<bool> {
         let resolved = if is_undecided_report_write_failure(&error) {
             let (start, site) = self.region;
             let end = self.cuts[self.next..]
@@ -1568,12 +1628,16 @@ impl CutCursor<'_> {
         } else {
             Err(error)
         };
-        match resolved {
-            Err(error) if is_caught_report_write_failure(&error) => self.caught = true,
-            resolved => resolved?,
-        }
+        let caught = match resolved {
+            Err(error) if is_caught_report_write_failure(&error) => true,
+            resolved => {
+                resolved?;
+                false
+            }
+        };
+        self.caught |= caught;
         self.skipping = true;
-        Ok(())
+        Ok(caught)
     }
 }
 
@@ -1883,7 +1947,7 @@ impl ReportWrite for NcbiOstream<'_> {
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:893-896 (`COStreamBuffer::FlushBuffer`)
 // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:339-354, :385-395
 /// Writes `document`, the report of a side file of outfmt 13 or 14, to `file` as NCBI's
-/// `CNcbiOfstream` (no exception mask; `basic_filebuf`, `NcbiStdio::File`) gets it from the buffer
+/// `CNcbiOfstream` (no exception mask; its file buffer, `NcbiStdio::File`) gets it from the buffer
 /// of its object stream: `pieces` are that buffer's writes (`out_buffer::xml_pieces`,
 /// `json_pieces`; `back_limit` its `m_BackLimit`), each one insertion of the stream.
 ///
@@ -1928,7 +1992,7 @@ pub fn write_side_file(
 }
 
 /// NCBI's end where a side file's device took `landed` bytes of its document, whose object
-/// stream's buffer inserts `pieces` into the file's `basic_filebuf` (`write_side_file`).
+/// stream's buffer inserts `pieces` into the file's buffer (`NcbiStdio::File`, `write_side_file`).
 #[cold]
 #[inline(never)]
 fn side_file_failure(
@@ -1938,28 +2002,23 @@ fn side_file_failure(
     back_limit: usize,
 ) -> anyhow::Result<()> {
     use std::io::Write;
-    let mut buffer = NcbiBuffer::new(NcbiStdio::File);
-    let mut end = 0usize;
-    let last = pieces.len().saturating_sub(1);
-    for (k, &piece) in pieces.iter().enumerate() {
-        end += piece;
-        buffer.sputn(piece, &[]);
-        // A write of the file's buffer inside the object that passes the bytes the file took.
-        if buffer.held() == 0 && piece > 0 && end as u64 > landed {
-            // `EndOfWrite`'s write leaves nothing in the object stream's buffer.
-            let leave = if k == last { 0 } else { back_limit };
-            let post = format!(
-                "Error: (802.5) [{program}] CObjectOStream: error at byte {}: stack is empty: \
-                 write fault\n",
-                end + leave
-            );
-            return Err(crate::cli::NativeError {
-                exit: 0,
-                message: post.into_bytes(),
-            }
-            .into());
+    // A write of the file's buffer inside the object that passes the bytes the file took.
+    let buffer = NcbiBuffer::new(NcbiStdio::File);
+    if let Some((k, end)) = failed_piece(buffer, 0, pieces, landed) {
+        // `EndOfWrite`'s write leaves nothing in the object stream's buffer.
+        let leave = if k + 1 == pieces.len() { 0 } else { back_limit };
+        let post = format!(
+            "Error: (802.5) [{program}] CObjectOStream: error at byte {}: stack is empty: \
+             write fault\n",
+            end as usize + leave
+        );
+        return Err(crate::cli::NativeError {
+            exit: 0,
+            message: post.into_bytes(),
         }
+        .into());
     }
+    let end: usize = pieces.iter().sum();
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:899-907 (`COStreamBuffer::Flush`)
     // NCBI's chain, written in LOSAT's words (`crate::wording::losat_bytes`: without the
     // exceptions' classes and codes, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) by the
@@ -2007,60 +2066,107 @@ pub fn tie_standard_output() -> std::io::Result<()> {
     }
 }
 
-/// The command line's standard error, tied to the organism report's standard output
-/// (`tie_standard_output`): the process's (`process`), so that what standard output writes before
-/// a text is written before it where the text is made. A whole message is written with one
-/// `write_all` of the stream, which `std::io::Stderr` writes under one lock of standard error, so
-/// that no other thread's message comes inside it. An empty write is no write of NCBI's to `cerr`
-/// (a query without warnings, whose `ERR_POST` NCBI does not make): it writes nothing of the
-/// report. Where the standard error is the file of `-logfile` (tblastx's, rpsblast's and
-/// rpstblastn's run, `DiagTarget::into_standard_error`), a failed write is dropped, as NCBI's
-/// handler of that file drops it: `CFileHandleDiagHandler::Post` ignores what the write returns
-/// (NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/full` runs and writes its report; line WQA's D11
-/// round 2, 2026-11-20).
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
-pub struct CliStderr(std::io::Stderr);
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
+/// NCBI's `cerr` (unbuffered, tied to `cout`) as NCBI BLAST+ 2.17.0's Linux build treats a write
+/// that fails (observed: standard error on `/dev/full`, in a file at its size limit, or a pipe
+/// whose reader closed it; line RG item T6a, review 2 D2): the stream becomes bad and the run goes
+/// on as if the text were written; a bad `cerr` takes no later text, and a later post no longer
+/// makes standard output write what it holds first (the tie, `tie_standard_output`, works on a
+/// good `cerr` only). So a full standard error changes neither the report nor the exit status. A
+/// pipe whose reader closed it fails the same way (`EPIPE`: the Rust runtime ignores SIGPIPE),
+/// where NCBI is ended by SIGPIPE (exit status 141, no text), which LOSAT cannot be without a
+/// native call: the form of NCBI's failed write of standard error (approved exception 5 of
+/// `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, the Owner's answer A to line RG's T6-Q1, 2026-11-17).
+/// Where the standard error is the file of `-logfile` (tblastx's, rpsblast's and rpstblastn's
+/// run, `DiagTarget::into_standard_error`), a failed write is dropped and the next is made, as
+/// NCBI's handler of that file writes each post and ignores what the write returns
+/// (`CFileHandleDiagHandler::Post`; NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/full` runs and
+/// writes its report; line WQA's D11 round 2, 2026-11-20).
+pub(crate) struct Cerr(std::sync::atomic::AtomicBool);
+
+/// The command line's `cerr`: the process's standard error.
+static PROCESS_CERR: Cerr = Cerr::new();
+
+impl Cerr {
+    const fn new() -> Self {
+        Cerr(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// Whether a write failed (`badbit`).
+    fn failed(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Writes `text` to `device`; a failed write makes the stream bad.
+    fn write(&self, device: &mut dyn std::io::Write, text: &[u8]) {
+        if device
+            .write_all(text)
+            .and_then(|()| device.flush())
+            .is_err()
+        {
+            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Writes `text` to the process's standard error (`write`), or to the file of `-logfile`,
+    /// whose failed write is dropped.
+    fn write_process(&self, text: &[u8]) {
+        if crate::blastinput::ncbi_environment::terminal_stderr().is_some() {
+            use std::io::Write;
+            let mut stderr = std::io::stderr();
+            let _ = stderr.write_all(text).and_then(|()| stderr.flush());
+            return;
+        }
+        self.write(&mut std::io::stderr(), text);
+    }
+}
+
+/// `text` on the command line's standard error as NCBI's `cerr` takes it (`Cerr`): after the tie
+/// (`tie_standard_output`, whose error is the report stream's: `std::terminate` while the
+/// formatter lives), nothing on a bad `cerr`. The application's posts outside the report (the
+/// error of `CATCH_ALL`, `cli::exit_on_native_error`) are written so too.
+pub fn cerr_post(text: &[u8]) -> std::io::Result<()> {
+    if text.is_empty() || PROCESS_CERR.failed() {
+        return Ok(());
+    }
+    tie_standard_output()?;
+    PROCESS_CERR.write_process(text);
+    Ok(())
+}
+
+/// The command line's standard error (`cerr_post`), tied to the report's standard output
+/// (`tie_standard_output`): what standard output writes before a text is written before it where
+/// the text is made. A whole message is written with one `write_all` of the stream, which
+/// `std::io::Stderr` writes under one lock of standard error, so that no other thread's message
+/// comes inside it. An empty write is no write of NCBI's to `cerr` (a query without warnings,
+/// whose `ERR_POST` NCBI does not make): it writes nothing of the report. A failed write of
+/// standard error is no error of the run (`Cerr`).
+pub struct CliStderr;
 
 impl CliStderr {
     /// The process's standard error.
     pub fn process() -> Self {
-        CliStderr(std::io::stderr())
-    }
-
-    /// `result` of a write, dropped where the standard error is the file of `-logfile`.
-    fn logged<T: Default>(result: std::io::Result<T>) -> std::io::Result<T> {
-        match result {
-            Err(_) if crate::blastinput::ncbi_environment::terminal_stderr().is_some() => {
-                Ok(T::default())
-            }
-            result => result,
-        }
+        CliStderr
     }
 }
 
 impl std::io::Write for CliStderr {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-        tie_standard_output()?;
-        Self::logged(self.0.write_all(buf)).map(|()| buf.len())
+        cerr_post(buf)?;
+        Ok(buf.len())
     }
 
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        if buf.is_empty() {
-            return Ok(());
-        }
-        tie_standard_output()?;
-        Self::logged(self.0.write_all(buf))
+        cerr_post(buf)
     }
 
     fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {
         self.write_all(args.to_string().as_bytes())
     }
 
+    /// Standard error holds nothing.
     fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
+        Ok(())
     }
 }
 

@@ -1478,12 +1478,19 @@ pub(crate) fn create_out_file(
 /// that the run already wrote (`post_native_error`) is not written again. A failed write is
 /// dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0 -logfile /dev/full`
 /// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20).
+///
+/// The text of `CATCH_ALL` is a post on `cerr`, which a failed standard error does not take
+/// (`report::ostream::cerr_post`); the C++ runtime's text before an abort (exit -6, `std::terminate`)
+/// is written to C's `stderr` whatever `cerr`'s state.
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
-        if !posted(&e.message) {
+        if posted(&e.message) {
+        } else if e.exit < 0 {
             let mut stderr = std::io::stderr();
             let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message));
             let _ = std::io::Write::flush(&mut stderr);
+        } else {
+            let _ = crate::report::ostream::cerr_post(catch_all_text(&e.message));
         }
         if e.exit < 0 {
             std::process::abort();
@@ -1563,7 +1570,7 @@ pub fn post_native_error(error: &anyhow::Error) {
         return;
     }
     if let Some(native) = error.downcast_ref::<NativeError>() {
-        let _ = std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&native.message));
+        let _ = crate::report::ostream::cerr_post(catch_all_text(&native.message));
         *POSTED_TEXT
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native.message.clone());

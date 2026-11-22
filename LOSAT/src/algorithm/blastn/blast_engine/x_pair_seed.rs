@@ -1660,6 +1660,7 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
         x_last: h.x_last.clone(),
         #[cfg(debug_assertions)]
         x_last_fresh: h.x_last_fresh,
+        x_map: super::XDiagMap::default(),
     }
 }
 

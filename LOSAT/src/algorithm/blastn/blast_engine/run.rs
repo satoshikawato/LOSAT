@@ -836,6 +836,7 @@ fn advance_diag_table_offset(
         // EXPERIMENT (LOSAT_X_DIAGLV2, `x_diag_lv.rs`): no bucket has an insert now. No NCBI
         // counterpart (empty while the switch is off).
         diag_hash.x_last.fill(x_diag_lv::LvLast::EMPTY);
+        diag_hash.x_map.clear();
         #[cfg(debug_assertions)]
         {
             diag_hash.x_last_fresh = true;
@@ -884,6 +885,135 @@ struct DiagHashTable {
     // has); the memo's reads and upkeep assert it.
     #[cfg(debug_assertions)]
     x_last_fresh: bool,
+    /// PROBE (line FD s1, not for a PR; LOSAT_X_FDMAP=1): the latest insert of each diagonal in an
+    /// open-addressing map, the folds of the dc strips stage without partitions reading and writing
+    /// it instead of the chains.
+    pub(super) x_map: XDiagMap,
+}
+
+/// PROBE (LOSAT_X_FDMAP): read once.
+pub(super) fn x_fd_map() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("LOSAT_X_FDMAP").is_ok_and(|v| v == "1"))
+}
+
+#[derive(Clone, Copy, Default)]
+struct XMapCell {
+    diag: i32,
+    level: i32,
+    hit_len: i32,
+    hit_saved: bool,
+    used: bool,
+}
+
+/// PROBE (LOSAT_X_FDMAP): diagonal -> its latest insert. An entry whose level is stale for the
+/// current seed (`s_off - level > window`, the take-over test of the insert) decides as an
+/// absent one; the rebuild drops them.
+#[derive(Default)]
+pub(super) struct XDiagMap {
+    cells: Vec<XMapCell>,
+    bits: u32,
+    used: usize,
+}
+
+impl XDiagMap {
+    fn with_bits(bits: u32) -> Self {
+        Self {
+            cells: vec![XMapCell::default(); 1 << bits],
+            bits,
+            used: 0,
+        }
+    }
+
+    #[inline(always)]
+    fn home(&self, diag: i32) -> usize {
+        ((diag as u32).wrapping_mul(0x9E37_79B1) >> (32 - self.bits)) as usize
+    }
+
+    #[inline(always)]
+    pub(super) fn get(&self, diag: i32) -> Option<(i32, i32, bool)> {
+        let mask = (1usize << self.bits) - 1;
+        let mut i = self.home(diag);
+        loop {
+            // SAFETY: `i <= mask < cells.len()`.
+            let c = unsafe { self.cells.get_unchecked(i) };
+            if !c.used {
+                return None;
+            }
+            if c.diag == diag {
+                return Some((c.level, c.hit_len, c.hit_saved));
+            }
+            i = (i + 1) & mask;
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn put(
+        &mut self,
+        diag: i32,
+        level: i32,
+        hit_len: i32,
+        hit_saved: bool,
+        s_off: i32,
+        window: i32,
+    ) {
+        if self.bits == 0 {
+            *self = Self::with_bits(10);
+        }
+        let mask = (1usize << self.bits) - 1;
+        let mut i = self.home(diag);
+        loop {
+            // SAFETY: as `get`.
+            let c = unsafe { self.cells.get_unchecked_mut(i) };
+            if !c.used || c.diag == diag {
+                if !c.used {
+                    c.used = true;
+                    c.diag = diag;
+                    self.used += 1;
+                }
+                c.level = level;
+                c.hit_len = hit_len;
+                c.hit_saved = hit_saved;
+                break;
+            }
+            i = (i + 1) & mask;
+        }
+        if self.used * 2 > self.cells.len() {
+            self.rebuild(s_off, window);
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn rebuild(&mut self, s_off: i32, window: i32) {
+        let live: Vec<XMapCell> = self
+            .cells
+            .iter()
+            .filter(|c| c.used && s_off - c.level <= window)
+            .copied()
+            .collect();
+        let mut bits = self.bits;
+        while live.len() * 4 > (1usize << bits) {
+            bits += 1;
+        }
+        *self = Self::with_bits(bits);
+        let mask = (1usize << bits) - 1;
+        for c in live {
+            let mut i = self.home(c.diag);
+            while self.cells[i].used {
+                i = (i + 1) & mask;
+            }
+            self.cells[i] = c;
+            self.used += 1;
+        }
+    }
+
+    pub(super) fn clear(&mut self) {
+        if self.used > 0 {
+            self.cells.iter_mut().for_each(|c| *c = XMapCell::default());
+            self.used = 0;
+        }
+    }
 }
 
 impl DiagHashTable {
@@ -905,6 +1035,7 @@ impl DiagHashTable {
             x_last: x_diag_lv::new_last(window),
             #[cfg(debug_assertions)]
             x_last_fresh: true,
+            x_map: XDiagMap::default(),
         }
     }
 

@@ -309,6 +309,7 @@ impl PartState {
                 x_last: Vec::new(),
                 #[cfg(debug_assertions)]
                 x_last_fresh: true,
+                x_map: super::super::XDiagMap::default(),
             },
             hits: Vec::new(),
             out: PartOut {

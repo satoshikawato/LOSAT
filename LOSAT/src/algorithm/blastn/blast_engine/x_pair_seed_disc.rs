@@ -427,6 +427,40 @@ fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
     );
 }
 
+/// PROBE (LOSAT_X_FDMAP): `part::insert_t`, or the map's insert.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_insert<const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>(
+    x_map: bool,
+    diag_hash: &mut DiagHashTable,
+    out: &mut part::PartOut,
+    x_key: u64,
+    diag: i32,
+    level: i32,
+    hit_len: i32,
+    hit_saved: bool,
+    s_off: i32,
+    window_size: i32,
+) {
+    if x_map {
+        diag_hash
+            .x_map
+            .put(diag, level, hit_len, hit_saved, s_off, window_size);
+    } else {
+        part::insert_t::<PT, LEAN, MEMO, TRACK>(
+            diag_hash,
+            out,
+            x_key,
+            diag,
+            level,
+            hit_len,
+            hit_saved,
+            s_off,
+            window_size,
+        );
+    }
+}
+
 /// `fold_two_hit`; EXPERIMENT (LOSAT_X_DCSEEDLEAN): without `TRACK` the inserts of a partition
 /// do not record the buckets they change (`part::insert_t`; the merge then writes back every
 /// bucket of the partition).
@@ -459,6 +493,8 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
     // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the table has level bounds; the bound's
     // constants of these seeds.
     let x_lv = diag_hash.x_lv_on();
+    // PROBE (line FD s1, LOSAT_X_FDMAP): the folds without partitions on the map.
+    let x_map = !PT && super::super::x_fd_map();
     let x_lv_seeds = super::super::x_diag_lv::LvSeeds::new(two_hits, word_length, window_size);
     counts.seeds += seeds.len() as u64;
     for (x_k, seed) in seeds.iter().enumerate() {
@@ -479,7 +515,9 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         let (last_hit, hit_saved) = {
             // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
             // of a bucket below the bound (the `last_hit` test and the window test).
-            let (level, _hit_len, hit_saved) = if x_lv {
+            let (level, _hit_len, hit_saved) = if x_map {
+                diag_hash.x_map.get(diag as i32)
+            } else if x_lv {
                 diag_hash.retrieve_below::<MEMO>(
                     diag as i32,
                     &x_lv_seeds,
@@ -569,9 +607,11 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
                 let s_b = s_end_pos as isize - 2 * word_length as isize;
                 let diag_i32 = diag as i32;
                 for delta in 1..=delta_max {
-                    if let Some((off_s_end, off_s_l, _)) =
+                    if let Some((off_s_end, off_s_l, _)) = (if x_map {
+                        diag_hash.x_map.get(diag_i32 + delta as i32)
+                    } else {
                         diag_hash.retrieve(diag_i32 + delta as i32)
-                    {
+                    }) {
                         if off_s_l > 0
                             && (off_s_end as isize - delta) >= s_a
                             && (off_s_end as isize - off_s_l as isize) <= s_b
@@ -580,9 +620,11 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
                             break;
                         }
                     }
-                    if let Some((off_s_end, off_s_l, _)) =
+                    if let Some((off_s_end, off_s_l, _)) = (if x_map {
+                        diag_hash.x_map.get(diag_i32 - delta as i32)
+                    } else {
                         diag_hash.retrieve(diag_i32 - delta as i32)
-                    {
+                    }) {
                         if off_s_l > 0
                             && (off_s_end as isize) >= s_a
                             && (off_s_end as isize - off_s_l as isize + delta) <= s_b
@@ -624,7 +666,8 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:897,939-941
         if !hit_ready {
-            part::insert_t::<PT, LEAN, MEMO, TRACK>(
+            x_insert::<PT, LEAN, MEMO, TRACK>(
+                x_map,
                 diag_hash,
                 out,
                 x_key,
@@ -691,7 +734,8 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:923-932,939-941
         if !(off_found || ungapped_score >= cutoff_score) {
             hit_ready = false;
-            part::insert_t::<PT, LEAN, MEMO, TRACK>(
+            x_insert::<PT, LEAN, MEMO, TRACK>(
+                x_map,
                 diag_hash,
                 out,
                 x_key,
@@ -719,7 +763,8 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
-        part::insert_t::<PT, LEAN, MEMO, TRACK>(
+        x_insert::<PT, LEAN, MEMO, TRACK>(
+            x_map,
             diag_hash,
             out,
             x_key,

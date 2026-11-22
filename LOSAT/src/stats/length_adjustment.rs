@@ -116,8 +116,7 @@ pub fn compute_length_adjustment_ncbi(
                 break;
             }
             if ell_min == ell_max {
-                // There are no more points to check
-                // NCBI: if(ell_min == ell_max) { /* There are no more points to check */ break; }
+                // Stop iterating when the lower and upper bounds meet (no more points to check).
                 break;
             }
         } else {

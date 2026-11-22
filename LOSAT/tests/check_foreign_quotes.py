@@ -33,6 +33,10 @@ Python's docstrings; every line of Markdown and text files):
     messages and LOSAT's own code, not an assignment, an operation or a call with arguments of
     C or C++. One with a mark of C or C++ is a quote; in Rust, so is one that uses a name
     LOSAT's code nowhere uses.
+  - In a Rust, Python, TOML, YAML or shell file, an unbackticked C or C++ statement or
+    expression outside backticks (`unbackticked_c_code`) in a line comment, docstring or block
+    comment, cited or not (valid 1-line citations, Rust pseudo-code, plain math equations,
+    output labels and observed runtime messages pass).
 - LABEL: a comment line labelled as NCBI's (`NCBI reference ...`, `NCBI <path>`) whose label or
   path names another project's source (the code is not NCBI's).
 - PIN (source files): a citation of NCBI's source that does not name the pinned tree: an
@@ -841,6 +845,390 @@ def inline_statement_findings(
     return findings
 
 
+# Unbackticked C or C++ statements and expressions in comment text outside backticks (line
+# comments, docstrings and `/* ... */` block comments in `NON_C_FAMILY` files), cited or not.
+# Every pattern below is linear-time (no adjacent or nested quantifiers competing for the same
+# characters; balanced parentheses are scanned in Python by `_closing_paren`).
+UNBACKTICKED_QUOTE = "unbackticked C/C++ code"
+DOUBLE_QUOTED_RE = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"')
+QUOTE_PREFIX_RE = re.compile(
+    r"^(?:(?:NCBI(?:\s+(?:BLAST|lines?\s+\d+(?:-\d+)?))?|C(?:\+\+)?)\s*:\s*|\[C(?:\+\+)?\]\s*)"
+)
+SQL_DDL_RE = re.compile(r"^\s*CREATE\s+(?:UNIQUE\s+)?(?:INDEX|TABLE)\b", re.I)
+OBSERVED_MPOS_MSG_RE = re.compile(r"'[^']+'\s+to\s+\w+\s+\(m_Pos\s*=")
+CONTROL_START_RE = re.compile(r"(?:^|[;{}]\s*|\belse\s+)(?P<kw>if|while|for|switch|catch)\s*\(")
+CONTROL_BODY_RE = re.compile(
+    r"\s*(?:\{|;|return\b|break\b|continue\b|goto\b|else\b|\+\+|--"
+    r"|\*?[A-Za-z_]\w*(?:\[[^\[\]]*\])*(?:->|\.[A-Za-z_]\w*|\s*(?:[-+*/%&|^]?=|\+\+|--|\()))"
+)
+CONTROL_COND_MARK_RE = re.compile(r"&&|\|\||==|!=|<=|>=|(?<!\w)[A-Za-z_]\w*->|\bm_[A-Za-z]\w*")
+UNBACKTICKED_STRUCT_RE = re.compile(
+    r"(?:^|[;}]\s*)else\s*\{"
+    r"|(?:^|[;{}]\s*)typedef\s+(?:struct|enum|union)\b"
+    r"|(?:^|[;{}]\s*)(?:static\s+|const\s+)?struct\s*(?:[A-Za-z_]\w*\s+)?\{[^}]*\}\s*[A-Za-z_]\w*\s*;"
+)
+SEMI_BRACE_END_RE = re.compile(
+    r";\s*\}\s*(?://[^\n]*|/\*[^*]*(?:\*(?!/)[^*]*)*\*/|\([^()]*\))?$"
+)
+UNBACKTICKED_STMT_RE = re.compile(
+    r"(?:^|[;{}]\s*)(?:break|continue)\s*;"
+    r"|(?:^|[;{}]\s*)return(?:\s+[^;.]*)?;\s*(?:$|/\*|//|\})"
+    r"|(?:^|[;{}]\s*)(?:\+\+|--)[A-Za-z_]\w*\s*;"
+    r"|(?:^|[;{}]\s*)[A-Za-z_]\w*(?:\[[^\[\]]*\])*(?<!\b[Cc])(?:\+\+|--)\s*;"
+)
+UNBACKTICKED_DECL_RE = re.compile(
+    r"(?:^|[;{}]\s*)(?:static\s+|const\s+|unsigned\s+|signed\s+)*"
+    r"(?:Int[1248]|Uint[1248]|Boolean|TSeqPos|TGi|size_t|Blast[A-Z]\w*)"
+    r"(?:\s*[*&]+\s*[A-Za-z_]\w*|\s+[A-Za-z_]\w*\s*[=,;\[])"
+)
+# Standalone assignment or call statement with `;` (e.g. a variable assignment or function call).
+STANDALONE_ASSIGN_SEMI_RE = re.compile(
+    r"^(?:\*|\(\s*\*?[A-Za-z_]\w*\s*\)|[A-Za-z_]\w*(?:(?:\.|->)[A-Za-z_]\w*|\[[^\[\]]*\])*)"
+    r"\s*(?:[-+*/%&|^]|<<|>>)?=\s*[^=\s][^;]*;\s*(?:$|/\*|//|\})"
+)
+STANDALONE_CALL_HEAD_RE = re.compile(r"^[A-Za-z_]\w*(?:(?:::|\.|->)[A-Za-z_]\w*)*\(")
+TRAILING_SEMI_END_RE = re.compile(r"^\s*;\s*(?:$|/\*|//|\})")
+ARROW_MEMBER_RE = re.compile(r"(?<!\w)[A-Za-z_]\w+->[A-Za-z_]\w+")
+ASSIGN_HEAD_RE = re.compile(
+    r"(?:^|[;{}]\s*)(?:\*?[A-Za-z_]\w*(?:(?:\.|->)[A-Za-z_]\w*|\[[^\[\]]*\])*|\(\s*\*?[A-Za-z_]\w*\s*\))"
+    r"\s*(?:[-+*/%&|^]|<<|>>)?=(?![=>])\s*(?P<rhs>\S.*)$"
+)
+UNBACKTICKED_EXPR_RE = re.compile(
+    # pointer member in assignment / comparison / inc / dec / call without space
+    r"(?<!\w)[A-Za-z_]\w+->[A-Za-z_]\w+(?:\[[^\[\]]*\])*\s*(?:[-+*/%&|^]?=|==|!=|<=|>=|\+\+|--)"
+    r"|(?<!\w)[A-Za-z_]\w+->[A-Za-z_]\w+\([^)\s][^)]*\)"
+    # m_* member in expression (observed `(m_Pos = <n>)` / `'x' to T (m_Pos = 0)` are filtered)
+    r"|(?<![\w.])m_[A-Za-z]\w*(?:\[[^\[\]]*\]|\.[A-Za-z_]\w*\([^)]*\)|\s*(?:[-+*/%&|^]?=|==|!=|<=|>=|<<|\+\+|--))"
+    # C++ stream insertion `<<`
+    r"|\b(?:m_[A-Za-z]\w*|cout|cerr|ostr|os|out|\w*[Ss]tream\w*)\s*<<\s*(?:\"\"|'|[A-Za-z_])"
+    r"|<<\s*(?:\"\"|\b(?:endl|NcbiEndl|Warning|Error|Info|Fatal|Critical)\b)"
+    # C++ namespace::Call(args) or C++ STL method calls (no space before `(`)
+    r"|\b(?:NStr|C[A-Z][a-z]\w*|std)::[A-Za-z_]\w*(?:<[^<>]*>)?\([^)\s][^)]*\)"
+    r"|\.(?:c_str|push_back|emplace_back|substr|find_first_of|find_last_of|find_first_not_of|tellg|seekg|tellp|seekp|rdbuf)\([^)]*\)"
+    # C cast attached to an expression (not English prose like `Int4` before "of" or "cast")
+    r"|\((?:const\s+)?(?:unsigned\s+|signed\s+)?(?:Int[1248]|Uint[1248]|size_t|TSeqPos|double|float|int|long)\s*\*?\)"
+    r"(?:\(|[A-Za-z_*]\w*(?:->|\.|\[|\()|\s+(?:ceil|floor|[A-Za-z_]\w*->|\*[A-Za-z_]))"
+    # prefix increment or postfix increment/decrement at statement boundary (not `C++` or `--flag`)
+    r"|(?<![\w+-])\+\+[A-Za-z_]\w*"
+    r"|(?:^|[;{}]\s*)[A-Za-z_]\w*(?:\[[^\[\]]*\])*(?<!\b[Cc])(?:\+\+|--)(?=\s*[,;)}]|$)"
+    # array equality/inequality: `a[i] == b[i]`
+    r"|(?<!\w)[A-Za-z_]\w*\[[^\[\]]+\]\s*(?:==|!=)\s*[A-Za-z_]\w*\[[^\[\]]+\]"
+    # C/NCBI function or macro call with arguments (no space before `(`), or `sizeof` operator
+    r"|(?<![\w:.])(?:[sx]_[A-Z]\w*|BLAST_[A-Z]\w*|Blast_[A-Z]\w*|Blast[A-Z]\w*|LOG_POST|ERR_POST\w*|ITERATE|NON_CONST_ITERATE)\([^)\s][^)]*\)"
+    r"|\bsizeof\s*\([^)\s][^)]*\)"
+)
+UNBACKTICKED_METHOD_CALL_RE = re.compile(r"(?:\.|->)[A-Z]\w*\([^)\s][^)]*\)")
+UNBACKTICKED_CAMEL_CALL_RE = re.compile(r"(?<![\w:.])(?P<name>[A-Z][a-z0-9]+[A-Z]\w*)\([^)\s][^)]*\)")
+PREFIXED_ASSIGN_RE = re.compile(
+    r"^(?:\*?[A-Za-z_]\w*(?:(?:\.|->)[A-Za-z_]\w*|\[[^\[\]]*\])*|\(\s*\*?[A-Za-z_]\w*\s*\))"
+    r"\s*(?:[-+*/%&|^]|<<|>>)?=(?![=>])\s*\S"
+)
+FOR_INIT_CODE_RE = re.compile(r"^\s*$|==|!=|<=|>=|=|\+\+|--|->|<|>")
+
+
+def _is_c_for_header(inside: str) -> bool:
+    """Whether `inside` (the text after `for (`) starts with a C `for` initializer before `;`."""
+    if ";" not in inside:
+        return False
+    init = inside.split(";", 1)[0]
+    return FOR_INIT_CODE_RE.search(init) is not None
+
+
+def _closing_paren(text: str, open_idx: int) -> int | None:
+    """Index of the `)` matching `text[open_idx] == '('`, or None if unclosed."""
+    depth = 0
+    for idx in range(open_idx, len(text)):
+        ch = text[idx]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return idx
+    return None
+
+
+def _has_c_control_statement(clean: str) -> bool:
+    """Whether `clean` (double-quoted strings masked) contains an unbackticked C/C++ control or
+    struct/typedef statement."""
+    if UNBACKTICKED_STRUCT_RE.search(clean):
+        return True
+    for match in CONTROL_START_RE.finditer(clean):
+        kw = match.group("kw")
+        open_idx = match.end() - 1
+        close_idx = _closing_paren(clean, open_idx)
+        if close_idx is None:
+            inside = clean[open_idx + 1 :]
+            if kw == "for" and _is_c_for_header(inside):
+                return True
+            if kw in ("if", "while", "catch") and CONTROL_COND_MARK_RE.search(inside):
+                return True
+            continue
+        inside = clean[open_idx + 1 : close_idx]
+        rest = clean[close_idx + 1 :]
+        if kw == "for":
+            if _is_c_for_header(inside):
+                return True
+            continue
+        if kw == "switch":
+            if rest.lstrip().startswith("{"):
+                return True
+            continue
+        if CONTROL_BODY_RE.match(rest) or CONTROL_COND_MARK_RE.search(inside):
+            return True
+    return False
+
+
+def _is_standalone_call_semi(clean: str) -> bool:
+    """Whether `clean` is a standalone C/C++ call ending with `;` (supporting nested parens)."""
+    head = STANDALONE_CALL_HEAD_RE.match(clean)
+    if head is None:
+        return False
+    close_idx = _closing_paren(clean, head.end() - 1)
+    return close_idx is not None and TRAILING_SEMI_END_RE.match(clean[close_idx + 1 :]) is not None
+
+
+def unbackticked_c_code(
+    outside: str,
+    raw: str,
+    *,
+    style: str,
+    names: Callable[[], frozenset[str]],
+) -> bool:
+    """Whether comment text outside backticks (`outside`, from comment line `raw`) holds an
+    unbackticked C or C++ statement or expression."""
+    if not outside:
+        return False
+    if is_citation(raw) and code_after_citation(raw) is None:
+        return False
+    if style == "python" and outside.startswith(">>>"):
+        return False
+    if PLACEHOLDER_RE.search(outside) or SQL_DDL_RE.match(outside):
+        return False
+    had_prefix = False
+    body = outside
+    while True:
+        pref = QUOTE_PREFIX_RE.match(body)
+        if pref is None:
+            break
+        had_prefix = True
+        body = body[pref.end() :].strip()
+    if not body:
+        return False
+    if RUST_MARK_RE.search(body) or RUST_STATEMENT_RE.search(body):
+        return False
+    clean = DOUBLE_QUOTED_RE.sub('""', body) if '"' in body else body
+    if OBSERVED_MPOS_MSG_RE.search(clean):
+        return False
+    if _has_c_control_statement(clean):
+        return True
+    if SEMI_BRACE_END_RE.search(clean):
+        return True
+    if not PROSE_RE.search(clean) and not clean.startswith("- "):
+        if (
+            UNBACKTICKED_DECL_RE.search(clean)
+            or STANDALONE_ASSIGN_SEMI_RE.match(clean)
+            or _is_standalone_call_semi(clean)
+            or UNBACKTICKED_STMT_RE.search(clean)
+        ):
+            return True
+    if UNBACKTICKED_EXPR_RE.search(clean):
+        return True
+    assign = ASSIGN_HEAD_RE.search(clean)
+    if assign is not None and ARROW_MEMBER_RE.search(assign.group("rhs")):
+        return True
+    if had_prefix and PREFIXED_ASSIGN_RE.match(clean) and not PROSE_RE.search(clean):
+        return True
+    if style != "python":
+        if UNBACKTICKED_METHOD_CALL_RE.search(clean):
+            return True
+        for match in UNBACKTICKED_CAMEL_CALL_RE.finditer(clean):
+            if match.group("name") not in names():
+                return True
+    return False
+
+
+def strip_backticks_in_run(run: Sequence[tuple[int, str]]) -> list[tuple[int, str, str]]:
+    """For each `(line_no, raw_text)` in a comment run, return `(line_no, raw_text, outside)`
+    where text inside backtick spans (including spans that cross comment lines) is replaced by
+    a neutral token so adjacent words never merge across a removed span."""
+    out: list[tuple[int, str, str]] = []
+    in_bt = False
+    for number, text in run:
+        if not in_bt and "`" not in text:
+            out.append((number, text, text.strip()))
+            continue
+        parts: list[str] = []
+        for ch in text:
+            if ch == "`":
+                in_bt = not in_bt
+                parts.append(" _BT_ " if not in_bt else " ")
+            elif not in_bt:
+                parts.append(ch)
+        out.append((number, text, "".join(parts).strip()))
+    return out
+
+
+def block_comments(lines: Sequence[str]) -> list[tuple[int, str]]:
+    """Every non-empty line inside `/* ... */` block comments of a slash-style file (skipping
+    `//` comments, string/raw-string literals and char literals, supporting nested `/* ... */`),
+    as `(1-based line_no, text)` with leading `*` decoration stripped."""
+    text = "\n".join(lines)
+    if "/*" not in text:
+        return []
+    n = len(text)
+    i = 0
+    line_no = 1
+    out: list[tuple[int, str]] = []
+    while i < n:
+        ch = text[i]
+        if ch == "\n":
+            line_no += 1
+            i += 1
+            continue
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if text.startswith("/*", i):
+            start_line = line_no
+            depth = 1
+            i += 2
+            buf_start = i
+            while i < n and depth > 0:
+                if text.startswith("/*", i):
+                    depth += 1
+                    i += 2
+                elif text.startswith("*/", i):
+                    depth -= 1
+                    if depth == 0:
+                        body = text[buf_start:i]
+                        i += 2
+                        break
+                    i += 2
+                else:
+                    if text[i] == "\n":
+                        line_no += 1
+                    i += 1
+            else:
+                body = text[buf_start:i]
+            for offset, raw_line in enumerate(body.split("\n")):
+                cleaned = raw_line.strip()
+                if cleaned.startswith("*"):
+                    cleaned = cleaned.lstrip("*").strip()
+                if cleaned:
+                    out.append((start_line + offset, cleaned))
+            continue
+        raw = re.match(r'[bc]?r(#*)"', text[i : i + 260])
+        if raw and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+            close = '"' + raw.group(1)
+            j = text.find(close, i + raw.end())
+            end = n if j < 0 else j + len(close)
+            line_no += text.count("\n", i, end)
+            i = end
+            continue
+        if ch == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                if text[j] == "\n":
+                    line_no += 1
+                j += 2 if text[j] == "\\" else 1
+            i = min(j + 1, n)
+            continue
+        char = re.match(r"'(?:\\.[^'\n]*|[^'\\\n])'", text[i : i + 16])
+        if char:
+            i += char.end()
+            continue
+        i += 1
+    return out
+
+
+def unbackticked_findings(
+    rel: str,
+    texts: Sequence[str | None],
+    lines: Sequence[str],
+    style: str,
+    functions: frozenset[str],
+    identifiers: frozenset[str],
+    already_quoted: frozenset[int],
+) -> list[Finding]:
+    """QUOTE findings for unbackticked C/C++ statements and expressions in `NON_C_FAMILY` files
+    (line comments, docstrings, trailing comments and `/* ... */` block comments)."""
+    if Path(rel).suffix not in NON_C_FAMILY:
+        return []
+    findings: list[Finding] = []
+    seen_lines: set[int] = set(already_quoted)
+    known: list[frozenset[str]] = []
+
+    def names() -> frozenset[str]:
+        if not known:
+            known.append(code_names(style, lines, texts) | functions)
+        return known[0]
+
+    def record(number: int, raw: str, outside: str) -> None:
+        if number in seen_lines:
+            return
+        if unbackticked_c_code(outside, raw, style=style, names=names):
+            seen_lines.add(number)
+            findings.append(Finding(rel, number, "QUOTE", UNBACKTICKED_QUOTE, raw))
+
+    def check_single(number: int, raw: str) -> None:
+        _, _, outside = strip_backticks_in_run([(number, raw)])[0]
+        record(number, raw, outside)
+
+    run: list[tuple[int, str]] = []
+    in_fence = False
+
+    def flush() -> None:
+        for number, raw, outside in strip_backticks_in_run(run):
+            record(number, raw, outside)
+        run.clear()
+
+    for number, text in enumerate(texts, start=1):
+        if text is None:
+            flush()
+            in_fence = False
+            if style == "slash" and number not in seen_lines:
+                no_str = DOUBLE_QUOTED_RE.sub('""', lines[number - 1])
+                trailing = TRAILING_COMMENT_RE.search(no_str)
+                if trailing is not None:
+                    check_single(number, trailing.group("text").strip())
+            continue
+        if FENCE_RE.match(text):
+            flush()
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if not text:
+            flush()
+            continue
+        run.append((number, text))
+    flush()
+
+    if style == "slash":
+        bc_lines = block_comments(lines)
+        if bc_lines:
+            snake_case = Path(rel).suffix in (".rs", ".py")
+            rust = Path(rel).suffix == ".rs"
+            for number, raw in bc_lines:
+                if number in seen_lines:
+                    continue
+                for match in SPAN_RE.finditer(raw):
+                    span = match.group(1)
+                    if inline_statement(span):
+                        seen_lines.add(number)
+                        findings.append(Finding(rel, number, "QUOTE", INLINE_STATEMENT, match.group(0)))
+                        break
+                    if inline_expression(span, names, False, snake_case, lambda: identifiers, rust):
+                        seen_lines.add(number)
+                        findings.append(Finding(rel, number, "QUOTE", INLINE_EXPRESSION, match.group(0)))
+                        break
+                check_single(number, raw)
+
+    return findings
+
+
 def citation_findings(
     rel: str, number: int, text: str, table: dict[str, int], dirs: frozenset[str]
 ) -> list[Finding]:
@@ -972,6 +1360,11 @@ def check_text(
             findings.extend(citation_findings(rel, number, text, table, dirs or frozenset()))
         if citation:
             last_citation = (number, text)
+    if style != "text":
+        already_quoted = frozenset(f.line for f in findings if f.kind == "QUOTE")
+        findings.extend(
+            unbackticked_findings(rel, texts, lines, style, functions, identifiers, already_quoted)
+        )
     return findings
 
 
@@ -1034,8 +1427,8 @@ def fix_lines(
         index = finding.line - 1
         if finding.kind == "QUOTE":
             text = texts[index] or ""
-            if finding.source in (INLINE_STATEMENT, INLINE_EXPRESSION):
-                continue  # inside prose: the writer says it in words
+            if finding.source in (INLINE_STATEMENT, INLINE_EXPRESSION, UNBACKTICKED_QUOTE):
+                continue  # inside prose or unbackticked comment: the writer says it in words
             if finding.source == CODE_AFTER_CITATION:
                 cut = code_after_citation(lines[index])
                 if cut is not None:
@@ -1279,8 +1672,8 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 ADVICE = {
     "QUOTE": "source text in a comment: keep or add the citation (path:lines), remove the text "
-    "(a statement or expression in backticks: name the function or member, say in words what it "
-    "does)",
+    "(a statement or expression in or outside backticks: name the function or member, say in "
+    "words what it does)",
     "LABEL": "labels another project's code as NCBI's: name the project and version",
     "PIN": "write `NCBI reference (598d8ae6): c++/<path>:<lines>` (rpsbproc: "
     "`NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/<path>:<lines>`)",

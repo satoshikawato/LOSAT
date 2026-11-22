@@ -84,8 +84,7 @@ pub(crate) fn compute_backbone_size(
     alphabet_size: usize,
     charsize: usize,
 ) -> usize {
-    // NCBI: for (i=0;i<word_length;i++) backbone_size |= (alphabet_size-1) << (i*charsize);
-    //       backbone_size++;
+    // Pack the maximum residue code into each of `word_length` slots of width `charsize`, then add 1.
     let mut backbone_size: usize = 0;
     for i in 0..word_length {
         backbone_size |= (alphabet_size - 1) << (i * charsize);

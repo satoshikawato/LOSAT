@@ -577,7 +577,7 @@ where
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:508-607
     // FAITHFUL TRANSPILE - DO NOT ASSUME
 
-    // NCBI: *extended = 0;
+    // Initialize the extra extended length output to zero.
     let mut extended = 0;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531
@@ -585,13 +585,11 @@ where
         return (1, 0, q_off, s_off);
     }
 
-    // NCBI: Int4 q_end = *q_off + word_length;
-    // NCBI: Int4 s_end = *s_off + word_length;
+    // Compute the initial exclusive end offsets in query and subject by adding `word_length`.
     let mut q_end = q_off + word_length;
     let mut s_end = s_off + word_length;
 
-    // NCBI: if (locations) { ... }
-    // Check masked regions and adjust q_off/s_off if needed
+    // When mask locations are present, check masked regions and adjust `q_off` and `s_off` if needed.
     let mut q_off_adjusted = q_off;
     let mut s_off_adjusted = s_off;
     if has_locations {
@@ -633,36 +631,35 @@ where
     }
     let ext_max = ext_max as usize;
 
-    // NCBI: if (ext_to || locations) {
+    // Re-extend and check intermediate seeds whenever the start shifted or mask locations exist.
     if ext_to > 0 || has_locations {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:559
         if ext_to > ext_max {
             return (0, 0, q_off_adjusted, s_off_adjusted);
         }
 
-        // NCBI: q_end += ext_to;
-        // NCBI: s_end += ext_to;
+        // Advance `q_end` and `s_end` by `ext_to`.
         q_end += ext_to;
         s_end += ext_to;
 
-        // NCBI: for (s_pos = s_end - lut_word_length, q_pos = q_end - lut_word_length;
+        // Walk backwards from `s_end` and `q_end` in steps of `lut_word_length`.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:563-569
         let mut s_pos = s_end - lut_word_length;
         let mut q_pos = q_end - lut_word_length;
 
-        // NCBI BLAST: Loop condition is s_pos > *s_off (no underflow check)
+        // NCBI's loop tests while `s_pos` exceeds the adjusted subject start without an underflow check.
         // We use saturating_sub to prevent underflow while maintaining NCBI behavior
         while s_pos > s_off_adjusted {
             if is_seed_masked(s_pos, q_pos) {
                 return (0, 0, q_off_adjusted, s_off_adjusted);
             }
-            // NCBI BLAST: s_pos -= lut_word_length (no bounds check)
+            // NCBI steps `s_pos` back by `lut_word_length` without a bounds check.
             // Use saturating_sub to prevent underflow while maintaining loop termination
             s_pos = s_pos.saturating_sub(lut_word_length);
             q_pos = q_pos.saturating_sub(lut_word_length);
         }
 
-        // NCBI: (*extended) = ext_to;
+        // Record `ext_to` as the extended length so far.
         extended = ext_to;
     }
 
@@ -671,9 +668,9 @@ where
         return (1, extended, q_off_adjusted, s_off_adjusted);
     }
 
-    // NCBI: ext_to += word_length;
+    // Target a second full `word_length` beyond `ext_to` to test for a double word.
     let double_ext_to = ext_to + word_length;
-    // NCBI: ext_max = MIN(ext_max, ext_to);
+    // Cap the double-word target by `ext_max`.
     let double_ext_max = ext_max.min(double_ext_to);
 
     // NCBI: try seed by seed
@@ -697,7 +694,7 @@ where
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:595-596
     // NCBI BLAST: Position adjustment happens UNCONDITIONALLY (before the while loop)
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:594-603
-    // NCBI BLAST: s_pos -= (lut_word_length - 1) (unconditional, no bounds check)
+    // NCBI steps `s_pos` back by `lut_word_length - 1` unconditionally without a bounds check.
     // Use saturating_sub to prevent underflow while maintaining NCBI behavior
     s_pos = s_pos.saturating_sub(lut_word_length - 1);
     q_pos = q_pos.saturating_sub(lut_word_length - 1);

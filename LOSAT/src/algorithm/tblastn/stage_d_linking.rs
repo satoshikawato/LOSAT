@@ -20,7 +20,8 @@ pub use x_link_window::print_summary as x_link_window_print_summary;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:126-143;
 // c++/src/algo/blast/core/link_hsps.c:1765-1810:
-// hsp->num = 1; Blast_HSPListGetEvalues(...); s_BlastUnevenGapLinkHSPs(...);
+// Initializes each HSP's linked count to 1, computes individual E-values via
+// `Blast_HSPListGetEvalues`, and links uneven-gap sets via `s_BlastUnevenGapLinkHSPs`.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct LinkedHsp {
     pub context: usize,
@@ -40,7 +41,7 @@ pub(super) struct LinkedHspList {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1090-1100,1469-1492:
-// BlastLinkedHSPSet* prev; BlastLinkedHSPSet* next;
+// Doubly-linked chain node links (`prev` and `next` of `BlastLinkedHSPSet`).
 #[derive(Clone, Copy)]
 struct WorkHsp {
     value: LinkedHsp,
@@ -60,7 +61,7 @@ pub(super) fn score_compare(a: &GappedHsp, b: &GappedHsp) -> Ordering {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1567-1594:
-//     current_index = index; current_end = link->hsp->query.end;
+// Tracks the running prefix index and maximum query end across each context.
 fn query_end_prefix_index(work: &[WorkHsp], offset_order: &[usize]) -> Vec<usize> {
     let mut index = vec![0; offset_order.len()];
     let mut current = 0;
@@ -523,9 +524,8 @@ pub(super) fn compare_preliminary_lists_for_kappa(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676 and
 // c++/src/algo/blast/core/blast_hits.c:1976-2010:
-// cutoff = hit_params->prelim_evalue;   /* preliminary pass */
-// cutoff = hit_options->expect_value;   /* post-Kappa pass */
-// else { if (index > hsp_cnt) hsp_array[hsp_cnt] = hsp_array[index]; hsp_cnt++; }
+// Reaps HSPs exceeding `prelim_evalue` in the preliminary pass or `expect_value`
+// in the post-Kappa pass, compacting surviving entries in place.
 #[allow(dead_code)]
 pub(super) fn reap_by_evalue(list: &mut LinkedHspList, prelim_evalue: f64) {
     list.hsps.retain(|hsp| hsp.evalue <= prelim_evalue);

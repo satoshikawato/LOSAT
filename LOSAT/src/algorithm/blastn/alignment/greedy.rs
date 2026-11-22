@@ -778,7 +778,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:380-453
     // NCBI BLAST doubles scores if reward is odd to avoid fractions
     // IMPORTANT: x_drop must also be doubled to maintain consistent units
-    // NCBI: if (match_score % 2 == 1) { match_score *= 2; mismatch_score *= 2; xdrop_threshold *= 2; }
+    // When `match_score` is odd, NCBI doubles `match_score`, `mismatch_score`, and `xdrop_threshold`.
     let (match_cost, mismatch_cost, scaled_xdrop) = if reward % 2 == 1 {
         (reward * 2, (-penalty) * 2, x_drop.wrapping_mul(2))
     } else {
@@ -873,7 +873,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
 
             // X-drop score threshold (using scaled_xdrop for consistent units)
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:496, 531-533
-            // max_score = aux_data->max_score + xdrop_offset;  (pointer arithmetic)
+            // NCBI advances the `max_score` pointer by `xdrop_offset` into `aux_data->max_score`.
             // Note: In NCBI, max_score[d - xdrop_offset] accesses aux_data->max_score[d] when d >= xdrop_offset
             // When d < xdrop_offset, d - xdrop_offset is negative, accessing before the array start
             // NCBI initializes max_score[0..xdrop_offset] to 0, so negative index access returns 0
@@ -882,7 +882,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
             let xdrop_idx = d.saturating_sub(xdrop_offset);
             let xdrop_score =
                 mem.max_score[xdrop_idx + xdrop_offset] + (op_cost * d as i32) - scaled_xdrop;
-            // NCBI uses ceil division: (Int4)ceil((double)xdrop_score / (match_cost / 2))
+            // NCBI takes the ceiling of `xdrop_score` divided by half the match cost as an `Int4`.
             // Rust equivalent: (xdrop_score + match_cost / 2 - 1) / (match_cost / 2)
             let xdrop_score = (xdrop_score + match_cost / 2 - 1) / (match_cost / 2);
 
@@ -930,7 +930,7 @@ pub(crate) fn greedy_align_one_direction_with_max_dist(
                     (p_plus, p, p_minus)
                 };
 
-                // NCBI: seq2_index = MAX(prev_k_plus, prev_k) + 1; then MAX(seq2_index, prev_k_minus)
+                // Take one past the larger of the `k + 1` and `k` offsets, then compare against the `k - 1` offset.
                 let mut seq2_index = prev_k_plus.max(prev_k) + 1;
                 seq2_index = seq2_index.max(prev_k_minus);
 
@@ -1261,7 +1261,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
     while d <= scaled_max_dist {
         // Compute X-dropoff score threshold
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:920, 979-983
-        // max_score = aux_data->max_score + xdrop_offset;  (pointer arithmetic)
+        // NCBI advances the `max_score` pointer by `xdrop_offset` into `aux_data->max_score`.
         // Note: In NCBI, max_score[d - xdrop_offset] accesses aux_data->max_score[d] when d >= xdrop_offset
         // When d < xdrop_offset, d - xdrop_offset is negative, accessing before the array start
         // NCBI initializes max_score[0..xdrop_offset] to 0, so negative index access returns 0
@@ -1270,9 +1270,9 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         let xdrop_idx = (d as usize).saturating_sub(xdrop_offset);
         let xdrop_score_raw =
             max_score[xdrop_idx + xdrop_offset] + score_common_factor * d - xdrop_threshold;
-        // NCBI: (Int4)ceil((double)xdrop_score / match_score_half)
+        // Convert the raw threshold by ceiling division by `match_score_half` into an `Int4`.
         let xdrop_score = ((xdrop_score_raw as f64) / (match_score_half as f64)).ceil() as i32;
-        // NCBI: if (xdrop_score < 0) xdrop_score = 0;
+        // Clamp negative X-drop thresholds up to zero.
         let xdrop_score = xdrop_score.max(0);
 
         let mut curr_extent = 0i32;
@@ -1290,7 +1290,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
 
             // Find best offset for DELETE (gap in seq1) - look at k+1 diagonal
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1000-1021
-            // if (k + 1 <= diag_upper[d - gap_extend] && k + 1 >= diag_lower[d - gap_extend] &&
+            // Check whether diagonal `k + 1` was active at the preceding gap-open or gap-extend distance.
             let mut seq2_index_del = INVALID_OFFSET;
 
             // From gap opening (match -> delete)
@@ -1298,7 +1298,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             if d_open >= 0 {
                 let dl = get_diag_lower(&diag_lower_arr, d_open, max_penalty_usize);
                 let du = get_diag_upper(&diag_upper_arr, d_open, max_penalty_usize);
-                // NCBI: k + 1 <= diag_upper && k + 1 >= diag_lower
+                // Require diagonal `k + 1` to fall within the active diagonal bounds.
                 if k + 1 >= dl && k < du && (d_open as usize) < last_seq2_off.len() {
                     let ku1 = (k + 1) as usize;
                     if ku1 < array_size {
@@ -1307,9 +1307,8 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
                 }
             }
 
-            // From gap extension (delete -> delete)
-            // NCBI: if (k + 1 <= diag_upper[d - gap_extend] && k + 1 >= diag_lower[d - gap_extend] &&
-            //      seq2_index < last_seq2_off[d - gap_extend][k+1].delete_off)
+            // From gap extension (delete -> delete): if diagonal `k + 1` was active at
+            // the gap-extend distance and its `delete_off` is larger, prefer extending the deletion.
             let d_ext = d - gap_extend;
             if d_ext >= 0 {
                 let dl = get_diag_lower(&diag_lower_arr, d_ext, max_penalty_usize);
@@ -1318,7 +1317,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
                     let ku1 = (k + 1) as usize;
                     if ku1 < array_size {
                         let ext_off = last_seq2_off[d_ext as usize][ku1].delete_off;
-                        // NCBI: seq2_index < last_seq2_off[d - gap_extend][k+1].delete_off
+                        // Update if extending the deletion reaches a larger `seq2` offset.
                         if ext_off > seq2_index_del {
                             seq2_index_del = ext_off;
                         }
@@ -1327,7 +1326,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
 
             // Save delete offset (deletion means seq2 offset slips by one)
-            // NCBI: if (seq2_index == kInvalidOffset) ... else ... seq2_index + 1
+            // Store `INVALID_OFFSET` when unreachable, otherwise advance the `seq2` offset by one.
             let du = d as usize;
             if du < last_seq2_off.len() {
                 last_seq2_off[du][ku].delete_off = if seq2_index_del == INVALID_OFFSET {
@@ -1339,14 +1338,14 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
 
             // Find best offset for INSERT (gap in seq2) - look at k-1 diagonal
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1026-1036
-            // if (k - 1 <= diag_upper[d - gap_extend] && k - 1 >= diag_lower[d - gap_extend] &&
+            // Check whether diagonal `k - 1` was active at the preceding gap-open or gap-extend distance.
             let mut seq2_index_ins = INVALID_OFFSET;
 
             // From gap opening (match -> insert)
             if d_open >= 0 && k >= 1 {
                 let dl = get_diag_lower(&diag_lower_arr, d_open, max_penalty_usize);
                 let du_bound = get_diag_upper(&diag_upper_arr, d_open, max_penalty_usize);
-                // NCBI: k - 1 <= diag_upper && k - 1 >= diag_lower
+                // Require diagonal `k - 1` to fall within the active diagonal bounds.
                 if k > dl && k - 1 <= du_bound && (d_open as usize) < last_seq2_off.len() {
                     let km1 = (k - 1) as usize;
                     if km1 < array_size {
@@ -1355,9 +1354,8 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
                 }
             }
 
-            // From gap extension (insert -> insert)
-            // NCBI: if (k - 1 <= diag_upper[d - gap_extend] && k - 1 >= diag_lower[d - gap_extend] &&
-            //      seq2_index < last_seq2_off[d - gap_extend][k-1].insert_off)
+            // From gap extension (insert -> insert): if diagonal `k - 1` was active at
+            // the gap-extend distance and its `insert_off` is larger, prefer extending the insertion.
             if d_ext >= 0 && k >= 1 {
                 let dl = get_diag_lower(&diag_lower_arr, d_ext, max_penalty_usize);
                 let du_bound = get_diag_upper(&diag_upper_arr, d_ext, max_penalty_usize);
@@ -1365,7 +1363,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
                     let km1 = (k - 1) as usize;
                     if km1 < array_size {
                         let ext_off = last_seq2_off[d_ext as usize][km1].insert_off;
-                        // NCBI: seq2_index < last_seq2_off[d - gap_extend][k-1].insert_off
+                        // Update if extending the insertion reaches a larger `seq2` offset.
                         if ext_off > seq2_index_ins {
                             seq2_index_ins = ext_off;
                         }
@@ -1374,15 +1372,15 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             }
 
             // Save insert offset (insertion doesn't change seq2 offset)
-            // NCBI: last_seq2_off[d][k].insert_off = seq2_index;
+            // Store the best insertion offset for distance `d` and diagonal `k`.
             if du < last_seq2_off.len() {
                 last_seq2_off[du][ku].insert_off = seq2_index_ins;
             }
 
             // Compare with mismatch path (from diagonal k at d - op_cost)
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:1041-1047
-            // seq2_index = MAX(last_seq2_off[d][k].insert_off, last_seq2_off[d][k].delete_off);
-            //     seq2_index = MAX(seq2_index, last_seq2_off[d - op_cost][k].match_off + 1);
+            // Take the maximum of the insertion offset, deletion offset, and one past the
+            // match offset at the mismatch distance on diagonal `k`.
             let mut seq2_index = last_seq2_off[du][ku]
                 .insert_off
                 .max(last_seq2_off[du][ku].delete_off);
@@ -1391,11 +1389,11 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
             if d_mismatch >= 0 {
                 let dl = get_diag_lower(&diag_lower_arr, d_mismatch, max_penalty_usize);
                 let du_bound = get_diag_upper(&diag_upper_arr, d_mismatch, max_penalty_usize);
-                // NCBI: k <= diag_upper[d - op_cost] && k >= diag_lower[d - op_cost]
+                // Require diagonal `k` to fall within the active bounds at the mismatch distance.
                 if k >= dl && k <= du_bound && (d_mismatch as usize) < last_seq2_off.len() {
                     let match_off = last_seq2_off[d_mismatch as usize][ku].match_off;
                     if match_off != INVALID_OFFSET {
-                        // NCBI: MAX(seq2_index, last_seq2_off[d - op_cost][k].match_off + 1)
+                        // Compare against one past the previous `match_off` on diagonal `k`.
                         seq2_index = seq2_index.max(match_off + 1);
                     }
                 }
@@ -1459,7 +1457,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         let curr_score = curr_extent * match_score_half - d * score_common_factor;
 
         // Update best if this is better
-        // NCBI: if (curr_score > max_score[d - 1]) (strict greater than)
+        // Update the best score only on a strict improvement over the previous distance's maximum.
         let prev_max = if d >= 1 && (d - 1) as usize + xdrop_offset < max_score.len() {
             max_score[(d - 1) as usize + xdrop_offset]
         } else {
@@ -1500,7 +1498,7 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
         if old_bounds_idx < diag_lower_arr.len() && d >= max_penalty {
             let old_lower = diag_lower_arr[old_bounds_idx];
             let old_upper = diag_upper_arr[old_bounds_idx];
-            // NCBI: if (diag_lower[d - max_penalty] <= diag_upper[d - max_penalty])
+            // Decrement `num_nonempty_dist` when the range expiring `max_penalty` steps ago was non-empty.
             if old_lower <= old_upper {
                 num_nonempty_dist -= 1;
             }
@@ -3269,7 +3267,7 @@ fn blast_greedy_align_rows(
                 );
                 if *fence_hit {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:523-526,571-576
-                    // if (fence_hit && *fence_hit) { return 0; }
+                    // Abort and return zero immediately when the fence sentinel is reached.
                     // NCBI's row writes already reside in persistent scratch.
                     return 0;
                 }

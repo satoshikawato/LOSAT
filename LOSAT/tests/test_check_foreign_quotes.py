@@ -555,6 +555,144 @@ class SettingSpanTest(unittest.TestCase):
         self.assertIsNone(checker.SETTING_SPAN_RE.match("=" + "-=" * 5000 + " +="))
 
 
+class UnbacktickedCodeTest(unittest.TestCase):
+    """Unbackticked C/C++ statements and expressions in comments (`UNBACKTICKED_QUOTE`)."""
+
+    CITE = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-9\n"
+
+    def unbackticked(
+        self,
+        text: str,
+        rel: str = "x.rs",
+        style: str = "slash",
+        functions: frozenset[str] = frozenset(),
+    ) -> list[tuple[int, str]]:
+        return [
+            (f.line, f.source)
+            for f in checker.check_text(rel, text.split("\n"), style, TABLE, None, functions)
+            if f.kind == "QUOTE"
+        ]
+
+    def assert_flagged(self, text: str, line_no: int = 1, msg: str | None = None) -> None:
+        self.assertEqual(self.unbackticked(text), [(line_no, checker.UNBACKTICKED_QUOTE)], msg)
+
+    def test_o4c_examples_fail_cited_or_uncited(self) -> None:
+        cases = (
+            # stage_d_results.rs:41
+            "// if (m_QuerySeq[i] == m_SubjectSeq[i]) { ++num_ident; ++num_positives; }\n",
+            # tblastn/search_gapped.rs:28-29
+            "// typedef struct BlastSeg { Int2 frame; Int4 offset, end, gapped_start; } BlastSeg;\n",
+            "// typedef struct BlastHSP { Int4 score; ... BlastSeg query, subject; } BlastHSP;\n",
+            # blastn/alignment/gapped.rs:1602-1603
+            "// if (score < score_gap_col) { script = SCRIPT_GAP_IN_B; score = score_gap_col; }\n",
+            "// if (score < score_gap_row) { script = SCRIPT_GAP_IN_A; score = score_gap_row; }\n",
+            # blastp/args.rs:123-124
+            "// if (program == eBlastp && compo_mode != eNoCompositionBasedStats &&\n",
+            "//     tolower(comp_stat_string[1]) == 'u') { opt.SetUnifiedP(1); }\n",
+        )
+        for line in cases:
+            self.assert_flagged(line, 1, line)
+            found = checker.check_text("x.rs", (self.CITE + line).split("\n"), "slash", TABLE)
+            self.assertEqual([f.line for f in found if f.kind == "QUOTE"], [2], line)
+            # Unbackticked quotes are left to the writer by `--fix` (when not cited CODE_LINE_RE).
+            lines = line.split("\n")
+            found_uncited = checker.check_text("x.rs", lines, "slash", TABLE)
+            self.assertEqual(checker.fix_lines(list(lines), "slash", found_uncited), lines, line)
+
+    def test_common_unbackticked_c_statement_and_expression_forms_fail(self) -> None:
+        for line in (
+            "// if (x > 0) { y = 1; }\n",
+            "// ++count;\n",
+            "// --count;\n",
+            "// if (a[i] == b[i]) break;\n",
+            "// Compare a[i] == b[i] here.\n",
+            "// x = f(y);\n",
+            "// for (i = 0; i < n; ++i)\n",
+            "// return TRUE;\n",
+            "/// m_Args.push_back(arg) registers the option group.\n",
+            "//! NStr::StringToInt(id) parses the identifier.\n",
+            "/// new_node->leftend = (Int4) midpt + 1;\n",
+            "// Remove worse HSP from list: list_node->midptr = tmp_index\n",
+            "// score DESC (BLAST_CMP(hsp2->score, hsp1->score))\n",
+            "// NCBI: E = MAX(E, kSmallFloat)\n",
+            '// NCBI: snprintf(evalue_buf, sizeof(evalue_buf), "0.0");\n',
+            "// if (CheckInternalData() != 0) each result in this batch\n",
+            "let x = 1; // if (a == b) { ++c; }\n",
+        ):
+            self.assert_flagged(line, 1, line)
+
+    def test_block_comments_are_checked_and_strings_are_skipped(self) -> None:
+        self.assert_flagged("/* if (m_QuerySeq[i] == m_SubjectSeq[i]) { ++num_ident; } */\nfn f() {}\n", 1)
+        self.assert_flagged("/*\n * x = f(y);\n */\nfn f() {}\n", 2)
+        bc_backtick = "/* `m_Input.GetChars(count)` */\nfn f() {}\n"
+        self.assertEqual(self.unbackticked(bc_backtick), [(1, checker.INLINE_EXPRESSION)])
+        bc_nested_ok = "/* /* matrix row A */ A */\nconst ROW: [i32; 1] = [/*A*/ 4];\n"
+        self.assertEqual(self.unbackticked(bc_nested_ok), [])
+        in_string = 'let s = "/* if (a == b) { ++c; } */";\nlet r = r#"/* x = f(y); */"#;\n'
+        self.assertEqual(self.unbackticked(in_string), [])
+
+    def test_valid_losat_comments_pass(self) -> None:
+        code = "fn f(x: i32, y: i32) { let _ = (x, y); }\n"
+        for line in (
+            "// let x = y;\n",
+            "// self.count = x + 1;\n",
+            "// a = b + c\n",
+            "// Length=100\n",
+            "// Score = 10 bits, Identities = 8/10\n",
+            "// (m_Pos = <n>)\n",
+            "// Cannot convert string '12x' to Uint8 (m_Pos = 2)\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:10-20\n",
+            "// No NCBI counterpart: debug print switch (LOSAT_DEBUG_COORDS, read once); it stays off.\n",
+            "// The reader opens nothing until a name is asked for ([`LazyTaxDb`]); it is lazy.\n",
+            "// NCBI's (Int4) of infinity is INT_MIN on x86-64, and the cutoff stays 1.\n",
+            "// query_blk->sequence (masked) drives the traceback score.\n",
+            "// Run cargo build --release --locked for the binary.\n",
+            "// Measured on dev (peaks in KiB; extra = T4 - T1;\n",
+            "// - k when n <= 5 or k < 3;\n",
+            "// CREATE INDEX name ON TaxidInfo(parent,taxid): no sort order.\n",
+            "// T->A, G->C, C->G, A->T = ACGT\n",
+            "// SeqId(warning) wraps a LOSAT warning.\n",
+            "// for (a coordinate, `length`, `gaps`, `gapopen` or `qframe`; the block's other fields fetch\n",
+        ):
+            self.assertEqual(
+                self.unbackticked(line + code, functions=frozenset({"SeqId"})),
+                [],
+                line,
+            )
+        # Python docstrings allow Python doctests and dotted constructor calls, while still
+        # rejecting unbackticked C/C++ statements.
+        py_ok = '"""\n>>> search = pylosat.Search("blastn")\nRandom from random.Random(20261019).\n"""\n'
+        self.assertEqual(self.unbackticked(py_ok, "x.py", "python"), [])
+        py_bad = '"""\nif (hsp->evalue > cutoff) { hsp_array[i] = Blast_HSPFree(hsp); }\n"""\n'
+        self.assertEqual(self.unbackticked(py_bad, "x.py", "python"), [(2, checker.UNBACKTICKED_QUOTE)])
+        # C-family files show their own syntax.
+        self.assertEqual(self.unbackticked("// if (a[i] == b[i]) { ++n; }\n", "x.ts", "slash"), [])
+
+    def test_unbackticked_regexes_are_linear_time(self) -> None:
+        import time
+
+        n = 5000
+        tricky_inputs = (
+            "// " + "a" * n + "\n",
+            "// if " + "(" * n + "a == b\n",
+            "// if (" + "a && " * (n // 5) + "\n",
+            "// for (" + ";" * n + "\n",
+            "// " + "a.b" * (n // 3) + " = 1\n",
+            "// " + 'a"' * (n // 2) + "\n",
+            "// " + "x[0]" * (n // 4) + "\n",
+            "// " + "Int4 " + "*" * n + "\n",
+            "// " + "; " * (n // 2) + "}\n",
+            "/* " + "*" * n + " */\n",
+        )
+        total_start = time.perf_counter()
+        for sample in tricky_inputs:
+            start = time.perf_counter()
+            checker.check_text("x.rs", sample.splitlines(), "slash", TABLE)
+            per_case = time.perf_counter() - start
+            self.assertLess(per_case, 0.1, f"ReDoS stress case took {per_case:.3f}s")
+        self.assertLess(time.perf_counter() - total_start, 0.5)
+
+
 class FixTest(unittest.TestCase):
     def fixed(self, text: str, style: str = "slash") -> str:
         lines = text.split("\n")

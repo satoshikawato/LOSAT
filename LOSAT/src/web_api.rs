@@ -79,7 +79,7 @@ impl FastaStore {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
-// catch (const std::exception& e) { LOG_POST(Error << "Error: " << e.what()); }
+// Catch standard exceptions and report their message through `LOG_POST`.
 // Preserve the Rust engine context and its underlying cause across the ABI.
 fn engine_error(err: anyhow::Error) -> String {
     format!("{err:#}")

@@ -67,8 +67,8 @@ use crate::utils::threading::{with_search_pool, SearchPool};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:673-675;
 // c++/include/algo/blast/core/blast_options.h:128,144,163:
-// gap_x_dropoff = BLAST_GAP_X_DROPOFF_PROT; /* 15 */
-// gap_x_dropoff_final = BLAST_GAP_X_DROPOFF_FINAL_PROT; /* 25 */
+// Default protein gapped x-dropoffs: `BLAST_GAP_X_DROPOFF_PROT` (15) for preliminary
+// alignment and `BLAST_GAP_X_DROPOFF_FINAL_PROT` (25) for final traceback.
 #[derive(Clone, Copy)]
 pub(super) struct LocalStageDProfile<'a> {
     pub seg: Option<&'a SegParams>,
@@ -879,7 +879,8 @@ pub(super) fn run_local_mode2_sum_stats(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501,1644-1707:
-// else Blast_TracebackFromHSPList(...); Blast_HSPResultsInsertHSPList(...);
+// Runs non-composition traceback via `Blast_TracebackFromHSPList` and inserts the
+// resulting list via `Blast_HSPResultsInsertHSPList`.
 #[allow(dead_code)]
 pub(super) fn run_local_mode0_no_sum_stats(
     queries: &[Vec<u8>],
@@ -980,7 +981,7 @@ pub(super) fn run_local_mode0_no_sum_stats_with_scoring(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501:
-// else Blast_TracebackFromHSPList(...);
+// Runs standard traceback via `Blast_TracebackFromHSPList` when composition adjustment is off.
 fn run_local_search(
     queries: &[Vec<u8>],
     subjects: &[&[u8]],
@@ -1466,7 +1467,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319:
-    // Blast_HSPResultsReverseSort(results); stream reads from the end.
+    // Reverses the results via `Blast_HSPResultsReverseSort` so the stream reads from the end.
     let mut preliminary_lists: Vec<_> = preliminary_hitlists
         .iter()
         .enumerate()
@@ -1716,7 +1717,8 @@ fn run_local_search_with_redo<R: MatchRedo>(
             .map(|index| slots[index].take().expect("unique containment survivor"))
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:411-427,364-368:
-        // else Blast_HSPListGetEvalues(..., s_GetSubjectLength(...), ..., 1.0);
+        // Without HSP linking, recomputes E-values via `Blast_HSPListGetEvalues` using
+        // `s_GetSubjectLength` and a unit gap-decay divisor.
         let mut postredo = if let Some(link) = post_link.as_ref() {
             link_preliminary_hsps(
                 &hsp_values,
@@ -2044,7 +2046,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
-    // Blast_HSPResultsSortByEvalue(results); /* positive local TotLen */
+    // Sorts final hit lists by E-value (`Blast_HSPResultsSortByEvalue`) for positive local total length.
     let mut results = Vec::with_capacity(queries.len());
     for (context, heap) in heaps.iter_mut().enumerate() {
         let mut hitlist = KappaResultHitList::new(profile.max_target_seqs)?;
@@ -2578,7 +2580,8 @@ impl LocalParameterRecipe<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
-// BlastHitSavingParametersNew(...); the score block, effective lengths and cutoffs of a
+// Initializes hit-saving parameters (`BlastHitSavingParametersNew`): the score block,
+// effective lengths and cutoffs of a
 // query set. `eff_searchsp_override` is the options' effective search spaces that NCBI sets
 // from the whole batch before it searches a query chunk (`SplitQuery_SetEffectiveSearchSpace`).
 fn query_set_setup<'a>(
@@ -3370,8 +3373,8 @@ fn initial_translated_stat_length(nt_length: usize) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:141-144,1811-1926:
-// Blast_HSPNew() uses calloc, so num remains zero without BLAST_LinkHsps.
-// hsp->evalue = BLAST_SpougeStoE(score, kbp, sbp->gbp,
+// `Blast_HSPNew` zero-initializes the struct, so `num` remains zero without `BLAST_LinkHsps`,
+// and each HSP E-value is computed with `BLAST_SpougeStoE`.
 fn direct_local_evalues(
     input: &[(usize, super::search_gapped::GappedHsp)],
     query_lengths: &[i32],
@@ -3524,7 +3527,7 @@ fn finish_local_mode0_no_sum_stats(
         }
         let input: Vec<_> = traced.iter().map(|row| (context, row.hsp)).collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:213-250,717-719:
-        // else Blast_HSPListGetEvalues(..., stat_length, ...);
+        // Without HSP linking, computes E-values via `Blast_HSPListGetEvalues` using `stat_length`.
         let mut post = if let Some(link) = link {
             let mut post_link = *link;
             post_link.cutoff_small_gap = 0;

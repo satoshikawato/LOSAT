@@ -4,8 +4,8 @@
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.cpp:49-54
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:163-174
-// SetInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
-// SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
+// `SetInitialWordOptionsDefaults` sets the ungapped X-drop to `BLAST_UNGAPPED_X_DROPOFF_NUCL`,
+// while `SetMBInitialWordOptionsDefaults` sets `BLAST_WINDOW_SIZE_NUCL` and leaves X-drop zero.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:380-383
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4012-4031
 // This fixture crosses an ungapped score valley at raw X-drop 13; using

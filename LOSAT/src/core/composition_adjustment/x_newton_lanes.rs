@@ -727,7 +727,7 @@ fn newton_step<V: LaneVec>(st: &mut LaneState<V>, step: &[bool; MAX_LANES], _rou
             }
         }
     }
-    // ---- SolveReNewtonSystem(resids_x, resids_z)
+    // ---- `SolveReNewtonSystem` over `resids_x` and `resids_z`
     let mut s39 = st.resids_z[M - 1];
     for i in 0..N {
         let base = i * N;

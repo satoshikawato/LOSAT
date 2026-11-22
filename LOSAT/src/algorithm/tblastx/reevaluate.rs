@@ -616,7 +616,7 @@ pub(crate) fn get_num_identities_and_positives_ungapped(
 
     let align_length = hsp_len;
 
-    // NCBI: for (i=0; i<align_length; i++)
+    // Count identical residue pairs across the alignment of length `align_length`.
     //
     // SIMD optimization: use AVX2/SSE2 to compare 32/16 bytes at a time
     let num_ident = unsafe {

@@ -293,8 +293,8 @@ fn ncbi_all_candidates_match_in_set_and_order() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:816-831
-// if (context == 0) { /* convert subject scan ranges to AA */ }
-// else if (context == 3) { /* reverse ranges for minus frames */ }
+// On the first plus frame (context 0), converts subject scan ranges to amino-acid
+// coordinates; on the first minus frame (context 3), reverses them for minus frames.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/masksubj.inl:51-59
 #[test]
 fn ncbi_lowercase_mask_candidates_match_in_set_and_order() {
@@ -485,7 +485,7 @@ fn six_frame_translation_and_seed_coverage() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234
-// status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
+// Collects initial hits via `s_BlastAaWordFinder_TwoHit`.
 // The comparison-only C probe captures NCBI's saved seed pair. Each
 // unambiguous saved pair must exist in the Rust scan for the same frame.
 #[test]
@@ -827,7 +827,7 @@ fn long_multi_query_every_candidate_and_context_matches_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-841:
-//     status = s_BlastSearchEngineOneContext(...);
+// Searches each translated frame context via `s_BlastSearchEngineOneContext`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-505:
 #[test]
 fn long_subject_every_candidate_matches_ncbi_in_chunk_order() {

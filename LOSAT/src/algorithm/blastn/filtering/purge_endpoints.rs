@@ -101,7 +101,7 @@ pub fn cut_off_gap_edit_script(
     let mut s_end_0 = hit.internal_s_end_0;
 
     // Convert absolute cut positions to relative (within HSP)
-    // NCBI: q_cut -= hsp->query.offset; s_cut -= hsp->subject.offset;
+    // Subtract the HSP's starting query and subject offsets from `q_cut` and `s_cut`.
     // NCBI's `Int4` difference; one below 0 tests as 0 (`qid` and `sid` are at least 0 when
     // they are tested).
     let q_cut_rel = (q_cut - q_offset_0).max(0) as usize;
@@ -115,20 +115,20 @@ pub fn cut_off_gap_edit_script(
     let mut found_index: usize = 0;
     let mut found_opid: usize = 0;
 
-    // NCBI: for (index=0; index < esp->size; index++)
+    // Iterate over every run in the edit script.
     'outer: for (index, op) in gap_info.iter().enumerate() {
         let num = op.num() as usize;
 
-        // NCBI: for(opid=0; opid < esp->num[index];)
+        // Advance through the operations in the current edit-script run.
         match op {
             GapEditOp::Sub(_) => {
                 // Sub: iterate position by position to find exact cut point
-                // NCBI: qid++; sid++; opid++;
+                // Increment `qid`, `sid`, and `opid` once per aligned substitution base.
                 for opid in 0..num {
                     qid += 1;
                     sid += 1;
 
-                    // NCBI: if (qid >= q_cut && sid >= s_cut) found = TRUE;
+                    // Stop as soon as both `qid` and `sid` reach or pass their cut targets.
                     if qid >= q_cut_rel && sid >= s_cut_rel {
                         found = true;
                         found_index = index;
@@ -139,7 +139,7 @@ pub fn cut_off_gap_edit_script(
             }
             GapEditOp::Del(n) => {
                 // Del: gap in query, consumes only subject
-                // NCBI: sid+=esp->num[index]; opid+=esp->num[index];
+                // Advance both `sid` and `opid` by the full deletion run length.
                 sid += *n as usize;
 
                 // Check if cut point reached after this run
@@ -152,7 +152,7 @@ pub fn cut_off_gap_edit_script(
             }
             GapEditOp::Ins(n) => {
                 // Ins: gap in subject, consumes only query
-                // NCBI: qid+=esp->num[index]; opid+=esp->num[index];
+                // Advance both `qid` and `opid` by the full insertion run length.
                 qid += *n as usize;
 
                 // Check if cut point reached after this run
@@ -186,7 +186,7 @@ pub fn cut_off_gap_edit_script(
         }
 
         // Update HSP coordinates
-        // NCBI: hsp->query.offset += qid; hsp->subject.offset += sid;
+        // Advance the HSP's query and subject starting offsets by `qid` and `sid`.
         q_offset_0 += qid as i32;
         s_offset_0 = s_offset_0.saturating_add(sid);
     } else {

@@ -286,12 +286,12 @@ struct LhHelper {
     s_off_trim: i32,
     sum: [i64; 2],      // sum for both indices (small gap, large gap)
     next_larger: usize, // index of next HSP with larger sum[1]
-    maxsum1: i64,       // NCBI: threshold for stopping link attempts (unused with if(0))
+    maxsum1: i64,       // NCBI threshold for stopping link attempts (disabled in NCBI source)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633,654-658:
-// if(sum0>=max0) { max0=sum0; best[0]=H; }
-// if(sum1>=max1) { max1=sum1; best[1]=H; }
+// Update each channel's maximum (`max0`, `max1`) and winning HSP (`best`) whenever a
+// candidate's sum (`sum0`, `sum1`) is at least the current maximum so later ties win.
 // Each channel retains its own (score, stable post-sort group index) winner.
 // SENTINEL_IDX means inactive, never a real contender at cutoff equality.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -301,8 +301,7 @@ struct DualMaximum {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:610-623:
-//   if(sum0>=max0) { max0=sum0; best[0]=H; }
-//   if(sum1>=max1) { max1=sum1; best[1]=H; }
+// Each channel updates its running maximum and winning HSP on greater-than-or-equal sums.
 impl DualMaximum {
     const INACTIVE: Self = Self {
         sum: [0; 2],
@@ -336,9 +335,9 @@ impl DualMaximum {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:603-659,897-908,942-978:
-// if (!first_pass) { /* find the current max sums */ }
-// if(!use_current_max) { /* recompute stored sums */ }
-// best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
+// After the first pass, locate the current maximum stored sums; when the cached maximum cannot
+// be reused, recompute stored sums, and before scoring add back `num` times the small-gap cutoff
+// to the small-gap winner's stored sum.
 // A group-local flat tree mirrors stored sums and physical membership only.
 // It does not validate paths or recompute survivors after predecessor removal.
 struct DualMaximumTree {
@@ -347,8 +346,7 @@ struct DualMaximumTree {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633,755-758,869-873,975-978:
-// if(sum0>=max0) { max0=sum0; best[0]=H; }
-// if(sum1>=max1) { max1=sum1; best[1]=H; }
+// Maintain the running maximum and winning HSP for both gap channels using non-strict ties.
 impl DualMaximumTree {
     fn new(group_len: usize) -> Self {
         let capacity = group_len.max(1).next_power_of_two();
@@ -877,8 +875,8 @@ fn replay_ncbi_output_list(mut sorted_hits: Vec<&mut UngappedHit>) -> Vec<Ungapp
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-863
-// if(b0) { H2_index=next_larger; }
-//   H_hsp_sum=H2->hsp_link.sum[index]; H_hsp_xsum=H2->hsp_link.xsum[index];
+// When the score guard `b0` triggers, jump the predecessor index to `next_larger`; otherwise
+// adopt the predecessor's `sum`, `xsum`, `num`, and link when all geometry predicates pass.
 // Both cursor drivers expand this single selection/trace body. All caller
 // state is explicit; continue targets the surrounding predecessor loop.
 macro_rules! visit_large_gap_predecessor {
@@ -896,7 +894,7 @@ macro_rules! visit_large_gap_predecessor {
         let next_larger = $helper.next_larger;
         let b0 = sum <= $h_sum;
 
-        // NCBI line 841: H2_index--
+        // Step backward to the previous predecessor index (link_hsps.c:841).
         visit_large_gap_predecessor!(@advance $mode, $cursor, $next_cursor);
         if b0 {
             visit_large_gap_predecessor!(@jump $mode, $cursor, next_larger);
@@ -907,9 +905,9 @@ macro_rules! visit_large_gap_predecessor {
                 );
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:838-859
-            // if (b0) { H2_index = next_larger; }
-            // if (!(b0|b1|b2)) { H_hsp_link = H2; }
-            // A true b0 cannot select this predecessor. Keep the
+            // When `b0` holds, jump the predecessor index to `next_larger`; a predecessor can only
+            // be selected when `b0`, `b1`, and `b2` are all false.
+            // A true `b0` cannot select this predecessor. Keep the
             // same jump, but defer coordinate loads to contenders.
             // Tracing still evaluates all three reported predicates.
             if !$is_target_hsp {
@@ -922,9 +920,9 @@ macro_rules! visit_large_gap_predecessor {
         let b1 = qo <= $h_qe;
         let b2 = so <= $h_se;
 
-        // NCBI line 852: if (!(b0|b1|b2))
+        // Select this predecessor only when all three rejection flags are false (link_hsps.c:852).
         if !(b0 || b1 || b2) {
-            // Use saved $current_idx (NCBI: H2 = H2_helper->ptr)
+            // Use saved $current_idx to retrieve the predecessor HSP index from the helper.
             let j = $helper.hsp_idx;
             if $is_target_hsp {
                 eprintln!(
@@ -953,8 +951,8 @@ macro_rules! visit_large_gap_predecessor {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-863
-//     if (b0) { H2_index=next_larger; }
-//         H_hsp_num=H2->hsp_link.num[index]; H_hsp_sum=H2->hsp_link.sum[index];
+// Walk large-gap predecessors backward, jumping to `next_larger` when `b0` holds and recording
+// the best predecessor's count, sum, scaled sum, and link index.
 // A call per HSP provides a repeated real function-entry boundary within a long
 // threaded-WASI group invocation. Native tests can also check the indexed driver.
 // The loop, trace timing, initial state and returned values are unchanged;
@@ -977,7 +975,8 @@ fn scan_large_gap_predecessors(
     mut h_link: usize,
 ) -> (i64, i16, f64, usize) {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:675-684,876-885
-    // while((cur_sum>=prev_sum) && (prev>0)) { prev=lh_helper[prev].next_larger; }
+    // Follow `next_larger` backward while the current sum is at least the previous entry's sum
+    // and the previous index remains positive.
     // Every jump is backward. A borrowed prefix excludes sentinels 0/1;
     // its last element is the same predecessor and truncation is metadata-only.
     // One macro owns the unchanged selection and tracing statements for both
@@ -1253,7 +1252,7 @@ fn link_hsp_group_ncbi(
     let length_adjustment = length_adj_per_context[query_context];
     let eff_search_space = eff_searchsp_per_context[query_context];
 
-    // NCBI: query_length = MAX(query_length - length_adjustment, 1)
+    // Clamp the effective query length to at least 1 after subtracting the length adjustment.
     let eff_query_len = (query_len_aa - length_adjustment).max(1) as f64;
 
     // LOCAL effective subject length for BLAST_SmallGapSumE/LargeGapSumE arguments
@@ -1501,20 +1500,18 @@ fn link_hsp_group_ncbi(
         if !first_pass {
             // NCBI lines 607-625: Find the current max sums
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:610-623
-            //      if(sum0>=max0) { max0=sum0; best[0]=H; }
-            //      if(sum1>=max1) { max1=sum1; best[1]=H; }
-            // NCBI does NOT check linked_to or changed flags here.
+            // Update `max0`/`best` and `max1`/`best` whenever a candidate's stored sum is at least
+            // the current maximum.
+            // NCBI does NOT check `linked_to` or `changed` flags here.
             // Processed HSPs are physically removed from the linked list (lines 975-978),
-            // so they cannot appear in hp_start->next traversal.
+            // so they cannot appear during active-list traversal.
             // In LOSAT, we also unlink processed HSPs (lines 1623-1642), so they cannot
-            // appear in active_head traversal either. No defensive checks needed.
+            // appear in `active_head` traversal either. No defensive checks needed.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633:
-            // if(sum0>=max0) { max0=sum0; best[0]=H; }
-            // if(sum1>=max1) { max1=sum1; best[1]=H; }
-            // Read the exact stored-score maxima before unchanged path validation.
+            // Read the exact stored-score maxima for both channels before unchanged path validation.
             (best, _) = maximum_tree.maxima([cutoff_small, cutoff_big], ignore_small_gaps);
 
-            // NCBI line 635: if(path_changed==0) use_current_max=1
+            // Reuse the current maxima directly when no path changed (link_hsps.c:635).
             if !path_changed {
                 // No path was changed, use these max sums directly
                 use_current_max = true;
@@ -1587,7 +1584,7 @@ fn link_hsp_group_ncbi(
 
                 let next_cur = pool_hsp_links[hsp_idx].next_active;
 
-                // NCBI line 685: H->linked_to = 0
+                // Reset the incoming-link counter for each active HSP (link_hsps.c:685).
                 pool_hsp_links[hsp_idx].linked_to = 0;
 
                 // NCBI lines 664-668: copy data + store ptr
@@ -1603,8 +1600,8 @@ fn link_hsp_group_ncbi(
                 running_max = running_max.max(pool_hsp_links[hsp_idx].sum[1]);
                 pool_lh_helpers[lh_len].maxsum1 = running_max;
 
-                // NCBI lines 675-684: compute next_larger
-                // NCBI: while((cur_sum>=prev_sum) && (prev>0))
+                // Compute `next_larger` by following prior links while `cur_sum` is at least
+                // `prev_sum` and `prev` stays positive (link_hsps.c:675-684).
                 let cur_sum = pool_lh_helpers[lh_len].sum[1];
                 let mut prev = lh_len - 1;
                 let mut prev_sum = pool_lh_helpers[prev].sum[1];
@@ -1617,7 +1614,7 @@ fn link_hsp_group_ncbi(
                 lh_len += 1;
                 cur = next_cur;
             }
-            // NCBI line 688: lh_helper[1].maxsum1 = -10000;
+            // Initialize sentinel slot 1's `maxsum1` to -10000 (link_hsps.c:688).
             pool_lh_helpers[1].maxsum1 = -10000;
             let _active_count = lh_len - 2;
 
@@ -1626,8 +1623,7 @@ fn link_hsp_group_ncbi(
 
             // INDEX 0 LOOP (small gaps) - NCBI lines 691-768
             if !ignore_small_gaps {
-                // NCBI: H_index = 2; for (H=hp_start->next; H!=NULL; H=H->next,H_index++)
-                // Iterate over pool_lh_helpers[2..] which contains only active HSPs
+                // Walk active HSPs starting at helper index 2 (`pool_lh_helpers[2..]`).
                 for h_lh_idx in 2..lh_len {
                     let i = pool_lh_helpers[h_lh_idx].hsp_idx; // Use stored hsp_idx (NCBI: ptr)
 
@@ -1636,7 +1632,7 @@ fn link_hsp_group_ncbi(
                     let mut h_num = 0i16;
                     let mut h_link: usize = SENTINEL_IDX;
 
-                    // NCBI line 702: if (H->hsp->score > cutoff[index])
+                    // Only attempt linking when the HSP's score strictly exceeds the channel cutoff (link_hsps.c:702).
                     let is_target_hsp = if debug_chaining {
                         target_hsp_idx == Some(i)
                     } else {
@@ -1762,9 +1758,9 @@ fn link_hsp_group_ncbi(
                             );
                         }
                     }
-                    // NCBI line 764: H->hsp_link.xsum[index] = new_xsum; (after best update)
+                    // Store `new_xsum` after updating the channel's best candidate (link_hsps.c:764).
                     pool_hsp_links[i].xsum[0] = new_xsum;
-                    // NCBI line 765-766: if(H_hsp_link) ((LinkHSPStruct*)H_hsp_link)->linked_to++;
+                    // Increment the chosen predecessor's `linked_to` count when linked (link_hsps.c:765-766).
                     if h_link != SENTINEL_IDX {
                         pool_hsp_links[h_link].linked_to += 1;
                     }
@@ -1781,7 +1777,7 @@ fn link_hsp_group_ncbi(
                 let mut h_link: usize = SENTINEL_IDX;
 
                 let i_score = pool_hsp_links[i].score;
-                // NCBI line 781: H->hsp_link.changed=1
+                // Mark the current HSP as changed before checking the fast-path skip (link_hsps.c:781).
                 pool_hsp_links[i].changed = true;
                 let prev_link = pool_hsp_links[i].link[1];
 
@@ -1796,9 +1792,9 @@ fn link_hsp_group_ncbi(
                 //
                 // This is the original fast-path: if the previous best choice exists and
                 // was not changed in the last pass, it is still the best.
-                // NCBI only checks H2->hsp_link.changed==0 (no linked_to check needed).
-                // When an HSP is processed, both linked_to=-1000 and hsp_link.changed=1 are set,
-                // so changed==0 is sufficient to determine the HSP hasn't been processed.
+                // NCBI only checks that the previous link's `changed` flag is zero (no `linked_to`
+                // check needed). When an HSP is processed, both `linked_to` (-1000) and `changed`
+                // (1) are set, so a cleared `changed` flag suffices to know it is still active.
                 let can_skip_ncbi = !first_pass
                     && (prev_link == SENTINEL_IDX || !pool_hsp_links[prev_link].changed);
 
@@ -1871,7 +1867,7 @@ fn link_hsp_group_ncbi(
                             );
                         }
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-863
-                        // for(H2_index=H_index-1; H2_index>1;) { H2_index--; ... }
+                        // Scan predecessor helper entries backward from `h_lh_idx - 1` down past sentinel 1.
                         // Keep the indexed scan in the caller without a function/tuple boundary.
                         #[cfg(not(all(losat_wasi_threads, feature = "wasm-threads")))]
                         {
@@ -1922,8 +1918,8 @@ fn link_hsp_group_ncbi(
                 pool_hsp_links[i].link[1] = h_link;
                 pool_lh_helpers[h_lh_idx].sum[1] = new_sum;
 
-                // NCBI line 874: lh_helper[H_index].maxsum1 = MAX(lh_helper[H_index-1].maxsum1, new_sum);
-                // Note: maxsum1 is unused (NCBI line 850 is if(0)) but we compute it for strict parity
+                // Update `maxsum1` to the greater of the previous helper's `maxsum1` and `new_sum` (link_hsps.c:874).
+                // Note: `maxsum1` is disabled in NCBI's inner loop (link_hsps.c:850), but we compute it for strict parity.
                 pool_lh_helpers[h_lh_idx].maxsum1 =
                     pool_lh_helpers[h_lh_idx - 1].maxsum1.max(new_sum);
 
@@ -1950,9 +1946,9 @@ fn link_hsp_group_ncbi(
                         );
                     }
                 }
-                // NCBI line 892: H->hsp_link.xsum[index] = new_xsum; (after best update)
+                // Store `new_xsum` after updating the channel's best candidate (link_hsps.c:892).
                 pool_hsp_links[i].xsum[1] = new_xsum;
-                // NCBI line 893-894: if(H_hsp_link) ((LinkHSPStruct*)H_hsp_link)->linked_to++;
+                // Increment the chosen predecessor's `linked_to` count when linked (link_hsps.c:893-894).
                 if h_link != SENTINEL_IDX {
                     pool_hsp_links[h_link].linked_to += 1;
                 }
@@ -1963,7 +1959,7 @@ fn link_hsp_group_ncbi(
             // selected best/sums, including any incoming cached maximum boundary.
             maximum_tree.rebuild(pool_hsp_links, active_head);
 
-            // NCBI line 897: path_changed=0 after first pass computation
+            // Clear `path_changed` after the full DP pass finishes (link_hsps.c:897).
             path_changed = false;
             first_pass = false;
         }
@@ -1974,13 +1970,11 @@ fn link_hsp_group_ncbi(
 
         if !ignore_small_gaps {
             if let Some(bi) = best[0] {
-                // NCBI lines 907-908: Add back cutoff*num that was subtracted during DP
-                // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
+                // Add back `num` times the small-gap cutoff that was subtracted during DP (link_hsps.c:907-908).
                 pool_hsp_links[bi].sum[0] +=
                     i64::from(pool_hsp_links[bi].num[0]) * i64::from(cutoff_small);
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:907-908:
-                // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
-                // Mirror the persistent addback even if another chain is selected.
+                // Mirror the persistent small-gap cutoff addback in the tree even if another chain is selected.
                 maximum_tree.update(bi, DualMaximum::active(bi, pool_hsp_links[bi].sum));
 
                 // The count is NCBI's Int2: a wrapped (negative) count is not "> 1"
@@ -2109,9 +2103,9 @@ fn link_hsp_group_ncbi(
         // If best has a link, it's a linked set (multiple HSPs)
         let linked_set = pool_hsp_links[best_i].link[ordering] != SENTINEL_IDX;
 
-        // NCBI line 955: best[ordering_method]->start_of_chain = TRUE;
-        // CRITICAL: NCBI sets start_of_chain = TRUE for ALL selected HSPs (both single and chain heads)
-        // This is set BEFORE the loop that processes chain members
+        // Mark the selected chain head with `start_of_chain` true (link_hsps.c:955).
+        // CRITICAL: NCBI sets `start_of_chain` true for ALL selected HSPs (both single and chain heads)
+        // before the loop that processes chain members.
         pool_hsp_links[best_i].start_of_chain = true;
         group_hits[best_i].start_of_chain = true;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1044-1045
@@ -2141,7 +2135,7 @@ fn link_hsp_group_ncbi(
             if collect_chain_members {
                 chain_members.push(cur);
             }
-            // NCBI line 968: if (H->linked_to>1) path_changed=1
+            // Mark `path_changed` when more than one HSP linked to this chain member (link_hsps.c:968).
             if pool_hsp_links[cur].linked_to > 1 {
                 path_changed = true;
             }
@@ -2173,14 +2167,12 @@ fn link_hsp_group_ncbi(
             // Remove every physical chain member without renumbering survivors.
             maximum_tree.update(cur, DualMaximum::INACTIVE);
 
-            // NCBI line 972: H->linked_set = linked_set
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:972
-            // This is set for ALL HSPs in the chain (both head and members)
+            // Record `linked_set` for ALL HSPs in the chain (both head and members).
             pool_hsp_links[cur].linked_set = linked_set;
 
-            // NCBI line 973: H->ordering_method = ordering_method;
-            // This records which ordering method (small gap=0 / large gap=1) was used
-            // to select this chain for output.
+            // Record which ordering method (0 for small gap, 1 for large gap) selected this chain
+            // for output (link_hsps.c:973).
             group_hits[cur].ordering_method = ordering as u8;
 
             // Set E-value for ALL HSPs in the chain (not just head)
@@ -2188,8 +2180,7 @@ fn link_hsp_group_ncbi(
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:974
             group_hits[cur].e_value = evalue;
 
-            // Transfer linked_set flag to UngappedHit for output filtering
-            // NCBI line 972: H->linked_set = linked_set
+            // Transfer `linked_set` to `UngappedHit` for output filtering (link_hsps.c:972).
             group_hits[cur].linked_set = linked_set;
 
             let next = pool_hsp_links[cur].link[ordering];
@@ -2202,13 +2193,11 @@ fn link_hsp_group_ncbi(
             };
 
             if is_first {
-                // Chain head: start_of_chain already set to true above (NCBI line 955)
-                // This matches NCBI: best[ordering_method]->start_of_chain = TRUE (before loop)
+                // Chain head: `start_of_chain` was already set to true before the loop (link_hsps.c:955).
                 is_first = false;
             } else {
-                // Non-head HSP in chain: mark as not start_of_chain
-                // NCBI: only the first HSP in the loop (best[ordering_method]) has start_of_chain=TRUE
-                // All subsequent HSPs in the chain have start_of_chain=FALSE (default from initialization)
+                // Non-head HSP in chain: mark `start_of_chain` false; only the head keeps it true
+                // while subsequent chain members remain false from initialization.
                 pool_hsp_links[cur].start_of_chain = false;
                 group_hits[cur].start_of_chain = false;
             }

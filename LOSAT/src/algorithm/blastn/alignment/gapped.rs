@@ -1599,8 +1599,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
             let script_row = SCRIPT_EXTEND_GAP_A;
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:592-598
-            // if (score < score_gap_col) { script = SCRIPT_GAP_IN_B; score = score_gap_col; }
-            // if (score < score_gap_row) { script = SCRIPT_GAP_IN_A; score = score_gap_row; }
+            // Prefer a gap in sequence B or A whenever its column or row gap score beats the substitution score.
             if score_val < score_gap_col {
                 script = SCRIPT_GAP_IN_B;
                 score_val = score_gap_col;

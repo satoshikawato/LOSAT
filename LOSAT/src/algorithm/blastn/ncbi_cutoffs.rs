@@ -57,18 +57,16 @@ pub fn cutoff_score_max_from_evalue(
         return 1; // Return error value (matches NCBI behavior)
     }
 
-    // NCBI: es = 1 (default), then calculate if e > 0.
-    // NCBI: if (es > s) *S = es; (pick larger between initial S and calculated es)
+    // Default the raw cutoff to 1, then replace it with the E-value-derived score when larger.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4108-4129
     let mut s = 1; // Initial value (matches NCBI: es = 1)
 
-    // NCBI: if (e > 0.)
+    // Only compute an E-value-derived cutoff when `evalue` is positive.
     if evalue > 0.0 {
-        // NCBI: E = MAX(E, kSmallFloat)
+        // Floor `evalue` at `kSmallFloat` to prevent underflow.
         let e = evalue.max(K_SMALL_FLOAT);
 
-        // NCBI: es = BlastKarlinEtoS_simple(e, kbp, searchsp)
-        // NCBI: S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ))
+        // Compute the raw score via `BlastKarlinEtoS_simple` as the ceiling of ln(K * searchsp / E) / Lambda as an `Int4`.
         let searchsp = eff_searchsp as f64;
         let k_times_searchsp = gapped_params.k * searchsp;
         let k_times_searchsp_over_e = k_times_searchsp / e;
@@ -76,7 +74,7 @@ pub fn cutoff_score_max_from_evalue(
         let score_before_ceil = log_value / gapped_params.lambda;
         let es = ncbi_int4_from_double(score_before_ceil.ceil());
 
-        // NCBI: if (es > s) *S = es; (pick larger)
+        // Keep the larger of the initial cutoff and the E-value-derived score.
         if es > s {
             s = es;
         }
@@ -106,13 +104,13 @@ pub fn cutoff_score_for_ungapped_extension(
     cutoff_score_max: i32,
     scale_factor: f64,
 ) -> i32 {
-    // NCBI: new_cutoff = gap_trigger (gapped mode)
+    // Start from `gap_trigger` in gapped mode.
     let mut new_cutoff = gap_trigger;
 
-    // NCBI: new_cutoff *= (Int4)sbp->scale_factor
+    // Scale the cutoff by `sbp->scale_factor`.
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
-    // NCBI: new_cutoff = MIN(new_cutoff, cutoff_score_max)
+    // Cap the cutoff at `cutoff_score_max`.
     new_cutoff.min(cutoff_score_max)
 }
 
@@ -143,10 +141,10 @@ pub fn compute_blastn_cutoff_score_ungapped(
     gap_decay_rate: f64,
     cutoff_score_max: i32,
 ) -> i32 {
-    // NCBI: cutoff_e = s_GetCutoffEvalue(program_number) = CUTOFF_E_BLASTN = 0.05
+    // Use the fixed blastn ungapped cutoff E-value from `s_GetCutoffEvalue` (`CUTOFF_E_BLASTN`, 0.05).
     let cutoff_e = CUTOFF_E_BLASTN;
 
-    // NCBI: searchsp = MIN(subj_length, query_length) * subj_length (length adjustmentなし)
+    // Compute the unadjusted search space as the product of the shorter sequence length and the subject length.
     let min_len = subject_len.min(query_len);
     let searchsp = min_len * subject_len;
 
@@ -155,29 +153,26 @@ pub fn compute_blastn_cutoff_score_ungapped(
         return 1; // Return error value (matches NCBI behavior)
     }
 
-    // NCBI: BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, searchsp, TRUE, gap_decay_rate)
-    // NCBI: es = 1 (default), then calculate if e > 0.
-    // NCBI: if (es > s) *S = es; (pick larger between initial S and calculated es)
+    // Compute the cutoff via `BLAST_Cutoffs` with gap decay enabled, defaulting to 1 and
+    // taking the larger of the initial cutoff and the E-value-derived score.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4108-4129
     let mut new_cutoff = 1; // Initial value (matches NCBI: es = 1, s = *S = 1)
 
-    // NCBI: if (e > 0.)
+    // Only compute an E-value-derived cutoff when `cutoff_e` is positive.
     if cutoff_e > 0.0 {
-        // NCBI: E = MAX(E, kSmallFloat)
+        // Floor `cutoff_e` at `kSmallFloat` to prevent underflow.
         let e = cutoff_e.max(K_SMALL_FLOAT);
 
         // NCBI: When dodecay=TRUE, apply gap decay divisor to E-value before conversion
         let e_adjusted = if gap_decay_rate > 0.0 && gap_decay_rate < 1.0 {
-            // NCBI: e *= BLAST_GapDecayDivisor(gap_decay_rate, 1)
-            // BLAST_GapDecayDivisor(decayrate, 1) = (1 - decayrate) * decayrate^0 = (1 - decayrate)
+            // Multiply the E-value by the single-HSP `BLAST_GapDecayDivisor` factor, one minus `gap_decay_rate`.
             let divisor = 1.0 - gap_decay_rate;
             e * divisor
         } else {
             e
         };
 
-        // NCBI: es = BlastKarlinEtoS_simple(e, kbp, searchsp)
-        // NCBI: S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ))
+        // Compute the raw score via `BlastKarlinEtoS_simple` as the ceiling of ln(K * searchsp / E) / Lambda as an `Int4`.
         let searchsp_f64 = searchsp as f64;
         let k_times_searchsp = ungapped_params.k * searchsp_f64;
         let k_times_searchsp_over_e = k_times_searchsp / e_adjusted;
@@ -185,19 +180,18 @@ pub fn compute_blastn_cutoff_score_ungapped(
         let score_before_ceil = log_value / ungapped_params.lambda;
         let es = ncbi_int4_from_double(score_before_ceil.ceil());
 
-        // NCBI: if (es > s) *S = es; (pick larger)
+        // Keep the larger of the initial cutoff and the E-value-derived score.
         if es > new_cutoff {
             new_cutoff = es;
         }
     }
 
-    // NCBI: if (program_number != eBlastTypeBlastn) new_cutoff = MIN(new_cutoff, gap_trigger)
-    // For blastn, this check is skipped (always true for blastn)
+    // Non-blastn programs cap the cutoff at `gap_trigger` here; blastn skips that cap.
 
-    // NCBI: new_cutoff *= (Int4)sbp->scale_factor
+    // Scale the cutoff by `sbp->scale_factor`.
     new_cutoff = (new_cutoff as f64 * scale_factor) as i32;
 
-    // NCBI: new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max)
+    // Cap the cutoff at each context's `cutoff_score_max` from `hit_params->cutoffs`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:372-373
     new_cutoff = new_cutoff.min(cutoff_score_max);
 

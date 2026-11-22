@@ -8,9 +8,8 @@ use crate::algorithm::blastp::x_ungapped_fast;
 use crate::config::ScoringMatrix;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-163
-// typedef struct BlastUngappedData { Int4 q_start, s_start, length, score; } ...;
-// typedef struct BlastInitHSP { BlastOffsetPair offsets;
-//                              BlastUngappedData* ungapped_data; } ...;
+// Mirrors `BlastUngappedData` (query start, subject start, length, and score) and
+// `BlastInitHSP` (seed offset pair plus ungapped extension data).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct InitHsp {
     pub frame: i8,

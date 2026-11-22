@@ -171,8 +171,8 @@ fn each_karlin_block_is_read_where_ncbi_reads_it() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1788-1802;
 // c++/src/algo/blast/core/blast_hits.c:1811-1926:
-// Blast_HSPListGetEvalues receives translated subject_length/3 and
-// divides each Spouge E-value by BLAST_GapDecayDivisor(rate, 1).
+// `Blast_HSPListGetEvalues` receives the translated subject length (divided by 3) and
+// divides each Spouge E-value by the single-HSP divisor from `BLAST_GapDecayDivisor`.
 #[test]
 fn preliminary_individual_evalues_match_ncbi_double_bits() {
     let trace = include_str!(concat!(

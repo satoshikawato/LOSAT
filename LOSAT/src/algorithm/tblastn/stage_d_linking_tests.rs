@@ -694,8 +694,8 @@ fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3383-3427,
     // 3525-3535; composition_adjustment/redo_alignment.c:64,1560-1580;
     // composition_adjustment/compo_heap.c:252-275,330-391,405-410:
-    // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
-    //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
+    // When `BlastCompo_EarlyTermination` triggers on a local match's best E-value
+    // against the redone matches, frees that HSP list (`Blast_HSPListFree`) and continues.
     let would_rows: Vec<_> = kappa_trace
         .lines()
         .filter(|line| line.starts_with("K_TRACE_HEAP_WOULD\t"))

@@ -546,12 +546,12 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
             q_off = q_off_adj;
             s_off = s_off_adj;
 
-            // NCBI: if (!word_type) return 0;
+            // Skip this seed when `word_type` is zero (non-word).
             if word_type == 0 {
                 continue;
             }
 
-            // NCBI: s_end += extended; s_end_pos += extended;
+            // Advance `s_end` and `s_end_pos` by `extended`.
             s_end += extended;
             s_end_pos += extended;
 
@@ -1151,12 +1151,12 @@ fn fold_two_hit_array<const LEAN: bool>(
             q_off = q_off_adj;
             s_off = s_off_adj;
 
-            // NCBI: if (!word_type) return 0;
+            // Skip this seed when `word_type` is zero (non-word).
             if word_type == 0 {
                 continue;
             }
 
-            // NCBI: s_end += extended; s_end_pos += extended;
+            // Advance `s_end` and `s_end_pos` by `extended`.
             s_end += extended;
             s_end_pos += extended;
 

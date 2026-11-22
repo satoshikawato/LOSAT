@@ -472,7 +472,7 @@ impl TypedReader<'_> {
                     .map(|at| at + pos)
             }
             MemberId::Tag(range) => {
-                // NStr::StringToInt(id) with the default flags: its `CStringException` leaves
+                // Parse the tag with `NStr::StringToInt` using default flags: its `CStringException` leaves
                 // the reader (NCBI 2.17.0: `[3x]`, `[99999999999]`, probe e03, e07).
                 let tag = crate::ncbi_str::string_to_int(self.r.bytes(range), 0)
                     .map_err(ReadError::Exception)?;

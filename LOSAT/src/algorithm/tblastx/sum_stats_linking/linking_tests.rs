@@ -1,8 +1,8 @@
 use super::*;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633:
-// if(sum0>=max0) { max0=sum0; best[0]=H; }
-// if(sum1>=max1) { max1=sum1; best[1]=H; }
+// Scan active HSPs and update each channel's running maximum (`max0`, `max1`) and winner
+// (`best`) on greater-than-or-equal sums.
 // Reconciled T01 list scan, retained verbatim as the tree's reference.
 fn reference_maxima(
     pool_hsp_links: &[HspLink],
@@ -15,14 +15,14 @@ fn reference_maxima(
     if !ignore_small_gaps {
         let mut cur = active_head;
         while cur != SENTINEL_IDX {
-            // NCBI line 613: if(sum0>=max0)
+            // Update the small-gap channel when the stored sum is at least the running max (link_hsps.c:613).
             if pool_hsp_links[cur].sum[0] >= best_sum[0] {
                 best_sum[0] = pool_hsp_links[cur].sum[0];
                 best[0] = Some(cur);
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:618-623:
-            // if(sum1>=max1) { max1=sum1; best[1]=H; }
-            // Both independent maxima are complete before path validation.
+            // Update the large-gap channel on greater-than-or-equal stored sum; both independent
+            // maxima are complete before path validation.
             if pool_hsp_links[cur].sum[1] >= best_sum[1] {
                 best_sum[1] = pool_hsp_links[cur].sum[1];
                 best[1] = Some(cur);
@@ -31,10 +31,10 @@ fn reference_maxima(
         }
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:624-633:
-        //    if(sum>=maxscore) { maxscore=sum; best[1]=H; }
+        // When small gaps are ignored, update the large-gap maximum on greater-than-or-equal sum.
         let mut cur = active_head;
         while cur != SENTINEL_IDX {
-            // NCBI line 618: if(sum1>=max1)
+            // Update the large-gap channel when the stored sum is at least the running max (link_hsps.c:618).
             if pool_hsp_links[cur].sum[1] >= best_sum[1] {
                 best_sum[1] = pool_hsp_links[cur].sum[1];
                 best[1] = Some(cur);
@@ -47,7 +47,7 @@ fn reference_maxima(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:610-633,755-758,975-978:
-// for (H=hp_start->next; H!=NULL; H=H->next) { /* stored sums */ }
+// Traverse the active HSP list to inspect stored sums in list order.
 // Finite state fixture with stable leaves and a separately maintained list.
 fn tree_links(scores: &[[i64; 2]], active: &[bool]) -> (Vec<HspLink>, usize) {
     let mut links: Vec<_> = scores
@@ -88,8 +88,7 @@ fn tree_links(scores: &[[i64; 2]], active: &[bool]) -> (Vec<HspLink>, usize) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:608-633:
-// if(sum0>=max0) { max0=sum0; best[0]=H; }
-// if(sum1>=max1) { max1=sum1; best[1]=H; }
+// Check both channels' boundary cutoffs and non-strict tie resolution for running maxima.
 #[test]
 fn dual_maximum_boundaries_and_channel_ties() {
     let cases: Vec<(Vec<[i64; 2]>, Vec<bool>, [Option<usize>; 2], [i64; 2])> = vec![
@@ -132,7 +131,7 @@ fn dual_maximum_boundaries_and_channel_ties() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:907-908,936-937,965-978:
-// best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
+// Check that the small-gap winner's persistent cutoff addback survives removal of another chain.
 #[test]
 fn dual_maximum_surviving_addback_and_multi_remove() {
     let mut scores = vec![[9, 1], [2, 12], [3, 11], [1, 4], [0, 2]];
@@ -171,7 +170,7 @@ fn dual_maximum_surviving_addback_and_multi_remove() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:659,755-758,869-873:
-// if(!use_current_max) { ... H->hsp_link.sum[index] = new_sum; ... }
+// When cached maxima are not reused, rebuilding the tree replaces stale state with recomputed sums.
 #[test]
 fn dual_maximum_rebuild_replaces_unrepaired_state() {
     let mut tree = DualMaximumTree::new(5);
@@ -200,8 +199,8 @@ fn dual_maximum_rebuild_replaces_unrepaired_state() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:659,755-758,869-873,975-978:
-// if(!use_current_max) { ... H->hsp_link.sum[index] = new_sum; ... }
-// Deterministic finite transitions, including rebuilt arbitrary stored state.
+// Recomputed stored sums and rebuilds match the active-list scan across deterministic finite
+// transitions, including rebuilt arbitrary stored state.
 #[test]
 fn dual_maximum_deterministic_state_transitions() {
     let mut seed = 0x0911_2026_u32;
@@ -660,7 +659,7 @@ fn test_final_link_replay_parallel_matches_sequential_complete_payloads() {
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-863,876-885
-// for (H2_index=H_index-1; H2_index>1;) { ... if(b0) H2_index=next_larger; }
+// Backward large-gap predecessor scan jumps to `next_larger` when `b0` holds.
 // The end sentinels 0/1 cannot select a predecessor, even with tracing enabled.
 #[test]
 fn large_gap_scan_preserves_initial_state_and_zero_one_jumps() {

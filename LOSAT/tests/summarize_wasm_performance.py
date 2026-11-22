@@ -2,7 +2,8 @@
 """Recheck retained raw evidence and export PR01 tables without changing gates.
 
 NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108:
-  x_PrintField(*iter); ... m_Ostream << "\n";
+Each tabular row writes its fields in order via `x_PrintField` and ends with a
+newline on `m_Ostream`.
 Hashes here cover those complete ordered bytes; TSV tables summarize evidence
 and never replace the saved search output or its acceptance decision.
 """

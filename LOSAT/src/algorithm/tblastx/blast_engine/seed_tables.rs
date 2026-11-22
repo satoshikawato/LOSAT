@@ -117,7 +117,7 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
     }
     let diag_mask: i32 = diag_array_size - 1;
     if trace_hsp_target().is_some() {
-        // NCBI: diag_array_length = next_power_of_2(qlen + window_size).
+        // Diagonal table length is the next power of two above query length plus window size.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-61
         eprintln!(
             "[TRACE_HSP] diag_table query_length={} window={} diag_array_size={} diag_mask={}",

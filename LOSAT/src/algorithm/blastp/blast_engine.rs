@@ -782,7 +782,7 @@ fn blastp_should_parallelize_stage(
     worker_jobs: usize,
 ) -> bool {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1475
-    // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) { ... }
+    // Iterate subject OIDs with `BlastSeqSrcIteratorNext` until `BLAST_SEQSRC_EOF`.
     // This stage selects existing independent jobs within the verified pool.
     let parallel = effective_threads > 1 && worker_jobs > 1;
     crate::utils::threading::report_stage("blastp", stage, worker_jobs, parallel);

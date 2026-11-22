@@ -582,7 +582,7 @@ impl BlastIntervalTree {
         let midpt = ((parent.leftend as i64 + parent.rightend as i64) / 2) as i32;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:102-109
-        //     new_node->leftend = (Int4) midpt + 1;  // <-- +1 is CRITICAL
+        // The right child starts at one past `midpt` (the +1 offset is critical).
         let (leftend, rightend) = match which_half {
             IntervalDirection::Left => (parent.leftend, midpt),
             IntervalDirection::Right => (midpt + 1, parent.rightend), // +1 is CRITICAL
@@ -753,7 +753,7 @@ impl BlastIntervalTree {
                 match result {
                     Some(EndpointResult::KeepTree) => return true,
                     Some(EndpointResult::KeepInput) => {
-                        // Remove worse HSP from list: list_node->midptr = tmp_index
+                        // Unlink the worse HSP from the list by updating `midptr` to `next_idx`.
                         self.nodes[list_idx].midptr = next_idx;
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:361-362
                         // The list unlink is the line above; the flag only tells the grid index

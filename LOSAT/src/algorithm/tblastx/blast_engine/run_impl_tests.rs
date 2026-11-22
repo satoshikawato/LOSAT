@@ -281,7 +281,7 @@ fn chunk_offsets_move_an_end_below_zero() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1513-1527
 // A positive HSP of the earlier chunk absorbs an HSP of length -1 that starts inside it: its
-// bounds stay, the density (100 + 7) / (20 - 1) raises its score to (int)(107/19*20) = 112.
+// bounds stay, and the density (100 + 7) / (20 - 1) raises its score to trunc(107 / 19 * 20) = 112.
 #[test]
 fn chunk_merge_absorbs_an_hsp_of_negative_length() {
     let mut combined = vec![make_chunk_hit(0, 100, 120, 100, 120, 100)];
@@ -298,7 +298,7 @@ fn chunk_merge_absorbs_an_hsp_of_negative_length() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits_priv.h:68-69
 // An HSP of length 0 of the earlier chunk contains the HSP that starts at its point: it takes
-// that HSP's bounds and seed (a higher score), and its score becomes (int)((5 + 30)/(0 + 10) *
+// that HSP's bounds and seed (a higher score), and its score becomes trunc((5 + 30) / (0 + 10) *
 // 10) = 35. An HSP of negative length contains nothing.
 #[test]
 fn chunk_merge_lets_an_hsp_of_length_zero_absorb_and_one_of_negative_length_not() {

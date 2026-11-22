@@ -60,7 +60,7 @@ fn subject_slices(subjects: &[Vec<u8>]) -> Vec<&[u8]> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2777-2827;
 // c++/src/algo/blast/core/blast_parameters.c:208-223,335-347:
-// sbp->kbp = sbp->kbp_std; x_dropoff_init uses kbp[context]->Lambda.
+// Points the active Karlin block to `kbp_std`; initial ungapped x-dropoff uses that context's Lambda.
 // c++/src/algo/blast/core/aa_ungapped.c:570-590:
 // For BDT63307, NCBI's query-specific x-drop is 15; using the matrix
 // average's 16 changes which gapped seed survives into Kappa traceback.
@@ -659,7 +659,7 @@ fn natural_multi_query_local_path_matches_retained_ncbi_scores_and_coordinates()
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:800-812;
 // core/blast_engine.c:1460-1466; core/blast_kappa.c:3687-3736:
-// The comparison-only API uses FindGeneticCode(32) with the CLI-calibrated
+// The comparison-only API looks up genetic code 32 via `FindGeneticCode` with the CLI-calibrated
 // local seqSrc state and gives one retained HSP with full-precision values.
 #[test]
 fn code32_local_path_matches_cli_calibrated_api_oracle() {

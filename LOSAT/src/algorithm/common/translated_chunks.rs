@@ -40,7 +40,7 @@ impl TranslatedChunk {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264:
-// while (backup->next < backup->full_range.right) { s_GetNextSubjectChunk(...); }
+// Advance through overlapping subject chunks via `s_GetNextSubjectChunk` until the full range ends.
 pub(crate) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedChunk> {
     use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
     let mut chunks = Vec::new();
@@ -59,7 +59,7 @@ pub(crate) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedC
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:489-502:
-// apply_mask_to_both_strands = true; PackedSeqLocToMaskedQueryRegions(...);
+// Apply lowercase masking to both strands via `PackedSeqLocToMaskedQueryRegions`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:436-454:
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:689-707,825-826:
 // both mask copies enter masked_ranges before BlastSeqBlkSetSeqRanges.

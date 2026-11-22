@@ -1087,7 +1087,7 @@ fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
         ))
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
-    // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
+    // Appends shared, formatting, DB, and PSI argument groups to `m_Args`.
     // The named NCBI options below have no Stage B Rust behavior.
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
     // Product scope explicitly refuses unported NCBI capabilities.

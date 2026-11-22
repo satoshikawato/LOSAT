@@ -55,7 +55,7 @@ pub(crate) fn s_blast_aa_scan_subject(
     seq_ranges: &[(i32, i32)],
     offset_pairs: &mut [OffsetPair],
     array_size: i32,
-    s_range: &mut [i32; 3], // [C] Int4 *s_range
+    s_range: &mut [i32; 3], // NCBI `s_range` 3-element scan-range array
 ) -> i32 {
     let mut totalhits: i32 = 0;
 
@@ -75,7 +75,7 @@ pub(crate) fn s_blast_aa_scan_subject(
         let s_first = s_range[1] as usize;
         let s_last = s_range[2] as usize;
 
-        // [C] index = ComputeTableIndex(word_length - 1, lookup->charsize, s_first);
+        // Seed the initial lookup index from the first `word_length` minus 1 residues (`ComputeTableIndex`).
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:79-81
         // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:96-107
         let mut index: usize = 0;
@@ -84,10 +84,10 @@ pub(crate) fn s_blast_aa_scan_subject(
             index = (index << charsize) | ch;
         }
 
-        // [C] for (s = s_first; s <= s_last; s++)
+        // Walk subject positions from `s_first` through `s_last` inclusive.
         let mut s = s_first;
         while s <= s_last {
-            // [C] index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
+            // Advance the lookup index incrementally with the next residue (`ComputeTableIndexIncremental`).
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:85-87
             // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:121-127
             let new_char = unsafe { *subject.get_unchecked(s + word_length - 1) } as usize;
@@ -102,7 +102,7 @@ pub(crate) fn s_blast_aa_scan_subject(
                 let cell = unsafe { &*backbone.add(index) };
                 let numhits = cell.num_used;
 
-                // [C] if (numhits <= (array_size - totalhits)) { ... }
+                // Emit the cell's hits if they fit in the remaining capacity of `offset_pairs`.
                 if numhits <= array_size - totalhits {
                     // NCBI BlastOffsetPair uses Uint4 offsets.
                     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:141-150

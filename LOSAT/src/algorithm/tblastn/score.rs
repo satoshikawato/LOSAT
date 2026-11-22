@@ -321,7 +321,7 @@ impl TbnScore for MatrixScore {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3953:
-    // status = s_BlastProtGappedAlignment(...);
+    // Computes preliminary gapped protein alignment score via `s_BlastProtGappedAlignment`.
     #[inline(always)]
     fn score_only(
         self,
@@ -350,7 +350,7 @@ impl TbnScore for MatrixScore {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-449:
-    // retval = BlastGetOffsetsForGappedAlignment(...);
+    // Computes gapped alignment starting offsets via `BlastGetOffsetsForGappedAlignment`.
     #[inline(always)]
     fn offsets(
         self,

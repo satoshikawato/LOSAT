@@ -4753,7 +4753,7 @@ fn search_query_batch<S: TbxScore>(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180,261-264;
     // c++/src/algo/blast/core/blast_engine.c:1372-1374,1434-1443
-    // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
+    // When total database length is zero, NCBI updates parameters per subject via `BLAST_OneSubjectUpdateParameters`.
     // The set's numbers are read once per run (`SubjectSetNumbers`: the records' sums, or the
     // database index's numbers).
     let db_length_nucl = numbers.total;
@@ -4762,7 +4762,7 @@ fn search_query_batch<S: TbxScore>(
     // (`SubjectSetNumbers::link_total`).
     let link_db_length_nucl = numbers.link_total;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:535-560
-    // if (valid_context_found) { return 0; } else { return 1; }
+    // NCBI returns success only when at least one valid query context exists.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-178,206-208
     // A batch without a valid context is not searched; each of its queries is reported
     // with the `-1` statistics.
@@ -5009,13 +5009,13 @@ fn search_query_batch<S: TbxScore>(
         };
         x_lap.lap(XStage::Translate);
 
-        // [C] BlastOffsetPair *offset_pairs
+        // Reusable buffer for scanned word offset pairs (NCBI `BlastOffsetPair`).
         let offset_pairs = &mut st.offset_pairs;
 
-        // [C] DiagStruct *diag_array = diag->hit_level_array;
+        // Diagonal tracking array for hit extension (NCBI `diag->hit_level_array`).
         let diag_array = &mut st.diag_array;
 
-        // [C] diag_offset = diag->offset;  (reset to window per-subject)
+        // Diagonal offset for this subject (NCBI `diag->offset`, reset to `window` per subject).
         let mut diag_offset: i32 = st.diag_offset;
 
         // The subject's linking parameters (`subject_link::subject_linking_params`), computed once

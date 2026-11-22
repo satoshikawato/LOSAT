@@ -72,8 +72,8 @@ impl QueryStrand {
 
 // CLI v2 names/defaults: NCBI c++/src/algo/blast/blastinput/blast_args.cpp:
 // 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
-// arg_desc.SetConstraint(kArgMaxHSPsPerSubject, new CArgAllowValuesGreaterThanOrEqual(1));
-// arg_desc.AddDefaultKey(kArgNumThreads, "int_value", ..., NStr::IntToString(kDfltValue));
+// Constrains `kArgMaxHSPsPerSubject` to integers >= 1 via `CArgAllowValuesGreaterThanOrEqual`,
+// and registers `kArgNumThreads` with its default integer value.
 // The single-dash lexical translation is owned by crate::cli.
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]

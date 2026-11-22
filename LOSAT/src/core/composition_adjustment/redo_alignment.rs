@@ -825,7 +825,7 @@ pub(crate) fn get_translated_length(length: i32, f: i32) -> i32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,644-765:
-// if (same subject/query context && window->subject_range.end >=
+// Merge overlapping or adjacent windows that share the same subject/query context and frame.
 // The sorts are glibc's `qsort`, a stable merge sort (see `blastp::hsp::sort_hsplist_by_score`).
 // `is_pos_based`: NCBI's `params->positionBased` (RPSTBLASTN's redo, series PR, item PS12b).
 pub(crate) fn windows_from_translated_aligns(
@@ -940,7 +940,7 @@ fn translated_query_composition(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1504-1525;
 // c++/src/algo/blast/core/blast_util.c:428-454,1141-1205:
-// translation_start = frame > 0 ? 3 * range->begin
+// Compute the nucleotide start offset from the translated range begin/end and reading frame.
 fn translated_subject_window_sequence(
     subject_nt: SubjectNt<'_>,
     range: &BlastCompoSequenceRange,

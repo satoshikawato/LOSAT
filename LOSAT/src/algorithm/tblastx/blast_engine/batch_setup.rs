@@ -99,9 +99,9 @@ pub(super) fn batch_flags<S: TbxScore>(
     // local `-s/--subject` searches. Unlike BLAST+, search/scoring and reporting
     // both honor the explicit subject code.
 
-    // [C] window = diag->window;
+    // Two-hit window size (NCBI `diag->window`).
     let window = args.window();
-    // [C] wordsize = lookup->word_length;
+    // Seed word length (NCBI `lookup->word_length`).
     // (`-word_size`; BLOSUM62's instance of the search is for 3, `TbxScore::word`)
     let wordsize: i32 = sc.word() as i32;
 
@@ -420,12 +420,12 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // Compute per-context x_dropoff using kbp[context]->Lambda.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:219-221
     //
-    // For translated queries, NCBI computes kbp_std per context and applies check_ideal:
-    //   if (check_ideal && kbp->Lambda >= kbp_ideal->Lambda) Blast_KarlinBlkCopy(kbp, kbp_ideal);
+    // For translated queries, NCBI computes `kbp_std` per context and applies `check_ideal`,
+    // copying `kbp_ideal` into `kbp` via `Blast_KarlinBlkCopy` whenever `kbp->Lambda` is at least `kbp_ideal->Lambda`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
     //
     // NCBI BLAST dynamic x_dropoff (c++/src/algo/blast/core/blast_parameters.c:380-383):
-    //      curr_cutoffs->x_dropoff = new_cutoff;  // x_dropoff = cutoff_score
+    // when initialized to zero, `curr_cutoffs->x_dropoff` is set dynamically to the cutoff score.
     //
     // For TBLASTX, x_dropoff_init is non-zero, so this dynamic update is not triggered.
     // However, we store x_dropoff_init here and apply the logic during subject processing

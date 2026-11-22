@@ -98,9 +98,9 @@ pub(super) fn local_kappa_redo_params(
         32.0
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2369-2378,2439-2448:
-    // for (i=0; i<num_queries; i++) if (kbp_gap[i] != NULL &&
-    //     if (contexts[index].is_valid) { near_identical_cutoff =
-    //         (1.74*NCBIMATH_LN2)/kbp_gap[index]->Lambda; break; }
+    // Scans all valid query contexts for the minimum gapped Lambda, whereas
+    // `near_identical_cutoff` takes the first valid context's gapped Lambda
+    // (1.74 times `NCBIMATH_LN2` divided by Lambda).
     let active = gapped
         .iter()
         .zip(valid_contexts)
@@ -129,8 +129,9 @@ pub(super) fn local_kappa_redo_params(
     let matrix_info = build_matrix_info(matrix, ideal_lambda / scale)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2438-2479;
     // composition_adjustment/redo_alignment.c:1028-1043:
-    // near_identical_cutoff = (1.74 * NCBIMATH_LN2) / kbp_gap[index]->Lambda;
-    // cutoff_s = do_link_hsps ?
+    // Computes `near_identical_cutoff` from the first valid context's gapped Lambda
+    // (1.74 times `NCBIMATH_LN2` divided by Lambda) and chooses `cutoff_s` according to
+    // whether HSP linking is enabled.
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1037-1037
     Ok(BlastRedoAlignParams {
         matrix_info,

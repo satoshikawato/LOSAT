@@ -23,8 +23,8 @@ fn an_average_query_length_of_zero_takes_ncbis_expected_length_of_zero() {
         (0, 9, 0.0)
     );
     // One subject: the database is the subject, y = log(1) = 0, x = 0, and the big-gap
-    // cutoff is (Int4) floor(-inf) + 1, INT_MIN + 1 (x86-64 and Rust both give INT_MIN for
-    // the conversion of -inf).
+    // cutoff is the 32-bit signed integer conversion of floor(-inf) plus 1, giving `INT_MIN` + 1
+    // (x86-64 and Rust both give `INT_MIN` for the conversion of -inf).
     let one = calculate_link_hsp_cutoffs(&kbp, 0, 10_000, 10_000, true, || 41);
     assert_eq!(
         (one.cutoff_small_gap, one.cutoff_big_gap, one.gap_prob),

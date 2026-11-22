@@ -114,7 +114,7 @@ def main():
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-# (*thread)->Join(&result); if (result) { retv = reinterpret_cast<Uint8>(result); }
+# Join each preliminary-search worker thread and propagate any non-null status result.
 # Record failed or partial orchestration before propagating the failure to CI.
 def run_benchmark(args, out):
     args.node = str(Path(shutil.which(args.node) or args.node).resolve())

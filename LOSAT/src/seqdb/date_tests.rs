@@ -213,7 +213,7 @@ fn empty_later_date_is_never_later() {
 
 #[test]
 fn number_without_digit_is_caught_and_keeps_current_date() {
-    // t2: NStr::StringToLong("") throws CStringException, caught by GetDate.
+    // t2: `NStr::StringToLong` on an empty string throws `CStringException`, caught by `GetDate`.
     for bad in [
         "Oct xx, 2026  3:22 PM", // day
         "Oct 12, year  3:22 PM", // year

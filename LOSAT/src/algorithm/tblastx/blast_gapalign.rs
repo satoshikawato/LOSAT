@@ -144,7 +144,7 @@ pub fn adjust_initial_hsp_offsets(
     hsp_q_absolute: i32, // Absolute coordinate in concatenated buffer
     frame_base: i32,     // Context start position (absolute)
 ) -> i32 {
-    // NCBI: init_hsp->ungapped_data->q_start -= query_start;
+    // Subtract the context's query start offset from `q_start` to make it context-relative.
     hsp_q_absolute - frame_base
 }
 
@@ -258,8 +258,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
         );
 
         // NCBI: Blast_HSPInit (c++/src/algo/blast/core/blast_hits.c:150-189)
-        // query.offset = ungapped_data->q_start (context-relative, 0-based)
-        // query.end = ungapped_data->length + ungapped_data->q_start
+        // Sets `query.offset` to the 0-based context-relative `q_start` and `query.end` to `q_start` plus `length`.
         //
         // In LOSAT, q_start_relative is context-relative coordinate (0-based).
         // No NCBI counterpart: the record holds these `i32` (NCBI `Int4`) offsets in `u32`

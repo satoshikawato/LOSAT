@@ -240,7 +240,7 @@ pub(super) fn match_outcome<R: MatchRedo, T>(
 /// The error of a query batch whose last redone match failed its Smith-Waterman redo: NCBI's
 /// `Traceback failed` (exit 3), or LOSAT's refusal where NCBI's clean-up crashes, when the
 /// batch's first query holds a redone match (`first_query_holds_match`, the heap of the batch's
-/// first query is not empty; PD-LOSAT-NCBI-DEFECTS 1.68, rule 3), after the reports of the
+/// first query is not empty; PD-LOSAT-NCBI-DEFECTS 1.70, rule 3), after the reports of the
 /// batches before (`ErrorAfterBatchReports`, `tblastn_app::batch_failure`). NCBI's `-num_threads
 /// 1` result at every thread count: with `-db` and more threads NCBI interrupts the batch at the
 /// first failure.
@@ -285,7 +285,7 @@ pub(super) fn sw_pssm_refusal() -> anyhow::Error {
 
 /// LOSAT's refusal of a batch with a match whose Smith-Waterman redo does not end in NCBI (a
 /// significant score of 0 in a window of two or more preliminary HSPs whose first query letter
-/// scores the window's first subject letter above 0; PD-LOSAT-NCBI-DEFECTS 1.68, rule 3), after
+/// scores the window's first subject letter above 0; PD-LOSAT-NCBI-DEFECTS 1.70, rule 3), after
 /// the reports of the batches before (`ErrorAfterBatchReports`): the Owner's decision of
 /// 2026-11-16 on line RG's Q-X2c, "the results of the query batches before are written". What
 /// makes the score of 0 significant: a cutoff score of 0 with sum statistics (a tiny `-dbsize`),

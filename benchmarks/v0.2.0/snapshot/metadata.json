@@ -5,6 +5,7 @@
   "rpsbproc_version": "0.5.1",
   "wasm_commit": "7f7db49c",
   "wasm_derived": true,
+  "wasm_derived_from": "6a0a8719",
   "toolmt_commit": "095ff0c16",
   "dt_commits": {
     "dt1": "e04e794808b8b7847bf58fe95926976567035f4d",

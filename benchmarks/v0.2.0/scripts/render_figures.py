@@ -612,6 +612,9 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
 
     meta = read_meta(snap)
     wasm_derived = bool(meta.get("wasm_derived", False))
+    base_sha = short_sha(meta.get("wasm_derived_from") or "")
+    if wasm_derived and not base_sha:
+        sys.exit("metadata.json has wasm_derived=true without wasm_derived_from")
     fig, axes = plt.subplots(1, 2, figsize=(11.6, 5.5 if wasm_derived else 5.4), sharey=True)
     fig.patch.set_facecolor(theme["surface"])
     fig.subplots_adjust(left=0.27, right=0.895, top=0.785 if wasm_derived else 0.815, bottom=0.155, wspace=0.38)
@@ -661,8 +664,7 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, str], dark: bool) -> Pat
                 ax.plot([max(1.0, min(ws, 18.0)), 22.0], [yv, yv], linestyle=":", color=theme["line"], linewidth=1.4, zorder=2)
                 ax.text(10.0, yv + 0.25, f"{fmt_fold(ws)} and {fmt_fold(ns)} (off scale)", ha="center", va="bottom", fontsize=7.6, color=theme["ink"])
 
-    wasm_sha = short_sha(meta.get("wasm_commit", ""))
-    base_sha = short_sha(meta.get("wasm_derived_from", "6a0a8719"))
+    wasm_sha = short_sha(meta.get("wasm_commit") or "")
     if wasm_derived:
         fig.text(
             0.975,

@@ -62,9 +62,9 @@ impl IndexVolume {
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:413-433
     // NCBI reference (598d8ae6): c++/include/algo/blast/dbindex/dbindex_sp.hpp:467-501
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:449-565
-    /// `CDbIndex::Load(fname)` of the index volume `path`: its version (5 legacy, 6 the other
-    /// format), its header, then the sections in the writer's order. `Err` says why LOSAT does
-    /// not read it (a file that does not open, a version NCBI rejects, or a section that does
+    /// `CDbIndex::Load` of `fname`, here the index volume `path`: its version (5 legacy, 6 the
+    /// other format), its header, then the sections in the writer's order. `Err` says why LOSAT
+    /// does not read it (a file that does not open, a version NCBI rejects, or a section that does
     /// not lie in the file).
     pub(crate) fn open(path: &Path) -> Result<IndexVolume, String> {
         let map = MappedFile::open(path).map_err(|error| error.to_string())?;
@@ -117,8 +117,8 @@ impl IndexVolume {
         at += hash.len;
         let data = section(at, data_len)?;
         at += data.len;
-        // `CSubjectMap(map, header)`: the bytes of the lengths and the offset bits, the lengths,
-        // the bytes of the local id map and the map (four words a local id), then `Load`.
+        // `CSubjectMap` of `map` and `header`: the bytes of the lengths and the offset bits, the
+        // lengths, the bytes of the local id map and the map (four words a local id), then `Load`.
         let lengths_len = word(at)? as usize / 4;
         let offset_bits = word(at + 1)?;
         at += 2;
@@ -154,7 +154,7 @@ impl IndexVolume {
         {
             return Err("packed sequences past the end of the file".to_string());
         }
-        // `offset_mask_ = (1 << offset_bits_) - 1` of an `int`.
+        // `offset_mask_` is one less than 1 shifted left by `offset_bits_`, in an `int`.
         if !(1..=30).contains(&offset_bits) {
             return Err("offset bits out of range".to_string());
         }
@@ -250,7 +250,7 @@ impl IndexVolume {
         }
     }
 
-    /// `GetMinOffset(stride)`: the first offset value that is not a boundary code.
+    /// `GetMinOffset` of `stride`: the first offset value that is not a boundary code.
     pub(crate) fn min_offset(&self) -> u64 {
         min_offset(self.stride)
     }

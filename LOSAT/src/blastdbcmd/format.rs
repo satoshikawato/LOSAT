@@ -37,7 +37,8 @@ pub(super) struct FormatSpec {
     /// `m_DeflineFields.asn_defline`: `%d`, the ASN.1 text of the definition lines (which the
     /// request makes the whole format, `retrieve::init_search_request`).
     asn_defline: bool,
-    /// `m_OtherFields & (1 << e_seq)`, `(1 << e_hash)`.
+    /// Whether `m_OtherFields` has the bit of `e_seq` (`need_seq`) and the bit of `e_hash`
+    /// (`need_hash`).
     need_seq: bool,
     need_hash: bool,
 }
@@ -333,7 +334,7 @@ fn write_asn_deflines(
     }
 }
 
-/// The document `MSerial_AsnText << *df_set`.
+/// The document that `MSerial_AsnText` writes for the set `df_set`.
 struct DeflineSetDocument<'a>(&'a DeflineSet);
 
 impl AsnTextDocument for DeflineSetDocument<'_> {
@@ -342,7 +343,7 @@ impl AsnTextDocument for DeflineSetDocument<'_> {
     }
 }
 
-/// The document `MSerial_AsnText << dl`.
+/// The document that `MSerial_AsnText` writes for the line `dl`.
 struct DeflineDocument<'a>(&'a BlastDefline);
 
 impl AsnTextDocument for DeflineDocument<'_> {

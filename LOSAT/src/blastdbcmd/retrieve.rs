@@ -150,7 +150,7 @@ impl<'a> Source<'a> {
         }
     }
 
-    /// `GetHdr(oid)`: the definition lines with their Seq-ids; `None`, NCBI's null set, for a
+    /// `GetHdr` of `oid`: the definition lines with their Seq-ids; `None`, NCBI's null set, for a
     /// stored header of no bytes ([`Source::null_set`]).
     pub fn deflines(&self, oid: u32) -> Result<Option<DeflineSet>, Stop> {
         let at = self.at(oid)?;
@@ -161,7 +161,7 @@ impl<'a> Source<'a> {
         Ok(Some(set))
     }
 
-    /// `GetHdr(oid)` and the header that `GetBioseq` keeps in the Bioseq's user object
+    /// `GetHdr` of `oid` and the header that `GetBioseq` keeps in the Bioseq's user object
     /// (`SeqDb::defline_set_with_header_at`); `None` as for [`Source::deflines`].
     pub fn deflines_with_header(&self, oid: u32) -> Result<Option<(DeflineSet, Vec<u8>)>, Stop> {
         let at = self.at(oid)?;
@@ -189,7 +189,7 @@ impl<'a> Source<'a> {
         Ok(None)
     }
 
-    /// The `Seq-data` of `GetBioseq(oid)`: the stored NCBIstdaa of a protein, the stored 2-bit
+    /// The `Seq-data` of `GetBioseq` of `oid`: the stored NCBIstdaa of a protein, the stored 2-bit
     /// bytes or NCBI4na of a nucleotide (`SequenceBlock::nucleotide_seq_data`).
     pub fn seq_data(&self, oid: u32) -> Result<DbSeqData, Stop> {
         let block = self.db.read_sequence_at(self.at(oid)?)?;
@@ -340,8 +340,9 @@ impl Output<'_, '_> {
         Ok(())
     }
 
-    /// `m_Out << MSerial_AsnText << object`: the ASN.1 text document `document`, with NCBI's post
-    /// of each byte its text stream replaces (`bioseq::write_asn_text`).
+    /// The write of `object` to `m_Out` through `MSerial_AsnText`: the ASN.1 text document
+    /// `document`, with NCBI's post of each byte its text stream replaces
+    /// (`bioseq::write_asn_text`).
     pub fn asn_text<D: AsnTextDocument>(&mut self, document: &D) -> Result<(), Stop> {
         let diag = &mut *self.diag;
         write_asn_text(document, &mut *self.out, |replaced| {
@@ -456,7 +457,7 @@ pub(super) fn null_pointer() -> Stop {
     Stop::Ncbi("Attempt to access NULL pointer.".to_string())
 }
 
-/// `NStr::StringToNumeric<Int8>(text, fConvErr_NoThrow)` with `errno` clear: the number of
+/// `NStr::StringToNumeric<Int8>` of `text` with `fConvErr_NoThrow` and `errno` clear: the number of
 /// a text that is one (an optional sign and digits that fit 64 bits).
 pub(super) fn numeric_target(text: &str) -> Option<i64> {
     args::string_to_int8_message(text).ok()
@@ -469,7 +470,7 @@ pub(super) fn parse_target(text: &str) -> Result<ParsedSeqId, Stop> {
     parse_target_with(text, PARTIAL_OK | DEFAULT)
 }
 
-/// `CSeq_id(text, flags)` of a `-target_only` target (`parse_target`).
+/// `CSeq_id` of `text` with `flags`, for a `-target_only` target (`parse_target`).
 pub(super) fn parse_target_with(text: &str, flags: u32) -> Result<ParsedSeqId, Stop> {
     seq_id_from_text(text.as_bytes(), flags, &mut |_| {})
         .map_err(|error| Stop::NcbiBytes(error.message))

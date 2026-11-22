@@ -162,7 +162,7 @@ fn target_id(target: &str) -> Result<ParsedSeqId, Stop> {
     }
 }
 
-/// The ids `CSeq_id::ParseIDs(ids, text, fParse_PartialOK)` gives (none when it throws).
+/// The ids `CSeq_id::ParseIDs` gives for `text` with `fParse_PartialOK` (none when it throws).
 /// `Err`: a parse that posts a warning NCBI prints (an id of several parts of which one
 /// fails), whose line LOSAT does not reproduce; blastdbcmd filters out the warning of extra
 /// parts (`CSeq_id` 1306.10) alone.

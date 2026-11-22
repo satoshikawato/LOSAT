@@ -156,7 +156,8 @@ pub(super) fn megablast_index(
         Ok(index) => return Ok(MegablastIndex::Used(Arc::new(index))),
         Err(text) => text,
     };
-    // `ERR_POST_EX(1, 1, Warning << errstr << " Database index will not be used.")`.
+    // The warning that `ERR_POST_EX` posts (code 1, subcode 1): `errstr`, then
+    // " Database index will not be used.".
     let warning = [
         b"Warning: (1.1) [blastn] ".as_slice(),
         &text,
@@ -236,10 +237,10 @@ impl Loaded {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:812-857
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1036-1066
     /// The index the search uses: its volumes with their first OIDs (`GetNextUnusedOID`; an
-    /// old-style one's `seqmap_`, of the `StopSeq() - StartSeq()` of each header), each volume
-    /// read as the search reads it (`CDbIndex::Load`, which NCBI runs when the search reaches
-    /// the volume). `Err`: LOSAT's refusal of an index that leaves a database volume unindexed
-    /// (a mixed search, item D5b-3) or of a volume that does not read as an index.
+    /// old-style one's `seqmap_`, of the span from `StartSeq()` to `StopSeq()` of each header),
+    /// each volume read as the search reads it (`CDbIndex::Load`, which NCBI runs when the search
+    /// reaches the volume). `Err`: LOSAT's refusal of an index that leaves a database volume
+    /// unindexed (a mixed search, item D5b-3) or of a volume that does not read as an index.
     fn into_index(self) -> Result<LoadedIndex, String> {
         let first = &self.first;
         if self.volumes.iter().any(|entry| !entry.has_index) {

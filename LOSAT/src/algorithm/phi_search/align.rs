@@ -316,7 +316,7 @@ fn banded_align(seg: &Segments<'_>, start1: i32, start2: i32, ops: &mut Vec<GapE
         add_op(ops, GapEditOp::Del(start2 as u32));
         return;
     }
-    if high_diag - low_diag + 1 <= 1 {
+    if high_diag <= low_diag {
         for _ in 1..=start1 {
             add_op(ops, GapEditOp::Sub(1));
         }

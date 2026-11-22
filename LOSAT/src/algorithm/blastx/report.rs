@@ -1028,6 +1028,8 @@ pub(super) fn pairwise_hits(
     use crate::common::Hit;
     use crate::report::pairwise::PairwiseHit;
     let mut hits = Vec::new();
+    // The rows' masks, kept from row to row (`query_row_masks`).
+    let mut row_masks = crate::report::query_anchored::HspMasks::default();
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let absolute = batch.query_ordinal + qidx;
@@ -1077,10 +1079,15 @@ pub(super) fn pairwise_hits(
                         gap_info: Some(hsp.edit_script.clone()),
                         num_positives: counts.positive,
                     };
-                    // The row holds its masks in lower case; the lists are dropped
-                    // (`query_anchored::output_seq`).
-                    let (query_seq, _) =
-                        query_row_masks(a.qseq, (a.qstart, a.qend), a.frame, &query_masks);
+                    // The row holds its masks in lower case; the lists are left to the next
+                    // row (`query_anchored::output_seq`).
+                    let query_seq = query_row_masks(
+                        a.qseq,
+                        (a.qstart, a.qend),
+                        a.frame,
+                        &query_masks,
+                        &mut row_masks,
+                    );
                     hits.push(PairwiseHit {
                         hit,
                         query_seq: Some(query_seq),
@@ -1164,9 +1171,10 @@ pub(super) fn pairwise_hits(
 // by the row's width (three nucleotides a residue here), counted from the segment's end on the
 // minus strand.
 /// The outfmt 0 query row `row` of a display alignment (`DisplayAlignment::qseq`, of the 1-based
-/// record positions `ends`, `qstart` and `qend`, on the frame `frame`) and the row's masks
-/// (`HspMasks`, `None` when none meets the row): the query's masks of the row's frame
-/// (`query_masks`, `masks_by_frame`; record positions) at the row's columns of `x_FillLocList`
+/// record positions `ends`, `qstart` and `qend`, on the frame `frame`) with its masks in lower
+/// case, which it sets as row 0 of `masks` (`HspMasks`, the rows' builder's, which keeps its
+/// buffers from row to row): the query's masks of the row's frame (`query_masks`,
+/// `masks_by_frame`; record positions) at the row's columns of `x_FillLocList`
 /// (`query_anchored::fill_row_loc_list`: the row's nucleotides from its first to its last, three
 /// a residue, on the frame's strand), in the masks' order, which `x_OutputSeq` puts in lower
 /// case. A mask of another frame never shows on the row (`x_OutputSeq` passes over it), so the
@@ -1178,41 +1186,36 @@ fn query_row_masks(
     ends: (i32, i32),
     frame: i8,
     query_masks: &[(i8, MaskSeek<u32>)],
-) -> (String, Option<crate::report::query_anchored::HspMasks>) {
+    masks: &mut crate::report::query_anchored::HspMasks,
+) -> String {
     let Some((_, seek)) = query_masks
         .iter()
         .find(|(masks_frame, _)| *masks_frame == frame)
     else {
-        return (row, None);
+        return row;
     };
     if row.is_empty() {
-        return (row, None);
+        return row;
     }
     let (first, last) = (ends.0.min(ends.1), ends.0.max(ends.1));
     let range = ((first - 1) as u32, (last - 1) as u32);
-    let mut shown: Vec<(u32, crate::report::query_anchored::Mask)> = Vec::new();
-    seek.for_each_meeting(range.0, range.1, |from, to, index| {
-        shown.push((index, (from, to, frame)));
-    });
-    if shown.is_empty() {
-        return (row, None);
-    }
-    shown.sort_unstable_by_key(|&(index, _)| index);
-    let mut row = row.into_bytes();
-    let mut masks = crate::report::query_anchored::HspMasks::default();
-    masks.set_row(
+    masks.add_meeting(seek, range.0, range.1, |from, to| (from, to, frame));
+    let letters = row.as_bytes();
+    masks.set_row_met(
         0,
         frame,
-        &row,
-        |column| row[column] != b'-',
+        letters,
+        |column| letters[column] != b'-',
         range,
         frame > 0,
         3,
-        shown.into_iter().map(|(_, mask)| mask),
     );
+    if masks.row(0).is_none() {
+        return row;
+    }
+    let mut row = row.into_bytes();
     masks.lower_row(0, &mut row);
-    let row = String::from_utf8(row).expect("ASCII alignment row");
-    (row, (!masks.is_empty()).then_some(masks))
+    String::from_utf8(row).expect("ASCII alignment row")
 }
 
 /// The masks `masks` of a query (every frame's, `anchored::query_record_masks`) by frame, each

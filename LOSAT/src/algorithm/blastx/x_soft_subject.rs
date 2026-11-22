@@ -148,15 +148,16 @@ pub(super) fn x_scan(
 /// (`ReportedSubjects::shown_db_masks`). Each row places the kept masks that meet its own range
 /// at its columns (`x_FillLocList`, `query_anchored::fill_row_loc_list`), which `x_OutputSeq`
 /// puts in lower case. The rows come back so, as the hit records that the library API and LOSAT
-/// Web hand out show them (`HspMasks::lower_row`); the lists are dropped
-/// (`query_anchored::output_seq`). With `-subject_loc` the runs lie where they lie in the record,
-/// as the hits' positions.
+/// Web hand out show them (`HspMasks::lower_row`); the lists are not kept
+/// (`query_anchored::output_seq`): one `HspMasks` serves every row. With `-subject_loc` the runs
+/// lie where they lie in the record, as the hits' positions.
 #[cold]
 #[inline(never)]
 pub(super) fn x_set_subject_row_masks(
     hits: &mut [PairwiseHit],
     kept: &std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>,
 ) {
+    let mut masks = crate::report::query_anchored::HspMasks::default();
     for hit in hits.iter_mut() {
         let Some(runs) = kept.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {
             continue;
@@ -166,7 +167,6 @@ pub(super) fn x_set_subject_row_masks(
             continue;
         };
         let mut letters = std::mem::take(row).into_bytes();
-        let mut masks = crate::report::query_anchored::HspMasks::default();
         // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`, in order).
         let stored = &hit.subject_stored_gaps;
         masks.set_row(

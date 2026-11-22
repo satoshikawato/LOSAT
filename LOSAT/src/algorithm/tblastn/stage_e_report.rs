@@ -1207,6 +1207,8 @@ fn pairwise_hits(
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
     let mut x_window = Vec::new();
+    // The rows' masks, kept from row to row (`query_row_masks`).
+    let mut row_masks = crate::report::query_anchored::HspMasks::default();
     for (q_idx, hitlist) in hitlists.iter().enumerate() {
         let query = query_records[q_idx].seq();
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1541-1557:
@@ -1251,9 +1253,10 @@ fn pairwise_hits(
                     hsp.s_end,
                     &payload.edit_script,
                 )?;
-                // The row holds its masks in lower case; the lists are dropped
+                // The row holds its masks in lower case; the lists are left to the next row
                 // (`query_anchored::output_seq`).
-                let (qseq, _) = query_row_masks(qseq, &report_masks, hsp.q_start, hsp.q_end)?;
+                let qseq =
+                    query_row_masks(qseq, &report_masks, hsp.q_start, hsp.q_end, &mut row_masks)?;
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
                 let report_positives = crate::report::row_letters::display_positives(
                     qseq.as_bytes(),
@@ -1514,31 +1517,31 @@ fn write_pairwise(
     Ok(())
 }
 
-/// The masks of the outfmt 0 query row `row` of an HSP (`HspMasks`), which holds the
-/// searched letters `q_start..q_end` (0-based, `q_end` excluded): the query's masks
+/// The outfmt 0 query row `row` of an HSP, which holds the searched letters `q_start..q_end`
+/// (0-based, `q_end` excluded), with its masks in lower case, which it sets as row 0 of `masks`
+/// (`HspMasks`, the rows' builder's, which keeps its buffers from row to row): the query's masks
 /// `report_masks` (half-open in the searched letters, frame 0: the list `pairwise_hits` hands to
 /// the query-anchored sections, which show the same masks) at the row's columns
 /// (`HspMasks::set_row`, `x_FillLocList`), which `x_OutputSeq` puts in lower case when it writes
-/// the row; and the row with them in lower case (`HspMasks::lower_row`), as the hit records of
-/// the library API and the Web adapter show it (and outfmt 0, which gets no lists,
-/// `query_anchored::output_seq`). `None` when no mask meets the row. A query with
-/// masks is a FASTA record, which holds no `-` (a PSSM query's search sets none). The subject
-/// row has no masks: it is a translation (width 3, a frame of ±1 to 3), and the subjects' masks
-/// have no frame (`anchored`), so NCBI shows none of them there.
+/// the row; the row comes back so (`HspMasks::lower_row`), as the hit records of the library API
+/// and the Web adapter show it (and outfmt 0, which gets no lists, `query_anchored::output_seq`).
+/// A query with masks is a FASTA record, which holds no `-` (a PSSM query's search sets none).
+/// The subject row has no masks: it is a translation (width 3, a frame of ±1 to 3), and the
+/// subjects' masks have no frame (`anchored`), so NCBI shows none of them there.
 fn query_row_masks(
     row: String,
     report_masks: &[(usize, usize)],
     q_start: i32,
     q_end: i32,
-) -> Result<(String, Option<crate::report::query_anchored::HspMasks>)> {
+    masks: &mut crate::report::query_anchored::HspMasks,
+) -> Result<String> {
     if report_masks.is_empty() {
-        return Ok((row, None));
+        return Ok(row);
     }
     let range = (
         u32::try_from(q_start)?,
         u32::try_from(q_end)?.saturating_sub(1),
     );
-    let mut masks = crate::report::query_anchored::HspMasks::default();
     let letters = row.as_bytes();
     masks.set_row(
         0,
@@ -1553,12 +1556,12 @@ fn query_row_masks(
             .filter(|&&(left, right)| left < right)
             .map(|&(left, right)| (left as u32, right as u32 - 1, 0)),
     );
-    if masks.is_empty() {
-        return Ok((row, None));
+    if masks.row(0).is_none() {
+        return Ok(row);
     }
     let mut row = row.into_bytes();
     masks.lower_row(0, &mut row);
-    Ok((String::from_utf8(row)?, Some(masks)))
+    Ok(String::from_utf8(row)?)
 }
 
 /// Whether the reports read other letters than the search, so that they count its HSPs again

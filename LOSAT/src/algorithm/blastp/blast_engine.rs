@@ -2683,14 +2683,14 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 /// masked database search's masks, `db_mask_search::shown_db_subject_masks`), at the columns of
 /// `x_FillLocList` (`query_anchored::fill_row_loc_list`: a mask position outside the aligned range
 /// is the row's first or last residue), which `x_OutputSeq` puts in lower case when it writes the
-/// row. The lists are dropped (`query_anchored::output_seq`).
+/// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row.
 fn set_row_masks(
     hits: &mut [PairwiseHit],
     query_masks: Option<&[Vec<(i32, i32)>]>,
     subject_masks: [&std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>; 2],
 ) {
+    let mut masks = crate::report::query_anchored::HspMasks::default();
     for hit in hits {
-        let mut masks = crate::report::query_anchored::HspMasks::default();
         let query = query_masks.map_or(&[][..], |masks| &masks[hit.hit.q_idx as usize][..]);
         // A row without letters (`-ungapped`'s HSP of length 0, whose range ends before it
         // starts) has no mask.

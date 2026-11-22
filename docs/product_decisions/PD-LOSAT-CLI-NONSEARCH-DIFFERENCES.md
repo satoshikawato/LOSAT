@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.27 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.28 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -53,7 +53,12 @@
   DECISIONS 1; the forms, NW2 DECISIONS 2-4, Owner-delegated, the same standing instruction);
   1.26 2026-11-21 (every search call of the library API runs the application start at its
   beginning, as its tool calls and the command line do; line LIB item E1; Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07); 1.27 2026-11-22 (exception 3
+  standing instruction 2026-09-29, restated 2026-10-07); 1.27 2026-11-22 (exception 2: the memory
+  LOSAT uses with more than 64 threads where NCBI's does not grow with `-num_threads`, recorded
+  as a known difference for the v0.2.0 release on the Owner's choice of 2026-11-22, line EB,
+  EB DECISIONS 55; the Owner approved its text the same day, with no words: at 22:55 JST the
+  Owner pressed "Ready for review" on pull request #1484, which its description named as the
+  Owner's decision on the text); 1.28 2026-11-22 (exception 3
   withdrawn: a failed write of outfmt 6, 7 or 10 aborts as NCBI's; exception 7
   withdrawn: a failed write of a side file of outfmt 13 or 14 ends as NCBI's; a failed write to
   standard error is NCBI's, the run goes on; exception 5 for every format of the search programs
@@ -73,7 +78,7 @@ BLASTX, since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report
 place of a search result, since version 1.13 `losat blastdbcmd` and `losat dustmasker`, and
 since version 1.16 `losat segmasker`, since version 1.18 `losat convert2blastmask` and since
 version 1.24 `losat windowmasker`, whose outputs do) that is not part of a search result: argument parsing, help text, thread
-warnings, output-write failures, memory exhaustion and, since version 1.22, BLASTN's progress
+warnings, since version 1.27 the memory used with more than 64 threads, output-write failures, memory exhaustion and, since version 1.22, BLASTN's progress
 bar on a terminal, and since version 1.25 the statement of the running program's version in every
 output, search results included (exception 14). Search results, their outfmt
 0/6/7 bytes, warnings and errors raised after argument parsing, and exit codes of
@@ -102,12 +107,20 @@ BLAST+.
    count `Number of threads was reduced to N to match the number of available CPUs`
    (`blast_args.cpp:3203-3236`). LOSAT prints neither warning. Every other byte of stdout
    and stderr must equal NCBI's (BLASTN's progress bar on a terminal: exception 11).
+   Since version 1.27: with more than 64 threads, LOSAT can use more memory than NCBI in the
+   searches where NCBI's memory does not grow with `-num_threads`, such as those with
+   `-subject`, which NCBI runs on one thread: measured for v0.2.0 (development build
+   `ff07c6a7d` against NCBI BLAST+ 2.17.0 on 64 logical CPUs), LOSAT's median peak resident
+   memory was up to 1.21 times NCBI's at 96 threads and up to 1.44 times at 128 threads
+   (TBLASTN with `-subject`; also BLASTX, BLASTN and BLASTP with `-subject` and TBLASTN with a
+   database of one sequence, but not TBLASTX or `blastn-short` with `-subject`), while LOSAT
+   finished 8 to 69 times sooner; the Owner accepted this difference for v0.2.0 on 2026-11-22.
 3. **Write failure in tabular output.** When writing outfmt 6 or 7 fails (for example
    `-out /dev/full` or a closed pipe), NCBI aborts; LOSAT reports the write error and
    exits with a non-zero code. For outfmt 0 LOSAT must follow NCBI
    (`BLAST failed to write output: <msg>`, exit code 6 `BLAST_OUTPUT_ERROR`,
    `blast_app_util.hpp:242-254`); this is ported program by program (BLASTN in S07+++b).
-   Version 1.27: withdrawn. Every program's report stream fails where NCBI's does
+   Version 1.28: withdrawn. Every program's report stream fails where NCBI's does
    (`report::ostream::ReportStream`, line RG item T6a): a failed write of outfmt 6, 7 or 10
    aborts with libstdc++'s `terminate called after throwing an instance of
    'std::__ios_failure'` text, as NCBI's (the destructor of `CBlastTabularInfo` flushes the failed
@@ -116,18 +129,18 @@ BLAST+.
    allocation failure and prints `BLAST ran out of memory`, exit code 4
    (`BLAST_OUT_OF_MEMORY`, `blast_app_util.hpp:216-235,255-258`).
 5. **Closed pipe** (outfmt 0 in version 1.1, accepted by the maintainer on 2026-10-02 in
-   Session S07+++b; every format in version 1.27). NCBI keeps the C runtime's default action for SIGPIPE, so a write to
+   Session S07+++b; every format in version 1.28). NCBI keeps the C runtime's default action for SIGPIPE, so a write to
    a pipe whose reader has closed ends it by the signal (exit status 141 from the shell,
    no message), in every format. The Rust runtime ignores SIGPIPE; restoring it needs a
    native `signal` call that the project's pure-Rust runtime boundary check rejects. LOSAT
    reports the failed outfmt 0 write as NCBI reports other outfmt 0 write failures:
-   `BLAST failed to write output`, exit code 6 (outfmt 6/7: exception 3, withdrawn in 1.27).
+   `BLAST failed to write output`, exit code 6 (outfmt 6/7: exception 3, withdrawn in 1.28).
    Version 1.2: whether a write to a pipe fails depends on when the reader closes it. When
    LOSAT's writes have completed before the reader closes (for example a short outfmt 6 or
    7 report read by `head -c 100`), LOSAT exits with code 0, where NCBI, which writes later
    (at its flushes), is ended by SIGPIPE (141). This timing is part of exceptions 3 and 5
-   (round-3 audit of Session S07+++b; exception 3 withdrawn in 1.27, the timing restated below).
-   Version 1.27: every format of the search programs (the Owner's answer A to line RG's
+   (round-3 audit of Session S07+++b; exception 3 withdrawn in 1.28, the timing restated below).
+   Version 1.28: every format of the search programs (the Owner's answer A to line RG's
    question T6-Q1, 2026-11-17: no crate and no native call; RG DECISIONS T6-3). A write to a
    closed pipe (`EPIPE`; the Rust runtime ignores SIGPIPE) is a failed write of the report's
    stream like any other (`report::ostream::ReportStream`, line RG item T6a), and the run ends as
@@ -139,14 +152,14 @@ BLAST+.
    libstdc++'s `terminate` text and an abort (exit status 134); SAM (17) with exit code 0. A pipe
    that only the writes after the formatter reach (`~CBlastFormat`'s flush and the exit's) is not
    reported (exit code 0), as NCBI does not report a failed device there.
-   The timing of version 1.2, as it happens since version 1.27: a write to the pipe fails only
+   The timing of version 1.2, as it happens since version 1.28: a write to the pipe fails only
    when it comes after the reader has closed, in LOSAT as in NCBI. LOSAT keeps up to 8,192 bytes
    of NCBI's writes before it makes them together (where one fails, the run ends where NCBI's
    failed write ends it), so a short report reaches the pipe in one write at the end of the run;
    when that write lands before the reader closes, the run sees no failure and exits with code
    0 (`head -c 0` on a one-query BLASTN outfmt 0 report: LOSAT 0 in 2 of 40 runs, code 6 in the
    others; NCBI 2.17.0 141 in 40 of 40; line RG item T6a, review 2 N1, 2026-11-18).
-   A closed pipe on standard error (version 1.27) is a failed write of standard error, which
+   A closed pipe on standard error (version 1.28) is a failed write of standard error, which
    NCBI's run survives: NCBI's `cerr` that cannot write (`2>/dev/full`) takes no later message,
    and the run goes on to the end of its report and its exit code (0 for a search that ends
    well; NCBI 2.17.0 observed, line RG item T6a, review 2 D2). LOSAT does the same where NCBI
@@ -194,7 +207,7 @@ BLAST+.
    `-outfmt 13` or `14` cannot be written, LOSAT stops with `BLAST failed to write output`
    (exit status 6), where NCBI BLAST+ 2.17.0 reports it on standard error and continues with
    exit status 0.
-   Version 1.27: withdrawn. A side file is written as NCBI's object stream and `CNcbiOfstream`
+   Version 1.28: withdrawn. A side file is written as NCBI's object stream and `CNcbiOfstream`
    write it (`report::ostream::write_side_file`, line RG item T6a; NCBI 2.17.0 probed on Linux,
    RG survey T6 D8): a write that fails inside the document is the buffer's write fault, posted
    as `Error: (802.5) [<program>] CObjectOStream: error at byte <N>: stack is empty: write
@@ -243,7 +256,7 @@ BLAST+.
    rpsbproc's own code for its output file (`e_OutputFileOpenError`, main:91-101), as NCBI's
    search programs use their output-error code 6 for a failed report write (`BLAST failed to
    write output`; exception 3, which had LOSAT's search programs do so in every format, is
-   withdrawn in 1.27). As in
+   withdrawn in 1.28). As in
    exception 5 (version 1.2), a closed pipe that LOSAT's completed writes never reach ends
    with exit code 0. Nothing is written to standard error after the failure (no progress
    line). A failed write to standard error (its reader has closed: NCBI's rpsbproc ends by

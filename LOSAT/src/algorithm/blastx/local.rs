@@ -60,6 +60,11 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTX_TASK.check(&mut args.task)?;
+    // A search of records reads no database: `run_local_database` searches the database of `-db`.
+    // `check_options` (LOSAT Web's `validate`) checks `-db` as the command line does (line WQA D12a).
+    if args.db.is_some() {
+        bail!("-db (a database search) is not supported in the browser yet");
+    }
     let requested = requested_formats(outputs);
     let (choices, resolutions) = read_options(&args, &requested)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
@@ -123,7 +128,7 @@ fn search_records(
         if let Some(range) = &subject_range {
             let (from, to_exclusive) = record_cut(range, subject.sequence.len())?;
             // The lower case of the whole record, which outfmt 0's Sbjct rows and the hits show
-            // (`x_soft_subject::x_masked_subject_rows`), and the archive's Bioseqs.
+            // (`x_soft_subject::x_set_subject_row_masks`), and the archive's Bioseqs.
             let keep_whole =
                 archive.is_some() || (args.lcase_masking && !subject.lowercase_masks.is_empty());
             subject.cut_in_place(from, to_exclusive, keep_whole);
@@ -1359,10 +1364,6 @@ fn read_options(
     args: &BlastxArgs,
     outfmts: &[&str],
 ) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
-    // The host has no database files; LOSAT Web searches the records it gives.
-    if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
-    }
     // `-parse_deflines` is the records' (`run_local`): LOSAT Web reads them with the ids of their
     // deflines since line WQA's sweep, D7, 2026-11-19 (`register_inputs`), so its refusal of
     // records that kept none, which also refused two empty inputs that the command line ends with

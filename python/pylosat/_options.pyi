@@ -406,6 +406,7 @@ class TblastnOptions(TypedDict, total=False):
     seg: str
     """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: 12 2.2 2.5]"""
     lcase_masking: bool
+    use_sw_tback: bool
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
     sum_stats: bool

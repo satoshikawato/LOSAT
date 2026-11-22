@@ -289,13 +289,22 @@ pub(crate) fn pairwise_hits(
         hits.par_iter()
             .enumerate()
             .with_min_len(CHUNK / 4)
-            .map_init(Vec::new, |window, (index, hsp)| {
-                rows.hit(
-                    hsp,
-                    seqalign_identities.map(|identities| identities[index]),
-                    window,
-                )
-            })
+            .map_init(
+                || {
+                    (
+                        Vec::new(),
+                        crate::report::query_anchored::HspMasks::default(),
+                    )
+                },
+                |(window, row_masks), (index, hsp)| {
+                    rows.hit(
+                        hsp,
+                        seqalign_identities.map(|identities| identities[index]),
+                        window,
+                        row_masks,
+                    )
+                },
+            )
             .collect()
     })
 }
@@ -311,6 +320,7 @@ pub(crate) fn pairwise_hits(
     rows: &PairwiseRows<'_>,
 ) -> Vec<PairwiseHit> {
     let mut window = Vec::new();
+    let mut row_masks = crate::report::query_anchored::HspMasks::default();
     hits.iter()
         .enumerate()
         .map(|(index, hsp)| {
@@ -318,6 +328,7 @@ pub(crate) fn pairwise_hits(
                 hsp,
                 seqalign_identities.map(|identities| identities[index]),
                 &mut window,
+                &mut row_masks,
             )
         })
         .collect()

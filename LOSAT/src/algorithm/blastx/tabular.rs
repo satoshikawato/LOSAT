@@ -716,7 +716,7 @@ pub(super) fn write_blastx_tabular(
                         } else {
                             // The writer counts the rows' identities and positives
                             // (`TabularWriter::row`); `alignment` makes no counts.
-                            a = alignment(batch, hsp, subject, query, &code)?;
+                            a = alignment(hsp, subject, query, &code)?;
                             // NCBI reads the alignment's rows when a field reads its counts
                             // (`COUNTS_FIELDS`, or `nident` with the engine's identities above 0;
                             // BLASTX fetches the sequences, so `nident`, `mismatch` and `pident`

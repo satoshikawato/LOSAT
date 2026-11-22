@@ -742,7 +742,8 @@ NCBI's own data, INSDC, Ensembl, the Protein Data Bank). The data that do:
   is reproduced with each copy." The records are written into test inputs and databases, some
   with an added second definition line or a shortened title.
 - FlyBase (https://flybase.org/), through Ensembl BDGP6.54: five Drosophila melanogaster
-  cDNA records (FBtr0078009, FBtr0100310, FBtr0083245, FBtr0301286, FBtr0078640). FlyBase
+  cDNA records (FBtr0078009, FBtr0100310, FBtr0083245, FBtr0301286, FBtr0078640) and the
+  definition line of a sixth (FBtr0337025), added to a zebrafish record. FlyBase
   distributes the annotations and data it produces under CC BY 4.0
   (https://wiki.flybase.org/wiki/FlyBase:About).
 - SGD, the Saccharomyces Genome Database (https://www.yeastgenome.org/), through Ensembl

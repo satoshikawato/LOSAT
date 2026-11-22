@@ -10788,8 +10788,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     two_hits: crate::algorithm::blastn::coordination::determine_window_size(args)
                         as u64,
                 },
-                args.num_threads,
-            )?)
+            ))
         }
         _ => None,
     };
@@ -10882,7 +10881,9 @@ fn search_query_batch<const UNGAPPED: bool>(
         (&x_batch_cutoffs, query_eff_searchsp_ref)
     };
     let trace_batch = traceback_subject::TraceBatch {
-        // A batch split into query chunks traces what its chunks' indexed searches kept.
+        // A batch split into query chunks traces what its chunks' indexed searches kept. (With
+        // an index of only some volumes this is 1 for every subject: the traceback sees only
+        // subjects with kept HSPs, and a scanned subject shorter than a word has none.)
         shortest_subject: prelim_subject::shortest_subject(
             effective_word_size,
             args.megablast_index_loaded.is_some(),

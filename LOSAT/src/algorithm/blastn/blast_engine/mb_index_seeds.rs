@@ -15,7 +15,8 @@
 //! (`results_holder_`, counted by the threads that have not passed the volume), and searches the
 //! volume again only once its count is down to 0. A thread that goes on to a database volume
 //! without an index does not count down the volumes it passed (`UpdateIndex` returns before), so
-//! in a mixed search the volume before each such volume keeps its results: the next search (a
+//! in a mixed search the last index volume that a search reaches before each such volume that it
+//! reaches (by the database's OID list) keeps its results: the next search (a
 //! later query batch or query chunk) takes them as the word finder left them, every list moved
 //! out and empty (`BlastInitHitListMove`), and finds no seed there; a sequence whose list the
 //! earlier search had is read and searched with none, the others skipped. LOSAT reproduces this
@@ -24,8 +25,10 @@
 //! initial hit that the scan of a volume without an index saves takes `realloc` of 0 bytes (glibc
 //! gives a block of one hit) and the second frees it, after which NCBI reads and frees freed
 //! memory (it crashes, or not): LOSAT refuses such a search ([`IndexSeeds::check`]). With more
-//! than one thread, which volumes keep their results depends on the threads' order (NCBI crashes
-//! in some runs): LOSAT refuses a later search of a mixed index with more than one thread.
+//! than one thread, which volumes keep their results depends on which thread passes which volume
+//! (NCBI crashes in some runs where its one thread does not): LOSAT's search at every thread count
+//! is the one-thread search, whose output is NCBI's `-num_threads 1` output (Owner 2026-10-13,
+//! 「DB-3: NCBI の 1 スレッド。LOSAT はどのスレッド数でも同じ出力」).
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -154,8 +157,7 @@ impl<'a> IndexSeeds<'a> {
     /// segments: the unmasked intervals of each valid context in order, as NCBI's
     /// `BLAST_ComplementMaskLocations` gives them to the lookup table and to the index), and the
     /// word size (`lut_options->word_size`) and two-hit window (`word_options->window_size`, 0
-    /// for the one-hit search) of `options`, searched with `num_threads` threads. `Err`: LOSAT's
-    /// refusal of a later search of a mixed index with more than one thread.
+    /// for the one-hit search) of `options`.
     pub(super) fn new(
         index: &'a LoadedIndex,
         oids: OidMap<'a>,
@@ -163,8 +165,7 @@ impl<'a> IndexSeeds<'a> {
         contexts: &[QueryContext],
         context_valid: &[bool],
         options: SearchOptions,
-        num_threads: usize,
-    ) -> anyhow::Result<Self> {
+    ) -> Self {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
         // NCBI runs neither the preliminary search nor `DoPreSearch` for a batch (or a query
         // chunk) without a valid context.
@@ -176,13 +177,6 @@ impl<'a> IndexSeeds<'a> {
         } else {
             0
         };
-        if search > 1 && num_threads > 1 && index.mixed() {
-            let first = &index.volumes[0].path;
-            return Err(super::mb_index::refusal(&format!(
-                "a MegaBLAST database index of only some database volumes ({first}), more than one \
-                 thread and more than one query batch or query chunk"
-            )));
-        }
         let visited: Vec<bool> = index
             .volumes
             .iter()
@@ -206,7 +200,7 @@ impl<'a> IndexSeeds<'a> {
                 .map(|_| VolumePlan::Searched { kept: false })
                 .collect()
         };
-        Ok(IndexSeeds {
+        IndexSeeds {
             index,
             oids,
             query,
@@ -223,7 +217,7 @@ impl<'a> IndexSeeds<'a> {
                 .collect(),
             scanned_hits: index.volumes.iter().map(|_| AtomicU32::new(0)).collect(),
             error: Mutex::new(None),
-        })
+        }
     }
 
     /// Keeps the refusal `what` of volume `at` and kind `kind` unless one of an earlier volume,

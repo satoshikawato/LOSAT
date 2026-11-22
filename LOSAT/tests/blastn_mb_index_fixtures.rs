@@ -9,12 +9,16 @@
 //! (`masker_fixtures::take_variables`).
 //!
 //! A row with a refusal is one where NCBI searches with an index in a way that LOSAT does not
-//! (`-db_hard_mask`), or in a way that its threads decide, or reads the index in a way that
-//! leaves the search undefined or fails: LOSAT refuses it with that text, and NCBI's output is
-//! kept for the lines that take these searches. Where NCBI exits with its error in a later query
-//! batch, LOSAT first writes NCBI's output of the batches before; elsewhere (NCBI's run succeeds,
-//! crashes or never ends) LOSAT writes at most a beginning of NCBI's output: nothing when it
-//! refuses before the search, the batches before when it refuses a later batch.
+//! (`-db_hard_mask`), or reads the index in a way that leaves the search undefined or fails:
+//! LOSAT refuses it with that text, and NCBI's output is kept for the lines that take these
+//! searches. Where NCBI exits with its error in a later query batch, LOSAT first writes NCBI's
+//! output of the batches before; where NCBI crashes or never ends, LOSAT writes at most a
+//! beginning of NCBI's output; where NCBI's run succeeds, LOSAT writes nothing, or the batches
+//! before for a refusal of a later query batch or query chunk (its text names one).
+//!
+//! A row whose fourth field is `same as NAME` is compared with row NAME's NCBI files: NCBI's
+//! `-num_threads 1` output, which LOSAT gives at every thread count (Owner 2026-10-13), for a run
+//! whose NCBI result at more threads depends on its threads.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,6 +43,8 @@ struct Case {
     /// LOSAT's refusal (`@CWD@` for the row's directory), for a row that NCBI searches with
     /// the index.
     refusal: Option<String>,
+    /// The row whose NCBI files this row is compared with (itself, or that of `same as NAME`).
+    ncbi: String,
 }
 
 /// The rows of the table.
@@ -56,12 +62,17 @@ fn cases() -> Vec<Case> {
         };
         let mut words = shell_words(fields[2]).0;
         let variables = take_variables(&mut words);
+        let same_as = fields.get(3).and_then(|text| text.strip_prefix("same as "));
         cases.push(Case {
             name: fields[0].to_string(),
             setup,
             words,
             variables,
-            refusal: fields.get(3).map(|text| text.to_string()),
+            refusal: fields
+                .get(3)
+                .filter(|_| same_as.is_none())
+                .map(|text| text.to_string()),
+            ncbi: same_as.unwrap_or(fields[0]).to_string(),
         });
     }
     cases
@@ -232,7 +243,7 @@ fn rows_that_differ() -> Vec<String> {
                     fs::read(
                         fixtures()
                             .join("ncbi")
-                            .join(format!("{}.{extension}", case.name)),
+                            .join(format!("{}.{extension}", case.ncbi)),
                     )
                     .unwrap()
                 };
@@ -245,12 +256,15 @@ fn rows_that_differ() -> Vec<String> {
                     let out = here(&String::from_utf8(ncbi("out")).unwrap(), &dir);
                     losat::wording::losat_output_bytes(out.as_bytes()).into_owned()
                 };
-                // NCBI's run succeeded, or ended by a signal or the time limit (124): LOSAT
-                // refuses before the search or at a later query batch whose result NCBI's
-                // threads decide or that NCBI's crash leaves without one, and writes the
-                // batches before.
-                let out_ok = if ncbi_rc == 0 || ncbi_rc == 124 || ncbi_rc >= 128 {
+                // NCBI's run ended by a signal or the time limit (124): what it wrote up to its
+                // crash is no result, and LOSAT may refuse before it. NCBI's run succeeded:
+                // LOSAT refuses before the search (nothing written), or a later query batch or
+                // query chunk after the batches before.
+                let later = refusal.contains("query batch or query chunk");
+                let out_ok = if ncbi_rc == 124 || ncbi_rc >= 128 || (ncbi_rc == 0 && later) {
                     want_out.starts_with(&output.stdout)
+                } else if ncbi_rc == 0 {
+                    output.stdout.is_empty()
                 } else {
                     output.stdout == want_out
                 };
@@ -261,7 +275,7 @@ fn rows_that_differ() -> Vec<String> {
                     fs::read(
                         fixtures()
                             .join("ncbi")
-                            .join(format!("{}.{extension}", case.name)),
+                            .join(format!("{}.{extension}", case.ncbi)),
                     )
                     .unwrap()
                 };

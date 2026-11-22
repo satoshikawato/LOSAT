@@ -828,10 +828,20 @@ fn refuses_non_utf8_value(scope: &clap::Command, name: &str) -> bool {
 fn non_utf8_value_error(scope: &clap::Command, name: &str) -> clap::Error {
     clap::Error::raw(
         ErrorKind::InvalidUtf8,
-        format!(
-            "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, which is not supported by LOSAT's {}",
-            scope.get_name().to_uppercase()
-        ),
+        non_utf8_value_refusal(&scope.get_name().to_uppercase(), name),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270 (cited at
+// `non_utf8_value_error`)
+/// LOSAT's refusal of the value of `-name` that is not UTF-8 in `program` (its name in LOSAT's
+/// refusals, `MAKEBLASTDB`): NCBI's arguments keep the value's bytes. The one text of it, for the
+/// programs on clap (`non_utf8_value_error`) and those of `ncbi_app`
+/// (`ncbi_app::args::Args::text_values_refusal`).
+pub(crate) fn non_utf8_value_refusal(program: &str, name: &str) -> String {
+    format!(
+        "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, \
+         which is not supported by LOSAT's {program}"
     )
 }
 

@@ -434,7 +434,14 @@ impl Args {
     /// value that is not UTF-8, which the programs of `ncbi_app` do not run
     /// (`text_values_refusal`).
     pub(crate) fn value(&self, name: &str) -> Option<&str> {
-        match self.values.get(name) {
+        let value = self.values.get(name);
+        // A body reads a value that is not UTF-8 only by its bytes (`os_value`): the others are
+        // refused before it (`text_values_refusal`).
+        debug_assert!(
+            !matches!(value, Some(Some(Value::Bytes(_)))),
+            "-{name} is not UTF-8: read it with `os_value`"
+        );
+        match value {
             Some(Some(Value::Text(text))) => Some(text),
             _ => None,
         }
@@ -444,27 +451,26 @@ impl Args {
     // read their values as text.
     /// LOSAT's refusal of a value that is not UTF-8 of an argument that a program of `ncbi_app`
     /// reads as text (`value`), which `ncbi_app::run_app` writes where the body would start, so
-    /// that NCBI's errors of the reader come first: NCBI's `Run` reads the bytes. The values read
-    /// by their bytes are not refused: an `eOutputFile` key, which the programs open by its name's
-    /// bytes (`output_file`, `os_value`), and the file arguments of every application (`-logfile`,
-    /// `-conffile`), which the application reads before the reader (`ncbi_environment`).
+    /// that NCBI's errors of the reader and `-dryrun` come first: NCBI's `Run` reads the bytes.
+    /// It names the first such argument in the command line's order, in the words of the
+    /// programs on clap (`cli::non_utf8_value_refusal`). The values read by their bytes are not
+    /// refused: an `eOutputFile` key, which the programs open by its name's bytes (`output_file`,
+    /// `os_value`), and `-logfile`, which the application opens before the reader
+    /// (`ncbi_environment`; a `-conffile` name that is not UTF-8 is refused there, before the
+    /// reader).
     pub(crate) fn text_values_refusal(&self, tool: &Tool) -> Option<String> {
         let read_as_bytes = |name: &str| {
             FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
                 || find_desc(tool_arguments(tool), name)
                     .is_some_and(|desc| desc.kind == Kind::OutputFile)
         };
-        let not_text = self
-            .values
-            .iter()
-            .any(|(name, value)| matches!(value, Some(Value::Bytes(_))) && !read_as_bytes(name));
-        not_text.then(|| {
-            format!(
-                "a word of the command line is not UTF-8; NCBI BLAST+ reads its bytes, which is \
-                 not supported by LOSAT's {}",
-                tool.refusal_name
-            )
-        })
+        let refused = self.given.iter().find(|&&name| {
+            matches!(self.values.get(name), Some(Some(Value::Bytes(_)))) && !read_as_bytes(name)
+        })?;
+        Some(crate::cli::non_utf8_value_refusal(
+            tool.refusal_name,
+            refused,
+        ))
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:509-516

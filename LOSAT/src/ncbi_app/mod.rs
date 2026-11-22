@@ -215,8 +215,9 @@ impl Diag<'_> {
 /// - `-help` and `-help-full`: the program's `-help` text (`help_text`) on `out`, exit status 0.
 /// - `-xmlhelp`: NCBI's XML of the program's arguments on `out`, made by `xml_help` (the
 ///   command line's; LOSAT's XML leaves out the arguments that LOSAT refuses,
-///   `ncbi_app::args::refusal`, `cli::xml_help_text`), exit status 0; a caller without it (the library API) refuses the
-///   word (`cli::xml_help_refusal`, line RG DECISIONS E2x-1) on the standard error, exit status 1.
+///   `ncbi_app::args::refusal`, `cli::xml_help_text`), exit status 0; a caller without it (the
+///   library API) refuses the word (`cli::xml_help_refusal`, line RG DECISIONS E2x-1) on the
+///   standard error, exit status 1.
 /// - An argument error (`ArgException`): on `diag`'s standard error, the short usage, then, when
 ///   the diagnostics go to the file of `-logfile`, the line `Error in command-line arguments. See
 ///   error logs for more details.`, then a line of 72 `=` and an empty line; then NCBI's posts of
@@ -268,7 +269,9 @@ pub(crate) fn run(
         words,
         (&mut std::io::stdin(), &mut out, &mut err),
         body,
-        (start, Some(ncbi_xml)),
+        // The command line's `-xmlhelp`: NCBI's XML without the arguments that LOSAT refuses
+        // (the programs of `ncbi_app` refuse none, `ncbi_xmlhelp_tests`).
+        (start, Some(crate::cli::xml_help_text)),
     );
     let _ = out.flush();
     let _ = err.flush();
@@ -324,12 +327,6 @@ pub(crate) fn run_with(
     run_app(tool, words, (input, out, err), body, (&start, None))
 }
 
-/// NCBI's XML of `program`'s arguments without those that LOSAT refuses by name
-/// (`cli::xml_help_text`): the programs of `ncbi_app` refuse none (`ncbi_xmlhelp_tests`).
-fn ncbi_xml(program: &str) -> Option<String> {
-    crate::cli::xml_help_text(program)
-}
-
 /// The run of `run` and `run_with` after the application start `start` (whose usage report's
 /// messages the caller has written), with the writer of NCBI's XML of `-xmlhelp` that the command
 /// line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
@@ -370,7 +367,8 @@ fn run_app(
         Ok(Some(status)) => return status,
         Err(reason) => return diag.refuse(&reason),
     }
-    // NCBI's XML, which the command line's run writes (`ncbi_xml`); the library API writes none.
+    // NCBI's XML, which the command line's run writes (`cli::xml_help_text`); the library API
+    // writes none.
     let args = match read(tool, &words, out, &mut diag, xml_help) {
         Ok(args) => args,
         Err(status) => return status,

@@ -123,7 +123,7 @@ enum Refused {
 /// `-xmlhelp`, which leaves them out of NCBI's XML (`cli::xml_help_text`), read it. Un-refusing an
 /// argument is deleting its row. The build checks that each row names an argument of its program's
 /// XML, once.
-const REFUSED: [(&str, &str, Refused); 57] = [
+const REFUSED: &[(&str, &str, Refused)] = &[
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:63-70
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
     // `-db` and `-dbsize` are implemented (`blastn/args.rs`), as are the X-drops,

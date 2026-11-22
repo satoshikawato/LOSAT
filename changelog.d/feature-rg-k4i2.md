@@ -4,4 +4,6 @@
   value, a value outside its list) and the help words (`-h`, `-help`, `-xmlhelp`) come first, and an
   error quotes the word's bytes as NCBI's does. `-out` and `-logfile` with a name that is not UTF-8
   write that file, and `-dryrun` ends with exit status 0. Any other value that is not UTF-8 is still
-  refused, now where the program would start its work.
+  refused, now where the program would start its work, with the error that the search programs give,
+  which names the option. A `-conffile` name that is not UTF-8 is still refused, before the arguments
+  are read.

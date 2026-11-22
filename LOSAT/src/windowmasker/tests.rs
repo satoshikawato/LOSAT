@@ -220,8 +220,9 @@ fn the_convert_mode_refuses_what_ncbi_gives_no_one_result_for() {
 
 // NCBI's counts writers open `-out` by its bytes (`CSeqMaskerOstatFactory::create` of the
 // argument's string, line RG item K4i-2a): a name that is not UTF-8 is written as given, in the
-// counts mode and in the convert mode, and the counts are those of a name of text.
-#[cfg(unix)]
+// counts mode and in the convert mode, and the counts are those of a name of text. Not on macOS,
+// whose APFS refuses a file name that is not UTF-8 (as `tests/non_utf8_names.rs`).
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn the_counts_modes_write_an_out_name_that_is_not_utf8() {
     use std::os::unix::ffi::OsStringExt;

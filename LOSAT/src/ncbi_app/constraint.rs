@@ -65,14 +65,13 @@ impl Constraint {
     /// `Verify` of the constraint, on the value's bytes as the command line gives them; an
     /// exception that NCBI's `Verify` throws (a value that its conversion does not read) is a
     /// value it does not allow.
-    pub(crate) fn verify(self, value: &[u8]) -> bool {
-        let bytes = value;
+    pub(crate) fn verify(self, bytes: &[u8]) -> bool {
         let blast_double = || crate::ncbi_str::string_to_double(bytes).ok();
         match self {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4605-4609
             // A lookup of the value in the set, with case.
             Constraint::Strings(values) | Constraint::StringSet(values) => {
-                strings(values).any(|allowed| allowed.as_bytes() == value)
+                strings(values).any(|allowed| allowed.as_bytes() == bytes)
             }
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:111-113
             // BLAST's bounds read the value with `NStr::StringToDouble` (default flags), then
@@ -101,7 +100,7 @@ impl Constraint {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4686-4695
             // Read with `s_StringToInt8`, then inside the closed interval.
             Constraint::Integers { min, max } => {
-                string_to_int8(value).is_ok_and(|number| min <= number && number <= max)
+                string_to_int8(bytes).is_ok_and(|number| min <= number && number <= max)
             }
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-222, 239
             // Read with `NStr::StringToInt`, then looked up in the set.

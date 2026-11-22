@@ -5509,6 +5509,9 @@ fn resolve_for_formats(
         options.outfmt.clear();
         options.num_descriptions = 0;
         options.num_alignments = 0;
+        // The `-html` links belong to the format as well: only the pairwise report reads them
+        // (`blastinput::app::html_links`), so a run of outfmt 0 and 6 has them for 0 alone.
+        options.html = None;
         format!("{options:?}")
     };
     let mut resolved_formats = resolved_formats.into_iter();

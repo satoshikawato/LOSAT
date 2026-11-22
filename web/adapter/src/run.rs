@@ -2536,7 +2536,7 @@ mod tests {
             rows.iter().map(|(_, argv)| argv[0].as_str()).collect();
         assert_eq!(programs.len(), 5, "{programs:?}");
         assert!(rows.len() >= 130, "{}", rows.len());
-        let (mut shown, mut gaps, mut alone) = (0, 0, 0);
+        let (mut shown, mut gaps, mut alone, mut refused) = (0, 0, 0, 0);
         for (id, argv) in &rows {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
@@ -2555,8 +2555,20 @@ mod tests {
             // writes the argv's format and outfmt 0 fails alone, its refusal on stream 3 after the
             // CLI's warnings.
             let shared_masks = id.starts_with("pd.self.") && !id.ends_with(".0");
-            let streams = try_registered_streams(&words, &query, &subject)
-                .unwrap_or_else(|error| panic!("{id}: {error}"));
+            // The html.bp.smix.* rows: NCBI reads the subject ids of other molecules under
+            // `-parse_deflines` (`gnl|TI|`), LOSAT refuses them on the CLI and on the Web alike
+            // (OWNER_DECISIONS 7, 2026-10-30; line RG item X7 owns the lift).
+            let streams = match try_registered_streams(&words, &query, &subject) {
+                Err(error) if id.starts_with("html.bp.smix.") => {
+                    assert!(
+                        error.contains("names the other molecule under -parse_deflines"),
+                        "{id}: {error}"
+                    );
+                    refused += 1;
+                    continue;
+                }
+                streams => streams.unwrap_or_else(|error| panic!("{id}: {error}")),
+            };
             let outfmt = at("-outfmt");
             let stream = match outfmt {
                 "0" => 0,
@@ -2641,8 +2653,9 @@ mod tests {
         assert!(shown > 0);
         assert!(gaps > 0, "the rows of a gap line run");
         assert_eq!(alone, 33, "the pd.self rows other than outfmt 0");
+        assert_eq!(refused, 2, "the html.bp.smix.* rows");
         eprintln!(
-            "{} rows, {gaps} with a gap line, {alone} with outfmt 0 failed alone, {shown} outfmt 6 rows' ids",
+            "{} rows, {gaps} with a gap line, {alone} with outfmt 0 failed alone, {refused} refused, {shown} outfmt 6 rows' ids",
             rows.len()
         );
     }
@@ -4635,7 +4648,7 @@ mod tests {
 
     /// The rows of NCBI's frozen outputs (`LOSAT/tests/outfmt0_manifest.tsv`) for which `keep(program,
     /// format number, files column)` holds, as (fixture id, argv): the arguments of
-    /// `run_oracle.search_argv` (none of the rows taken here quotes a value); never a row with `-html`.
+    /// `run_oracle.search_argv` (none of the rows taken here quotes a value).
     fn manifest_rows(keep: impl Fn(&str, &str, &str) -> bool) -> Vec<(String, Vec<String>)> {
         manifest_rows_with(|program, number, files, _| keep(program, number, files))
     }
@@ -4672,14 +4685,6 @@ mod tests {
                 field("files"),
                 field("extra_args"),
             ) {
-                continue;
-            }
-            // `-html` reaches the Web in T4b (SURVEY_T4 §4.1, decision T4-1); until then the Web
-            // checks keep to the plain rows.
-            if field("extra_args")
-                .split_whitespace()
-                .any(|word| word == "-html")
-            {
                 continue;
             }
             let extra = field("extra_args");

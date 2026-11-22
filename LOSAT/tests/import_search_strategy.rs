@@ -8,8 +8,9 @@
 //! options a strategy ignores, the strategies' query ranges and filters, the archive (outfmt 11)
 //! of an imported run, the reader's errors, another program's strategy with options of the
 //! command line (`C.*.from.*`), the parameters that the setters take (`S1.*`: best hits, database
-//! masks, the repeat filter, the MegaBLAST index) and the command line's index and database mask
-//! over a strategy's (`B.*`).
+//! masks, the repeat filter, the MegaBLAST index), the command line's index and database mask
+//! over a strategy's (`B.*`), and the formatting options that a strategy's hit list size above
+//! 500 leaves unread in the pairwise formats (`Y.*`).
 //!
 //! A strategy's subjects are searched once whatever `-num_threads` says (Owner 2026-11-20 F2-Q1
 //! "Q1=C"; NCBI prints every alignment once per thread or aborts): the runs at 2, 4 and 8 threads

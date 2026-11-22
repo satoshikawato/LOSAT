@@ -944,23 +944,31 @@ pub(crate) enum DbMaskAlgorithm {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
-/// The formatting handler's early return for an imported hit list size above 500 (no
-/// `-num_descriptions`, no `-num_alignments`, a pairwise format): it reads none of the options
-/// after it, so `-line_length`, `-sorthits` and `-sorthsps` keep their defaults (probe
-/// `I.blastn.mts600.ll`); the report counts follow it (`report_counts_from`).
+/// The formatting handler's early return for an imported hit list size that it keeps
+/// (`report_counts::kept_hitlist_counts`): it reads none of the options after it, so
+/// `-line_length`, `-sorthits` and `-sorthsps` keep their defaults and post no warning (probes
+/// `I.blastn.mts600.ll`, `Y.*.imp.*`); the report counts take the same rule
+/// (`report_counts_from`).
 pub(crate) fn formatting_early_return(
     formatting: &mut crate::blastinput::report_counts::FormattingArgs,
     num_descriptions_given: bool,
     num_alignments_given: bool,
     outfmt: &str,
 ) {
-    let pairwise = crate::blastinput::app::parse_formatting_string(outfmt)
-        .is_ok_and(|format| format.number <= 4);
-    if formatting.hitlist_start.is_some_and(|size| size > 500)
-        && !num_descriptions_given
-        && !num_alignments_given
-        && pairwise
-    {
+    let kept = match (
+        formatting.hitlist_start,
+        crate::blastinput::app::parse_formatting_string(outfmt),
+    ) {
+        (Some(start), Ok(format)) => crate::blastinput::report_counts::kept_hitlist_counts(
+            start,
+            format.number,
+            num_descriptions_given,
+            num_alignments_given,
+        )
+        .is_some(),
+        _ => false,
+    };
+    if kept {
         formatting.line_length = None;
         formatting.sort_hits = None;
         formatting.sort_hsps = None;

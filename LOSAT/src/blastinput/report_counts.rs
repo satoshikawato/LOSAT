@@ -130,7 +130,8 @@ impl Default for ReportCounts {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
 /// (`BLAST_HITLIST_SIZE` is 500, `m_DfltNumDescriptions` 500, `m_DfltNumAlignments` 250; the
-/// import search strategy branch at 2900-2908 does not exist in LOSAT)
+/// branch at 2900-2908 of a hit list size above 500 in the options is [`kept_hitlist_counts`],
+/// which the default start never reaches)
 /// Note that `args[kArgNumDescriptions]` is false for an absent option, not for the value 0.
 pub fn report_counts(
     outfmt: i32,
@@ -148,10 +149,33 @@ pub fn report_counts(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
+/// The counts of options whose hit list size `hitlist_size` is above `BLAST_HITLIST_SIZE` before
+/// the formatting handler reads the command line (an imported search strategy's `HitlistSize`),
+/// when NCBI keeps it: output format `outfmt` up to 4 and neither `-num_descriptions` nor
+/// `-num_alignments` given: the numbers of descriptions and alignments become the size and half
+/// of it. The handler then returns at once: `-max_target_seqs`, `-line_length`, `-sorthits` and
+/// `-sorthsps` are not read and no warning is written (probes `Y.*.imp.*`). `None` otherwise
+/// ([`report_counts_from`] goes on). The one rule of that return: the counts here, the
+/// formatting options in the import (`import::formatting_early_return`).
+pub fn kept_hitlist_counts(
+    hitlist_size: usize,
+    outfmt: i32,
+    num_descriptions_given: bool,
+    num_alignments_given: bool,
+) -> Option<ReportCounts> {
+    (hitlist_size > BLAST_HITLIST_SIZE
+        && !num_descriptions_given
+        && !num_alignments_given
+        && outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES)
+        .then_some(ReportCounts {
+            hitlist_size,
+            num_descriptions: hitlist_size,
+            num_alignments: hitlist_size / 2,
+        })
+}
+
 /// [`report_counts`] from the hit list size `start` of the options (an imported search
-/// strategy's `HitlistSize`): above 500, with neither `-num_descriptions` nor `-num_alignments`
-/// and a pairwise format, the handler keeps it and returns early (`-max_target_seqs` is then not
-/// read).
+/// strategy's `HitlistSize`), which the handler may keep ([`kept_hitlist_counts`]).
 pub fn report_counts_from(
     start: usize,
     outfmt: i32,
@@ -159,16 +183,13 @@ pub fn report_counts_from(
     num_descriptions: Option<usize>,
     num_alignments: Option<usize>,
 ) -> ReportCounts {
-    if start > BLAST_HITLIST_SIZE
-        && num_descriptions.is_none()
-        && num_alignments.is_none()
-        && outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES
-    {
-        return ReportCounts {
-            hitlist_size: start,
-            num_descriptions: start,
-            num_alignments: start / 2,
-        };
+    if let Some(kept) = kept_hitlist_counts(
+        start,
+        outfmt,
+        num_descriptions.is_some(),
+        num_alignments.is_some(),
+    ) {
+        return kept;
     }
     let mut hitlist_size = start;
     if outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES {

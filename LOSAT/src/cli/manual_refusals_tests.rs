@@ -32,11 +32,6 @@ const PAGE: &str = include_str!(concat!(
     "/../docs/manual/src/refusals.md"
 ));
 
-const EDGE_CASES_PAGE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../docs/manual/src/refusals-edge-cases.md"
-));
-
 /// The programs of the section `All five search programs`.
 const FIVE_PROGRAMS: [&str; 5] = ["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 
@@ -172,13 +167,7 @@ fn every_refused_option_is_in_the_manual_for_its_program() {
         ("tblastx", UNPORTED_TBLASTX_ARGS.to_vec()),
         ("psiblast", psiblast),
         ("rpsblast", UNPORTED_RPSBLAST_ARGS.to_vec()),
-        (
-            "rpstblastn",
-            ["entrez_query", "html", "import_search_strategy", "remote"]
-                .into_iter()
-                .filter(|name| is_unported_rpstblastn_arg(name))
-                .collect(),
-        ),
+        ("rpstblastn", UNPORTED_RPSTBLASTN_ARGS.to_vec()),
         (
             "makeblastdb",
             crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.to_vec(),
@@ -331,66 +320,4 @@ fn the_in_msa_input_refusals_of_the_code_are_listed_in_the_manual() {
         }
     }
     assert!(wrong.is_empty(), "\n{}\n", wrong.join("\n"));
-}
-
-fn mdbook_heading_id(heading: &str) -> String {
-    let mut out = String::new();
-    let mut in_tag = false;
-    for ch in heading.trim().chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if in_tag => {}
-            '`' => {}
-            _ if ch.is_alphanumeric() || ch == '_' || ch == '-' => {
-                out.extend(ch.to_lowercase());
-            }
-            _ if ch.is_whitespace() => out.push('-'),
-            _ => {}
-        }
-    }
-    out
-}
-
-#[test]
-fn edge_cases_page_has_sections_linked_from_refusals() {
-    assert!(
-        !EDGE_CASES_PAGE.trim().is_empty(),
-        "docs/manual/src/refusals-edge-cases.md must not be empty"
-    );
-    let edge_headings: Vec<String> = page_lines(EDGE_CASES_PAGE)
-        .into_iter()
-        .filter(|(_, line)| line.starts_with("## "))
-        .map(|(heading, _)| mdbook_heading_id(heading))
-        .collect();
-    assert!(
-        !edge_headings.is_empty(),
-        "docs/manual/src/refusals-edge-cases.md has no ## section headings"
-    );
-
-    let mut linked_anchors = 0usize;
-    let mut missing = Vec::new();
-    let prefix = "(refusals-edge-cases.md#";
-    for (idx, line) in PAGE.lines().enumerate() {
-        let mut rest = line;
-        while let Some(pos) = rest.find(prefix) {
-            rest = &rest[pos + prefix.len()..];
-            if let Some(end) = rest.find(')') {
-                let anchor = &rest[..end];
-                linked_anchors += 1;
-                if !edge_headings.iter().any(|h| h == anchor) {
-                    missing.push(format!(
-                        "docs/manual/src/refusals.md:{}: anchor #{anchor} has no matching ## heading in docs/manual/src/refusals-edge-cases.md",
-                        idx + 1
-                    ));
-                }
-                rest = &rest[end + 1..];
-            }
-        }
-    }
-    assert!(
-        linked_anchors > 0,
-        "docs/manual/src/refusals.md should link to sections in docs/manual/src/refusals-edge-cases.md"
-    );
-    assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));
 }

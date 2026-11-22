@@ -52,7 +52,7 @@ There is one section for each program, and one for the five search programs toge
 | `-remote`, `-entrez_query` | All search programs | Out of scope (needs NCBI servers) |
 | `-gilist`, `-negative_gilist` | Five search programs, `psiblast` | Out of scope (GI lists) |
 | `-ipglist`, `-negative_ipglist` | `blastp`, `blastx`, `psiblast` | Out of scope (IPG lists) |
-| `-import_search_strategy` | All search programs | Refused |
+| `-import_search_strategy` | All search programs | Out of scope (needs NCBI servers) |
 | `-html` | All search programs | Not yet supported |
 | `-use_sw_tback` | `blastx`, `tblastn`, `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY` / `-ungapped`) | Refused |
 | `-ungapped` | `tblastn`, `rpstblastn` (without CBS) | Refused (`rpstblastn` with CBS gives NCBI error) |

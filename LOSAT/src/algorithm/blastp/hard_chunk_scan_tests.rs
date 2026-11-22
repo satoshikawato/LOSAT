@@ -87,7 +87,7 @@ fn walks_of_overlapping_and_nested_masks() {
     assert_eq!(end, -98);
 }
 
-/// Masks sorted by their start that do not overlap: every offset is at least the window past the
+/// Masks apart in the order of their start: every offset is at least the window past the
 /// entries before it, so no chunk goes back, and the margins are 0, at every word and window.
 #[test]
 fn walks_of_masks_apart_stay_within_the_sequence() {

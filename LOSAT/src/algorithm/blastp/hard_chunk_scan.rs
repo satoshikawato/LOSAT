@@ -1,7 +1,7 @@
 //! The word finders over the hard chunks of a protein database sequence with `-db_hard_mask`
-//! (BLASTP and BLASTX; series NP, M4b-3b), where the stored masks, sorted by their start, may
-//! overlap or nest. NCBI searches every chunk of the sequence's hard ranges whatever its length
-//! (`core::subject_split::HardChunk::length`, NCBI's `Int4`: negative for the inverted range
+//! (BLASTP and BLASTX; series NP, M4b-3b), where the stored masks may overlap or nest, or be out of
+//! the order of their start. NCBI searches every chunk of the sequence's hard ranges whatever its
+//! length (`core::subject_split::HardChunk::length`, NCBI's `Int4`: negative for the inverted range
 //! between two masks that overlap), and after each chunk moves the diagonal offset by the chunk's
 //! length plus the window: back where the length is negative, so that a later chunk can meet the
 //! word hits of an earlier one on its diagonals. Here is what both programs share:
@@ -26,8 +26,8 @@ pub(crate) enum ChunkWork {
     /// the sequence may have stored (the offset went back), so the chunk is searched by the
     /// reference scan (the scan ranges of `-db_soft_mask`, one range of the whole chunk): the other
     /// scans take every entry of the table to lie below the offset of the subject they read
-    /// (`blastp::x_seed_fused::XHitBf`, blastx's `x_seed_scan.rs`). Never with masks that do not
-    /// overlap, where the offset only grows.
+    /// (`blastp::x_seed_fused::XHitBf`, blastx's `x_seed_scan.rs`). Never with masks apart in the
+    /// order of their start, where the offset only grows.
     Words { reference: bool },
     /// A chunk of a two-hit search shorter than the word (of no letters, or of a negative length,
     /// too): the scan reads the one word at the chunk's offset, past the chunk ([`OneWord`]).
@@ -172,12 +172,12 @@ impl DiagonalWalk {
     /// word with zeros). The word's hits cannot change a result when no entry without the flag that
     /// an earlier chunk can store lies within the window behind it (so no hit of it is extended)
     /// and every later chunk that reads a word lies at least the window past it (so a later hit on
-    /// a diagonal it stored reads that entry as it would read the one before it); past the
-    /// sequence the margins cover it (`past_end`). Otherwise the sequence is refused
-    /// (`HardMaskShape::WordPastEnd`). Sorted masks that do not overlap meet both conditions.
-    /// Each word's conditions are its own (they do not depend on which other words run past the
-    /// sentinel), so that the refusal of a sequence and the offset it names change only where the
-    /// set of such words does (`HardMaskShape::of_scan` reads the shape at two lengths).
+    /// a diagonal it stored reads that entry as it would read the one before it); past the sequence
+    /// the margins cover it (`past_end`). Otherwise the sequence is refused
+    /// (`HardMaskShape::WordPastEnd`). Masks apart in the order of their start meet both
+    /// conditions. Each word's conditions are its own (they do not depend on which other words run
+    /// past the sentinel), so that the refusal of a sequence and the offset it names change only
+    /// where the set of such words does (`HardMaskShape::of_scan` reads the shape at two lengths).
     fn past_words(&mut self, offset: usize, d: i64, one_word: bool) {
         for word in &mut self.past_end_words {
             if d < word.0 + self.window {

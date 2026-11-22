@@ -11,10 +11,11 @@
 //!   chunk: its scan, extensions, gapped stage and purge, or with `-ungapped` its ungapped hits),
 //!   its HSPs moved by the chunk's offset and merged; then the E-values of the whole sequence and
 //!   the reap by the preliminary E-value (`BlastpPrelimKernel::subject_lists`, or
-//!   `BlastpPrelimKernel::ungapped_lists`). Every chunk is walked, whatever its length (masks
-//!   sorted by their start may overlap or nest; series NP, M4b-3b): a chunk shorter than the word
-//!   gives the two-hit search its one word (`blastp::hard_chunk_scan::OneWord`) and the one-hit
-//!   search nothing, and the diagonal offset moves by each chunk's length plus the window.
+//!   `BlastpPrelimKernel::ungapped_lists`). Every chunk is walked, whatever its length (masks may
+//!   overlap or nest, or be out of the order of their start; series NP, M4b-3b): a chunk shorter
+//!   than the word gives the two-hit search its one word (`blastp::hard_chunk_scan::OneWord`) and
+//!   the one-hit search nothing, and the diagonal offset moves by each chunk's length plus the
+//!   window.
 //!
 //! The masks come from `SeqDb::read_mask_block`, a window of sequences at a time
 //! (`algorithm::common::db_mask_search::SubjectMasks`); the first read error by ordinal id ends
@@ -156,18 +157,19 @@ impl BlastpDbMasking<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:476-584
-// Each hard chunk is searched alone: its scan, its gapped stage, the purge of the HSPs with
-// common endpoints and the sort by score; its HSPs move by the chunk's offset
+// Each hard chunk is searched alone: its scan, its gapped stage, the purge of the HSPs with common
+// endpoints and the sort by score; its HSPs move by the chunk's offset
 // (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`). NCBI's
-// overlap there is not 0: it compares the chunk's offset with the left of the range after it
-// (the chunker has already moved to it, blast_engine.c:254-258, 579-580) and takes the chunk
-// overlap of 100. The merge only looks at the HSPs of the joined list that end past the new
-// chunk's offset (blast_hits.c:2888-2899); a chunk ends where its range does and no HSP reaches
-// into the mask after it, so there are none, and the merge appends the chunk's HSPs and sorts
-// the list by score (`s_BlastHSPListsCombineByScore`, blast_hits.c:2749-2766; no limit on the
-// HSPs of a list in the preliminary stage). TBLASTN's and TBLASTX's chunks of a long range
-// overlap; this reason does not carry over. With `-subject_besthit` the filter then runs on the
-// joined list after every chunk with HSPs (blast_engine.c:586-591, blast_hits.c:2537-2606).
+// overlap there is not 0: it compares the chunk's offset with the left of the range after it (the
+// chunker has already moved to it, blast_engine.c:254-258, 579-580) and takes the chunk overlap of
+// 100. The merge only looks at the HSPs of the joined list that end past the new chunk's offset
+// (blast_hits.c:2888-2899); a chunk ends where its range does and no HSP reaches into the mask
+// after it, and no chunk that can hold HSPs starts before the end of an earlier one (else
+// `HardMaskShape::PartsOutOfOrder`), so there are none, and the merge appends the chunk's HSPs and
+// sorts the list by score (`s_BlastHSPListsCombineByScore`, blast_hits.c:2749-2766; no limit on the
+// HSPs of a list in the preliminary stage). TBLASTN's and TBLASTX's chunks of a long range overlap;
+// this reason does not carry over. With `-subject_besthit` the filter then runs on the joined list
+// after every chunk with HSPs (blast_engine.c:586-591, blast_hits.c:2537-2606).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:869-899
 // After the chunks, the E-values of the sequence's HSPs with its whole length and the reap by
 // the preliminary E-value.
@@ -189,8 +191,9 @@ impl BlastpDbMasking<'_> {
 /// NCBI scans past its end (its "no chunking" branch; an approved NCBI defect,
 /// PD-LOSAT-NCBI-DEFECTS exception 21, the Owner's answer Q1 = B of M4b); a shorter one gives the
 /// two-hit search its one word and the one-hit search nothing. The sequences that LOSAT refuses
-/// never come here: masks out of the order of their start (`HardMaskShape::Unsorted`), a mask
-/// past the sequence's end (`HardMaskShape::PastEnd`), a range longer than `MAX_DBSEQ_LEN`
+/// never come here: a mask that ends before it starts (`HardMaskShape::Inverted`), a chunk that can
+/// hold alignments starting before the end of an earlier one (`HardMaskShape::PartsOutOfOrder`),
+/// a mask past the sequence's end (`HardMaskShape::PastEnd`), a range longer than `MAX_DBSEQ_LEN`
 /// (`HardMaskShape::LongRange`), word hits that reach other sequences' diagonal entries
 /// (`HardMaskShape::StaleDiagonals`) and a one word past the sentinel that can change a result
 /// (`HardMaskShape::WordPastEnd`), so the sequence's result does not depend on the diagonal

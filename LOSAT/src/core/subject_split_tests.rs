@@ -72,10 +72,11 @@ fn protein_chunks_start_at_their_range() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276 (cited at
 // `HardSplitState::next_chunk`)
-// Masks sorted by their start that overlap or nest (series NP, M4b-3b): the range between them
-// runs back from the end of one mask to the start of the next, and its chunk's length is NCBI's
-// `Int4` difference, negative (no letters); touching masks give a chunk of length 0. The chunks
-// stop once the next range starts at the end, also where a later range would start before it.
+// Masks that overlap or nest, or are out of the order of their start (series NP, M4b-3b): the range
+// between them runs back from the end of one mask to the start of the next, and its chunk's length
+// is NCBI's `Int4` difference, negative (no letters); touching masks give a chunk of length 0. The
+// chunks stop once the next range starts at the end, also where a later range would start before
+// it.
 #[test]
 fn protein_chunks_of_overlapping_masks_have_signed_lengths() {
     let of = |masks: &[(u32, u32)], length: usize| {

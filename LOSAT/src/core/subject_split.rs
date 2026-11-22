@@ -136,10 +136,11 @@ impl HardSplitState {
     /// range of no letters: a mask at 0, masks that touch), scanned from the residual (NCBI scans
     /// the full range in the "no chunking" branch, [`HardChunk::full_range`]); with the overlap of
     /// the merge after it ([`HardChunk::overlap`], [`HardChunk::overlap_past_list`]). NCBI's
-    /// `Int4` arithmetic: the hard range of masks that overlap or nest (sorted by start) runs
-    /// from the end of one mask back to the start of the next, and its chunk's length is
-    /// negative, as NCBI's (the word finders then move the diagonal offset back by it; BLASTN and
-    /// the translated programs refuse such masks before the search, `HardMaskShape::Unsorted`).
+    /// `Int4` arithmetic: the hard range of masks that overlap or nest, or are out of the order of
+    /// their start, runs from the end of one mask back to the start of the next, and its chunk's
+    /// length is negative, as NCBI's (the word finders then move the diagonal offset back by it;
+    /// BLASTN and the translated programs refuse such masks before the search,
+    /// `HardMaskShape::Unsorted`).
     pub fn next_chunk(&mut self, chunk_overlap: usize) -> Option<HardChunk> {
         if self.next >= self.full_right {
             return None;

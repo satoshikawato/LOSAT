@@ -181,11 +181,12 @@ impl SubjectPlan {
     /// which NCBI's merge takes after every chunk that ends a range, as it compares the chunk's
     /// offset with the next range's left). BLASTP and BLASTX search every chunk, whatever its
     /// length (`algorithm::blastp::hard_chunk_scan::DiagonalWalk::chunk`), and append each
-    /// chunk's HSPs: with masks sorted by their start a range starts at or past the end of every
-    /// earlier range, a chunk's HSPs end within its range, and only the seed of the one word of a
+    /// chunk's HSPs: a chunk's HSPs end within its range, only the seed of the one word of a
     /// chunk shorter than the word (refused, `hard_chunk_scan::short_chunk_seed_refusal`) lies
-    /// past it, so the merge finds none past the next chunk's offset (blast_hits.c:2888-2899). A
-    /// long range's chunks overlap (refused, `HardMaskShape::LongRange`).
+    /// past it, and a chunk that can hold HSPs (of the word's letters or more) starts at or past
+    /// the end of every earlier such chunk (else refused, `HardMaskShape::PartsOutOfOrder`), so
+    /// the merge finds none past the next chunk's offset (blast_hits.c:2888-2899). A long range's
+    /// chunks overlap (refused, `HardMaskShape::LongRange`).
     pub(crate) fn next_chunk(&mut self) -> Option<HardChunk> {
         self.split
             .next_chunk(crate::core::subject_split::DBSEQ_CHUNK_OVERLAP)
@@ -208,8 +209,8 @@ impl SubjectPlan {
 /// Writes [`HARD_MASK_PROTEIN_LETTER`] over the residues of `residues` (a whole protein sequence,
 /// from its first residue) that the stored masks `masks` cover, as NCBI's fetch of the sequence
 /// after the preliminary stage does with `-db_hard_mask` (masks past the sequence are cut at its
-/// end; masks sorted by their start that overlap or nest are each written, and NCBI's scan stops
-/// at the first mask that starts at or past the end, in any order).
+/// end; masks that overlap or nest, or are out of the order of their start, are each written, and
+/// NCBI's scan stops at the first mask that starts at or past the end).
 pub(crate) fn mask_protein_letters(residues: &mut [u8], masks: &[(u32, u32)]) {
     let end = residues.len();
     let mut i = 0;

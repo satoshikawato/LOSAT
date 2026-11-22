@@ -10,8 +10,8 @@
 //!   chunk: its scan, extensions and purge), its HSPs moved by the chunk's offset and merged by
 //!   score. The sink then computes the E-values, the links and the reap of the merged list with
 //!   the whole sequence's length (`Runtime::subject`), as NCBI does after the chunks. Every chunk
-//!   is walked, whatever its length (masks sorted by their start may overlap or nest; series NP,
-//!   M4b-3b): a chunk shorter than the word gives the two-hit search its one word
+//!   is walked, whatever its length (masks may overlap or nest, or be out of the order of their
+//!   start; series NP, M4b-3b): a chunk shorter than the word gives the two-hit search its one word
 //!   (`blastp::hard_chunk_scan::OneWord`) and the one-hit search nothing, and the diagonal offset
 //!   moves by each chunk's length plus the window.
 //!
@@ -178,16 +178,18 @@ impl Masked<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:476-591
     // Each hard chunk is searched alone: its scan, its extensions, the purge of the HSPs with
     // common endpoints (gapped) and the sort by score; its HSPs move by the chunk's offset
-    // (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`).
-    // NCBI's overlap there is not 0: it compares the chunk's offset with the left of the range
-    // after it (the chunker has already moved to it, blast_engine.c:254-258, 579-580) and takes
-    // the chunk overlap of 100. The merge only looks at the HSPs of the joined list that end past
-    // the new chunk's offset (blast_hits.c:2888-2899); a chunk ends where its range does and no
-    // HSP reaches into the mask after it, so there are none and the merge appends the chunk's
-    // HSPs and sorts the list by score (`s_BlastHSPListsCombineByScore`, blast_hits.c:2749-2766).
-    // TBLASTN's and TBLASTX's chunks of a long range overlap; this reason does not carry over.
-    // With `-subject_besthit` the filter then runs on the joined list after every chunk with HSPs
-    // (blast_engine.c:586-591, blast_hits.c:2538-2580), not once on the whole sequence's list.
+    // (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`). NCBI's
+    // overlap there is not 0: it compares the chunk's offset with the left of the range after it
+    // (the chunker has already moved to it, blast_engine.c:254-258, 579-580) and takes the chunk
+    // overlap of 100. The merge only looks at the HSPs of the joined list that end past the new
+    // chunk's offset (blast_hits.c:2888-2899); a chunk ends where its range does and no HSP reaches
+    // into the mask after it, and no chunk that can hold HSPs starts before the end of an earlier
+    // one (else `HardMaskShape::PartsOutOfOrder`), so there are none and the merge appends the
+    // chunk's HSPs and sorts the list by score (`s_BlastHSPListsCombineByScore`,
+    // blast_hits.c:2749-2766). TBLASTN's and TBLASTX's chunks of a long range overlap; this reason
+    // does not carry over. With `-subject_besthit` the filter then runs on the joined list after
+    // every chunk with HSPs (blast_engine.c:586-591, blast_hits.c:2538-2580), not once on the whole
+    // sequence's list.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
     // Every chunk goes through the word finder, whose exit moves the diagonal offset by the chunk's
     // length (negative between overlapping masks) plus the window.

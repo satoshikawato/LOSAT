@@ -69,6 +69,8 @@ pub(crate) struct Diag<'a> {
     target: DiagTarget,
     stderr: &'a mut dyn Write,
     tool: &'static Tool,
+    /// A copy of the texts written since `start_record` (`take_record`).
+    record: Option<Vec<u8>>,
 }
 
 impl Diag<'_> {
@@ -87,7 +89,21 @@ impl Diag<'_> {
     /// Writes `text`, diagnostic lines that end with their line feeds (an NCBI report made by
     /// `crate::ncbi_exception`: `err_post_x`, `NcbiException::report_default_ex`).
     pub(crate) fn write_text(&mut self, text: &[u8]) {
+        if let Some(record) = &mut self.record {
+            record.extend_from_slice(text);
+        }
         self.target.write_text(text, self.stderr);
+    }
+
+    /// Starts keeping a copy of the texts that `write_text` writes (the posts of a read that
+    /// NCBI repeats where LOSAT reads once: windowmasker's `-mk_counts`).
+    pub(crate) fn start_record(&mut self) {
+        self.record = Some(Vec::new());
+    }
+
+    /// The texts written since `start_record`, which stops keeping them.
+    pub(crate) fn take_record(&mut self) -> Vec<u8> {
+        self.record.take().unwrap_or_default()
     }
 
     /// Writes `text` to the standard error stream itself (an insertion into `cerr`), not to the
@@ -326,6 +342,7 @@ fn run_app(
         target,
         stderr: err,
         tool,
+        record: None,
     };
     // The configuration (the file of `-conffile` in place of `<program>.ini`,
     // `ApplicationStart::of_process`).

@@ -17,12 +17,13 @@ carries the data too. To find them, search the directory for the record ids name
 
 - What: sequences and definition lines (names, the text of `RecName: Full=`) of UniProtKB/Swiss-Prot records: 23
   globins (`db_search/taxfilter/tfp.faa`, and the databases and inputs made from it), `P69905.2` and other
-  Swiss-Prot records in the query and subject files of `db_search/` and `fasta/psiblast/`, and five records of
-  UniProtKB/Swiss-Prot release 2026_03 (`O15067`, `P68501`, `P12042`, `B1YBM5`, `P68502`; `fasta/outfmt0/`). The
-  globins and `P69905.2` come from the `swissprot` BLAST database that NCBI distributes; the release of that copy is
-  not recorded.
-- Where: about 300 files: `db_search/` (inputs, `multidb/`, `coldb/`, `taxfilter/` and others), `fasta/outfmt0/`,
-  `fasta/psiblast/`, `blastdbcmd/`, and the frozen outputs under `fixtures/` that print them.
+  Swiss-Prot records in the query and subject files of `db_search/`, `fasta/psiblast/` and `fasta/rps/`, and five
+  records of UniProtKB/Swiss-Prot release 2026_03 (`O15067`, `P68501`, `P12042`, `B1YBM5`, `P68502`;
+  `fasta/outfmt0/`). The globins and `P69905.2` come from the `swissprot` BLAST database that NCBI distributes; the
+  release of that copy is not recorded.
+- Where: `db_search/` (inputs, `multidb/`, `coldb/`, `taxfilter/` and others), `fasta/outfmt0/`, `fasta/psiblast/`,
+  `fasta/rps/`, `blastdbcmd/`, and the frozen outputs that print them (under `fixtures/`, and the expected outputs of
+  other directories such as `segmasker/ncbi/`).
 - Changes: the records are written into test FASTA files and BLAST databases. Some records carry an added second
   definition line, and the titles of the five 2026_03 records in `fasta/outfmt0/` are shortened or rewritten (for
   example `q_mtb MTB_ONCMY (UniProtKB P68501) metallothionein B, Oncorhynchus mykiss`).
@@ -36,11 +37,13 @@ carries the data too. To find them, search the directory for the record ids name
 ### FlyBase, through Ensembl BDGP6.54 (CC BY 4.0)
 
 - What: five *Drosophila melanogaster* cDNA records (`FBtr0078009`, `FBtr0100310`, `FBtr0083245`, `FBtr0301286`,
-  `FBtr0078640`) with their gene ids (`FBgn...`), taken from Ensembl's BDGP6.54 `cdna` file. Several have the Ensembl
-  definition line cut to the identifier.
+  `FBtr0078640`) with their gene ids (`FBgn...`), taken from Ensembl's BDGP6.54 `cdna` file, and the definition line
+  of a sixth, `FBtr0337025` (gene `FBgn0250846`, glob2), which `db_search/taxfilter/tfn.fna` and 4 files of
+  `db_search/multidb/` add to the zebrafish record `ENSDART00000113098.5` as its second definition line. Several have
+  the Ensembl definition line cut to the identifier.
 - Where: 11 FASTA files (`blastx_diag_bitfield/query.fna`, `fasta/outfmt0/bx_best_hsp_query.fna`,
   `db_search/taxfilter/tfn.fna` and 8 in `db_search/multidb/`), the BLAST databases and id maps made from them
-  (`db_search/`, `blastdbcmd/db/`), and the frozen outputs that print the ids; about 230 files in all.
+  (`db_search/`, `blastdbcmd/db/`), and the frozen outputs that print the ids.
 - License: FlyBase states that all annotations and data produced by FlyBase are distributed under CC BY 4.0
   (<https://wiki.flybase.org/wiki/FlyBase:About>, "FlyBase Licenses and Availability"), and that different terms may
   apply to data from other resources that FlyBase does not distribute. Source: FlyBase, <https://flybase.org/>.

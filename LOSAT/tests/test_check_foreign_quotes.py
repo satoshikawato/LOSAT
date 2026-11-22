@@ -9,6 +9,8 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import itertools
+import re
 import sys
 import tempfile
 import unittest
@@ -530,6 +532,27 @@ class StatementTest(unittest.TestCase):
         self.assertNotIn("chunk", fixed.split("blast_hits.c")[1])
         self.assertIn('"""\n    return 1', fixed)
         self.assertEqual(checker.python_code(fixed), checker.python_code(text))
+
+
+class SettingSpanTest(unittest.TestCase):
+    """`SETTING_SPAN_RE` reads the same strings as its earlier form, in time linear in the span."""
+
+    EARLIER = re.compile(r"^(?:[\w.\[\]-]*=[^\s=]*\s*)+$")
+
+    def test_the_same_strings_as_the_earlier_form(self) -> None:
+        letters = ("a", "-", "+", "=", " ")
+        for length in range(7):
+            for parts in itertools.product(letters, repeat=length):
+                text = "".join(parts)
+                self.assertEqual(
+                    bool(checker.SETTING_SPAN_RE.match(text)), bool(self.EARLIER.match(text)), repr(text)
+                )
+        for text in ("-evalue=10", "a=1 b=2", "x[0]=y.z", "a=1 +b=2", "a b=1", "=", "a=b=c"):
+            self.assertEqual(bool(checker.SETTING_SPAN_RE.match(text)), bool(self.EARLIER.match(text)), text)
+
+    def test_a_long_span_that_does_not_match_ends(self) -> None:
+        # The earlier form took about 0.4 s at 20 repeats and four times as long for each 2 more.
+        self.assertIsNone(checker.SETTING_SPAN_RE.match("=" + "-=" * 5000 + " +="))
 
 
 class FixTest(unittest.TestCase):

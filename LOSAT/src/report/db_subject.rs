@@ -2244,11 +2244,17 @@ impl From<Vec<Option<usize>>> for ReportKeys {
 /// `rows`: every row, or for a table that reads the subject for `nident` alone the rows of HSPs
 /// with identities (`report::tabular::SubjectFetch::WithIdentities`, `TabularSpec::throw_rows`);
 /// a row of no identities there reads nothing of the subject, so its load neither throws nor ends
-/// anything (it prints the 0 of `x_ResetFields`).
+/// anything (it prints the 0 of `x_ResetFields`). `first_row_ends`: a table whose run NCBI ends
+/// where a report's first row throws (`report::tabular::first_thrown_row_ends_run`: the null
+/// pointer of `sacc` or `saccver`, exit 255), which LOSAT refuses
+/// (`report::tabular::check_failed_lookups`); no report after it is reached, so no subject is
+/// held in one (review 1 of line DBID pfoff-4, H2: the null pointer's words, not a later report's
+/// holder's).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunThrow {
     pub after: AfterThrow,
     pub rows: super::tabular::SubjectFetch,
+    pub first_row_ends: bool,
 }
 
 impl RunThrow {
@@ -2257,6 +2263,7 @@ impl RunThrow {
         RunThrow {
             after,
             rows: super::tabular::SubjectFetch::Every,
+            first_row_ends: false,
         }
     }
 
@@ -2340,7 +2347,10 @@ impl FormatThrow {
             | ReportFormat::CommaSeparatedValues
             | ReportFormat::CommaSeparatedValuesWithHeader
             | ReportFormat::TaxFormat => spec.map_or(
-                FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow)),
+                FormatThrow::Writes(RunThrow {
+                    first_row_ends: super::tabular::first_thrown_row_ends_run(None),
+                    ..RunThrow::every_row(AfterThrow::WritesRow)
+                }),
                 |spec| spec.format_throw(program),
             ),
             ReportFormat::Xml => FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesHit)),
@@ -2400,6 +2410,7 @@ impl FormatThrow {
                     } else {
                         SubjectFetch::Every
                     },
+                    first_row_ends: one.first_row_ends || other.first_row_ends,
                 })
             }
         }
@@ -2775,9 +2786,12 @@ impl HitLoads {
                 }
                 loads.throws.insert(first, exception);
                 // Outfmt 13 to 16 load nothing after it in the report (or the run); BLAST XML's
-                // next `Hit` and a table's next row look their own subjects up.
-                thrown = matches!(run.after, AfterThrow::EndsRun | AfterThrow::EndsReport);
-                if run.after == AfterThrow::EndsRun {
+                // next `Hit` and a table's next row look their own subjects up, but where the
+                // report's first row throws, a table of `sacc` or `saccver` ends the run.
+                let ends_run =
+                    run.after == AfterThrow::EndsRun || (run.first_row_ends && range.start == 0);
+                thrown = ends_run || run.after == AfterThrow::EndsReport;
+                if ends_run {
                     ended.set(true);
                 }
                 passed.extend(keys.filter(|&key| key != first));

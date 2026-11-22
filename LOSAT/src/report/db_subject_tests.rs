@@ -684,15 +684,24 @@ fn the_formats_say_what_loads_after_a_throw() {
     // The formats' answers.
     let of = |outfmt: &str| FormatThrow::of_outfmt(outfmt, Program::Blastp, RequestKind::Blastp);
     let writes = |after| FormatThrow::Writes(RunThrow::every_row(after));
-    for rows in [
-        "6",
-        "7 qseqid sseqid evalue",
-        "10 qseqid stitle slen",
-        "20",
-        "20 qseqid sacc",
-        "18",
+    // The tables of `sacc` or `saccver` (the default fields too) end the run where a report's
+    // first row throws (`tabular::first_thrown_row_ends_run`).
+    for (rows, first_row_ends) in [
+        ("6", true),
+        ("7 qseqid sseqid evalue", false),
+        ("10 qseqid stitle slen", false),
+        ("20", true),
+        ("20 qseqid sacc", true),
+        ("18", false),
     ] {
-        assert_eq!(of(rows), writes(AfterThrow::WritesRow), "{rows}");
+        assert_eq!(
+            of(rows),
+            FormatThrow::Writes(RunThrow {
+                first_row_ends,
+                ..RunThrow::every_row(AfterThrow::WritesRow)
+            }),
+            "{rows}"
+        );
     }
     assert_eq!(of("6 qseqid slen"), writes(AfterThrow::EndsRun));
     assert_eq!(of("6 qseqid pident"), writes(AfterThrow::EndsRun));
@@ -702,6 +711,7 @@ fn the_formats_say_what_loads_after_a_throw() {
         FormatThrow::Writes(RunThrow {
             after: AfterThrow::EndsRun,
             rows: super::super::tabular::SubjectFetch::WithIdentities,
+            first_row_ends: false,
         })
     );
     assert_eq!(of("6 qseqid evalue bitscore"), FormatThrow::Unread);
@@ -753,10 +763,11 @@ fn the_formats_say_what_loads_after_a_throw() {
     );
     // Outfmt 5 loads after a throw what a table's rows load but its thrown `Hit`'s copies, which a
     // row of such a copy looks up itself; more than outfmt 13 to 16, which end there.
-    assert_eq!(
-        after(&["5", "6"]),
-        Some(RunThrow::every_row(AfterThrow::WritesRow))
-    );
+    let sacc_rows = RunThrow {
+        first_row_ends: true,
+        ..RunThrow::every_row(AfterThrow::WritesRow)
+    };
+    assert_eq!(after(&["5", "6"]), Some(sacc_rows));
     assert_eq!(
         after(&["15", "5"]),
         Some(RunThrow::every_row(AfterThrow::WritesHit))
@@ -765,10 +776,7 @@ fn the_formats_say_what_loads_after_a_throw() {
         after(&["5", "8"]),
         Some(RunThrow::every_row(AfterThrow::WritesHit))
     );
-    assert_eq!(
-        after(&["6", "8"]),
-        Some(RunThrow::every_row(AfterThrow::WritesRow))
-    );
+    assert_eq!(after(&["6", "8"]), Some(sacc_rows));
     // A pairwise format with another whose throws end elsewhere: refused.
     assert_eq!(after(&["6", "0"]), None);
     assert_eq!(after(&["0", "3"]), None);
@@ -804,6 +812,7 @@ fn the_formats_say_what_loads_after_a_throw() {
         Some(RunThrow {
             after: AfterThrow::EndsRun,
             rows: super::super::tabular::SubjectFetch::WithIdentities,
+            first_row_ends: false,
         })
     );
     assert_eq!(
@@ -904,6 +913,7 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     let nident = Some(RunThrow {
         after: AfterThrow::EndsRun,
         rows: super::super::tabular::SubjectFetch::WithIdentities,
+        first_row_ends: false,
     });
     // The identities of each report's entries: 1's rows have none, 3's have some.
     let identities = |report: usize, entry: usize| [[5, 0, 7], [2, 4, 0]][report][entry];
@@ -1098,7 +1108,13 @@ fn the_call_refuses_a_throw_over_all_its_searches() {
     );
     // Outfmt 5 in another search (line DBID pfoff-4): a table keeps its own answer, outfmt 0
     // refuses the mix.
-    assert_eq!(search(&["6"], &["5"]), writes(AfterThrow::WritesRow));
+    assert_eq!(
+        search(&["6"], &["5"]),
+        FormatThrow::Writes(RunThrow {
+            first_row_ends: true,
+            ..RunThrow::every_row(AfterThrow::WritesRow)
+        })
+    );
     assert_eq!(
         search(&["0"], &["5"]),
         FormatThrow::Refused(ThrowRefusal::Mixed)
@@ -2625,6 +2641,30 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     assert!(held_first.reaches(1) && held_first.loaded(4) && held_first.thrown(1).is_none());
     // It reads nothing of its own (the taxonomy texts' reads leave it to `fetched`).
     assert!(!held_first.loaded(1));
+    // A table of `sacc` whose report's first row throws: NCBI's run ends there (the null pointer,
+    // which `tabular::check_failed_lookups` refuses), so no later report holds the subject; at a
+    // later row the run goes on and the next report holds it.
+    let sacc = RunThrow {
+        first_row_ends: true,
+        ..RunThrow::every_row(AfterThrow::WritesRow)
+    };
+    let first_row = HitLoads::of(
+        LoadsBefore::NONE,
+        Some(sacc),
+        [entries(&[1, 0]), entries(&[1])],
+        subject,
+        none,
+    );
+    assert_eq!(first_row.load(1), T);
+    assert!(first_row.reaches(0) && !first_row.reaches(1));
+    let later_row = HitLoads::of(
+        LoadsBefore::NONE,
+        Some(sacc),
+        [entries(&[4, 1, 0]), entries(&[1])],
+        subject,
+        none,
+    );
+    assert_eq!(later_row.load(1), H(Some(holder)));
     let thrown_first = HitLoads::of(
         LoadsBefore::NONE,
         Some(RunThrow::every_row(AfterThrow::EndsRun)),

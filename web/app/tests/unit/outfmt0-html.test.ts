@@ -1,5 +1,5 @@
 // The text that the viewer shows for outfmt 0 of a run made with -html (line RG T4a2, decision
-// T4a2-Web): NCBI's HTML with the tags removed and the four entities decoded. The expected strings
+// T4a2-5): NCBI's HTML with the tags removed and the four entities decoded. The expected strings
 // are written by hand from the engine's fixtures (LOSAT/tests/fixtures/outfmt0).
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -70,5 +70,18 @@ describe('htmlShownText', () => {
     expect(htmlShownText('no markup\n')).toBe('no markup\n');
     // A "<" that closes nowhere starts a tag to the end of the text.
     expect(htmlShownText('x<b')).toBe('x');
+  });
+
+  it('opens a quoted value only where a value starts: an unquoted value keeps a quote as a letter', () => {
+    // NCBI writes the anchor of a local id unquoted (the bytes of `blastp -subject -parse_deflines -html` for the ids a'b, c"d, e>f).
+    expect(htmlShownText(">a'b<a name=a'b></a> apostrophe id title\nLength=450\n")).toBe(">a'b apostrophe id title\nLength=450\n");
+    expect(htmlShownText('>c"d<a name=c"d></a> dquote id title\nLength=450\n')).toBe('>c"d dquote id title\nLength=450\n');
+    // An unquoted value ends at ">": the "f>" after it is text, as a browser shows it.
+    expect(htmlShownText('>e>f<a name=e>f></a> gt id title\nLength=450\n')).toBe('>e>ff> gt id title\nLength=450\n');
+    // A quoted value after "=" (spaces allowed) holds ">" and the other quote, and ends at its own quote.
+    expect(htmlShownText('<a title = "x > \'y\'" name=z>t</a>')).toBe('t');
+    expect(htmlShownText("<a title='say \"> hi\"' href=u>t</a>")).toBe('t');
+    // After an unquoted value and a space the next attribute may be quoted.
+    expect(htmlShownText('<a name=a\'b title="p>q">t</a>')).toBe('t');
   });
 });

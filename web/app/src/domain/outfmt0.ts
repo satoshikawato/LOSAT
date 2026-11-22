@@ -39,17 +39,32 @@ export function htmlShownText(html: string): string {
     out += html.slice(at, found.index);
     at = found.index;
     if (html[at] === '<') {
+      // A browser's reading of a tag: a quote opens a quoted value only where a value starts (after "=",
+      // spaces allowed); an unquoted value (NCBI writes a local id's anchor so: `<a name=a'b>`) runs to
+      // a space or ">" and keeps any quote in it as a letter.
       let quote = '';
+      let value: 'none' | 'expected' | 'unquoted' = 'none';
       at += 1;
       while (at < html.length) {
         const char = html[at]!;
         at += 1;
         if (quote !== '') {
           if (char === quote) quote = '';
-        } else if (char === '"' || char === "'") {
-          quote = char;
         } else if (char === '>') {
           break;
+        } else if (/\s/.test(char)) {
+          if (value === 'unquoted') value = 'none';
+        } else if (value === 'unquoted') {
+          // part of the value
+        } else if (value === 'expected') {
+          if (char === '"' || char === "'") {
+            quote = char;
+            value = 'none';
+          } else {
+            value = 'unquoted';
+          }
+        } else if (char === '=') {
+          value = 'expected';
         }
       }
     } else {

@@ -920,7 +920,7 @@ test('with -sorthits, outfmt 0 shows the alignments of the first subjects in its
 });
 
 // With -html the engine writes outfmt 0 as NCBI's HTML (line RG T4a2): the stored output and its export stay
-// those bytes, and the lists show the text that the HTML displays (decision T4a2-Web, 2026-11-23). The
+// those bytes, and the lists show the text that the HTML displays (decision T4a2-5, 2026-11-23). The
 // FakeEngine writes no HTML, so the engine build checks it.
 test('with -html, outfmt 0 is stored as HTML and the subject list shows the plain title', async ({ page }) => {
   test.skip(!BUILD_HAS_ENGINE, 'The FakeEngine writes no HTML.');

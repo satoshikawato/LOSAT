@@ -249,11 +249,15 @@ function sectionKey(section: string): string {
 
 /**
  * The subject headings of outfmt 0 in order with their offsets, the query they belong to (the index
- * among the registered queries, matched by id in order) and the sections of their HSPs.
+ * among the registered queries, matched by id in order) and the sections of their HSPs. `raw` is the
+ * bytes as written (the offsets are the records' coordinates; under `-html` a raw `>` at a line's start
+ * is always a heading, NCBI writes a title's `>` as `&gt;`); `shown` gives the text of a range (the ids
+ * and the sections' lines).
  */
 function headingsOf(
-  text: string,
+  raw: string,
   queryIds: readonly string[],
+  shown: (text: string) => string,
 ): Array<{ qIdx: number; offset: number; id: string; hsps: string[] }> {
   const found: Array<{ qIdx: number; offset: number; id: string; hsps: string[] }> = [];
   let qIdx = -1;
@@ -261,19 +265,19 @@ function headingsOf(
   let current: { qIdx: number; offset: number; id: string; hsps: string[] } | undefined;
   let section: string[] | undefined;
   const close = () => {
-    if (section !== undefined && current !== undefined) current.hsps.push(sectionKey(section.join('\n')));
+    if (section !== undefined && current !== undefined) current.hsps.push(sectionKey(shown(section.join('\n'))));
     section = undefined;
   };
-  for (const line of text.split('\n')) {
+  for (const line of raw.split('\n')) {
     if (line.startsWith('Query= ')) {
       close();
       current = undefined;
-      const id = line.slice(7).trim().split(/\s+/)[0]!;
+      const id = shown(line).slice(7).trim().split(/\s+/)[0]!;
       do qIdx++;
       while (qIdx < queryIds.length && queryIds[qIdx] !== id);
     } else if (line.startsWith('>') && qIdx >= 0) {
       close();
-      current = { qIdx, offset, id: line.slice(1).trim().split(/\s+/)[0]!, hsps: [] };
+      current = { qIdx, offset, id: shown(line).slice(1).trim().split(/\s+/)[0]!, hsps: [] };
       found.push(current);
     } else if (line.startsWith(' Score =') && current !== undefined) {
       close();
@@ -296,7 +300,8 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   const where = (record: HspRecord) => `${fixture.id} HSP ${record.index}`;
   // A run with -html wrote NCBI's HTML: the ranges are read as the app shows them (`htmlShownText`).
   const html = fixture.words.includes('-html');
-  const outfmt0Text = (bytes: Uint8Array): string => (html ? htmlShownText(decoder.decode(bytes)) : decoder.decode(bytes));
+  const shownText = (text: string): string => (html ? htmlShownText(text) : text);
+  const outfmt0Text = (bytes: Uint8Array): string => shownText(decoder.decode(bytes));
   /** The name of each subject's heading, by subject (-parse_deflines). */
   const headingNames = new Map<number, string>();
 
@@ -394,6 +399,8 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   // The text has as many sections and subject headings as the records point to: no section or
   // heading of outfmt 0 lacks its records. In a run of two searches outfmt 0 has a hit list of its own:
   // a section or heading that no record points to is a pair whose records are absent or differ.
+  // The headings are counted and located on the raw bytes (the records' offsets); the shown text serves the contents.
+  const raw = decoder.decode(out0);
   const text = outfmt0Text(out0);
   const pointed = new Set([...headings.values()].flatMap((range) => (range === null || skippedHeadings.has(range[0]) ? [] : [range[0]])));
   const twice = searchedTwice(fixture);
@@ -401,7 +408,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   if (!twice) {
     expect(text.match(/^ Score =/gm)?.length ?? 0, `${fixture.id}: outfmt 0 sections and records with one`).toBe(sections);
     expect(text.match(/^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped$/gm)?.length ?? 0, `${fixture.id}: skipped alignments`).toBe(skipped);
-    expect(text.match(/^>/gm)?.length ?? 0, `${fixture.id}: outfmt 0 subject headings and the records' headings`).toBe(pointed.size);
+    expect(raw.match(/^>/gm)?.length ?? 0, `${fixture.id}: outfmt 0 subject headings and the records' headings`).toBe(pointed.size);
   } else {
     const recordsOf = new Map<string, string[]>();
     for (const record of records) {
@@ -409,7 +416,7 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
       recordsOf.set(key, [...(recordsOf.get(key) ?? []), JSON.stringify([record.raw_score, record.q_start, record.q_end, record.s_start, record.s_end])]);
     }
     let seenPointed = 0;
-    for (const heading of headingsOf(text, outputs.queryIds)) {
+    for (const heading of headingsOf(raw, outputs.queryIds, shownText)) {
       if (pointed.has(heading.offset)) {
         seenPointed++;
         continue;
@@ -477,11 +484,9 @@ describe.skipIf(reactors === undefined)('HSP records and the rows and sections o
         } catch (error) {
           // The search of these fixtures is outfmt 0 (the fixture's other format only adds its search):
           // LOSAT refuses outfmt 0 of a record that is both a query and a subject and has masks, as on the
-          // command line (the pd.self rows of formats other than 0), and the id of the other molecule in a
-          // subject (the html.bp.smix.* rows: NCBI reads it, LOSAT refuses it, OWNER_DECISIONS 7,
-          // 2026-10-30; line RG item X7 owns the lift).
-          const refusal = /is both a query and a subject under -parse_deflines and has masks|names the other molecule under -parse_deflines/.test(String(error));
-          if (!refusal || !fixture.words.includes('-parse_deflines')) throw error;
+          // command line (the pd.self rows of formats other than 0).
+          const shared = /is both a query and a subject under -parse_deflines and has masks/.test(String(error));
+          if (!shared || !fixture.words.includes('-parse_deflines')) throw error;
           summary.refused++;
           continue;
         }

@@ -157,12 +157,6 @@ def outfmt0_fixtures(every_format: bool = True) -> list[dict]:
         if row.get("files") and not files:
             continue
         argv = run_oracle.search_argv(row)
-        # The html.bp.smix.* rows: NCBI reads the subject ids of other molecules under -parse_deflines
-        # (`gnl|TI|`), LOSAT refuses them, native and Web alike (OWNER_DECISIONS 7, 2026-10-30; line RG
-        # item X7 owns the lift): no run of either writes the frozen bytes. run.rs
-        # (`parse_deflines_runs_write_ncbis_outputs`) checks the Web's refusal.
-        if row["fixture_id"].startswith("html.bp.smix."):
-            continue
         # A hit list of 0 (-num_alignments 0) fails the CLI's outfmt 6 and 7 while the Web run
         # succeeds with the error on stream 3 (abi_v2.md §5, §7), so there is no native output of
         # those formats to compare: the adapter's tests cover the row (run.rs).

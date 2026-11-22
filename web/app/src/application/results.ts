@@ -16,6 +16,7 @@ import { programById, residueUnit } from '../domain/programs';
 import {
   buildResultIndex,
   filterQuery,
+  flagGiven,
   hitLimits,
   NO_FILTERS,
   orientation,
@@ -517,7 +518,7 @@ export class ResultsBrowser {
    * reads outfmt 0 ranges. The stored bytes and the export stay as written.
    */
   private readOutfmt0(loaded: LoadedRun, range: readonly [number, number]): Promise<string> {
-    const html = loaded.run.snapshot.argv.includes('-html');
+    const html = flagGiven(loaded.run.snapshot.argv, '-html');
     return this.deps.data.readOutputRange(loaded.run.snapshot.runId, 0, range[0], range[1]).then((bytes) => {
       const text = decoder.decode(bytes);
       return html ? htmlShownText(text) : text;

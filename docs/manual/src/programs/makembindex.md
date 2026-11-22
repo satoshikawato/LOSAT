@@ -1,6 +1,6 @@
 # makembindex
 
-`losat makembindex` builds a MegaBLAST index of a nucleotide BLAST database: a table of where each short word occurs in the database, which `blastn -task megablast -use_index true` reads in place of scanning the database. LOSAT's `blastn` searches with the index and gives NCBI's output, except for an index of only some database volumes, a two-hit search and `-db_hard_mask`, which it refuses (see [What LOSAT refuses](../refusals.md)).
+`losat makembindex` builds a MegaBLAST index of a nucleotide BLAST database: a table of where each short word occurs in the database, which `blastn -task megablast -use_index true` reads in place of scanning the database. LOSAT's `blastn` searches with the index and gives NCBI's output, two-hit searches and indexes of only some database volumes included; it refuses `-db_hard_mask` with an index and a few later query batches of an index of only some volumes (see [What LOSAT refuses](../refusals.md)).
 
 It writes the same files as NCBI's `makembindex` 2.17.0, byte for byte.
 
@@ -30,7 +30,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-legacy` | `true` | The index format that `blastn -use_index` reads. `-legacy false` writes the newer format, with `-stride` and `-ws_hint`. |
 | `-stride` | `5` | With `-legacy false`: distance between the database positions that are stored. |
 | `-ws_hint` | `28` | With `-legacy false`: the word size you expect to search with. A value below `-nmer` + `-stride` − 1 is raised to it, with a warning. |
-| `-idmap` | `false` | Also write `VOLUME.map`, the first word of each sequence's title as NCBI makes it, one per line (for a database sequence without a title and with a tax id, the first word of its organism's scientific name from the taxonomy database, or `No`). |
+| `-idmap` | `false` | Also write `VOLUME.00.idx.map` (one per index volume), the first word of each sequence's title as NCBI makes it, one per line (for a database sequence without a title and with a tax id, the first word of its organism's scientific name from the taxonomy database, or `No`). |
 | `-old_style_index` | `false` | One index for the whole input, named by `-output` (deprecated in NCBI). |
 | `-output` | none | With `-old_style_index true`: the name of the index files. Ignored otherwise, with a warning. |
 | `-iformat` | `blastdb` (`fasta` for the old style) | Input format. |

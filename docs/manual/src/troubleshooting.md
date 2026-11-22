@@ -10,7 +10,7 @@ Questions and answers for the problems people meet most. Each answer is based on
 error: the NCBI BLAST+ option -html is not supported by LOSAT's BLASTN
 ```
 
-The command exits with status 2 and runs nothing. For an output format that NCBI writes and LOSAT does not (for example `psiblast -outfmt 1`), the message is `Error: output format 1 is not supported by LOSAT's PSIBLAST yet`, and it comes before any input is read.
+The command exits with status 2 and runs nothing. For an output format that NCBI writes and LOSAT does not (in `psiblast` or `tblastn -in_pssm`), see [Output formats](output-formats.md) and [`psiblast` refuses some `-outfmt` values](#psiblast-refuses-some--outfmt-values).
 
 **Why?** LOSAT stops with an error for each option and value it does not implement. It never ignores an option and never runs something else in its place, so a result you get is the result you asked for.
 
@@ -24,7 +24,7 @@ A different message, `error: unknown option or argument '-xyz'; use -help to lis
 losat --install-shims: these files exist and are not this executable; nothing was installed: /path/to/bin/blastn
 ```
 
-A file with one of the 15 program names is already in the folder, often NCBI's own `blastn`. LOSAT never overwrites a file that is not a LOSAT link or copy, and it makes none of the names when one is in the way. Exit status is 1.
+A file with one of the 16 program names is already in the folder, often NCBI's own `blastn`. LOSAT never overwrites a file that is not a LOSAT link or copy, and it makes none of the names when one is in the way. Exit status is 1.
 
 You can:
 
@@ -100,6 +100,32 @@ These apply when you run `losat.wasm` yourself. See [Platforms and WebAssembly](
 ## The output differs from NCBI BLAST+
 
 First check [Differences from NCBI BLAST+](differences.md). A few differences are on purpose, for example a local `tblastx` or `tblastn` subject translated with `-db_gencode`, the last digit of some full-precision values on macOS, and the `CL:` tag of SAM output. If your case is not covered there, it is a bug: please report it.
+
+## `psiblast` refuses some `-outfmt` values
+
+`psiblast` writes `-outfmt 0`, `5` to `11` and `20` from a FASTA query, `-in_pssm` or `-in_msa`, at any `-num_iterations`. `tblastn -in_pssm` writes `0` to `10` and `20`.
+
+- A `psiblast` format `1` to `4`, `12` to `16` or `18` stops before the search: `Error: output format N is not supported by LOSAT's PSIBLAST yet`.
+- A `tblastn -in_pssm` format `12` to `16` or `18` stops after the PSSM is read: `Error: output format N with -in_pssm is not supported by LOSAT's TBLASTN yet`. `-outfmt 11` stops there too, because NCBI's own run of it stops with a C++ exception whose report changes from run to run.
+- Each exits with status 1.
+
+Use NCBI BLAST+ if your workflow requires those formats.
+
+## `rpsblast` or `rpstblastn` rejects `-subject`
+
+Both `rpsblast` and `rpstblastn` search profile databases (`-db`, such as CDD) only and have no `-subject` option, matching NCBI BLAST+ 2.17.0. Passing `-subject` exits with status 2 at argument parsing.
+
+## `blastn -use_index true` stops with an error
+
+`losat blastn -use_index true` searches with MegaBLAST index files built by `makembindex`. It refuses the search when an index covers only some volumes of `-db`, when `-window_size` is above 0 (two-hit search), when `-db_hard_mask` is given, or when an index volume is damaged or does not match the database (see [What LOSAT refuses](refusals.md#blastn)). Omit `-use_index true` to search without an index.
+
+## `rpsblast`, `rpstblastn`, or `rpsbproc` is missing in Python (`pylosat`), Rust (`losat::api`), or LOSAT Web
+
+In v0.2.0, `losat::api` and `pylosat` run the six core search programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`) and wrap the seven tools (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex`). The `losat` npm package and LOSAT Web run `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` (`psiblast` is not available in the browser engine). `rpsblast`, `rpstblastn` and `rpsbproc` run on the command line only (through `losat` or its installed shims).
+
+## A full-precision E-value on macOS differs in the 15th digit
+
+On macOS (`-outfmt 8` or `-outfmt 11`), the last (15th) significant digit of a full-precision E-value can differ by 1 because of Apple's maths library. Tabular, JSON, XML and pairwise formats are unaffected in practice, and Linux, Windows and WASI match Linux x86_64. See [Differences from NCBI BLAST+](differences.md#last-digit-of-a-full-precision-value-on-macos) and [Platforms and WebAssembly](platforms.md#macos).
 
 ## Where to report a problem
 

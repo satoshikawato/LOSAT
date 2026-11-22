@@ -16,6 +16,8 @@
 //!   of an NCBI exception report ([`losat_text`]: the message of each exception, without NCBI's
 //!   `NCBI C++ Exception:` header, its thread, the source file of NCBI's build tree and the line,
 //!   the class and error code, and NCBI's C++ function).
+//! - NCBI's report of running out of memory ([`OUT_OF_MEMORY`]), whose text stays NCBI's: its one
+//!   producer for every program.
 //!
 //! NCBI's diagnostic codes such as `(106.15)`, the message bodies, the exit statuses and every
 //! other byte of the search outputs stay NCBI's.
@@ -143,6 +145,10 @@ pub const NCBI_EXCEPTION_HEADER: &str = "NCBI C++ Exception:";
 /// NCBI's text of a `CStringException`'s position (`ReportExtra`), and LOSAT's.
 pub const NCBI_POSITION: &str = "(m_Pos = ";
 pub const POSITION: &str = "(position ";
+
+/// NCBI's report of a `std::bad_alloc` that leaves a program (`CATCH_ALL`'s, exit status 4, and
+/// makeblastdb's): a message body, which stays NCBI's; its one producer, with NCBI's other words.
+pub const OUT_OF_MEMORY: &str = "BLAST ran out of memory";
 
 /// The classes of NCBI's serial exceptions whose names do not end with `Exception`.
 pub const SERIAL_EXCEPTION_CLASSES: &[&str] = &["CInvalidChoiceSelection", "CUnassignedMember"];

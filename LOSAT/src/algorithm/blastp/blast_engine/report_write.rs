@@ -17,7 +17,7 @@
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
 //! (`BlastpReports`, `BlastpRanges`, `BlastpReport`, `ShownSubjects`, `ShownQueries`,
-//! `query_record_masks`, `mask_query_rows`, `blastp_scan_mode_definition`,
+//! `query_record_masks`, `set_row_masks`, `blastp_scan_mode_definition`,
 //! `write_blastp_tabular_hit_lists`) and its sibling modules `anchored`, `database`, `psi_round`,
 //! `pssm_hooks`, `query_rows` and `x_soft_subject`.
 
@@ -29,8 +29,8 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::{
-    anchored, blastp_scan_mode_definition, database, mask_query_rows, psi_round, pssm_hooks,
-    query_record_masks, query_rows, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
+    anchored, blastp_scan_mode_definition, database, psi_round, pssm_hooks, query_record_masks,
+    query_rows, set_row_masks, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
     BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
@@ -962,22 +962,22 @@ pub(super) fn write_pairwise(
                     },
                 }
             });
-        if anchored_sequences.is_none() {
-            if let Some(masks) = query_masks.as_deref() {
-                mask_query_rows(rows.to_mut(), masks);
-            }
-            // `-lcase_masking`: the subject rows show their records' lower case too.
-            if args.lcase_masking {
-                rows = std::borrow::Cow::Owned(x_soft_subject::x_masked_subject_rows(
-                    &rows,
-                    subject_records,
-                    ranges.subject_placements,
-                ));
-            }
-            if let Some(masks) = db_subject_masks.as_ref() {
-                rows =
-                    std::borrow::Cow::Owned(x_soft_subject::lower_case_subject_rows(&rows, masks));
-            }
+        if anchored_sequences.is_none()
+            && (query_masks.is_some() || args.lcase_masking || db_subject_masks.is_some())
+        {
+            // `-lcase_masking`: the subject rows show their records' lower case too; a masked
+            // database search, its masks.
+            let lcase_masks = if args.lcase_masking {
+                x_soft_subject::x_subject_masks(&rows, subject_records, ranges.subject_placements)
+            } else {
+                Default::default()
+            };
+            let no_masks = Default::default();
+            set_row_masks(
+                rows.to_mut(),
+                query_masks.as_deref(),
+                [&lcase_masks, db_subject_masks.as_ref().unwrap_or(&no_masks)],
+            );
         }
         // psiblast's rounds: the round's report (`psiblast_round`), without the
         // epilog.

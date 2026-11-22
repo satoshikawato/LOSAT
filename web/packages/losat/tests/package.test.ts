@@ -119,7 +119,7 @@ describe.skipIf(!built)('the built package', () => {
 
   it("names the engine's version and the reactors' ABI version, as the README's table does", () => {
     const abi = JSON.parse(readFileSync(join(DIST, 'abi.json'), 'utf8')) as { package: string; engine: string; abi_version: number };
-    expect(abi).toEqual({ package: engineVersion(), engine: engineVersion(), abi_version: 11 });
+    expect(abi).toEqual({ package: engineVersion(), engine: engineVersion(), abi_version: 12 });
     expect(README).toContain(`| ${abi.package} | ${abi.engine} | ${abi.abi_version} |`);
     expect(README).toContain(`(ABI v2 at version ${abi.abi_version}, `);
   });
@@ -141,7 +141,7 @@ describe.skipIf(!built)('the built package', () => {
         '  abi.abi_version, typeof record.artifacts, ENGINE_ASSETS.serial.url === wasm]));',
       ].join('\n');
       const printed = execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: consumer, encoding: 'utf8' });
-      expect(JSON.parse(printed)).toEqual(['function', 5, [0, 6, 7], 'function', 11, 'object', true]);
+      expect(JSON.parse(printed)).toEqual(['function', 5, [0, 6, 7], 'function', 12, 'object', true]);
     } finally {
       rmSync(consumer, { recursive: true, force: true });
     }

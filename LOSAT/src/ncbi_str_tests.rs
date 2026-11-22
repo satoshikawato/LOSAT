@@ -1,4 +1,5 @@
 use super::*;
+use crate::utils::byte_search::tests::{search_needles, search_texts};
 
 // NCBI BLAST+ 2.17.0, probes of line RG D1a-3 (outfmt 0 prolog and epilog, blastdbcmd
 // `-info`) and the copy of `s_PrintBase10Uint8` in D/logs/survey_d1a3/sim/commas.c.
@@ -657,4 +658,132 @@ fn c_atoi_is_glibcs() {
     assert_eq!(c_atoi(b"-99999999999999999999"), 0);
     assert_eq!(c_atoi(b"-9223372036854775808"), 0);
     assert_eq!(c_atoi(b"-9223372036854775807"), 1);
+}
+
+/// `NStr::Replace` as dev had it before `find` (a slice compare at every byte), the reference
+/// of the tests.
+fn replace_by_windows(src: &[u8], search: &[u8], replacement: &[u8]) -> Vec<u8> {
+    let mut dst = Vec::new();
+    let mut pos = 0;
+    while let Some(found) = src[pos..]
+        .windows(search.len())
+        .position(|window| window == search)
+    {
+        dst.extend_from_slice(&src[pos..pos + found]);
+        dst.extend_from_slice(replacement);
+        pos += found + search.len();
+    }
+    dst.extend_from_slice(&src[pos..]);
+    dst
+}
+
+#[test]
+fn replace_is_the_window_search() {
+    let texts = search_texts();
+    for search in search_needles() {
+        for replacement in [&b""[..], b"X", b"   ", b"a", b"aa", b"\\t"] {
+            for text in &texts {
+                let expected = replace_by_windows(text, &search, replacement);
+                let got = replace(text, &search, replacement);
+                assert_eq!(*got, expected, "{text:?} {search:?} {replacement:?}");
+                let unchanged = search == replacement || find(text, &search).is_none();
+                assert_eq!(
+                    matches!(got, Cow::Borrowed(_)),
+                    unchanged,
+                    "{text:?} {search:?} {replacement:?}"
+                );
+                let mut in_place = text.clone();
+                replace_in_place(&mut in_place, &search, replacement);
+                assert_eq!(in_place, expected, "{text:?} {search:?} {replacement:?}");
+            }
+        }
+    }
+}
+
+/// Occurrences from the left, at the ends, overlapping, and in a replacement (never read again).
+#[test]
+fn replace_takes_occurrences_from_the_left() {
+    let r = |src: &[u8], search: &[u8], replacement: &[u8]| {
+        replace(src, search, replacement).into_owned()
+    };
+    assert_eq!(r(b"", b"\\t", b"   "), b"");
+    assert_eq!(r(b"\\t", b"\\t", b"   "), b"   ");
+    assert_eq!(r(b"\\ta\\t", b"\\t", b"   "), b"   a   ");
+    assert_eq!(r(b"a\\\\tb", b"\\t", b"   "), b"a\\   b");
+    assert_eq!(r(b"aaa", b"aa", b"X"), b"Xa");
+    assert_eq!(r(b"aaaa", b"aa", b"a"), b"aa");
+    assert_eq!(r(b"abab", b"ab", b"abab"), b"abababab");
+    assert_eq!(r(b"x. [. [", b". [", b" ["), b"x [ [");
+    assert_eq!(r(b"a. . [b", b". [", b" ["), b"a.  [b");
+    assert_eq!(r(b"b\x01\x01\x01", b"\x01", b" "), b"b   ");
+    assert_eq!(r(b"a", b"ab", b"X"), b"a");
+}
+
+/// `NStr::PrintableString` as dev had it before `find_first` (the loop looks at every byte), the
+/// reference of the test below.
+fn printable_string_byte_by_byte(str_: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (i, &byte) in str_.iter().enumerate() {
+        let mut c = byte;
+        match byte {
+            0x07 => c = b'a',
+            0x08 => c = b'b',
+            0x0c => c = b'f',
+            b'\r' => c = b'r',
+            b'\t' => c = b't',
+            0x0b => c = b'v',
+            b'\n' => c = b'n',
+            b'\\' | b'\'' | b'"' => {}
+            b'?' => {
+                let after_one = i > 0 && str_[i - 1] == b'?';
+                let before_one = i + 1 < str_.len() && str_[i + 1] == b'?';
+                if !after_one && !before_one {
+                    out.push(byte);
+                    continue;
+                }
+            }
+            0x20..=0x7e => {
+                out.push(byte);
+                continue;
+            }
+            _ => {
+                out.push(b'\\');
+                let mut reduce = i == str_.len() - 1 || !(b'0'..=b'7').contains(&str_[i + 1]);
+                for (shift, last) in [(6, false), (3, false), (0, true)] {
+                    let v = (c >> shift) & 7;
+                    if last || v != 0 || !reduce {
+                        out.push(b'0' + v);
+                        reduce = false;
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(b'\\');
+        out.push(c);
+    }
+    out
+}
+
+#[test]
+fn printable_string_skips_only_what_it_passes_over() {
+    let mut texts = search_texts();
+    texts.extend([
+        b"a?b??c???d?".to_vec(),
+        b"?".to_vec(),
+        b"??".to_vec(),
+        b"x\x01".to_vec(),
+        b"\x017".to_vec(),
+        (0..=255).collect(),
+    ]);
+    for text in texts {
+        let got = printable_string(&text);
+        let expected = printable_string_byte_by_byte(&text);
+        assert_eq!(*got, expected, "{text:?}");
+        assert_eq!(
+            matches!(got, Cow::Borrowed(_)),
+            expected == text,
+            "{text:?}"
+        );
+    }
 }

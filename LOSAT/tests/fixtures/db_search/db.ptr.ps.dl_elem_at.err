@@ -1,2 +1,2 @@
-BLAST query/options error: Unrecognized format for PSSM in /home/kawato/losat-baselines/remaining-gaps-20261112/D/d3/c3b/logs/tmp/pssm_inputs_xmuya4rq/d3b_dl_elem_at.asn (must be PssmWithParameters)
+BLAST query/options error: Unrecognized format for PSSM in tests/fixtures/pssm/d3b_dl_elem_at.asn (must be PssmWithParameters)
 Please refer to the BLAST+ user manual.

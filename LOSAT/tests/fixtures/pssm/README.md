@@ -53,7 +53,8 @@ The six `block_*` cases (the query's ncbistdaa OCTET STRING with a length past t
 the review of D3c-3a (`remaining-gaps-20261112/D/d3/c3a/review_probe/`), frozen with the official build under an address limit
 of 8 GiB.
 
-`d3b_<case>.asn.gz` (31 text files) and `d3b_b_<case>.asnb` (7 BER files): the inputs of the rows `db.ptr.ps.<case>`
+`d3b_<case>.asn.gz` (24 text files), `d3b_<case>.asn` (7 text files whose NCBI answer is an error that names the file,
+kept uncompressed for that reason) and `d3b_b_<case>.asnb` (7 BER files): the inputs of the rows `db.ptr.ps.<case>`
 (psiblast, `-comp_based_stats 0 -evalue 1000`, database `tests/db_search/paja`) and `db.ptr.tbn.<case>` (tblastn,
 `-evalue 1000`, database `tests/db_search/tslice`) in `tests/db_search_manifest/psiblast.ptr.tsv` and `tblastn.ptr.tsv`:
 NCBI's pointer forms where its reader reads a member or an element held by reference (an OPTIONAL member of a class type,

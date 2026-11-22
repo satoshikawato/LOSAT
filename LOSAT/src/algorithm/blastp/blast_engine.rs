@@ -9767,7 +9767,7 @@ fn run_call(
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
     // trees (hspfilter_culling.c:516-581; `culling.rs`), where the collector's lists were
     // updated as the subjects came; `-best_hit_*`: `s_BlastHSPBestHitFinal` from the best hit
-    // lists (hspfilter_besthit.c:190-221; `besthit.rs`). A query chunk's lists leave below as the
+    // lists (hspfilter_besthit.c:194-231; `besthit.rs`). A query chunk's lists leave below as the
     // collector's do.
     if let Some(filter) = prelim_filter.take() {
         filter.finish(&mut x_compact_hit_lists);

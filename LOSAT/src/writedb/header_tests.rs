@@ -41,6 +41,38 @@ fn bytes_outside_the_visible_range_become_number_signs() {
     assert_eq!(reported, [(0xC3, 21), (0xA9, 22), (0x80, 29), (0x7F, 33)]);
 }
 
+/// The runs that `write_visible_string` copies whole give the record and the reports of the loop
+/// over each byte that it replaced, for texts of every byte and length.
+#[test]
+fn visible_runs_are_written_as_byte_by_byte() {
+    let mut prefix = vec![0x30, 0x80];
+    for text in crate::utils::byte_search::tests::search_texts() {
+        let earlier = BadTitleChar {
+            byte: 0,
+            stream_offset: 0,
+        };
+        let (mut out, mut bad) = (prefix.clone(), vec![earlier]);
+        write_visible_string(&mut out, &text, &mut bad);
+        let (mut expected, mut expected_bad) = (prefix.clone(), vec![earlier]);
+        expected.push(TAG_VISIBLE_STRING);
+        write_length(&mut expected, text.len());
+        for &byte in &text {
+            if (b' '..=b'~').contains(&byte) {
+                expected.push(byte);
+            } else {
+                expected_bad.push(BadTitleChar {
+                    byte,
+                    stream_offset: expected.len(),
+                });
+                expected.push(b'#');
+            }
+        }
+        assert_eq!(out, expected, "{text:?}");
+        assert_eq!(bad, expected_bad, "{text:?}");
+        prefix.push(b'x');
+    }
+}
+
 #[test]
 fn lengths_and_integers_take_the_shortest_form() {
     let mut out = Vec::new();

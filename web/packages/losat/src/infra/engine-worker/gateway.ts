@@ -205,9 +205,11 @@ export class WasmEngine implements EngineGateway {
   }
 
   private async launch(active: ActiveRun, request: EngineRunRequest, output: MessagePort): Promise<void> {
+    // A run of -db searches the files of its directory, by their size as the subject's.
+    const searched = request.subject?.bytes.length ?? (request.files ?? []).reduce((total, { file }) => total + file.size, 0);
     const threads = chooseThreads(
       request.requestedThreads,
-      request.query.bytes.length + request.subject.bytes.length,
+      request.query.bytes.length + searched,
       this.options.hardwareConcurrency ?? navigator.hardwareConcurrency,
     );
     const modules = await this.compiled();
@@ -228,7 +230,8 @@ export class WasmEngine implements EngineGateway {
       argv: request.argv,
       threads,
       query: workerInput(program, request.query),
-      subject: workerInput(program, request.subject),
+      ...(request.subject === undefined ? {} : { subject: workerInput(program, request.subject) }),
+      ...(request.files === undefined ? {} : { files: request.files }),
       ...(request.windowMasker === undefined ? {} : { windowMasker: workerCounts(request.windowMasker) }),
       ...(request.conffile === undefined ? {} : { conffile: request.conffile }),
       output,

@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 12, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 13, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 12 |
+| 0.2.0 | 0.2.0 | 13 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
@@ -195,6 +195,68 @@ abi.release(subject.handle);
 
 The package's tests run this example on one of the repository's fixtures (`tests/package.test.ts`):
 its outfmt 6 is byte for byte what NCBI BLAST+ 2.17.0 writes for the same search.
+
+## Running windowmasker
+
+`engine.runTool(argv, options)` runs the command line's `windowmasker` (`losat windowmasker`: `-mk_counts` in each
+`-sformat`, `-convert`, and the masking of `-ustat` in each `-outfmt`, with their options, help and version) on the
+user's files, as the command line runs it in a folder that holds them. `argv[0]` is `windowmasker`, then the command
+line's words. `options.directory` holds the files that the words name (`-in`, `-ustat`, `-fa_list` and the files it
+lists, `-ids`, `-exclude_ids`, a BLAST database of `-infmt blastdb`, `-conffile`), each a `DirectoryFile` that the engine
+reads in place, as for a search of `-db` (above). The promise resolves with the command line's exit status
+(`status`, whatever it is: a refusal of the words is status 3, its text on `stderr`) and what the tool wrote: `stdout`,
+`stderr` and `files` (`-out FILE`, `-logfile FILE`, in the order the run opened them, named as the argv writes them;
+two openings of one name are two files). A name that is not a tool rejects. The run is one at a time with the searches;
+`options.signal` cancels it.
+
+```ts
+import { WasmEngine } from 'losat';
+
+declare const engine: WasmEngine; // as in "Use"
+declare const fasta: File; // the genome, from a file picker
+
+const argv = ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-unit', '15', '-out', 'genome.counts', '-logfile', 'genome.log'];
+const verdict = await engine.validateTool(argv); // the command line's check of the words, before any file is opened
+if (!verdict.ok) throw new Error(verdict.message);
+
+// Without sinks, each output is collected as a Blob (a list of the engine's chunks, never one joined array).
+const { status, stderr, files } = await engine.runTool(argv, { directory: [{ name: 'genome.fa', file: fasta }] });
+const counts = files.find((file) => file.name === 'genome.counts')?.file; // a Blob
+if (status !== 0) throw new Error(await stderr.text());
+```
+
+A tool's output may be larger than the browser's memory (human unit counts are 724 MB, a genome masked as FASTA is
+3.1 GB), so the engine sends it as it writes it, and a sink takes each chunk instead of the host keeping it:
+
+```ts
+declare const folder: FileSystemDirectoryHandle; // the user's choice, from showDirectoryPicker()
+
+const result = await engine.runTool(
+  ['windowmasker', '-ustat', 'genome.counts', '-in', 'genome.fa', '-outfmt', 'fasta', '-out', 'masked.fa'],
+  {
+    directory: [
+      { name: 'genome.counts', file: counts! },
+      { name: 'genome.fa', file: fasta },
+    ],
+    sinks: {
+      onStderr: (chunk) => console.warn(new TextDecoder().decode(chunk, { stream: true })),
+      // One sink for each file that the run opens; the host calls `write` for each chunk, in order, then `close`.
+      onFile: async (name) => {
+        const writable = await (await folder.getFileHandle(name, { create: true })).createWritable();
+        return { write: (chunk) => writable.write(chunk), close: () => writable.close(), abort: (reason) => writable.abort(reason) };
+      },
+    },
+  },
+);
+// The files and the standard error went to the sinks, so `result.files` is empty and `result.stderr` is an empty Blob;
+// `result.status` is the exit status. A sink that returns undefined for a name has that file collected in `files`.
+```
+
+The host awaits each call of a sink before the next one (`write` and `close` may return a promise), and the chunks are the
+sink's own. The engine does not wait for a slow sink: its call is synchronous, so the chunks queue on the page until the sink
+takes them. A cancel, a failure of the engine or an error of a sink ends the run and calls `abort` of each sink whose file is
+still open, and the promise rejects. `engine.validateTool(argv)` needs the engine's `control` to have `validateTool`, as the
+`reactorControl` of "Use" does; a Data worker that serves `describe`, `start` and `validate` has to serve it too.
 
 ## License
 

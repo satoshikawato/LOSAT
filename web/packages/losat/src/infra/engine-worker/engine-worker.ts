@@ -20,6 +20,7 @@ import {
   type WorkerPrepare,
   type WorkerRun,
   type WorkerTestCommand,
+  type WorkerTool,
 } from './protocol.js';
 import { EngineRuntime } from './runtime.js';
 
@@ -175,6 +176,24 @@ async function run(command: WorkerRun): Promise<void> {
   }
 }
 
+/**
+ * A tool run: its standard output, standard error and file frames are posted to the main thread as the engine emits them,
+ * each buffer transferred (D-WW3-6: nothing is held here), and the exit status last. Runs in its turn, as a search does.
+ */
+async function tool(command: WorkerTool): Promise<void> {
+  const { runId } = command;
+  try {
+    if (runtime === undefined) throw new Error('the Engine worker was not initialized');
+    const result = await runtime.tool(command, {
+      chunk: (stream, bytes) => scope.postMessage({ type: 'tool-chunk', generation, runId, stream, bytes }, [bytes.buffer as ArrayBuffer]),
+      file: (frame) => scope.postMessage({ type: 'tool-file', generation, runId, frame }, frame.kind === 'bytes' ? [frame.bytes.buffer as ArrayBuffer] : []),
+    });
+    scope.postMessage({ type: 'tool-done', generation, runId, result });
+  } catch (error) {
+    scope.postMessage({ type: 'done', generation, runId, ok: false, error: toWorkerError(error) });
+  }
+}
+
 // Test builds drive the worker's run output writer directly, so that the run output
 // contract (web/app/tests/contract/run-output.contract.ts) runs with the writer in this worker.
 const testWriters = new Map<number, { readonly writer: RunOutputWriter; readonly port: MessagePort }>();
@@ -204,6 +223,9 @@ scope.onmessage = (event) => {
   else if (command.type === 'run') {
     pending = undefined;
     inTurn(() => run(command));
+  } else if (command.type === 'tool') {
+    pending = undefined;
+    inTurn(() => tool(command));
   } else if (command.type === 'prepare') queuePrepare(command);
   else if (__LOSAT_TEST_HOOKS__) test(command);
 };

@@ -11,7 +11,9 @@
 // much (policy.ts). A preparation hint (prepare) starts the generation, its instance and its
 // thread workers, or that renewal, before the search that would start them. `describe`, `start`
 // and `validate` go to the Data worker's serial reactor, which can answer while a search runs
-// (src/infra/reactor/control.ts).
+// (src/infra/reactor/control.ts). A tool run (`runTool`, ABI v2 version 13) is posted to the same worker, and the chunks and file
+// frames that the worker posts as the tool writes them go to a ToolOutputRouter (tool-output.ts), which gives them to the
+// caller's sinks or collects them as Blobs: the Gateway holds no output whole (D-WW3-6).
 import type { CountsFile } from '../../domain/counts.js';
 import type { RegistryFile } from '../../domain/run-files.js';
 import {
@@ -28,10 +30,14 @@ import {
   type ProgramDescription,
   type RuntimeInfo,
   type StartResult,
+  type ToolEngine,
+  type ToolRunOptions,
+  type ToolRunResult,
+  type ToolValidation,
   type ValidationResult,
 } from '../../ports/engine.js';
 import { engineBuildName, type EngineAssets } from '../reactor/assets.js';
-import type { EngineControl } from '../reactor/control.js';
+import type { EngineControl, ToolControl } from '../reactor/control.js';
 import { loadReactor } from '../reactor/instance.js';
 import { watchLife, webLocks, type LifeLocks } from '../worker-life.js';
 import { InstanceUse } from './instance-use.js';
@@ -48,7 +54,9 @@ import type {
   WorkerInput,
   WorkerLink,
   WorkerRun,
+  WorkerTool,
 } from './protocol.js';
+import { ToolOutputRouter } from './tool-output.js';
 
 /**
  * How a runtime ended (retire): at once (its threaded instance was not in use, or its worker had
@@ -58,8 +66,11 @@ export type RuntimeEnd = 'at-once' | 'grown';
 
 export interface WasmEngineOptions {
   readonly assets: EngineAssets;
-  /** describe/start/validate: the Data worker's serial reactor. */
-  readonly control: EngineControl;
+  /**
+   * describe/start/validate: the Data worker's serial reactor. `validateTool` (`reactorControl` has it) answers
+   * `WasmEngine.validateTool`; a control without it makes that call reject.
+   */
+  readonly control: EngineControl & Partial<ToolControl>;
   readonly hardwareConcurrency?: number;
   readonly renewal?: Partial<RenewalLimits>;
   /** Starts an Engine worker (tests may start a test build). */
@@ -120,13 +131,16 @@ interface Generation {
 interface ActiveRun {
   readonly runId: string;
   readonly onPhase: (phase: EnginePhase) => void;
-  readonly resolve: (info: RuntimeInfo) => void;
+  /** Takes the run's `RuntimeInfo`, or a tool run's `ToolRunResult` (`tool` is set). */
+  readonly resolve: (value: RuntimeInfo | ToolRunResult) => void;
   readonly reject: (error: Error) => void;
+  /** A tool run: where the worker's chunks and frames go. */
+  readonly tool?: ToolOutputRouter;
   generation: Generation | undefined;
   settled: boolean;
 }
 
-export class WasmEngine implements EngineGateway {
+export class WasmEngine implements EngineGateway, ToolEngine {
   private current: Generation | undefined;
   private active: ActiveRun | undefined;
   private generations = 0;
@@ -154,12 +168,66 @@ export class WasmEngine implements EngineGateway {
   run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     if (this.active !== undefined) return Promise.reject(new Error('the engine runs one search at a time'));
     return new Promise<RuntimeInfo>((resolve, reject) => {
-      const active: ActiveRun = { runId: request.runId, onPhase, resolve, reject, generation: undefined, settled: false };
+      const active: ActiveRun = {
+        runId: request.runId,
+        onPhase,
+        resolve: (info) => resolve(info as RuntimeInfo),
+        reject,
+        generation: undefined,
+        settled: false,
+      };
       this.active = active;
       this.launch(active, request, output).catch((error: unknown) => {
         output.close();
         this.settle(active, error instanceof Error ? error : new Error(String(error)));
       });
+    });
+  }
+
+  /**
+   * Checks the words of a tool (`windowmasker`) as the command line does before the tool opens a file, on the Data worker's
+   * serial reactor (as `validate`), so that it answers while a run is in progress.
+   */
+  validateTool(argv: readonly string[]): Promise<ToolValidation> {
+    const { control } = this.options;
+    if (control.validateTool === undefined) return Promise.reject(new Error('this engine was made with a control that does not validate tools'));
+    return control.validateTool(argv);
+  }
+
+  /**
+   * Runs a tool (`windowmasker`) on the Engine worker's serial module, in the run's working directory that
+   * `options.directory` makes (`ToolEngine.runTool`). The worker posts the tool's standard output, standard error and files
+   * as it writes them; each goes to `options.sinks` or is collected as a Blob (tool-output.ts). A search and a tool run take
+   * turns: one at a time. `options.signal` cancels the run as `cancel` does a search.
+   */
+  runTool(argv: readonly string[], options: ToolRunOptions = {}): Promise<ToolRunResult> {
+    if (this.active !== undefined) return Promise.reject(new Error('the engine runs one search at a time'));
+    const runId = `tool:${crypto.randomUUID()}`;
+    const { signal } = options;
+    if (signal?.aborted === true) return Promise.reject(new RunCancelledError(runId));
+    return new Promise<ToolRunResult>((resolve, reject) => {
+      const stop = () => this.cancel(runId);
+      const finish = () => signal?.removeEventListener('abort', stop);
+      // A sink or the frames that fail end the run with their error, as a cancel ends a search.
+      const router: ToolOutputRouter = new ToolOutputRouter(options.sinks, (error) => this.stopTool(active, error));
+      const active: ActiveRun = {
+        runId,
+        onPhase: () => undefined,
+        resolve: (result) => {
+          finish();
+          resolve(result as ToolRunResult);
+        },
+        reject: (error) => {
+          finish();
+          reject(error);
+        },
+        generation: undefined,
+        settled: false,
+        tool: router,
+      };
+      this.active = active;
+      signal?.addEventListener('abort', stop, { once: true });
+      this.launchTool(active, argv, options.directory).catch((error: unknown) => this.settle(active, error instanceof Error ? error : new Error(String(error))));
     });
   }
 
@@ -202,6 +270,30 @@ export class WasmEngine implements EngineGateway {
     // Ending the worker ends its thread workers too; nothing of this generation is used again.
     if (active.generation !== undefined && active.generation === this.current) this.retire();
     this.settle(active, new RunCancelledError(runId));
+  }
+
+  private async launchTool(active: ActiveRun, argv: readonly string[], files: ToolRunOptions['directory']): Promise<void> {
+    const modules = await this.compiled();
+    if (active.settled) return;
+    if (this.current?.renew !== undefined) this.retire();
+    const generation = this.current ?? this.startGeneration(modules);
+    active.generation = generation;
+    generation.prepared = undefined;
+    const command: WorkerTool = {
+      type: 'tool',
+      generation: generation.id,
+      runId: active.runId,
+      argv,
+      ...(files === undefined ? {} : { files }),
+    };
+    this.post(generation.worker, command);
+  }
+
+  /** A tool run whose sink failed: its worker ends (the tool may still be running), and the run rejects with the sink's error. */
+  private stopTool(active: ActiveRun, error: unknown): void {
+    if (active.settled) return;
+    if (active.generation !== undefined && active.generation === this.current) this.retire();
+    this.settle(active, error instanceof Error ? error : new Error(String(error)));
   }
 
   private async launch(active: ActiveRun, request: EngineRunRequest, output: MessagePort): Promise<void> {
@@ -342,6 +434,27 @@ export class WasmEngine implements EngineGateway {
       active.onPhase(event.phase);
       return;
     }
+    if (event.type === 'tool-chunk') {
+      if (event.stream === 'stdout') active.tool?.stdout(event.bytes);
+      else active.tool?.stderr(event.bytes);
+      return;
+    }
+    if (event.type === 'tool-file') {
+      active.tool?.frame(event.frame);
+      return;
+    }
+    if (event.type === 'tool-done') {
+      const router = active.tool;
+      if (router === undefined) return;
+      const { status, memory, countsBytes } = event.result;
+      generation.renew = renewalReason(memory, limitsHolding(this.renewal, countsBytes));
+      // The result comes once the router has handed every chunk and frame that the worker posted before it to the sinks.
+      router.finish().then(
+        (collected) => this.settle(active, undefined, { status, ...collected }),
+        (error: unknown) => this.settle(active, error instanceof Error ? error : new Error(String(error))),
+      );
+      return;
+    }
     if (event.type !== 'done') return;
     if (!event.ok) {
       if (event.error.stopped === true) this.retire();
@@ -466,12 +579,15 @@ export class WasmEngine implements EngineGateway {
     }
   }
 
-  private settle(active: ActiveRun, error: Error | undefined, info?: RuntimeInfo): void {
+  private settle(active: ActiveRun, error: Error | undefined, info?: RuntimeInfo | ToolRunResult): void {
     if (active.settled) return;
     active.settled = true;
     if (this.active === active) this.active = undefined;
-    if (error !== undefined) active.reject(error);
-    else active.resolve(info!);
+    if (error !== undefined) {
+      // A tool run that ends without its status: the sinks of its open files are told.
+      void active.tool?.abort(error);
+      active.reject(error);
+    } else active.resolve(info!);
   }
 }
 

@@ -26,6 +26,7 @@ import { InputMismatchError, withRunFiles, withRunOutputFailed, type EnginePhase
 import { DIAGNOSTICS_STREAM, isRunOutput, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { RunOutput } from '../../domain/output-format.js';
+import { ownedFrame, type ToolFrame } from '../../domain/tool-frames.js';
 import {
   discardSignal,
   DISCARD_STREAM,
@@ -49,7 +50,7 @@ import { createSharedMemory } from '../reactor/shared-memory.js';
 import { RunOutputWriter } from '../run-output/writer.js';
 import type { InstanceUse } from './instance-use.js';
 import type { MainLinks } from './link.js';
-import type { RuntimePath, WorkerCounts, WorkerInput, WorkerRun, WorkerRunResult } from './protocol.js';
+import type { RuntimePath, WorkerCounts, WorkerInput, WorkerRun, WorkerRunResult, WorkerTool, WorkerToolResult } from './protocol.js';
 import { ThreadHost } from './thread-host.js';
 import { warmUp } from './warm-up.js';
 
@@ -70,6 +71,15 @@ export interface RuntimeOptions {
   readonly beforeOutput?: () => void;
   /** Test builds only: called at the start of each use of the threaded instance (a search, a warm-up). */
   readonly onUse?: () => void;
+}
+
+/**
+ * Where a tool run's streams go as the tool writes them (`EngineRuntime.tool`). Each chunk is a copy that the receiver owns
+ * (the Engine worker transfers its buffer), and a frame of bytes holds its own copy.
+ */
+export interface ToolPosts {
+  chunk(stream: 'stdout' | 'stderr', bytes: Uint8Array): void;
+  file(frame: ToolFrame): void;
 }
 
 interface Retained {
@@ -176,6 +186,42 @@ export class EngineRuntime {
       return this.search(loaded, request, fallbackReason, phase, windowMasker, registry);
     } finally {
       use?.leave();
+    }
+  }
+
+  /**
+   * Runs a tool (ABI v2 `losat_web2_tool`, version 13) on the serial instance, in the run's working directory that
+   * `request.files` makes (as a search of -db has it), and gives its standard output, standard error and the frames of its
+   * files to `posts` as the engine emits them: nothing of them is held here (D-WW3-6). The instance's retained subject and
+   * counts file are released first, so that the memory and the names of the instance are the tool's, and the files go
+   * back to nothing after the run. Resolves with the exit status, which the engine returns for every status; an error is
+   * the engine's (a name that is not a tool) or a stop of the instance, which the next run starts again.
+   */
+  async tool(request: WorkerTool, posts: ToolPosts): Promise<WorkerToolResult> {
+    const loaded = await this.load('serial');
+    const abi = loaded.instance.abi;
+    try {
+      this.releaseRetained(loaded);
+      this.releaseCounts(loaded, undefined);
+      loaded.directory.open(request.files ?? []);
+      // The engine's standard error of this run only, for a stop message.
+      loaded.instance.wasi.clear();
+      const linearBytesBefore = abi.memoryBytes();
+      const status = abi.tool(request.argv, {
+        stdout: (bytes) => posts.chunk('stdout', bytes.slice()),
+        stderr: (bytes) => posts.chunk('stderr', bytes.slice()),
+        file: (frame) => posts.file(ownedFrame(frame)),
+      });
+      loaded.runs++;
+      return {
+        status,
+        memory: { linearBytesBefore, linearBytesAfter: abi.memoryBytes(), instanceRuns: loaded.runs },
+        ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
+      };
+    } finally {
+      // The run's files are let go (as after a search); a stopped instance is loaded again by the next run.
+      if (abi.stoppedBy === undefined) loaded.directory.open([]);
+      else this.dispose();
     }
   }
 

@@ -323,3 +323,88 @@ export interface EnginePrepareHint {
    */
   readonly argv?: readonly string[];
 }
+
+// --- tools (ABI v2 version 13, `losat_web2_tool`; line NP WW3a, 2026-11-22) -------------------------------------
+
+/**
+ * Where a file that a tool run writes goes, as it is written (D-WW3-6): a tool's output may be larger than the
+ * browser's memory (human counts are 724 MB, a genome masked as FASTA 3.1 GB), so the engine hands it over in
+ * chunks and the host never holds it whole. The calls come in order, each after the promise of the one before has
+ * settled: the chunks of the file in the order that the run wrote them, then `close`. A `chunk` is the sink's own
+ * (it is not used again by the host).
+ */
+export interface ToolFileSink {
+  write(chunk: Uint8Array): void | Promise<void>;
+  /** The run closed the file: all its bytes were written. */
+  close(): void | Promise<void>;
+  /**
+   * The file was left open because the run failed, was cancelled or a sink failed: its bytes are not all there. Optional;
+   * a sink that holds a resource (a writable stream of a file) releases it here.
+   */
+  abort?(reason: unknown): void | Promise<void>;
+}
+
+/**
+ * Where the output of a tool run goes as the run writes it. A stream without a sink is collected: its chunks are kept
+ * as a Blob, never joined into one array (`ToolRunResult`). With a sink, that output is not kept: its Blob is empty,
+ * and the file is not in `files`. Each call of a sink waits for the promise of the one before (a slow sink slows the
+ * host's handling of the engine's chunks, not the engine, which runs on).
+ */
+export interface ToolSinks {
+  /** A chunk of the tool's standard output (ABI v2 stream 11); the chunk is the sink's own. */
+  readonly onStdout?: (chunk: Uint8Array) => void | Promise<void>;
+  /** A chunk of the tool's standard error (stream 3). */
+  readonly onStderr?: (chunk: Uint8Array) => void | Promise<void>;
+  /**
+   * The run opens a file named `name` (as the argv writes it; two openings of one name are two files): returns the sink of
+   * its bytes, or undefined to have the file collected as a Blob in `files`.
+   */
+  readonly onFile?: (name: string) => ToolFileSink | undefined | Promise<ToolFileSink | undefined>;
+}
+
+/** A file that a tool run wrote and the host collected: its name as the argv wrote it, and its bytes as a Blob. */
+export interface ToolFile {
+  readonly name: string;
+  readonly file: Blob;
+}
+
+export interface ToolRunOptions {
+  /**
+   * The files of the run's working directory that the words of the tool name (`-in`, `-ustat`, `-fa_list` and the files it
+   * lists, `-ids`, `-conffile`, a BLAST database of `-infmt blastdb`), as `EngineRunRequest.files` gives them to a search:
+   * the engine reads each in place, never copied whole. A `ToolFile` of an earlier run may be given here.
+   */
+  readonly directory?: readonly DirectoryFile[];
+  readonly sinks?: ToolSinks;
+  /** Aborting it cancels the run: the promise rejects with a RunCancelledError. */
+  readonly signal?: AbortSignal;
+}
+
+/** What a tool run did. `status` is the command line's exit status; the engine returns for every status. */
+export interface ToolRunResult {
+  /** The exit status of the command line's run of the same words. */
+  readonly status: number;
+  /** What the tool wrote to its standard output; empty when `ToolSinks.onStdout` took it. */
+  readonly stdout: Blob;
+  /** What the tool wrote to its standard error; empty when `ToolSinks.onStderr` took it. */
+  readonly stderr: Blob;
+  /** The files that the run wrote (`-out`, `-logfile`), in the order it opened them; those that `ToolSinks.onFile` took are not here. */
+  readonly files: readonly ToolFile[];
+}
+
+/** The verdict of `validateTool`: the command line's error text (its standard error, the usage and the error line) for an argv that it refuses. */
+export type ToolValidation = { readonly ok: true } | { readonly ok: false; readonly message: string };
+
+/** What an engine offers for the command line's tools besides the searches (`windowmasker`). */
+export interface ToolEngine {
+  /**
+   * Runs a tool as the command line runs it in the run's directory (`argv[0]` is the tool's name, `windowmasker`, then the
+   * command line's words), with its standard input empty. Streams the tool's standard output, standard error and files to
+   * `options.sinks` as they are written, then resolves with the exit status (the command line's, for every status, a refusal
+   * of an argument included: its text is on stderr). Rejects for a name that is not a tool that the engine runs, for a
+   * cancel and for a failure of the engine or of a sink. One run at a time, a search's included.
+   */
+  runTool(argv: readonly string[], options?: ToolRunOptions): Promise<ToolRunResult>;
+  /** Checks the words of a tool as the command line checks them before the tool opens a file; reads no file. */
+  validateTool(argv: readonly string[]): Promise<ToolValidation>;
+}

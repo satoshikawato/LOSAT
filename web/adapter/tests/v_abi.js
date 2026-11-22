@@ -58,7 +58,10 @@
 // the CLI runs there (line WQA D12a, 2026-11-20). Each engine runs it on an instance whose `/work` is that
 // directory; the threaded engine's
 // threads share the table of the files it opens (LOSAT/tests/wasi_files.js), as the browser host's
-// threads share theirs (web/packages/losat/src/infra/reactor/run-directory.ts).
+// threads share theirs (web/packages/losat/src/infra/reactor/run-directory.ts). A search with `"run_directory"`
+// (BLASTN `-filtering_db` with `-subject`, line RG item D4) has a subject as every search has and runs on the
+// instance of its directory too, where the engine opens the repeat database by the option's name; its subject
+// handle is held and released on that instance.
 //
 // The words with which the command line prints its help or its version (`checkPrints`; line WQA's D14, 2026-11-20) run
 // for every program and word with the host's -num_threads: *start* says what the run prints, `validate` accepts the argv,
@@ -1226,7 +1229,10 @@ async function main() {
     console.log(`ok ${engine.name} help and version: ${checkPrints(own, options.native)} argvs as the CLI`);
     const subjects = new Map(); // "program subject data_loaders" -> handle, kept across runs
     const subjectReactors = new Map(); // the same key -> the reactor that holds the handle (a run directory's instance has its own)
-    const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
+    // Per reactor, the -window_masker_db value or taxid file name -> { handle, file }, kept across runs: a file registered
+    // on one instance (the engine's own or a run directory's) is known there only, and released there.
+    const counts = new Map();
+    const countsOn = (reactor) => counts.get(reactor) ?? counts.set(reactor, new Map()).get(reactor);
     let countsRegistered = 0, countsKept = 0;
     const databases = new Map(); // a -db search's directory -> the engine's instance whose "/work" it is
     for (const search of all) {
@@ -1281,8 +1287,8 @@ async function main() {
         continue;
       }
       let queryIds = q && JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
-      const taxid = registerTaxidCounts(reactor, counts, search);
-      const named = registerCounts(reactor, counts, search) ?? taxid;
+      const taxid = registerTaxidCounts(reactor, countsOn(reactor), search);
+      const named = registerCounts(reactor, countsOn(reactor), search) ?? taxid;
       if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
       for (const threads of engine.threads) {
         const argv = [...search.argv, ...custom, "-num_threads", String(threads)].join("\0");
@@ -1403,7 +1409,7 @@ async function main() {
       if (registry !== null) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
     }
     for (const [key, handle] of subjects) assert.equal(subjectReactors.get(key).call("losat_web2_release", handle).status, 0);
-    for (const { handle } of counts.values()) assert.equal(own.call("losat_web2_file_release", handle).status, 0);
+    for (const [holder, held] of counts) for (const { handle } of held.values()) assert.equal(holder.call("losat_web2_file_release", handle).status, 0);
     for (const instance of databases.values()) await instance.close();
     if (countsRegistered + countsKept) console.log(`ok ${engine.name} -window_masker_db and -window_masker_taxid: ${countsRegistered} searches that registered counts, ${countsKept} searches with counts kept or unregistered`);
     await close();

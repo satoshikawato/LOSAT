@@ -131,7 +131,8 @@ describe('buildArgv', () => {
     }
   });
 
-  // BLASTN's -filtering_db searches a BLAST database of repeats, which the browser build cannot read.
+  // BLASTN's -filtering_db searches a BLAST database of repeats: the engine reads it from the run's directory, but the
+  // form has no input for its files yet (D4-W2, with WQA D12b; Owner 2026-11-22).
   it('refuses the database of repeats of BLASTN, also written -flag=value', () => {
     for (const words of [['-filtering_db', 'repeats'], ['-filtering_db=repeats']]) {
       expect(extra('blastn', words)).toThrow(/^-filtering_db \(a BLAST database of repeats\) is not supported in the browser yet$/);

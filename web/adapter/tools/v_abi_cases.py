@@ -44,7 +44,10 @@ the runs whose outcome and standard error are those of the argv's own `-outfmt` 
 whose files the engine opens in the run's working directory (abi_v2.md §3; line WQA D12a, 2026-11-20), with
 a query read with the data loaders on and off (`-conffile` of `DATA_LOADERS=none`), and the
 inputs of line WQA's D13 and D16 (`scan_d13`: gap lines, joined lines, Seq-id first lines, and
-`-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2).
+`-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2), and BLASTN
+`-filtering_db` (line RG item D4): with `-db` (`REPEAT_ROWS`, `REPEAT_FAILURE_ROWS`) and with `-subject`
+(`repeat_subject`, `"run_directory": true`: the subject is registered as for every search, and the run goes to
+the instance whose `/work` holds the repeat database).
 `--group fasta_input` writes that group of the full suite alone.
 
 Usage: v_abi_cases.py --suite quick|full [--group fasta_input] --out FILE.json
@@ -274,8 +277,11 @@ DATABASE_ROWS = ["db.blastn.mega.6", "db.d1.6", "db.blastx.default.6", "db.tblas
 # files the engine opens by `-filtering_db`'s name. Rows of db.rpt.* in LOSAT/tests/db_search_manifest/blastn.rpt.tsv
 # without an environment: four tasks and both strands in outfmt 6, outfmt 0, the archive (11) with the lower case
 # joined to the repeats, a -query_loc edge, and the XML of the filter (5).
-REPEAT_ROWS = ["db.rpt.mb.6", "db.rpt.bn.6", "db.rpt.short.6", "db.rpt.plus.6", "db.rpt.minus.6", "db.rpt.mb.0",
+REPEAT_ROWS = ["db.rpt.mb.6", "db.rpt.bn.6", "db.rpt.short.6", "db.rpt.dc.6", "db.rpt.plus.6", "db.rpt.minus.6", "db.rpt.mb.0",
                "db.rpt.edge_lo.0", "db.rpt.lc.11", "db.rpt.edge_lo.11", "db.rpt.mb.5"]
+# The repeat search's errors through the adapter (D4-web; review N4): a repeat database whose header counts are
+# wrong and a query without letters, whose NCBI messages name no path (exit 3; the native CLI's run is compared).
+REPEAT_FAILURE_ROWS = ["db.rpt.badcount.6", "db.rpt.noletters.6"]
 # The -subject run of a repeat database (D4-web): rpt.* rows of LOSAT/tests/fixtures/blastn_regression/manifest.tsv.
 REPEAT_SUBJECT_ROWS = ["rpt.megablast", "rpt.blastn_fmt0", "rpt.lc", "rpt.fmt11"]
 
@@ -307,6 +313,11 @@ def database() -> list[dict]:
         else:
             search["frozen"][row["outfmt"]] = row["stdout_sha256"]
         searches.append(search)
+    for row_id in REPEAT_FAILURE_ROWS:
+        row = rows[row_id]
+        assert row["kind"] == "ncbi" and row["rc"] == "3" and row["program"] == "blastn", row_id
+        searches.append({"program": "blastn", "argv": ["blastn", "-db", row["db"], "-query", row["query"], *shlex.split(row["extra_args"])],
+                         "cwd": str(REPO / "LOSAT"), "cases": [row_id], "frozen": {}, "expect": "failure", "database": True})
     searches += repeat_subject()
     # With -parse_deflines the run registers its query with `register_inputs` (its subject handle 0, the
     # response's subject null), and the records' `s_idx` are the database's OIDs (abi_v2.md §4, §8); the

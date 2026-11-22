@@ -152,7 +152,7 @@ it needs, with `FileReaderSync` in the workers: a database is never copied into 
 browser's storage. Every thread of a threaded search reads the same files.
 
 BLASTN's `-filtering_db` (a database of repeats that masks the query) runs the same way, with `-db` or
-with a `-subject`: give the run the repeat database's files (`<name>.nin`, `.nhr`, `.nsq`, or its alias file)
+with a `-subject`: give the run the repeat database's files (every file of that database, as for `-db`)
 in `EngineRunRequest.files` under the name of the option's value, and the engine searches it for repeats
 as the command line does. LOSAT Web's form has no input for these files yet and refuses the option.
 

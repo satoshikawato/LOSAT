@@ -528,9 +528,12 @@ pub struct BlastpPairwiseReport {
     pub gapped_karlin: KarlinParams,
     /// None with `-searchsp` (`PrintKAParameters` without `gbp`).
     pub gumbel: Option<BlastGumbelBlk>,
-    /// A gapped search (`options.GetGappedMode()`); BLASTP's `-ungapped` search has no `Gapped`
-    /// Karlin block in a query's footer and no `Gap Penalties:` line in the epilog.
+    /// The options' gapped mode: an ungapped search's footers print the ungapped Karlin block
+    /// only and its epilog no `Gap Penalties` line (`gapped_karlin` is then unused).
     pub gapped: bool,
+    /// NCBI's `m_ShowLinkedSetSize` (sum statistics in an ungapped search): the description
+    /// table's `N` column.
+    pub show_linked_set_size: bool,
     /// Subjects in the description table and with alignments, per query (NCBI's
     /// `m_NumDescriptions` and `m_NumAlignments`).
     pub num_descriptions: usize,
@@ -3607,7 +3610,7 @@ pub struct BlastnPairwiseReport {
     pub zero_gap_extension_formula: bool,
     /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
     pub window_size: usize,
-    /// A gapped search (`options.GetGappedMode()`); an ungapped (`-ungapped`) search has no
+    /// A gapped search (the options' gapped mode); an ungapped (`-ungapped`) search has no
     /// Gapped Karlin block in a query's footer and no `Gap Penalties` line in the epilog.
     pub gapped: bool,
     /// Subjects in the description table and with alignments, per query.
@@ -5384,14 +5387,12 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
             } else {
-                write_blastp_query_footer_spacing(
+                write_translated_query_footer(
                     writer,
-                    query.ungapped_karlin,
+                    query,
+                    self.report,
                     self.report.gapped_karlin,
-                    self.report.gumbel,
                     self.report.gapped,
-                    query.effective_search_space,
-                    false,
                 )?;
             }
             return Ok(());
@@ -5410,7 +5411,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             &group.subject_titles,
             self.parsed_subjects,
             self.subject_sources,
-            false,
+            self.report.show_linked_set_size,
             false,
             self.config.sort_columns(query.query_length),
             place,
@@ -5459,7 +5460,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                     parsed,
                     sources,
                     database,
-                    true,
+                    self.report.gapped,
                     self.thrown(subject).is_some(),
                     subject,
                 )
@@ -5506,15 +5507,14 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
     }
 
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
-        let query = &self.queries[q_idx];
-        write_blastp_query_footer_spacing(
+        // An ungapped search's footer has the ungapped Karlin block only (`x_PrintOneQueryFooter`,
+        // cited at `write_translated_query_footer`).
+        write_translated_query_footer(
             writer,
-            query.ungapped_karlin,
+            &self.queries[q_idx],
+            self.report,
             self.report.gapped_karlin,
-            self.report.gumbel,
             self.report.gapped,
-            query.effective_search_space,
-            false,
         )
     }
 }
@@ -5999,7 +5999,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
     }
 
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
-        write_blastx_query_footer(
+        write_translated_query_footer(
             writer,
             &self.queries[q_idx],
             self.report,
@@ -6091,9 +6091,9 @@ pub fn write_blastx_epilog(
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:583-613
-/// The footer of a BLASTX query (`BlastpPairwiseQuery::valid` and `batch_skipped`: its Karlin
-/// blocks, `gapped`: the gapped one, `gapped_karlin`: the query's, `query_gapped_karlin`).
-fn write_blastx_query_footer(
+/// The footer of a BLASTX or TBLASTN query (`BlastpPairwiseQuery::valid` and `batch_skipped`: its
+/// Karlin blocks, `gapped`: the gapped one, `gapped_karlin`: the query's, `query_gapped_karlin`).
+fn write_translated_query_footer(
     writer: &mut impl Write,
     query: &BlastpPairwiseQuery,
     report: &BlastpPairwiseReport,

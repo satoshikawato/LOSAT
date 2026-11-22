@@ -1,6 +1,6 @@
 # makembindex
 
-`losat makembindex` builds a MegaBLAST index of a nucleotide BLAST database: a table of where each short word occurs in the database, which `blastn -task megablast -use_index true` reads in place of scanning the database. LOSAT's `blastn` searches with the index and gives NCBI's output, two-hit searches and indexes of only some database volumes included; it refuses `-db_hard_mask` with an index and a few later query batches of an index of only some volumes (see [What LOSAT refuses](../refusals.md)).
+`losat makembindex` builds a MegaBLAST index of a nucleotide BLAST database: a table of where each short word occurs in the database, which `blastn -task megablast -use_index true` reads in place of scanning the database. LOSAT's `blastn` searches with the index and gives NCBI's output, two-hit searches and indexes of only some database volumes included. With `-db_hard_mask` it reports the alignments in the unmasked parts of each sequence, the same at every `-num_threads` (see [Differences from NCBI BLAST+](../differences.md#blastn--use_index-true-with--db_hard_mask)). It refuses a few later query batches of an index of only some volumes (see [What LOSAT refuses](../refusals.md)).
 
 It writes the same files as NCBI's `makembindex` 2.17.0, byte for byte.
 

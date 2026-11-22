@@ -174,6 +174,7 @@ fn refused_batch_setup_error(
         pssm: None,
         fetch_excluded: None,
         max_intron_length: resolved.max_intron_length,
+        query_cov_hsp_perc: resolved.query_cov_hsp_perc,
     };
     let setup = super::stage_d_pipeline::set_up_batch(
         &letters,
@@ -266,6 +267,10 @@ impl TblastnArgs {
         use crate::blastinput::seq_range;
         let mut args = self;
         args.id_scope = args.parse_deflines.then(Default::default);
+        // NCBI's score block looks for the file of an ungapped search's `-matrix` that its tables
+        // do not have when it sets up a batch (`TblastnArgs::find_matrix_file`); the search
+        // refuses it there (`args::check_search_limits`).
+        args.find_matrix_file(&settings.matrix_search)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
         // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
         // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
@@ -1191,6 +1196,8 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::TBLASTN_TASK.check(&mut args.task)?;
+    // The file of an unknown `-matrix`, as the command line's `run_io` looks it up.
+    args.find_matrix_file(&settings.matrix_search)?;
     report_formats(outputs, args.out.as_deref())?;
     let archive_requested = outputs
         .formats
@@ -1465,6 +1472,7 @@ fn filter_final_hitlists(
                 super::stage_d_pipeline::preliminary_hitlist_size(
                     resolved.hitlist_size,
                     compo_adjust_mode,
+                    resolved.gapped,
                 ),
             )
         });
@@ -1925,6 +1933,7 @@ fn search(
                 subject_besthit: resolved.subject_besthit,
                 pssm: pssm.as_deref(),
                 fetch_excluded: fetch_excluded.as_ref(),
+                query_cov_hsp_perc: resolved.query_cov_hsp_perc,
             },
             compo_adjust_mode,
             resolved.sum_stats,
@@ -1984,6 +1993,7 @@ fn search(
                             subject_besthit: resolved.subject_besthit,
                             pssm: pssm.as_deref(),
                             fetch_excluded: fetch_excluded.as_ref(),
+                            query_cov_hsp_perc: resolved.query_cov_hsp_perc,
                         },
                         compo_adjust_mode,
                         resolved.sum_stats,
@@ -2187,11 +2197,13 @@ fn search(
                 .map(|batch| batch.searched)
                 .filter(|searched| !searched.is_empty() && searched.end <= results.len())
                 .collect();
-            super::database::prefetch_stop(&titles, &results, &spans).filter(|(span, _)| {
-                failed
-                    .as_ref()
-                    .is_none_or(|(range, _)| span.start < range.start)
-            })
+            super::database::prefetch_stop(&titles, &results, &spans, resolved.gapped).filter(
+                |(span, _)| {
+                    failed
+                        .as_ref()
+                        .is_none_or(|(range, _)| span.start < range.start)
+                },
+            )
         } else {
             None
         };
@@ -2330,6 +2342,7 @@ fn search(
                     outputs.other_outfmts,
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
+                    resolved.gapped,
                 )
                 // A read of a reported sequence that
                 // failed: the run's error, as the check's error would be.
@@ -2430,8 +2443,9 @@ fn search(
                         break;
                     }
                     let hitlists = &results[span.clone()];
-                    // The batch's Seq-aligns, one for each HSP (`database::seq_aligns_of`).
-                    let seq_aligns = super::database::seq_aligns_of(hitlists);
+                    // The batch's Seq-aligns, one for each HSP of a gapped search, one for each
+                    // subject of an ungapped one (`database::seq_aligns_of`).
+                    let seq_aligns = super::database::seq_aligns_of(hitlists, resolved.gapped);
                     // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
                     // (`shared::prefetch_off`), each query's report fetches the subjects it
                     // shows, after the query's own warnings, where the first format's rows read

@@ -86,6 +86,7 @@ fn the_prologs_that_flush_after_their_two_newlines() {
         gapped_karlin: Default::default(),
         gumbel: None,
         gapped: true,
+        show_linked_set_size: false,
         num_descriptions: 500,
         num_alignments: 250,
     };

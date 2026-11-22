@@ -196,8 +196,8 @@ impl TaxIdSet {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/taxid_set.cpp:77-81
-    /// `AddTaxId(seqid, taxid)`: the key of `id` (`AccessionToKey` of its FASTA form) maps to
-    /// `taxid` from now on (makeprofiledb's taxids of the PSSMs' organisms).
+    /// `AddTaxId` of `seqid` and `taxid`: the key of `id` (`AccessionToKey` of its FASTA form) maps
+    /// to `taxid` from now on (makeprofiledb's taxids of the PSSMs' organisms).
     pub fn add_tax_id(
         &mut self,
         id: &ParsedSeqId,

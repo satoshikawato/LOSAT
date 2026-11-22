@@ -76,8 +76,8 @@ pub(super) fn check_input_scoremat(
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:624,1406
 // The `size_t` of a `TSeqPos` (`Uint4`) converted to `int`, which GCC defines as the value modulo
 // 2^32: a length past `INT_MAX` is negative.
-/// `(int) GetQueryLength()`: the length of the query when it is a Bioseq with one, else 0, as an
-/// `int`.
+/// `GetQueryLength()` cast to `int`: the length of the query when it is a Bioseq with one, else 0,
+/// as an `int`.
 pub(super) fn query_length(pssm_w_parameters: &PssmWithParameters) -> i32 {
     pssm_w_parameters
         .pssm
@@ -200,8 +200,8 @@ pub(super) fn update_statistics(
     seq_size: i32,
 ) -> Result<(), ProfileError> {
     let query = query_ncbistdaa(pssm_w_parameters)?;
-    // `(Int4) query_v.size() != seq_size`: a negative length (one past `INT_MAX`) never matches
-    // a query of fewer than 2^31 letters.
+    // The size of `query_v` cast to `Int4`, compared with `seq_size`: a negative length (one past
+    // `INT_MAX`) never matches a query of fewer than 2^31 letters.
     if query.len() as i32 != seq_size {
         return Err(ProfileError::Blast(
             "Query sequence lengths mismatch".to_string(),

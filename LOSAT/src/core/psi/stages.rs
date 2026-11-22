@@ -1333,7 +1333,7 @@ fn impala_scale_matrix(
             }
         }
     }
-    // `_PSICopyMatrix_int(pssm, scaled_pssm)`: the scaled PSSM is the result.
+    // `_PSICopyMatrix_int` of `scaled_pssm` into `pssm`: the scaled PSSM is the result.
     internal.pssm.clone_from(&internal.scaled_pssm);
     Ok(kbp_psi)
 }

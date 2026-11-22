@@ -231,7 +231,8 @@ impl TypedReader<'_> {
                 let (file, line, function) = frame.site();
                 ReadError::Exception(e.rethrow_same(file, line, function, frame.info()))
             }
-            // `ThrowError(fEOF, GetFrameInfo())`: the position, then the frame's information.
+            // `ThrowError` with `fEOF` and `GetFrameInfo()`: the position, then the frame's
+            // information.
             ReadError::Eof if self.frames.len() >= 2 => {
                 ReadError::Serial(format!("line {}: {}", self.r.line, frame.info()))
             }
@@ -532,8 +533,8 @@ impl TypedReader<'_> {
         found.ok_or_else(|| self.unexpected_member(self.r.bytes(id), items))
     }
 
-    /// `UnexpectedMember(id, items)`: the id read, then every member or variant of the class or
-    /// choice, each in quotes and followed by a space.
+    /// `UnexpectedMember` of `id` and `items`: the id read, then every member or variant of the
+    /// class or choice, each in quotes and followed by a space.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1305-1314
     #[cold]
     fn unexpected_member(&self, id: &[u8], items: &'static [Member]) -> ReadError {
@@ -550,7 +551,7 @@ impl TypedReader<'_> {
     }
 
     /// `ReadMissingSimpleMember` -> `ExpectedMember` of a mandatory member: "member X expected"
-    /// (`ThrowError(fFormatError, ...)`, NCBI's default verification).
+    /// (`ThrowError` with `fFormatError`, NCBI's default verification).
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
     fn expected_member(&self, member: &Member) -> R<()> {
         if member.optional() {

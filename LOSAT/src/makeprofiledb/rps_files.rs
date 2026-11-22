@@ -138,15 +138,15 @@ pub(super) fn open_volume(
     Ok(volume)
 }
 
-/// `(Int4) value` of a `double`: `None` where C's conversion is undefined (NaN, or a value whose
-/// integer part an `Int4` does not hold).
+/// A `double` `value` cast to `Int4`: `None` where C's conversion is undefined (NaN, or a value
+/// whose integer part an `Int4` does not hold).
 pub(super) fn int4_of(value: f64) -> Option<i32> {
     (value > f64::from(i32::MIN) - 1.0 && value < f64::from(i32::MAX) + 1.0).then_some(value as i32)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441
-/// `(Int4) BLAST_Nint(value)`: the nearest `long` (halves away from zero), then its low 32 bits
-/// (GCC's conversion to `Int4`); `None` where the conversion to `long` is undefined.
+/// `BLAST_Nint` of `value` cast to `Int4`: the nearest `long` (halves away from zero), then its low
+/// 32 bits (GCC's conversion to `Int4`); `None` where the conversion to `long` is undefined.
 fn nint_int4(value: f64) -> Option<i32> {
     const LONG_LIMIT: f64 = 9_223_372_036_854_775_808.0;
     let x = value + if value >= 0.0 { 0.5 } else { -0.5 };
@@ -155,8 +155,8 @@ fn nint_int4(value: f64) -> Option<i32> {
         .then_some(x as i64 as i32)
 }
 
-/// C's `%e` (`ostream << scientific`): six digits after the point, the exponent with its sign
-/// and at least two digits; `inf`, `-inf`, `nan` and `-nan` as glibc writes them. Rust's
+/// C's `%e` (a stream in `scientific` notation): six digits after the point, the exponent with its
+/// sign and at least two digits; `inf`, `-inf`, `nan` and `-nan` as glibc writes them. Rust's
 /// precision formatting rounds the exact binary value half to even, as glibc does.
 pub(super) fn c_scientific(value: f64) -> String {
     if !value.is_finite() {
@@ -179,7 +179,7 @@ pub(super) fn c_scientific(value: f64) -> String {
 }
 
 impl RpsVolume {
-    /// Whether the first profile has made the table (`NULL != lookup`).
+    /// Whether the first profile has made the table (`lookup` is not null).
     pub(super) fn has_lookup(&self) -> bool {
         self.lookup.is_some()
     }
@@ -369,7 +369,7 @@ impl RpsVolume {
 // add_pssm_words`): the same threshold inside `Int4`, the mathematical one outside (beyond the
 // 64 bits, where no word's score reaches or every one does, the saturated value). A NaN has no
 // value to compare with and is refused.
-/// `lookup->threshold`: `(Int4) threshold`, kept in 64 bits.
+/// `lookup->threshold`: `threshold` cast to `Int4`, kept in 64 bits.
 fn word_threshold(threshold: f64) -> Result<i64, RpsError> {
     if threshold.is_nan() {
         return Err(RpsError::Refused(
@@ -384,12 +384,12 @@ fn word_threshold(threshold: f64) -> Result<i64, RpsError> {
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1106-1167
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:144-156
 // A query length past `INT_MAX` is a negative `int`, and passes `x_CheckInputScoremat` when
-// `numColumns` is that number. `Create(seq_size + 1)` allocates `new Int4*[seq_size + 1]`: from
-// -2 down a negative array size, whose new-expression throws `std::bad_array_new_length` (the
-// handler's unknown exception); at -1 no row, so the loops over the positions do not run: by
-// position the scores are found short ("PSSM was truncated early"), by row they are found too
-// many ("PSSM too large for this sequence"), and by row without scores NCBI writes its extra row
-// at index -1, before the array (undefined behaviour), which LOSAT refuses.
+// `numColumns` is that number. `Create` of one more than `seq_size` allocates an array of that
+// many `Int4` row pointers: from -2 down a negative array size, whose new-expression throws
+// `std::bad_array_new_length` (the handler's unknown exception); at -1 no row, so the loops over
+// the positions do not run: by position the scores are found short ("PSSM was truncated early"), by
+// row they are found too many ("PSSM too large for this sequence"), and by row without scores NCBI
+// writes its extra row at index -1, before the array (undefined behaviour), which LOSAT refuses.
 /// The error of `x_RPSUpdatePSSM` for a profile of the negative length `seq_size` whose scores
 /// `scores` are stored by row when `by_row`.
 pub(super) fn negative_length_error(seq_size: i32, by_row: bool, scores: &[i32]) -> RpsError {

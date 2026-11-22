@@ -13,8 +13,8 @@ fn kappa_is_written_as_c_scientific() {
     assert_eq!(c_scientific(f64::NEG_INFINITY), "-inf");
 }
 
-// `(Int4) BLAST_Nint(x)`: halves away from zero, then the low 32 bits of the `long`; no value
-// where the conversion to `long` is undefined (survey cases S_fredge, S_frhuge).
+// `BLAST_Nint` of `x` cast to `Int4`: halves away from zero, then the low 32 bits of the `long`; no
+// value where the conversion to `long` is undefined (survey cases S_fredge, S_frhuge).
 #[test]
 fn frequency_ratios_round_half_away_and_wrap_to_32_bits() {
     assert_eq!(nint_int4(0.5 * FREQ_RATIO_SCALE), Some(500_000_000));

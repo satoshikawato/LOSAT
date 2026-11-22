@@ -25,7 +25,7 @@ What the table holds, per type (named, or anonymous at its place of use):
     DEFAULT (with the default value as written in the module) and the delayed flag (`_delay`);
     per SEQUENCE member, whether the generated class keeps a set flag for it (`SET_FLAG`,
     `->SetSetFlag(`): every member but a class held by reference (`ADD_NAMED_REF_MEMBER`, a
-    SEQUENCE, a CHOICE or a named SEQUENCE OF / SET OF, unless `.def` says `_pointer = false`).
+    SEQUENCE, a CHOICE or a named SEQUENCE OF / SET OF, unless `.def` sets `_pointer` to false).
 
 The storage of an INTEGER is NCBI's C++ type, from the `.def` files: `TSeqPos` and `unsigned` are
 Uint4, `TSignedSeqPos` and `int` Int4, `TGi`, `TEntrezId`, `TIntId` and `Int8` Int8 (NCBI_INT8_GI,
@@ -591,8 +591,8 @@ def held_by_reference(table: Table, index: int) -> bool:
 def has_set_flag(table: Table, owner: Entry, name: str, index: int) -> bool:
     """Whether the generated class of the SEQUENCE `owner` keeps a set flag for its member `name`
     of the type `index` (`->SetSetFlag(`): every member but a class held by reference
-    (`ADD_NAMED_REF_MEMBER`); `.def` `_pointer = false` holds the class by value
-    (`ADD_NAMED_MEMBER(..., CLASS, ...)`, `Score.value`)."""
+    (`ADD_NAMED_REF_MEMBER`); `.def` with `_pointer` set to false holds the class by value
+    (`ADD_NAMED_MEMBER` with `CLASS`, `Score.value`)."""
     return not held_by_reference(table, index) or name in owner.by_value
 
 

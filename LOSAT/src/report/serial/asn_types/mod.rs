@@ -38,7 +38,7 @@ pub(crate) const DEFAULT: u8 = 2;
 /// skipped with the skip functions and kept as the text read (`Value::Delayed`).
 pub(crate) const DELAYED: u8 = 4;
 /// `Member::flags`: a SEQUENCE member that the generated class keeps a set flag for
-/// (`->SetSetFlag(...)`): every member but a class held by reference (`ADD_NAMED_REF_MEMBER`).
+/// (`SetSetFlag`): every member but a class held by reference (`ADD_NAMED_REF_MEMBER`).
 /// NCBI reads it with `ReadWithSetFlagMember`, which rethrows a `CSerialException` with the
 /// member's name (`read::member_error`).
 pub(crate) const SET_FLAG: u8 = 8;

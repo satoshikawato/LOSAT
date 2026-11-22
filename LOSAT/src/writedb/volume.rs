@@ -15,7 +15,7 @@ use crate::seqid::{label, ParsedSeqId};
 
 /// `CWriteDB::EIndexType` as makeblastdb sets it (makeblastdb.cpp:1207-1209): `eFullIndex`
 /// for `-parse_seqids`, `eAddHash` for `-hash_index`; `eNoIndex` without both. makeprofiledb's
-/// `eDefault` is `eFullIndex | eAddTrace`.
+/// `eDefault` is `eFullIndex` and `eAddTrace` together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Indices {
     /// `eFullIndex` (`-parse_seqids`).

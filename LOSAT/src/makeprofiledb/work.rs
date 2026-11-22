@@ -28,7 +28,7 @@ use super::profile::{
 };
 use super::rps_files::{self, ProfileData, RpsError, RpsVolume, VolumeParams};
 
-/// The limit of each file of a volume's database (`SetMaxFileSize(4000000000)`).
+/// The limit of each file of a volume's database (`SetMaxFileSize` of 4,000,000,000 bytes).
 const MAX_FILE_SIZE: u64 = 4_000_000_000;
 
 /// What makeprofiledb's `Run` reports, by the clause of its handler that catches it.
@@ -276,8 +276,8 @@ fn init<'a>(
     })
 }
 
-/// A warning of the Seq-id parser (`CSeq_id`'s `ERR_POST_X(Warning ...)`), as makeprofiledb
-/// posts it (no prefix of its own).
+/// A warning of the Seq-id parser (a warning that `CSeq_id` posts with `ERR_POST_X`), as
+/// makeprofiledb posts it (no prefix of its own).
 fn post_seq_id_warning(diag: &mut Diag, warning: &crate::seqid::accguide::SeqIdWarning) {
     let mut line = format!("Warning: (1306.{}) ", warning.subcode).into_bytes();
     line.extend_from_slice(&warning.message);
@@ -445,8 +445,9 @@ fn smp_filenames(list: &[u8]) -> Result<Vec<&[u8]>, RunError> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1228-1263
-// `m_NumOfVols = n / max + 1` with C's division: a maximum of 0 divides by zero (NCBI 2.17.0:
-// SIGFPE), and so does a count of volumes of 0 (`num_seqs = n / m_NumOfVols`); a negative count
+// `m_NumOfVols` is one more than the quotient of the count and the maximum, with C's division: a
+// maximum of 0 divides by zero (NCBI 2.17.0: SIGFPE), and so does a count of volumes of 0
+// (`num_seqs` is the count divided by `m_NumOfVols`); a negative count
 // makes no volume, no alias file and exit status 0.
 /// `x_Run`.
 fn x_run(params: &mut Params<'_>, built: &mut Built, diag: &mut Diag) -> Result<(), RunError> {
@@ -567,9 +568,10 @@ fn create_alias_file(params: &Params<'_>, built: &Built, diag: &mut Diag) -> Res
 /// A profile file read: the reader's posts written, its errors as makeprofiledb's handler
 /// reports them.
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1381-1393
-// `in_stream >> MSerial_AsnText >> pssm`: a `CSerialException`'s message (`line N: ...`), the
-// frame of the root object for a text that ends in it (`CEofException`), the message of the
-// newest exception of the reader's stack; a `std::exception` is the handler's unknown one.
+// The read of `pssm` from `in_stream` in ASN.1 text (`MSerial_AsnText`): a `CSerialException`'s
+// message (`line N: ...`), the frame of the root object for a text that ends in it
+// (`CEofException`), the message of the newest exception of the reader's stack; a `std::exception`
+// is the handler's unknown one.
 fn read_profile(
     path: &Path,
     filename: &[u8],
@@ -756,7 +758,7 @@ fn add_profiles(
         }
         let mut pssm_w_parameters = read_profile(&path, filename, diag)?;
         let sm = check_input_scoremat(&pssm_w_parameters, filename)?;
-        // `int seq_size = pssm.GetQueryLength()`: negative past `INT_MAX` (`query_length`).
+        // `seq_size`, the `int` of `GetQueryLength()`: negative past `INT_MAX` (`query_length`).
         let seq_size = query_length(&pssm_w_parameters);
         add_to_database(params, diag, output_db, &pssm_w_parameters)?;
         if !rps.has_lookup() {

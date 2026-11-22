@@ -294,7 +294,7 @@ pub(crate) struct BioseqDeflines {
 // line, so the definition lines are the binary ones of the descriptors (decoded by
 // `x_SetDeflinesFromBinary`; its `s_CheckEmptyLists` is `WriteDb::set_deflines`'s), or else
 // `x_BuildDeflinesFromBioseq`'s. The binary ones replace the Bioseq's ids and title.
-/// `CWriteDB::ExtractBioseqDeflines(bioseq, parse_ids, long_ids = false, scan = false)` of a
+/// `CWriteDB::ExtractBioseqDeflines` with `parse_ids`, and `long_ids` and `scan` false, of a
 /// Bioseq with descriptors (`descr`) and the ids `ids`, without the serialization (the writer
 /// posts its diagnostics: `WriteDb::post_extracted_deflines`, for the lines that are not binary).
 pub(crate) fn bioseq_deflines(

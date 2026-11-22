@@ -78,7 +78,7 @@ impl ThinBackbone {
         );
     }
 
-    /// `BlastAaLookupFinalize(eBackbone)` of the backbone, for a table of `query_length`
+    /// `BlastAaLookupFinalize` with `eBackbone` of the backbone, for a table of `query_length`
     /// letters searched with `threshold` (the values the table keeps).
     pub(crate) fn finalize(
         self,

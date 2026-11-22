@@ -1210,7 +1210,7 @@ impl ScanChunk {
 }
 
 /// NCBI's `CSeqDBException(eArgErr, "Error: Unable to use ISAM index in batch mode.")`.
-fn batch_mode_error() -> SeqDbError {
+pub(super) fn batch_mode_error() -> SeqDbError {
     SeqDbError::NotFound(
         "Error: Unable to use ISAM index in batch mode."
             .to_string()

@@ -1521,7 +1521,11 @@ impl SeqDb {
         root: &mut alias::AliasNode,
         names: &[String],
     ) -> Result<(), SeqDbError> {
-        alias::compute_masks(root).map_err(SeqDbError::Ncbi)?;
+        alias::compute_masks(root)?;
+        let version5 = self.is_version5();
+        if version5 {
+            alias::refuse_v5_lists(root)?;
+        }
         let at = |path: &str| {
             names
                 .iter()
@@ -1534,18 +1538,21 @@ impl SeqDb {
         });
         let num_oids = self.num_oids();
         let scan = alias::needs_totals_scan(root);
-        let volumes: Vec<(&str, u32, u32)> = names
+        let volumes: Vec<alias::TreeVolume<'_>> = names
             .iter()
             .enumerate()
-            .map(|(at, name)| {
-                (
-                    name.as_str(),
-                    self.volume_starts[at],
-                    self.volume_starts[at + 1],
-                )
+            .map(|(at, name)| alias::TreeVolume {
+                name: name.as_str(),
+                start: self.volume_starts[at],
+                end: self.volume_starts[at + 1],
+                has_lmdb: self.volumes[at]
+                    .index()
+                    .lmdb_file
+                    .as_ref()
+                    .is_some_and(|name| !name.is_empty()),
             })
             .collect();
-        let oids = match alias::alias_oids(root, &volumes, num_oids) {
+        let oids = match alias::alias_oids(root, &volumes, num_oids, self.seqtype, version5) {
             Ok(oids) => oids,
             Err(failure) => {
                 self.oid_list_error = Some(failure);
@@ -1554,11 +1561,18 @@ impl SeqDb {
                     words: None,
                     all_bits_special_set: false,
                     mask_types: Vec::new(),
+                    lists: Vec::new(),
                 }
             }
         };
         for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
             volume.set_exclude_model(oid_mask::excludes_models(mask_type));
+        }
+        for (at, lists) in oids.lists.into_iter().enumerate() {
+            if !lists.is_empty() {
+                let start = self.volume_starts[at];
+                self.volumes[at].set_alias_lists(lists, start);
+            }
         }
         // `(int)` of the `Int8` walks.
         let nseq = totals.nseq.as_ref().map_or(0, |&value| value as i32);

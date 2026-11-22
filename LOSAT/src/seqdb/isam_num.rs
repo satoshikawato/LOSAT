@@ -100,11 +100,12 @@ impl NumericIsam {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:161-175
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:214-224
-    // A list's lookups open the volume's ISAM only for a volume with OIDs: the GIs' as the
-    // single lookups do (a failure to open is caught), the TIs' where both files are regular
-    // files (`IndexExists`), whose constructor's errors are not caught.
+    // The lookups open the volume's ISAM only for a volume with OIDs: the GIs' as the single
+    // lookups do (a failure to open is caught), the TIs' where both files are regular files
+    // (`IndexExists`), whose constructor's errors are not caught.
     /// The volume's ISAM of `kind` for the lookups of an id list (`x_OpenGiFile`,
-    /// `x_OpenTiFile`): `None` where NCBI has none ("... list specified but no ISAM file found").
+    /// `x_OpenTiFile`), and the trace-id ISAM of a single lookup: `None` where NCBI has none
+    /// ("... list specified but no ISAM file found").
     pub(crate) fn open_for_list(
         base: &Path,
         seqtype: SeqType,
@@ -304,7 +305,12 @@ impl NumericIsam {
             if gilist_index >= gilist_size {
                 break;
             }
-            advance_keys(&sample_keys, &mut sample_index, num_samples, ids[gilist_index].key);
+            advance_keys(
+                &sample_keys,
+                &mut sample_index,
+                num_samples,
+                ids[gilist_index].key,
+            );
             if sample_index < 0 {
                 return Err(SeqDbError::Format {
                     path: self.index.path().to_path_buf(),
@@ -345,11 +351,12 @@ impl NumericIsam {
     }
 }
 
-/// A numeric ISAM opened for an id list's lookups ([`NumericIsam::open_for_list`]).
+/// A numeric ISAM opened for an id list's lookups or a single TI's ([`NumericIsam::open_for_list`]).
 #[derive(Debug)]
 pub(crate) enum Opened {
     Ready(NumericIsam),
-    /// `m_Initialized` false: the list's lookups throw "Unable to use ISAM index in batch mode".
+    /// `m_Initialized` false: the list's lookups throw "Unable to use ISAM index in batch mode",
+    /// a single lookup finds nothing.
     Uninitialized,
 }
 

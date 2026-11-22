@@ -60,6 +60,164 @@ pub(super) enum OidListError {
         code: Option<i32>,
         text: String,
     },
+    /// The error of an id list of the alias files (`alias::ListSet`): its file's
+    /// `CSeqDBException` text, the error of a volume's ISAM that translates it, LOSAT's refusal.
+    Reader(KeptError),
+}
+
+/// A `SeqDbError` kept to be met later ([`OidListError::Reader`]), which `SeqDbError` itself
+/// cannot be (it holds `std::io::Error`): the system's error is kept as its code, or its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum KeptError {
+    NotFound(Vec<u8>),
+    MemoryMap(Vec<u8>),
+    Open {
+        path: PathBuf,
+        error: KeptIo,
+    },
+    Io {
+        path: PathBuf,
+        error: KeptIo,
+    },
+    Map {
+        path: PathBuf,
+        len: u64,
+        error: KeptIo,
+    },
+    Read {
+        path: PathBuf,
+        error: KeptIo,
+    },
+    Format {
+        path: PathBuf,
+        message: String,
+    },
+    Integrity {
+        path: PathBuf,
+        message: String,
+    },
+    Unsupported {
+        path: PathBuf,
+        message: String,
+    },
+    NcbiCrashes {
+        path: PathBuf,
+        message: String,
+    },
+    Range(String),
+    Ncbi(crate::ncbi_exception::NcbiException),
+    TaxdbThrows {
+        path: PathBuf,
+        reason: String,
+        exception: Box<crate::ncbi_exception::NcbiException>,
+    },
+}
+
+/// A `std::io::Error` as [`KeptError`] keeps it: the system's code, else its kind and text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct KeptIo {
+    code: Option<i32>,
+    kind: std::io::ErrorKind,
+    text: String,
+}
+
+impl KeptIo {
+    fn keep(error: &std::io::Error) -> Self {
+        Self {
+            code: error.raw_os_error(),
+            kind: error.kind(),
+            text: error.to_string(),
+        }
+    }
+
+    fn error(&self) -> std::io::Error {
+        match self.code {
+            Some(code) => std::io::Error::from_raw_os_error(code),
+            None => std::io::Error::new(self.kind, self.text.clone()),
+        }
+    }
+}
+
+impl KeptError {
+    /// `error`, kept.
+    pub(super) fn keep(error: SeqDbError) -> Self {
+        match error {
+            SeqDbError::NotFound(message) => KeptError::NotFound(message),
+            SeqDbError::MemoryMap(message) => KeptError::MemoryMap(message),
+            SeqDbError::Open { path, source } => KeptError::Open {
+                path,
+                error: KeptIo::keep(&source),
+            },
+            SeqDbError::Io { path, source } => KeptError::Io {
+                path,
+                error: KeptIo::keep(&source),
+            },
+            SeqDbError::Map { path, len, source } => KeptError::Map {
+                path,
+                len,
+                error: KeptIo::keep(&source),
+            },
+            SeqDbError::Read { path, source } => KeptError::Read {
+                path,
+                error: KeptIo::keep(&source),
+            },
+            SeqDbError::Format { path, message } => KeptError::Format { path, message },
+            SeqDbError::Integrity { path, message } => KeptError::Integrity { path, message },
+            SeqDbError::Unsupported { path, message } => KeptError::Unsupported { path, message },
+            SeqDbError::NcbiCrashes { path, message } => KeptError::NcbiCrashes { path, message },
+            SeqDbError::Range(message) => KeptError::Range(message),
+            SeqDbError::Ncbi(exception) => KeptError::Ncbi(exception),
+            SeqDbError::TaxdbThrows {
+                path,
+                reason,
+                exception,
+            } => KeptError::TaxdbThrows {
+                path,
+                reason,
+                exception,
+            },
+        }
+    }
+
+    /// The error kept.
+    fn to_error(&self) -> SeqDbError {
+        match self.clone() {
+            KeptError::NotFound(message) => SeqDbError::NotFound(message),
+            KeptError::MemoryMap(message) => SeqDbError::MemoryMap(message),
+            KeptError::Open { path, error } => SeqDbError::Open {
+                path,
+                source: error.error(),
+            },
+            KeptError::Io { path, error } => SeqDbError::Io {
+                path,
+                source: error.error(),
+            },
+            KeptError::Map { path, len, error } => SeqDbError::Map {
+                path,
+                len,
+                source: error.error(),
+            },
+            KeptError::Read { path, error } => SeqDbError::Read {
+                path,
+                source: error.error(),
+            },
+            KeptError::Format { path, message } => SeqDbError::Format { path, message },
+            KeptError::Integrity { path, message } => SeqDbError::Integrity { path, message },
+            KeptError::Unsupported { path, message } => SeqDbError::Unsupported { path, message },
+            KeptError::NcbiCrashes { path, message } => SeqDbError::NcbiCrashes { path, message },
+            KeptError::Range(message) => SeqDbError::Range(message),
+            KeptError::Ncbi(exception) => SeqDbError::Ncbi(exception),
+            KeptError::TaxdbThrows {
+                path,
+                reason,
+                exception,
+            } => SeqDbError::TaxdbThrows {
+                path,
+                reason,
+                exception,
+            },
+        }
+    }
 }
 
 impl OidListError {
@@ -94,6 +252,7 @@ impl OidListError {
                      OIDLIST, past the memory page after its {len} bytes"
                 ),
             },
+            OidListError::Reader(kept) => kept.to_error(),
             OidListError::Read {
                 path,
                 open,

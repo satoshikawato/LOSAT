@@ -356,8 +356,8 @@ impl OidWalk {
 // set for them (seqdblmdbset.cpp:315-333, 335-354).
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:943-962
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:997-1010
-// A list of seqids holds no gi and no ti (`HasIdFilters` is its `GetNumSis() > 0`), and the
-// volumes have no lists of their own (alias `GILIST` keys are refused, DI-8 DECISIONS 6).
+// A list of seqids holds no gi and no ti (`HasIdFilters` is its `GetNumSis() > 0`). The lists
+// of the alias files attached to a volume are tested beside this rule (`Volume::list_mask`).
 /// Which definition lines of an included OID a restricted database keeps.
 #[derive(Debug)]
 pub(crate) enum DeflineRule {
@@ -522,7 +522,7 @@ fn find_id(list: &[Vec<u8>], id: &ParsedSeqId) -> bool {
 
 /// The lookups of a Seq-id that is not a gi or a ti: its string with and without version,
 /// then its simplified string with and without version.
-fn find_si_forms(list: &[Vec<u8>], id: &ParsedSeqId) -> bool {
+pub(super) fn find_si_forms(list: &[Vec<u8>], id: &ParsedSeqId) -> bool {
     if find_si(list, &blast_seq_id_string(id, true))
         || find_si(list, &blast_seq_id_string(id, false))
     {

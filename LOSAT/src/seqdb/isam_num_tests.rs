@@ -128,7 +128,16 @@ fn a_list_is_translated_against_every_page_of_the_volume() {
         let oids: Vec<Option<u32>> = ids.iter().map(|id| id.oid).collect();
         assert_eq!(
             oids,
-            vec![None, Some(101), None, Some(104), Some(104), Some(110), Some(123), None]
+            vec![
+                None,
+                Some(101),
+                None,
+                Some(104),
+                Some(104),
+                Some(110),
+                Some(123),
+                None
+            ]
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -151,12 +160,16 @@ fn an_id_translated_by_an_earlier_volume_keeps_its_oid() {
 fn a_list_isam_needs_oids_and_an_index_of_the_data_length() {
     let dir = temp_dir("batch_open");
     let base = write_isam(&dir, &[(5, 0), (9, 1)], false, 256);
-    assert!(NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Gi, 0)
-        .unwrap()
-        .is_none());
-    assert!(NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Ti, 2)
-        .unwrap()
-        .is_none());
+    assert!(
+        NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Gi, 0)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Ti, 2)
+            .unwrap()
+            .is_none()
+    );
     let nd = with_extension(&base, SeqType::Protein, "nd");
     let data = std::fs::read(&nd).unwrap();
     std::fs::write(&nd, &data[..8]).unwrap();

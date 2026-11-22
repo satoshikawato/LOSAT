@@ -93,30 +93,38 @@ fn a_ti_list_is_signed_and_widened_past_int8() {
     );
 }
 
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:1586 IsBinaryGiList_True
 #[test]
-fn a_taxid_list_is_a_set_of_int4_numbers() {
-    let set = read_tax_id_list(b"9606\n10090\n9606\n2147483648\n").unwrap();
+fn a_list_whose_first_byte_is_0xff_is_binary() {
+    // The first words of NCBI's data/prot345b.gil: the marker, its count of 471, a GI.
     assert_eq!(
-        set.into_iter().collect::<Vec<_>>(),
-        vec![
-            ListNumber::Value(9606),
-            ListNumber::Value(10090),
-            ListNumber::Past
-        ]
+        binary_kind(&binary(&[0xFFFF_FFFF, 471, 0x0000_CFC0])),
+        Ok(Some(false))
     );
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:1591-1592 IsBinaryGiList_False
+#[test]
+fn a_text_list_and_an_alias_file_are_not_binary() {
+    // The first lines of NCBI's data/prot345t.gil and data/totals.nal.
+    assert_eq!(binary_kind(b"43381475\n44389145\n43713354\n"), Ok(None));
     assert_eq!(
-        read_tax_id_list(&binary(&[0xFFFF_FFFF, 1, 562]))
-            .unwrap()
-            .into_iter()
-            .collect::<Vec<_>>(),
-        vec![ListNumber::Value(562)]
+        binary_kind(b"# Test case for STATS_NSEQ and STATS_TOTLEN\nDBLIST "),
+        Ok(None)
     );
-    assert_eq!(
-        read_tax_id_list(&binary(&[0xFFFF_FFFF, 2, 562])).unwrap_err(),
-        "Specified file is not a valid binary Tax Id List file."
-    );
-    assert_eq!(
-        read_tax_id_list(b"9606,\n").unwrap_err(),
-        "Invalid byte in textTAXID list [44]."
-    );
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:1597-1598 IsBinaryGiList_EmptyFile
+#[test]
+fn an_empty_file_is_no_list() {
+    assert_eq!(binary_kind(b"").unwrap_err(), "Specified file is empty.");
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/seqdb_reader/seqdb_unit_test.cpp:1603-1606 IsBinaryGiList_InvalidFile
+#[test]
+fn the_null_device_is_no_list() {
+    let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    if let Ok(bytes) = std::fs::read(null) {
+        assert_eq!(binary_kind(&bytes).unwrap_err(), "Specified file is empty.");
+    }
 }

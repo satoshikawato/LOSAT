@@ -1,10 +1,107 @@
-//! The numeric id list files of the alias files' `GILIST`, `TILIST` and `TAXIDLIST` keys, read as
-//! NCBI's `SeqDB_ReadMemoryGiList`, `SeqDB_ReadMemoryTiList` and `SeqDB_ReadMemoryTaxIdList` read
-//! them: a binary list (its first byte 0xFF: a marker word, the big-endian count, then one
+//! The numeric id list files of the alias files' `GILIST` and `TILIST` keys, read as NCBI's
+//! `SeqDB_ReadMemoryGiList` and `SeqDB_ReadMemoryTiList` read them: a binary list (its first byte 0xFF: a marker word, the big-endian count, then one
 //! big-endian id per word) or a text list (decimal numbers, each ended by a space, a line feed or
-//! a carriage return). The one owner of their layout.
+//! a carriage return). The one owner of their layout, and of the lists the alias files attach to
+//! the volumes they reach for NCBI's filtered header read (`AliasIdList`).
 
-use std::collections::BTreeSet;
+use crate::seqid::model::ObjectId;
+use crate::seqid::ParsedSeqId;
+
+/// The four keys of an alias file that name an id list (`CSeqDB_AliasMask`'s `eGiList`,
+/// `eTiList`, `eSiList`, `eTaxIdList`), in the order NCBI's `ComputeMasks` reads them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum IdListKind {
+    Gi,
+    Ti,
+    Si,
+    TaxId,
+}
+
+impl IdListKind {
+    /// Every kind, in NCBI's order.
+    pub(crate) const ALL: [IdListKind; 4] = [
+        IdListKind::Gi,
+        IdListKind::Ti,
+        IdListKind::Si,
+        IdListKind::TaxId,
+    ];
+
+    /// The alias file's key.
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            IdListKind::Gi => "GILIST",
+            IdListKind::Ti => "TILIST",
+            IdListKind::Si => "SEQIDLIST",
+            IdListKind::TaxId => "TAXIDLIST",
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:2016-2090
+    /// The words of NCBI's error for a value with a space: `has multiple <words> (<value>).`.
+    pub(crate) fn multiple_words(self) -> &'static str {
+        match self {
+            IdListKind::Gi => "GI lists",
+            IdListKind::Ti => "TI lists",
+            IdListKind::Si => "SEQID lists",
+            IdListKind::TaxId => "Tax ids lists",
+        }
+    }
+}
+
+/// An id list of the alias files as NCBI attaches it to a volume it reaches
+/// (`CSeqDBVol::AttachVolumeGiList`): the ids its filtered header read finds a definition line's
+/// Seq-ids in (`CSeqDBGiList::FindId`). Each kind sorted as NCBI's `InsureOrder` leaves it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AliasIdList {
+    /// The GIs of a `GILIST`.
+    pub gis: Vec<i64>,
+    /// The TIs of a `TILIST`, as NCBI's unsigned `TTi` (a number past `Int8` is none).
+    pub tis: Vec<u64>,
+    /// The Seq-id strings of a `SEQIDLIST`, as the lookups left them.
+    pub sis: Vec<Vec<u8>>,
+}
+
+impl AliasIdList {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1633-1665
+    // A `ti` general id's string tag is converted by `NStr::StringToInt8`, which throws for a tag
+    // that is not a number: LOSAT refuses the line (`Err`). The Seq-id strings are looked up in
+    // the forms of `filter::find_si_forms`.
+    /// `FindId`: whether the list holds `id`; `Err` for a `ti` id whose tag NCBI's conversion
+    /// throws on.
+    pub(crate) fn find_id(&self, id: &ParsedSeqId) -> Result<bool, Vec<u8>> {
+        match id {
+            ParsedSeqId::Gi(gi) => Ok(self.gis.binary_search(gi).is_ok()),
+            ParsedSeqId::General(dbtag) if dbtag.db == b"ti" => {
+                let ti = match &dbtag.tag {
+                    ObjectId::Id(value) => i64::from(*value),
+                    ObjectId::Str(text) => {
+                        crate::ncbi_str::string_to_int8(text, 0).map_err(|_| text.clone())?
+                    }
+                };
+                Ok(self.tis.binary_search(&(ti as u64)).is_ok())
+            }
+            _ => Ok(super::filter::find_si_forms(&self.sis, id)),
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:957-968
+/// `have_vol` of NCBI's id test of a definition line with the Seq-ids `ids`: one of `lists` holds
+/// one of them, asked in the order of the ids; `Err` with the tag of a `ti` id whose conversion
+/// throws before one is found.
+pub(crate) fn lists_hold(
+    lists: &[std::sync::Arc<AliasIdList>],
+    ids: &[ParsedSeqId],
+) -> Result<bool, Vec<u8>> {
+    for id in ids {
+        for list in lists {
+            if list.find_id(id)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:854-887
 // A first byte that is a digit or '#' makes a text list (where '#' is then an invalid byte), a
@@ -149,28 +246,6 @@ pub(crate) fn read_ti_list(bytes: &[u8]) -> Result<Vec<ListNumber>, String> {
     read_text(bytes, "TI", |elem, digit| {
         widened_step(elem, digit, i64::MAX)
     })
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1080-1121
-// A binary list's ids are big-endian `Int4`s; a text list's number is an `Int4`.
-/// The taxids of a taxid list file (`SeqDB_ReadMemoryTaxIdList`), as the set NCBI keeps;
-/// NCBI's `CSeqDBException` text for a file that is not one.
-pub(crate) fn read_tax_id_list(bytes: &[u8]) -> Result<BTreeSet<ListNumber>, String> {
-    if binary_kind(bytes)?.is_some() {
-        let words = bytes.len() / 4;
-        let num_taxids = words - 2;
-        if word(bytes, 0) != 0xFFFF_FFFF || word(bytes, 1) as i32 != num_taxids as i32 {
-            return Err("Specified file is not a valid binary Tax Id List file.".to_string());
-        }
-        return Ok((2..words)
-            .map(|at| ListNumber::Value(i64::from(word(bytes, at) as i32)))
-            .collect());
-    }
-    Ok(read_text(bytes, "TAXID", |elem, digit| {
-        widened_step(elem, digit, i64::from(i32::MAX))
-    })?
-    .into_iter()
-    .collect())
 }
 
 #[cfg(test)]

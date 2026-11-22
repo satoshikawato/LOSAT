@@ -25,6 +25,9 @@ pub struct Volume {
     /// model sequences after `defline_rule` (`m_OidMaskType & fExcludeModel`,
     /// `oid_mask::excludes_models`; `SeqDb::read_alias_tree`).
     exclude_model: bool,
+    /// The id lists of the alias files that reach the volume (`m_VolumeGiLists`,
+    /// `alias::AliasOids::lists`), none without one.
+    alias_lines: Option<AliasLines>,
     /// The column files (`.?xa`...), opened on first use (`m_HaveColumns`).
     columns: OnceLock<Vec<Column>>,
     /// The failure of NCBI's OID list that a search meets at its first read of a sequence
@@ -38,6 +41,14 @@ pub struct Volume {
 #[derive(Debug)]
 struct LineRule {
     rule: std::sync::Arc<DeflineRule>,
+    volume_start: u32,
+}
+
+/// The alias files' id lists attached to a volume, with the volume's first OID in the database,
+/// which NCBI adds to the tag of each `BL_ORD_ID` before the lists read the Seq-ids.
+#[derive(Debug)]
+struct AliasLines {
+    lists: Vec<std::sync::Arc<super::id_list::AliasIdList>>,
     volume_start: u32,
 }
 
@@ -119,6 +130,7 @@ impl Volume {
             hdr: OnceLock::new(),
             defline_rule: None,
             exclude_model: false,
+            alias_lines: None,
             columns: OnceLock::new(),
             read_failure: None,
         })
@@ -579,15 +591,28 @@ impl Volume {
         self.exclude_model = exclude_model;
     }
 
-    /// Whether the reads of this volume remove definition lines: a list's rule or the erasure of
-    /// model lines.
+    /// Attaches the alias files' id lists that reach this volume (`SeqDb::read_alias_tree`);
+    /// `volume_start` is the volume's first OID in the database.
+    pub(super) fn set_alias_lists(
+        &mut self,
+        lists: Vec<std::sync::Arc<super::id_list::AliasIdList>>,
+        volume_start: u32,
+    ) {
+        self.alias_lines = Some(AliasLines {
+            lists,
+            volume_start,
+        });
+    }
+
+    /// Whether the reads of this volume remove definition lines: a list's rule, the alias files'
+    /// id lists or the erasure of model lines.
     fn filters_lines(&self) -> bool {
-        self.defline_rule.is_some() || self.exclude_model
+        self.defline_rule.is_some() || self.alias_lines.is_some() || self.exclude_model
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1990-1995
     // This is the read of `GetBioseq` (seqdbvol.cpp:1324-1325); the overload with a stream, for
-    // `GetSeqIDs`, does the same (2106-2111). The rule reads the Seq-ids of a volume whose first
+    // `GetSeqIDs`, does the same (2106-2111). The lists read the Seq-ids of a volume whose first
     // OID is not 0 with the tags of `BL_ORD_ID` made OIDs in the database
     // (`super::adjust_ordinal_tags`): a list's `gnl|BL_ORD_ID|n` keeps a line whose stored tag plus
     // the volume's first OID is n. The lookup that selected the OID read the stored number (the
@@ -595,22 +620,65 @@ impl Volume {
     // `-parse_seqids`), so on a list of databases or a database of several volumes the OID it
     // found may keep no line, and a line with another id may be kept or removed by the sum
     // (line DBID ordsl, DECISIONS 55).
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2023-2034
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:943-969
+    // A line passes the id test when one of its Seq-ids is in the search's list (or the search has
+    // none with ids) and one, maybe another, is in one of the alias files' lists attached to the
+    // volume (or none is attached); the search's taxids come next, on the lines the ids keep. So
+    // the alias lists' test is ANDed with the search's rule. The lists are asked in the order of
+    // the line's Seq-ids until one holds one (`have_vol`); a `ti` id whose tag NCBI's conversion
+    // throws on before that is refused.
     /// Which definition lines of the sequence `oid` (volume-relative), decoded as `set`, the
-    /// rule keeps, as NCBI's filtered header read tests them: `None` where a seqid rule keeps
-    /// none; the tag NCBI's read cannot adjust as an error.
-    fn rule_mask(
-        line_rule: &LineRule,
+    /// search's list rule and the alias files' id lists keep, as NCBI's filtered header read
+    /// tests them: `None` where a seqid rule keeps none; the reader's error for a tag NCBI's read
+    /// cannot adjust, LOSAT's refusal of a `ti` id NCBI's lists throw on.
+    fn list_mask(
+        &self,
+        oid: u32,
         set: &crate::seqid::DeflineSet,
-    ) -> Result<Option<Vec<bool>>, super::OrdinalTagError> {
-        if line_rule.volume_start > 0
-            && line_rule.rule.reads_seqids()
-            && super::has_ordinal_tag(set)
-        {
-            let mut adjusted = set.clone();
-            super::adjust_ordinal_tags(&mut adjusted, line_rule.volume_start)?;
-            return Ok(line_rule.rule.keep_mask(&adjusted));
+    ) -> Result<Option<Vec<bool>>, SeqDbError> {
+        let user = self.defline_rule.as_ref();
+        let alias = self.alias_lines.as_ref();
+        let volume_start = match (user, alias) {
+            (Some(line_rule), _) => line_rule.volume_start,
+            (None, Some(lines)) => lines.volume_start,
+            (None, None) => return Ok(Some(vec![true; set.deflines.len()])),
+        };
+        let reads_seqids = alias.is_some() || user.is_some_and(|rule| rule.rule.reads_seqids());
+        let adjusted;
+        let set = if volume_start > 0 && reads_seqids && super::has_ordinal_tag(set) {
+            let mut copy = set.clone();
+            super::adjust_ordinal_tags(&mut copy, volume_start)
+                .map_err(|error| error.error(&self.base, volume_start + oid))?;
+            adjusted = copy;
+            &adjusted
+        } else {
+            set
+        };
+        let mut mask = match user {
+            Some(line_rule) => match line_rule.rule.keep_mask(set) {
+                Some(mask) => mask,
+                None => return Ok(None),
+            },
+            None => vec![true; set.deflines.len()],
+        };
+        if let Some(lines) = alias {
+            for (keep, defline) in mask.iter_mut().zip(&set.deflines) {
+                let held =
+                    super::id_list::lists_hold(&lines.lists, &defline.ids).map_err(|tag| {
+                        SeqDbError::Unsupported {
+                            path: self.base.clone(),
+                            message: format!(
+                            "sequence {oid} of the volume: the general id ti|{} under an alias \
+                             file's id list, whose tag NCBI's conversion to a number throws on",
+                            String::from_utf8_lossy(&tag)
+                        ),
+                        }
+                    })?;
+                *keep &= held;
+            }
         }
-        Ok(line_rule.rule.keep_mask(set))
+        Ok(Some(mask))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2006-2058
@@ -625,8 +693,9 @@ impl Volume {
     // for each byte it reads as '#' in a line it then removes too (probe b1 of line RG D1b-2):
     // refused as the bytes of a kept line are where they are read.
     /// Which definition lines of the sequence `oid` (volume-relative), decoded as `set`, the reads
-    /// keep, as NCBI's filtered header read tests them (the volume's list rule, `rule_mask`, then
-    /// the erasure of model lines): `None` where a seqid rule keeps none; the reader's error for
+    /// keep, as NCBI's filtered header read tests them (the search's list rule and the alias
+    /// files' id lists, `list_mask`, then the erasure of model lines): `None` where a seqid rule
+    /// keeps none; the reader's error for
     /// a tag NCBI's read cannot adjust, LOSAT's refusals of a removed line with bytes NCBI reads
     /// as '#' and of an id the accession guide warns about.
     fn filtered_mask(
@@ -634,17 +703,12 @@ impl Volume {
         oid: u32,
         set: &crate::seqid::DeflineSet,
     ) -> Result<Option<Vec<bool>>, SeqDbError> {
-        let mut mask = match &self.defline_rule {
-            Some(line_rule) => match Self::rule_mask(line_rule, set)
-                .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))?
-            {
-                Some(mask) => mask,
-                None => {
-                    self.refuse_removed_replaced_bytes(oid, set, &vec![false; set.deflines.len()])?;
-                    return Ok(None);
-                }
-            },
-            None => vec![true; set.deflines.len()],
+        let mut mask = match self.list_mask(oid, set)? {
+            Some(mask) => mask,
+            None => {
+                self.refuse_removed_replaced_bytes(oid, set, &vec![false; set.deflines.len()])?;
+                return Ok(None);
+            }
         };
         let mut warned = false;
         if self.exclude_model {
@@ -700,10 +764,11 @@ impl Volume {
     }
 
     /// Whether the reads of the volume may leave a sequence without a line: its rule is a seqid
-    /// list's, positive or negative, or its `OID_MASK_TYPE` erases model lines
-    /// (`SeqDb::drops_lineless_hits`).
+    /// list's, positive or negative, an alias file's id list reaches it, or its `OID_MASK_TYPE`
+    /// erases model lines (`SeqDb::drops_lineless_hits`).
     pub(super) fn may_drop_every_line(&self) -> bool {
         self.exclude_model
+            || self.alias_lines.is_some()
             || self
                 .defline_rule
                 .as_ref()
@@ -793,14 +858,8 @@ impl Volume {
         }
         let (record, path) = self.header_record(oid)?;
         let set = decode_full(&record, path)?;
-        let mask = match &self.defline_rule {
-            Some(line_rule) => match Self::rule_mask(line_rule, &set)
-                .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))?
-            {
-                Some(mask) => mask,
-                None => return Ok(true),
-            },
-            None => vec![true; set.deflines.len()],
+        let Some(mask) = self.list_mask(oid, &set)? else {
+            return Ok(true);
         };
         Ok(mask.iter().zip(&set.deflines).any(|(&keep, defline)| {
             !keep

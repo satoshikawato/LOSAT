@@ -188,8 +188,9 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             assert!(text.ends_with("</arguments>\n</ncbi_application>\n"));
             // Each argument left out is refused by name: by the parser (`-name 1 -h`), or by the
             // run of a search (psiblast's `-use_sw_tback`, tblastn's `-ungapped` with
-            // `-comp_based_stats 0`; rpstblastn's `-ungapped`, which needs a database, is in
-            // `cli::RUN_REFUSALS` with them). The arguments left in are read
+            // `-comp_based_stats 0`; rpstblastn's `-ungapped`, which needs a database, is a run
+            // refusal of LOSAT's table of refusals with them, `REFUSED` of
+            // `build/ncbi_args.rs`). The arguments left in are read
             // (`ncbi_xmlhelp_tests`; blastp's `-use_sw_tback` runs with composition-based
             // statistics, line RG item X4; blastp's `-ungapped` runs, line NP item O4b).
             let kept = argument_names(&xml.stdout);

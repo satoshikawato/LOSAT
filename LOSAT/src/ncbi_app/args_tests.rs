@@ -794,7 +794,7 @@ fn the_refusals_and_the_sets_come_from_the_tables() {
     ));
     // The programs on NCBI's reader refuse none of their arguments.
     let rows = refusals();
-    assert_eq!(rows.len(), 64);
+    assert_eq!(rows.len(), 58);
     for program in [
         "blastdbcmd",
         "convert2blastmask",

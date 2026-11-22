@@ -78,7 +78,7 @@ fn one_object_read_leaves_the_rest() {
     assert_eq!(rest, &text[24..]);
 }
 
-/// `in.seekg(0)` of a file: the input from its start again.
+/// The stream's `seekg` to its start, of a file: the input from its start again.
 #[test]
 fn a_seekable_input_rewinds() {
     let text = b"Blast4-request ::= { body get-matrices NULL }\n".to_vec();
@@ -284,7 +284,7 @@ fn a_binary_strategy_reads_as_its_text() {
 /// RG-F2's `craft/blastn.xml`) read by the archive's style (`XmlStyle::Asn`) is one
 /// `Blast4-request`, written back as text the strategy it was made of, and the stream stops after
 /// it with the rest of the input. (NCBI's `-import_search_strategy` reads standard XML
-/// (`SetEnforcedStdXml(true)`) and refuses this file: that style is line RG-F2's, `XmlStyle::Std`.)
+/// (`SetEnforcedStdXml` on) and refuses this file: that style is line RG-F2's, `XmlStyle::Std`.)
 #[test]
 fn an_xml_strategy_reads_as_its_text() {
     let text = fixture("strategy_blastn.asn");

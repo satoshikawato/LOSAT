@@ -28,8 +28,8 @@ pub(crate) const TAG_OCTET_STRING: u8 = 0x04;
 pub(crate) const TAG_UTF8_STRING: u8 = 0x0c;
 pub(crate) const TAG_VISIBLE_STRING: u8 = 0x1a;
 pub(crate) const TAG_STRING_STORE: u8 = 0x41;
-/// An INTEGER with the application class (`MakeTagByte(eApplication, ePrimitive, eInteger)`),
-/// which NCBI's reader takes as an INTEGER (`ExpectIntegerTag`).
+/// An INTEGER with the application class (`MakeTagByte` of `eApplication`, `ePrimitive` and
+/// `eInteger`), which NCBI's reader takes as an INTEGER (`ExpectIntegerTag`).
 pub(crate) const TAG_APPLICATION_INTEGER: u8 = 0x42;
 pub(crate) const TAG_SEQUENCE: u8 = 0x30;
 pub(crate) const TAG_SET: u8 = 0x31;

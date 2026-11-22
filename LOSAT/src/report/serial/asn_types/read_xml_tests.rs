@@ -1,6 +1,6 @@
 //! Unit tests of the XML front end (`read_xml`): what NCBI's `CObjectIStreamXml` reads of the
-//! table's types in the ASN.1 style (`CObjectIStream::Open(eSerial_Xml, f)`, blast_formatter's
-//! archive) and where it stops, with its messages (objistrxml.cpp, quoted at each step of
+//! table's types in the ASN.1 style (`CObjectIStream::Open` with `eSerial_Xml`, blast_formatter's
+//! archive) and where it stops, with its messages (objistrxml.cpp, cited at each step of
 //! `read_xml`), on small values of `Dbtag`, `Seq-interval`, `Seq-loc` and `Seq-data` written by
 //! NCBI's XML writer of the archive (`XmlEncoder::ncbi_object`).
 
@@ -28,7 +28,7 @@ fn text_of(value: &Value, root: u16) -> String {
     String::from_utf8(out).expect("ASCII")
 }
 
-/// The XML that NCBI's object stream writes of a text's value (`os << MSerial_Xml << object`).
+/// The XML that NCBI's object stream writes of a text's value (an object written to an output stream with the manipulator `MSerial_Xml`).
 fn xml(root: u16, module: &'static str, text: &str) -> String {
     let (value, posts) = read_document(text.as_bytes(), root);
     assert!(posts.is_empty());
@@ -147,7 +147,7 @@ fn tags_are_checked_as_ncbi_checks_them() {
         outcome(&document.replace("Dbtag_db", "Other_db"), named::DBTAG),
         serial("invalid tag name: Other_db")
     );
-    // The class's name without `_` (`SkipStackTagName(tag, level, '_')`).
+    // The class's name without `_` (`SkipStackTagName` with the separator `_`).
     assert_eq!(
         outcome(&document.replace("Dbtag_db", "Dbtagdb"), named::DBTAG),
         serial("invalid tag name: db")
@@ -225,9 +225,10 @@ fn enumerated_values_and_numbers() {
     )
     .0
     {
-        // The exception as thrown (the oldest of its chain: each frame left rethrows it).
+        // The exception as thrown (the oldest of NCBI's report of the chain: each frame left
+        // rethrows it).
         Err(ReadError::Exception(e)) => {
-            let report = String::from_utf8_lossy(&e.what()).into_owned();
+            let report = String::from_utf8_lossy(&e.ncbi_what()).into_owned();
             let first = report.lines().nth(1).expect("the throw").to_string();
             let line = first
                 .split(", line ")
@@ -306,7 +307,7 @@ fn control_characters_are_replaced_and_posted_with_their_line() {
     );
 }
 
-/// The standard-XML style (`SetEnforcedStdXml(true)`, the search strategy of line RG-F2) is not
+/// The standard-XML style (`SetEnforcedStdXml` on, the search strategy of line RG-F2) is not
 /// read yet: the stream refuses it at the header.
 #[test]
 fn the_standard_style_is_refused_until_it_is_read() {

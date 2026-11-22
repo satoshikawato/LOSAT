@@ -1,5 +1,5 @@
 //! Unit tests of the binary front end (`read_ber`): what NCBI's `CObjectIStreamAsnBinary` reads
-//! of the table's types and where it stops, with its messages (objistrasnb.cpp, quoted at each
+//! of the table's types and where it stops, with its messages (objistrasnb.cpp, cited at each
 //! step of `read_ber`), on small values of `Dbtag`, `Object-id`, `Seq-interval`, `Score` and
 //! `Seq-loc`.
 

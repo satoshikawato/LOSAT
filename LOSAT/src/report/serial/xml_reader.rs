@@ -243,8 +243,8 @@ pub(crate) struct XmlReader<S: AsnSource> {
     /// `m_Utf8Buf` and `m_Utf8Pos`: the UTF-8 bytes of a character being returned one by one.
     utf8: Vec<u8>,
     utf8_at: usize,
-    /// The object stream of a type table (`asn_types::read_xml`, `CObjectIStream::Open(eSerial_Xml)`
-    /// for blast_formatter's archives) rather than rpsbproc's reader of a BLAST XML document:
+    /// The object stream of a type table (`asn_types::read_xml`, `CObjectIStream::Open` with
+    /// `eSerial_Xml` for blast_formatter's archives) rather than rpsbproc's reader of a BLAST XML document:
     /// attributes are skipped as NCBI skips the ones it does not know, and a control character
     /// is replaced by `#` with a post (`x_VerifyChar`), where rpsbproc's refuses both.
     object: bool,
@@ -744,7 +744,7 @@ impl<S: AsnSource> XmlReader<S> {
         };
         if bad_char(c) {
             if self.object {
-                // `ReplaceVisibleChar(c, eFNP_ReplaceAndWarn, ...)`: the post at the line now,
+                // `ReplaceVisibleChar` of `c` with `eFNP_ReplaceAndWarn`: the post at the line now,
                 // and `#` (`x_FixCharsSubst`).
                 self.replaced.push((c as u8, self.line));
                 return Ok(i32::from(b'#'));

@@ -348,15 +348,16 @@ impl RedoMatch<'_> {
                 cutoff_e: self.expect_value,
             };
             // NCBI asks the heap only for the match's first alignment, while
-            // `alignments[query_index]` is still `NULL`: the round loop asks at its window's first
-            // round, so a window after one that made alignments passes.
-            let match_has_alignments = !made.is_empty();
+            // `alignments[query_index]` is still `NULL`: a window after one that made alignments
+            // starts with the query's list not empty (`query_had_none` false), as TBLASTN's.
+            let query_had_none = made.is_empty();
             let (matrix, gap, x_dropoff) = (&run.matrix, &mut run.scratch, run.x_dropoff);
             let (gap_open, gap_extend) = (run.gap_open, run.gap_extend);
             let redone = smith_waterman_redo_window(
                 &window_letters,
                 significance,
-                |evalue, score| match_has_alignments || heap.would_insert(evalue, score, oid),
+                query_had_none,
+                |evalue, score| heap.would_insert(evalue, score, oid),
                 |query, subject_span, score| {
                     pssm_sw_xdrop_traceback(
                         matrix,

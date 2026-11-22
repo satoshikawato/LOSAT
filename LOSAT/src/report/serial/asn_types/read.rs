@@ -500,7 +500,7 @@ impl TypedReader<'_> {
     fn item_index(&mut self, items: &'static [Member], pos: usize, in_class: bool) -> R<usize> {
         let found = match self.r.member_or_tag()? {
             MemberId::Name(range) => {
-                let id = self.r.bytes(range);
+                let id = self.r.bytes(range.clone());
                 if id.is_empty() && !in_class {
                     return Err(self.stream_error("choice variant id expected"));
                 }

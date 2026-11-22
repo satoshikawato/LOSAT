@@ -184,6 +184,20 @@ impl std::io::Seek for &InputFile {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
+/// The bytes of an opened `-query` or `-subject` input (`open_input`, `open_file_input`) from its
+/// position to its end, as the FASTA readers read it (`fasta_reader::stream`): a read that fails
+/// ends the input as its end does, with the bytes read before it (NCBI's line reader is at its end
+/// once the stream has failed). A directory opens and fails its first read: no byte, so the
+/// command line's query of a directory is empty (`Query is Empty!`) and its subject set has no
+/// record. The library's `api::read_input_file` reads its files here.
+pub(crate) fn read_to_failure(input: &mut impl std::io::Read) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    // `read_to_end` keeps the bytes before a failed read; the failure itself is the end.
+    let _ = input.read_to_end(&mut bytes);
+    bytes
+}
+
 /// Opens the file of a `-query` or `-subject` argument (`path` is not `-`): a file that does not
 /// open gets NCBI's error (`crate::cli::inaccessible`), and a file named `.gz`, `.bz2` or `.zst`
 /// (`compressed::compression_of_name`) is inflated into an unnamed temporary file first, which is

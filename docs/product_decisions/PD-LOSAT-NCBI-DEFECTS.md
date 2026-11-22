@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.72
+- Version: 1.73
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -328,7 +328,14 @@
   them with a format of another writer it covers the whole call, also where the call searches
   once for each hit list size; line DBID item pfoff-3, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07);
-  1.72 2026-11-21 (TBLASTN `-use_sw_tback`, line RG item X4b-1: the explicit rejections of 1.53,
+  1.72 2026-11-22 (`losat windowmasker`, line NP items M5a and M5b: NCBI's defined results of
+  `-mk_counts`, `-convert` and `-checkdup` reproduced, rule 2, and the explicit rejections, rule 3,
+  of the masking and counts inputs whose result NCBI leaves undefined, takes from the C runtime or
+  the host's memory, or fetches from NCBI's servers; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.71; first 1.68, then 1.70 and 1.72 at the merges
+  of dev that brought line NP items O2b's 1.68 and M4b-3's 1.69, then line RG item D1b-2's 1.70 and line
+  DBID item pfoff-3's 1.71);
+  1.73 2026-11-21 (TBLASTN `-use_sw_tback`, line RG item X4b-1: the explicit rejections of 1.53,
   a Smith-Waterman redo that NCBI repeats without end and a failed batch whose first query holds
   a redone match, on which NCBI's clean-up crashes, extended from BLASTP to TBLASTN, rule 3,
   within the class of 1.30, after the reports of the query batches before; a subject excluded
@@ -336,7 +343,7 @@
   NCBI fails, crashes, does not end or writes rows that change from run to run, refused at the
   first match the redo reaches instead of before the search; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.55, line RG item X6, then after
-  1.56 and 1.57, line RG item D1a-4, after 1.58, line RG item Q-BM, and after 1.59 to 1.71
+  1.56 and 1.57, line RG item D1a-4, after 1.58, line RG item Q-BM, and after 1.59 to 1.72
   at the merges of dev)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -1466,6 +1473,29 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   conversion (INT_MIN), and the catch in `BlastSetupPreliminarySearchEx` that never
   matches.
 
+- `losat windowmasker -mk_counts`, `-convert` and `-checkdup` (version 1.72, 2026-11-22, line NP
+  item M5b, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): NCBI's defined
+  but surprising results are written byte for byte (fixture rows of `LOSAT/tests/windowmasker`):
+  - `-smem` passes through `atoi` into a `Uint2` (`seq_masker_ostat_factory.cpp:63-72`): 65536 is
+    0 megabytes, which gives the insufficient-memory error (exit status 3) after an empty output
+    file; 70000 is 4464; -1 is 65535.
+  - The `-t_*_pct` options apply only when `-out` names a file (`win_mask_gen_counts.cpp:216-219`).
+  - Binary counts written to the standard output start with an extra 0 word
+    (`seq_masker_ostat_bin.cpp:62-67`), which NCBI's own reader then rejects (`wrong length`).
+  - An `-out` that cannot be opened gives exit status 0, no file and no message (NCBI's writer
+    writes to a failed `ofstream`).
+  - Counts above 511 in the optimized formats run into the check bits (`Uint2` counts, 9-bit
+    fields, `seq_masker_ostat_opt.cpp:82-99, 311-325`); counts above 65,535 keep their low 16 bits.
+  - `-t_high_pct 0` gives `t_high` 0 and every count 0 (the ascii file then fails to load, the
+    obinary one masks nothing); `-t_high_pct 100` and `-t_low_pct 100` keep the counts NCBI keeps.
+  - A negative `-genome_size` wraps as a `Uint8` and gives units of 16 letters.
+  - The FASTA reader's warnings are written once per read of the input, so their number follows
+    `-mem` (one read per prefix and pass).
+  - `-convert` of an ascii counts file whose unit size line is 0 (or a multiple of 256) to `ascii`
+    or `binary`; a `##pct:` line whose value is missing, or whose word does not start a number,
+    reads as 0, as NCBI's `istringstream` stores it.
+  - A `-checkdup` interval whose start falls below 0 is printed as NCBI's `size_t` wrap.
+
 ## Explicit rejections (rule 3)
 
 - A scoring system without Karlin-Altschul values when an invalid query (such as all N)
@@ -1940,7 +1970,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   nor crashes NCBI, and LOSAT reproduces that (rule 2; version 1.59; 2026-11-21, line RG item
   X4-excl, rows `db.x4excl.*`).
 
-- TBLASTN `-use_sw_tback` (version 1.72, 2026-11-21, line RG item X4b-1, Owner-delegated, standing
+- TBLASTN `-use_sw_tback` (version 1.73, 2026-11-21, line RG item X4b-1, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07, within the class of 1.30 and the rules of 1.53; P2,
   P3: the same match body and round loop as BLASTP's,
   `core::composition_adjustment::smith_waterman_match`): TBLASTN's redo of a match holds the
@@ -2455,6 +2485,40 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
     volume of -1, such as `oidx,,0,-1`), or whose last volume is past `LONG_MAX` while its first
     is not: NCBI's loop over the volume numbers never ends (row `old_endless`). Other ranges,
     negative ones too, end and are reproduced.
+
+- `losat windowmasker` (version 1.72, 2026-11-22, line NP items M5a and M5b, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07). LOSAT refuses each (exit status 1, the
+  manual's `refusals.md`) where NCBI meets it:
+  - `-mk_counts` of an input without a unit of unambiguous letters (all `N`, or an empty input
+    with `-unit`): NCBI writes the percentages of the file as its C runtime prints 0/0 (`-nan` on
+    x86-64 Linux), a text that depends on the runtime.
+  - `-mk_counts -infmt seqids`: NCBI fetches each sequence from NCBI's servers, as masking with
+    `-infmt seqids` is refused.
+  - `-mk_counts` or `-convert` to `oascii` or `obinary` with units of 1 to 3 letters and an
+    `-smem` whose low 16 bits are 0: NCBI's `Uint1` key size wraps below 0 to 253
+    (`seq_masker_ostat_opt.cpp:222-242`), and NCBI then allocates 8 GiB and shifts by 253 bits
+    (undefined behaviour in C++). Units of 4 letters or more give NCBI's insufficient-memory
+    error, which LOSAT writes.
+  - `-mk_counts` whose counters (4^suffix `Uint4`) or cache bit array (4^unit/32 words) cannot be
+    allocated on the host: NCBI's result then depends on the memory of the computer
+    (`std::bad_alloc`, or a file without the cache bit array after a warning).
+  - `-convert` of an ascii counts file with units of 17 letters or more: the converter's reverse
+    complement shifts the 32-bit unit past its width (undefined behaviour), as masking with such a
+    file is refused.
+  - `-convert` of an ascii counts file whose unit size line is 0 (or a multiple of 256) to `oascii`
+    or `obinary`: NCBI's search for the size of its hash table never ends
+    (`seq_masker_ostat_opt.cpp:217-223`).
+  - A counts file whose `##pct:` line holds a number that C++ libraries read differently (`inf`,
+    `nan`, a hexadecimal number, a number with letters after it, a number past the range of a
+    double), with `-convert` or a `-t_*_pct` option; and a `binary` or `obinary` file whose
+    `##pct:` line names 4294967295 or more as its largest count, where NCBI's table has no room for
+    it and its loop reads past the table.
+  - An `-ids` or `-exclude_ids` file matched as text with an empty id: NCBI indexes its id sets at
+    -1 and crashes (SIGSEGV after its own `bad id` post).
+  - An optimized ascii counts file whose hash-parameter line leaves a value unread, which NCBI then
+    checks uninitialised; an `obinary` file with units of 1 or 2 letters, whose empty array NCBI
+    reads past; a FASTA record or database sequence of 4,294,967,296 letters or more, whose
+    positions NCBI counts in 32 bits.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

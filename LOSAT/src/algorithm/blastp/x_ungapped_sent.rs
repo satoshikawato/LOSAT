@@ -362,7 +362,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize
             best = key;
         }
     }
-    let (_, right_d) = best_of(best);
+    let right_d = best_of(best).1 as i32;
     q_right_off += right_d;
     s_right_off += right_d;
 
@@ -378,7 +378,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize
             dropoff,
             0,
         );
-        (best, len)
+        (best, len as i32)
     };
 
     let mut right_extend = false;
@@ -402,7 +402,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize
             dropoff,
             left_score,
         );
-        (right_score, right_d, s_last_off) = (best, len, s_right_off + end as i32);
+        (right_score, right_d, s_last_off) = (best, len as i32, s_right_off + end as i32);
     }
 
     Some(BlastpTwoHitUngappedResult {

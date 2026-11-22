@@ -28,12 +28,15 @@ pub(crate) const KEY_TABLE_LEN: usize = 32 * 32;
 /// score of the two codes (-128 for a sentinel). The walks add it (module comment).
 pub(crate) type KeyTable = [i64; KEY_TABLE_LEN];
 
-/// The score and the length of a best key (module comment).
+/// The score and the length of a best key (module comment). The length is the low half of
+/// `-best`, below `2^32`: as a `u32` it widens to an offset with no sign extension (TBLASTX's
+/// offsets are `usize`; a sign extension put a multiply on the path from the word loop to the
+/// walks, DT1-10).
 // No NCBI counterpart: decodes the key of the module comment.
 #[inline(always)]
-pub(crate) fn best_of(best: i64) -> (i32, i32) {
-    let len = (best.wrapping_neg() as u64 & 0xffff_ffff) as i64;
-    (((best + len) >> 32) as i32, len as i32)
+pub(crate) fn best_of(best: i64) -> (i32, u32) {
+    let len = best.wrapping_neg() as u32;
+    (((best + i64::from(len)) >> 32) as i32, len)
 }
 
 /// A query code as the walks read it: the row of the keys (`code << 5`). blastp's block is kept
@@ -74,7 +77,7 @@ pub(crate) unsafe fn walk<const RIGHT: bool, Q: XQueryCode>(
     sp: *const u8,
     dropoff: i32,
     maxscore: i32,
-) -> (i32, i32, usize) {
+) -> (i32, u32, usize) {
     let mut key = (maxscore as i64) << 32;
     let mut best = key;
     let drop = (dropoff as i64) << 32;

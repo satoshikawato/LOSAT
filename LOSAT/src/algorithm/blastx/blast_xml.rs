@@ -1407,10 +1407,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 let post = match document.unwritten(&mut buf) {
                     Ok(()) => None,
                     Err(error) => match error.downcast::<CaughtException>() {
-                        Ok(CaughtException(exception)) => Some(caught_post(
-                            options.program().lower,
-                            &document.caught_message(&exception),
-                        )),
+                        Ok(CaughtException(exception)) => {
+                            Some(crate::ncbi_exception::error_post_line(
+                                None,
+                                Some(options.program().lower),
+                                &document.caught_message(&exception),
+                            ))
+                        }
                         Err(error) => return Err(error),
                     },
                 };
@@ -1561,8 +1564,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             let caught = match written {
                 Ok(()) => None,
                 Err(error) => match error.downcast::<CaughtException>() {
-                    Ok(CaughtException(exception)) => Some(caught_post(
-                        options.program().lower,
+                    Ok(CaughtException(exception)) => Some(crate::ncbi_exception::error_post_line(
+                        None,
+                        Some(options.program().lower),
                         &document.caught_message(&exception),
                     )),
                     Err(error) => return Err(error),
@@ -1596,7 +1600,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
 /// The end of the document (`PrintEpilog`): its trailer when `queries` queries were formatted,
 /// else the epilog's end of line alone. For the XML2 and JSON documents `xml2` is the run's
 /// writer: it writes the report held back by a `-subject` run and the document's end; `program`
-/// names the run's program in its message (`caught_post`).
+/// names the run's program in its message (`ncbi_exception::error_post_line`).
 pub(super) fn write_xml_epilog(
     writer: &mut impl Write,
     diagnostics: &mut dyn Write,
@@ -1611,9 +1615,11 @@ pub(super) fn write_xml_epilog(
                 // The held report of a `-subject` run that fails (`CaughtException`): its
                 // message, then the end of the document.
                 match error.downcast::<CaughtException>() {
-                    Ok(CaughtException(exception)) => {
-                        Ok(caught_post(program, &xml2.caught_message(&exception)))
-                    }
+                    Ok(CaughtException(exception)) => Ok(crate::ncbi_exception::error_post_line(
+                        None,
+                        Some(program),
+                        &xml2.caught_message(&exception),
+                    )),
                     Err(error) => Err(error),
                 }
             });
@@ -1649,21 +1655,6 @@ fn write_with_posts(
     let mut hits = crate::report::query_warnings::HitPosts::default();
     hits.document(posts);
     crate::report::query_warnings::write_posts_to(buf, &hits, 0, writer, diagnostics, None)
-}
-
-/// NCBI's post (`ERR_POST` at the error level with `message`) of a structured report's caught exception
-/// (`CaughtException`, `StructuredXml::caught_message`), as BLASTX and RPSTBLASTN write it:
-/// `Error: [blastx] ` (`program`, the lower-case name), the message (which ends with the `what()`
-/// text's end of line) and the post's end of line.
-fn caught_post(program: &str, message: &[u8]) -> Vec<u8> {
-    [
-        b"Error: [".as_slice(),
-        program.as_bytes(),
-        b"] ",
-        message,
-        b"\n",
-    ]
-    .concat()
 }
 
 #[cfg(test)]

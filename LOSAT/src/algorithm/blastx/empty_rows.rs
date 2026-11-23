@@ -28,6 +28,7 @@ pub(crate) fn rows_empty(hsp: &super::results::Hsp) -> bool {
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
 /// What `CSeq_align::GetSeqRange` of the row finds on the Std-segs of the reported HSP `hsp`
 /// (`serial::seqalign::std_seg_row_range`, the one predicate of the writers): the empty rows of an
 /// HSP of length 0 (`rows_empty`), or the row that a gapped HSP's edit script starts with a gap in,
@@ -42,6 +43,8 @@ pub(crate) fn row_range(hsp: &super::results::Hsp, row: AlignRow) -> Option<RowR
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2907-2930
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
 /// What a formatter that reads the query's range of `hsp`'s Seq-align and then the subject's finds
 /// (`row_range`): the first exception, `None` where both are taken. The description table of
 /// outfmt 0 to 4 (`s_ProcessAlignSet`) and BLAST XML (`s_SeqAlignToXMLHsp`) read them so; an HSP of
@@ -503,6 +506,7 @@ pub(crate) fn subject_rows_all_empty(list: &super::results::HspList, gapped: boo
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:677-679
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-230
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
 /// Whether NCBI's prefetch of the query batch `batches` of a report of `loc`'s subjects (where it
 /// reads the Seq-aligns, `common::database::prefetch_reads_seq_aligns`) throws before it loads
 /// anything: `s_ExtractSeqidsAndRanges` asks for the subject row's range of every Seq-align

@@ -279,7 +279,9 @@ impl RpsTraceback<'_> {
             // shows what NCBI's reports write for it, and LOSAT refuses the profile.
             if S::Instance::SUBJECT_IS_TRANSLATED
                 && redo.smith_waterman
-                && hsp_list.hsps.iter().any(starts_with_query_gap)
+                && hsp_list.hsps.iter().any(|hsp| {
+                    starts_with_row_gap(hsp, crate::report::serial::seqalign::AlignRow::Query)
+                })
             {
                 anyhow::bail!(
                     "a profile whose Smith-Waterman redo (-use_sw_tback) gives an alignment that starts with a gap in the query's row, for which no NCBI BLAST+ 2.17.0 report was found to follow, is not supported by LOSAT's {program}"
@@ -297,13 +299,12 @@ impl RpsTraceback<'_> {
 }
 
 /// Whether the alignment `hsp` (switched back: its query is the search's query) starts with a gap
-/// in the query's row (`serial::seqalign::gapped_row_range`).
-pub(super) fn starts_with_query_gap(hsp: &crate::algorithm::blastp::hsp::BlastpHsp) -> bool {
+/// in the row `row` (`serial::seqalign::gapped_row_range`).
+pub(crate) fn starts_with_row_gap(
+    hsp: &crate::algorithm::blastp::hsp::BlastpHsp,
+    row: crate::report::serial::seqalign::AlignRow,
+) -> bool {
     hsp.gap_info.as_deref().is_some_and(|ops: &[GapEditOp]| {
-        crate::report::serial::seqalign::gapped_row_range(
-            ops,
-            crate::report::serial::seqalign::AlignRow::Query,
-        )
-        .is_some()
+        crate::report::serial::seqalign::gapped_row_range(ops, row).is_some()
     })
 }

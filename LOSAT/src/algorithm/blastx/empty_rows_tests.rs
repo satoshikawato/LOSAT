@@ -2,7 +2,7 @@ use super::*;
 use crate::ncbi_exception::NCBI_BUILD_ROOT;
 
 // NCBI BLAST+ 2.17.0 (the official Linux x64 release), rows db.x2g.bx.f0616.0,
-// db.x2g.bx.f0616.subj.6 and db.rpstbn.sw.nest.0: `CATCH_ALL`'s report of the three exceptions.
+// db.x2g.bx.f0616.subj.6 and db.rpstbn.sw.nest.p.0: `CATCH_ALL`'s report of the three exceptions.
 #[test]
 fn the_exceptions_are_ncbis_reports() {
     // NCBI's reports in LOSAT's words (`crate::wording::losat_text`).

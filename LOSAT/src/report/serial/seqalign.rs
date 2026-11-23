@@ -945,8 +945,9 @@ fn end_std_seg_locs<E: Encoder>(enc: &mut E) {
 /// Whether the Std-seg of segment `seg` (of `numseg`, `gap` telling whether a segment has a
 /// gap row) is kept by the mapper of `s_RemapToSubjectLoc` (a `-subject` search; see
 /// `remap_strands`), which rebuilds the Std-segs and leaves out a first and a last segment
-/// with fewer than two aligned rows. (The segments of a BLAST edit script start and end with
-/// a substitution, so this keeps every segment of LOSAT's HSPs.)
+/// with fewer than two aligned rows. An X-drop edit script starts and ends with a substitution,
+/// so this keeps its every segment; a Smith-Waterman alignment of `-use_sw_tback` can start with
+/// a gap (line PS item PS12d), whose first segment the mapper leaves out.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
 fn std_seg_kept(seg: usize, numseg: usize, gap: impl Fn(usize) -> bool) -> bool {
@@ -1090,6 +1091,7 @@ pub(crate) fn std_seg_row_range(
     gapped_row_range(ops, row)
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
 /// `std_seg_row_range` of a gapped HSP whose edit script is `ops` (never of length 0): the row that
 /// the script starts with a gap in (`RowRangeError::SeqidsNotConsistent`).
 #[inline]

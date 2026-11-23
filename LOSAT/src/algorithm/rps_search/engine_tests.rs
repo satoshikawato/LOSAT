@@ -873,7 +873,10 @@ fn a_batchs_cutoff_refusal_comes_before_its_search_errors() {
 // profile's row (`Ins` first, nest_p.fna's, written as NCBI BLAST+ 2.17.0's).
 #[test]
 fn only_a_query_row_gap_start_is_refused() {
-    use super::super::redo::starts_with_query_gap;
+    use crate::report::serial::seqalign::AlignRow;
+    let starts_with_query_gap = |hsp: &crate::algorithm::blastp::hsp::BlastpHsp| {
+        super::super::redo::starts_with_row_gap(hsp, AlignRow::Query)
+    };
     use crate::common::GapEditOp::{Del, Ins, Sub};
     let with = |ops: Vec<crate::common::GapEditOp>| {
         let mut hsp = hsp(0, 1e-5, 0, 99);

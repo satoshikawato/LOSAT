@@ -593,13 +593,10 @@ pub(crate) fn report_ordinal_ids(
     // Whether a dropped profile's HSP has a subject row that starts with a gap.
     let starts_with_gap = |hsp_list: &crate::algorithm::blastp::hsp::BlastpHspList| {
         hsp_list.hsps.iter().any(|hsp| {
-            hsp.gap_info.as_deref().is_some_and(|ops| {
-                crate::report::serial::seqalign::gapped_row_range(
-                    ops,
-                    crate::report::serial::seqalign::AlignRow::Subject,
-                )
-                .is_some()
-            })
+            super::redo::starts_with_row_gap(
+                hsp,
+                crate::report::serial::seqalign::AlignRow::Subject,
+            )
         })
     };
     for (index, slot) in lists.iter_mut().enumerate() {

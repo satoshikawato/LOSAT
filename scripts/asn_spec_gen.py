@@ -451,7 +451,7 @@ class Entry:
     values: list[tuple[str, int]] = field(default_factory=list)
     integer: bool = False
     alias: bool = False  # a named type that is another named type (`A ::= B`)
-    by_value: set[str] = field(default_factory=set)  # members of `.def` `_pointer = false`
+    by_value: set[str] = field(default_factory=set)  # members whose `.def` `_pointer` setting is `false`
 
 
 class Table:

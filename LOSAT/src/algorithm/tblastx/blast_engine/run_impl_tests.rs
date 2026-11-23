@@ -279,9 +279,27 @@ fn chunk_offsets_move_an_end_below_zero() {
     assert_eq!((hits[1].q_aa_start, hits[1].q_aa_end), (10, 40));
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3037-3051
+// An HSP of the chunk from residue 4,999,900 that starts at its offset -95, and a seed at -1 (masks
+// stored out of order, M4b-T2), move as NCBI's `Int4`.
+#[test]
+fn chunk_offsets_move_a_start_and_a_seed_before_the_chunk() {
+    let mut hit = make_chunk_hit(0, 0, 60, 0, 0, 100);
+    hit.s_aa_start = (-95i32) as u32;
+    hit.set_int4_ends(60, -35);
+    hit.s_seed_off = (-1i32) as u32;
+    let mut hits = vec![hit];
+    adjust_tblastx_chunk_subject_offsets(&mut hits, 4_999_900);
+    assert_eq!(
+        (hits[0].s_aa_start, hits[0].s_end_int4(), hits[0].s_seed_off),
+        (4_999_805, 4_999_865, 4_999_899)
+    );
+    assert_eq!((hits[0].q_aa_start, hits[0].q_end_int4()), (0, 60));
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1513-1527
 // A positive HSP of the earlier chunk absorbs an HSP of length -1 that starts inside it: its
-// bounds stay, the density (100 + 7) / (20 - 1) raises its score to (int)(107/19*20) = 112.
+// bounds stay, and the density (100 + 7) / (20 - 1) raises its score to trunc(107 / 19 * 20) = 112.
 #[test]
 fn chunk_merge_absorbs_an_hsp_of_negative_length() {
     let mut combined = vec![make_chunk_hit(0, 100, 120, 100, 120, 100)];
@@ -298,7 +316,7 @@ fn chunk_merge_absorbs_an_hsp_of_negative_length() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits_priv.h:68-69
 // An HSP of length 0 of the earlier chunk contains the HSP that starts at its point: it takes
-// that HSP's bounds and seed (a higher score), and its score becomes (int)((5 + 30)/(0 + 10) *
+// that HSP's bounds and seed (a higher score), and its score becomes trunc((5 + 30) / (0 + 10) *
 // 10) = 35. An HSP of negative length contains nothing.
 #[test]
 fn chunk_merge_lets_an_hsp_of_length_zero_absorb_and_one_of_negative_length_not() {

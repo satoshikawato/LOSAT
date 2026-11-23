@@ -354,7 +354,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
 
     // NCBI BLAST: Final traceback X-dropoff (100 for all nucleotide tasks), in bits
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:146
-    // BLAST_GAP_X_DROPOFF_FINAL_NUCL = 100; `-xdrop_gap_final` replaces it
+    // Default `BLAST_GAP_X_DROPOFF_FINAL_NUCL` is 100; `-xdrop_gap_final` replaces it
     // (blast_args.cpp:284-286). The raw value is at least the gapped one (`gap_x_dropoffs`).
     let x_drop_final = args
         .xdrop_gap_final

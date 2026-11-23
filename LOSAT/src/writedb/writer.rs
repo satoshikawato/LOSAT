@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use super::bioseq::Bioseq;
+use super::bioseq::{Bioseq, SeqData};
 use super::column::{unsupported_late_column, BlobPair, ColumnDates, ColumnMeta};
 use super::convert::{
     find_sequence_length, raw_sequence_hash, seq_data_to_binary, sequence_hash, BinarySequence,
@@ -46,6 +46,10 @@ pub struct WriteDb {
     pending: Option<Pending>,
     /// What NCBI's serializer posts to the diagnostic stream, in order.
     diagnostics: Vec<u8>,
+    /// What NCBI's writer writes to the standard output (`cout`), in order: the lines of the
+    /// conversion of NCBI4na data whose size is not the one its length needs
+    /// (`convert::ncbi4na_to_binary`).
+    stdout: Vec<u8>,
     /// `m_Lmdbdb` (version 5, from the first published sequence until `Close`).
     lmdb: Option<WriteDbLmdb>,
     /// `m_Taxdb` (as `m_Lmdbdb`).
@@ -213,6 +217,7 @@ impl WriteDb {
             closed: false,
             pending: None,
             diagnostics: Vec::new(),
+            stdout: Vec::new(),
             lmdb: None,
             taxdb: None,
             lmdb_oid: 0,
@@ -246,6 +251,13 @@ impl WriteDb {
     /// standard error stream).
     pub fn take_diagnostics(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.diagnostics)
+    }
+
+    /// Takes the text written to the standard output since the last call. Only a PSSM's query
+    /// gives such text (makeprofiledb): makeblastdb's FASTA source gives NCBI4na data of the size
+    /// its length needs, and a copied sequence is not converted.
+    pub fn take_stdout(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.stdout)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
@@ -320,6 +332,15 @@ impl WriteDb {
         }
         if self.indices.hash {
             if let Some(seq_data) = &bioseq.seq_data {
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1709-1712
+                // The hash reads the Bioseq's sequence vector (`convert::sequence_hash`), which
+                // LOSAT has for the codings of its sources only; no program of LOSAT asks for the
+                // hash of iupacna data.
+                if let SeqData::Iupacna(_) = seq_data {
+                    return Err(WriteDbError::Unsupported(
+                        "the sequence hash (-hash_index) of iupacna data".to_string(),
+                    ));
+                }
                 self.pending_hash = sequence_hash(seq_data, bioseq.length).unwrap_or(0);
             }
         }
@@ -534,7 +555,7 @@ impl WriteDb {
         let cooked;
         let binary = match &pending {
             Pending::Bioseq(bioseq) => {
-                cooked = self.cook_sequence(bioseq)?;
+                cooked = cook_sequence(bioseq, &mut self.stdout)?;
                 &cooked
             }
             Pending::Raw(binary) => binary,
@@ -722,23 +743,6 @@ impl WriteDb {
         )?;
         self.taxdb = Some(taxdb);
         Ok(())
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1032-1041
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1042-1048
-    /// `x_CookSequence`.
-    fn cook_sequence(&self, bioseq: &Bioseq) -> Result<BinarySequence, WriteDbError> {
-        let Some(seq_data) = &bioseq.seq_data else {
-            return Err(WriteDbError::Creation(
-                "No sequence data in Bioseq, and no Bioseq_Handle available.".to_string(),
-            ));
-        };
-        seq_data_to_binary(seq_data, bioseq.length as u32).map_err(|_| {
-            WriteDbError::Creation(format!(
-                "Unable to process sequence for entry [{}].",
-                bioseq.first_id_string()
-            ))
-        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:326-354
@@ -1143,6 +1147,23 @@ impl WriteDb {
         }
         files
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1032-1041
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1042-1048
+/// `x_CookSequence`, with the conversion's text on the standard output appended to `cout`.
+fn cook_sequence(bioseq: &Bioseq, cout: &mut Vec<u8>) -> Result<BinarySequence, WriteDbError> {
+    let Some(seq_data) = &bioseq.seq_data else {
+        return Err(WriteDbError::Creation(
+            "No sequence data in Bioseq, and no Bioseq_Handle available.".to_string(),
+        ));
+    };
+    seq_data_to_binary(seq_data, bioseq.length as u32, cout).map_err(|_| {
+        WriteDbError::Creation(format!(
+            "Unable to process sequence for entry [{}].",
+            bioseq.first_id_string()
+        ))
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:383-392

@@ -126,7 +126,8 @@ pub(super) fn sort_ungapped_hits_for_gapped(
     // ============================================================
     // NCBI ARCHITECTURE: Batch process ungapped hits in score order
     // ============================================================
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824
+    // Asserts that `init_hitlist` is sorted by score (`Blast_InitHitListIsSortedByScore`).
     // NCBI processes init_hsp_array sorted by score DESCENDING
     // High-score HSPs are processed first, their GAPPED HSPs added to interval tree
     // Lower-score HSPs are then checked for containment against these GAPPED HSPs

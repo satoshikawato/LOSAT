@@ -268,7 +268,7 @@ fn reevaluate_ungapped_hit_ncbi_translated_scalar<S: TbxScore>(
     for idx in 0..hsp_len {
         let q = unsafe { *q_ptr.add(idx) };
         let s = unsafe { *s_ptr.add(idx) };
-        // NCBI: matrix[*query & 0xff][*subject]
+        // Look up the substitution score for the current query residue (masked to a byte) and subject residue.
         sum += sc.score(q, s);
 
         if sum < 0 {
@@ -616,7 +616,7 @@ pub(crate) fn get_num_identities_and_positives_ungapped(
 
     let align_length = hsp_len;
 
-    // NCBI: for (i=0; i<align_length; i++)
+    // Count identical residue pairs across the alignment of length `align_length`.
     //
     // SIMD optimization: use AVX2/SSE2 to compare 32/16 bytes at a time
     let num_ident = unsafe {

@@ -618,8 +618,8 @@ enum UserData {
 /// NCBI reference (598d8ae6): c++/src/objects/general/general.asn:128-136
 /// (`data`: `str` 0, `int` 1, `real` 2, `bool` 3, general.asn:136-140.)
 fn write_user_object<E: Encoder>(enc: &mut E, type_str: &[u8], label: &[u8], data: UserData) {
-    // Annotdesc ::= CHOICE { name, title, comment, pub, user User-object, ... }
-    // (objects/seq/seq.asn:440-445).
+    // `Annotdesc` choice variant `user` (`User-object`, index 4;
+    // objects/seq/seq.asn:440-445).
     enc.variant("Annotdesc", "user", 4);
     enc.begin_sequence("User-object");
     enc.member("type", 1);
@@ -945,8 +945,9 @@ fn end_std_seg_locs<E: Encoder>(enc: &mut E) {
 /// Whether the Std-seg of segment `seg` (of `numseg`, `gap` telling whether a segment has a
 /// gap row) is kept by the mapper of `s_RemapToSubjectLoc` (a `-subject` search; see
 /// `remap_strands`), which rebuilds the Std-segs and leaves out a first and a last segment
-/// with fewer than two aligned rows. (The segments of a BLAST edit script start and end with
-/// a substitution, so this keeps every segment of LOSAT's HSPs.)
+/// with fewer than two aligned rows. An X-drop edit script starts and ends with a substitution,
+/// so this keeps its every segment; a Smith-Waterman alignment of `-use_sw_tback` can start with
+/// a gap (line PS item PS12d), whose first segment the mapper leaves out.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
 fn std_seg_kept(seg: usize, numseg: usize, gap: impl Fn(usize) -> bool) -> bool {
@@ -1043,6 +1044,63 @@ pub(crate) fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -
 #[inline]
 pub(crate) fn ungapped_rows_empty(offset: i64, end: i64) -> bool {
     end == offset
+}
+
+/// A row of a pairwise Seq-align (`CSeq_align::TDim`): the query's, 0, and the subject's, 1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AlignRow {
+    Query,
+    Subject,
+}
+
+/// Why `CSeq_align::GetSeqRange` throws on a row of a translated search's Seq-align (`segs std`,
+/// one Std-seg per segment of an HSP's edit script, `write_std_segs`): the exceptions of
+/// `Seq_align.cpp`, which `algorithm::blastx::empty_rows::row_range_exception` makes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RowRangeError {
+    /// `Row is empty` (Seq_align.cpp:227): no segment has a location of letters in the row, the
+    /// rows of an ungapped HSP of length 0 (`ungapped_rows_empty`).
+    Empty,
+    /// `Row seqids not consistent. Cannot determine range.` (Seq_align.cpp:186): the row's first
+    /// Std-seg has no location of letters (`empty`, the gap row of a segment), so the row takes no
+    /// Seq-id there, and the first segment with an interval compares its Seq-id with that unset
+    /// one. A gapped HSP whose edit script starts with a gap in the row: an alignment of the
+    /// Smith-Waterman redo (`-use_sw_tback`), which `ALIGN_EX` runs from the Smith-Waterman start;
+    /// an X-drop alignment starts with a substitution. A gap at the row's end is read as any.
+    SeqidsNotConsistent,
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-230
+/// What `CSeq_align::GetSeqRange` of the row finds on the Std-segs of a translated search's HSP from the
+/// query offset `offset` to `end` (exclusive, in its frame's letters) whose edit script is `ops`
+/// (empty for an ungapped HSP): the exception it throws (`RowRangeError`), `None` where it gives
+/// the range. An `Ins` keeps the query's letters against a gap of the subject's row, a `Del` the
+/// subject's against a gap of the query's (`collect_seq_align_data`). The one predicate of the
+/// writers that read a row's range (BLASTX's and RPSTBLASTN's reports through
+/// `algorithm::blastx::empty_rows::row_range`, the pairwise report's `PairwiseHit::row_range`).
+pub(crate) fn std_seg_row_range(
+    offset: i64,
+    end: i64,
+    ops: &[GapEditOp],
+    row: AlignRow,
+) -> Option<RowRangeError> {
+    if ungapped_rows_empty(offset, end) {
+        return Some(RowRangeError::Empty);
+    }
+    gapped_row_range(ops, row)
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
+/// `std_seg_row_range` of a gapped HSP whose edit script is `ops` (never of length 0): the row that
+/// the script starts with a gap in (`RowRangeError::SeqidsNotConsistent`).
+#[inline]
+pub(crate) fn gapped_row_range(ops: &[GapEditOp], row: AlignRow) -> Option<RowRangeError> {
+    match (ops.first(), row) {
+        (Some(GapEditOp::Ins(_)), AlignRow::Subject)
+        | (Some(GapEditOp::Del(_)), AlignRow::Query) => Some(RowRangeError::SeqidsNotConsistent),
+        _ => None,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:453-460

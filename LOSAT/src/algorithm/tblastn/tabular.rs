@@ -385,6 +385,11 @@ pub(super) fn write_tblastn_tabular(
                 // own lookups. A row that reads a subject whose load throws outside the subject
                 // block ends the run (`TabularWriter::ends_run`).
                 let engine_ident = usize::try_from(payload.num_ident).unwrap_or(0);
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    if warnings.reads_with_texts(q_idx) && fetch.reads(engine_ident) {
+                        warnings.subject_read(q_idx, oid as u32, &mut *writer)?;
+                    }
+                }
                 if let Some(end) = table.ends_run(
                     &subject,
                     crate::blastinput::app::Program::Tblastn,
@@ -395,14 +400,6 @@ pub(super) fn write_tblastn_tabular(
                             warnings.end_run();
                         }
                     }));
-                }
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx)
-                        && fetch.reads(engine_ident)
-                        && !subject.throws()
-                    {
-                        warnings.subject_read(q_idx, oid as u32, &mut *writer)?;
-                    }
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.

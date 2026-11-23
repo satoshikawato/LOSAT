@@ -127,7 +127,7 @@ fn alternate_matrix_word2_wordfinder_hsps_match_ncbi() {
 // BSearchContextInfo finds the query context before two-hit extension;
 // the left word must remain within that context's query_offset.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234:
-// Blast_InitHitListSortByScore(init_hitlist) fixes frame-local HSP order.
+// `Blast_InitHitListSortByScore` fixes frame-local HSP order.
 #[test]
 fn multi_query_wordfinder_hsps_match_ncbi_in_order() {
     let root = concat!(
@@ -317,7 +317,7 @@ fn real_wordfinder_distinct_context_xdrop_matches_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:816-831
-// subject->seq_ranges[i].left = CONV_NUCL2PROT_COORDINATES(...);
+// Converts subject nucleotide scan ranges to protein coordinates via `CONV_NUCL2PROT_COORDINATES`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-614
 #[test]
 fn lowercase_mask_init_hsps_match_ncbi_scores_and_internal_offsets() {
@@ -366,7 +366,7 @@ fn lowercase_mask_init_hsps_match_ncbi_scores_and_internal_offsets() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-614
-// score = s_BlastAaExtendTwoHit(...);
+// Extends two-hit seeds via `s_BlastAaExtendTwoHit`.
 #[test]
 fn ambiguity_spectrum_init_hsp_matches_ncbi() {
     let root = concat!(
@@ -405,7 +405,7 @@ fn ambiguity_spectrum_init_hsp_matches_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234,575-614
-// status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
+// Populates the initial hit list via `s_BlastAaWordFinder_TwoHit`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:747-775
 #[test]
 fn code32_api_oracle_init_hsps_match_scores_internal_offsets_and_order() {
@@ -458,7 +458,7 @@ fn code32_api_oracle_init_hsps_match_scores_internal_offsets_and_order() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234,575-614
-// score = s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
+// Extends two-hit seeds via `s_BlastAaExtendTwoHit` using the context ungapped x-dropoff.
 #[test]
 fn saved_init_hsps_match_ncbi_fixture_scores_and_internal_offsets() {
     let root = concat!(

@@ -834,6 +834,7 @@ fn write_run(
                 results,
                 search_options.gapped,
                 asks,
+                &mut *diagnostics,
             )?,
             None => None,
         };

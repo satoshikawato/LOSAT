@@ -207,7 +207,7 @@ impl Volume {
         self.seq_file().map(|_| ())
     }
 
-    fn hdr_file(&self) -> Result<&DbFile, SeqDbError> {
+    pub(super) fn hdr_file(&self) -> Result<&DbFile, SeqDbError> {
         self.lazy_file(&self.hdr, "hr")
     }
 
@@ -537,8 +537,7 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2316
-    /// The encoded `Blast-def-line-set` of the sequence `oid` (volume-relative).
-    #[cfg(test)]
+    /// The encoded `Blast-def-line-set` of the sequence `oid` (volume-relative; `header_record`'s).
     pub fn header_bytes(&self, oid: u32) -> Result<Vec<u8>, SeqDbError> {
         self.header_record(oid).map(|(record, _)| record)
     }
@@ -806,18 +805,22 @@ impl Volume {
     }
 
     /// Whether the volume's reads keep a line of the sequence `oid` (volume-relative;
-    /// `SeqDb::keeps_line`): false only where a seqid rule keeps none or the erasure of model
+    /// `SeqDb::line_read`): false only where a seqid rule keeps none or the erasure of model
     /// lines leaves none; the reader's error for a tag that NCBI's read cannot adjust (NCBI's
-    /// `GetSeqIDs` of the Seq-align throws there), LOSAT's refusal of `filtered_mask`.
-    pub(super) fn keeps_line(&self, oid: u32) -> Result<bool, SeqDbError> {
+    /// `GetSeqIDs` of the Seq-align throws there), LOSAT's refusal of `filtered_mask`. With it,
+    /// whether the record holds a UTF8String where a VisibleString is expected
+    /// (`DeflineSet::utf8`; false where the reads cannot drop every line, which leaves the record
+    /// unread here).
+    pub(super) fn line_read(&self, oid: u32) -> Result<(bool, bool), SeqDbError> {
         if !self.may_drop_every_line() {
-            return Ok(true);
+            return Ok((true, false));
         }
         let (record, path) = self.header_record(oid)?;
         let set = decode_full(&record, path)?;
-        Ok(self
+        let kept = self
             .filtered_mask(oid, &set)?
-            .is_some_and(|mask| mask.contains(&true)))
+            .is_some_and(|mask| mask.contains(&true));
+        Ok((kept, set.utf8))
     }
 
     /// `decoded`, the definition lines of `record` (one sequence's header), without those

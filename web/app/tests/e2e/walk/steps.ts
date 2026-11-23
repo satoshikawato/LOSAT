@@ -104,7 +104,7 @@ export interface Walker {
   readonly problems: string[];
   notes: string[];
   /** The outputs compared with the native CLI, the runs that ended each way, and the completed runs whose inputs the walk could not tell apart. */
-  readonly counts: { compared: number; completed: number; failed: number; cancelled: number; refused: number; unmatched: number };
+  readonly counts: { compared: number; completed: number; failed: number; cancelled: number; refused: number; unmatched: number; offered: number; offeredLeftOut: number };
 }
 
 /** WebKit's report of a <select>'s own inline style (see `watch`). */
@@ -122,7 +122,7 @@ export async function watch(page: Page, fixtures: FixtureLibrary, outDir: string
     runs: 0,
     problems: [],
     notes: [],
-    counts: { compared: 0, completed: 0, failed: 0, cancelled: 0, refused: 0, unmatched: 0 },
+    counts: { compared: 0, completed: 0, failed: 0, cancelled: 0, refused: 0, unmatched: 0, offered: 0, offeredLeftOut: 0 },
   };
   const engine = page.context().browser()?.browserType().name();
   page.on('pageerror', (error) => walker.problems.push(`page-error: ${error.message}`));
@@ -653,7 +653,7 @@ async function submitted(walker: Walker): Promise<Submitted> {
   for (const role of ROLES) {
     const cards = await sourceCards(page, role);
     const ready = cards.flatMap((card, index) => (card.status === 'ready' ? [index] : []));
-    inputs[role] = expectedInputs(walker.model[role], role, alphabetOf(walker.program, role), ready);
+    inputs[role] = expectedInputs(walker.model[role], alphabetOf(walker.program, role), ready);
   }
   const expectedRuns = ROLES.reduce((product, role) => product * Math.max(1, inputs[role].length), 1);
   return { inputs, changed, extraFlags, values, expectedRuns };
@@ -791,19 +791,126 @@ async function customOutput(page: Page): Promise<Buffer | undefined> {
   return readFileSync((await download.path())!);
 }
 
-/** The input of a role that the run searched, by the name its details give ("name: n records, size"). */
-function inputOf(candidates: readonly ExpectedInput[], shown: string): ExpectedInput | undefined {
-  const named = candidates.filter((input) => shown.startsWith(`${input.name}: `));
-  if (named.length === 0) return undefined;
-  const distinct = new Set(named.map((input) => Buffer.from(input.bytes).toString('base64')));
-  return distinct.size === 1 ? named[0] : undefined;
+/**
+ * The file that the page offers for a role of the run chosen (Download All: the query or subject that is a file of LOSAT's, line
+ * WQA's D22), saved as the user gets it: its name and bytes. Undefined where the input is the user's file as given.
+ */
+async function offeredInput(page: Page, role: Role): Promise<{ name: string; bytes: Buffer } | undefined> {
+  await page.getByTestId('results-download-all').click();
+  const item = page.getByTestId('results-download-menu').getByTestId(`results-download-${role}`);
+  if ((await item.count()) === 0) {
+    await page.keyboard.press('Escape');
+    return undefined;
+  }
+  const [download] = await Promise.all([page.waitForEvent('download'), item.click()]);
+  return { name: download.suggestedFilename(), bytes: readFileSync((await download.path())!) };
+}
+
+/**
+ * The walk's own account of the name that run `run` gives a file that it makes (line WQA's D22, DECISIONS 44): `losat-run<N>-<program>
+ * [-<task>]-<UTC time>.<role>.fa`. The number is the run's (the walk counts its runs) and the program the one it chose; the task and
+ * the time of "Run LOSAT" cannot be known beforehand, so they are read from the name that the page gives the run's outfmt 6 file
+ * (which has the number and program too: they must be the walk's). Not the app's function.
+ */
+async function madeNameOf(walker: Walker, run: number, role: Role): Promise<string> {
+  const { page } = walker;
+  await page.getByTestId('results-download-all').click();
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('results-download-menu').getByTestId('results-download-6').click()]);
+  const saved = download.suggestedFilename();
+  const parts = /^losat-run(\d+)-([a-z]+)(?:-(.+?))?-(\d{8}T\d{6}Z)\.outfmt6\.txt$/.exec(saved);
+  if (parts === null || Number(parts[1]) !== run || parts[2] !== walker.program) {
+    throw new StepFailure('output-prefix', `run ${run} of ${walker.program}: the page names its outfmt 6 file ${saved}`);
+  }
+  return `losat-run${run}-${walker.program}${parts[3] === undefined ? '' : `-${parts[3]}`}-${parts[4]}.${role}.fa`;
+}
+
+/** A file that the native CLI is given: its name, its bytes, and whether the page made it. */
+interface CliFile {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+  readonly made: boolean;
+}
+
+/**
+ * The file of each role that the command line names, for the native CLI, for run number `at` of the press's group (the draft makes
+ * the group with the query outer and the subject inner: src/application/draft.ts `prepareAndEnqueue`). The walk's model says, from what
+ * the walk gave, what the run's input is (`expectedInputs`) and whether it is made or the user's file as given. The page must offer a
+ * file exactly for a made input (Download All), under the run's own name (`madeNameOf`), which is none of the user's file names (it would name other bytes) and that
+ * Run details shows, holding exactly the run's own expected bytes; it must offer none for a file as given, which the CLI gets by its
+ * own name. The CLI then runs the command that the page shows on the files that the page offers, as the user would. The name of a made
+ * file is the run's prefix and the role (`madeNameOf`), built here from the walk's own record of the run.
+ */
+async function filesOf(walker: Walker, run: number, before: Submitted, at: number, shown: Record<Role, string>): Promise<Record<Role, CliFile> | undefined> {
+  const subjects = Math.max(1, before.inputs.subject.length);
+  const expected: Record<Role, ExpectedInput | undefined> = {
+    query: before.inputs.query[Math.floor(at / subjects)],
+    subject: before.inputs.subject[at % subjects],
+  };
+  const userNames = new Set(ROLES.flatMap((role) => walker.model[role].sources.filter((source) => source.origin === 'file').map((source) => source.name)));
+  const files = {} as Record<Role, CliFile>;
+  for (const role of ROLES) {
+    const input = expected[role];
+    if (input === undefined) throw new StepFailure('input-missing', `run ${run} (place ${at} of its group) has no ${role} among the walk's inputs`);
+    const offered = await offeredInput(walker.page, role);
+    if (!input.made) {
+      if (offered !== undefined) throw new StepFailure('given-offered', `run ${run}: the ${role} is the user's file ${input.name}, but the page offers a file ${offered.name} for it`);
+      if (!shown[role].startsWith(`${input.name}: `)) {
+        throw new StepFailure('input-unmatched', `run ${run}: the ${role} the walk gave is the file ${input.name}; Run details say "${shown[role]}"`);
+      }
+      files[role] = { name: input.name!, bytes: input.bytes, made: false };
+      continue;
+    }
+    if (offered === undefined) {
+      throw new StepFailure('made-not-offered', `run ${run}: the ${role} is not the user's file as given (pasted, several files, or records left out), but the page offers no file for it ("${shown[role]}")`);
+    }
+    // The name that Run details give the input is the command line's name, and the browser saves the file under exactly that name,
+    // which is the run's own prefix and the role: the same for the file of the run's other inputs of the same kind of no other run.
+    const shownName = /^(.*): [\d,]+ records?, /.exec(shown[role])?.[1];
+    if (shownName === undefined || shownName !== offered.name) {
+      throw new StepFailure('offered-name', `run ${run}: the page offers ${offered.name} as the ${role} file, but the run's details say "${shown[role]}"`);
+    }
+    if (userNames.has(shownName)) {
+      throw new StepFailure('offered-user-name', `run ${run}: the page offers ${shownName} as the ${role} file, a name that one of the user's files has`);
+    }
+    const expectedName = await madeNameOf(walker, run, role);
+    if (shownName !== expectedName) {
+      throw new StepFailure('offered-name', `run ${run}: the page offers ${shownName} as the ${role} file; the walk expects ${expectedName}`);
+    }
+    // A file with records left out is that file's own: Run details say From that file, without those records, and the count.
+    if (input.from !== undefined) {
+      const fromText = ((await walker.page.getByTestId(`run-input-${role}-from`).textContent().catch(() => null)) ?? '').trim();
+      const { file, leftOutIds, included, total } = input.from;
+      const count = (n: number): string => n.toLocaleString('en-US');
+      if (
+        !fromText.startsWith(`From ${file} without `) ||
+        !leftOutIds.every((id) => fromText.includes(id)) ||
+        !fromText.includes(`(${count(included)} of ${count(total)} records)`)
+      ) {
+        throw new StepFailure('offered-from', `run ${run}: the ${role} is ${file} without ${leftOutIds.join(', ')} (${included} of ${total} records); Run details say "${fromText}"`);
+      }
+    }
+    if (Buffer.compare(Buffer.from(input.bytes), offered.bytes) !== 0) {
+      throw new StepFailure('offered-bytes', `run ${run}: the ${role} file ${offered.name} that the page offers (${offered.bytes.length} bytes) is not what the walk gave this run (${input.bytes.length} bytes)`);
+    }
+    walker.counts.offered += 1;
+    // Of those, the files with records left out (Run details says "without").
+    if (((await walker.page.getByTestId(`run-input-${role}-from`).textContent().catch(() => null)) ?? '').includes(' without ')) walker.counts.offeredLeftOut += 1;
+    files[role] = { name: shownName, bytes: offered.bytes, made: true };
+  }
+  if (!files.query.made && !files.subject.made && files.query.name === files.subject.name && Buffer.compare(Buffer.from(files.query.bytes), Buffer.from(files.subject.bytes)) !== 0) {
+    // Two of the user's own files of one name with different records: the command names both by one name (the user's own naming, D21).
+    walker.notes.push(`run ${run}: the user's files ${files.query.name} differ and are named alike; native check skipped`);
+    walker.counts.unmatched += 1;
+    return undefined;
+  }
+  return files;
 }
 
 /**
  * Checks a run that ended: a completed one against the native CLI and the form; a failed one must
  * be one that the native CLI refuses too. Returns its outputs (format → bytes) when it completed.
  */
-async function verifyRun(walker: Walker, run: number, before: Submitted): Promise<Map<string, Buffer> | undefined> {
+async function verifyRun(walker: Walker, run: number, before: Submitted, at: number): Promise<Map<string, Buffer> | undefined> {
   const { page } = walker;
   const status = await runStatus(page, run);
   walker.counts[status as 'completed' | 'failed' | 'cancelled'] += 1;
@@ -846,14 +953,9 @@ async function verifyRun(walker: Walker, run: number, before: Submitted): Promis
     stored.set('custom', custom);
   }
   if (NATIVE === undefined) return stored;
-  const query = inputOf(before.inputs.query, details.inputs.query);
-  const subject = inputOf(before.inputs.subject, details.inputs.subject);
-  if (query === undefined || subject === undefined) {
-    // Two inputs of one name with different records left out: the details cannot tell which.
-    walker.notes.push(`run ${run}: inputs not told apart by name (${details.inputs.query} / ${details.inputs.subject}); native check skipped`);
-    walker.counts.unmatched += 1;
-    return stored;
-  }
+  const files = await filesOf(walker, run, before, at, details.inputs);
+  if (files === undefined) return stored;
+  const { query, subject } = files;
   if (query.name === subject.name && Buffer.compare(Buffer.from(query.bytes), Buffer.from(subject.bytes)) !== 0) {
     throw new StepFailure('command-names', `run ${run}: the command line names ${query.name} for both inputs, which differ`);
   }
@@ -889,12 +991,24 @@ const runOnce: StepBody = async (walker) => {
   const { runs, refused } = await pressRun(walker, before);
   if (refused !== undefined) return `refused: ${refused}`;
   const ended = [];
-  for (const run of runs) {
-    await verifyRun(walker, run, before);
+  for (const [at, run] of runs.entries()) {
+    await verifyRun(walker, run, before, at);
     ended.push(`${run} ${await page.getByTestId(`run-${run}-option`).getAttribute('data-status')}`);
   }
   return `runs ${ended.join(', ')}`;
 };
+
+/**
+ * A file that a run made for an input is named by that run (line WQA's D22: `losat-run3-blastn-megablast-20261123T101530Z.query.fa`), and
+ * the engine writes the name where the command line writes a file name (outfmt 0 and 7 `Input:`, SAM's `CL:`): two runs of one form
+ * differ there and nowhere else. The names are compared by the walk's own checks of each run (`filesOf`); here each becomes its role.
+ * A name has no space, so outfmt 0, which wraps its lines at spaces, never splits one.
+ */
+const MADE_NAME = /losat-run\d+-[a-z0-9-]+-\d{8}T\d{6}Z\.(query|subject)\.fa/g;
+
+function withoutMadeNames(bytes: Buffer): Buffer {
+  return Buffer.from(bytes.toString('latin1').replace(MADE_NAME, '<made $1>'), 'latin1');
+}
 
 const twice: StepBody = async (walker) => {
   const { page } = walker;
@@ -908,11 +1022,11 @@ const twice: StepBody = async (walker) => {
   if (second.runs.length !== first.runs.length) throw new StepFailure('twice', `the same form started ${first.runs.length} then ${second.runs.length} runs`);
   const notes = [];
   for (const [i, run] of first.runs.entries()) {
-    const a = await verifyRun(walker, run, before);
-    const b = await verifyRun(walker, second.runs[i]!, before);
+    const a = await verifyRun(walker, run, before, i);
+    const b = await verifyRun(walker, second.runs[i]!, before, i);
     if (a !== undefined && b !== undefined) {
       for (const [format, bytes] of a) {
-        if (!bytes.equals(b.get(format) ?? Buffer.alloc(0))) {
+        if (!withoutMadeNames(bytes).equals(withoutMadeNames(b.get(format) ?? Buffer.alloc(0)))) {
           throw new StepFailure(`twice-bytes:${format}`, `runs ${run} and ${second.runs[i]} of the same form differ in outfmt ${format}`);
         }
       }
@@ -934,8 +1048,8 @@ const cancel: StepBody = async (walker) => {
   if ((await group.count()) > 0) await group.click().catch(() => undefined);
   else if ((await one.count()) > 0) await one.click().catch(() => undefined);
   const ended = [];
-  for (const run of runs) {
-    await verifyRun(walker, run, before);
+  for (const [at, run] of runs.entries()) {
+    await verifyRun(walker, run, before, at);
     ended.push(`${run} ${await page.getByTestId(`run-${run}-option`).getAttribute('data-status')}`);
   }
   return `runs ${ended.join(', ')}`;

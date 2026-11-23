@@ -103,8 +103,8 @@ fn test_compute_blastn_cutoff_score_ungapped() {
     // Should be a positive value
     assert!(cutoff_score > 0);
     // Should use CUTOFF_E_BLASTN = 0.05
-    // searchsp = MIN(2000, 10000) * 10000 = 2000 * 10000 = 20,000,000
+    // Search space is min(2000, 10000) * 10000 = 2000 * 10000 = 20,000,000.
     // Expected score should be calculated from CUTOFF_E_BLASTN = 0.05
-    // Should be MIN(new_cutoff, cutoff_score_max)
+    // Final cutoff is capped at `cutoff_score_max`.
     assert!(cutoff_score <= cutoff_score_max);
 }

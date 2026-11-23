@@ -79,7 +79,7 @@ impl FastaStore {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-266
-// catch (const std::exception& e) { LOG_POST(Error << "Error: " << e.what()); }
+// Catch standard exceptions and report their message through `LOG_POST`.
 // Preserve the Rust engine context and its underlying cause across the ABI.
 fn engine_error(err: anyhow::Error) -> String {
     format!("{err:#}")
@@ -249,7 +249,8 @@ fn parse_blastn_args(
         penalty: None,
         gap_open: None,
         gap_extend: None,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:46-48: kDustLevel=20, kDustWindow=64, kDustLinker=1.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:46-48
+        // Default DUST settings: `kDustLevel` 20, `kDustWindow` 64, `kDustLinker` 1.
         dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
@@ -415,7 +416,8 @@ fn parse_tblastx_args(
         html_links: None,
         max_hsps: None,
         qcov_hsp_perc: None,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:83-85
+        // Default SEG parameters from `kSegWindow`, `kSegLocut`, and `kSegHicut`.
         seg: "yes".to_string(),
         soft_masking: None,
         sum_stats: None,

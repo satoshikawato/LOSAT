@@ -20,6 +20,8 @@ mod tblastx_chunk_merge;
 mod tblastx_ctx_table;
 #[path = "../tblastx_db_search.rs"]
 mod tblastx_db_search;
+#[path = "../tblastx_db_soft_lead.rs"]
+mod tblastx_db_soft_lead;
 #[path = "../tblastx_db_stream.rs"]
 mod tblastx_db_stream;
 #[path = "../tblastx_extbatch.rs"]

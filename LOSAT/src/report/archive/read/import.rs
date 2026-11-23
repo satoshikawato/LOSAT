@@ -1568,7 +1568,7 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
                 }
             } else if start.has_subjects() {
                 // The Owner's decision F2-Q1 (2026-11-20 「Q1=C」, PD-LOSAT-NCBI-DEFECTS exception
-                // 25): a strategy's subjects are searched once, as with `-num_threads 1`, whatever
+                // 26): a strategy's subjects are searched once, as with `-num_threads 1`, whatever
                 // `-num_threads` says (NCBI searches them once per thread or aborts: its thread
                 // check reads only the command line's `-subject`). The one place of the rule, for
                 // every program and caller.

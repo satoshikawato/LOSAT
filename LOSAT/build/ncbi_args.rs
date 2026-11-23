@@ -156,12 +156,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ("blastx", "ipglist", Refused::Read(None)),
     ("blastx", "negative_ipglist", Refused::Read(None)),
     ("blastx", "remote", Refused::Read(None)),
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:246-250
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:279-288
-    // `-gi_mask` and `-gi_mask_name` make GI-indexed mask files, which LOSAT's writer does not
-    // write yet (line NP, item M4c); `-mask_data` itself works.
-    ("makeblastdb", "gi_mask", Refused::Read(Some(GI_MASK))),
-    ("makeblastdb", "gi_mask_name", Refused::Read(Some(GI_MASK))),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
     // PHI-BLAST (PS8; the ASCII and ASN.1 PSSM files are PS2's and PS3's,
     // `algorithm::psiblast::pssm`, `-in_pssm` PS4's, `algorithm::psiblast::in_pssm`, the MSA
@@ -224,9 +218,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ("tblastx", "negative_gilist", Refused::Read(None)),
     ("tblastx", "remote", Refused::Read(None)),
 ];
-
-/// Why makeblastdb's `-gi_mask` and `-gi_mask_name` are refused.
-const GI_MASK: &str = "it writes GI-indexed mask files, which LOSAT does not write yet; -mask_data, -mask_id and -mask_desc work";
 
 // No NCBI counterpart: PD-TLOSAN-LOCAL-GENCODE-32. NCBI's constraint allows the codes of its usage
 // text (c++/src/algo/blast/blastinput/blast_args.cpp:998-1012, cited at `Constraint::GeneticCode`).

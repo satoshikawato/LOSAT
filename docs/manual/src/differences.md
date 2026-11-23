@@ -226,6 +226,7 @@ These are error paths: when the output can be written, the output matches NCBI's
 ### `makeblastdb`
 
 - A `-in` file made of several bzip2 streams or zstd frames is read to the end; NCBI's `makeblastdb` stops after the first and drops the rest silently. A single-stream file builds the same files as NCBI.
+- `-gi_mask` on a database in one volume writes an alias file that names the volume by its file name, so the database opens and the build ends with exit status 0 and its metadata file. NCBI's `makeblastdb` names the database by its full path there, which no program can open, and ends with `DB alias files are mutually recursive` (exit status 2). Every other file is NCBI's, and NCBI's programs read the database and its masks.
 - An `-out` path with a space or a double quote, or an existing database that has to be replaced, is handled as one database. NCBI treats the path as a list of names and can keep volume files of the old database.
 - Database files are compared with NCBI's `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform; those files have not been compared with NCBI's builds there. The order of `-randomize` is the Linux builds' on every platform: NCBI's Windows and macOS builds shuffle with their own C++ libraries.
 

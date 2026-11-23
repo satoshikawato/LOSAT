@@ -154,20 +154,23 @@ fn windowmasker_skips_a_database_sequence_without_letters_before_its_lookup() {
 #[test]
 fn makembindex_refuses_a_database_sequence_without_letters() {
     let dir = database("mk", 0);
+    let expected = "creating @D@/z.00.idx...\nError: sequence 0 of the database, which has no \
+                    letters or no definition line left by the alias files' OID_MASK_TYPE (NCBI's \
+                    makembindex reads the null sequence its database reader gives for it and \
+                    stops with a report of the run's memory addresses), is not supported by \
+                    LOSAT's MAKEMBINDEX\n";
+    // The index's name has the separator of the platform after the directory.
+    let expected = if cfg!(windows) {
+        crate::ncbi_windows_paths::ncbi_paths_on_windows(expected, &["@D@"])
+    } else {
+        expected.to_string()
+    };
     for idmap in ["false", "true"] {
         let run = losat(&dir, None, &["makembindex", "-input", "z", "-idmap", idmap]);
         let err = String::from_utf8_lossy(&run.stderr).replace(&*dir.to_string_lossy(), "@D@");
         assert_eq!(
             (err.as_str(), run.status.code(), run.stdout.len()),
-            (
-                "creating @D@/z.00.idx...\nError: sequence 0 of the database, which has no \
-                 letters or no definition line left by the alias files' OID_MASK_TYPE (NCBI's \
-                 makembindex reads the null sequence its database reader gives for it and stops \
-                 with a report of the run's memory addresses), is not supported by LOSAT's \
-                 MAKEMBINDEX\n",
-                Some(1),
-                0
-            ),
+            (expected.as_str(), Some(1), 0),
             "-idmap {idmap}"
         );
     }

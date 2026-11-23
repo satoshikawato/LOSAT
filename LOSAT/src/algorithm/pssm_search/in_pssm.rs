@@ -468,6 +468,7 @@ fn stopped_as_query_joins_scope(
         warning_title: Some(Vec::new()),
         request: None,
         archive_pssm: None,
+        archive_matrix_name_unwritable: false,
         annot,
         defline_reads_annot,
         round_query: None,
@@ -979,6 +980,7 @@ pub(crate) fn psi_search_and_object_of(
         warning_title: Some(warning_title),
         request,
         archive_pssm: None,
+        archive_matrix_name_unwritable: false,
         annot,
         defline_reads_annot,
         round_query: None,
@@ -1163,6 +1165,25 @@ pub(crate) struct InPssmFile {
     pub(crate) object: PssmWithParameters,
     pub(crate) computed: bool,
     pub(crate) valid: bool,
+}
+
+impl InPssmFile {
+    /// Whether NCBI cannot write the object's parameters: a PSSM of frequency ratios only without
+    /// `params.rpsdbparams` gets those parameters from `CPsiBlastImpl`'s constructor (the gap
+    /// costs, `PsiBlastAddAncillaryPssmData`) without the matrix name, and the object stream
+    /// stops with "cannot write unassigned member matrixName" (a C++ exception, rc 255) wherever
+    /// it writes the object: `-out_pssm` (`algorithm::psiblast::in_pssm_files`) and the archive's
+    /// request (`-outfmt 11`, `algorithm::psiblast::in_pssm`). The one owner of that condition.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:426-433
+    pub(crate) fn matrix_name_unwritable(&self) -> bool {
+        self.computed
+            && self
+                .object
+                .params
+                .as_ref()
+                .is_none_or(|params| params.rpsdbparams.is_none())
+    }
 }
 
 /// The scores and gapped values that `CPsiBlastImpl`'s constructor sets in a PSSM of frequency

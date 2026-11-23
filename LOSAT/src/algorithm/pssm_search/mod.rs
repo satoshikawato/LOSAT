@@ -98,6 +98,9 @@ pub struct PsiSearch {
     /// archive; `None` otherwise and for tblastn.
     pub(crate) archive_pssm:
         Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>>,
+    /// Whether `archive_pssm` is a PSSM that NCBI cannot write (`in_pssm::InPssmFile::
+    /// matrix_name_unwritable`), so NCBI's archive of the round stops with its exception.
+    pub(crate) archive_matrix_name_unwritable: bool,
     /// What NCBI's object manager makes of the annotations of the PSSM's query when the query
     /// joins the scope (`annot_index::index_entry`): its messages, the diagnostic stream it
     /// leaves failed and its exception, which the run writes where NCBI posts them
@@ -435,6 +438,7 @@ impl PsiSearch {
             warning_title: None,
             request: None,
             archive_pssm: None,
+            archive_matrix_name_unwritable: false,
             annot: annot_index::AnnotOutcome::default(),
             defline_reads_annot: false,
             round_query: None,

@@ -953,6 +953,7 @@ impl BlastpArgs {
                 // (`blastp::archive::PsiArchive`).
                 if self.app == BlastpApp::Psiblast && self.archive.is_some() && file.valid {
                     search.archive_pssm = Some(std::sync::Arc::new(file.object.clone()));
+                    search.archive_matrix_name_unwritable = file.matrix_name_unwritable();
                 }
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(

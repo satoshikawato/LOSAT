@@ -888,7 +888,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     // A run that reported the holder before (a batch, query or round before; the record of
     // a run that can stop: `lda` has no accession table).
     let loaded = TaxdbRun::default();
-    loaded.note_loaded(&db, || [unparsed, held]);
+    loaded.note_loaded(&db, 0, || [unparsed, held]);
     assert_eq!(loaded.loaded(), [holder]);
     let why = unsure(
         &db,
@@ -903,18 +903,20 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     // A run that reported only sequences without parsed Seq-ids: nothing recorded, NCBI looks
     // the stopping id up (M1).
     let never = TaxdbRun::default();
-    never.note_loaded(&db, || [unparsed]);
+    never.note_loaded(&db, 0, || [unparsed]);
     assert!(never.loaded().is_empty());
     assert_eq!(
         unsure(&db, &never, &[stopping], stop_queries(1), stop, stop_parsed),
         None
     );
     // A call of the library's batches after others, whose reports nothing recorded.
+    let mut after_calls = TaxdbRun::default();
+    after_calls.note_calls_before(true);
     let why = unsure(
         &db,
-        &never,
+        &after_calls,
         &[stopping],
-        stop_queries(1).after_unrecorded_calls(true),
+        stop_queries(1),
         stop,
         stop_parsed,
     )
@@ -941,7 +943,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
         .unwrap() as u32;
     let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
     let copied = TaxdbRun::default();
-    copied.note_loaded(&db, || {
+    copied.note_loaded(&db, 0, || {
         [PrefetchSubject::unflipped(
             copy,
             parsed[copy as usize].as_deref(),
@@ -964,7 +966,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     // version 5 database with the accession table) never makes the subjects it is given.
     let closed = open(&["ldp"]);
     let run = TaxdbRun::default();
-    run.note_loaded(&closed, || -> [PrefetchSubject<'_>; 0] {
+    run.note_loaded(&closed, 0, || -> [PrefetchSubject<'_>; 0] {
         panic!("the subjects of a run that cannot stop were made")
     });
     assert!(!run.prefetch_can_stop(&closed));
@@ -973,7 +975,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     let open_gate = open(&["lda", "ldp"]);
     let run = TaxdbRun::default();
     let mut made = 0;
-    run.note_loaded(&open_gate, || {
+    run.note_loaded(&open_gate, 0, || {
         made += 1;
         std::iter::empty()
     });
@@ -987,7 +989,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     let stop = accession(&parsed, "NP_000002.1");
     assert_eq!(db.oid(stop).get(), 3);
     let recorded = TaxdbRun::default();
-    recorded.note_loaded(&db, || {
+    recorded.note_loaded(&db, 0, || {
         [PrefetchSubject::unflipped(2, parsed[2].as_deref())]
     });
     assert_eq!(recorded.loaded(), [2]);
@@ -1233,7 +1235,7 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
         // The run that loaded the holder and looked its taxonomy up (its batch's prefetch).
         let looked_up = || {
             let run = TaxdbRun::default();
-            run.note_loaded(&db, || [subject(&parsed, holder)]);
+            run.note_loaded(&db, 0, || [subject(&parsed, holder)]);
             let opened = prefetch_messages(
                 &db,
                 &run,
@@ -1261,7 +1263,7 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
         // the texts of opening, which NCBI writes only where it skips the first lookup.
         let fresh = || {
             let run = TaxdbRun::default();
-            run.note_loaded(&db, || [subject(&parsed, holder)]);
+            run.note_loaded(&db, 0, || [subject(&parsed, holder)]);
             run
         };
         for (subjects, what) in [
@@ -1543,7 +1545,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
         "BLASTP",
     )
     .unwrap()];
-    run.note_loaded(&db, || [subject(&parsed, holder)]);
+    run.note_loaded(&db, 0, || [subject(&parsed, holder)]);
     let open_text = String::from_utf8(reads[0][0].text.clone()).unwrap();
     let before = XmlCuts::of(true, &cut)
         .reports_before(&reads, &none)

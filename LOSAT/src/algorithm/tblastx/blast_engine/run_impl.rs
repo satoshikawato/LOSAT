@@ -1271,7 +1271,8 @@ fn open_search_database(
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -3307,9 +3308,6 @@ fn run_batch_loop(
             &query_runs.input_records[input],
         )
     };
-    // A call of the library's batches after the first (`api::run_batches`) searched the batches
-    // before with a database of its own, whose loads nothing here records.
-    let unrecorded_calls = reports.args.first_query_ordinal > 0;
     // The XML2 and JSON formats, whose prefetch NCBI runs too but which write the taxonomy texts
     // at each `Hit`: of the prefetch only its stop (`database::batch_prefetch_stop`).
     let xml2_prefetch = outputs.formats.first().is_some_and(|format| {
@@ -3805,8 +3803,7 @@ fn run_batch_loop(
                     },
                     ordered,
                     &reports.titles.borrow(),
-                    &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                        .after_unrecorded_calls(unrecorded_calls),
+                    &crate::algorithm::common::database::PrefetchQueries::new(start, &scope),
                 ) {
                     prefetch_failed!(error);
                 }
@@ -3851,10 +3848,10 @@ fn run_batch_loop(
                             // Not a subject whose load throws, nor one that no report reaches
                             // after it (`database::report_loads`, after the reports before it).
                             let loads = super::super::database::report_loads(
-                                &run_loads,
+                                (database, &run_loads),
                                 &ordered[from..to],
                                 &reports.titles.borrow(),
-                                (pairwise, unrecorded_calls),
+                                (pairwise, start),
                                 identities,
                             );
                             let shown: Vec<&TblastxHsp> = match rows {
@@ -3960,7 +3957,6 @@ fn run_batch_loop(
                         ordered,
                         &reports.titles.borrow(),
                         &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                            .after_unrecorded_calls(unrecorded_calls)
                             .after_xml_reports(xml_before.as_ref())
                             .where_reports_unchanged_by_load_throws(
                                 reports_unchanged_by_load_throws,
@@ -4051,7 +4047,7 @@ fn run_batch_loop(
                 super::super::database::note_loaded(
                     database,
                     &batch.hits,
-                    0..end - start,
+                    (start, 0..end - start),
                     &reports.titles.borrow(),
                     rows,
                 );
@@ -4257,8 +4253,6 @@ impl BatchReports<'_> {
                             self.args.formatting.report_sort(),
                             self.args.report_counts,
                         ),
-                        // A call of the library's batches after the first.
-                        self.args.first_query_ordinal > 0,
                     ),
                     &|hsp| {
                         super::super::database::hit_identities(

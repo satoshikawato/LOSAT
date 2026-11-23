@@ -74,6 +74,14 @@ impl TblastxDatabase {
         self
     }
 
+    /// The database of a call of the run after other calls whose loads its record does not hold
+    /// where `unrecorded` (`shared::TaxdbRun::note_calls_before`: the call's first query is not the
+    /// run's first, `first_query_ordinal` above 0).
+    pub(crate) fn after_calls(mut self, unrecorded: bool) -> Self {
+        self.taxdb.note_calls_before(unrecorded);
+        self
+    }
+
     /// Opens the nucleotide database `name` as NCBI's `CSearchDatabase` opens it
     /// (`common::database::open_database`). The total length is NCBI's `Int8`, which the engine
     /// holds as such (`SubjectSetNumbers::total`) on every target.
@@ -647,7 +655,7 @@ pub(crate) fn batch_prefetch_stop(
     let loads = hit_loads(
         before,
         &prefetch,
-        (after, None, queries.unrecorded_calls()),
+        (after, None, database.taxdb.calls_before()),
         titles,
         identities,
     );
@@ -668,17 +676,18 @@ pub(crate) fn batch_prefetch_stop(
 /// writes each batch's reports and drops its hits (`report_stream`), so that `batch_prefetch`'s
 /// `before` no longer holds them. The stream never writes outfmt 5 (`report_stream::Off`), so no
 /// report of the batch is cut (`shared::XmlCuts::NONE`); `queries` are the batch's queries as its
-/// hits number them (`q_idx`, from 0 in the batch).
+/// hits number them (`q_idx`, from 0 in the batch), `start` its first query in the call (the
+/// record's name of the batch).
 pub(crate) fn note_loaded(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
-    queries: std::ops::Range<usize>,
+    (start, queries): (usize, std::ops::Range<usize>),
     titles: &DatabaseTitles,
     rows: SubjectFetch,
 ) {
     if database.parsed_seqids() {
         let batch = [queries];
-        database.taxdb.note_loaded(&database.db, || {
+        database.taxdb.note_loaded(&database.db, start, || {
             loaded_subjects(
                 LoadedBefore {
                     hits: ordered,
@@ -792,15 +801,15 @@ pub(crate) struct ReportedSubjects {
 /// are those that `blast_xml` makes (the HSPs of each query, a subject's following each other),
 /// or the pairwise reports' reads (`pairwise`: how they read them, `pairwise_keys`). The reports
 /// are the call's first loads (where a lookup can fail, the reports are not streamed and the run
-/// records none of its batches, `report_stream::Off::Database`), after those of calls before whose
-/// loads nothing here holds where `unrecorded_calls` (`HitLoads::of`).
+/// records none of its batches, `report_stream::Off::Database`), after `before`, those of the calls
+/// before (`shared::TaxdbRun::calls_before`, `HitLoads::of`).
 fn hit_loads(
     ordered: &[TblastxHsp],
     prefetch: &shared::BatchPrefetch,
-    (after, pairwise, unrecorded_calls): (
+    (after, pairwise, before): (
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
-        bool,
+        crate::report::db_subject::LoadsBefore,
     ),
     titles: &DatabaseTitles,
     identities: &dyn Fn(&TblastxHsp) -> usize,
@@ -809,12 +818,12 @@ fn hit_loads(
         .chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx)
         .collect();
     HitLoads::of(
-        crate::report::db_subject::LoadsBefore::new(&[], unrecorded_calls),
+        before,
         after,
         reports.iter().map(|hits| {
             // A batch that prefetches loads every subject, in any order.
-            let one_by_one = prefetch.reads_one_by_one(hits[0].hit.q_idx as usize);
-            let keys = pairwise_keys(hits, titles, after, pairwise.filter(|_| one_by_one))
+            let read = prefetch.report_read(hits[0].hit.q_idx as usize, 0);
+            let keys = pairwise_keys(hits, titles, after, pairwise.filter(|_| read.one_by_one))
                 .unwrap_or_else(|| {
                     crate::report::db_subject::ReportKeys::Entries(
                         hits.iter()
@@ -822,7 +831,7 @@ fn hit_loads(
                             .collect(),
                     )
                 });
-            (one_by_one, keys)
+            (read, keys)
         }),
         |ordinal| titled_parsed(titles, ordinal),
         |report, hit| identities(&reports[report][hit]),
@@ -908,13 +917,14 @@ pub(crate) fn pairwise_reading(
 /// before it in the run, `run`; `identities`: [`hit_identities`]): the subjects of its reads one
 /// by one (`run_impl`'s texts of a batch whose prefetch is off), not one whose load throws, nor
 /// one that no report reaches after it. `pairwise`: how a pairwise report reads them
-/// (`pairwise_keys`); `unrecorded_calls`: calls before this one loaded what nothing here holds
+/// (`pairwise_keys`); `batch`: the first query in the call of the report's query batch, whose
+/// scope it reads in; the reports come after the loads of the calls before on `database`
 /// (`hit_loads`).
 pub(crate) fn report_loads(
-    run: &crate::report::db_subject::RunLoads,
+    (database, run): (&TblastxDatabase, &crate::report::db_subject::RunLoads),
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
-    (pairwise, unrecorded_calls): (Option<crate::report::pairwise::PairwiseReading>, bool),
+    (pairwise, batch): (Option<crate::report::pairwise::PairwiseReading>, usize),
     identities: impl Fn(&TblastxHsp) -> usize,
 ) -> HitLoads {
     // A subject's HSPs follow each other: one `Hit`.
@@ -929,9 +939,13 @@ pub(crate) fn report_loads(
                 .collect(),
         )
     });
+    let read = crate::report::db_subject::ReportRead {
+        one_by_one: true,
+        batch: Some(batch),
+    };
     run.loads(
-        crate::report::db_subject::LoadsBefore::new(&[], unrecorded_calls),
-        [(true, keys)],
+        database.taxdb.calls_before(),
+        [(read, keys)],
         |ordinal| titled_parsed(titles, ordinal),
         |_, subject| subjects[subject].iter().map(&identities).max().unwrap_or(0),
     )
@@ -984,10 +998,10 @@ fn batches_prefetch(
 /// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; where only the prefetch reads a subject, a batch whose
 /// prefetch is on reports it, `batches_prefetch` of the hits' `queries` queries and the queries of
-/// each batch `spans`; `after`: what the formats do after a subject whose lookup throws, how
-/// the pairwise reports read the subjects and whether calls before loaded what nothing here holds,
-/// for the one answer of what the reports load, `hit_loads`, with the hits' engine `identities`,
-/// `hit_identities`).
+/// each batch `spans`; `after`: what the formats do after a subject whose lookup throws and how
+/// the pairwise reports read the subjects, for the one answer of what the reports load,
+/// `hit_loads`, after the loads of the calls before (`shared::TaxdbRun::calls_before`), with the
+/// hits' engine `identities`, `hit_identities`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn reported_subjects(
     database: &TblastxDatabase,
@@ -996,10 +1010,9 @@ pub(crate) fn reported_subjects(
     stores: Option<&ReportedStores>,
     read_lengths: &ReportedLengths,
     shown: ParsedShown,
-    after: (
+    (after, pairwise): (
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
-        bool,
     ),
     identities: &dyn Fn(&TblastxHsp) -> usize,
     queries: usize,
@@ -1019,6 +1032,7 @@ pub(crate) fn reported_subjects(
             .map(|hsp| (hsp.hit.q_idx as usize, hsp.hit.s_idx)),
     );
     // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
+    let after = (after, pairwise, database.taxdb.calls_before());
     let loads = hit_loads(ordered, &prefetch, after, titles, identities);
     for hsp in ordered.iter_mut() {
         let rank = ordinals

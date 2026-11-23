@@ -381,7 +381,8 @@ fn run_inner(
                 &mut stderr,
                 program.upper,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             // RPSTBLASTN: each batch's `EffectiveSearchSpace` option is its last search unit's
             // own (`BatchResults::request_space`), and its units read `-dbsize` themselves
             // (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes a list.
@@ -826,7 +827,7 @@ fn run_inner(
                     &options,
                     asks,
                     results,
-                    queries,
+                    (queries, queries_before),
                     query_scopes
                         .borrow()
                         .as_ref()
@@ -1321,7 +1322,8 @@ impl<'a> BatchScopes<'a> {
 /// each batch's reports are written before the next is searched, `reported_error`); a batch whose
 /// prefetch does not stop is recorded in the run (`ReportedSubjects::note_loaded`), without the
 /// loads of an outfmt 5 report that NCBI's XML stream cuts before its hits (`queries`, the reader
-/// batch's records: `XmlCuts`).
+/// batch's records: `XmlCuts`), as the loads of the batch numbered `queries_before` (the queries
+/// of the run before it), in whose scope its reports read (`ReportedSubjects::for_batch`).
 pub(super) fn reported_batch(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
@@ -1329,7 +1331,7 @@ pub(super) fn reported_batch(
     options: &super::args::ResolvedOptions,
     asks: ReportedAsks,
     results: &mut [BatchResults],
-    queries: &[FastaRecord],
+    (queries, queries_before): (&[FastaRecord], usize),
     query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
     prefetch_queries: &crate::algorithm::common::database::PrefetchQueries<'_>,
     diagnostics: &mut dyn Write,
@@ -1364,7 +1366,7 @@ pub(super) fn reported_batch(
             asks.throw,
             // The pairwise report reads the subjects that it shows as its writer reads them.
             options.pairwise_reading(),
-            prefetch_queries.unrecorded_calls(),
+            queries_before,
         ),
     );
     super::x_timing::run(XRun::Titles, x_t);
@@ -1493,7 +1495,7 @@ pub(super) fn reported_batch(
         })
     };
     reported.note_loaded(
-        database,
+        (database, queries_before),
         results,
         options.gapped,
         loads,

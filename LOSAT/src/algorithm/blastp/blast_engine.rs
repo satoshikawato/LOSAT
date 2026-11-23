@@ -4575,7 +4575,8 @@ fn open_search_database(
                 resolved.db_mask.as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             let rps = resolved.rps_search.is_some();
             let database = if rps {
                 rps_hooks::with_units(resolved, database)?

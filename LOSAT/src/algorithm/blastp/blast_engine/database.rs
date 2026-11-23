@@ -137,6 +137,14 @@ impl BlastpDatabase {
         self
     }
 
+    /// The database of a call of the run after other calls whose loads its record does not hold
+    /// where `unrecorded` (`shared::TaxdbRun::note_calls_before`: the call's first query is not the
+    /// run's first, `first_query_ordinal` above 0).
+    pub(super) fn after_calls(mut self, unrecorded: bool) -> Self {
+        self.taxdb.note_calls_before(unrecorded);
+        self
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors, which name `program`.
     #[cfg(test)]
@@ -1491,16 +1499,18 @@ impl ListedTitles<'_> {
     /// The run's record of the subjects of ranks `ranks` that NCBI's BLAST database data loader
     /// loaded for a call's batches (`shared::TaxdbRun::note_loaded`): psiblast's round of a query,
     /// a call of its own, for the stop of a later round's or query's prefetch, and the batches
-    /// before a stop of the XML2 and JSON formats.
+    /// before a stop of the XML2 and JSON formats; `batch`: the query batch of the loads (the
+    /// round's query, `TaxdbRun::note_loaded`).
     pub(super) fn note_loaded<I: IntoIterator<Item = usize>>(
         &self,
         database: &BlastpDatabase,
+        batch: usize,
         ranks: impl FnOnce() -> I,
     ) {
         if self.parsed.is_empty() {
             return;
         }
-        database.taxdb.note_loaded(&database.db, || {
+        database.taxdb.note_loaded(&database.db, batch, || {
             ranks().into_iter().map(|rank| self.prefetch_subject(rank))
         });
     }
@@ -2140,11 +2150,12 @@ impl ListedTitles<'_> {
     /// it (by the HSPs' identities, the Seq-align's `num_ident`, as `fetched_ranks`).
     /// A pairwise run (outfmt 0 to 4) reads of query `query` what its writer reads,
     /// `pairwise_reads(query)` (by rank), asked where its batch reads one by one. The reports come
-    /// after the loads of the run's record on `database` (psiblast's rounds before) and, where
-    /// `unrecorded_calls`, of calls before whose loads it does not hold (`HitLoads::of`).
+    /// after the loads of the run's record on `database` (psiblast's rounds before, and the calls
+    /// before whose loads it does not hold, `shared::TaxdbRun::loads_before`), each query's report
+    /// in the scope of its batch, numbered from `batch_base` (`BatchPrefetch::report_read`).
     pub(super) fn hit_loads(
         &self,
-        (database, unrecorded_calls): (Option<&BlastpDatabase>, bool),
+        (database, batch_base): (Option<&BlastpDatabase>, usize),
         hit_lists: &[Option<BlastpHitList>],
         prefetch: &shared::BatchPrefetch,
         run: crate::report::db_subject::FormatThrow,
@@ -2162,13 +2173,18 @@ impl ListedTitles<'_> {
             run
         };
         let pairwise = run.run().is_some_and(|run| run.after.is_pairwise());
-        let recorded = database.map_or_else(Vec::new, |database| database.taxdb.loaded());
+        let before = database.map_or(crate::report::db_subject::LoadsBefore::NONE, |database| {
+            database
+                .taxdb
+                .loads_before(prefetch.report_read(0, batch_base).batch)
+        });
         HitLoads::of(
-            crate::report::db_subject::LoadsBefore::new(&recorded, unrecorded_calls),
+            before,
             run,
             (0..hit_lists.len()).map(|query| {
                 // A batch that prefetches loads every subject, in any order.
-                let one_by_one = prefetch.reads_one_by_one(query);
+                let read = prefetch.report_read(query, batch_base);
+                let one_by_one = read.one_by_one;
                 let subjects = if pairwise && one_by_one {
                     crate::report::db_subject::ReportKeys::Pairwise(pairwise_reads(query))
                 } else {
@@ -2179,7 +2195,7 @@ impl ListedTitles<'_> {
                             .collect(),
                     )
                 };
-                (one_by_one, subjects)
+                (read, subjects)
             }),
             |rank| self.parsed_subject(rank),
             |query, list| {

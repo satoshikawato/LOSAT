@@ -78,6 +78,14 @@ impl BlastxDatabase {
         self
     }
 
+    /// The database of a call of the run after other calls whose loads its record does not hold
+    /// where `unrecorded` (`shared::TaxdbRun::note_calls_before`: the call's first query is not the
+    /// run's first, `first_query_ordinal` above 0).
+    pub(crate) fn after_calls(mut self, unrecorded: bool) -> Self {
+        self.taxdb.note_calls_before(unrecorded);
+        self
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     #[cfg(test)]
@@ -587,10 +595,10 @@ impl ReportedSubjects {
     /// `FormatThrow::of_formats`, or a refusal with its reason), for `HitLoads::of` (where `one_by_one`, which subjects throw
     /// and which no report loads; the refusals, the names, the tables' rows, the taxonomy reads
     /// and the run's record of the loads, `note_loaded`, take that one answer), with how a
-    /// pairwise report reads the subjects (`pairwise_read_order`) and whether calls before this
-    /// one loaded what the run's record does not hold (`PrefetchQueries::unrecorded_calls`): the
-    /// batch's reports come after the loads of the record (the batches before,
-    /// `HitLoads::of`).
+    /// pairwise report reads the subjects (`pairwise_read_order`) and the batch's number in the
+    /// run (its first query's): the batch's reports come after the loads of the record (the
+    /// batches before and the calls before, `TaxdbRun::loads_before`), in the batch's scope
+    /// (`HitLoads::of`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -613,7 +621,7 @@ impl ReportedSubjects {
         after: (
             crate::report::db_subject::FormatThrow,
             Option<crate::report::pairwise::PairwiseReading>,
-            bool,
+            usize,
         ),
     ) -> Result<Self> {
         let BatchTitles {
@@ -686,7 +694,7 @@ impl ReportedSubjects {
             .collect();
         // A pairwise report's reads (`pairwise_read_order`), of the lists that the formatter's cut
         // keeps (`BatchResults::cut_lists`).
-        let (after, pairwise_reading, unrecorded_calls) = after;
+        let (after, pairwise_reading, batch) = after;
         let pairwise_reading = pairwise_reading
             .filter(|_| one_by_one && after.run().is_some_and(|run| run.after.is_pairwise()));
         let mut pairwise_reads = Vec::new();
@@ -712,9 +720,13 @@ impl ReportedSubjects {
             }
         }
         let mut pairwise_reads = pairwise_reads.into_iter();
-        let recorded = database.taxdb.loaded();
+        // The reports of one query batch, in its scope.
+        let read = crate::report::db_subject::ReportRead {
+            one_by_one,
+            batch: Some(batch),
+        };
         let loads = HitLoads::of(
-            crate::report::db_subject::LoadsBefore::new(&recorded, unrecorded_calls),
+            database.taxdb.loads_before(read.batch),
             after,
             report_lists.iter().map(|lists| {
                 let keys = match pairwise_reads.next() {
@@ -726,7 +738,7 @@ impl ReportedSubjects {
                             .collect(),
                     ),
                 };
-                (one_by_one, keys)
+                (read, keys)
             }),
             |oid| parsed.get(&oid).map(Arc::as_ref),
             // A list's rows read its subject where one of the HSPs that they show has
@@ -978,10 +990,11 @@ impl ReportedSubjects {
     /// `LoadedBefore::subjects` itself: these loads are `BatchPrefetch::loads` (the rows where
     /// the prefetch fails at an empty subject row with the prefetch on, which the Seq-aligns'
     /// count that `subjects` asks cannot tell), and the lists nest in `BatchResults` by query
-    /// of each search batch, not one slice by query of the call (review 7, L2).
+    /// of each search batch, not one slice by query of the call (review 7, L2). `batch`: the
+    /// reader batch's number in the run (`for_batch`).
     pub(crate) fn note_loaded(
         &self,
-        database: &BlastxDatabase,
+        (database, batch): (&BlastxDatabase, usize),
         batches: &[BatchResults],
         gapped: bool,
         loads: shared::BatchLoads,
@@ -989,7 +1002,7 @@ impl ReportedSubjects {
     ) {
         if database.parsed_seqids() {
             let rows = loads.reported_rows();
-            database.taxdb.note_loaded(&database.db, || {
+            database.taxdb.note_loaded(&database.db, batch, || {
                 batches
                     .iter()
                     .flat_map(move |batch| {

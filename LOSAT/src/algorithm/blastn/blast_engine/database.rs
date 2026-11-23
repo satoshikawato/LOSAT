@@ -257,7 +257,7 @@ pub(super) struct BlastnDatabase {
     /// that `note_loaded` recorded: the loads before the reports that the loop writes next
     /// (LOSAT_X_RPTSTREAM, which records each batch before it writes the batch's reports; empty
     /// without it, where the loop records nothing), for `reported_subjects`.
-    loaded_before_batch: std::sync::Mutex<Vec<u32>>,
+    loaded_before_batch: std::sync::Mutex<crate::report::db_subject::LoadsBefore>,
     /// Whether the database has parsed Seq-ids (`shared::check_seqids`), whose subjects NCBI's
     /// prefetch can fail at (`batch_prefetch`).
     parsed_seqids: bool,
@@ -408,6 +408,14 @@ impl BlastnDatabase {
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
+    /// The database of a call of the run after other calls whose loads its record does not hold
+    /// where `unrecorded` (`shared::TaxdbRun::note_calls_before`: the call's first query is not the
+    /// run's first, `first_query_ordinal` above 0).
+    pub(super) fn after_calls(mut self, unrecorded: bool) -> Self {
+        self.taxdb.note_calls_before(unrecorded);
         self
     }
 
@@ -677,7 +685,7 @@ impl BlastnDatabase {
             before,
             &prefetch,
             (after, None),
-            crate::report::db_subject::LoadsBefore::new(&[], queries.unrecorded_calls()),
+            self.taxdb.calls_before(),
             |ordinal| titled_parsed(titles, ordinal),
         );
         shared::held_batch_prefetch_stop(
@@ -697,11 +705,14 @@ impl BlastnDatabase {
     /// `loaded_subjects` of the batch alone, `rows`: the first format's), for a later batch's
     /// stop: where the loop writes each batch's reports and drops its lists (LOSAT_X_RPTSTREAM),
     /// so that `batch_prefetch`'s `before` no longer holds them. The stream never writes outfmt 5
-    /// (`x_rpt_stream`), so no report of the batch is cut (`shared::XmlCuts::NONE`).
+    /// (`x_rpt_stream`), so no report of the batch is cut (`shared::XmlCuts::NONE`). `start`: the
+    /// batch's first query in the call, its number in the record (`shared::TaxdbRun::note_loaded`,
+    /// as `reported_subjects` and `QueryFetches::batch` number the batches).
     pub(super) fn note_loaded(
         &self,
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
+        start: usize,
         gapped: bool,
         rows: SubjectFetch,
     ) {
@@ -709,9 +720,9 @@ impl BlastnDatabase {
             *self
                 .loaded_before_batch
                 .lock()
-                .expect("the loads before the batch") = self.taxdb.loaded();
+                .expect("the loads before the batch") = self.taxdb.loads_before(Some(start));
             let batch = [0..hit_lists.len()];
-            self.taxdb.note_loaded(&self.db, || {
+            self.taxdb.note_loaded(&self.db, start, || {
                 Self::loaded_subjects(
                     titles,
                     LoadedBefore {
@@ -1828,16 +1839,21 @@ fn pairwise_keys<'p>(
 /// subjects of its reads one by one (`DatabaseTitles`' texts of a batch whose prefetch is off),
 /// not one whose load throws, nor one that no report reaches after it. `pairwise`: how a
 /// pairwise report reads them (`pairwise_keys`); `before`: the loads of the run's record and of
-/// the calls before (`RunLoads::loads`).
+/// the calls before (`RunLoads::loads`), whose last report is of the batch that `before` names
+/// (`TaxdbRun::loads_before`), in whose scope these reports read.
 fn report_loads(
     run: &crate::report::db_subject::RunLoads,
     titles: &DatabaseTitles,
     hit_lists: &[Option<BlastnHitList>],
     (pairwise, before): (
         Option<crate::report::pairwise::PairwiseReading>,
-        crate::report::db_subject::LoadsBefore<'_>,
+        crate::report::db_subject::LoadsBefore,
     ),
 ) -> HitLoads {
+    let read = crate::report::db_subject::ReportRead {
+        one_by_one: true,
+        batch: before.batch(),
+    };
     run.loads(
         before,
         hit_lists.iter().map(|hit_list| {
@@ -1853,7 +1869,7 @@ fn report_loads(
                             .collect(),
                     )
                 });
-            (true, keys)
+            (read, keys)
         }),
         |ordinal| titled_parsed(titles, ordinal),
         |report, list| most_identities(&shown_lists(&hit_lists[report])[list]),
@@ -1881,9 +1897,6 @@ pub(super) struct QueryFetches<'a> {
     pub(super) pairwise_first: bool,
     /// Whether each HSP is a Seq-align (`seq_aligns_of`).
     pub(super) gapped: bool,
-    /// Whether calls before this one loaded what the run's record does not hold (the library's
-    /// calls after the first, `PrefetchQueries::unrecorded_calls`), for the loads.
-    pub(super) unrecorded_calls: bool,
 }
 
 impl QueryFetches<'_> {
@@ -1932,9 +1945,7 @@ impl QueryFetches<'_> {
             .map(|(index, hit_list)| {
                 let shown = std::slice::from_ref(hit_list);
                 // The loop records a batch after its texts here (`note_loaded`).
-                let recorded = self.database.taxdb.loaded();
-                let before =
-                    crate::report::db_subject::LoadsBefore::new(&recorded, self.unrecorded_calls);
+                let before = self.database.taxdb.loads_before(Some(first));
                 let loads = report_loads(self.run, self.titles, shown, (self.pairwise, before));
                 let mut messages = Vec::new();
                 if fetches && seq_aligns_of(shown, self.gapped) > 0 {
@@ -2016,7 +2027,7 @@ pub(super) fn hit_loads<'p>(
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
     ),
-    before: crate::report::db_subject::LoadsBefore<'_>,
+    before: crate::report::db_subject::LoadsBefore,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
     let lists = |query: usize| {
@@ -2029,7 +2040,8 @@ pub(super) fn hit_loads<'p>(
         after,
         (0..hit_lists.len()).map(|query| {
             // A batch that prefetches loads every subject, in any order.
-            let one_by_one = prefetch.reads_one_by_one(query);
+            let read = prefetch.report_read(query, 0);
+            let one_by_one = read.one_by_one;
             let keys = pairwise_keys(
                 &hit_lists[query],
                 after,
@@ -2044,7 +2056,7 @@ pub(super) fn hit_loads<'p>(
                         .collect(),
                 )
             });
-            (one_by_one, keys)
+            (read, keys)
         }),
         &parsed,
         |query, list| most_identities(&lists(query)[list]),
@@ -2081,7 +2093,7 @@ fn titled_parsed(titles: &DatabaseTitles, ordinal: usize) -> Option<&ParsedSubje
 /// (`after_throw`), for the one answer of the reports' loads, `hit_loads`, which the refusals
 /// take, with how the pairwise reports read them, `pairwise`, `pairwise_reading`, after the loads
 /// of the batches before that the run recorded, `BlastnDatabase::loaded_before_batch`, and of the
-/// calls before where `unrecorded_calls`). The records are made on `pool`
+/// calls before, `shared::TaxdbRun::unrecorded_calls`). The records are made on `pool`
 /// (`x_reported_records`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
@@ -2090,10 +2102,9 @@ pub(super) fn reported_subjects(
     hit_lists: &mut [Option<BlastnHitList>],
     letters: bool,
     shown: ParsedShown,
-    (after, pairwise, unrecorded_calls): (
+    (after, pairwise): (
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
-        bool,
     ),
     batches: &[std::ops::Range<usize>],
     first_query: usize,
@@ -2137,7 +2148,7 @@ pub(super) fn reported_subjects(
         hit_lists,
         &prefetch,
         (after, pairwise),
-        crate::report::db_subject::LoadsBefore::new(&recorded, unrecorded_calls),
+        recorded.with_calls_before(database.taxdb.unrecorded_calls()),
         |ordinal| titled_parsed(titles, ordinal),
     );
     let rank = |ordinal: u32| -> u32 {

@@ -1600,7 +1600,12 @@ pub(crate) fn prefetch_always_off() -> bool {
 /// [`check_prefetched_parsed`]) and for the weak matches of NCBI's scope, which only such
 /// reads make ([`ParsedShown::one_by_one`]).
 #[derive(Debug)]
-pub(crate) struct BatchPrefetch(Batches);
+pub(crate) struct BatchPrefetch(Batches, BatchStarts);
+
+/// The query batch of each query of a call ([`BatchPrefetch::report_read`]): the first query of
+/// its batch, as the call's batch ranges number it; `None` for a query of no batch range.
+#[derive(Debug)]
+struct BatchStarts(Vec<Option<usize>>);
 
 /// The prefetch of the batches of a call ([`BatchPrefetch`]).
 #[derive(Debug)]
@@ -1615,16 +1620,6 @@ enum Batches {
 }
 
 impl BatchPrefetch {
-    /// Every batch prefetches (no limit that counts, a subject set, a test).
-    pub(crate) fn every() -> Self {
-        Self(Batches::Every)
-    }
-
-    /// No batch prefetches (a limit of 0 or below).
-    fn none() -> Self {
-        Self(Batches::None)
-    }
-
     /// The batches of a call of `queries` queries (its hit lists, numbered from 0): `batches`,
     /// the ranges of the queries of each batch numbered from `first` (the call's first query;
     /// ranges before it are the batches written before), or the whole call as one batch where
@@ -1648,28 +1643,36 @@ impl BatchPrefetch {
         batches: &[std::ops::Range<usize>],
         seq_aligns: impl Fn(std::ops::Range<usize>) -> usize,
     ) -> Self {
-        if limit.is_none_or(|limit| limit == i32::MAX) {
-            return Self::every();
-        }
-        if prefetch_off_at(limit, 0) {
-            return Self::none();
-        }
-        let mut on = vec![None; queries];
         let whole = [first..first + queries];
         let batches = if batches.is_empty() {
             &whole[..]
         } else {
             batches
         };
+        let span = |batch: &std::ops::Range<usize>| {
+            batch.start.saturating_sub(first).min(queries)
+                ..batch.end.saturating_sub(first).min(queries)
+        };
+        let mut starts = vec![None; queries];
         for batch in batches {
-            let span = batch.start.saturating_sub(first).min(queries)
-                ..batch.end.saturating_sub(first).min(queries);
+            starts[span(batch)].fill(Some(batch.start));
+        }
+        let starts = BatchStarts(starts);
+        if limit.is_none_or(|limit| limit == i32::MAX) {
+            return Self(Batches::Every, starts);
+        }
+        if prefetch_off_at(limit, 0) {
+            return Self(Batches::None, starts);
+        }
+        let mut on = vec![None; queries];
+        for batch in batches {
+            let span = span(batch);
             if !span.is_empty() {
                 let prefetches = !prefetch_off_at(limit, seq_aligns(span.clone()));
                 on[span].fill(Some(prefetches));
             }
         }
-        Self(Batches::Each(on))
+        Self(Batches::Each(on), starts)
     }
 
     /// Whether the batch of the call's query `query` prefetches; `None` for a query of no batch.
@@ -1686,6 +1689,29 @@ impl BatchPrefetch {
     /// [`BatchPrefetch::reads`]).
     pub(crate) fn reads_one_by_one(&self, query: usize) -> bool {
         self.batch_of(query) != Some(true)
+    }
+
+    /// How the report of the call's query `query` reads its subjects, for the walk of the
+    /// reports' loads (`report::db_subject::HitLoads::of`): one by one or not
+    /// ([`BatchPrefetch::reads_one_by_one`]), in the scope of its query batch, named by the batch's
+    /// first query as the call's batch ranges number it plus `base` (the number of the call's
+    /// first batch range in the run's record, `TaxdbRun::loads_before`; `None` for a query of no
+    /// batch range).
+    pub(crate) fn report_read(
+        &self,
+        query: usize,
+        base: usize,
+    ) -> crate::report::db_subject::ReportRead {
+        crate::report::db_subject::ReportRead {
+            one_by_one: self.reads_one_by_one(query),
+            batch: self
+                .1
+                 .0
+                .get(query)
+                .copied()
+                .flatten()
+                .map(|start| start + base),
+        }
     }
 
     /// What the batches read of the subjects of `reported`, the (query of the call, ordinal id)
@@ -1823,6 +1849,37 @@ impl<'r, 'd> CaseHolders<'r, 'd> {
                 }
             })
             .map(|(oid, _)| oid)
+    }
+}
+
+/// What [`HeaderReader::weak_matches`] finds for a Seq-align id.
+enum WeakMatches {
+    /// It matches nothing weakly (no weak keys).
+    None,
+    /// A version 5 database cannot list what it matches weakly (a name, a `pir` or `prf` id).
+    Unlisted,
+    /// Its weak keys (`id_scope::weak_keys`) and the OIDs of the sequences that may hold one.
+    Found { keys: Vec<u64>, oids: Vec<u32> },
+}
+
+impl WeakMatches {
+    /// The OIDs found that hold an id of a weak key (`id_scope::kind_keys`), in their order, each
+    /// as often as found.
+    fn holders<'s, 'a>(
+        &'s self,
+        reader: &'s HeaderReader<'a>,
+    ) -> impl Iterator<Item = u32> + use<'s, 'a> {
+        let (keys, oids): (&[u64], &[u32]) = match self {
+            WeakMatches::Found { keys, oids } => (keys, oids),
+            WeakMatches::None | WeakMatches::Unlisted => (&[], &[]),
+        };
+        oids.iter().copied().filter(move |&oid| {
+            reader.holds_key(
+                reader.db.ordinal_of(oid),
+                keys,
+                crate::seqid::id_scope::kind_keys,
+            )
+        })
     }
 }
 
@@ -2165,29 +2222,38 @@ impl<'a> HeaderReader<'a> {
 
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-396 (cited
     // at `stop_lookup_unsure`)
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:864-880 (cited at `found_instead`)
     // NCBI's scope finds a Bioseq it holds for the Seq-align id before the data loader looks it
-    // up, and the loader gives a sequence it loaded for every Seq-id of it (`RegisterIds`), so
-    // where the run loaded such a holder before, the lookup that fails is not made (review 1 of
-    // line DBID pfoff-4, H1 and H2; `ParsedSubject::held_before` asks the order).
+    // up, by the id's handle, an id that it takes for it, or a weak match, and the loader gives a
+    // sequence it loaded for every Seq-id of it (`RegisterIds`), by the handle, so where the run
+    // loaded such a holder before, the lookup that fails is not made (reviews 1 and 2 of line DBID
+    // pfoff-4, H1 and H2, H1 and M1; `ParsedSubject::held_before` asks the order and the lifetime
+    // of each place).
     /// For `found_instead` where NCBI's lookup of the Seq-align id of the sequence `ordinal`,
-    /// `subject`, fails on a file: the other sequences of the database that hold an id that NCBI's
-    /// scope takes for it, found as for a lookup that does not fail (every OID of the lookup and
-    /// the keys in another letter case, [`HeaderReader::case_holders`]), in the LMDB files that
-    /// have the accession table (`SeqidLookup::in_indexed_files`: a file without it holds no
-    /// text id, and NCBI's lookup fails there), as the stop of a prefetch finds them
-    /// ([`stop_lookup_unsure`]); of those, the ones whose own Seq-align id's lookup does not fail
-    /// (a load of one by that id would throw and load nothing). `ScopeHolders::Unknown` where
-    /// that list fails on a file.
+    /// `subject`, fails on a file: the other sequences of the database that NCBI may give for it
+    /// without the lookup ([`crate::report::db_subject::ScopeHolders`]), found in the LMDB files that
+    /// have the accession table (`SeqidLookup::in_indexed_files`: a file without it holds no text
+    /// id, and NCBI's lookup fails there), as the stop of a prefetch finds them
+    /// ([`stop_lookup_unsure`]): the scope's, by the searches of a lookup that does not fail
+    /// (every OID of the lookup and the keys in another letter case, [`HeaderReader::case_holders`],
+    /// with the scope keys) and of its weak matches ([`HeaderReader::weak_matches`]); of those, the
+    /// data loader's hold an id of the Seq-align id's handle (`seqid::mask_handle::mask_handle_key`;
+    /// every one where the id has no handle that a function can know). Each list keeps the
+    /// sequences whose own Seq-align id's lookup does not fail (a load of one by that id would
+    /// throw and load nothing). `Holders::Unknown` where a list fails on a file, and for the scope's
+    /// where the weak matches cannot be listed.
     fn failed_holders(
         &self,
         subject: &crate::report::db_subject::ParsedSubject,
         ordinal: u32,
     ) -> crate::report::db_subject::ScopeHolders {
-        use crate::report::db_subject::ScopeHolders;
+        use crate::report::db_subject::{Holders, ScopeHolders};
         let unknown = |error: &str| {
-            ScopeHolders::Unknown(format!(
-                "the other sequences that hold it, where its lookup fails ({error})"
-            ))
+            let why = format!("the other sequences that hold it, where its lookup fails ({error})");
+            ScopeHolders {
+                loader: Holders::Unknown(why.clone()),
+                scope: Holders::Unknown(why),
+            }
         };
         let indexed = self.indexed_lookup.get_or_init(|| {
             self.db
@@ -2200,36 +2266,58 @@ impl<'a> HeaderReader<'a> {
             Err(error) => return unknown(error),
         };
         let id = subject.alignment_id();
-        let listed = indexed
-            .seqid_to_oids(id, true)
-            .and_then(|oids| Ok((self.case_holders(indexed, subject)?, oids)));
-        let (in_case, oids) = match listed {
+        let listed = indexed.seqid_to_oids(id, true).and_then(|oids| {
+            let weak = self.weak_matches(indexed, subject, &oids)?;
+            Ok((self.case_holders(indexed, subject)?, oids, weak))
+        });
+        let (in_case, oids, weak) = match listed {
             Ok(listed) => listed,
             Err(error) => return unknown(&error_words(&error)),
         };
         let own = self.db.oid(ordinal).get();
         let lookup = self.lookup.get();
-        let mut holders: Vec<u32> = in_case
-            .holders(&oids)
-            .filter(|&oid| oid != own)
-            .map(|oid| self.db.ordinal_of(oid))
-            .filter(|&other| {
-                let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = self.db.read_header(other)
-                else {
-                    return true;
-                };
-                set.alignment_id()
-                    .is_none_or(|id| lookup.is_some_and(|lookup| lookup.seqid_to_oid(id).is_ok()))
-            })
-            .collect();
-        holders.sort_unstable();
-        holders.dedup();
-        ScopeHolders::Listed(
+        let list = |found: &mut dyn Iterator<Item = u32>| {
+            let mut holders: Vec<u32> = found
+                .filter(|&oid| oid != own)
+                .map(|oid| self.db.ordinal_of(oid))
+                .filter(|&other| {
+                    let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = self.db.read_header(other)
+                    else {
+                        return true;
+                    };
+                    set.alignment_id().is_none_or(|id| {
+                        lookup.is_some_and(|lookup| lookup.seqid_to_oid(id).is_ok())
+                    })
+                })
+                .collect();
+            holders.sort_unstable();
+            holders.dedup();
             holders
                 .into_iter()
                 .map(|other| self.db.sequence(other))
-                .collect(),
-        )
+                .collect::<Vec<_>>()
+        };
+        let handle = crate::seqid::mask_handle::mask_handle_key(id)
+            .ok()
+            .flatten();
+        let loader = list(&mut in_case.holders(&oids).filter(|&oid| {
+            handle
+                .as_deref()
+                .is_none_or(|handle| self.holds_handle(self.db.ordinal_of(oid), handle))
+        }));
+        let scope = match weak {
+            WeakMatches::Unlisted => Holders::Unknown(
+                "the sequences that it matches weakly by its name, which a version 5 database cannot list"
+                    .to_owned(),
+            ),
+            weak => Holders::Listed(list(
+                &mut in_case.holders(&oids).chain(weak.holders(self)),
+            )),
+        };
+        ScopeHolders {
+            loader: Holders::Listed(loader),
+            scope,
+        }
     }
 
     /// The sequences that `lookup` finds for the Seq-align id of `subject` under its keys in
@@ -2292,21 +2380,46 @@ impl<'a> HeaderReader<'a> {
         oids: &[u32],
     ) -> Result<Option<crate::report::db_subject::WeakMatch>, SeqDbError> {
         use crate::report::db_subject::WeakMatch;
+        let own = self.db.oid(ordinal).get();
+        Ok(match self.weak_matches(lookup, subject, oids)? {
+            WeakMatches::Unlisted => Some(WeakMatch::Unlisted),
+            weak => weak
+                .holders(self)
+                .filter(|&oid| oid != own)
+                .map(|oid| self.db.ordinal_of(oid))
+                .find(|&other| self.copy_of(subject, ordinal, other) == RecordCopy::Differs)
+                .map(|other| WeakMatch::Held(self.db.sequence(other))),
+        })
+    }
+
+    /// The sequences of the database that hold an id that the Seq-align id of `subject` matches
+    /// weakly (`seqid::id_scope::weak_keys`), as `lookup` finds them: among the sequences that its
+    /// lookup gives (`oids`: in both versions an accession without a version gives its versions,
+    /// in version 4 a name its holders) and that the lookup of its name alone gives. In version 5
+    /// a Seq-align id with a name, or a `pir` or `prf` one, with weak keys cannot be listed
+    /// (`WeakMatches::Unlisted`). The one search of the weak matches of NCBI's scope, for a lookup
+    /// that does not fail (`weakly_held`) and for one that fails (`failed_holders`).
+    fn weak_matches(
+        &self,
+        lookup: &crate::seqdb::lookup::SeqidLookup<'_>,
+        subject: &crate::report::db_subject::ParsedSubject,
+        oids: &[u32],
+    ) -> Result<WeakMatches, SeqDbError> {
         let id = subject.alignment_id();
         let Some(text) = id.textseq() else {
-            return Ok(None);
+            return Ok(WeakMatches::None);
         };
         let mut keys = Vec::new();
         crate::seqid::id_scope::weak_keys(id, &mut keys);
         if keys.is_empty() {
-            return Ok(None);
+            return Ok(WeakMatches::None);
         }
         let pir_or_prf = matches!(
             id,
             crate::seqid::model::ParsedSeqId::Pir(_) | crate::seqid::model::ParsedSeqId::Prf(_)
         );
         if self.db.is_version5() && (text.name.is_some() || pir_or_prf) {
-            return Ok(Some(WeakMatch::Unlisted));
+            return Ok(WeakMatches::Unlisted);
         }
         let mut found = oids.to_vec();
         let name = match (&text.name, pir_or_prf) {
@@ -2324,16 +2437,7 @@ impl<'a> HeaderReader<'a> {
             };
             found.extend(lookup.seqid_to_oids(&name_alone, true)?);
         }
-        let own = self.db.oid(ordinal).get();
-        Ok(found
-            .iter()
-            .filter(|&&oid| oid != own)
-            .map(|&oid| self.db.ordinal_of(oid))
-            .find(|&other| {
-                self.holds_key(other, &keys, crate::seqid::id_scope::kind_keys)
-                    && self.copy_of(subject, ordinal, other) == RecordCopy::Differs
-            })
-            .map(|other| WeakMatch::Held(self.db.sequence(other))))
+        Ok(WeakMatches::Found { keys, oids: found })
     }
 
     /// Whether a Seq-id of the sequence `ordinal` is one `CSeq_id_Handle` with the key `handle`
@@ -3831,7 +3935,7 @@ pub(crate) struct TaxdbRun {
     rows_open: std::sync::OnceLock<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
     /// The sequences with parsed Seq-ids, by ordinal id, that NCBI's BLAST database data loader
     /// has loaded in the run before a batch whose prefetch stops ([`TaxdbRun::note_loaded`]).
-    loaded: std::sync::Mutex<std::collections::HashSet<u32>>,
+    loaded: std::sync::Mutex<LoadRecord>,
     /// Whether a prefetch of the run can stop, so that the run keeps `loaded`
     /// ([`TaxdbRun::prefetch_can_stop`]), decided once.
     can_stop: std::sync::OnceLock<bool>,
@@ -3841,6 +3945,21 @@ pub(crate) struct TaxdbRun {
     /// The texts of the loads that the model of the reads placed where NCBI makes no load
     /// ([`TaxdbRun::load_texts`], `report::query_warnings::LoadTexts`).
     load_texts: std::sync::Arc<crate::report::query_warnings::LoadTexts>,
+    /// Whether calls of the run before this one loaded sequences that no record here holds
+    /// ([`TaxdbRun::note_calls_before`]).
+    calls_before: bool,
+}
+
+/// The run's record of the loads of NCBI's BLAST database data loader ([`TaxdbRun::note_loaded`]):
+/// every sequence that the run loaded, whose Seq-ids the loader keeps for the run (`m_Ids`), and
+/// those of them that the query batch of the last record loaded (`batch`, as the program numbers
+/// its batches), which NCBI's scope holds until the formatter empties it after the batch
+/// (`ResetScopeHistory`; psiblast's rounds of one query share it).
+#[derive(Debug, Default)]
+struct LoadRecord {
+    run: std::collections::HashSet<u32>,
+    batch: Option<usize>,
+    in_batch: std::collections::HashSet<u32>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -4130,46 +4249,112 @@ impl TaxdbRun {
     /// on), and only in a run that can stop ([`TaxdbRun::prefetch_can_stop`], asked first): the
     /// subjects are made (`subjects`, called once) only there, so a run that cannot stop builds
     /// and walks nothing (review 4 of line DBID loadord, M1). The callers ask it only of a
-    /// database with parsed Seq-ids: nothing is opened for any other.
-    pub(crate) fn note_loaded<'s, I>(&self, db: &SeqDb, subjects: impl FnOnce() -> I)
+    /// database with parsed Seq-ids: nothing is opened for any other. `batch`: the query batch of
+    /// these loads, as the program numbers its batches for its walks of the reports' loads
+    /// (`BatchPrefetch::report_read`; psiblast's rounds of a query, its batch, share the number),
+    /// whose scope holds them until a record of another batch ([`TaxdbRun::loads_before`]).
+    pub(crate) fn note_loaded<'s, I>(&self, db: &SeqDb, batch: usize, subjects: impl FnOnce() -> I)
     where
         I: IntoIterator<Item = PrefetchSubject<'s>>,
     {
         if self.prefetch_can_stop(db) {
-            self.keep_loaded(subjects());
+            self.keep_loaded(Some(batch), subjects());
         }
     }
 
     /// The record of [`TaxdbRun::note_loaded`] without its gate: at a stop
     /// ([`batch_prefetch`], [`held_batch_prefetch_stop`]), which only a run that can stop reaches,
-    /// the subjects that the call's batches before loaded.
-    fn keep_loaded<'s>(&self, subjects: impl IntoIterator<Item = PrefetchSubject<'s>>) {
-        let mut parsed = subjects
+    /// the subjects that the call's batches before loaded (`batch` `None`: the loader's alone; the
+    /// run ends at the stop).
+    fn keep_loaded<'s>(
+        &self,
+        batch: Option<usize>,
+        subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
+    ) {
+        let parsed: Vec<u32> = subjects
             .into_iter()
             .filter(|subject| subject.parsed.is_some())
             .map(|subject| subject.ordinal)
-            .peekable();
-        if parsed.peek().is_none() {
+            .collect();
+        if parsed.is_empty() {
             return;
         }
-        self.loaded
-            .lock()
-            .expect("the loaded sequences")
-            .extend(parsed);
+        let mut record = self.loaded.lock().expect("the loaded sequences");
+        record.run.extend(&parsed);
+        if let Some(batch) = batch {
+            if record.batch != Some(batch) {
+                record.in_batch.clear();
+                record.batch = Some(batch);
+            }
+            record.in_batch.extend(parsed);
+        }
     }
 
-    /// The sequences that [`TaxdbRun::note_loaded`] recorded, in the order of their ordinal ids
-    /// (also the loads before a walk of the reports' loads, `db_subject::LoadsBefore`).
+    /// The sequences that [`TaxdbRun::note_loaded`] recorded, in the order of their ordinal ids:
+    /// the data loader's (the stop of a prefetch, [`stop_lookup_unsure`]).
     pub(crate) fn loaded(&self) -> Vec<u32> {
         let mut loaded: Vec<u32> = self
             .loaded
             .lock()
             .expect("the loaded sequences")
+            .run
             .iter()
             .copied()
             .collect();
         loaded.sort_unstable();
         loaded
+    }
+
+    /// Records that calls of the run before this one loaded sequences that no record here holds
+    /// where `unrecorded` (`api::run_batches`' calls after the first, each a query batch searched
+    /// with a database handle of its own: the call's first query is not the run's first,
+    /// `first_query_ordinal` above 0), so that every sequence of the database may have been loaded
+    /// before the call: the one owner of that fact for the walks of the reports' loads
+    /// ([`TaxdbRun::loads_before`], [`TaxdbRun::calls_before`]) and the stops of the prefetch
+    /// ([`stop_lookup_unsure`]). Each program's database sets it where it opens.
+    pub(crate) fn note_calls_before(&mut self, unrecorded: bool) {
+        self.calls_before = unrecorded;
+    }
+
+    /// Whether calls of the run before this one loaded what no record here holds
+    /// ([`TaxdbRun::note_calls_before`]).
+    pub(crate) fn unrecorded_calls(&self) -> bool {
+        self.calls_before
+    }
+
+    /// The loads before a walk of the reports' loads that takes no record of this call's own
+    /// (TBLASTN and TBLASTX, which keep none where a lookup can fail, and the walks of the batches
+    /// that the call still holds at a stop): those of the calls before
+    /// ([`TaxdbRun::note_calls_before`]).
+    pub(crate) fn calls_before(&self) -> crate::report::db_subject::LoadsBefore {
+        crate::report::db_subject::LoadsBefore::after_calls(self.calls_before)
+    }
+
+    /// The loads before a walk of the reports' loads whose first report is of the query batch
+    /// `batch` (`db_subject::LoadsBefore`, the one producer): every sequence recorded, and those of
+    /// them recorded for `batch` (where it is the batch of the last record: psiblast's rounds
+    /// before of the query; every one where `batch` is unknown, `None`), after the calls of the run
+    /// before ([`TaxdbRun::note_calls_before`]).
+    pub(crate) fn loads_before(
+        &self,
+        batch: Option<usize>,
+    ) -> crate::report::db_subject::LoadsBefore {
+        let sorted = |set: &std::collections::HashSet<u32>| {
+            let mut loads: Vec<u32> = set.iter().copied().collect();
+            loads.sort_unstable();
+            loads
+        };
+        let record = self.loaded.lock().expect("the loaded sequences");
+        let in_batch = match batch {
+            None => sorted(&record.run),
+            Some(_) if record.batch == batch => sorted(&record.in_batch),
+            Some(_) => Vec::new(),
+        };
+        crate::report::db_subject::LoadsBefore::new(
+            sorted(&record.run),
+            (batch, in_batch),
+            self.calls_before,
+        )
     }
 
     /// [`SeqDb::taxdb_found`] of the run's database, asked once: the search path is not
@@ -5359,9 +5544,6 @@ pub(crate) struct PrefetchQueries<'a> {
     /// (`CBlastFormat::ResetScopeHistory`, cited at [`stop_lookup_unsure`]), those of the batches
     /// before too; never those of the batches after.
     scope: &'a dyn Fn() -> crate::blastinput::query_batch::QueryScope,
-    /// Whether calls before this one reported sequences of the run that the run's record does not
-    /// hold ([`PrefetchQueries::after_unrecorded_calls`]).
-    unrecorded_calls: bool,
     /// The outfmt 5 reports of the queries before the batch, where outfmt 5 is the first format
     /// of a program that writes them after the stop ([`PrefetchQueries::after_xml_reports`]).
     xml_before: Option<&'a XmlReportsBefore<'a>>,
@@ -5380,7 +5562,6 @@ impl<'a> PrefetchQueries<'a> {
         Self {
             error_query,
             scope,
-            unrecorded_calls: false,
             xml_before: None,
             reports_unchanged_by_load_throws: false,
         }
@@ -5397,25 +5578,6 @@ impl<'a> PrefetchQueries<'a> {
             reports_unchanged_by_load_throws: self.reports_unchanged_by_load_throws || unchanged,
             ..self
         }
-    }
-
-    /// The same batch of a call that comes after other calls of the run (`unrecorded`: the
-    /// library's batches, each searched as a call of its own with its own database handle) whose
-    /// loads neither the call's batches before ([`batch_prefetch`]'s `before`) nor the run's
-    /// record ([`TaxdbRun::note_loaded`]) hold: every sequence of the database may have been
-    /// loaded before the batch.
-    pub(crate) fn after_unrecorded_calls(self, unrecorded: bool) -> Self {
-        Self {
-            unrecorded_calls: self.unrecorded_calls || unrecorded,
-            ..self
-        }
-    }
-
-    /// Whether calls before this one loaded sequences that no record holds
-    /// ([`PrefetchQueries::after_unrecorded_calls`]), as the walk of the reports' loads takes it
-    /// (`report::db_subject::LoadsBefore`).
-    pub(crate) fn unrecorded_calls(&self) -> bool {
-        self.unrecorded_calls
     }
 
     /// The same batch after the outfmt 5 reports `xml_before` of the queries before it
@@ -5582,7 +5744,7 @@ pub(crate) fn batch_prefetch<'s, 'b>(
 ) -> Result<crate::report::diag_log::Posts> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     if stops(&subjects) {
-        run.keep_loaded(before);
+        run.keep_loaded(None, before);
         return Err(prefetch_stop(db, run, run, &subjects, program, queries));
     }
     let mut failed_lookup: Option<(u32, String)> = None;
@@ -5754,8 +5916,8 @@ pub(crate) fn held_batch_prefetch_stop<'s, 'b, 'l>(
         return Ok(());
     }
     let before: Vec<PrefetchSubject<'b>> = before.into_iter().collect();
-    run.keep_loaded(before.iter().copied());
-    run.keep_loaded(loaded);
+    run.keep_loaded(None, before.iter().copied());
+    run.keep_loaded(None, loaded);
     let lookups = reports_record(db, before, program)?;
     Err(prefetch_stop(
         db, &lookups, run, &subjects, program, queries,
@@ -6034,7 +6196,7 @@ impl LoadOrder {
 ///   own lookup fails loads nothing, and a copy with the same Seq-align id is the same lookup,
 ///   which would have stopped the run there), or it is the first sequence that the lookup of an id
 ///   of a sequence loaded before gives (NCBI's reads by another id of that sequence, a superset);
-///   and, after calls whose loads nothing recorded ([`PrefetchQueries::after_unrecorded_calls`]),
+///   and, after calls whose loads nothing recorded ([`TaxdbRun::note_calls_before`]),
 ///   any such sequence whose own lookup does not fail (found in the LMDB files that have the
 ///   accession table, [`crate::seqdb::lookup::SeqidLookup::in_indexed_files`]).
 ///
@@ -6094,7 +6256,7 @@ fn stop_lookup_unsure(
         }
     }
     let loaded = record.loaded();
-    if loaded.is_empty() && !queries.unrecorded_calls {
+    if loaded.is_empty() && !record.unrecorded_calls() {
         return Ok(why.map(|why| StopUnsure {
             why,
             instead: instead.map(|oids| ordinals_of(db, oids)),
@@ -6154,7 +6316,7 @@ fn stop_lookup_unsure(
         })
     };
     if !holders.as_ref().is_ok_and(Vec::is_empty) {
-        if queries.unrecorded_calls {
+        if record.unrecorded_calls() {
             match &holders {
                 Ok(holders) => {
                     for &oid in holders.iter().filter(|&&oid| own_lookup_ok(oid)) {

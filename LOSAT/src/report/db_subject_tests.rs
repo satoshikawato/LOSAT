@@ -712,12 +712,21 @@ fn the_formats_say_what_loads_after_a_throw() {
             after: AfterThrow::EndsRun,
             rows: super::super::tabular::SubjectFetch::WithIdentities,
             first_row_ends: false,
+            keeps_scope: false,
         })
     );
     assert_eq!(of("6 qseqid evalue bitscore"), FormatThrow::Unread);
     assert_eq!(of("13"), writes(AfterThrow::EndsRun));
     assert_eq!(of("15"), writes(AfterThrow::EndsReport));
     assert_eq!(of("5"), writes(AfterThrow::WritesHit));
+    // Only outfmt 5's formatter keeps NCBI's scope for the run (review 2 of line DBID pfoff-4, M1).
+    for (outfmt, keeps) in [("5", true), ("6", false), ("15", false), ("0", false)] {
+        assert_eq!(
+            of(outfmt).run().map(|run| run.keeps_scope),
+            Some(keeps),
+            "{outfmt}"
+        );
+    }
     assert_eq!(of("8"), FormatThrow::Unread);
     assert_eq!(of("17"), FormatThrow::Refused(ThrowRefusal::Format));
     // Pairwise: the first shown alignment ends the run, a later one is skipped; query-anchored:
@@ -763,14 +772,17 @@ fn the_formats_say_what_loads_after_a_throw() {
     );
     // Outfmt 5 loads after a throw what a table's rows load but its thrown `Hit`'s copies, which a
     // row of such a copy looks up itself; more than outfmt 13 to 16, which end there.
+    // The call takes outfmt 5's scope, kept for the run, for both.
     let sacc_rows = RunThrow {
         first_row_ends: true,
         ..RunThrow::every_row(AfterThrow::WritesRow)
     };
-    assert_eq!(after(&["5", "6"]), Some(sacc_rows));
     assert_eq!(
-        after(&["15", "5"]),
-        Some(RunThrow::every_row(AfterThrow::WritesHit))
+        after(&["5", "6"]),
+        Some(RunThrow {
+            keeps_scope: true,
+            ..sacc_rows
+        })
     );
     assert_eq!(
         after(&["5", "8"]),
@@ -780,11 +792,28 @@ fn the_formats_say_what_loads_after_a_throw() {
     // A pairwise format with another whose throws end elsewhere: refused.
     assert_eq!(after(&["6", "0"]), None);
     assert_eq!(after(&["0", "3"]), None);
-    assert_eq!(
-        after(&["0", "8"]),
-        Some(RunThrow::every_row(AfterThrow::SkipsAlignment))
-    );
     assert_eq!(after(&["6 qseqid evalue"]), None);
+    // Review 2 of line DBID pfoff-4, M3: a format that reads nothing goes on to its end with exit
+    // status 0 and posts nothing, apart from one whose run ends at the throw or at an alignment,
+    // and from outfmt 15 and 16, whose runs post NCBI's error; and those post it where outfmt 5,
+    // 6 and 18 post nothing: the call has one standard error. Refused.
+    for mixed in [
+        &["0", "8"][..],
+        &["8", "0"],
+        &["6 qseqid slen", "8"],
+        &["11", "13"],
+        &["6 qseqid evalue", "3"],
+        &["15", "8"],
+        &["15", "5"],
+        &["16", "6"],
+        &["16", "18", "5"],
+    ] {
+        assert_eq!(
+            answer(mixed),
+            FormatThrow::Refused(ThrowRefusal::Mixed),
+            "{mixed:?}"
+        );
+    }
     // Review 1 of line DBID pfoff-4, M1: a format whose run ends at the throw with one whose run
     // goes on, and two that end at different rows (`nident` alone: the rows of HSPs with
     // identities), stop at different places in NCBI's runs of each: refused.
@@ -813,11 +842,19 @@ fn the_formats_say_what_loads_after_a_throw() {
             after: AfterThrow::EndsRun,
             rows: super::super::tabular::SubjectFetch::WithIdentities,
             first_row_ends: false,
+            keeps_scope: false,
         })
     );
     assert_eq!(
-        after(&["16", "18", "5"]),
-        Some(RunThrow::every_row(AfterThrow::WritesRow))
+        after(&["18", "5", "8"]),
+        Some(RunThrow {
+            keeps_scope: true,
+            ..RunThrow::every_row(AfterThrow::WritesRow)
+        })
+    );
+    assert_eq!(
+        after(&["15", "16"]),
+        Some(RunThrow::every_row(AfterThrow::EndsReport))
     );
     assert_eq!(
         after(&["0", "0"]),
@@ -914,6 +951,7 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
         after: AfterThrow::EndsRun,
         rows: super::super::tabular::SubjectFetch::WithIdentities,
         first_row_ends: false,
+        keeps_scope: false,
     });
     // The identities of each report's entries: 1's rows have none, 3's have some.
     let identities = |report: usize, entry: usize| [[5, 0, 7], [2, 4, 0]][report][entry];
@@ -2519,24 +2557,33 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     };
     let holder = DbSequence::of_unrestricted(10);
     // 0: the holder (its own lookup does not fail; another record, as `gi|5001|ref|NP_100001.1|`
-    // is for `ref|NP_100001.1|`); 1: a failing lookup that 0 holds; 2: one that no other sequence
-    // holds; 3: one whose holders LOSAT cannot list; 4: another subject.
+    // is for `ref|NP_100001.1|`: an id of its own handle, so both places hold it); 1: a failing
+    // lookup that 0 holds; 2: one that no other sequence holds; 3: one whose holders LOSAT cannot
+    // list; 4: another subject.
+    let exact = ScopeHolders {
+        loader: Holders::Listed(vec![holder]),
+        scope: Holders::Listed(vec![holder]),
+    };
+    let unknown = ScopeHolders {
+        loader: Holders::Unknown("its holders".to_owned()),
+        scope: Holders::Unknown("its holders".to_owned()),
+    };
     let parsed: Vec<ParsedSubject> = vec![
         plain("AAA00009", 10),
         plain("AAA00001", 11)
             .found_instead(failure())
-            .scope_holders(ScopeHolders::Listed(vec![holder])),
+            .scope_holders(exact),
         plain("AAA00002", 12)
             .found_instead(failure())
-            .scope_holders(ScopeHolders::Listed(Vec::new())),
+            .scope_holders(ScopeHolders::default()),
         plain("AAA00003", 13)
             .found_instead(failure())
-            .scope_holders(ScopeHolders::Unknown("its holders".to_owned())),
+            .scope_holders(unknown),
         plain("AAA00004", 14),
     ];
     let subject = |key: usize| parsed.get(key);
     let none = |_: usize, _: usize| 0;
-    let loads = |before: LoadsBefore<'_>, after, reports: Vec<(bool, ReportKeys)>| {
+    let loads = |before: LoadsBefore, after, reports: Vec<(bool, ReportKeys)>| {
         let loads = HitLoads::of(
             before,
             Some(RunThrow::every_row(after)),
@@ -2610,20 +2657,23 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     );
     // The run's record of the batches and rounds before, and calls before of which nothing here
     // holds a record.
-    let recorded = [10];
     for before in [
-        LoadsBefore::new(&recorded, false),
-        LoadsBefore::new(&[], true),
+        LoadsBefore::new(vec![10], (None, Vec::new()), false),
+        LoadsBefore::after_calls(true),
     ] {
         assert_eq!(
-            loads(before, AfterThrow::WritesRow, vec![entries(&[1, 2])])[1],
+            loads(
+                before.clone(),
+                AfterThrow::WritesRow,
+                vec![entries(&[1, 2])]
+            )[1],
             H(Some(holder)),
             "{before:?}"
         );
     }
     assert_eq!(
         loads(
-            LoadsBefore::new(&[12], false),
+            LoadsBefore::new(vec![12], (None, Vec::new()), false),
             AfterThrow::WritesRow,
             vec![entries(&[1])]
         )[1],
@@ -2714,8 +2764,184 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     );
     let error = parsed[3].fetched(false, true, H(None)).unwrap_err();
     assert!(error.contains("LOSAT cannot list its holders"), "{error}");
-    // `held_before` asks only a lookup that fails on a file.
-    assert_eq!(parsed[0].held_before(|_| true, true), None);
-    assert_eq!(parsed[1].held_before(|_| false, true), None);
-    assert_eq!(parsed[1].held_before(|_| true, false), Some(Some(holder)));
+    // `held_before` asks only a lookup that fails on a file, the loader's holders first.
+    let never = (|_: DbSequence| false, true);
+    let every = (|_: DbSequence| true, true);
+    assert_eq!(parsed[0].held_before(every, every), None);
+    assert_eq!(parsed[1].held_before(never, never), None);
+    assert_eq!(parsed[1].held_before(every, never), Some(Some(holder)));
+    assert_eq!(parsed[1].held_before(never, every), Some(Some(holder)));
+    assert_eq!(parsed[3].held_before(never, (|_| false, false)), Some(None));
+    assert_eq!(
+        parsed[3].held_before((|_| false, false), (|_| false, false)),
+        None
+    );
+}
+
+// Review 2 of line DBID pfoff-4, H1 and M1 (`R/pfoff/p4/review2`, cases `w.*`, `v.*`): NCBI
+// gives a held sequence for a failing lookup from two places: its BLAST database data loader's
+// `m_Ids`, the exact handles of every sequence it loaded, for the whole run; and its scope's
+// index, which also finds another text type of the accession and version and the weak matches,
+// from the load to the end of the query batch (to the end of the run in outfmt 5). A holder in
+// the scope's index alone that an earlier batch loaded holds nothing (NCBI throws: `w.E.21.b1`),
+// in the same batch or in outfmt 5 it holds.
+#[test]
+fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_batch() {
+    let failure = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let plain = |accession: &str, ordinal: u32| {
+        ParsedSubject::new(one_defline(vec![gb(accession, 1)]))
+            .unwrap()
+            .in_database(DbSequence::of_unrestricted(ordinal))
+    };
+    let exact = DbSequence::of_unrestricted(10);
+    let weak = DbSequence::of_unrestricted(11);
+    // 0: a holder of the failing id's own handle; 1: a holder in the scope alone (`emb|X.1|` for
+    // `ref|X.1|`, `ref|X.1|` for `ref|X|`); 2: the failing lookup that 0 holds; 3: the one that 1
+    // holds; 4: one whose weak matches LOSAT cannot list (a name, version 5); 5: another subject.
+    let parsed: Vec<ParsedSubject> = vec![
+        plain("AAA00010", 10),
+        plain("AAA00011", 11),
+        plain("AAA00012", 12)
+            .found_instead(failure())
+            .scope_holders(ScopeHolders {
+                loader: Holders::Listed(vec![exact]),
+                scope: Holders::Listed(vec![exact]),
+            }),
+        plain("AAA00013", 13)
+            .found_instead(failure())
+            .scope_holders(ScopeHolders {
+                loader: Holders::Listed(Vec::new()),
+                scope: Holders::Listed(vec![weak]),
+            }),
+        plain("AAA00014", 14)
+            .found_instead(failure())
+            .scope_holders(ScopeHolders {
+                loader: Holders::Listed(Vec::new()),
+                scope: Holders::Unknown("its weak matches".to_owned()),
+            }),
+        plain("AAA00015", 15),
+    ];
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let report = |batch: usize, keys: &[usize]| {
+        (
+            ReportRead {
+                one_by_one: true,
+                batch: Some(batch),
+            },
+            ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect()),
+        )
+    };
+    let loads = |before: LoadsBefore, after, reports: Vec<(ReportRead, ReportKeys)>| {
+        let loads = HitLoads::of(
+            before,
+            Some(RunThrow::every_row(after)),
+            reports,
+            subject,
+            none,
+        );
+        (0..6).map(|key| loads.load(key)).collect::<Vec<_>>()
+    };
+    use HitLoad::{Held as H, Throws as T};
+    // The holders in an earlier batch: the loader's hold for the run, the scope's only in outfmt 5.
+    // The loader's answer puts its holder into the batch's scope, where it may match 4 weakly.
+    let earlier = || vec![report(0, &[0, 1, 5]), report(1, &[2, 3, 4])];
+    assert_eq!(
+        loads(LoadsBefore::NONE, AfterThrow::WritesRow, earlier())[2..5],
+        [H(Some(exact)), T, H(None)]
+    );
+    assert_eq!(
+        loads(
+            LoadsBefore::NONE,
+            AfterThrow::WritesRow,
+            vec![report(0, &[0, 1, 5]), report(1, &[3, 4])]
+        )[3..5],
+        [T, T]
+    );
+    assert_eq!(
+        loads(LoadsBefore::NONE, AfterThrow::WritesHit, earlier())[2..5],
+        [H(Some(exact)), H(Some(weak)), H(None)]
+    );
+    // In the same batch, an earlier report: both places hold.
+    for after in [AfterThrow::WritesRow, AfterThrow::EndsReport] {
+        assert_eq!(
+            loads(
+                LoadsBefore::NONE,
+                after,
+                vec![report(3, &[0, 1, 5]), report(3, &[2, 3, 4])]
+            )[2..5],
+            [H(Some(exact)), H(Some(weak)), H(None)],
+            "{after:?}"
+        );
+    }
+    // A report without a batch name stays in the scope of the one before.
+    assert_eq!(
+        loads(
+            LoadsBefore::NONE,
+            AfterThrow::WritesRow,
+            vec![
+                report(0, &[1]),
+                (true.into(), ReportKeys::Entries(vec![Some(3)]))
+            ]
+        )[3],
+        H(Some(weak))
+    );
+    // The run's record: its loads of the batch named, which share the scope (psiblast's rounds
+    // before), and of other batches, which hold only in the loader.
+    let recorded = |batch| LoadsBefore::new(vec![10, 11], (Some(batch), vec![10, 11]), false);
+    assert_eq!(
+        loads(recorded(2), AfterThrow::WritesRow, vec![report(2, &[2, 3])])[2..4],
+        [H(Some(exact)), H(Some(weak))]
+    );
+    assert_eq!(
+        loads(recorded(1), AfterThrow::WritesRow, vec![report(2, &[2, 3])])[2..4],
+        [H(Some(exact)), T]
+    );
+    assert_eq!(
+        loads(recorded(1), AfterThrow::WritesHit, vec![report(2, &[2, 3])])[2..4],
+        [H(Some(exact)), H(Some(weak))]
+    );
+    // Calls before of which nothing here holds a record: each was a batch of its own.
+    assert_eq!(
+        loads(
+            LoadsBefore::after_calls(true),
+            AfterThrow::WritesRow,
+            vec![report(0, &[3, 4, 2])]
+        )[2..5],
+        [H(Some(exact)), T, T]
+    );
+    assert_eq!(
+        loads(
+            LoadsBefore::after_calls(true),
+            AfterThrow::WritesHit,
+            vec![report(0, &[2, 3, 4])]
+        )[2..5],
+        [H(Some(exact)), H(Some(weak)), H(None)]
+    );
+    // A walk of a run's reports one at a time (`RunLoads`) keeps both places across its calls.
+    for (after, held) in [
+        (AfterThrow::WritesRow, T),
+        (AfterThrow::WritesHit, H(Some(weak))),
+    ] {
+        let run = RunLoads::new(FormatThrow::Writes(RunThrow::every_row(after)));
+        let first = run.loads(LoadsBefore::NONE, [report(0, &[0, 1])], subject, none);
+        assert!(first.loaded(0) && first.loaded(1));
+        let next = run.loads(LoadsBefore::NONE, [report(4, &[2, 3])], subject, none);
+        assert_eq!(
+            [next.load(2), next.load(3)],
+            [H(Some(exact)), held],
+            "{after:?}"
+        );
+        let same = run.loads(
+            LoadsBefore::NONE,
+            [report(4, &[1]), report(4, &[3])],
+            subject,
+            none,
+        );
+        assert_eq!(same.load(3), H(Some(weak)), "{after:?}");
+    }
 }

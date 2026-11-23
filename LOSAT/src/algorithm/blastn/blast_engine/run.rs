@@ -6447,7 +6447,8 @@ fn open_search_database(
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -8857,11 +8858,8 @@ fn run_in_pool(
                     _ => batch_records.input(),
                 })
             };
-            // A call of the library's batches after the first (`api::run_batches`) searched the
-            // batches before with a database of its own, whose loads nothing here records.
             let prefetch_queries =
                 crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0)
                     .where_reports_unchanged_by_load_throws(
                         database::reports_unchanged_by_load_throws(&output_formats),
                     );
@@ -8906,7 +8904,6 @@ fn run_in_pool(
                         .and_then(crate::report::pairwise::PairwiseView::of)
                         .is_some(),
                     gapped: !args.ungapped,
-                    unrecorded_calls: args.first_query_ordinal > 0,
                 };
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
                     database::seq_aligns_of(hit_lists, !args.ungapped)
@@ -9042,7 +9039,7 @@ fn run_in_pool(
             // prefetches' `before`): the run's record of what NCBI's data loader loaded for the
             // batch (`BlastnDatabase::note_loaded`; nothing for a database that cannot stop).
             if stream.acting() {
-                database.note_loaded(&titles, &batch_hit_lists, !args.ungapped, first_rows);
+                database.note_loaded(&titles, &batch_hit_lists, start, !args.ungapped, first_rows);
             }
         }
         // The batch numbers its queries from 0.
@@ -9675,8 +9672,6 @@ fn write_reports_untimed(
                         args.formatting.report_sort(),
                         args.report_counts,
                     ),
-                    // A call of the library's batches after the first.
-                    args.first_query_ordinal > 0,
                 ),
                 results.batches,
                 written.queries,

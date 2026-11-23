@@ -724,7 +724,8 @@ fn open_search_database(
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0);
             if !joins_scope {
                 return Ok(Some(database));
             }
@@ -2316,7 +2317,7 @@ fn search(
                         hard_masked,
                     ),
                     &outputs.formats,
-                    (outputs.other_outfmts, args.first_query_ordinal > 0),
+                    outputs.other_outfmts,
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                 )
@@ -2499,7 +2500,6 @@ fn search(
                         &crate::algorithm::common::database::PrefetchQueries::new(
                             span.start, &scope,
                         )
-                        .after_unrecorded_calls(args.first_query_ordinal > 0)
                         .after_xml_reports(xml_before.as_ref())
                         .where_reports_unchanged_by_load_throws(
                             crate::report::db_subject::unchanged_by_load_throws_outfmts(
@@ -2540,7 +2540,6 @@ fn search(
                 },
                 &subjects,
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0)
                     .after_xml_reports(xml_before.as_ref()),
                 first_xml2,
             );

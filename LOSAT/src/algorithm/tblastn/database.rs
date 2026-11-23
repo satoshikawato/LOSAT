@@ -68,6 +68,14 @@ impl TblastnDatabase {
         self
     }
 
+    /// The database of a call of the run after other calls whose loads its record does not hold
+    /// where `unrecorded` (`shared::TaxdbRun::note_calls_before`: the call's first query is not the
+    /// run's first, `first_query_ordinal` above 0).
+    pub(super) fn after_calls(mut self, unrecorded: bool) -> Self {
+        self.taxdb.note_calls_before(unrecorded);
+        self
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`) with
     /// the command line's errors. The total length is NCBI's `Int8`, which the engine holds as
@@ -886,8 +894,8 @@ fn pairwise_read_order<'l>(
 /// what the formats do after a `Hit` that throws, `after_throw`, with the call's refusal over the
 /// `-outfmt` values of its other searches, `others`, for the one answer of what the reports load,
 /// `hit_loads`, with how the pairwise reports read each query's subjects, `pairwise`, after the
-/// loads of the calls before where `unrecorded_calls`: the library's calls after the first, whose
-/// loads nothing here records, `HitLoads::of`). The packed
+/// loads of the calls before, whose loads nothing here records, `TaxdbRun::calls_before`). The
+/// packed
 /// subjects are read from the database (`SubjectLetters::Stream`, one read each) instead of
 /// cloned from the copy.
 #[allow(clippy::too_many_arguments)]
@@ -898,7 +906,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-    (others, unrecorded_calls): (&[&str], bool),
+    others: &[&str],
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
 ) -> Result<ReportedSubjects> {
@@ -960,7 +968,7 @@ pub(super) fn reported_subjects(
     let loads = hit_loads(
         hitlists,
         &prefetch,
-        (after, unrecorded_calls),
+        (after, database.taxdb.calls_before()),
         pairwise_order,
         titled,
     );
@@ -1094,18 +1102,21 @@ pub(super) fn reported_subjects(
 /// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a key;
 /// the `Hit`s are those that `blast_xml::prepare`'s reports make (the lists with HSPs), or a
 /// pairwise report's reads (`pairwise_reads[query]`, where given). TBLASTN keeps no record of its
-/// loads: the reports are the call's first loads, after those of calls before whose loads nothing
-/// here holds where `unrecorded_calls` (`HitLoads::of`).
+/// loads: the reports are the call's first loads, after `before`, those of the calls before
+/// (`shared::TaxdbRun::calls_before`, `HitLoads::of`).
 fn hit_loads<'p>(
     hitlists: &[KappaResultHitList],
     prefetch: &shared::BatchPrefetch,
-    (after, unrecorded_calls): (crate::report::db_subject::FormatThrow, bool),
+    (after, before): (
+        crate::report::db_subject::FormatThrow,
+        crate::report::db_subject::LoadsBefore,
+    ),
     pairwise_reads: Vec<Option<crate::report::db_subject::PairwiseReads>>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
     let mut pairwise_reads = pairwise_reads.into_iter();
     HitLoads::of(
-        crate::report::db_subject::LoadsBefore::new(&[], unrecorded_calls),
+        before,
         after,
         hitlists.iter().enumerate().map(|(query, hitlist)| {
             let keys = match pairwise_reads.next().flatten() {
@@ -1122,7 +1133,7 @@ fn hit_loads<'p>(
                         .collect(),
                 ),
             };
-            (prefetch.reads_one_by_one(query), keys)
+            (prefetch.report_read(query, 0), keys)
         }),
         parsed,
         // The most identities of a list's HSPs (`reads_subject`).

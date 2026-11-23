@@ -266,7 +266,7 @@ pub struct BlastxArgs {
     /// The position in the whole input of the first of these records, where the library searches
     /// each query batch as a call of its own (`api::run_batches`); 0 on the command line, whose
     /// records are the whole input. A later call's prefetch has no record of the loads of the
-    /// calls before (`local::DatabaseReports::unrecorded_calls`). Not a public option.
+    /// calls before (`common::database::TaxdbRun::note_calls_before`). Not a public option.
     #[arg(skip)]
     pub first_query_ordinal: usize,
     /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of

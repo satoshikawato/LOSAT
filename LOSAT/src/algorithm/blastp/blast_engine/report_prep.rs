@@ -318,8 +318,9 @@ pub(super) fn prefetch_reported_subjects(
         .as_ref()
         .map_or_else(Default::default, |titles| {
             titles.hit_loads(
-                // A call of the library's batches after the first (`api::run_batches`).
-                (database, args.first_query_ordinal > 0),
+                // The batches numbered from the call's first input record (psiblast's rounds of a
+                // query, one batch, share it).
+                (database, ranges.x_ordinal_base),
                 reported_lists,
                 batch_prefetch,
                 crate::report::db_subject::FormatThrow::of_outfmts(
@@ -447,9 +448,6 @@ pub(super) fn prefetch_reported_subjects(
         let input = if xml_scope { 0..input.end } else { input };
         crate::blastinput::query_batch::QueryScope::of_shown_records(&ranges.input_records[input])
     };
-    // A call of the library's batches after the first (`api::run_batches`): the calls before
-    // searched with a database of their own, whose loads nothing here records.
-    let unrecorded_calls = args.first_query_ordinal > 0;
     // Which rows of the first format's report read the subjects' Bioseqs, which NCBI's
     // formatters fetch one by one where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off: a
     // custom tabular report's only for fields that read them (`TabularSpec::subject_fetch`).
@@ -550,8 +548,7 @@ pub(super) fn prefetch_reported_subjects(
                 loaded(span.start),
                 &hit_loads,
                 prefetched_ranks(span.clone()),
-                &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
-                    .after_unrecorded_calls(unrecorded_calls),
+                &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope),
             )?;
         } else if let Some(span) = prefetch_stop
             .as_ref()
@@ -564,7 +561,6 @@ pub(super) fn prefetch_reported_subjects(
                 loaded(span.start),
                 database::ListedTitles::reported_ranks(&hit_lists[span.clone()]),
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
-                    .after_unrecorded_calls(unrecorded_calls)
                     .where_reports_unchanged_by_load_throws(reports_unchanged_by_load_throws),
             )?;
         }
@@ -689,7 +685,6 @@ pub(super) fn prefetch_reported_subjects(
                     batch.searched.start,
                     &scope,
                 )
-                .after_unrecorded_calls(unrecorded_calls)
                 .after_xml_reports(xml_before.as_ref())
                 .where_reports_unchanged_by_load_throws(reports_unchanged_by_load_throws);
                 let messages = match psiblast_prefetched.as_ref() {
@@ -741,7 +736,7 @@ pub(super) fn prefetch_reported_subjects(
         // (`shared::TaxdbRun::note_loaded`, on the database that the rounds share). The call
         // reaches here where its prefetch did not stop.
         if reports.psi_round.is_some() {
-            titles.note_loaded(database, || loaded(hit_lists.len()));
+            titles.note_loaded(database, ranges.x_ordinal_base, || loaded(hit_lists.len()));
         }
     }
     Ok(ReportedPrefetch {

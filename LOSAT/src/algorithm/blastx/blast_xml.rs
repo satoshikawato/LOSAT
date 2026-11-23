@@ -1621,7 +1621,7 @@ pub(super) fn write_xml_epilog(
         Some(xml2) => {
             let finished = xml2.finish(&mut buf).map_err(|error| {
                 // The held report of a `-subject` run that fails (`CaughtException`): its
-                // message, then the end of the document.
+                // message, then the end of the document (`DocumentPosts::place_caught`).
                 match error.downcast::<CaughtException>() {
                     Ok(CaughtException(exception)) => Ok(crate::ncbi_exception::error_post_line(
                         None,
@@ -1638,9 +1638,10 @@ pub(super) fn write_xml_epilog(
             crate::report::blast_xml::DocumentPosts::default(),
         ),
     };
+    let mut posts = posts;
     let post = match finished {
         Ok(()) => None,
-        Err(Ok(post)) => Some(post),
+        Err(Ok(post)) => posts.place_caught(post),
         Err(Err(error)) => return Err(error),
     };
     if let Some(post) = post {

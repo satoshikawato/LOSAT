@@ -1492,13 +1492,38 @@ fn a_failed_report_keeps_its_separator_and_fails_where_it_is_written() {
         String::from_utf8(out).unwrap(),
         "{\n\"BlastOutput2\": [\n,\n{\n  a\n}\n]\n}\n"
     );
-    // `-subject`: the held failed report in the epilog: the failure after the document's end.
+    // `-subject`: the held failed report in the epilog: the failure returned after the
+    // document's end, its post marked before the end (`DocumentPosts::caught_at`).
     let mut doc = Xml2Document::new(Xml2Kind::Single16, true);
     let mut out = Vec::new();
     fail(&mut doc, &mut out).unwrap();
     assert!(caught(doc.epilog(&mut out)));
+    assert_eq!(doc.take_posts().caught_at, Some(framing::header16().len()));
     assert_eq!(
         String::from_utf8(out).unwrap(),
         format!("{}</BlastXML2>\n", framing::header16())
     );
+    // outfmt 15: after the separator of the held report, before the end.
+    let mut doc = Xml2Document::new(Xml2Kind::Single15, true);
+    let mut out = Vec::new();
+    put(&mut doc, b"{\n  a\n}\n", &mut out).unwrap();
+    fail(&mut doc, &mut out).unwrap();
+    assert!(caught(doc.epilog(&mut out)));
+    let text = String::from_utf8(out).unwrap();
+    let at = doc.take_posts().caught_at.unwrap();
+    assert_eq!(
+        (&text[..at], &text[at..]),
+        ("{\n\"BlastOutput2\": [\n{\n  a\n}\n,\n", "]\n}\n")
+    );
+    // The post goes there; without the mark, after the report.
+    let mut posts = crate::report::blast_xml::DocumentPosts {
+        caught_at: Some(3),
+        ..Default::default()
+    };
+    assert_eq!(posts.place_caught(b"E\n".to_vec()), None);
+    assert_eq!(
+        (posts.posts[0].at, &posts.posts[0].text[..]),
+        (3, &b"E\n"[..])
+    );
+    assert_eq!(posts.place_caught(b"F\n".to_vec()), Some(b"F\n".to_vec()));
 }

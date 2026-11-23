@@ -685,6 +685,7 @@ impl HitPosts {
             posts,
             cut,
             ends_run,
+            caught_at: _,
         } = posts;
         self.document.extend(posts);
         self.cut |= cut;
@@ -762,9 +763,10 @@ pub fn write_document_posts(
 /// Writes `report`, the end of a structured document or a held report written there
 /// (`StructuredXml::finish`, `StructuredXml::unwritten`), whose writing returned `written`, as
 /// `write_document_posts`; where the held report raised an exception that NCBI's report function
-/// catches (`CaughtException`: the stream forms 15 and 16 have written their end, the report is
-/// left out), the post of it by `program` (`blast_xml::writer::caught_post`) after the other
-/// posts. Any other error is returned and `report` is not written.
+/// catches (`CaughtException`: the stream forms 15 and 16 leave the report out), the post of it
+/// by `program` (`blast_xml::writer::caught_post`) before the document's end where the epilog
+/// marks it (`DocumentPosts::caught_at`), else after the other posts. Any other error is
+/// returned and `report` is not written.
 pub fn write_document_end<D: crate::report::blast_xml::writer::StructuredXml + ?Sized>(
     written: Result<()>,
     report: &[u8],
@@ -774,11 +776,12 @@ pub fn write_document_end<D: crate::report::blast_xml::writer::StructuredXml + ?
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let mut hits = HitPosts::default();
-    if let Some(post) = crate::report::blast_xml::writer::caught_post(written, &*document, program)?
-    {
+    let caught = crate::report::blast_xml::writer::caught_post(written, &*document, program)?;
+    let mut posts = document.take_posts();
+    if let Some(post) = caught.and_then(|post| posts.place_caught(post)) {
         hits.caught(post);
     }
-    hits.document(document.take_posts());
+    hits.document(posts);
     write_hit_posts(report, &hits, 0, writer, warnings)
 }
 

@@ -35,6 +35,10 @@ const INDEFINITE_LENGTH: u8 = 0x80;
 /// The first content octet of a REAL written in decimal form (`eDecimal`, the NR form is
 /// not selected, CXX-5248).
 const REAL_DECIMAL: u8 = 0x00;
+/// The special REAL values (X.690, 8.5.9).
+const REAL_PLUS_INFINITY: u8 = 0x40;
+const REAL_MINUS_INFINITY: u8 = 0x41;
+const REAL_NOT_A_NUMBER: u8 = 0x42;
 
 /// `WriteLength`: one byte up to 127, else the long form: `0x80 + count` and the `count` bytes of
 /// the length, big-endian, `count` the fewest that hold it (`WriteLongLength` counts 1, 2 or 3
@@ -316,11 +320,20 @@ impl Encoder for AsnBinaryEncoder<'_> {
         Ok(())
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:738-820
+    // A NaN and an infinity are one content byte of their own (the special REAL values of
+    // X.690, 8.5.9: PLUS-INFINITY, MINUS-INFINITY, NOT-A-NUMBER), as in NCBI's stream.
     fn real(&mut self, value: f64) {
         if !value.is_finite() {
-            if self.error.is_none() {
-                self.error = Some(SerialError::NonFiniteReal);
-            }
+            self.out.push(TAG_REAL);
+            self.length(1);
+            self.out.push(if value.is_nan() {
+                REAL_NOT_A_NUMBER
+            } else if value > 0.0 {
+                REAL_PLUS_INFINITY
+            } else {
+                REAL_MINUS_INFINITY
+            });
             return;
         }
         let mut digits = Vec::with_capacity(24);

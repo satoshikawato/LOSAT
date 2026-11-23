@@ -231,14 +231,21 @@ fn reals_are_a_decimal_form_byte_and_posix_digits() {
     );
 }
 
-/// A NaN or an infinity is an error, not a byte string (no BLAST report has one).
+/// A NaN or an infinity is one content byte of its own (X.690, 8.5.9), as NCBI's binary stream
+/// writes them: the bit score of a Seq-align whose Lambda is +inf is `09 01 40`.
 #[test]
-fn a_non_finite_real_is_an_error() {
-    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+fn a_non_finite_real_is_a_special_value() {
+    for (value, byte) in [
+        (f64::INFINITY, 0x40),
+        (f64::NEG_INFINITY, 0x41),
+        (f64::NAN, 0x42),
+        (-f64::NAN, 0x42),
+    ] {
         let mut buf = Vec::new();
         let mut enc = AsnBinaryEncoder::new(&mut buf);
         enc.real(value);
-        assert_eq!(enc.error(), Some(SerialError::NonFiniteReal));
+        assert_eq!(enc.error(), None);
+        assert_eq!(buf, [0x09, 0x01, byte]);
     }
 }
 

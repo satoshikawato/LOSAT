@@ -736,7 +736,7 @@ pub(crate) fn seq_id_written_as_is(
 /// stream of the archive does not write as NCBI's does yet: in XML an anonymous SEQUENCE or
 /// CHOICE (`User-field.data`, `Seq-annot.data`; LOSAT's object mode writes `<>` for its tag), a
 /// NULL, a UTF8String or a member read into a delay buffer (`Auth-list.names`, which NCBI parses
-/// first); in ASN.1 binary the last two and a NaN or infinite REAL (`SerialError::NonFiniteReal`);
+/// first); in ASN.1 binary the last two and a NaN or infinite REAL (the archive's own gap);
 /// in ASN.1 text a member of a binary file that NCBI re-reads with a message (`unread_delayed`).
 /// NCBI BLAST+ 2.17.0 writes them all (probe XA of the review fixes of line PS item PS15b-1,
 /// 2026-11-23); ASN.1 text writes the rest as NCBI does.

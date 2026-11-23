@@ -1328,3 +1328,15 @@ fn pssm_searches_name_their_type_and_psiblast_omits_zero_identities() {
     assert!(tblastn.contains("int 11"), "{tblastn}");
     assert!(tblastn.contains("num_ident"), "{tblastn}");
 }
+
+// Line PS item PS7c: a list of a PSSM's search keeps the absent E-value for the writers, any other
+// E-value goes through `seqalign_evalue` (a value below 1e-180, a negative one too, is 0).
+#[test]
+fn a_listed_absent_evalue_stays_for_the_writers() {
+    use super::seqalign::{seqalign_evalue_listed, ABSENT_EVALUE};
+    assert_eq!(seqalign_evalue_listed(ABSENT_EVALUE), -1.0);
+    assert_eq!(seqalign_evalue_listed(-3.5), 0.0);
+    assert_eq!(seqalign_evalue_listed(1e-200), 0.0);
+    assert_eq!(seqalign_evalue_listed(0.25), 0.25);
+    assert!(seqalign_evalue_listed(f64::NAN).is_nan());
+}

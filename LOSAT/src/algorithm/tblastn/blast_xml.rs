@@ -48,7 +48,7 @@ use crate::report::blast_xml::{
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{query_messages, QueryWarnings};
-use crate::report::serial::seqalign::seqalign_evalue;
+use crate::report::serial::seqalign::seqalign_evalue_listed;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegParams;
@@ -632,7 +632,7 @@ impl PreparedXml {
                                 hsps.hsp(&XmlHsp {
                                     score: hsp.score,
                                     bit_score: payload.bit_score,
-                                    evalue: seqalign_evalue(linked.evalue),
+                                    evalue: seqalign_evalue_listed(linked.evalue),
                                     query_from: q_start,
                                     query_to: q_end,
                                     hit_from,

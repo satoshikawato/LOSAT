@@ -110,6 +110,18 @@ pub(crate) fn seqalign_scores(evalue: f64, bit_score: f64) -> (f64, f64) {
 /// that `seqalign_scores` made carries it for such an HSP; no other value of such a list is
 /// negative (a negative E-value is 0 in a Seq-align).
 pub(crate) const ABSENT_EVALUE: f64 = -1.0;
+
+/// The E-value of a list's HSP that a writer of the Seq-align (the ASN.1 scores, the XML's
+/// `Hsp_evalue`) takes: a list of a PSSM's search carries `ABSENT_EVALUE` for an HSP that has none
+/// (`seqalign_scores`), which stays; any other value goes through `seqalign_evalue`. The writers
+/// then omit an E-value below 0, and the XML writes -1.
+pub(crate) fn seqalign_evalue_listed(evalue: f64) -> f64 {
+    if evalue == ABSENT_EVALUE {
+        evalue
+    } else {
+        seqalign_evalue(evalue)
+    }
+}
 pub(crate) const GAP_VALUE: i32 = -1;
 const BLAST_ALIGNMENT_DIM: i32 = 2;
 
@@ -786,7 +798,7 @@ fn write_score_list<E: Encoder>(enc: &mut E, hsp: &HspRecord<'_>, query_length: 
     if hsp.num > 1 {
         write_score_int(enc, "sum_n", hsp.num);
     }
-    let evalue = seqalign_evalue(hsp.evalue);
+    let evalue = seqalign_evalue_listed(hsp.evalue);
     if evalue >= 0.0 {
         let score_type = if hsp.num <= 1 { "e_value" } else { "sum_e" };
         write_score_real(enc, score_type, evalue);

@@ -550,7 +550,7 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
         assert_eq!(pssm_unwritten(ArchiveEncoding::Text, &pssm), None, "{path}");
     }
     // A frequency ratio of PLUS-INFINITY (a PSSM file in ASN.1 binary, whose REAL NCBI's reader
-    // takes): NCBI writes it in each stream, LOSAT's BER encoder does not (`NonFiniteReal`).
+    // takes): NCBI writes it in each stream, the archive's writer of LOSAT does not yet (`PssmGaps`).
     let bytes = std::fs::read(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/pssm/ps9_ber_real_list_pinf.asnb"),

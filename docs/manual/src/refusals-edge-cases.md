@@ -149,7 +149,7 @@ Strategy files:
 - In the cases checked, NCBI keeps such an alignment in the frame where it started, with query coordinates outside that frame. It writes coordinates past the query or leaves the alignment out of every report.
 - LOSAT writes the results of the query batches before and then stops with the error.
 - An extension that passes into the next frame without scoring higher there gives NCBI's output (apart from the version line, which names LOSAT).
-- `-db_hard_mask` on the sequences described under `tblastn` is searched as in `tblastn`: a frame after an empty part at its start as outside the mask, and a part that ends before its frame's end alone; see [Differences](differences.md).
+- `-db_hard_mask` on the sequences described under `tblastn` is searched as in `tblastn`: a frame after an empty part at its start whole (its masked bases stay masked), and a part that ends before its frame's end alone; see [Differences](differences.md).
 
 ## Alias files and database arithmetic
 

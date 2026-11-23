@@ -803,6 +803,7 @@ impl ReportOutputs<'_> {
             later_warnings,
             hits,
             observer,
+            html_posts,
         } = self;
         let mut held: Vec<(&str, Held<'_>, FormatRefusal)> = formats
             .iter_mut()
@@ -851,6 +852,10 @@ impl ReportOutputs<'_> {
                     .collect(),
                 diagnostics: &mut **diagnostics,
                 later_warnings: later_warnings.as_deref_mut(),
+                // A later search's `-html` posts go where they went (`ReportOutputs::html_posts`).
+                html_posts: html_posts
+                    .as_deref_mut()
+                    .map(|posts| posts as &mut (dyn Write + Send)),
                 hits: hits.as_mut().map(|hits| &mut **hits as &mut HitsSink<'_>),
                 observer: observer
                     .as_mut()

@@ -365,11 +365,12 @@ pub(super) fn write_xml(
             // report of a `-subject` or psiblast run is made when the next query's
             // results arrive, or in `PrintEpilog`)
             // The report data's constructor throws for the run's first searched query,
-            // or for its second where the report is held (`blastp_xml_matrix_failure`):
+            // or where the report is held for its first of another Seq-id
+            // (`blastp_xml_matrix_failure`, `QueryScopes::held_xml_failure`):
             // in the call of that query, after the reader's messages of the batches up
             // to its own and NCBI's posts of the bytes replaced in their search strategy
             // requests (`query_posts`); a call of the queries before it writes those
-            // and no report. A run of one searched query whose report is held fails at
+            // and no report. A run whose held report has no such query fails at
             // its end (the last call, with the epilog), unless the run's stop
             // (`QueryBatches::stop`, written by `search`) ends it first. The XML2 and
             // JSON prolog is written before the search (`PrintProlog`), once: with the
@@ -384,7 +385,7 @@ pub(super) fn write_xml(
             let first = ranges.searched_base;
             let failing = failure
                 .query()
-                .checked_sub(first)
+                .and_then(|query| query.checked_sub(first))
                 .filter(|&query| query < query_records.len());
             if let Some(warnings) = warnings.as_mut() {
                 for query in 0..failing.map_or(query_records.len(), |query| query + 1) {

@@ -173,6 +173,14 @@ fn search_records(
         args.parse_deflines,
         args.scope_refusal.as_ref(),
     )?;
+    // The query of a held report's failure, of the scopes read ahead
+    // (`QueryScopes::held_xml_failure`).
+    let xml_matrix = xml_matrix.map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::held_xml_failure(
+            xml_scan.query_scopes.as_ref(),
+            failure,
+        )
+    });
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
     // NCBI's error of an XInclude format without a file name, where the command line gives it
     // (`native::run_inner`, blastx_app.cpp:251).
@@ -343,7 +351,11 @@ fn scan_xml_titles(
         structured.contains(&5),
         "BLASTX",
     )
-    .map(|scopes| scopes.with_refusal(scope_refusal.cloned()));
+    .map(|scopes| {
+        scopes
+            .with_refusal(scope_refusal.cloned())
+            .with_xml_matrix_failure(xml_matrix)
+    });
     let count = crate::blastinput::query_batch::BatchCount::of(query_scopes.as_ref());
     // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
     // any report is written (`xml_matrix`, the run's `blast_xml::xml_matrix_failure`): no title is
@@ -1320,6 +1332,14 @@ fn search_database(
         args.parse_deflines,
         args.scope_refusal.as_ref(),
     )?;
+    // The query of a held report's failure, of the scopes read ahead
+    // (`QueryScopes::held_xml_failure`).
+    let xml_matrix = xml_matrix.map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::held_xml_failure(
+            xml_scan.query_scopes.as_ref(),
+            failure,
+        )
+    });
     report_batches(
         RunReports {
             lowercase: args.lcase_masking,

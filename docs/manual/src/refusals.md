@@ -76,7 +76,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-export_search_strategy` with `-dbsize` and a list that keeps no sequence of the database | Refused. |
 | `-export_search_strategy` in the library API and pylosat | Refused. The command line writes the file. |
 | `-parse_deflines` with two subjects of one id | Refused. NCBI cannot report it correctly. |
-| `-parse_deflines` with two queries of one id in one query batch | Refused. |
+| `-parse_deflines` with two queries of one id in one query batch | Refused. A run that NCBI stops first because its BLAST XML, XML2 or JSON report (`-outfmt 5`, `13`, `14`, `15`, `16`) does not know the `-matrix` name (such as `blosum62` in lower case) is not refused: it ends with NCBI's error and output, before anything of the second query. With `-export_search_strategy` it stays refused. |
 | `-parse_deflines` with a query and a subject of one id that are not the same record | Refused. |
 | `-db` with a sequence whose id NCBI cannot report correctly | Refused. The error names the sequence. |
 | An alias file with `SEQIDLIST` or `TAXIDLIST` over a version 5 database, `MEMB_BIT` or `MASKLIST` | Refused. See Alias files below. `MASKLIST` names the GI-indexed masks that `makeblastdb -gi_mask` writes; LOSAT does not read them yet. |

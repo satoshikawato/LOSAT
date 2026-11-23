@@ -68,36 +68,51 @@ pub enum XmlMatrixFailure {
     /// The XML2 and JSON documents of a `-subject` search (`m_IsBl2Seq`) or of an iterative
     /// program (`m_IsIterative`: psiblast, tblastn `-in_pssm`; `blast_xml2::reports_held`): a
     /// query's report is held until a result arrives whose query Seq-id does not match the held
-    /// one (blast_format.cpp:2377), and is made then. LOSAT refuses two queries of one Seq-id in a
-    /// `-subject` search before any output (`-parse_deflines`, `query_batch::QueryScopes`: one
-    /// scope for the run; without the option every query has its own local id), so that result is
-    /// the run's second searched query's: its batch fails, after its reader messages and search
-    /// strategy request and before anything of its reports. A run of one searched query fails at
-    /// its end (`PrintEpilog`) instead of writing the epilog, unless another error ends it first.
+    /// one (blast_format.cpp:2377); a result of the held Seq-id is accumulated with it. The report
+    /// data is made, and fails, when the result of `second_id` arrives: the run's first searched
+    /// query whose Seq-id is not the first's (`QueryScopes::held_xml_failure`; without
+    /// `-parse_deflines` every query has a local id of its own, so the second), in its batch,
+    /// after its reader messages and search strategy request and before anything of its reports.
+    /// Without such a query (`None`, or a run that searched no further), the run fails at its
+    /// end (`PrintEpilog`) instead of writing the epilog, unless another error ends it first.
     /// (psiblast's and tblastn `-in_pssm`'s XML formats are not written yet, line PS items PS15
-    /// and PS15b: there a later query of the same Seq-id would be accumulated with the first.)
-    SecondQueryOrEnd,
+    /// and PS15b.)
+    SecondQueryOrEnd { second_id: Option<usize> },
 }
 
 impl XmlMatrixFailure {
     /// The run's searched query (0-based, in the run's order) whose batch fails as NCBI formats
-    /// it.
-    pub fn query(self) -> usize {
+    /// it; `None` for a held report that only the run's end makes.
+    pub fn query(self) -> Option<usize> {
         match self {
-            Self::FirstQuery => 0,
-            Self::SecondQueryOrEnd => 1,
+            Self::FirstQuery => Some(0),
+            Self::SecondQueryOrEnd { second_id } => second_id,
         }
     }
 
     /// Whether NCBI fails while it formats the batch of the run's searched queries `batch`.
     pub fn fails_in(self, batch: std::ops::Range<usize>) -> bool {
-        batch.contains(&self.query())
+        self.query().is_some_and(|query| batch.contains(&query))
     }
 
     /// Whether NCBI fails at the end of a run whose batches searched `searched` queries and
-    /// ended without an error (its epilog makes the held report of the one query).
+    /// ended without an error: its epilog makes the held report, of queries of one Seq-id.
     pub fn fails_at_end(self, searched: usize) -> bool {
-        self == Self::SecondQueryOrEnd && searched == 1
+        match self {
+            Self::FirstQuery => false,
+            Self::SecondQueryOrEnd { second_id } => {
+                searched > 0 && second_id.is_none_or(|query| query >= searched)
+            }
+        }
+    }
+
+    /// The failure with the run's first searched query of a second Seq-id, `second_id`, where
+    /// the report is held (`SecondQueryOrEnd`; `query_batch::QueryScopes::held_xml_failure`).
+    pub(crate) fn with_second_id(self, second_id: Option<usize>) -> Self {
+        match self {
+            Self::FirstQuery => Self::FirstQuery,
+            Self::SecondQueryOrEnd { .. } => Self::SecondQueryOrEnd { second_id },
+        }
     }
 }
 
@@ -109,7 +124,9 @@ impl XmlMatrixFailure {
 /// `-in_pssm`), whose XML2 and JSON reports are held (`blast_xml2::reports_held`). With several
 /// formats (the library), the first to fail stops the run. The one decision behind the error
 /// (`unsupported_score_matrix`) and the search strategy's last request
-/// (`StrategyExport::stop_after`) of BLASTP (psiblast too), TBLASTN, TBLASTX and BLASTX.
+/// (`StrategyExport::stop_after`) of BLASTP (psiblast too), TBLASTN, TBLASTX and BLASTX. A held
+/// report fails with the second searched query here, each query's local id its own; the scopes of
+/// `-parse_deflines` give the query of the run (`QueryScopes::held_xml_failure`).
 pub fn xml_formatting_failure<'a>(
     outfmts: impl IntoIterator<Item = &'a str>,
     matrix_name: &str,
@@ -125,12 +142,12 @@ pub fn xml_formatting_failure<'a>(
         .filter(|outfmt| is_structured_xml(outfmt))
         .map(|outfmt| {
             if holds_back && !is_blast_xml(outfmt) {
-                XmlMatrixFailure::SecondQueryOrEnd
+                XmlMatrixFailure::SecondQueryOrEnd { second_id: Some(1) }
             } else {
                 XmlMatrixFailure::FirstQuery
             }
         })
-        .min_by_key(|failure| failure.query())
+        .min_by_key(|failure| failure.query().unwrap_or(usize::MAX))
 }
 
 /// Whether `outfmt` is BLAST XML (5), whose report is never held (blast_format.cpp:707-743).

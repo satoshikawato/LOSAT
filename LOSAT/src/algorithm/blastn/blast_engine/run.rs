@@ -8386,7 +8386,11 @@ fn run_in_pool(
         // (Round 4 refused after the search, and wrote the batch's request.)
         let mut scope_refusal = None;
         if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(refusal) = scopes.add_batch(batch_records.input(), start) {
+            if let Err(refusal) = scopes.add_batch(
+                batch_records.input(),
+                &query_input.skipped[input_start..input_end],
+                start,
+            ) {
                 scope_refusal = Some(refusal);
             }
         }
@@ -8583,8 +8587,10 @@ fn run_in_pool(
         // The batch of LOSAT's refusal (`scope_refusal` above, without a request): NCBI's error of
         // the set-up of its records that are first in the scope (`BatchStage::Search::setup_only`,
         // which ends before the search), or the refusal (line WQA D10 round 5, 2026-11-20).
+        // BLASTN's formats have no failure of a matrix name (`QueryScopes::with_xml_matrix_failure`):
+        // every refusal stops its batch.
         if let Some(refusal) = scope_refusal.take() {
-            let error =
+            if let Err(error) =
                 crate::blastinput::query_batch::refused_batch_error(refusal, false, |first| {
                     refused_batch_setup_error(
                         &args,
@@ -8604,13 +8610,17 @@ fn run_in_pool(
                         &mut warnings[start],
                         &mut query_keep,
                     )
-                });
-            // The first batch's set-up wrote the prologs before its error (`database_search_error`).
-            if input_start == 0 && error.is::<crate::cli::NativeError>() {
-                warnings[start].write(&mut *outputs.diagnostics, archive)?;
-                return Err(error);
+                    .into()
+                })
+            {
+                // The first batch's set-up wrote the prologs before its error
+                // (`database_search_error`).
+                if input_start == 0 && error.is::<crate::cli::NativeError>() {
+                    warnings[start].write(&mut *outputs.diagnostics, archive)?;
+                    return Err(error);
+                }
+                fail_batch!(error);
             }
-            fail_batch!(error);
         }
         // Whether the loop reads no batch after this one: its keep then frees the table after the
         // batch's preliminary stage (`BatchStage::Search`'s `last`).

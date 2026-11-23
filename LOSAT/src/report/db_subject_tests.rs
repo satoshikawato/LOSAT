@@ -1183,8 +1183,29 @@ fn the_call_refuses_a_throw_over_all_its_searches() {
     );
     // Formats that agree: each search keeps its own answer (a table of fields that read nothing
     // of the subject too).
-    assert_eq!(search(&["0"], &["8"]), writes(AfterThrow::SkipsAlignment));
-    assert_eq!(search(&["15"], &["5"]), writes(AfterThrow::EndsReport));
+    assert_eq!(
+        search(&["6"], &["8"]),
+        FormatThrow::Writes(RunThrow {
+            first_row_ends: true,
+            ..RunThrow::every_row(AfterThrow::WritesRow)
+        })
+    );
+    assert_eq!(search(&["15"], &["16"]), writes(AfterThrow::EndsReport));
+    assert_eq!(
+        search(&["13"], &["6 qseqid slen"]),
+        writes(AfterThrow::EndsRun)
+    );
+    // Review 2 of line DBID pfoff-4, M3: across the call's searches as within one, a format that
+    // reads nothing with outfmt 0, and outfmt 15 (which posts the error) with outfmt 5 (which
+    // posts nothing), are refused: the call has one result and one standard error.
+    assert_eq!(
+        search(&["0"], &["8"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
+    );
+    assert_eq!(
+        search(&["15"], &["5"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
+    );
     // A table that ends the run at the throw with outfmt 15, whose run goes on (review 1 of line
     // DBID pfoff-4, M1).
     assert_eq!(

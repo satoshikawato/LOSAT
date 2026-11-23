@@ -1230,9 +1230,14 @@ class UnbacktickedCodeTest(unittest.TestCase):
             found = checker.find(root, TABLE)
             self.assertEqual([(f.path, f.line, f.kind) for f in found], [("b.rs", 1, "QUOTE")])
 
-        # ② Cited prose `case` lines still pass while cited `case kFoo:` / `case foo_bar:` fail.
+        # ② Cited prose `case` lines (including short lowercase prose words) still pass, while
+        # cited `case kFoo:`, `case kFoo: return `x`;`, and C parameter declarations with Doxygen
+        # comments fail.
         for prose_case in (
             "// case sensitive: the names differ\n",
+            "// case sensitive: yes\n",
+            "// case insensitive:\n",
+            "// case study: foo\n",
             "// case c_xml_tab: the byte is a tab\n",
             "// case c_xml_tab: `Bad char [0x1] in string at line 8` for\n",
             "// case 3: the query is empty and nothing is written\n",
@@ -1243,8 +1248,29 @@ class UnbacktickedCodeTest(unittest.TestCase):
                 [],
                 prose_case,
             )
+        for cited_bad in (
+            "// case kFoo: return `x`;\n",
+            "// Int4 foo(const unsigned long x,\n",
+            "//     Int4 query_length, /* the length of the query */\n",
+            "//     Int4 hitlist_size, ///< number of hits to keep in a list\n",
+            "//     Int4 query_length, /**< [in] Length of the query sequence */\n",
+        ):
+            self.assertEqual(
+                [f.line for f in checker.check_text("x.rs", (self.CITE + cited_bad).splitlines(), "slash", TABLE) if f.kind == "QUOTE"],
+                [2],
+                cited_bad,
+            )
 
-        # ③ Odd backticks in a multi-line run must not swallow C code on following lines.
+        # ③ Odd backticks (both multi-line and single-line) must not swallow C code.
+        for single_odd in (
+            "// an odd ` tick then hsp_list->hspcnt = hsp_cnt; and `x` y\n",
+            "// Error: `foo' and hsp_list->hspcnt = hsp_cnt; see `x`\n",
+        ):
+            self.assertEqual(self.unbackticked(single_odd), [(1, checker.UNBACKTICKED_QUOTE)], single_odd)
+        self.assertEqual(
+            self.unbackticked("// Error: `foo' and plain prose see `x`\n"),
+            [],
+        )
         odd_three = (
             "// an odd ` tick here\n"
             "// then hsp_list->hspcnt = hsp_cnt; and `x\n"
@@ -1339,16 +1365,20 @@ class UnbacktickedCodeTest(unittest.TestCase):
             ("yaml_quote_spam", "x.yml", "hash", lambda n: "a: " + "it's " * (n // 5) + "# y\n"),
             ("odd_bt_spam", "x.rs", "slash", lambda n: "// odd `\n// " + "a `b` " * (n // 6) + "`x\n// y` done\n"),
             ("escaped_char_spam", "x.rs", "slash", lambda n: "let a = [" + "'\\''," * (n // 5) + "'a']; // ok\n"),
+            ("c_decl_comment_spam", "x.rs", "slash", lambda n: self.CITE + "// Int4 values, " + "/* " * (n // 3) + "a b c d\n"),
+            ("case_bt_spam", "x.rs", "slash", lambda n: "// case kFoo: " + "`a` " * (n // 4) + "ok\n"),
         )
+        # Use process CPU time and an 8x size jump (linear ~8x vs quadratic ~64x) so host load
+        # preemption spikes never flake the bound.
         n_small = 2000
-        n_large = 8000
+        n_large = 16000
 
         def measure(rel: str, style: str, lines: list[str], reps: int = 3) -> float:
             best = float("inf")
             for _ in range(reps):
-                t0 = time.perf_counter()
+                t0 = time.process_time()
                 checker.check_text(rel, lines, style, TABLE)
-                dt = time.perf_counter() - t0
+                dt = time.process_time() - t0
                 if dt < best:
                     best = dt
             return best
@@ -1358,20 +1388,20 @@ class UnbacktickedCodeTest(unittest.TestCase):
             large_lines = build(n_large).splitlines()
             t_small = measure(rel, style, small_lines)
             t_large = measure(rel, style, large_lines)
-            # Only enforce ratio when small time is above noise floor (0.2 ms); otherwise confirm
-            # large time stays tiny (< 25 ms), which still rejects any O(n^2) blowup.
-            if t_small >= 0.0002:
+            # Only enforce ratio when small time is above noise floor (0.5 ms); otherwise confirm
+            # large time stays tiny (< 50 ms), which still rejects any O(n^2) blowup.
+            if t_small >= 0.0005:
                 ratio = t_large / t_small
                 self.assertLess(
                     ratio,
-                    9.5,
+                    24.0,
                     f"{name}: t({n_large})/t({n_small}) = {ratio:.2f} "
                     f"({t_large*1000:.2f}ms / {t_small*1000:.2f}ms)",
                 )
             else:
                 self.assertLess(
                     t_large,
-                    0.025,
+                    0.050,
                     f"{name}: t({n_large}) = {t_large*1000:.2f}ms (t({n_small})={t_small*1000:.3f}ms)",
                 )
 

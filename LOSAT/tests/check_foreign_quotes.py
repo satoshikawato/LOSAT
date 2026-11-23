@@ -209,12 +209,12 @@ LABEL_START_RE = re.compile(r"^[A-Za-z][\w.+ -]{0,40}\breference\b")
 NCBI_PATH_LABEL_RE = re.compile(
     r"^NCBI(?:\s+[^\s:`]+){0,4}?\s+`?(?P<path>[\w.+/-]+\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|tcc))\b"
 )
-# A C `case` label: matches any C/C++ identifier (including `::`-scoped), integer, or char literal,
-# while `_is_c_case_label` excludes English prose tails (3+ lowercase words, such as
-# `case sensitive: the names differ`, `case c_xml_tab: the byte is a tab`, or
-# `case 3: the query is empty ...`) when comments are re-wrapped.
+# A C `case` label: matches a C/C++ identifier (excluding single lowercase English words such as
+# `case insensitive:` or `case study:`), `::`-scoped name, integer, or char literal, while
+# `_is_c_case_label` excludes English prose tails (3+ lowercase words, or backticked spans without
+# C punctuation outside backticks such as `case c_xml_tab: `Bad char ...` for`).
 C_CASE_LABEL_RE = re.compile(
-    r"^\s*case\s+(?:[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*|-?\d+|'(?:\\.|[^'\\])')\s*:(?P<tail>.*)$"
+    r"^\s*case\s+(?:(?![a-z]+\s*:)[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*|-?\d+|'(?:\\.|[^'\\])')\s*:(?P<tail>.*)$"
 )
 THREE_PROSE_WORDS_RE = re.compile(r"\b[a-z]+ [a-z]+ [a-z]+\b")
 
@@ -226,7 +226,8 @@ def _is_c_case_label(text: str) -> bool:
         return False
     tail = match.group("tail").strip()
     if "_BT_" in tail or "`" in tail:
-        return False
+        outside = re.sub(r"`[^`]*`|_BT_", " ", tail)
+        return re.search(r"[;=(]|->", outside) is not None
     return not tail or THREE_PROSE_WORDS_RE.search(tail) is None
 
 
@@ -267,8 +268,11 @@ def is_cited_code_line(text: str, prev_enum: bool = False) -> bool:
         return True
     clean = _mask_double_quoted(text)
     prose = PROSE_RE.search(clean) is not None
-    if CODE_LINE_C_TYPE_DECL_RE.search(clean) and (not prose or ";" in clean or "=" in clean):
-        return True
+    decl = CODE_LINE_C_TYPE_DECL_RE.search(clean)
+    if decl:
+        rest = re.sub(r"/\*.*?(?:\*/|$)|///?<.*$", " ", clean[decl.end() :])
+        if not (clean[decl.end() - 1] == "," and "(" not in clean and PROSE_RE.search(rest)):
+            return True
     if not prose and (CODE_LINE_SEMI_RE.search(text) or CODE_LINE_BARE_TYPE_DECL_RE.search(clean)):
         return True
     s = text.strip()
@@ -2200,13 +2204,23 @@ def unbackticked_findings(
     def record_run(items: Sequence[tuple[int, str]]) -> None:
         for number, raw, outside in strip_backticks_in_run(items):
             record_outside(number, raw, outside)
-        # When a multi-line run has an odd number of backticks (for example an unpaired GNU-style
-        # `` `String' `` quote), also check per-line pairing so the stray tick cannot pair across
-        # lines and hide C/C++ code on a following line.
-        if len(items) > 1 and sum(text.count("`") for _, text in items) % 2 == 1:
-            for number, raw in items:
+        # When a run has an odd total number of backticks (for example an unpaired GNU-style
+        # `` `String' `` quote), also check odd-backtick lines dropping their first backtick (so a
+        # single-line stray tick cannot pair with a later backtick and swallow C/C++ code) and, for
+        # multi-line runs, per-line pairing (so the stray tick cannot pair across lines).
+        odd_total = sum(text.count("`") for _, text in items) % 2 == 1
+        odd_run = len(items) > 1 and odd_total
+        for number, raw in items:
+            if number in seen_lines:
+                continue
+            if odd_total and raw.count("`") % 2 == 1:
+                first = raw.index("`")
+                alt = raw[:first] + " " + raw[first + 1 :]
+                _, _, alt_outside = strip_backticks_in_run([(number, alt)])[0]
+                record_outside(number, raw, alt_outside)
                 if number in seen_lines:
                     continue
+            if odd_run:
                 _, _, per_line_outside = strip_backticks_in_run([(number, raw)])[0]
                 record_outside(number, raw, per_line_outside)
 

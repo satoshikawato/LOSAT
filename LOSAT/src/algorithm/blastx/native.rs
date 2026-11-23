@@ -149,16 +149,14 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // subject that throws in an outfmt 13 or 14 report, `Xml2Document::failed`), which is
         // not an engine error.
         error
-    } else if error
-        .downcast_ref::<io::Error>()
-        .is_some_and(|e| crate::ncbi_exception::NcbiException::of_io_error(e).is_some())
-    {
+    } else if let Some(native) = NativeError::of_writer_exception(&error) {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
         // An exception of NCBI's that a report's writer raised (`NcbiException::into_io_error`:
         // the `-html` registries, `formatter_registry::FormatterNcbirc` in the prolog and
-        // `InitConfig` at the first id link) is `CATCH_ALL`'s `CException` report, exit status 255
-        // (`cli::exit_on_native_error`), not a failed write.
-        error
+        // `InitConfig` at the first id link; a subject's load that ends the run) is `CATCH_ALL`'s
+        // `CException` report, exit status 255 (as every program's `NativeError::of_writer`), not
+        // a failed write.
+        native.into()
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
     } else if let Some(e) = error.downcast_ref::<io::Error>() {

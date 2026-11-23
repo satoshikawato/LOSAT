@@ -988,7 +988,9 @@ fn the_query_s_own_bioseq_without_a_start_is_where_ncbi_aborts() {
 // identity dots of formats 1 and 3 (a masked letter equal to the query's is a `.`, `x_OutputSeq`
 // masks the line after the identity test), the gaps and the blanks past the row's end. The spans
 // are all that `-html` adds to the section (NCBI BLAST+ 2.17.0, `blastp -html` on the T3a probes
-// below: `/home/kawato/losat-baselines/remaining-gaps-20261112/T/t4b/unit_probe/`).
+// below: line RG T4b probes `bp.t3a.lc.f1.h`, `bp.t3a.lc.f3.h` (the inputs of the fixture rows
+// `db.of1.bp.lc.f1` and `.f3` with `-html`), `bp.t3a.seg.f1.h` and `bp.t3a.seg.f3.h`; the
+// fixture rows `html.bp.mk.lc.f1` and `.f3` hold such spans of other inputs).
 const OPEN: &str = "<font color=\"#000000\">";
 const CLOSE: &str = "</font>";
 

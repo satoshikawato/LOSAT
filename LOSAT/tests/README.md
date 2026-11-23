@@ -446,7 +446,13 @@ and `NAME=VALUE` (its README.md), which `freeze` and `check` run alike and `chec
 `outfmt0_manifest.tsv`, `check_losat.py` (with `--library` too) and the Web's checks
 (`web/adapter/tools/v_abi_cases.py`, `web/adapter/src/run.rs`, `run_local_blastx.rs`, web/app's
 `hsp-correspondence.test.ts` and verification table), run its `-html` rows as the others: LOSAT Web takes
-`-html` (line RG, decision T4a2-5). The fixture directories carry a `.gitattributes` with `-text` for the binary `.out` files. `--jobs` overlaps independent
+`-html` (line RG, decision T4a2-5). The bytes of formats 1 to 4 with `-html` are compared with NCBI's by
+`check_losat.py` (the `html.*` rows of `outfmt0_manifest.tsv`) and `db_search_fixtures.py check` (the
+`db.html.*` rows), each on the command line and through the library (`--library`, which LOSAT Web runs);
+the Web's checks above take only the rows of outfmt 0, 6 and 7, so they never reach those formats. The
+library's own tests (`src/api/run_tests.rs`) compare each `-html` format of a call of several formats with
+that format alone, and the Web's end-to-end test (`web/app/tests/e2e/results.spec.ts`) runs one search
+with `-html -outfmt 1` (line RG T4b). The fixture directories carry a `.gitattributes` with `-text` for the binary `.out` files. `--jobs` overlaps independent
 comparison processes; it does not change a search's requested thread count.
 The frozen runner uses a 3600-second per-search deadline, configurable with a
 positive `--timeout-seconds`; long genome cases can exceed a 900-second limit.

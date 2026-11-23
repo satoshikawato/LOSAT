@@ -2018,6 +2018,8 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
         &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
         &crate::report::db_subject::HitLoads,
     )>,
+    // Where the rows' ranges throw (`write_description_table`).
+    rows_throw: Option<EmptyRowsStop>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -2038,6 +2040,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
             parsed,
             loads,
         }),
+        rows_throw,
     )
 }
 
@@ -3457,6 +3460,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 parsed: self.parsed_subjects,
                 loads: self.loads,
             }),
+            None,
         )?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1589
         writeln!(writer)
@@ -3681,6 +3685,9 @@ fn write_description_table<W: Write>(
     place: super::query_warnings::ReportHook<'_, W>,
     // `-html`: the rows' links (`HtmlRows`); `None`: the plain table.
     html: Option<HtmlRows<'_>>,
+    // Where the table's read of its rows' ranges throws (BLASTX's HSPs with empty rows,
+    // `describes_empty_rows`): that exception; `None` for every other table.
+    rows_throw: Option<EmptyRowsStop>,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1068-1070
     // An `-html` table reads `./.ncbirc` first (`x_InitDeflineTable`), also one without rows
@@ -3691,6 +3698,15 @@ fn write_description_table<W: Write>(
             super::query_warnings::ReportPlace::Html(super::html_ids::HtmlPost::Ncbirc),
             writer,
         )?;
+    }
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1080-1100
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:225-228
+    // Then its rows' scores read the ranges of every HSP of each described subject
+    // (`x_GetScoreInfoForTable`), where an empty row throws (`Row is empty`), before the table's
+    // bytes and after that read (line RG T4b review a B2).
+    if let Some(stop) = rows_throw {
+        writer.flush()?;
+        return Err(io::Error::other(stop));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:513-514
     // c++/src/objtools/align_format/showdefline.cpp:757,848: with `-num_descriptions 0`
@@ -4179,6 +4195,7 @@ fn write_blastn_description_table<W: Write>(
             parsed,
             loads,
         }),
+        None,
     )
 }
 
@@ -5905,12 +5922,11 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         // highest bit score and that HSP's E-value, for the first `m_NumDescriptions` subjects;
         // the last one is NCBI's "last hit" when every subject fits.
         let descriptions = group.described(self.options.num_descriptions);
-        // The table reads the ranges of every HSP of each described subject first: an HSP with
-        // empty rows stops the report after the query's `Length=` (`describes_empty_rows`).
-        if describes_empty_rows(descriptions, grouped) {
-            writer.flush()?;
-            return Err(io::Error::other(EmptyRowsStop::RowIsEmpty));
-        }
+        // The table reads the ranges of every HSP of each described subject (after its `-html`
+        // read of `./.ncbirc`): an HSP with empty rows stops the report after the query's
+        // `Length=` (`describes_empty_rows`).
+        let rows_throw =
+            describes_empty_rows(descriptions, grouped).then_some(EmptyRowsStop::RowIsEmpty);
         write_subject_summary_table_with_sum_n(
             writer,
             descriptions,
@@ -5927,6 +5943,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
                 };
                 (report, parsed, self.loads)
             }),
+            rows_throw,
         )?;
         writeln!(writer)
     }
@@ -5981,9 +5998,10 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
     }
 
     // Each HSP's Dense-seg is made after its subject's read, before the section's first byte and
-    // outside its `try`: the Std-seg of an HSP with empty rows that `-subject`'s Seq-loc mapper
-    // rewrote throws there (`EmptyRowsStop::StdSegLengths`, as outfmt 0's alignments).
-    fn merged_subject<W: Write>(
+    // outside its `try` (with `-html` in outfmt 0, before the first alignment): the Std-seg of an
+    // HSP with empty rows that `-subject`'s Seq-loc mapper rewrote throws there
+    // (`EmptyRowsStop::StdSegLengths`, as outfmt 0's plain alignments at the HSP).
+    fn subject_densegs<W: Write>(
         &self,
         writer: &mut W,
         group: &super::x_pairwise_par::QueryGroup<'_>,

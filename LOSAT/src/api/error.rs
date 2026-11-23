@@ -125,19 +125,14 @@ pub(crate) fn chain_bytes(error: &anyhow::Error) -> Vec<u8> {
         if at > 0 {
             bytes.extend_from_slice(b": ");
         }
-        if let Some(native) = cause.downcast_ref::<crate::cli::NativeError>() {
+        // A `NativeError`, or an exception of NCBI's that a report's writer raised mid-report
+        // (the `-html` links' registry): `CATCH_ALL`'s report of it, as the command line writes
+        // it, whichever program wrote the report (`cli::NativeError::caught`).
+        if let Some(native) = crate::cli::NativeError::caught(cause) {
             bytes.extend_from_slice(&native.message);
         } else if let Some(exception) = cause.downcast_ref::<crate::ncbi_exception::NcbiException>()
         {
             bytes.extend_from_slice(&exception.what());
-        } else if let Some(exception) = cause
-            .downcast_ref::<std::io::Error>()
-            .and_then(crate::ncbi_exception::NcbiException::of_io_error)
-        {
-            // An exception of NCBI's that a report's writer raised mid-report (the `-html` links'
-            // registry): `CATCH_ALL`'s report of it, as the command line writes it
-            // (`cli::exit_on_native_error`), whichever program wrote the report.
-            bytes.extend_from_slice(&crate::cli::NativeError::exception(exception).message);
         } else {
             bytes.extend_from_slice(cause.to_string().as_bytes());
         }

@@ -179,24 +179,35 @@ fn diagnostics_come_after_the_output_written_before_them() {
     );
 }
 
-// NCBI 2.17.0 with `-out /dev/full` (F2): the serial stream of `-metadata` reports the
-// failed write (five lines, exit status 6), which LOSAT refuses.
+// NCBI 2.17.0 writing `-metadata` to a full standard output (line RG KC-11b-1): a document
+// that its serializer holds whole fails at the flush of `json_out->Flush()`, which `CATCH_ALL`
+// reports, exit status 6. On a terminal `crate::cli::NcbiBuffer` writes each line, so the
+// serializer's write of the document fails first and its destructor posts that, exit status 0:
+// the model's result (no NCBI run had a terminal whose writes fail). The `-out` file and the
+// documents longer than the buffers are `tests/blastdbcmd_metadata_failures.rs`.
 #[test]
-fn a_failed_write_of_the_metadata_is_refused() {
+fn a_failed_write_of_the_metadata_is_ncbi_s_report() {
     let db = fixture_db("dustmasker/db/basic");
     let words = ["-db", db.as_str(), "-metadata"];
     let mut written = Vec::new();
     assert_eq!(run_on(&words, "", &mut written), (0, String::new()));
     assert!(written.ends_with(b"}\n"));
-    assert_eq!(
-        run_on(&words, "", &mut FullDisk),
+    let expected = if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        let at = written.len() - 1;
         (
-            1,
-            "Error: a failed write of the -metadata output (NCBI's serial stream reports it) \
-                 is not supported by LOSAT's BLASTDBCMD\n"
-                .to_string()
+            0,
+            format!(
+                "Error: (802.5) [blastdbcmd] CObjectOStream: error at byte {at}: stack is empty: \
+                 write fault\n"
+            ),
         )
-    );
+    } else {
+        (
+            6,
+            "BLAST failed to write output: COStreamBuffer::Flush: failed\n".to_string(),
+        )
+    };
+    assert_eq!(run_on(&words, "", &mut FullDisk), expected);
     // A closed pipe ends the program silently outside Windows, where SIGPIPE ends NCBI's.
     if !cfg!(windows) {
         assert_eq!(run_on(&words, "", &mut ClosedPipe), (0, String::new()));

@@ -118,8 +118,9 @@ impl SubjectRead {
 /// What the load of a read's subject looks up, as far as it decides the texts: NCBI's lookups write
 /// the texts of opening the taxonomy database at the run's first ask, and the offset error at a
 /// volume's first lookup of the taxid whose record begins past the end of `taxdb.btd`
-/// (`TaxDb::offset_error_taxid`; a volume whose cache would ask again is refused,
-/// `TaxdbRun::cache_collision`), nothing else. The model of the reads gives each text to the load
+/// (`TaxDb::offset_error_taxid`; on a database with a volume whose cache can ask again,
+/// `TaxdbRun::cache_collision`, every read is refused and only a batch's prefetch asks, again
+/// where NCBI's order of its loads gives that, so no load is left out there), nothing else. The model of the reads gives each text to the load
 /// that makes the ask, assuming every load it models happens; a load that NCBI does not make (a
 /// BLAST XML `Iteration` or `Hit` that the stream leaves out, `ReadCursor::cut`) leaves its texts
 /// to NCBI's next load that makes the same ask (`LoadTexts`).

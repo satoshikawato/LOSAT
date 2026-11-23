@@ -203,10 +203,10 @@ impl BlastpDatabase {
         self.taxdb.found(&self.db)
     }
 
-    /// Whether the run's prefetch is refused for NCBI's taxonomy cache
-    /// (`shared::TaxdbRun::prefetch_refused`), which comes at the first batch that prefetches.
-    pub(super) fn prefetch_refused(&self) -> bool {
-        self.taxdb.prefetch_refused(&self.db)
+    /// Whether a fetch of the run may be refused for NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::cache_may_refuse`), which can come at a later batch.
+    pub(super) fn cache_may_refuse(&self) -> bool {
+        self.taxdb.cache_may_refuse(&self.db)
     }
 
     /// The number of included sequences (`SeqDb::num_seqs`: the OIDs that the alias files'
@@ -1332,7 +1332,7 @@ fn exclude_fetched(
 ) -> Result<(Vec<FetchExcludedMatch>, XFetchedUtf8)> {
     let mut fetched = XFetchedUtf8::default();
     let excluded = shared::FetchExcluded::of(&database.db);
-    // Without a negative seqid list with ids the fetches exclude nothing: no list is read here.
+    // Without a negative seqid list the fetches exclude nothing: no list is read here.
     if excluded.is_none() {
         return Ok((Vec::new(), fetched));
     }
@@ -2807,8 +2807,9 @@ impl ListedTitles<'_> {
 // XML2's lookups can (DBID item T): `taxids` then also asks that every sequence's taxid decodes
 // and that no lookup can be refused (`shared::taxdb_may_refuse` without the names, which the
 // prefetch does not ask for), as `x_titles_taxids_allow_blocks` asks for outfmt 15 and 16.
-// The prefetch's refusal of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) comes at
-// the run's first prefetch, in block 0 before its rows.
+// The prefetch's refusal of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`,
+// `shared::prefetch_slot_plan`) can come at any batch that prefetches: a run that may make it
+// takes the search of all queries (`titles_allowed` in `blast_engine.rs`).
 
 // No NCBI counterpart: the order of LOSAT's own checks; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPDBKEEP): whether `check` holds for every range of
@@ -3047,7 +3048,7 @@ pub(super) fn x_titles_read_allow_blocks(
 // earlier blocks' bytes. So the block search is taken only where none can fail for any subject
 // of the database: every sequence's taxid reads, and `shared::taxdb_may_refuse` (OF5b, the one
 // implementation of "can a lookup of this database refuse?", DECISIONS 34 and 38) says no (the
-// refusal of NCBI's taxonomy cache, `shared::TaxdbRun::prefetch_refused`, is asked apart, by
+// refusal of NCBI's taxonomy cache, `shared::TaxdbRun::cache_may_refuse`, is asked apart, by
 // `titles_allowed` in `blast_engine.rs`). That
 // check answers from the smaller side: one pass over the taxonomy database when it is the smaller
 // one (NCBI's real taxdb has no refusable record, so no taxid lookup and no pass over the

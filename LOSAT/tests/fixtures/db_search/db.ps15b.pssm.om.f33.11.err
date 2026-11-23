@@ -1,0 +1,9 @@
+Error: (1204.6) [psiblast] Failed to parse location of 
+Error: (1204.1) [psiblast] Seq-feat ::= {
+  data comment NULL,
+  location int {
+    from 10,
+    to 5,
+    id local id 1
+  }
+}

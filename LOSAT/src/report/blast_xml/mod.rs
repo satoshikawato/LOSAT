@@ -44,5 +44,10 @@ pub const REFERENCE_GAPPED_BLAST: &str = super::reference::Publication::GappedBl
 /// `BlastOutput_reference` of megablast (`CReference::GetString` of `eMegaBlast`).
 pub const REFERENCE_MEGABLAST: &str = super::reference::Publication::MegaBlast.string();
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:652-671
+/// `BlastOutput_reference` of psiblast, whose task is `ePSIBlast` in every round
+/// (`CReference::GetString` of `eCompBasedStats`).
+pub const REFERENCE_COMP_BASED_STATS: &str = super::reference::Publication::CompBasedStats.string();
+
 #[cfg(test)]
 mod tests;

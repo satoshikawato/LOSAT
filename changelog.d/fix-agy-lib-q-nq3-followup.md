@@ -1,0 +1,1 @@
+- Narrow uncited lowercase `case` prose handling, URL `//` stripping in cited C declarations, and `GNU_QUOTE_RE` lookahead in `LOSAT/tests/check_foreign_quotes.py` (follow-up to `#1499`).

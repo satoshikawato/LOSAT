@@ -3884,8 +3884,7 @@ Scheduling (each value computed by one thread with the original function; order 
   `-subject`): megablast at 16 threads 0.757 s against 0.748 s with VmHWM +2.90 % (137,004 against 133,146 KiB; `=0`
   +0.10 %), at one thread 3.935 s against 3.916 s with max RSS +2.5 %; blastn at 16 threads 4.718 s against 4.651 s
   (VmHWM -1.6 %), so no gain for more memory. The discontiguous CSR batches are the full ones (`LOSAT_X_DCCSR`'s size
-  rule) and the probe batches chains, so the kept `qs` goes from one full batch to the next: dc-megablast at 16 threads
-  x0.957 (VmHWM +0.11 %), at 8 x0.967 (+0.28 %), at one x0.990; 5,000 of the cDNAs at 16 threads x0.965 (+0.28 %).
+  rule) and the probe batches chains, so the kept `qs` goes from one full batch to the next (numbers below).
   Every discontiguous build writes each element of `qs` that it uses before it reads one (its place pass writes each
   place `0 .. words` once), so a kept `qs` is not zeroed and the CSR is the fresh build's: every array and every report
   is what it is without the switch. Memory: no build allocates a `qs` beside the kept one; between a CSR's drop and the
@@ -3903,7 +3902,15 @@ Scheduling (each value computed by one thread with the original function; order 
   and checks the counters. A probe of line FD (commit e79ea6298, one process-wide `qs` instead of the keep's;
   workstation node 1, the cDNAs above against 3 Mb, `-subject`, outfmt 6) took 1.251 s against 1.319 s at 16 threads
   (x0.948, cycles equal) and x0.983 at one, max RSS +0.4 % and -0.06 %.
-  Evidence: EVIDENCE-TODO.
+  Evidence (2026-11-24, line FD, workstation node 1, 16 cores, memory bound to the node; dev 9be4c0c5f, its merge
+  7ed7a66d1 and the merge with `=0` in one run, rotated, medians; reports identical in every arm): dc-megablast of the
+  31,168 cDNAs against 3 Mb of the D. melanogaster genome (`-subject`, outfmt 6) at 16 threads 1.216 s against 1.285 s
+  (x0.946; VmHWM sampled every 2 ms over 8 rounds 120,170 against 119,592 KiB, +0.48 %), at 8 threads 2.085 s against
+  2.167 s (x0.962, VmHWM +0.29 %), at one thread 12.801 s against 12.978 s (x0.986); 5,000 of the cDNAs at 16 threads
+  0.246 s against 0.256 s (x0.961, VmHWM +0.58 %); MG1655 against AP027131 (no CSR batch loop) x0.993 at 16 threads
+  (VmHWM -0.37 %) and x0.987 at one; blastn and megablast of the 31,168 cDNAs (contiguous builds, dev's code) x0.997
+  and x1.007 at 16 threads, x0.995 and x0.997 at one, blastn's VmHWM -0.52 %, megablast's peak about 133 or 160 MB per
+  run in every arm. `=0` stays within the runs' range of dev in every case.
 - `LOSAT_X_BNHITGROUP=1` (BLASTN, speed, every task, `-subject` and `-db`; in the strict set from the pull request that
   added it (feature/manyq-reads): on unless it is `0`) the preliminary stage's collector (`blastn/blast_engine/run.rs`
   `PrelimHitCollector::x_add_grouped`) keeps one list per query, made at the first subject with an HSP, and visits only

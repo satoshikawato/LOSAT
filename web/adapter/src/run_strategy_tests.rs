@@ -515,10 +515,11 @@ fn a_database_search_writes_the_command_lines_strategy_file() {
         ];
         let (result, streams) = database_run(&argv, query);
         let error = result.unwrap_err();
-        assert!(
-            error.starts_with("BLAST Database error: No alias or index file found"),
-            "{name}: {error}"
+        // NCBI's error in LOSAT's words (the search path is the run's own).
+        let start = losat::web_adapter::losat_output_bytes(
+            b"BLAST Database error: No alias or index file found",
         );
+        assert!(error.as_bytes().starts_with(&start), "{name}: {error}");
         assert_eq!(frozen(name), b"");
         assert_eq!(
             files(&streams),

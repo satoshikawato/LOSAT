@@ -994,7 +994,13 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
     use crate::blastinput::ncbi_environment::{ApplicationStart, TextPlace};
     use crate::report::run_files::RunFiles;
     use std::io::Write as _;
-    let files = Files(vec![("./.ncbirc", b"\xef")]);
+    // The registry file of the working directory: `.ncbirc`, `ncbi.ini` on Windows.
+    let registry = if cfg!(windows) {
+        "./ncbi.ini"
+    } else {
+        "./.ncbirc"
+    };
+    let files = Files(vec![(registry, b"\xef")]);
     let error = "Error: (110.4) Error reading the registry after line 1: \n";
     let warning = "Warning: w\n";
     // Where the name sends the start's messages: `cerr`, a file that is the standard error, a file

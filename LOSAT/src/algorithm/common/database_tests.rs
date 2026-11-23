@@ -809,7 +809,10 @@ fn an_unreadable_header_stays_in_the_redo_stream_and_ends_the_traceback() {
     // A composition-based redo's stream keeps the list.
     let mut items = stream.to_vec();
     let reads = fetch.retain_noting(&mut items, |&ordinal| Some(ordinal), |_| ());
-    assert_eq!((items.as_slice(), reads.unreadable.len()), (stream.as_slice(), 1));
+    assert_eq!(
+        (items.as_slice(), reads.unreadable.len()),
+        (stream.as_slice(), 1)
+    );
     let refusal = FetchExcluded::refusal_at(&db, 1, "BLASTP").to_string();
     assert!(
         refusal.contains("those of sequence 1 cannot be read") && refusal.contains("string tag"),

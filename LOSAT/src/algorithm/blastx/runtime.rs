@@ -942,11 +942,13 @@ impl PreliminarySink for Runtime<'_> {
                                 .collect::<Vec<_>>(),
                         )
                     {
-                        return Err(crate::algorithm::common::database::FetchExcluded::refusal_at(
-                            excluded.db(),
-                            ordinal,
-                            "BLASTX",
-                        ));
+                        return Err(
+                            crate::algorithm::common::database::FetchExcluded::refusal_at(
+                                excluded.db(),
+                                ordinal,
+                                "BLASTX",
+                            ),
+                        );
                     }
                     fetched_utf8 = crate::algorithm::common::database::FetchedUtf8::traceback_first(
                         &fetched_reads

@@ -243,6 +243,12 @@ fn run_queries(
         CompositionMode::NoCompositionBasedStats => BlastpCompositionMode::NoCompositionBasedStats,
         _ => BlastpCompositionMode::CompositionBasedStats,
     };
+    // deltablast: the first PSSM search of the run is the one that warns of a mode that PSSM
+    // searches reset (`delta_hooks`), and a one-round run writes the PSSM files of the first query
+    // of each of NCBI's query batches only (`delta_group_firsts`).
+    let delta = args.delta.as_deref();
+    let group_firsts = delta_group_firsts(args, plan, query_records, searched_queries, query_input);
+    let first_pssm_round = if delta.is_some() { 1 } else { 2 };
     // The rounds formatted so far (`m_QueriesFormatted`: each round's `PrintOneResultSet`).
     let mut calls = 0usize;
     for (batch, &(input_start, query)) in batches.starts.iter().enumerate() {
@@ -324,6 +330,37 @@ fn run_queries(
         if let (Some(strategy), Some(requests)) = (args.strategy.as_ref(), requests) {
             requests.write(strategy, query, records, placement)?;
         }
+        // deltablast: the query's batch starts here (its prolog, which comes before the domain
+        // search's errors, and its reader's messages), then the PSSM of its conserved domains is
+        // round 1's.
+        let group_first = group_firsts.as_ref().is_none_or(|firsts| firsts.contains(&query));
+        if let Some(delta) = delta {
+            if calls == 0 {
+                write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+            }
+            outputs.diagnostics.write_all(&batches.warnings[query])?;
+            let id = crate::algorithm::psiblast::pssm::fasta_query_id(
+                record,
+                args.first_query_ordinal + ranges.x_ordinal_base + ordinal + 1,
+            );
+            let mut cdd = delta.cdd_pssm(
+                args,
+                &plan.request,
+                &super::delta_hooks::CddQuery {
+                    record,
+                    id: &id,
+                },
+                pool,
+                &mut *outputs.diagnostics,
+            )?;
+            // NCBI saves the PSSM of the first query of each batch of a one-round run only.
+            if !group_first {
+                cdd.asn = None;
+                cdd.ascii = None;
+                cdd.asn_posts.clear();
+            }
+            pssm = Some(cdd);
+        }
         while state.go() {
             let round = state.number();
             match (&pssm, input_files.as_mut()) {
@@ -352,7 +389,14 @@ fn run_queries(
             if let Some(current) = &pssm {
                 // The options' mode when this round's score block is set up: the given one in
                 // the query's first PSSM round, 1 (or 0) after it.
-                let setup_mode = if round == 2 {
+                let setup_mode = if delta.is_some() {
+                    // The options object is the run's: its first PSSM search resets the mode.
+                    if calls == 0 && round == 1 {
+                        app_mode(original_mode)
+                    } else {
+                        pssm_mode
+                    }
+                } else if round == first_pssm_round {
                     app_mode(original_mode)
                 } else {
                     pssm_mode
@@ -379,7 +423,9 @@ fn run_queries(
                 search.warning_title = args
                     .psi_search
                     .as_deref()
-                    .and_then(|psi| psi.warning_title.clone());
+                    .and_then(|psi| psi.warning_title.clone())
+                    // deltablast's warning has no query title.
+                    .or_else(|| delta.map(|_| Vec::new()));
                 // So are the letters of its Bioseq that its reports read (`PsiSearch::
                 // bioseq_letters`): NCBI's reports of every round read the query's Bioseq.
                 search.bioseq_letters = args
@@ -400,6 +446,8 @@ fn run_queries(
                 } else {
                     let query = match round_query.take() {
                         Some(before) => before.next(args),
+                        // deltablast's round 1 is the query's first search.
+                        None if delta.is_some() => RoundQuery::first(args, &records[0]),
                         None => RoundQuery::first(args, &records[0]).next(args),
                     };
                     (query, None)
@@ -429,12 +477,13 @@ fn run_queries(
             }
             let io = PsiRoundIo {
                 state: state.clone(),
-                save_last: plan.save_last,
+                save_last: plan.save_last && group_first,
                 request: plan.request.clone(),
                 query_id: args
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.query_seq_loc_id().cloned()),
+                silent: args.delta.is_some() && plan.num_iterations == 1,
                 outcome: std::sync::Mutex::new(None),
             };
             // The library's records of the round (`FormatObserver::round_begin`): the call's hit
@@ -443,7 +492,7 @@ fn run_queries(
                 observer.round_begin(query, round);
             }
             // The reader's messages of the batch come with its first round.
-            let reader_warnings: &[Vec<u8>] = if round == 1 {
+            let reader_warnings: &[Vec<u8>] = if round == 1 && delta.is_none() {
                 &batches.warnings[query..query + 1]
             } else {
                 &[]
@@ -462,7 +511,7 @@ fn run_queries(
                     reader_warnings,
                     identity_warned: 0,
                     epilog: false,
-                    x_prolog: calls == 0,
+                    x_prolog: calls == 0 && delta.is_none(),
                     // The result sets formatted before (`m_QueriesFormatted`): BLAST XML numbers
                     // each round's `Iteration` after them and writes its header with the first.
                     x_queries_before: calls,
@@ -545,7 +594,7 @@ fn run_queries(
         // round's K/A write-back (psiblast_impl.cpp:150-168): an engine PSSM's own values (the
         // same bytes), or the input PSSM's after round 1 (`InPssmRounds::written_back`), whose
         // ASCII PSSM is round 1's (`m_AncillaryData` is still the input PSSM's).
-        if plan.save_last {
+        if plan.save_last && group_first {
             match (&pssm, &plan.input, &input_files, searched_input) {
                 (Some(current), _, _, _) => write_round_pssm(args, &mut files, current, outputs)?,
                 (None, Some(input), Some((_, ascii, _)), Some((ungapped, gapped))) => {
@@ -567,6 +616,34 @@ fn run_queries(
         write_round_epilogs(args, subject_source, subject_label, outputs, calls)?;
     }
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:282-362
+/// deltablast `-num_iterations 1`: NCBI reads the queries in batches of `BATCH_SIZE` letters
+/// (10000) and searches the batch's queries one after the other, but makes the PSSM files and
+/// the last PSSM of the batch's first query only (`GetPssm(0)`, `(*results)[0]`). The searched
+/// queries that start a batch; `None` for every other run (each query is its round's first).
+fn delta_group_firsts(
+    args: &ResolvedBlastpArgs,
+    plan: &PsiRoundPlan,
+    query_records: &[FastaRecord],
+    searched_queries: &[FastaRecord],
+    query_input: &seq_range::QueryInput,
+) -> Option<Vec<usize>> {
+    if args.delta.is_none() || plan.num_iterations != 1 {
+        return None;
+    }
+    let size = crate::blastinput::app::query_batch_size(10000).ok()?;
+    let batches = crate::blastinput::query_batch::read_query_batches(
+        query_records,
+        searched_queries,
+        query_input,
+        crate::blastinput::query_batch::QueryReading::End,
+        size,
+        true,
+        None,
+    );
+    Some(batches.starts.iter().map(|&(_, query)| query).collect())
 }
 
 /// The query of one round of a psiblast query, as NCBI's search sets it up. NCBI keeps the
@@ -889,6 +966,15 @@ pub(super) fn round_outcome(
                 .collect()
         })
         .unwrap_or_default();
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:466-580
+    // deltablast's round 1 of `-subject` records is `CPsiBl2Seq`'s, whose results are one for each
+    // subject; the next PSSM is made of `(*results)[0]`, the first subject's.
+    let hsps: Vec<&crate::algorithm::blastp::hsp::BlastpHsp> =
+        if args.delta.is_some() && io.state.number() == 1 && keys.listed_ordinals.is_none() {
+            hsps.into_iter().filter(|hsp| hsp.s_idx == 0).collect()
+        } else {
+            hsps
+        };
     let has_alignments = !hsps.is_empty();
     let previous = io.state.previously_found();
     let set: InclusionSet = hsps

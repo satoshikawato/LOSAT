@@ -260,6 +260,7 @@ impl RpsblastArgs {
                 sum_stats: self.sum_stats == Some(true),
                 use_sw_tback: self.use_sw_tback,
             }),
+            delta: None,
         })
     }
 

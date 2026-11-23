@@ -402,6 +402,104 @@ pub(crate) fn query_pssm(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:632-661
+// NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:101-130 (`s_AddSeqTitleToPssm`)
+/// The files of deltablast's PSSM of the conserved domains (`CPssmEngine::Run` of a
+/// `CCddInputData`, `x_PSIMatrix2Asn1` without the ancillary data): its ASN.1 text carries the
+/// query's Bioseq with the descriptors `s_AddSeqTitleToPssm` adds when `-out_pssm` is given (the
+/// FASTA reader's `DefLine` user object, `defline` as read, then the title), the pseudocount 0 and
+/// the matrix's name; the ASCII PSSM is the one of a PSSM file (`in_pssm_files::ascii_pssm`).
+pub(crate) fn cdd_query_pssm(
+    request: &PssmRequest,
+    pssm: PsiPssm,
+    letters: &[u8],
+    query: PssmQueryRecord<'_>,
+    defline: &[u8],
+    matrix_name: &str,
+) -> Result<QueryPssm> {
+    let object = (request.asn_path.is_some() || request.ascii_path.is_some()).then(|| {
+        let mut descr = Vec::new();
+        if request.asn_path.is_some() {
+            descr.push(fasta_defline_descriptor(defline));
+            descr.push(Seqdesc::Title(query.title.to_vec()));
+        } else {
+            descr.push(Seqdesc::Title(query.title.to_vec()));
+        }
+        let entry = SeqEntry::Seq(Box::new(PssmQuery {
+            ids: vec![query.id.clone()],
+            descr: Some(descr),
+            inst: SeqInst::new(
+                ("raw", 2),
+                ("aa", 3),
+                Some(letters.len() as u32),
+                Some(SeqData::Ncbistdaa(letters.to_vec())),
+            ),
+            annot: None,
+        }));
+        msa_pssm_with_parameters(&pssm, letters.len(), Some(entry), matrix_name)
+    });
+    let (asn, asn_posts) = match (&request.asn_path, &object) {
+        (Some(_), Some(value)) => {
+            let (asn, posts) = crate::report::serial::pssm::asn_text_posting(value)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            (Some(asn), posts)
+        }
+        _ => (None, Vec::new()),
+    };
+    let ascii = match (&request.ascii_path, &object) {
+        (Some(_), Some(value)) => Some(super::in_pssm_files::ascii_pssm(value)),
+        _ => None,
+    };
+    Ok(QueryPssm {
+        object: object.map(std::sync::Arc::new),
+        asn,
+        asn_posts,
+        ascii,
+        engine: pssm,
+    })
+}
+
+/// The descriptor that `CFastaReader` adds to a Bioseq: a `user` object of the type
+/// `CFastaReader` with the field `DefLine` holding the definition line as read.
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:600
+fn fasta_defline_descriptor(defline: &[u8]) -> Seqdesc {
+    use crate::report::serial::asn_types::{member_index, members, table::named, Value};
+    let object_id_str = |text: &[u8]| {
+        Value::Choice(
+            member_index(named::OBJECT_ID, "str") as u16,
+            Box::new(Value::Str(text.to_vec())),
+        )
+    };
+    let data_type = members(named::USER_FIELD)[member_index(named::USER_FIELD, "data")].ty;
+    let field = Value::Sequence(vec![
+        (
+            member_index(named::USER_FIELD, "label") as u16,
+            object_id_str(b"DefLine"),
+        ),
+        (
+            member_index(named::USER_FIELD, "data") as u16,
+            Value::Choice(
+                member_index(data_type, "str") as u16,
+                Box::new(Value::Str(defline.to_vec())),
+            ),
+        ),
+    ]);
+    let user = Value::Sequence(vec![
+        (
+            member_index(named::USER_OBJECT, "type") as u16,
+            object_id_str(b"CFastaReader"),
+        ),
+        (
+            member_index(named::USER_OBJECT, "data") as u16,
+            Value::List(vec![field]),
+        ),
+    ]);
+    Seqdesc::Other(Value::Choice(
+        member_index(named::SEQDESC, "user") as u16,
+        Box::new(user),
+    ))
+}
+
 /// The `PssmWithParameters` of a PSSM (`x_PSIMatrix2Asn1` with its query, then
 /// `PsiBlastAddAncillaryPssmData`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:632-661

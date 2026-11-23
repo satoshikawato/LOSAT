@@ -46,14 +46,25 @@ pub enum BlastpApp {
     Blastp,
     Psiblast,
     Rpsblast,
+    /// deltablast (`algorithm/deltablast`): psiblast's rounds (`is_psi`) whose round 1 searches
+    /// the PSSM of the conserved domains that an RPS search of the query found.
+    Deltablast,
 }
 
 impl BlastpApp {
+    /// Whether the app runs psiblast's rounds and PSSM searches: psiblast and deltablast.
+    pub fn is_psi(self) -> bool {
+        matches!(self, BlastpApp::Psiblast | BlastpApp::Deltablast)
+    }
+
     /// The program's name in NCBI's messages (`Warning: [psiblast] ...`) and reports
     /// (`# PSIBLAST 2.17.0+` in upper case): its application's name
     /// (`options::RequestKind::application`, the one table of the names).
     pub fn ncbi_name(self) -> &'static str {
-        self.request_kind().application()
+        match self {
+            BlastpApp::Deltablast => "deltablast",
+            _ => self.request_kind().application(),
+        }
     }
 
     /// The program type of the app's Seq-aligns where BLASTP does not name it
@@ -62,7 +73,7 @@ impl BlastpApp {
         use crate::report::record::ProgramType;
         match self {
             BlastpApp::Blastp => None,
-            BlastpApp::Psiblast => Some(ProgramType::PsiBlast),
+            BlastpApp::Psiblast | BlastpApp::Deltablast => Some(ProgramType::PsiBlast),
             BlastpApp::Rpsblast => Some(ProgramType::RpsBlast),
         }
     }
@@ -72,7 +83,7 @@ impl BlastpApp {
         use crate::report::archive::options::RequestKind;
         match self {
             BlastpApp::Blastp => RequestKind::Blastp,
-            BlastpApp::Psiblast => RequestKind::Psiblast,
+            BlastpApp::Psiblast | BlastpApp::Deltablast => RequestKind::Psiblast,
             BlastpApp::Rpsblast => RequestKind::Rpsblast,
         }
     }
@@ -81,7 +92,10 @@ impl BlastpApp {
     /// that the formatter then cuts (`PruneSeqalign`): psiblast's larger lists, and rpsblast's
     /// merged volumes. `# N hits found` of outfmt 7 counts before the cut.
     pub fn prunes_after_traceback(self) -> bool {
-        matches!(self, BlastpApp::Psiblast | BlastpApp::Rpsblast)
+        matches!(
+            self,
+            BlastpApp::Psiblast | BlastpApp::Rpsblast | BlastpApp::Deltablast
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
@@ -98,7 +112,7 @@ impl BlastpApp {
         match (self, outfmt) {
             _ if !self.prunes_after_traceback() => ListCut::Uncut,
             (_, ARCHIVE_FORMAT) => ListCut::Uncut,
-            (BlastpApp::Psiblast, XML) => ListCut::BeforePssm,
+            (BlastpApp::Psiblast | BlastpApp::Deltablast, XML) => ListCut::BeforePssm,
             _ => ListCut::AfterPssm,
         }
     }
@@ -109,6 +123,7 @@ impl BlastpApp {
             BlastpApp::Blastp => "BLASTP",
             BlastpApp::Psiblast => "PSIBLAST",
             BlastpApp::Rpsblast => "RPSBLAST",
+            BlastpApp::Deltablast => "DELTABLAST",
         }
     }
 }
@@ -460,6 +475,9 @@ pub struct BlastpArgs {
     /// blastp and psiblast.
     #[arg(skip)]
     pub rps: Option<crate::algorithm::rps_search::engine::RpsSearch>,
+    /// deltablast's options besides psiblast's (`algorithm::deltablast`); `None` for the others.
+    #[arg(skip)]
+    pub delta: Option<crate::algorithm::deltablast::DeltaOptions>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-402
@@ -671,6 +689,9 @@ pub struct ResolvedBlastpArgs {
     /// psiblast `-num_iterations` other than 1 for FASTA queries: the rounds that the round
     /// driver runs (`algorithm::psiblast::rounds`), with the PSSM files it writes.
     pub psi_rounds: Option<std::sync::Arc<crate::algorithm::psiblast::rounds::PsiRoundPlan>>,
+    /// deltablast: its options (`BlastpArgs::delta`) and, once the command line has opened them,
+    /// the domain database and its files (`blast_engine::delta_hooks`); `None` for the others.
+    pub(crate) delta: Option<std::sync::Arc<super::blast_engine::DeltaRun>>,
     /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
     traceback_hitlist: usize,
     /// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search whose custom tabular
@@ -728,7 +749,7 @@ impl ResolvedBlastpArgs {
             // RPS-BLAST's traceback keeps `hitlist_size` lists per volume (`s_RPSComputeTraceback`,
             // `Blast_HSPResultsInsertHSPList` of `hsp_list` into `results` with `hitlist_size`).
             BlastpApp::Blastp | BlastpApp::Rpsblast => self.max_target_seqs,
-            BlastpApp::Psiblast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+            BlastpApp::Psiblast | BlastpApp::Deltablast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
                 self.max_target_seqs,
                 self.comp_based_stats.is_enabled(),
                 true,
@@ -743,7 +764,7 @@ impl ResolvedBlastpArgs {
     pub fn query_batch_size(&self) -> Result<u32> {
         match self.app {
             BlastpApp::Blastp => crate::blastinput::app::query_batch_size(10000),
-            BlastpApp::Psiblast => Ok(1),
+            BlastpApp::Psiblast | BlastpApp::Deltablast => Ok(1),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:141-144
             // (`eRPSBlast` takes the default of `GetQueryBatchSize`, 10000, or `BATCH_SIZE`.)
             BlastpApp::Rpsblast => crate::blastinput::app::query_batch_size(10000),
@@ -969,7 +990,7 @@ impl BlastpArgs {
                 // holds (the `CPsiBlast` constructor keeps the application's reference to it): after the
                 // constructor's scores, with the round's K/A written back
                 // (`blastp::archive::PsiArchive`).
-                if self.app == BlastpApp::Psiblast && self.archive.is_some() && file.valid {
+                if self.app.is_psi() && self.archive.is_some() && file.valid {
                     search.archive_pssm = Some(std::sync::Arc::new(file.object.clone()));
                     search.archive_matrix_name_unwritable = file.matrix_name_unwritable();
                 }
@@ -1019,7 +1040,7 @@ impl BlastpArgs {
                 == BlastpLookupTableType::CompressedAaLookupTable,
             hitlist_size: counts.hitlist_size,
             evalue: options.evalue,
-            psiblast: self.app == BlastpApp::Psiblast,
+            psiblast: self.app.is_psi(),
             psi_tblastn: false,
             // blastp's and psiblast's `-xdrop_ungap`, or rpsblast's (`RpsSearch`).
             x_dropoff: self
@@ -1121,7 +1142,7 @@ impl BlastpArgs {
             // (rpsblast_app.cpp:187 sets the line length only, as psiblast_app.cpp does.)
             sort: match self.app {
                 BlastpApp::Blastp => self.formatting.report_sort(),
-                BlastpApp::Psiblast | BlastpApp::Rpsblast => Default::default(),
+                BlastpApp::Psiblast | BlastpApp::Deltablast | BlastpApp::Rpsblast => Default::default(),
             },
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-318
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
@@ -1186,6 +1207,9 @@ impl BlastpArgs {
             psi_search,
             rps_search: self.rps.clone().map(std::sync::Arc::new),
             psi_rounds,
+            delta: self.delta.clone().map(|options| {
+                std::sync::Arc::new(super::blast_engine::DeltaRun::new(options, self.lcase_masking))
+            }),
             app: self.app,
             inclusion_ethresh: self
                 .inclusion_ethresh

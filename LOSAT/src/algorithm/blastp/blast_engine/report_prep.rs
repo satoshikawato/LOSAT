@@ -1134,7 +1134,6 @@ use super::{
     recount_shown_identities, write_pairwise_prologs, write_request_posts, BlastpSubjectSource,
     ShownLetters, ShownQueries, ShownSubjects,
 };
-use crate::algorithm::blastp::args::BlastpApp;
 use crate::algorithm::blastp::encoding::EncodedProtein;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::report::{OutputFormat, ReportContext};
@@ -1264,7 +1263,7 @@ pub(super) fn refuse_prefetch_environment(
     // its reports (`app::check_prefetch_environment`; the first call of a run that writes reports
     // meets it: not a chunk's search, which returned earlier in `run_call`). psiblast's iterations fetch ahead
     // before they choose the archive, rpsblast's and blastp's write the archive without it.
-    let archive_alone = outputs.only_archive() && args.app != BlastpApp::Psiblast;
+    let archive_alone = outputs.only_archive() && !args.app.is_psi();
     if let Err(error) = crate::blastinput::app::check_prefetch_environment(archive_alone) {
         // NCBI wrote the first batch's search strategy request before its search (`CallRequests`).
         if let Some(call) = reports.call_requests {

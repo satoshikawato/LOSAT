@@ -392,6 +392,17 @@ fn run_main_entry() -> Result<()> {
                 return Err(error);
             }
         }
+        // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:586-588
+        Commands::Deltablast(args) => {
+            // deltablast is an NCBI application as psiblast: its application layer reads its
+            // environment and registry files (`deltablast.ini`, then `.ncbirc`) before its own
+            // code runs; LOSAT rejects the settings that change the output.
+            let settings = start.settings().map_err(anyhow::Error::msg)?;
+            if let Err(error) = crate::algorithm::deltablast::run(args, settings) {
+                crate::cli::exit_on_native_error(&error);
+                return Err(error);
+            }
+        }
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:324-328
         Commands::Rpsblast(args) => {
             // rpsblast is an NCBI application as blastp: its application layer reads its

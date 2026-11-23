@@ -302,7 +302,7 @@ impl InPssmRounds {
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:792-804
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:117-134
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:186-196
-fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
+pub(crate) fn ascii_pssm(object: &PssmWithParameters) -> Vec<u8> {
     let pssm = &object.pssm;
     let rows_n = usize::try_from(pssm.num_rows).unwrap_or(0);
     let columns = usize::try_from(pssm.num_columns).unwrap_or(0);

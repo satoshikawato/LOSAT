@@ -17,7 +17,7 @@ use crate::utils::mapped_file::MappedFile;
 
 mod cd_data;
 
-pub(crate) use cd_data::{CdColumns, CdProfileFiles};
+pub(crate) use cd_data::CdProfileFiles;
 
 /// `RPS_MAGIC_NUM`: the files of a 26-letter alphabet.
 ///

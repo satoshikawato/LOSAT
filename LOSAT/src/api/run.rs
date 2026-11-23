@@ -482,7 +482,7 @@ fn query_loc(command: &Commands) -> Option<&str> {
         Commands::Psiblast(a) => a.query_loc.as_deref(),
         Commands::Rpsblast(a) => a.query_loc.as_deref(),
         Commands::Rpstblastn(a) => a.query_loc.as_deref(),
-        Commands::Makedb(_) | Commands::Rpsbproc(_) => None,
+        Commands::Deltablast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => None,
     }
 }
 
@@ -507,7 +507,7 @@ fn num_threads(command: &Commands) -> usize {
         Commands::Psiblast(a) => a.num_threads,
         Commands::Rpsblast(a) => usize::try_from(a.num_threads.max(1)).unwrap_or(1),
         Commands::Rpstblastn(a) => usize::try_from(a.num_threads.max(1)).unwrap_or(1),
-        Commands::Makedb(_) | Commands::Rpsbproc(_) => 1,
+        Commands::Deltablast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => 1,
     }
 }
 
@@ -528,7 +528,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
         Commands::Psiblast(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         Commands::Rpsblast(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         Commands::Rpstblastn(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
-        Commands::Makedb(_) | Commands::Rpsbproc(_) => [None; 3],
+        Commands::Deltablast(_) | Commands::Makedb(_) | Commands::Rpsbproc(_) => [None; 3],
     }
 }
 
@@ -738,6 +738,7 @@ fn run_local_entry(
                 run_local_database_blastp(args, query, end, settings, outputs)
             }
             Commands::Rpsblast(_)
+            | Commands::Deltablast(_)
             | Commands::Rpstblastn(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => {
@@ -818,6 +819,7 @@ fn run_local_entry(
             run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
+        | Commands::Deltablast(_)
         | Commands::Rpstblastn(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {

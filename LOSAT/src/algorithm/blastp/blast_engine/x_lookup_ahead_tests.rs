@@ -671,6 +671,7 @@ fn test_args_of(task: &str, matrix: Option<&str>) -> ResolvedBlastpArgs {
         psiblast_pssm: None,
         formatting: Default::default(),
         rps: None,
+        delta: None,
     }
     .resolve()
     .expect("resolved arguments")

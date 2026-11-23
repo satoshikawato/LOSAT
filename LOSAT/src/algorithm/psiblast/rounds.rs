@@ -258,6 +258,10 @@ pub(crate) struct PsiRoundIo {
     /// The Seq-id of the next PSSM's query: the PSSM query's of `-in_pssm`, `None` for a FASTA
     /// query (`Query_<n>`).
     pub(crate) query_id: Option<crate::seqid::ParsedSeqId>,
+    /// deltablast `-num_iterations 1`: the round writes the report of a search without rounds
+    /// (no "Results from round" line, no `# Iteration:` line), whose PSSM files and next PSSM
+    /// the round driver still makes.
+    pub(crate) silent: bool,
     pub(crate) outcome: std::sync::Mutex<Option<RoundOutcome>>,
 }
 

@@ -416,6 +416,7 @@ impl PsiblastArgs {
             // (`BlastpArgs::check_options`) and sort nothing (`ResolvedBlastpArgs::sort`).
             formatting: self.formatting,
             rps: None,
+            delta: None,
         })
     }
 

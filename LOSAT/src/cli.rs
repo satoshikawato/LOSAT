@@ -8,7 +8,9 @@ use std::{ffi::OsString, fmt};
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
-use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx};
+use crate::algorithm::{
+    blastn, blastp, blastx, deltablast, psiblast, rpsblast, rpstblastn, tblastn, tblastx,
+};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 // LOSAT retains its program subcommand; search parameter names are NCBI names.
@@ -379,6 +381,10 @@ programs! {
         /// Position-Specific Iterated BLAST (psiblast)
         #[command(help_template = NCBI_HELP_TEMPLATE)]
         Psiblast(psiblast::PsiblastArgs),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/deltablast_args.cpp:44-52
+        /// Domain Enhanced Lookup Time Accelerated BLAST (deltablast)
+        #[command(help_template = NCBI_HELP_TEMPLATE)]
+        Deltablast(deltablast::DeltablastArgs),
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
         /// Reverse Position Specific BLAST (rpsblast)
         #[command(help_template = NCBI_HELP_TEMPLATE)]

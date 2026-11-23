@@ -68,6 +68,11 @@ static PSIBLAST: Tool = tool!(
     "PSIBLAST",
     include_str!("../algorithm/psiblast/help.txt")
 );
+static DELTABLAST: Tool = tool!(
+    "deltablast",
+    "DELTABLAST",
+    include_str!("../algorithm/deltablast/help.txt")
+);
 static RPSBLAST: Tool = tool!(
     "rpsblast",
     "RPSBLAST",
@@ -105,13 +110,14 @@ static RPSBPROC: Tool = Tool {
 };
 
 /// The programs on this reader, in the order of `Commands`' variants.
-static TOOLS: [&Tool; 10] = [
+static TOOLS: [&Tool; 11] = [
     &BLASTX,
     &BLASTN,
     &BLASTP,
     &TBLASTX,
     &TBLASTN,
     &PSIBLAST,
+    &DELTABLAST,
     &RPSBLAST,
     &RPSTBLASTN,
     &MAKEBLASTDB,

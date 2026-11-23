@@ -98,6 +98,9 @@ mod pssm_hooks;
 // rpsblast (series PR, item PS11a): the RPS engine's search, reached through the `rps_search`
 // hooks of `search_cli`, `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod rps_hooks;
+// deltablast's domain search and conserved-domain PSSM (series PR, item PS13a).
+mod delta_hooks;
+pub(crate) use delta_hooks::DeltaRun;
 // psiblast's rounds of FASTA queries (series PS, item PS5a): the round driver, reached from
 // `search`, and the round's outcome hook of `run_call`.
 mod psi_round;
@@ -2197,7 +2200,7 @@ fn blastp_pairwise_view_of(
     crate::blastinput::app::ReportFormat::from_number(number)
         .and_then(crate::report::pairwise::PairwiseView::of)
         .filter(|view| {
-            *view == crate::report::pairwise::PairwiseView::Pairwise || app != BlastpApp::Psiblast
+            *view == crate::report::pairwise::PairwiseView::Pairwise || !app.is_psi()
         })
 }
 
@@ -4779,6 +4782,10 @@ fn search_cli(
     // query batch is refused then, and a run without a batch reads no file.
     args.matrix_search = Some(settings.matrix_search.clone());
     let mut resolved = args.check_options(outputs.diagnostics)?;
+    // deltablast opens its domain database where its first domain search needs it.
+    if let Some(delta) = resolved.delta.as_deref() {
+        delta.set_settings(settings.clone());
+    }
     // rpsblast: NCBI's check of the database's frequency ratios comes between the options and
     // the database (`rps_hooks::check_freq_ratio_file`).
     if resolved.rps_search.is_some() {
@@ -4792,7 +4799,7 @@ fn search_cli(
         }
     }
     // psiblast sets its subjects up here, before the query (`psiblast_check_subject_letters`).
-    if resolved.app == BlastpApp::Psiblast && database.is_none() {
+    if resolved.app.is_psi() && database.is_none() {
         psiblast_check_subject_letters(&subjects.records)?;
     }
     // psiblast `-in_pssm`: the query is the PSSM's (read with the options, `check_options`);
@@ -4836,7 +4843,17 @@ fn search_cli(
     let mut query_source = FastaInputSource::from_file(
         query_file,
         ReaderConfig::query(args.app.name(), true, settings.data_loaders)
-            .with_defline(args.archive.is_some() || args.strategy.is_some())
+            .with_defline(
+                args.archive.is_some()
+                    || args.strategy.is_some()
+                    // deltablast's `-out_pssm` holds the query's definition line as read
+                    // (`cdd_query_pssm`).
+                    || (args.delta.is_some()
+                        && args
+                            .psiblast_pssm
+                            .as_ref()
+                            .is_some_and(|pssm| pssm.out_pssm.is_some())),
+            )
             .with_parse_deflines(args.parse_deflines),
     );
     query_source.set_id_scope(args.id_scope.clone());
@@ -5217,7 +5234,7 @@ fn run_local_formats(
     let xinclude = xinclude_format(&args, outputs)?;
     let scope = pssm_check_scope(&args);
     let args = resolved;
-    if args.app == BlastpApp::Psiblast {
+    if args.app.is_psi() {
         psiblast_check_subject_letters(&subjects.records)?;
     }
     // psiblast `-in_pssm` (the library API's `Inputs::pssm`): the query is the PSSM's, whose ids
@@ -6003,7 +6020,7 @@ fn blastp_xml_matrix_failure(
         outputs.formats.iter().map(|format| format.outfmt),
         &args.matrix_name,
         !database,
-        args.app == BlastpApp::Psiblast,
+        args.app.is_psi(),
     )
 }
 
@@ -6173,7 +6190,7 @@ fn search(
                 query_scopes,
             )
         }
-        BlastpApp::Psiblast => psiblast_stop_at_invalid_query(
+        BlastpApp::Psiblast | BlastpApp::Deltablast => psiblast_stop_at_invalid_query(
             &args,
             &searched_queries,
             database,
@@ -7610,7 +7627,7 @@ fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> Strin
 fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> String {
     match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:182-184
-        BlastpApp::Psiblast | BlastpApp::Rpsblast => String::new(),
+        BlastpApp::Psiblast | BlastpApp::Deltablast | BlastpApp::Rpsblast => String::new(),
         BlastpApp::Blastp if subject_label.is_empty() => args.subject.display().to_string(),
         BlastpApp::Blastp => subject_label.to_string(),
     }
@@ -9278,6 +9295,9 @@ fn x_lookup_after_prelim(
 /// query.
 enum PrelimOnly<'a> {
     Chunk(&'a mut Vec<Option<BlastpHitList>>),
+    /// deltablast's domain search (`delta_hooks`): the RPS engine's whole search is its
+    /// preliminary stage, so the lists it hands over are the search's final ones.
+    Domain(&'a mut Vec<Option<BlastpHitList>>),
     /// The block's lists, and what the call of all queries made once for all its blocks: its
     /// subjects, encoded, with `-lcase_masking` their scan ranges (`x_soft_subject`), and the
     /// block's query frames (SEG made once); `first_query`: the index among the call's queries of
@@ -9305,6 +9325,7 @@ impl PrelimOnly<'_> {
         mut x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>>,
     ) {
         match self {
+            PrelimOnly::Domain(domain_lists) => *domain_lists = preliminary_hit_lists,
             PrelimOnly::Chunk(chunk_lists) => {
                 // A chunk's lists leave as `BlastpHitList`s of full HSPs, so the chunk merge
                 // (`query_split.rs`) reads what it reads from a search without chunks.

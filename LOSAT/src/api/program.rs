@@ -97,6 +97,10 @@ impl Program {
             "rpstblastn" => Err(Error::Argv(
                 "rpstblastn is not available through the library API".into(),
             )),
+            // deltablast (series PR, item PS13a) likewise.
+            "deltablast" => Err(Error::Argv(
+                "deltablast is not available through the library API".into(),
+            )),
             other => Err(Error::Argv(format!("unknown program '{other}'").into())),
         }
     }

@@ -1558,8 +1558,8 @@ pub(crate) fn test_near_identical_on_copy(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1258-1312
-/// The statements of `s_TestNearIdentical` on the query letters `query` (NCBI's `queryData->data`,
-/// from its first letter); `find_identical` is its call of `s_FindNumIdentical` (the query words'
+/// The statements of `s_TestNearIdentical` on the query letters `query` (NCBI's query data
+/// pointer, from its first letter); `find_identical` is its call of `s_FindNumIdentical` (the query words'
 /// start, the query's middle part, the subject's middle slice).
 fn near_identical_by<Q: WalkLetters>(
     seq_data: &BlastCompoSequenceData,
@@ -1738,7 +1738,7 @@ impl<'a> NearIdenticalCopy<'a> {
         }
     }
 
-    /// The table from word `start` (NCBI's `query_words + start`).
+    /// The word table from the start `start` (NCBI's table of query words from that word).
     fn words_from(self, start: usize) -> CopyWords<'a> {
         CopyWords {
             words: self

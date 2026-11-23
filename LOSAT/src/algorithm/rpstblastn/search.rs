@@ -575,8 +575,12 @@ impl TranslatedRpsSearch {
                 options: &self.search,
                 program: PROGRAM,
             };
-            let traced =
-                run.search_volume(&files, &ProfileLetters::new(setup, volume), pool, workers);
+            let traced = run.search_volume(
+                &files,
+                &ProfileLetters::new(setup, volume, volumes.starts[index]),
+                pool,
+                workers,
+            );
             drop(run);
             drop(masks);
             let traced = match traced {

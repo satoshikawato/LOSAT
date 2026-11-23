@@ -3147,7 +3147,7 @@ file would differ, and NCBI's programs still could not open the database).
   query and `L_pin` as the profile's length. LOSAT searches such a profile as NCBI does, with `L_pin`
   in the traceback (the rows from the profile's offset, the composition, the words, the redo's
   matrix and query, the e-value length; fixture rows `db.rps.odd.*` and `db.rpstbn.odd.*`), and
-  refuses the query batch (exit 1, "a hit on profile N of an RPS-BLAST volume, whose consensus has
+  refuses the query batch (exit 1, "a hit of the profile of OID N, whose consensus has
   L_pin letters in .psq for L_rps columns of scores in .rps (makeprofiledb writes it for a scored
   profile whose seq-data is nucleotide-coded or has more or fewer letters than its length), where
   NCBI BLAST+ 2.17.0's traceback READ, is not supported by LOSAT's RPSBLAST", one text for both
@@ -3160,7 +3160,8 @@ file would differ, and NCBI's programs still could not open the database).
     offset plus `L_pin` above `R + 1`, or a column of row `R` past the file's last page that NCBI
     reads (the rescale and the `.freq` rows read all of its columns; RPSTBLASTN without
     composition-based statistics reads the mapped row `R` one letter at a time, so only a letter its
-    alignment reads there counts) (probe A_P23x3L_q3, SIGSEGV; row `db.rps.rej.odd.p23x3l.q3`).
+    alignment reads there counts) (probes A_P23x3L_q3, A_P23x3L_q3_c0 and A_P23x3L_nq3, SIGSEGV;
+    rows `db.rps.rej.odd.p23x3l.q3`, `.p23x3l.q3c0`, `db.rpstbn.rej.odd.p23x3l.nq3`).
     READ is "reads past its rows".
   - B, the composition with composition-based statistics (`Blast_ReadAaComposition`,
     `composition_adjustment.c:1162-1199`): a letter of 28 or more, such as the packed bytes of a
@@ -3174,20 +3175,31 @@ file would differ, and NCBI's programs still could not open the database).
     `db.rpstbn.rej.odd.p10.nq1`). READ is "reads past its copy of the consensus".
   - D, an alignment that starts at or past `L_pin` in NCBI's heap matrix of `L_pin` rows: the redo's
     (`s_RedoOneAlignment`, `blast_kappa.c:1924-1946`), and RPSBLAST's rescaled matrix without
-    composition-based statistics, whose rows the start of an HSP with both starts 0 also reads
-    (T_AA1_q1_c0, H_HL_q12_m6c0: SIGSEGV; rows `db.rps.rej.odd.aa1.q1c0`, `.hl.q12.m6c0`). READ is
-    "starts an alignment past the consensus".
+    composition-based statistics (T_AA1_q1_c0, H_HL_q12_m6c0: SIGSEGV; rows
+    `db.rps.rej.odd.aa1.q1c0`, `.hl.q12.m6c0`). READ is "starts an alignment past the consensus".
   - E, the identities and positives of an alignment traced without composition-based statistics
     (`blast_traceback.c:589`, `blast_hits.c:796-812`): a profile letter of 28 or more in a
-    substituted column reads past the 28 rows of the score matrix (N_SC_nq2_c0, SIGSEGV; row
-    `db.rpstbn.rej.odd.sc.nq2c0`). READ is "reads letter B past its score matrix".
+    substituted column reads past the 28 rows of the score matrix (E_NA1_qi11_c0 and
+    E_NA1_nqi11_c0 of the line's `PR/ps10e/probe2`: c1 nucleotide-coded, 6 letters 143 18 159 6 210
+    210 for 22 columns, and c1's first 11 letters or their back-translation; the alignment starts at
+    column 5, below `L_pin`; SIGSEGV natively and under valgrind, invalid read in
+    `s_Blast_HSPGetNumIdentitiesAndPositives`; rows `db.rps.rej.odd.na1.qi11c0`,
+    `db.rpstbn.rej.odd.na1.nqi11c0`). Until those rows no fixture row reached E: in N_SC_nq2_c0
+    NCBI's run ends at E after a start past `L_pin`, where LOSAT refuses first (the rule-2 item
+    below), and with 12 letters or more the start is column 6, read D (E_NA1_qi12_c0 to
+    E_NA1_qi14_c0). READ is "reads letter B past its score matrix".
 
   A profile whose `L_pin` is `L_rps` never meets them, and a hit that NCBI's preliminary e-value or
   hit list leaves out of the traceback meets none (rows `db.rps.odd.sc.q2.e14`,
   `db.rps.odd.hl.q12.m5c0`). The refusal at the volume's open that compared each profile's rows with
-  its `.pin` length (from series PR item PS11b) is narrowed to offsets that do not ascend, a profile
-  without its sentinel row ("a profile database whose .rps profile N has M rows (not even its
-  sentinel row) is not supported"). The preliminary tree's refusal of a concatenated length below the
+  its `.pin` length (from series PR item PS11b) is narrowed to its part that only a hand-edited
+  `.rps` meets, offsets that do not ascend (a profile without its sentinel row, which makeprofiledb
+  writes for every profile: "a profile database whose .rps profile N has no rows, not even its
+  sentinel row (its offsets A and B do not ascend) is not supported"); LOSAT refused such a file
+  before too. NCBI crashes on one when a query hits its profiles (N2_SB0eq_qcdd, N2_SB0desc_qcdd and
+  their `-comp_based_stats 0` twins of `PR/ps10e/probe2`: SB0 with profile 1's second offset equal
+  to its first or 3 below it, SIGSEGV natively and under valgrind, invalid reads in
+  `s_ExtendRight` and `ALIGN_EX`). The preliminary tree's refusal of a concatenated length below the
   rows (line RG item D1a-4) names this further cause: profiles whose `.pin` lengths are below their
   `.rps` rows (N_AA1s_nqt2_c0, NCBI exit 4; row `db.rpstbn.rej.odd.aa1s.nqt2c0`).
 
@@ -3695,10 +3707,20 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   disagree (probes N_AA1_nq1_c0: profile columns 1 to 10 of a 6-letter profile; N_AA1_nqt2_c0: a bit
   score of 0.0 with an e-value of 3.38e-11, columns 26 to 31 of a 22-column profile; N_P6d_nq1_c0:
   the archive's `num_ident` 9 where the tabular formats count 6). LOSAT refuses it for now with the
-  text of read D of that entry, "starts an alignment past the consensus" (row
-  `db.rpstbn.rej.odd.aa1.nq1c0`), as its own arm (`ProfileRead::StartInMapping` of
-  `LOSAT/src/algorithm/rps_search/profile.rs`), the one place to change if the maintainer decides to
-  reproduce NCBI's bytes.
+  text of read D of that entry, "starts an alignment past the consensus" (rows
+  `db.rpstbn.rej.odd.aa1.nq1c0` and `db.rpstbn.rej.odd.sc.nq2c0`; in the second NCBI's run goes on
+  to read E of that entry and ends with SIGSEGV, probe N_SC_nq2_c0), as its own arm
+  (`ProfileRead::StartInMapping` of `LOSAT/src/algorithm/rps_search/profile.rs`). The other option,
+  to print NCBI's bytes, changes besides that arm: the profile's letters (NCBI's traceback reads the
+  mapped `.psq` bytes after its `L_pin` letters: the profile's trailing 0, the next profile's
+  letters, past the file's end the zeros of its last page; LOSAT holds the `L_pin` letters); the
+  traceback's identities and positives on those bytes (`final_hsp` of
+  `LOSAT/src/algorithm/pssm_search/traceback0.rs` and the test of read E); the reports' identities
+  on them (`formatter_identities` of `LOSAT/src/algorithm/rps_search/traceback.rs`); and the
+  archive's count of the traceback beside the formatter's recount, which differ there (9 and 6 in
+  N_P6d_nq1_c0). A run such as N_SC_nq2_c0, whose alignment then reads a letter of 28 or more,
+  stays refused, at read E. LOSAT's gapped traceback already skips the extension to the right as
+  NCBI's does.
 
 ## Ported (rule 4)
 

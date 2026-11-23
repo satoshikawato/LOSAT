@@ -702,7 +702,7 @@ fn units_of_contexts_give_the_results_of_the_search_in_order() {
         options: &options,
         program: "RPSTBLASTN",
     };
-    let consensus = ProfileLetters::new(&setup, volume);
+    let consensus = ProfileLetters::new(&setup, volume, 0);
     let shown = |results: RpsVolumeResults| -> Vec<String> {
         assert!(results.late.is_none());
         results
@@ -808,7 +808,7 @@ fn a_batchs_cutoff_refusal_comes_before_its_search_errors() {
         let Ok(files) = setup.reopen(volume, false).unwrap() else {
             panic!("rps_mini opens");
         };
-        let consensus = ProfileLetters::new(&setup, volume);
+        let consensus = ProfileLetters::new(&setup, volume, 0);
         let results = run(lambda)
             .search_volume(
                 &files,

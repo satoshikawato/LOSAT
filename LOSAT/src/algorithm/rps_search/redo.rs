@@ -22,7 +22,7 @@
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
-use super::profile::{ProfileRead, TracebackProfile};
+use super::profile::ProfileRead;
 use super::traceback::{sort_by_score, swap_roles, RpsTraceScratch, RpsTraceback, RpsTraced};
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
@@ -147,8 +147,7 @@ impl RpsTraceback<'_> {
             // The profile as NCBI's traceback reads it (`TracebackProfile`): `L_pin` (its `.pin`
             // length) the redo's query length, its `.psq` letters the redo's query, `L_pin`
             // frequency-ratio rows from its offset (read A), then its composition (read B).
-            let profile =
-                TracebackProfile::new(list.oid, self.offsets, self.letters.of(list.oid)?, program);
+            let profile = self.letters.profile(list.oid, self.offsets, program)?;
             let length = profile.length();
             let consensus = profile.letters();
             profile.freq_rows(redo.files, &mut scratch.freq_bytes, &mut scratch.ratios)?;

@@ -551,7 +551,12 @@ pub(super) fn rps_search(
         let live = failed.as_ref().map_or(spans.len(), |(batch, _)| *batch);
         let mut traced = Vec::new();
         for (number, batch) in engine
-            .search_volume(&files, &ProfileLetters::new(&setup, volume), pool, &workers)?
+            .search_volume(
+                &files,
+                &ProfileLetters::new(&setup, volume, starts[index]),
+                pool,
+                &workers,
+            )?
             .batches(&spans)
             .into_iter()
             .take(live)

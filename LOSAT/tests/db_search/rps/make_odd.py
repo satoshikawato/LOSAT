@@ -10,6 +10,7 @@ a scored profile and checks only Seq-inst.length against the columns) and one li
 lines name in/<profile>.smp (build.sh runs makeprofiledb -in in/l_<set>.lst -out rps_odd_<set> in OUT_DIR).
 
   c2_na    c2 with `seq-data iupacna` of 18 bases (its .psq bytes nucleotide-packed: L_pin 5, letters >= 28)
+  c1_na    c1 with `seq-data iupacna` of 22 bases (.psq 143 18 159 6 210 210: L_pin 6, four letters >= 28)
   c1_k<n>  c1 under the id tag 91000 + n (n = 1..10): copies of c1 that score as c1
   c1_A     c1 with `seq-data iupacna` of 22 A (.psq 00 00 00 00 00 02: L_pin 6, every letter below 28)
   c1p<n>   c1 (22 columns) with its first n ncbieaa letters (n = 6, 10, 16, 21), or with W, WW after them (23, 24)
@@ -35,6 +36,7 @@ SETS = {
     'p23l': ['c1', 'c2', 'c3p21'],
     'p24l': ['c1', 'c2', 'c3p22'],
     'p23x3l': ['c1', 'c2', 'c3p23'],
+    'na1': ['c1_na', 'c2', 'c3'],
 }
 
 
@@ -57,6 +59,7 @@ def main() -> None:
 
     variant('c2_na', 'c2', 'iupacna', 'GATTACAGGCTTAACGTC')
     variant('c1_A', 'c1', 'iupacna', 'A' * 22)
+    variant('c1_na', 'c1', 'iupacna', 'GATTACAGGCTTAACGTCAGTC')
     for n in (6, 10, 16, 21):
         variant('c1p%d' % n, 'c1', 'ncbieaa', C1[:n])
     variant('c1p23', 'c1', 'ncbieaa', C1 + 'W')

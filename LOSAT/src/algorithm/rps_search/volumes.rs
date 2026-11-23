@@ -811,23 +811,52 @@ fn formatter_kept(
 pub(crate) struct ProfileLetters<'a> {
     setup: &'a RpsVolumeSetup,
     volume: &'a Volume,
-    block: std::sync::OnceLock<crate::seqdb::SequenceBlock>,
+    /// The volume's first OID in the database.
+    first_oid: u32,
+    /// The volume's letters, and whether one of them is 28 or more (`profile::has_wide`).
+    block: std::sync::OnceLock<(crate::seqdb::SequenceBlock, bool)>,
 }
 
 impl<'a> ProfileLetters<'a> {
-    pub(crate) fn new(setup: &'a RpsVolumeSetup, volume: &'a Volume) -> Self {
+    /// The letters of `volume`, whose first OID in the database is `first_oid`.
+    pub(crate) fn new(setup: &'a RpsVolumeSetup, volume: &'a Volume, first_oid: u32) -> Self {
         Self {
             setup,
             volume,
+            first_oid,
             block: std::sync::OnceLock::new(),
         }
     }
 
-    /// The letters of the profile `oid` of the volume; the volume's are read once (threads that
-    /// ask together may each read them; one copy stays).
+    /// The profile `oid` of the volume, whose offsets are `offsets`, as NCBI's traceback reads it
+    /// (`TracebackProfile`).
+    pub(crate) fn profile(
+        &self,
+        oid: u32,
+        offsets: &[i32],
+        program: &'static str,
+    ) -> Result<super::profile::TracebackProfile<'_>> {
+        let (block, wide) = self.block()?;
+        Ok(super::profile::TracebackProfile::new(
+            oid,
+            self.first_oid,
+            offsets,
+            block.protein(oid as usize),
+            *wide,
+            program,
+        ))
+    }
+
+    /// The letters of the profile `oid` of the volume.
     pub(crate) fn of(&self, oid: u32) -> Result<&[u8]> {
+        Ok(self.block()?.0.protein(oid as usize))
+    }
+
+    /// The volume's letters, read once (threads that ask together may each read them; one copy
+    /// stays), with whether one of them is 28 or more.
+    fn block(&self) -> Result<&(crate::seqdb::SequenceBlock, bool)> {
         if let Some(block) = self.block.get() {
-            return Ok(block.protein(oid as usize));
+            return Ok(block);
         }
         let block = self
             .volume
@@ -835,7 +864,8 @@ impl<'a> ProfileLetters<'a> {
             .map_err(|error| {
                 crate::algorithm::common::database::database_error(error, self.setup.program)
             })?;
-        Ok(self.block.get_or_init(|| block).protein(oid as usize))
+        let wide = super::profile::has_wide(block.protein_bytes());
+        Ok(self.block.get_or_init(|| (block, wide)))
     }
 }
 

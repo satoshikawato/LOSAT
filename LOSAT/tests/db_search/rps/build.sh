@@ -48,7 +48,8 @@
 #   tests/fixtures/makeprofiledb/in, and the lists): sc (c2 nucleotide-coded), sc2v (sc with -max_smp_vol 2: volumes .00,
 #   .01 and rps_odd_sc2v.pal), hl (ten copies of c1, then c2 nucleotide-coded), aa1 and aa1s (c1 as 22 A: 6 letters below
 #   28; aa1s alone), p6 p10 p16 p21 p23 p24 (c1 with 6 to 24 letters for 22 columns), p23l p24l p23x3l (the last profile
-#   c3 with 21, 22 and 23 letters for 20 columns). makeprofiledb runs in OUT_DIR/odd with -in in/l_<set>.lst -out
+#   c3 with 21, 22 and 23 letters for 20 columns), na1 (c1 nucleotide-coded: 6 letters, four of them 28 or more).
+#   makeprofiledb runs in OUT_DIR/odd with -in in/l_<set>.lst -out
 #   rps_odd_<set>, under env -i with TZ=UTC and, when FAKETIME_SO names an LD_PRELOAD shim whose time(), gettimeofday()
 #   and clock_gettime(CLOCK_REALTIME) return $FAKE_TIME (PS10d's probe/tools/faketime.c), the wall clock frozen at
 #   2026-11-21 05:07 UTC (FAKE_TIME=1795237620): a rebuild under the same shim gives the committed bytes.
@@ -66,7 +67,7 @@ build_odd() {
   mkdir -p "$odd"
   python3 -I "$HERE/make_odd.py" "$LOSAT/tests/fixtures/makeprofiledb/in" "$odd"
   [ -n "${FAKETIME_SO:-}" ] && preload=(LD_PRELOAD="$FAKETIME_SO" FAKE_TIME=1795237620)
-  for set in sc sc2v hl aa1 aa1s p6 p10 p16 p21 p23 p24 p23l p24l p23x3l; do
+  for set in sc sc2v hl aa1 aa1s p6 p10 p16 p21 p23 p24 p23l p24l p23x3l na1; do
     local extra=()
     [ "$set" = sc2v ] && extra=(-max_smp_vol 2)
     (cd "$odd" && env -i PATH=/usr/bin:/bin TZ=UTC LC_ALL=C BLAST_USAGE_REPORT=false HOME="$odd" "${preload[@]}" \

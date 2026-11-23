@@ -526,8 +526,9 @@ impl RpsVolumeFiles {
         }
         if let Some(i) = (0..num_profiles).find(|&i| offsets[i + 1] <= offsets[i]) {
             return Err(refused(&format!(
-                ".rps profile {i} has {} rows (not even its sentinel row)",
-                i64::from(offsets[i + 1]) - i64::from(offsets[i])
+                ".rps profile {i} has no rows, not even its sentinel row (its offsets {} and {} do not ascend)",
+                offsets[i],
+                offsets[i + 1]
             ))
             .into());
         }

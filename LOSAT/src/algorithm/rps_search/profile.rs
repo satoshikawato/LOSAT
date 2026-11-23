@@ -32,7 +32,17 @@
 //! not a heap matrix: there an alignment that starts at or past `L_pin` stays in NCBI's mapping
 //! but gives HSPs whose coordinates, scores and identities disagree (PD-LOSAT-NCBI-DEFECTS, the
 //! rule-2 item pending the maintainer's decision). LOSAT refuses it for now, as its own arm
-//! (`ProfileRead::StartInMapping`), the one place to change.
+//! (`ProfileRead::StartInMapping`). To print NCBI's bytes there instead would change, besides
+//! that arm: the letters (NCBI's traceback reads the mapped `.psq` bytes after the profile's
+//! `L_pin` letters, its trailing 0, the next profile's letters and past the file's end the zeros
+//! of its last page, where `letters` holds `L_pin` letters, `ProfileLetters::of`); the
+//! traceback's identities on those bytes (`pssm_search::traceback0::final_hsp` and
+//! `ProfileTraceReads::traced` read only `L_pin` letters); the reports' identities on them
+//! (`formatter_identities` of `rps_search::traceback`), and the archive's count of the traceback
+//! against the formatter's recount, which differ there (9 and 6 in probe N_P6d_nq1_c0). Such a
+//! run whose alignment then reads a letter of 28 or more on those bytes still ends at read E,
+//! where NCBI crashes (probe N_SC_nq2_c0). The skipped extension to the right is LOSAT's already
+//! (`pssm_search::gapalign`, its `q_start < query_length` test).
 //!
 //! The first read that leaves NCBI's data refuses the query batch (`TracebackProfile::check`, a
 //! traceback error as `RpsPastRows::overran`'s): NCBI ends there with a fault or reads what it does
@@ -91,6 +101,9 @@ impl ProfileRead {
 pub(crate) struct TracebackProfile<'a> {
     /// The profile's OID in its volume.
     oid: u32,
+    /// The volume's first OID in the database (the refusal names the profile's OID in the
+    /// database, as LOSAT's other refusals of an RPS hit do).
+    first_oid: u32,
     /// The profile's offset in the volume's rows.
     start: usize,
     /// `L_rps`, its `.rps` columns (its rows without the sentinel row).
@@ -99,7 +112,7 @@ pub(crate) struct TracebackProfile<'a> {
     num_rows: usize,
     /// Its `.psq` letters (`L_pin` of them).
     letters: &'a [u8],
-    /// The first letter of 28 or more.
+    /// The first letter of 28 or more (`None` without one).
     first_wide: Option<u8>,
     /// The program of LOSAT's refusals (`RPSBLAST`, `RPSTBLASTN`).
     program: &'static str,
@@ -108,17 +121,34 @@ pub(crate) struct TracebackProfile<'a> {
 }
 
 impl<'a> TracebackProfile<'a> {
-    /// The profile `oid` of a volume of offsets `offsets` (`num_profiles + 1`) whose `.psq`
-    /// letters are `letters`.
-    pub(crate) fn new(oid: u32, offsets: &[i32], letters: &'a [u8], program: &'static str) -> Self {
+    /// The profile `oid` of a volume of offsets `offsets` (`num_profiles + 1`) whose first OID
+    /// in the database is `first_oid`, whose `.psq` letters are `letters`; `wide_volume` whether
+    /// the volume's letters hold one of 28 or more (`has_wide`, once per volume: only then are
+    /// the profile's letters searched for the first such letter).
+    pub(crate) fn new(
+        oid: u32,
+        first_oid: u32,
+        offsets: &[i32],
+        letters: &'a [u8],
+        wide_volume: bool,
+        program: &'static str,
+    ) -> Self {
         let oid_index = oid as usize;
         Self {
             oid,
+            first_oid,
             start: offsets[oid_index] as usize,
             columns: (offsets[oid_index + 1] - offsets[oid_index] - 1) as usize,
             num_rows: offsets[offsets.len() - 1] as usize,
             letters,
-            first_wide: first_wide(letters),
+            first_wide: if wide_volume {
+                letters
+                    .iter()
+                    .copied()
+                    .find(|&letter| usize::from(letter) >= BLASTAA_SIZE)
+            } else {
+                None
+            },
             program,
             fault: OnceLock::new(),
         }
@@ -151,8 +181,8 @@ impl<'a> TracebackProfile<'a> {
     /// LOSAT's refusal of the read `read`.
     pub(crate) fn refusal(&self, read: ProfileRead) -> String {
         format!(
-            "a hit on profile {} of an RPS-BLAST volume, whose consensus has {} letters in .psq for {} columns of scores in .rps (makeprofiledb writes it for a scored profile whose seq-data is nucleotide-coded or has more or fewer letters than its length), where NCBI BLAST+ 2.17.0's traceback {}, is not supported by LOSAT's {}",
-            self.oid,
+            "a hit of the profile of OID {}, whose consensus has {} letters in .psq for {} columns of scores in .rps (makeprofiledb writes it for a scored profile whose seq-data is nucleotide-coded or has more or fewer letters than its length), where NCBI BLAST+ 2.17.0's traceback {}, is not supported by LOSAT's {}",
+            u64::from(self.first_oid) + u64::from(self.oid),
             self.length(),
             self.columns,
             read.read(),
@@ -276,19 +306,13 @@ impl<'a> TracebackProfile<'a> {
     }
 }
 
-/// The first of `letters` of 28 or more: their largest letter first (a loop that compiles to
-/// vector maxima, once per HSP list), the first such letter only when there is one.
-fn first_wide(letters: &[u8]) -> Option<u8> {
+/// Whether `letters` (a volume's) hold one of 28 or more: their largest letter (a loop that
+/// compiles to vector maxima), once per volume (`ProfileLetters`).
+pub(crate) fn has_wide(letters: &[u8]) -> bool {
     let largest = letters
         .iter()
         .fold(0u8, |largest, &letter| largest.max(letter));
-    if usize::from(largest) < BLASTAA_SIZE {
-        return None;
-    }
-    letters
-        .iter()
-        .copied()
-        .find(|&letter| usize::from(letter) >= BLASTAA_SIZE)
+    usize::from(largest) >= BLASTAA_SIZE
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:184-190 (cited at

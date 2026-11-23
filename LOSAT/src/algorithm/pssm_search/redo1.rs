@@ -191,7 +191,9 @@ impl Align {
     }
 
     /// The alignment that a redo does not make (`RedoRun::starts_in_rows`): score 0, below every
-    /// cutoff of the redo, so no list keeps it.
+    /// cutoff of the redo, so no list keeps it. Out of the redo's loops.
+    #[cold]
+    #[inline(never)]
     fn not_made(rule: EMatrixAdjustRule) -> Self {
         Align {
             score: 0,
@@ -375,10 +377,12 @@ impl<'a> RedoRun<'a> {
     /// starts at its `gapped_start`, whose row NCBI's left extension reads first): with
     /// `with_profile_reads`, as the profile answers its start (`TraceReads::starts`, read D: not
     /// at or past the matrix's `L_pin` rows, nor after the profile's first fault).
+    #[inline]
     fn starts_in_rows(&self, hsp: &BlastpPreliminaryHsp) -> bool {
-        self.profile_reads.is_none_or(|reads| {
-            reads.starts(usize::try_from(hsp.gapped_query_start).unwrap_or(usize::MAX))
-        })
+        match self.profile_reads {
+            None => true,
+            Some(reads) => profile_starts(reads, hsp),
+        }
     }
 
     /// The matrix and the alignment scratch, for the next run (RPS-BLAST redoes one profile
@@ -1436,6 +1440,13 @@ fn window_composition<C: RedoInstance>(
     let (left, right) = blast_get_composition_range(letters, start, finish)
         .expect("an alignment's range lies in the letters read");
     read_aa_composition(&letters[left..right])
+}
+
+/// The profile's answer for the gapped start of the preliminary HSP `hsp`
+/// (`RedoRun::starts_in_rows`, `TraceReads::starts`), out of the redo's loops.
+#[inline(never)]
+fn profile_starts(reads: &dyn TraceReads, hsp: &BlastpPreliminaryHsp) -> bool {
+    reads.starts(usize::try_from(hsp.gapped_query_start).unwrap_or(usize::MAX))
 }
 
 /// `s_RedoOneAlignment` in a window of a translated subject: the gapped alignment of the

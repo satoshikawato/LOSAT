@@ -9,7 +9,7 @@ use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
 use super::engine::RpsQuery;
-use super::profile::{ProfileRead, RowAfter, TracebackProfile};
+use super::profile::{ProfileRead, RowAfter};
 use super::redo::RpsQueryStats;
 use super::rescale::{residue_probabilities, rps_rescale_pssm};
 use super::volumes::ProfileLetters;
@@ -309,12 +309,7 @@ impl RpsTraceback<'_> {
             let oid = list.oid as usize;
             // The profile as NCBI's traceback reads it: `L_pin` (its `.pin` length) its length,
             // its `.psq` letters, its rows from its offset (`TracebackProfile`).
-            let profile = TracebackProfile::new(
-                list.oid,
-                self.offsets,
-                self.letters.of(list.oid)?,
-                self.program,
-            );
+            let profile = self.letters.profile(list.oid, self.offsets, self.program)?;
             let length = profile.length();
             let consensus = profile.letters();
             let hsps = list.hsps.iter().map(|hsp| hsp.hsp);

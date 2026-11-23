@@ -288,7 +288,22 @@ fn inconsistent_files_are_refused() {
         panic!("offsets that do not ascend are refused");
     };
     assert!(
-        text.contains(".rps profile 0 has 0 rows (not even its sentinel row)"),
+        text.contains(
+            ".rps profile 0 has no rows, not even its sentinel row (its offsets 0 and 0 do not ascend)"
+        ),
+        "{text}"
+    );
+    // Offsets that descend (a hand-edited `.rps`): the same text, no row count below 0.
+    let mut descending = rps.clone();
+    descending[12..16].copy_from_slice(&(-3i32).to_le_bytes());
+    std::fs::write(base.with_extension("rps"), &descending).unwrap();
+    let Err(RpsOpenError::Refused(text)) = RpsVolumeFiles::open(&base, &[3, 2]) else {
+        panic!("offsets that descend are refused");
+    };
+    assert!(
+        text.contains(
+            ".rps profile 0 has no rows, not even its sentinel row (its offsets 0 and -3 do not ascend)"
+        ),
         "{text}"
     );
     std::fs::write(base.with_extension("rps"), &rps).unwrap();

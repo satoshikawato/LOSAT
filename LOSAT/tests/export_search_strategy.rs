@@ -23,10 +23,11 @@
 //! name its XML data does not know). Under `-parse_deflines` with such a name and without
 //! `-export_search_strategy`, two queries with one id end with NCBI's failure where it comes
 //! before NCBI shows anything that the repeated record's letters decide (the `.pd.xmlmatrix.`
-//! rows, line RG-KB item 7: a repeat in the first query's batch, and with held reports one before
-//! the first query of another id or after it in its batch); a repeat of the first query's id in a
-//! later batch before that query stays refused (NCBI reads its results back in the first record's
-//! letters and stops: `CSeqVector_CI: cannot locate segment`). psiblast's request of each query (before its rounds, with the
+//! rows, line RG-KB item 7: a repeat in the first query's batch, and with held reports a repeat in
+//! any batch up to that of the first query of another id, a later batch's too where NCBI's set-up
+//! of it, in the first record's letters, passes); a batch whose every searched record is a repeat
+//! longer than its first record stays refused (NCBI's set-up stops at the first record's end:
+//! `CSeqVector_CI: cannot locate segment`). psiblast's request of each query (before its rounds, with the
 //! search space of the query before; `Web_StepNumber`), rpsblast's and rpstblastn's (the profile
 //! database's length and `.aux` costs in the requests after the first; `-mt_mode 1` at 4 and 8
 //! threads writes NCBI's `-num_threads 1` file, DECISIONS F1b-2). A PSSM query's request with

@@ -1259,7 +1259,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     batches: &[BatchResults],
     queries_before: usize,
     stops: bool,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
 ) -> Result<()> {
     let gapped_karlin = gapped_karlin(options);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
@@ -1267,11 +1267,10 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     // `blast_xml::matrix::XmlMatrixFailure`)
     // The formatting table is found by the name as typed (`strcmp`): a lower-case name stops the
     // report data of the run's first query, or where the report is held of NCBI's next query of
-    // another Seq-id (`XmlMatrixFailure::SecondQueryOrEnd`, of the read-ahead scopes:
-    // `QueryScopes::held_xml_failure`; `xml_matrix`, the run's
-    // `xml_matrix_failure`), in the batch of that query (`BLAST engine
-    // error:`, exit 3), before any byte of the reports; a batch before it writes nothing (its
-    // reader messages and request posts are the batch loop's).
+    // another Seq-id (`XmlMatrixFailure::SecondQueryOrEnd`; `xml_matrix`, the run's
+    // `xml_matrix_failure` at its query of the read-ahead scopes, `QueryScopes::xml_failing_query`),
+    // in the batch of that query (`BLAST engine error:`, exit 3), before any byte of the reports; a
+    // batch before it writes nothing (its reader messages and request posts are the batch loop's).
     let Some(positives) = FormattingMatrix::new(&options.matrix) else {
         let failure =
             xml_matrix.context("LOSAT internal error: no run decision for an XML matrix")?;

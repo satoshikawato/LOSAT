@@ -514,7 +514,7 @@ fn run_inner(
     // know (`blast_xml::xml_matrix_failure`, decided once for the run): before any report is
     // written, so NCBI writes no title. Such a run reads the queries before the search only for
     // their scopes (`-parse_deflines`), checks no title and holds nothing.
-    let mut xml_matrix =
+    let xml_matrix =
         super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), database.is_none());
     let reads_ahead = held
         .as_ref()
@@ -569,14 +569,6 @@ fn run_inner(
         query_file = file;
         stops_after = scan.stops_after;
         read_ahead_scopes = scan.query_scopes;
-        // The query of a held report's failure, of the scopes read ahead
-        // (`QueryScopes::held_xml_failure`).
-        xml_matrix = xml_matrix.map(|failure| {
-            crate::blastinput::query_batch::QueryScopes::held_xml_failure(
-                read_ahead_scopes.as_ref(),
-                failure,
-            )
-        });
         // A `-db` search in which a later batch can still refuse the taxonomy database or a
         // subject with parsed Seq-ids (outfmt 5 looks the batch's subjects up in its prefetch,
         // `ReportedSubjects::batch_prefetch`, DBID item T, and asks no scientific name), or whose
@@ -596,6 +588,14 @@ fn run_inner(
             held.hold();
         }
     }
+    // The query whose batch the failure stops, of the scopes read ahead
+    // (`QueryScopes::xml_failing_query`).
+    let xml_failing = xml_matrix.map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(
+            read_ahead_scopes.as_ref(),
+            failure,
+        )
+    });
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
     let mut query_stream = query_settings.stream(query_file);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155 (cited at
@@ -892,7 +892,7 @@ fn run_inner(
                     queries_before,
                     stops,
                     xml2.borrow_mut().as_mut(),
-                    xml_matrix,
+                    xml_failing,
                     pool,
                 )
                 .map_err(refused)
@@ -908,7 +908,7 @@ fn run_inner(
                 queries_before,
                 stops,
                 xml2.borrow_mut().as_mut(),
-                xml_matrix,
+                xml_failing,
                 pool,
             )
             .map_err(refused),
@@ -1026,7 +1026,7 @@ fn run_inner(
         &shown_run,
         processed,
         xml2.borrow_mut().as_mut(),
-        xml_matrix,
+        xml_failing,
     )
     .map_err(report_error)?;
     writer.flush().map_err(output_error)?;

@@ -1854,7 +1854,7 @@ fn search(
         // know (`stage_e_report::xml_matrix_failure`, the decision of `stage_e_report::render`):
         // the batch of the run's first searched query, or where the report is held (`-subject`,
         // `-in_pssm`; `XmlMatrixFailure::SecondQueryOrEnd`) of NCBI's next query of another
-        // Seq-id (`QueryScopes::held_xml_failure` of the batches' scopes);
+        // Seq-id (`QueryScopes::xml_failing_query` of the batches' scopes);
         // the search strategy's file holds the requests up to that
         // batch's, whatever the number of batches after it (probe 7 of RG-F1, probe K4f of line
         // RG). A held report that fails at the run's end, or a run that stops before, writes every

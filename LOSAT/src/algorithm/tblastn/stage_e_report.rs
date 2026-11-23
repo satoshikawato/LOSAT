@@ -275,7 +275,7 @@ fn x_refuse_a_column_of_the_nullb(hitlists: &[KappaResultHitList]) -> Result<()>
 /// query and subject lie in its record (`-query_loc`, `-subject_loc`), whether the
 /// reports end with the epilog (a search that stops at a query batch writes none), and under
 /// `-parse_deflines` the scopes of the queries, whose Seq-ids place the XML failure of a held
-/// report (`query_batch::QueryScopes::held_xml_failure`).
+/// report (`query_batch::QueryScopes::xml_failing_query`).
 pub(super) struct ReportRanges<'a> {
     pub queries: &'a crate::blastinput::seq_range::Placements,
     pub subjects: &'a crate::blastinput::seq_range::Placements,
@@ -374,7 +374,7 @@ pub(super) fn render(
     // fails for a matrix of its formatting table's that it does not know when it makes a report's
     // data (`xml_matrix_failure`): that of the run's first query, or where the report is held
     // (`XmlMatrixFailure::SecondQueryOrEnd`) of NCBI's next query of another Seq-id
-    // (`QueryScopes::held_xml_failure` of the scopes, `ranges.query_scopes`), in the batch of that
+    // (`QueryScopes::xml_failing_query` of the scopes, `ranges.query_scopes`), in the batch of that
     // query, or for a run whose held report has no such query
     // in `PrintEpilog` (blast_format.cpp:2204-2212, cited at
     // `blast_xml::matrix::XmlMatrixFailure`) unless the run stops before (`ranges.epilog`; the
@@ -390,7 +390,7 @@ pub(super) fn render(
         pssm.is_some(),
     )
     .map(|failure| {
-        crate::blastinput::query_batch::QueryScopes::held_xml_failure(ranges.query_scopes, failure)
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(ranges.query_scopes, failure)
     })
     .filter(|_| !query_records.is_empty())
     {

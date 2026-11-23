@@ -4144,7 +4144,7 @@ fn run_batch_loop(
         // NCBI fails where it formats the batch of the run's first searched query, or where the
         // report is held of NCBI's next query of another Seq-id (`BatchReports::xml_matrix_failure`;
         // `XmlMatrixFailure::SecondQueryOrEnd`, of the batches' scopes so far:
-        // `QueryScopes::held_xml_failure`): after the batch's
+        // `QueryScopes::xml_failing_query`): after the batch's
         // search, the read of its titles (and LOSAT's refusal of two queries of one id, above) and
         // its prefetch, whose errors come first. It writes nothing of the batch's reports or of
         // the batches' before (the XML2 and JSON documents only their start, `PrintProlog`): the
@@ -4155,7 +4155,7 @@ fn run_batch_loop(
         // failing batch's.
         let failing = xml_matrix_failure
             .and_then(|failure| {
-                crate::blastinput::query_batch::QueryScopes::held_xml_failure(
+                crate::blastinput::query_batch::QueryScopes::xml_failing_query(
                     query_scopes.as_ref(),
                     failure,
                 )
@@ -4257,7 +4257,7 @@ fn run_batch_loop(
     // epilog, after what the batch loop wrote before a failing batch (the prologs, the batches'
     // reader messages and posts).
     if xml_matrix_failure.is_some_and(|failure| {
-        crate::blastinput::query_batch::QueryScopes::held_xml_failure(
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(
             query_scopes.as_ref(),
             failure,
         )

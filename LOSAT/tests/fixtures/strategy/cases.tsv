@@ -351,6 +351,21 @@ tblastx.sub.pd.xmlmatrix.dup3.f16	tblastx	-	-query tests/fasta/strategy/order_xm
 tblastx.sub.pd.xmlmatrix.dup.f16	tblastx	-	-query tests/fasta/strategy/order_xmpd.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -matrix blosum62 -outfmt 16	ncbi	3	-	-
 tblastx.sub.pd.xmlmatrix.dup.b1.f16	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmpd.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -matrix blosum62 -outfmt 16	near:tblastx.sub.pd.xmlmatrix.dup.f16	1	-	two query records have the Seq-id lcl|q1
 tblastx.db.pd.xmlmatrix.dup.f15	tblastx	-	-query tests/fasta/strategy/order_xmpd.fna -db tests/db_search/arch_tbx_snucl -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-
+blastp.sub.pd.xmlmatrix.short.b1.f16	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmpd_short.faa -subject tests/fasta/strategy/order_s.faa -parse_deflines -matrix blosum62 -outfmt 16	ncbi	3	-	-
+tblastn.sub.pd.xmlmatrix.short.b1.f15	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmpd_short.faa -subject tests/fasta/strategy/order_s.fna -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-
+blastx.sub.pd.xmlmatrix.short.b1.f16	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmpd_short.fna -subject tests/fasta/strategy/order_s.faa -parse_deflines -matrix blosum62 -outfmt 16	ncbi	3	-	-
+tblastx.sub.pd.xmlmatrix.short.b1.f15	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_xmpd_short.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-
+blastp.sub.pd.xmlmatrix.mixed.b50.f15	blastp	BATCH_SIZE=50	-query tests/fasta/strategy/order_xmpd_mixed.faa -subject tests/fasta/strategy/order_s.faa -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-
+blastx.sub.pd.xmlmatrix.mixed.b150.f16	blastx	BATCH_SIZE=150	-query tests/fasta/strategy/order_xmpd_mixed.fna -subject tests/fasta/strategy/order_s.faa -parse_deflines -matrix blosum62 -outfmt 16	ncbi	3	-	-
+tblastx.sub.pd.xmlmatrix.mixed.b150.f15	tblastx	BATCH_SIZE=150	-query tests/fasta/strategy/order_xmpd_mixed.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-
+blastp.sub.pd.xmlmatrix.subset.b60.f15	blastp	BATCH_SIZE=60	-query tests/fasta/strategy/order_xmpd_subset.faa -subject tests/fasta/strategy/order_s.faa -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-
+tblastn.sub.pd.xmlmatrix.subset.b60.f16	tblastn	BATCH_SIZE=60	-query tests/fasta/strategy/order_xmpd_subset.faa -subject tests/fasta/strategy/order_s.fna -parse_deflines -matrix blosum62 -outfmt 16	ncbi	3	-	-
+blastx.sub.pd.xmlmatrix.subset.b180.f16	blastx	BATCH_SIZE=180	-query tests/fasta/strategy/order_xmpd_subset.fna -subject tests/fasta/strategy/order_s.faa -parse_deflines -matrix blosum62 -outfmt 16	ncbi	3	-	-
+tblastx.sub.pd.xmlmatrix.subset.b180.f15	tblastx	BATCH_SIZE=180	-query tests/fasta/strategy/order_xmpd_subset.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-
+blastp.sub.pd.xmlmatrix.skip.f5	blastp	-	-query tests/fasta/strategy/order_xmpd_skip.faa -query_loc 20-40 -subject tests/fasta/strategy/order_s.faa -parse_deflines -matrix blosum62 -outfmt 5	ncbi	3	-	-
+tblastn.sub.pd.xmlmatrix.skip.f15	tblastn	-	-query tests/fasta/strategy/order_xmpd_skip.faa -query_loc 20-40 -subject tests/fasta/strategy/order_s.fna -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-
+blastx.sub.pd.xmlmatrix.skip.f15	blastx	-	-query tests/fasta/strategy/order_xmpd_skip.fna -query_loc 20-60 -subject tests/fasta/strategy/order_s.faa -parse_deflines -matrix blosum62 -outfmt 15	ncbi	3	-	-
+tblastx.sub.pd.xmlmatrix.skip.f5	tblastx	-	-query tests/fasta/strategy/order_xmpd_skip.fna -query_loc 20-60 -subject tests/fasta/strategy/order_s.fna -parse_deflines -matrix blosum62 -outfmt 5	ncbi	3	-	-
 psiblast.db.itdef	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 6 -export_search_strategy {ss}	ncbi	0	-	-
 psiblast.db.f14.stdout	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 14 -export_search_strategy -	ncbi	1	-	-
 psiblast.db.f99.ss	psiblast	-	-query tests/fasta/psiblast/tk.faa -db tests/db_search/paja -outfmt 99 -export_search_strategy {ss}	ncbi	255	-	-

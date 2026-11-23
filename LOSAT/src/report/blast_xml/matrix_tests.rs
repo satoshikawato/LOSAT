@@ -15,7 +15,7 @@ fn the_xml_formats_fail_for_a_name_ncbi_does_not_spell() {
             assert_eq!(
                 failure,
                 Some(if held {
-                    XmlMatrixFailure::SecondQueryOrEnd { second_id: Some(1) }
+                    XmlMatrixFailure::SecondQueryOrEnd
                 } else {
                     XmlMatrixFailure::FirstQuery
                 }),
@@ -43,7 +43,7 @@ fn the_xml_formats_fail_for_a_name_ncbi_does_not_spell() {
     // Several formats: the first to fail stops the run.
     assert_eq!(
         xml_formatting_failure(["16", "15"], "blosum62", true, false),
-        Some(XmlMatrixFailure::SecondQueryOrEnd { second_id: Some(1) })
+        Some(XmlMatrixFailure::SecondQueryOrEnd)
     );
     assert_eq!(
         xml_formatting_failure(["16", "5"], "blosum62", true, false),
@@ -58,32 +58,6 @@ fn the_xml_formats_fail_for_a_name_ncbi_does_not_spell() {
             b"LOSAT engine error: unsupported score matrix\n".as_slice()
         )
     );
-}
-
-/// Where the run stops (probe K/k4f, NCBI 2.17.0): the batch of the first searched query, or
-/// of the second when the report is held (`-subject` 13-16: 3 batches of one query wrote
-/// the requests of Query_1 and Query_2), or the end of a run of one query. With queries of one
-/// Seq-id (probe 2 of line RG-KB item 7): the batch of the first query of another Seq-id, or the
-/// end of a run without one.
-#[test]
-fn a_held_report_fails_with_the_second_query_or_at_the_end() {
-    let first = XmlMatrixFailure::FirstQuery;
-    let held = XmlMatrixFailure::SecondQueryOrEnd { second_id: Some(1) };
-    assert!(first.fails_in(0..1) && first.fails_in(0..3) && !first.fails_in(1..2));
-    assert!(!held.fails_in(0..1) && held.fails_in(1..2) && held.fails_in(0..3));
-    assert!(!held.fails_in(2..3) && !held.fails_in(1..1));
-    assert!(held.fails_at_end(1) && !held.fails_at_end(0) && !held.fails_at_end(2));
-    assert!(!first.fails_at_end(1));
-    assert_eq!((first.query(), held.query()), (Some(0), Some(1)));
-    // `q1, q1, q2`: the third query's batch; `q1, q1`: the end, whatever was searched.
-    let third = XmlMatrixFailure::SecondQueryOrEnd { second_id: Some(2) };
-    assert!(!third.fails_in(0..2) && third.fails_in(2..3) && third.fails_in(0..3));
-    assert!(third.fails_at_end(2) && !third.fails_at_end(3));
-    let end = XmlMatrixFailure::SecondQueryOrEnd { second_id: None };
-    assert!(!end.fails_in(0..3) && end.query().is_none());
-    assert!(end.fails_at_end(1) && end.fails_at_end(3) && !end.fails_at_end(0));
-    assert_eq!(first.with_second_id(Some(2)), first);
-    assert_eq!(held.with_second_id(None), end);
 }
 
 #[test]

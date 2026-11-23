@@ -173,14 +173,6 @@ fn search_records(
         args.parse_deflines,
         args.scope_refusal.as_ref(),
     )?;
-    // The query of a held report's failure, of the scopes read ahead
-    // (`QueryScopes::held_xml_failure`).
-    let xml_matrix = xml_matrix.map(|failure| {
-        crate::blastinput::query_batch::QueryScopes::held_xml_failure(
-            xml_scan.query_scopes.as_ref(),
-            failure,
-        )
-    });
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
     // NCBI's error of an XInclude format without a file name, where the command line gives it
     // (`native::run_inner`, blastx_app.cpp:251).
@@ -705,6 +697,14 @@ fn write_run(
         xml_matrix,
         ..
     } = run;
+    // The query whose batch the run's XML failure stops, of the scopes read ahead
+    // (`QueryScopes::xml_failing_query`).
+    let xml_matrix = xml_matrix.map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(
+            read_ahead_scopes.as_ref(),
+            failure,
+        )
+    });
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`): with outfmt 5 and
     // 13 to 16 the read before the search made them (`scan_xml_titles`, `QueryScopes::read_ahead`),
     // whose refusal comes where the loop takes its batch; else the batches add theirs where the loop
@@ -1333,14 +1333,6 @@ fn search_database(
         args.parse_deflines,
         args.scope_refusal.as_ref(),
     )?;
-    // The query of a held report's failure, of the scopes read ahead
-    // (`QueryScopes::held_xml_failure`).
-    let xml_matrix = xml_matrix.map(|failure| {
-        crate::blastinput::query_batch::QueryScopes::held_xml_failure(
-            xml_scan.query_scopes.as_ref(),
-            failure,
-        )
-    });
     report_batches(
         RunReports {
             lowercase: args.lcase_masking,

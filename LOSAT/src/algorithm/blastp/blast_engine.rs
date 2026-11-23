@@ -5906,14 +5906,11 @@ fn psiblast_stop_at_pssm_query(
 /// NCBI's BLAST XML report data does not know (`blast_xml::matrix::xml_formatting_failure`), with
 /// the facts of the search: no database (`-subject`, `m_IsBl2Seq`) and psiblast (`m_IsIterative`).
 /// The one decision behind the search strategy's last request (`search`) and the formats' error
-/// (`run_call`). With `scopes` (the run's scopes of the batches added, under `-parse_deflines`), a
-/// held report fails with the run's first searched query of another Seq-id
-/// (`QueryScopes::held_xml_failure`).
+/// (`run_call`, at the run's query of `blastp_xml_failing_query`).
 fn blastp_xml_matrix_failure(
     args: &ResolvedBlastpArgs,
     outputs: &ReportOutputs<'_>,
     database: bool,
-    scopes: Option<&crate::blastinput::query_batch::QueryScopes>,
 ) -> Option<crate::report::blast_xml::matrix::XmlMatrixFailure> {
     crate::report::blast_xml::matrix::xml_formatting_failure(
         outputs.formats.iter().map(|format| format.outfmt),
@@ -5921,7 +5918,20 @@ fn blastp_xml_matrix_failure(
         !database,
         args.app == BlastpApp::Psiblast,
     )
-    .map(|failure| crate::blastinput::query_batch::QueryScopes::held_xml_failure(scopes, failure))
+}
+
+/// The run's query at which blastp's formats of `outputs` fail for the matrix name
+/// (`blastp_xml_matrix_failure`), of the run's scopes of the batches added (`scopes`, under
+/// `-parse_deflines`): `QueryScopes::xml_failing_query`.
+fn blastp_xml_failing_query(
+    args: &ResolvedBlastpArgs,
+    outputs: &ReportOutputs<'_>,
+    database: bool,
+    scopes: Option<&crate::blastinput::query_batch::QueryScopes>,
+) -> Option<crate::blastinput::query_batch::XmlFailingQuery> {
+    blastp_xml_matrix_failure(args, outputs, database).map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(scopes, failure)
+    })
 }
 
 /// The search of `run_local` and of the CLI, after NCBI's processing of the options and
@@ -6081,7 +6091,6 @@ fn search(
                 &args,
                 outputs,
                 database.is_some(),
-                None,
             ))
     });
     let batches = match args.app {
@@ -6355,12 +6364,12 @@ fn search(
     // data does not know ("unsupported score matrix", `run_resolved_in_pool`'s format loop): the
     // batch of the run's first searched query, or where the report is held
     // (`blastp_xml_matrix_failure`; `XmlMatrixFailure::SecondQueryOrEnd`) of NCBI's next query of
-    // another Seq-id (`QueryScopes::held_xml_failure` of the batches' scopes); the
+    // another Seq-id (`QueryScopes::xml_failing_query` of the batches' scopes); the
     // search strategy's file then holds the requests up to that
     // batch's (probe 7 of RG-F1, probe K4f of line RG), whichever call writes them. A held report
     // that fails at the run's end, or a run that stops before, writes every request it makes.
     if let Some(strategy) = args.strategy.as_ref() {
-        if let Some(end) = blastp_xml_matrix_failure(&args, outputs, database.is_some(), None)
+        if let Some(end) = blastp_xml_matrix_failure(&args, outputs, database.is_some())
             .and_then(|failure| batches.xml_matrix_request_end(failure))
         {
             strategy.stop_after(end);
@@ -10607,9 +10616,9 @@ fn run_call(
             query_records.len(),
         )
     };
-    // Where the run's XML formats fail for the matrix name (`blastp_xml_matrix_failure`).
+    // Where the run's XML formats fail for the matrix name (`blastp_xml_failing_query`).
     let scopes = reports.query_scopes.map(|scopes| scopes.run());
-    let xml_matrix_failure = blastp_xml_matrix_failure(&args, outputs, database.is_some(), scopes);
+    let xml_matrix_failure = blastp_xml_failing_query(&args, outputs, database.is_some(), scopes);
     let observer = &mut outputs.observer;
     if let Some(observer) = observer.as_deref_mut() {
         for (q_idx, stats) in query_stats().into_iter().enumerate() {

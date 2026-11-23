@@ -42,7 +42,7 @@ use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatOutput, FormatProbe};
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::report::blast_xml::matrix::XmlMatrixFailure;
+use crate::blastinput::query_batch::XmlFailingQuery;
 use crate::report::blast_xml::XmlStats;
 use crate::report::blast_xml2::SideFileSink;
 use crate::report::db_subject::ParsedSubject;
@@ -127,7 +127,7 @@ pub(super) struct ReportView<'a> {
     pub(super) filtered_empty: bool,
     /// rpsblast over several volumes (`prelim_run::PrelimRun::rps_multi_volume`).
     pub(super) rps_multi_volume: bool,
-    pub(super) xml_matrix_failure: Option<XmlMatrixFailure>,
+    pub(super) xml_matrix_failure: Option<XmlFailingQuery>,
     pub(super) xml_only_xml2: bool,
     pub(super) x_rows_pool: Option<&'a SearchPool<'a>>,
     pub(super) blastp_parallel_pool: &'a SearchPool<'a>,
@@ -366,7 +366,7 @@ pub(super) fn write_xml(
             // results arrive, or in `PrintEpilog`)
             // The report data's constructor throws for the run's first searched query,
             // or where the report is held for its first of another Seq-id
-            // (`blastp_xml_matrix_failure`, `QueryScopes::held_xml_failure`):
+            // (`blastp_xml_matrix_failure`, `QueryScopes::xml_failing_query`):
             // in the call of that query, after the reader's messages of the batches up
             // to its own and NCBI's posts of the bytes replaced in their search strategy
             // requests (`query_posts`); a call of the queries before it writes those

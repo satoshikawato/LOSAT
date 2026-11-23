@@ -26,9 +26,10 @@ use std::ffi::OsString;
 pub use crate::cli::{ArgvError, Cli, Commands, NativeError, WEB_V2_PROGRAMS};
 
 // The values that NCBI's arguments allow, as LOSAT's argument tables give them (`ncbi_app::args`,
-// made from each program's NCBI XML): the genetic codes that `describe` lists and the tasks whose
-// defaults it resolves.
-pub use crate::ncbi_app::args::{choices, default_value, genetic_codes, string_values};
+// made from each program's NCBI XML): the genetic codes that `describe` lists, the tasks whose
+// defaults it resolves and the defaults that its test reads (the choices come with
+// `described_parameters`).
+pub use crate::ncbi_app::args::{default_value, genetic_codes, string_values};
 
 /// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
 /// as the command line reads it after its application start (NCBI's reader, LOSAT's refusals,

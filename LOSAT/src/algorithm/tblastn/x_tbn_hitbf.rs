@@ -40,6 +40,9 @@ use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 /// its four bytes (`LOSAT_X_TBNDIAGPACK`: last_hit in bits 0-30, flag in bit 31; the table's
 /// values fit 31 bits without a sign, `search_init::x_packs`), or `(last_hit, flag)`.
 pub(super) trait XDiagCell: Copy {
+    /// PROBE (line FX s3): whether the table's values stay inside +-2^30 (the packed table,
+    /// `search_init::x_packs`), so that `diff - wordsize` never wraps.
+    const BOUNDED: bool;
     /// `(last_hit, flag)`.
     fn get(self) -> (i32, bool);
     /// Stores both `last_hit` and `flag`.
@@ -51,6 +54,8 @@ pub(super) trait XDiagCell: Copy {
 }
 
 impl XDiagCell for (i32, bool) {
+    const BOUNDED: bool = false;
+
     #[inline(always)]
     fn get(self) -> (i32, bool) {
         self
@@ -73,6 +78,8 @@ impl XDiagCell for (i32, bool) {
 }
 
 impl XDiagCell for u32 {
+    const BOUNDED: bool = true;
+
     #[inline(always)]
     fn get(self) -> (i32, bool) {
         ((self & 0x7fff_ffff) as i32, self >> 31 != 0)
@@ -103,6 +110,86 @@ pub(super) fn fits(window: i32, word_size: usize) -> bool {
     i32::try_from(word_size).is_ok_and(|word_size| word_size < window)
 }
 
+/// PROBE (exp/fx-pairs-diag, line FX s3): the form of `x_hits_bf` on a bounded table, fixed at
+/// build time (LOSAT_FXPAIRS_BUILD, a digit; 0 or unset = dev's): 1 = one compare of
+/// `diff - wordsize` with `window - wordsize` for both outcomes; 2 = 1 with two hits a step;
+/// 3 = 1 with four hits a step.
+pub(super) const X_FX_PAIRS: u8 = match option_env!("LOSAT_FXPAIRS_BUILD") {
+    Some(v) => v.as_bytes()[0].wrapping_sub(b'0'),
+    None => 0,
+};
+
+/// PROBE (LOSAT_FXPAIRS_BUILD >= 1): one hit of `x_hits_bf` on a bounded table: false (nothing
+/// written) when it is a flag-1 cell or a candidate, else its cell updated and true. With the
+/// values inside +-2^30, `dw = diff - wordsize` does not wrap, so `diff >= window` is
+/// `dw >= window - wordsize` and the one compare of `dw` with `k` gives both tests.
+///
+/// # Safety
+/// `pair`'s cell index (masked by `mask`) is inside the table at `base`.
+#[inline(always)]
+unsafe fn x_hit_one<C: XDiagCell>(
+    base: *mut C,
+    mask: u32,
+    offset: i32,
+    word_size: i32,
+    k: u32,
+    pair: BlastOffsetPair,
+) -> bool {
+    let index = (pair.q_off.wrapping_sub(pair.s_off) & mask) as usize;
+    // SAFETY: (caller) index <= mask = entries.len() - 1.
+    let entry = unsafe { base.add(index) };
+    let (last_hit, flag) = unsafe { entry.read() }.bf_read();
+    let s_diag = (pair.s_off as i32).wrapping_add(offset);
+    let dw = s_diag.wrapping_sub(last_hit).wrapping_sub(word_size);
+    if flag | ((dw as u32) < k) {
+        return false;
+    }
+    let next = if dw >= k as i32 { s_diag } else { last_hit };
+    unsafe { (*entry).set_last_hit(next) };
+    true
+}
+
+/// PROBE (LOSAT_FXPAIRS_BUILD >= 1): `x_hits_bf` on a bounded table by `x_hit_one`, `STEP` hits a
+/// step (1, 2 or 4; a down-counter of steps, so that the step's control is one add and one
+/// decrement), the rest one by one.
+#[inline(always)]
+fn x_hits_bf_one_compare<C: XDiagCell, const STEP: usize>(
+    entries: &mut [C],
+    offset: i32,
+    window: i32,
+    word_size: i32,
+    pairs: &[BlastOffsetPair],
+) -> usize {
+    let mask = (entries.len() - 1) as u32;
+    let k = window.wrapping_sub(word_size) as u32;
+    let base = entries.as_mut_ptr();
+    let start = pairs.as_ptr();
+    let mut p = start;
+    // SAFETY: every pair read is below `start + pairs.len()`; the cells as in `x_hit_one`.
+    unsafe {
+        let end = start.add(pairs.len());
+        if STEP > 1 {
+            let mut steps = pairs.len() / STEP;
+            while steps != 0 {
+                for j in 0..STEP {
+                    if !x_hit_one(base, mask, offset, word_size, k, p.add(j).read()) {
+                        return p.add(j).offset_from(start) as usize;
+                    }
+                }
+                p = p.add(STEP);
+                steps -= 1;
+            }
+        }
+        while p < end {
+            if !x_hit_one(base, mask, offset, word_size, k, p.read()) {
+                break;
+            }
+            p = p.add(1);
+        }
+        p.offset_from(start) as usize
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (module doc).
 /// The hits of `pairs` from the first, each on its cell of
 /// `entries` (`(last_hit, flag)`, `XDiagCell`), up to the first that is a flag-1 cell or a
@@ -123,6 +210,13 @@ pub(super) fn x_hits_bf<C: XDiagCell>(
     let Some(last) = entries.len().checked_sub(1) else {
         return 0;
     };
+    if X_FX_PAIRS >= 1 && C::BOUNDED {
+        return match X_FX_PAIRS {
+            2 => x_hits_bf_one_compare::<C, 2>(entries, offset, window, word_size, pairs),
+            3 => x_hits_bf_one_compare::<C, 4>(entries, offset, window, word_size, pairs),
+            _ => x_hits_bf_one_compare::<C, 1>(entries, offset, window, word_size, pairs),
+        };
+    }
     // [C] diag_coord = (query_offset - subject_offset) & diag_mask; (diag_mask = length - 1)
     let mask = last as u32;
     // window - wordsize: the length of the candidate range of diff - wordsize.

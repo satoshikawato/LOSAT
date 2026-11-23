@@ -257,8 +257,8 @@ struct XIns {
     len: usize,
 }
 
-/// No NCBI counterpart: `find_perfect`'s two vectors, kept across its calls and across the ranges
-/// a thread masks (`X_SCRATCH`).
+/// No NCBI counterpart: `find_perfect`'s two vectors, kept across its calls in a range. `ins`
+/// (at most 62 intervals) is the thread's (`X_INS`); `merged` is the range's, as before.
 #[derive(Default)]
 struct XScratch {
     ins: Vec<XIns>,
@@ -266,16 +266,12 @@ struct XScratch {
 }
 
 thread_local! {
-    /// No NCBI counterpart: the `XScratch` of the ranges this thread masks. Each range takes it and
-    /// puts it back, so the merge allocates only while the vectors grow to the largest call the
-    /// thread has seen (a few KiB). Vectors of each range's own, allocated and grown again in every
-    /// range, raised the peak memory of the one-thread cDNA run by 100-124 KiB (line FM s2, rss6).
-    static X_SCRATCH: Cell<XScratch> = const {
-        Cell::new(XScratch {
-            ins: Vec::new(),
-            merged: Vec::new(),
-        })
-    };
+    /// No NCBI counterpart: `XScratch::ins` of the ranges this thread masks (at most 62 intervals,
+    /// 2 KiB). Each range takes it and puts it back: allocated and grown again in every range, it
+    /// raised the peak memory of the one-thread cDNA run by 100-124 KiB (line FM s2, rss6). The
+    /// thread does not keep `merged`, which grows to the longest perfect list it has seen: kept by
+    /// 16 threads, it raised the 16-thread run's peak by about 800 KiB (rss7).
+    static X_INS: Cell<Vec<XIns>> = const { Cell::new(Vec::new()) };
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:123-141,161-163
@@ -674,7 +670,10 @@ impl DustMasker {
             thresholds: &self.thresholds,
         };
         let thr = x_tenth_thresholds(k);
-        let mut scratch = X_SCRATCH.with(Cell::take);
+        let mut scratch = XScratch {
+            ins: X_INS.with(Cell::take),
+            merged: Vec::new(),
+        };
 
         while stop > current_start + 2 {
             let mut perfect_list: VecDeque<PerfectInterval> = VecDeque::new();
@@ -786,7 +785,7 @@ impl DustMasker {
             }
         }
 
-        X_SCRATCH.with(|c| c.set(scratch));
+        X_INS.with(|c| c.set(scratch.ins));
         result
     }
 }

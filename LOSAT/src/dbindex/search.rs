@@ -293,13 +293,13 @@ struct SeedList {
 }
 
 impl SeedList {
-    /// The seed at the cursor (`*it_`), `None` at the end.
+    /// The seed at the cursor, `None` at the end.
     #[inline(always)]
     fn at(&self) -> Option<TrackedSeed> {
         self.buf.get(self.at).copied()
     }
 
-    /// `++it_` (not at the end).
+    /// The cursor moved to the next seed (not at the end).
     #[inline(always)]
     fn step(&mut self) {
         self.at += 1;
@@ -308,7 +308,7 @@ impl SeedList {
         }
     }
 
-    /// `it_ = seeds_.begin()`.
+    /// The cursor back at the first seed (`Reset`).
     #[inline(always)]
     fn rewind(&mut self) {
         self.at = self.first;
@@ -332,7 +332,7 @@ impl SeedList {
         self.at = self.gap_end;
     }
 
-    /// `it_ = seeds_.erase(it_)` (not at the end).
+    /// The seed at the cursor erased, the cursor then at the seed after it (not at the end).
     #[inline(never)]
     fn erase(&mut self) {
         debug_assert!(self.at < self.buf.len());
@@ -342,8 +342,8 @@ impl SeedList {
         self.edited();
     }
 
-    /// `seeds_.insert(it_, seed)`: before the cursor (the buffer doubled, to at least 8 slots, when
-    /// the gap is empty).
+    /// `seed` inserted before the cursor (the buffer doubled, to at least 8 slots, when the gap is
+    /// empty).
     #[inline(never)]
     fn insert(&mut self, seed: TrackedSeed) {
         self.gap_to_cursor();
@@ -372,8 +372,7 @@ impl SeedList {
         Some(&mut self.buf[before])
     }
 
-    /// `seeds_.erase(std::prev(it_))` (not at the start): the seed before the cursor, the cursor
-    /// unchanged.
+    /// The seed before the cursor erased (not at the start), the cursor unchanged.
     #[inline(never)]
     fn erase_before_cursor(&mut self) {
         self.gap_to_cursor();

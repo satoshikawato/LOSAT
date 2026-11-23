@@ -297,3 +297,51 @@ fn the_html_links_reach_outfmt_0_in_any_place() {
         );
     }
 }
+
+// Line RG item T4b: formats 0 to 4 read `-html`'s links (`blastinput::app::formats_link_ids`), so
+// in a call of several formats each format's report is its report alone, the query-anchored ones
+// (outfmt 1 to 4) and the organism report (outfmt 18) among them, in each of the five programs
+// (review a S3; LOSAT Web calls the library with several formats). Their posts with a registry
+// file that posts (`FMTCFG`), against the command line's: `tests/library_html_posts.rs`
+// (`later_formats_post_as_their_runs_alone`, in a child process that gets the environment; review
+// b N3).
+#[test]
+fn each_html_report_of_a_call_of_several_formats_is_its_report_alone() {
+    for program in [
+        Program::Blastn,
+        Program::Blastp,
+        Program::Blastx,
+        Program::Tblastn,
+        Program::Tblastx,
+    ] {
+        let (query, subject) = self_pair(program);
+        let search = validate(program, &["-html"]).unwrap();
+        let alone = |format: &str| {
+            run_collect(&search, Inputs::new(&query, &subject), &[format])
+                .unwrap()
+                .reports
+                .remove(0)
+                .bytes
+        };
+        assert!(
+            alone("1").starts_with(b"<HTML>"),
+            "{program}: {}",
+            String::from_utf8_lossy(&alone("1"))
+        );
+        for formats in [
+            &["6", "1"][..],
+            &["0", "1"],
+            &["1", "18"],
+            &["3", "0", "4", "2"],
+        ] {
+            let together = run_collect(&search, Inputs::new(&query, &subject), formats).unwrap();
+            for (at, &format) in formats.iter().enumerate() {
+                assert_eq!(
+                    String::from_utf8_lossy(&together.reports[at].bytes),
+                    String::from_utf8_lossy(&alone(format)),
+                    "{program} {formats:?}: outfmt {format}"
+                );
+            }
+        }
+    }
+}

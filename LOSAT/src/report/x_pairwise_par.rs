@@ -389,6 +389,7 @@ impl<'h> QueryGroup<'h> {
                 .iter()
                 .map(|shown| members.remove(shown).unwrap_or_default())
                 .collect(),
+            html: reading.html,
         }
     }
 }
@@ -441,6 +442,7 @@ pub(crate) fn writer_reads(
             .map(position)
             .collect(),
         aligned: group.aligned(reading.shown.alignments).len(),
+        html: reading.html,
     }
 }
 
@@ -655,17 +657,31 @@ pub(crate) trait QuerySections: Sync {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2002-2009
-    /// Where `merges_alignments`: the merge's work on aligned subject `s_idx` of the query
-    /// (`group`) after it reads the subject and before it reads the next one, all before the
-    /// section's first byte. NCBI makes the Dense-segs of the subject's Std-segs there, which can
-    /// throw (BLASTX's `EmptyRowsStop::StdSegLengths`); nothing by default.
-    fn merged_subject<W: Write>(
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1817-1824
+    /// NCBI's Dense-segs of the Std-segs of aligned subject `s_idx`'s HSPs (`group`), made before
+    /// any byte of the query's alignments, which can throw (BLASTX's
+    /// `EmptyRowsStop::StdSegLengths`): where `merges_alignments`, the merge's work on the subject
+    /// after it reads it and before it reads the next one; in the `-html` pairwise report, for
+    /// the aligned subjects that `html_links_densegs` does not pass over, before the first
+    /// alignment. Nothing by default.
+    fn subject_densegs<W: Write>(
         &self,
         _writer: &mut W,
         _group: &QueryGroup<'_>,
         _s_idx: u32,
     ) -> io::Result<()> {
         Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4590-4610
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2145-2154
+    /// The Seq-id text (`CSeq_id::GetSeqIdString`) of aligned subject `s_idx`'s Seq-align id
+    /// without and with its version, which the `-html` pairwise report compares with the last
+    /// subject whose Dense-segs it made (`html_links_densegs`). `None` (the default) where the
+    /// report's Dense-segs never throw (`subject_densegs` makes nothing there): then that pass
+    /// makes none for the subject.
+    fn alignment_id_texts(&self, _s_idx: u32) -> Option<[Vec<u8>; 2]> {
+        None
     }
 
     /// The one section of the alignments of the query's aligned subjects (`group`), where
@@ -786,29 +802,78 @@ pub(super) fn end_here(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1881-1885
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1907-1914
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1921-1934
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4577-4613
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4188-4212
 /// The start of the alignment of aligned subject `s_idx` at position `position` of the query's
-/// alignments, at its `place`s, before its heading (after `end_here`): its load
-/// (`ReportPlace::Load`); before the first alignment, with `-html`, the read of `./.ncbirc` that
-/// `x_InitAlignParams` makes after `GetDbType` loads the first alignment's subject, before that
-/// load where its Seq-align id is local (`GetDbType` does not load it; its heading does).
+/// alignments (`group`), at its `place`s, before its heading: the end of the run where `end`
+/// (`alignment_end`) is at that position, then its load (`ReportPlace::Load`). Before the first
+/// alignment, with `-html`, `x_InitAlignParams` reads `./.ncbirc` after `GetDbType` loads the
+/// first alignment's subject, so before that load (and before the end of the run there) where
+/// its Seq-align id is local (`GetDbType` does not load it; the merge of a query-anchored
+/// section, outfmt 1 to 4, or the pairwise heading does); then the pairwise report (outfmt 0)
+/// makes the Dense-segs of the HSPs of the aligned subjects that `html_links_densegs` does not
+/// pass over, for its links (`x_PreProcessSeqAlign`, `QuerySections::subject_densegs`), which
+/// can throw, before any alignment. One order for both writers (line RG T4b review a B1, N3).
 fn alignment_start<S: QuerySections, W: Write>(
     sections: &S,
+    group: &QueryGroup<'_>,
+    end: Option<(usize, &crate::ncbi_exception::NcbiException)>,
     position: usize,
     s_idx: u32,
     writer: &mut W,
     place: ReportHook<'_, W>,
 ) -> io::Result<()> {
     if position > 0 || sections.html_links().is_none() {
+        end_here(end, position)?;
         return place(ReportPlace::Load(s_idx), writer);
     }
     let ncbirc = ReportPlace::Html(super::html_ids::HtmlPost::Ncbirc);
     if sections.alignment_id_is_local(s_idx) {
         place(ncbirc, writer)?;
+        html_links_densegs(sections, group, writer)?;
+        end_here(end, position)?;
         place(ReportPlace::Load(s_idx), writer)
     } else {
+        end_here(end, position)?;
         place(ReportPlace::Load(s_idx), writer)?;
-        place(ncbirc, writer)
+        place(ncbirc, writer)?;
+        html_links_densegs(sections, group, writer)
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4590-4610
+/// The Dense-segs that the `-html` pairwise report (outfmt 0) makes of the HSPs of the aligned
+/// subjects of the query (`group`), in their order, before its first alignment, for the
+/// alignments' links (`x_PreProcessSeqAlign`, `x_CalcUrlLinksParams`; `alignment_start`). A
+/// subject is passed over where both texts of the last subject whose Dense-segs were made are
+/// not empty, its text without the version is that subject's and its text with the version is
+/// not (`QuerySections::alignment_id_texts`: another version of one accession); the passed
+/// subject does not become the last one, and its Dense-segs are made at its own alignment, as in
+/// the plain report (line RG T4b review b F1). The plain report makes each at its alignment, the
+/// query-anchored section at its merge.
+fn html_links_densegs<S: QuerySections, W: Write>(
+    sections: &S,
+    group: &QueryGroup<'_>,
+    writer: &mut W,
+) -> io::Result<()> {
+    if sections.merges_alignments() {
+        return Ok(());
+    }
+    let mut last: [Vec<u8>; 2] = Default::default();
+    for &s_idx in group.aligned(sections.num_alignments()) {
+        let Some(texts) = sections.alignment_id_texts(s_idx) else {
+            continue;
+        };
+        let [id, versioned] = &last;
+        if !id.is_empty() && !versioned.is_empty() && *id == texts[0] && *versioned != texts[1] {
+            continue;
+        }
+        sections.subject_densegs(writer, group, s_idx)?;
+        last = texts;
+    }
+    Ok(())
 }
 
 /// What the report of query `query` writes to the run's diagnostics at `place`, after the report
@@ -895,16 +960,24 @@ fn write_serial<S: QuerySections, W: Write>(
             if sections.merges_alignments() {
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1997-2003
                 // The merge loads every aligned subject before the section's first byte
-                // (`merged_subject` after each load); without one (`-num_alignments 0`) there is
+                // (`subject_densegs` after each load); without one (`-num_alignments 0`) there is
                 // no section (`DisplaySeqalign` returns at once). A load that throws ends the run
-                // there (`alignment_end`).
+                // there (`alignment_end`). With `-html` the section reads `./.ncbirc` where the
+                // pairwise alignments do, at the first load (`alignment_start`).
                 let aligned = group.aligned(sections.num_alignments());
                 let end = alignment_end(sections, group);
                 if !aligned.is_empty() {
                     for (position, &s_idx) in aligned.iter().enumerate() {
-                        end_here(end, position)?;
-                        place(ReportPlace::Load(s_idx), &mut *writer)?;
-                        sections.merged_subject(writer, group, s_idx)?;
+                        alignment_start(
+                            sections,
+                            group,
+                            end,
+                            position,
+                            s_idx,
+                            &mut *writer,
+                            &mut place,
+                        )?;
+                        sections.subject_densegs(writer, group, s_idx)?;
                     }
                     sections.alignments(writer, q_idx, group)?;
                 }
@@ -915,8 +988,15 @@ fn write_serial<S: QuerySections, W: Write>(
                 for (position, &s_idx) in
                     group.aligned(sections.num_alignments()).iter().enumerate()
                 {
-                    end_here(end, position)?;
-                    alignment_start(sections, position, s_idx, &mut *writer, &mut place)?;
+                    alignment_start(
+                        sections,
+                        group,
+                        end,
+                        position,
+                        s_idx,
+                        &mut *writer,
+                        &mut place,
+                    )?;
                     let hsps = group.subject_hits[&s_idx].len();
                     sections.subject(
                         writer,
@@ -1155,8 +1235,15 @@ fn format_piece<S: QuerySections>(
                 };
                 if from < to {
                     if from == 0 {
-                        end_here(end, position)?;
-                        alignment_start(sections, position, s_idx, &mut buffer, &mut mark)?;
+                        alignment_start(
+                            sections,
+                            group,
+                            end,
+                            position,
+                            s_idx,
+                            &mut buffer,
+                            &mut mark,
+                        )?;
                     }
                     sections.subject(&mut buffer, None, group, s_idx, from..to, &mut mark)?;
                 }
@@ -1167,9 +1254,16 @@ fn format_piece<S: QuerySections>(
             let group = group.expect("a query with a section has hits");
             let end = alignment_end(sections, group);
             for (position, &s_idx) in group.aligned(sections.num_alignments()).iter().enumerate() {
-                end_here(end, position)?;
-                mark(ReportPlace::Load(s_idx), &mut buffer)?;
-                sections.merged_subject(&mut buffer, group, s_idx)?;
+                alignment_start(
+                    sections,
+                    group,
+                    end,
+                    position,
+                    s_idx,
+                    &mut buffer,
+                    &mut mark,
+                )?;
+                sections.subject_densegs(&mut buffer, group, s_idx)?;
             }
             sections.alignments(&mut buffer, piece.query, group)
         }

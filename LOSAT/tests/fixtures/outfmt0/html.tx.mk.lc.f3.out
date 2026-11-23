@@ -1,0 +1,166 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>TBLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ns_pmask.fna).
+           1 sequences; 804 total letters
+
+
+
+<b>Query=</b> nq_pmask back-translation of pq_mask, masked codons lowercase
+
+Length=804
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+ns_pmask back-translation of ps_mask, masked codons lowercase         <a href=#Subject_1>391</a>     0.0    3
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1    1    dasedngwcwyilldmkdapagagvsmvqpaermgllweteecneprrpcwhvtripqfa  180
+Subject_1  1    ........................................K...................  180
+
+Query_1    181  <font color="#000000">kfymmdclqq</font>IELNACHTNSMWPSSLGYLFADLSGEWVWAKLFSW<font color="#000000">yiwrinltdphihye</font>  360
+Subject_1  181  ...................................T........................  360
+
+Query_1    361  QMAVGAHFSQAKWKYCMVETAKKDS<font color="#000000">gkewkktfrg</font>CDCETWKQKYFCLLWRQERTTNV<font color="#000000">fm</font>  540
+Subject_1  361  ..........Q...................                                450
+Subject_1  457                                .......................A......  546
+
+Query_1    541  <font color="#000000">hwphc</font>WEIKQIHFSYVMLIMVLNFQNINRRVIVYVNMVCPEDPHQHDV<font color="#000000">mlsnadfirec</font>A  720
+Subject_1  592                   VML..................A.....................  720
+Subject_1  547  ..................VL                                          606
+Subject_1  376                                                             .  378
+
+Query_1    721  HFITLQGRFCNVNKHAYYPPYKRMGVHI  804
+Subject_1  721  ........C...................  804
+Subject_1  379  ..SQQKWKY.M.                  414
+
+For reading frame +2 of query sequence:
+
+Query_1    5    hlkttvgagtffwt*kmlqqeqaclwcnlqrewacfgrqknatnhvahagmlpvsrnspn  184
+Subject_1  5    .P........SCLI*..HRLA.V*A.S.Q.SV.DFC....S.M.RAD.V.TS.A.L.L.S  184
+
+Query_1    185  <font color="#000000">fi*wivcnr</font>LN*TPVTPIPCGRAAWVICSLT*AENGFGQSCFP<font color="#000000">gifgesi*qtltfttn</font>K  364
+Subject_1  185  ST*.TA...S.*M.....L...PPLDT....CLVP...LN.S..TS.V..*.IH.S..S.  364
+
+Query_1    365  WQSVLTLAKLNGNIVWSKPPRKT<font color="#000000">persgrrlsad</font>ATARLGNKSIFACCGAKRELPM<font color="#000000">clci</font>  544
+Subject_1  365  .LLAPISLSRS..TA.W.Q.K..LV.N..M.                               457
+Subject_1  458                               ..LEA..VK..SRNT.......KPPL.S..T  550
+
+Query_1    545  <font color="#000000">ghia</font>GRLNRFTSLT*CLSWC*IFRILTVESSFTSIWFVRKTLTNTM<font color="#000000">*ccltqilfvna</font>LT  724
+Subject_1  635                                .C.*T.SL.R.R....L.FP......S..I  724
+Subject_1  551  .R.V..S...IFP.*..                                             601
+
+Query_1    725  SSPFRADFVMSINTLTIRRTSAW  793
+Subject_1  725  .LHCK.VVA..TSMH.T.L....  793
+
+For reading frame +3 of query sequence:
+
+Query_1    12   rqrlvlvhssghercssrsrrvygatcrengpalgdrrmqrttspmlacypypairqily  191
+Subject_1  12   ........LA*Y...TGWR.CEH.P.S.AY.TSV..K.V.*.AQT...RH.H.S.C.V.H  191
+
+Query_1    192  <font color="#000000">dglfatd</font>*TERLSHQFHVAEQLGLSVR*LERRMGLGKVVFL<font color="#000000">vylenqfdrpshslrt</font>NGS  371
+Subject_1  192  ...P...RI.C.....Y..VLPWIP..*.VWYL...*T.L..H.AY.S..ST.P..A..   368
+
+Query_1    372  RCSL*PS*MEILYGRNRQERL<font color="#000000">rkgveedfprm</font>RLRDLETKVFLPAVAPRENYQC<font color="#000000">vyalat</font>  551
+
+Query_1    552  <font color="#000000">llgd*tdslll</font>RDAYHGVEFSEY*P*SHRLRQYGLSGRPSPTRC<font color="#000000">dav*rrfys*mr</font>SLHH  731
+Subject_1  636                              .V.EH.R..G.A....Y.FQ.....*V..F.Y  731
+
+Query_1    732  PSGQIL*CQ*TRLLSAVQAHG  794
+Subject_1  732  IARPL.Q..QACI.P.L....  794
+
+For reading frame -1 of query sequence:
+
+Query_1    804  NVHTHALVRRIVSVFIDITKSALKGDEVS<font color="#000000">aftnkicvrq</font>HHIVLVRVFRTNHIDVNDDST  625
+Subject_1  804  DMNA......V.CMLV..ATT..QCN.M..L......GK.N......L.SD.VH.H.HTS  625
+
+Query_1    624  VNILKIQHHDKHHVREVNLFNLP<font color="#000000">amwpmh</font>KHIGSSLLAPQQAKILLFPSLAVA<font color="#000000">saesllp</font>  445
+Subject_1  480                                                  TV.ASKSL.I..  445
+Subject_1  624  IDV.E..N                                                      601
+Subject_1  615       LEIQN....GKM...D..T.R.V..D.SGGF.......VF.L..FT..ASK..    457
+
+Query_1    444  <font color="#000000">ll</font>SGVFLGGFDHTIFPFSLAKVSTDCHL<font color="#000000">fvvnvrvcqidspn</font>IPGKQLCPNPFSAQVSEQ  265
+Subject_1  444  F.TR..F.C.H.AV..LL.REMGANS..L..D.WI....T.DV..E.FS...GTR.....  265
+
+Query_1    264  ITQAARPHGIGVTGVQFN<font color="#000000">llqtihhikfgelrdtgnmpawatwfvaffclpkqahslcrl</font>  85
+Subject_1  264  VSKGG...R.....I..D...AV..VEL.K...A.DV.T.SAR.I.L....QKS.T..W.  85
+
+Query_1    84   <font color="#000000">hhrhacscwsifhvqknvpaptvvfrc</font>V  1
+Subject_1  84   D.A.T.ASRC...IKQD........G.I  1
+
+For reading frame -2 of query sequence:
+
+Query_1    797  TPMRLYGG**ACLLTLQNLP*RVMK*<font color="#000000">ahsriksalds</font>ITSCW*GSSGQ<font color="#000000">tilt*tmtlrl</font>I  618
+Subject_1  797  .....*..*Y.......QR.CN...*.........E......C....A.MF.Y.I.RL.M  618
+
+Query_1    617  F*KFNTMISIT*EK*ICLIS<font color="#000000">qqcgqci</font>NTLVVLSWRHSRQKYFCFQVSQS<font color="#000000">hprkvffhsf</font>  438
+Subject_1  449                                                          ...L  438
+Subject_1  617  .W..R.S.T                                                     591
+Subject_1  599          ...*..*............K....A....NK...........Q.L..       459
+
+Query_1    437  PESFLAVSTIQYFHLAWLK*APTAI<font color="#000000">cs**m*gsvklilqi</font>YQENNFAQTHSPLKSANR*P  258
+Subject_1  437  .........M....FC*E.W.......*W.C...R..R.M....SL...QV.D.....Y.  258
+
+Query_1    257  KLLGHMELV*QAFSS<font color="#000000">icckqsii*nlancgirvtcqhgrrgslhssvsqsrpilsagcti</font>  78
+Subject_1  257  RED..I...*...N....R...M*....*.M.......L......F..HRS..R...W.M  78
+
+Query_1    77   <font color="#000000">dtpapagasfmsrrmyqhqplssd</font>A  3
+Subject_1  77   L.........I.SK...........  3
+
+For reading frame -3 of query sequence:
+
+Query_1    793  PCACTADSKRVY*HYKICPEG**SE<font color="#000000">rihe*nlr*ta</font>SHRVGEGLPDKPY*RKR*LYG*YS  614
+Subject_1  793  ....K.G.MHAC*.CNNGLAM**N..T..*...WK.*....A.P.ER.CS.T.         635
+
+Query_1    613  ENSTP**ASRKRSESV*SP<font color="#000000">snvana*</font>THW*FSLGATAGKNTFV<font color="#000000">sksrsrirgkssstpf</font>R  434
+Subject_1  478                                               ...L*KS*HP.I.YQ  434
+Subject_1  598         ...RKN...*..N.A.S.*R.*WWL....TS.SISA..FH..SL*..        458
+
+Query_1    433  SLSWRFRPYNISI*LG*SEHRLPF<font color="#000000">vrseceglsn*fsky</font>TRKTTLPKPILRSSQRTDNPS  254
+Subject_1  433  ..F.L.P.CS..TSAERNGRQQ..A..G.VD..D*YARC..R.V*...RYQT....GIQG  254
+
+Query_1    253  CSATWNWCDRRSVQ<font color="#000000">svannpsykiwriagyg*hasmgdvvrcillspkagpfslqvap*t</font>  74
+Subject_1  253  RT..*.....H.IR...GS..CRT.Q.E.C.*R.N.VCA.H.T....TEV.YA.L.G.CS  74
+
+Query_1    73   <font color="#000000">rllllehlscpeectstnrclqm</font>  5
+Subject_1  73   H.RQPV...YQAR........R.  5
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 62001
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ns_pmask.fna).
+    Posted date:  Unknown
+  Number of letters in database: 804
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

@@ -62,6 +62,87 @@ pub use crate::report::run_files::{FileReceiver, RunFiles};
 // run's files where the command line makes it, and given to each search of the run.
 pub use crate::report::archive::strategy::StrategyFile;
 
+/// What LOSAT Web reads of the arguments of a search that may write `-export_search_strategy`
+/// (`search_files`): the name of the strategy file, the program's label in NCBI's messages, the
+/// files of `-query`, `-subject` and BLASTN's `-window_masker_db`, and what the search reads from
+/// the run's working directory: the filters of the database of `-db` (`filter`, `None` without
+/// `-db`) and BLASTN's `-filtering_db` (`repeats`).
+struct SearchFiles<'a> {
+    strategy: Option<&'a std::path::Path>,
+    label: &'a str,
+    query: &'a std::path::Path,
+    subject: Option<&'a std::path::Path>,
+    masker: Option<&'a str>,
+    filter: Option<&'a crate::blastinput::db_filter::DbFilterArgs>,
+    repeats: Option<&'a str>,
+}
+
+/// `SearchFiles` of the arguments `command`: `None` for a program that writes no strategy file.
+fn search_files(command: &Commands) -> Option<SearchFiles<'_>> {
+    let (strategy, label, query, subject, db, filter, masker, repeats) = match command {
+        Commands::Blastp(args) => (
+            &args.export_search_strategy,
+            args.app.name(),
+            &args.query,
+            &args.subject,
+            &args.db,
+            &args.db_filter,
+            None,
+            None,
+        ),
+        Commands::Blastn(args) => (
+            &args.export_search_strategy,
+            "BLASTN",
+            &args.query,
+            &args.subject,
+            &args.db,
+            &args.db_filter,
+            args.window_masker_db.as_deref(),
+            args.filtering_db.as_deref(),
+        ),
+        Commands::Tblastn(args) => (
+            &args.export_search_strategy,
+            "TBLASTN",
+            &args.query,
+            &args.subject,
+            &args.db,
+            &args.db_filter,
+            None,
+            None,
+        ),
+        Commands::Tblastx(args) => (
+            &args.export_search_strategy,
+            "TBLASTX",
+            &args.query,
+            &args.subject,
+            &args.db,
+            &args.db_filter,
+            None,
+            None,
+        ),
+        Commands::Blastx(args) => (
+            &args.export_search_strategy,
+            "BLASTX",
+            &args.query,
+            &args.subject,
+            &args.db,
+            &args.db_filter,
+            None,
+            None,
+        ),
+        _ => return None,
+    };
+    Some(SearchFiles {
+        strategy: strategy.as_deref(),
+        label,
+        query: query.as_path(),
+        subject: subject.as_deref(),
+        masker,
+        filter: db.is_some().then_some(filter),
+        repeats,
+    })
+}
+
 /// The `-export_search_strategy` file of the arguments `command` (`words`: the arguments after the
 /// program's name) of a run whose files go to `run_files` (LOSAT Web: `RunFiles::Receiver`), made
 /// where the command line makes it (`strategy::open_strategy_file_in`, as the command line's
@@ -76,51 +157,14 @@ pub fn open_strategy_file(
     run_files: &RunFiles,
 ) -> anyhow::Result<Option<StrategyFile>> {
     use crate::report::run_files::RunFileName;
-    use std::path::Path;
-    let (path, label, query, subject, masker): (Option<&Path>, &str, &Path, _, Option<&str>) =
-        match command {
-            Commands::Blastp(args) => (
-                args.export_search_strategy.as_deref(),
-                args.app.name(),
-                args.query.as_path(),
-                args.subject.as_deref(),
-                None,
-            ),
-            Commands::Blastn(args) => (
-                args.export_search_strategy.as_deref(),
-                "BLASTN",
-                args.query.as_path(),
-                args.subject.as_deref(),
-                args.window_masker_db.as_deref(),
-            ),
-            Commands::Tblastn(args) => (
-                args.export_search_strategy.as_deref(),
-                "TBLASTN",
-                args.query.as_path(),
-                args.subject.as_deref(),
-                None,
-            ),
-            Commands::Tblastx(args) => (
-                args.export_search_strategy.as_deref(),
-                "TBLASTX",
-                args.query.as_path(),
-                args.subject.as_deref(),
-                None,
-            ),
-            Commands::Blastx(args) => (
-                args.export_search_strategy.as_deref(),
-                "BLASTX",
-                args.query.as_path(),
-                args.subject.as_deref(),
-                None,
-            ),
-            _ => return Ok(None),
-        };
+    let Some(files) = search_files(command) else {
+        return Ok(None);
+    };
     let mut others = vec![RunFileName {
         option: "query",
-        name: query.as_os_str(),
+        name: files.query.as_os_str(),
     }];
-    others.extend(subject.map(|subject| RunFileName {
+    others.extend(files.subject.map(|subject| RunFileName {
         option: "subject",
         name: subject.as_os_str(),
     }));
@@ -128,7 +172,7 @@ pub fn open_strategy_file(
         option: "logfile",
         name,
     }));
-    others.extend(masker.map(|masker| RunFileName {
+    others.extend(files.masker.map(|masker| RunFileName {
         option: "window_masker_db",
         name: std::ffi::OsStr::new(masker),
     }));
@@ -138,8 +182,8 @@ pub fn open_strategy_file(
     // compared under their options; any other file of that directory that a relative name opens is
     // a database's (the taxonomy database's too): `-filtering_db`'s for a name that starts with its
     // value or in a run without `-db`, else `-db`'s.
-    if let Some(reads) = directory_reads(command) {
-        if let Some(filter) = reads.filter {
+    if files.filter.is_some() || files.repeats.is_some() {
+        if let Some(filter) = files.filter {
             for (option, list) in [
                 ("seqidlist", &filter.seqidlist),
                 ("negative_seqidlist", &filter.negative_seqidlist),
@@ -152,9 +196,12 @@ pub fn open_strategy_file(
                 }));
             }
         }
-        if let Some(path) = path.filter(|path| path.is_relative() && path.is_file()) {
-            let repeats = reads.filter.is_none()
-                || reads.repeats.is_some_and(|repeats| {
+        let read_there = files
+            .strategy
+            .filter(|path| path.is_relative() && path.is_file());
+        if let Some(path) = read_there {
+            let repeats = files.filter.is_none()
+                || files.repeats.is_some_and(|repeats| {
                     path.as_os_str()
                         .as_encoded_bytes()
                         .starts_with(repeats.as_bytes())
@@ -165,111 +212,32 @@ pub fn open_strategy_file(
             });
         }
     }
-    crate::report::archive::strategy::open_strategy_file_in(run_files, path, None, label, &others)
-}
-
-/// What a search reads from the run's working directory (`open_strategy_file`): the filters of the
-/// database of `-db` (`filter`, `None` without `-db`) and BLASTN's `-filtering_db` (`repeats`).
-struct DirectoryReads<'a> {
-    filter: Option<&'a crate::blastinput::db_filter::DbFilterArgs>,
-    repeats: Option<&'a str>,
-}
-
-/// What the search of `command` reads from the run's working directory; `None` for a search that
-/// reads no file there.
-fn directory_reads(command: &Commands) -> Option<DirectoryReads<'_>> {
-    let (db, filter, repeats) = match command {
-        Commands::Blastp(args) => (&args.db, &args.db_filter, None),
-        Commands::Blastn(args) => (&args.db, &args.db_filter, args.filtering_db.as_deref()),
-        Commands::Tblastn(args) => (&args.db, &args.db_filter, None),
-        Commands::Tblastx(args) => (&args.db, &args.db_filter, None),
-        Commands::Blastx(args) => (&args.db, &args.db_filter, None),
-        _ => return None,
-    };
-    let filter = db.is_some().then_some(filter);
-    (filter.is_some() || repeats.is_some()).then_some(DirectoryReads { filter, repeats })
+    crate::report::archive::strategy::open_strategy_file_in(
+        run_files,
+        files.strategy,
+        None,
+        files.label,
+        &others,
+    )
 }
 
 /// Gives the search of `command` (a search of LOSAT Web's run of the argv, `run_local`) the export
-/// of its requests into `file` (`open_strategy_file`), as the command line's run makes it
-/// (`StrategyExport::for_run`): the recorded options of the arguments, with the `HitlistSize` of
-/// the argv's format numbered `outfmt` and the database of `-db` as the command line names it
-/// (the archive's request shares the export's options handle, `run_local` and
-/// `run_local_database`).
+/// of its requests into `file` (`open_strategy_file`), made as the command line's run makes it
+/// (`StrategyExport::for_args`, the program's `StrategyArgs`), with the `HitlistSize` of the argv's
+/// format numbered `outfmt` (the archive's request shares the export's options handle,
+/// `run_local` and `run_local_database`).
 pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
-    use crate::report::archive::strategy::{HitlistArgs, StrategyExport};
+    use crate::report::archive::strategy::{StrategyArgs, StrategyExport};
     let options = crate::report::archive::OptionsHandle::default();
-    let export = |inputs, counts, database: Option<&str>| {
-        Some(StrategyExport::for_run(
-            file,
-            inputs,
-            Some(outfmt),
-            counts,
-            database,
-            &options,
-        ))
+    let export = |args: &dyn StrategyArgs| {
+        Some(StrategyExport::for_args(args, file, Some(outfmt), &options))
     };
     match command {
-        Commands::Blastp(args) => {
-            let counts = HitlistArgs {
-                max_target_seqs: args.max_target_seqs,
-                num_descriptions: args.num_descriptions,
-                num_alignments: args.num_alignments,
-            };
-            args.strategy = export(
-                crate::algorithm::blastp::archive::option_inputs(args),
-                counts,
-                args.db.as_deref().map(crate::seqdb::db_argument_name),
-            );
-        }
-        Commands::Blastn(args) => {
-            let counts = HitlistArgs {
-                max_target_seqs: args.max_target_seqs,
-                num_descriptions: args.num_descriptions,
-                num_alignments: args.num_alignments,
-            };
-            let inputs = crate::algorithm::blastn::archive::option_inputs(
-                args,
-                args.dust_filtering.as_deref(),
-            );
-            args.strategy = export(inputs, counts, args.database_name());
-        }
-        Commands::Tblastn(args) => {
-            let counts = HitlistArgs {
-                max_target_seqs: args.max_target_seqs,
-                num_descriptions: args.num_descriptions,
-                num_alignments: args.num_alignments,
-            };
-            args.strategy = export(
-                crate::algorithm::tblastn::archive::option_inputs(args),
-                counts,
-                args.database_name(),
-            );
-        }
-        Commands::Tblastx(args) => {
-            let counts = HitlistArgs {
-                max_target_seqs: args.max_target_seqs,
-                num_descriptions: args.num_descriptions,
-                num_alignments: args.num_alignments,
-            };
-            args.strategy = export(
-                crate::algorithm::tblastx::option_inputs(args),
-                counts,
-                args.database_name(),
-            );
-        }
-        Commands::Blastx(args) => {
-            let counts = HitlistArgs {
-                max_target_seqs: args.max_target_seqs.map(|count| count as usize),
-                num_descriptions: args.num_descriptions,
-                num_alignments: args.num_alignments,
-            };
-            args.strategy = export(
-                crate::algorithm::blastx::option_inputs(args),
-                counts,
-                args.database_name(),
-            );
-        }
+        Commands::Blastp(args) => args.strategy = export(&*args),
+        Commands::Blastn(args) => args.strategy = export(&*args),
+        Commands::Tblastn(args) => args.strategy = export(&*args),
+        Commands::Tblastx(args) => args.strategy = export(&*args),
+        Commands::Blastx(args) => args.strategy = export(&*args),
         _ => {}
     }
 }
@@ -278,14 +246,7 @@ pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
 /// reads its records as the command line's reader then reads them (their deflines kept, LOSAT
 /// Web's `store`).
 pub fn export_search_strategy_of(command: &Commands) -> Option<&std::path::Path> {
-    match command {
-        Commands::Blastp(args) => args.export_search_strategy.as_deref(),
-        Commands::Blastn(args) => args.export_search_strategy.as_deref(),
-        Commands::Tblastn(args) => args.export_search_strategy.as_deref(),
-        Commands::Tblastx(args) => args.export_search_strategy.as_deref(),
-        Commands::Blastx(args) => args.export_search_strategy.as_deref(),
-        _ => None,
-    }
+    search_files(command)?.strategy
 }
 
 /// The NCBI application start of a run of `program` with the arguments `words` (after the

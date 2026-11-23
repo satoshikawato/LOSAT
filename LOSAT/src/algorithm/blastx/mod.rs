@@ -74,9 +74,6 @@ pub mod report;
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod anchored;
 mod archive;
-// The options of a run's requests, which LOSAT Web's search strategy file takes (line RG item F1w;
-// `web_adapter::give_strategy`).
-pub(crate) use archive::option_inputs;
 // The streams of a library call's hold, which the report streams of `cli::NcbiOstream` name.
 pub(crate) use blast_xml::HeldFormatWriter;
 mod blast_xml;

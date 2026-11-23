@@ -1265,7 +1265,7 @@ describe('SearchDraft submit', () => {
       useCoordinator: true,
       start: (argv) => {
         const word = argv.find((w) => w in kinds) as keyof typeof kinds | undefined;
-        return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: word === undefined ? null : kinds[word], database: false } };
+        return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: word === undefined ? null : kinds[word], database: false } };
       },
     });
     draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
@@ -1299,7 +1299,7 @@ describe('SearchDraft submit', () => {
     const { draft } = setup({
       start: (argv) => ({
         ok: true,
-        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
       }),
     });
     draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
@@ -1332,7 +1332,7 @@ describe('SearchDraft submit', () => {
     const { draft, requests } = setup({
       start: (argv) => ({
         ok: true,
-        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
       }),
     });
     draft.setPaste('query', 'NC_000913.3');

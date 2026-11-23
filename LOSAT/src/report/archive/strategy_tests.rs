@@ -591,49 +591,90 @@ fn the_file_is_created_and_its_refusal_kept() {
 /// (once, before the next write) when the run ends before it.
 #[test]
 fn held_report_stream_waits_for_the_request_point() {
-    fn held(sink: &Sink) -> (ReportHold, HeldReport<Sink>) {
-        let hold = ReportHold::default();
-        (
-            hold.clone(),
-            HeldReport {
-                inner: sink.clone(),
-                hold,
-            },
-        )
+    fn held(holds: &ReportHolds, sink: &Sink) -> HeldReport<Sink> {
+        HeldReport {
+            inner: sink.clone(),
+            hold: holds.hold(),
+        }
     }
     // Held until the run ends: nothing reaches the stream before.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
+    let (holds, sink) = (ReportHolds::default(), Sink::default());
+    let mut stream = held(&holds, &sink);
     stream.write_all(b"prolog\n").unwrap();
     stream.flush().unwrap();
     assert!(sink.0.lock().unwrap().is_empty());
     // The run ends with NCBI's error: the held bytes, then what the error writes.
-    hold.end(true);
+    holds.end(true);
     stream.write_all(b"error\n").unwrap();
     assert_eq!(&*sink.0.lock().unwrap(), b"prolog\nerror\n");
     // The request point refuses the run: no byte ever.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
+    let (holds, sink) = (ReportHolds::default(), Sink::default());
+    let mut stream = held(&holds, &sink);
     stream.write_all(b"prolog\n").unwrap();
-    hold.drop_held();
+    holds.drop_held();
     stream.write_all(b"more\n").unwrap();
-    hold.end(true);
+    holds.end(true);
     drop(stream);
     assert!(sink.0.lock().unwrap().is_empty());
     // LOSAT's own refusal at the run's end: no byte either.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
+    let (holds, sink) = (ReportHolds::default(), Sink::default());
+    let mut stream = held(&holds, &sink);
     stream.write_all(b"prolog\n").unwrap();
-    hold.end(false);
+    holds.end(false);
     drop(stream);
     assert!(sink.0.lock().unwrap().is_empty());
     // A released stream writes its bytes when it is dropped without another write.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
+    let (holds, sink) = (ReportHolds::default(), Sink::default());
+    let mut stream = held(&holds, &sink);
     stream.write_all(b"prolog\n").unwrap();
-    hold.end(true);
+    holds.end(true);
     drop(stream);
     assert_eq!(&*sink.0.lock().unwrap(), b"prolog\n");
+}
+
+/// Each held stream of a run (LOSAT Web writes each format to its own) gets back only its own
+/// bytes, whichever stream writes first after the run's end; a stream held after the end or the
+/// request point takes the run's state at once.
+#[test]
+fn each_held_stream_gets_its_own_bytes() {
+    let holds = ReportHolds::default();
+    let (first, second) = (Sink::default(), Sink::default());
+    let mut one = HeldReport {
+        inner: first.clone(),
+        hold: holds.hold(),
+    };
+    let mut two = HeldReport {
+        inner: second.clone(),
+        hold: holds.hold(),
+    };
+    one.write_all(b"pairwise prolog\n").unwrap();
+    two.write_all(b"tabular\n").unwrap();
+    holds.end(true);
+    // The second stream writes first: its own bytes, not the first stream's.
+    two.write_all(b"error 2\n").unwrap();
+    one.write_all(b"error 1\n").unwrap();
+    let late = Sink::default();
+    let mut three = HeldReport {
+        inner: late.clone(),
+        hold: holds.hold(),
+    };
+    three.write_all(b"after\n").unwrap();
+    drop((one, two, three));
+    assert_eq!(&*first.0.lock().unwrap(), b"pairwise prolog\nerror 1\n");
+    assert_eq!(&*second.0.lock().unwrap(), b"tabular\nerror 2\n");
+    assert_eq!(&*late.0.lock().unwrap(), b"after\n");
+    // Held after the request point: dropped, as the others.
+    let holds = ReportHolds::default();
+    holds.drop_held();
+    let sink = Sink::default();
+    let mut stream = HeldReport {
+        inner: sink.clone(),
+        hold: holds.hold(),
+    };
+    stream.write_all(b"late\n").unwrap();
+    holds.end(true);
+    drop(stream);
+    assert!(sink.0.lock().unwrap().is_empty());
 }
 
 /// The files that a receiver got (LOSAT Web's run files).
@@ -654,7 +695,8 @@ impl Received {
 }
 
 /// LOSAT Web's strategy file (`RunFiles::Receiver`, line RG's F1w): the receiver gets it under
-/// the name as typed when the export ends, with the bytes that the command line writes to the file;
+/// the name as typed where the run ends (`end_run`, whatever still holds the export), with the bytes
+/// that the command line writes to the file;
 /// a made file dropped before its export (an error after it is made) is the empty file that the
 /// command line leaves; NCBI's error cuts it back as it cuts the command line's file
 /// (`end_run`).
@@ -677,19 +719,16 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
     let made = export(open("out/s.asn").unwrap());
     assert!(!made.holds_report());
     assert!(made.write_request(0..1, &request(&queries, &[])).unwrap());
-    // The run's end lets the posts of its requests go, which hold the export (their marks).
-    end_run(Some(&made), Ok(())).unwrap();
+    // The run's end hands the file over, while a clone of the export is still held; the drop
+    // gives it no second time.
     let kept = made.clone();
-    drop(made);
-    assert!(
-        received.files().is_empty(),
-        "a clone of the export holds the file"
-    );
-    drop(kept);
+    end_run(Some(&made), Ok(())).unwrap();
     assert_eq!(
         received.files(),
         [(b"out/s.asn".to_vec(), FIRST.as_bytes().to_vec())]
     );
+    drop((made, kept));
+    assert_eq!(received.files().len(), 1);
     // An error after the file is made: the file, empty.
     received.0.lock().unwrap().clear();
     drop(open("s.asn").unwrap());
@@ -713,6 +752,31 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
     assert_eq!(
         received.files(),
         [(b"s.asn".to_vec(), FIRST.as_bytes().to_vec())]
+    );
+    // A file that does not reach the run's files is the run's internal error, not a run without
+    // it; a refusal of LOSAT's keeps its own text.
+    struct Closed;
+    impl FileReceiver for Closed {
+        fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+            Err(std::io::Error::other("the archive was closed"))
+        }
+    }
+    let closed = RunFiles::Receiver(Arc::new(Closed));
+    let lost = |result: Result<()>| {
+        let file = create_strategy_file_in(&closed, Path::new("s.asn"), None, "BLASTP", &[]);
+        end_run(Some(&export(file.unwrap())), result)
+            .unwrap_err()
+            .to_string()
+    };
+    let error = lost(Ok(()));
+    assert!(
+        error.starts_with("LOSAT internal error: the -export_search_strategy file did not reach")
+            && error.contains("the archive was closed"),
+        "{error}"
+    );
+    assert_eq!(
+        lost(Err(anyhow::anyhow!("a refusal of LOSAT's"))),
+        "a refusal of LOSAT's"
     );
 }
 

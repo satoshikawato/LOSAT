@@ -8,9 +8,6 @@
 // one Blast4-archive per query batch.
 mod anchored;
 mod archive;
-// The options of a run's requests, which LOSAT Web's search strategy file takes (line RG item F1w;
-// `web_adapter::give_strategy`).
-pub(crate) use archive::option_inputs;
 pub mod args;
 mod besthit;
 pub mod blast_aascan;

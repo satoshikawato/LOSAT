@@ -272,6 +272,39 @@ fn the_names_the_run_has_no_file_for() {
     );
 }
 
+/// A run that NCBI ends after its prolog and before its first request (`-query_loc` past the
+/// query's end: `Empty CBlastQueryVector`), with a name that LOSAT refuses at that request: each of
+/// the run's formats (the argv's, then outfmt 6, 7 and 0) holds its own bytes and gets them back at
+/// the run's end, so every stream is that of the run without the option, the argv's own output and
+/// its signals too (review 1 B1: one hold for every format put outfmt 0's prolog into the argv's
+/// tabular or XML output).
+#[test]
+fn a_run_that_ends_before_its_first_request_keeps_each_formats_bytes() {
+    let (_, _, query, subject, _) = ROWS[0];
+    for outfmt in ["6", "5", "0", "7"] {
+        let plain = [
+            "blastp",
+            "-query",
+            query,
+            "-subject",
+            subject,
+            "-query_loc",
+            "100000-100100",
+            "-outfmt",
+            outfmt,
+        ];
+        let (plain_result, without) = run_files_of(&plain, query, subject);
+        assert!(plain_result.is_err(), "outfmt {outfmt}");
+        for name in ["-", "/dev/stdout", "/dev/stderr", query] {
+            let mut words = plain.to_vec();
+            words.extend(["-export_search_strategy", name]);
+            let (result, streams) = run_files_of(&words, query, subject);
+            assert_eq!(result, plain_result, "outfmt {outfmt} {name}");
+            assert_eq!(streams, without, "outfmt {outfmt} {name}");
+        }
+    }
+}
+
 /// The result of `run` of `words` (program name first), a search of `-db` (line WQA D12a), on the
 /// query file `query` (of `LOSAT/`), and the bytes of each stream that it emitted, joined. The
 /// names of the argv that start with `tests/` are files of `LOSAT/`, given from the adapter's

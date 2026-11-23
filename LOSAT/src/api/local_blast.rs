@@ -760,8 +760,9 @@ impl ReportOutputs<'_> {
     /// and `finish` writes what the command line writes after it (an archive's error archive,
     /// `finish_archive`). Where LOSAT refuses the file at NCBI's first request
     /// (`StrategyExport::holds_report`), each format's writer is held as the command line holds
-    /// its report stream (`strategy::hold_report_send`), through `finish`: a run that NCBI ends
-    /// before that request writes what it held, and the refusal drops it. Without a strategy,
+    /// its report stream (`strategy::hold_report_send`), each writer with its own hold, through
+    /// `finish`: a run that NCBI ends before that request writes to each format what that format
+    /// held, and the refusal drops it. Without a strategy,
     /// `run` and `finish` alone.
     fn with_strategy(
         &mut self,

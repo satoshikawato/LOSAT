@@ -704,7 +704,6 @@ fn write_run(
         )
         .map(|scopes| scopes.with_refusal(scope_refusal.cloned()))
     }));
-    let scope_taken = std::cell::Cell::new(None);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
         let mut quiet = io::sink();
@@ -781,6 +780,21 @@ fn write_run(
     let mut subject_places = std::collections::HashMap::new();
     let mut first_hsp = 0;
     let asks = ReportedAsks::of_all(resolved, other_outfmts);
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264 (cited at
+    // `native::run_inner`'s `batch_take`)
+    // The loop's takes of a reader batch, as the command line's (`native::BatchTake`): the batch
+    // joins the scopes of the queries (line WQA D10 round 5, 2026-11-20) and, with LOSAT Web's
+    // `-export_search_strategy` (the library refuses the option, `api::search::file_options`), its
+    // request is written before the loop looks at the batch's search.
+    let batch_take = super::native::BatchTake::new(
+        &query_scopes,
+        strategy,
+        archive,
+        search_options,
+        search_subjects,
+        search_error,
+        database.is_none().then_some(subjects),
+    );
     // NCBI's scope of the query records at each batch's prefetch (`native::BatchScopes`).
     let batch_scopes =
         super::native::BatchScopes::new(xml, database.as_ref().map(|run| run.database));
@@ -791,13 +805,8 @@ fn write_run(
                       pool: Option<&crate::utils::threading::SearchPool<'_>>|
      -> Result<()> {
         // The batch's set-up has written its `EffectiveSearchSpace` option, which the next batch's
-        // search strategy request holds (`take` below; `native::run_inner`).
-        if let Some(strategy) = strategy {
-            strategy.note_searched(
-                queries_before..queries_before + queries.len(),
-                archive::batch_searched_space(results, search_options),
-            )?;
-        }
+        // search strategy request holds (`take` below).
+        batch_take.note_searched(queries, results, queries_before)?;
         // Every format and the hit list read the lists in the order of the reports.
         report::sort_lists(results);
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (cited at
@@ -1031,40 +1040,10 @@ fn write_run(
         }
         Ok(())
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264 (cited at
-    // `native::run_inner`'s `take`)
-    // The search strategy's request of a reader batch (LOSAT Web's `-export_search_strategy`; the
-    // library refuses the option, `api::search::file_options`), which the loop takes before it
-    // looks at the batch's search, as the command line's (`native::run_inner`), and NCBI's posts
-    // of the bytes that its stream replaced in it.
-    let requests = strategy.map(|_| archive::requests(database.is_none().then_some(subjects)));
     let mut take = |diagnostics: &mut dyn Write,
                     queries: &[FastaRecord],
                     queries_before: usize|
-     -> Result<()> {
-        // The batch the loop takes joins the scopes of the queries first (`native::add_batch_scope`),
-        // as the command line's (line WQA D10 round 5, 2026-11-20).
-        super::native::add_batch_scope(
-            &query_scopes,
-            &scope_taken,
-            queries,
-            queries_before,
-            strategy.is_some(),
-            search_options,
-            search_subjects,
-            search_error,
-        )?;
-        let (Some(strategy), Some(requests)) = (strategy, &requests) else {
-            return Ok(());
-        };
-        requests.write(
-            strategy,
-            queries_before,
-            queries,
-            queries.first().map(FastaRecord::placement),
-        )?;
-        Ok(strategy.write_posts(diagnostics, archive)?)
-    };
+     -> Result<()> { batch_take.take(diagnostics, queries, queries_before) };
     let processed = run_query_batches(
         search_options,
         search_subjects,

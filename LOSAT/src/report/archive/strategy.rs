@@ -88,6 +88,12 @@ pub trait StrategySink: Write + Send {
     /// Whether `truncate` can cut it: a regular file (not a FIFO, a pipe, a terminal or another
     /// device, whose bytes are gone once written).
     fn can_cut(&self) -> bool;
+
+    /// The run has ended (`end_run`): the file is complete. LOSAT Web's file goes to the run's
+    /// receiver here (`ReceivedFile`); a file of the disk is the file system's already.
+    fn hand_over(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// The sink of a strategy file that LOSAT refuses before any request (`-`, NCBI's standard
@@ -129,14 +135,16 @@ impl StrategySink for std::io::BufWriter<std::fs::File> {
 
 /// The strategy file of a caller without files (LOSAT Web, `RunFiles::Receiver`): the file in
 /// memory under the name that the command line writes it to, a regular file that can be cut, which
-/// the receiver gets whole when it is dropped (No NCBI counterpart: NCBI writes a file). That is
-/// when the run's export ends (`StrategyExport`, held by the run's arguments), or, for a run that
-/// stops before its export is made, when the made file is dropped: the receiver gets the file
-/// that the command line leaves then, empty (`create_strategy_file`).
+/// the receiver gets whole where the run ends (`end_run`, `hand_over`: its error is the run's
+/// internal error), or, for a run that stops before its export is made, when the made file is
+/// dropped: the receiver gets the file that the command line leaves then, empty
+/// (`create_strategy_file`). (No NCBI counterpart: NCBI writes a file.)
 pub struct ReceivedFile {
     name: Vec<u8>,
     bytes: Vec<u8>,
     receiver: Arc<dyn FileReceiver>,
+    /// The receiver has got the file (`hand_over`).
+    handed: bool,
 }
 
 impl std::fmt::Debug for ReceivedFile {
@@ -150,6 +158,10 @@ impl std::fmt::Debug for ReceivedFile {
 
 impl Write for ReceivedFile {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        debug_assert!(
+            !self.handed,
+            "a write of the strategy file after its run ended"
+        );
         self.bytes.extend_from_slice(bytes);
         Ok(bytes.len())
     }
@@ -169,13 +181,26 @@ impl StrategySink for ReceivedFile {
     fn can_cut(&self) -> bool {
         true
     }
+
+    fn hand_over(&mut self) -> std::io::Result<()> {
+        if std::mem::replace(&mut self.handed, true) {
+            return Ok(());
+        }
+        self.receiver.receive(&self.name, &self.bytes)
+    }
 }
 
 impl Drop for ReceivedFile {
     fn drop(&mut self) {
-        // The receiver keeps the file (LOSAT Web's run files, emitted after the run): a failure of
-        // its own has no run to fail any more, as a file that the command line cannot close.
-        let _ = self.receiver.receive(&self.name, &self.bytes);
+        // The file of a run that stopped before its export was made (`create_strategy_file_in`):
+        // the receiver keeps it (LOSAT Web's run files, emitted after the run). A failure has no
+        // run to fail any more; in a debug build it is a loss that a test sees.
+        let received = self.hand_over();
+        debug_assert!(
+            received.is_ok() || std::thread::panicking(),
+            "the strategy file {} did not reach the run's files: {received:?}",
+            String::from_utf8_lossy(&self.name)
+        );
     }
 }
 
@@ -217,9 +242,9 @@ struct Shared {
     options: OptionsHandle,
     /// LOSAT's refusal of the file (`create_strategy_file`, `check_report_stream`).
     refusal: Option<String>,
-    /// The report stream's bytes, held from the run's start until NCBI's first request
-    /// (`ReportHold`): only for a file that LOSAT refuses.
-    hold: Option<ReportHold>,
+    /// The report streams' bytes, each stream's held apart from the run's start until NCBI's
+    /// first request (`ReportHolds`): only for a file that LOSAT refuses.
+    hold: Option<ReportHolds>,
     state: Mutex<State>,
 }
 
@@ -302,6 +327,15 @@ fn same_as_output(label: &str) -> String {
     )
 }
 
+/// LOSAT Web's refusal of the strategy file `path`, which the command line's run writes where the
+/// run has no file (`what`, `create_strategy_file_in`).
+fn not_in_the_browser(path: &Path, what: &str) -> String {
+    format!(
+        "-export_search_strategy {} ({what}) is not supported in the browser; give a file name of the run's own",
+        path.display()
+    )
+}
+
 /// The strategy file `path` of a run whose files go to `files` (`RunFiles`): on `Disk` the
 /// command line's (`create_strategy_file`); for a `Receiver` (LOSAT Web, which has no file system
 /// and no `-out`), the file that the command line on Linux makes of the name
@@ -312,7 +346,8 @@ fn same_as_output(label: &str) -> String {
 /// the null device (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name whose
 /// command line run writes where the run has no file: the standard error, a device whose writes
 /// fail or wait for a reader, a file of the system (procfs, a message queue), or the file of
-/// another option of the run (`others`: `-query`, `-subject`, `-logfile`, `-window_masker_db`),
+/// another option of the run (`others`: `-query`, `-subject`, `-logfile`, `-window_masker_db`,
+/// the files that the search reads from the run's folder, `web_adapter::open_strategy_file`),
 /// whose bytes the command line's strategy file replaces or mixes with its own.
 pub fn create_strategy_file_in(
     files: &RunFiles,
@@ -327,14 +362,9 @@ pub fn create_strategy_file_in(
     if path.as_os_str() == "-" {
         return Ok(standard_output_refusal(label));
     }
-    let browser = |what: &str| {
-        StrategyFile {
+    let browser = |what: &str| StrategyFile {
         target: StrategyTarget::None,
-        refusal: Some(format!(
-            "-export_search_strategy {} ({what}) is not supported in the browser; give a file name of the run's own",
-            path.display()
-        )),
-    }
+        refusal: Some(not_in_the_browser(path, what)),
     };
     Ok(match RunFiles::strategy_target(path.as_os_str(), others) {
         Target::File => StrategyFile {
@@ -342,6 +372,7 @@ pub fn create_strategy_file_in(
                 name: path.as_os_str().as_encoded_bytes().to_vec(),
                 bytes: Vec::new(),
                 receiver: receiver.clone(),
+                handed: false,
             }),
             refusal: None,
         },
@@ -406,15 +437,9 @@ enum HoldState {
     Dropped,
 }
 
-/// The shared state of the held report stream of a run whose strategy file LOSAT refuses.
+/// The held state of one report stream of a run whose strategy file LOSAT refuses.
 #[derive(Clone)]
 struct ReportHold(Arc<Mutex<HoldState>>);
-
-impl Default for ReportHold {
-    fn default() -> Self {
-        ReportHold(Arc::new(Mutex::new(HoldState::Holding(Vec::new()))))
-    }
-}
 
 /// What a write of the held stream does (`ReportHold::step`).
 enum HoldStep {
@@ -444,12 +469,8 @@ impl ReportHold {
         })
     }
 
-    fn drop_held(&self) {
-        self.with_state(|state| *state = HoldState::Dropped);
-    }
-
-    /// The run ended: the held bytes are the stream's, as NCBI's error left them, unless
-    /// `keep` is false (LOSAT's refusal, which has no byte before it).
+    /// The run's end or its request point (`ReportHolds::end`): the held bytes are released to
+    /// the stream (`keep`) or dropped.
     fn end(&self, keep: bool) {
         self.with_state(|state| {
             if let HoldState::Holding(held) = state {
@@ -458,6 +479,69 @@ impl ReportHold {
                 } else {
                     HoldState::Dropped
                 };
+            }
+        });
+    }
+}
+
+/// Where a run's holds are (`ReportHolds`): before NCBI's first request and the run's end, then
+/// released or dropped.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HoldPhase {
+    Holding,
+    Released,
+    Dropped,
+}
+
+/// The held report streams of a run whose strategy file LOSAT refuses: one hold for each stream
+/// (`hold_report`), so that each stream gets back only its own bytes, as the command line's one
+/// report stream gets its own (LOSAT Web writes several formats, each to its own stream). The
+/// request point drops them all, the run's end releases or drops them all; a stream held after
+/// that gets the run's phase at once.
+#[derive(Default)]
+struct ReportHolds(Mutex<(Option<HoldPhase>, Vec<ReportHold>)>);
+
+impl ReportHolds {
+    fn with_holds<R>(&self, f: impl FnOnce(&mut (Option<HoldPhase>, Vec<ReportHold>)) -> R) -> R {
+        f(&mut self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+
+    /// The hold of one more report stream.
+    fn hold(&self) -> ReportHold {
+        self.with_holds(|(phase, holds)| {
+            let hold = ReportHold(Arc::new(Mutex::new(
+                match phase.unwrap_or(HoldPhase::Holding) {
+                    HoldPhase::Holding => HoldState::Holding(Vec::new()),
+                    HoldPhase::Released => HoldState::Released(Vec::new()),
+                    HoldPhase::Dropped => HoldState::Dropped,
+                },
+            )));
+            holds.push(hold.clone());
+            hold
+        })
+    }
+
+    fn drop_held(&self) {
+        self.end(false);
+    }
+
+    /// The run ended: the held bytes are each stream's, as NCBI's error left them, unless `keep`
+    /// is false (LOSAT's refusal, which has no byte before it). Only the first end counts.
+    fn end(&self, keep: bool) {
+        self.with_holds(|(phase, holds)| {
+            if phase.is_some() {
+                return;
+            }
+            *phase = Some(if keep {
+                HoldPhase::Released
+            } else {
+                HoldPhase::Dropped
+            });
+            for hold in holds.iter() {
+                hold.end(keep);
             }
         });
     }
@@ -503,13 +587,18 @@ impl<W: Write> Drop for HeldReport<W> {
 /// not written. NCBI writes nothing to the stream before its formatter, and its first request
 /// only after its prolog, so what is held is the prolog (and the reports of the stops that come
 /// first); the run's end writes them before its error (`end_run`), the request point drops them
-/// and refuses. The destination as it is, without a hold or a cost.
+/// and refuses. Each call holds its own stream (`ReportHolds`): a run with more than one report
+/// stream (LOSAT Web's formats) gets each stream's bytes back to that stream. The destination as
+/// it is, without a hold or a cost.
 pub(crate) fn hold_report<'a>(
     strategy: Option<&StrategyExport>,
     inner: Box<dyn Write + 'a>,
 ) -> Box<dyn Write + 'a> {
-    match strategy.and_then(|strategy| strategy.0.hold.clone()) {
-        Some(hold) => Box::new(HeldReport { inner, hold }),
+    match strategy.and_then(|strategy| strategy.0.hold.as_ref()) {
+        Some(holds) => Box::new(HeldReport {
+            inner,
+            hold: holds.hold(),
+        }),
         None => inner,
     }
 }
@@ -519,8 +608,11 @@ pub(crate) fn hold_report_send<'a>(
     strategy: Option<&StrategyExport>,
     inner: Box<dyn Write + Send + 'a>,
 ) -> Box<dyn Write + Send + 'a> {
-    match strategy.and_then(|strategy| strategy.0.hold.clone()) {
-        Some(hold) => Box::new(HeldReport { inner, hold }),
+    match strategy.and_then(|strategy| strategy.0.hold.as_ref()) {
+        Some(holds) => Box::new(HeldReport {
+            inner,
+            hold: holds.hold(),
+        }),
         None => inner,
     }
 }
@@ -580,6 +672,20 @@ pub struct HitlistArgs {
     pub max_target_seqs: Option<usize>,
     pub num_descriptions: Option<usize>,
     pub num_alignments: Option<usize>,
+}
+
+/// What a program's arguments give its search strategy's requests (`StrategyArgs`): the recorded
+/// options, the counts of its `HitlistSize` and the database of `-db` as NCBI keeps it.
+pub(crate) struct StrategyInputs<'a> {
+    pub(crate) inputs: OptionInputs,
+    pub(crate) counts: HitlistArgs,
+    pub(crate) database: Option<&'a str>,
+}
+
+/// The arguments of a program that writes `-export_search_strategy` (`StrategyExport::for_args`):
+/// each program's in its archive module, with its archive's recorded options.
+pub(crate) trait StrategyArgs {
+    fn strategy_inputs(&self) -> StrategyInputs<'_>;
 }
 
 /// The `HitlistSize` option of a run of format `outfmt` (`report_counts`): the archive's is that
@@ -662,7 +768,7 @@ impl StrategyExport {
         Self(Arc::new(Shared {
             request: ArchiveRequest::for_inputs(inputs, database),
             options,
-            hold: refusal.is_some().then(ReportHold::default),
+            hold: refusal.is_some().then(ReportHolds::default),
             refusal,
             state: Mutex::new(State {
                 held: (!sink.can_cut()).then(std::collections::VecDeque::new),
@@ -703,6 +809,23 @@ impl StrategyExport {
             StrategyTarget::None => Box::new(NoSink),
         };
         Self::with_refusal(sink, &inputs, database, options.clone(), file.refusal)
+    }
+
+    /// The export of the run of the arguments `args` into `file` (`for_run`), with the format
+    /// `outfmt` and the run's options handle `options`: the one maker of the command line's runs
+    /// and of LOSAT Web's (`web_adapter::give_strategy`).
+    pub(crate) fn for_args(
+        args: &dyn StrategyArgs,
+        file: StrategyFile,
+        outfmt: Option<i32>,
+        options: &OptionsHandle,
+    ) -> Self {
+        let StrategyInputs {
+            inputs,
+            counts,
+            database,
+        } = args.strategy_inputs();
+        Self::for_run(file, inputs, outfmt, counts, database, options)
     }
 
     /// The run's options handle.
@@ -960,7 +1083,18 @@ pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<
     let ended = end_export(strategy, result);
     let waiting = strategy.with_state(|state| std::mem::take(&mut state.pending));
     drop(waiting);
-    ended
+    // The file is complete: LOSAT Web's goes to the run's files now (`ReceivedFile`), and a file
+    // that does not get there is LOSAT's internal error instead of a run without it. A refusal of
+    // LOSAT's keeps its own text.
+    let handed = strategy.with_state(|state| state.sink.hand_over());
+    match handed {
+        Err(error) if !matches!(&ended, Err(refusal) if !refusal.is::<crate::cli::NativeError>()) => {
+            Err(anyhow::anyhow!(
+                "LOSAT internal error: the -export_search_strategy file did not reach the run's files ({error})"
+            ))
+        }
+        _ => ended,
+    }
 }
 
 /// `end_run` of a run with the export `strategy`, before its waiting posts go.

@@ -119,51 +119,42 @@ export function sortToolParameters(parameters: readonly ToolParameterDescription
     .map((entry) => entry.param);
 }
 
+type MaybeToolDescription = ToolDescription | undefined;
+
+function filterStageParameters(
+  description: MaybeToolDescription,
+  stage: WindowMaskerStage,
+  includeBlock: boolean,
+): readonly ToolParameterDescription[] {
+  if (description === undefined) return [];
+  const excluded = stageExcludedFlags(description, stage);
+  const allowed = description.parameters.filter(
+    (param) =>
+      param.group !== undefined &&
+      !param.hidden &&
+      !WINDOWMASKER_STAGE_FLAGS.has(param.flag) &&
+      (includeBlock || !WINDOWMASKER_BLOCK_FLAGS.has(param.flag)) &&
+      !excluded.has(param.flag),
+  );
+  return sortToolParameters(allowed);
+}
+
 /**
  * Every option allowed in `stage` that belongs under "WindowMasker options": all group-1 options
  * from `-xmlhelp` that are not stage flags, not block options, and not excluded by the stage flag,
  * sorted in NCBI `-help` usage order.
  */
-export function stageOptionParameters(
-  description: ToolDescription | undefined,
-  stage: WindowMaskerStage,
-): readonly ToolParameterDescription[] {
-  if (description === undefined) return [];
-  const excluded = stageExcludedFlags(description, stage);
-  const allowed = description.parameters.filter(
-    (param) =>
-      param.group !== undefined &&
-      !param.hidden &&
-      !WINDOWMASKER_STAGE_FLAGS.has(param.flag) &&
-      !WINDOWMASKER_BLOCK_FLAGS.has(param.flag) &&
-      !excluded.has(param.flag),
-  );
-  return sortToolParameters(allowed);
+export function stageOptionParameters(description: MaybeToolDescription, stage: WindowMaskerStage): readonly ToolParameterDescription[] {
+  return filterStageParameters(description, stage, false);
 }
 
 /** Every non-stage group-1 option allowed in `stage` (including block options like `-infmt`, `-sformat`, `-outfmt`), in usage order. */
-export function allStageParameters(
-  description: ToolDescription | undefined,
-  stage: WindowMaskerStage,
-): readonly ToolParameterDescription[] {
-  if (description === undefined) return [];
-  const excluded = stageExcludedFlags(description, stage);
-  const allowed = description.parameters.filter(
-    (param) =>
-      param.group !== undefined &&
-      !param.hidden &&
-      !WINDOWMASKER_STAGE_FLAGS.has(param.flag) &&
-      !excluded.has(param.flag),
-  );
-  return sortToolParameters(allowed);
+export function allStageParameters(description: MaybeToolDescription, stage: WindowMaskerStage): readonly ToolParameterDescription[] {
+  return filterStageParameters(description, stage, true);
 }
 
 /** Looks up a block option (`-infmt`, `-sformat`, `-outfmt`, etc.) if allowed in `stage`. */
-export function stageBlockParameter(
-  description: ToolDescription | undefined,
-  stage: WindowMaskerStage,
-  flag: string,
-): ToolParameterDescription | undefined {
+export function stageBlockParameter(description: MaybeToolDescription, stage: WindowMaskerStage, flag: string): ToolParameterDescription | undefined {
   if (description === undefined) return undefined;
   if (stageExcludedFlags(description, stage).has(flag)) return undefined;
   return description.parameters.find((param) => param.flag === flag);
@@ -247,6 +238,8 @@ export function toolPrintsKind(argv: readonly string[]): PrintedKind | null {
 const BLASTDB_ALIAS_EXT = /\.(?:nal|pal)$/i;
 const BLASTDB_VOLUME_EXT = /(?:\.\d{2,})?\.(?:nin|pin|nsq|psq|nhr|phr|ndb|pdb|not|pot|ntf|ptf|nto|pto|nos|pos)$/i;
 
+const byShortestName = (a: string, b: string) => a.length - b.length || a.localeCompare(b);
+
 /**
  * Finds the BLAST database name among picked/folder file names: an alias file (`.nal`/`.pal`)
  * first, otherwise a volume's base name (stripping the extension and any `.00` volume suffix).
@@ -255,13 +248,13 @@ export function detectBlastDbName(fileNames: readonly string[]): string | undefi
   const aliases = fileNames
     .filter((name) => BLASTDB_ALIAS_EXT.test(name))
     .map((name) => name.replace(BLASTDB_ALIAS_EXT, ''))
-    .sort((a, b) => a.length - b.length || a.localeCompare(b));
+    .sort(byShortestName);
   if (aliases.length > 0) return aliases[0];
 
   const volumes = fileNames
     .filter((name) => BLASTDB_VOLUME_EXT.test(name))
     .map((name) => name.replace(BLASTDB_VOLUME_EXT, ''))
-    .sort((a, b) => a.length - b.length || a.localeCompare(b));
+    .sort(byShortestName);
   return volumes[0];
 }
 

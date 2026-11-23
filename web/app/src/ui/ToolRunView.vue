@@ -115,6 +115,10 @@ watch(
   { immediate: true },
 );
 
+function setActionError(error: unknown): void {
+  actionError.value = error instanceof Error ? error.message : String(error);
+}
+
 async function downloadActive(): Promise<void> {
   const tab = activeTab.value;
   if (tab === undefined) return;
@@ -122,7 +126,7 @@ async function downloadActive(): Promise<void> {
   try {
     await props.coordinator.exportToolOutput(props.run.snapshot.runId, tab.key);
   } catch (error) {
-    actionError.value = error instanceof Error ? error.message : String(error);
+    setActionError(error);
   }
 }
 
@@ -134,7 +138,7 @@ async function useInBlastn(): Promise<void> {
     const file = await props.coordinator.getToolOutputFile(props.run.snapshot.runId, tab.key, tab.entry.name);
     emit('use-in-blastn', file);
   } catch (error) {
-    actionError.value = error instanceof Error ? error.message : String(error);
+    setActionError(error);
   }
 }
 

@@ -215,12 +215,12 @@ export class ToolDraft {
     const state = this.state.get();
     const { stage, values, extra, description, runFiles } = state;
     const optionFlags = new Set(stageOptionParameters(description, stage).map((param) => param.flag));
-    const nextValues = this.patchStageValues(values, stage, (next) => {
+    const clearedValues = this.patchStageValues(values, stage, (next) => {
       for (const flag of optionFlags) delete next[flag];
     });
     const nextRunFiles = runFiles.filter((entry) => entry.flag === undefined || !optionFlags.has(entry.flag));
     this.set({
-      values: nextValues,
+      values: clearedValues,
       extra: { ...extra, [stage]: '' },
       runFiles: Object.freeze(nextRunFiles),
       runFilesError: undefined,
@@ -246,14 +246,14 @@ export class ToolDraft {
     const existing = new Set(this.state.get().fastaFiles.map((entry) => entry.name));
     const added: ToolInputFile[] = [];
     for (const file of files) {
-      const name = normalizeEntryName(file.name);
-      if (existing.has(name)) {
-        this.set({ message: { kind: 'error', text: `A file named "${name}" is already added.` } });
+      const entryName = normalizeEntryName(file.name);
+      if (existing.has(entryName)) {
+        this.reportError(`A file named "${entryName}" is already added.`);
         continue;
       }
-      existing.add(name);
+      existing.add(entryName);
       const key = `fa-${this.nextKey++}`;
-      added.push({ key, name, size: file.size, file, status: 'inflating' });
+      added.push({ key, name: entryName, size: file.size, file, status: 'inflating' });
     }
     if (added.length === 0) return;
     this.set({
@@ -266,9 +266,7 @@ export class ToolDraft {
   removeFastaFile(key: string): void {
     const target = this.state.get().fastaFiles.find((entry) => entry.key === key);
     if (target === undefined) return;
-    if (target.sessionToken !== undefined) {
-      void this.deps.data.dropSessionFile(target.sessionToken).catch(() => undefined);
-    }
+    this.releaseSessionToken(target.sessionToken);
     this.set({
       fastaFiles: Object.freeze(this.state.get().fastaFiles.filter((entry) => entry.key !== key)),
       message: undefined,
@@ -283,7 +281,7 @@ export class ToolDraft {
 
   setUstatSession(runId: string, runNumber: number, key: string, name: string, size: number): void {
     this.set({
-      ustatSource: { kind: 'session', runId, runNumber, key, name, size },
+      ustatSource: sessionCountsChoice(runId, runNumber, key, name, size),
       message: undefined,
     });
     this.scheduleValidation();
@@ -291,10 +289,7 @@ export class ToolDraft {
 
   setUstatFile(file: File | undefined): void {
     this.set({
-      ustatSource:
-        file === undefined
-          ? { kind: 'none' }
-          : { kind: 'file', file, name: normalizeEntryName(file.name), size: file.size },
+      ustatSource: fileCountsChoice(file),
       message: undefined,
     });
     this.scheduleValidation();
@@ -307,7 +302,7 @@ export class ToolDraft {
 
   setConvertSession(runId: string, runNumber: number, key: string, name: string, size: number): void {
     this.set({
-      convertSource: { kind: 'session', runId, runNumber, key, name, size },
+      convertSource: sessionCountsChoice(runId, runNumber, key, name, size),
       message: undefined,
     });
     this.scheduleValidation();
@@ -315,10 +310,7 @@ export class ToolDraft {
 
   setConvertFile(file: File | undefined): void {
     this.set({
-      convertSource:
-        file === undefined
-          ? { kind: 'none' }
-          : { kind: 'file', file, name: normalizeEntryName(file.name), size: file.size },
+      convertSource: fileCountsChoice(file),
       message: undefined,
     });
     this.scheduleValidation();
@@ -332,11 +324,8 @@ export class ToolDraft {
   /** Switches to Mask and preselects a counts file produced by an earlier run in this session. */
   useCountsForMask(runId: string, runNumber: number, key: string, name: string, size: number): void {
     this.ensureLoaded();
-    this.set({
-      stage: 'mask',
-      ustatSource: { kind: 'session', runId, runNumber, key, name, size },
-      message: undefined,
-    });
+    const ustatSource = sessionCountsChoice(runId, runNumber, key, name, size);
+    this.set({ stage: 'mask', ustatSource, message: undefined });
     this.scheduleValidation();
   }
 
@@ -401,26 +390,17 @@ export class ToolDraft {
 
   /** Preview argv built by the single command-line builder (`buildWindowMaskerArgv`). */
   previewArgv(state: ToolDraftState = this.state.get()): readonly string[] {
-    const { stage, values, extra, outNames, description } = state;
     let extraWords: readonly string[] = [];
     try {
-      extraWords = splitOptions(extra[stage]);
+      extraWords = splitOptions(state.extra[state.stage]);
     } catch {
       // Unclosed quote in Additional options: omit broken extra words from preview; validation reports it.
       extraWords = [];
     }
     const inputName = this.previewInputName(state);
-    const ustatName = stage === 'mask' && state.ustatSource.kind !== 'none' ? state.ustatSource.name : undefined;
+    const ustatName = state.stage === 'mask' && state.ustatSource.kind !== 'none' ? state.ustatSource.name : undefined;
     try {
-      return buildWindowMaskerArgv({
-        stage,
-        ...(inputName === undefined ? {} : { inputName }),
-        ...(ustatName === undefined ? {} : { ustatName }),
-        outName: outNames[stage],
-        values: values[stage],
-        ...(description === undefined ? {} : { description }),
-        extra: extraWords,
-      });
+      return this.buildArgv(state, extraWords, { inputName, ustatName });
     } catch {
       return ['windowmasker'];
     }
@@ -455,20 +435,14 @@ export class ToolDraft {
     try {
       let extraWords: readonly string[];
       try {
-        extraWords = splitOptions(state.extra[state.stage]);
+        extraWords = this.parseExtra(state);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.set({ message: { kind: 'error', text: message } });
+        const message = errorMessage(error);
+        this.reportError(message);
         return { ok: false, message };
       }
 
-      const preview = buildWindowMaskerArgv({
-        stage: state.stage,
-        outName: state.outNames[state.stage],
-        values: state.values[state.stage],
-        ...(state.description === undefined ? {} : { description: state.description }),
-        extra: extraWords,
-      });
+      const preview = this.buildArgv(state, extraWords);
       const prints = toolPrintsKind(preview);
 
       const busy = this.deps.isBusy?.() === true;
@@ -485,7 +459,7 @@ export class ToolDraft {
       const validated = this.state.get().validation;
       if (validated.state === 'invalid' && (!busy || this.validatedKey === currentKey)) {
         const text = toolValidationSummary(validated.message);
-        this.set({ message: { kind: 'error', text } });
+        this.reportError(text);
         return { ok: false, message: text };
       }
 
@@ -505,7 +479,7 @@ export class ToolDraft {
       return result;
     } catch (error) {
       const message = failureText(error);
-      this.set({ message: { kind: 'error', text: message } });
+      this.reportError(message);
       return { ok: false, message };
     } finally {
       this.set({ submitting: false });
@@ -514,19 +488,50 @@ export class ToolDraft {
 
   // --- internals --------------------------------------------------------------------------
 
-  private buildPrintRequest(state: ToolDraftState, extraWords: readonly string[], prints: 'help' | 'version'): ToolRequest {
-    const argv = buildWindowMaskerArgv({
-      stage: state.stage,
-      outName: state.outNames[state.stage],
-      values: state.values[state.stage],
-      ...(state.description === undefined ? {} : { description: state.description }),
-      extra: extraWords,
+  private parseExtra(state: ToolDraftState): readonly string[] {
+    return splitOptions(state.extra[state.stage]);
+  }
+
+  private buildArgv(
+    state: ToolDraftState,
+    extra: readonly string[],
+    names: { readonly inputName?: string | undefined; readonly ustatName?: string | undefined } = {},
+  ): readonly string[] {
+    const { stage, outNames, values, description } = state;
+    return buildWindowMaskerArgv({
+      stage,
+      ...(names.inputName === undefined ? {} : { inputName: names.inputName }),
+      ...(names.ustatName === undefined ? {} : { ustatName: names.ustatName }),
+      outName: outNames[stage],
+      values: values[stage],
+      ...(description === undefined ? {} : { description }),
+      extra,
     });
+  }
+
+  private reportError(text: string): void {
+    this.set({ message: { kind: 'error', text } });
+  }
+
+  private markInvalid(error: unknown): void {
+    this.set({ validation: { state: 'invalid', message: errorMessage(error) } });
+  }
+
+  private releaseSessionToken(token: string | undefined): void {
+    if (token !== undefined) void this.deps.data.dropSessionFile(token).catch(() => undefined);
+  }
+
+  private buildPrintRequest(state: ToolDraftState, extraWords: readonly string[], prints: 'help' | 'version'): ToolRequest {
+    const argv = this.buildArgv(state, extraWords);
     return { tool: 'windowmasker', stage: state.stage, argv, directory: [], prints };
   }
 
+  private oneReq(stage: WindowMaskerStage, argv: readonly string[], directory: readonly ToolDirectoryFile[]): ToolRequest[] {
+    return [{ tool: 'windowmasker', stage, argv, directory }];
+  }
+
   private async buildStageRequests(state: ToolDraftState, extraWords: readonly string[]): Promise<ToolRequest[]> {
-    const { stage, values, outNames, description, runFiles } = state;
+    const { stage, runFiles } = state;
     const baseExtraDir: ToolDirectoryFile[] = runFiles.map((entry) => ({
       name: entry.name,
       file: entry.file,
@@ -536,15 +541,8 @@ export class ToolDraft {
     if (stage === 'convert') {
       const counts = await this.resolveCountsChoice(state.convertSource, 'Choose a counts file to convert.');
       const directory = assembleDirectory([counts, ...baseExtraDir]);
-      const argv = buildWindowMaskerArgv({
-        stage,
-        inputName: counts.name,
-        outName: outNames[stage],
-        values: values[stage],
-        ...(description === undefined ? {} : { description }),
-        extra: extraWords,
-      });
-      return [{ tool: 'windowmasker', stage, argv, directory }];
+      const argv = this.buildArgv(state, extraWords, { inputName: counts.name });
+      return this.oneReq(stage, argv, directory);
     }
 
     const ustatFile =
@@ -554,16 +552,8 @@ export class ToolDraft {
       const inputName = state.blastDbIn.trim();
       if (inputName === '') throw new Error('Enter an input name or open files.');
       const directory = assembleDirectory([...(ustatFile === undefined ? [] : [ustatFile]), ...baseExtraDir]);
-      const argv = buildWindowMaskerArgv({
-        stage,
-        inputName,
-        ...(ustatFile === undefined ? {} : { ustatName: ustatFile.name }),
-        outName: outNames[stage],
-        values: values[stage],
-        ...(description === undefined ? {} : { description }),
-        extra: extraWords,
-      });
-      return [{ tool: 'windowmasker', stage, argv, directory }];
+      const argv = this.buildArgv(state, extraWords, { inputName, ustatName: ustatFile?.name });
+      return this.oneReq(stage, argv, directory);
     }
 
     if (state.fastaFiles.some((entry) => entry.status === 'inflating')) {
@@ -595,15 +585,7 @@ export class ToolDraft {
 
     const makeRequest = (inputEntry: ToolDirectoryFile): ToolRequest => {
       const directory = assembleDirectory([inputEntry, ...(ustatFile === undefined ? [] : [ustatFile]), ...baseExtraDir]);
-      const argv = buildWindowMaskerArgv({
-        stage,
-        inputName: inputEntry.name,
-        ...(ustatFile === undefined ? {} : { ustatName: ustatFile.name }),
-        outName: outNames[stage],
-        values: values[stage],
-        ...(description === undefined ? {} : { description }),
-        extra: extraWords,
-      });
+      const argv = this.buildArgv(state, extraWords, { inputName: inputEntry.name, ustatName: ustatFile?.name });
       return { tool: 'windowmasker', stage, argv, directory };
     };
 
@@ -649,12 +631,12 @@ export class ToolDraft {
       const current = this.state.get().fastaFiles;
       const stillPresent = current.some((entry) => entry.key === key);
       if (!stillPresent) {
-        if (ref.token !== undefined) void this.deps.data.dropSessionFile(ref.token).catch(() => undefined);
+        this.releaseSessionToken(ref.token);
         return;
       }
       const conflict = current.some((entry) => entry.key !== key && entry.name === ref.name);
       if (conflict) {
-        if (ref.token !== undefined) void this.deps.data.dropSessionFile(ref.token).catch(() => undefined);
+        this.releaseSessionToken(ref.token);
         this.updateFastaEntry(key, { status: 'failed', error: `A file named "${ref.name}" is already added.` });
         return;
       }
@@ -698,7 +680,7 @@ export class ToolDraft {
         if (this.descriptionRequest === req) this.descriptionRequest = undefined;
         const unavailable = isUnavailable(error);
         this.set({
-          descriptionError: error instanceof Error ? error.message : String(error),
+          descriptionError: errorMessage(error),
           ...(unavailable ? { descriptionUnavailable: true as const } : {}),
         });
         return undefined;
@@ -718,31 +700,24 @@ export class ToolDraft {
   /** Runs `validateTool` immediately (serialized so older answers are dropped). */
   runValidationNow(): Promise<void> {
     const generation = ++this.validationGeneration;
+    const stale = () => generation !== this.validationGeneration;
     const run = async () => {
       const state = this.state.get();
-      if (generation !== this.validationGeneration) return;
+      if (stale()) return;
       let extraWords: readonly string[];
       try {
-        extraWords = splitOptions(state.extra[state.stage]);
+        extraWords = this.parseExtra(state);
       } catch (error) {
-        this.set({ validation: { state: 'invalid', message: error instanceof Error ? error.message : String(error) } });
+        this.markInvalid(error);
         return;
       }
       let argv: readonly string[];
       try {
         const inputName = this.previewInputName(state) ?? (state.stage === 'convert' ? 'counts.ascii' : 'input.fa');
         const ustatName = state.stage === 'mask' ? (state.ustatSource.kind === 'none' ? 'counts.ascii' : state.ustatSource.name) : undefined;
-        argv = buildWindowMaskerArgv({
-          stage: state.stage,
-          inputName,
-          ...(ustatName === undefined ? {} : { ustatName }),
-          outName: state.outNames[state.stage],
-          values: state.values[state.stage],
-          ...(state.description === undefined ? {} : { description: state.description }),
-          extra: extraWords,
-        });
+        argv = this.buildArgv(state, extraWords, { inputName, ustatName });
       } catch (error) {
-        this.set({ validation: { state: 'invalid', message: error instanceof Error ? error.message : String(error) } });
+        this.markInvalid(error);
         return;
       }
       this.set({ validation: { state: 'checking' } });
@@ -751,8 +726,8 @@ export class ToolDraft {
       try {
         verdict = await this.deps.engine.validateTool(argv, { directory });
       } catch (error) {
-        if (generation !== this.validationGeneration) return;
-        const message = error instanceof Error ? error.message : String(error);
+        if (stale()) return;
+        const message = errorMessage(error);
         this.set({
           validation: isUnavailable(error)
             ? { state: 'unavailable', message }
@@ -760,7 +735,7 @@ export class ToolDraft {
         });
         return;
       }
-      if (generation !== this.validationGeneration) return;
+      if (stale()) return;
       this.validatedKey = this.validationKey(state);
       this.set({
         validation: verdict.ok ? { state: 'ok' } : { state: 'invalid', message: verdict.message },
@@ -804,6 +779,18 @@ export function holdsToolInputs(state: ToolDraftState): boolean {
     state.ustatSource.kind !== 'none' ||
     state.convertSource.kind !== 'none'
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function sessionCountsChoice(runId: string, runNumber: number, key: string, name: string, size: number): ToolCountsChoice {
+  return { kind: 'session', runId, runNumber, key, name, size };
+}
+
+function fileCountsChoice(file: File | undefined): ToolCountsChoice {
+  return file === undefined ? { kind: 'none' } : { kind: 'file', file, name: normalizeEntryName(file.name), size: file.size };
 }
 
 /** Normalizes a picked or folder-relative entry name for the run directory. */

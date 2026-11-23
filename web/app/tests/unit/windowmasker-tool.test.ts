@@ -36,11 +36,41 @@ import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import WINDOWMASKER_XMLHELP from '../../src/infra/fake/windowmasker-xmlhelp.xml?raw';
+import WINDOWMASKER_XMLHELP_DOC from '../../src/infra/fake/windowmasker-xmlhelp.json';
 import type { Downloader } from '../../src/ports/download';
 import { NodeInflater } from './support/node-inflater';
 
-const WM_DESC = parseToolDescription(WINDOWMASKER_XMLHELP);
+const WM_DESC = parseToolDescription(WINDOWMASKER_XMLHELP_DOC.xml);
+const NCBI_RULE = '='.repeat(72);
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function stubEngine(base: FakeEngine, overrides: Partial<EngineGateway & ToolEngine>): EngineGateway & ToolEngine {
+  return {
+    describe: (p) => base.describe(p),
+    describeTool: (t) => base.describeTool(t),
+    start: () => base.start(),
+    validate: (a) => base.validate(a),
+    validateTool: async () => ({ ok: true }),
+    cancel: (id) => base.cancel(id),
+    run: (req, out, onPhase) => base.run(req, out, onPhase),
+    runTool: (argv, opts) => base.runTool(argv, opts),
+    ...overrides,
+  };
+}
+
+function sampleMkCountsRequest(): ToolRequest {
+  return {
+    tool: 'windowmasker',
+    stage: 'mk_counts',
+    argv: ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', 'wmasker.ascii'],
+    directory: [{ name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } }],
+  };
+}
+
+async function nextGate(gates: Array<() => void>): Promise<void> {
+  while (gates.length === 0) await sleep(5);
+  gates.shift()!();
+}
 
 function makeData(store = new MemoryBlockStore()) {
   let tok = 0;
@@ -198,7 +228,7 @@ describe('windowmasker domain helpers', () => {
     const unitErr = [
       'USAGE',
       '  windowmasker [-h] [-unit unit_length] [-dust use_dust]',
-      '========================================================================',
+      NCBI_RULE,
       '',
       "Error: Argument \"unit\". Illegal value, expected 1..16:  `0'",
       "Error:  Argument \"unit\". Illegal value, expected 1..16:  `0'",
@@ -209,7 +239,7 @@ describe('windowmasker domain helpers', () => {
     const dustErr = [
       'USAGE',
       '  windowmasker [-mk_counts] [-dust use_dust]',
-      '========================================================================',
+      NCBI_RULE,
       '',
       "Error: Argument \"mk_counts\". Incompatible with argument:  `dust'",
     ].join('\n');
@@ -311,28 +341,24 @@ describe('Coordinator single queue and DataService tool storage', () => {
     const order: string[] = [];
     const base = new FakeEngine();
     const gates: Array<() => void> = [];
-    const engine: EngineGateway & ToolEngine = {
-      describe: (p) => base.describe(p),
-      describeTool: (t) => base.describeTool(t),
-      start: () => base.start(),
-      validate: (a) => base.validate(a),
+    const waitGate = () => new Promise<void>((resolve) => gates.push(resolve));
+    const engine = stubEngine(base, {
       validateTool: (a) => base.validateTool(a),
-      cancel: (id) => base.cancel(id),
       async run(req: EngineRunRequest, out, onPhase) {
         order.push(`search:${req.runId}:start`);
-        await new Promise<void>((resolve) => gates.push(resolve));
+        await waitGate();
         const info = await base.run(req, out, onPhase);
         order.push(`search:${req.runId}:end`);
         return info;
       },
       async runTool(argv: readonly string[], opts?: ToolRunOptions): Promise<ToolRunResult> {
         order.push(`tool:${argv[1]}:start`);
-        await new Promise<void>((resolve) => gates.push(resolve));
+        await waitGate();
         const res = await base.runTool(argv, opts);
         order.push(`tool:${argv[1]}:end`);
         return res;
       },
-    };
+    });
     const { coordinator } = makeCoordinator(engine);
     const searchReq: SearchRequest = {
       program: 'blastn',
@@ -341,12 +367,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
       parameters: [],
       requestedThreads: 1,
     };
-    const toolReq: ToolRequest = {
-      tool: 'windowmasker',
-      stage: 'mk_counts',
-      argv: ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', 'wmasker.ascii'],
-      directory: [{ name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } }],
-    };
+    const toolReq = sampleMkCountsRequest();
 
     const r1 = (await coordinator.enqueue(searchReq)).runId!;
     const r2 = (await coordinator.enqueueTool(toolReq)).runId!;
@@ -359,17 +380,14 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(coordinator.state.get().runs[2]!.status).toBe('cancelled');
 
     // Release r1 -> r2 -> r4 sequentially.
-    while (gates.length === 0) await new Promise((r) => setTimeout(r, 5));
-    gates.shift()!();
+    await nextGate(gates);
     await waitTerminal(coordinator, r1);
-    while (gates.length === 0) await new Promise((r) => setTimeout(r, 5));
-    gates.shift()!();
+    await nextGate(gates);
     const run2 = await waitTerminal(coordinator, r2);
     expect(isToolRun(run2) && run2.status === 'completed' && run2.record.exitStatus === 0).toBe(true);
     expect(coordinator.sessionMadeCounts()).toHaveLength(1);
 
-    while (gates.length === 0) await new Promise((r) => setTimeout(r, 5));
-    gates.shift()!();
+    await nextGate(gates);
     await waitTerminal(coordinator, r4);
 
     expect(order).toEqual([
@@ -384,14 +402,8 @@ describe('Coordinator single queue and DataService tool storage', () => {
 
   it('commits outputs and stderr of a non-zero exit status tool run and opens them in ResultsBrowser', async () => {
     const base = new FakeEngine();
-    const engine: EngineGateway & ToolEngine = {
-      describe: (p) => base.describe(p),
-      describeTool: (t) => base.describeTool(t),
-      start: () => base.start(),
-      validate: (a) => base.validate(a),
-      validateTool: async () => ({ ok: true }),
+    const engine = stubEngine(base, {
       cancel: () => undefined,
-      run: (req, out, onPhase) => base.run(req, out, onPhase),
       async runTool(_argv, opts) {
         const enc = new TextEncoder();
         await opts?.sinks?.onStderr?.(enc.encode('ERROR: invalid counts header\n'));
@@ -400,7 +412,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
         await sink?.close();
         return { status: 3, stdout: new Blob(), stderr: new Blob(), files: [] };
       },
-    };
+    });
     const { coordinator, data } = makeCoordinator(engine);
     const results = new ResultsBrowser({
       data,
@@ -409,54 +421,44 @@ describe('Coordinator single queue and DataService tool storage', () => {
       runs: coordinator.state,
       verification: { ncbi: '2.17.0', sources: [], programs: {} },
     });
-    const { runId } = await coordinator.enqueueTool({
+    const failedQueued = await coordinator.enqueueTool({
       tool: 'windowmasker',
       stage: 'mask',
       argv: ['windowmasker', '-ustat', 'bad.counts', '-in', 'a.fa', '-out', 'partial.out'],
       directory: [],
     });
-    const finished = await waitTerminal(coordinator, runId!);
+    const runId = failedQueued.runId!;
+    const finished = await waitTerminal(coordinator, runId);
     expect(finished.status).toBe('failed');
     expect(isToolRun(finished) && finished.record.exitStatus).toBe(3);
 
-    await results.open(runId!);
+    await results.open(runId);
     expect(results.state.get().phase).toBe('ready');
     expect(results.state.get().toolRun?.record.exitStatus).toBe(3);
-    const stderrPreview = await coordinator.readToolOutputPreview(runId!, 'stderr', 1024);
+    const stderrPreview = await coordinator.readToolOutputPreview(runId, 'stderr', 1024);
     expect(new TextDecoder().decode(stderrPreview.bytes)).toContain('invalid counts header');
-    const filePreview = await coordinator.readToolOutputPreview(runId!, 'file:0', 1024);
+    const filePreview = await coordinator.readToolOutputPreview(runId, 'file:0', 1024);
     expect(new TextDecoder().decode(filePreview.bytes)).toBe('partial');
   });
 
   it('cancels a running tool run and handles Data worker end cleanly', async () => {
     const base = new FakeEngine({ phaseDelayMs: 500 });
     const { coordinator } = makeCoordinator(base);
-    const { runId } = await coordinator.enqueueTool({
-      tool: 'windowmasker',
-      stage: 'mk_counts',
-      argv: ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', 'wmasker.ascii'],
-      directory: [{ name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } }],
-    });
-    await new Promise((r) => setTimeout(r, 20));
+    const { runId } = await coordinator.enqueueTool(sampleMkCountsRequest());
+    await sleep(20);
     coordinator.cancel(runId!);
     const cancelled = await waitTerminal(coordinator, runId!);
     expect(cancelled.status).toBe('cancelled');
 
     let endWorker!: (err: Error) => void;
     const ended = new Promise<Error>((resolve) => (endWorker = resolve));
-    const hangingEngine: EngineGateway & ToolEngine = {
-      describe: (p) => base.describe(p),
-      describeTool: (t) => base.describeTool(t),
-      start: () => base.start(),
-      validate: (a) => base.validate(a),
-      validateTool: async () => ({ ok: true }),
+    const hangingEngine = stubEngine(base, {
       cancel: () => undefined,
-      run: (req, out, onPhase) => base.run(req, out, onPhase),
       runTool: (_argv, opts) =>
         new Promise((_resolve, reject) => {
           opts?.signal?.addEventListener('abort', () => reject(new RunCancelledError('tool')));
         }),
-    };
+    });
     const second = makeCoordinator(hangingEngine, ended);
     const { runId: r2 } = await second.coordinator.enqueueTool({
       tool: 'windowmasker',
@@ -464,7 +466,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
       argv: ['windowmasker', '-mk_counts'],
       directory: [],
     });
-    await new Promise((r) => setTimeout(r, 20));
+    await sleep(20);
     endWorker(new Error('Data worker stopped'));
     const failed = await waitTerminal(second.coordinator, r2!);
     expect(failed.status).toBe('failed');
@@ -477,11 +479,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     const gate = new Promise<void>((resolve) => (releaseFirst = resolve));
     let validateCalledWhileActive = false;
     let activeRun = false;
-    const blockingEngine: EngineGateway & ToolEngine = {
-      describe: (p) => base.describe(p),
-      describeTool: (t) => base.describeTool(t),
-      start: () => base.start(),
-      validate: (a) => base.validate(a),
+    const blockingEngine = stubEngine(base, {
       validateTool: async (argv) => {
         if (activeRun) {
           validateCalledWhileActive = true;
@@ -490,7 +488,6 @@ describe('Coordinator single queue and DataService tool storage', () => {
         return base.validateTool(argv);
       },
       cancel: () => undefined,
-      run: (req, out, onPhase) => base.run(req, out, onPhase),
       async runTool(argv, opts) {
         if (!activeRun && argv.includes('slow.fa')) {
           activeRun = true;
@@ -499,7 +496,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
         }
         return base.runTool(argv, opts);
       },
-    };
+    });
     const { coordinator } = makeCoordinator(blockingEngine);
     const first = await coordinator.enqueueTool({
       tool: 'windowmasker',

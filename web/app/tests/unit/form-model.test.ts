@@ -63,9 +63,9 @@ describe('searchFormModel', () => {
     const draft = makeDraft();
     draft.setProgram('tblastx');
     await vi.waitFor(() => expect(draft.state.get().description?.program).toBe('tblastx'));
-    const model = searchFormModel(draft, draft.state.get());
-    expect(model.queryGencodes).toEqual(toProgramDescription(DESCRIBE.tblastx).queryGencodes);
-    expect(model.subjectGencodes).toEqual(toProgramDescription(DESCRIBE.tblastx).subjectGencodes);
+    const tblastxModel = searchFormModel(draft, draft.state.get());
+    expect(tblastxModel.queryGencodes).toEqual(toProgramDescription(DESCRIBE.tblastx).queryGencodes);
+    expect(tblastxModel.subjectGencodes).toEqual(toProgramDescription(DESCRIBE.tblastx).subjectGencodes);
   });
 });
 

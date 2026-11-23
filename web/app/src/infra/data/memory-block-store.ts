@@ -43,19 +43,25 @@ export class MemoryBlockStore implements BlockStore {
     const block: MemoryBlock = { chunks: [], length: 0, state: 'open' };
     this.blocks.set(path, block);
     const live = () => this.blocks.get(path) === block;
-    const append = (bytes: Uint8Array) => {
+    const ensureOpen = () => {
       if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
-      if (this.used + bytes.length > this.capacity) {
+    };
+    const ensureCapacity = (delta: number) => {
+      if (this.used + delta > this.capacity) {
         block.state = 'full';
         throw new StorageFullError(this.fullMessage);
       }
+    };
+    const append = (bytes: Uint8Array) => {
+      ensureOpen();
+      ensureCapacity(bytes.length);
       if (bytes.length === 0) return;
       block.chunks.push(bytes.slice());
       block.length += bytes.length;
       this.used += bytes.length;
     };
     const writeAt = (offset: number, bytes: Uint8Array) => {
-      if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
+      ensureOpen();
       if (!Number.isSafeInteger(offset) || offset < 0) {
         throw new RangeError(`invalid write offset ${offset} of block ${path}`);
       }
@@ -66,10 +72,7 @@ export class MemoryBlockStore implements BlockStore {
       }
       const nextLength = Math.max(block.length, offset + bytes.length);
       const delta = nextLength - block.length;
-      if (this.used + delta > this.capacity) {
-        block.state = 'full';
-        throw new StorageFullError(this.fullMessage);
-      }
+      ensureCapacity(delta);
       const merged = new Uint8Array(nextLength);
       let cursor = 0;
       for (const chunk of block.chunks) {
@@ -83,13 +86,13 @@ export class MemoryBlockStore implements BlockStore {
       this.used += delta;
     };
     const clear = () => {
-      if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
+      ensureOpen();
       this.used -= block.length;
       block.chunks.length = 0;
       block.length = 0;
     };
     const truncate = (length: number) => {
-      if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
+      ensureOpen();
       if (!Number.isSafeInteger(length) || length < 0) {
         throw new RangeError(`invalid truncate length ${length} of block ${path}`);
       }
@@ -100,10 +103,7 @@ export class MemoryBlockStore implements BlockStore {
       if (length === block.length) return;
       if (length > block.length) {
         const delta = length - block.length;
-        if (this.used + delta > this.capacity) {
-          block.state = 'full';
-          throw new StorageFullError(this.fullMessage);
-        }
+        ensureCapacity(delta);
         block.chunks.push(new Uint8Array(delta));
         block.length = length;
         this.used += delta;
@@ -133,7 +133,7 @@ export class MemoryBlockStore implements BlockStore {
       clear,
       seal: async () => {
         if (live() && block.state === 'full') throw new StorageFullError(this.fullMessage);
-        if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
+        ensureOpen();
         block.state = 'sealed';
         return block.length;
       },

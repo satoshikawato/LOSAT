@@ -121,15 +121,18 @@ export async function inflateToWriter(
     }
   });
   if (inflation === undefined) return undefined;
+  const checkFailure = () => {
+    if (failure !== undefined) throw failure;
+  };
   try {
     writer = await openWriter();
     for (let start = 0; start < file.size; start += SLICE_BYTES) {
       const end = Math.min(start + SLICE_BYTES, file.size);
       await inflation.push(new Uint8Array(await file.slice(start, end).arrayBuffer()));
-      if (failure !== undefined) throw failure;
+      checkFailure();
     }
     await inflation.end();
-    if (failure !== undefined) throw failure;
+    checkFailure();
     const size = await writer.seal();
     return { plainName: inflation.plainName, size };
   } catch (error) {

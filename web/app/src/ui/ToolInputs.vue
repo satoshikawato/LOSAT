@@ -7,13 +7,14 @@
 // - Mask: Counts (-ustat) picker (session-made counts or Choose file…).
 import { computed, ref } from 'vue';
 import type { SessionCountsEntry } from '../application/coordinator';
-import type { ToolCountsChoice, ToolDraft, ToolDraftState } from '../application/tool-draft';
+import type { ToolDraft, ToolDraftState } from '../application/tool-draft';
 import { stageBlockParameter, toToolParameterField } from '../domain/tools';
 import { formatBytes } from './format';
 import type { FormModel } from './form-model';
 import LosatLoader from './LosatLoader.vue';
 import OptionName from './OptionName.vue';
 import ParameterField from './ParameterField.vue';
+import ToolCountsPicker from './ToolCountsPicker.vue';
 
 const props = defineProps<{
   draft: ToolDraft;
@@ -26,8 +27,6 @@ const dragging = ref(false);
 const fastaInput = ref<HTMLInputElement | null>(null);
 const inFilesInput = ref<HTMLInputElement | null>(null);
 const inFolderInput = ref<HTMLInputElement | null>(null);
-const ustatInput = ref<HTMLInputElement | null>(null);
-const convertInput = ref<HTMLInputElement | null>(null);
 
 const infmtField = computed(() => {
   const param = stageBlockParameter(props.state.description, props.state.stage, '-infmt');
@@ -36,10 +35,16 @@ const infmtField = computed(() => {
 const usesFasta = computed(() => props.draft.usesFastaBox(props.state));
 const fastaCount = computed(() => (props.state.fastaPaste.trim() !== '' ? 1 : 0) + props.state.fastaFiles.length);
 
-function onFastaFiles(event: Event): void {
+function readPickedFiles(event: Event): File[] {
   const input = event.target as HTMLInputElement;
-  if (input.files !== null && input.files.length > 0) props.draft.addFastaFiles([...input.files]);
+  const files = input.files !== null ? [...input.files] : [];
   input.value = '';
+  return files;
+}
+
+function onFastaFiles(event: Event): void {
+  const files = readPickedFiles(event);
+  if (files.length > 0) props.draft.addFastaFiles(files);
 }
 
 function onDrop(event: DragEvent): void {
@@ -52,42 +57,8 @@ function onDrop(event: DragEvent): void {
 }
 
 function onInFiles(event: Event): void {
-  const input = event.target as HTMLInputElement;
-  if (input.files !== null && input.files.length > 0) props.draft.addRunFiles([...input.files]);
-  input.value = '';
-}
-
-function onUstatFile(event: Event): void {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (file !== undefined) props.draft.setUstatFile(file);
-  input.value = '';
-}
-
-function onConvertFile(event: Event): void {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (file !== undefined) props.draft.setConvertFile(file);
-  input.value = '';
-}
-
-function selectValue(choice: ToolCountsChoice): string {
-  return choice.kind === 'session' ? `session:${choice.runId}:${choice.key}` : '';
-}
-
-function onSelectCounts(target: 'ustat' | 'convert', value: string): void {
-  if (value === '') {
-    if (target === 'ustat') props.draft.clearUstat();
-    else props.draft.clearConvert();
-    return;
-  }
-  const match = props.sessionCounts.find((entry) => `session:${entry.runId}:${entry.key}` === value);
-  if (match === undefined) return;
-  if (target === 'ustat') {
-    props.draft.setUstatSession(match.runId, match.runNumber, match.key, match.name, match.size);
-  } else {
-    props.draft.setConvertSession(match.runId, match.runNumber, match.key, match.name, match.size);
-  }
+  const files = readPickedFiles(event);
+  if (files.length > 0) props.draft.addRunFiles(files);
 }
 </script>
 
@@ -107,36 +78,15 @@ function onSelectCounts(target: 'ustat' | 'convert', value: string): void {
         <label class="param-label" for="wm-convert-select">
           Counts file <OptionName class="flag" name="-in" />
         </label>
-        <div class="param-control wm-counts-pick">
-          <span v-if="sessionCounts.length > 0" class="select-clip">
-            <select
-              id="wm-convert-select"
-              :value="selectValue(state.convertSource)"
-              data-testid="wm-convert-select"
-              @change="onSelectCounts('convert', ($event.target as HTMLSelectElement).value)"
-            >
-              <option value="">Choose a counts file from this session…</option>
-              <option v-for="entry in sessionCounts" :key="`${entry.runId}:${entry.key}`" :value="`session:${entry.runId}:${entry.key}`">
-                Run {{ entry.runNumber }}: {{ entry.name }} ({{ formatBytes(entry.size) }})
-              </option>
-            </select>
-          </span>
-          <button type="button" data-testid="wm-convert-choose" @click="convertInput?.click()">Choose file…</button>
-          <input
-            ref="convertInput"
-            class="visually-hidden"
-            type="file"
-            tabindex="-1"
-            aria-hidden="true"
-            aria-label="Choose counts file to convert"
-            data-testid="wm-convert-file"
-            @change="onConvertFile"
-          />
-          <span v-if="state.convertSource.kind !== 'none'" class="file-name" data-testid="wm-convert-chosen">
-            <span>{{ state.convertSource.name }} ({{ formatBytes(state.convertSource.size) }})<template v-if="state.convertSource.kind === 'session'">, from run {{ state.convertSource.runNumber }}</template></span>
-            <button type="button" class="link" data-testid="wm-convert-clear" @click="draft.clearConvert()">Clear</button>
-          </span>
-        </div>
+        <ToolCountsPicker
+          prefix="convert"
+          :source="state.convertSource"
+          :session-counts="sessionCounts"
+          file-aria-label="Choose counts file to convert"
+          @select-session="(e) => draft.setConvertSession(e.runId, e.runNumber, e.key, e.name, e.size)"
+          @choose-file="(file) => draft.setConvertFile(file)"
+          @clear="draft.clearConvert()"
+        />
       </div>
     </template>
 
@@ -282,36 +232,15 @@ function onSelectCounts(target: 'ustat' | 'convert', value: string): void {
       <label class="param-label" for="wm-ustat-select">
         Counts file <OptionName class="flag" name="-ustat" />
       </label>
-      <div class="param-control wm-counts-pick">
-        <span v-if="sessionCounts.length > 0" class="select-clip">
-          <select
-            id="wm-ustat-select"
-            :value="selectValue(state.ustatSource)"
-            data-testid="wm-ustat-select"
-            @change="onSelectCounts('ustat', ($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">Choose a counts file from this session…</option>
-            <option v-for="entry in sessionCounts" :key="`${entry.runId}:${entry.key}`" :value="`session:${entry.runId}:${entry.key}`">
-              Run {{ entry.runNumber }}: {{ entry.name }} ({{ formatBytes(entry.size) }})
-            </option>
-          </select>
-        </span>
-        <button type="button" data-testid="wm-ustat-choose" @click="ustatInput?.click()">Choose file…</button>
-        <input
-          ref="ustatInput"
-          class="visually-hidden"
-          type="file"
-          tabindex="-1"
-          aria-hidden="true"
-          aria-label="Choose counts file for -ustat"
-          data-testid="wm-ustat-file"
-          @change="onUstatFile"
-        />
-        <span v-if="state.ustatSource.kind !== 'none'" class="file-name" data-testid="wm-ustat-chosen">
-          <span>{{ state.ustatSource.name }} ({{ formatBytes(state.ustatSource.size) }})<template v-if="state.ustatSource.kind === 'session'">, from run {{ state.ustatSource.runNumber }}</template></span>
-          <button type="button" class="link" data-testid="wm-ustat-clear" @click="draft.clearUstat()">Clear</button>
-        </span>
-      </div>
+      <ToolCountsPicker
+        prefix="ustat"
+        :source="state.ustatSource"
+        :session-counts="sessionCounts"
+        file-aria-label="Choose counts file for -ustat"
+        @select-session="(e) => draft.setUstatSession(e.runId, e.runNumber, e.key, e.name, e.size)"
+        @choose-file="(file) => draft.setUstatFile(file)"
+        @clear="draft.clearUstat()"
+      />
     </div>
   </fieldset>
 </template>

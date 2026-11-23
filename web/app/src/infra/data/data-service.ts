@@ -551,16 +551,22 @@ export class DataService implements DataGateway {
         if (close) run.port.close();
       }
     };
+    const removeToolBlocks = () => this.deps.store.removeAll(toolRunPrefix(run.token)).catch(() => undefined);
+    const requireOpenFile = (key: string) => {
+      const file = run.files.get(key);
+      if (file === undefined || file.closed) throw new Error(`tool output ${key} is not open`);
+      return file;
+    };
     const fail = (error: unknown, close = false) => {
       const normalized = isStorageFull(error) ? asStorageFull(error) : toError(error);
       run.failure ??= normalized;
-      void this.deps.store.removeAll(toolRunPrefix(run.token)).catch(() => undefined);
+      void removeToolBlocks();
       reply({ id: cmd.id, ok: false, error: { name: normalized.name, message: normalized.message } }, close);
     };
     if (cmd.op === 'discard') {
       if (this.toolRuns.get(runId) === run) {
         this.toolRuns.delete(runId);
-        await this.deps.store.removeAll(toolRunPrefix(run.token)).catch(() => undefined);
+        await removeToolBlocks();
       }
       reply({ id: cmd.id, ok: true }, true);
       return;
@@ -572,7 +578,7 @@ export class DataService implements DataGateway {
     if (run.failure !== undefined) {
       if (cmd.op === 'commit') {
         this.toolRuns.delete(runId);
-        await this.deps.store.removeAll(toolRunPrefix(run.token)).catch(() => undefined);
+        await removeToolBlocks();
       }
       reply({ id: cmd.id, ok: false, error: { name: run.failure.name, message: run.failure.message } }, cmd.op === 'commit');
       return;
@@ -596,14 +602,12 @@ export class DataService implements DataGateway {
         run.fileOrder.push(cmd.key);
         reply({ id: cmd.id, ok: true });
       } else if (cmd.op === 'write') {
-        const file = run.files.get(cmd.key);
-        if (file === undefined || file.closed) throw new Error(`tool output ${cmd.key} is not open`);
+        const file = requireOpenFile(cmd.key);
         file.writer.writeAt(cmd.offset, cmd.bytes);
         if (cmd.bytes.length > 0) file.length = Math.max(file.length, cmd.offset + cmd.bytes.length);
         reply({ id: cmd.id, ok: true });
       } else if (cmd.op === 'truncate') {
-        const file = run.files.get(cmd.key);
-        if (file === undefined || file.closed) throw new Error(`tool output ${cmd.key} is not open`);
+        const file = requireOpenFile(cmd.key);
         file.writer.truncate(cmd.length);
         file.length = cmd.length;
         reply({ id: cmd.id, ok: true });

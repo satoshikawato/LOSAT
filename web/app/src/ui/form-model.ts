@@ -77,6 +77,20 @@ export interface SearchFormModelOptions {
   readonly onMakeCounts?: (() => void) | undefined;
 }
 
+function descriptionFields(state: { readonly descriptionError?: string; readonly descriptionUnavailable?: boolean }) {
+  return {
+    ...(state.descriptionError === undefined ? {} : { descriptionError: state.descriptionError }),
+    ...(state.descriptionUnavailable === undefined ? {} : { descriptionUnavailable: state.descriptionUnavailable }),
+  };
+}
+
+function draftActions(draft: { setField(flag: string, value: FieldValue): void; setExtra(text: string): void }) {
+  return {
+    setField: (flag: string, value: FieldValue) => draft.setField(flag, value),
+    setExtra: (text: string) => draft.setExtra(text),
+  };
+}
+
 /** Adapts `SearchDraft` + `DraftState` into a `FormModel` for ParameterField / ParameterForm / ParameterPair. */
 export function searchFormModel(draft: SearchDraft, state: DraftState, extras: SearchFormModelOptions = {}): FormModel {
   const program = programById(state.program);
@@ -101,14 +115,12 @@ export function searchFormModel(draft: SearchDraft, state: DraftState, extras: S
     refusal: currentRefusal,
     refusalId: REFUSAL_ID,
     idPrefix: 'param',
-    ...(state.descriptionError === undefined ? {} : { descriptionError: state.descriptionError }),
-    ...(state.descriptionUnavailable === undefined ? {} : { descriptionUnavailable: state.descriptionUnavailable }),
-    setField: (flag, value) => draft.setField(flag, value),
+    ...descriptionFields(state),
+    ...draftActions(draft),
     setFile: (flag, file) => draft.setFile(flag, file),
     sections,
     extra: state.extra[state.program],
     extraHelp: SEARCH_EXTRA_HELP,
-    setExtra: (text) => draft.setExtra(text),
     ...(conffileName === undefined ? {} : { conffileName }),
     ...(conffile === undefined ? {} : { conffile }),
     setConffile: (file) => draft.setConffile(file),
@@ -170,13 +182,11 @@ export function windowMaskerFormModel(draft: ToolDraft, state: ToolDraftState): 
     refusal: currentRefusal,
     refusalId: WM_REFUSAL_ID,
     idPrefix: 'wm-param',
-    ...(state.descriptionError === undefined ? {} : { descriptionError: state.descriptionError }),
-    ...(state.descriptionUnavailable === undefined ? {} : { descriptionUnavailable: state.descriptionUnavailable }),
-    setField: (flag, value) => draft.setField(flag, value),
+    ...descriptionFields(state),
+    ...draftActions(draft),
     setFile: (flag, file) => draft.setOptionFile(flag, file),
     sections,
     extra: state.extra[stage],
     extraHelp: WM_EXTRA_HELP,
-    setExtra: (text) => draft.setExtra(text),
   };
 }

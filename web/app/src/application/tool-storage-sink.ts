@@ -36,26 +36,23 @@ export class ToolStorageSink {
       this.fail(new Error('The output channel to temporary storage stopped'));
     };
 
+    const sendBytes = async (
+      chunk: Uint8Array,
+      make: (bytes: Uint8Array) => ToolOutputCommand,
+    ): Promise<void> => {
+      if (chunk.length === 0) return;
+      const { bytes, transfer } = transferable(chunk);
+      await this.send(make(bytes), transfer);
+    };
+
     this.sinks = {
-      onStdout: async (chunk) => {
-        if (chunk.length === 0) return;
-        const { bytes, transfer } = transferable(chunk);
-        await this.send({ id: 0, op: 'stdout', bytes }, transfer);
-      },
-      onStderr: async (chunk) => {
-        if (chunk.length === 0) return;
-        const { bytes, transfer } = transferable(chunk);
-        await this.send({ id: 0, op: 'stderr', bytes }, transfer);
-      },
+      onStdout: (chunk) => sendBytes(chunk, (bytes) => ({ id: 0, op: 'stdout', bytes })),
+      onStderr: (chunk) => sendBytes(chunk, (bytes) => ({ id: 0, op: 'stderr', bytes })),
       onFile: async (name) => {
         const key = `file:${this.nextFile++}`;
         await this.send({ id: 0, op: 'open', key, name }, []);
         const fileSink: ToolFileSink = {
-          write: async (chunk, offset) => {
-            if (chunk.length === 0) return;
-            const { bytes, transfer } = transferable(chunk);
-            await this.send({ id: 0, op: 'write', key, offset, bytes }, transfer);
-          },
+          write: (chunk, offset) => sendBytes(chunk, (bytes) => ({ id: 0, op: 'write', key, offset, bytes })),
           truncate: async (length) => {
             await this.send({ id: 0, op: 'truncate', key, length }, []);
           },

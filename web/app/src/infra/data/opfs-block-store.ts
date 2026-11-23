@@ -104,17 +104,21 @@ export class OpfsBlockStore implements BlockStore {
     const block: OpfsBlock = { file, directory, name, handle, length: 0, state: 'open' };
     this.blocks.set(path, block);
     const live = () => this.blocks.get(path) === block;
-    const writeAt = (offset: number, bytes: Uint8Array) => {
+    const openHandle = (): SyncAccessHandle => {
       if (!live() || block.state !== 'open' || block.handle === undefined) {
         throw new Error(`block ${path} is not open`);
       }
+      return block.handle;
+    };
+    const writeAt = (offset: number, bytes: Uint8Array) => {
+      const h = openHandle();
       if (!Number.isSafeInteger(offset) || offset < 0) {
         throw new RangeError(`invalid write offset ${offset} of block ${path}`);
       }
       if (bytes.length === 0) return;
       let written: number;
       try {
-        written = block.handle.write(bytes as BufferSource, { at: offset });
+        written = h.write(bytes as BufferSource, { at: offset });
       } catch (error) {
         if (!isStorageFull(error)) throw error;
         block.state = 'full';
@@ -129,14 +133,12 @@ export class OpfsBlockStore implements BlockStore {
       }
     };
     const truncate = (length: number) => {
-      if (!live() || block.state !== 'open' || block.handle === undefined) {
-        throw new Error(`block ${path} is not open`);
-      }
+      const h = openHandle();
       if (!Number.isSafeInteger(length) || length < 0) {
         throw new RangeError(`invalid truncate length ${length} of block ${path}`);
       }
       try {
-        block.handle.truncate(length);
+        h.truncate(length);
       } catch (error) {
         if (!isStorageFull(error)) throw error;
         block.state = 'full';
@@ -152,15 +154,13 @@ export class OpfsBlockStore implements BlockStore {
       clear: () => truncate(0),
       seal: async () => {
         if (live() && block.state === 'full') throw new StorageFullError();
-        if (!live() || block.state !== 'open' || block.handle === undefined) {
-          throw new Error(`block ${path} is not open`);
-        }
+        const h = openHandle();
         try {
-          block.handle.flush();
+          h.flush();
         } catch (error) {
           throw isStorageFull(error) ? asStorageFull(error) : error;
         }
-        block.handle.close();
+        h.close();
         block.handle = undefined;
         block.state = 'sealed';
         return block.length;

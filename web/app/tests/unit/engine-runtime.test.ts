@@ -620,7 +620,7 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
     });
     expect(status).toBe(0);
     const xml = Buffer.concat(chunks).toString('utf8');
-    await expect(xml).toMatchFileSnapshot('../../src/infra/fake/windowmasker-xmlhelp.xml');
+    await expect(`${JSON.stringify({ xml })}\n`).toMatchFileSnapshot('../../src/infra/fake/windowmasker-xmlhelp.json');
     const parsed = parseToolDescription(xml);
     const flags = new Set(parsed.parameters.map((param) => param.flag));
     for (const flag of WINDOWMASKER_USAGE_ORDER) expect(flags, flag).toContain(flag);

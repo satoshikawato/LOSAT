@@ -65,20 +65,18 @@ const NAMED_ENTITIES: Readonly<Record<string, string>> = {
   quot: '"',
 };
 
+function decodeNumericEntity(whole: string, raw: string, radix: number): string {
+  const code = Number.parseInt(raw, radix);
+  if (Number.isInteger(code) && code >= 0 && code <= 0x10ffff) return String.fromCodePoint(code);
+  throw new Error(`invalid numeric XML entity ${whole}`);
+}
+
 /** Decodes XML character and named references in a single pass. */
 export function decodeXmlEntities(text: string): string {
   if (!text.includes('&')) return text;
   return text.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|([a-zA-Z]+));/g, (whole, hex: string | undefined, dec: string | undefined, named: string | undefined) => {
-    if (hex !== undefined) {
-      const code = Number.parseInt(hex, 16);
-      if (Number.isInteger(code) && code >= 0 && code <= 0x10ffff) return String.fromCodePoint(code);
-      throw new Error(`invalid numeric XML entity ${whole}`);
-    }
-    if (dec !== undefined) {
-      const code = Number.parseInt(dec, 10);
-      if (Number.isInteger(code) && code >= 0 && code <= 0x10ffff) return String.fromCodePoint(code);
-      throw new Error(`invalid numeric XML entity ${whole}`);
-    }
+    if (hex !== undefined) return decodeNumericEntity(whole, hex, 16);
+    if (dec !== undefined) return decodeNumericEntity(whole, dec, 10);
     const decoded = named === undefined ? undefined : NAMED_ENTITIES[named];
     if (decoded === undefined) throw new Error(`unknown XML entity ${whole}`);
     return decoded;
@@ -110,6 +108,12 @@ function parseXml(input: string): XmlElement {
     while (pos < len && isWhitespace(input.charCodeAt(pos))) pos++;
   };
 
+  const skipComment = (): void => {
+    const end = input.indexOf('-->', pos + 4);
+    if (end < 0) throw new Error('unterminated XML comment');
+    pos = end + 3;
+  };
+
   const skipProlog = (): void => {
     while (pos < len) {
       skipWs();
@@ -118,9 +122,7 @@ function parseXml(input: string): XmlElement {
         if (end < 0) throw new Error('unterminated XML processing instruction');
         pos = end + 2;
       } else if (input.startsWith('<!--', pos)) {
-        const end = input.indexOf('-->', pos + 4);
-        if (end < 0) throw new Error('unterminated XML comment');
-        pos = end + 3;
+        skipComment();
       } else {
         break;
       }
@@ -177,9 +179,7 @@ function parseXml(input: string): XmlElement {
         return { tag, attrs, children, text };
       }
       if (input.startsWith('<!--', pos)) {
-        const end = input.indexOf('-->', pos + 4);
-        if (end < 0) throw new Error('unterminated XML comment');
-        pos = end + 3;
+        skipComment();
       } else if (input.startsWith('<![CDATA[', pos)) {
         const end = input.indexOf(']]>', pos + 9);
         if (end < 0) throw new Error('unterminated CDATA section');
@@ -221,13 +221,11 @@ function parseNumberBound(raw: string | undefined, label: string): number {
   return parsed;
 }
 
-function parseConstraint(constraint: XmlElement): {
-  readonly choices?: readonly string[];
-  readonly caseSensitive?: boolean;
-  readonly range?: ToolParameterRange;
-  readonly constraintDescription?: string;
-} {
+function parseConstraint(
+  constraint: XmlElement,
+): Pick<ToolParameterDescription, 'choices' | 'caseSensitive' | 'range' | 'constraintDescription'> {
   const constraintDescription = childText(constraint, 'description');
+  const desc = constraintDescription === undefined ? {} : { constraintDescription };
   const strings = child(constraint, 'Strings');
   if (strings !== undefined) {
     const choices = strings.children.filter((entry) => entry.tag === 'value').map((entry) => entry.text);
@@ -235,7 +233,7 @@ function parseConstraint(constraint: XmlElement): {
     return {
       choices,
       ...(caseSensitive === undefined ? {} : { caseSensitive }),
-      ...(constraintDescription === undefined ? {} : { constraintDescription }),
+      ...desc,
     };
   }
   const integers = child(constraint, 'Integers');
@@ -246,7 +244,7 @@ function parseConstraint(constraint: XmlElement): {
         max: parseNumberBound(childText(integers, 'max'), 'max'),
         kind: 'integer',
       },
-      ...(constraintDescription === undefined ? {} : { constraintDescription }),
+      ...desc,
     };
   }
   const doubles = child(constraint, 'Doubles');
@@ -257,10 +255,10 @@ function parseConstraint(constraint: XmlElement): {
         max: parseNumberBound(childText(doubles, 'max'), 'max'),
         kind: 'double',
       },
-      ...(constraintDescription === undefined ? {} : { constraintDescription }),
+      ...desc,
     };
   }
-  return constraintDescription === undefined ? {} : { constraintDescription };
+  return desc;
 }
 
 function parseParameter(element: XmlElement): ToolParameterDescription {

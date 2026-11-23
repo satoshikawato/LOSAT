@@ -166,19 +166,22 @@ describe('WasmEngine.describeTool', () => {
     threads: { url: '/threads.wasm', sha256: 'b'.repeat(64), size: 1, artifactSha256: 'c'.repeat(64), transform: 'shared-memory guard' },
   };
   const WINDOWMASKER_XML = readFileSync(join(XMLHELP_DIR, 'windowmasker.xml'), 'utf8');
+  const UNUSED_CONTROL = {
+    describe: () => Promise.reject(new Error('unused')),
+    start: () => Promise.reject(new Error('unused')),
+    validate: () => Promise.reject(new Error('unused')),
+  };
 
   it('delegates to control.describeTool when provided', async () => {
     const expected = parseToolDescription(WINDOWMASKER_XML);
     const engine = new WasmEngine({
       assets: ASSETS,
       control: {
-        describe: () => Promise.reject(new Error('unused')),
+        ...UNUSED_CONTROL,
         describeTool: async (tool) => {
           expect(tool).toBe('windowmasker');
           return expected;
         },
-        start: () => Promise.reject(new Error('unused')),
-        validate: () => Promise.reject(new Error('unused')),
       },
     });
     expect(await engine.describeTool('windowmasker')).toBe(expected);
@@ -189,11 +192,7 @@ describe('WasmEngine.describeTool', () => {
     let workerRef: { onmessage: ((event: MessageEvent<EngineEvent>) => void) | null } | undefined;
     const engine = new WasmEngine({
       assets: ASSETS,
-      control: {
-        describe: () => Promise.reject(new Error('unused')),
-        start: () => Promise.reject(new Error('unused')),
-        validate: () => Promise.reject(new Error('unused')),
-      },
+      control: { ...UNUSED_CONTROL },
       createWorker: () => {
         const worker = {
           onmessage: null as ((event: MessageEvent<EngineEvent>) => void) | null,

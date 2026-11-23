@@ -36,8 +36,10 @@ import { PROGRAMS } from '../../domain/programs';
 import { toolOptionValue } from '../../domain/tool-argv';
 import { WINDOWMASKER_HELP_FLAGS, WINDOWMASKER_VERSION_FLAGS } from '../../domain/tools';
 import DESCRIBE from './describe.json';
-import WINDOWMASKER_XMLHELP from './windowmasker-xmlhelp.xml?raw';
+import WINDOWMASKER_XMLHELP_DOC from './windowmasker-xmlhelp.json';
 import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
+
+const WINDOWMASKER_XMLHELP: string = WINDOWMASKER_XMLHELP_DOC.xml;
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
 
@@ -129,14 +131,21 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     const checkAborted = () => {
       if (options.signal?.aborted === true) throw new RunCancelledError(runId);
     };
+    const pause = () => this.pauseAbortable(options.signal);
     checkAborted();
-    await this.pauseAbortable(options.signal);
+    await pause();
     checkAborted();
 
     const encoder = new TextEncoder();
     const stdoutParts: BlobPart[] = [];
     const stderrParts: BlobPart[] = [];
     const collectedFiles: ToolFile[] = [];
+    const finish = (status: number): ToolRunResult => ({
+      status,
+      stdout: new Blob(stdoutParts),
+      stderr: new Blob(stderrParts),
+      files: collectedFiles,
+    });
     const writeStdout = async (text: string) => {
       const bytes = encoder.encode(text);
       if (options.sinks?.onStdout !== undefined) await options.sinks.onStdout(bytes);
@@ -150,21 +159,21 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     const verdict = await this.validateTool(argv);
     if (!verdict.ok) {
       await writeStderr(`${verdict.message}\n`);
-      return { status: 1, stdout: new Blob(stdoutParts), stderr: new Blob(stderrParts), files: collectedFiles };
+      return finish(1);
     }
 
     const words = argv.slice(1).map((word) => word.split('=', 1)[0]!);
     if (words.includes('-xmlhelp')) {
       await writeStdout(WINDOWMASKER_XMLHELP);
-      return { status: 0, stdout: new Blob(stdoutParts), stderr: new Blob(stderrParts), files: collectedFiles };
+      return finish(0);
     }
     if (words.some((w) => WINDOWMASKER_HELP_FLAGS.has(w))) {
       await writeStdout(`USAGE\n  windowmasker ... (${FAKE_MARKER})\n`);
-      return { status: 0, stdout: new Blob(stdoutParts), stderr: new Blob(stderrParts), files: collectedFiles };
+      return finish(0);
     }
     if (words.some((w) => WINDOWMASKER_VERSION_FLAGS.has(w))) {
       await writeStdout(`windowmasker: 0.2.0 (${FAKE_MARKER})\n`);
-      return { status: 0, stdout: new Blob(stdoutParts), stderr: new Blob(stderrParts), files: collectedFiles };
+      return finish(0);
     }
 
     const outName = toolOptionValue(argv, '-out');
@@ -187,7 +196,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       }
     };
 
-    await this.pauseAbortable(options.signal);
+    await pause();
     checkAborted();
 
     const sameOutAndLog = outName !== undefined && outName !== '-' && logName !== undefined && outName === logName;
@@ -200,7 +209,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       else await writeStderr(logText);
     }
 
-    return { status: 0, stdout: new Blob(stdoutParts), stderr: new Blob(stderrParts), files: collectedFiles };
+    return finish(0);
   }
 
   /**

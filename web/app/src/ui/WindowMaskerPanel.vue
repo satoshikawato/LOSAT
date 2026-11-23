@@ -16,14 +16,13 @@ import {
   windowMaskerStageSummary,
 } from '../domain/tools';
 import { announce } from './announcer';
-import CommandText from './CommandText.vue';
 import { formatBytes } from './format';
 import { windowMaskerFormModel, WM_REFUSAL_ID } from './form-model';
-import LosatLoader from './LosatLoader.vue';
 import OptionName from './OptionName.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
 import ToolInputs from './ToolInputs.vue';
+import ToolRunBar from './ToolRunBar.vue';
 import { useStore } from './useStore';
 
 const props = defineProps<{
@@ -163,20 +162,15 @@ function onRunFiles(event: Event): void {
       <ParameterField v-if="formatField" :model="formModel" :field="formatField" />
     </fieldset>
 
-    <div class="blast-row">
-      <button
-        type="button"
-        class="primary-action"
-        data-testid="wm-run-losat"
-        :aria-disabled="state.submitting || undefined"
-        @click="submit('top')"
-      >
-        <LosatLoader v-if="state.submitting" />{{ buttonLabel }}
-      </button>
-      <p class="wm-command-line" data-testid="wm-command">
-        <code><CommandText :words="commandWords" :takes-value="takesValue" /></code>
-      </p>
-    </div>
+    <ToolRunBar
+      :submitting="state.submitting"
+      :button-label="buttonLabel"
+      button-test-id="wm-run-losat"
+      :command-words="commandWords"
+      :takes-value="takesValue"
+      command-test-id="wm-command"
+      @run="submit('top')"
+    />
 
     <div class="blast-notes">
       <p class="validation" :data-state="state.validation.state" data-testid="wm-argv-validation" aria-live="polite">
@@ -265,20 +259,14 @@ function onRunFiles(event: Event): void {
             </div>
           </template>
         </ParameterForm>
-        <div class="blast-row">
-          <button
-            type="button"
-            class="primary-action"
-            data-testid="wm-run-losat-bottom"
-            :aria-disabled="state.submitting || undefined"
-            @click="submit('bottom')"
-          >
-            <LosatLoader v-if="state.submitting" />{{ buttonLabel }}
-          </button>
-          <p class="wm-command-line">
-            <code><CommandText :words="commandWords" :takes-value="takesValue" /></code>
-          </p>
-        </div>
+        <ToolRunBar
+          :submitting="state.submitting"
+          :button-label="buttonLabel"
+          button-test-id="wm-run-losat-bottom"
+          :command-words="commandWords"
+          :takes-value="takesValue"
+          @run="submit('bottom')"
+        />
         <p v-if="state.message && messageBelow" class="error" data-testid="wm-message">{{ state.message.text }}</p>
       </div>
     </section>

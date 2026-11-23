@@ -2,9 +2,9 @@
 // the same argv array is validated by `validateTool`, run by `runTool`, displayed beside
 // "Run LOSAT" as `losat windowmasker ...` and shown in Run details. Defaults are omitted;
 // Make counts and Convert counts write `-out wmasker.<sformat>` until the user edits it.
-import type { ToolDescription } from 'losat/domain';
+import type { ToolDescription, ToolParameterDescription } from 'losat/domain';
 import { splitOptions } from './argv';
-import { writtenValue, type FormValues } from './parameters';
+import { writtenValue, type FieldValue, type FormValues } from './parameters';
 import {
   allStageParameters,
   defaultCountsOutName,
@@ -31,6 +31,12 @@ export interface WindowMaskerArgvInput {
   readonly description?: ToolDescription;
   /** Extra words parsed from "Additional options" (`splitOptions`). */
   readonly extra?: readonly string[];
+}
+
+function toolWrittenValue(param: ToolParameterDescription, value: FieldValue | undefined): string | boolean | undefined {
+  const field = toToolParameterField(param);
+  const known = param.defaultValue === undefined ? undefined : { defaultValue: param.defaultValue };
+  return writtenValue(field, value, known);
 }
 
 /**
@@ -72,9 +78,7 @@ export function buildWindowMaskerArgv(input: WindowMaskerArgvInput): readonly st
   );
   if (ordered.length > 0) {
     for (const param of ordered) {
-      const field = toToolParameterField(param);
-      const known = param.defaultValue === undefined ? undefined : { defaultValue: param.defaultValue };
-      const written = writtenValue(field, values[param.flag], known);
+      const written = toolWrittenValue(param, values[param.flag]);
       if (written === true) argv.push(param.flag);
       else if (typeof written === 'string') argv.push(param.flag, written);
     }
@@ -111,9 +115,7 @@ export function changedToolOptionsCount(
   let count = 0;
   for (const param of stageOptionParameters(description, stage)) {
     if (WINDOWMASKER_BLOCK_FLAGS.has(param.flag)) continue;
-    const field = toToolParameterField(param);
-    const known = param.defaultValue === undefined ? undefined : { defaultValue: param.defaultValue };
-    if (writtenValue(field, values[param.flag], known) !== undefined) count++;
+    if (toolWrittenValue(param, values[param.flag]) !== undefined) count++;
   }
   if (extra.trim() !== '') count++;
   return count;
@@ -140,12 +142,16 @@ export function toolOptionValue(argv: readonly string[], flag: string): string |
   return found;
 }
 
+function namedOutPath(argv: readonly string[]): string | undefined {
+  const out = toolOptionValue(argv, '-out');
+  return out !== undefined && out !== '-' ? normalizeRelName(out) : undefined;
+}
+
 /** Identifies which option(s) (`-out`, `-logfile`) named an output file produced by a tool run. */
 export function toolFileOptionLabel(argv: readonly string[], fileName: string): string | undefined {
   const target = normalizeRelName(fileName);
-  const out = toolOptionValue(argv, '-out');
   const log = toolOptionValue(argv, '-logfile');
-  const matchesOut = out !== undefined && out !== '-' && normalizeRelName(out) === target;
+  const matchesOut = namedOutPath(argv) === target;
   const matchesLog = log !== undefined && normalizeRelName(log) === target;
   if (matchesOut && matchesLog) return '-out, -logfile';
   if (matchesOut) return '-out';
@@ -156,8 +162,7 @@ export function toolFileOptionLabel(argv: readonly string[], fileName: string): 
 /** Whether `fileName` is the counts output file of `-mk_counts` or `-convert` (eligible for "Use in BLASTN" / "Mask with these counts"). */
 export function isCountsOutputFile(stage: WindowMaskerStage, argv: readonly string[], fileName: string): boolean {
   if (stage !== 'mk_counts' && stage !== 'convert') return false;
-  const out = toolOptionValue(argv, '-out');
-  return out !== undefined && out !== '-' && normalizeRelName(out) === normalizeRelName(fileName);
+  return namedOutPath(argv) === normalizeRelName(fileName);
 }
 
 /**

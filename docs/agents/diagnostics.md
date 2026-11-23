@@ -444,6 +444,7 @@ export LOSAT_X_CHAINRUN=1
 export LOSAT_X_CLUTPAIRS=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
+export LOSAT_X_DCQSAHEAD=1
 export LOSAT_X_DCSEEDLEAN=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
@@ -452,8 +453,10 @@ export LOSAT_X_DP32=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
+export LOSAT_X_DUSTREG=1
 export LOSAT_X_FOLDLEAN=1
 export LOSAT_X_GREEDYROWFUSE=1
+export LOSAT_X_LISTSTEP=1
 export LOSAT_X_MB24=1
 export LOSAT_X_MBCSR=1
 export LOSAT_X_MBFILL=1
@@ -1106,6 +1109,25 @@ Same values, faster computation:
   merge (the literal `std::list` port was deleted), and `DustMasker::mask_subsequence` uses the ring buffer
   for a window of at most 64; `mask_subsequence_reference`, the port of `CSymDustMasker::operator()`, runs
   for a larger window. The unit test compares the ring buffer with that port on random sequences.
+- `LOSAT_X_DUSTREG=1` (DUST: BLASTN's query masking in every task, `dustmasker`, and the sdust step of
+  `windowmasker`; speed; in the strict set from the pull request that added it, 2026-11-23: on unless it is `0`)
+  the symdust loop in `utils/x_dust_regs.rs` (`DustMasker::x_mask_range_regs`). `XTripletWindow` kept the
+  window's scalars in the struct that holds its arrays, and the calls of `find_perfect` took its address, so
+  every scalar was loaded and stored on every letter (line FR s1, H1 §1.2). Here the scalars are a value the
+  loop keeps in registers; the ring of triplets is written twice, so the window is one slice; a full window's
+  letters run without its length (`x_run_full`: `start` follows `pos`, and the three tests of
+  `needs_processing` are one comparison with a table of the thresholds divided by ten that has `u32::MAX`
+  past its end); and `find_perfect` tests each triplet with one comparison against a threshold chosen by a
+  conditional move (`x_gate_limit`), where a branch on whether the triplet was already in the suffix was
+  mispredicted on about every fifth iteration in cDNA. `=0` runs `XTripletWindow` (`x_mask_range`). The same
+  intervals: the unit test compares both with the port of `CSymDustMasker::operator()` on 3,000 random
+  sequences of every kind the masker distinguishes (30,000 in the probe). Measured (ws node 1, dev 49682c228
+  against 82d57d241 and its `=0`, warm-up and rotated rounds, medians of the per-round ratios, every output
+  identical to NCBI BLAST+ 2.17.0's): megablast Sakai x MG1655, one thread, wall x0.954 and cycles x0.950 (15
+  of 15 rounds faster); dc-megablast of 31,168 D. melanogaster cDNAs x 3 Mb of its genome, one thread x0.945
+  and x0.944 (7/7), 16 threads x0.958 and x0.952; blastn of the same pair, 16 threads, x0.990 and x0.986 (8/9);
+  max RSS x0.996 to x1.0002; `=0` x0.976 to x1.012 against dev. DUST's own cycles in the one-thread cDNA run
+  (perf record, node 1): 7.06 G on dev 5db244bec, 4.56 G here (line FR's floor 2.4 to 3.0 G).
 - KARLINFAST (graduated 2026-10-22; no variable) Karlin K convolution in eight lanes (same per-lane
   order). Always run where `first == 0` and eight positions remain; the scalar loop runs for `first != 0`
   and for the remaining positions. The unit test that compared the lanes with the scalar-only run went
@@ -4251,6 +4273,26 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
+- `LOSAT_X_DCQSAHEAD=1` (BLASTN `-task dc-megablast` and megablast given template options, where `LOSAT_X_DCSEEDLEAN`
+  builds a table laid out as CSR (`LOSAT_X_DCCSR`) on a pool of two threads or more; in the strict set from the pull
+  request that added it, 2026-11-23: `LOSAT_X_DCQSAHEAD=0` turns it off) brings in the line of `qs` that each entry
+  of the build's place pass will be written to before the pass writes it (`blastn/x_dc_csr.rs`, argument in its
+  header). The place pass reads `offsets[cell]`, decrements it and writes the word's query offset to `qs` there; `qs`
+  has one element per word (tens of MiB for a large query set), and the pass brought in the `offsets` element of the
+  entry 16 places ahead but not the `qs` line. Now the owner (`x_disc_lookup_par::csr_on_pool_steps`) also reads the
+  `offsets` element of the entry 8 places ahead and brings in the `qs` line it points to. The entries are placed in
+  the same order at the same places; the value read ahead only chooses which line is brought in (x86_64
+  `prefetcht0`; elsewhere nothing is brought in). Its sides are DCSEEDLEAN's pooled build's: the serial build (one
+  thread) and `csr_on_pool` (`LOSAT_X_DCSEEDLEAN=0`) place as before. `[TIMING] disc_lookup_csr: ... qs_ahead=`
+  counts the builds that took it. The unit tests `csr_on_a_pool_lists_the_chains` (2, 3 and 5 threads, chunks of 1 to
+  524,288 positions) and `csr_on_a_pool_at_every_short_length` (0 to 40 words, one letter repeated or random) build
+  each table both ways and compare every cell's run with its chain, the presence vector, the counters and the longest
+  chain, and `LOSAT/tests/blastn_dc_qs_ahead.rs` compares the reports with `=0`'s at 1 and 4 threads.
+  Evidence: ws node 1 (16 cores of one node, memory bound to it), dev d44f18cfa, this change and its `=0` in the
+  same run, alternating, medians: `-task dc-megablast` dmel cDNA 31,168 x dmel 3 Mb `-subject` x0.985 at 16 threads (8 rounds,
+  cycles x0.973), x0.964 at 8 (5, cycles x0.955), x0.970 at 4 (3), x0.999 at 1 (the serial build, unchanged); 5,000 cDNAs x0.996
+  at 16; MG1655 x AP027131 x0.994 at 16 (cycles x0.870), x1.003 at 1 (unchanged path, same instruction count); `=0` within
+  0.6 % of dev; reports identical in every arm; max RSS (VmHWM sampled every 2 ms, 8 rounds) -0.26 % to +0.03 % of dev.
 - `LOSAT_X_DCSEEDLEAN=1` (BLASTN `-task dc-megablast`, and megablast given template options, at two threads or more;
   in the strict set from the pull request that added it, 2026-10-28: `LOSAT_X_DCSEEDLEAN=0` turns it off) changes
   three LOSAT-only parts of dc-megablast's seed stage; each gives the same table, seeds and hits in the same order:
@@ -5858,6 +5900,30 @@ Scheduling (each value computed by one thread with the original function; order 
   proteins x yeast x0.859; one protein x the human genome (99.9 % of 1.23 G candidates of up to 3 hits) x0.999
   (0.993-1.020), one BUSCO protein x yeast, nf-core and Galaxy tblastn rows x1.000. None of the six BLASTX rows of the
   downstream-tool set takes the direct loop (`LOSAT_X_REACH`: no `LOSAT_X_BXSCANBYTE` side), so they are unchanged.
+- `LOSAT_X_LISTSTEP=1` tblastn, tblastx, blastx (speed; in the strict set from the pull request that added it, 2026-11-23;
+  `=0` turns it off; `tblastx/x_scan_byte.rs` `list_steps`, `opaque_entry`, `X_LIST_STEP`): the AVX2 candidate stage of the
+  scan on presence bytes (`LOSAT_X_TBNSCANBYTE`'s units, `LOSAT_X_TBXSCANBYTE`'s tables, BLASTX's direct loop under
+  `LOSAT_X_BXSCANBYTE`) lists a block's candidate words eight at a time: the eight presence bytes are read first, then
+  each word's position is written at the entry pointer and the pointer moved on by its byte, passed through an empty
+  `asm!` (no instruction) so that every store keeps the pointer alone as its address; the words after the last whole
+  step one by one; the plain loops (WebAssembly, x86-64 without AVX2) and other CPUs list as before (`list`). Cause
+  removed: listed one word a step, the loop's counter, test and pointer cost as much as the word, and unrolled, LLVM
+  folds the pointer adds into the next stores' addresses (pointer + index), which the workstation's Ice Lake cores issue
+  as two µops instead of one (one protein x the human genome, line FX s2: a four-word count form ran 5.75 instructions
+  per word instead of 7 but issued 7.55 µops per word instead of 6.97 and took x1.075 of the stage's cycles; its stores
+  still used the store address ports, 1.10 against 1.08 µops per word). The candidates and their order are those of
+  `list` (unit tests `indexes_and_presence_equal_the_rolled_index_and_pv` and
+  `x_scan_byte_equals_ncbi_scan_on_random_subjects` with both forms against NCBI's scan; `tests/tblastn_scan_byte.rs`
+  `the_list_steps_change_no_report`: the report of `=0` at one and four threads, and `steps=` in the
+  `[X_STATS] TBNSCANBYTE` line counts the scan calls that listed in steps; `tests/blastx_scan_byte.rs`: the direct loop
+  with `=0` gives the same reports). Where: the AVX2 candidate stage (platform).
+  Measured 2026-11-23 on the workstation (2x Xeon Gold 6338, node 1, one core, `-num_threads 1`, against dev f06115840
+  built in a tree path of the same length, a warm-up and 5 rounds, arm order rotated; every output the same bytes;
+  `v4-FX/results/s2/s2h_*`): one protein x the human genome (`-db`) cycles x0.957 (37.31 -> 35.71 G, 12.13 -> 11.62 s,
+  instructions x0.925, max RSS x1.000; `=0` x1.004); 40 BUSCO proteins x yeast x0.997 (wall x1.000); TBLASTX AP027131 x
+  AP027133 (gencode 4) x1.000; BLASTX of 5 cDNAs and of a 50 kb genomic query x dmel proteins x1.000 and x1.004 with the
+  instructions of dev (neither takes the AVX2 candidate stage; the same binary with `=0` x1.001 and x1.001, so the 0.4 %
+  is the spread of the rounds, not the stage).
 - `LOSAT_X_TBNSCANRESUME=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-29;
   `=0` turns it off; `tblastx/x_scan_byte.rs` `XScanHeld`, `x_scan_one_range_held`, `tblastn/search_seed.rs`
   `x_scan_unit`, `OFFSET_ARRAY_SIZE`): a unit scanned on presence bytes (`LOSAT_X_TBNSCANBYTE`) keeps the block of

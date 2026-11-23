@@ -57,3 +57,29 @@ fn titles_of_makeblastdb() {
 fn empty_field_gives_no_title() {
     assert_eq!(fasta_reader_title(b""), Ok(None));
 }
+
+/// NCBI's steps of `fasta_reader_title` without its search for the bytes they change, for any
+/// field (also bytes that `printable_string` never writes, and escapes that fail).
+fn title_by_every_step(field: &[u8]) -> Result<Option<Vec<u8>>, &'static str> {
+    let fasta = fasta_reader_fasta(field)?;
+    if fasta.is_empty() {
+        return Ok(None);
+    }
+    let title = replace(&fasta[1..], b"\x01", b" ");
+    Ok(Some(replace(&title, b"\t", TAB_REPLACEMENT).into_owned()))
+}
+
+#[test]
+fn a_field_without_the_bytes_the_steps_change_is_its_title() {
+    for text in crate::utils::byte_search::tests::search_texts() {
+        let field = [b">".as_slice(), &text].concat();
+        let printable = printable_string(&field);
+        for field in [&text[..], &field, &printable] {
+            assert_eq!(
+                fasta_reader_title(field),
+                title_by_every_step(field),
+                "{field:?}"
+            );
+        }
+    }
+}

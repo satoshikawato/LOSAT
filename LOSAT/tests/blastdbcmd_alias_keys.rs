@@ -9,12 +9,16 @@
 //! part 2) `FIRST_OID` / `LAST_OID` of 2^31 or more and the iteration range of the only alias file
 //! of a `-db`, as each sub-command reads NCBI's OID list (`make_d1a2a_fixtures.py`), and (D1b-1)
 //! `OIDLIST` (`make_d1b_blastdbcmd.py`, 2026-11-21) and (D1b-2) `OID_MASK_TYPE`
-//! (`make_d1b2_blastdbcmd.py`, 2026-11-21). The
+//! (`make_d1b2_blastdbcmd.py`, 2026-11-21), and (D1c-1) `GILIST`, `TILIST` and `SEQIDLIST`
+//! over the databases of `tests/db_search/idlist` and the lists over `db/pz4`'s header of no
+//! bytes (`db/pzl*`, `make_d1c_blastdbcmd.py`, 2026-11-22; review 1 of D1c-1: string tags of
+//! `PIG` and `BL_ORD_ID` under a list, TI and GI ISAMs NCBI does not initialise, a `SEQIDLIST`
+//! over two volumes, A382-A389). The
 //! expected bytes are NCBI BLAST+ 2.17.0 blastdbcmd's (the release build on the developer machine,
 //! 2026-11-12 and 2026-11-13, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py` and
 //! `make_d1a2_blastdbcmd.py`); the alias files are in `tests/blastdbcmd/db/ak/`, the batch files
-//! in `tests/blastdbcmd/in/`. `{R}` stands for the directory of the runs (`tests/blastdbcmd`). NCBI
-//! is not run here.
+//! in `tests/blastdbcmd/in/`. `{R}` stands for the directory of the runs (`tests/blastdbcmd`), `{T}`
+//! for the directory `tests`. NCBI is not run here.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -94,24 +98,30 @@ fn frozen(name: &str) -> Vec<u8> {
     fs::read(run_dir().join("expected").join(name)).unwrap()
 }
 
-/// `text` with `{R}` placed, in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md
-/// rule 8).
+/// `text` with `{R}` and `{T}` placed, in LOSAT's words (NCBI's bytes through `losat::wording`,
+/// AGENTS.md rule 8).
 fn placed(text: &[u8]) -> Vec<u8> {
     let root = run_dir();
-    let root = root.to_str().unwrap().as_bytes();
+    let tests = root.parent().unwrap().to_str().unwrap().as_bytes().to_vec();
+    let root = root.to_str().unwrap().as_bytes().to_vec();
     let mut placed = Vec::with_capacity(text.len());
     let mut rest = text;
-    while let Some(at) = rest.windows(3).position(|window| window == b"{R}") {
+    while let Some(at) = rest
+        .windows(3)
+        .position(|window| window == b"{R}" || window == b"{T}")
+    {
         placed.extend_from_slice(&rest[..at]);
-        placed.extend_from_slice(root);
+        placed.extend_from_slice(if rest[at + 1] == b'R' { &root } else { &tests });
         rest = &rest[at + 3..];
     }
     placed.extend_from_slice(rest);
     losat::wording::losat_output_bytes(&placed).into_owned()
 }
 
+/// Whether `text` names a path under the run directory (`{R}`) or the tests directory (`{T}`).
 fn holds_root(text: &[u8]) -> bool {
-    text.windows(3).any(|window| window == b"{R}")
+    text.windows(3)
+        .any(|window| window == b"{R}" || window == b"{T}")
 }
 
 /// The cases: id, words, exit status.
@@ -427,6 +437,124 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A268", &["-db", "../db_search/oidmask/j1", "-entry", "all", "-outfmt", "%o|%a|%t"], 0),
     ("A269", &["-db", "../db_search/oidmask/tover", "-entry", "all", "-outfmt", "%o"], 255),
     ("A270", &["-db", "../db_search/oidmask/tall", "-entry", "all", "-outfmt", "%o|%a|%l|%s", "-line_length", "20"], 0),
+    ("A272", &["-db", "../db_search/idlist/g_gi", "-info"], 0),
+    ("A273", &["-db", "../db_search/idlist/g_gi", "-info", "-exact_length"], 0),
+    ("A274", &["-db", "../db_search/idlist/g_gi", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A275", &["-db", "../db_search/idlist/g_gi", "-entry", "NP_000101.1", "-outfmt", "%o|%a|%t"], 0),
+    ("A276", &["-db", "../db_search/idlist/g_gi", "-entry", "NP_000103.1", "-outfmt", "%o|%a"], 1),
+    ("A277", &["-db", "../db_search/idlist/g_gi", "-entry", "P10102.1,AAA00108.1", "-outfmt", "%o|%a|%g"], 0),
+    ("A278", &["-db", "../db_search/idlist/g_gil", "-info"], 0),
+    ("A279", &["-db", "../db_search/idlist/g_gil", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A280", &["-db", "../db_search/idlist/g_gib", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A281", &["-db", "../db_search/idlist/g_nonl", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A282", &["-db", "../db_search/idlist/g_cr", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A283", &["-db", "../db_search/idlist/g_wrap", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A284", &["-db", "../db_search/idlist/g_unk", "-info"], 0),
+    ("A285", &["-db", "../db_search/idlist/g_unk", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A286", &["-db", "../db_search/idlist/g_hash", "-info"], 2),
+    ("A287", &["-db", "../db_search/idlist/g_hashl", "-info"], 0),
+    ("A288", &["-db", "../db_search/idlist/g_hashl", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 1),
+    ("A289", &["-db", "../db_search/idlist/g_alpha", "-info"], 2),
+    ("A290", &["-db", "../db_search/idlist/g_nl1", "-info"], 2),
+    ("A291", &["-db", "../db_search/idlist/g_empty", "-info"], 2),
+    ("A292", &["-db", "../db_search/idlist/g_badcnt", "-info"], 2),
+    ("A293", &["-db", "../db_search/idlist/g_short", "-info"], 2),
+    ("A294", &["-db", "../db_search/idlist/g_miss", "-info"], 2),
+    ("A295", &["-db", "../db_search/idlist/g_missl", "-info"], 0),
+    ("A296", &["-db", "../db_search/idlist/g_missl", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 1),
+    ("A297", &["-db", "../db_search/idlist/g_rel", "-info"], 2),
+    ("A298", &["-db", "../db_search/idlist/g_miss", "-info", "-dbtype", "prot"], 2),
+    ("A299", &["-db", "../db_search/idlist/g_multi", "-info"], 2),
+    ("A300", &["-db", "../db_search/idlist/g_multil", "-info"], 2),
+    ("A301", &["-db", "../db_search/idlist/g_multil", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 2),
+    ("A302", &["-db", "../db_search/idlist/g_gr", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A303", &["-db", "../db_search/idlist/g_go", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A304", &["-db", "../db_search/idlist/g_nest", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A305", &["-db", "../db_search/idlist/g_nest", "-info"], 0),
+    ("A306", &["-db", "../db_search/idlist/g_sib", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A307", &["-db", "../db_search/idlist/g_bare", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A308", &["-db", "../db_search/idlist/g_bare", "-info"], 0),
+    ("A309", &["-db", "../db_search/idlist/g_bare", "-entry", "NP_000103.1", "-outfmt", "%o|%a"], 0),
+    ("A310", &["-db", "../db_search/idlist/g_bare", "-entry", "NP_000101.1", "-outfmt", "%o|%a"], 0),
+    ("A311", &["-db", "../db_search/idlist/g_ti", "-info"], 2),
+    ("A312", &["-db", "../db_search/idlist/g_til", "-info"], 0),
+    ("A313", &["-db", "../db_search/idlist/g_til", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 1),
+    ("A314", &["-db", "../db_search/idlist/gt_ti", "-info"], 0),
+    ("A315", &["-db", "../db_search/idlist/gt_ti", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A316", &["-db", "../db_search/idlist/gt_ti4", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A317", &["-db", "../db_search/idlist/gt_ti8", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A318", &["-db", "../db_search/idlist/gt_tib", "-info"], 2),
+    ("A319", &["-db", "../db_search/idlist/gt_sib", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A320", &["-db", "../db_search/idlist/gt_sib", "-entry", "gnl|ti|1020", "-outfmt", "%o|%a"], 0),
+    ("A321", &["-db", "../db_search/idlist/gu_gi", "-info"], 2),
+    ("A322", &["-db", "../db_search/idlist/gu_gil", "-info"], 0),
+    ("A323", &["-db", "../db_search/idlist/gu_gil", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 1),
+    ("A324", &["-db", "../db_search/idlist/g4_sq", "-info"], 0),
+    ("A325", &["-db", "../db_search/idlist/g4_sq", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A326", &["-db", "../db_search/idlist/g4_sqc", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A327", &["-db", "../db_search/idlist/g4_sqd", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A328", &["-db", "../db_search/idlist/g4_sqe", "-info"], 0),
+    ("A329", &["-db", "../db_search/idlist/g4_sqe", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A330", &["-db", "../db_search/idlist/g4_sqm", "-info"], 2),
+    ("A331", &["-db", "../db_search/idlist/g4_gs", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A332", &["-db", "../db_search/idlist/g4_gsu", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A333", &["-db", "../db_search/idlist/g4_gi", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A334", &["-db", "../db_search/idlist/g4_tx", "-info"], 0),
+    ("A335", &["-db", "../db_search/idlist/g4_tx", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A336", &["-db", "../db_search/idlist/g4_txm", "-info"], 0),
+    ("A337", &["-db", "../db_search/idlist/gm_gi", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A338", &["-db", "../db_search/idlist/gm_v0", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A339", &["-db", "../db_search/idlist/gm_v1", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A340", &["-db", "../db_search/idlist/gm_v01", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A341", &["-db", "../db_search/idlist/gm_mix", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A342", &["-db", "../db_search/idlist/gm_mix", "-info"], 0),
+    ("A343", &["-db", "../db_search/idlist/gm_fr", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A344", &["-db", "../db_search/idlist/n_gi", "-dbtype", "nucl", "-info"], 0),
+    ("A345", &["-db", "../db_search/idlist/n_gi", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A346", &["-db", "../db_search/idlist/n_gi", "-dbtype", "nucl", "-info", "-exact_length"], 0),
+    ("A347", &["-db", "../db_search/idlist/n4_sq", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A348", &["-db", "../db_search/idlist/n4_gi", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A349", &["-db", "../db_search/idlist/g_gi", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%o|%a|%T"], 0),
+    ("A350", &["-db", "../db_search/idlist/g_gi", "-taxids", "10090", "-no_taxid_expansion", "-outfmt", "%o|%a|%T"], 0),
+    ("A351", &["-db", "../db_search/idlist/g_bare", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%o|%a|%T"], 0),
+    ("A352", &["-db", "../db_search/idlist/g_hash", "-dbtype", "prot", "-info"], 2),
+    ("A353", &["-db", "../db_search/idlist/g_alpha", "-dbtype", "prot", "-info"], 2),
+    ("A354", &["-db", "../db_search/idlist/g_nl1", "-dbtype", "prot", "-info"], 2),
+    ("A355", &["-db", "../db_search/idlist/g_empty", "-dbtype", "prot", "-info"], 2),
+    ("A356", &["-db", "../db_search/idlist/g_badcnt", "-dbtype", "prot", "-info"], 2),
+    ("A357", &["-db", "../db_search/idlist/g_short", "-dbtype", "prot", "-info"], 2),
+    ("A358", &["-db", "../db_search/idlist/g_rel", "-dbtype", "prot", "-info"], 2),
+    ("A359", &["-db", "../db_search/idlist/g_multi", "-dbtype", "prot", "-info"], 2),
+    ("A360", &["-db", "../db_search/idlist/g_multil", "-dbtype", "prot", "-info"], 2),
+    ("A361", &["-db", "../db_search/idlist/g_ti", "-dbtype", "prot", "-info"], 2),
+    ("A362", &["-db", "../db_search/idlist/gt_tib", "-dbtype", "prot", "-info"], 2),
+    ("A363", &["-db", "../db_search/idlist/gu_gi", "-dbtype", "prot", "-info"], 2),
+    ("A364", &["-db", "../db_search/idlist/g4_sqm", "-dbtype", "prot", "-info"], 2),
+    ("A365", &["-db", "../db_search/idlist/g_multil", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 2),
+    ("A366", &["-db", "../db_search/idlist/g_hashl", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 1),
+    ("A367", &["-db", "db/pzlg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 0),
+    ("A368", &["-db", "db/pzlgs", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 0),
+    ("A369", &["-db", "db/pzlgs", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o"], 0),
+    ("A370", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 1),
+    ("A371", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o"], 0),
+    ("A372", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 1),
+    ("A373", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "all"], 1),
+    ("A374", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%b"], 1),
+    ("A375", &["-db", "db/pzlrg", "-dbtype", "prot", "-entry", "5001", "-outfmt", "%o|%a"], 0),
+    ("A376", &["-db", "db/pzlrn", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 1),
+    ("A377", &["-db", "db/pzlrn", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o"], 0),
+    ("A378", &["-db", "../db_search/idlist/tz_rg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 1),
+    ("A379", &["-db", "../db_search/idlist/tz_rg", "-dbtype", "prot", "-entry", "all"], 1),
+    ("A380", &["-db", "../db_search/idlist/tz_g", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A381", &["-db", "../db_search/idlist/tz_rg", "-dbtype", "prot", "-entry", "gnl|ti|77", "-outfmt", "%o|%a"], 0),
+    ("A382", &["-db", "../db_search/idlist/pz_rg", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 1),
+    ("A383", &["-db", "../db_search/idlist/pz_og", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 1),
+    ("A384", &["-db", "../db_search/idlist/gtx_ti", "-dbtype", "prot", "-info"], 0),
+    ("A385", &["-db", "../db_search/idlist/gtx_ti", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A386", &["-db", "../db_search/idlist/gd_gi", "-dbtype", "prot", "-info"], 2),
+    ("A387", &["-db", "../db_search/idlist/gd_gi", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 2),
+    ("A388", &["-db", "../db_search/idlist/cv_sq", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A389", &["-db", "../db_search/idlist/cv_sq", "-dbtype", "prot", "-info"], 0),
 ];
 
 /// A range outside the bit array of the union of the ranges below it, where NCBI clears bits

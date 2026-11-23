@@ -138,6 +138,7 @@ fn initial_tabular_oracle_bytes() {
                 subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
+                query_cov_hsp_perc: 0.0,
             },
             if mode == 2 {
                 BlastCompoAdjustMode::CompositionMatrixAdjust
@@ -153,6 +154,7 @@ fn initial_tabular_oracle_bytes() {
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: FORMATS
                 .iter()
                 .zip(outputs_bytes.iter_mut())

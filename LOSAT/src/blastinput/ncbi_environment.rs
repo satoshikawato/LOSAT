@@ -33,7 +33,26 @@ const HARMLESS_ENTRIES: &[(&str, &str)] = &[
     ("NCBI", "DATA"),
     ("NCBI", "DONT_USE_NCBIRC"),
     ("WINDOW_MASKER", "WINDOW_MASKER_PATH"),
+    // The formatter's own reads (`report::formatter_registry`): it reads `./.ncbirc` (or the file
+    // of `FMTCFG`/`$NCBI`) by itself, so these entries of the application's registry change no
+    // output; NCBI BLAST+ 2.17.0 writes every plain run with them as without (line RG T4 probes
+    // `rc_p_http`, `rc_p_empty`, `rc_taxbr`, `rc_localid`, `rc_feat`: each `.p` case equals its
+    // base), and LOSAT implements their effects on `-html` and outfmt 18 (SURVEY_T4 §1.7, Q5).
+    ("BLASTFMTUTIL", "PROTOCOL"),
+    ("BLASTFMTUTIL", "INCLUDE_BASE_DIR"),
+    ("TAX_BROWSER", "BLASTFMTUTIL"),
+    ("LOCAL_ID", "TOOL_URL"),
+    ("LOCAL_ID", "TOOL_URL_ALIGN"),
+    ("FEATURE_INFO", "FEATURE_FILE"),
+    ("FEATURE_INFO", "FEATURE_FILE_INDEX"),
 ];
+
+/// `[BLASTFMTUTIL]` entries of `CAlignFormatUtil::GetURLFromRegistry` for the name `LOCAL_ID`,
+/// which reads them with or without the suffix `_<index>` and never uses what it builds of them
+/// (`GetIDUrlGen` of a local id, `formatter_registry`): they change no output either.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3453-3456, 3462-3463
+const LOCAL_ID_URL_ENTRIES: &[&str] = &["LOCAL_ID_HOST_PORT", "LOCAL_ID_FORMAT"];
 
 /// Environment variables, besides the `DIAG_` and `NCBI_CONFIG__` families, that the NCBI
 /// C++ Toolkit reads for every application and that change its error output or exit status.
@@ -74,6 +93,20 @@ fn is_harmless_entry(section: &str, name: &str) -> bool {
     // 2.17.0 with `[BLAST] BLAST_USAGE_REPORT=maybe` in `blastn.ini`, or in `.ncbirc` with
     // `BLAST_USAGE_REPORT=false`: rc 0, g_reg probes `l1.ini`, `l1.rc_ur0`).
     if section.eq_ignore_ascii_case("BLAST") && name.eq_ignore_ascii_case("BLAST_USAGE_REPORT") {
+        return true;
+    }
+    if section.eq_ignore_ascii_case("BLASTFMTUTIL")
+        && LOCAL_ID_URL_ENTRIES.iter().any(|key| {
+            name.get(..key.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(key))
+                && match &name[key.len()..] {
+                    "" => true,
+                    index => index.strip_prefix('_').is_some_and(|digits| {
+                        !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+                    }),
+                }
+        })
+    {
         return true;
     }
     HARMLESS_ENTRIES
@@ -784,7 +817,7 @@ pub(crate) fn normalize_path(
 /// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:256-265
 fn find_registry(
     search_path: &[PathBuf],
-    file_name: &str,
+    file_name: &OsStr,
     files: &dyn RegistryFiles,
 ) -> Option<PathBuf> {
     search_path
@@ -797,13 +830,12 @@ fn find_registry(
 #[derive(Debug, PartialEq, Eq)]
 enum ConfFile {
     /// NCBI's post that it is not a file (`ERR_POST_X`, subcode 23, severity `Critical`), after which the
-    /// application aborts.
-    NotFound(String),
+    /// application aborts. The bytes of the post, which holds the name's own bytes.
+    NotFound(Vec<u8>),
     /// NCBI's report of a name with a directory whose file cannot be opened (`CAppException`
-    /// `eNoRegistry`, thrown by `LoadConfig`: the configuration load fails, exit status 2).
-    CannotOpen(String),
-    /// LOSAT's refusal: a name that is not UTF-8, whose bytes NCBI's post prints.
-    Refused(String),
+    /// `eNoRegistry`, thrown by `LoadConfig`: the configuration load fails, exit status 2). The
+    /// bytes of the report, which holds the name's own bytes.
+    CannotOpen(Vec<u8>),
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1014-1022 (after the words before the
@@ -824,17 +856,14 @@ fn conf_file_path(
     search_path: &[PathBuf],
     files: &dyn RegistryFiles,
 ) -> Result<Option<PathBuf>, ConfFile> {
-    let Some(text) = name.to_str() else {
-        return Err(ConfFile::Refused(format!(
-            "the -conffile name {:?} is not UTF-8; NCBI BLAST+ reads its bytes, which is not supported by LOSAT",
-            name
-        )));
-    };
     let path = Path::new(name);
+    // The name's bytes, as NCBI's `std::string` holds them (a name that is not UTF-8 too).
+    let name_bytes = name.as_encoded_bytes();
     if !files.is_file(path) {
-        return Err(ConfFile::NotFound(format!(
-            "Critical: (106.23) Registry file \"{text}\" not found, aborting.\n"
-        )));
+        let mut post = b"Critical: (106.23) Registry file \"".to_vec();
+        post.extend_from_slice(name_bytes);
+        post.extend_from_slice(b"\" not found, aborting.\n");
+        return Err(ConfFile::NotFound(post));
     }
     let has_directory = path
         .parent()
@@ -845,17 +874,22 @@ fn conf_file_path(
         // NCBI BLAST+ 2.17.0 (probes `conf_unread_dot`, `conf_unread_bare`, mode 000): `./c.ini`
         // ends the program with this report (exit status 2), `c.ini` loads no file.
         if !files.opens(path) {
-            let message = format!("Registry file \"{text}\" cannot be opened");
             // NCBI's `Error: (CAppException::eNoRegistry) <message>` and `... initialization failed
             // (CAppException::eNoRegistry) <message>`, in LOSAT's words (`crate::wording`: without
             // the class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
-            return Err(ConfFile::CannotOpen(format!(
-                "Error: {message}\nError: (106.15) Application's initialization failed: {message}\n"
-            )));
+            let mut message = b"Registry file \"".to_vec();
+            message.extend_from_slice(name_bytes);
+            message.extend_from_slice(b"\" cannot be opened");
+            let mut report = b"Error: ".to_vec();
+            report.extend_from_slice(&message);
+            report.extend_from_slice(b"\nError: (106.15) Application's initialization failed: ");
+            report.extend_from_slice(&message);
+            report.push(b'\n');
+            return Err(ConfFile::CannotOpen(report));
         }
         return Ok(Some(path.to_path_buf()));
     }
-    Ok(find_registry(search_path, text, files))
+    Ok(find_registry(search_path, name, files))
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/metareg.hpp:64-69
@@ -903,7 +937,7 @@ fn check_registry_entries(path: &Path, entries: &[RegistryEntry]) -> Result<(), 
     for RegistryEntry { section, name, .. } in entries {
         if !is_harmless_entry(section, name) {
             return Err(format!(
-                "the registry file {} sets [{section}] {name}, which LOSAT does not know to change no output of NCBI BLAST+ (LOSAT accepts only [BLAST] BLASTDB, BLASTMAT, DATA_LOADERS, BLASTDB_NUCL_DATA_LOADER, BLASTDB_PROT_DATA_LOADER, IGDATA, MAX_SEQID_LENGTH, BLAST_USAGE_REPORT, [NCBI] DATA and DONT_USE_NCBIRC, [WINDOW_MASKER] WINDOW_MASKER_PATH); this is not supported by LOSAT",
+                "the registry file {} sets [{section}] {name}, which LOSAT does not know to change no output of NCBI BLAST+ (LOSAT accepts only [BLAST] BLASTDB, BLASTMAT, DATA_LOADERS, BLASTDB_NUCL_DATA_LOADER, BLASTDB_PROT_DATA_LOADER, IGDATA, MAX_SEQID_LENGTH, BLAST_USAGE_REPORT, [NCBI] DATA and DONT_USE_NCBIRC, [WINDOW_MASKER] WINDOW_MASKER_PATH, [BLASTFMTUTIL] PROTOCOL, INCLUDE_BASE_DIR, LOCAL_ID_HOST_PORT and LOCAL_ID_FORMAT (also with _<n>), [TAX_BROWSER] BLASTFMTUTIL, [LOCAL_ID] TOOL_URL and TOOL_URL_ALIGN, [FEATURE_INFO] FEATURE_FILE and FEATURE_FILE_INDEX); this is not supported by LOSAT",
                 path.display()
             ));
         }
@@ -2019,11 +2053,12 @@ pub struct ApplicationStart {
 enum ConfigLoad {
     /// The messages of a load (an empty text when there are none).
     Loaded(String),
-    /// The report of the exception that ended the load (exit status 2).
-    Failed(String),
+    /// The report of the exception that ended the load (exit status 2), in bytes: it can hold
+    /// the bytes of a `-conffile` name that is not UTF-8.
+    Failed(Vec<u8>),
     /// NCBI's post that the file of `-conffile` is not a file, after which the application
-    /// aborts (exit status 255) before the load (`conf_file_path`).
-    NotFound(String),
+    /// aborts (exit status 255) before the load (`conf_file_path`), in bytes.
+    NotFound(Vec<u8>),
 }
 
 impl ApplicationStart {
@@ -2125,19 +2160,25 @@ impl ApplicationStart {
                 Ok(None)
             }
             Ok(ConfigLoad::NotFound(post)) => {
-                target.write_text(post.as_bytes(), stderr);
+                target.write_text(post, stderr);
                 Ok(Some(255))
             }
             Ok(ConfigLoad::Failed(report)) => {
-                target.write_text(report.as_bytes(), stderr);
+                target.write_text(report, stderr);
                 if !replays_collected(&self.program) {
                     return Ok(Some(2));
                 }
-                let replay = format!("{}{report}", self.usage_report.as_deref().unwrap_or(""));
+                let mut replay = self
+                    .usage_report
+                    .as_deref()
+                    .unwrap_or("")
+                    .as_bytes()
+                    .to_vec();
+                replay.extend_from_slice(report);
                 if replays_to_stderr(&self.program) {
-                    DiagTarget::Stderr.write_text(replay.as_bytes(), stderr);
+                    DiagTarget::Stderr.write_text(&replay, stderr);
                 } else {
-                    target.write_text(replay.as_bytes(), stderr);
+                    target.write_text(&replay, stderr);
                 }
                 Ok(Some(2))
             }
@@ -2368,7 +2409,12 @@ fn application_start(
     let ncbirc = if dont_use_ncbirc {
         None
     } else {
-        find_registry(&search_path, SYSTEM_WIDE_REGISTRY, process.files).map(|path| {
+        find_registry(
+            &search_path,
+            OsStr::new(SYSTEM_WIDE_REGISTRY),
+            process.files,
+        )
+        .map(|path| {
             (
                 read_registry_file(&path, Layer::SystemWide, process.files),
                 path,
@@ -2402,7 +2448,11 @@ fn application_start(
     }
     // The configuration: `<program>.ini` (or the file of `-conffile`), then `.ncbirc`.
     let ini_path = match conffile {
-        None => find_registry(&search_path, &format!("{program}.ini"), process.files),
+        None => find_registry(
+            &search_path,
+            OsStr::new(&format!("{program}.ini")),
+            process.files,
+        ),
         Some(name) => match conf_file_path(name, &search_path, process.files) {
             Ok(path) => path,
             Err(ConfFile::NotFound(post)) => {
@@ -2414,10 +2464,6 @@ fn application_start(
                     Some(reason) => Err(reason.clone()),
                     None => Ok(ConfigLoad::Failed(report)),
                 };
-                return ended(start);
-            }
-            Err(ConfFile::Refused(reason)) => {
-                start.config = Err(reason);
                 return ended(start);
             }
         },
@@ -2438,7 +2484,7 @@ fn application_start(
             let report = error.report_default_ex(106, 15, "Application's initialization failed");
             start.config = match &environment_refusal {
                 Some(reason) => Err(reason.clone()),
-                None => Ok(ConfigLoad::Failed(registry_text(report))),
+                None => Ok(ConfigLoad::Failed(registry_text(report).into_bytes())),
             };
             return ended(start);
         }
@@ -2525,7 +2571,7 @@ fn ended(mut start: ApplicationStart) -> ApplicationStart {
         (Err(reason), _) | (_, Err(reason)) => reason.clone(),
         (_, Ok(ConfigLoad::NotFound(post))) => format!(
             "{}; NCBI BLAST+ aborts there (exit status 255), and this is not supported by LOSAT",
-            post.trim_end()
+            String::from_utf8_lossy(post).trim_end()
         ),
         _ => "a registry file that NCBI BLAST+ reports as malformed ends the program (exit status 2), and this is not supported by LOSAT".to_string(),
     };
@@ -2542,8 +2588,8 @@ fn ended(mut start: ApplicationStart) -> ApplicationStart {
 /// `-window_masker_taxid` (`window_masker_path_of`).
 ///
 /// An application start has these (`ApplicationStart::settings`) after it has written what
-/// NCBI writes about the files: the command line's entry, and each call of LOSAT's library that
-/// reads NCBI's settings (`api::start`).
+/// NCBI writes about the files: the command line's entry, and each search call of LOSAT's library
+/// at its beginning (`api::start`).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1254-1259
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1636-1648

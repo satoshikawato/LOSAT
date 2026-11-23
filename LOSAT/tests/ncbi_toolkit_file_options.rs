@@ -357,6 +357,55 @@ fn the_conffile_is_read_in_place_of_the_programs_ini() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// A `-conffile` name that is not UTF-8 (no such file) is NCBI's post with the name's bytes, exit
+/// status 255, as in NCBI BLAST+ 2.17.0 (line RG K4i-2c, frozen 2026-11-23: dustmasker,
+/// segmasker, convert2blastmask, blastdbcmd, makembindex and windowmasker with `-conffile
+/// conf\xff`); the start code is the same for the search programs. The name is only an argument:
+/// no file with it is made.
+#[test]
+fn a_conffile_name_that_is_not_utf8_aborts_with_its_bytes() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = scratch("conffile-bytes");
+    let name = std::ffi::OsStr::from_bytes(b"conf\xff");
+    let expected = b"Critical: (106.23) Registry file \"conf\xff\" not found, aborting.\n";
+    let searches: [(&str, [&str; 2]); 3] = [
+        ("dustmasker", ["-in", "arch_tbx_q.fna"]),
+        ("segmasker", ["-in", "arch_bp_q.faa"]),
+        ("blastn", ["-query", "arch_tbx_q.fna"]),
+    ];
+    for (program, input) in searches {
+        for joined in [false, true] {
+            let mut command = Command::new(BIN);
+            command
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("HOME", "/nonexistent")
+                .current_dir(&dir)
+                .arg(program)
+                .args(input)
+                .stdin(std::process::Stdio::null());
+            if joined {
+                let mut word = b"-conffile=".to_vec();
+                word.extend_from_slice(name.as_bytes());
+                command.arg(std::ffi::OsStr::from_bytes(&word));
+            } else {
+                command.arg("-conffile").arg(name);
+            }
+            let aborted = command.output().unwrap();
+            assert_eq!(
+                (
+                    aborted.status.code(),
+                    aborted.stderr.as_slice(),
+                    aborted.stdout.len()
+                ),
+                (Some(255), &expected[..], 0),
+                "{program} joined {joined}"
+            );
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// NCBI BLAST+ 2.17.0 (probes `conf_missing`, `conf_dir`, `conf_empty`, `conf_log`, `conf_h`,
 /// `conf_ver`, `conf_two_bad`, `makeblastdb.conf_missing`): a `-conffile` that is not a file is
 /// NCBI's critical post where the diagnostics go, then its abort (exit status 255), before `-h`
@@ -705,10 +754,11 @@ fn losats_refusals_stay_on_the_terminal() {
 
 /// No NCBI counterpart: LOSAT refuses the settings that change NCBI's output (here
 /// `BL2SEQ_LEGACY` and `DIAG_POST_LEVEL` in the environment, `[BLAST] LONG_SEQID` in the
-/// `-conffile` file) after the start, before the run, dry run or not. A library call with
-/// `-logfile`, `-conffile` or `-dryrun` runs the start at its beginning and refuses them alike:
-/// its error is the command line's text after `Error: `, and its `-logfile` file is the command
-/// line's (line RG item E1w-2).
+/// `-conffile` file) and a usage report setting that NCBI aborts on
+/// (`NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT=maybe`) after the start, before the run, dry run or
+/// not. Every library call runs the start at its beginning (line RG item E1w-2; without
+/// `-logfile`, `-conffile` and `-dryrun` too since line LIB E1, fix 3) and refuses them alike: its
+/// error is the command line's text after `Error: `, and its `-logfile` file is the command line's.
 #[test]
 fn the_librarys_start_refuses_what_the_command_line_refuses() {
     let dir = scratch("librefusal");
@@ -719,6 +769,9 @@ fn the_librarys_start_refuses_what_the_command_line_refuses() {
             (&["-logfile", "log.txt"][..], &[("BL2SEQ_LEGACY", "1")][..]),
             (&["-logfile", "log.txt"], &[("DIAG_POST_LEVEL", "Info")]),
             (&["-conffile", "c.ini"], &[]),
+            (&[], &[("BL2SEQ_LEGACY", "1")]),
+            (&[], &[("DIAG_POST_LEVEL", "Info")]),
+            (&[], &[("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT", "maybe")]),
         ] {
             for dry in [&[][..], &["-dryrun"]] {
                 let mut words = vec![program];
@@ -760,4 +813,73 @@ fn the_librarys_start_refuses_what_the_command_line_refuses() {
         }
     }
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// The registry file `.ncbirc` in the working directory, which NCBI's start reads in every run:
+/// an entry that LOSAT refuses (`[BLAST] LONG_SEQID`) ends a search of records with the command
+/// line's refusal, and a file that NCBI cannot read (the one byte 0xEF) gets the start's message
+/// before the run, in the library's call as on the command line (line LIB E1, fix 3: the library
+/// ran the start of a search of records only for `-logfile`, `-conffile` and `-dryrun`), to
+/// standard output (`run`) and with `-out` (`run_to_file`), whose file is the command line's.
+#[test]
+fn a_search_of_records_reads_the_registry_file_as_the_command_line() {
+    for (name, ncbirc) in [
+        ("ncbircrefused", &b"[BLAST]\nLONG_SEQID=1\n"[..]),
+        ("ncbircbad", b"\xef"),
+    ] {
+        let dir = scratch(name);
+        fs::write(dir.join(".ncbirc"), ncbirc).unwrap();
+        let out = dir.join("out.txt");
+        for ((program, search), to_file) in SEARCHES
+            .into_iter()
+            .flat_map(|search| [(search, false), (search, true)])
+        {
+            let mut words = vec![program];
+            words.extend(search);
+            words.extend(["-outfmt", "6"]);
+            if to_file {
+                words.extend(["-out", "out.txt"]);
+            }
+            let _ = fs::remove_file(&out);
+            let cli = run_in(&dir, &words, &[]);
+            let cli_out = fs::read(&out).ok();
+            let refused = name == "ncbircrefused";
+            assert_eq!(
+                cli.status.code(),
+                Some(i32::from(refused)),
+                "{words:?}: {cli:?}"
+            );
+            let stderr = text(&cli.stderr);
+            if refused {
+                assert!(
+                    stderr.starts_with("Error: ") && stderr.contains("LONG_SEQID"),
+                    "{stderr}"
+                );
+            } else {
+                assert!(stderr.contains("Error reading the registry"), "{stderr}");
+            }
+            assert!(
+                cli_out.is_some() || !to_file || refused,
+                "{words:?}: {cli:?}"
+            );
+            let _ = fs::remove_file(&out);
+            let library = library_in(&dir, &words, &[]);
+            let library_stderr = if refused {
+                format!("Error: {}", text(&library.stderr))
+            } else {
+                text(&library.stderr)
+            };
+            assert_eq!(
+                (
+                    library.status.code(),
+                    library_stderr,
+                    text(&library.stdout),
+                    fs::read(&out).ok()
+                ),
+                (cli.status.code(), stderr, text(&cli.stdout), cli_out),
+                "{words:?}: the library"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

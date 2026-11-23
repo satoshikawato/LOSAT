@@ -12,7 +12,7 @@ use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::gapalign::{
     gapped_start_window, protein_identities_from_edit_ops, GapAlignScratch,
 };
-use crate::algorithm::common::translated_chunks::TranslatedChunk;
+use crate::algorithm::common::translated_chunks::{ChunkLetters, TranslatedChunk};
 use crate::algorithm::tblastx::translation::{
     frame_length, translate_frame_into, x_codon_residues, x_codons_into, QueryFrame,
 };
@@ -169,10 +169,11 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
                 matrix,
             )
         };
-        let s_gapped_start = i64::from(hit.s_seed) + i64::try_from(q_gapped_start)?
-            - i64::from(hit.q_seed - u32::try_from(context_offset)?);
-        let s_gapped_start =
-            usize::try_from(s_gapped_start).context("negative gapped subject start")?;
+        let s_gapped_start = x_gapped_subject_start(
+            hit.s_seed,
+            i32::try_from(q_gapped_start)?,
+            i32::try_from(hit.q_seed)? - context_offset,
+        )?;
         let gapped = if ONE_HIT && s_gapped_start >= chunk.length {
             // Only the window of a negative length reaches past the chunk (`q_gapped_start` is
             // then `q_start + 5`: inside the frame's letters, or with a PSSM, for a chunk that ends
@@ -538,6 +539,51 @@ fn x_score_only_past_chunk<S: super::score::TbnScore>(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953 and
+// c++/src/algo/blast/core/blast_gapalign.c:3393-3439
+/// The refusal (PD-LOSAT-NCBI-DEFECTS, rule 3) of a gapped search of a unit that saved an initial
+/// HSP starting before its chunk: a word that its scan found before the chunk (a later range of
+/// masks stored out of order, `common::translated_chunks::scan_lead`) whose one-hit extension (or
+/// a two-hit extension whose word lies wholly before the chunk) scores at the cutoff. NCBI's
+/// gapped start of that HSP reads the subject at its start taken as an unsigned offset (about
+/// 4 GiB past the frame: a segmentation fault, probe M4b-T2 2026-11-23) when the HSP is longer
+/// than HSP_MAX_WINDOW and no gapped HSP found before holds it, and otherwise starts the gapped
+/// alignment before the chunk. LOSAT stops the search there and names the sequence.
+#[cold]
+#[inline(never)]
+fn x_gapped_start_before_chunk(
+    subject: super::x_subject_store::XPrelimSubject<'_>,
+    frame: i8,
+    chunk_offset: usize,
+) -> anyhow::Error {
+    let name = match subject {
+        super::x_subject_store::XPrelimSubject::Stream(stream, ordinal, _) => {
+            format!("database sequence {}", stream.seqdb().oid(ordinal as u32))
+        }
+        super::x_subject_store::XPrelimSubject::Nt(_) => "the subject".to_owned(),
+    };
+    anyhow::anyhow!(
+        "TBLASTN: {name}, frame {frame}: an initial alignment of the chunk from residue {} starts before the chunk (-db_soft_mask with masks stored out of order on a frame longer than 5,000,000 residues), where NCBI BLAST+ starts its gapped alignment outside the chunk or reads past its buffer (a segmentation fault), which LOSAT does not support",
+        chunk_offset + 1
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3942-3945 and
+// c++/src/algo/blast/core/blast_aascan.c:110-113
+/// The subject's gapped start of an initial HSP: its seed (`s_seed`, the chunk's `Uint4` offset,
+/// which holds a seed before the chunk wrapped below 0) moved by the gapped start's distance from
+/// the query's seed, in NCBI's wrapping 32-bit sum, read as `Int4`. A seed at -1 whose HSP starts
+/// in the chunk gives a start in the chunk; a start below 0 is an internal error (an HSP that
+/// starts before the chunk is refused before, `x_gapped_start_before_chunk`).
+pub(super) fn x_gapped_subject_start(
+    s_seed: u32,
+    q_gapped_start: i32,
+    q_seed: i32,
+) -> Result<usize> {
+    let start = s_seed.wrapping_add(q_gapped_start.wrapping_sub(q_seed) as u32) as i32;
+    usize::try_from(start).context("negative gapped subject start")
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058-1101 and
 // c++/src/algo/blast/core/blast_gapalign.c:4251-4258,4266-4281
 /// The refusal (PD-LOSAT-NCBI-DEFECTS, rule 3) of a gapped start past the NULLB after frame -3,
@@ -612,6 +658,10 @@ pub(super) struct PreliminaryProfile<'a> {
     pub(super) gap_xdrop: i32,
     pub(super) gapped_cutoff: &'a [i32],
     pub(super) hsp_num_max: usize,
+    /// `score_options->gapped_calculation`: false for `-ungapped`, whose units save the initial
+    /// HSPs as they are (`BLAST_GetUngappedHSPList`, `ungapped_chunk_hsps`) and merge the chunks
+    /// of a frame on their diagonals only.
+    pub(super) gapped: bool,
     /// `-subject_besthit`: each frame's list is filtered after each merge of a chunk.
     pub(super) subject_besthit: bool,
 }
@@ -643,28 +693,30 @@ pub(super) fn preliminary_protein_hsps_for_search<S: super::score::TbnScore>(
     // aa_ungapped.c:214-224 (cited at the units' word finder)
     // Dispatch point: `-window_size 0` (no `multiple_hits`) takes the one-hit word finder, in an
     // instance of its own (`ONE_HIT`), so that the two-hit units keep their code.
-    if profile.window == 0 {
-        x_preliminary_protein_hsps_by_unit::<S, true>(
-            queries,
-            subject,
-            db_gencode,
-            profile,
-            pool,
-            x_query_side,
-            x_subject,
-            score,
-        )
-    } else {
-        x_preliminary_protein_hsps_by_unit::<S, false>(
-            queries,
-            subject,
-            db_gencode,
-            profile,
-            pool,
-            x_query_side,
-            x_subject,
-            score,
-        )
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503,560-563
+    // NCBI extends the initial HSPs with gaps only in a gapped search; an ungapped search keeps
+    // them as the unit's HSPs (`ungapped_chunk_hsps`).
+    // Dispatch point: `-ungapped` takes the units that save the initial HSPs, in instances of
+    // their own (`UNGAPPED`), so that the gapped units keep their code.
+    macro_rules! units {
+        ($one_hit:literal, $ungapped:literal) => {
+            x_preliminary_protein_hsps_by_unit::<S, $one_hit, $ungapped>(
+                queries,
+                subject,
+                db_gencode,
+                profile,
+                pool,
+                x_query_side,
+                x_subject,
+                score,
+            )
+        };
+    }
+    match (profile.window == 0, profile.gapped) {
+        (true, true) => units!(true, false),
+        (false, true) => units!(false, false),
+        (true, false) => units!(true, true),
+        (false, false) => units!(false, true),
     }
 }
 
@@ -968,7 +1020,11 @@ impl Drop for XUnitResidues<'_> {
 // (lines 572-586) and the per-frame append (840-850) depend on the order, and
 // they run here afterwards, in that order, on one thread.  The offset pairs are
 // consumed straight from the scan buffer, so no per-frame seed list is kept.
-fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: bool>(
+fn x_preliminary_protein_hsps_by_unit<
+    S: super::score::TbnScore,
+    const ONE_HIT: bool,
+    const UNGAPPED: bool,
+>(
     queries: &[&[u8]],
     subject: super::x_subject_store::XPrelimSubject<'_>,
     db_gencode: u8,
@@ -1050,14 +1106,27 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         scratch: M,
     }
     // The units end with NCBI's offset step instead of starting on a cleared table, and the
-    // sequential path below runs on this thread's kept buffers.
-    let state_on = |kept: Option<XUnitBuffers>| {
+    // sequential path below runs on this thread's kept buffers. `x_in_order`: a new table of
+    // `(last_hit, flag)` cells (below).
+    let state_on = |kept: Option<XUnitBuffers>, x_in_order: bool| {
         let (table, pairs, hits, scratch) = match kept {
             Some(kept) => (Some(kept.diagonals), kept.pairs, kept.hits, kept.scratch),
             None => (None, Vec::new(), Vec::new(), GapAlignScratch::new()),
         };
-        UnitState {
-            two_hit: S::x_two_hit(XTwoHit::with_table(
+        let two_hit = if x_in_order {
+            XTwoHit::x_with_layout(
+                false,
+                None,
+                query_sequence,
+                init_context_offsets,
+                profile.word_xdrop,
+                profile.word_cutoff,
+                profile.matrix,
+                profile.window,
+                profile.word_size,
+            )
+        } else {
+            XTwoHit::with_table(
                 table,
                 query_sequence,
                 init_context_offsets,
@@ -1066,26 +1135,45 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
                 profile.matrix,
                 profile.window,
                 profile.word_size,
-            )),
+            )
+        };
+        UnitState {
+            two_hit: S::x_two_hit(two_hit),
             pairs,
             hits,
             scratch: S::unit_scratch(scratch),
         }
     };
     #[cfg(feature = "parallel")]
-    let new_state = || state_on(None);
+    let new_state = || state_on(None, false);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306,478-498 and
+    // c++/src/algo/blast/core/aa_ungapped.c:516-547
+    // A unit whose scan reads letters before its chunk (masks stored out of order,
+    // `scan_lead`) has hits on diagonals that the units before it in its frame left in the
+    // table less than a window behind them: NCBI's units of a subject run one after another on
+    // one table, so these units do too, in order, on a table made for the subject. Its cells
+    // hold `(last_hit, flag)` as they are (their `last_hit` can fall below 0 there, which a
+    // packed cell does not hold). The table's earlier subjects lie more than a window behind
+    // every hit of the subject's units, as on a new table, while the offset stays below
+    // INT4_MAX / 4 (`Diagonals::finish_frame`).
+    let x_in_order =
+        plan.subject.units.iter().any(|(_, _, ranges)| {
+            crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
+        });
     let run_unit = |state: &mut UnitState<'_, S::Scratch>,
                     unit: usize|
      -> Result<Vec<(usize, GappedHsp)>> {
-        let (frame_index, chunk, _) = &plan.subject.units[unit];
+        let (frame_index, chunk, ranges) = &plan.subject.units[unit];
         let frame = &plan.subject.frames[*frame_index];
         let chunk = *chunk;
+        // The letters before the chunk that the unit's scan reads (masks stored out of order).
+        let x_lead = crate::algorithm::common::translated_chunks::scan_lead(ranges);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
-        // EXPERIMENT (LOSAT_X_TBNUNITXLATE): the frame from the chunk's first residue on: the
-        // plan's, or for a plan without residues those the unit reads, translated into a buffer
-        // of the query batch (`XUnitResiduesPool`).
+        // EXPERIMENT (LOSAT_X_TBNUNITXLATE): the frame from `x_lead` residues before the chunk's
+        // first one on: the plan's, or for a plan without residues those the unit reads,
+        // translated into a buffer of the query batch (`XUnitResiduesPool`).
         let mut x_held = None;
-        let subject_residues: &[u8] = if frame.aa_seq.is_empty() {
+        let x_residues: &[u8] = if frame.aa_seq.is_empty() {
             let XPrelimSubject::Nt(SubjectNt::Packed(store)) = subject else {
                 bail!("TBLASTN: a plan without residues of a subject that is not packed");
             };
@@ -1094,17 +1182,30 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
                 store,
                 db_gencode,
                 frame,
-                chunk,
+                TranslatedChunk {
+                    offset: chunk.offset - x_lead,
+                    length: chunk.length + x_lead,
+                    ..chunk
+                },
                 &mut held.1,
             )?;
             &held.1[range]
         } else {
-            &frame.aa_seq[1 + chunk.offset..]
+            &frame.aa_seq[1 + chunk.offset - x_lead..]
         };
+        let subject_residues = &x_residues[x_lead..];
         let subject_sequence = &subject_residues[..chunk.length];
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306
+        // The letters around the chunk for the extensions of the hits before it (a word past the
+        // chunk's last letter is never extended: `XTwoHit::pairs_on`).
+        let x_around = (x_lead > 0).then(|| ChunkLetters {
+            letters: &x_residues[..x_lead + chunk.length],
+            lead: x_lead,
+            length: chunk.length,
+        });
         // The buffers that the one-hit word finder's HSPs of negative length read (`-window_size
-        // 0` only).
-        let x_one_hit = if ONE_HIT {
+        // 0` only, in the gapped score).
+        let x_one_hit = if ONE_HIT && !UNGAPPED {
             Some(XOneHitBuffers::new(
                 &plan.subject.frames,
                 *frame_index,
@@ -1123,6 +1224,9 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
             scratch,
         } = state;
         hits.clear();
+        if x_around.is_some() {
+            two_hit.x_set_around(x_around);
+        }
         #[cfg(test)]
         probe_begin_unit(unit, frame.frame, chunk.offset);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:214-224
@@ -1134,7 +1238,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         // An extension that cannot run (`x_pairs_one_hit`), reported after the table's exit.
         let mut x_one_hit_failed = None;
         if ONE_HIT {
-            x_scan_unit_of::<false>(&plan, unit, subject_residues, pairs, |filled| {
+            x_scan_unit_of::<false>(&plan, unit, x_residues, x_lead, pairs, |filled| {
                 #[cfg(test)]
                 probe_seeds(unit, frame.frame, chunk_offset, filled);
                 if let Err(error) = two_hit.x_pairs_one_hit(
@@ -1150,7 +1254,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
             })
         } else {
             match (score.x_walks(), two_hit.x_ungap_matrix()) {
-                (Some(walks), _) => x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
+                (Some(walks), _) => x_scan_unit(&plan, unit, x_residues, x_lead, pairs, |filled| {
                     #[cfg(test)]
                     probe_seeds(unit, frame.frame, chunk_offset, filled);
                     two_hit.x_pairs_bf_walks(
@@ -1162,7 +1266,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
                         hits,
                     )
                 }),
-                (None, None) => x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
+                (None, None) => x_scan_unit(&plan, unit, x_residues, x_lead, pairs, |filled| {
                     #[cfg(test)]
                     probe_seeds(unit, frame.frame, chunk_offset, filled);
                     // The two-hit loop of the units without a branch on the common outcomes
@@ -1172,7 +1276,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
                 // Another matrix's byte-table walks (`XTwoHit::x_pairs_bf_of`), in a scan of its own
                 // so that BLOSUM62's keeps its code.
                 (None, Some(table)) => {
-                    x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
+                    x_scan_unit(&plan, unit, x_residues, x_lead, pairs, |filled| {
                         #[cfg(test)]
                         probe_seeds(unit, frame.frame, chunk_offset, filled);
                         two_hit.x_pairs_bf_of(
@@ -1191,6 +1295,9 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         // Right after the scan, before anything that can fail, so that the table is ready for the
         // next unit whatever this one returns.
         two_hit.exit(chunk.length);
+        if x_around.is_some() {
+            two_hit.x_set_around(None);
+        }
         if ONE_HIT {
             if let Some(error) = x_one_hit_failed {
                 return Err(error);
@@ -1204,6 +1311,16 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:500:
         if hits.is_empty() {
             return Ok(Vec::new());
+        }
+        if !UNGAPPED && x_lead > 0 && hits.iter().any(|hit| hit.s_start < 0) {
+            return Err(x_gapped_start_before_chunk(
+                subject,
+                frame.frame,
+                chunk.offset,
+            ));
+        }
+        if UNGAPPED {
+            return Ok(ungapped_chunk_hsps(context_offsets, frame.frame, hits));
         }
         let gapped = score_gapped_chunk::<S, ONE_HIT>(
             queries,
@@ -1239,7 +1356,9 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
     // parallel (map_init gives each thread its own state); without one the loop below runs them in
     // order. The results are collected by unit index.
     let unit_count = plan.subject.units.len();
-    let parallel = pool.is_some_and(crate::utils::threading::SearchPool::enabled) && unit_count > 1;
+    let parallel = pool.is_some_and(crate::utils::threading::SearchPool::enabled)
+        && unit_count > 1
+        && !x_in_order;
     // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
     // NCBI computes.
     crate::utils::threading::report_stage("tblastn", "prelim_units", unit_count, parallel);
@@ -1259,7 +1378,7 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
         });
     }
     if purged.is_empty() {
-        let mut state = state_on(X_UNIT_STATE.take());
+        let mut state = state_on(X_UNIT_STATE.take(), x_in_order);
         for unit in 0..unit_count {
             purged.push(run_unit(&mut state, unit));
         }
@@ -1294,7 +1413,8 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
-            per_frame = merge_adjusted_chunk(per_frame, unit_hsps, chunk, profile.hsp_num_max)?;
+            per_frame =
+                merge_adjusted_chunk(per_frame, unit_hsps, chunk, profile.hsp_num_max, !UNGAPPED)?;
             #[cfg(test)]
             probe_push(|| {
                 PreliminaryEvent::Merged(
@@ -1660,6 +1780,7 @@ pub(super) fn word_finder_profile<'a>(
         gap_xdrop: 38,
         gapped_cutoff: &TEST_NEVER[..word_xdrop.len()],
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     }
 }
@@ -1687,6 +1808,45 @@ pub(super) fn scan_profile(
         matrix,
         word_size,
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4742-4772
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2371-2394
+/// The HSPs of an ungapped search's (frame, chunk) unit (`BLAST_GetUngappedHSPList`): each initial
+/// HSP of `hits` (sorted by `XTwoHit::sort`, as NCBI's word finder leaves them) in its query
+/// context (the context of its word's query offset), with the query offsets made the context's
+/// and its word's offsets as the gapped start, then sorted by score. The subject offsets stay the
+/// chunk's (`merge_adjusted_chunk` adds the chunk's offset). The search's `hsp_num_max` is
+/// `INT4_MAX` (`PreliminaryProfile::hsp_num_max`), so every HSP is saved.
+fn ungapped_chunk_hsps(
+    context_offsets: &[i32],
+    frame: i8,
+    hits: &[InitHsp],
+) -> Vec<(usize, GappedHsp)> {
+    let mut hsps: Vec<(usize, GappedHsp)> = hits
+        .iter()
+        .map(|hit| {
+            let q_off = hit.q_seed as i32;
+            let context = context_offsets.partition_point(|&offset| offset <= q_off) - 1;
+            let query_start = context_offsets[context];
+            let q_start = hit.q_start - query_start;
+            (
+                context,
+                GappedHsp {
+                    frame,
+                    score: hit.score,
+                    q_start,
+                    q_end: hit.length + q_start,
+                    q_gapped_start: q_off - query_start,
+                    s_start: hit.s_start,
+                    s_end: hit.length + hit.s_start,
+                    s_gapped_start: hit.s_seed as i32,
+                },
+            )
+        })
+        .collect();
+    sort_preliminary_by_score(&mut hsps);
+    hsps
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1382:
@@ -1811,11 +1971,14 @@ fn append_preliminary_hsps(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3037-3050:
 // Adjust subject offset, end and gapped_start before merging.
+// `allow_gap` is `score_options->gapped_calculation` (blast_engine.c:584): an ungapped search
+// merges the HSPs of a diagonal only.
 fn merge_adjusted_chunk(
     per_frame: Vec<(usize, GappedHsp)>,
     mut incoming: Vec<(usize, GappedHsp)>,
     chunk: TranslatedChunk,
     hsp_num_max: usize,
+    allow_gap: bool,
 ) -> Result<Vec<(usize, GappedHsp)>> {
     let offset = i32::try_from(chunk.offset)?;
     for (_, hsp) in &mut incoming {
@@ -1841,7 +2004,7 @@ fn merge_adjusted_chunk(
         offset,
         overlap,
         hsp_num_max,
-        true,
+        allow_gap,
     ))
 }
 
@@ -1981,6 +2144,10 @@ struct TargetFrameTranslation {
     /// starts at the first residue.
     base: isize,
     sequence: Vec<u8>,
+    /// The request (`get`'s window of bases and whether it is fenced) that made `sequence`. The
+    /// same request again (the report counts after the search's counts of one HSP) reads it as
+    /// it is: a translation depends only on its window. No NCBI counterpart.
+    made_from: Option<(usize, usize, bool)>,
 }
 
 /// The index in a translated window (`TargetTranslation::get`, whose subject position of the
@@ -1997,8 +2164,8 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
 // next: the traceback's gapped start and ALIGN_EX
 // (blast_traceback.c:429-440,509-512), the identities after the composition-based redo
 // (blast_kappa.c:527-528, after its E-value purge, :3677-3700), the ungapped re-evaluation
-// (blast_hits.c:2700-2705; LOSAT's TBLASTN refuses `-ungapped`, TBLASTX refuses there,
-// PD-LOSAT-NCBI-DEFECTS 1.51). NCBI BLAST+ 2.17.0 dies there with
+// (blast_hits.c:2700-2705; LOSAT's TBLASTN `-ungapped` and TBLASTX refuse there,
+// PD-LOSAT-NCBI-DEFECTS 1.79 and 1.51). NCBI BLAST+ 2.17.0 dies there with
 // SIGSEGV (probes on ws, 2026-11-17: `-subject`, `-subject_loc` and `-db`, frames + and -, a matrix
 // query at `-comp_based_stats` 0 to 3, `-in_pssm`): no result is defined (PD-LOSAT-NCBI-DEFECTS
 // 1.46, rule 3). A subject that leaves no HSP to that point (cut by a cutoff, the redo's purge or
@@ -2084,7 +2251,10 @@ impl<'a> TargetTranslation<'a> {
             let nucl_length = nucl_end - nucl_start;
             let translation_length = 1 + nucl_length / 3;
             let start_shift = nucl_start / 3;
-            if start_shift < target.start || start_shift + translation_length > target.stop {
+            let request = (nucl_start, nucl_end, offset >= 0);
+            if (start_shift < target.start || start_shift + translation_length > target.stop)
+                && target.made_from != Some(request)
+            {
                 let nucl_shift = if frame < 0 { n - nucl_end } else { nucl_start };
                 let window = (nucl_shift, nucl_shift + nucl_length);
                 let letters = match self.subject {
@@ -2119,6 +2289,7 @@ impl<'a> TargetTranslation<'a> {
                 target.sequence.push(if offset >= 0 { 201 } else { 0 });
                 target.start = start_shift;
                 target.stop = start_shift + aa_len;
+                target.made_from = Some(request);
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1224-1228
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1235:
                 // The Rust slice begins at the left fence and `base` restores NCBI's
@@ -2143,6 +2314,31 @@ impl<'a> TargetTranslation<'a> {
             return Err(x_traceback_of_an_untranslated_frame());
         }
         Ok((&target.sequence, target.stop, target.base))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:911-918
+    // The reports translate the subject's codons again with the display's table (the rows of
+    // `stage_e_report::aligned_sequences`), where an ambiguous codon whose residues are D/N, E/Q or
+    // I/L is B, Z or J; the search's translation (`get`) reads X there.
+    /// The residue that the reports show at residue `offset` of frame `frame` of the subject (its
+    /// codon translated by `DisplayCode`), as an NCBIstdaa code; `buffer` holds the codon's
+    /// letters of a packed subject.
+    pub(super) fn shown_residue(
+        &self,
+        frame: i8,
+        offset: usize,
+        buffer: &mut Vec<u8>,
+    ) -> Result<u8> {
+        let n = self.subject.len();
+        let first = 3 * offset + usize::from(frame.unsigned_abs()) - 1;
+        anyhow::ensure!(first + 3 <= n, "TBLASTN shown residue outside the subject");
+        // The codon's three bases, read from its start on the plus strand and from its end on the
+        // minus strand (`DisplayCode::residue` of offset 0 in a frame of the same sign).
+        let start = if frame > 0 { first } else { n - first - 3 };
+        let codon = self.subject.fetch(start, start + 3, buffer);
+        let display = crate::algorithm::tblastx::report::DisplayCode::new(self.code);
+        let letter = display.residue(codon, frame.signum(), 0);
+        Ok(crate::utils::matrix::aa_char_to_ncbistdaa(letter))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1648-1677
@@ -2222,6 +2418,7 @@ impl<'a> TargetTranslation<'a> {
             target.sequence.push(if to == length { 0 } else { 201 });
             target.start = from;
             target.stop = to;
+            target.made_from = None;
             target.base = if from > 0 { from as isize - 1 } else { 0 };
         }
         Ok((&target.sequence, length, target.base))

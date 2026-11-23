@@ -54,6 +54,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI uses two lengths for one subject there. In `blastn` LOSAT gives NCBI's result wherever its scan past the piece finds nothing more. In the other programs LOSAT searches the piece as NCBI searches it in the same database with the mask shortened until a letter follows the piece (one letter in `blastp` and `blastx`, a few bases in `tblastn` and `tblastx`). The masked letters stay masked in the alignments and the statistics, so LOSAT's result is NCBI's result for that database with the freed letters masked (`X`, or `N` in nucleotides). Where no such shorter mask exists (a mask of one or two bases at the end of a very short sequence), LOSAT's result is NCBI's own.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### `-db_hard_mask` with a short mask at an end of a sequence (`tblastn`, `tblastx`)
+
+- **What you see.** LOSAT searches the sequence and writes its alignments. NCBI crashes.
+- **When.** `tblastn` or `tblastx` with `-db_hard_mask` on a sequence with a mask within its first two bases, or within the one or two bases after its last whole codon (for example [1200, 1202) of 1,202 bases), or with an empty mask at its start. Such a mask leaves a reading frame an empty part at its start.
+- **Why.** NCBI then searches the rest of that frame as the whole frame and frees memory that it did not allocate, in every run. LOSAT searches the frame as a frame without a mask, and the masked bases stay masked in every frame, as for every other mask. In the cases checked, LOSAT's result is NCBI's result for the same database with that short mask dropped and its bases stored as `N`, which is also what NCBI gives where another mask of the sequence avoids the crash. NCBI's preliminary search reads such a stored `N` as a random base, where LOSAT reads the real base, so a result can differ from that run.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### Titles made only of punctuation
 
 - **What you see.** LOSAT writes the report. NCBI crashes.
@@ -123,6 +130,20 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **When.** A damaged `taxdb.btd` whose record ends past NCBI's mapping, where the output does not write the bytes read there. Output that would write those bytes is refused (see [What LOSAT refuses](refusals.md)).
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### `blastx -use_sw_tback` in e-value mode
+
+- **What you see.** LOSAT writes a report where NCBI BLAST+ 2.17.0 crashes, and the same report in every run and at every `-num_threads`. Where NCBI ends, LOSAT's report is NCBI's in the cases we ran, except that NCBI's rows can change from one run to the next.
+- **When.** `blastx -use_sw_tback` with `-sum_stats false` (or a `-max_intron_length` of 1 to 4), on a query batch with a hit in a frame whose number is the batch's number of queries or more. The number is 6 × the query's place in the batch (counted from 0) plus 0 to 5 for frames +1, +2, +3, -1, -2, -3. With one query in a batch (for example a search of a single query, or a query that fills a batch of 10,002 letters, BLASTX's batch size, by itself), every hit outside frame +1 is such a case.
+- **Why.** NCBI checks each new Smith-Waterman alignment against a list of kept alignments that it picks by that number, but it keeps one list per query. Past its lists it reads other memory: it crashes (with more than one thread, in every run we made), fails the batch with `Traceback failed`, or goes on with what it read. LOSAT checks such an alignment against an empty list. Its report equals NCBI's report of the same queries followed by enough queries without hits to keep NCBI inside its lists, in all 9 cases of our test in which NCBI ends.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
+### `blastn -use_index true` with `-db_hard_mask`
+
+- **What you see.** LOSAT reports the alignments in the unmasked parts of each masked sequence, the same in every run and at every `-num_threads`. NCBI BLAST+ 2.17.0 reports fewer or other alignments for such sequences, and with more than one thread its rows can change from run to run.
+- **When.** `blastn -use_index true` with a MegaBLAST index of the database and `-db_hard_mask`, for sequences with masked letters. A sequence without masked letters gets NCBI's result, except for a match that runs on past its end into masked letters of the sequence after it in the index.
+- **Why.** NCBI's search takes the index's seeds of a masked sequence from another part of it, or from the sequence after it, because it numbers the index's pieces of a sequence over the whole sequence but the pieces of a masked search from each unmasked stretch. LOSAT reads the index as if the masked letters matched nothing and searches each unmasked stretch with its own seeds, so no masked letter changes the result. With the default `-window_size 0` of megablast, LOSAT's rows were those of NCBI's search without the index with the same `-db_hard_mask` in every case of our tests (the test suite's cases and 308 random databases and queries). With a `-window_size` above 0 the index and the scan pick different seeds even without a mask, and LOSAT keeps the index's choice.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### `-db` output does not depend on `-num_threads`
 
 - **What you see.** LOSAT's `-db` output is NCBI's output for `-num_threads 1` (apart from the version line, which names LOSAT), at every `-num_threads`. NCBI's own `-db` output can depend on the thread count (with composition-based statistics, `blastp` ends the redo of a query early by the hit lists of its batch, and with more threads NCBI keeps one set per thread: 42 rows differed in one test).
@@ -150,7 +171,8 @@ These cases are about what the program prints around the search, not the search 
 ### Threads with `-subject`
 
 - **What you see.** With `-subject`, NCBI BLAST+ ignores `-num_threads` and writes `'num_threads' is currently ignored when 'subject' is specified.` on the standard error. LOSAT uses the threads you ask for and does not print the line. Above the CPU count NCBI also writes `Number of threads was reduced to N to match the number of available CPUs`; LOSAT does not.
-- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's, apart from the version line and the error prefixes, which name LOSAT, and `blastn`'s progress bar on a terminal (next section).
+- **Why.** The output is the same at every thread count, so using the threads makes the search faster without changing its output. Every other byte of standard output and standard error equals NCBI's, apart from the version line and the error prefixes, which name LOSAT, and `blastn`'s progress bar on a terminal (next section).
+- **Memory with more than 64 threads.** LOSAT's memory grows with each thread, while NCBI BLAST+'s does not grow with `-num_threads` in a `-subject` search, which it runs on one thread. Above 64 threads LOSAT can then use more memory than NCBI BLAST+: in the v0.2.0 tests (development build `ff07c6a7d`, 64 logical CPUs), up to 1.21 times NCBI's peak memory at 96 threads and up to 1.44 times at 128 threads (`tblastn -subject`; also `blastx`, `blastn` and `blastp` with `-subject`, and `tblastn` with a database of one sequence), while LOSAT finished 8 to 69 times sooner.
 
 ### `blastn`'s progress bar on a terminal
 
@@ -161,7 +183,7 @@ These cases are about what the program prints around the search, not the search 
 ### Argument errors and help
 
 - **What you see.** An error found while reading the arguments (an unknown option, a missing value, a value outside its range such as `-word_size 3`) prints LOSAT's message and exits with status 2. NCBI prints its USAGE text and the argument exception, and exits with status 1. `-help`, `-help-full` and `-h` print LOSAT's help; `-xmlhelp` prints NCBI's XML for the arguments LOSAT runs, with LOSAT's name and version in its description line.
-- **What does not change.** Errors that NCBI raises after it has read the arguments (`BLAST query/options error: ...`, input errors, engine errors) keep NCBI's condition, message and exit status. Their prefix names LOSAT (`LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT options error:`); see [the version line and the error prefixes](#the-version-line-and-the-error-prefixes-name-losat).
+- **What does not change.** Errors that NCBI raises after it has read the arguments (where NCBI writes `BLAST query/options error: ...`, input errors and engine errors) keep NCBI's condition, message and exit status. Their prefix names LOSAT (`LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT options error:`); see [the version line and the error prefixes](#the-version-line-and-the-error-prefixes-name-losat).
 
 ### Wording of messages
 
@@ -211,6 +233,7 @@ These are error paths: when the output can be written, the output matches NCBI's
 ### `makeblastdb`
 
 - A `-in` file made of several bzip2 streams or zstd frames is read to the end; NCBI's `makeblastdb` stops after the first and drops the rest silently. A single-stream file builds the same files as NCBI.
+- `-gi_mask` on a database in one volume writes an alias file that names the volume by its file name, so the database opens and the build ends with exit status 0 and its metadata file. NCBI's `makeblastdb` names the database by its full path there, which no program can open, and ends with `DB alias files are mutually recursive` (exit status 2). Every other file is NCBI's, and NCBI's programs read the database and its masks.
 - An `-out` path with a space or a double quote, or an existing database that has to be replaced, is handled as one database. NCBI treats the path as a list of names and can keep volume files of the old database.
 - Database files are compared with NCBI's `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform; those files have not been compared with NCBI's builds there. The order of `-randomize` is the Linux builds' on every platform: NCBI's Windows and macOS builds shuffle with their own C++ libraries.
 
@@ -221,6 +244,13 @@ Records: [The decision record on NCBI BLAST+ defects](https://github.com/satoshi
 LOSAT writes correct output where NCBI's `blastdbcmd` writes letters or sequences that do not belong to the header or id you asked for. The six cases are `-long_seqids` with `-range` on the minus strand; `gnl|BL_ORD_ID|N` in a version 4 database of several volumes; `-mask_sequence_with` with `-strand minus`; two or more `%m` in one `-outfmt`; `-mask_sequence_with` on a protein without a range; a batch line without masks after a line with masks for the same sequence. In each, LOSAT's output is NCBI's own output for the neighbouring input that does not reach the defect.
 
 Record: [The decision record on blastdbcmd output that NCBI gets wrong](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-BLASTDBCMD-DEVIATIONS.md).
+
+### `windowmasker`: an empty id in `-ids` or `-exclude_ids`
+
+- **What you see.** LOSAT writes NCBI's error `bad id: ...: ignoring` for the line, skips it, and masks (or counts) as NCBI does for the file without that line. NCBI BLAST+ 2.17.0 writes the same error and then crashes (exit status 139) without output.
+- **When.** `windowmasker` with an `-ids` or `-exclude_ids` file matched as text (without `-text_match F`), in masking or with `-mk_counts`, when a line gives an empty id: a line that starts with a space or a tab, or a line `>`, `|`, `>|`, `>>` or `>>|` (alone or before a space or a tab).
+- **Why.** NCBI's error says that it ignores the id, but NCBI then stores the id far past the end of its list of ids, which is undefined in C++. LOSAT does what the error says.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ## The library
 

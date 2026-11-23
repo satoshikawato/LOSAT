@@ -35,8 +35,7 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
     argv.extend_from_slice(extra);
     // ABI v1 is frozen (plan TD-1): its `-outfmt` keeps the values and the parser errors of
     // the CLI's BLASTX parser before it read `-outfmt` as NCBI (`v1_outfmt`).
-    use clap::CommandFactory;
-    let command = crate::cli::Cli::command().mut_subcommand("blastx", |blastx| {
+    let command = crate::cli::command_of("blastx").mut_subcommand("blastx", |blastx| {
         blastx.mut_arg("outfmt", |outfmt| outfmt.value_parser(v1_outfmt))
     });
     match crate::cli::try_parse_from_command::<crate::cli::Cli, _, _>(command, argv)?.command {
@@ -140,6 +139,7 @@ pub(crate) fn run_pair(
     report::write_prolog(
         &mut output,
         &mut *diagnostics.borrow_mut(),
+        None,
         &options,
         &subjects,
         &shown,

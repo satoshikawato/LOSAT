@@ -1,45 +1,52 @@
 use super::*;
 
-// NCBI prints the versions before it reads the arguments, whatever their bytes (review 1 F4 of
-// line RG item E3: NCBI BLAST+ 2.17.0 `blastdbcmd -out $'\xff' -version-full`, rc 0); a word
-// that is not UTF-8 is refused otherwise.
+// A run of dustmasker's arguments (`include_str!` of its help) whose body writes one line into its
+// `-out`: the status, the standard output and the standard error.
 #[cfg(unix)]
-#[test]
-fn the_versions_come_before_the_refusal_of_a_word_that_is_not_utf8() {
-    use std::os::unix::ffi::OsStringExt;
+fn run_dustmasker_words(words: Vec<OsString>) -> (i32, Vec<u8>, Vec<u8>) {
     static TOOL: Tool = Tool {
-        program: "p",
-        refusal_name: "P",
-        help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
+        program: "dustmasker",
+        refusal_name: "DUSTMASKER",
+        help: include_str!("../dustmasker/help.txt"),
         post_prefix: None,
         components: &[],
+        dry_run: None,
     };
     fn body(
-        _: &Args,
+        args: &Args,
         _: &ApplicationSettings,
         _: &mut files::Cin<'_>,
-        _: &mut dyn Write,
+        out: &mut dyn Write,
         _: &mut Diag,
     ) -> i32 {
-        unreachable!("the run")
+        let mut output = args.output_file("out", out).unwrap();
+        output.write_all(b"ran\n").unwrap();
+        0
     }
-    let run = |words: Vec<OsString>| {
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        let status = run_with(
-            &TOOL,
-            &words,
-            &mut std::io::empty(),
-            &mut out,
-            &mut err,
-            body,
-        );
-        (
-            status,
-            String::from_utf8(out).unwrap(),
-            String::from_utf8(err).unwrap(),
-        )
-    };
-    let bytes = OsString::from_vec(vec![0xff]);
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = run_with(
+        &TOOL,
+        &words,
+        &mut std::io::empty(),
+        &mut out,
+        &mut err,
+        body,
+    );
+    (status, out, err)
+}
+
+// NCBI prints the versions before it reads the arguments, whatever their bytes (review 1 F4 of
+// line RG item E3: NCBI BLAST+ 2.17.0 `blastdbcmd -out $'\xff' -version-full`, rc 0), and its
+// reader takes a word's bytes as they are: its errors and its help words come first, and quote
+// the bytes (line RG item K4i-2a, probe `K/k4i2/nonutf8`). LOSAT refuses a value that is not
+// UTF-8 where the body would start, after the read and `-dryrun`, but those it opens by their
+// bytes: `-out` (`Args::output_file`, below) and `-logfile`.
+#[cfg(unix)]
+#[test]
+fn a_word_that_is_not_utf8_is_read_first_and_refused_after_the_read() {
+    use std::os::unix::ffi::OsStringExt;
+    let run = run_dustmasker_words;
+    let bytes = || OsString::from_vec(vec![0xff]);
     for (word, request) in [
         ("-version", crate::ncbi_version::VersionRequest::Version),
         (
@@ -47,21 +54,74 @@ fn the_versions_come_before_the_refusal_of_a_word_that_is_not_utf8() {
             crate::ncbi_version::VersionRequest::FullJson,
         ),
     ] {
+        let printed = crate::ncbi_version::print(request, "dustmasker");
         assert_eq!(
-            run(vec!["-out".into(), bytes.clone(), word.into()]),
-            (0, crate::ncbi_version::print(request, "p"), String::new())
+            run(vec!["-infmt".into(), bytes(), word.into()]),
+            (0, printed.into_bytes(), Vec::new())
         );
     }
+    let refusal = b"Error: the value of -infmt is not UTF-8; NCBI BLAST+ reads the bytes of an \
+                    option's value, which is not supported by LOSAT's DUSTMASKER\n";
     assert_eq!(
-        run(vec!["-out".into(), bytes]),
-        (
-            1,
-            String::new(),
-            "Error: a word of the command line is not UTF-8; NCBI BLAST+ reads its bytes, \
-                 which is not supported by LOSAT's P\n"
-                .to_string()
-        )
+        run(vec!["-infmt".into(), bytes()]),
+        (1, Vec::new(), refusal.to_vec())
     );
+    // Of two such values, the refusal names the first of the command line.
+    let (status, _, err) = run(vec!["-in".into(), bytes(), "-infmt".into(), bytes()]);
+    assert_eq!(status, 1);
+    assert!(
+        err.starts_with(b"Error: the value of -in is not UTF-8;"),
+        "{err:?}"
+    );
+    // `-dryrun` runs no body: status 0 (NCBI BLAST+ 2.17.0 dustmasker `-infmt $'\xff' -dryrun`).
+    assert_eq!(
+        run(vec!["-infmt".into(), bytes(), "-dryrun".into()]),
+        (0, Vec::new(), Vec::new())
+    );
+    // A help word stops the reader: the help, status 0.
+    let (status, out, err) = run(vec!["-infmt".into(), bytes(), "-h".into()]);
+    assert_eq!((status, err), (0, Vec::new()));
+    assert!(out.starts_with(b"USAGE\n  dustmasker"), "{out:?}");
+    // The reader's errors come first, also after the word: an unknown argument.
+    let (status, out, err) = run(vec!["-infmt".into(), bytes(), "-bogus".into()]);
+    let err = String::from_utf8(err).unwrap();
+    assert_eq!((status, out), (1, Vec::new()));
+    assert!(err.contains("Unknown argument: \"bogus\""), "{err}");
+    assert!(!err.contains("not UTF-8"), "{err}");
+    // A refused value is quoted with its bytes.
+    let (status, _, err) = run(vec!["-outfmt".into(), bytes()]);
+    assert_eq!(status, 1);
+    let quoted = b"Illegal value, expected `acclist', ";
+    assert!(err.windows(quoted.len()).any(|at| at == quoted), "{err:?}");
+    assert!(err.windows(3).any(|at| at == b"`\xff'"), "{err:?}");
+    // A name that is not UTF-8 is NCBI's invalid name, with its bytes.
+    let (status, _, err) = run(vec![OsString::from_vec(b"-o\xff".to_vec())]);
+    assert_eq!(status, 1);
+    let quoted = b"Invalid argument name: o\xff";
+    assert!(err.windows(quoted.len()).any(|at| at == quoted), "{err:?}");
+}
+
+// `-out` is opened by its bytes, as NCBI's `AsOutputFile` opens it. Not on macOS, whose APFS
+// refuses a file name that is not UTF-8 (as `tests/non_utf8_names.rs`).
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn an_out_name_that_is_not_utf8_is_opened_by_its_bytes() {
+    use std::os::unix::ffi::OsStringExt;
+    let run = run_dustmasker_words;
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-ncbi-app-out-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut path = dir.clone().into_os_string().into_vec();
+    path.extend_from_slice(b"/o\xff");
+    let path = OsString::from_vec(path);
+    assert_eq!(
+        run(vec!["-out".into(), path.clone()]),
+        (0, Vec::new(), Vec::new())
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), b"ran\n");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -72,12 +132,14 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
         post_prefix: None,
         components: &[],
+        dry_run: None,
     };
     let mut stderr = Vec::new();
     let mut diag = Diag {
         target: DiagTarget::Stderr,
         stderr: &mut stderr,
         tool: &TOOL,
+        record: None,
     };
     let error = ArgException::new("eNoFile", "Argument \"in\". X".to_string());
     assert_eq!(diag.run_arg_exception(error), 1);
@@ -97,6 +159,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         target: DiagTarget::Stderr,
         stderr: &mut stderr,
         tool: &TOOL,
+        record: None,
     };
     diag.run_arg_exception(ArgException::new("eNoValue", "m".to_string()));
     assert_eq!(

@@ -269,7 +269,8 @@ pub(crate) fn engine_counts<S: TbxScore>(
 }
 
 /// The outfmt 0 rows of `hits` (`report::pairwise_hits`, the Seq-aligns' identities
-/// `seqalign_identities` by HSP) as an indexed map on `pool` (item 2).
+/// `seqalign_identities` by HSP) as an indexed map on `pool` (item 2), under `-html` with each
+/// row's masks added to `html_masks` in the same order.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -279,20 +280,42 @@ pub(crate) fn pairwise_hits(
     hits: &[TblastxHsp],
     seqalign_identities: Option<&[u32]>,
     rows: &PairwiseRows<'_>,
+    html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) -> Vec<PairwiseHit> {
     debug_assert!(seqalign_identities.is_none_or(|identities| identities.len() == hits.len()));
+    let init = || {
+        (
+            Vec::new(),
+            crate::report::query_anchored::HspMasks::default(),
+        )
+    };
+    let row = |(window, row_masks): &mut (Vec<u8>, crate::report::query_anchored::HspMasks),
+               (index, hsp): (usize, &TblastxHsp)| {
+        rows.hit(
+            hsp,
+            seqalign_identities.map(|identities| identities[index]),
+            window,
+            row_masks,
+        )
+    };
     pool.install(|| {
-        hits.par_iter()
-            .enumerate()
-            .with_min_len(CHUNK / 4)
-            .map_init(Vec::new, |window, (index, hsp)| {
-                rows.hit(
-                    hsp,
-                    seqalign_identities.map(|identities| identities[index]),
-                    window,
-                )
-            })
-            .collect()
+        let indexed = hits.par_iter().enumerate().with_min_len(CHUNK / 4);
+        match html_masks {
+            None => indexed.map_init(init, row).collect(),
+            Some(table) => {
+                let (rows, masks): (
+                    Vec<PairwiseHit>,
+                    Vec<crate::report::query_anchored::HspMasks>,
+                ) = indexed
+                    .map_init(init, |state, item| {
+                        let hit = row(state, item);
+                        (hit, state.1.copy_rows())
+                    })
+                    .unzip();
+                table.extend(masks);
+                rows
+            }
+        }
     })
 }
 
@@ -305,16 +328,23 @@ pub(crate) fn pairwise_hits(
     hits: &[TblastxHsp],
     seqalign_identities: Option<&[u32]>,
     rows: &PairwiseRows<'_>,
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) -> Vec<PairwiseHit> {
     let mut window = Vec::new();
+    let mut row_masks = crate::report::query_anchored::HspMasks::default();
     hits.iter()
         .enumerate()
         .map(|(index, hsp)| {
-            rows.hit(
+            let hit = rows.hit(
                 hsp,
                 seqalign_identities.map(|identities| identities[index]),
                 &mut window,
-            )
+                &mut row_masks,
+            );
+            if let Some(table) = html_masks.as_deref_mut() {
+                table.push(row_masks.copy_rows());
+            }
+            hit
         })
         .collect()
 }

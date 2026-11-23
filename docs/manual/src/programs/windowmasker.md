@@ -1,21 +1,42 @@
 # windowmasker
 
-`losat windowmasker` masks the repeats of nucleotide sequences with the WindowMasker algorithm, from a file of unit counts made for the genome. Use it to see which parts of a genome a nucleotide search would mask, to write a masked FASTA file, or to make masks for [`makeblastdb -mask_data`](makeblastdb.md).
+`losat windowmasker` masks the repeats of nucleotide sequences with the WindowMasker algorithm, from a file of unit counts made for the genome. Use it to make the counts file of a genome, to see which parts of a genome a nucleotide search would mask, to write a masked FASTA file, or to make masks for [`makeblastdb -mask_data`](makeblastdb.md).
 
-It reads a FASTA file or an existing nucleotide BLAST database, and a counts file in any of the four formats of NCBI's `windowmasker` (`ascii`, `binary`, `oascii`, `obinary`). It writes the same bytes as NCBI's `windowmasker` 1.0.0 in all eight output formats.
+It has NCBI's three modes:
 
-LOSAT masks with a counts file; it does not make one yet. Make the counts with NCBI's `windowmasker -mk_counts`, or use the counts files that NCBI publishes for many genomes (the files that `blastn -window_masker_taxid` reads).
+- `-mk_counts` makes a counts file from the sequences of a genome.
+- `-convert` writes a counts file in another of the four formats (`ascii`, `binary`, `oascii`, `obinary`).
+- `-ustat` masks sequences with a counts file.
+
+It reads FASTA files or nucleotide BLAST databases, and counts files in all four formats. It writes the same bytes as NCBI's `windowmasker` 1.0.0: the same counts files, and the same masks in all eight output formats. So the whole workflow runs without NCBI BLAST+: counts from `-mk_counts` for [`blastn -window_masker_db`](blastn.md), masks for `makeblastdb -mask_data`. You can also use the counts files that NCBI publishes for many genomes (the files that `blastn -window_masker_taxid` reads).
 
 ## Synopsis
 
 ```bash
+losat windowmasker -mk_counts -in GENOME.fna -sformat obinary -out GENOME.counts [options]
+losat windowmasker -convert -in COUNTS -sformat ascii -out COUNTS.ascii
 losat windowmasker -ustat COUNTS -in SEQUENCES.fna [options]
 losat windowmasker -ustat COUNTS -infmt blastdb -in DB [options]
 ```
 
 With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.md)): `windowmasker -ustat COUNTS -in SEQUENCES.fna [options]`.
 
-## Input
+## Making a counts file (`-mk_counts`)
+
+- `-in` names the input: FASTA files separated by commas, or with `-infmt blastdb` nucleotide databases. With `-fa_list T`, `-in` is a file that lists the FASTA files, one per line. As in NCBI's, `-in -` is a file named `-`, not the standard input.
+- `-unit` sets the length of the units, 1 to 16 letters. Without it, the length follows from `-genome_size`, or from the length of the input, which is then read once more.
+- `-sformat` sets the format (`ascii`, the default; `binary`; `oascii` and `obinary`, the optimized formats that `blastn -window_masker_db` reads fastest). `-smem` is the memory in megabytes that the optimized formats may use.
+- `-t_low` and `-t_high` bound the counts that the file keeps. `-t_low_pct`, `-t_extend_pct`, `-t_thres_pct` and `-t_high_pct` set the percentages of the four thresholds; as in NCBI's, they apply only when `-out` names a file.
+- `-mem` is the memory in megabytes for counting. With less memory the input is read more times; the counts are the same.
+- `-ids` and `-exclude_ids` choose the sequences, as in masking. `-meta` adds a note to the file.
+- `-checkdup T` first checks the input for duplicated sequences, and writes each possible duplication to the standard error.
+- The progress lines (`pass 1`, `pass 2`, ...) go to the standard error, as NCBI writes them.
+
+## Converting a counts file (`-convert`)
+
+`-in` names the counts file, in any of the four formats; `-sformat` and `-smem` set the format written to `-out`. `-meta` replaces the note of the file. The `binary`, `oascii` and `obinary` files that `-convert` writes are the same as those that `-mk_counts` writes from the same counts; an `ascii` file has no statistics lines.
+
+## Masking (`-ustat`)
 
 - `-ustat` names the counts file. It is required.
 - `-in` names the input. `-in -` (the default) reads the standard input.
@@ -28,7 +49,8 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `-ustat` | none | The counts file. |
+| `-mk_counts`, `-convert` | off | Make a counts file, or convert one. |
+| `-ustat` | none | The counts file to mask with. |
 | `-in` | `-` | Input file or database name. |
 | `-infmt` | `fasta` | `fasta`, `blastdb` or `seqids`. |
 | `-out` | `-` | Output file. |
@@ -40,12 +62,17 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-dust` | `F` | Also mask low-complexity regions with DUST, as `dustmasker` does. |
 | `-dust_level` | `20` | DUST score threshold with `-dust T`. |
 | `-parse_seqids` | off | Parse the Seq-ids of FASTA input. |
+| `-sformat` | `ascii` | Format of the counts that `-mk_counts` and `-convert` write. |
+| `-unit` | from the genome | Unit length for `-mk_counts`. |
+| `-checkdup` | `F` | Check the input of `-mk_counts` for duplicated sequences. |
 
 For every option: `losat windowmasker -help`.
 
 ## Output
 
-`-outfmt` is one of:
+The counts files are those of NCBI's `windowmasker`, byte for byte, in all four formats. As in NCBI's, `binary` counts written to the standard output start with an extra word, which the readers do not accept: write them to a file.
+
+The masks: `-outfmt` is one of:
 
 | Format | What you get |
 | --- | --- |
@@ -60,11 +87,14 @@ Warnings about the input, such as a counts file without percentages when a `-t_*
 
 None that change the output of a normal run. When the reader of the output closes a pipe early, LOSAT stops at once with exit status 0, where NCBI ends with the signal (141). See [the decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md).
 
+A line of an `-ids` or `-exclude_ids` file (matched as text, without `-text_match F`) that gives an empty id, such as a line that starts with a space or a tab, or a line `>` or `|`, gets NCBI's error `bad id: ...: ignoring` and is skipped; the rest of the output is NCBI's for the file without that line. NCBI writes the same error and then crashes. See [`windowmasker`: an empty id in `-ids` or `-exclude_ids`](../differences.md#windowmasker-an-empty-id-in--ids-or--exclude_ids).
+
 ## What LOSAT refuses
 
-- `-mk_counts` and `-convert`: LOSAT does not make or convert counts files yet.
 - Counts files on which NCBI's result is undefined, such as an `ascii` file with units of more than 16 letters.
-- An ids file matched as text (without `-text_match F`) with an empty id (a line that starts with a space or a tab, `>`, `|` or `>|`).
+- `-mk_counts` of an input without a unit of unambiguous letters (all `N`; or, with `-unit`, no sequence, as when `-ids` keeps none): NCBI writes its percentages as its C runtime prints 0/0.
+- `-mk_counts -infmt seqids`: NCBI fetches each sequence from NCBI's servers.
+- `-mk_counts` or `-convert` of units of 1 to 3 letters to `oascii` or `obinary` with an `-smem` that is a multiple of 65536: NCBI's result is undefined.
 
 See [What LOSAT refuses](../refusals.md#windowmasker).
 
@@ -97,6 +127,21 @@ Mask a database you built earlier:
 ```bash
 losat makeblastdb -in genome.fna -dbtype nucl -out genome_db
 losat windowmasker -ustat genome.counts -infmt blastdb -in genome_db
+```
+
+Make the counts file of a genome in the optimized binary format, and mask a search's queries with it:
+
+<!-- example: windowmasker-5 -->
+```bash
+losat windowmasker -mk_counts -in genome.fna -sformat obinary -out genome.counts
+losat blastn -query reads.fna -subject genome.fna -window_masker_db genome.counts
+```
+
+Write a counts file as text:
+
+<!-- example: windowmasker-6 -->
+```bash
+losat windowmasker -convert -in genome.counts -sformat ascii -out genome.counts.txt
 ```
 
 ## See also

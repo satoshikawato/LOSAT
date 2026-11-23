@@ -23,7 +23,7 @@ pub(crate) fn max_target_seqs_count(max_target_seqs: Option<i32>) -> Option<usiz
 pub(crate) const BLASTX_TASK: crate::blastinput::value_parsers::TaskParser =
     crate::blastinput::value_parsers::task_parser("BLASTX", &["blastx", "blastx-fast"], &[]);
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:49-62
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:72-78
@@ -75,6 +75,11 @@ pub struct BlastxArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
+    // not write it yet (`blastinput::app::html_format_check`).
+    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
+    pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
     #[arg(
@@ -176,6 +181,12 @@ pub struct BlastxArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1941-1942
     #[arg(long)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
+    // NCBI's flag, off by default: the Smith-Waterman redo of each match (`kappa::sw_redo_context`,
+    // item X4b-2), with every `-comp_based_stats`. RPSTBLASTN's own (`rpstblastn::args`) never
+    // sets it here.
+    #[arg(long)]
+    pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     #[arg(long, default_value = "both", value_parser = ["both", "plus", "minus"])]
     pub strand: String,
@@ -499,6 +510,9 @@ pub struct ResolvedOptions {
     pub gap_extend: i32,
     pub gapped: bool,
     pub composition: u8,
+    /// `-use_sw_tback` (NCBI's `SetSmithWatermanMode`, blast_args.cpp:885): the redo of each
+    /// match is NCBI's Smith-Waterman redo, with or without composition-based statistics.
+    pub use_sw_tback: bool,
     pub seg: SegSpec,
     pub soft_masking: bool,
     pub strand: String,
@@ -537,6 +551,12 @@ pub struct ResolvedOptions {
     pub outfmt: u8,
     /// `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4) show a sequence's GI.
     pub show_gis: bool,
+    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`); None without
+    /// `-html` or outfmt 0, and for rpstblastn, which has no `-html`.
+    pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
+    /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
+    /// outfmt 0 and 18 reports (the organism report takes no links).
+    pub is_html: bool,
     /// The tabular report with a field list or a delimiter (outfmt 6 and 7), or outfmt 10 or
     /// 20 (`TabularSpec::of_app`); `None` for the default outfmt 6 and 7 (the `std` fields and a
     /// tab, `TabularSpec::std`, which the reports write with the same shared writer, `tabular.rs`)
@@ -832,6 +852,7 @@ impl BlastxArgs {
             gap_extend,
             gapped: !self.ungapped,
             composition,
+            use_sw_tback: self.use_sw_tback,
             seg,
             soft_masking: self.soft_masking,
             strand: self.strand.clone(),
@@ -866,6 +887,10 @@ impl BlastxArgs {
             formatting: self.formatting,
             outfmt,
             show_gis: self.show_gis,
+            // Set at the program's setup (`blastinput::app::html_links`, native.rs `run_inner`,
+            // local.rs `check_resolutions`).
+            html: None,
+            is_html: self.html,
             tabular,
             taxdb_found: false,
             subject_taxdb: None,

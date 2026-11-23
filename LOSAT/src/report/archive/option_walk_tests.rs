@@ -761,6 +761,9 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &[After("WordThreshold", "DbLength", "BigInteger(1000000)")],
         ),
         ("show_gis", &["-show_gis"], &[]),
+        // NCBI's `CFormattingArgs::ExtractAlgorithmOptions` records the hit list size only
+        // (blast_args.cpp:2894-2978): `-html` is the formatter's (`m_IsHTML`), not the request's.
+        ("html", &["-html"], &[]),
         ("parse_deflines", &["-parse_deflines"], &[]),
         (
             "searchsp",
@@ -923,6 +926,14 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             "ungapped",
             &["-ungapped"],
             &[At("UngappedMode", "Boolean(true)")],
+        ),
+        // `SetSmithWatermanMode` after `SetPSITblastnDefaults` (blast_args.cpp:885); with a PSSM
+        // query the run refuses it at the first match (`tblastn::match_redo::sw_pssm_refusal`),
+        // and a search without hits runs.
+        (
+            "use_sw_tback",
+            &["-use_sw_tback"],
+            &[At("SmithWatermanMode", "Boolean(true)")],
         ),
     ];
     walk(&App {

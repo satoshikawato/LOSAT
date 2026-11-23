@@ -1,5 +1,18 @@
 use super::*;
 
+// No NCBI counterpart: the size of LOSAT's record of an outfmt 0 HSP, one per reported HSP
+// until the report is written. It is not larger than on dev ed9178f49 (376 bytes on 64-bit
+// targets): the masks of the rows are not kept per HSP (line RG T4a1; the rows hold them in
+// lower case, `query_anchored::output_seq`). A boxed list per masked HSP had made it 384 bytes
+// and raised max RSS by up to 2 % (3,000 BLASTX HSPs). On 32-bit targets (wasm32) nothing is
+// pinned.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn pairwise_hit_is_no_larger_than_on_dev() {
+    let size = std::mem::size_of::<PairwiseHit>();
+    assert!(size <= 376, "{size}");
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:533-538
 // (cited at `write_blastp_database_header_spacing`)
 // The `Database:` lines of a FASTA subject set print NCBI's `Int8` counts whole: a set of
@@ -16,6 +29,7 @@ fn subject_set_database_lines_print_totals_of_2_to_the_32_letters_or_more() {
         2,
         6_000_000_000,
         None,
+        None,
     )
     .unwrap();
     let prolog = String::from_utf8(prolog).unwrap();
@@ -30,6 +44,137 @@ fn subject_set_database_lines_print_totals_of_2_to_the_32_letters_or_more() {
         epilog.contains("  Number of letters in database: 6,000,000,000\n  Number of sequences in database:  2\n"),
         "{epilog}"
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395 (cited at
+// `write_prolog`): the prolog's two `NcbiEndl`, each a newline and a flush.
+// Which programs' prologs flush after each of these two newlines (`write_prolog`'s
+// `endl_flushes`, each program's flushes of dev; review note N3 of line RG T4a1): the plain
+// prologs of blastx, rpstblastn, tblastn (also with `-in_pssm`), tblastx and the blastn tasks
+// other than megablast do; those of blastp's driver (blastp, psiblast, rpsblast) and of
+// megablast flush nowhere in the prolog. With `-html` every program's prolog flushes at both, as
+// NCBI's (line RG T4a2 review B4: blastp's `-html -out /dev/full` with `GETURL_DEBUG` wrote
+// `REGISTRY: .ncbirc` before NCBI's write error).
+#[test]
+fn the_prologs_that_flush_after_their_two_newlines() {
+    /// Keeps what is written and the number of bytes written at each flush.
+    #[derive(Default)]
+    struct Flushes(Vec<u8>, Vec<usize>);
+    impl Write for Flushes {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.1.push(self.0.len());
+            Ok(())
+        }
+    }
+    type Html<'h> = Option<(&'h crate::report::html_ids::HtmlLinks, &'h mut dyn Write)>;
+    type Prolog<'a> = Box<dyn for<'h> Fn(&mut Flushes, Html<'h>) -> io::Result<()> + 'a>;
+    let version = "2.17.0+";
+    let report = BlastpPairwiseReport {
+        version: version.into(),
+        database_name: "d".into(),
+        database_num_sequences: 1,
+        database_total_letters: 10,
+        matrix_name: Some("BLOSUM62".into()),
+        gap_open: 11,
+        gap_extend: 1,
+        word_threshold: 12.0,
+        window_size: 40,
+        gapped_karlin: Default::default(),
+        gumbel: None,
+        gapped: true,
+        show_linked_set_size: false,
+        num_descriptions: 500,
+        num_alignments: 250,
+    };
+    let blastp = |program: &'static str| -> Prolog<'_> {
+        Box::new(move |out: &mut Flushes, html: Html<'_>| {
+            write_blastp_pairwise_prolog(out, version, program, b"d", 1, 10, None, html)
+        })
+    };
+    let blastn = |megablast: bool| -> Prolog<'_> {
+        Box::new(move |out: &mut Flushes, html: Html<'_>| {
+            let intro = BlastnIntro {
+                megablast,
+                indexed_megablast: false,
+                matrix_only: false,
+            };
+            write_blastn_pairwise_prolog(out, version, intro, b"d", 1, 10, None, html)
+        })
+    };
+    let tblastn = |program: &'static str| -> Prolog<'_> {
+        Box::new(move |out: &mut Flushes, html: Html<'_>| {
+            write_tblastn_pairwise_prolog(out, program, version, b"d", 1, 10, None, html)
+        })
+    };
+    let blastx = |program: &'static str| -> Prolog<'_> {
+        let report = &report;
+        Box::new(move |out: &mut Flushes, html: Html<'_>| {
+            write_blastx_prolog(out, program, report, None, html)
+        })
+    };
+    let prologs: [(&str, Prolog<'_>, bool); 10] = [
+        ("blastp", blastp("blastp"), false),
+        ("psiblast", blastp("psiblast"), false),
+        ("rpsblast", blastp("rpsblast"), false),
+        ("megablast", blastn(true), false),
+        ("blastn", blastn(false), true),
+        (
+            "tblastx",
+            Box::new(|out: &mut Flushes, html: Html<'_>| {
+                write_tblastx_pairwise_prolog(out, version, b"d", 1, 10, None, html)
+            }),
+            true,
+        ),
+        ("tblastn", tblastn("TBLASTN"), true),
+        ("psitblastn", tblastn("PSITBLASTN"), true),
+        ("blastx", blastx("BLASTX"), true),
+        ("rpstblastn", blastx("RPSTBLASTN"), true),
+    ];
+    let links = html_links_with(None);
+    for (program, prolog, endl_flushes) in &prologs {
+        let mut out = Flushes::default();
+        prolog(&mut out, None).unwrap();
+        // The version line, then the two newlines.
+        let line = out.0.iter().position(|&byte| byte == b'\n').unwrap() + 1;
+        assert_eq!(&out.0[line..line + 2], b"\n\n", "{program}");
+        let flushes = if *endl_flushes {
+            vec![line + 1, line + 2]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(out.1, flushes, "{program}");
+        // `-html`: the bold version line after the HTML head, then the two newlines, each flushed
+        // (no `./.ncbirc`: the references post nothing and flush nowhere).
+        let mut out = Flushes::default();
+        let mut diagnostics = Vec::new();
+        prolog(&mut out, Some((&links, &mut diagnostics))).unwrap();
+        let line = HTML_PREFIX.len()
+            + out.0[HTML_PREFIX.len()..]
+                .iter()
+                .position(|&byte| byte == b'\n')
+                .unwrap()
+            + 1;
+        assert!(out.0[..line].ends_with(b"</b>\n"), "{program}");
+        assert_eq!(&out.0[line..line + 2], b"\n\n", "{program}");
+        assert_eq!(out.1, [line + 1, line + 2], "{program}");
+        assert!(diagnostics.is_empty());
+    }
+    // A reference that posts flushes the report written so far first (NCBI's `cerr` is tied to
+    // `cout`), so the posts follow the bytes before them.
+    let posting = html_links_with(Some(b"[BLASTFMTUTIL]\nPROTOCOL=https:\nPROTOCOL=https:\n"));
+    let mut out = Flushes::default();
+    let mut diagnostics = Vec::new();
+    (prologs[0].1)(&mut out, Some((&posting, &mut diagnostics))).unwrap();
+    assert_eq!(
+        String::from_utf8(diagnostics).unwrap(),
+        "Warning: (110.8) [blastp] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3\n"
+            .repeat(2)
+    );
+    assert_eq!(out.1.len(), 4);
 }
 
 /// `write_flatfile_wrapped_with` finds the break of a line without newlines or backspaces from the window's
@@ -79,6 +224,7 @@ fn a_description_label_in_parts_writes_the_joined_line() {
         DescriptionLabel {
             id: id.to_vec(),
             title: title.to_vec(),
+            caught: false,
         }
         .write_cut(&mut out)
         .unwrap();
@@ -300,7 +446,9 @@ fn heading_of(title: &[u8]) -> String {
         &[&hit],
         &[0],
         0..1,
-        |writer: &mut Vec<u8>, _| writer.write_all(b"<hsp>\n"),
+        None,
+        &mut crate::report::query_warnings::no_places,
+        |writer: &mut Vec<u8>, _, _| writer.write_all(b"<hsp>\n"),
     )
     .unwrap();
     String::from_utf8(written).unwrap()
@@ -507,6 +655,7 @@ fn alignment_rows_of_one_column_step_one_letter() {
             "ACDEW",
             [&[], &[]],
             Default::default(),
+            None,
             &config,
         )
         .unwrap();
@@ -556,6 +705,7 @@ fn alignment_rows_of_one_column_step_one_letter() {
         "MQ",
         [&[], &[]],
         Default::default(),
+        None,
         &config,
     )
     .unwrap();
@@ -600,19 +750,19 @@ fn translated_alignment_rows_of_one_column_hide_only_a_letter_row_at_1() {
     };
     let blastx = hit(6, 2, Some(1), None);
     assert_eq!(
-        text(&|out| write_blastx_alignment(out, &blastx, &config)),
+        text(&|out| write_blastx_alignment(out, &blastx, None, &config)),
         "Query  1  M  3\n          M\nSbjct     M  \n\n\
              Query  4  R  6\n          R\nSbjct  2  R  2\n\n"
     );
     let tblastn = hit(2, 6, None, Some(1));
     assert_eq!(
-        text(&|out| write_tblastn_alignment(out, &tblastn, &config)),
+        text(&|out| write_tblastn_alignment(out, &tblastn, None, &config)),
         "Query     M  \n          M\nSbjct  1  M  3\n\n\
              Query  2  R  2\n          R\nSbjct  4  R  6\n\n"
     );
     let tblastx = hit(6, 6, Some(1), Some(1));
     assert_eq!(
-        text(&|out| write_tblastx_alignment(out, &tblastx, 6, &config)),
+        text(&|out| write_tblastx_alignment(out, &tblastx, None, 6, &config)),
         "Query  1  M  3\n          M\nSbjct  1  M  3\n\n\
              Query  4  R  6\n          R\nSbjct  4  R  6\n\n"
     );
@@ -621,7 +771,7 @@ fn translated_alignment_rows_of_one_column_hide_only_a_letter_row_at_1() {
     let mut minus = hit(1, 2, Some(-1), None);
     (minus.hit.q_start, minus.hit.query_length) = (6, 6);
     assert_eq!(
-        text(&|out| write_blastx_alignment(out, &minus, &config)),
+        text(&|out| write_blastx_alignment(out, &minus, None, &config)),
         "Query  6  M  4\n          M\nSbjct     M  \n\n\
              Query  3  R  1\n          R\nSbjct  2  R  2\n\n"
     );
@@ -667,7 +817,7 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
     blastx.hit.query_length = 2707;
     for (line_length, end) in [(1431655765, 2693), (1431655766, 2706), (1431655767, 2703)] {
         assert_eq!(
-            text(&|out| write_blastx_alignment(out, &blastx, &config(line_length))),
+            text(&|out| write_blastx_alignment(out, &blastx, None, &config(line_length))),
             format!("Query  2707  MRKVL  {end}\n             MRKVL\nSbjct  4     MRKVL  8\n\n"),
             "-line_length {line_length}"
         );
@@ -675,7 +825,7 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
     let tblastn = hit((1, 5), (574, 588), None, Some(1));
     for (line_length, end) in [(1431655765, 588), (1431655766, 575), (1431655767, 578)] {
         assert_eq!(
-            text(&|out| write_tblastn_alignment(out, &tblastn, &config(line_length))),
+            text(&|out| write_tblastn_alignment(out, &tblastn, None, &config(line_length))),
             format!("Query  1    MRKVL  5\n            MRKVL\nSbjct  574  MRKVL  {end}\n\n"),
             "-line_length {line_length}"
         );
@@ -689,7 +839,7 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
         (2147483647, (16, 584)),
     ] {
         assert_eq!(
-            text(&|out| write_tblastx_alignment(out, &tblastx, 16, &config(line_length))),
+            text(&|out| write_tblastx_alignment(out, &tblastx, None, 16, &config(line_length))),
             format!(
                 "Query  2    MRKVL  {}\n            MRKVL\nSbjct  598  MRKVL  {}\n\n",
                 ends.0, ends.1
@@ -708,6 +858,7 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
                 "MRKVL",
                 [&[], &[]],
                 Default::default(),
+                None,
                 &PairwiseConfig {
                     program: "blastp".into(),
                     ..config(line_length)
@@ -758,6 +909,7 @@ fn the_writer_s_estimate_of_an_hsp_holds_at_every_line_length() {
             &letters,
             [&[], &[]],
             Default::default(),
+            None,
             &PairwiseConfig {
                 line_length,
                 program: "blastp".into(),
@@ -986,7 +1138,7 @@ fn matrix_only_hsp_header_is_the_raw_score() {
 }
 
 // NCBI 2.17.0 (line RG X6 probe `f_rm_sub_0`, ws:~/losat-bench/work/rgx6/s2): the outfmt 0
-// prolog of matrix-only scoring (`write_matrix_only_pairwise_intro`, blast_format.cpp:376-395),
+// prolog of matrix-only scoring (`write_prolog` with `disable_ka_stats`, blast_format.cpp:376-395),
 // and megablast's reference after the RMBlast lines for `-task megablast`.
 #[test]
 fn matrix_only_prolog_is_rmblastns() {
@@ -1003,6 +1155,7 @@ fn matrix_only_prolog_is_rmblastns() {
             b"User specified sequence set (Input: s1.fa)",
             1,
             100_000,
+            None,
             None,
         )
         .unwrap();
@@ -1154,6 +1307,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
                     None,
                     x_pool,
                     None,
+                    None,
                     &crate::report::db_subject::HitLoads::default(),
                 )
                 .unwrap();
@@ -1177,4 +1331,258 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         Ok(())
     })
     .unwrap();
+}
+
+/// The run's `-html` data with `./.ncbirc` `ncbirc` (`None`: no file) for the references and
+/// no file for the id links.
+fn html_links_with(ncbirc: Option<&[u8]>) -> crate::report::html_ids::HtmlLinks {
+    crate::report::html_ids::HtmlLinks {
+        registry: crate::report::formatter_registry::InitConfig::of("blastp", None, false).unwrap(),
+        db_name: Vec::new(),
+        nucleotide: false,
+        ncbirc: crate::report::formatter_registry::FormatterNcbirc::of(
+            "blastp",
+            ncbirc.map(<[u8]>::to_vec),
+        )
+        .unwrap(),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:371-373 (cited at
+// `HTML_PREFIX`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2290-2292 (cited at
+// `HTML_SUFFIX`)
+/// The `-html` prolog and epilog end of formats 0-4 are NCBI BLAST+ 2.17.0's in LOSAT's words
+/// (line RG T4 probe `bp.s.f0.h`, `T/t4/out`: its bytes before `Database:` and its last five
+/// lines): the HTML head and `<PRE>`, the version line in bold, the linked references, and after
+/// the epilog's last line the end of `<PRE>`, body and document. The plain forms are unchanged.
+#[test]
+fn the_html_prolog_and_epilog_end_are_ncbis() {
+    const NCBI_PROLOG: &str = "<HTML>\n\
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>\n\
+<BODY BGCOLOR=\"#FFFFFF\" LINK=\"#0000FF\" VLINK=\"#660099\" ALINK=\"#660099\">\n\
+<PRE>\n\
+\n\
+<b>BLASTP 2.17.0+</b>\n\
+\n\
+\n\
+<b><a\n\
+href=\"https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R\n\
+etrieve&list_uids=9254694&dopt=Citation\">Reference</a>:</b>\n\
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,\n\
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),\n\
+\"Gapped BLAST and PSI-BLAST: a new generation of protein database\n\
+search programs\", Nucleic Acids Res. 25:3389-3402.\n\
+\n\
+\n\
+<b><a\n\
+href=\"https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R\n\
+etrieve&list_uids=11452024&dopt=Citation\">Reference for\n\
+composition-based statistics</a>:</b>\n\
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei\n\
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and\n\
+Stephen F. Altschul (2001), \"Improving the accuracy of PSI-BLAST\n\
+protein database searches with composition-based statistics and\n\
+other refinements\", Nucleic Acids Res. 29:2994-3005.\n\
+\n\
+\n\
+\n\
+";
+    const NCBI_EPILOG_END: &str = "Neighboring words threshold: 11\n\
+Window for multiple hits: 40\n\
+</PRE>\n\
+</BODY>\n\
+</HTML>\n\
+";
+    let links = html_links_with(None);
+    let mut out = Vec::new();
+    write_prolog(
+        &mut out,
+        "blastp",
+        crate::wording::REPORT_VERSION,
+        false,
+        false,
+        false,
+        false,
+        Some((&links, &mut Vec::new())),
+    )
+    .unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        crate::wording::losat_text(NCBI_PROLOG)
+    );
+    let mut plain = Vec::new();
+    write_prolog(
+        &mut plain,
+        "blastp",
+        crate::wording::REPORT_VERSION,
+        false,
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+    assert!(plain.starts_with(
+        format!("BLASTP {}\n\n\nReference: ", crate::wording::REPORT_VERSION).as_bytes()
+    ));
+    let mut end = Vec::new();
+    write_epilog_end(&mut end, 11.0, 40, true).unwrap();
+    assert_eq!(String::from_utf8(end).unwrap(), NCBI_EPILOG_END);
+    let mut end = Vec::new();
+    write_epilog_end(&mut end, 11.0, 40, false).unwrap();
+    assert_eq!(
+        end,
+        b"Neighboring words threshold: 11\nWindow for multiple hits: 40\n"
+    );
+    // Matrix-only scoring names `rmblastn` in the same bold version line
+    // (`BlastPrintVersionInfo` with `m_IsHTML`, blast_format.cpp:376-381).
+    let mut rmblastn = Vec::new();
+    write_prolog(
+        &mut rmblastn,
+        "blastn",
+        crate::wording::REPORT_VERSION,
+        false,
+        false,
+        true,
+        true,
+        Some((&links, &mut Vec::new())),
+    )
+    .unwrap();
+    let head = format!(
+        "{}<b>RMBLASTN {}</b>\n\n\nReference: Robert M. Hubley",
+        std::str::from_utf8(HTML_PREFIX).unwrap(),
+        crate::wording::REPORT_VERSION
+    );
+    assert!(rmblastn.starts_with(head.as_bytes()));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:96-99 (cited at
+// `formatter_registry::FormatterNcbirc`)
+/// A malformed `./.ncbirc` ends the `-html` prolog after the version line and its two newlines
+/// with NCBI's exception (NCBI BLAST+ 2.17.0, line RG T4 probe `bp.di.f0.rc_bad.h`: the first 159
+/// bytes of `bp.s.f0.h`'s prolog, exit status 255); the plain prolog does not read the file.
+#[test]
+fn a_malformed_ncbirc_ends_the_html_prolog_after_the_version_line() {
+    let links = html_links_with(Some(b"this line has no equals sign\n"));
+    let mut out = Vec::new();
+    let error = write_prolog(
+        &mut out,
+        "blastp",
+        crate::wording::REPORT_VERSION,
+        false,
+        false,
+        false,
+        false,
+        Some((&links, &mut Vec::new())),
+    )
+    .unwrap_err();
+    assert!(crate::ncbi_exception::NcbiException::of_io_error(&error).is_some());
+    let mut expected = HTML_PREFIX.to_vec();
+    expected.extend_from_slice(
+        format!("<b>BLASTP {}</b>\n\n\n", crate::wording::REPORT_VERSION).as_bytes(),
+    );
+    assert_eq!(out, expected);
+    assert_eq!(
+        expected.len() - crate::wording::REPORT_VERSION.len() + crate::wording::NCBI_VERSION.len(),
+        159
+    );
+    let mut plain = Vec::new();
+    write_prolog(
+        &mut plain,
+        "blastp",
+        crate::wording::REPORT_VERSION,
+        false,
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2485-2573 (cited at
+// `query_anchored::output_seq`): under `-html` the rows' masks (`HtmlRowMasks`, from the rows'
+// builder) put each mask's columns on a line in a `<font color="#000000">` span. NCBI BLAST+
+// 2.17.0's rows of `blastp -seg yes -lcase_masking -soft_masking true -outfmt 0 -html` of a query
+// of 70 Q with the letters 70-79 in lower case (line RG survey T4 §1.9, `mk.bp.segadj.f0.h`): the
+// SEG mask 0-69 starts at the HSP's first column and runs past the first line, so that line has
+// no span; the lower-case mask that touches it is a mask of its own (NCBI's list is not merged),
+// with its span back to back. Without `-html` the same rows hold the masks in lower case only.
+#[test]
+fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
+    const TAIL: &str = "AEVCLNSHCYPLCPDTSPYSITYRIVVIAWPQTAFFYFIE\
+                        ELLDLEQNTLFHRGEDEWKVQLNYADVVIRPGINGINCHAVEQREHIFTPVCFLNKNDCG\
+                        YKLMAHGSIYIWIGHHDINCSVYDASQLAPYWCWVYARRVLEFSWCHLCDGGRVYYETAC\
+                        DPPCGRPATYTNNETYPWRV";
+    let query = format!("{}vplqwyrgpk{TAIL}", "q".repeat(70));
+    let subject = format!("{}VPLQWYRGPK{TAIL}", "Q".repeat(70))
+        .replacen("SITY", "SVTY", 1)
+        .replacen("CHAVE", "CHAFE", 1)
+        .replacen("RRVLE", "RRVVE", 1);
+    assert_eq!(query.len(), 260);
+    let hit = Hit {
+        length: 260,
+        q_start: 1,
+        q_end: 260,
+        s_start: 1,
+        s_end: 260,
+        ..make_hit()
+    };
+    let config = PairwiseConfig {
+        program: "blastp".to_string(),
+        show_frame: false,
+        ..PairwiseConfig::default()
+    };
+    let mut masks = crate::report::query_anchored::HspMasks::default();
+    masks.set_row(
+        0,
+        0,
+        query.as_bytes(),
+        |_| true,
+        (0, 259),
+        true,
+        1,
+        [(0, 69, 0), (70, 79, 0)],
+    );
+    let rows = |masks: Option<&crate::report::query_anchored::HspMasks>| {
+        let mut output = Vec::new();
+        write_alignment_with_sequences(
+            &mut output,
+            &hit,
+            &query,
+            &subject,
+            [&[], &[]],
+            Default::default(),
+            masks,
+            &config,
+        )
+        .unwrap();
+        String::from_utf8(output).unwrap()
+    };
+    let html = rows(Some(&masks));
+    const OPEN: &str = "<font color=\"#000000\">";
+    const CLOSE: &str = "</font>";
+    let lines: Vec<&str> = html.lines().collect();
+    assert_eq!(lines[0], format!("Query  1    {}  60", "q".repeat(60)));
+    assert_eq!(
+        lines[4],
+        format!(
+            "Query  61   {OPEN}qqqqqqqqqq{CLOSE}{OPEN}vplqwyrgpk{CLOSE}\
+             AEVCLNSHCYPLCPDTSPYSITYRIVVIAWPQTAFFYFIE  120"
+        )
+    );
+    assert_eq!(
+        lines[5],
+        "            QQQQQQQQQQVPLQWYRGPKAEVCLNSHCYPLCPDTSPYS+TYRIVVIAWPQTAFFYFIE"
+    );
+    assert_eq!(html.matches(OPEN).count(), 2);
+    // The spans are all that `-html` adds.
+    assert_eq!(html.replace(OPEN, "").replace(CLOSE, ""), rows(None));
+    // The table of the spans gives the masks of an HSP by its index in the run's hits.
+    let table = [masks.copy_rows()];
+    let of = HtmlRowMasks::new(Some(&table[..]), 4);
+    assert!(of.of(3).is_none() && of.of(5).is_none());
+    assert_eq!(rows(of.of(4)), html);
+    assert!(HtmlRowMasks::new(None, 0).of(0).is_none());
 }

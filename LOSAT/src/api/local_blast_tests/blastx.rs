@@ -59,6 +59,7 @@ fn try_run(
     let result = {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -429,6 +430,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         let result = {
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -459,6 +461,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let result = {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -706,4 +709,124 @@ fn errors_of_the_ranges_follow_the_command_line() {
         }
     }
     let _ = std::fs::remove_file(&short_subject);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2503
+// `x_OutputSeq` shows a mask on a row only when the mask's sequence and frame are the row's.
+// The rows of the hit records that the library API hands out (`HspRecord::query_aligned`,
+// `subject_aligned`) show the masks in lower case as outfmt 0 shows them (`HspMasks::lower_row`
+// with the masks that `x_OutputSeq` reads): with `-lcase_masking`, a query row shows the residues
+// of the codons of its frame's lowercase run (plus and minus strand), a subject row its record's
+// lowercase.
+#[test]
+fn hit_record_rows_show_the_lowercase_masks() {
+    let protein = fixture_sequence("AP027078.faa");
+    let (p1, p2) = (&protein[0..150], &protein[200..350]);
+    let codon = |residue: u8| -> &'static [u8] {
+        match residue {
+            b'A' => b"GCT",
+            b'R' => b"CGT",
+            b'N' => b"AAT",
+            b'D' => b"GAT",
+            b'C' => b"TGT",
+            b'Q' => b"CAA",
+            b'E' => b"GAA",
+            b'G' => b"GGT",
+            b'H' => b"CAT",
+            b'I' => b"ATT",
+            b'L' => b"CTG",
+            b'K' => b"AAA",
+            b'M' => b"ATG",
+            b'F' => b"TTT",
+            b'P' => b"CCG",
+            b'S' => b"TCT",
+            b'T' => b"ACT",
+            b'W' => b"TGG",
+            b'Y' => b"TAT",
+            b'V' => b"GTT",
+            other => panic!("no codon for {}", other as char),
+        }
+    };
+    let back_translated = |protein: &[u8]| -> Vec<u8> {
+        protein
+            .iter()
+            .flat_map(|&residue| codon(residue))
+            .copied()
+            .collect()
+    };
+    let lower_run = |seq: &[u8], run: std::ops::Range<usize>| -> Vec<u8> {
+        let mut seq = seq.to_vec();
+        seq[run].make_ascii_lowercase();
+        seq
+    };
+    let reverse_complement = |seq: &[u8]| -> Vec<u8> {
+        seq.iter()
+            .rev()
+            .map(|&base| match base {
+                b'A' => b'T',
+                b'C' => b'G',
+                b'G' => b'C',
+                b'T' => b'A',
+                other => panic!("no complement for {}", other as char),
+            })
+            .collect()
+    };
+    // The query: `p1` on the plus strand (frame 1), then `p2` on the minus strand (frame -1); a
+    // lowercase run of 10 codons in each (residues 30..40 of `p1`, 50..60 of `p2`).
+    let plus = lower_run(&back_translated(p1), 90..120);
+    let minus = reverse_complement(&back_translated(p2));
+    let minus = lower_run(&minus, minus.len() - 180..minus.len() - 150);
+    let query = [plus, minus].concat();
+    // The subjects: `p1` and `p2` with lowercase runs of their own.
+    let (s1, s2) = (lower_run(p1, 60..76), lower_run(p2, 100..112));
+    let fasta = |records: &[(&str, &[u8])]| -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for (id, seq) in records {
+            bytes.extend_from_slice(format!(">{id}\n").as_bytes());
+            bytes.extend_from_slice(seq);
+            bytes.push(b'\n');
+        }
+        bytes
+    };
+    use crate::api::{read_fasta, run_collect, validate, Inputs as ApiInputs, Program, Role};
+    let queries = read_fasta(Program::Blastx, Role::Query, &fasta(&[("q", &query)])).unwrap();
+    let subjects = read_fasta(
+        Program::Blastx,
+        Role::Subject,
+        &fasta(&[("s1", &s1), ("s2", &s2)]),
+    )
+    .unwrap();
+    let search = validate(Program::Blastx, &["-lcase_masking", "-seg", "no"]).unwrap();
+    let outcome = run_collect(&search, ApiInputs::new(&queries, &subjects), &["6", "0"]).unwrap();
+    let text = |row: &[u8]| String::from_utf8(row.to_vec()).unwrap();
+    for (s_idx, query_row, subject_row, frame) in [
+        (0, lower_run(p1, 30..40), &s1, 1),
+        // The minus frame's mask comes back from its residues 50..=59 as nucleotides 723..=749
+        // (`common::masks::protein_to_dna_masks`, `BlastMaskLocProteinToDNA`), which leaves the
+        // codon of residue 59 (720..=722) out: its row shows 50..59 in lower case.
+        (1, lower_run(p2, 50..59), &s2, -1),
+    ] {
+        let best = outcome
+            .hsps
+            .iter()
+            .filter(|hsp| hsp.s_idx == s_idx)
+            .max_by(|a, b| a.bit_score.total_cmp(&b.bit_score))
+            .unwrap_or_else(|| panic!("subject {s_idx}: no HSP"));
+        assert_eq!(best.query_frame, Some(frame), "subject {s_idx}");
+        let residues = best.s_start - 1..best.s_end;
+        assert!(
+            residues.start < 30 && residues.end > 112,
+            "subject {s_idx}: {residues:?}"
+        );
+        assert_eq!(
+            best.query_aligned.as_deref(),
+            Some(&text(&query_row[residues.clone()])[..]),
+            "subject {s_idx}"
+        );
+        assert_eq!(
+            best.subject_aligned.as_deref(),
+            Some(&text(&subject_row[residues])[..]),
+            "subject {s_idx}"
+        );
+    }
 }

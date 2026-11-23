@@ -12,21 +12,16 @@ import { withUnit } from '../domain/units';
 import { announce } from './announcer';
 import { formatDuration } from './format';
 import LosatLoader from './LosatLoader.vue';
+import { phaseLabel, tabWarning } from './run-phase';
 
 const props = defineProps<{ coordinator: Coordinator; run: RunView; runs: readonly RunView[] }>();
 /** The focus was on a button that left (Cancel, or the whole block as the run ended): the panel moves it (WA2-AX-04). */
 const emit = defineEmits<{ 'focus-lost': [] }>();
 const root = ref<HTMLElement>();
 
-const PHASE_LABELS: Readonly<Record<RunStatus, string>> = {
-  queued: 'Waiting',
-  preparing: 'Preparing',
-  running: 'Searching',
-  finalizing: 'Organizing results',
-  completed: 'Completed',
-  cancelled: 'Cancelled',
-  failed: 'Failed',
-};
+/** A run that prints the command line's help or version runs no search (line WQA's D20 round 3). */
+const printed = computed(() => props.run.snapshot.prints !== undefined);
+const label = (status: RunStatus) => phaseLabel(status, printed.value);
 
 const now = ref(Date.now());
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -61,7 +56,7 @@ const groupCancellable = computed(() => {
   return props.runs.some((other) => other.snapshot.group?.groupId === group.groupId && other !== props.run && cancellable(other));
 });
 
-const phase = computed(() => (ahead.value ? `Waiting for run ${ahead.value.snapshot.number}` : PHASE_LABELS[props.run.status]));
+const phase = computed(() => (ahead.value ? `Waiting for run ${ahead.value.snapshot.number}` : label(props.run.status)));
 watch(
   [() => props.run.snapshot.runId, phase],
   ([runId, text], [before]) => {
@@ -86,7 +81,7 @@ const phaseTimes = computed(() => {
   if (startedAt === undefined || times === undefined) return '';
   return (['preparing', 'running', 'finalizing'] as const)
     .filter((phase) => times[phase] !== undefined)
-    .map((phase) => `${PHASE_LABELS[phase]} at ${withUnit(((times[phase]! - startedAt) / 1000).toFixed(1), 's')}`)
+    .map((phase) => `${label(phase)} at ${withUnit(((times[phase]! - startedAt) / 1000).toFixed(1), 's')}`)
     .join(', ');
 });
 </script>
@@ -110,7 +105,7 @@ const phaseTimes = computed(() => {
       <!-- feather-icons 4.29.2: dist/icons/alert-triangle.svg, coordinates rounded (MIT License: THIRD_PARTY_NOTICES, section 9 (Feather)).
            Its round caps draw the dot of the "!" (the subpath "h.01"). -->
       <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
-      Closing or reloading this tab ends the search
+      {{ tabWarning(printed) }}
     </p>
   </div>
 </template>

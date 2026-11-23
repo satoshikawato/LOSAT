@@ -30,6 +30,8 @@ class BlastnOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -159,6 +161,8 @@ class BlastpOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -265,6 +269,8 @@ class BlastxOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -308,6 +314,7 @@ class BlastxOptions(TypedDict, total=False):
     subject_besthit: bool
     ungapped: bool
     lcase_masking: bool
+    use_sw_tback: bool
     strand: Literal['both', 'plus', 'minus']
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""
@@ -366,6 +373,8 @@ class TblastnOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -406,6 +415,7 @@ class TblastnOptions(TypedDict, total=False):
     seg: str
     """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: 12 2.2 2.5]"""
     lcase_masking: bool
+    use_sw_tback: bool
     soft_masking: bool
     """Apply filtering locations as soft masks [default: false]"""
     sum_stats: bool
@@ -476,6 +486,8 @@ class TblastxOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int

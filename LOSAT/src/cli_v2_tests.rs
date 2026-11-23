@@ -309,6 +309,31 @@ fn makedb_takes_makeblastdb_s_option_names() {
             "{words:?}: {err}"
         );
     }
+    // Without the mandatory `-dbtype`, NCBI's reader reports an exclusion first (the first walk
+    // of `x_PostCheck`), and a missing required argument only after the mandatory one, whose
+    // error is the parser's.
+    let err = makedb(&[
+        "-in",
+        "x.fa",
+        "-taxid",
+        "1",
+        "-taxid_map",
+        "m",
+        "-parse_seqids",
+    ])
+    .unwrap_err();
+    assert_eq!(err.exit_code(), 2, "{err}");
+    assert!(
+        err.to_string()
+            .contains("Argument \"taxid_map\". Incompatible with argument:  `taxid'"),
+        "{err}"
+    );
+    let err = makedb(&["-in", "x.fa", "-taxid_map", "m"]).unwrap_err();
+    assert_eq!(
+        err.kind(),
+        clap::error::ErrorKind::MissingRequiredArgument,
+        "{err}"
+    );
 
     // `-mask_data` takes a list of files, `-mask_id` needs `-mask_data` and `-mask_desc` needs
     // `-mask_id` (makeblastdb.cpp:259-277); the parser's errors end with exit status 2 as those of
@@ -345,16 +370,111 @@ fn makedb_takes_makeblastdb_s_option_names() {
         );
     }
 
-    // The options of makeblastdb that LOSAT does not implement are named (`-h` and
-    // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in ["-gi_mask", "-gi_mask_name"] {
-        let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
+    // `-gi_mask` needs `-parse_seqids` and excludes `-mask_id`; `-gi_mask_name` needs
+    // `-mask_data` and `-gi_mask` (makeblastdb.cpp:279-288): the parser's errors, exit status 2.
+    assert!(!defaults.gi_mask);
+    assert_eq!(defaults.gi_mask_name, None);
+    let given = args(
+        makedb(&[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-mask_data",
+            "a.asnb,b.asnb",
+            "-gi_mask",
+            "-gi_mask_name",
+            "x,y",
+        ])
+        .unwrap(),
+    );
+    assert!(given.gi_mask);
+    assert_eq!(given.gi_mask_name.as_deref(), Some("x,y"));
+    for words in [
+        &["-dbtype", "nucl", "-gi_mask"][..],
+        &[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-gi_mask",
+            "-mask_data",
+            "a",
+            "-mask_id",
+            "x",
+        ],
+        &["-dbtype", "nucl", "-gi_mask_name", "x"],
+        &[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-gi_mask",
+            "-gi_mask_name",
+            "x",
+        ],
+        &["-dbtype", "nucl", "-mask_data", "a", "-gi_mask_name", "x"],
+        &[
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-mask_data",
+            "a",
+            "-gi_mask",
+            "-gi_mask_name",
+        ],
+    ] {
+        let err = makedb(words).unwrap_err();
+        assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
         assert!(
-            err.to_string().contains(&format!(
-                "the NCBI BLAST+ option {option} is not supported by LOSAT's makeblastdb"
-            )),
-            "{option}: {err}"
+            !err.to_string().contains("not supported"),
+            "{words:?}: {err}"
         );
+    }
+    // The parser checks the dependencies after the parse and names the first that NCBI's
+    // `x_PostCheck` meets, in its words, also where an argument that one requires is excluded
+    // by another (NCBI BLAST+ 2.17.0: `tests/seqdb/gi_mask/expected/e03.stderr`, `e04.stderr`).
+    for (words, sentence) in [
+        (
+            &[
+                "-dbtype",
+                "nucl",
+                "-parse_seqids",
+                "-mask_data",
+                "a",
+                "-gi_mask",
+                "-mask_desc",
+                "d",
+            ][..],
+            "Argument \"mask_id\". Must be specified, as it is required by argument:  `mask_desc'",
+        ),
+        (
+            &[
+                "-dbtype",
+                "nucl",
+                "-mask_data",
+                "a",
+                "-mask_id",
+                "y",
+                "-gi_mask_name",
+                "x",
+            ],
+            "Argument \"gi_mask\". Must be specified, as it is required by argument:  \
+             `gi_mask_name'",
+        ),
+        (
+            &[
+                "-dbtype",
+                "prot",
+                "-taxid",
+                "1",
+                "-taxid_map",
+                "m",
+                "-parse_seqids",
+            ],
+            "Argument \"taxid_map\". Incompatible with argument:  `taxid'",
+        ),
+    ] {
+        let err = makedb(words).unwrap_err();
+        assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
+        assert!(err.to_string().contains(sentence), "{words:?}: {err}");
     }
 
     // `-help` prints LOSAT's usage of makeblastdb, under makeblastdb's option names.
@@ -1555,6 +1675,64 @@ fn show_gis_is_a_flag_of_every_search_program() {
     assert!(!args.show_gis);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+// `-html` is a flag of the five search programs (item T4a2 of line RG); psiblast keeps its refusal.
+#[test]
+fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        assert!(parse(program, &["-html"]).is_ok(), "{program}");
+        assert!(parse(program, &["-html", "true"]).is_err(), "{program}");
+        let given = match parse(program, &["-html"]).unwrap().command {
+            Commands::Blastn(args) => args.html,
+            Commands::Blastp(args) => args.html,
+            Commands::Blastx(args) => args.html,
+            Commands::Tblastn(args) => args.html,
+            Commands::Tblastx(args) => args.html,
+            _ => panic!("{program}"),
+        };
+        let absent = match parse(program, &[]).unwrap().command {
+            Commands::Blastn(args) => args.html,
+            Commands::Blastp(args) => args.html,
+            Commands::Blastx(args) => args.html,
+            Commands::Tblastn(args) => args.html,
+            Commands::Tblastx(args) => args.html,
+            _ => panic!("{program}"),
+        };
+        assert!(given && !absent, "{program}");
+    }
+    let error = crate::cli::render_message(&parse("psiblast", &["-html"]).unwrap_err());
+    assert!(
+        error.contains("the NCBI BLAST+ option -html is not supported by LOSAT's PSIBLAST"),
+        "{error}"
+    );
+}
+
+// NCBI BLAST+ 2.17.0's `blastp -help` (probe of 2026-11-13, line RG item E2) lists `-line_length`,
+// `-html`, `-sorthits` in that order, as do the other four search programs: LOSAT's `-help` lists
+// `-html` right after `-line_length` (`cli::with_html_help_place`).
+#[test]
+fn help_lists_html_right_after_line_length() {
+    // `-html` gets its place only where the help is rendered (line RG T4a2 review S1): every
+    // help word of the five programs.
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        for word in ["-help", "-help-full", "-h", "--help"] {
+            let error = parse(program, &[word]).unwrap_err();
+            let help = crate::cli::render_message(&error);
+            let at = |option: &str| {
+                help.find(&format!("\n      {option}"))
+                    .unwrap_or_else(|| panic!("{program} {word}: {option}"))
+            };
+            let (line_length, html, sorthits) =
+                (at("-line_length "), at("-html\n"), at("-sorthits "));
+            assert!(line_length < html && html < sorthits, "{program} {word}");
+            assert!(
+                !help[line_length + 1..html].contains("\n      -"),
+                "{program} {word}"
+            );
+        }
+    }
+}
+
 // NCBI blastp 2.17.0+ -help options that LOSAT's BLASTP does not implement, and the NCBI C++
 // Toolkit's standard options (ncbiargs.cpp:78-87), are rejected explicitly.
 #[test]
@@ -1580,7 +1758,7 @@ fn unported_ncbi_options_are_rejected_explicitly() {
 // BLASTN's (series NP, M4a-2), BLASTP's, BLASTX's (series NP, M4b), TBLASTN's and TBLASTX's (M4b
 // PR 2) `-db_soft_mask` and `-db_hard_mask`: strings, each excluding the other, `-subject` and
 // `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage; probes o04, o05, o06
-// of the M4a-2 survey); neither is a refusal of the run (`RUN_REFUSALS`, series NP, M4a-2b).
+// of the M4a-2 survey); neither is refused (`ncbi_app::args::refusal`, series NP, M4a-2b).
 #[test]
 fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
     let masks = |program: &str, words: &[&str]| {
@@ -1615,10 +1793,10 @@ fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
                 "{program} {words:?}"
             );
         }
-        assert!(!crate::cli::RUN_REFUSALS
-            .iter()
-            .any(|&(refused, name, _)| refused == program
-                && (name == "db_hard_mask" || name == "db_soft_mask")));
+        for name in ["db_hard_mask", "db_soft_mask"] {
+            let refusal = crate::ncbi_app::args::refusal(program, name);
+            assert_eq!(refusal, None, "{program} -{name}");
+        }
     }
 }
 
@@ -1721,15 +1899,9 @@ fn blastp_takes_a_database_and_its_size() {
         let text = crate::cli::render_message(&error);
         assert!(text.contains("'-db <NAME>'"), "{text}");
     }
-    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
-    let error =
-        crate::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap())
-            .unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
+    // LOSAT Web's validation (`check_options`) checks `-db` as the command line does: the run opens
+    // the database from the files that the host gives (line WQA D12a).
+    crate::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap()).unwrap();
 }
 
 // BLASTN's `-db NAME` and `-dbsize N` (blast_args.cpp:2191-2199 and 2231-2237, quoted
@@ -1829,14 +2001,9 @@ fn tblastn_takes_a_database_and_its_size() {
             "{words:?}: {error}"
         );
     }
-    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
-    let error =
-        crate::algorithm::tblastn::check_options(&tblastn(&["-db", "d"]).unwrap()).unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
+    // LOSAT Web's validation (`check_options`) checks `-db` as the command line does: the run opens
+    // the database from the files that the host gives (line WQA D12a).
+    crate::algorithm::tblastn::check_options(&tblastn(&["-db", "d"]).unwrap()).unwrap();
 }
 
 // TBLASTX's `-db NAME` and `-dbsize N`, as TBLASTN's: `-db` excludes `-subject` and
@@ -1880,21 +2047,18 @@ fn tblastx_takes_a_database_and_its_size() {
             "{words:?}: {error}"
         );
     }
-    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
-    let error =
-        crate::algorithm::tblastx::blast_engine::check_options(&tblastx(&["-db", "d"]).unwrap())
-            .unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
+    // LOSAT Web's validation (`check_options`) checks `-db` as the command line does: the run opens
+    // the database from the files that the host gives (line WQA D12a).
+    crate::algorithm::tblastx::blast_engine::check_options(&tblastx(&["-db", "d"]).unwrap())
+        .unwrap();
 }
 
 #[test]
 fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
-    // Decision D12 (AUTHORITY.md): an -evalue of DBL_MAX or more crashes NCBI's blastp and
-    // tblastn on some inputs. blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
+    // Decision D12 (AUTHORITY.md): an infinite -evalue, and DBL_MAX with the composition-based
+    // redo, which crashes NCBI's blastp and tblastn on some inputs
+    // (`protein_options_check::check_evalue_limit`); without the redo NCBI runs DBL_MAX (line
+    // O4c's review D1). blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
     // NCBI's int wraps or crashes NCBI; LOSAT computes the size without the overflow and runs
     // (PD-LOSAT-NCBI-DEFECTS exception 19).
     let blastp = |words: &[&str]| {
@@ -1912,6 +2076,7 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     for words in [
         &["-evalue", "+inf"][..],
         &["-evalue", "1e999"],
+        &["-evalue", "1e999", "-comp_based_stats", "0"],
         &["-evalue", "1.7976931348623157e308"],
     ] {
         let error = format!("{:#}", blastp(words).unwrap_err());
@@ -1923,6 +2088,12 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     for words in [
         &["-evalue", "1e308"][..],
         &["-evalue", "1.7976931348623156e308"],
+        &[
+            "-evalue",
+            "1.7976931348623157e308",
+            "-comp_based_stats",
+            "0",
+        ],
         &["-max_target_seqs", "2147483647"],
         &["-max_target_seqs", "1073741798"],
         // Past NCBI's `int` overflow of the preliminary hit list size (LOSAT computes it without).
@@ -1944,6 +2115,30 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
         "{error}"
     );
     tblastn(&["-evalue", "1e308"]).unwrap();
+    for words in [
+        &[
+            "-evalue",
+            "1.7976931348623157e308",
+            "-comp_based_stats",
+            "0",
+        ][..],
+        &[
+            "-evalue",
+            "1.7976931348623157e308",
+            "-ungapped",
+            "-comp_based_stats",
+            "0",
+        ],
+    ] {
+        tblastn(words).unwrap();
+    }
+    for words in [
+        &["-evalue", "+inf", "-comp_based_stats", "0"][..],
+        &["-evalue", "1e999", "-ungapped", "-comp_based_stats", "0"],
+    ] {
+        let error = format!("{:#}", tblastn(words).unwrap_err());
+        assert!(error.contains("an infinite -evalue"), "{words:?}: {error}");
+    }
 }
 
 #[test]
@@ -2299,10 +2494,13 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
         (args.input.as_str(), args.out.as_deref()),
         ("x.faa", Some("db"))
     );
-    // The checks that name the command apply.
+    // The checks that name the command apply: makeblastdb's dependencies.
     let error = makedb(&["-gi_mask"]).unwrap_err().to_string();
     assert!(
-        error.contains("the NCBI BLAST+ option -gi_mask is not supported by LOSAT's makeblastdb"),
+        error.contains(
+            "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+             `gi_mask'"
+        ),
         "{error}"
     );
     assert!(makedb(&["-parse_seqids"]).is_ok());

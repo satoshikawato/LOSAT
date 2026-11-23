@@ -17,7 +17,7 @@
 //!
 //! This module is a child of `blast_engine` for the private items of that file it reads
 //! (`BlastpReports`, `BlastpRanges`, `BlastpReport`, `ShownSubjects`, `ShownQueries`,
-//! `query_record_masks`, `mask_query_rows`, `blastp_scan_mode_definition`,
+//! `query_record_masks`, `set_row_masks`, `blastp_scan_mode_definition`,
 //! `write_blastp_tabular_hit_lists`) and its sibling modules `anchored`, `database`, `psi_round`,
 //! `pssm_hooks`, `query_rows` and `x_soft_subject`.
 
@@ -29,8 +29,8 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::{
-    anchored, blastp_scan_mode_definition, database, mask_query_rows, psi_round, pssm_hooks,
-    query_record_masks, query_rows, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
+    anchored, blastp_scan_mode_definition, database, psi_round, pssm_hooks, query_record_masks,
+    query_rows, set_row_masks, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
     BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
@@ -689,6 +689,19 @@ pub(super) fn write_pairwise(
         protein_matrix: args.scoring.matrix,
         sort: view.report_sort(args.sort),
         view,
+        html: args.html.as_ref().map(|links| {
+            crate::report::html_ids::HtmlReport::new(
+                links,
+                listed_subjects.as_ref().zip(database).into_iter().flat_map(
+                    |(listed, database)| {
+                        listed
+                            .ordinals
+                            .iter()
+                            .map(move |&o| database.oid_map().oid(o))
+                    },
+                ),
+            )
+        }),
         // psiblast's PSSM query of the molecule `other` (`PsiSearch::query_other_coding`).
         unreadable_query: args
             .psi_search
@@ -750,6 +763,7 @@ pub(super) fn write_pairwise(
         gapped_karlin: psi_report_karlin.map_or(gapped_params, |karlin| karlin.gapped),
         gumbel: gapped_gumbel,
         gapped: !args.ungapped,
+        show_linked_set_size: false,
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
         // or the -num_descriptions / -num_alignments / -max_target_seqs values
         // (`ReportCounts`).
@@ -863,22 +877,26 @@ pub(super) fn write_pairwise(
                     },
                 }
             });
-        if anchored_sequences.is_none() {
-            if let Some(masks) = query_masks.as_deref() {
-                mask_query_rows(rows.to_mut(), masks);
-            }
-            // `-lcase_masking`: the subject rows show their records' lower case too.
-            if args.lcase_masking {
-                rows = std::borrow::Cow::Owned(x_soft_subject::x_masked_subject_rows(
-                    &rows,
-                    subject_records,
-                    ranges.subject_placements,
-                ));
-            }
-            if let Some(masks) = db_subject_masks.as_ref() {
-                rows =
-                    std::borrow::Cow::Owned(x_soft_subject::lower_case_subject_rows(&rows, masks));
-            }
+        // Under `-html` the rows' masks of each HSP (`HtmlRowMasks`, the spans of outfmt 0).
+        let mut html_masks = None;
+        if anchored_sequences.is_none()
+            && (query_masks.is_some() || args.lcase_masking || db_subject_masks.is_some())
+        {
+            // `-lcase_masking`: the subject rows show their records' lower case too; a masked
+            // database search, its masks.
+            let lcase_masks = if args.lcase_masking {
+                x_soft_subject::x_subject_masks(&rows, subject_records, ranges.subject_placements)
+            } else {
+                Default::default()
+            };
+            let no_masks = Default::default();
+            html_masks = args.html.is_some().then(Vec::new);
+            set_row_masks(
+                rows.to_mut(),
+                query_masks.as_deref(),
+                [&lcase_masks, db_subject_masks.as_ref().unwrap_or(&no_masks)],
+                html_masks.as_mut(),
+            );
         }
         // psiblast's rounds: the round's report (`psiblast_round`), without the
         // epilog.
@@ -931,6 +949,7 @@ pub(super) fn write_pairwise(
             anchored_sequences
                 .as_ref()
                 .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
+            html_masks.as_deref(),
             hit_loads,
         )
         // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
@@ -1094,6 +1113,7 @@ pub(super) fn write_custom_tabular(
             hit_lists,
             &mut writer,
             warnings.as_mut(),
+            args.is_html,
         )?;
         writer.flush()?;
         return Ok(());

@@ -52,7 +52,7 @@ A file that NCBI BLAST+ reports as malformed gets NCBI BLAST+'s messages, where 
 - `rpsbproc` writes its messages to the `-logfile` file as NCBI's `rpsbproc` does, and its program information, progress and dry-run line to the standard error stream; its `-dryrun` runs its own dry run (its start, then the line of its status). `rpsbproc` reads `.ncbirc` once, when its configuration is loaded (it has no usage report): a `.ncbirc` with a syntax error is reported there as NCBI's `rpsbproc` reports it, naming a source file of that `rpsbproc`'s own build (the Linux x64 binary of NCBI's package of 2025-05-13), and the run goes on.
 - LOSAT stops instead where it does not write NCBI BLAST+'s message: a file in UTF-16, or a malformed line that is not UTF-8.
 
-The library runs the same start in a call whose arguments have `-logfile`, `-conffile` or `-dryrun`, and in a call that reads NCBI's settings (a database search, `blastn`'s `-window_masker_taxid`, the organism report of outfmt 18, the file of a `-matrix` that NCBI's tables do not have in `tblastx` and ungapped `blastx`). Its messages go where the command line writes them, and a start that stops the command line's program is the call's error.
+The library runs the same start at the beginning of every search call and every tool call, as the command line does in every run: it reads `.ncbirc`, `<program>.ini` and the `NCBI_*` variables and refuses what the command line refuses. Its messages go where the command line writes them, and a start that stops the command line's program is the call's error.
 
 ## WindowMasker files of `blastn -window_masker_taxid`
 
@@ -122,7 +122,7 @@ Each of these makes NCBI BLAST+ do something that LOSAT does not do, so LOSAT st
 
 An environment prepared for NCBI BLAST+ that sets one of the variables marked "every program" (for example `DIAG_POST_LEVEL` in a container) stops every LOSAT program before it runs; the other rows stop only the programs and runs named in them.
 
-Matrix files: for a `-matrix` that NCBI BLAST+ does not have built in (which only an ungapped `tblastx`, `blastx -ungapped -comp_based_stats 0` or `blastp -ungapped -comp_based_stats 0` search takes), NCBI BLAST+ looks for a file of that name in upper case in the directories of `NCBI_DATA_PATH` and `[NCBI] Data`, then in `BLASTMAT` and its `nt` subdirectory, then in `data` under the current directory. When it finds one that it can open, NCBI BLAST+ 2.17.0 reads it as a matrix and then stops abnormally (or with another error code when the file is not a matrix), so LOSAT stops with a message before the search. When it finds none, or cannot open it, both stop with NCBI's "Unknown error code -1".
+Matrix files: for a `-matrix` that NCBI BLAST+ does not have built in (which only an ungapped `tblastx`, `blastx -ungapped -comp_based_stats 0`, `blastp -ungapped -comp_based_stats 0` or `tblastn -ungapped -comp_based_stats 0` search takes), NCBI BLAST+ looks for a file of that name in upper case in the directories of `NCBI_DATA_PATH` and `[NCBI] Data`, then in `BLASTMAT` and its `nt` subdirectory, then in `data` under the current directory. When it finds one that it can open, NCBI BLAST+ 2.17.0 reads it as a matrix and then stops abnormally (or with another error code when the file is not a matrix), so LOSAT stops with a message before the search. When it finds none, or cannot open it, both stop with NCBI's "Unknown error code -1".
 
 ## Variables that LOSAT does not read
 

@@ -49,7 +49,9 @@ export interface RecordKey {
  * The IDs that the outputs of a run show for the records of its query and its subject, in the
  * order of the records, where the engine read them from the deflines (`-parse_deflines`: ABI v2 §9
  * *inputs*, `shown_id`): `AB000001.1` of `>gb|AB000001.1| ...`, the first two columns of outfmt 6
- * and 7. A run without them shows each record's ID (`RecordKey.id`).
+ * and 7. A run without them shows each record's ID (`RecordKey.id`). A run of `-db` has no subject records:
+ * `subject` is empty, and a hit's `s_idx` is its subject's OID in the database, whose IDs the outputs show
+ * (ABI v2 §8).
  */
 export interface ShownIds {
   readonly query: readonly string[];

@@ -51,3 +51,29 @@ fn report_intervals_keep_the_lowercase_run_apart_from_seg() {
         super::super::search_seed::tblastn_report_mask_intervals(query, None, false).is_empty()
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:993 (cited at `query_masks`):
+// the outfmt 0 rows' list (`row_masks`) keeps a SEG run and a lower-case run that touch it as two
+// masks, as NCBI 2.17.0's `-html` rows show them: two spans back to back for the query of 70 Q
+// with the letters 70-79 in lower case (line RG survey T4 §1.9, `mk.bp.segadj.f0.h`; TBLASTN's
+// query masks are combined the same way). The search's list joins them (`seg_masks`).
+#[test]
+fn row_masks_keep_a_seg_run_and_a_touching_lower_case_run_apart() {
+    let query = format!(
+        "{}vplqwyrgpkAEVCLNSHCYPLCPDTSPYSITYRIVVIAWPQTAFFYFIE\
+         ELLDLEQNTLFHRGEDEWKVQLNYADVVIRPGINGINCHAVEQREHIFTPVCFLNKNDCG\
+         YKLMAHGSIYIWIGHHDINCSVYDASQLAPYWCWVYARRVLEFSWCHLCDGGRVYYETAC\
+         DPPCGRPATYTNNETYPWRV",
+        "Q".repeat(70)
+    );
+    assert_eq!(query.len(), 260);
+    let seg = SegParams::default();
+    assert_eq!(
+        row_masks(query.as_bytes(), Some(&seg), true),
+        [(0, 70), (70, 80)]
+    );
+    assert_eq!(row_masks(query.as_bytes(), Some(&seg), false), [(0, 70)]);
+    assert_eq!(row_masks(query.as_bytes(), None, true), [(70, 80)]);
+    // A query masked from end to end has no mask in the list.
+    assert!(row_masks(query.to_ascii_lowercase().as_bytes(), None, true).is_empty());
+}

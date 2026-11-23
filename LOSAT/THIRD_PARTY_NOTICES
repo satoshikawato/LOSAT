@@ -4,7 +4,7 @@ LOSAT is a Rust translation of the search programs and database tools of NCBI BL
 2.17.0. LOSAT's own work is under the MIT License (the file LICENSE). This file lists the
 code in LOSAT's source that comes from other projects, one section each: what it is, the
 files that hold it, its license, and its notices and license text. Section 11 is about data,
-not code: the third-party data in LOSAT's tests.
+not code: the third-party data in LOSAT's tests. Section 12 is a table of LOSAT Web's source.
 
   1. NCBI BLAST+ 2.17.0 (public domain in the United States)
   2. LMDB 0.9.24 (OpenLDAP Public License 2.8)
@@ -18,6 +18,7 @@ not code: the third-party data in LOSAT's tests.
   10. BitMagic 8.0.1 (Apache License 2.0)
   11. Test data: UniProtKB/Swiss-Prot, FlyBase, SGD, TIGRFAMs and SMART (CC BY 4.0, CC BY-SA 4.0,
       SMART's terms)
+  12. The named character references of the WHATWG HTML Living Standard (BSD 3-Clause License)
 
 Paths are relative to the losat crate (the directory LOSAT/ of the repository).
 
@@ -742,7 +743,8 @@ NCBI's own data, INSDC, Ensembl, the Protein Data Bank). The data that do:
   is reproduced with each copy." The records are written into test inputs and databases, some
   with an added second definition line or a shortened title.
 - FlyBase (https://flybase.org/), through Ensembl BDGP6.54: five Drosophila melanogaster
-  cDNA records (FBtr0078009, FBtr0100310, FBtr0083245, FBtr0301286, FBtr0078640). FlyBase
+  cDNA records (FBtr0078009, FBtr0100310, FBtr0083245, FBtr0301286, FBtr0078640) and the
+  definition line of a sixth (FBtr0337025), added to a zebrafish record. FlyBase
   distributes the annotations and data it produces under CC BY 4.0
   (https://wiki.flybase.org/wiki/FlyBase:About).
 - SGD, the Saccharomyces Genome Database (https://www.yeastgenome.org/), through Ensembl
@@ -779,3 +781,50 @@ NCBI's own data, INSDC, Ensembl, the Protein Data Bank). The data that do:
   (https://smart.embl.de/about.cgi); it states no terms for the description text of a family.
 Files: LOSAT/tests/THIRD_PARTY_DATA.md lists them.
 License: the licenses named above; LOSAT's own tests are under the MIT License.
+
+===============================================================================
+12. The named character references of the WHATWG HTML Living Standard
+===============================================================================
+
+What: the table of HTML's named character references (the names, such as "&amp;" and "&lt",
+and the characters they stand for), from the WHATWG HTML Living Standard
+(https://html.spec.whatwg.org/, section "Named character references"; the file
+https://html.spec.whatwg.org/entities.json, taken on 2026-11-23). LOSAT Web's results screen
+decodes them where it shows the text of a report written with -html, as a browser shows it.
+Files (from the repository's root, outside the losat crate):
+web/app/src/domain/html-named-references.ts, written from that file by
+web/app/scripts/html-named-references.mjs.
+License: the standard is under the Creative Commons Attribution 4.0 International License;
+WHATWG's statement: "To the extent portions of it are incorporated into source code, such
+portions in the source code are licensed under the BSD 3-Clause License instead." WHATWG
+generates entities.json in the repository https://github.com/whatwg/html-build (the directory
+entities/, where it is checked in as entities/out/entities.json), whose LICENSE file has the
+same text. The license:
+
+-------------------------------------------------------------------------------
+Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
+
+Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of
+   conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of
+   conditions and the following disclaimer in the documentation and/or other materials
+   provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to
+   endorse or promote products derived from this software without specific prior written
+   permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS
+OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
+OF THE POSSIBILITY OF SUCH DAMAGE.
+-------------------------------------------------------------------------------

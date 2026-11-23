@@ -167,8 +167,9 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
         ),
         (9, 1, 18.0, 15)
     );
-    assert!(limit(&["-ungapped", "-comp_based_stats", "F"])
-        .contains("not supported by LOSAT's TBLASTN"));
+    // `-ungapped` with composition-based statistics F (0): NCBI's ungapped search, which
+    // LOSAT runs (line O4c).
+    assert!(check_options(&parse(&["-ungapped", "-comp_based_stats", "F"]).unwrap()).is_ok());
     // NCBI's tblastn crashes with IDENTITY's compressed lookup table.
     for extra in [
         &["-task", "tblastn-fast", "-matrix", "IDENTITY"][..],
@@ -360,17 +361,25 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
     ] {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
-    for extra in [
-        &["-gilist", "ids.gil"][..],
-        &["-remote"],
-        &["-use_sw_tback"],
-    ] {
+    for extra in [&["-gilist", "ids.gil"][..], &["-remote"]] {
         let error = crate::cli::render_message(&parse(extra).unwrap_err());
         assert!(
             error.contains("is not supported by LOSAT's TBLASTN"),
             "{extra:?}: {error}"
         );
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806,885
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
+    // `-use_sw_tback` is a flag that sets the Smith-Waterman traceback, with every
+    // `-comp_based_stats` (the redo runs with mode 0 too).
+    for cbs in ["0", "1", "2", "3"] {
+        let args = parse(&["-use_sw_tback", "-comp_based_stats", cbs]).unwrap();
+        check_options(&args).unwrap();
+        let resolved = args.resolve().unwrap();
+        assert!(resolved.use_sw_tback, "{cbs}");
+    }
+    assert!(!parse(&[]).unwrap().resolve().unwrap().use_sw_tback);
+    assert!(parse(&["-use_sw_tback", "true"]).is_err());
 }
 
 /// The tblastn arguments `-in_pssm <psiblast's frozen PSSM> -subject s.fna <extra>`.
@@ -562,6 +571,46 @@ fn the_x_drops_reach_the_search_or_ncbis_errors() {
             .resolve()
             .unwrap();
         assert!(check_search_limits(&resolved).is_ok());
+    }
+}
+
+// NCBI BLAST+ 2.17.0 with `-ungapped -comp_based_stats 0` (line O4c): a `-matrix` name that
+// NCBI's tables do not have reaches the setup of the first batch, which fails with NCBI's
+// engine error (`SetupEngineError::unknown_matrix`); one that the matrix loader reads as
+// IDENTITY without a table aborts there, which LOSAT refuses; a gapped search refuses both
+// with NCBI's options error first.
+#[test]
+fn an_ungapped_search_keeps_a_matrix_of_no_table_for_its_setup() {
+    use crate::algorithm::tblastx::args::TblastxMatrix;
+    let ungapped = |matrix: &str| {
+        parse(&["-ungapped", "-comp_based_stats", "0", "-matrix", matrix])
+            .unwrap()
+            .resolve()
+            .unwrap()
+    };
+    let resolved = ungapped("FOO");
+    assert_eq!(resolved.unknown_matrix, Some(TblastxMatrix::Unknown));
+    assert!(check_search_limits(&resolved).is_ok());
+    let scoring = search_settings(&resolved).unwrap().scoring;
+    assert!(scoring.unknown_matrix);
+    assert_eq!(scoring.matrix, ScoringMatrix::Blosum62);
+    for matrix in ["BLOSUM62", "pam30", "IDENTITY"] {
+        let resolved = ungapped(matrix);
+        assert_eq!(resolved.unknown_matrix, None, "{matrix}");
+        assert!(!search_settings(&resolved).unwrap().scoring.unknown_matrix);
+    }
+    let resolved = ungapped("identityx");
+    assert_eq!(resolved.unknown_matrix, Some(TblastxMatrix::Aborts));
+    let error = check_search_limits(&resolved).unwrap_err().to_string();
+    assert!(
+        error.contains("-matrix identityx is read as IDENTITY") && error.contains("TBLASTN"),
+        "{error}"
+    );
+    for matrix in ["FOO", "IDENTITYX"] {
+        assert!(
+            parse(&["-matrix", matrix]).unwrap().resolve().is_err(),
+            "{matrix}"
+        );
     }
 }
 

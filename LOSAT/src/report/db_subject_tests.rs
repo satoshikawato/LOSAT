@@ -793,6 +793,30 @@ fn the_formats_say_what_loads_after_a_throw() {
     assert_eq!(after(&["6", "0"]), None);
     assert_eq!(after(&["0", "3"]), None);
     assert_eq!(after(&["6 qseqid evalue"]), None);
+    // A run of one format answers as that format does, whichever place its run stops at (the
+    // fix of review 2's M3 first refused each of these alone, as a mix with no format), and so
+    // does a search of a call without other searches.
+    for single in [
+        "0",
+        "3",
+        "5",
+        "6",
+        "6 qseqid slen",
+        "13",
+        "14",
+        "15",
+        "16",
+        "18",
+    ] {
+        let alone = FormatThrow::of_outfmt(single, Program::Blastp, RequestKind::Blastp);
+        assert!(matches!(alone, FormatThrow::Writes(_)), "{single}");
+        assert_eq!(answer(&[single]), alone, "{single}");
+        assert_eq!(
+            alone.of_search(&[], Program::Blastp, RequestKind::Blastp),
+            alone,
+            "{single}"
+        );
+    }
     // Review 2 of line DBID pfoff-4, M3: a format that reads nothing goes on to its end with exit
     // status 0 and posts nothing, apart from one whose run ends at the throw or at an alignment,
     // and from outfmt 15 and 16, whose runs post NCBI's error; and those post it where outfmt 5,

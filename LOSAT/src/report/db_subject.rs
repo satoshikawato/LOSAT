@@ -2616,11 +2616,14 @@ impl FormatThrow {
     }
 
     /// The answer of the formats `formats` of a run ([`FormatThrow::and`] of them; `Unread`
-    /// without one): the one answer of every program, which [`HitLoads::of`] takes.
+    /// without one): the one answer of every program, which [`HitLoads::of`] takes. `Unread` is
+    /// the answer of a format that reads nothing, not the answer of no format: a run of one
+    /// format answers as that format does, so the first format starts the answer.
     pub fn of_formats(formats: impl IntoIterator<Item = Self>) -> Self {
         formats
             .into_iter()
-            .fold(FormatThrow::Unread, FormatThrow::and)
+            .reduce(FormatThrow::and)
+            .unwrap_or(FormatThrow::Unread)
     }
 
     /// What the reports do after a subject whose lookup throws: `None` where a format refuses it
@@ -2665,7 +2668,14 @@ impl FormatThrow {
         program: crate::blastinput::app::Program,
         app: crate::report::archive::options::RequestKind,
     ) -> Self {
-        match self.and(Self::of_outfmts(others.iter().copied(), program, app)) {
+        let call = Self::of_formats(
+            std::iter::once(self).chain(
+                others
+                    .iter()
+                    .map(|outfmt| Self::of_outfmt(outfmt, program, app)),
+            ),
+        );
+        match call {
             FormatThrow::Refused(why) => FormatThrow::Refused(why),
             FormatThrow::Unread | FormatThrow::Writes(_) => self,
         }

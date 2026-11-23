@@ -1097,9 +1097,13 @@ impl ReportedAsks {
     /// refusal of a subject whose lookup throws over the `-outfmt` values of its other searches,
     /// `others`, too (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
     pub(super) fn of_all(options: &[super::args::ResolvedOptions], others: &[&str]) -> Self {
+        // The first search's asks start the call's: `FormatThrow::and` of a format that reads
+        // nothing (`Self::default()`'s) with one that stops is a refusal (`FormatThrow::of_formats`).
         let mut asks = options
             .iter()
-            .fold(Self::default(), |asks, options| asks.or(Self::of(options)));
+            .map(Self::of)
+            .reduce(Self::or)
+            .unwrap_or_default();
         asks.throw = asks.throw.of_search(
             others,
             crate::blastinput::app::Program::Blastx,

@@ -784,12 +784,14 @@ fn adjust_tblastx_chunk_subject_offsets(hits: &mut [UngappedHit], offset: usize)
     }
 }
 
-/// Where a chunk merge of the one-hit word finder (`-window_size 0`) reports a refusal: the
-/// search's failure and the subject's ordinal id (`frame_chunks::ChunkSums::one_hit`).
+/// Where a chunk merge of the one-hit word finder (`-window_size 0` or less) reports a refusal: the
+/// search's failure, the subject's ordinal id and the window the refusal names
+/// (`frame_chunks::ChunkSums::one_hit`).
 #[derive(Clone, Copy)]
 struct OneHitChunkMerge<'a> {
     failure: &'a crate::algorithm::tblastx::subjects::XReadFailure,
     s_idx: usize,
+    window: i32,
 }
 
 impl OneHitChunkMerge<'_> {
@@ -805,7 +807,8 @@ impl OneHitChunkMerge<'_> {
         self.failure.fail(
             self.s_idx,
             anyhow::Error::new(ErrorAfterBatchReports(anyhow::anyhow!(
-                "TBLASTX -window_size 0: a one-hit ungapped alignment whose length is 0 or less meets another in the overlap of two 5,000,000-letter parts of a subject frame, and their lengths add up to 0 (NCBI BLAST+ divides by that sum when it merges them; its result is undefined), which LOSAT does not support"
+                "TBLASTX -window_size {}: a one-hit ungapped alignment whose length is 0 or less meets another in the overlap of two 5,000,000-letter parts of a subject frame, and their lengths add up to 0 (NCBI BLAST+ divides by that sum when it merges them; its result is undefined), which LOSAT does not support",
+                self.window
             ))),
         );
     }
@@ -2590,7 +2593,9 @@ fn write_tblastx_outputs(
                         },
                         matrix_name: args.matrix_name().to_string(),
                         word_threshold: args.word_threshold(),
-                        window_size: args.window() as usize,
+                        // The window as given, signed: an imported strategy can carry a
+                        // negative one, which the footer prints (`Window for multiple hits: -1`).
+                        window_size: args.window(),
                         num_descriptions,
                         num_alignments,
                         unsearched: unsearched.clone(),
@@ -5109,6 +5114,8 @@ fn search_query_batch<S: TbxScore>(
         local_collector: &local_collector,
     };
 
+    // A negative window's table offset, which lives for the batch (`word_finder::WideOffset`).
+    let wide_offset = word_finder::WideOffset::new(window);
     // What the word finder of the frame loop reads of this batch (`word_finder::WordFinderCx`),
     // in the batch's statistics below; `process_subject` makes a copy with the subject's
     // `cutoff_scores` where NCBI computes the statistics of each subject.
@@ -5136,6 +5143,7 @@ fn search_query_batch<S: TbxScore>(
         query_batch: QueryBatch::new(contexts_ref, &x_read_failure),
         subject_besthit: args.subject_besthit,
         extensions: (args.app() == crate::blastinput::app::Program::Blastn).then_some(&extensions),
+        wide_offset: (window < 0).then_some(&wide_offset),
     };
     // The batch's statistics (`SubjectStatistics`); `per_subject`: NCBI computes the statistics
     // of each subject (a database length of 0) with the preliminary stage's option spaces.
@@ -5187,16 +5195,22 @@ fn search_query_batch<S: TbxScore>(
             subject_emit.emit(st, s_idx);
             return;
         }
-        // NCBI: Creates ewp (diagonal table) ONCE per SUBJECT via BlastExtendWordNew
-        // (blast_engine.c:1002). Each subject sequence gets a fresh diagonal array.
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:109-180 (BlastExtendWordNew) allocates with calloc,
-        // which zeros all entries. The diag_offset is initialized to window.
-        //
-        // Reset diagonal state for each subject to match NCBI behavior:
-        for d in st.diag_array.iter_mut() {
-            *d = DiagStruct::default();
+        // NCBI makes the diagonal table once per thread and query batch (`BlastExtendWordNew` in
+        // `s_BlastSetUpAuxStructures`, blast_engine.c:1002, which `BLAST_PreliminarySearchEngine`
+        // calls before its subject loop, :1376-1378): calloc'ed cells (`last_hit` 0, flag 0) and
+        // the offset at the window (blast_extend.c:109-157), which each call of the word finder
+        // moves on (`Blast_ExtendWordExit`). With a window of 0 or more the cells that a subject
+        // leaves never block a word of the next one (the offset passes every `last_hit` of the
+        // subject before by at least the window), so a fresh table per subject is the same
+        // search. With a negative window they do (`word_finder::WideOffset`): the batch's one
+        // worker (`batch_setup::batch_flags`) keeps its table and its offset from subject to
+        // subject, in NCBI's order.
+        if window >= 0 {
+            for d in st.diag_array.iter_mut() {
+                *d = DiagStruct::default();
+            }
+            st.diag_offset = window;
         }
-        st.diag_offset = window;
         x_lap.lap(XStage::Enter);
 
         // The preliminary frames of the subject (`subject_prep::subject_frames`). A subject too

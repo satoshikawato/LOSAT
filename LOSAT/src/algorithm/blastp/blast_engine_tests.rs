@@ -2421,7 +2421,7 @@ fn test_x_block_search_refusals_of_the_search_of_all_queries() {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57 with the concatenated length of all queries.
     let mut wide = resolved.clone();
     let query_length = lengths.iter().sum::<usize>() + lengths.len() - 1;
-    wide.window_size = (1 << 30) - query_length;
+    wide.window_size = ((1usize << 30) - query_length) as i32;
     assert!(x_block_search_refuses_nothing(
         &wide, &records, &batches, &lengths
     ));
@@ -2475,6 +2475,70 @@ fn x_prelim_block_plan_is_the_search_of_all_queries_of_blastp() {
     }
     assert!(!BlastpReports::prelim_only(true).x_plan_blocks);
     assert!(!BlastpReports::prelim_only(false).x_plan_blocks);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137
+// A negative `-window_size` (a search strategy's): the diagonal table is the smallest power of 2
+// not below the query's length plus the window, 1 where the sum is 1 or less (the diagonals then
+// share one entry), with no overflow for any window; only a positive window builds the table of
+// 16-bit hits of the two-hit loop.
+#[test]
+fn a_negative_window_keeps_ncbis_table_shape_and_scans_one_hit() {
+    assert_eq!(compute_diag_table_shape(10, -40), (1, 0));
+    assert_eq!(compute_diag_table_shape(100, -40), (64, 63));
+    assert_eq!(compute_diag_table_shape(100, -99), (1, 0));
+    assert_eq!(compute_diag_table_shape(100, -98), (2, 1));
+    assert_eq!(compute_diag_table_shape(5, i32::MIN), (1, 0));
+    assert_eq!(compute_diag_table_shape(100, 40), (256, 255));
+    let mut resolved = make_blastp_args().resolve().expect("resolved blastp args");
+    for window in [i32::MIN, -40, -1, 0] {
+        resolved.window_size = window;
+        assert!(!x_bplk16_for(&resolved, false), "window {window}");
+    }
+    resolved.window_size = 40;
+    assert!(x_bplk16_for(&resolved, false));
+}
+
+// A negative `-window_size` and the preliminary stage in blocks: one block for each batch of the
+// call, whatever the batches' letters (NCBI's diagonal table of each batch keeps what the
+// subjects before left in it); none for one batch.
+#[test]
+fn a_negative_window_plans_one_block_for_each_batch() {
+    let records = x_block_test_records(&[1500, 2000, 1000]);
+    let input = seq_range::QueryInput::whole(&records);
+    let mut resolved = make_blastp_args().resolve().expect("resolved blastp args");
+    resolved.window_size = -1;
+    crate::utils::threading::with_search_pool(1, "blastp", |pool| {
+        assert_eq!(
+            x_prelim_block_plan(&resolved, &records, &input, 1, pool),
+            Some(vec![0..1, 1..2, 2..3])
+        );
+        assert_eq!(
+            x_prelim_block_plan(&resolved, &records, &input, 10000, pool),
+            None
+        );
+        Ok(())
+    })
+    .expect("pool");
+}
+
+// A negative `-window_size` is PSI-BLAST's and RPS-BLAST's refusal (their scans take a window of
+// 0 or more); BLASTP's search takes it.
+#[test]
+fn a_negative_window_is_refused_by_psiblast_and_rpsblast_only() {
+    let mut blastp = make_blastp_args().resolve().expect("resolved blastp args");
+    blastp.window_size = -40;
+    validate_requested_blastp_support(&blastp).expect("blastp");
+    for app in [BlastpApp::Psiblast, BlastpApp::Rpsblast] {
+        let mut other = blastp.clone();
+        other.app = app;
+        let error = validate_requested_blastp_support(&other).unwrap_err();
+        assert!(
+            error.to_string().starts_with("a -window_size of -40 "),
+            "{error}"
+        );
+    }
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): a database search without the Gumbel block (`-searchsp`,

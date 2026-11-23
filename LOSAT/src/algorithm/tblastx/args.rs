@@ -202,7 +202,10 @@ pub struct TblastxArgs {
     pub xdrop_ungap: Option<f64>,
 
     // The window of the two-hit word finder (`window`); 0 takes the one-hit word finder. The help is
-    // NCBI's, as tblastn's.
+    // NCBI's, as tblastn's. The command line takes 0 or more; an imported search strategy carries
+    // any `Int4`, which NCBI runs: a negative window takes the one-hit word finder too, on a table
+    // that keeps its state across the batch's calls (`blast_engine::word_finder::WideOffset`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:479-480
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
 

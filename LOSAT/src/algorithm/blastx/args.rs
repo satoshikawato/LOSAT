@@ -951,7 +951,12 @@ impl BlastxArgs {
             taxdb_found: false,
             subject_taxdb: None,
             filtered_empty: false,
-            num_threads: self.num_threads,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
+            // A negative window (a search strategy's; the command line takes `-window_size` from
+            // 0) leaves NCBI's diagonal table with entries and an offset that carry from one
+            // subject to the next, and with `-num_threads` above 1 NCBI's threads share the
+            // subjects by timing: the search runs on one thread, as NCBI's `-num_threads 1`.
+            num_threads: if window_size < 0 { 1 } else { self.num_threads },
             query_range: None,
             rpstblastn: self.rpstblastn.clone(),
             db_mask: None,

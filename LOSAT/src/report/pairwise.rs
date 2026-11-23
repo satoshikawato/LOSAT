@@ -3625,7 +3625,7 @@ pub struct BlastnPairwiseReport {
     /// the PMID 10890397 value (NCBI compares the task name, `m_Program`).
     pub zero_gap_extension_formula: bool,
     /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
-    pub window_size: usize,
+    pub window_size: i32,
     /// A gapped search (the options' gapped mode); an ungapped (`-ungapped`) search has no
     /// Gapped Karlin block in a query's footer and no `Gap Penalties` line in the epilog.
     pub gapped: bool,
@@ -4663,7 +4663,7 @@ pub struct TblastxPairwiseReport {
     pub matrix_name: String,
     /// `-threshold` and `-window_size` (the epilog prints them when they are not 0).
     pub word_threshold: f64,
-    pub window_size: usize,
+    pub window_size: i32,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
     pub num_alignments: usize,

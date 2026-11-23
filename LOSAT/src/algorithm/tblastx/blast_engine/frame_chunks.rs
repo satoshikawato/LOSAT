@@ -243,9 +243,10 @@ pub(super) fn search_subject_frames<S: TbxScore>(
                 stats_hsp_saved,
                 stats_hsp_filtered_by_cutoff,
                 stats_score_distribution,
-                one_hit: (window == 0).then_some(OneHitChunkMerge {
+                one_hit: (window <= 0).then_some(OneHitChunkMerge {
                     failure: x_read_failure,
                     s_idx,
+                    window,
                 }),
                 subject_besthit,
             },
@@ -286,8 +287,8 @@ pub(super) struct ChunkDrive {
 }
 
 /// What each chunk's result is added to: the frame's HSP list and the subject's HSP-saving
-/// statistics (`SubjectSums`), and for the one-hit word finder (`-window_size 0`, `one_hit`) where
-/// a chunk merge NCBI leaves undefined is refused.
+/// statistics (`SubjectSums`), and for the one-hit word finder (`-window_size 0` or less,
+/// `one_hit`) where a chunk merge NCBI leaves undefined is refused.
 pub(super) struct ChunkSums<'s> {
     pub(super) frame_ungapped_hits: &'s mut Vec<UngappedHit>,
     pub(super) stats_hsp_saved: &'s mut usize,

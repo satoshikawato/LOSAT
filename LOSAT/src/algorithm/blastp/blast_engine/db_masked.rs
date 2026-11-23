@@ -113,7 +113,7 @@ impl BlastpDbMasking<'_> {
         } else if !self.mask.hard() {
             let BlastpMaskScratch { stored, plan, .. } = &mut *masked;
             let ranges = plan.soft(stored, subject.aa_len);
-            kernel.search_subject_in(
+            kernel.search_subject_in_any(
                 scratch,
                 s_idx,
                 subject,
@@ -181,7 +181,21 @@ fn hard_chunks(
     masked.hits.clear();
     let residues = &subject.aa_seq[1..=subject.aa_len];
     let word = usize::try_from(kernel.word_size).unwrap_or(usize::MAX);
-    while let Some(chunk) = masked.plan.next_searched_chunk(word) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:475-486
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:807
+    // With a negative window the diagonal table keeps its state from chunk to chunk, and a chunk
+    // shorter than the word moves the offset (`Blast_ExtendWordExit`) though it holds no word:
+    // every chunk is searched (`search_subject_in_neg`; its scan of such a chunk reads nothing).
+    let every_chunk = kernel.window < 0;
+    loop {
+        let next = if every_chunk {
+            masked.plan.next_chunk()
+        } else {
+            masked.plan.next_searched_chunk(word)
+        };
+        let Some(chunk) = next else {
+            break;
+        };
         // The chunk's letters between two sentinels, as a sequence of the database block.
         masked.letters.clear();
         masked.letters.push(0);
@@ -193,7 +207,7 @@ fn hard_chunks(
             aa_seq: &masked.letters,
             aa_len: chunk.length,
         };
-        kernel.search_subject_in(
+        kernel.search_subject_in_any(
             scratch,
             s_idx,
             chunk_subject,

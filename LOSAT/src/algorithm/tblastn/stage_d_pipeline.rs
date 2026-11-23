@@ -3158,7 +3158,12 @@ fn run_preliminary_subjects_into(
     // subjects; otherwise the units of the single subject use it. Scheduling only.
     // Each subject keeps the NCBI search-to-link-to-reap order. Indexed
     // collection finishes before the OID-ordered shared collector below.
-    let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.count() > 1;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
+    // A window below 0 carries one diagonal table through the subjects of the batch, in NCBI's
+    // order of one search thread: its subjects are searched one after another on this thread,
+    // whatever the thread count (`NegDiagonals`, `-num_threads 1`'s result).
+    let parallel_selected =
+        pool.is_some_and(SearchPool::enabled) && subjects.count() > 1 && inputs.search.window >= 0;
     let unit_pool = if parallel_selected { None } else { pool };
     // Graduated 2026-10-22 (was `LOSAT_X_TBNOIDCHUNK`): the bases one chunk may hold, from the
     // size of the sequence file of the subjects (x_oid_chunk_bases); none when the subjects are

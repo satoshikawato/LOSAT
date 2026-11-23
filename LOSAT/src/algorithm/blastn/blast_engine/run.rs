@@ -221,6 +221,15 @@ mod na_scan;
 #[path = "two_stage_scan.rs"]
 mod two_stage_scan;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:42-65,90-106,109-185 (the
+// diagonal table and its exit), c++/src/algo/blast/core/na_ungapped.c:631-775 and :799-944 (the
+// diagonal array's and the hash's initial-hit steps) and :1597-1695 (`BlastNaWordFinder`).
+// The word finder of a window below 0 (an imported search strategy's `WindowSize`): the one-hit
+// steps with a diagonal table that starts at the window and carries its state from one chunk to
+// the next (a child module, so that it uses the private types of this file).
+#[path = "neg_window.rs"]
+mod neg_window;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:701-918
 // (`s_BlastSearchEngineCore`, whose :870-900 set the e-values of the subject's list and reap it),
 // :422-602 (`s_BlastSearchEngineOneContext`: the chunk loop, :478-593, and one chunk's word finder
@@ -3810,6 +3819,10 @@ struct SubjectScratch {
     x_pair_fold: x_pair_seed::PartScratch,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:159-176
     diag_table_offset: i32,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:109-157
+    // The diagonal table of a window below 0 (`neg_window.rs`), made by the first chunk that
+    // needs it and kept from chunk to chunk. `None` for every other search.
+    neg: Option<neg_window::NegTable>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
     offset_pairs: Vec<OffsetPair>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:146-170
@@ -3844,6 +3857,7 @@ impl SubjectScratch {
             // No NCBI counterpart: empty until a partitioned stage runs (LOSAT_X_PAIRPARFOLD).
             x_pair_fold: x_pair_seed::PartScratch::default(),
             diag_table_offset: window_size as i32,
+            neg: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:991-1041
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
             offset_pairs: vec![
@@ -4808,8 +4822,9 @@ struct BlastnReportInputs<'a> {
     gap_extend: i32,
     /// The task is megablast or blastn (`BlastnPairwiseReport::zero_gap_extension_formula`).
     zero_gap_extension_formula: bool,
-    /// The two-hit window of the task, printed in the epilog when not 0.
-    window_size: usize,
+    /// The two-hit window of the task, printed in the epilog when not 0 (below 0 too: an
+    /// imported search strategy's window).
+    window_size: i32,
     /// An ungapped (`-ungapped`) search: one Karlin block, no gap costs in the reports, and the
     /// hit list of the end of the traceback is the preliminary one (`finish_query_hit_list`).
     ungapped: bool,
@@ -7458,7 +7473,16 @@ fn search(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // The repeat search of `-filtering_db` runs in the pool of the search whose queries it masks
     // (`repeat_search_hits`); every other search has its own.
-    let requested = args.num_threads;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-185
+    // A window below 0 (an imported search strategy's) keeps the diagonal table's state from
+    // one word finder call to the next, so NCBI's result with several threads depends on which
+    // thread takes which subject; the search gives NCBI's one-thread result at any thread
+    // count (Owner-delegated): one thread, the subjects in NCBI's order on one table.
+    let requested = if super::super::coordination::determine_window_size(args) < 0 {
+        1
+    } else {
+        args.num_threads
+    };
     let run = |pool: &crate::utils::threading::SearchPool<'_>| {
         run_in_pool(
             args,
@@ -10194,7 +10218,7 @@ fn check_batch_window(args: &BlastnArgs, records: &[FastaRecord]) -> Result<()> 
         .sum();
     crate::blastinput::app::check_diag_table_window(
         i32::try_from(rooms.saturating_sub(1)).unwrap_or(i32::MAX),
-        i32::try_from(window).unwrap_or(i32::MAX),
+        window,
         "BLASTN",
     )
 }
@@ -10594,10 +10618,17 @@ fn search_query_batch<const UNGAPPED: bool>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:133-142
     // The two-hit window of the task or of `-window_size` (`configure_task`; a window whose sum
     // with the query would pass 2^30 is refused before this search, `check_batch_window`).
-    let window_size = config.window_size;
+    // The sum is NCBI's `Int4` one, without its wrap (the check refuses the sums over 2^30; a
+    // window below 0 only shortens it, down to the table of one cell).
+    // A window below 0 (`neg_window`, an imported search strategy's) is searched by the word
+    // finder of `neg_window.rs`; the unsigned window of the other word finders is then 0.
+    let window = config.window_size;
+    let neg_window = window.min(0);
+    let window_size = usize::try_from(window).unwrap_or(0);
     let diag_array_length = {
+        let target = query_concat_length as i64 + i64::from(window);
         let mut diag_array_length = 1usize;
-        while diag_array_length < query_concat_length + window_size {
+        while (diag_array_length as i64) < target {
             diag_array_length <<= 1;
         }
         diag_array_length
@@ -10970,6 +11001,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         scan_step,
         scan_range,
         window_size,
+        neg_window,
         offset_array_size,
         use_direct_lookup,
         small_na_compressed_query: &small_na_compressed_query,

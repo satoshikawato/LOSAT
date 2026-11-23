@@ -497,12 +497,13 @@ pub(crate) fn prefetch_reads_empty_row(
 /// nucleotide) and the first letter of the longest subject. NCBI's scope holds the whole record.
 /// 0 where no row is mapped: a query searched whole, and a search that reports no HSP of length
 /// 0 (gapped, or the two-hit word finder of a `-window_size` above 0: `s_BlastAaExtendOneHit`
-/// alone makes them, aa_ungapped.c:1054).
+/// alone makes them, aa_ungapped.c:1054; a negative window, a search strategy's, is the one-hit
+/// word finder too).
 pub(crate) fn query_letters_around(
     options: &super::args::ResolvedOptions,
     subjects: &[super::input::FastaRecord],
 ) -> usize {
-    if options.query_range.is_none() || options.gapped || options.window_size != 0 {
+    if options.query_range.is_none() || options.gapped || options.window_size > 0 {
         return 0;
     }
     subjects

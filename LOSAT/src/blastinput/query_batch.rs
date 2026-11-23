@@ -97,8 +97,8 @@ pub(crate) enum LoopBatchSizes {
 
 impl LoopBatchSizes {
     /// The sizes of BLASTN's application: `fixed_batch_size` is `BATCH_SIZE` (0 when it is not
-    /// set, and a size of 0 is no size: `if (batch_size)`), `max_batch_size` the mixer's maximum
-    /// (the chunk size of the options' program less 1000) and `total_length` the database's
+    /// set; the application takes a size of 0 as no fixed size), `max_batch_size` the mixer's
+    /// maximum (the chunk size of the options' program less 1000) and `total_length` the database's
     /// (`GetDbTotalLength`, which sets the target hits only when it is positive).
     pub(crate) fn of_blastn_app(
         fixed_batch_size: i32,

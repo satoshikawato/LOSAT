@@ -645,8 +645,8 @@ pub(super) fn preliminary_protein_hsps_for_search<S: super::score::TbnScore>(
 ) -> Result<Vec<(usize, GappedHsp)>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137 and
     // aa_ungapped.c:214-224 (cited at the units' word finder)
-    // Dispatch point: `-window_size 0` (no `multiple_hits`) takes the one-hit word finder, in an
-    // instance of its own (`ONE_HIT`), so that the two-hit units keep their code.
+    // Dispatch point: `-window_size 0` or below (no `multiple_hits`) takes the one-hit word finder,
+    // in an instance of its own (`ONE_HIT`), so that the two-hit units keep their code.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503,560-563
     // NCBI extends the initial HSPs with gaps only in a gapped search; an ungapped search keeps
     // them as the unit's HSPs (`ungapped_chunk_hsps`).
@@ -666,7 +666,7 @@ pub(super) fn preliminary_protein_hsps_for_search<S: super::score::TbnScore>(
             )
         };
     }
-    match (profile.window == 0, profile.gapped) {
+    match (profile.window <= 0, profile.gapped) {
         (true, true) => units!(true, false),
         (false, true) => units!(false, false),
         (true, false) => units!(true, true),
@@ -767,6 +767,10 @@ pub(super) struct XQuerySide {
     /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the buffers of the units of the batch's plans without
     /// residues.
     unit_residues: XUnitResiduesPool,
+    /// The diagonal table of a window below 0 (`-window_size` of a hand-edited search strategy),
+    /// made by the batch's first unit and carried through all its units, as NCBI's one search
+    /// thread carries its table (`NegDiagonals`). Empty for a window of 0 or above.
+    negative_window: std::sync::Mutex<Option<super::search_init::NegDiagonals>>,
 }
 
 // No NCBI counterpart: the methods below create the shared query-side state and build its frames
@@ -780,6 +784,7 @@ impl XQuerySide {
             lookup: OnceLock::new(),
             compressed: Default::default(),
             unit_residues: XUnitResiduesPool::new(),
+            negative_window: std::sync::Mutex::new(None),
         }
     }
 
@@ -1143,7 +1148,40 @@ fn x_preliminary_protein_hsps_by_unit<
         // their code), else the matrix's (BLOSUM62's or another's table).
         // An extension that cannot run (`x_pairs_one_hit`), reported after the table's exit.
         let mut x_one_hit_failed = None;
-        if ONE_HIT {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:109-157,162-175
+        // Dispatch point: a window below 0 (only a hand-edited search strategy gives one) takes
+        // the one-hit word finder on the batch's one table, which every unit of the batch
+        // finds as the unit before it left it (`NegDiagonals`; the units run in NCBI's order of
+        // one thread, `parallel` below). The two-hit and the other one-hit loops keep their code.
+        if ONE_HIT && profile.window < 0 {
+            let mut carried = x_query_side
+                .negative_window
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let table = carried.get_or_insert_with(|| {
+                super::search_init::NegDiagonals::new(
+                    query_sequence.len().saturating_sub(1),
+                    profile.window,
+                )
+            });
+            x_scan_unit_of::<false>(&plan, unit, subject_residues, pairs, |filled| {
+                #[cfg(test)]
+                probe_seeds(unit, frame.frame, chunk_offset, filled);
+                if let Err(error) = two_hit.x_pairs_one_hit_negative(
+                    table,
+                    score,
+                    frame.frame,
+                    chunk_offset,
+                    subject_sequence,
+                    filled,
+                    hits,
+                ) {
+                    x_one_hit_failed.get_or_insert(error);
+                }
+            });
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:805-807:
+            table.exit(chunk.length);
+        } else if ONE_HIT {
             x_scan_unit_of::<false>(&plan, unit, subject_residues, pairs, |filled| {
                 #[cfg(test)]
                 probe_seeds(unit, frame.frame, chunk_offset, filled);
@@ -1200,7 +1238,9 @@ fn x_preliminary_protein_hsps_by_unit<
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:608-609:
         // Right after the scan, before anything that can fail, so that the table is ready for the
         // next unit whatever this one returns.
-        two_hit.exit(chunk.length);
+        if !(ONE_HIT && profile.window < 0) {
+            two_hit.exit(chunk.length);
+        }
         if ONE_HIT {
             if let Some(error) = x_one_hit_failed {
                 return Err(error);
@@ -1252,7 +1292,12 @@ fn x_preliminary_protein_hsps_by_unit<
     // parallel (map_init gives each thread its own state); without one the loop below runs them in
     // order. The results are collected by unit index.
     let unit_count = plan.subject.units.len();
-    let parallel = pool.is_some_and(crate::utils::threading::SearchPool::enabled) && unit_count > 1;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
+    // A window below 0 carries the diagonal table from unit to unit, so its units run in order on
+    // this thread, as the one search thread of NCBI's `-num_threads 1` does (`NegDiagonals`).
+    let parallel = pool.is_some_and(crate::utils::threading::SearchPool::enabled)
+        && unit_count > 1
+        && !(ONE_HIT && profile.window < 0);
     // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
     // NCBI computes.
     crate::utils::threading::report_stage("tblastn", "prelim_units", unit_count, parallel);

@@ -259,6 +259,12 @@ struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
     diag_offset: i32,
+    // The diagonal offset of a search with a negative `-window_size` (a search strategy's: the
+    // command line takes none), which the one-hit scan of `BlastpPrelimKernel::search_subject_in_neg`
+    // reads and moves in 64 bits where NCBI's `Int4` would overflow; `diag_offset` is the offset of
+    // the searches with a window of 0 or more and does not move for it.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,162-172
+    neg_offset: i64,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:253-267
     init_hsps: Vec<InitHSP>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
@@ -479,6 +485,7 @@ impl BlastpSubjectScratch {
                     .expect("NCBI BLAST diagonal array size must fit in usize")
             ],
             diag_offset: window,
+            neg_offset: i64::from(window),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:253-267
             init_hsps: x_ih_pool::own_array(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
@@ -1937,6 +1944,16 @@ fn blastp_for_each_offset_pair_of<F>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4209-4319
 fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     let program = args.app.name();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137,162-172
+    // A negative `-window_size` (a search strategy's; the command line takes none) runs in
+    // BLASTP's scan, one-hit, on NCBI's one table; PSI-BLAST's and RPS-BLAST's scans (a later
+    // round's PSSM, the profiles' database) do not take it.
+    if args.window_size < 0 && args.app != BlastpApp::Blastp {
+        bail!(
+            "a -window_size of {} is not supported by LOSAT's {program}",
+            args.window_size
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918
     // LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
     // LOSAT's blastp engine does not implement. `-ungapped` is searched (series NP, O4b: the
@@ -6901,8 +6918,11 @@ fn x_query_block_plan(
     // P-values without a search space given (`-searchsp`): the redo's set-up may refuse a query
     // batch (`redo_run::evalue_adjust_contexts`: a query before one without a search space, known
     // only once the queries are set up), after the reports of the batches before
-    // (`database::HeaderReadError`). An ungapped search plans no blocks (`args.ungapped`).
+    // (`database::HeaderReadError`). An ungapped search plans no blocks (`args.ungapped`). A search
+    // with a negative `-window_size` has its own blocks in the preliminary stage only
+    // (`x_prelim_block_plan`: one batch each, NCBI's diagonal table of each batch).
     if args.query_range.is_some()
+        || args.window_size < 0
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()
         || args.rps_search.is_some()
@@ -7139,6 +7159,12 @@ fn x_prelim_block_plan(
         return None;
     }
     let query_batches = query_input.batches(batch_size);
+    // A negative `-window_size`: one block for each batch, whatever its letters.
+    if args.window_size < 0 {
+        let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+        let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, 0, None)?;
+        return (blocks.len() > 1).then_some(blocks);
+    }
     let blocks = x_batch_blocks(args, queries, &query_batches)?;
     let (blocks, _) = x_word_blocks(args, queries, query_input, batch_size, &blocks, pool)?;
     (blocks.len() > 1).then_some(blocks)
@@ -7196,7 +7222,7 @@ fn x_block_search_refuses_nothing(
     let Ok(query_length) = i32::try_from(query_length) else {
         return false;
     };
-    let window = args.window_size as i32;
+    let window = args.window_size;
     if crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP").is_err() {
         return false;
     }
@@ -7679,7 +7705,7 @@ fn write_reports_without_queries(
                     gap_open: args.scoring.gap_open,
                     gap_extend: args.scoring.gap_extend,
                     word_threshold: args.threshold,
-                    window_size: args.window_size as i32,
+                    window_size: args.window_size,
                     // None for an ungapped search, whose gap costs NCBI does not read
                     // (`call_setup::gapped_block`).
                     gapped_karlin: call_setup::gapped_block(args).unwrap_or_default(),
@@ -8746,7 +8772,7 @@ fn x_bplk16() -> bool {
 /// with a window (the fused two-hit loop scans it; the offset-pair scan of a search without one
 /// reads the 32-bit table) that is not a query chunk of a split batch (`x_chunk`).
 fn x_bplk16_for(args: &ResolvedBlastpArgs, x_chunk: bool) -> bool {
-    args.window_size != 0 && !x_chunk
+    args.window_size > 0 && !x_chunk
 }
 
 // No NCBI counterpart: LOSAT_X_BPLK16's table in the runtime lookup; it does not change any value
@@ -9448,6 +9474,19 @@ fn run_call(
     } else {
         None
     };
+    // A negative `-window_size` (a search strategy's; the command line takes none): NCBI's one
+    // diagonal table passes from each subject to the next, so the call searches the subjects one
+    // after the other on one thread, in NCBI's one-thread order, at any `-num_threads`; every
+    // stage below, a query chunk's and a block's calls included, takes this pool. A window of 0 or
+    // more keeps the caller's.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
+    let x_neg_window_pool;
+    let blastp_parallel_pool = if args.window_size < 0 {
+        x_neg_window_pool = crate::utils::threading::SearchPool::x_serial();
+        &x_neg_window_pool
+    } else {
+        blastp_parallel_pool
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1744-1748
@@ -9570,6 +9609,13 @@ fn run_call(
             UngappedSetupFailure::Engine(text) => setup_error(outputs, true, "", &text),
             UngappedSetupFailure::Refusal(error) => error,
         });
+    }
+    // A negative `-window_size` and a subject that NCBI searches in overlapping parts, each with
+    // its own move of the diagonal offset: LOSAT's refusal, where the ungapped search's is.
+    if args.window_size < 0 && query_valid.iter().any(|valid| *valid) {
+        if let Some(error) = negative_window_long_subject(&args, subject_source) {
+            return Err(error);
+        }
     }
 
     // A database without sequences (makeblastdb builds none; a volume whose index holds
@@ -10958,6 +11004,43 @@ fn too_long_subject_refusal(what: &str, length: usize) -> anyhow::Error {
         "{what} has {length} residues; a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP",
         crate::core::subject_split::MAX_DBSEQ_LEN
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310,476-584
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
+/// LOSAT's refusal of a search with a negative `-window_size` over a subject longer than
+/// `MAX_DBSEQ_LEN`: NCBI searches it in overlapping parts, and the diagonal offset that passes from
+/// a subject to the next moves after each part (`Blast_ExtendWordExit`), which LOSAT's scan of the
+/// whole subject does not do. A window of 0 or more does not read the offset of an earlier part.
+fn negative_window_long_subject(
+    args: &ResolvedBlastpArgs,
+    subject_source: BlastpSubjectSource<'_>,
+) -> Option<anyhow::Error> {
+    let longest = match subject_source {
+        BlastpSubjectSource::Fasta(records) => records
+            .iter()
+            .enumerate()
+            .find(|(_, record)| record.sequence.len() > crate::core::subject_split::MAX_DBSEQ_LEN)
+            .map(|(index, record)| {
+                (
+                    format!("subject sequence {}", index + 1),
+                    record.sequence.len(),
+                )
+            }),
+        BlastpSubjectSource::Database(database) => {
+            let longest = database.seqdb().max_length() as usize;
+            (longest > crate::core::subject_split::MAX_DBSEQ_LEN)
+                .then(|| ("a database sequence".to_string(), longest))
+        }
+    };
+    longest.map(|(what, length)| {
+        anyhow::anyhow!(
+            "a -window_size of {} with {what} of {length} residues, a subject which NCBI BLAST+ searches in overlapping parts of {} residues, is not supported by LOSAT's {}",
+            args.window_size,
+            crate::core::subject_split::MAX_DBSEQ_LEN,
+            args.app.name()
+        )
+    })
 }
 
 #[cfg(test)]

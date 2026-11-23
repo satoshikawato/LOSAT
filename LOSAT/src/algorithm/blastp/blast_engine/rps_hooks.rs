@@ -405,7 +405,7 @@ pub(super) fn rps_search(
         // `run_call` checked): LOSAT's refusal (`RpsUnit::check_engine_length`; none where no
         // query is searched).
         if searches {
-            unit.check_engine_length(args.window_size as i32, "RPSBLAST")?;
+            unit.check_engine_length(args.window_size, "RPSBLAST")?;
         }
         let masked: Vec<Option<Vec<u8>>> = run
             .contexts
@@ -514,7 +514,7 @@ pub(super) fn rps_search(
             sbp: sbp.as_ref(),
             hitlist_size: args.traceback_hitlist_size(),
             prelim_hitlist_size: run.prelim_hitlist_size,
-            window: args.window_size as i32,
+            window: args.window_size,
             // The unit's concatenated length `Lc` (an alias file's `LENGTH` and `NSEQ` over one
             // volume).
             concat_length: unit.concat_length(),

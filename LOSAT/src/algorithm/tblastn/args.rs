@@ -844,7 +844,8 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // threshold and window are the options' (the matrix's suggested values by default). The
     // standard table takes word sizes 2 to 4 and the compressed one 5 to 7; the word finder is
     // the two-hit one (a window above 0) or the one-hit one (a window of 0,
-    // `XTwoHit::x_pairs_one_hit`).
+    // `XTwoHit::x_pairs_one_hit`; below 0, which only a hand-edited search strategy gives,
+    // `XTwoHit::x_pairs_one_hit_negative`).
     let profile_supported = (2..=7).contains(&args.word_size);
     let Some(matrix) = matrix.filter(|_| profile_supported) else {
         anyhow::bail!(

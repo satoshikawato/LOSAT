@@ -112,6 +112,8 @@ pub(super) struct PairExtendState<'s> {
     pub(super) dbg_ungapped_ext_calls: &'s mut usize,
     pub(super) dbg_ungapped_low: &'s mut usize,
     pub(super) dbg_gapped_attempted: &'s mut usize,
+    /// The diagonal table of a window below 0 (`neg_window.rs`): the batches then go to its steps.
+    pub(super) neg: Option<&'s mut super::neg_window::NegTable>,
 }
 
 /// The steps of the offset pairs that the scan of one chunk with a two-stage table
@@ -144,6 +146,19 @@ pub(super) fn extend_offset_pairs(
     scan_pause_ns: &mut u64,
     track_scan_pause: bool,
 ) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:631-775,799-944
+    // A window below 0: the one-hit steps of its diagonal table (`neg_window.rs`).
+    if let Some(neg) = state.neg.as_deref_mut() {
+        super::neg_window::extend_offset_pairs(
+            scan,
+            x,
+            neg,
+            &mut *state.ungapped_hits,
+            offset_pairs,
+            offset_pairs_len,
+        );
+        return;
+    }
     let ext_first = x_bn_ext_first() && {
         let form = x.small_na_word.is_none()
             && scan.word_length > scan.lut_word_length

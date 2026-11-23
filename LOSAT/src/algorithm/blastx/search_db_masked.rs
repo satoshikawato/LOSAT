@@ -240,7 +240,15 @@ impl Masked<'_> {
         } else {
             None
         };
-        let word = usize::try_from(options.word_size).unwrap_or(usize::MAX);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
+        // With a negative window (a search strategy's) the table carries its offset from one
+        // call to the next, and a chunk shorter than the word still moves it (the call's
+        // `Blast_ExtendWordExit`): every chunk is searched.
+        let word = if options.window_size < 0 {
+            0
+        } else {
+            usize::try_from(options.word_size).unwrap_or(usize::MAX)
+        };
         plan.start_hard(stored, length);
         let mut raw = Vec::new();
         let mut purged = Vec::new();

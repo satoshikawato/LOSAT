@@ -590,7 +590,12 @@ pub struct ResolvedBlastpArgs {
     /// composition-based redo, and lowers the cutoff scores of the HSPs it keeps
     /// (`BlastHitSavingParametersUpdate`).
     pub sum_stats: bool,
-    pub window_size: usize,
+    /// `-window_size` as the options hold it, a signed `Int4`: the command line takes 0 and more, a
+    /// search strategy any value, and NCBI runs it (blast_options.c has no check of it; a window
+    /// of 0 or less is the one-hit search: only a positive window sets the multiple-hit flag).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137
+    pub window_size: i32,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
     /// is its LOSAT matrix when LOSAT has it, otherwise BLOSUM62 (and the search rejects
     /// the name, `blast_engine.rs` `validate_requested_blastp_support`).
@@ -1128,7 +1133,7 @@ impl BlastpArgs {
                 .gap_trigger
                 .unwrap_or(crate::algorithm::tblastx::constants::GAP_TRIGGER_BIT_SCORE),
             sum_stats: self.sum_stats,
-            window_size: usize::try_from(options.window_size).unwrap_or(0),
+            window_size: options.window_size,
             matrix_name: options.matrix_name,
             unknown_matrix,
             matrix_file,

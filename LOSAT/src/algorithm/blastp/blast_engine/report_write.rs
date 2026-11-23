@@ -760,7 +760,7 @@ pub(super) fn write_pairwise(
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
         word_threshold: args.threshold,
-        window_size: args.window_size as i32,
+        window_size: args.window_size,
         gapped_karlin: psi_report_karlin.map_or(gapped_params, |karlin| karlin.gapped),
         gumbel: gapped_gumbel,
         gapped: !args.ungapped,

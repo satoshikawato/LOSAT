@@ -90,9 +90,21 @@ fn x_packs(window: i32, word_size: usize) -> bool {
     x_tbn_diag_pack() && super::x_tbn_hitbf::fits(window, word_size) && window <= X_PACK_MAX_WINDOW
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:42-65
+/// The cells of an `XTwoHit`'s own table for a query of `query_length` letters and `window`: the
+/// smallest power of two not below their sum. A negative window (`-window_size` below 0, only a
+/// hand-edited search strategy gives it) runs on the batch's `NegDiagonals`, which `XTwoHit` is
+/// handed at each call; the table of the finder is then one cell that nothing reads.
+fn cell_count(query_length: usize, window: i32) -> usize {
+    match usize::try_from(window) {
+        Ok(window) => (query_length + window).next_power_of_two(),
+        Err(_) => 1,
+    }
+}
+
 impl Diagonals {
     fn new(query_length: usize, window: i32, packed: bool) -> Self {
-        let size = (query_length + window as usize).next_power_of_two();
+        let size = cell_count(query_length, window);
         Self {
             entries: if packed {
                 XDiagCells::Packed(vec![0; size])
@@ -111,6 +123,75 @@ impl Diagonals {
             self.entries.clear();
         } else {
             self.offset += subject_length as i32 + self.window;
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:51-55
+/// The `last_hit` of NCBI's `DiagStruct`, a signed bit field of 31 bits: the low 31 bits of `value`
+/// as a signed number. NCBI computes the value in `Int4`; where that overflows (undefined in C) the
+/// value is taken in `i64`, whose low 31 bits are the same as those of the wrapped `Int4`.
+fn last_hit_31(value: i64) -> i32 {
+    ((value as i32) << 1) >> 1
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:42-65,90-106,109-157,162-175
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:715-810
+// NCBI's diagonal table (one `BlastExtendWordNew` per preliminary search, one search thread) for a
+// negative window: the one-hit word finder (`multiple_hits` is `window_size > 0`), a table that
+// starts with `offset` = the window and cells of `last_hit` 0 (`calloc`), and a table that can be
+// shorter than the query (the smallest power of two not below `query length + window`, from 1), so
+// that diagonals share cells. Its state carries from one WordFinder call to the next, as the
+// offset update at the end of a call (`exit`) only adds to `offset`: with a window below 0 a cell
+// that an earlier call left, or one never written, holds a `last_hit` that is ahead of the
+// subject offsets of a later call, which the diagonal then does not extend. A window of 0 or above
+// keeps the units apart (`XTwoHit`).
+/// The diagonal table of a negative window, held by the batch (`XQuerySide`) and handed to the word
+/// finder at each of the batch's (frame, chunk) units in NCBI's order of one search thread. No NCBI
+/// counterpart for the type; the values are `BLAST_DiagTable`'s: `offset` in `i64` (NCBI's `Int4`,
+/// whose overflow is undefined) and the cells as the 31-bit values of `DiagStruct.last_hit`. The
+/// cell has no flag: only the two-hit finder sets one.
+pub(super) struct NegDiagonals {
+    cells: Vec<i32>,
+    mask: u32,
+    offset: i64,
+    window: i32,
+}
+
+impl NegDiagonals {
+    /// The table of a query of `query_length` letters (the concatenated queries' length) and the
+    /// window `window`, below 0.
+    pub(super) fn new(query_length: usize, window: i32) -> Self {
+        debug_assert!(window < 0);
+        let wanted = i64::try_from(query_length)
+            .unwrap_or(i64::MAX)
+            .saturating_add(i64::from(window));
+        let length = if wanted <= 1 {
+            1
+        } else {
+            usize::try_from(wanted.unsigned_abs().next_power_of_two()).unwrap_or(usize::MAX)
+        };
+        Self {
+            cells: vec![0; length],
+            mask: u32::try_from(length - 1).unwrap_or(u32::MAX),
+            offset: i64::from(window),
+            window,
+        }
+    }
+
+    /// The end of a WordFinder call over `subject_length` residues (`Blast_ExtendWordExit`): the
+    /// offset moves on by the length and the window, or, from a quarter of `INT4_MAX` on, back to the
+    /// window with every cell cleared to `-window` (`s_BlastDiagClear`).
+    pub(super) fn exit(&mut self, subject_length: usize) {
+        if self.offset >= i64::from(i32::MAX / 4) {
+            self.offset = i64::from(self.window);
+            self.cells.fill(last_hit_31(-i64::from(self.window)));
+        } else {
+            self.offset = self.offset.saturating_add(
+                i64::try_from(subject_length)
+                    .unwrap_or(i64::MAX)
+                    .saturating_add(i64::from(self.window)),
+            );
         }
     }
 }
@@ -293,7 +374,7 @@ impl<'a> XTwoHit<'a> {
         word_size: usize,
     ) -> Self {
         let query_length = query_sequence.len().saturating_sub(1);
-        let size = (query_length + window as usize).next_power_of_two();
+        let size = cell_count(query_length, window);
         let diagonals = match table {
             Some(table)
                 if table.entries.len() == size
@@ -850,6 +931,76 @@ impl<'a> XTwoHit<'a> {
                 });
             }
             cell.set_last_hit(result.s_last_off - (word_size_i32 - 1) + diagonals.offset);
+        }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:773-803
+    // The loop of `x_pairs_one_hit` for a window below 0, on the batch's table (`NegDiagonals`,
+    // carried from call to call). The arithmetic is NCBI's `Int4` one (the offsets are `Uint4`, so
+    // `diff` is the 32-bit difference read as `Int4`), and where `last_hit - offset` leaves `Int4`
+    // (undefined in C) the difference is taken in `i64`. The table's `exit` is the caller's, after
+    // the scan.
+    /// The loop body of the one-hit word finder for one filled offset array, on the table
+    /// `table` of a window below 0.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn x_pairs_one_hit_negative<S: super::score::TbnScore>(
+        &self,
+        table: &mut NegDiagonals,
+        score: S,
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) -> anyhow::Result<()> {
+        debug_assert!(self.window < 0 && table.window == self.window);
+        let word_size = self.word_size;
+        let word_size_i32 = word_size as i32;
+        for pair in pairs {
+            let q = pair.q_off as i32;
+            let s = pair.s_off as i32;
+            let index = (pair.s_off.wrapping_sub(pair.q_off) & table.mask) as usize;
+            let relative = i64::from(table.cells[index]) - table.offset;
+            let diff = match i32::try_from(relative) {
+                Ok(relative) => i64::from(s.wrapping_sub(relative)),
+                Err(_) => i64::from(pair.s_off) - relative,
+            };
+            if diff < 0 {
+                continue;
+            }
+            let context = self.context_offsets.partition_point(|&offset| offset <= q) - 1;
+            let Some(result) = score.one_hit(
+                self.query_sequence,
+                subject_sequence,
+                q as usize,
+                s as usize,
+                self.x_dropoffs[context],
+                word_size,
+                self.matrix,
+            ) else {
+                anyhow::bail!(
+                    "TBLASTN -window_size {}: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                    self.window,
+                    pair.q_off,
+                    pair.s_off
+                );
+            };
+            if result.ungapped_data.score >= self.cutoff_scores[context] {
+                hits.push(InitHsp {
+                    frame,
+                    chunk_offset,
+                    q_seed: pair.q_off,
+                    s_seed: pair.s_off,
+                    q_start: result.ungapped_data.q_start,
+                    s_start: result.ungapped_data.s_start,
+                    length: result.ungapped_data.length,
+                    score: result.ungapped_data.score,
+                });
+            }
+            table.cells[index] = last_hit_31(
+                i64::from(result.s_last_off) - i64::from(word_size_i32 - 1) + table.offset,
+            );
         }
         Ok(())
     }

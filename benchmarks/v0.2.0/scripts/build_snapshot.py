@@ -77,7 +77,8 @@ ST_TOOLS = [
 
 LARGE_WORKFLOW_SPECS = [
     # toolmt case, label, workflow, program, detail
-    ("M2_reads1e6s", "1M reads via stdin", "megablast stdin", "blastn", "1M reads (150 nt) vs 16S rRNA, stdin"),
+    ("M2_reads1e6s", "1M reads \u00d7 16S (stdin)", "megablast stdin", "blastn", "1M reads (150 nt) vs 16S rRNA, piped stdin"),
+    ("M2_reads1e6", "1M reads \u00d7 16S (file)", "megablast file", "blastn", "1M reads (150 nt) vs 16S rRNA, query file"),
     ("M2_amp1e5", "QIIME 2 (100k amplicons)", "QIIME 2", "blastn", "100k amplicons (253 nt) vs 16S rRNA"),
     ("SPB", "Trinotate proteome", "Trinotate", "blastp", "Proteome vs UniProtKB/Swiss-Prot"),
     ("UR50_q100", "UniRef50 (100 proteins)", "UniRef50", "blastp", "100 human proteins vs 38.8M seqs (19 GB)"),

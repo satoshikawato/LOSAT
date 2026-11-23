@@ -3,7 +3,7 @@
 
 Approved visual architecture:
   fig1_suite_overview : 12 search modes + 3 utilities (16t/1t speedup lollipops + shrinking memory % of BLAST+)
-  fig2_real_pipelines : Real workloads >= 1 s/run (8 large workflows, 14 MT tools, 7 ST tools; speedup + shrinking RAM %)
+  fig2_real_pipelines : Real workloads >= 1 s/run (9 large workflows, 14 MT tools, 7 ST tools; speedup + shrinking RAM %)
   fig3_scaling        : 3x2 scaling grid (DB RAM, DB warm/cold time, query time+RAM, thread speed diagonal,
                         thread RAM curves for blastn/blastp/tblastn, and 1t->16t RAM shift across all 12 modes)
   fig4_vs_heuristics  : Memory-sized bubble Pareto on UniRef50 (vs DIAMOND & MMseqs2) + SILVA 144 horizontal dumbbells
@@ -486,10 +486,33 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
             ax_s.text(s1 * 1.20, yv - 0.21, f"{fmt_sec(float(r['losat_wall_s']))} vs {fmt_sec(float(r['ncbi_wall_s']))}", ha="left", va="center", fontsize=6.5, color=theme["muted"])
             _put_mem_row(yv, float(r["losat_rss_mib"]), float(r["ncbi_rss_mib"]), float(r["mem_reduction"]), False, theme["wasm"])
 
+    def _runs_summary(rows_t: list[dict[str, str]]) -> str:
+        by_pair: dict[tuple[int, int], list[str]] = defaultdict(list)
+        for r in rows_t:
+            by_pair[(int(r["losat_runs"]), int(r["ncbi_runs"]))].append(r["label"])
+        main_pair = max(by_pair, key=lambda k: len(by_pair[k]))
+        lo_m, nc_m = main_pair
+        head = f"{lo_m} rounds" if lo_m == nc_m else f"{lo_m} LOSAT / {nc_m} NCBI"
+        excs = []
+        for pair, lbls in sorted(by_pair.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            if pair == main_pair:
+                continue
+            lo_n, nc_n = pair
+            if lo_n == lo_m and nc_n != nc_m:
+                excs.append(f"NCBI {', '.join(lbls)}: {nc_n}")
+            elif lo_n == nc_n:
+                excs.append(f"{', '.join(lbls)}: {lo_n}")
+            else:
+                excs.append(f"{', '.join(lbls)}: {lo_n} LOSAT / {nc_n} NCBI")
+        return f"{head} ({'; '.join(excs)})" if excs else head
+
+    std1 = [r for r in std if int(r["threads"]) == 1]
+    util_runs_set = sorted({int(r["runs"]) for r in util})
+    util_runs_txt = "/".join(str(x) for x in util_runs_set)
     add_footer(
         fig,
         f"LOSAT {short_sha(meta.get('losat_commit', ''))} vs NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')} & rpsbproc {meta.get('rpsbproc_version', '0.5.1')}, {short_hw(meta)}. "
-        f"Medians of 8 rounds at 16t (profile modes: 3; NCBI tblastx: 1), 5 LOSAT / 1 NCBI at 1t (utilities: 3).\n"
+        f"Medians at 16t: {_runs_summary(std16)}; at 1t: {_runs_summary(std1)}; utilities: {util_runs_txt}.\n"
         f"[-db] paired BLAST databases; [-subj] LOSAT -subject vs BLAST+ -db (blastp/blastp-fast parity confirmed form-for-form). BLAST+ max RSS includes memory-mapped DB pages.",
         theme,
         y_rule=0.052,
@@ -532,16 +555,20 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
     n_tools = len({r["tool"] for r in dt})
     real_mt.sort(key=lambda r: float(r["mt_speedup"]), reverse=True)
     real_st.sort(key=lambda r: float(r["n1_speedup"]), reverse=True)
-    large_s = sorted(large, key=lambda r: float(r["speedup"]), reverse=True)
+    # Keep 1M reads (stdin) and 1M reads (file) directly adjacent at the top of Panel a so the stdin contrast is immediate
+    large_s = sorted(
+        large,
+        key=lambda r: (0 if r["case"] in ("M2_reads1e6s", "M2_reads1e6") else 1, -float(r["speedup"])),
+    )
 
-    fig = new_fig((14.2, 9.1), theme)
+    fig = new_fig((14.2, 9.5), theme)
     add_header(
         fig,
         "Drop-in speed and memory gains across real bioinformatics workflows (excluding < 1 s start-up runs)",
         f"Unmodified BLAST+ commands via losat --install-shims  \u00b7  Only workloads where BLAST+ took \u2265 1 s/run are plotted  \u00b7  All {n_tools} tested tools matched NCBI output",
         theme,
-        y_title=0.974,
-        y_sub=0.945,
+        y_title=0.975,
+        y_sub=0.947,
     )
     handles = [
         Patch(facecolor=theme["losat"], label="Wall-time speedup (BLAST+ \u00f7 LOSAT, longer = faster)"),
@@ -549,7 +576,11 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
         mem_shrink_patch(theme),
         Line2D([0], [0], ls="none", marker="", label="\u2020 NCBI multi-thread output drifts; LOSAT matches 1-thread NCBI"),
     ]
-    add_legend(fig, handles, y=0.908, ncol=4, fs=7.4, colsp=1.0, hlen=1.3)
+    add_legend(fig, handles, y=0.911, ncol=4, fs=7.4, colsp=1.0, hlen=1.3)
+
+    def _calls_label(cases_count: str) -> str:
+        n = int(cases_count)
+        return "1 BLAST call" if n == 1 else f"{n} calls"
 
     def _item(name: str, sub: str, sp: float, ls: float, ns: float, lm: float, nm: float, drift: bool) -> dict[str, object]:
         return dict(name=name, sub=sub, sp=sp, time_txt=f"{fmt_sec(ls)} vs {fmt_sec(ns)}", lm=lm, nm=nm, drift=drift)
@@ -558,10 +589,10 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
                      float(r["losat_wall_s"]), float(r["ncbi_wall_s"]), float(r["losat_rss_mib"]), float(r["ncbi_rss_mib"]),
                      r["ncbi_mt_differs"] == "yes") for r in large_s]
     items_b = [_item(f"{r['tool']} ({r['program']})" if r["tool"] in ("Kaptive", "Trinotate") else r["tool"],
-                     f"{r['program']} \u00b7 {r['threads_label']}t \u00b7 {r['cases_count']} run(s)", float(r["mt_speedup"]),
+                     f"{r['program']} \u00b7 {r['threads_label']}t \u00b7 {_calls_label(r['cases_count'])}", float(r["mt_speedup"]),
                      float(r["losat_mt_s"]), float(r["ncbi_mt_s"]), float(r["losat_mt_rss_mib"]), float(r["ncbi_mt_rss_mib"]),
                      r["ncbi_mt_differs"] == "yes") for r in real_mt]
-    items_c = [_item(r["tool"], f"{r['program']} \u00b7 1t \u00b7 {r['cases_count']} run(s)", float(r["n1_speedup"]),
+    items_c = [_item(r["tool"], f"{r['program']} \u00b7 1t \u00b7 {_calls_label(r['cases_count'])}", float(r["n1_speedup"]),
                      float(r["losat_n1_s"]), float(r["ncbi_n1_s"]), float(r["losat_n1_rss_mib"]), float(r["ncbi_n1_rss_mib"]),
                      False) for r in real_st]
 
@@ -615,12 +646,12 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
                       fontweight="bold" if pct < 20.0 else "semibold", color=theme["wasm"] if pct < 25.0 else theme["ink"])
             ax_m.text(104.5, yv - 0.21, f"{fmt_mem(lm, True)} / {fmt_mem(nm, True)}", ha="left", va="center", fontsize=6.3, color=theme["muted"])
 
-    draw_block(items_a, [0.020, 0.502, 0.205, 0.330], [0.230, 0.502, 0.118, 0.330], [0.356, 0.502, 0.132, 0.330],
+    draw_block(items_a, [0.020, 0.474, 0.205, 0.362], [0.230, 0.474, 0.118, 0.362], [0.356, 0.474, 0.132, 0.362],
                "a", "Large reference workflows (16 threads)", 12.0, [1, 2, 5, 10])
-    draw_block(items_c, [0.020, 0.116, 0.205, 0.286], [0.230, 0.116, 0.118, 0.286], [0.356, 0.116, 0.132, 0.286],
+    draw_block(items_c, [0.020, 0.120, 0.205, 0.270], [0.230, 0.120, 0.118, 0.270], [0.356, 0.120, 0.132, 0.270],
                "c", "Single-thread published tools (\u2265 1 s/run)", 8.0, [1, 2, 4, 8])
-    fig.add_artist(Line2D([0.502, 0.502], [0.106, 0.856], transform=fig.transFigure, color=theme["grid"], linewidth=0.9))
-    draw_block(items_b, [0.518, 0.116, 0.175, 0.716], [0.698, 0.116, 0.128, 0.716], [0.834, 0.116, 0.146, 0.716],
+    fig.add_artist(Line2D([0.502, 0.502], [0.110, 0.860], transform=fig.transFigure, color=theme["grid"], linewidth=0.9))
+    draw_block(items_b, [0.518, 0.120, 0.175, 0.716], [0.698, 0.120, 0.128, 0.716], [0.834, 0.120, 0.146, 0.716],
                "b", "Multi-thread published tools (\u2265 1 s/run)", 22.0, [1, 2, 5, 10, 20])
 
     dt_commits = meta.get("dt_commits", {})
@@ -629,16 +660,26 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
         f"{t} ({progs[0]})" if len(progs) == 1 else f"{t} ({len(progs)} modes)"
         for t, progs in sorted(startup_by_tool.items())
     ]
+    by_lcase = {r["case"]: r for r in large}
+    stdin_note = ""
+    if "M2_reads1e6s" in by_lcase and "M2_reads1e6" in by_lcase:
+        s_nc, f_nc = float(by_lcase["M2_reads1e6s"]["ncbi_wall_s"]), float(by_lcase["M2_reads1e6"]["ncbi_wall_s"])
+        s_lo, f_lo = float(by_lcase["M2_reads1e6s"]["losat_wall_s"]), float(by_lcase["M2_reads1e6"]["losat_wall_s"])
+        stdin_note = (
+            f" Piping 1M reads via stdin slows BLAST+ {s_nc / f_nc:.1f}\u00d7 ({fmt_sec(f_nc)} \u2192 {fmt_sec(s_nc)}) "
+            f"vs {s_lo / f_lo:.2f}\u00d7 for LOSAT ({fmt_sec(f_lo)} \u2192 {fmt_sec(s_lo)})."
+        )
     excl_wrapped = textwrap.fill(
-        f"Memory bars show remaining % of BLAST+ max RSS (shorter = smaller). Excluded < 1 s/run rows ({', '.join(excl_parts)}) also matched NCBI output (see snapshot/downstream_tools.tsv).",
-        width=215,
+        f"Plotted times are summed over the BLAST calls in each workflow (medians of 3 rounds in a, b; 4 runs in c); memory shows peak max RSS (% of BLAST+, shorter = smaller).{stdin_note} "
+        f"Excluded < 1 s/run rows ({', '.join(excl_parts)}) also matched NCBI output (see snapshot/downstream_tools.tsv).",
+        width=212,
     )
     add_footer(
         fig,
-        f"Panels a, b: LOSAT {short_sha(meta.get('toolmt_commit', ''))} (medians of 3 rounds, peak max RSS); Panel c: LOSAT {one_shas} (medians of 4 runs); "
+        f"Panels a, b: LOSAT {short_sha(meta.get('toolmt_commit', ''))}; Panel c: LOSAT {one_shas}; "
         f"vs NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}, {short_hw(meta)}.\n{excl_wrapped}",
         theme,
-        y_rule=0.062,
+        y_rule=0.072,
     )
     return save_themed(fig, out, "fig2_real_pipelines", dark, theme)
 
@@ -671,7 +712,7 @@ def render_fig3(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
     fig = new_fig((13.4, 10.6), theme)
     add_header(
         fig,
-        f"Peak memory stays at {fmt_mem(core_lo_mib)} on {core_gb:.0f} GB core_nt while scaling cleanly across queries, threads, and modes",
+        f"Resident memory peaks at {fmt_mem(core_lo_mib)} on {core_gb:.0f} GB core_nt while scaling cleanly across queries, threads, and modes",
         f"DB size ({abr_mb:.2f} MB \u2192 {core_gb:.1f} GB), query volume ({q_lo_k}k \u2192 {q_hi_m}M reads), thread speed & memory (1 \u2192 {t_max} cores), and 1t \u2192 16t memory across all {len(all12)} modes",
         theme,
         y_title=0.978,
@@ -897,7 +938,7 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
     add_header(
         fig,
         "Exact NCBI BLAST+ parity vs. heuristic aligners: speed, sensitivity, and memory trade-offs",
-        f"UniRef50 (38.8M proteins, 32t): bubble area encodes max RSS ({lo_lo:.2f} GiB LOSAT dot vs {mm_hi:.0f} GiB MMseqs2)  \u00b7  SILVA 144 (905k rRNAs, 16t): horizontal dumbbells",
+        f"UniRef50 (38.8M proteins, 32t): bubble area scales with \u221a(max RSS) + min size ({lo_lo:.2f} GiB LOSAT vs {mm_hi:.0f} GiB MMseqs2; key at lower right of a)  \u00b7  SILVA 144 (905k rRNAs, 16t): dumbbells",
         theme,
         y_title=0.974,
         y_sub=0.943,
@@ -960,8 +1001,8 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
     ]
 
     for p_i, (qset, rect, let, title, xlim, olist) in enumerate([
-        ("q100",  [0.056, 0.135, 0.278, 0.645], "a", "UniRef50: 100q (bubble = max RSS)",   (7.0, 3600.0),  offsets_100),
-        ("q1000", [0.362, 0.135, 0.278, 0.645], "b", "UniRef50: 1,000q (bubble = max RSS)", (14.0, 32000.0), offsets_1000),
+        ("q100",  [0.056, 0.135, 0.278, 0.645], "a", "UniRef50: 100q (area: \u221amax RSS)",   (7.0, 3600.0),  offsets_100),
+        ("q1000", [0.362, 0.135, 0.278, 0.645], "b", "UniRef50: 1,000q (area: \u221amax RSS)", (14.0, 32000.0), offsets_1000),
     ]):
         ax = fig.add_axes(rect)
         ax.set_facecolor(theme["surface"])
@@ -982,10 +1023,12 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
             gib = float(r["max_rss_gib"])
             col = tcol[r["tool"]]
             is_lo = r["tool"] == "LOSAT"
-            ax.scatter([x], [y], s=mem_area(gib), facecolors=col, alpha=0.95 if is_lo else (0.30 if dark else 0.22),
-                       edgecolors=col, linewidths=1.5 if is_lo else 1.2, zorder=6 if is_lo else 3)
+            ax.scatter([x], [y], s=mem_area(gib), facecolors=col, alpha=0.94 if is_lo else (0.30 if dark else 0.22),
+                       edgecolors=col, linewidths=1.5 if is_lo else 1.2, zorder=5 if is_lo else 3)
             if not is_lo:
-                ax.scatter([x], [y], s=14, color=col, zorder=5)
+                # Draw non-LOSAT centre dots above LOSAT's dot with a crisp halo so near-coincident points
+                # (e.g. DIAMOND --more-sensitive vs LOSAT blastp-fast in panel b) remain both clearly visible.
+                ax.scatter([x], [y], s=24, facecolors=col, edgecolors=theme["surface"], linewidths=0.9, zorder=6)
 
         for aid, dx_pt, dy_pt, ha in olist:
             r = by_arm[aid]
@@ -996,13 +1039,13 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
                 ha=ha, va="center", fontsize=6.8 if is_lo else 6.4, fontweight="bold" if is_lo else "normal",
                 color=theme["losat"] if is_lo else theme["ink2"], linespacing=1.15,
                 bbox=dict(boxstyle="round,pad=0.13", facecolor=theme["surface"], edgecolor=theme["zone_edge"] if is_lo else "none", lw=0.6 if is_lo else 0.0, alpha=0.90),
-                arrowprops=dict(arrowstyle="-", color=theme["losat"] if is_lo else theme["hairline"], lw=0.7, shrinkA=2, shrinkB=5),
+                arrowprops=dict(arrowstyle="-", color=theme["losat"] if is_lo else theme["hairline"], lw=0.7, shrinkA=2, shrinkB=4 if aid == "dmnd_ms" else 5),
                 zorder=8 if is_lo else 7,
             )
 
         # Bubble-size scale reference inside bottom-right empty corner of Panel a
         if p_i == 0:
-            ax.text(1050, 64.2, "Bubble = max RSS", ha="center", va="bottom", fontsize=6.6, fontweight="semibold", color=theme["muted"])
+            ax.text(1050, 64.2, "Key: \u221a(max RSS)", ha="center", va="bottom", fontsize=6.6, fontweight="semibold", color=theme["muted"])
             for bx, gib_ref, blbl in [(450, 0.2, "0.2G"), (1000, 10.0, "10G"), (2150, 100.0, "100G")]:
                 ax.scatter([bx], [60.2], s=mem_area(gib_ref), facecolors=theme["muted"], alpha=0.22, edgecolors=theme["muted"], lw=1.0, zorder=5)
                 ax.text(bx, 57.0, blbl, ha="center", va="top", fontsize=6.3, color=theme["muted"])
@@ -1107,12 +1150,23 @@ def render_fig5(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
 
     fig = new_fig((13.6, 7.0), theme)
     rows16_m = [r for r in rows if int(r["threads"]) == 16 and r["ncbi_s"]]
+    clear_wins16 = [r for r in rows16_m if float(r["ncbi_s"]) / float(r["wasm_s"]) >= 1.05]
+    near_eq16 = [r for r in rows16_m if 0.95 <= float(r["ncbi_s"]) / float(r["wasm_s"]) < 1.05]
     n_wins16 = sum(1 for r in rows16_m if float(r["wasm_s"]) < float(r["ncbi_s"]))
     ncbi_ver = meta.get("ncbi_version", "2.17.0")
-    sub_extra = f"  \u00b7  Estimated from build {base_sha} via side-by-side ratio" if wasm_derived else "  \u00b7  Direct paired runs under Node.js"
+    if wasm_derived:
+        eq_note = f" ({', '.join(r['mode_label'] for r in near_eq16)} ~equal)" if near_eq16 else ""
+        fig5_title = (
+            f"Inside WebAssembly, LOSAT is estimated faster than native NCBI BLAST+ {ncbi_ver} "
+            f"in {len(clear_wins16)} of {len(rows16_m)} modes at 16t{eq_note}"
+        )
+        sub_extra = f"  \u00b7  Estimated times scaled from build {base_sha} via side-by-side ratio"
+    else:
+        fig5_title = f"Inside WebAssembly, LOSAT is faster than native NCBI BLAST+ {ncbi_ver} in {n_wins16} of {len(rows16_m)} measured modes at 16t"
+        sub_extra = "  \u00b7  Direct paired runs under Node.js"
     add_header(
         fig,
-        f"Inside WebAssembly, LOSAT is faster than native NCBI BLAST+ {ncbi_ver} in {n_wins16} of {len(rows16_m)} measured modes at 16t",
+        fig5_title,
         f"Physical-scale comparison (left = faster / smaller): Native LOSAT vs. wasm32-wasip1-threads (Node.js) vs. Native NCBI BLAST+ {ncbi_ver}{sub_extra}",
         theme,
         y_title=0.968,
@@ -1230,7 +1284,7 @@ def render_fig6(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
     fig = new_fig((12.6, 6.2), theme)
     add_header(
         fig,
-        f"LOSAT v0.1.0 \u2192 v{meta.get('losat_version', '0.2.0')}: up to {max_sp_v:.1f}\u00d7 faster and {max_rm_v:.1f}\u00d7 lower memory, leaping far below NCBI BLAST+",
+        f"LOSAT v0.1.0 \u2192 v{meta.get('losat_version', '0.2.0')}: up to {max_sp_v:.1f}\u00d7 faster and {max_rm_v:.1f}\u00d7 lower memory, below NCBI BLAST+ in all {len(cases)} modes",
         f"All {len(cases)} search modes present in v0.1.0 (16 threads) alongside NCBI BLAST+ {meta.get('ncbi_version', '2.17.0')}  \u00b7  v{meta.get('losat_version', '0.2.0')} also expands from 3 to 17 programs and adds -db support",
         theme,
         y_title=0.964,

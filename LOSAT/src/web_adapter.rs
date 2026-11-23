@@ -26,6 +26,11 @@ pub use crate::cli::{
     command_line_message, printed_text, Cli, Commands, NativeError, WEB_V2_PROGRAMS,
 };
 
+// The values that NCBI's arguments allow, as LOSAT's argument tables give them (`ncbi_app::args`,
+// made from each program's NCBI XML): the genetic codes that `describe` lists and the tasks whose
+// defaults it resolves.
+pub use crate::ncbi_app::args::{genetic_codes, string_values};
+
 /// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
 /// as the command line reads it after its application start, NCBI's single-dash options included.
 /// A run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads
@@ -63,8 +68,8 @@ pub use crate::report::archive::strategy::StrategyFile;
 /// `open_strategy_file`): after the settings and a dry run's end, before `-outfmt` is read. `None`
 /// without the option. The error is the command line's (NCBI's `File is not accessible` for a name
 /// that the command line cannot open); the run's other files that the name may be are its `-query`,
-/// `-subject`, `-logfile`, BLASTN's `-window_masker_db`, and with `-db` the lists of its filters and
-/// the files of the run's working directory that the search reads.
+/// `-subject`, `-logfile`, BLASTN's `-window_masker_db`, and the files of the run's working directory
+/// that the search reads (`-db`, the lists of its filters, BLASTN's `-filtering_db`).
 pub fn open_strategy_file(
     command: &Commands,
     words: &[&str],
@@ -127,42 +132,62 @@ pub fn open_strategy_file(
         option: "window_masker_db",
         name: std::ffi::OsStr::new(masker),
     }));
-    // A search of `-db` (line WQA D12a) reads the database and the lists of its filters from the
-    // run's working directory, which holds the files that the host gives the engine
-    // (docs/web/abi_v2.md §3): the lists under their options, and every other file of it that the
-    // name opens under `-db` (the database's, and the taxonomy database's that it reads).
-    if let Some(filter) = database_filter(command) {
-        for (option, list) in [
-            ("seqidlist", &filter.seqidlist),
-            ("negative_seqidlist", &filter.negative_seqidlist),
-            ("taxidlist", &filter.taxidlist),
-            ("negative_taxidlist", &filter.negative_taxidlist),
-        ] {
-            others.extend(list.as_deref().map(|name| RunFileName {
-                option,
-                name: std::ffi::OsStr::new(name),
-            }));
+    // The files of the run's working directory that the search reads (docs/web/abi_v2.md §3), which
+    // the host gives the engine there: with `-db` (line WQA D12a) the database and the lists of its
+    // filters, with BLASTN's `-filtering_db` (line RG item D4) the database of repeats. The lists are
+    // compared under their options; any other file of that directory that a relative name opens is
+    // a database's (the taxonomy database's too): `-filtering_db`'s for a name that starts with its
+    // value or in a run without `-db`, else `-db`'s.
+    if let Some(reads) = directory_reads(command) {
+        if let Some(filter) = reads.filter {
+            for (option, list) in [
+                ("seqidlist", &filter.seqidlist),
+                ("negative_seqidlist", &filter.negative_seqidlist),
+                ("taxidlist", &filter.taxidlist),
+                ("negative_taxidlist", &filter.negative_taxidlist),
+            ] {
+                others.extend(list.as_deref().map(|name| RunFileName {
+                    option,
+                    name: std::ffi::OsStr::new(name),
+                }));
+            }
         }
-        others.extend(path.filter(|path| path.is_file()).map(|path| RunFileName {
-            option: "db",
-            name: path.as_os_str(),
-        }));
+        if let Some(path) = path.filter(|path| path.is_relative() && path.is_file()) {
+            let repeats = reads.filter.is_none()
+                || reads.repeats.is_some_and(|repeats| {
+                    path.as_os_str()
+                        .as_encoded_bytes()
+                        .starts_with(repeats.as_bytes())
+                });
+            others.push(RunFileName {
+                option: if repeats { "filtering_db" } else { "db" },
+                name: path.as_os_str(),
+            });
+        }
     }
     crate::report::archive::strategy::open_strategy_file_in(run_files, path, None, label, &others)
 }
 
-/// The filters of the database of `command`, a search of `-db` (`None` for a search of
-/// `-subject`): `open_strategy_file`.
-fn database_filter(command: &Commands) -> Option<&crate::blastinput::db_filter::DbFilterArgs> {
-    let (db, filter) = match command {
-        Commands::Blastp(args) => (&args.db, &args.db_filter),
-        Commands::Blastn(args) => (&args.db, &args.db_filter),
-        Commands::Tblastn(args) => (&args.db, &args.db_filter),
-        Commands::Tblastx(args) => (&args.db, &args.db_filter),
-        Commands::Blastx(args) => (&args.db, &args.db_filter),
+/// What a search reads from the run's working directory (`open_strategy_file`): the filters of the
+/// database of `-db` (`filter`, `None` without `-db`) and BLASTN's `-filtering_db` (`repeats`).
+struct DirectoryReads<'a> {
+    filter: Option<&'a crate::blastinput::db_filter::DbFilterArgs>,
+    repeats: Option<&'a str>,
+}
+
+/// What the search of `command` reads from the run's working directory; `None` for a search that
+/// reads no file there.
+fn directory_reads(command: &Commands) -> Option<DirectoryReads<'_>> {
+    let (db, filter, repeats) = match command {
+        Commands::Blastp(args) => (&args.db, &args.db_filter, None),
+        Commands::Blastn(args) => (&args.db, &args.db_filter, args.filtering_db.as_deref()),
+        Commands::Tblastn(args) => (&args.db, &args.db_filter, None),
+        Commands::Tblastx(args) => (&args.db, &args.db_filter, None),
+        Commands::Blastx(args) => (&args.db, &args.db_filter, None),
         _ => return None,
     };
-    db.is_some().then_some(filter)
+    let filter = db.is_some().then_some(filter);
+    (filter.is_some() || repeats.is_some()).then_some(DirectoryReads { filter, repeats })
 }
 
 /// Gives the search of `command` (a search of LOSAT Web's run of the argv, `run_local`) the export
@@ -290,6 +315,13 @@ pub use crate::algorithm::blastn::coordination::{
 };
 pub use crate::algorithm::blastn::scoring::{check_losat_limits, check_scoring_options};
 pub use crate::algorithm::blastn::BlastnArgs;
+
+/// Gives BLASTN's `-filtering_db` its repeat search with the run's `settings` (the lookup of the
+/// database as of `-db`: the run's working directory and registry), as the command line does
+/// before a search; nothing without the option (`BlastnArgs::resolve_repeat_filter`).
+pub fn resolve_blastn_repeat_filter(args: &mut BlastnArgs, settings: &ApplicationSettings) {
+    args.resolve_repeat_filter(settings);
+}
 pub use crate::algorithm::blastp::blast_engine::check_options as check_blastp_options;
 pub use crate::algorithm::blastx::check_options as check_blastx_options;
 pub use crate::algorithm::blastx::BlastxArgs;

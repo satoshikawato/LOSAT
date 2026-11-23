@@ -20,6 +20,7 @@ use std::io::{BufRead, BufReader};
 
 use crate::ncbi_exception::NcbiException;
 use crate::ncbi_str::{printable_string, string_to_double, string_to_int, string_to_uint};
+use crate::report::serial::asn_input::VECTOR_RESERVE_LENGTH_ERROR;
 
 /// `INVALIDPSSMID`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:26-30
@@ -721,7 +722,7 @@ impl CddData {
             pos0 = pos1.wrapping_add(1);
             pos1 = line.find(b'\t', pos0);
             if pos1 == NPOS {
-                return Err(DataError::Std("vector::reserve".to_string()));
+                return Err(DataError::Std(VECTOR_RESERVE_LENGTH_ERROR.to_string()));
             }
             residues.clear();
             let mut pos_c = line.find(b',', pos0);

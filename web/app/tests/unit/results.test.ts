@@ -523,7 +523,7 @@ describe('ResultsBrowser', () => {
     expect(state.detail!.row).toBe('q0\ts1\t99.000\t50\t0\t0\t1\t50\t101\t150\t1e-20\t90\n');
     expect(state.outfmt0Subjects).toBe(2);
     expect(state.atSubjectLimit).toBe(false);
-    expect(state.loaded!.badge.level).toBe('outside');
+    expect(state.loaded!.badge!.level).toBe('outside');
   });
 
   it('follows an HSP of another subject, and shows a query without hits', async () => {
@@ -883,6 +883,19 @@ describe('ResultsBrowser', () => {
     }
     expect(NO_HSP_TEXT['printed-help']).toBe("This run printed the command line's help and ran no search. The text is in Outputs.");
     expect(NO_HSP_TEXT['printed-version']).toBe("This run printed the command line's version and ran no search. The text is in Outputs.");
+  });
+
+  // Line WQA's D20, S3-1, 2026-11-23: a run that printed the command line's help or version compared no options: no badge.
+  it('gives no support badge to a run that printed the command line\'s help or version', async () => {
+    for (const prints of ['help', 'version'] as const) {
+      const { results } = setup({ specs: [], snapshot: { prints } });
+      await results.open('r1');
+      expect(results.state.get().phase).toBe('ready');
+      expect(results.state.get().loaded!.badge).toBeUndefined();
+    }
+    const { results } = setup({ specs: [] });
+    await results.open('r1');
+    expect(results.state.get().loaded!.badge).toBeDefined();
   });
 
   // WA-FM-07: the command of a run without results is read with the grammar too.

@@ -3,7 +3,7 @@
   the run's results. Before, the Web GUI took the option, searched and wrote no file. The name is read as the command
   line on Linux opens it: a name it cannot open is NCBI's `File is not accessible` error, `/dev/null` gives no file, and
   `-` and the standard output are refused as on the command line. The standard error stream, the system's devices and
-  files, the file of `-query`, `-subject`, `-logfile` or `-window_masker_db`, and with `-db` a file that the database
-  search reads (a file of the database, the list of a filter) are refused in the Web GUI, where the command line writes
-  the requests into that stream or file. A search of `-db` writes its file too, with the database in its requests. The
-  library and pylosat still refuse the option.
+  files, the file of `-query`, `-subject`, `-logfile` or `-window_masker_db`, and a file that the search reads from the
+  run's folder (a file of the database of `-db` or `-filtering_db`, the list of a filter) are refused in the Web GUI,
+  where the command line writes the requests into that stream or file. A search of `-db` writes its file too, with the
+  database in its requests. The library and pylosat still refuse the option.

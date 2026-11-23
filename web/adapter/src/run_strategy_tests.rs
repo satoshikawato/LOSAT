@@ -528,9 +528,10 @@ fn a_database_search_writes_the_command_lines_strategy_file() {
     }
 }
 
-/// The files that a search of `-db` reads (the database's in the run's working directory, a list of
-/// a filter) are the files of another option of the run: LOSAT Web's refusal, at NCBI's first
-/// request (the command line's strategy file would replace the bytes that the search reads).
+/// The files that a search reads from the run's working directory (a file of the database of `-db`,
+/// a list of its filter, a file of BLASTN's `-filtering_db`) are the files of another option of the
+/// run: LOSAT Web's refusal, at NCBI's first request (the command line's strategy file would replace
+/// the bytes that the search reads).
 #[test]
 fn the_files_of_a_database_search_are_no_strategy_file() {
     let query = "tests/db_search/taxfilter/q.faa";
@@ -562,4 +563,29 @@ fn the_files_of_a_database_search_are_no_strategy_file() {
         assert!(files(&streams).is_empty(), "{name}");
         assert!(streams.get(&6).is_none_or(Vec::is_empty), "{name}");
     }
+    // BLASTN's `-filtering_db` (line RG item D4) reads its database of repeats from the run's
+    // working directory in a search of `-subject` too.
+    let name = format!("{DB_ROOT}/tests/db_search/rpt_d4.nin");
+    let repeats = format!("{DB_ROOT}/tests/db_search/rpt_d4");
+    let words = [
+        "blastn",
+        "-query",
+        "outfmt11/arch_q.fna",
+        "-subject",
+        "outfmt11/arch_s.fna",
+        "-filtering_db",
+        &repeats,
+        "-outfmt",
+        "6",
+        "-export_search_strategy",
+        &name,
+    ];
+    let (result, streams) = run_files_of(&words, "outfmt11/arch_q.fna", "outfmt11/arch_s.fna");
+    assert_eq!(
+        result.unwrap_err(),
+        format!(
+            "-export_search_strategy {name} (the file of -filtering_db too, whose bytes the command line's strategy file replaces or mixes with its own) is not supported in the browser; give a file name of the run's own"
+        )
+    );
+    assert!(files(&streams).is_empty());
 }

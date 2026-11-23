@@ -14,7 +14,7 @@ import type { SearchDraft } from '../application/draft';
 import type { CountsLoader } from '../application/counts';
 import type { ExampleLoader } from '../application/examples';
 import { changedFields, effectiveValue, placementFlags, sectionsAt } from '../domain/parameters';
-import { programById, PROGRAMS, searchSummaryParts } from '../domain/programs';
+import { printSummaryParts, programById, PROGRAMS, searchSummaryParts } from '../domain/programs';
 import { announce } from './announcer';
 import { REFUSAL_ID } from './refusal';
 import { useStore } from './useStore';
@@ -84,7 +84,12 @@ watch(
 );
 onUnmounted(() => clearTimeout(engineWait));
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
-const summaryParts = computed(() => searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)));
+const summaryParts = computed(() => {
+  void state.value; // recompute with the draft
+  // A draft whose argv prints the command line's help or version says so, not that it searches (line WQA's D20, 2026-11-23).
+  const prints = props.draft.printsKind();
+  return prints === null ? searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)) : printSummaryParts(program.value, prints);
+});
 /**
  * The Algorithm parameters that differ from the engine's defaults ("♦"); the words of
  * "Additional options" count as one.

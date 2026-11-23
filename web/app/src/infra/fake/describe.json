@@ -1349,6 +1349,15 @@
     ]
    },
    {
+    "flag": "-use_sw_tback",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-strand",
     "help": "",
     "takes_value": true,

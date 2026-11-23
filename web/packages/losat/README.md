@@ -170,6 +170,11 @@ that directory. Such a run has no `subject`, and `engine.start(argv)` says so (`
 it needs, with `FileReaderSync` in the workers: a database is never copied into memory or into the
 browser's storage. Every thread of a threaded search reads the same files.
 
+BLASTN's `-filtering_db` (a database of repeats that masks the query) runs the same way, with `-db` or
+with a `-subject`: give the run the repeat database's files (every file of that database, as for `-db`)
+in `EngineRunRequest.files` under the name of the option's value, and the engine searches it for repeats
+as the command line does. LOSAT Web's form has no input for these files yet and refuses the option.
+
 The limits are the browser's: a search must fit in WebAssembly's 4 GiB of memory, and a browser keeps
 no access to the user's files across a reload, so the user gives them again. `-remote` and
 `-entrez_query` are refused, as on the command line.

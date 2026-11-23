@@ -201,7 +201,7 @@ fn search_records(
         // LOSAT's refusal, not an error of NCBI's engine, and an error that has NCBI's report
         // already (`native::search_error_as_is`).
         if super::native::search_error_as_is(&error) {
-            error
+            super::native::search_error_held(error)
         } else {
             engine(error)
         }

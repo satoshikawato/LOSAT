@@ -58,7 +58,10 @@
 // the CLI runs there (line WQA D12a, 2026-11-20). Each engine runs it on an instance whose `/work` is that
 // directory; the threaded engine's
 // threads share the table of the files it opens (LOSAT/tests/wasi_files.js), as the browser host's
-// threads share theirs (web/packages/losat/src/infra/reactor/run-directory.ts).
+// threads share theirs (web/packages/losat/src/infra/reactor/run-directory.ts). A search with `"run_directory"`
+// (BLASTN `-filtering_db` with `-subject`, line RG item D4) has a subject as every search has and runs on the
+// instance of its directory too, where the engine opens the repeat database by the option's name; its subject
+// handle is held and released on that instance.
 //
 // The words with which the command line prints its help or its version (`checkPrints`; line WQA's D14, 2026-11-20) run
 // for every program and word with the host's -num_threads: *start* says what the run prints, `validate` accepts the argv,
@@ -1244,13 +1247,20 @@ async function main() {
     console.log(`ok ${engine.name} -logfile names: ${logRows} runs as the CLI's`);
     console.log(`ok ${engine.name} help and version: ${checkPrints(own, options.native)} argvs as the CLI`);
     const subjects = new Map(); // "program subject data_loaders" -> handle, kept across runs
-    const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
+    const subjectReactors = new Map(); // the same key -> the reactor that holds the handle (a run directory's instance has its own)
+    // Per reactor, the -window_masker_db value or taxid file name -> { handle, file }, kept across runs: a file registered
+    // on one instance (the engine's own or a run directory's) is known there only, and released there.
+    const counts = new Map();
+    const countsOn = (reactor) => counts.get(reactor) ?? counts.set(reactor, new Map()).get(reactor);
     let countsRegistered = 0, countsKept = 0;
     const databases = new Map(); // a -db search's directory -> the engine's instance whose "/work" it is
     for (const search of all) {
       const program = search.program;
-      if (search.database && !databases.has(search.cwd)) databases.set(search.cwd, await engine.open(search.cwd));
-      const instance = search.database ? databases.get(search.cwd) : { reactor: own, waitForWorkers };
+      // A search with `"run_directory"` has a subject like any other and files in its directory too (the repeat
+      // database of BLASTN `-filtering_db`, line RG item D4): it runs on the instance of that directory.
+      const inDirectory = search.database || search.run_directory;
+      if (inDirectory && !databases.has(search.cwd)) databases.set(search.cwd, await engine.open(search.cwd));
+      const instance = inDirectory ? databases.get(search.cwd) : { reactor: own, waitForWorkers };
       const reactor = instance.reactor;
       const query = inputPath(search, "-query"), subject = search.database ? undefined : inputPath(search, "-subject");
       const expected = nativeOutputs(options.native, search, scratch);
@@ -1264,7 +1274,7 @@ async function main() {
       const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
       const first = reactor.call("losat_web2_validate", [...search.argv, ...custom, "-num_threads", "1"].join("\0"));
       const dataLoaders = first.status === 0 ? JSON.parse(first.streams.get(2).toString()).data_loaders : true;
-      const subjectKey = `${program} ${subject} ${dataLoaders}`;
+      const subjectKey = `${program} ${subject} ${dataLoaders} ${inDirectory ? search.cwd : ""}`;
       // An input that the CLI's reader refuses (a first line that may be a Seq-id with the data loaders on) fails
       // the search as the CLI fails, before any hit: the subject first, as the CLI reads it first. The application
       // shows the error on the input and runs nothing; the CLI has written no output for a subject (read with the
@@ -1288,6 +1298,7 @@ async function main() {
           continue;
         }
         subjects.set(subjectKey, registered.status);
+        subjectReactors.set(subjectKey, reactor);
       }
       const q = together ? undefined : reactor.call("losat_web2_register", program, 0, dataLoaders ? 1 : 0, fs.readFileSync(query));
       if (q && q.status < 0) {
@@ -1295,8 +1306,8 @@ async function main() {
         continue;
       }
       let queryIds = q && JSON.parse(q.streams.get(2).toString()).records.map((record) => record.id);
-      const taxid = registerTaxidCounts(reactor, counts, search);
-      const named = registerCounts(reactor, counts, search) ?? taxid;
+      const taxid = registerTaxidCounts(reactor, countsOn(reactor), search);
+      const named = registerCounts(reactor, countsOn(reactor), search) ?? taxid;
       if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
       for (const threads of engine.threads) {
         const argv = [...search.argv, ...custom, "-num_threads", String(threads)].join("\0");
@@ -1416,8 +1427,8 @@ async function main() {
       if (q) assert.equal(reactor.call("losat_web2_release", q.status).status, 0);
       if (registry !== null) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
     }
-    for (const handle of subjects.values()) assert.equal(own.call("losat_web2_release", handle).status, 0);
-    for (const { handle } of counts.values()) assert.equal(own.call("losat_web2_file_release", handle).status, 0);
+    for (const [key, handle] of subjects) assert.equal(subjectReactors.get(key).call("losat_web2_release", handle).status, 0);
+    for (const [holder, held] of counts) for (const { handle } of held.values()) assert.equal(holder.call("losat_web2_file_release", handle).status, 0);
     for (const instance of databases.values()) await instance.close();
     if (countsRegistered + countsKept) console.log(`ok ${engine.name} -window_masker_db and -window_masker_taxid: ${countsRegistered} searches that registered counts, ${countsKept} searches with counts kept or unregistered`);
     await close();

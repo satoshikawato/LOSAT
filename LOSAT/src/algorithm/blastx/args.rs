@@ -176,6 +176,12 @@ pub struct BlastxArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1941-1942
     #[arg(long)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
+    // NCBI's flag, off by default: the Smith-Waterman redo of each match (`kappa::sw_redo_context`,
+    // item X4b-2), with every `-comp_based_stats`. RPSTBLASTN's own (`rpstblastn::args`) never
+    // sets it here.
+    #[arg(long)]
+    pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     #[arg(long, default_value = "both", value_parser = ["both", "plus", "minus"])]
     pub strand: String,
@@ -504,6 +510,9 @@ pub struct ResolvedOptions {
     pub gap_extend: i32,
     pub gapped: bool,
     pub composition: u8,
+    /// `-use_sw_tback` (NCBI's `SetSmithWatermanMode`, blast_args.cpp:885): the redo of each
+    /// match is NCBI's Smith-Waterman redo, with or without composition-based statistics.
+    pub use_sw_tback: bool,
     pub seg: SegSpec,
     pub soft_masking: bool,
     pub strand: String,
@@ -837,6 +846,7 @@ impl BlastxArgs {
             gap_extend,
             gapped: !self.ungapped,
             composition,
+            use_sw_tback: self.use_sw_tback,
             seg,
             soft_masking: self.soft_masking,
             strand: self.strand.clone(),

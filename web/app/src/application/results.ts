@@ -127,7 +127,8 @@ export interface LoadedRun {
    * outfmt 6 was written.
    */
   readonly tabularError: OutputPlace | undefined;
-  readonly badge: Badge;
+  /** The support badge of the run's options; none for a run that printed the command line's help or version (`RunSnapshot.prints`). */
+  readonly badge?: Badge;
   /** The run's diagnostics (stream 3): the lines that the CLI writes to its standard error. */
   readonly diagnostics: string;
   /**
@@ -286,18 +287,23 @@ export class ResultsBrowser {
         limits,
         outfmt0Error: failedOutput(run, 0),
         tabularError: failedOutput(run, 6),
-        badge: verificationBadge(
-          {
-            program: run.snapshot.program,
-            argv: run.snapshot.argv,
-            formats: description.formats,
-            custom: customOutfmt(run.snapshot.argv),
-            runtimePath: run.record.runtimePath,
-            threads: run.record.threads,
-            grammar: this.grammarOf(run.snapshot.program, description),
-          },
-          this.deps.verification,
-        ),
+        // A run that printed the command line's help or version compared no options (line WQA's D20, S3-1, 2026-11-23).
+        ...(run.snapshot.prints !== undefined
+          ? {}
+          : {
+              badge: verificationBadge(
+                {
+                  program: run.snapshot.program,
+                  argv: run.snapshot.argv,
+                  formats: description.formats,
+                  custom: customOutfmt(run.snapshot.argv),
+                  runtimePath: run.record.runtimePath,
+                  threads: run.record.threads,
+                  grammar: this.grammarOf(run.snapshot.program, description),
+                },
+                this.deps.verification,
+              ),
+            }),
         diagnostics,
         messages,
         kinds,

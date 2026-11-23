@@ -562,6 +562,7 @@ impl TblastnArgs {
             evalue,
             psiblast: false,
             psi_tblastn: psi,
+            phi: false,
             x_dropoff: self.xdrop_ungap,
         })?;
         Ok(ResolvedTblastnArgs {

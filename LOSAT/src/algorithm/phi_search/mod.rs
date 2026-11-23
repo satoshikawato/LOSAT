@@ -2,9 +2,6 @@
 //! occurrences in the query and in the subject. Cold, scalar code, as NCBI's PHI code: the pattern
 //! compiler, the pattern scans, the statistics, the gapped alignments around the pattern, the
 //! engine of round 1 and the pattern file reader.
-// PS8a is wired into psiblast in a later commit of this branch; until then only the tests use
-// the module. Remove this when `-phi_pattern` reaches it.
-#![allow(dead_code)]
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1382-1411
 pub(crate) mod file;

@@ -79,6 +79,7 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
         [&[], &[]],
         Default::default(),
         &config,
+        &PlainRows,
     )
     .unwrap();
     String::from_utf8(out).unwrap()

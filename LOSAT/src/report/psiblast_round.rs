@@ -11,13 +11,12 @@
 //! of a round serially (no `LOSAT_X_PAIRWISEPAR` pieces).
 
 use super::{
-    database_description_label, write_alignment, write_blast_database_header,
-    write_blastp_database_header_spacing, write_blastp_pairwise_intro,
-    write_blastp_query_footer_spacing, write_blastp_query_header,
-    write_database_subject_alignments_part, write_description_table, write_hsp_info,
-    write_no_hits_found, write_spaces, write_subject_alignments_part,
+    database_description_label, write_blast_database_header, write_blastp_database_header_spacing,
+    write_blastp_pairwise_intro, write_blastp_query_footer_spacing, write_blastp_query_header,
+    write_database_subject_alignments_part, write_decorated_alignment, write_description_table,
+    write_hsp_info, write_no_hits_found, write_spaces, write_subject_alignments_part,
     write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery, BlastpPairwiseReport,
-    DatabaseHeading, PairwiseConfig, PairwiseDatabase, PairwiseHit,
+    DatabaseHeading, PairwiseConfig, PairwiseDatabase, PairwiseHit, PlainRows, RowDecoration,
 };
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi};
@@ -25,6 +24,10 @@ use crate::report::query_warnings::SubjectReadHook;
 use crate::report::x_pairwise_par::QueryGroup;
 use std::io::{self, Write};
 use std::sync::Arc;
+
+// PHI-BLAST's round (`-phi_pattern`): its report through this module's writer and sections.
+#[path = "phi_round.rs"]
+pub(crate) mod phi_round;
 
 /// The report's writer: the caller's stream behind a type that no default report writes through.
 struct RoundWriter<'w>(&'w mut dyn Write);
@@ -142,7 +145,7 @@ pub(crate) fn write_psiblast_round_report(
             );
             for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
                 read(s_idx, &mut *writer)?;
-                sections.subject(writer, probe.as_deref_mut(), group, s_idx)?;
+                sections.subject(writer, probe.as_deref_mut(), group, s_idx, &PlainRows)?;
             }
             if let Some((_, exception)) = end {
                 if let Some(warnings) = warnings.as_deref_mut() {
@@ -378,13 +381,15 @@ impl RoundSections<'_> {
         Ok(())
     }
 
-    /// The alignments of the subject `s_idx` (`BlastpSections::subject`, all its HSPs).
-    fn subject<W: Write>(
+    /// The alignments of the subject `s_idx` (`BlastpSections::subject`, all its HSPs), their rows
+    /// with the query feature of `decoration` (PHI-BLAST's `phi_round::PatternRow`).
+    fn subject<W: Write, D: RowDecoration>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
         group: &QueryGroup<'_>,
         s_idx: u32,
+        decoration: &D,
     ) -> io::Result<()> {
         let config = self.config;
         let hsps = group.subject_hits[&s_idx].len();
@@ -424,7 +429,7 @@ impl RoundSections<'_> {
                 0..hsps,
                 |writer, hit| {
                     write_hsp_info(writer, hit, config)?;
-                    write_alignment(writer, hit, config)
+                    write_decorated_alignment(writer, hit, config, decoration)
                 },
             );
         }
@@ -440,7 +445,7 @@ impl RoundSections<'_> {
             0..hsps,
             |writer, hit| {
                 write_hsp_info(writer, hit, config)?;
-                write_alignment(writer, hit, config)
+                write_decorated_alignment(writer, hit, config, decoration)
             },
         )
     }
@@ -448,6 +453,12 @@ impl RoundSections<'_> {
     /// The footer of a query with hits (`BlastpSections::foot`).
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
         let query = &self.queries[q_idx];
+        // A query that NCBI did not search (PHI-BLAST without its table's Karlin block,
+        // `phi_hooks::phi_footers`): the -1 blocks.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
+        if query.batch_skipped {
+            return write_tblastn_unsearched_query_footer_spacing(writer, false);
+        }
         write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,

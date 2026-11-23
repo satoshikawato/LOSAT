@@ -416,7 +416,10 @@ impl TabularSpec {
     ) -> Option<Self> {
         use crate::report::archive::options::RequestKind;
         let delimiter = match app {
-            RequestKind::Psiblast | RequestKind::Rpsblast | RequestKind::Rpstblastn => "",
+            RequestKind::Psiblast
+            | RequestKind::Phiblastp
+            | RequestKind::Rpsblast
+            | RequestKind::Rpstblastn => "",
             RequestKind::Blastn
             | RequestKind::Blastp
             | RequestKind::Blastx

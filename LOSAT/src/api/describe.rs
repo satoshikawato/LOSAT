@@ -12,7 +12,7 @@
 use clap::CommandFactory;
 
 use super::program::Program;
-use super::search::{alignment_owned, file_options, API_OWNED};
+use super::search::{alignment_owned, file_options, pattern_owned, API_OWNED};
 use crate::cli::Cli;
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbiargs.hpp:588-598
@@ -64,8 +64,8 @@ pub struct Description {
     /// The options that an argv of the library API may hold, in the order of the command
     /// line's help: every option of the program but those the API sets itself (`-query`,
     /// `-subject`, `-db`, `-in_pssm`, `-out`, `-outfmt`; `search::API_OWNED`; psiblast's
-    /// `-in_msa`, `search::alignment_owned`) and the search strategy file, which it refuses
-    /// (`search::file_options`). psiblast's `-msa_master_idx` and `-ignore_msa_master` are
+    /// `-in_msa`, `search::alignment_owned`), the search strategy file, which it refuses
+    /// (`search::file_options`), and psiblast's `-phi_pattern` (`search::pattern_owned`). psiblast's `-msa_master_idx` and `-ignore_msa_master` are
     /// listed: they choose the master of the alignment that `Inputs::msa` gives.
     pub parameters: Vec<Parameter>,
     /// The values that `-query_gencode` accepts; empty for a program without the option.
@@ -142,6 +142,7 @@ pub fn describe(program: Program) -> Description {
             || API_OWNED.contains(&long)
             || file_options(program).contains(&long)
             || alignment_owned(program).contains(&long)
+            || pattern_owned(program).contains(&long)
         {
             continue;
         }

@@ -38,6 +38,23 @@ The PSSM files are written like this:
 
 `-comp_based_stats` takes 0 to 3 (default 2). Round 1 runs in the mode you give. Later rounds, and any `-in_pssm` or `-in_msa` search, run mode 2 and mode 3 as mode 1, and LOSAT prints NCBI's warning once per query.
 
+## Pattern search (PHI-BLAST)
+
+`-phi_pattern FILE` keeps only the alignments that contain a protein pattern found in the query, as NCBI BLAST+'s PHI-BLAST does. The file gives the pattern in PROSITE syntax on a `PA` line, after an `ID` line that names it:
+
+```text
+ID  P-loop
+PA  [AG]-x(4)-G-K-[ST]
+```
+
+```bash
+losat psiblast -query QUERY.faa -db DB -phi_pattern PATTERN.txt
+```
+
+Each place where the pattern occurs in the query is searched on its own, and its E-values come from NCBI's statistics for patterns. With `-outfmt 0`, the report lists these places and the pattern's probability, then, for each place, a table of hits and the alignments, with a `pattern` line that marks the pattern's letters with `*`. Formats 6, 7, 10 and 20 write the rows of each place in turn, and `-outfmt 7` writes a header for each place. A query that does not contain the pattern stops the run with NCBI's message and exit status 3, as in NCBI BLAST+.
+
+A pattern search runs one round (`-num_iterations 1`, the default). With a matrix and gap costs for which NCBI BLAST+ has no pattern statistics (`-matrix PAM250`, or `-gapopen 10 -gapextend 2` with BLOSUM62), LOSAT writes NCBI's message for each query and reports no hits, as NCBI BLAST+ does.
+
 ## Common options
 
 | Option | Default | Meaning |
@@ -60,6 +77,7 @@ The PSSM files are written like this:
 | `-comp_based_stats N` | 2 | Composition-based statistics, 0 to 3 |
 | `-matrix NAME` | BLOSUM62 | Scoring matrix |
 | `-gapopen N`, `-gapextend N` | 11, 1 | Gap costs (the matrix's own values for other matrices) |
+| `-phi_pattern FILE` | | Search for a pattern (PROSITE syntax) found in the query (PHI-BLAST) |
 | `-max_target_seqs N` | 500 | Number of subject sequences to keep |
 | `-seg yes\|no\|"W L H"` | no | Filter low-complexity regions of the query |
 | `-num_threads N` | 1 | Number of threads; the output is the same at every value |
@@ -74,6 +92,7 @@ For every option: `losat psiblast -help`.
 | --- | --- |
 | FASTA query (`-query`) | 0, 6, 7, 10, 20 |
 | PSSM or alignment query (`-in_pssm`, `-in_msa`) | 0, 6, 7 |
+| Pattern search (`-phi_pattern`) | 0, 6, 7, 10, 20 |
 
 Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid sseqid evalue"`. As in NCBI's `psiblast`, `delim=` is read and checked but the columns keep their tab or comma. With `-outfmt 0`, the report shows each round, and the description table of a later round has NCBI's two parts: sequences used in the model and found again, and sequences not found before or not below the threshold before. With `-outfmt 7`, the comment lines count rounds. See [Output formats](../output-formats.md).
 
@@ -85,8 +104,8 @@ Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid
 
 Not yet supported:
 
-- `-phi_pattern`.
-- `-outfmt` other than 0, 6, 7, 10 and 20 (with `-in_pssm` or `-in_msa`, other than 0, 6 and 7). `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors.
+- `-outfmt` other than 0, 6, 7, 10 and 20 (with `-in_pssm` or `-in_msa`, other than 0, 6 and 7). `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors; with `-phi_pattern`, so do 8, 9 and 12.
+- With `-phi_pattern`: more than one round, `-sum_stats true` and a subject longer than 5,000,000 residues. The library and pylosat do not take `phi_pattern`.
 
 Also refused:
 
@@ -96,6 +115,7 @@ Also refused:
 - With `-in_msa`, where NCBI BLAST+ crashes: a query sequence of X or O alone, and `-matrix IDENTITY`.
 - With `-in_msa`, where NCBI BLAST+ crashes or reads memory that the file does not give: a PHYLIP header with 0 sequences, an empty command (a lone `;`) in a NEXUS file, a FASTA alignment whose rows have different lengths where the shorter row is read past its end, a `secondary-accession` range that runs backwards or has a number of more than 18 digits. See [Refusals](../refusals.md).
 - A `-subject` file whose sequences all have no letters.
+- A `-phi_pattern` pattern that NCBI BLAST+ cannot read without going past its memory: more than 330 positions, an unterminated `(`, `[`, `{` or `x(`, `x(n,m)` without two numbers, a count outside 32-bit integers, a byte that is not ASCII (outside `[]`), and, in a pattern that needs more than two machine words, two variable wildcards in a row or more than 100 words. Also a sequence with more than 10,000 hits of such a long pattern. See [Refusals](../refusals.md).
 
 `psiblast` has no `-task` and no `-ungapped`. For the full list, see [What LOSAT refuses](../refusals.md).
 

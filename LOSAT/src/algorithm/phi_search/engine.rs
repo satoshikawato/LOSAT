@@ -1,7 +1,7 @@
 //! Round 1 of a PHI search for one query, per subject: the setup (occurrences, statistics,
 //! cutoff, X-dropoffs), the preliminary HSPs of every occurrence against every subject hit, the
-//! traceback with e-values, reaping and bit scores, and the split of the kept HSPs per occurrence.
-//! The driver (subjects, hit lists, report) is blastp's.
+//! traceback with e-values, reaping and bit scores. The driver (subjects, hit lists, the split
+//! per occurrence, report) is blastp's (`blastp::blast_engine::phi_hooks`).
 
 use super::align::{prelim_alignment, traceback, PhiGapCosts};
 use super::pattern::{PhiError, PhiPattern};
@@ -99,9 +99,10 @@ pub(crate) fn x_dropoffs(lambda: f64, x_drop_bits: f64, x_drop_final_bits: f64) 
     (prelim, last)
 }
 
-/// The parameters of the setup.
-pub(crate) struct PhiSetup<'a> {
-    pub(crate) pattern: &'a PhiPattern,
+/// The parameters of the setup: the pattern (`'p`, which the search keeps) and the query's
+/// values (`'a`, which it copies).
+pub(crate) struct PhiSetup<'p, 'a> {
+    pub(crate) pattern: &'p PhiPattern,
     /// The query's letters (NCBIstdaa, masked as the search sees them).
     pub(crate) query: &'a [u8],
     /// The lookup segments (inclusive ranges of `query`).
@@ -119,21 +120,33 @@ pub(crate) struct PhiSetup<'a> {
     pub(crate) x_drop_final_bits: f64,
 }
 
+/// The occurrences of `pattern` in the query's letters `query` within its lookup segments
+/// `segments` (`Blast_SetPHIPatternInfo`), or NCBI's error of a query without one or covered by
+/// one, or LOSAT's refusal of the scan. `setup` starts with it; a search whose matrix and gap
+/// costs have no entry in NCBI's table calls it alone, for its errors (`blastp`'s `phi_start`).
+pub(crate) fn occurrences(
+    pattern: &PhiPattern,
+    query: &[u8],
+    segments: &[(usize, usize)],
+) -> Result<Vec<Occurrence>, PhiSetupError> {
+    match query_occurrences(pattern, query, segments) {
+        Ok(Occurrences::Found(found)) if found.is_empty() => {
+            Err(PhiSetupError::NotFound(pattern.text.clone()))
+        }
+        Ok(Occurrences::Found(found)) => Ok(found),
+        Ok(Occurrences::WholeQuery) => Err(PhiSetupError::WholeQuery(pattern.text.clone())),
+        Err(PhiError::Refusal(message)) | Err(PhiError::Ncbi(message)) => {
+            Err(PhiSetupError::Refusal(message))
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:893-907
 /// The query's setup: occurrences (`Blast_SetPHIPatternInfo`), search space, effective count,
 /// cutoff (`5 * -evalue`), X-dropoffs and the matrix rows of the query's letters.
-pub(crate) fn setup<'a>(params: &PhiSetup<'a>) -> Result<PhiSearch<'a>, PhiSetupError> {
+pub(crate) fn setup<'p>(params: &PhiSetup<'p, '_>) -> Result<PhiSearch<'p>, PhiSetupError> {
     let pattern = params.pattern;
-    let occurrences = match query_occurrences(pattern, params.query, params.segments) {
-        Ok(Occurrences::Found(found)) if found.is_empty() => {
-            return Err(PhiSetupError::NotFound(pattern.text.clone()))
-        }
-        Ok(Occurrences::Found(found)) => found,
-        Ok(Occurrences::WholeQuery) => return Err(PhiSetupError::WholeQuery(pattern.text.clone())),
-        Err(PhiError::Refusal(message)) | Err(PhiError::Ncbi(message)) => {
-            return Err(PhiSetupError::Refusal(message))
-        }
-    };
+    let occurrences = occurrences(pattern, params.query, params.segments)?;
     let search_space = stats::search_space(
         params.db_length,
         params.db_num_seqs,
@@ -286,29 +299,6 @@ impl PhiSearch<'_> {
         }
         Ok(kept)
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3572-3627
-/// `PHIBlast_HSPResultsSplit` of the subjects' kept HSPs (`(oid, hsps)` in the hit list's order):
-/// per occurrence, the subjects with an HSP of it and those HSPs in their order; the caller sorts
-/// each occurrence's lists by e-value (`s_EvalueCompareHSPLists`).
-pub(crate) fn split_by_occurrence(
-    subjects: &[(usize, Vec<PhiHsp>)],
-    num_occurrences: usize,
-) -> Vec<Vec<(usize, Vec<PhiHsp>)>> {
-    let mut split: Vec<Vec<(usize, Vec<PhiHsp>)>> = vec![Vec::new(); num_occurrences];
-    for (oid, hsps) in subjects {
-        let mut per: Vec<Vec<PhiHsp>> = vec![Vec::new(); num_occurrences];
-        for hsp in hsps {
-            per[hsp.occurrence].push(hsp.clone());
-        }
-        for (occurrence, list) in per.into_iter().enumerate() {
-            if !list.is_empty() {
-                split[occurrence].push((*oid, list));
-            }
-        }
-    }
-    split
 }
 
 #[cfg(test)]

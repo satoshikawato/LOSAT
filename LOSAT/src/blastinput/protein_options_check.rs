@@ -26,6 +26,10 @@ pub struct ProteinOptionsCheck<'a> {
     /// The program is tblastn with `-in_pssm` (PSI-TBLASTN, `eBlastTypePsiTblastn`): neither blastp
     /// nor tblastn nor psiblast.
     pub psi_tblastn: bool,
+    /// The program is PHI-BLAST (psiblast `-phi_pattern`, `eBlastTypePhiBlastp`): its scoring is
+    /// checked as psiblast's (`psiblast` is set too), and it has no lookup table or ungapped
+    /// extension to check.
+    pub phi: bool,
     /// The ungapped X-drop in bits (`word_options->x_dropoff`) where the command line gives it
     /// (`-xdrop_ungap` of blastp, tblastn and rpsblast); `None`: the program's default, which is
     /// above 0.
@@ -68,6 +72,12 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
                 )))
             }
         }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1298-1300
+    // PHI-BLAST skips the lookup table's checks and the initial word's (blast_options.c:609-612):
+    // the hit saving checks follow.
+    if check.phi {
+        return check_hit_saving(check);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1303-1395 (the lookup
     // check of BLAST_ValidateOptions for blastp and tblastn)
@@ -114,6 +124,19 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
     if check.x_dropoff.is_some_and(|x_dropoff| x_dropoff <= 0.0) {
         return Err(options_error("x_dropoff must be greater than zero"));
     }
+    check_hit_saving(check)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1783-1795
+    if check.word_size > 5 && check.matrix_name.eq_ignore_ascii_case("IDENTITY") {
+        return Err(options_error(
+            "Word size larger than 5 is not supported for the identity scoring matrix",
+        ));
+    }
+    Ok(())
+}
+
+/// The hit saving checks of `BLAST_ValidateOptions` (`validate_protein_options`).
+fn check_hit_saving(check: &ProteinOptionsCheck<'_>) -> anyhow::Result<()> {
+    use crate::blastinput::app::options_error;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1511-1517 (the hit saving
     // check of the hit list size, before the e-value's)
     if check.hitlist_size < 1 {
@@ -124,12 +147,6 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
     if check.evalue <= 0.0 {
         return Err(options_error(
             "expect value or cutoff score must be greater than zero",
-        ));
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1783-1795
-    if check.word_size > 5 && check.matrix_name.eq_ignore_ascii_case("IDENTITY") {
-        return Err(options_error(
-            "Word size larger than 5 is not supported for the identity scoring matrix",
         ));
     }
     Ok(())

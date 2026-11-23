@@ -95,6 +95,9 @@ mod redo_run;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
 // `psi_search` hooks of `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod pssm_hooks;
+// psiblast `-phi_pattern` (series PS, item PS8a): the stages of a PHI-BLAST search, reached through
+// the `phi` hooks of `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
+mod phi_hooks;
 // rpsblast (series PR, item PS11a): the RPS engine's search, reached through the `rps_search`
 // hooks of `search_cli`, `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod rps_hooks;
@@ -1468,6 +1471,7 @@ pub(super) fn blastp_hsp_from_preliminary(hit: &BlastpPreliminaryHsp, e_value: f
         num_positives: 0,
         // Blast_HSPInit callocs the HSP: no composition adjustment yet.
         comp_adjustment_method: 0,
+        phi_occurrence: 0,
     }
 }
 
@@ -1954,6 +1958,30 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.evalue
         );
     }
+    // psiblast `-phi_pattern` (item PS8a): LOSAT's refusals of a pattern whose compilation
+    // NCBI's code does not define (`phi_search::pattern::PhiError::Refusal`), and of the rounds
+    // after a PHI-BLAST round (a later item, PS8b). Where NCBI's table has no Karlin block for the
+    // matrix and gap costs, nothing is searched and round 1 is the run's last, whatever
+    // `-num_iterations` and `-sum_stats` say (`phi_hooks::phi_karlin`; probes `k.pam.it3.0`,
+    // `k.pam.ss3.0`).
+    if let Some(phi) = args.phi.as_deref() {
+        if let Err(crate::algorithm::phi_search::pattern::PhiError::Refusal(message)) = phi {
+            bail!("{message}");
+        }
+        let searched = phi_hooks::phi_karlin(args).is_ok();
+        if let Some(rounds) = args.psi_rounds.as_deref().filter(|_| searched) {
+            bail!(
+                "-phi_pattern with -num_iterations {} is not supported by LOSAT's {program} yet",
+                rounds.num_iterations
+            );
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-900
+        // NCBI links PHI-BLAST's preliminary HSPs with the pattern's Karlin block and reaps them by
+        // the linked e-values (probe `op.sumstats.6`), which LOSAT does not port yet.
+        if args.sum_stats && searched {
+            bail!("-phi_pattern with -sum_stats true is not supported by LOSAT's {program} yet");
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
     // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
@@ -1992,6 +2020,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     if !matches!(args.word_size, 2..=4)
         && args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable
         && args.psi_search.is_none()
+        && args.phi.is_none()
     {
         bail!(
             "-word_size {} (the lookup table) is not supported by LOSAT's {program}",
@@ -5580,12 +5609,15 @@ fn psiblast_stop_at_invalid_query(
         (Some(_), Some(context)) => context.is_valid && kbp_psi_valid(context),
         _ => false,
     };
+    // PHI-BLAST's score block is the pattern table's (`s_PHIScoreBlkFill`, blast_setup.c:504-506):
+    // no query's letters are checked, and a query without letters to search has no occurrence
+    // (`phi_hooks::phi_start`).
     let first_stop = if read_stop {
         Some(0)
     } else {
-        contexts
-            .iter()
-            .position(|context| !context.is_valid || !kbp_psi_valid(context))
+        contexts.iter().position(|context| {
+            (!context.is_valid && args.phi.is_none()) || !kbp_psi_valid(context)
+        })
     };
     let Some(batch) = first_stop else {
         return batches;
@@ -7502,7 +7534,7 @@ fn write_pairwise_prologs(
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
                 crate::wording::REPORT_VERSION,
-                args.app.ncbi_name(),
+                args.report_program(),
                 blastp_database_name(args, subject_label).as_bytes(),
                 num_sequences,
                 total_letters,
@@ -7566,7 +7598,7 @@ fn write_reports_without_queries(
             super::tabular::write_tabular_without_queries(
                 spec,
                 taxdb_found,
-                args.app.ncbi_name(),
+                args.report_program(),
                 &mut writer,
                 &mut *outputs.diagnostics,
             )?;
@@ -7635,7 +7667,7 @@ fn write_reports_without_queries(
                 let config = PairwiseConfig {
                     line_length: args.line_length,
                     show_frame: false,
-                    program: args.app.ncbi_name().to_string(),
+                    program: args.report_program().to_string(),
                     protein_matrix: args.scoring.matrix,
                     sort: args.sort,
                     view: view.unwrap_or_default(),
@@ -7743,6 +7775,64 @@ fn preliminary_search_error(
         Ok(()) => crate::blastinput::app::engine_error(text),
         Err(error) => error,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:515-560
+/// psiblast `-phi_pattern` (item PS8a): NCBI's engine error of query `query`'s PHI-BLAST setup
+/// (`phi_hooks::PhiStart::EngineError`). psiblast searches one query per batch: the first searched
+/// batch's error follows the prolog (`preliminary_search_error`); a later query's follows the
+/// reports of the queries before it, without the epilog (`reports_then_engine_error`).
+#[allow(clippy::too_many_arguments)]
+fn phi_setup_error(
+    args: &ResolvedBlastpArgs,
+    query_records: &[FastaRecord],
+    subject_source: BlastpSubjectSource<'_>,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    ranges: &BlastpRanges<'_>,
+    reports: &BlastpReports<'_>,
+    query_batches: &[seq_range::RangedBatch],
+    query_batch_skipped: &[bool],
+    query: usize,
+    text: &str,
+) -> anyhow::Error {
+    let batch = query_batches
+        .iter()
+        .find(|batch| batch.searched.contains(&query))
+        .expect("every query is in a batch");
+    let first_searched = query_batches
+        .iter()
+        .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start]);
+    if first_searched.is_none_or(|first| first.searched.start == batch.searched.start) {
+        return preliminary_search_error(
+            args,
+            query_records,
+            subject_source,
+            subject_label,
+            outputs,
+            pool,
+            ranges,
+            reports,
+            query_batches,
+            query_batch_skipped,
+            true,
+            "",
+            text,
+        );
+    }
+    reports_then_engine_error(
+        args,
+        query_records,
+        subject_source,
+        subject_label,
+        outputs,
+        pool,
+        ranges,
+        reports,
+        batch,
+        text,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
@@ -8168,6 +8258,36 @@ fn unsearched_batches_then_engine_error(
             args.app.name()
         );
     };
+    reports_then_engine_error(
+        args,
+        query_records,
+        subject_source,
+        subject_label,
+        outputs,
+        pool,
+        ranges,
+        reports,
+        batch,
+        text,
+    )
+}
+
+/// The engine error of the search of `batch` (`text`, `unsearched_batches_then_engine_error`),
+/// after the reports of the batches before it, which the search of that prefix of the queries
+/// writes without the epilog.
+#[allow(clippy::too_many_arguments)]
+fn reports_then_engine_error(
+    args: &ResolvedBlastpArgs,
+    query_records: &[FastaRecord],
+    subject_source: BlastpSubjectSource<'_>,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    ranges: &BlastpRanges<'_>,
+    reports: &BlastpReports<'_>,
+    batch: &seq_range::RangedBatch,
+    text: &str,
+) -> anyhow::Error {
     let (searched_end, input_end) = (batch.searched.start, batch.input.start);
     let input = ranges.query_input;
     let prefix_input = seq_range::QueryInput {
@@ -8214,7 +8334,7 @@ fn unsearched_batches_then_engine_error(
         // call (the XML formats, the only readers of `last_call`, keep the refusal before here).
         last_call: true,
         psi_round: None,
-        // BLASTP only (`args.app` above): no psiblast PSSM stops here.
+        // BLASTP and psiblast's PHI-BLAST round (no PSSM): no psiblast PSSM stops here.
         stopped_pssms: None,
         query_scopes: reports.query_scopes,
         prefetch_scope: None,
@@ -9241,7 +9361,10 @@ fn ungapped_setup_failure(
             }));
         }
     }
-    if args.ungapped && query_valid.iter().any(|valid| *valid) {
+    // PHI-BLAST's search of such a subject (`-phi_pattern`) is refused too: NCBI's parts keep
+    // the occurrences and the alignments that each part holds (an alignment past a part's end
+    // stops there unless the next part holds its occurrence), which LOSAT does not port yet.
+    if (args.ungapped || args.phi.is_some()) && query_valid.iter().any(|valid| *valid) {
         let longest = match subject_source {
             BlastpSubjectSource::Fasta(records) => records
                 .iter()
@@ -9262,9 +9385,10 @@ fn ungapped_setup_failure(
             }
         };
         if let Some((what, length)) = longest {
-            return Some(UngappedSetupFailure::Refusal(too_long_subject_refusal(
-                &what, length,
-            )));
+            return Some(UngappedSetupFailure::Refusal(match args.phi {
+                Some(_) => too_long_phi_subject_refusal(&what, length),
+                None => too_long_subject_refusal(&what, length),
+            }));
         }
     }
     None
@@ -9535,6 +9659,36 @@ fn run_call(
         rps_units,
         ..
     } = extent;
+    // psiblast `-phi_pattern` (item PS8a): each query's PHI-BLAST setup (`phi_hooks::phi_start`),
+    // whose errors follow the reports of the queries before (`phi_setup_error`).
+    let phi_call = match args.phi.as_ref() {
+        None => None,
+        Some(_) => match phi_hooks::phi_start(
+            &args,
+            query_frames,
+            phi_hooks::phi_karlin(&args),
+            eff_db_length,
+            i64::from(num_subjects),
+        )? {
+            phi_hooks::PhiStart::Search(call) => Some(call),
+            phi_hooks::PhiStart::EngineError { query, text } => {
+                return Err(phi_setup_error(
+                    &args,
+                    query_records,
+                    subject_source,
+                    subject_label,
+                    outputs,
+                    blastp_parallel_pool,
+                    ranges,
+                    reports,
+                    &query_batches,
+                    &query_batch_skipped,
+                    query,
+                    &text,
+                ))
+            }
+        },
+    };
     let call_statistics = call_setup::CallStatistics {
         args: &args,
         database,
@@ -9684,6 +9838,7 @@ fn run_call(
         x_block_call: x_block_inputs.is_some(),
         lookup: &lookup,
         contexts: &contexts,
+        phi: phi_call.as_ref(),
         gapped_params: &gapped_params,
         gapped_gumbel: &gapped_gumbel,
         exact_search_spaces: &exact_search_spaces,
@@ -9883,7 +10038,17 @@ fn run_call(
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
-    let ordinary_hit_lists = if args.rps_search.is_some() {
+    let ordinary_hit_lists = if let Some(phi) = phi_call.as_ref() {
+        // psiblast `-phi_pattern`: the PHI-BLAST traceback (`phi_hooks::phi_traceback`).
+        Some(phi_hooks::phi_traceback(
+            phi,
+            &args,
+            &contexts,
+            subjects,
+            &mut x_compact_hit_lists,
+            sorts_results,
+        )?)
+    } else if args.rps_search.is_some() {
         // rpsblast: the RPS engine's final hit lists (`rps_hooks::rps_search`).
         Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
     } else if ordinary_traceback && args.psi_search.is_some() {
@@ -10188,37 +10353,42 @@ fn run_call(
     // psiblast's later rounds: the reports read the record's letters
     // (`psi_round::report_contexts`).
     let report_contexts = psi_round::report_contexts(&args, &contexts, query_records);
+    // The rows of the hit lists `lists` of the queries from `first` (PHI-BLAST's: one query's
+    // lists of an occurrence, `phi_hooks::occurrence_list`).
+    let rows_of_lists =
+        |lists: &[Option<BlastpHitList>], first: usize| -> Result<Vec<PairwiseHit>> {
+            let mut hits = collect_hits_and_methods_from_hit_lists(lists, first, &engine_counts);
+            for (hit, _, _, _) in hits.iter_mut() {
+                let q_shift = ranges.query_input.placements.offset(hit.q_idx as usize);
+                let s_shift = ranges.subject_placements.offset(hit.s_idx as usize);
+                hit.q_start -= q_shift;
+                hit.q_end -= q_shift;
+                hit.s_start -= s_shift;
+                hit.s_end -= s_shift;
+            }
+            let mut rows = build_pairwise_hits(
+                hits,
+                &report_contexts,
+                subjects,
+                args.scoring.matrix,
+                true,
+                ShownQueries::of(query_records, &args),
+                shown_subjects,
+                x_rows_pool,
+            )?;
+            for row in rows.iter_mut() {
+                let s_idx = row.hit.s_idx as usize;
+                shift_to_records(&mut row.hit, ranges);
+                row.subject_length = row
+                    .subject_length
+                    .map(|searched| ranges.subject_placements.length(s_idx, searched));
+            }
+            Ok(rows)
+        };
     let rows_of = |window: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
         let end = window.end.min(hit_lists.len());
         let first = window.start.min(end);
-        let mut hits =
-            collect_hits_and_methods_from_hit_lists(&hit_lists[first..end], first, &engine_counts);
-        for (hit, _, _, _) in hits.iter_mut() {
-            let q_shift = ranges.query_input.placements.offset(hit.q_idx as usize);
-            let s_shift = ranges.subject_placements.offset(hit.s_idx as usize);
-            hit.q_start -= q_shift;
-            hit.q_end -= q_shift;
-            hit.s_start -= s_shift;
-            hit.s_end -= s_shift;
-        }
-        let mut rows = build_pairwise_hits(
-            hits,
-            &report_contexts,
-            subjects,
-            args.scoring.matrix,
-            true,
-            ShownQueries::of(query_records, &args),
-            shown_subjects,
-            x_rows_pool,
-        )?;
-        for row in rows.iter_mut() {
-            let s_idx = row.hit.s_idx as usize;
-            shift_to_records(&mut row.hit, ranges);
-            row.subject_length = row
-                .subject_length
-                .map(|searched| ranges.subject_placements.length(s_idx, searched));
-        }
-        Ok(rows)
+        rows_of_lists(&hit_lists[first..end], first)
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1585
     // NCBI makes and prints the alignments of one query's result set at a time: the reports
@@ -10310,6 +10480,9 @@ fn run_call(
         pssm_reads: &pssm_reads,
     };
     let (mut query_warning_lines, kept) = report_prep::query_warning_lines(&prep);
+    let phi_result_warnings = phi_call
+        .as_ref()
+        .map(|call| report_prep::phi_result_warnings(&prep, call.no_statistics.as_deref()));
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
@@ -10723,6 +10896,31 @@ fn run_call(
                 &pairwise_shown,
                 &rows_of,
             ),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1658-1664
+            // psiblast `-phi_pattern` (item PS8a): NCBI's Seq-annot writer does not take the
+            // program (`ProgramNameToEnum`), after the search of the first query.
+            // Without NCBI's Karlin block there is no alignment to write, and no error.
+            BlastpReport::Seqalign(_) if phi_call.is_some() => {
+                match phi_call
+                    .as_ref()
+                    .and_then(|call| call.no_statistics.as_ref())
+                {
+                    Some(_) => Ok(()),
+                    None => Err(crate::blastinput::app::engine_error(
+                        "Program type 'phiblastp' not supported",
+                    )),
+                }
+            }
+            // psiblast `-phi_pattern`: the tabular reports of each query occurrence.
+            BlastpReport::Text(outfmt) if phi_call.is_some() => report_write::write_phi_text(
+                &report_view,
+                phi_call.as_ref().expect("a PHI-BLAST call"),
+                phi_result_warnings.as_deref().unwrap_or_default(),
+                outfmt,
+                format,
+                &mut warnings,
+                &mut probe,
+            ),
             BlastpReport::Seqalign(serial) => {
                 report_write::write_seqalign(&report_view, serial, format, &mut warnings)
             }
@@ -10750,6 +10948,11 @@ fn run_call(
                 &mut probe,
                 &pairwise_shown,
                 &rows_of,
+                phi_call.as_ref().map(|call| report_write::PhiPairwise {
+                    call,
+                    rows_of_lists: &rows_of_lists,
+                    result_warnings: phi_result_warnings.as_deref().unwrap_or_default(),
+                }),
             ),
             BlastpReport::CustomTabular(spec) => report_write::write_custom_tabular(
                 &report_view,
@@ -10758,6 +10961,11 @@ fn run_call(
                 &mut warnings,
                 &mut probe,
                 &rows_of,
+                phi_call.as_ref().map(|call| report_write::PhiPairwise {
+                    call,
+                    rows_of_lists: &rows_of_lists,
+                    result_warnings: phi_result_warnings.as_deref().unwrap_or_default(),
+                }),
             ),
             BlastpReport::Text(
                 outfmt @ (OutputFormat::Tabular | OutputFormat::TabularWithComments),
@@ -10862,6 +11070,17 @@ fn unknown_matrix_message(records: &[FastaRecord]) -> String {
 fn too_long_subject_refusal(what: &str, length: usize) -> anyhow::Error {
     anyhow::anyhow!(
         "{what} has {length} residues; a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP",
+        crate::core::subject_split::MAX_DBSEQ_LEN
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-250
+/// The refusal of PHI-BLAST's search (`-phi_pattern`) of a subject longer than `MAX_DBSEQ_LEN`
+/// (`ungapped_setup_failure`). NCBI's output is the same at 1 and 8 threads (probe
+/// `PS/ncbi8/long`, 11-23); the parts and their merge are a later item's port.
+fn too_long_phi_subject_refusal(what: &str, length: usize) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{what} has {length} residues; -phi_pattern with a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's PSIBLAST yet",
         crate::core::subject_split::MAX_DBSEQ_LEN
     )
 }

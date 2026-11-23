@@ -622,6 +622,19 @@ pub struct ResolvedBlastpArgs {
     /// psiblast `-num_iterations` other than 1 for FASTA queries: the rounds that the round
     /// driver runs (`algorithm::psiblast::rounds`), with the PSSM files it writes.
     pub psi_rounds: Option<std::sync::Arc<crate::algorithm::psiblast::rounds::PsiRoundPlan>>,
+    /// psiblast `-phi_pattern` (item PS8a): round 1's pattern as compiled
+    /// (`phi_search::pattern::PhiPattern::compile`), or why it does not compile: NCBI's error,
+    /// which NCBI's engine raises after the prolog (`blast_engine/phi_hooks.rs`), or LOSAT's
+    /// refusal, raised where NCBI starts the search (`validate_requested_blastp_support`). The
+    /// search then runs PHI-BLAST's stages (`algorithm::phi_search`) in place of blastp's.
+    pub(crate) phi: Option<
+        std::sync::Arc<
+            Result<
+                crate::algorithm::phi_search::pattern::PhiPattern,
+                crate::algorithm::phi_search::pattern::PhiError,
+            >,
+        >,
+    >,
     /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
     traceback_hitlist: usize,
     /// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search whose custom tabular
@@ -674,11 +687,27 @@ impl ResolvedBlastpArgs {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
+    /// The program that the reports name (the formatter's program): the application's, or
+    /// `phiblastp` for psiblast's `-phi_pattern` (`PHIBLASTP` in the prolog and in outfmt 7's
+    /// header, item PS8a).
+    pub(crate) fn report_program(&self) -> &'static str {
+        if self.phi.is_some() {
+            "phiblastp"
+        } else {
+            self.app.ncbi_name()
+        }
+    }
+
     fn compute_traceback_hitlist_size(&self) -> usize {
         match self.app {
             // RPS-BLAST's traceback keeps `hitlist_size` lists per volume (`s_RPSComputeTraceback`,
             // `Blast_HSPResultsInsertHSPList` of `hsp_list` into `results` with `hitlist_size`).
             BlastpApp::Blastp | BlastpApp::Rpsblast => self.max_target_seqs,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-50
+            // PHI-BLAST's handle is not psiblast's (`CPHIBlastProtOptionsHandle`): its traceback
+            // keeps `hitlist_size` lists, as blastp's.
+            BlastpApp::Psiblast if self.phi.is_some() => self.max_target_seqs,
             BlastpApp::Psiblast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
                 self.max_target_seqs,
                 self.comp_based_stats.is_enabled(),
@@ -799,9 +828,13 @@ impl BlastpArgs {
             options.matrix_name = matrix.clone();
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623
+        // psiblast's programs (`ePSIBlast`, and `ePHIBlastp` with `-phi_pattern`) are not among
+        // those whose threshold away from 11 counts as set (`s_IsDefaultWordThreshold`): theirs is
+        // the matrix's suggestion, also after a word size above 4 (PHI-BLAST, probe `op.ws8.0`;
+        // psiblast's other searches refuse such a word size).
         if let Some(threshold) = self.threshold {
             options.threshold = threshold;
-        } else if options.threshold as i32 == 11 {
+        } else if options.threshold as i32 == 11 || self.app == BlastpApp::Psiblast {
             options.threshold =
                 suggested_threshold(SuggestionProgram::Protein, &options.matrix_name);
         }
@@ -847,6 +880,13 @@ impl BlastpArgs {
         if let Some(pssm) = &self.psiblast_pssm {
             pssm.check()?;
         }
+        // psiblast `-phi_pattern` (PS8a): NCBI's PHI-BLAST options handle
+        // (`CPHIBlastProtOptionsHandle`, psiblast_args.cpp:123-131), whose program is
+        // `ePHIBlastp`.
+        let phi_file = self
+            .psiblast_pssm
+            .as_ref()
+            .and_then(|pssm| pssm.phi_pattern.as_deref());
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
         // psiblast's `-in_pssm` is read by the same handler, after the checks of its PSSM
         // files (`algorithm::psiblast::in_pssm`); the file as read goes to the rounds' plan
@@ -921,6 +961,34 @@ impl BlastpArgs {
         } else {
             mode
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1382-1411
+        // The PHI-BLAST handler, the last of psiblast's, reads the pattern file
+        // (`phi_search::file`); LOSAT compiles it here and keeps the result for the search
+        // (`ResolvedBlastpArgs::phi`).
+        let phi = match phi_file {
+            Some(path) => {
+                let bytes = crate::algorithm::pssm_search::in_pssm::read_input_argument(
+                    "phi_pattern",
+                    path,
+                )?;
+                let raw = crate::algorithm::phi_search::file::read_pattern(&bytes)
+                    .map_err(crate::algorithm::phi_search::file::PatternFileError::into_error)?;
+                Some(std::sync::Arc::new(
+                    crate::algorithm::phi_search::pattern::PhiPattern::compile(&raw),
+                ))
+            }
+            None => None,
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:825-880
+        // The composition-based statistics handler sets the mode of the programs it lists, and
+        // PHI-BLAST is not one of them: round 1 runs without composition-based statistics and
+        // without the Smith-Waterman traceback whatever the arguments say (the value is still
+        // parsed above, with its errors).
+        let (mode, unified_p) = if phi.is_some() {
+            (CompositionMode::NoCompositionBasedStats, false)
+        } else {
+            (mode, unified_p)
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-155
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3043
         // IDENTITY has no composition data: NCBI searches it in mode 0 whatever mode was asked,
@@ -952,6 +1020,7 @@ impl BlastpArgs {
             evalue: options.evalue,
             psiblast: self.app == BlastpApp::Psiblast,
             psi_tblastn: false,
+            phi: phi.is_some(),
             // blastp's and psiblast's `-xdrop_ungap`, or rpsblast's (`RpsSearch`).
             x_dropoff: self
                 .xdrop_ungap
@@ -1103,7 +1172,8 @@ impl BlastpArgs {
             seg: options.seg,
             soft_masking,
             lcase_masking: self.lcase_masking,
-            use_sw_tback: self.use_sw_tback,
+            // PHI-BLAST's round 1 has no Smith-Waterman traceback (the handler above).
+            use_sw_tback: self.use_sw_tback && phi.is_none(),
             chaining: options.chaining,
             query_range,
             outfmt: self.outfmt.clone(),
@@ -1115,6 +1185,7 @@ impl BlastpArgs {
             psi_search,
             rps_search: self.rps.clone().map(std::sync::Arc::new),
             psi_rounds,
+            phi,
             app: self.app,
             inclusion_ethresh: self
                 .inclusion_ethresh

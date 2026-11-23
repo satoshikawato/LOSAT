@@ -112,8 +112,9 @@ pub(super) fn query_warning_lines(
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
     // the warnings go with the first format, or, where it is structured, they are kept for the
     // later formats that write them (`later`).
-    let result_warnings = outputs.first_writes_query_warnings();
-    let later = outputs.keeps_later_query_warnings();
+    // PHI-BLAST's report writes them on its output (`phi_result_warnings`).
+    let result_warnings = outputs.first_writes_query_warnings() && args.phi.is_none();
+    let later = outputs.keeps_later_query_warnings() && args.phi.is_none();
     let mut later_lines = Vec::new();
     let lines = query_records
         .iter()
@@ -159,6 +160,48 @@ pub(super) fn query_warning_lines(
         })
         .collect();
     (lines, later.then_some(later_lines))
+}
+
+/// psiblast `-phi_pattern`: each query's messages as PHI-BLAST's report writes them on its output
+/// (`query_warnings::phi_result_warning`), those of `query_warning_lines` and NCBI's message of a
+/// matrix and gap costs without its table's Karlin block (`no_statistics`, for every query).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:170
+pub(super) fn phi_result_warnings(
+    prep: &ReportPrep<'_, '_>,
+    no_statistics: Option<&str>,
+) -> Vec<Vec<u8>> {
+    let ReportPrep {
+        args,
+        reports,
+        ranges,
+        query_records,
+        query_batch_skipped,
+        filtered_empty,
+        ..
+    } = *prep;
+    query_records
+        .iter()
+        .enumerate()
+        .map(|(q_idx, record)| {
+            // PHI-BLAST's score block is the pattern table's: no query's letters are checked for
+            // Karlin-Altschul parameters (`psiblast_stop_at_invalid_query`).
+            let mut messages = crate::report::query_warnings::query_messages(
+                record.seq(),
+                true,
+                reports.x_queries_before + q_idx < reports.identity_warned,
+                filtered_empty && !query_batch_skipped[q_idx],
+            );
+            messages.extend(no_statistics.map(str::to_string));
+            crate::report::query_warnings::phi_result_warning(
+                args.first_query_ordinal
+                    + ranges.x_ordinal_base
+                    + ranges.query_input.ordinal(q_idx),
+                record,
+                &messages,
+            )
+        })
+        .collect()
 }
 
 /// What query `query`'s pairwise report (outfmt 0 to 4) of its hit list `shown` reads, by rank
@@ -1572,7 +1615,7 @@ pub(super) fn report_labels(
             Some(database) => database.name().to_string(),
             None => format!("User specified sequence set (Input: {subject_input_label})"),
         }),
-        program: args.app.ncbi_name().to_string(),
+        program: args.report_program().to_string(),
     };
     ReportLabels {
         subject_input_label,

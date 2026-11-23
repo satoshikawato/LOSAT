@@ -350,7 +350,18 @@ These refusals apply to every search program that reads databases.
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-phi_pattern` | Refused: not yet supported. |
+| `-phi_pattern` with `-num_iterations` other than 1 | Refused: not yet supported. |
+| `-phi_pattern` with `-outfmt` 1 to 5, 11, 13 to 16 or 18 | Refused: not yet supported. `-outfmt` 8, 9 and 12 get NCBI's own error (exit status 3). |
+| `-phi_pattern` with `-sum_stats true` | Refused: not yet supported. |
+| `-phi_pattern` with a subject longer than 5,000,000 residues | Refused: not yet supported. NCBI searches such a sequence in overlapping parts. |
+| `phi_pattern` in the library and pylosat | Refused: not yet supported. Use `losat psiblast -phi_pattern`. |
+| A `-phi_pattern` pattern with an unterminated `(`, `{` or `x(` | Refused. NCBI reads past the end of the pattern and crashes. |
+| A `-phi_pattern` pattern with `x(n,m)` that does not give two numbers (`x(a,b)`, `x(3,)`) | Refused. NCBI reads values that were never set, and its result changes from run to run. |
+| A `-phi_pattern` pattern with a count outside 32-bit integers | Refused. NCBI's count overflows. |
+| A `-phi_pattern` pattern with positions past NCBI's 330 (`A(400)`, `M-x(330)`) | Refused. NCBI writes past its pattern array before it reports the pattern as too long. |
+| A `-phi_pattern` pattern with a byte that is not ASCII outside `[]` or inside `{}` | Refused. NCBI reads past its residue table. |
+| A `-phi_pattern` pattern that needs more than two machine words, with two variable wildcards in a row or more than 100 words | Refused. NCBI shifts by a negative count or writes past its arrays. |
+| A `-phi_pattern` search where a sequence has more than 10,000 hits of a pattern of more than one machine word | Refused. NCBI writes past its hit array and stops (`stack smashing detected`). |
 | `-in_msa` with a PHYLIP header of 0 sequences, or an empty command (a lone `;`) in a NEXUS file | Refused. NCBI crashes (a division by zero, a null pointer). |
 | `-in_msa` with a FASTA alignment whose rows have different lengths, where a row that holds the query is shorter than the first row, or the first row has a letter past the end of a shorter row | Refused. NCBI swaps or reads the shorter row past its end, and its result depends on the memory allocator. Make the rows the same length. |
 | `-in_msa` with a `secondary-accession` range that runs backwards (`AB000003-AB000001`) or has a number of more than 18 digits | Refused. NCBI loops without end on a backwards range and reads the numbers into a 32-bit integer that overflows; LOSAT reads 64 bits, so a number past 2147483647 is written with its digits, where NCBI's build wraps it. A range of any length is answered. |
@@ -677,7 +688,7 @@ error: the NCBI BLAST+ option -gi_mask is not supported by LOSAT's makeblastdb (
 ## On the list for a later release
 
 - The programs `deltablast`, `makeprofiledb` and `blast_formatter`.
-- `psiblast -phi_pattern`.
+- `psiblast -phi_pattern` with more than one round, and in the library and pylosat.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
 - `-html`.
 

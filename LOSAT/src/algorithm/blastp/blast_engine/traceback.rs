@@ -347,7 +347,7 @@ fn prelim_lists_of_queries(
 /// at `HitList::put_in_traceback_order` of BLASTN): the traceback reads the preliminary
 /// lists by OID. Where the results are sorted at the end, the order of insertion changes
 /// nothing (the comparison is total); where they are not, it is the report's order.
-fn hit_lists_of_traced(
+pub(super) fn hit_lists_of_traced(
     mut traced: Vec<(usize, Option<BlastpHspList>)>,
     queries: usize,
     hitlist_size: usize,
@@ -612,6 +612,7 @@ fn final_hsp(
         gap_info: Some(edit_script),
         num_positives,
         comp_adjustment_method: 0,
+        phi_occurrence: 0,
     }
 }
 

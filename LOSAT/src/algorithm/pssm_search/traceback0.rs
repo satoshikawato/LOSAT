@@ -453,7 +453,7 @@ pub(super) fn preliminary_hsp(local: &BlastpHsp) -> BlastpPreliminaryHsp {
 /// (`sbp->matrix`; rpsblast's is BLOSUM62), with the gaps and mismatches that the reports read.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:796-833
-pub(super) fn final_hsp(
+pub(crate) fn final_hsp(
     hsp: &BlastpPreliminaryHsp,
     edit_script: Vec<GapEditOp>,
     query_nomask: &[u8],
@@ -524,6 +524,7 @@ pub(super) fn final_hsp(
         gap_info: Some(edit_script),
         num_positives,
         comp_adjustment_method: 0,
+        phi_occurrence: 0,
     }
 }
 

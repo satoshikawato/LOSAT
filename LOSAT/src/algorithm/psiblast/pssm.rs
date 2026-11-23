@@ -48,6 +48,9 @@ pub struct PsiblastPssmOptions {
     /// when it is not 1 (0: until convergence), or 1 with `-in_pssm` and a PSSM file (the input
     /// PSSM is written before round 1); `None` for the one search of today's call.
     pub rounds: Option<u32>,
+    /// `-phi_pattern`: the pattern file of a PHI-BLAST round 1 (`algorithm::phi_search`), read
+    /// with the options (`BlastpArgs::check_options`).
+    pub phi_pattern: Option<std::path::PathBuf>,
 }
 
 /// A run that writes the PSSM of each query whose round-1 results have alignments.
@@ -175,7 +178,11 @@ impl PsiblastPssmOptions {
     // `-out_ascii_pssm` (`SaveCheckpoint`, `SaveAsciiPssm`).
     // With more rounds the driver writes the files (`rounds::RoundFiles`), not the search.
     pub(crate) fn request(&self) -> Option<PssmRequest> {
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:270-310
+        // A PHI-BLAST round makes no PSSM (only a PSI round computes the next one), so one round
+        // saves none.
         if self.rounds.is_some()
+            || self.phi_pattern.is_some()
             || !self.save_pssm_after_last_round
             || (self.out_pssm.is_none() && self.out_ascii_pssm.is_none())
         {

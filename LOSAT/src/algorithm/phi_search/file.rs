@@ -59,6 +59,15 @@ fn buffer_lines(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
     })
 }
 
+/// The pattern of the file at `path` as text, for the search strategy's `PHIPattern`
+/// (`OptionInputs::phi_pattern`); `None` when the file does not give one (the run then stops with
+/// the error of `read_pattern` where NCBI reads the file, `BlastpArgs::check_options`).
+pub(crate) fn pattern_text(path: &std::path::Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let pattern = read_pattern(&bytes).ok()?;
+    Some(String::from_utf8_lossy(&pattern).into_owned())
+}
+
 /// The pattern of the file's `bytes`, as the bytes NCBI passes to the compiler.
 pub(crate) fn read_pattern(bytes: &[u8]) -> Result<Vec<u8>, PatternFileError> {
     let mut pattern: &[u8] = &[];

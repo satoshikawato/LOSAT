@@ -49,6 +49,16 @@ pub(crate) fn alignment_owned(program: Program) -> &'static [&'static str] {
     }
 }
 
+/// The option of `program`'s command line that gives a PHI-BLAST pattern file (psiblast's
+/// `-phi_pattern`, item PS8a): the library API will give the pattern as an input (item PS8b), so
+/// `validate` refuses the option until then and `describe` leaves it out.
+pub(crate) fn pattern_owned(program: Program) -> &'static [&'static str] {
+    match program {
+        Program::Psiblast => &["phi_pattern"],
+        _ => &[],
+    }
+}
+
 /// The options that choose the master of the query alignment: the command line takes them with
 /// `-in_msa` only (`-msa_master_idx` and `-ignore_msa_master`, psiblast's), which the parser
 /// excludes from `-query`. An argv that holds one is checked with the alignment as the query.
@@ -315,6 +325,14 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: a query alignment is given as the inputs (Inputs::msa)"
             ).into()));
+        }
+        if pattern_owned(program).contains(&name) {
+            return Err(Error::Argv(
+                format!(
+                    "{key} (a PHI-BLAST pattern file) is not supported by LOSAT's library API yet"
+                )
+                .into(),
+            ));
         }
         if API_OWNED.contains(&name) {
             return Err(Error::Argv(format!(

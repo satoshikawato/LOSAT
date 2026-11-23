@@ -391,6 +391,42 @@ impl HspAlnVec {
         self.aln_stop
     }
 
+    /// The alignment columns of the query's positions `from..=to` (0-based) where they meet the
+    /// query row's range (`x_GetQueryFeatureList` of row 0, plus strand; `GetAlnPosFromSeqPos`
+    /// without a direction): `None` where the clipped range has no columns. A feature that starts
+    /// right of the row's range (NCBI's column -1) is none here: PHI-BLAST's occurrence lies
+    /// within its HSPs' query range, or left of it under `-query_loc` (offsets in the range).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4352-4389
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:527-541
+    pub(crate) fn query_columns(&self, from: u32, to: u32) -> Option<(usize, usize)> {
+        let ds = &self.ds;
+        if !ds.plus.first().copied().unwrap_or(true) {
+            return None;
+        }
+        // The query row's segments: (start, length, first column).
+        let mut column = 0u32;
+        let mut segments = Vec::with_capacity(ds.lens.len());
+        for (seg, &len) in ds.lens.iter().enumerate() {
+            let start = ds.starts[2 * seg];
+            if start >= 0 {
+                segments.push((start as u32, len, column));
+            }
+            column += len;
+        }
+        let (&(first, _, _), &(last_start, last_len, _)) = (segments.first()?, segments.last()?);
+        let (seq_start, seq_stop) = (first, last_start + last_len - 1);
+        let aln_pos = |pos: u32| {
+            segments
+                .iter()
+                .find(|&&(start, len, _)| start <= pos && pos < start + len)
+                .map(|&(start, _, column)| column + pos - start)
+        };
+        let aln_from = aln_pos(from.max(seq_start))?;
+        let aln_to = aln_pos(to.min(seq_stop))?;
+        (aln_from <= aln_to).then_some((aln_from as usize, aln_to as usize))
+    }
+
     /// Row `row` on line `line` (0 for the first), of columns `from..=to`: its first and last
     /// position there (`seqStarts[row].front()`, `seqStops[row].front()`, 0-based) when the row
     /// meets the line (`hasSequence`), `None` otherwise. Every line pops each row's fronts

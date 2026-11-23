@@ -88,7 +88,5 @@ fn setup_errors_and_a_self_search() {
     assert_eq!(kept.len(), 1);
     assert_eq!((kept[0].query_start, kept[0].query_end), (0, 10));
     assert_eq!(kept[0].edit_script, vec![GapEditOp::Sub(10)]);
-    let split = split_by_occurrence(&[(4, kept)], 2);
-    assert_eq!(split[0].len(), 1);
-    assert!(split[1].is_empty());
+    assert_eq!(kept[0].occurrence, 0);
 }

@@ -294,7 +294,7 @@ fn the_x_drops_gap_trigger_culling_and_sum_stats_reach_blastps_search() {
 
 #[test]
 fn psiblasts_arguments_that_losat_does_not_run_are_named() {
-    for (option, value) in [("-phi_pattern", Some("x")), ("-html", None)] {
+    for (option, value) in [("-html", None::<&str>)] {
         let mut extra = vec![option];
         extra.extend(value);
         let error = parse(&extra).unwrap_err();
@@ -308,6 +308,14 @@ fn psiblasts_arguments_that_losat_does_not_run_are_named() {
     // `-in_pssm` (PS4a) is an argument: with `-query` it is the parser's exclusion
     // (blast_args.cpp:1240-1247).
     let error = parse(&["-in_pssm", "x"]).unwrap_err();
+    assert!(error.contains("cannot be used with"), "{error}");
+    // `-phi_pattern` (PS8a) is an argument; `-in_msa` excludes it (blast_args.cpp:1173-1192).
+    let args = parse(&["-phi_pattern", "p.pat"]).unwrap();
+    assert_eq!(
+        args.phi_pattern.as_deref(),
+        Some(std::path::Path::new("p.pat"))
+    );
+    let error = parse(&["-phi_pattern", "p.pat", "-in_msa", "a.aln"]).unwrap_err();
     assert!(error.contains("cannot be used with"), "{error}");
     // Arguments that psiblast does not have are unknown, as in NCBI's parser.
     for option in ["-task", "-ungapped", "-db_soft_mask", "-mt_mode"] {

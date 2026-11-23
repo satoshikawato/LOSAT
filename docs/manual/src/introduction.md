@@ -43,7 +43,7 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 These are on the list for a later release:
 
 - the programs `deltablast`, `makeprofiledb` and `blast_formatter`;
-- `psiblast -phi_pattern`;
+- `psiblast -phi_pattern` with more than one round, and in the library and pylosat;
 - the `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`);
 - `-html`.
 

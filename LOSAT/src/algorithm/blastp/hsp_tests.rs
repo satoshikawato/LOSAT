@@ -601,3 +601,11 @@ fn test_fill_results_from_compo_heaps_builds_hitlist_via_hitlist_update() {
     assert_eq!(hit_list.hsplist_array[0].oid, 2);
     assert_eq!(hit_list.hsplist_array[1].oid, 1);
 }
+
+// PHI-BLAST's occurrence (`BlastpHsp::phi_occurrence`, item PS8a) takes the padding of the struct:
+// an HSP of every other search keeps its size (x86-64 and the other 64-bit targets).
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn the_phi_occurrence_keeps_the_size_of_an_hsp() {
+    assert_eq!(std::mem::size_of::<BlastpHsp>(), 168);
+}

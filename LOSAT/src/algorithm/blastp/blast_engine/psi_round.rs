@@ -787,8 +787,8 @@ fn write_round_epilogs(
         }
         match crate::blastinput::app::parse_formatting_string(format.outfmt)?.number {
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2237-2238
-            // The formats below the tabular ones (`m_FormatType >= eTabular` returns) end with the
-            // pairwise footer.
+            // The formats below the tabular ones end with the pairwise footer; the tabular ones and
+            // those after them write no footer.
             0..=4 => {}
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2246
             // BLAST XML's end, after the rounds' `Iteration`s (`BlastXmlWriter::finish`).

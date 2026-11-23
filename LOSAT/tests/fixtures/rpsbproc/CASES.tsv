@@ -91,6 +91,11 @@ bracket_member	compare	-	-	-i bracket_member.asn -d data -t doms
 neg0_length	compare	-	-	-i neg0_length.asn -d data -t doms
 org_descr	compare	-	-	-i org_descr.asn -d data -t doms
 nolength	compare	-	-	-i nolength.asn -d data -t doms
+vis_all.doms	compare	-	-	-i vis_all.asn -d data -t doms
+vis_all.full	compare	-	-	-i vis_all.asn -d data -m full
+cm_bad.doms	compare	-	-	-i cm_bad.asn -d data -t doms
+two_e9.doms	compare	-	-	-i two_e9.asn -d data -t doms
+t_nul.doms	compare	-	-	-i t_nul.asn -d data -t doms
 d_acc0	compare	-	data-with:d_acc0	-i arch/three.asn -d d_acc0 -m rep -t doms -f
 d_annot10	compare	-	data-with:d_annot10	-i arch/three.asn -d d_annot10 -m rep -t doms -f
 d_bs12	compare	-	data-with:d_bs12	-i arch/three.asn -d d_bs12 -m rep -t doms -f

@@ -327,3 +327,25 @@ changes are of `use` `tied`:
   query with a NaN E-value or bit score), and the counts must equal the table's. Lines are counted as a diff counts
   them: the lines of each block that a longest common subsequence of NCBI's and LOSAT's block leaves out, NCBI's
   (`ncbi_lines`, removed) and LOSAT's (`losat_lines`, added), so that a changed line after a moved one counts too.
+
+## Bytes outside 0x20..0x7E in an archive (line RG-KB, item 9(a))
+
+NCBI's rpsbproc reads the archive with the toolkit's typed reader. In a VisibleString, each byte outside
+0x20..0x7E is read as `#`, and NCBI posts `Error: (803.7) <stack path>`, `Bad char [0x<HEX>] in string at line <N>` and
+the piece of the string being read. The posts come before the session, because the object is read whole first. A
+UTF8String, such as a DefLine's title, keeps its bytes and posts nothing. The archives in `root/` are copies of
+`q_tab_utf8.asn` with such bytes, made by a script of the task folder. NCBI's binary and Bioconda's 0.5.1 gave the
+same bytes (2026-11-24), run as above:
+
+- `vis_all.asn` (`vis_all.doms`, `vis_all.full`) puts such bytes in these places:
+  - the `ident` (0x7F) and a query's `local str`;
+  - a title with `""` and two bytes in one piece, and a `comment` across a line end;
+  - a title whose byte is past the first 128 bytes of its run, and a `name`;
+  - a `Seq-annot`'s `name` and its descriptor's `comment`, and a `string-list` of a `Blast4-value`;
+  - a Dense-seg id, the search statistics and the archive's `messages`.
+- `cm_bad.asn` (`cm_bad.doms`) has a `comment` with 0xE9, followed in the same `descr` by `nonesuch 5`, which is not a
+  Seqdesc. The post comes first. Then NCBI's reader fails, and the run ends with no session and exit status 0.
+- `two_e9.asn` (`two_e9.doms`) holds two archives, one after the other, with 0xE9 in a title of the second. Each object
+  is read by a new stream, whose line 1 is the rest of the line on which the object before it ended. The title is on
+  line 47 of the first object, so the post names line 48.
+- `t_nul.asn` (`t_nul.doms`) has a 0 byte in a title. The piece is quoted with the byte as it is.

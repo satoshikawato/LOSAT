@@ -6462,7 +6462,7 @@ fn search(
                     (Some(database), _)
                         if (x_prefetch_taxids(x_kind)
                             || matches!(x_kind, XBlockReport::Xml2) && database.taxdb_found())
-                            && database.prefetch_refused() =>
+                            && database.cache_may_refuse() =>
                     {
                         false
                     }

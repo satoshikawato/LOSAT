@@ -61,18 +61,18 @@ fn stage_of(
         hash.x_lv2_reset();
     }
     match (lean, !hash.x_last.is_empty()) {
-        (false, false) => seed_stage_of::<false, false>(
-            x, disc, threads, hash, hits, None, false, fold_part, lists,
+        (false, false) => seed_stage_of::<false, false, false>(
+            x, disc, threads, hash, hits, None, false, fold_part, lists, None,
         ),
-        (false, true) => seed_stage_of::<false, true>(
-            x, disc, threads, hash, hits, None, false, fold_part, lists,
+        (false, true) => seed_stage_of::<false, true, false>(
+            x, disc, threads, hash, hits, None, false, fold_part, lists, None,
         ),
-        (true, false) => seed_stage_of::<true, false>(
-            x, disc, threads, hash, hits, None, false, fold_part, lists,
+        (true, false) => seed_stage_of::<true, false, false>(
+            x, disc, threads, hash, hits, None, false, fold_part, lists, None,
         ),
-        (true, true) => {
-            seed_stage_of::<true, true>(x, disc, threads, hash, hits, None, false, fold_part, lists)
-        }
+        (true, true) => seed_stage_of::<true, true, false>(
+            x, disc, threads, hash, hits, None, false, fold_part, lists, None,
+        ),
     }
 }
 
@@ -676,6 +676,7 @@ fn disc_two_hit_stage_on_strips_equals_one_scan() {
                                     let fold_part = (parts > 0).then_some(part::FoldPart {
                                         scratch: &mut scratch,
                                         parts,
+                                        latest: None,
                                     });
                                     let stats =
                                         if lean == lean_on() && lists == seed_lean_on() {
@@ -1006,5 +1007,409 @@ fn scope_is_the_two_hit_discontiguous_stage() {
             assert!(hits.is_empty());
             assert_eq!(hash.occupancy, 1);
         });
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_DCLATEST): a fold's table that logs what the fold reads and writes: per
+/// retrieve the diagonal, the position and the decisions it makes (`LvSeeds::decisions`:
+/// rejected, two-hit branch), per insert the diagonal, level, saved flag and position.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+struct Traced<'t, T> {
+    inner: T,
+    seeds: super::super::super::x_diag_lv::LvSeeds,
+    reads: &'t mut Vec<(i32, usize, (bool, bool))>,
+    inserts: &'t mut Vec<(i32, i32, bool, i32)>,
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl<T: FoldTable> FoldTable for Traced<'_, T> {
+    fn ahead(&self, seed: &Seed) {
+        self.inner.ahead(seed);
+    }
+
+    fn retrieve(&mut self, diag: i32, s_off_pos: usize) -> (i32, bool) {
+        let (level, saved) = self.inner.retrieve(diag, s_off_pos);
+        let decisions = self.seeds.decisions(Some((level, 0, saved)), s_off_pos);
+        self.reads.push((diag, s_off_pos, decisions));
+        (level, saved)
+    }
+
+    fn retrieve_off(&self, diag: i32) -> Option<(i32, i32, bool)> {
+        self.inner.retrieve_off(diag)
+    }
+
+    fn insert(
+        &mut self,
+        out: &mut part::PartOut,
+        key: u64,
+        diag: i32,
+        level: i32,
+        hit_len: i32,
+        hit_saved: bool,
+        s_off: i32,
+        window_size: i32,
+    ) {
+        self.inserts.push((diag, level, hit_saved, s_off));
+        self.inner.insert(
+            out,
+            key,
+            diag,
+            level,
+            hit_len,
+            hit_saved,
+            s_off,
+            window_size,
+        );
+    }
+}
+
+/// The fields of a hit the stage tests compare.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn hit_keys(hits: &[UngappedHit]) -> Vec<(u32, u32, u32, i32, i32, u32, u32, i32)> {
+    hits.iter()
+        .map(|h| {
+            (
+                h.context_idx,
+                h.seed_q_off,
+                h.seed_s_off,
+                h.qs,
+                h.qe,
+                h.ss,
+                h.se,
+                h.score,
+            )
+        })
+        .collect()
+}
+
+/// The pairs of the reference wrapper `scan_subject_disc_words_with_ranges` as seeds (one scan of
+/// the whole range; a masked subject's ranges one by one).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn all_seeds(c: &Case, lookup: &TwoStageLookup, x: &Inputs<'_>) -> Vec<Seed> {
+    let disc = lookup.disc().expect("a discontiguous table");
+    let mut seeds = Vec::new();
+    scan_subject_disc_words_with_ranges(
+        &c.packed,
+        c.s_len,
+        disc,
+        &c.seq_ranges,
+        c.masked,
+        |s_off, s_range, index, index2| {
+            lookup.for_each_hit(index, |q_off_1| {
+                if q_off_1 != 0 {
+                    seed_of_pair(x, q_off_1 as usize - 1, s_off, s_range, &mut seeds);
+                }
+            });
+            if let Some(index2) = index2 {
+                lookup.for_each_hit2(index2, |q_off_1| {
+                    seed_of_pair(x, q_off_1 as usize - 1, s_off, s_range, &mut seeds);
+                });
+            }
+        },
+    );
+    seeds
+}
+
+/// The windows of the map's tests for a word length `wl`: the band 2w + 2 < wl and around it,
+/// around the word length, and the default 40 and above.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn latest_windows(wl: usize) -> Vec<usize> {
+    let mut w: Vec<usize> = (1..=10).collect();
+    w.extend([wl - 1, wl, wl + 1, 40, 64]);
+    w.sort_unstable();
+    w.dedup();
+    w
+}
+
+/// A diagonal hash without level bounds or memo (whatever the environment says).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn plain_table(window: usize, offset: i32) -> DiagHashTable {
+    let mut h = DiagHashTable::new(window as i32);
+    h.max_level = Vec::new();
+    h.x_last = Vec::new();
+    h.offset = offset;
+    h
+}
+
+// EXPERIMENT (LOSAT_X_DCLATEST): seed by seed, the fold on the map of the latest inserts makes the
+// decisions (rejected, two-hit branch) and the inserts of the fold on the chains, and gives its
+// hits, for every template and windows from 1 to 64: with NCBI's take-over window in the scope (w
+// + 1, module comment (iii) of `x_dc_latest.rs`) at every window, with LOSAT's
+// (`diag_hash_insert_window`) outside the band 2w + 2 < wl; inside the band, and wherever w < wl,
+// neither fold extends a seed (module comment (v)).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[test]
+fn the_fold_on_the_map_makes_the_decisions_of_the_chains() {
+    let mut rng = Lcg(0x1A7E_57D1);
+    let mut case_no = 0;
+    let mut band = 0;
+    for word_size in [11usize, 12] {
+        for word_type in [
+            DiscWordType::Coding,
+            DiscWordType::Optimal,
+            DiscWordType::TwoTemplates,
+        ] {
+            for template_length in [16usize, 18, 21] {
+                case_no += 1;
+                let c = make_case(&mut rng, 20_000);
+                let c = if case_no % 2 == 0 {
+                    mask_case(&mut rng, c)
+                } else {
+                    c
+                };
+                let lookup = build_disc_mb_lookup(
+                    &ctx_refs(&c),
+                    &c.offsets,
+                    word_size,
+                    template_length,
+                    word_type,
+                    &c.masks,
+                    c.concat.len(),
+                );
+                let wl = template_length;
+                let diag_offset = 37 + rng.below(1000) as isize;
+                let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, diag_offset, 40));
+                for w in latest_windows(wl) {
+                    let x = inputs(&c, &lookup, diag_offset, w);
+                    let lv = super::super::super::x_diag_lv::LvSeeds::new(true, wl, w);
+                    for ncbi in [true, false] {
+                        let at = format!("case {case_no} wl {wl} w {w} ncbi {ncbi}");
+                        let xw = Inputs {
+                            diag_hash_window: if ncbi {
+                                w as i32 + 1
+                            } else {
+                                x.diag_hash_window
+                            },
+                            ..x
+                        };
+                        let mut hash = plain_table(w, diag_offset as i32);
+                        let (mut reads, mut inserts, mut hits) =
+                            (Vec::new(), Vec::new(), Vec::new());
+                        fold_two_hit_t::<false, false, _>(
+                            &xw,
+                            &seeds,
+                            &mut Traced {
+                                inner: Chains::<false, false, false, true>::new(&xw, &mut hash),
+                                seeds: lv,
+                                reads: &mut reads,
+                                inserts: &mut inserts,
+                            },
+                            &mut hits,
+                            None,
+                            &mut 0,
+                            &mut FoldCounts::default(),
+                            &mut part::PartOut::default(),
+                            &[],
+                        );
+                        let mut map = DiagLatest::default();
+                        map.begin(lv.bound(diag_offset as usize));
+                        let (mut map_reads, mut map_inserts, mut map_hits) =
+                            (Vec::new(), Vec::new(), Vec::new());
+                        fold_two_hit_t::<false, false, _>(
+                            &xw,
+                            &seeds,
+                            &mut Traced {
+                                inner: Latest::new(&xw, &mut map),
+                                seeds: lv,
+                                reads: &mut map_reads,
+                                inserts: &mut map_inserts,
+                            },
+                            &mut map_hits,
+                            None,
+                            &mut 0,
+                            &mut FoldCounts::default(),
+                            &mut part::PartOut::default(),
+                            &[],
+                        );
+                        if ncbi || 2 * w + 2 >= wl {
+                            assert_eq!(map_reads, reads, "{at}");
+                            assert_eq!(map_inserts, inserts, "{at}");
+                            assert_eq!(hit_keys(&map_hits), hit_keys(&hits), "{at}");
+                        } else {
+                            band += 1;
+                        }
+                        if w < wl {
+                            assert!(hits.is_empty() && map_hits.is_empty(), "{at}");
+                        } else if w == 40 {
+                            assert!(hits.len() > 5, "{at}: too few hits");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(band > 0);
+}
+
+// EXPERIMENT (LOSAT_X_DCLATEST): the stage on the maps (`seed_stage_latest`) gives the hits of the
+// reference fold on the chains, chunk after chunk on one scratch: the owner's map (1 and 4 threads
+// without partitions) and 2, 3, 7, 8 and 16 partitions on 1..8 threads, with and without
+// LOSAT_X_FOLDLEAN and LOSAT_X_DCSEEDLEAN's lists (in pieces of 1 seed, a few, hundreds, or the
+// strips' lists), at windows from the band to 64, on plain and masked subjects. The chunks move the
+// offset as NCBI does (`advance_diag_table_offset`), from below a quarter of the largest Int4 past it, where it is
+// cleared (and the maps are emptied at the next stage's start). Outside the band (module comment
+// (v) of `x_dc_latest.rs`) the rejected seeds are the chains' too; the chunk's table is never read
+// or changed.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[test]
+fn disc_two_hit_stage_on_maps_gives_the_hits_of_the_chains() {
+    let mut rng = Lcg(0x0D1A_6111);
+    let mut case_no = 0;
+    for word_size in [11usize, 12] {
+        for word_type in [
+            DiscWordType::Coding,
+            DiscWordType::Optimal,
+            DiscWordType::TwoTemplates,
+        ] {
+            for template_length in [16usize, 18, 21] {
+                case_no += 1;
+                let c = make_case(&mut rng, 20_000);
+                let c = if case_no % 2 == 0 {
+                    mask_case(&mut rng, c)
+                } else {
+                    c
+                };
+                let lookup = build_disc_mb_lookup(
+                    &ctx_refs(&c),
+                    &c.offsets,
+                    word_size,
+                    template_length,
+                    word_type,
+                    &c.masks,
+                    c.concat.len(),
+                );
+                let disc = lookup.disc().expect("a discontiguous table");
+                let wl = template_length;
+                let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, 40, 40));
+                let mut windows = vec![1 + case_no % 6, wl - 1, wl + 1, 40, 64];
+                windows.dedup();
+                for w in windows {
+                    let x0 = inputs(&c, &lookup, w as isize, w);
+                    // the reference: the chunks' offsets, hits and rejected seeds
+                    let mut hash = plain_table(w, w as i32);
+                    let mut offsets = Vec::new();
+                    let mut expected = Vec::new();
+                    for chunk in 0..5 {
+                        if chunk == 2 {
+                            // as after many chunks
+                            hash.offset = i32::MAX / 4 - 3;
+                        }
+                        let xc = Inputs {
+                            diag_offset: hash.offset as isize,
+                            ..x0
+                        };
+                        let (mut hits, mut counts) = (Vec::new(), FoldCounts::default());
+                        fold_serial(
+                            false,
+                            &xc,
+                            &seeds,
+                            &mut hash,
+                            &mut hits,
+                            &mut 0,
+                            &mut counts,
+                        );
+                        offsets.push(hash.offset);
+                        expected.push((hit_keys(&hits), counts.skipped));
+                        super::super::super::advance_diag_table_offset(
+                            &mut 0,
+                            w as i32,
+                            c.s_len,
+                            false,
+                            &mut [],
+                            &mut [],
+                            &mut hash,
+                        );
+                    }
+                    assert_eq!(offsets[4], w as i32, "the offset was not cleared");
+                    if w >= wl {
+                        assert!(expected.iter().all(|(hits, _)| hits.len() > 5));
+                    }
+                    for (k, (threads, parts)) in [
+                        (1usize, None),
+                        (4, None),
+                        (1, Some(2usize)),
+                        (2, Some(2)),
+                        (3, Some(3)),
+                        (3, Some(7)),
+                        (5, Some(16)),
+                        (8, Some(8)),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let lean = k % 2 == 1;
+                        let lists = (k / 2) % 2 == 0;
+                        let pool = rayon::ThreadPoolBuilder::new()
+                            .num_threads(threads)
+                            .build()
+                            .unwrap();
+                        pool.install(|| {
+                            let mut scratch = PartScratch::default();
+                            let mut table = plain_table(w, w as i32);
+                            let before = hash_state(&table);
+                            for (chunk, &offset) in offsets.iter().enumerate() {
+                                let pieces = [1usize, 3 + case_no % 11, 0, 250 + 37 * k]
+                                    [(k + chunk) % 4];
+                                scratch.x_pieces = Some(pieces);
+                                let at = format!(
+                                    "case {case_no} wl {wl} w {w} threads {threads} parts {parts:?} lean {lean} lists {lists} pieces {pieces} chunk {chunk}"
+                                );
+                                let xc = Inputs {
+                                    diag_offset: offset as isize,
+                                    ..x0
+                                };
+                                let bound0 = latest_bound(&xc).expect("a chunk with bounds");
+                                let mut hits = Vec::new();
+                                let stats = seed_stage_latest(
+                                    &xc,
+                                    disc,
+                                    threads,
+                                    &mut table,
+                                    &mut hits,
+                                    None,
+                                    false,
+                                    &mut scratch,
+                                    parts,
+                                    bound0,
+                                    lean,
+                                    lists,
+                                );
+                                let (keys, skipped) = &expected[chunk];
+                                assert_eq!(&hit_keys(&hits), keys, "{at}");
+                                assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");
+                                if 2 * w + 2 >= wl {
+                                    assert_eq!(stats.counts.skipped, *skipped, "{at}");
+                                }
+                            }
+                            assert_eq!(hash_state(&table), before, "the chunk's table changed");
+                        });
+                    }
+                }
+            }
+        }
     }
 }

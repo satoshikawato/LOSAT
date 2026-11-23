@@ -444,6 +444,7 @@ export LOSAT_X_CHAINRUN=1
 export LOSAT_X_CLUTPAIRS=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
+export LOSAT_X_DCLATEST=1
 export LOSAT_X_DCSEEDLEAN=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
@@ -4251,6 +4252,42 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
+- `LOSAT_X_DCLATEST=1` (BLASTN `-task dc-megablast`, and megablast given template options, wherever
+  `LOSAT_X_PAIRPARDISC`'s stage of the diagonal hash runs: a query block over 8000 letters, a subject searched
+  by its owner, two threads or more or one with `LOSAT_X_BNDCONE`, with or without `LOSAT_X_PAIRPARFOLD`'s
+  partitions; in the strict set from the pull request that added it, 2026-11-23: `LOSAT_X_DCLATEST=0` turns
+  it off) folds the stage's seeds into a map of each diagonal's latest insert (`blast_engine/x_dc_latest.rs`,
+  argument in its header) instead of NCBI's diagonal hash (512 buckets of chains whose stale cells later
+  inserts of the bucket take over). A seed reads its own diagonal only (`scan_range` is 0 in the scope),
+  and an entry whose level lies below the seed's level bound (`LOSAT_X_DIAGLV`'s `x_diag_lv::LvSeeds`)
+  decides as no entry; the map returns each diagonal's latest insert while it is live and only dead
+  entries otherwise, and NCBI's chains do the same, since their take-over window (w + 1 in the scope: a
+  negative Delta is set to 0 in the two-hit branch every unrejected seed takes) takes over dead cells only.
+  So every seed makes NCBI's decisions and inserts. The map: buckets of one cache line (seven slots of
+  diagonal and level, the slots' saved flags and the bucket's stash bound in the eighth lane), a home bucket
+  from the diagonal's Fibonacci hash, a stash for a full home bucket, and the buckets doubled when the
+  stash is full while they are fewer than twice the entries (keeping the live entries); the fold brings in
+  the home bucket of the seed 8 places ahead (x86_64 `prefetcht0`). Each partition folds into its own map,
+  so the partitioned stage no longer copies the stage's table into every partition at its start nor writes
+  the partitions' chains back at its merge (the hits only); without partitions the owner keeps one map.
+  The maps live in the subject scratch from chunk to chunk: NCBI moves the hash offset past every level of
+  a chunk after it, so every entry is dead at the next chunk, and a map whose largest level is not below
+  the next stage's first bound (only after the offset's clear at `INT4_MAX / 4`, where NCBI empties its
+  table) is emptied. The chunk's diagonal hash is neither read nor changed by the stage, so
+  `LOSAT_X_DIAGLV2`'s memo is not made there (its strips path runs only with `LOSAT_X_DCLATEST=0`); the
+  reference fold outside the stage keeps the chains. LOSAT's chains take their window once per chunk
+  without NCBI's step to 0 (`diag_hash_insert_window`: 2w - wl + 1 below the word length wl), so with
+  `-window_size` w in the band 2w + 2 < wl (w at most 6, 7 or 9 for templates 16, 18 or 21) they can drop
+  live cells and reject other seeds than NCBI and the map; below the word length no dc-megablast seed is
+  extended, so only `[TIMING] x_pairpardisc_seed: skipped=` can differ there. `[TIMING] x_dc_latest:
+  grows= buckets=` counts the maps' growths and their largest size. The unit tests of `x_dc_latest.rs`
+  check the map against a model of the latest inserts over stages, clears, crowded buckets and growths,
+  and against the chains with NCBI's window (every window) and LOSAT's (outside the band);
+  `the_fold_on_the_map_makes_the_decisions_of_the_chains` compares the folds' decisions and inserts seed
+  by seed, `disc_two_hit_stage_on_maps_gives_the_hits_of_the_chains` the stage's hits on the owner's map
+  and 2 to 16 partitions over five chunks through the offset's clear, and `LOSAT/tests/blastn_dc_latest.rs`
+  the reports with `=0`'s at 1 and 4 threads, windows 40, 24, 12 and 4 and a masked subject.
+  Evidence: EVIDENCE-TODO.
 - `LOSAT_X_DCSEEDLEAN=1` (BLASTN `-task dc-megablast`, and megablast given template options, at two threads or more;
   in the strict set from the pull request that added it, 2026-10-28: `LOSAT_X_DCSEEDLEAN=0` turns it off) changes
   three LOSAT-only parts of dc-megablast's seed stage; each gives the same table, seeds and hits in the same order:

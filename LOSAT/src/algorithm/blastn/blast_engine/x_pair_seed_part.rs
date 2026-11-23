@@ -80,6 +80,7 @@
 //!   operations changes.
 
 use super::super::{DiagHashCell, DiagHashTable, UngappedHit, DIAGHASH_NUM_BUCKETS};
+use super::latest::DiagLatest;
 use super::{FoldCounts, Resume, Seed, SeedOut};
 
 // EXPERIMENT (LOSAT_X_SEEDPIECE): the home stage of `seed_stage_part_lists` in seed pieces of a
@@ -166,6 +167,11 @@ pub(super) struct PartOut {
     /// (`touched`, `dirty`; `insert_t` without `TRACK`), and the merge writes back every bucket of
     /// the partition.
     all_dirty: bool,
+    /// EXPERIMENT (LOSAT_X_DCLATEST, `x_dc_latest.rs`): the stage's folds keep the partition's map
+    /// of the latest inserts (`PartState::latest`) instead of its table, and the merge writes
+    /// back no bucket (the stage's table is not read again before it is dead, module comment
+    /// (vii) of `x_dc_latest.rs`).
+    latest: bool,
     pub(super) ungapped_ns: u64,
     pub(super) ungapped_calls: u64,
 }
@@ -238,6 +244,10 @@ pub(super) fn insert_t<const PT: bool, const LEAN: bool, const MEMO: bool, const
             TRACK || out.all_dirty,
             "an untracked fold outside its stage"
         );
+        debug_assert!(
+            !out.latest,
+            "LOSAT_X_DCLATEST: a table insert in a map stage"
+        );
         let occupancy = hash.occupancy;
         if LEAN {
             hash.insert_inl::<MEMO>(diag, level, hit_len, hit_saved, s_off, window_size);
@@ -292,6 +302,10 @@ pub(super) struct PartState {
     next: usize,
     /// The numbers of the partition's appended cells in the stage's table.
     map: Vec<u32>,
+    /// EXPERIMENT (LOSAT_X_DCLATEST): the partition's map of the latest inserts, in a stage
+    /// whose folds keep it (`PartOut::latest`) instead of `hash`; carried from stage to stage
+    /// (`DiagLatest::begin`).
+    pub(super) latest: DiagLatest,
 }
 
 impl PartState {
@@ -320,6 +334,7 @@ impl PartState {
             fold_ns: 0,
             next: 0,
             map: Vec::new(),
+            latest: DiagLatest::default(),
         }
     }
 
@@ -404,7 +419,8 @@ impl SeedOut for PartSink<'_> {
 /// No NCBI counterpart (scheduling only): the allocations of the partitioned fold's partition
 /// tables and buffers, kept in the subject scratch (`run.rs` `SubjectScratch`) from one stage
 /// to the next. No content is carried over: every stage copies the stage's table into the
-/// partition tables (`rebuild`).
+/// partition tables (`rebuild`); only the maps of LOSAT_X_DCLATEST go on to the next stage,
+/// whose entries are all dead there (`x_dc_latest.rs`, module comment (vii)).
 #[derive(Default)]
 pub(in super::super) struct PartScratch {
     parts: Vec<PartState>,
@@ -420,12 +436,18 @@ pub(in super::super) struct PartScratch {
     /// `Some(0)` the strips' lists, `Some(k)` pieces of `k` seeds.
     #[cfg(test)]
     pub(super) x_pieces: Option<usize>,
+    /// EXPERIMENT (LOSAT_X_DCLATEST): the owner's map of the latest inserts in a stage without
+    /// partitions (`x_pair_seed_disc.rs` `seed_stage_latest`); carried from stage to stage.
+    pub(super) latest: DiagLatest,
 }
 
-/// How a strips stage folds when the switch is on: the scratch and the partition count.
+/// How a strips stage folds when the switch is on: the scratch and the partition count; with
+/// `latest` (EXPERIMENT LOSAT_X_DCLATEST, the level bound of the stage's first position) the
+/// partitions fold into their maps of the latest inserts instead of copies of the table.
 pub(super) struct FoldPart<'a> {
     pub(super) scratch: &'a mut PartScratch,
     pub(super) parts: usize,
+    pub(super) latest: Option<i32>,
 }
 
 /// What one partitioned stage did.
@@ -666,12 +688,16 @@ where
     #[cfg(not(test))]
     let pieces = piece::seeds();
     if let (true, Some(piece_seeds)) = (home, pieces) {
-        let FoldPart { scratch, parts } = fold_part;
+        let FoldPart {
+            scratch,
+            parts,
+            latest,
+        } = fold_part;
         assert!(
             (1..=DIAGHASH_NUM_BUCKETS).contains(&parts),
             "LOSAT_X_PAIRPARFOLD: {parts} partitions"
         );
-        rebuild(scratch, hash, parts, true);
+        rebuild(scratch, hash, parts, true, latest);
         let occ0 = hash.occupancy;
         return piece::seed_stage_pieces(
             n,
@@ -727,13 +753,17 @@ where
     FL: Fn(usize, &mut PartSink<'_>) + Sync,
     FF: Fn(&mut PartState, &[Seed], &[u32]) + Sync,
 {
-    let FoldPart { scratch, parts } = fold_part;
+    let FoldPart {
+        scratch,
+        parts,
+        latest,
+    } = fold_part;
     assert!(
         (1..=DIAGHASH_NUM_BUCKETS).contains(&parts),
         "LOSAT_X_PAIRPARFOLD: {parts} partitions"
     );
     let ahead = ahead.max(1);
-    rebuild(scratch, hash, parts, scan_lists.is_some());
+    rebuild(scratch, hash, parts, scan_lists.is_some(), latest);
     let occ0 = hash.occupancy;
     if home {
         return seed_stage_home(
@@ -1415,7 +1445,16 @@ fn run_participants(
 
 /// No NCBI counterpart: every partition's table made a copy of the stage's table, and its
 /// per-stage fields reset (at the start of every stage; only the allocations are reused).
-fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize, all_dirty: bool) {
+/// EXPERIMENT (LOSAT_X_DCLATEST): with `latest` (the level bound of the stage's first position)
+/// the partitions fold into their maps instead, which start the stage (`DiagLatest::begin`), and
+/// the tables are not copied.
+fn rebuild(
+    scratch: &mut PartScratch,
+    hash: &DiagHashTable,
+    parts: usize,
+    all_dirty: bool,
+    latest: Option<i32>,
+) {
     scratch.parts.truncate(parts);
     while scratch.parts.len() < parts {
         scratch.parts.push(PartState::new());
@@ -1423,6 +1462,11 @@ fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize, all_di
     for st in &mut scratch.parts {
         st.reset();
         st.out.all_dirty = all_dirty;
+        st.out.latest = latest.is_some();
+        if let Some(bound0) = latest {
+            st.latest.begin(bound0);
+            continue;
+        }
         let t = &mut st.hash;
         t.num_buckets = hash.num_buckets;
         t.occupancy = hash.occupancy;
@@ -1618,7 +1662,8 @@ fn hits_of_strips(
 /// changed buckets of every partition (of all its buckets where its folds did not record them,
 /// `PartOut::all_dirty`) written into `hash` with those numbers (each cell at its
 /// number, its link and the bucket's head mapped; the partition tables themselves are left as
-/// they are); the capacity of the reference's doublings.
+/// they are); the capacity of the reference's doublings. EXPERIMENT (LOSAT_X_DCLATEST): in a
+/// stage whose partitions folded into their maps (`PartOut::latest`) the hits only.
 fn merge(
     hash: &mut DiagHashTable,
     hits: &mut Vec<UngappedHit>,
@@ -1647,6 +1692,13 @@ fn merge(
         for &(_, p, j) in order.iter() {
             hits.push(states[p as usize].hits[j as usize]);
         }
+    }
+    // EXPERIMENT (LOSAT_X_DCLATEST): no table write-back.
+    let latest = states.first().is_some_and(|st| st.out.latest);
+    debug_assert!(states.iter().all(|st| st.out.latest == latest));
+    if latest {
+        debug_assert!(states.iter().all(|st| st.out.appends.is_empty()));
+        return;
     }
 
     apps.clear();

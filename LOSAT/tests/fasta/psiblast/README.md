@@ -57,6 +57,9 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   query's letters, not X); `pol.faa` under the made-up defline `>sp|P99998.1|POL_WSSV DNA polymerase test`, searched
   against itself with `-parse_deflines -seg yes` (psiblast's outfmt 0 draws no query masks, so the record that is
   both a query and a subject is written, where blastp refuses it).
+- `ps15b_lcmix_pd.faa` (second review fixes of PS15b-1, rows `db.ps15b.fix.self.lcm.*`): `ps15b_lcmix.faa` under the made-up
+  defline `>sp|Q99997.1|TKLC_TEST lowercase stretches`, searched against itself with `-parse_deflines -lcase_masking`
+  (psiblast's outfmt 0 draws no query masks, so the record that is both a query and a subject is written).
 - `ps5c_big.faa` (PS5c): YP_009220597.1 of `tests/fasta/WSSV.faa` (capsid protein, 6,077 letters), searched
   against itself with `-searchsp 9223372036854775807 -evalue 1e-300`: a hit cutoff whose `K × searchsp / E`
   is past the double (`ncbi_cutoffs::cutoff_score_from_evalue`).

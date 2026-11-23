@@ -1,0 +1,154 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: in/nmix_ids.fna
+           6 sequences; 3,000 total letters
+
+
+
+<b>Query=</b> n1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+gi|2000 gi only nucleotide                                            <a href=#2000>832</a>     0.0   
+<a title="Show report for BN000001.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/BN000001.1?report=genbank&log$=nucltop&blast_rank=2&RID=" >BN000001.1 </a>tpe subject                                                <a href=#BN000001.1>521</a>     2e-151
+<a title="Show report for AY000001.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/AY000001.1?report=genbank&log$=nucltop&blast_rank=3&RID=" >AY000001.1 </a>                                                           <a href=#AY000001.1>291</a>     6e-82 
+<a title="Show report for EP1000000_2" href="https://www.ncbi.nlm.nih.gov/nucleotide/EP1000000_2?report=genbank&log$=nucltop&blast_rank=4&RID=" >EP1000000_2 </a>patent nucleotide                                         <a href=#EP1000000_2>261</a>     5e-73 
+<a title="Show report for CAA00001.1" href="https://www.ncbi.nlm.nih.gov/nucleotide/CAA00001.1?report=genbank&log$=nucltop&blast_rank=5&RID=" >CAA00001.1 </a>gi and emb                                                 <a href=#2001>202</a>     3e-55 
+
+
+
+Query_1      1     TGCTTCGATTATCAAGGCAAGGGCTTTATT--TCTATGTATTCATTGCGTTT-GACATCG  57
+2000         1     ..............................--....................-.......  57
+EP1000000_2  1     ..............................--..................GGC.....A-  57
+CAA00001.1   1     ......AC..........GTT.........GGGA..C.-.-...GCT...G.-C......  57
+
+Query_1      58    AACCCATTCCCA--GAGATATTTAGTAGAGTAGAA-AGA-CCAATGAGGGGGCGACTGGC  113
+2000         58    ............--.....................-...-....................  113
+EP1000000_2  58    ......GAG...--......GCG............--..T...GC.......GTT.....  113
+CAA00001.1   58    ............TTT..-.T..C..-.........T.TT-G.-............GGC..  113
+
+Query_1      114   ATTGATAGACGTGCGTCATAGAGTCCCCTATGCATGTG--GTGACGAGTCTCACATCGTG  171
+2000         114   ......................................--....................  171
+BN000001.1   1                                          .--....................  21
+EP1000000_2  114   .......AC................TAT.........CCA..-.-...............  171
+CAA00001.1   114   .ACC...A.TT.A..C......................--............TTGC..CT  171
+
+Query_1      172   GCAGGACGTCCTGCCCGTCCGACTTTGACTCGGAGCGTACGCCACACCATTTCACCCGAT  231
+2000         172   ............................................................  231
+BN000001.1   22    ....AT.TA......GCC........................GTT...........T...  81
+EP1000000_2  172   ..............................AAA............G.A............  231
+CAA00001.1   172   .........................C.......GTG................GT...A.G  231
+
+Query_1      232   CCTTTCTTTGTATGTAGGTGTAGAAGAG-ACTATTCTATCCAATACATGCTTCAGCCGAG  290
+2000         232   ............................-...............................  290
+BN000001.1   82    .........CC.................-...CA..........................  140
+EP1000000_2  232   .........                                                     240
+CAA00001.1   232   TA.......C.G...C.A..........T.G.G.GG-..................AGT..  290
+
+Query_1      291   ACTACTTCGCCC-GTCCGAAAATGTGGAATCCGGGACTTGTGCGAAC-CTAGTTATGCGA  348
+2000         291   ............-..................................-............  348
+BN000001.1   141   ............-...................ATC............T..-.........  198
+AY000001.1   1               ..-...................CAT....C.......-........T...  48
+CAA00001.1   291   ..........G.T.A.A.-................TA.....T..C.-.......       343
+
+Query_1      349   GCGGTTGTTAAAGTATCTGCA-TATGACTTCGCCGTTAAAACAAGTAACGATTTTGATGG  407
+2000         349   .....................-......................................  407
+BN000001.1   199   ......AGC....CT......-......................................  257
+AY000001.1   49    C.A............AGA...GCC..-T.........TGT.............CC.....  107
+
+Query_1      408   AGGTGTGTGCGAGCGCGACAAAAGCTATGTGACTCTTATACCAAGT-GGTTTGAGTACCC  466
+2000         408   ...........................................                   450
+2000         900                                              ...G...C.........  916
+BN000001.1   258   .AAG.....................C.A.............AC...-.............  316
+AY000001.1   108   ..AC......ATA.................................-.............  166
+
+Query_1      467   CATTTGTTAATCTTGTACGTCACGCCATGCAATTGAAAGTGCCAT-CACGCCTCGCT-GC  524
+2000         917   ..........................GCC...........-.T..T...........T..  975
+BN000001.1   317   ..AGGAGG...........................C.G.......-...........--.  373
+AY000001.1   167   GT...................CT......................-.....-....CC..  224
+
+Query_1      525   T-TGTTATA-CTCACCTAGCGGCTTTAAAAGGT-CTTGGAT-CTC-CGAGGCTTACAGAA  579
+2000         976   ---.AC..TG.C....CC...............A.CC..-.-...-.............C  1029
+BN000001.1   374   .G.......-.....GGG.......CG......-......AG...A.C.--...C.....  429
+AY000001.1   225   .-.......-.................CT....-...CCG.-...-...             268
+
+Query_1      580   TATAACCGCTGTAGTACTCATTCTGGACGTGGCCTATTCGAGCCTGAATCTACGCTTGGG  639
+2000         1030  ...CCG..........TC.......................C..................  1089
+BN000001.1   430   AG...................                                         450
+
+Query_1      640   GATCCCAGTAGAGTGCAAATACCACTCACCGAGACTAGG-TGCAACAGTCGTTTGGTAAC  698
+2000         1090  ..C...............................G-..CC......CTG...C.--..T.  1146
+
+Query_1      699   ACCGA-T-CACGAATTATTGTACATCAAAGTCTAGAGAGCCACGACACTCGTGTAACTTA  756
+2000         1147  ..A.TC.C....G.C...............A.C.........GCT.........GT....  1206
+
+Query_1      757   GTTCGGGTTAACGTTATATTGATATGTAACTCC-GCTAGGGGGTACCTGTGCAAGCGCTC  815
+2000         1207  ...GAC...........................A..-.......CG..............  1265
+
+Query_1      816   GCGAGGGACAGAGTACCATAAATTCACATCCTCAGAATTTTCCAGCCCCCCATGGATGAA  875
+2000         1266  ................AG.................GG................CC...GT  1325
+
+Query_1      876   CCTCACTCTTGTAAATTATCAGAAT  900
+2000         1326  GACA...T.A...............  1350
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 2583576
+
+
+<b>Query=</b> nq2 unrelated query (no hits)
+
+Length=120
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 319806
+
+
+  Database: in/nmix_ids.fna
+    Posted date:  Nov 17, 2026  10:56 PM
+  Number of letters in database: 3,000
+  Number of sequences in database:  6
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>

@@ -12,38 +12,136 @@ pub(super) type Interval = (u32, u32);
 /// end it, or are longer than `max_ns` (dustmasker's `-window` as given, as an unsigned 32-bit
 /// number). NCBI counts each letter in `Uint4`s: a run starts at its index modulo 2^32 and is as
 /// long as its length modulo 2^32, and a run whose length is a multiple of 2^32 counts as none.
-/// The search goes 16 letters at a time (`first_from`).
+///
+/// The letters are read 16 at a time as a mask of their `N`s (`n_mask`). A block that leaves the
+/// state as it was (no `N` after a letter that is not `N`, or only `N` inside a run) is passed
+/// with that one test. In the others, the run that comes into the block is closed and the one
+/// that goes on after it is opened, both at the edges of the mask. The runs that start and end
+/// inside the block are visited only when one of them is kept (`inner_runs`): one longer than
+/// `max_ns` (`RunTest`) or one at position 0.
 fn long_n_runs(max_ns: u32, seq: &[u8]) -> Vec<Interval> {
     let mut runs = Vec::new();
-    let mut from = 0;
-    while let Some(start) = first_from(seq, from, |letter| letter == b'N') {
-        let end = first_from(seq, start, |letter| letter != b'N').unwrap_or(seq.len());
+    let close = |runs: &mut Vec<Interval>, start: usize, end: usize| {
         let (pos, ns) = (start as u32, (end - start) as u32);
-        if ns > 0 && (end == seq.len() || ns > max_ns || pos == 0) {
+        if ns > 0 && (ns > max_ns || pos == 0) {
             runs.push((pos, pos.wrapping_add(ns).wrapping_sub(1)));
         }
-        from = end;
+    };
+    let longer = RunTest::new(max_ns);
+    // Whether the letters so far end in a run of `N`, and the index where that run starts.
+    let mut in_run = false;
+    let mut open = 0;
+    let (blocks, tail) = seq.as_chunks::<16>();
+    for (index, block) in blocks.iter().enumerate() {
+        let (low, high) = n_mask(block);
+        if !in_run && (low | high) == 0 {
+            continue;
+        }
+        let mask = gather(low) | gather(high) << 8;
+        if in_run && mask == 0xffff {
+            continue;
+        }
+        let base = index * 16;
+        let others = !mask & 0xffff;
+        let mut inner = mask;
+        if in_run {
+            let end = others.trailing_zeros();
+            close(&mut runs, open, base + end as usize);
+            inner &= !((1 << end) - 1);
+        }
+        in_run = mask & 0x8000 != 0;
+        if in_run {
+            let start = 32 - others.leading_zeros();
+            open = base + start as usize;
+            inner &= (1 << start) - 1;
+        }
+        let base = base as u32;
+        if longer.holds(inner) != 0 || (base == 0 && inner & 1 != 0) {
+            inner_runs(&mut runs, inner, base, max_ns);
+        }
+    }
+    let base = seq.len() - tail.len();
+    for (offset, &letter) in tail.iter().enumerate() {
+        if letter == b'N' {
+            if !in_run {
+                (in_run, open) = (true, base + offset);
+            }
+        } else if in_run {
+            close(&mut runs, open, base + offset);
+            in_run = false;
+        }
+    }
+    if in_run {
+        let (pos, ns) = (open as u32, (seq.len() - open) as u32);
+        if ns > 0 {
+            runs.push((pos, pos.wrapping_add(ns).wrapping_sub(1)));
+        }
     }
     runs
 }
 
-/// The index of the first letter of `seq` from `from` on for which `wanted` holds. Each block of
-/// 16 letters is tested whole first (a test without a branch per letter).
-fn first_from(seq: &[u8], from: usize, wanted: impl Fn(u8) -> bool) -> Option<usize> {
-    let rest = &seq[from..];
-    let (blocks, _) = rest.as_chunks::<16>();
-    let at = blocks
-        .iter()
-        .position(|block| {
-            block
-                .iter()
-                .fold(false, |any, &letter| any | wanted(letter))
-        })
-        .map_or(blocks.len() * 16, |block| block * 16);
-    rest[at..]
-        .iter()
-        .position(|&letter| wanted(letter))
-        .map(|off| from + at + off)
+/// The high bit of each byte of `word` that is zero; no other bit is set.
+fn zero_bytes(word: u64) -> u64 {
+    const LOW7: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    !(((word & LOW7) + LOW7) | word | LOW7)
+}
+
+/// The `N`s of `block` as the high bits of its bytes, 8 letters in each word.
+fn n_mask(block: &[u8; 16]) -> (u64, u64) {
+    const NS: u64 = 0x4e4e_4e4e_4e4e_4e4e;
+    let (low, high) = block.split_at(8);
+    let word = |bytes: &[u8]| u64::from_le_bytes(bytes.try_into().expect("8 letters")) ^ NS;
+    (zero_bytes(word(low)), zero_bytes(word(high)))
+}
+
+/// Bit k of the result is the high bit of byte k of `bits` (`bits` as `zero_bytes` gives).
+fn gather(bits: u64) -> u32 {
+    ((bits >> 7).wrapping_mul(0x0102_0408_1020_4080) >> 56) as u32
+}
+
+/// Whether a 16-bit mask holds a run of more than `max_ns` set bits: `holds(x)` has bit k set
+/// when bits k to k + `max_ns` of `x` are all set (never when `max_ns` is 16 or more). Each shift
+/// at most doubles the length of the runs it tests, so 5 shifts reach 17.
+struct RunTest {
+    shifts: [u32; 5],
+}
+
+impl RunTest {
+    fn new(max_ns: u32) -> Self {
+        let wanted = max_ns.saturating_add(1).min(17);
+        let mut shifts = [0; 5];
+        let mut covered = 1;
+        for shift in &mut shifts {
+            *shift = covered.min(wanted - covered);
+            covered += *shift;
+        }
+        Self { shifts }
+    }
+
+    fn holds(&self, mut x: u32) -> u32 {
+        for &shift in &self.shifts {
+            x &= x >> shift;
+        }
+        x
+    }
+}
+
+/// The kept runs of `inner`, a block's mask of `N`s without the runs that cross its edges, the
+/// block starting at `base` (modulo 2^32): the k-th start of a run with the k-th end. A function
+/// of its own, so that the loop over the blocks keeps its registers.
+#[inline(never)]
+fn inner_runs(runs: &mut Vec<Interval>, inner: u32, base: u32, max_ns: u32) {
+    let mut starts = inner & !(inner << 1);
+    let mut ends = (inner << 1) & !inner;
+    while starts != 0 {
+        let (start, end) = (starts.trailing_zeros(), ends.trailing_zeros());
+        starts &= starts - 1;
+        ends &= ends - 1;
+        let pos = base.wrapping_add(start);
+        if end - start > max_ns || pos == 0 {
+            runs.push((pos, pos.wrapping_add(end - start - 1)));
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:212-225

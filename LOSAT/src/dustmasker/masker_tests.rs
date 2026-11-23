@@ -69,16 +69,41 @@ fn runs_found_block_by_block_are_those_counted_letter_by_letter() {
             } else {
                 b"ACGTn"[next(5) as usize]
             };
-            let length = [0, 1, 2, 15, 16, 17, 31, 32, 33, 40][next(10) as usize];
+            let length = [0, 1, 2, 3, 5, 7, 15, 16, 17, 31, 32, 33, 40][next(13) as usize];
             seq.extend(std::iter::repeat_n(letter, length));
         }
-        for max_ns in [0, 1, 2, 15, 16, 17, 64, u32::MAX] {
+        for max_ns in [0, 1, 2, 3, 7, 8, 14, 15, 16, 17, 64, u32::MAX] {
             assert_eq!(
                 long_n_runs(max_ns, &seq),
                 long_n_runs_by_letter(max_ns, &seq),
                 "{max_ns} {:?}",
                 String::from_utf8_lossy(&seq)
             );
+        }
+    }
+}
+
+#[test]
+fn every_block_of_16_letters_gives_the_runs_counted_letter_by_letter() {
+    // Every pattern of `N` in the second block, after a block of `N` (a run that comes in) or of
+    // `A`, with no letter after it or with one `N` or `A`.
+    for pattern in 0..=u16::MAX {
+        for (before, after) in [
+            (b'N', None),
+            (b'A', None),
+            (b'N', Some(b'N')),
+            (b'A', Some(b'A')),
+        ] {
+            let mut seq = vec![before; 16];
+            seq.extend((0..16).map(|k| if pattern >> k & 1 == 1 { b'N' } else { b'C' }));
+            seq.extend(after);
+            for max_ns in [0, 1, 2, 7, 14, 15, 64] {
+                assert_eq!(
+                    long_n_runs(max_ns, &seq),
+                    long_n_runs_by_letter(max_ns, &seq),
+                    "{max_ns} {pattern:#06x} {before} {after:?}"
+                );
+            }
         }
     }
 }

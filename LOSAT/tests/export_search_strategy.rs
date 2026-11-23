@@ -20,7 +20,14 @@
 //! batch: the file and the standard output are NCBI's of a near input whose reader stops at that
 //! batch (`near:` rows, line WQA D10 round 5, 2026-11-20).
 //! The first batch's request alone when NCBI fails to format that batch in BLAST XML (a matrix
-//! name its XML data does not know). psiblast's request of each query (before its rounds, with the
+//! name its XML data does not know). Under `-parse_deflines` with such a name and without
+//! `-export_search_strategy`, two queries with one id end with NCBI's failure where it comes
+//! before NCBI shows anything that the repeated record's letters decide (the `.pd.xmlmatrix.`
+//! rows, line RG-KB item 7: a repeat in the first query's batch, and with held reports a repeat in
+//! any batch up to that of the first query of another id, a later batch's too where NCBI's set-up
+//! of it, in the first record's letters, passes); a batch whose every searched record is a repeat
+//! longer than its first record stays refused (NCBI's set-up stops at the first record's end:
+//! `CSeqVector_CI: cannot locate segment`). psiblast's request of each query (before its rounds, with the
 //! search space of the query before; `Web_StepNumber`), rpsblast's and rpstblastn's (the profile
 //! database's length and `.aux` costs in the requests after the first; `-mt_mode 1` at 4 and 8
 //! threads writes NCBI's `-num_threads 1` file, DECISIONS F1b-2). A PSSM query's request with
@@ -260,43 +267,41 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
                     crate::outfmt11_blastx::first_difference(written, want)
                 );
             }
-            if case.check == "parser" {
-                assert!(output.stdout.is_empty(), "{label}: standard output");
-                assert!(stderr.starts_with("error: "), "{label}: {stderr}");
-            } else {
-                let want_out = crate::outfmt11_blastx::expected_losat_bytes(
-                    frozen(&case.name, "out").unwrap_or_default(),
-                );
-                assert!(
-                    output.stdout == want_out,
-                    "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
-                    output.stdout.len(),
-                    want_out.len(),
-                    crate::outfmt11_blastx::first_difference(&output.stdout, &want_out)
-                );
-                let engine = engine();
-                let rps = dir.join("rpsdb");
-                let mut stderr = stderr;
-                for form in [std::fs::canonicalize(&rps).unwrap_or_default(), rps] {
-                    if !form.as_os_str().is_empty() {
-                        stderr = stderr.replace(form.to_str().unwrap(), "{RPS}");
-                    }
+            // NCBI's bytes on both streams; a `parser` case's are NCBI's argument reader's (its
+            // usage and posts on the standard error, nothing on the standard output: line RG item
+            // K4i-2b round 2, frozen on the workstation with NCBI BLAST+ 2.17.0).
+            let want_out = crate::outfmt11_blastx::expected_losat_bytes(
+                frozen(&case.name, "out").unwrap_or_default(),
+            );
+            assert!(
+                output.stdout == want_out,
+                "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
+                output.stdout.len(),
+                want_out.len(),
+                crate::outfmt11_blastx::first_difference(&output.stdout, &want_out)
+            );
+            let engine = engine();
+            let rps = dir.join("rpsdb");
+            let mut stderr = stderr;
+            for form in [std::fs::canonicalize(&rps).unwrap_or_default(), rps] {
+                if !form.as_os_str().is_empty() {
+                    stderr = stderr.replace(form.to_str().unwrap(), "{RPS}");
                 }
-                let stderr = stderr.replace(engine.to_str().unwrap(), "{ENGINE}");
-                let stderr = if cfg!(windows) {
-                    unix_separators(&stderr)
-                } else {
-                    stderr
-                };
-                let want_err = crate::outfmt11_blastx::expected_losat_bytes(
-                    frozen(&case.name, "err").unwrap_or_default(),
-                );
-                assert_eq!(
-                    stderr,
-                    String::from_utf8_lossy(&want_err),
-                    "{label}: stderr"
-                );
             }
+            let stderr = stderr.replace(engine.to_str().unwrap(), "{ENGINE}");
+            let stderr = if cfg!(windows) {
+                unix_separators(&stderr)
+            } else {
+                stderr
+            };
+            let want_err = crate::outfmt11_blastx::expected_losat_bytes(
+                frozen(&case.name, "err").unwrap_or_default(),
+            );
+            assert_eq!(
+                stderr,
+                String::from_utf8_lossy(&want_err),
+                "{label}: stderr"
+            );
         }
         "refuse" => {
             assert!(output.stdout.is_empty(), "{label}: standard output");

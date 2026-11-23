@@ -1,0 +1,305 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nz nc
+           4 sequences; 978 total letters
+
+
+
+Query= q1
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sZ_nz_nc subject sZ                                                   73.9    1e-24
+sM_nz_nc subject sM                                                   73.9    2e-24
+sN_nz_nc subject sN                                                   50.8    2e-15
+
+
+>sZ_nz_nc subject sZ
+Length=249
+
+ Score = 73.9 bits (180),  Expect = 1e-24
+ Identities = 0/60 (0%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  183
+
+
+>sM_nz_nc subject sM
+Length=423
+
+ Score = 73.9 bits (180),  Expect = 2e-24
+ Identities = 0/60 (0%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  183
+
+
+>sN_nz_nc subject sN
+Length=123
+
+ Score = 50.8 bits (120),  Expect = 2e-15
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  40
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+
+Lambda      K        H        a         alpha
+   0.390    0.205    0.673    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 12420
+
+
+Query= q2
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sM_nz_nc subject sM                                                   184     5e-67
+sI_nz_nc subject sI                                                   139     3e-49
+sZ_nz_nc subject sZ                                                   73.9    2e-23
+sN_nz_nc subject sN                                                   50.8    2e-14
+
+
+>sM_nz_nc subject sM
+Length=423
+
+ Score = 184 bits (468),  Expect = 5e-67
+ Identities = 60/160 (38%), Positives = 120/160 (75%), Gaps = 40/160 (25%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  183
+
+Query  61   DDDDDDDDDDDDDDDDDDDD--------------------FFYEQYGQLGRYMGGALKMC  100
+                                                    FFYEQYGQLGRYMGGALKMC
+Sbjct  184  --------------------WWWWWWWWWWWWWWWWWWWWFFYEQYGQLGRYMGGALKMC  303
+
+Query  101  SDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  140
+            SDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC
+Sbjct  304  SDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  423
+
+
+>sI_nz_nc subject sI
+Length=183
+
+ Score = 139 bits (350),  Expect = 3e-49
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  81   FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  140
+            FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC
+Sbjct  4    FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  183
+
+
+>sZ_nz_nc subject sZ
+Length=249
+
+ Score = 73.9 bits (180),  Expect = 2e-23
+ Identities = 0/60 (0%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+            ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  183
+
+
+>sN_nz_nc subject sN
+Length=123
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  40
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+
+Lambda      K        H        a         alpha
+   0.345    0.164    0.566    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 29520
+
+
+Query= q3
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sI_nz_nc subject sI                                                   139     1e-50
+sM_nz_nc subject sM                                                   139     2e-50
+sZ_nz_nc subject sZ                                                   18.9    0.006
+sN_nz_nc subject sN                                                   16.5    0.035
+
+
+>sI_nz_nc subject sI
+Length=183
+
+ Score = 139 bits (350),  Expect = 1e-50
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  60
+            FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC
+Sbjct  4    FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  183
+
+
+>sM_nz_nc subject sM
+Length=423
+
+ Score = 139 bits (350),  Expect = 2e-50
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  60
+            FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC
+Sbjct  244  FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  423
+
+
+>sZ_nz_nc subject sZ
+Length=249
+
+ Score = 18.9 bits (37),  Expect = 0.006
+ Identities = 6/23 (26%), Positives = 10/23 (43%), Gaps = 0/23 (0%)
+ Frame = +2
+
+Query  31   SKVQCTWSCSRQYNYFIEIAYTC  53
+            S   C ++C+    +     YTC
+Sbjct  77   STFMCMYTCTFMCTFMSTSTYTC  145
+
+
+>sN_nz_nc subject sN
+Length=123
+
+ Score = 16.5 bits (31),  Expect = 0.035
+ Identities = 5/19 (26%), Positives = 8/19 (42%), Gaps = 0/19 (0%)
+ Frame = +2
+
+Query  35  CTWSCSRQYNYFIEIAYTC  53
+           C ++C     +     YTC
+Sbjct  11  CMFTCMSTSMFTCTFMYTC  67
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.139    0.498    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 12420
+
+
+Query= q4
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sI_nz_nc subject sI                                                   139     3e-49
+sM_nz_nc subject sM                                                   139     5e-49
+sZ_nz_nc subject sZ                                                   73.9    2e-23
+sN_nz_nc subject sN                                                   50.8    2e-14
+
+
+>sI_nz_nc subject sI
+Length=183
+
+ Score = 139 bits (350),  Expect = 3e-49
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  60
+            FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC
+Sbjct  4    FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  183
+
+
+>sM_nz_nc subject sM
+Length=423
+
+ Score = 139 bits (350),  Expect = 5e-49
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  60
+            FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC
+Sbjct  244  FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  423
+
+
+>sZ_nz_nc subject sZ
+Length=249
+
+ Score = 73.9 bits (180),  Expect = 2e-23
+ Identities = 0/60 (0%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  81   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  140
+            ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  183
+
+
+>sN_nz_nc subject sN
+Length=123
+
+ Score = 50.8 bits (120),  Expect = 2e-14
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  81   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  120
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  123
+
+
+
+Lambda      K        H        a         alpha
+   0.345    0.164    0.566    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 29520
+
+
+  Database: nz nc
+    Posted date:  Nov 5, 2026  5:53 AM
+  Number of letters in database: 978
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 9
+Window for multiple hits: 40

@@ -93,6 +93,12 @@ fn a_batch_searched_whole_is_left_the_threads_of_its_places() {
             };
             assert_eq!((per_task(40, 4), per_task(40, 2)), (3, 5));
             assert_eq!(per_task(100_000, 4), 64);
+            // At most ceil(subjects / 4) threads: 8 subjects in tasks of one on 2 threads, 1 or
+            // none on 1.
+            let threads = |subjects| super::flow_threads(&pool, &options, subjects, Some(4));
+            assert_eq!((threads(8), threads(9), threads(16)), (2, 3, 4));
+            assert_eq!((threads(1), threads(0)), (1, 1));
+            assert_eq!(per_task(8, 4), 1);
         }
         // A unit of one place: the pool's threads and tasks of 64, as before.
         assert_eq!(super::flow_threads(&pool, &options, 40, None), 4);

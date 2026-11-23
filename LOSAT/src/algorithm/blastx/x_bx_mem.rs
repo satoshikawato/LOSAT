@@ -129,8 +129,9 @@
 //!   at a time than with the split's units, and one of more places than the threads (K under the
 //!   cap) with no other such batch. It is left the threads of its places (`whole_batch_threads`:
 //!   one per place without the cap, a unit's share under it, at most all of them). These threads
-//!   take its subjects as the flow's tasks, `LOSAT_X_BXCAPFILL`'s f tasks for each of them
-//!   (`flow_subjects_per_task`, `flow_threads`; the helpers leave once every task is claimed, as
+//!   take its subjects as the flow's tasks, `LOSAT_X_BXCAPFILL`'s f tasks for each of them, and
+//!   no more threads than have f tasks (`flow_subjects_per_task`, `flow_threads`: each holds a
+//!   diagonal table of the batch's letters; the helpers leave once every task is claimed, as
 //!   inside the capped flow), build its lookup table in as many parts (`LOSAT_X_BXBUILDPAR`), and
 //!   compute its contexts' Karlin blocks on the pool (`parameters::score_block_for_in`), the work
 //!   that the split's units had done side by side. Without them such a batch searched its subjects
@@ -444,7 +445,10 @@ pub(crate) fn flow_subjects_per_task(
 /// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`): the threads the subject flow of a
 /// batch searched on `pool` takes (its own and the helpers): the pool's, for a batch of one task
 /// of the capped batch flow (`one_task`) the threads the cap leaves it, and for a reader batch
-/// searched whole those it is left (`whole`, `whole_batch_threads`).
+/// searched whole those it is left (`whole`, `whole_batch_threads`), at most ceil(subjects / f)
+/// with the fill's f: every thread then has f tasks (of one subject where the subjects are few),
+/// and no thread holds a diagonal table of the batch's letters (`next_pow2(letters + window)`
+/// cells of 4 bytes, 8 MiB for 1,000,000 letters) for fewer subjects than that.
 pub(crate) fn flow_threads(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,
@@ -452,7 +456,7 @@ pub(crate) fn flow_threads(
     whole: Option<usize>,
 ) -> usize {
     if let Some(share) = whole {
-        return share;
+        return cap_fill().map_or(share, |f| share.min(subjects.div_ceil(f).max(1)));
     }
     match search_cap_k(pool.threads(), options, subjects) {
         Some((k, _)) if in_capped_batch(pool) && one_task_bound(options, subjects) => {

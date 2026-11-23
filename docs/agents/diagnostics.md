@@ -7308,7 +7308,8 @@ Scheduling (each value computed by one thread with the original function; order 
   a sequence apart), which the batch flow searches alone once its places exceed the threads, is left the threads of
   its places (`x_bx_mem::whole_batch_threads`: its places times the threads a unit of one place is left, 1 without
   the cap and ceil(threads / K) under it, at most the threads). Its subjects run as tasks of
-  ceil(subjects / (f x that share)) subjects (at most 64), its lookup table is built in that many parts
+  ceil(subjects / (f x that share)) subjects (at most 64) on at most ceil(subjects / f) of those threads (each
+  holds a diagonal table of the batch's letters, 8 MiB for 1,000,000), its lookup table is built in that many parts
   (`LOSAT_X_BXBUILDPAR`, at most 8) and its contexts' Karlin blocks are computed on the pool, each by the statements
   of the serial loop, in context order. Before, a lone batch of 100,000 letters against the 40 proteins of `ov_atha`
   searched its subjects as one task on one thread. A unit of one place keeps its schedule.

@@ -675,6 +675,23 @@ fn a_panic_writes_the_requests_held_for_a_sink_that_cannot_be_cut() {
     let _ = end_run(Some(&strategy), Ok(()));
     let all = [all, with_space(5)].concat();
     assert_eq!(sink.text(), all);
+    // Every lock that the hook takes was given back (`hook_lock`): a panic after it waits for none
+    // that its own thread holds.
+    assert_eq!(HOOK_LOCKS.get(), 0);
     let (file, _) = made(true);
     assert!(!kept(&file));
+}
+
+/// The panic hook of a thread that holds one of the hook's locks (a panic inside such a step)
+/// returns at once instead of waiting for it (`write_held_at_panic`, `hook_lock`), and the count
+/// of such locks goes back to none when the lock is given back.
+#[test]
+fn the_panic_hook_does_not_wait_for_a_lock_its_own_thread_holds() {
+    let lock = Mutex::new(());
+    {
+        let _held = hook_lock(&lock);
+        assert_eq!(HOOK_LOCKS.get(), 1);
+        write_held_at_panic();
+    }
+    assert_eq!(HOOK_LOCKS.get(), 0);
 }

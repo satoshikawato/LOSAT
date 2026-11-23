@@ -178,7 +178,11 @@ fn karlin_blocks<const UNGAPPED: bool>(
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
                 if prolog_with_report(format, output_format) {
-                    write_format_prolog(format, output_format, intro, shown)?;
+                    let posts = crate::report::query_warnings::html_posts_sink(
+                        outputs.html_posts.as_deref_mut(),
+                        &mut *outputs.diagnostics,
+                    );
+                    write_format_prolog(format, output_format, intro, shown, posts)?;
                 }
             }
             return Err(karlin_error(&message, empty_queries));

@@ -33,7 +33,26 @@ const HARMLESS_ENTRIES: &[(&str, &str)] = &[
     ("NCBI", "DATA"),
     ("NCBI", "DONT_USE_NCBIRC"),
     ("WINDOW_MASKER", "WINDOW_MASKER_PATH"),
+    // The formatter's own reads (`report::formatter_registry`): it reads `./.ncbirc` (or the file
+    // of `FMTCFG`/`$NCBI`) by itself, so these entries of the application's registry change no
+    // output; NCBI BLAST+ 2.17.0 writes every plain run with them as without (line RG T4 probes
+    // `rc_p_http`, `rc_p_empty`, `rc_taxbr`, `rc_localid`, `rc_feat`: each `.p` case equals its
+    // base), and LOSAT implements their effects on `-html` and outfmt 18 (SURVEY_T4 §1.7, Q5).
+    ("BLASTFMTUTIL", "PROTOCOL"),
+    ("BLASTFMTUTIL", "INCLUDE_BASE_DIR"),
+    ("TAX_BROWSER", "BLASTFMTUTIL"),
+    ("LOCAL_ID", "TOOL_URL"),
+    ("LOCAL_ID", "TOOL_URL_ALIGN"),
+    ("FEATURE_INFO", "FEATURE_FILE"),
+    ("FEATURE_INFO", "FEATURE_FILE_INDEX"),
 ];
+
+/// `[BLASTFMTUTIL]` entries of `CAlignFormatUtil::GetURLFromRegistry` for the name `LOCAL_ID`,
+/// which reads them with or without the suffix `_<index>` and never uses what it builds of them
+/// (`GetIDUrlGen` of a local id, `formatter_registry`): they change no output either.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3453-3456, 3462-3463
+const LOCAL_ID_URL_ENTRIES: &[&str] = &["LOCAL_ID_HOST_PORT", "LOCAL_ID_FORMAT"];
 
 /// Environment variables, besides the `DIAG_` and `NCBI_CONFIG__` families, that the NCBI
 /// C++ Toolkit reads for every application and that change its error output or exit status.
@@ -74,6 +93,20 @@ fn is_harmless_entry(section: &str, name: &str) -> bool {
     // 2.17.0 with `[BLAST] BLAST_USAGE_REPORT=maybe` in `blastn.ini`, or in `.ncbirc` with
     // `BLAST_USAGE_REPORT=false`: rc 0, g_reg probes `l1.ini`, `l1.rc_ur0`).
     if section.eq_ignore_ascii_case("BLAST") && name.eq_ignore_ascii_case("BLAST_USAGE_REPORT") {
+        return true;
+    }
+    if section.eq_ignore_ascii_case("BLASTFMTUTIL")
+        && LOCAL_ID_URL_ENTRIES.iter().any(|key| {
+            name.get(..key.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(key))
+                && match &name[key.len()..] {
+                    "" => true,
+                    index => index.strip_prefix('_').is_some_and(|digits| {
+                        !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+                    }),
+                }
+        })
+    {
         return true;
     }
     HARMLESS_ENTRIES
@@ -903,7 +936,7 @@ fn check_registry_entries(path: &Path, entries: &[RegistryEntry]) -> Result<(), 
     for RegistryEntry { section, name, .. } in entries {
         if !is_harmless_entry(section, name) {
             return Err(format!(
-                "the registry file {} sets [{section}] {name}, which LOSAT does not know to change no output of NCBI BLAST+ (LOSAT accepts only [BLAST] BLASTDB, BLASTMAT, DATA_LOADERS, BLASTDB_NUCL_DATA_LOADER, BLASTDB_PROT_DATA_LOADER, IGDATA, MAX_SEQID_LENGTH, BLAST_USAGE_REPORT, [NCBI] DATA and DONT_USE_NCBIRC, [WINDOW_MASKER] WINDOW_MASKER_PATH); this is not supported by LOSAT",
+                "the registry file {} sets [{section}] {name}, which LOSAT does not know to change no output of NCBI BLAST+ (LOSAT accepts only [BLAST] BLASTDB, BLASTMAT, DATA_LOADERS, BLASTDB_NUCL_DATA_LOADER, BLASTDB_PROT_DATA_LOADER, IGDATA, MAX_SEQID_LENGTH, BLAST_USAGE_REPORT, [NCBI] DATA and DONT_USE_NCBIRC, [WINDOW_MASKER] WINDOW_MASKER_PATH, [BLASTFMTUTIL] PROTOCOL, INCLUDE_BASE_DIR, LOCAL_ID_HOST_PORT and LOCAL_ID_FORMAT (also with _<n>), [TAX_BROWSER] BLASTFMTUTIL, [LOCAL_ID] TOOL_URL and TOOL_URL_ALIGN, [FEATURE_INFO] FEATURE_FILE and FEATURE_FILE_INDEX); this is not supported by LOSAT",
                 path.display()
             ));
         }

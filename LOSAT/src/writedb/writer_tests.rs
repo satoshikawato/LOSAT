@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
-use super::union_of_tax_ids;
+use super::{build_lmdb_file_name, union_of_tax_ids};
 use crate::seqid::BlastDefline;
+use crate::writedb::WriteDbError;
 
 /// A definition line with `taxid` and `links`.
 fn line(taxid: Option<i32>, links: Option<&[i32]>) -> BlastDefline {
@@ -45,4 +46,22 @@ fn the_tax_ids_of_a_set_are_the_union_of_each_line_s() {
             "{deflines:?}"
         );
     }
+}
+
+// `BuildLMDBFileName` of an empty basename throws `std::invalid_argument` (makeprofiledb `-out ''`
+// in version 5, rows RZ03 and RZ05: the handler's unknown exception).
+#[test]
+fn an_empty_basename_has_no_lmdb_file_name() {
+    assert_eq!(
+        build_lmdb_file_name("db", true).ok().as_deref(),
+        Some("db.pdb")
+    );
+    assert_eq!(
+        build_lmdb_file_name("db.00", false).ok().as_deref(),
+        Some("db.00.ndb")
+    );
+    assert!(matches!(
+        build_lmdb_file_name("", true),
+        Err(WriteDbError::InvalidArgument("Basename is empty"))
+    ));
 }

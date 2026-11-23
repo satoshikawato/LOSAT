@@ -30,13 +30,14 @@ the shallowest from which every run crashed.
 
 A bisect found a first crash depth for each path; the depths up to 60 levels either side of it, in steps of 12, ran
 5 times each. The depths in between crash in some runs only (for example bioconda binary `mix` at 6,461 levels in 4
-of 5 runs, official text `mix` at 6,886 in 3 of 5). The official build's table is the last of three surveys of the
-same day; the other two put each boundary within 11 levels of it. Several things move the crash depth: the build,
-the stack limit, the lengths of the command line and the environment, and the stack's random start at each run.
+of 5 runs, official text `mix` at 6,886 in 3 of 5). The official build's table is the third of four surveys
+(2026-11-23 10:49, 20:53 and 22:07, 2026-11-24 02:32 JST); the other three put each boundary within 11 levels of
+it. Several things move the crash depth: the build, the stack limit, the lengths of the command line and the
+environment, and the stack's random start at each run.
 
 With no stack limit (`ulimit -s unlimited`), NCBI reads every nest tried, up to 100,000 levels, and writes its
-normal database (at 100,000 levels in 0.2-0.5 s, with 205-239 MB of memory for the bioconda build and 170-201 MB for
-the official one). For a file damaged deep inside a nest, NCBI writes its report, which names every frame of the
+normal database (at 100,000 levels in 0.2-0.55 s, with 205-239 MB of memory for the bioconda build and 170-200 MB
+for the official one). For a file damaged deep inside a nest, NCBI writes its report, which names every frame of the
 nest. These reports grow with the depth; at 100,000 levels they take about 25 s and are 2 MB long.
 
 A number too large for `int` in a text file gives a different report: one line per frame. It took 0.5 s at 401
@@ -53,9 +54,9 @@ Its reports take time linear in the depth.
 - In all 90 rows of `results.tsv` LOSAT's exit status, standard output, database and the nest frames of its report
   equal those of NCBI's bioconda run with no stack limit; the 60 rows run with the official release too equal
   that build's.
-- At 100,000 levels LOSAT takes at most 0.09 s and 25 MB, where NCBI takes 0.2-0.5 s and 170-239 MB; a damaged
-  file at most 0.18 s and 16 MB, where NCBI takes 24-28 s and 204-210 MB.
-- The number too large for `int` at 20,000 levels takes LOSAT 0.19-0.27 s and 51 MB. Its report has the same
+- At 100,000 levels LOSAT takes at most 0.09 s and 26 MB, where NCBI takes 0.2-0.55 s and 170-239 MB; a damaged
+  file at most 0.12 s and 16 MB, where NCBI takes 24-28 s and 205-210 MB.
+- The number too large for `int` at 20,000 levels takes LOSAT 0.36 s and 51 MB. Its report has the same
   message and the same 80,012 frame lines in the same order as NCBI's (`compare_reports.py`: NCBI's location
   prefixes removed, LOSAT's words through `crate::wording`).
 
@@ -63,7 +64,8 @@ Dev before this change refused every nest of 97 levels and more ("objects nested
 
 ## The runs
 
-`results.tsv` has one row per kind, format and depth. Each row gives:
+`results.tsv` has one row per kind, format and depth (LOSAT's columns: the build of commit fc29d08f8). Each row
+gives:
 - the exit statuses of NCBI's 5 runs with 8 MiB, for the bioconda build and, for the kinds that read, the official
   release;
 - NCBI's run with no stack limit, dev's run, and LOSAT's runs with 8 MiB and with 2 MiB, each as

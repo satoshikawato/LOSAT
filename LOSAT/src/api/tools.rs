@@ -21,7 +21,7 @@ use std::io::{self, Read, Write};
 
 use super::error::Error;
 use crate::blastinput::ncbi_environment::{preparse, Preparsed};
-use crate::cli::{Cli, Commands};
+use crate::cli::Commands;
 use crate::writedb::makeblastdb;
 use crate::writedb::time::LocalTime;
 use crate::writedb::Platform;
@@ -75,17 +75,13 @@ fn refused(mut recorded: Recorded<'_>, reason: &[u8]) -> Error {
     }
 }
 
-/// The parser's refusal `error` of a tool's argv (makeblastdb's, which LOSAT's parser reads): the
-/// command line writes its message to standard error (`cli::command_line_message`, exit status 2),
-/// so it goes to the diagnostics, and the error is what the run wrote there without its last line
-/// feeds, as a tool's error (`outcome`), of the parser's kind (`Error::Argv`). The help (`-h`,
-/// `-help`), which the command line writes to standard output, is the error's text alone.
-fn parser_refused(mut recorded: Recorded<'_>, error: &clap::Error) -> Error {
-    if !error.use_stderr() {
-        return Error::Argv(crate::cli::render_message(error).into());
-    }
-    let _ = recorded.write_all(crate::cli::command_line_message(error, false).as_bytes());
-    Error::written_argv(recorded.bytes)
+/// LOSAT's refusal `reason` of an argument of a tool's argv (makeblastdb's, after NCBI's reader:
+/// `cli::reader::refusal_after_read`), written to its diagnostics as the command line writes it
+/// (`Error: ` and the reason; exit status 1 there); the error is the refusal's text, of the argv's
+/// kind (`Error::Argv`), as the searches' refusals of an argument.
+fn refused_argument(mut recorded: Recorded<'_>, reason: String) -> Error {
+    let _ = recorded.write_all(format!("Error: {reason}\n").as_bytes());
+    Error::Argv(reason.into_bytes())
 }
 
 /// Runs `blastdbcmd` with the words after the program name, as on the command line. `input` is what
@@ -261,13 +257,43 @@ pub fn run_makeblastdb(
         Ok(Some(status)) => return outcome(status, recorded.bytes),
         Err(reason) => return Err(refused(recorded, reason.as_bytes())),
     }
-    drop(opened.target);
-    let cli: Cli = match crate::cli::try_parse_with_own_start(words()) {
-        Ok(cli) => cli,
-        Err(error) => return Err(parser_refused(recorded, &error)),
+    // NCBI's reader of the words that the start leaves to it (`-dryrun` taken), as on the command
+    // line (`cli::main_entry`): the help on `output`, an argument error's usage on the
+    // diagnostics and its posts where the diagnostics go (the file of `-logfile`); `-xmlhelp`,
+    // whose XML only the command line writes, is refused.
+    let tool = crate::cli::reader::tool("makeblastdb").expect("makeblastdb is on the reader");
+    let (words, dryrun) = match preparse(argv) {
+        Preparsed::Words { words, dryrun, .. } => (words, dryrun),
+        Preparsed::Version(_) => unreachable!("the versions are printed above"),
     };
-    let Commands::Makedb(args) = cli.command else {
-        unreachable!("the first word names makeblastdb");
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    let mut diag = crate::ncbi_app::Diag::new(opened.target, &mut recorded, tool);
+    let read = crate::ncbi_app::read(tool, &words, output, &mut diag, None);
+    drop(diag);
+    let args = match read {
+        Ok(args) => args,
+        Err(crate::ncbi_app::ReadEnd::Exit(0)) => return Ok(()),
+        Err(crate::ncbi_app::ReadEnd::Exit(_)) => return Err(Error::written_argv(recorded.bytes)),
+        Err(crate::ncbi_app::ReadEnd::Refused(reason)) => {
+            return Err(refused_argument(recorded, reason))
+        }
+    };
+    // `-dryrun` ends here, after the settings that LOSAT refuses, as on the command line
+    // (`cli::main_entry`).
+    if dryrun {
+        return match opened.start.settings() {
+            Ok(_) => Ok(()),
+            Err(reason) => Err(refused(recorded, reason.as_bytes())),
+        };
+    }
+    let converted = match crate::cli::reader::refusal_after_read(tool, &args) {
+        Some(reason) => Err(reason),
+        None => crate::cli::reader::convert(tool, &args, false),
+    };
+    let args = match converted {
+        Ok(Commands::Makedb(args)) => args,
+        Ok(_) => unreachable!("makeblastdb's arguments are makeblastdb's"),
+        Err(reason) => return Err(refused_argument(recorded, reason)),
     };
     // NCBI's application layer reads the environment and the registry files before `Run`, and
     // LOSAT rejects the settings that change the output (`cli/main_entry.rs`).
@@ -275,10 +301,6 @@ pub fn run_makeblastdb(
         Ok(settings) => settings,
         Err(reason) => return Err(refused(recorded, reason.as_bytes())),
     };
-    // `-dryrun` ends here, as on the command line (`cli::main_entry`).
-    if matches!(preparse(argv), Preparsed::Words { dryrun: true, .. }) {
-        return Ok(());
-    }
     let checked = makeblastdb::check_registry_settings(
         &args,
         settings

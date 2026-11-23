@@ -38,7 +38,8 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
     let command = crate::cli::command_of("blastx").mut_subcommand("blastx", |blastx| {
         blastx.mut_arg("outfmt", |outfmt| outfmt.value_parser(v1_outfmt))
     });
-    match crate::cli::try_parse_from_command::<crate::cli::Cli, _, _>(command, argv)?.command {
+    let argv = argv.into_iter().map(Into::into).collect();
+    match crate::web_v1_argv::parse(command, argv).map_err(anyhow::Error::msg)? {
         crate::cli::Commands::Blastx(args) => Ok(args),
         _ => unreachable!("fixed BLASTX subcommand"),
     }

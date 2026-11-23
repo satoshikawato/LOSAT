@@ -301,8 +301,9 @@ fn option_values_that_are_not_utf8_are_rejected_explicitly() {
         inline.extend(&value);
         let joined = blastn_argv(vec![OsString::from_vec(inline)]);
         for argv in [separate, joined] {
-            let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
-            let message = render_message(&error);
+            let error = try_parse_from(argv).unwrap_err();
+            let message = error.to_string();
+            assert!(matches!(error, ArgvError::Refused(_)), "{message}");
             assert!(
                 message.contains(&format!("the value of {option} is not UTF-8"))
                     && message.contains("not supported by LOSAT's BLASTN"),
@@ -314,7 +315,8 @@ fn option_values_that_are_not_utf8_are_rejected_explicitly() {
 
 // makeblastdb keeps its values as UTF-8 strings: a value that is not UTF-8 (a file name of
 // `-in`, `-out`, `-mask_data`, `-taxid_map`, `-logfile`, a `-title`) is LOSAT's explicit
-// rejection, where the parser's own error named no option (line LIB-B, probe 2026-11-21).
+// rejection after NCBI's reader, in the words of makeblastdb's other refusals (line LIB-B,
+// probe 2026-11-21; line RG DECISIONS K4i-2b-2 (1)).
 #[test]
 fn makeblastdb_rejects_values_that_are_not_utf8_explicitly() {
     for option in [
@@ -335,12 +337,12 @@ fn makeblastdb_rejects_values_that_are_not_utf8_explicitly() {
             OsString::from(option),
             OsString::from_vec(b"n\xe9.x".to_vec()),
         ];
-        let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
-        let message = render_message(&error);
-        assert_eq!(error.kind(), ErrorKind::InvalidUtf8, "{option}: {message}");
+        let error = try_parse_from(argv).unwrap_err();
+        let message = error.to_string();
+        assert!(matches!(error, ArgvError::Refused(_)), "{option}: {message}");
         assert!(
             message.contains(&format!("the value of {option} is not UTF-8"))
-                && message.contains("not supported by LOSAT's MAKEBLASTDB"),
+                && message.contains("not supported by LOSAT's makeblastdb"),
             "{message}"
         );
     }
@@ -351,7 +353,7 @@ fn makeblastdb_rejects_values_that_are_not_utf8_explicitly() {
 // (c) of line SX).
 #[test]
 fn blastx_reads_the_ranges_and_rejects_values_that_are_not_utf8() {
-    let parsed = try_parse_from::<Cli, _, _>([
+    let parsed = try_parse_from([
         "losat",
         "blastx",
         "-query",
@@ -369,7 +371,7 @@ fn blastx_reads_the_ranges_and_rejects_values_that_are_not_utf8() {
     };
     assert_eq!(args.query_loc.as_deref(), Some("1-10"));
     assert_eq!(args.subject_loc.as_deref(), Some("2-5"));
-    let error = try_parse_from::<Cli, _, _>([
+    let error = try_parse_from([
         "losat",
         "blastx",
         "-query",
@@ -380,7 +382,11 @@ fn blastx_reads_the_ranges_and_rejects_values_that_are_not_utf8() {
         "2-5",
     ])
     .unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    // NCBI's reader: `-subject_loc` excludes `-db` (`Incompatible with argument`).
+    assert!(
+        matches!(&error, ArgvError::Report(text) if String::from_utf8_lossy(text).contains("Incompatible with argument")),
+        "{error}"
+    );
     for (option, value) in [
         ("-query_loc", vec![0xff]),
         ("-subject_loc", b"1-\xff".to_vec()),
@@ -388,7 +394,7 @@ fn blastx_reads_the_ranges_and_rejects_values_that_are_not_utf8() {
     ] {
         let mut argv = blastn_argv(vec![OsString::from(option), OsString::from_vec(value)]);
         argv[1] = OsString::from("blastx");
-        let message = render_message(&try_parse_from::<Cli, _, _>(argv).unwrap_err());
+        let message = try_parse_from(argv).unwrap_err().to_string();
         assert!(
             message.contains(&format!("the value of {option} is not UTF-8"))
                 && message.contains("not supported by LOSAT's BLASTX"),
@@ -397,50 +403,24 @@ fn blastx_reads_the_ranges_and_rejects_values_that_are_not_utf8() {
     }
 }
 
-// The rejection comes after the parser, as NCBI reads the value only after its
-// arguments parse: `-help` and the parser's errors come first.
+// The rejection comes after NCBI's reader, which reads the value's bytes: `-help` and the
+// reader's errors come first.
 #[test]
 fn help_and_parser_errors_come_before_a_value_that_is_not_utf8() {
     let mut argv = vec![OsString::from("losat"), OsString::from("blastn")];
     argv.push(OsString::from("-help"));
     argv.push(OsString::from("-query_loc"));
     argv.push(OsString::from_vec(vec![0xff]));
-    let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+    let error = try_parse_from(argv).unwrap_err();
+    assert!(matches!(error, ArgvError::Printed(_)), "{error}");
     let argv = blastn_argv(vec![
         OsString::from("-query_loc"),
         OsString::from_vec(vec![0xff]),
         OsString::from("-no_such_option"),
     ]);
-    let message = render_message(&try_parse_from::<Cli, _, _>(argv).unwrap_err());
-    assert!(!message.contains("not UTF-8"), "{message}");
-}
-
-// `try_parse_from` is generic: a caller's own type can name an option with letters that are
-// not ASCII, here U+FFFD (3 bytes), which a byte that is not UTF-8 also reads as in the
-// word's lossy text. The value of `-name=value` starts after the first `=` of the bytes,
-// not `name.len()` bytes on (which skipped `\xfe\xfd` and read `abc`).
-#[test]
-fn inline_value_starts_after_the_first_equals_sign() {
-    #[derive(clap::Parser)]
-    enum Own {
-        Blastn(OwnArgs),
-    }
-    #[derive(clap::Args)]
-    struct OwnArgs {
-        #[arg(long = "q\u{fffd}")]
-        q: Option<String>,
-    }
-    impl ProgramParser for Own {}
-    let argv = vec![
-        OsString::from("losat"),
-        OsString::from("blastn"),
-        OsString::from_vec(b"-q\xff=\xfe\xfdabc".to_vec()),
-    ];
-    let error = try_parse_from::<Own, _, _>(argv)
-        .err()
-        .expect("a value that is not UTF-8");
-    assert_eq!(error.kind(), ErrorKind::InvalidUtf8);
+    let error = try_parse_from(argv).unwrap_err();
+    assert!(matches!(error, ArgvError::Report(_)), "{error}");
+    assert!(!error.to_string().contains("not UTF-8"), "{error}");
 }
 
 // A file name keeps its bytes in both spellings (`check_utf8_file_name` reads it).
@@ -456,7 +436,7 @@ fn file_names_keep_their_bytes_in_both_spellings() {
         OsString::from("-subject"),
         OsString::from("s.fa"),
     ];
-    let Commands::Blastn(args) = try_parse_from::<Cli, _, _>(argv).unwrap().command else {
+    let Commands::Blastn(args) = try_parse_from(argv).unwrap().command else {
         panic!("not blastn");
     };
     assert_eq!(args.query.into_os_string(), OsString::from_vec(name));
@@ -537,15 +517,15 @@ fn the_top_level_has_no_option_of_its_own() {
 }
 
 // The program's command is the one that `Cli::command()` has, every byte (its arguments with the
-// toolkit's file arguments that the parser adds, its description and help template), and clap
+// description and help template), and clap
 // writes the same help and errors with it: the parser's texts do not depend on the other
 // programs' arguments.
 #[test]
 fn the_command_of_one_program_is_its_command_among_every_program() {
-    let every = with_toolkit_file_args(Cli::command(), |_| true);
+    let every = Cli::command();
     for name in program_names() {
         let words = [OsString::from("losat"), OsString::from(&name)];
-        let one = with_toolkit_file_args(Cli::program_command(&words), |program| program == name);
+        let one = Cli::program_command(&words);
         assert_eq!(
             format!("{:?}", one.find_subcommand(&name)),
             format!("{:?}", every.find_subcommand(&name)),
@@ -676,88 +656,6 @@ fn a_deferred_program_is_built_with_its_arguments() {
             by_clap.render_long_help().to_string(),
             ours.render_long_help().to_string(),
             "{name}"
-        );
-    }
-}
-
-/// What LOSAT's reader makes of a command line (`try_parse_from`): the parsed command, or the
-/// error's kind, its text on the command line (`command_line_message`) and the text printed in
-/// place of a run (`printed_text`).
-fn read_text(read: Result<Cli, clap::Error>, rpsbproc: bool) -> String {
-    match read {
-        Ok(cli) => format!("parsed {:?}", cli.command),
-        Err(error) => format!(
-            "{:?}\n{}\n{:?}",
-            error.kind(),
-            command_line_message(&error, rpsbproc),
-            printed_text(&error, rpsbproc)
-        ),
-    }
-}
-
-// The reader reads every command line with the command of its program as it reads it with every
-// program's command (`Cli::command()`): the same parse, error, help and printed text.
-#[test]
-fn the_reader_reads_a_command_line_as_with_every_program() {
-    let mut lines: Vec<Vec<String>> = [
-        &[][..],
-        &["-help"],
-        &["--help"],
-        &["-h"],
-        &["--version"],
-        &["-version"],
-        &["-help-full"],
-        &["nosuch"],
-        &["nosuch", "blastp"],
-        &["-x", "blastn", "blastp", "-query", "q"],
-        &["help", "blastp"],
-        &["--", "blastp"],
-    ]
-    .iter()
-    .map(|words| words.iter().map(|word| word.to_string()).collect())
-    .collect();
-    for name in program_names() {
-        for words in [
-            &[][..],
-            &["-h"],
-            &["-help"],
-            &["-help-full"],
-            &["--help"],
-            &["-xmlhelp"],
-            &["-nosuch_option"],
-            &["--dust", "no"],
-            &["-evalue", "abc"],
-            &["-out"],
-            &["-version"],
-            &["-logfile", "log"],
-            &["-query", "q", "-subject", "s"],
-            &["-i", "x", "-e", "abc"],
-        ] {
-            let mut line = vec![name.clone()];
-            line.extend(words.iter().map(|word| word.to_string()));
-            lines.push(line);
-        }
-        for (before, after) in [
-            (&["-help"][..], &["-evalue", "1"][..]),
-            (&["-h"][..], &["-query", "x"][..]),
-            (&["--version"][..], &[][..]),
-        ] {
-            let mut line: Vec<String> = before.iter().map(|word| word.to_string()).collect();
-            line.push(name.clone());
-            line.extend(after.iter().map(|word| word.to_string()));
-            lines.push(line);
-        }
-    }
-    for line in lines {
-        let argv: Vec<String> = std::iter::once("losat".to_string()).chain(line).collect();
-        let rpsbproc = argv.iter().any(|word| word == "rpsbproc");
-        assert_eq!(
-            read_text(try_parse_from::<Cli, _, _>(&argv), rpsbproc),
-            read_text(
-                try_parse_from_command::<Cli, _, _>(Cli::command(), &argv),
-                rpsbproc
-            ),
-            "{argv:?}"
         );
     }
 }

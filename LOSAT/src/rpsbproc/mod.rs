@@ -57,7 +57,7 @@ use sites::{MotifError, MotifState};
 const E_OK: i32 = 0;
 const E_DATA_LOAD_ERROR: i32 = 2;
 const E_INPUT_FILE_OPEN_ERROR: i32 = 3;
-const E_OUTPUT_FILE_OPEN_ERROR: i32 = 4;
+pub(crate) const E_OUTPUT_FILE_OPEN_ERROR: i32 = 4;
 const E_INPUT_DATA_ERROR: i32 = 5;
 
 /// `CRpsbProcApp::COORDSBASE`: the printed coordinates count from 1.

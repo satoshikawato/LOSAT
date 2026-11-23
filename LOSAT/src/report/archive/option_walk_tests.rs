@@ -46,9 +46,9 @@ struct App {
 fn parse(program: &str, words: &[&str]) -> Result<Commands, String> {
     let mut argv = vec!["losat", program];
     argv.extend_from_slice(words);
-    crate::cli::try_parse_from::<Cli, _, _>(argv)
+    crate::cli::try_parse_from(argv)
         .map(|cli| cli.command)
-        .map_err(|error| crate::cli::render_message(&error))
+        .map_err(|error| error.to_string())
 }
 
 /// The request's options, `HitlistSize` included, and `Web_StepNumber` last.

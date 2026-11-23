@@ -20,7 +20,7 @@ fn search(
     ];
     args.extend_from_slice(extra);
     let crate::cli::Commands::Blastx(args) =
-        crate::cli::try_parse_from::<crate::cli::Cli, _, _>(args)
+        crate::cli::try_parse_from(args)
             .unwrap()
             .command
     else {

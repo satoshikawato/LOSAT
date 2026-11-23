@@ -21,7 +21,7 @@ fn the_frozen_help_names_the_version_that_losat_writes() {
 
 #[test]
 fn the_short_usage_is_the_head_of_the_help() {
-    let usage = crate::ncbi_app::short_usage(HELP);
+    let usage = crate::ncbi_app::short_usage(&TOOL);
     // NCBI's `2.17.0+` is LOSAT's `LOSAT <version>` (`crate::wording`), four bytes longer
     // than the 780 of NCBI's.
     assert_eq!(usage.len(), 784);

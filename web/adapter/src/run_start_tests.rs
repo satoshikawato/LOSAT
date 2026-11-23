@@ -782,8 +782,8 @@ fn printing_run(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) 
 }
 
 // Line WQA's D14 (2026-11-20): the help and version words print what the command line prints to
-// its standard output (the parser's help, the XML of `-xmlhelp`, NCBI's version texts with LOSAT's
-// values: `printed_text` and `ncbi_version_request`, the command line's own producers), on stream
+// its standard output (NCBI's help, the XML of `-xmlhelp`, NCBI's version texts with LOSAT's
+// values: `ncbi_app::read` and `ncbi_version_request`, the command line's own producers), on stream
 // 11, with no input and no search; `validate` accepts them. `web/adapter/tests/v_abi.js` compares
 // the bytes with the native command line.
 #[test]
@@ -793,7 +793,6 @@ fn help_and_version_words_print_the_command_lines_text() {
             "-h",
             "-help",
             "-help-full",
-            "--help",
             "-xmlhelp",
             "-version",
             "-version-full",
@@ -832,12 +831,19 @@ fn help_and_version_words_print_the_command_lines_text() {
                         std::iter::once("losat").chain(words.iter().copied()),
                     )
                     .unwrap_err();
-                    losat::web_adapter::printed_text(&error, false).unwrap()
+                    match error {
+                        losat::web_adapter::ArgvError::Printed(text) => text,
+                        error => panic!("{program} {word}: {error:?}"),
+                    }
                 }
             };
             assert_eq!(text, expected, "{program} {word}");
         }
-        // The words before a help word are read first, as the command line reads them.
+        // `--help` is no word of NCBI's reader (`Unknown argument: "-help"`, line RG DECISIONS
+        // K4i-2 D3), and the words before a help word are read first, as the command line reads
+        // them.
+        let unknown = argv(program, &["--help"]);
+        assert!(validate(&unknown).is_err(), "{program}");
         let refused = argv(program, &["-evalue", "x", "-h"]);
         assert!(validate(&refused).is_err(), "{program}");
         assert!(printing_run(&refused).0.is_err(), "{program}");

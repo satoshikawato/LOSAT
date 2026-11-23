@@ -58,12 +58,14 @@ use super::id::DebugBytes;
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
-    /// The argv: the parser's message (`cli::render_message`), NCBI's message for an `-outfmt`
-    /// value that NCBI's reading refuses (`Error: Formatting choice is out of range` and its
-    /// newline), or an option or input that the library API does not take (`validate`, which has
-    /// no command line counterpart). The parser's error of a tool
-    /// ([`run_makeblastdb`](super::run_makeblastdb)) is a tool's error: the text that the tool
-    /// writes to its `diagnostics`, without its last newlines.
+    /// The argv: NCBI's report of an argument error as the command line writes it to its standard
+    /// error (the usage, a line of `=` and the posts), without its last newline; LOSAT's refusal
+    /// of an argument (the text that the command line writes after `Error: `, without the
+    /// newline); NCBI's message for an `-outfmt` value that NCBI's reading refuses (`Error:
+    /// Formatting choice is out of range` and its newline), or an option or input that the
+    /// library API does not take (`validate`, which has no command line counterpart). The
+    /// argument error of a tool ([`run_makeblastdb`](super::run_makeblastdb)) is the text that the
+    /// tool writes to its `diagnostics`, without its last newlines.
     Argv(Vec<u8>),
     /// A FASTA input: the reader's message (`read_fasta`, `read_inputs`, `read_input_file`)
     /// without its last newlines, and without the `Error: ` before LOSAT's own refusals (a file
@@ -112,6 +114,19 @@ impl Error {
     /// (`Error::Argv`).
     pub(crate) fn written_argv(text: Vec<u8>) -> Self {
         Error::Argv(without_line_feeds(text))
+    }
+
+    /// The error of an argv that NCBI's reader and LOSAT's refusals end (`cli::ArgvError`): the
+    /// report of an argument error as the command line writes it to its standard error
+    /// (`written_argv`), LOSAT's refusal without `Error: ` and the newline, or the help text that
+    /// the command line prints in place of a run.
+    pub(crate) fn of_argv(error: crate::cli::ArgvError) -> Self {
+        match error {
+            crate::cli::ArgvError::Report(text) => Error::written_argv(text),
+            crate::cli::ArgvError::Refused(text) | crate::cli::ArgvError::Printed(text) => {
+                Error::Argv(text.into_bytes())
+            }
+        }
     }
 }
 

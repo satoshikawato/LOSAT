@@ -43,18 +43,11 @@ fn a_batch_input_is_the_batch_part_numbered_from_zero() {
 
 /// The arguments of a `blastn` command line (`extra` after `-query q -subject s`).
 fn args(extra: &[&str]) -> BlastnArgs {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
-    let mut argv = vec!["test", "-query", "q", "-subject", "s"];
+    let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
     argv.extend_from_slice(extra);
-    crate::cli::try_parse_from::<Options, _, _>(argv)
+    crate::cli::try_parse_from(argv)
         .unwrap()
-        .blastn
+        .blastn()
 }
 
 fn record(

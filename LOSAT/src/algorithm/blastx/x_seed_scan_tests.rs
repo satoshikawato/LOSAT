@@ -71,7 +71,7 @@ fn direct_scan_loop_matches_ncbi_hits_and_reference_diagonal_table() {
             &window.to_string(),
         ];
         let crate::cli::Commands::Blastx(args) =
-            crate::cli::try_parse_from::<crate::cli::Cli, _, _>(args)
+            crate::cli::try_parse_from(args)
                 .unwrap()
                 .command
         else {
@@ -465,7 +465,7 @@ fn blastx_lookup(letters: &[u8], extra: &[&str]) -> Lookup {
     ];
     args.extend_from_slice(extra);
     let crate::cli::Commands::Blastx(args) =
-        crate::cli::try_parse_from::<crate::cli::Cli, _, _>(args)
+        crate::cli::try_parse_from(args)
             .unwrap()
             .command
     else {

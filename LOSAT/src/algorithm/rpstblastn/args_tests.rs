@@ -4,13 +4,13 @@ use crate::cli::{Cli, Commands};
 fn parse(extra: &[&str]) -> Result<RpstblastnArgs, String> {
     let mut argv = vec!["losat", "rpstblastn", "-query", "q.fna", "-db", "cdd"];
     argv.extend_from_slice(extra);
-    match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+    match crate::cli::try_parse_from(argv) {
         Ok(Cli {
             command: Commands::Rpstblastn(args),
             ..
         }) => Ok(args),
         Ok(_) => Err("not rpstblastn".to_string()),
-        Err(error) => Err(crate::cli::render_message(&error)),
+        Err(error) => Err(error.to_string()),
     }
 }
 

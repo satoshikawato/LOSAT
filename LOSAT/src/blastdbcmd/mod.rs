@@ -52,6 +52,9 @@ static TOOL: Tool = Tool {
     help: HELP,
     post_prefix: Some("blastdbcmd"),
     components: &[],
+    help_full: None,
+    short_description: None,
+    write_failure: None,
 };
 
 /// Runs `blastdbcmd` with `words` (the command line after `losat blastdbcmd`), after its

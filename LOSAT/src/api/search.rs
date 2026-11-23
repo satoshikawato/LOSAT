@@ -274,7 +274,7 @@ fn parse_words(
             .chain(out)
             .chain(argv.iter().map(std::ffi::OsString::from)),
     )
-    .map_err(|error| Error::Argv(crate::cli::render_message(&error).into()))?;
+    .map_err(Error::of_argv)?;
     Ok(cli.command)
 }
 

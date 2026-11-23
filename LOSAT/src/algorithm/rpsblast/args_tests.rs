@@ -4,7 +4,7 @@ use crate::cli::{Cli, Commands};
 fn parse(extra: &[&str]) -> Result<RpsblastArgs, String> {
     let mut argv = vec!["losat", "rpsblast", "-query", "q.faa", "-db", "cdd"];
     argv.extend_from_slice(extra);
-    match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+    match crate::cli::try_parse_from(argv) {
         Ok(Cli {
             command: Commands::Rpsblast(args),
             ..

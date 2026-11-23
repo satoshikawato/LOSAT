@@ -4,12 +4,12 @@ use crate::cli::{Cli, Commands};
 fn parse(extra: &[&str]) -> Result<PsiblastArgs, String> {
     let mut argv = vec!["losat", "psiblast", "-query", "q.faa", "-subject", "s.faa"];
     argv.extend_from_slice(extra);
-    match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+    match crate::cli::try_parse_from(argv) {
         Ok(Cli {
             command: Commands::Psiblast(args),
         }) => Ok(args),
         Ok(other) => panic!("not psiblast: {other:?}"),
-        Err(error) => Err(crate::cli::render_message(&error)),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -104,7 +104,7 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
         argv.extend_from_slice(extra);
         let Ok(Cli {
             command: Commands::Psiblast(args),
-        }) = crate::cli::try_parse_from::<Cli, _, _>(argv)
+        }) = crate::cli::try_parse_from(argv)
         else {
             panic!("psiblast -in_pssm {extra:?}");
         };
@@ -206,12 +206,12 @@ fn blastps_database_filters_and_id_options_reach_the_search() {
     let db = |extra: &[&str]| {
         let mut argv = vec!["losat", "psiblast", "-query", "q.faa", "-db", "d"];
         argv.extend_from_slice(extra);
-        match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+        match crate::cli::try_parse_from(argv) {
             Ok(Cli {
                 command: Commands::Psiblast(args),
             }) => Ok(args.into_blastp_args().unwrap()),
             Ok(other) => panic!("not psiblast: {other:?}"),
-            Err(error) => Err(crate::cli::render_message(&error)),
+            Err(error) => Err(error.to_string()),
         }
     };
     let blastp = db(&[
@@ -243,9 +243,9 @@ fn blastps_database_filters_and_id_options_reach_the_search() {
     ] {
         let mut argv = vec!["losat", "psiblast", "-query", "q.faa"];
         argv.extend_from_slice(extra);
-        let error = crate::cli::try_parse_from::<Cli, _, _>(argv).unwrap_err();
+        let error = crate::cli::try_parse_from(argv).unwrap_err();
         assert!(
-            crate::cli::render_message(&error).contains("cannot be used with"),
+            error.to_string().contains("cannot be used with"),
             "{extra:?}"
         );
     }

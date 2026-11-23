@@ -40,7 +40,7 @@ fn lcase_masking_flag_is_explicit() {
     assert!(parse(&["-lcase_masking"]).unwrap().lcase_masking);
 }
 
-fn parse(extra: &[&str]) -> std::result::Result<TblastnArgs, clap::Error> {
+fn parse(extra: &[&str]) -> std::result::Result<TblastnArgs, crate::cli::ArgvError> {
     let mut argv = vec!["losat", "tblastn", "-query", "q.faa", "-subject", "s.fna"];
     argv.extend_from_slice(extra);
     let cli: Cli = try_parse_from(argv)?;
@@ -362,7 +362,7 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
     for extra in [&["-gilist", "ids.gil"][..], &["-remote"]] {
-        let error = crate::cli::render_message(&parse(extra).unwrap_err());
+        let error = (parse(extra).unwrap_err()).to_string();
         assert!(
             error.contains("is not supported by LOSAT's TBLASTN"),
             "{extra:?}: {error}"
@@ -383,7 +383,7 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
 }
 
 /// The tblastn arguments `-in_pssm <psiblast's frozen PSSM> -subject s.fna <extra>`.
-fn parse_pssm(extra: &[&str]) -> std::result::Result<TblastnArgs, clap::Error> {
+fn parse_pssm(extra: &[&str]) -> std::result::Result<TblastnArgs, crate::cli::ArgvError> {
     let pssm = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/db_search/db.ps.asn.rnd.6.asn"
@@ -485,7 +485,7 @@ fn in_pssm_errors_are_ncbis_and_losats() {
     for extra in [&["-query", "q.faa"][..], &["-query_loc", "1-10"]] {
         let mut argv = vec!["losat", "tblastn", "-in_pssm", pssm, "-subject", "s.fna"];
         argv.extend_from_slice(extra);
-        assert!(try_parse_from::<Cli, _, _>(argv).is_err(), "{extra:?}");
+        assert!(try_parse_from(argv).is_err(), "{extra:?}");
     }
 }
 

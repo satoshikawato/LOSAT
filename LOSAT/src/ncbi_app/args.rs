@@ -263,6 +263,12 @@ pub fn string_values(program: &str, name: &str) -> Option<Vec<&'static str>> {
 // (`AddDefaultFileArguments`: `-logfile`, `-conffile`); the build script cites NCBI's lines.
 include!(concat!(env!("OUT_DIR"), "/ncbi_args.rs"));
 
+/// Whether `name` is one of the arguments that every NCBI application has after its own
+/// (`FILE_ARGUMENTS`: `-logfile`, `-conffile`), which the application start reads.
+pub(crate) fn is_file_argument(name: &str) -> bool {
+    FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
+}
+
 /// The argument descriptions of `program` (`PROGRAMS`), if LOSAT has its XML.
 pub(crate) fn arguments(program: &str) -> Option<Arguments> {
     PROGRAMS
@@ -422,6 +428,9 @@ pub(crate) enum ArgsError {
     Usage,
     /// `-help` (`CArgHelpException::eHelpFull`): the full description on stdout, exit status 0.
     Help,
+    /// `-help-full` (`CArgHelpException::eHelpShowAll`): the full description with the hidden
+    /// arguments on stdout, exit status 0.
+    HelpFull,
     /// `-xmlhelp` (`CArgHelpException::eHelpXml`): the description in XML on stdout, exit status
     /// 0 (`ncbi_xmlhelp`).
     XmlHelp,
@@ -535,6 +544,18 @@ impl Args {
             tool.refusal_name,
             refused,
         ))
+    }
+
+    /// The arguments given on the command line, in their order, each with its value's bytes
+    /// (`None` for a flag): what LOSAT's programs on clap hand to clap's conversion
+    /// (`cli::reader::convert`).
+    pub(crate) fn given_values(&self) -> impl Iterator<Item = (&'static str, Option<&OsStr>)> + '_ {
+        self.given.iter().map(|&name| (name, self.os_value(name)))
+    }
+
+    /// Whether the value of the key `name` is not UTF-8.
+    pub(crate) fn is_bytes(&self, name: &str) -> bool {
+        matches!(self.values.get(name), Some(Some(Value::Bytes(_))))
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:509-516
@@ -730,9 +751,11 @@ fn create_arg(
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2840-2852
         match bytes {
             b"-h" => return Err(ArgsError::Usage),
-            // `-help-full` adds the hidden arguments, of which LOSAT's programs have none: the
-            // text is that of `-help` (probe C05 of line BDC).
-            b"-help" | b"-help-full" => return Err(ArgsError::Help),
+            b"-help" => return Err(ArgsError::Help),
+            // `-help-full` adds the hidden arguments: makeblastdb's `-randomize`
+            // (`Tool::help_full`); the other programs have none, and their text is that of
+            // `-help` (probe C05 of line BDC).
+            b"-help-full" => return Err(ArgsError::HelpFull),
             // The help in XML (`ncbi_xmlhelp`).
             b"-xmlhelp" => return Err(ArgsError::XmlHelp),
             _ => {}

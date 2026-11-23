@@ -45,13 +45,12 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<TblastnArgs> {
     }
     let mut argv = vec!["losat", "tblastn", "-query", "query", "-subject", "subject"];
     argv.extend_from_slice(extra);
-    match crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv) {
-        Ok(cli) => match cli.command {
-            crate::cli::Commands::Tblastn(args) => Ok(args),
-            _ => unreachable!("fixed TBLASTN subcommand"),
-        },
-        // The CLI's message for the words (`main` writes it to standard error).
-        Err(error) => Err(anyhow::Error::msg(crate::cli::render_message(&error))),
+    // v1's reader and its messages (`web_v1_argv`), frozen.
+    let argv = argv.into_iter().map(Into::into).collect();
+    match crate::web_v1_argv::parse(crate::cli::command_of("tblastn"), argv) {
+        Ok(crate::cli::Commands::Tblastn(args)) => Ok(args),
+        Ok(_) => unreachable!("fixed TBLASTN subcommand"),
+        Err(message) => Err(anyhow::Error::msg(message)),
     }
 }
 

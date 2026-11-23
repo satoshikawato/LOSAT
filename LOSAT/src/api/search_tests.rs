@@ -20,11 +20,11 @@ fn the_argv_is_parsed_as_on_the_command_line() {
     validate(Program::Tblastx, &[]).unwrap();
     // A parser error is the command line's message.
     let error = validate(Program::Blastp, &["-evalue"]).unwrap_err();
-    let cli = crate::cli::try_parse_from::<Cli, _, _>([
+    let cli = crate::cli::try_parse_from([
         "losat", "blastp", "-query", "query", "-subject", "subject", "-evalue",
     ])
     .unwrap_err();
-    assert_eq!(error, Error::Argv(crate::cli::render_message(&cli).into()));
+    assert_eq!(error, Error::of_argv(cli));
     let error = validate(Program::Blastn, &["-nosuchoption", "1"]).unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
 }

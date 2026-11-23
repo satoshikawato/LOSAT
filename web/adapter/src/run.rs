@@ -205,9 +205,9 @@ fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
 enum Parsed {
     /// The program's arguments (boxed: they are far larger than a text).
     Command(Program, Box<Commands>),
-    /// The text that the command line prints to its standard output in place of a run, where the
-    /// reader stopped at a help word (`-h`, `-help`, `-help-full`, `--help`, `-xmlhelp`, the words
-    /// before it read: `losat::web_adapter::printed_text`).
+    /// The text that the command line prints to its standard output in place of a run, where
+    /// NCBI's reader stopped at a help word (`-h`, `-help`, `-help-full`, `-xmlhelp`, the words
+    /// before it read: `losat::web_adapter::ArgvError::Printed`).
     Prints(String),
 }
 
@@ -220,11 +220,9 @@ fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
     // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
     let argv = std::iter::once("losat").chain(words.iter().copied());
     let parsed = losat::web_adapter::try_parse_cli(argv);
-    if let Err(error) = &parsed {
-        if let Some(text) = losat::web_adapter::printed_text(error, false) {
-            return Program::parse(words.first().copied().unwrap_or(""))
-                .map(|_| Parsed::Prints(text));
-        }
+    if let Err(losat::web_adapter::ArgvError::Printed(text)) = &parsed {
+        return Program::parse(words.first().copied().unwrap_or(""))
+            .map(|_| Parsed::Prints(text.clone()));
     }
     for word in words.iter().skip(1) {
         let key = word.split('=').next().unwrap_or("");
@@ -234,8 +232,7 @@ fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
             ));
         }
     }
-    let cli: Cli =
-        parsed.map_err(|error| losat::web_adapter::command_line_message(&error, false))?;
+    let cli: Cli = parsed.map_err(|error| losat::web_adapter::argv_message(&error))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
     Ok(Parsed::Command(program, Box::new(cli.command)))
 }
@@ -2154,7 +2151,7 @@ mod tests {
                 .unwrap_err();
                 assert_eq!(
                     parse(&both).unwrap_err(),
-                    losat::web_adapter::command_line_message(&cli, false),
+                    losat::web_adapter::argv_message(&cli),
                     "{program} {option}"
                 );
                 assert!(parse(&both).unwrap_err().contains("cannot be used with"));
@@ -2175,7 +2172,7 @@ mod tests {
                 std::iter::once("losat").chain(words.iter().copied()),
             )
             .map(|_| ())
-            .map_err(|error| losat::web_adapter::command_line_message(&error, false));
+            .map_err(|error| losat::web_adapter::argv_message(&error));
             assert_eq!(parse(words).map(|_| ()), cli, "{words:?}");
         }
         // An argv without subjects is NCBI's error after the parse (line WQA's D14, 2026-11-21).
@@ -2337,7 +2334,7 @@ mod tests {
             .unwrap_err();
             assert_eq!(
                 parse(words).unwrap_err(),
-                losat::web_adapter::command_line_message(&cli, false),
+                losat::web_adapter::argv_message(&cli),
                 "{words:?}"
             );
         }

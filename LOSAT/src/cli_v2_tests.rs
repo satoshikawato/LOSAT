@@ -1358,7 +1358,7 @@ fn flags_and_value_tokens_are_not_reinterpreted() {
     );
     // NCBI's `-` is standard input (c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427, c++/src/corelib/ncbiargs.cpp).
     let cli =
-        try_parse_from::<Cli, _, _>(["losat", "blastp", "-query", "-", "-subject", "s"]).unwrap();
+        try_parse_from(["losat", "blastp", "-query", "-", "-subject", "s"]).unwrap();
     let Commands::Blastp(a) = cli.command else {
         panic!()
     };
@@ -1583,7 +1583,7 @@ fn output_formats_follow_the_format_table() {
 fn output_capabilities_fail_explicitly_and_help_is_canonical() {
     for program in ["blastn", "blastp", "tblastx"] {
         for help in ["-help", "--help"] {
-            let err = try_parse_from::<Cli, _, _>(["losat", program, help]).unwrap_err();
+            let err = try_parse_from(["losat", program, help]).unwrap_err();
             assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
             let text = crate::cli::render_message(&err);
             assert!(text.contains("-query <PATH>"), "{text}");
@@ -1778,7 +1778,7 @@ fn blastp_takes_a_database_and_its_size() {
     let blastp = |words: &[&str]| {
         let mut argv = vec!["losat", "blastp", "-query", "q.fa"];
         argv.extend(words);
-        try_parse_from::<Cli, _, _>(argv).map(|cli| match cli.command {
+        try_parse_from(argv).map(|cli| match cli.command {
             Commands::Blastp(args) => args,
             _ => unreachable!("blastp"),
         })
@@ -1854,7 +1854,7 @@ fn blastn_takes_a_database_and_its_size() {
     let blastn = |words: &[&str]| {
         let mut argv = vec!["losat", "blastn", "-query", "q.fa"];
         argv.extend(words);
-        try_parse_from::<Cli, _, _>(argv).map(|cli| match cli.command {
+        try_parse_from(argv).map(|cli| match cli.command {
             Commands::Blastn(args) => args,
             _ => unreachable!("blastn"),
         })
@@ -1909,7 +1909,7 @@ fn tblastn_takes_a_database_and_its_size() {
     let tblastn = |words: &[&str]| {
         let mut argv = vec!["losat", "tblastn", "-query", "q.fa"];
         argv.extend(words);
-        try_parse_from::<Cli, _, _>(argv).map(|cli| match cli.command {
+        try_parse_from(argv).map(|cli| match cli.command {
             Commands::Tblastn(args) => args,
             _ => unreachable!("tblastn"),
         })
@@ -1955,7 +1955,7 @@ fn tblastx_takes_a_database_and_its_size() {
     let tblastx = |words: &[&str]| {
         let mut argv = vec!["losat", "tblastx", "-query", "q.fa"];
         argv.extend(words);
-        try_parse_from::<Cli, _, _>(argv).map(|cli| match cli.command {
+        try_parse_from(argv).map(|cli| match cli.command {
             Commands::Tblastx(args) => args,
             _ => unreachable!("tblastx"),
         })
@@ -2252,7 +2252,7 @@ fn toolkit_file_options_need_an_application_start() {
         argv.extend_from_slice(words);
         argv
     };
-    let makedb = |words: &[&'static str]| try_parse_from::<Cli, _, _>(argv(words));
+    let makedb = |words: &[&'static str]| try_parse_from(argv(words));
     let library_makedb =
         |words: &[&'static str]| crate::cli::try_parse_with_own_start::<Cli, _, _>(argv(words));
     for (words, name) in [
@@ -2297,7 +2297,7 @@ fn toolkit_file_options_need_an_application_start() {
     // The programs that the library API does not run: the refusals name the command line alone.
     for (program, upper) in [("rpsblast", "RPSBLAST"), ("rpstblastn", "RPSTBLASTN")] {
         let refused = |word: &'static str| {
-            try_parse_from::<Cli, _, _>(["losat", program, "-query", "q.fa", "-db", "d", word])
+            try_parse_from(["losat", program, "-query", "q.fa", "-db", "d", word])
                 .unwrap_err()
                 .to_string()
         };
@@ -2337,7 +2337,7 @@ fn a_last_double_dash_changes_nothing_and_a_word_after_it_is_an_error() {
     let makedb = |words: &[&str]| {
         let mut argv = vec!["losat", "makeblastdb", "-dbtype", "prot"];
         argv.extend(words);
-        try_parse_from::<Cli, _, _>(argv)
+        try_parse_from(argv)
     };
     assert!(makedb(&["-in", "x.faa", "--"]).is_ok());
     assert!(makedb(&["--", "-in", "x.faa"]).is_err());
@@ -2353,7 +2353,7 @@ fn blastx_takes_a_database_and_its_size() {
     let blastx = |words: &[&str]| {
         let mut argv = vec!["losat", "blastx", "-query", "q.fa"];
         argv.extend(words);
-        try_parse_from::<Cli, _, _>(argv).map(|cli| match cli.command {
+        try_parse_from(argv).map(|cli| match cli.command {
             Commands::Blastx(args) => args,
             _ => unreachable!("blastx"),
         })
@@ -2410,7 +2410,7 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
     let makedb = |words: &[&str]| {
         let mut argv = vec!["losat", "makeblastdb", "-dbtype", "prot"];
         argv.extend(words);
-        try_parse_from::<Cli, _, _>(argv)
+        try_parse_from(argv)
     };
     // The old name is gone: an unknown command, with every spelling of its arguments.
     for words in [
@@ -2420,7 +2420,7 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
     ] {
         let mut argv = vec!["losat"];
         argv.extend(words);
-        let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+        let error = try_parse_from(argv).unwrap_err();
         assert_eq!(
             error.kind(),
             clap::error::ErrorKind::UnknownArgument,
@@ -2465,7 +2465,7 @@ fn short_help_h_is_display_help_for_every_program() {
         "psiblast",
         "makeblastdb",
     ] {
-        let error = try_parse_from::<Cli, _, _>(["losat", program, "-h"]).unwrap_err();
+        let error = try_parse_from(["losat", program, "-h"]).unwrap_err();
         assert_eq!(
             error.kind(),
             clap::error::ErrorKind::DisplayHelp,
@@ -2491,7 +2491,7 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
     let help = |program: &str, words: &[&str]| -> String {
         let mut argv = vec!["losat", program];
         argv.extend(words);
-        match try_parse_from::<Cli, _, _>(argv) {
+        match try_parse_from(argv) {
             Err(error) => {
                 assert_eq!(error.exit_code(), 0, "{program} {words:?}: {error}");
                 format!("{:?} {}", error.kind(), crate::cli::render_message(&error))
@@ -2543,16 +2543,16 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
             assert_eq!(help(program, words), short, "{program} {words:?}");
         }
         // A word before the flag is read first.
-        let error = try_parse_from::<Cli, _, _>(["losat", program, "-bogus", "-help-full"])
+        let error = try_parse_from(["losat", program, "-bogus", "-help-full"])
             .err()
             .unwrap_or_else(|| panic!("{program}: -bogus read"));
         assert_ne!(error.exit_code(), 0, "{program}");
     }
     // As an option's value, `-help-full` is the value; outside a program it is no flag.
     assert!(parse("blastn", &["-out", "-help-full"]).is_ok());
-    assert!(try_parse_from::<Cli, _, _>(["losat", "-help-full"]).is_err());
+    assert!(try_parse_from(["losat", "-help-full"]).is_err());
     assert_ne!(
-        try_parse_from::<Cli, _, _>(["losat", "-help-full"])
+        try_parse_from(["losat", "-help-full"])
             .err()
             .map(|error| error.exit_code()),
         Some(0)
@@ -2568,7 +2568,7 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
         ("makeblastdb", "the command line of LOSAT's"),
         ("rpsbproc", "the command line of LOSAT's"),
     ] {
-        let error = try_parse_from::<Cli, _, _>(["losat", program, "-xmlhelp"]).unwrap_err();
+        let error = try_parse_from(["losat", program, "-xmlhelp"]).unwrap_err();
         let text = crate::cli::render_message(&error);
         assert!(
             text.contains(&format!("the option -xmlhelp runs on {place}")),

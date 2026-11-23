@@ -7,11 +7,12 @@
 //! What changes. `x_greedy_row_impl` (the three passes) reads off, in its pass 2, the slide
 //! length of every diagonal from one eight-byte comparison, as a vector loop over the block, and
 //! stores it in an array that pass 3 reads in the order of the diagonals. Here pass 1 also stores
-//! the two load offsets of each diagonal and whether they lie inside both sequences, and the
-//! eight-byte comparison runs as scalar code inside the pass 3 loop, for the surviving diagonals
-//! only. The vector form spent most of its time moving lanes between vector and general registers
-//! (line F s5, probe P6: kernel 17.5 -> 12.3 cycles per cell of the band; the measurements are in
-//! the `LOSAT_X_GREEDYROWFUSE` entry of `docs/agents/diagnostics.md`).
+//! the two load offsets of each diagonal (the `seq1` one as -1 when the diagonal takes no
+//! eight-byte test) and `seq1_index + seq2_index`, and the eight-byte comparison runs as scalar
+//! code inside the pass 3 loop, for the surviving diagonals only. The vector form spent most of
+//! its time moving lanes between vector and general registers (line F s5, probe P6: kernel 17.5
+//! -> 12.3 cycles per cell of the band; the measurements are in the `LOSAT_X_GREEDYROWFUSE` entry
+//! of `docs/agents/diagnostics.md`).
 //!
 //! Why the result is the same. Pass 3 is the pass 3 of `x_greedy_row_impl` statement by
 //! statement: the same cells written with the same values in increasing `k`, the same
@@ -26,7 +27,11 @@
 //!   `seq1_index > len1 - 8` (`len1 >= 8` wherever the comparison is used, so `len1 - 8` is not
 //!   negative), and the same for `seq2_index`; such a diagonal goes to `x_greedy_cell_slow`
 //!   without a load. With `len1 < 8`, `len2 < 8` or the fence already hit (`inline_ok` false)
-//!   both give -1 for every diagonal.
+//!   both give -1 for every diagonal. Pass 1 stores the `seq1` load offset `at1` as -1 for these
+//!   diagonals and for the dropped ones (their `seq2_index` of -1 is above `len2 - 8` as u32);
+//!   any other `at1` is at most `len1 - 8`, not negative as an i32. So `at1 >= 0` is the test of
+//!   the three passes (kept, both inside, `inline_ok`), and with `at1 < 0` pass 2 tests `start <
+//!   0` before anything else, as they do.
 //! - Otherwise both read the same eight bytes of each sequence (`seq[at .. at + 8]`, or
 //!   `seq[len - 8 - at .. len - at]` for `REVERSE`), and compute the same `diff`, `bits`,
 //!   `stop_byte` and `index` with the same integer operations. The `REVERSE` offset `(len - 8) -
@@ -39,6 +44,13 @@
 //!   64`, `index == 8`, which is above the minimum; an `index` of 0-7 is above the minimum exactly
 //!   when it is above `longest_match_run`. Both read `longest_match_run` once per block, before
 //!   pass 3 (which may raise it through `x_greedy_cell_slow`).
+//! - The rest of pass 2 holds the same values in other places. It writes `current` through a
+//!   pointer to the block and keeps the cell that set `curr_extent` as an offset in the block
+//!   (`X_NO_CELL` survives the wrapping subtraction and addition of the block start); it takes
+//!   `seq1_index + seq2_index` of each diagonal from pass 1 instead of adding `block_first + i`
+//!   (`seq1_index = seq2_index + block_first + i` there); and its inner loop stops at a diagonal
+//!   that goes to `x_greedy_cell_slow`, which is called after that loop, before the loop goes on
+//!   with the next diagonal.
 //!
 //! So both forms hand pass 3 the same slide length (or -1) for every surviving diagonal, and pass
 //! 3 does the same with it. A dropped diagonal (`start < 0`) never reads the slide length in
@@ -60,9 +72,17 @@ use crate::algorithm::blastn::constants::INVALID_OFFSET;
 ///
 /// 1. For every diagonal, the offset the reference loop starts its slide from, or -1 when the
 ///    diagonal fails the X-drop test; then the eight-byte load offsets of both sequences
-///    (clamped to 0 when outside, reversed for `REVERSE`) and whether either was outside.
+///    (clamped to 0 when outside, reversed for `REVERSE`; the `seq1` one -1 when the diagonal
+///    takes no eight-byte test) and `seq1_index + seq2_index`.
 /// 2. The diagonals in the reference order, as pass 3 of `x_greedy_row_impl`; a surviving
 ///    diagonal whose offsets lie inside both sequences tests its eight bytes here.
+///
+/// Pass 2 calls `x_greedy_cell_slow` (about 0.3 % of the diagonals of a megablast search) after
+/// its inner loop, not inside it; the inner loop reads `seq1_index + seq2_index` from pass 1,
+/// writes through a pointer to the block and tests one array for the eight-byte test. With the
+/// call inside the loop, LLVM kept the sequence pointers and the `current` pointer on the stack
+/// and rebuilt `NOT_A_BASE` on every diagonal; the inner loop now holds them in registers (40 ->
+/// 31 instructions per inline diagonal for `REVERSE`, 39 -> 30 otherwise).
 ///
 /// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
 #[inline(always)]
@@ -104,18 +124,21 @@ unsafe fn x_greedy_row_fused<const REVERSE: bool>(
     };
     let mut last_valid = X_NO_CELL;
 
-    // All four arrays are written for `0..block_len` before they are read.
+    // All four arrays are written for `0..block_len` before they are read. `at1` is -1 for a
+    // diagonal without the eight-byte test: dropped, outside either sequence, or `!inline_ok`.
+    // `start_extent` is `seq1_index + seq2_index` at the diagonal's start offset.
     let mut start = [std::mem::MaybeUninit::<i32>::uninit(); X_GREEDY_BLOCK];
-    let mut at1 = [std::mem::MaybeUninit::<u32>::uninit(); X_GREEDY_BLOCK];
+    let mut at1 = [std::mem::MaybeUninit::<i32>::uninit(); X_GREEDY_BLOCK];
     let mut at2 = [std::mem::MaybeUninit::<u32>::uninit(); X_GREEDY_BLOCK];
-    let mut outside = [std::mem::MaybeUninit::<i32>::uninit(); X_GREEDY_BLOCK];
+    let mut start_extent = [std::mem::MaybeUninit::<i32>::uninit(); X_GREEDY_BLOCK];
     let start = start.as_mut_ptr() as *mut i32;
-    let at1 = at1.as_mut_ptr() as *mut u32;
+    let at1 = at1.as_mut_ptr() as *mut i32;
     let at2 = at2.as_mut_ptr() as *mut u32;
-    let outside = outside.as_mut_ptr() as *mut i32;
+    let start_extent = start_extent.as_mut_ptr() as *mut i32;
     // The last eight-byte load offsets; used only with `inline_ok` (both lengths >= 8).
     let last1 = (len1 - 8) as u32;
     let last2 = (len2 - 8) as u32;
+    let no_inline = -(!inline_ok as i32);
     let mut block = 0usize;
     'row: while block < band_len {
         let block_len = (band_len - block).min(X_GREEDY_BLOCK);
@@ -141,9 +164,11 @@ unsafe fn x_greedy_row_fused<const REVERSE: bool>(
             let out2 = (seq2_index as u32) > last2;
             let a1 = if out1 { 0 } else { seq1_index as u32 };
             let a2 = if out2 { 0 } else { seq2_index as u32 };
-            *at1.add(i) = if REVERSE { last1 - a1 } else { a1 };
+            let a1 = if REVERSE { last1 - a1 } else { a1 };
+            // -1 (all bits) when either lies outside or `!inline_ok`; else `a1`, below 2^31
+            *at1.add(i) = a1 as i32 | -((out1 | out2) as i32) | no_inline;
             *at2.add(i) = if REVERSE { last2 - a2 } else { a2 };
-            *outside.add(i) = -((out1 | out2) as i32);
+            *start_extent.add(i) = seq1_index + seq2_index;
         }
 
         // pass 2
@@ -151,99 +176,115 @@ unsafe fn x_greedy_row_fused<const REVERSE: bool>(
         let run7 = cold.longest_match_run.min(7);
         let mut diag_lower = cold.diag_lower;
         let mut curr_extent = cold.curr_extent;
-        let mut best_cell = cold.best_cell;
-        for i in 0..block_len {
-            let cell = block + i;
-            let seq2_index = *start.add(i);
-            if seq2_index < 0 {
-                if tmp_diag_lower + cell as i32 == diag_lower {
-                    diag_lower += 1;
-                } else {
-                    *current.add(cell) = INVALID_OFFSET;
-                }
-                continue;
-            }
-            let index = if inline_ok && *outside.add(i) == 0 {
-                let w1 =
-                    u64::from_le((seq1.add(*at1.add(i) as usize) as *const u64).read_unaligned());
-                let w2 =
-                    u64::from_le((seq2.add(*at2.add(i) as usize) as *const u64).read_unaligned());
-                let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
-                let bits = if REVERSE {
-                    diff.leading_zeros()
-                } else {
-                    diff.trailing_zeros()
-                };
-                let shift = bits & 0x38;
-                let stop_byte = if REVERSE {
-                    (w2 >> (56 - shift)) as u8
-                } else {
-                    (w2 >> shift) as u8
-                };
-                let index = (bits >> 3) as i32;
-                let mut index_or_slow = index;
-                if index > run7 {
-                    index_or_slow = -1;
-                }
-                if stop_byte == FENCE_SENTRY {
-                    index_or_slow = -1;
-                }
-                index_or_slow
-            } else {
-                -1
-            };
-            if index < 0 {
-                // A diagonal past the end of `seq1` (`x_past_seq1_end`), unless the fence was
-                // already hit on entry (C returns at the first kept diagonal then).
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565-600
-                let seq1_index = seq2_index + block_first + i as i32;
-                if !cold.fence_hit
-                    && x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index)
-                {
-                    *current.add(cell) = seq2_index;
-                    let extent = seq1_index + seq2_index;
-                    if extent > curr_extent {
-                        curr_extent = extent;
-                        best_cell = cell;
+        let cur = current.add(block);
+        let mut best_i = cold.best_cell.wrapping_sub(block);
+        let mut i = 0usize;
+        loop {
+            // The diagonals before the next one that needs `x_greedy_cell_slow`.
+            while i < block_len {
+                let a1 = *at1.add(i);
+                let seq2_index = *start.add(i);
+                let extent0 = *start_extent.add(i);
+                let index = if a1 >= 0 {
+                    let w1 = u64::from_le((seq1.add(a1 as usize) as *const u64).read_unaligned());
+                    let w2 = u64::from_le(
+                        (seq2.add(*at2.add(i) as usize) as *const u64).read_unaligned(),
+                    );
+                    let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
+                    let bits = if REVERSE {
+                        diff.leading_zeros()
+                    } else {
+                        diff.trailing_zeros()
+                    };
+                    let shift = bits & 0x38;
+                    let stop_byte = if REVERSE {
+                        (w2 >> (56 - shift)) as u8
+                    } else {
+                        (w2 >> shift) as u8
+                    };
+                    let index = (bits >> 3) as i32;
+                    let mut index_or_slow = index;
+                    if index > run7 {
+                        index_or_slow = -1;
                     }
-                    continue;
+                    if stop_byte == FENCE_SENTRY {
+                        index_or_slow = -1;
+                    }
+                    index_or_slow
+                } else {
+                    if seq2_index < 0 {
+                        if tmp_diag_lower + (block + i) as i32 == diag_lower {
+                            diag_lower += 1;
+                        } else {
+                            *cur.add(i) = INVALID_OFFSET;
+                        }
+                        i += 1;
+                        continue;
+                    }
+                    -1
+                };
+                if index < 0 {
+                    // A diagonal past the end of `seq1` (`x_past_seq1_end`), unless the fence was
+                    // already hit on entry (C returns at the first kept diagonal then).
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565-600
+                    let seq1_index = extent0 - seq2_index;
+                    if !cold.fence_hit
+                        && x_past_seq1_end::<REVERSE>(seq2, len1, len2, seq1_index, seq2_index)
+                    {
+                        *cur.add(i) = seq2_index;
+                        let extent = seq1_index + seq2_index;
+                        if extent > curr_extent {
+                            curr_extent = extent;
+                            best_i = i;
+                        }
+                        i += 1;
+                        continue;
+                    }
+                    break;
                 }
-                cold.diag_lower = diag_lower;
-                cold.curr_extent = curr_extent;
-                cold.best_cell = best_cell;
-                x_greedy_cell_slow::<REVERSE>(
-                    seq1,
-                    seq2,
-                    len1,
-                    len2,
-                    seq2_index + block_first + i as i32,
-                    seq2_index,
-                    cell,
-                    tmp_diag_lower + cell as i32,
-                    current,
-                    &mut cold,
-                );
-                if cold.stopped {
-                    last_valid = cell;
-                    break 'row;
+                let stop2 = seq2_index + index;
+                *cur.add(i) = stop2;
+                // seq1_index + index + seq2_index + index
+                let extent = extent0 + index + index;
+                if extent > curr_extent {
+                    curr_extent = extent;
+                    best_i = i;
                 }
-                diag_lower = cold.diag_lower;
-                curr_extent = cold.curr_extent;
-                best_cell = cold.best_cell;
-                continue;
+                i += 1;
             }
-            let stop2 = seq2_index + index;
-            *current.add(cell) = stop2;
-            // seq1_index + index + seq2_index + index
-            let extent = stop2 + stop2 + block_first + i as i32;
-            if extent > curr_extent {
-                curr_extent = extent;
-                best_cell = cell;
+            if i == block_len {
+                break;
             }
+            // Diagonal `i` goes to `x_greedy_cell_slow`.
+            let seq2_index = *start.add(i);
+            let cell = block + i;
+            cold.diag_lower = diag_lower;
+            cold.curr_extent = curr_extent;
+            cold.best_cell = best_i.wrapping_add(block);
+            x_greedy_cell_slow::<REVERSE>(
+                seq1,
+                seq2,
+                len1,
+                len2,
+                seq2_index + block_first + i as i32,
+                seq2_index,
+                cell,
+                tmp_diag_lower + cell as i32,
+                current,
+                &mut cold,
+            );
+            if cold.stopped {
+                last_valid = cell;
+                break 'row;
+            }
+            diag_lower = cold.diag_lower;
+            curr_extent = cold.curr_extent;
+            best_i = cold.best_cell.wrapping_sub(block);
+            i += 1;
         }
         cold.diag_lower = diag_lower;
         cold.curr_extent = curr_extent;
-        cold.best_cell = best_cell;
+        cold.best_cell = best_i.wrapping_add(block);
 
         // last surviving diagonal of this block
         let mut j = block_len;

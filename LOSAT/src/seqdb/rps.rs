@@ -15,6 +15,10 @@ use std::path::{Path, PathBuf};
 
 use crate::utils::mapped_file::MappedFile;
 
+mod cd_data;
+
+pub(crate) use cd_data::{CdColumns, CdProfileFiles};
+
 /// `RPS_MAGIC_NUM`: the files of a 26-letter alphabet.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_rps.h:43-44

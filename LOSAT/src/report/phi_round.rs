@@ -18,6 +18,7 @@ use super::super::{
 };
 use super::{ReportRound, RoundSections, RoundWriter};
 use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::report::query_warnings::ReportPlace;
 use crate::report::x_pairwise_par::QueryGroup;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -158,7 +159,7 @@ pub(crate) fn write_phi_round_report(
     let query_title = query_titles
         .get(q_idx)
         .map_or(&b""[..], |title| title.as_ref());
-    write_blastp_query_header(writer, query_title, queries[q_idx].query_length)?;
+    write_blastp_query_header(writer, query_title, queries[q_idx].query_length, false)?;
     if let Some(info) = info {
         write_phi_info(writer, info)?;
     }
@@ -167,11 +168,11 @@ pub(crate) fn write_phi_round_report(
         write_no_hits_found(writer)?;
         return sections.foot(writer, q_idx).and_then(|()| writer.flush());
     }
-    let mut read =
-        |s_idx: u32, writer: &mut io::BufWriter<RoundWriter<'_>>| match warnings.as_deref_mut() {
-            Some(warnings) => warnings.subject_read(q_idx, s_idx, writer),
-            None => Ok(()),
-        };
+    // NCBI loads each subject that the query's batch did not prefetch at its description line,
+    // or one the tables do not show at its alignment's heading (`QueryWarnings::subject_read`).
+    let mut place = |place: ReportPlace, writer: &mut io::BufWriter<RoundWriter<'_>>| {
+        crate::report::x_pairwise_par::at_place(warnings.as_deref_mut(), None, q_idx, place, writer)
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2118-2128
     for group in &groups {
         match group {
@@ -184,7 +185,9 @@ pub(crate) fn write_phi_round_report(
                 // psiblast does not hand `-sorthits` to the formatter (psiblast_app.cpp:502).
                 None,
                 |s_idx| sections.label(group, s_idx),
-                &mut read,
+                &mut place,
+                // psiblast refuses `-html` (`ncbi_app::args::refusal`): the plain table.
+                None,
             )?,
             None => write_empty_table(writer, report.num_descriptions)?,
         }
@@ -211,7 +214,7 @@ pub(crate) fn write_phi_round_report(
                 |s_idx| sections.thrown(s_idx),
             );
             for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
-                read(s_idx, &mut *writer)?;
+                place(ReportPlace::Load(s_idx), &mut *writer)?;
                 sections.subject(writer, probe.as_deref_mut(), group, s_idx, &pattern)?;
             }
             if let Some((_, exception)) = end {

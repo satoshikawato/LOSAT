@@ -1560,6 +1560,7 @@ fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
             Default::default(),
             masks,
             &config,
+            &PlainRows,
         )
         .unwrap();
         String::from_utf8(output).unwrap()

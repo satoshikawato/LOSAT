@@ -837,6 +837,8 @@ pub(super) fn write_pairwise(
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2155-2161
         if let Some(phi) = phi.as_ref() {
             let phi_query_masks = query_record_masks(query_frames, &ranges.query_input.placements);
+            let phi_query_masks =
+                (!phi_query_masks.iter().all(Vec::is_empty)).then_some(phi_query_masks);
             use crate::report::pairwise::psiblast_round::phi_round;
             if window.start == 0 && reports.x_prolog {
                 phi_round::write_phi_prolog(
@@ -859,14 +861,24 @@ pub(super) fn write_pairwise(
                         occurrence,
                     )];
                     let mut rows = (phi.rows_of_lists)(&list, q_idx)?;
-                    if !phi_query_masks.iter().all(Vec::is_empty) {
-                        mask_query_rows(&mut rows, &phi_query_masks);
-                    }
-                    if args.lcase_masking {
-                        rows = x_soft_subject::x_masked_subject_rows(
-                            &rows,
-                            subject_records,
-                            ranges.subject_placements,
+                    // The rows' masks as the other reports' (`set_row_masks`); psiblast refuses
+                    // `-html`, so no spans are kept.
+                    if phi_query_masks.is_some() || args.lcase_masking {
+                        let lcase_masks = if args.lcase_masking {
+                            x_soft_subject::x_subject_masks(
+                                &rows,
+                                subject_records,
+                                ranges.subject_placements,
+                            )
+                        } else {
+                            Default::default()
+                        };
+                        let no_masks = Default::default();
+                        set_row_masks(
+                            &mut rows,
+                            phi_query_masks.as_deref(),
+                            [&lcase_masks, &no_masks],
+                            None,
                         );
                     }
                     occurrence_hits.push(rows);

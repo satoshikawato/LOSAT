@@ -6,7 +6,7 @@ mod in_pssm;
 mod score;
 mod tblastn_app;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-844:
-//     status = s_BlastSearchEngineOneContext(...);
+// Per-frame preliminary search driver (`s_BlastSearchEngineOneContext`).
 pub(crate) mod search_seed;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once
 // (blastx's direct loop takes it too, LOSAT_X_BXSCANBYTE).
@@ -15,7 +15,7 @@ pub(crate) mod search_seed;
 #[cfg(test)]
 mod x_scan_bf_tests;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
-// length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
+// Translates compressed subject nucleotide frames via `BLAST_TranslateCompressedSequence`.
 // The subject frames read from tables.
 mod x_subject_translate;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects held packed, their letters made when read.
@@ -23,7 +23,7 @@ mod x_subject_store;
 // The stages over the `-db` stream (`common/x_db_stream.rs`).
 mod x_db_stream;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234:
-// status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
+// Two-hit amino-acid word finder (`s_BlastAaWordFinder_TwoHit`) populating the initial hit list.
 mod search_init;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552: the two-hit tests of every hit.
 // Too far and overlap without a branch.

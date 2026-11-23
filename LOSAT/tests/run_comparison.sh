@@ -86,7 +86,7 @@ done
 export RUN_NATIVE RUN_NCBI RUN_LOSAT_WASM RUN_LOSAT_WASM_THREADED
 export BUILD_LOSAT_WASM BUILD_LOSAT_WASM_THREADED
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-# x_PrintField(*iter); ... m_Ostream << "\n";
+# Emit each tabular field in order via `x_PrintField` and terminate each row on `m_Ostream` with a newline.
 # Record the effective locale used for every subsequent comparison invocation.
 export LC_ALL=C
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
@@ -260,7 +260,7 @@ while IFS=$'\t' read -r task query subject name losat_stem ncbi_stem query_genco
             prepared_dbs[$db]=1
         fi
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
-        #     ERR_POST(Warning << ... << "ignored when 'subject' is specified."); }
+        # Emit a warning that `-num_threads` is ignored when a local subject is specified.
         # Preserve local-subject NCBI rows only for non-TBLASTX distributions.
         # They are stored separately and are never selected as timing samples.
         if [[ "$task" != tblastx ]]; then

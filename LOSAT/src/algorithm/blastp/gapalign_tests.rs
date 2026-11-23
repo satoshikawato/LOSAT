@@ -1053,7 +1053,7 @@ fn x_standard_tables_give_the_scalar_port_for_every_matrix() {
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:563-575,634-639
-//     if (matrix_index == FENCE_SENTRY) { ... break; }
+// Stop scanning the row immediately upon encountering `FENCE_SENTRY`.
 // The fence cell is never written. Only the preceding initialized bytes
 // may become visible when leaving the first main-band row.
 #[test]

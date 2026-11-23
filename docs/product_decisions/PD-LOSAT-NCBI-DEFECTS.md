@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.89
+- Version: 1.90
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -315,7 +315,7 @@
   in the classes of 1.10 and 1.37; Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07; numbered after 1.69; first 1.65, then 1.66, 1.68 and 1.69 at the merges of dev that brought
   line RG item D5b-1's 1.65, then line NP's 1.66 and line LIB-S's 1.67, then line NP's 1.68, then
-  line NP's 1.69)
+  line NP's 1.69);
   1.71 2026-11-22 (outfmt 0 to 4 of such a sequence are written as NCBI writes them: its
   description line is the Seq-align id and `Unknown`; outfmt 0 stops with `BLAST Database error`
   where the first alignment shown is of such a sequence under a Seq-align id that is not local,
@@ -488,7 +488,13 @@
   2026-09-29, restated 2026-10-07; numbered after 1.88, line NP item M4b-3c; first 1.81, then 1.82 at the merge of dev
   that brought 1.81, then 1.84 after dev's 1.82 (line PS item PS10a) and M4b-AX's 1.83, then 1.86 after dev's 1.84
   (psiblast line item PS10c), then 1.87 after dev's 1.85 (line RG item D1c-1), then 1.88 after dev's 1.86
-  (psiblast line item PS10d), then 1.89 after dev's 1.87 (line NP item O4b2-2) and M4b-3c's 1.88)
+  (psiblast line item PS10d), then 1.89 after dev's 1.87 (line NP item O4b2-2) and M4b-3c's 1.88);
+  1.90 2026-11-16 (the read of a header record by NCBI's object stream reproduced, rule 2: a
+  definite length in the long form ends the value one byte per length byte after the first too
+  early, and the bytes after the set are not read; line RG item T5d, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; written 2026-11-16 as 1.39, renumbered at the merges
+  with dev to 1.44, 1.46, 1.47, 1.50, 1.51, 1.52, 1.68, 1.70, 1.71, 1.72, 1.73, 1.74, 1.75, 1.78, 1.81,
+  1.82, 1.83, 1.85, 1.86, 1.89 and then 1.90, numbered after 1.89)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1658,6 +1664,18 @@ file would differ, and NCBI's programs still could not open the database).
   (`(int)GetAlnStop()` is -1): its blank line alone. LOSAT writes the same (probes
   `T/t3/x2g/`: 1,880 cases of the X2g fixtures' inputs and of the X2g-1 probe P1's pairs, 1,662 of
   P1's 277 pairs with such HSPs, 18 of two queries; fixture rows `db.x2g.bx.of.*`).
+- The header record of a database sequence as NCBI's object stream reads it
+  (`CObjectIStreamAsnBinary`, `x_GetHdrAsn1`), version 1.90 (line RG item T5d): a constructed
+  value with a definite length in the long form ends where NCBI's `ExpectIndefiniteLength` puts
+  it, at the position after the first length byte plus the length (objistrasnb.inl:296 takes the
+  stream position before `ReadLengthLong` reads the other length bytes):
+  one byte per further length byte before the value's end, so that NCBI 2.17.0 fails on such a
+  record with `EndOfContentsByte expected` (probes c30 and c31 of
+  `remaining-gaps-20261112/T/t5d/impl/probe1`); makeblastdb writes indefinite lengths. The bytes
+  after the set are not read (`EndOfRead`; probe c25). `seqid::ber::decode_full_set` reads as
+  NCBI does, and the ordinal-id decoder of `seqdb::header` fails wherever it does; unit tests
+  `header_reads_fail_as_ncbis_object_stream_fails` and
+  `definite_lengths_read_as_ncbis_reader_reads_them` (`LOSAT/src/seqid/tests.rs`).
 
 - `losat rpsbproc`, the end of an aligned segment when a site is mapped (`MapSegSet`'s `SeqPos_t end
   = m_vecSStarts[idx] + m_vecLens[idx] - 1`, `common/basedata.cpp:1180-1250`): an `unsigned int` sum

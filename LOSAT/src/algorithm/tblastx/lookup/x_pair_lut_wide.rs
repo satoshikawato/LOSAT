@@ -763,7 +763,7 @@ fn x_wide_list_part(
     let mut q_bounds = vec![(u32::MAX, 0u32); groups];
     for i in range {
         let runs = sources.runs_of(i);
-        // blast_aalookup.c:490: w = query + offset_list[2];
+        // blast_aalookup.c:490: query word starting at the first stored offset (`offset_list[2]`).
         let first = usize::try_from(sources.offsets[runs[0].from as usize])
             .expect("NCBI BLAST query offset must fit");
         let before = targets.len();

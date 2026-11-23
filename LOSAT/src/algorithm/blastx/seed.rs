@@ -849,7 +849,8 @@ pub(crate) fn word_finder(
     )
 }
 
-/// [`word_finder_bx`] with another matrix than BLOSUM62 (`MatrixBx`).
+/// The word finder of a lookup table of either width (`word_finder_bx`, which only the tests
+/// call) with another matrix than BLOSUM62 (`MatrixBx`).
 // The reference that the tests of `x_seed_diag` compare the searches' word finders with, and the
 // word finder of a search with a negative window (`search::subject_hits_with`), which none of
 // the faster loops runs.

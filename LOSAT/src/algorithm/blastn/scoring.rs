@@ -82,6 +82,10 @@ fn check_scoring_options_with(
         // a caller of `run_local` sets the field itself.
         "Invalid discontiguous template parameters: template length must be 16, 18, or 21"
             .to_string()
+    } else if template_length > 0 && args.strategy_template_type.is_some() {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1271-1277
+        // A search strategy's type above 2 (`MBTemplateType`; the command line names the three).
+        "Invalid discontiguous template parameters: template type must be 0, 1, or 2".to_string()
     } else if template_length > 0 && !mb_lookup_options {
         "Invalid lookup table type for discontiguous Mega BLAST".to_string()
     } else if args.limit_lookup && word_size < 16 {
@@ -112,8 +116,23 @@ fn check_scoring_options_with(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1543-1548 (the HSP
         // filtering options, the last check of the hit saving options)
         message.to_string()
-    } else if spec.gap_open == 0 && spec.gap_extend == 0 && !greedy {
+    } else if spec.gap_open == 0
+        && spec.gap_extend == 0
+        && match args.strategy_algorithms {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1700-1712
+            // A search strategy's pair: greedy where either algorithm is.
+            Some((extension, traceback)) => extension != 1 && traceback != 1,
+            None => !greedy,
+        }
+    {
         "Greedy extension must be used if gap existence and extension options are zero".to_string()
+    } else if args.strategy_algorithms.is_some() {
+        // NCBI's checks pass: NCBI runs the pair (its jumper, Smith-Waterman or a greedy
+        // extension with dynamic programming's traceback), which LOSAT does not.
+        return Err(crate::report::archive::read::import::Start::unported(
+            "a search strategy with this pair of gapped extension algorithms",
+            crate::blastinput::app::Program::Blastn.name(),
+        ));
     } else {
         return Ok(());
     };

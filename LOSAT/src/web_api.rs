@@ -293,6 +293,8 @@ fn parse_blastn_args(
         export_search_strategy: None,
         import_search_strategy: None,
         import: None,
+        strategy_algorithms: None,
+        strategy_template_type: None,
         given: Default::default(),
         strategy: None,
         command_line: None,

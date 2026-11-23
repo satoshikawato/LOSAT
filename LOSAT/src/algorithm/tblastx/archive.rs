@@ -496,20 +496,10 @@ impl import::StrategyArgs for TblastxArgs {
             Setter::QueryCovHspPerc(v) => self.qcov_hsp_perc = Some(*v),
             Setter::MaskAtHash(on) => self.soft_masking = Some(*on),
             Setter::QueryGeneticCode(n) => {
-                self.query_gencode = u8::try_from(*n).map_err(|_| {
-                    import::Start::unported(
-                        "a search strategy with this query genetic code",
-                        program,
-                    )
-                })?
+                self.query_gencode = import::Start::genetic_code(*n, "query", program)?
             }
             Setter::DbGeneticCode(n) => {
-                self.db_gencode = u8::try_from(*n).map_err(|_| {
-                    import::Start::unported(
-                        "a search strategy with this database genetic code",
-                        program,
-                    )
-                })?
+                self.db_gencode = import::Start::genetic_code(*n, "database", program)?
             }
             Setter::SubjectBestHit => self.subject_besthit = true,
             Setter::BestHitOverhang(v) => self.best_hit_overhang = Some(*v),

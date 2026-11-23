@@ -278,6 +278,17 @@ pub struct BlastnArgs {
     /// The run state of an imported search strategy (`import::apply`).
     #[arg(skip)]
     pub(crate) import: Option<crate::report::archive::read::import::ImportRun>,
+    /// A search strategy's gapped extension and traceback algorithms (`GapExtnAlgorithm`,
+    /// `GapTracebackAlgorithm`, the task's where one is missing) other than the pairs that LOSAT
+    /// runs (dynamic programming, and megablast's greedy pair): NCBI's options check reads them
+    /// where it comes (`scoring::check_scoring_options`), and LOSAT refuses them after NCBI's
+    /// checks. `None` from the command line.
+    #[arg(skip)]
+    pub(crate) strategy_algorithms: Option<(i32, i32)>,
+    /// A search strategy's discontiguous template type above 2 (`MBTemplateType`, NCBI's
+    /// `Uint1`), which NCBI's options check refuses (`scoring::check_scoring_options`).
+    #[arg(skip)]
+    pub(crate) strategy_template_type: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:648-660,674-679
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:175-182,262-271
     // An omitted option keeps the default of the task (`coordination.rs`); a given one is

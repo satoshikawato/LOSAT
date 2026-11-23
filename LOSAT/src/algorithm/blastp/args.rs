@@ -792,6 +792,13 @@ impl BlastpArgs {
         if let Some(evalue) = self.evalue {
             options.evalue = evalue;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3801-3837
+        // After `-import_search_strategy` NCBI runs only the handlers that
+        // `SetOptionsForSavedStrategy` names: the rules of the generic search, word threshold and
+        // window size handlers below (the matrix's gap costs, threshold and window, the threshold
+        // of a word size above 4) are the command line's, and a strategy's options keep the
+        // task's values where it sets none (a hand-edited strategy: NCBI's export writes them).
+        let command_line = self.import.is_none();
         let (matrix_gap_open, matrix_gap_extend) = self
             .matrix
             .as_deref()
@@ -799,16 +806,16 @@ impl BlastpArgs {
             .unwrap_or((0, 0));
         match (self.gap_open, &self.matrix) {
             (Some(gap_open), _) => options.gap_open = gap_open,
-            (None, Some(_)) => options.gap_open = matrix_gap_open,
-            (None, None) => {}
+            (None, Some(_)) if command_line => options.gap_open = matrix_gap_open,
+            (None, _) => {}
         }
         match (self.gap_extend, &self.matrix) {
             (Some(gap_extend), _) => options.gap_extend = gap_extend,
-            (None, Some(_)) => options.gap_extend = matrix_gap_extend,
-            (None, None) => {}
+            (None, Some(_)) if command_line => options.gap_extend = matrix_gap_extend,
+            (None, _) => {}
         }
         if let Some(word_size) = self.word_size {
-            if word_size > 4 {
+            if word_size > 4 && command_line {
                 options.lookup_table_type = BlastpLookupTableType::CompressedAaLookupTable;
                 options.threshold = 19.3;
                 if word_size > 5 {
@@ -836,14 +843,15 @@ impl BlastpArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623
         if let Some(threshold) = self.threshold {
             options.threshold = threshold;
-        } else if options.threshold as i32 == 11 {
+        } else if command_line && options.threshold as i32 == 11 {
             options.threshold =
                 suggested_threshold(SuggestionProgram::Protein, &options.matrix_name);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
         options.window_size = match self.window_size {
             Some(window) => window,
-            None => suggested_window_size(&options.matrix_name),
+            None if command_line => suggested_window_size(&options.matrix_name),
+            None => options.window_size,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
         // The query options handler comes after the window size handler and before the

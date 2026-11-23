@@ -540,12 +540,7 @@ impl import::StrategyArgs for TblastnArgs {
             Setter::GappedMode(gapped) => self.ungapped = !*gapped,
             Setter::SumStatisticsMode(on) => self.sum_stats = Some(*on),
             Setter::DbGeneticCode(n) => {
-                self.db_gencode = u8::try_from(*n).map_err(|_| {
-                    import::Start::unported(
-                        "a search strategy with this database genetic code",
-                        program,
-                    )
-                })?
+                self.db_gencode = import::Start::genetic_code(*n, "database", program)?
             }
             Setter::LongestIntronLength(n) => self.max_intron_length = Some(*n),
             Setter::SubjectBestHit => self.subject_besthit = true,

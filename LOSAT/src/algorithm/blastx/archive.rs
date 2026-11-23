@@ -587,12 +587,7 @@ impl import::StrategyArgs for BlastxArgs {
             Setter::GappedMode(gapped) => self.ungapped = !*gapped,
             Setter::SumStatisticsMode(on) => self.sum_stats = Some(*on),
             Setter::QueryGeneticCode(n) => {
-                self.query_gencode = u8::try_from(*n).map_err(|_| {
-                    import::Start::unported(
-                        "a search strategy with this query genetic code",
-                        program,
-                    )
-                })?
+                self.query_gencode = import::Start::genetic_code(*n, "query", program)?
             }
             Setter::LongestIntronLength(n) => self.max_intron_length = *n,
             Setter::SubjectBestHit => self.subject_besthit = true,

@@ -1228,7 +1228,7 @@ fn search_database(
         database.list_taxids(),
         &database.statistics(),
         false,
-        args.searchsp.is_some_and(|space| space > 0),
+        args.searchsp.is_some_and(|space| space != 0),
         args.dbsize.is_some_and(|size| size > 0),
         "BLASTX",
     )?;

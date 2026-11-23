@@ -403,12 +403,19 @@ impl TblastxArgs {
         Ok(())
     }
 
-    /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject.
+    /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject; a
+    /// search strategy without one keeps the handle's 13 (`BLAST_WORD_THRESHOLD_TBLASTX`): after
+    /// an import NCBI runs only the handlers that `SetOptionsForSavedStrategy` names.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (TBLASTX's default
     /// threshold is always the suggestion's)
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3801-3837
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:115
     pub fn word_threshold(&self) -> f64 {
         self.threshold.unwrap_or_else(|| {
+            if self.import.is_some() {
+                return 13.0;
+            }
             crate::stats::protein_options::suggested_threshold(
                 crate::stats::protein_options::SuggestionProgram::TranslatedSubject,
                 self.matrix_name(),
@@ -416,11 +423,16 @@ impl TblastxArgs {
         })
     }
 
-    /// The two-hit window: `-window_size`, or the matrix's suggestion.
+    /// The two-hit window: `-window_size`, or the matrix's suggestion; a search strategy without
+    /// one keeps the handle's 40 (`BLAST_WINDOW_SIZE_PROT`, as `word_threshold`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:57
     pub fn window(&self) -> i32 {
         self.window_size.unwrap_or_else(|| {
+            if self.import.is_some() {
+                return 40;
+            }
             crate::stats::protein_options::suggested_window_size(self.matrix_name())
         })
     }

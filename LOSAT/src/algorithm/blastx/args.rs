@@ -731,10 +731,19 @@ impl BlastxArgs {
         // The matrix as typed (BLOSUM62 when omitted) and its gap costs: with `-matrix`, a cost
         // not given is the matrix's BEST one.
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:255-275
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3801-3837
+        // After `-import_search_strategy` NCBI runs only the handlers that
+        // `SetOptionsForSavedStrategy` names: the rules of the generic search, word threshold and
+        // window size handlers below (the matrix's gap costs, threshold and window, the threshold
+        // of a word size above 4) are the command line's, and a strategy's options keep the
+        // task's values where it sets none (a hand-edited strategy: NCBI's export writes them).
+        let command_line = self.import.is_none();
         let matrix_name = self.matrix.clone().unwrap_or_else(|| "BLOSUM62".into());
         let (best_open, best_extend) = match &self.matrix {
-            Some(name) => protein_gap_existence_extend_params(name).unwrap_or((0, 0)),
-            None => (11, 1),
+            Some(name) if command_line => {
+                protein_gap_existence_extend_params(name).unwrap_or((0, 0))
+            }
+            _ => (11, 1),
         };
         let gap_open = self.gap_open.unwrap_or(best_open);
         let gap_extend = self.gap_extend.unwrap_or(best_extend);
@@ -852,6 +861,7 @@ impl BlastxArgs {
         // of `-word_size` 5, 6 and 7 are not the default, and stay.
         let threshold = match self.threshold {
             Some(threshold) => threshold,
+            None if !command_line => task_threshold,
             None if self.word_size == Some(5) => 19.3,
             None if self.word_size == Some(6) => 21.0,
             None if self.word_size == Some(7) => 20.25,
@@ -859,9 +869,12 @@ impl BlastxArgs {
             None => suggested_threshold(SuggestionProgram::TranslatedQuery, &matrix_name),
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
-        let window_size = self
-            .window_size
-            .unwrap_or_else(|| suggested_window_size(&matrix_name));
+        // (blastx's handle: window 40)
+        let window_size = match self.window_size {
+            Some(window) => window,
+            None if command_line => suggested_window_size(&matrix_name),
+            None => 40,
+        };
         // NCBI 2.17.0 crashes on a name that its matrix loader reads as IDENTITY without IDENTITY's
         // statistics table (`IDENTITYX`), and on IDENTITY with the compressed lookup table
         // (`-word_size` 5 to 7, blastx-fast): LOSAT refuses both (ungapped searches only: a gapped
@@ -878,6 +891,14 @@ impl BlastxArgs {
             self.program().lower,
             self.program().upper,
         )?;
+        // A search strategy's word size below 2 (the command line takes 2 or more): NCBI builds a
+        // lookup table of one letter, which LOSAT's tables do not have (as BLASTP).
+        if word_size < 2 {
+            bail!(
+                "-word_size {word_size} (the lookup table) is not supported by LOSAT's {}",
+                self.program().upper
+            );
+        }
         // The counts are at most `i32::MAX` (the options are `Int4`).
         let hitlist_size = counts.hitlist_size as i32;
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:250

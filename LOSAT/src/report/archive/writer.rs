@@ -250,6 +250,15 @@ fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
             }
             enc.end_list();
         }
+        // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:493-497
+        ParamValue::StrandType(value) => enc.enumerated(
+            match value {
+                1 => "forward-strand",
+                2 => "reverse-strand",
+                _ => "both-strands",
+            },
+            *value,
+        ),
     }
     enc.end_variant();
     enc.end_member();

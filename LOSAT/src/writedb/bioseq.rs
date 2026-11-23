@@ -7,15 +7,16 @@
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1007-1036
 /// `CSeq_data` of a sequence: the choice and its bytes exactly as NCBI holds
 /// them (one letter per residue for the text codings, 4 bases per byte for
-/// ncbi2na, 2 bases per byte for ncbi4na; the last byte is padded with zero
-/// bits).
+/// ncbi2na, 2 bases per byte for ncbi4na; the FASTA source pads the last byte with zero
+/// bits, a PSSM's query has the bytes and the byte count of its file).
 ///
-/// CWriteDB also writes iupacna, which no writer of LOSAT gives it; iupacaa and ncbistdaa are
-/// the codings of a PSSM's query (makeprofiledb).
+/// iupacna, iupacaa and ncbistdaa are codings of a PSSM's query only (makeprofiledb), which
+/// also gives the other three.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SeqData {
     Ncbi2na(Vec<u8>),
     Ncbi4na(Vec<u8>),
+    Iupacna(Vec<u8>),
     Ncbieaa(Vec<u8>),
     Iupacaa(Vec<u8>),
     Ncbistdaa(Vec<u8>),

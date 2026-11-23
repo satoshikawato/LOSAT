@@ -5,6 +5,8 @@
 //! stored in place of an ambiguous one.
 
 use super::bioseq::SeqData;
+use super::fasta_source::pack::iupacna_to_ncbi4na;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 
 // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:159-165
 // NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:98
@@ -221,16 +223,28 @@ pub struct BinarySequence {
     pub ambig: Vec<u8>,
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:456-517
-// `ncbi4na` holds `ceil(base_length / 2)` bytes: the Seq-data of the FASTA
-// source always does (NCBI only prints a line otherwise and reads on).
-/// `WriteDB_Ncbi4naToBinary`.
-pub(crate) fn ncbi4na_to_binary(ncbi4na: &[u8], base_length: u32) -> BinarySequence {
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:444-518
+// `byte_length` is the size of the data and `ncbi4na` the bytes that NCBI's pointer reaches (for
+// iupacna, its NCBI4na string and the string's terminating zero). A size other than the
+// `ceil(base_length / 2)` bytes that the loop reads gets a line on the standard output (`cout`,
+// before the debug-only assertion); the loop then reads the bytes it reads, and fewer than that is
+// a read past the data, which makeprofiledb refuses (`short_nucleotide_data`; here the loop stops
+// at the end of `ncbi4na`). The Seq-data of the FASTA source always has its bytes.
+/// `WriteDB_Ncbi4naToBinary`, with its line on the standard output appended to `cout`.
+pub(crate) fn ncbi4na_to_binary(
+    ncbi4na: &[u8],
+    byte_length: usize,
+    base_length: u32,
+    cout: &mut Vec<u8>,
+) -> BinarySequence {
     let inp_bytes = base_length.div_ceil(2) as usize;
     let blast_bytes = (base_length / 4 + 1) as usize;
     let remainder = (base_length & 3) as u8;
     let last_byte = blast_bytes - 1;
     let mut ambiguities = AmbigDataBuilder::new(base_length);
+    if inp_bytes != byte_length {
+        cout.extend_from_slice(format!("ib={inp_bytes},n4sz={byte_length}\n").as_bytes());
+    }
     let mut seq = vec![0u8; blast_bytes];
     for (i, &inp) in ncbi4na.iter().enumerate().take(inp_bytes) {
         let mut b1 = inp >> 4;
@@ -261,7 +275,9 @@ pub(crate) fn ncbi4na_to_binary(ncbi4na: &[u8], base_length: u32) -> BinarySeque
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:572-587
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:569-588
+// The first `ceil(base_length / 4)` bytes of the data are copied (bytes past them are not read);
+// fewer bytes is a read past the data, which makeprofiledb refuses (`short_nucleotide_data`).
 /// `WriteDB_Ncbi2naToBinary`: no ambiguity data.
 pub(crate) fn ncbi2na_to_binary(ncbi2na: &[u8], base_length: u32) -> BinarySequence {
     let data_bytes = base_length.div_ceil(4) as usize;
@@ -277,47 +293,6 @@ pub(crate) fn ncbi2na_to_binary(ncbi2na: &[u8], base_length: u32) -> BinarySeque
         seq,
         ambig: Vec::new(),
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:391-394
-// The table of 256 pairs (the letter as the first and as the second base of
-// a byte) is 0xf0, 0xf (N) for every byte except the letters below, in
-// either case (sequtil_tables.cpp:409-423, the rows of 'A'-'Z' and 'a'-'z'):
-// A 1, B 14, C 2, D 13, G 4, H 11, K 12, M 3, R 5, S 6, T 8, U 8, V 7, W 9,
-// Y 10.
-#[cfg(test)]
-const fn iupacna_to_ncbi4na_table() -> [u8; 256] {
-    let mut table = [0xFu8; 256];
-    let letters = b"ABCDGHKMRSTUVWY";
-    let codes = [1u8, 14, 2, 13, 4, 11, 12, 3, 5, 6, 8, 8, 7, 9, 10];
-    let mut i = 0;
-    while i < letters.len() {
-        table[letters[i] as usize] = codes[i];
-        table[letters[i].to_ascii_lowercase() as usize] = codes[i];
-        i += 1;
-    }
-    table
-}
-#[cfg(test)]
-const IUPACNA_TO_NCBI4NA: [u8; 256] = iupacna_to_ncbi4na_table();
-
-// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:324-339
-/// `CSeqConvert::Convert` from iupacna to ncbi4na: two bases per byte, the
-/// first in the high half.
-#[cfg(test)]
-pub(crate) fn iupacna_to_ncbi4na(iupacna: &[u8]) -> Vec<u8> {
-    let mut na4 = Vec::with_capacity(iupacna.len().div_ceil(2));
-    let mut pairs = iupacna.chunks_exact(2);
-    for pair in &mut pairs {
-        na4.push(
-            (IUPACNA_TO_NCBI4NA[usize::from(pair[0])] << 4)
-                | IUPACNA_TO_NCBI4NA[usize::from(pair[1])],
-        );
-    }
-    if let [last] = pairs.remainder() {
-        na4.push(IUPACNA_TO_NCBI4NA[usize::from(*last)] << 4);
-    }
-    na4
 }
 
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1747-1749
@@ -366,7 +341,7 @@ pub(crate) fn protein_codes(seq_data: &SeqData) -> Option<Vec<u8>> {
         SeqData::Ncbieaa(v) => Some(ncbieaa_codes(v)),
         SeqData::Iupacaa(v) => Some(iupacaa_codes(v)),
         SeqData::Ncbistdaa(v) => Some(v.clone()),
-        SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other => None,
+        SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Iupacna(_) | SeqData::Other => None,
     }
 }
 
@@ -383,6 +358,24 @@ pub(crate) fn iupacaa_codes(letters: &[u8]) -> Vec<u8> {
 
 fn convert_1_to_1(src: &[u8], table: &[u8; 256]) -> Vec<u8> {
     src.iter().map(|&byte| table[usize::from(byte)]).collect()
+}
+
+/// `CSeqConvert`'s exception for a conversion that no function covers (`CSeqUtilException`,
+/// `eInvalidCoding`): one from a nucleotide coding to NCBIstdaa (psiblast's query from an
+/// alignment, `CPsiBlastInputClustalW`; makeprofiledb's query of a profile with frequency ratios
+/// only, `CPssm::GetQuerySequenceData`). NCBI BLAST+ 2.17.0 reports it with `Unknown
+/// conversion.` (PS6 corpus `e.len1`, `n.q`; row PS10d survey `FA_*`).
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:225
+pub(crate) fn unknown_conversion() -> NcbiException {
+    NcbiException::new(
+        ThrowSite {
+            file: "src/util/sequtil/sequtil_convert_imp.cpp",
+            line: 225,
+            kind: "CSeqUtilException::Invalid coding",
+            function: Some("ncbi::CSeqConvert_imp::Convert"),
+        },
+        "Unknown conversion.",
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbobj.cpp:47-60
@@ -410,7 +403,9 @@ pub(crate) fn sequence_hash(seq_data: &SeqData, length: u64) -> Option<u32> {
             hash((0..length).map(|i| 1u8 << ((v[i / 4] >> (6 - 2 * (i % 4))) & 3)))
         }
         SeqData::Ncbi4na(v) => hash((0..length).map(|i| (v[i / 2] >> (4 - 4 * (i % 2))) & 0x0f)),
-        SeqData::Other => return None,
+        // No program of LOSAT hashes iupacna (makeprofiledb's writer has no hash index), and its
+        // codes through the object manager's sequence vector are not ported.
+        SeqData::Iupacna(_) | SeqData::Other => return None,
     })
 }
 
@@ -445,18 +440,16 @@ pub(crate) fn raw_sequence_hash(
 pub struct UnprocessableSequence;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1007-1036
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:530-567
-// LOSAT has no counterpart of `WriteDB_StdaaToBinary` and `WriteDB_IupacaaToBinary` (nor of the
-// `e_Ncbistdaa` and `e_Iupacaa` cases of the switch above): LOSAT's FASTA reader never makes these
-// Seq-data choices, so they are not ported (P-V3b).
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:592-609
-// LOSAT has no counterpart of `WriteDB_IupacnaToBinary` (nor of the `e_Iupacna` case of the switch
-// above): LOSAT's FASTA reader never makes this Seq-data choice, so it is not ported (P-V3b).
-/// `CWriteDB_Impl::x_CookSequence` for a `CBioseq` with `Seq-data`: the
-/// sequence bytes and the ambiguity data of a sequence of `length` letters.
+// The six codings that CWriteDB converts, whatever the volume (a protein volume writes the bytes
+// of a nucleotide coding, without its ambiguity data: `volume::write_sequence`); the others stop
+// the publication.
+/// `CWriteDB_Impl::x_CookSequence` for a `CBioseq` with `Seq-data`: the sequence bytes and the
+/// ambiguity data of a sequence of `length` letters, and the line that the conversion of NCBI4na
+/// writes on the standard output, appended to `cout`.
 pub(crate) fn seq_data_to_binary(
     seq_data: &SeqData,
     length: u32,
+    cout: &mut Vec<u8>,
 ) -> Result<BinarySequence, UnprocessableSequence> {
     let protein = |seq: Vec<u8>| BinarySequence {
         seq,
@@ -467,8 +460,67 @@ pub(crate) fn seq_data_to_binary(
             protein(protein_codes(seq_data).expect("a protein coding"))
         }
         SeqData::Ncbi2na(v) => ncbi2na_to_binary(v, length),
-        SeqData::Ncbi4na(v) => ncbi4na_to_binary(v, length),
+        SeqData::Ncbi4na(v) => ncbi4na_to_binary(v, v.len(), length, cout),
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:590-610
+        // Every letter converts (none for empty data: `CSeqConvert`'s template returns before
+        // the conversion), and the conversion of the length reads the NCBI4na string through
+        // its `c_str()`: its bytes, then the terminating zero.
+        SeqData::Iupacna(v) => {
+            let mut na4 = iupacna_to_ncbi4na(v);
+            let byte_length = na4.len();
+            na4.push(0);
+            ncbi4na_to_binary(&na4, byte_length, length, cout)
+        }
         SeqData::Other => return Err(UnprocessableSequence),
+    })
+}
+
+/// A nucleotide `Seq-data` with fewer bytes than `x_CookSequence`'s conversion of its length
+/// reads: its coding, how much it holds and the bytes that NCBI reads (of iupacna: its letters,
+/// and the bytes of their NCBI4na form).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShortNucleotideData {
+    pub(crate) coding: &'static str,
+    /// Whether the data is text (iupacna), whose `held` counts letters, not bytes.
+    pub(crate) text: bool,
+    pub(crate) held: usize,
+    pub(crate) read: usize,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:569-588
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:444-528
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:590-610
+// The conversions read `ceil(length / 4)` bytes of ncbi2na and `ceil(length / 2)` bytes of
+// ncbi4na from the data (its first byte's address even when it is empty), and of iupacna the
+// `ceil(letters / 2)` bytes of its NCBI4na string and the string's terminating zero; the assertions
+// of the right size are debug-only. NCBI BLAST+ 2.17.0 reads past the data there (valgrind's
+// invalid reads and uninitialised values, bytes that change between runs, SIGSEGV for empty
+// ncbi2na and ncbi4na; row PS10d survey §6). One byte short for iupacna reads the zero (its two
+// bases are N), which is NCBI's defined result.
+/// The data of `length` letters that CWriteDB's conversion reads past; `None` for data of enough
+/// bytes and for another coding.
+pub(crate) fn short_nucleotide_data(
+    seq_data: &SeqData,
+    length: u32,
+) -> Option<ShortNucleotideData> {
+    let (coding, text, held, available, read) = match seq_data {
+        SeqData::Ncbi2na(v) => ("ncbi2na", false, v.len(), v.len(), length.div_ceil(4)),
+        SeqData::Ncbi4na(v) => ("ncbi4na", false, v.len(), v.len(), length.div_ceil(2)),
+        SeqData::Iupacna(v) => (
+            "iupacna",
+            true,
+            v.len(),
+            v.len().div_ceil(2) + 1,
+            length.div_ceil(2),
+        ),
+        _ => return None,
+    };
+    let read = read as usize;
+    (available < read).then_some(ShortNucleotideData {
+        coding,
+        text,
+        held,
+        read,
     })
 }
 

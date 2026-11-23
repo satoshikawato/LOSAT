@@ -1,0 +1,251 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: nz pc
+           4 sequences; 326 total letters
+
+
+
+Query= q1
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sZ_nz_pc subject sZ                                                   73.9    4e-24
+sM_nz_pc subject sM                                                   73.9    2e-23
+sN_nz_pc subject sN                                                   50.8    2e-15
+
+
+
+Query_1   1   IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+sZ_nz_pc  2   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  61
+sZ_nz_pc  6   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVY  65
+sZ_nz_pc  8   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVY  67
+sZ_nz_pc  10  VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVY  69
+sZ_nz_pc  12  VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVY  71
+sZ_nz_pc  14  VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVY  73
+sZ_nz_pc  16  VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVY  75
+sZ_nz_pc  18  VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVY  77
+sZ_nz_pc  20  VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVY  79
+sZ_nz_pc  22  VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVY  81
+sZ_nz_pc  24  VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVYVY  83
+sM_nz_pc  2   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  61
+sN_nz_pc  2   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY                      41
+sN_nz_pc  2     VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY                    41
+sN_nz_pc  2       VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY                  41
+sN_nz_pc  2         VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY                41
+sN_nz_pc  2           VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY              41
+sN_nz_pc  2             VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY            41
+sN_nz_pc  2               VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY          41
+sN_nz_pc  2                 VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY        41
+sN_nz_pc  2                   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY      41
+sN_nz_pc  2                     VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY    41
+sN_nz_pc  2                       VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  41
+
+
+Lambda      K        H        a         alpha
+   0.390    0.205    0.673    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 12420
+
+
+Query= q2
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sM_nz_pc subject sM                                                   184     7e-66
+sI_nz_pc subject sI                                                   139     6e-49
+sZ_nz_pc subject sZ                                                   73.9    6e-23
+sN_nz_pc subject sN                                                   50.8    2e-14
+
+
+
+Query_2   1    IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  60
+sM_nz_pc  2    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  61
+sZ_nz_pc  2    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  61
+sZ_nz_pc  6    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVY  65
+sZ_nz_pc  8    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVY  67
+sZ_nz_pc  10   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVY  69
+sZ_nz_pc  12   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVY  71
+sZ_nz_pc  14   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVY  73
+sZ_nz_pc  16   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVY  75
+sZ_nz_pc  18   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVY  77
+sZ_nz_pc  20   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVY  79
+sZ_nz_pc  22   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVY  81
+sZ_nz_pc  24   VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVYVY  83
+sN_nz_pc  2    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY                      41
+sN_nz_pc  2      VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY                    41
+sN_nz_pc  2        VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY                  41
+sN_nz_pc  2          VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY                41
+sN_nz_pc  2            VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY              41
+sN_nz_pc  2              VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY            41
+sN_nz_pc  2                VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY          41
+sN_nz_pc  2                  VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY        41
+sN_nz_pc  2                    VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY      41
+sN_nz_pc  2                      VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY    41
+sN_nz_pc  2                        VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  41
+
+Query_2   61   DDDDDDDDDDDDDDDDDDDDFFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCS  120
+sM_nz_pc  82   --------------------........................................  121
+                                   \                                       
+                                   |                                       
+                WWWWWWWWWWWWWWWWWWWW
+sI_nz_pc  2                        ........................................  41
+
+Query_2   121  RQYNYFIEIAYTCHTDPLPC  140
+sM_nz_pc  122  ....................  141
+sI_nz_pc  42   ....................  61
+sZ_nz_pc  53     .V.VYVYV.C.         63
+
+
+Lambda      K        H        a         alpha
+   0.345    0.164    0.566    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 29520
+
+
+Query= q3
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sI_nz_pc subject sI                                                   139     2e-50
+sM_nz_pc subject sM                                                   139     2e-49
+sZ_nz_pc subject sZ                                                   12.7    2.1  
+
+
+
+Query_3   1    FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  60
+sI_nz_pc  2    ............................................................  61
+sM_nz_pc  82   ............................................................  141
+sZ_nz_pc  61                                       YC.VYV.V.VYVYV.           75
+sZ_nz_pc  53                                             .V.VYVYV.C.         63
+
+
+Lambda      K        H        a         alpha
+   0.324    0.139    0.498    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 12420
+
+
+Query= q4
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sI_nz_pc subject sI                                                   139     6e-49
+sM_nz_pc subject sM                                                   139     6e-48
+sZ_nz_pc subject sZ                                                   73.9    6e-23
+sN_nz_pc subject sN                                                   50.8    2e-14
+
+
+
+Query_4   1    FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC  60
+sI_nz_pc  2    ............................................................  61
+sM_nz_pc  82   ............................................................  141
+sZ_nz_pc  53                                             .V.VYVYV.C.-------  63
+
+Query_4   61   DDDDDDDDDDDDDDDDDDDDIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF  120
+sM_nz_pc  2                        VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  41
+sZ_nz_pc  2                        VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  41
+sZ_nz_pc  6                        VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  45
+sZ_nz_pc  8                        VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  47
+sZ_nz_pc  10                       VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  49
+sZ_nz_pc  12                       VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  51
+sZ_nz_pc  14                       VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  53
+sZ_nz_pc  16                       VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  55
+sZ_nz_pc  18                       VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  57
+sZ_nz_pc  20                       VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  59
+sZ_nz_pc  22                       VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  61
+sZ_nz_pc  24                       VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCC  63
+sZ_nz_pc  64   --------------------VYVYVYVYVYVYVYVYVYVY                      83
+sN_nz_pc  2                        VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  41
+sN_nz_pc  2                          VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  39
+sN_nz_pc  2                            VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  37
+sN_nz_pc  2                              VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  35
+sN_nz_pc  2                                VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  33
+sN_nz_pc  2                                  VYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  31
+sN_nz_pc  2                                    VYVYVYVYVYVYVYVYVYVYVYVYVYVY  29
+sN_nz_pc  2                                      VYVYVYVYVYVYVYVYVYVYVYVYVY  27
+sN_nz_pc  2                                        VYVYVYVYVYVYVYVYVYVYVYVY  25
+sN_nz_pc  2                                          VYVYVYVYVYVYVYVYVYVYVY  23
+sN_nz_pc  2                                            VYVYVYVYVYVYVYVYVYVY  21
+
+Query_4   121  IFIFIFIFIFIFIFIFIFIF  140
+sM_nz_pc  42   VYVYVYVYVYVYVYVYVYVY  61
+sZ_nz_pc  42   VYVYVYVYVYVYVYVYVYVY  61
+sZ_nz_pc  46   VYVYVYVYVYVYVYVYCCVY  65
+sZ_nz_pc  48   VYVYVYVYVYVYVYCCVYVY  67
+sZ_nz_pc  50   VYVYVYVYVYVYCCVYVYVY  69
+sZ_nz_pc  52   VYVYVYVYVYCCVYVYVYVY  71
+sZ_nz_pc  54   VYVYVYVYCCVYVYVYVYVY  73
+sZ_nz_pc  56   VYVYVYCCVYVYVYVYVYVY  75
+sZ_nz_pc  58   VYVYCCVYVYVYVYVYVYVY  77
+sZ_nz_pc  60   VYCCVYVYVYVYVYVYVYVY  79
+sZ_nz_pc  62   CCVYVYVYVYVYVYVYVYVY  81
+sZ_nz_pc  64   VYVYVYVYVYVYVYVYVYVY  83
+sN_nz_pc  40   VY                    41
+sN_nz_pc  38   VYVY                  41
+sN_nz_pc  36   VYVYVY                41
+sN_nz_pc  34   VYVYVYVY              41
+sN_nz_pc  32   VYVYVYVYVY            41
+sN_nz_pc  30   VYVYVYVYVYVY          41
+sN_nz_pc  28   VYVYVYVYVYVYVY        41
+sN_nz_pc  26   VYVYVYVYVYVYVYVY      41
+sN_nz_pc  24   VYVYVYVYVYVYVYVYVY    41
+sN_nz_pc  22   VYVYVYVYVYVYVYVYVYVY  41
+
+
+Lambda      K        H        a         alpha
+   0.345    0.164    0.566    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 29520
+
+
+  Database: nz pc
+    Posted date:  Nov 5, 2026  5:52 AM
+  Number of letters in database: 326
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 9
+Window for multiple hits: 40

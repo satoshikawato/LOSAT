@@ -534,7 +534,7 @@ impl TblastnArgs {
             match &result {
                 Err(error) => {
                     // The `-in_pssm` file, which NCBI opens inside `Run` too.
-                    let in_run = super::in_pssm::file_error_in_run(error);
+                    let in_run = crate::algorithm::pssm_search::in_pssm::file_error_in_run(error);
                     if let Some(lines) = super::archive::error_lines(error, in_run) {
                         let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
                     } else if let Some(lines) =
@@ -1522,9 +1522,9 @@ fn filter_final_hitlists(
 #[allow(clippy::too_many_arguments)]
 /// How the pairwise reports of `formats` read each query's subjects, as the first pairwise
 /// format's writer reads them (`PairwiseView::reading` of `-sorthits`, `-sorthsps`,
-/// `-num_descriptions` and `-num_alignments`; the formats of a run whose loads they make share
-/// one view's order, `FormatThrow::and`), for the loads of a subject whose lookup throws and the
-/// texts of its reads (line DBID item pfoff-3); `None` without one.
+/// `-num_descriptions`, `-num_alignments` and `-html`; the formats of a run whose loads they
+/// make share one view's order, `FormatThrow::and`), for the loads of a subject whose lookup
+/// throws and the texts of its reads (line DBID item pfoff-3); `None` without one.
 fn pairwise_reading(
     resolved: &ResolvedTblastnArgs,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
@@ -1540,6 +1540,7 @@ fn pairwise_reading(
             descriptions: resolved.num_descriptions,
             alignments: resolved.num_alignments,
         },
+        resolved.html.is_some(),
     ))
 }
 
@@ -2781,6 +2782,7 @@ fn search(
                 db_gencode: i32::from(resolved.db_gencode),
                 identity_warned,
                 filtered_empty,
+                pssm: pssm.is_some(),
             },
             xml_taxa,
             args.out.as_deref(),

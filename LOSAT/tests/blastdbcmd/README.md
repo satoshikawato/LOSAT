@@ -36,6 +36,11 @@ taxid 10116, NCBI BLAST+ 2.17.0 makeblastdb, `remaining-gaps-20261112/D/fixtures
 run in this directory on hexadecimal values of `-line_length` and `-ipg` (`G07`, `-line_length 0x7fffffff`, is not
 frozen): `remaining-gaps-20261112/K/k4i1/tools/make_g_blastdbcmd.py`, `LOSAT/tests/blastdbcmd_retrieve.rs`
 (`G11`: `blastdbcmd_info.rs`).
+`metadata_failures.tsv` (line RG item KC-11b, 2026-11-23) is NCBI BLAST+ 2.17.0 blastdbcmd (the official Linux x64
+release on the developer machine) writing `-metadata` of `db/p4` (with `-metadata_output_prefix` of 0 to 3,000 bytes: JSON
+of 401 to 21,408 bytes) to standard output or to `-out`, on `/dev/full` and on a file under `RLIMIT_FSIZE` (SIGXFSZ ignored,
+standard error on a pipe): per row the exit status, the size and FNV-1a hash of the file and the standard error
+(`LOSAT/tests/blastdbcmd_metadata_failures.rs`; probe `remaining-gaps-20261112/K/kc/p11b/fs/`).
 `U01`, `U03` and `U04` (line SW, SW8, 2026-11-08) are NCBI BLAST+ 2.17.0 blastdbcmd on the
 developer machine, run with the words of the tests from the `blastdbcmd` directory of a copy of
 this layout whose `seqdb/db` held the five files of `user-column-db`

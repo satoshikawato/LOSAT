@@ -51,6 +51,9 @@ static TOOL: Tool = Tool {
     help: HELP,
     post_prefix: None,
     components: &[],
+    help_full: None,
+    short_description: None,
+    write_failure: None,
     dry_run: None,
 };
 
@@ -157,7 +160,14 @@ fn run_body(
                 )
             }
         };
-        return archive::format_archive(&Options::of(args), settings, &mut archive, out, diag);
+        return archive::format_archive(
+            &Options::of(args),
+            settings,
+            &mut archive,
+            out,
+            args.files(),
+            diag,
+        );
     }
     let rid = match args.as_string("rid") {
         Ok(rid) => rid,

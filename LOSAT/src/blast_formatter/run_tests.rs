@@ -18,7 +18,7 @@ fn run_words(line: &[&str], input: &[u8]) -> (i32, String, String) {
 
 #[test]
 fn the_short_usage_is_the_head_of_the_help() {
-    let usage = crate::ncbi_app::short_usage(HELP);
+    let usage = crate::ncbi_app::short_usage(&TOOL);
     // NCBI's 482 bytes, its version replaced by LOSAT's.
     assert_eq!(usage.len(), 482 + crate::wording::IDENT_GROWTH);
     assert!(usage.starts_with("USAGE\n  blast_formatter [-h] [-help] [-rid BLAST_RID]"));

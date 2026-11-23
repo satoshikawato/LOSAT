@@ -4883,11 +4883,11 @@ struct BlastnReportInputs<'a> {
     epilog: bool,
     /// `-show_gis` (the labels of the query-anchored sections, outfmt 1 to 4).
     show_gis: bool,
-    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`); None without
-    /// `-html` or outfmt 0.
+    /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
+    /// without `-html` or any of those formats.
     html: Option<Arc<crate::report::html_ids::HtmlLinks>>,
-    /// `-html` (`BlastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 and 18
-    /// reports (the organism report takes no links).
+    /// `-html` (`BlastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 to 4 and
+    /// 18 reports (the organism report takes no links).
     is_html: bool,
     /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
     /// before the search (`write_pairwise_prologs`).
@@ -5689,7 +5689,7 @@ fn post_process_hits_and_write(
         &hit_lists,
         pairwise_hits.as_deref().map(Vec::as_slice),
         &subject_titles,
-        // The query-anchored formats show no `-html` spans (they refuse `-html`).
+        // The check reads the hits' segments only, not the rows' masks of `-html`'s spans.
         &|queries| rows_of(queries, None),
     )?;
     // The queries' result warnings that a structured first format does not write are each later
@@ -6921,7 +6921,6 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check_of_run(&choice, args.app(), Program::Blastn)?;
-        app::html_format_check(choice.number, args.app(), args.html)?;
         outfmts.push(choice.number);
     }
     args.html_links = app::html_links(
@@ -7930,7 +7929,7 @@ struct ShownSubjects {
     tabular_taxdb_found: bool,
     /// The running application (`BlastnArgs::app`), the prefix of the formatter's warnings.
     app: crate::blastinput::app::Program,
-    /// The run's `-html` data for the outfmt 0 prolog (`BlastnArgs::html_links`,
+    /// The run's `-html` data for the outfmt 0 to 4 prolog (`BlastnArgs::html_links`,
     /// `write_blastn_pairwise_prolog`); `None`: the plain prolog.
     html_links: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
 }
@@ -9077,6 +9076,7 @@ fn run_in_pool(
                         &output_formats,
                         args.formatting.report_sort(),
                         args.report_counts,
+                        args.html,
                     ),
                     pairwise_first: first_report
                         .and_then(crate::report::pairwise::PairwiseView::of)
@@ -9867,6 +9867,7 @@ fn write_reports_untimed(
                         output_formats,
                         args.formatting.report_sort(),
                         args.report_counts,
+                        args.html,
                     ),
                 ),
                 results.batches,

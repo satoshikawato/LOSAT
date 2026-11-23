@@ -360,7 +360,7 @@ fn a_strategys_subjects_keep_the_threads_of_the_command_line() {
             "-num_threads",
             "4",
         ];
-        let cli = crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv)
+        let cli = crate::cli::try_parse_from(argv)
             .unwrap_or_else(|error| panic!("{program} {file}: {error}"));
         let mut posted = Vec::new();
         let command = super::import::apply(cli.command, None, &mut posted)
@@ -387,7 +387,7 @@ fn imported(running: &str, file: &str, options: &[&str]) -> crate::cli::Commands
         path.to_str().unwrap(),
     ];
     argv.extend_from_slice(options);
-    let cli = crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv)
+    let cli = crate::cli::try_parse_from(argv)
         .unwrap_or_else(|error| panic!("{running} {file}: {error}"));
     let mut posted = Vec::new();
     super::import::apply(cli.command, None, &mut posted)

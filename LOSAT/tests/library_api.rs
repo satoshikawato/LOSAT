@@ -18,8 +18,9 @@ use temp_support::TempPath;
 
 use losat::api::{
     describe, read_fasta, read_input_file, read_inputs, run, run_batches, run_blastdbcmd,
-    run_collect, run_dustmasker, run_makeblastdb, run_to_file, validate, Error, FastaRecord,
-    HspRecord, Inputs, Outcome, Program, Role, Strand, ValueKind, API_OWNED,
+    run_collect, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_makembindex,
+    run_segmasker, run_to_file, run_windowmasker, validate, Error, FastaRecord, HspRecord, Inputs,
+    Outcome, Program, Role, Strand, ValueKind, API_OWNED,
 };
 
 /// One search: a program, two fixtures of `tests/fasta`, options and the formats to compare.
@@ -1528,8 +1529,9 @@ fn the_pssm_files_are_the_command_lines() {
             "{context}: the batches' files"
         );
     }
-    // A call whose formats take two searches (`-num_descriptions` with a report and a table) would
-    // write the files of two searches: refused before any search.
+    // A call whose formats take two searches (`-num_descriptions` with a report and a table, or
+    // psiblast's outfmt 5 or 11 with another format: their hit lists are cut apart) would write the
+    // files of two searches: refused before any search.
     let search = validate(
         Program::Psiblast,
         &[
@@ -1539,15 +1541,25 @@ fn the_pssm_files_are_the_command_lines() {
         .concat(),
     )
     .unwrap();
-    let error = run_collect(&search, inputs, &["0", "6"]).unwrap_err();
-    assert!(
-        matches!(&error, Error::Argv(_))
+    let refused = |error: &Error| {
+        matches!(error, Error::Argv(_))
             && error.to_string().starts_with(
-                "-out_pssm is not accepted by the library API with formats of two hit list sizes"
-            ),
-        "{error}"
-    );
+                "-out_pssm is not accepted by the library API with formats that take two searches",
+            )
+    };
+    let error = run_collect(&search, inputs, &["0", "6"]).unwrap_err();
+    assert!(refused(&error), "{error}");
     assert!(take_files(&directory).is_empty());
+    let other_cuts = validate(
+        Program::Psiblast,
+        &[&["-num_iterations", "2"][..], &files].concat(),
+    )
+    .unwrap();
+    for formats in [["11", "6"], ["5", "6"]] {
+        let error = run_collect(&other_cuts, inputs, &formats).unwrap_err();
+        assert!(refused(&error), "{formats:?}: {error}");
+        assert!(take_files(&directory).is_empty(), "{formats:?}");
+    }
     // One format, or formats of one hit list size, search once.
     run_collect(&search, inputs, &["6", "7"]).unwrap();
     assert!(!take_files(&directory).is_empty());
@@ -2255,18 +2267,26 @@ fn a_pssm_query_is_the_command_lines() {
     assert!(outcome.reports[0].bytes == stdout);
     assert!(std::fs::read(&api_file).unwrap() == std::fs::read(&cli_file).unwrap());
     // Each format is checked as the command line checks it alone: psiblast's `-in_pssm` writes
-    // outfmt 0, 6 and 7 (`in_pssm::check_in_pssm_options`), whatever the order of the formats.
+    // outfmt 0, 5 to 11 and 20 (`in_pssm::check_in_pssm_options`; the others are item PS15b-2's),
+    // whatever the order of the formats.
     let search = validate(Program::Psiblast, &[]).unwrap();
-    for formats in [&["6", "10"][..], &["10", "6"], &["0", "20"]] {
+    for formats in [&["6", "1"][..], &["1", "6"], &["0", "15"]] {
         let error =
             run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
         assert!(
             error
                 .to_string()
-                .contains("with -in_pssm is not supported by LOSAT's PSIBLAST"),
+                .contains("is not supported by LOSAT's PSIBLAST yet"),
             "{formats:?}: {error}"
         );
     }
+    let outcome = run_collect(
+        &search,
+        Inputs::pssm_database(&pssm, &database),
+        &["6", "10", "20"],
+    )
+    .unwrap();
+    assert_eq!(outcome.reports.len(), 3);
     // A PSSM file the command line cannot read is its error, and so is `-query_loc` with it.
     let missing = directory.join("none.asn");
     let search = validate(Program::Psiblast, &[]).unwrap();
@@ -3190,14 +3210,23 @@ fn cli_output(program: &str, words: &[&str]) -> std::process::Output {
 
 /// The rule of `Error` by which the command line's standard error `stderr` is the library's
 /// `diagnostics` (what the search wrote before the failure) and then the message of `error`:
-/// NCBI's message as it is (`"ncbi"`), or LOSAT's refusal after `Error: ` and before a newline
-/// (`"losat"`); `None` when neither gives it.
+/// NCBI's message as it is (`"ncbi"`), LOSAT's refusal after `Error: ` and before a newline
+/// (`"losat"`), or the reader's error of a file that does not open (`read_input_file`: an
+/// `Error::Input` of NCBI's `Command line argument error: `) without its last newlines
+/// (`"reader"`); `None` when none gives it.
 fn failure_rule(stderr: &[u8], diagnostics: &[u8], error: &Error) -> Option<&'static str> {
     let tail = stderr.strip_prefix(diagnostics)?;
     if tail == error.message() {
         Some("ncbi")
     } else if tail == [b"Error: ", error.message(), b"\n"].concat() {
         Some("losat")
+    } else if matches!(error, Error::Input(_))
+        && error
+            .message()
+            .starts_with(b"Command line argument error: ")
+        && without_last_newlines(tail) == error.message()
+    {
+        Some("reader")
     } else {
         None
     }
@@ -3389,7 +3418,9 @@ fn a_long_organism_report_that_cannot_be_written_fails_as_the_command_lines_out(
 /// E1, fix 2): it opens and its first read fails, which ends the input, so it holds no record
 /// (`read_input_file`: blastp's query of a directory is NCBI's `Query is Empty!`); a directory
 /// named `.gz`, `.bz2` or `.zst` is refused as not of that format, as the command line refuses
-/// it. Every program, both sides, against the command line in the same test.
+/// it. On Windows a directory does not open, whatever its name (NCBI's `ifstream` there opens
+/// none, and the open comes before the format): it is a file that is not accessible. Every
+/// program, both sides, against the command line in the same test.
 #[test]
 fn a_directory_input_is_read_as_the_command_line_reads_it() {
     let directory = TempPath::new(temp_path("directories"));
@@ -3439,7 +3470,19 @@ fn a_directory_input_is_read_as_the_command_line_reads_it() {
                         }
                     }
                 }
-                if program == Program::Blastp && name == "records" && query == &named {
+                if cfg!(windows) {
+                    let not_accessible = format!(
+                        "Command line argument error: Argument \"{}\". File is not \
+                         accessible:  `{}'\n",
+                        if query == &named { "query" } else { "subject" },
+                        named.display()
+                    );
+                    assert_eq!(
+                        (cli.status.code(), stderr.as_ref()),
+                        (Some(1), not_accessible.as_str()),
+                        "{context}"
+                    );
+                } else if program == Program::Blastp && name == "records" && query == &named {
                     assert_eq!(
                         (cli.status.code(), cli.stderr.as_slice()),
                         (Some(0), b"Warning: [blastp] Query is Empty!\n".as_slice()),
@@ -3483,7 +3526,7 @@ fn makeblastdbs_refused_argv_is_a_tools_error() {
         )
         .unwrap_err();
         let cli = cli_output("makeblastdb", words);
-        assert_eq!(cli.status.code(), Some(2), "{words:?}");
+        assert_eq!(cli.status.code(), Some(1), "{words:?}");
         assert!(matches!(error, Error::Argv(_)), "{words:?}: {error:?}");
         assert_eq!(diagnostics, cli.stderr, "{words:?}");
         assert!(cli.stderr.ends_with(b"\n"), "{words:?}");
@@ -3583,18 +3626,26 @@ fn a_losat_refusal_is_its_text_without_error_and_the_newline() {
     );
 }
 
-/// The parser's message is its text (`Error`'s third rule), which the command line writes with a
-/// newline where the text has none: a value that the option refuses (the text ends with a
-/// newline) and an option that the program does not have (it does not).
+/// NCBI's reader's report is the command line's standard error without its last newline
+/// (`Error`'s third rule; line RG item K4i-2b): a value that the option does not convert and an
+/// option that the program does not have, both NCBI's usage and posts with status 1.
 #[test]
-fn the_parsers_message_is_its_text() {
-    for (words, newline_added) in [(&["-evalue", "abc"][..], false), (&["-nosuch"], true)] {
+fn the_readers_report_is_the_command_lines_text() {
+    for words in [&["-evalue", "abc"][..], &["-nosuch"]] {
         let error = validate(Program::Blastp, words).unwrap_err();
         let cli = cli_output("blastp", words);
-        assert_eq!(cli.status.code(), Some(2), "{words:?}");
+        assert_eq!(cli.status.code(), Some(1), "{words:?}");
         assert!(matches!(error, Error::Argv(_)), "{words:?}: {error:?}");
-        let added: &[u8] = if newline_added { b"\n" } else { b"" };
-        assert_eq!(cli.stderr, [error.message(), added].concat(), "{words:?}");
+        assert_eq!(cli.stderr, [error.message(), b"\n"].concat(), "{words:?}");
+        assert!(
+            cli.stderr
+                .ends_with(b"\nError:  Unknown argument: \"nosuch\"\n")
+                || cli
+                    .stderr
+                    .ends_with(b"Argument cannot be converted:  `abc'\n"),
+            "{words:?}: {}",
+            String::from_utf8_lossy(&cli.stderr)
+        );
     }
 }
 
@@ -3659,4 +3710,65 @@ fn a_start_that_ends_the_program_is_its_text_without_the_last_newline() {
     assert!(matches!(error, Error::Search(_)), "{error:?}");
     assert!(diagnostics.is_empty());
     assert_eq!(cli.stderr, [error.message(), b"\n"].concat(), "{error:?}");
+}
+
+/// A tool of the library (`losat::api::run_<tool>`).
+type ToolCall = fn(
+    &[&str],
+    &mut dyn std::io::Read,
+    &mut dyn std::io::Write,
+    &mut dyn std::io::Write,
+) -> Result<(), Error>;
+
+// One rule for a help word in the library's tools (line RG item K4i-2b round 2, R-M1): each writes
+// the help that the command line prints to its output and returns `Ok`, as the command line exits
+// with status 0, makeblastdb included (it returned the help as `Error::Argv` before NCBI's reader
+// read its arguments). A search has no output for it: `validate` gives the help as `Error::Argv`.
+#[test]
+fn a_help_word_is_the_tools_output_and_the_searchs_error() {
+    let tools: [(&str, ToolCall); 7] = [
+        ("makeblastdb", run_makeblastdb),
+        ("blastdbcmd", run_blastdbcmd),
+        ("dustmasker", run_dustmasker),
+        ("segmasker", run_segmasker),
+        ("windowmasker", run_windowmasker),
+        ("convert2blastmask", run_convert2blastmask),
+        ("makembindex", run_makembindex),
+    ];
+    for (name, tool) in tools {
+        for word in ["-h", "-help"] {
+            let cli = command(env!("CARGO_BIN_EXE_losat"))
+                .args([name, word])
+                .stdin(std::process::Stdio::null())
+                .output()
+                .unwrap();
+            assert_eq!(cli.status.code(), Some(0), "{name} {word}");
+            assert!(!cli.stdout.is_empty(), "{name} {word}");
+            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+            tool(
+                &[word],
+                &mut std::io::empty(),
+                &mut output,
+                &mut diagnostics,
+            )
+            .unwrap();
+            assert_eq!(
+                (output, diagnostics),
+                (cli.stdout, cli.stderr),
+                "{name} {word}"
+            );
+        }
+    }
+    for word in ["-h", "-help"] {
+        let cli = command(env!("CARGO_BIN_EXE_losat"))
+            .args(["blastp", word])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(cli.status.code(), Some(0), "blastp {word}");
+        match validate(Program::Blastp, &[word]) {
+            Err(Error::Argv(help)) => assert_eq!(help, cli.stdout, "blastp {word}"),
+            other => panic!("blastp {word}: {other:?}"),
+        }
+    }
 }

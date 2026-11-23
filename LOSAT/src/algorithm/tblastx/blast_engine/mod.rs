@@ -69,7 +69,7 @@ pub(crate) use super::extension::{
     convert_coords, extend_hit_two_hit_fitting, extend_hit_two_hit_with, QueryBatch,
 };
 // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): extension/x_two_hit_fast.rs.
-pub(crate) use super::extension::{x_tbx_sent_contexts, x_tbx_sent_subject};
+pub(crate) use super::extension::{x_tbx_sent_contexts, x_tbx_sent_frame, x_tbx_sent_subject};
 #[cfg(test)]
 pub(crate) use super::lookup::build_ncbi_lookup;
 pub(crate) use super::lookup::QueryContext;

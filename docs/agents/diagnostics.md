@@ -486,6 +486,7 @@ export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNDIAGPACK=1
 export LOSAT_X_TBNFLOWHELP=1
+export LOSAT_X_TBNHITSTEP=1
 export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKCTX=1
 export LOSAT_X_TBNLINKSETS=1
@@ -1955,7 +1956,7 @@ Rebuilding less:
   same heaps (`blastp/x_redo_par.rs`, exactness argument in its header). The jobs run in windows of
   consecutive jobs, one `pool.install` each, that may end inside a query: at most 64 jobs per thread
   (`LOSAT_X_BPREDOPARWINDOW` below), so at most 4 x 64 x threads redone results are held before their
-  replay. A job builds its query's workspace once per window (`OnceLock`; a query that spans windows has it
+  replay (two budgets with a `-use_sw_tback` carry, below). A job builds its query's workspace once per window (`OnceLock`; a query that spans windows has it
   built again from the same inputs, a small cost that grows with the query's length) and its own
   parameters, prefetches the first Newton problems of its own matches with the Newton lanes (one vector
   of four, against the heaps as the window's start left them), and redoes its matches with per-worker
@@ -1975,12 +1976,45 @@ Rebuilding less:
   one window drops matches of q, and it drops at most 4 x cap(q) of them, cap(q) <= threads + q's jobs at
   risk computed, and all used, before (the one-thread loop computes none); where q's batch's heaps never
   fill, q's windows are back to their budget after a number of windows logarithmic in q's work at risk.
-  With
+  Since line RG X4-mt (2026-11-21) the path also runs the Smith-Waterman redo of `-use_sw_tback` (before, such
+  a search ran the one-thread loop at every thread count): a job answers a match's heap test
+  (`BlastCompo_HeapWouldInsert` before its first alignment) where the heap at the window's start makes the
+  answer certain, and otherwise stops the match's redo at the test as on FALSE and leaves the test to the
+  replay; a FALSE there keeps the job's result (NCBI's), a TRUE stops the replay and carries that match and
+  the window's matches after it to the next window, which finishes the match (a continuation, which resumes
+  the redo from the state its job kept at the test, so neither the composition adjustment nor the first
+  round's score-only scan runs twice) and every carried match whose test is TRUE for certain, and the replay
+  keeps each batch's status with the one-thread loop's own rule (core's `smith_waterman_match::SwBatchStatus`).
+  A kept state (about 3.2 KB, most of it the adjusted matrix) lives from the job to FALSE or to the
+  continuation's job, one per match a window holds with its carry: at most 2 x 4 x 64 x threads. A window with a carry
+  takes at most a budget of new jobs, as one without, and the carried matches (in jobs of four) and the new
+  jobs together are at most two budgets, so a window holds at most 2 x 4 x 64 x threads results before their
+  replay, carried ones included, and a stop's serial work is linear in the carry (at most a window's; it
+  reads no heap's root). One
+  window drops results of q there too (a replay never stops within q after dropping a result of q), and
+  cap(q) grows only by q's jobs at risk of a window whose replay passed all of q's matches in it, so each
+  stopped window before it carries at most cap(q) new jobs at risk of q on to it: it drops at most
+  4 x cap(q) x (1 + those stopped windows) results of q, and at most the 2 x 4 x 64 x threads results it
+  holds. Evidence (head a988bc0f2, node 1 of the workstation, 8 cores, median of 3, `-db paja`, every output =
+  NCBI 2.17.0 `-num_threads 1`): SicyWSV.faa 0.72 s at 8 threads against 4.36 s before (dev dab8ae2ae) and
+  NCBI's 2.14 s; AP027131.faa 2.79 s against 20.52 s and 4.50 s; with `-max_target_seqs 1` and 5 0.67 /
+  2.51 / 1.14 / 3.32 s (dev 3.60 / 17.05 / 4.32 / 20.01 s, NCBI 1.78 / 3.84 / 2.63 / 4.37 s); one thread
+  unchanged (instructions x0.99998); max RSS at most 32.0 MiB (NCBI 74-94 MiB). UniRef50 (5 volumes,
+  19 GB) with 100 human queries, `-max_target_seqs` 1 and 5, at 32 threads (head 4dba02449; no replay
+  stops there, so no carry): 387 / 391 s against dev's 663 / 662 s and NCBI's 1,176 / 1,186 s, max RSS
+  143 / 142 MiB (dev 249 / 245 MiB, NCBI 12,027 / 12,067 MiB with the volumes mapped); the same rows. With
   `LOSAT_TIMING=1` each search the path runs prints
   `[TIMING] x_bpredopar: matches=<n> jobs=<j> windows=<w> split=<s> ended=<e> skipped=<k> wasted=<x>
   par_s=<s> replay_s=<s>` (on one line; `split`: windows that end inside a query; `ended`: the matches the
   early termination test ended, as many as in the one-thread loop; `skipped`: those not computed;
-  `wasted`: those computed and dropped). Diagnostics only, the output bytes do not change: the counters
+  `wasted`: those computed and dropped; with `-use_sw_tback` the line ends with ` turned=<t>
+  continued=<c> cont_stop=<a> cont_ahead=<b> cont_bound=<d> carried_max=<m>`:
+  the matches whose heap test a job could not answer (its redo stopped at the test) and the replay
+  answered FALSE (the job's result stands); the carried matches that a continuation in the next window
+  finishes, by the reason why their test is TRUE (the stopped match itself, the exact look-ahead in a
+  later query, the bound on the lists the heap holds); the most matches a replay carried). A redo that
+  ends in an error prints the line
+  too, with the counts of the windows replayed before the one that ended it. Diagnostics only, the output bytes do not change: the counters
   and traces of the redo count the `wasted` matches as well (`[TIMING] x_bpredofit: lists= hsps=`, the
   kappa range counters, `LOSAT_DEBUG_BLASTP_TRACE_HSP` lines), and `[X_STATS] NEWTONLANES` counts the
   prefetches of the jobs (four matches each, the one-thread loop prefetches 16 ahead). With
@@ -2039,7 +2073,12 @@ Rebuilding less:
   expansion. The match counts that the early termination bound (`x_end_above`) and the choice of the path read are
   counted from the compact lists. Where the path does not run after all (fewer than two matches), every list is expanded before
   the other paths (the only expansion before the previous switch existed). The expanded lists held at a time are those of the queries of about one
-  window, and each query's compact list is freed when it is expanded.
+  window (with `-use_sw_tback` also those of the queries of the matches that a stopped replay carries behind
+  the window's start, fewer than two budgets' results, while the lists read ahead stay one budget's: about
+  three budgets, two with the carry and one read ahead, with the lists of the first carried query and of the
+  last query read ahead whole; unit test `a_carry_holds_the_expanded_lists_of_about_three_budgets`), and each query's
+  compact list is freed
+  when it is expanded.
   Evidence 2026-10-20 (v4-D12 s3 probe, workstation): in `blastp -db` UniRef50 q100 at 32 threads the expansion of all
   91 lists of the first query batch (194,347 HSPs of 168 bytes) added 31 MiB to the main heap before the redo, which
   ran in 10 windows. Measured (head 6ef84094, workstation, on / off in one job): that run (node 1, the branch merged
@@ -5875,6 +5914,29 @@ Scheduling (each value computed by one thread with the original function; order 
   threads x0.953 / x0.955 / x0.956 / x0.958 (8 of 8, 12 of 12 each faster; instructions x0.9987; `=0` x0.9992 /
   x1.0005 / x1.0002 / x0.9998); AP027131 `-subject` at 1 / 16 / 32 x0.991 / x0.995 / x0.990 (12, 7, 8 of 12 faster;
   `=0` x1.0001 / x1.0007 / x1.0000).
+- `LOSAT_X_TBNHITSTEP=1` tblastn (speed; in the strict set from the pull request that added it, 2026-11-23;
+  `=0` turns it off; `tblastn/x_tbn_hitbf.rs` `x_hits_steps`, `x_hit_step`, `XDiagCell::PACKED`, `x_hit_steps`;
+  `tblastn/search_init.rs` `x_pairs_bf_with`): the two-hit loop of the units (`x_hits_bf`: the too-far and overlap
+  outcomes without a branch) takes each hit's outcomes from one compare, two hits a step. With `dw = diff - wordsize`
+  and `k = window - wordsize`, a candidate is `dw` below `k` unsigned and too far is `dw >= k` signed whenever
+  `diff - wordsize` is exact: in 32 bits on a packed table (a flag-0 cell's last_hit in [0, 2^31), `s + offset` in
+  [window, 2^31) by `x_packs`), in 64 bits on `(last_hit, flag)` cells (any window, NCBI's wrapped `diff`). The loop
+  before compared `diff - wordsize` with `k` and `diff` with the window, with a copy of `diff` for the second. Cause
+  removed: retirement-bound, 18 issued µops per hit on the workstation's Ice Lake cores (the cell's store with an
+  index is two), of which the second compare, the copy and the loop's add and branch (once per hit) are 4; now 15
+  (the loop's control once per two hits). The hits taken and the cells left are those of `x_hits_bf` (unit tests
+  `x_hits_bf_takes_the_reference_outcomes`, against the reference's statements on random tables with windows up to
+  i32::MAX and wrapping offsets, and `x_hits_bf_on_packed_cells_equals_pair_cells` on both layouts;
+  `tests/tblastn_scan_byte.rs` `the_hit_steps_change_no_report`: the report of `=0` at one and four threads). Always:
+  every tblastn search whose two-hit window is above the word size.
+  Measured 2026-11-24 on the workstation (2x Xeon Gold 6338, node 1, one core, `-num_threads 1`, against dev 016d73cad
+  built in a tree path of the same length, a warm-up and 5 rounds, arm order rotated; every output the same bytes): one
+  protein x the human genome (`-db`) cycles x0.968 (35.15 -> 34.03 G, 11.46 -> 11.11 s, instructions x0.962, max RSS
+  107,372 KiB in both; `=0` x0.995); 40 BUSCO proteins x yeast (`-db`) x0.927 (3.480 -> 3.226 G, 1.131 -> 1.052 s,
+  instructions x0.928; `=0` x0.988); TBLASTX AP027131 x AP027133 (gencode 4) and BLASTX of 5 cDNAs and of a 50 kb
+  genomic query x dmel proteins x0.9985, x0.999 and x0.996 with the instructions of dev (they do not take this loop).
+  Wasm (the serial WASI command, one Node process, `=1` / `=0` / `=1` as an A/A arm, a warm-up and 6 rounds): the BUSCO
+  case x0.980 (the A/A arm x0.981).
 - `LOSAT_X_CHAINRUN=1` tblastn, blastx (speed; in the strict set from the pull request that added it, 2026-11-16;
   `=0` turns it off; `tblastx/x_scan_byte.rs` `write_avx2`, `copy_avx2_run`, `X_CHAIN_RUN`): the AVX2 copy of the scan on
   presence bytes (`LOSAT_X_TBNSCANBYTE`'s units, BLASTX's direct loop under `LOSAT_X_BXSCANBYTE`) writes the first 24
@@ -6863,6 +6925,22 @@ Scheduling (each value computed by one thread with the original function; order 
   `walk_right`, 30.6 % of the cycles in `perf record`) and 38 fewer with the switch (from the cycle
   totals), about 197; what is left is the latency of the first query loads and the mispredicted
   exits of the walks (as in TBXUNGAP).
+  From DT1-10 (2026-11-21) the walks are the key walks of BLASTP and BLASTX (item SC2e, #940), shared in
+  `algorithm/common/x_key_walk.rs`: the score and the step are one `i64` (`score << 32 - (i + 1)`
+  after step `i`), so one comparison keeps the best and its length, and the word loop adds the same
+  keys (`KeyTable`, `(t << 32) - 1` at `q << 5 | s`, beside BLOSUM62's table and each
+  `MatrixWalkTable`). The keys hold the scores of the bytes below 32, so a batch or a frame takes the
+  path only if every byte of its buffers is below 32 (`letters` in `sent_contexts` and
+  `sent_frame`); a frame's letters (NCBISTDAA 0..=27) and the sentinel always are. The frame's
+  check reads the whole buffer, so it runs once for each chunk where the units are listed
+  (`XUnit::sent_frame`), not in every unit: run in each unit's `x_unit_sent` (twice, the dispatch
+  and its assertion), it cost ViPTreeGen's Autographivirales.40 the gain (cycles x1.003 of dev
+  against x0.97 without it).
+  On dev 92e2a3044 (one booked core of workstation node 1, `-num_threads 1`, outputs identical):
+  ViPTreeGen's Autographivirales.40 (`-matrix BLOSUM45`) 45.01 -> 43.72 s wall (x0.971; cycles x0.971,
+  instructions x0.911), max RSS the same (25,976 -> 25,968 KiB); the other TBLASTX cases x0.990 to
+  x1.002 in cycles; blastp and BLASTX, which run the moved walks, the same instructions (cycles
+  x0.983 to x1.005). Numbers: `tool-speed-20261115/results/dt19/ab4`.
 - `LOSAT_X_TBXHITBF=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off) the hit loop of the unit scan of the unit path (`scan_unit`, the
   batched scan of `LOSAT_X_TBXEXTBATCH`, and, from the next pull request (2026-10-19), the scan in slices

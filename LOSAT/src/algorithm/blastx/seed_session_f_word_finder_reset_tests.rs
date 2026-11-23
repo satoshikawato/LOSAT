@@ -36,10 +36,7 @@ fn fresh_retained_and_threshold_reset_word_finder_match_ncbi() {
             "-window_size",
             &window.to_string(),
         ];
-        let crate::cli::Commands::Blastx(args) =
-            crate::cli::try_parse_from::<crate::cli::Cli, _, _>(args)
-                .unwrap()
-                .command
+        let crate::cli::Commands::Blastx(args) = crate::cli::try_parse_from(args).unwrap().command
         else {
             unreachable!()
         };
@@ -154,10 +151,7 @@ fn negative_window_one_hit_word_finder_reads_the_table_at_the_window_and_carries
             "-window_size",
             "0",
         ];
-        let crate::cli::Commands::Blastx(args) =
-            crate::cli::try_parse_from::<crate::cli::Cli, _, _>(args)
-                .unwrap()
-                .command
+        let crate::cli::Commands::Blastx(args) = crate::cli::try_parse_from(args).unwrap().command
         else {
             unreachable!()
         };

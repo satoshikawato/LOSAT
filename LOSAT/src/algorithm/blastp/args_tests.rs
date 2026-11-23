@@ -59,18 +59,20 @@ fn the_database_name_loses_the_white_space_at_its_ends() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-349: parse the same single string as the public CLI.
 fn parse_cli<'a>(args: impl IntoIterator<Item = &'a str>) -> TestCli {
-    crate::cli::try_parse_from(args).unwrap()
+    match crate::cli::try_parse_from(args).unwrap().command {
+        crate::cli::Commands::Blastp(args) => TestCli {
+            command: TestCommand::Blastp(args),
+        },
+        command => panic!("not blastp: {command:?}"),
+    }
 }
 
-#[derive(clap::Parser, Debug)]
+#[derive(Debug)]
 struct TestCli {
-    #[command(subcommand)]
     command: TestCommand,
 }
 
-impl crate::cli::ProgramParser for TestCli {}
-
-#[derive(clap::Subcommand, Debug)]
+#[derive(Debug)]
 enum TestCommand {
     Blastp(BlastpArgs),
 }
@@ -594,4 +596,41 @@ fn the_x_drops_reach_the_resolved_arguments() {
     }
     // `<= 0.0` is false for NaN, as in C: NCBI searches with it.
     assert!(resolved(&["-xdrop_ungap", "+nan"]).is_ok());
+}
+
+// Review of PS15b-1, B1/S2 and S1: psiblast's results carry no query masks in any round
+// (`report::record::carries_query_masks`), BLASTP's and RPS-BLAST's do; the formatters' cuts of the
+// hit lists (`BlastpApp::list_cut`): the archive keeps them, psiblast's XML cuts them before the
+// round's PSSM, the other formats of psiblast and rpsblast after it, BLASTP's are never cut.
+#[test]
+fn the_apps_masks_and_cuts() {
+    use crate::report::record::carries_query_masks;
+    assert!(!carries_query_masks(BlastpApp::Psiblast.program_type()));
+    assert!(carries_query_masks(BlastpApp::Blastp.program_type()));
+    assert!(carries_query_masks(BlastpApp::Rpsblast.program_type()));
+    for (app, cuts) in [
+        (
+            BlastpApp::Psiblast,
+            [
+                ListCut::AfterPssm,
+                ListCut::BeforePssm,
+                ListCut::AfterPssm,
+                ListCut::Uncut,
+            ],
+        ),
+        (
+            BlastpApp::Rpsblast,
+            [
+                ListCut::AfterPssm,
+                ListCut::AfterPssm,
+                ListCut::AfterPssm,
+                ListCut::Uncut,
+            ],
+        ),
+        (BlastpApp::Blastp, [ListCut::Uncut; 4]),
+    ] {
+        for (outfmt, cut) in [0, 5, 8, 11].into_iter().zip(cuts) {
+            assert_eq!(app.list_cut(outfmt), cut, "{app:?} -outfmt {outfmt}");
+        }
+    }
 }

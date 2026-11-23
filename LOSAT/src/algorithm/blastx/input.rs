@@ -160,6 +160,8 @@ impl FastaRecord {
             local_id: &self.internal_id,
             title: &self.title,
             believed: self.believed(),
+            // BLASTX's records are FASTA records (no PSSM query).
+            bioseq_ids: None,
         }
     }
 

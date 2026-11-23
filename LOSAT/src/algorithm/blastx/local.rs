@@ -1482,7 +1482,6 @@ fn check_resolutions(
 ) -> Result<Vec<ResolvedOptions>> {
     for choice in choices {
         app::formatting_handler_check_of_run(choice, args.app(), Program::Blastx)?;
-        app::html_format_check(choice.number, args.app(), args.html)?;
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
     let html = app::html_links(

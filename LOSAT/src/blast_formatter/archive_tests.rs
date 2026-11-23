@@ -219,8 +219,10 @@ fn a_failed_standard_output_ends_the_run_as_ncbi_s_runtime_does() {
 
 #[test]
 fn the_formatter_s_constructor_throws_on_a_stream_that_failed() {
+    let files = crate::report::run_files::OpenFiles::disk();
     let mut output = Output {
         stdout: Some(Box::leak(Box::new(FullDevice))),
+        files: &files,
         stream: None,
         formatting: false,
     };

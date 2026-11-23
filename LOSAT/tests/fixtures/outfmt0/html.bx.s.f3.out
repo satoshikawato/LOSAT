@@ -1,0 +1,143 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ps_spec.faa).
+           4 sequences; 820 total letters
+
+
+
+<b>Query=</b> n1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=900
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     3e-109
+s3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  <a href=#Subject_3>247</a>     2e-87 
+s2 long title words long title words long title words long title ...  <a href=#Subject_2>159</a>     2e-53 
+s4 plain title for the third subject                                  <a href=#Subject_4>139</a>     1e-45 
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  180
+Subject_1  1    ............................................................  60
+Subject_3  1                                                      ........DL  10
+Subject_3  136                  .G.S.L..                                      143
+Subject_2  1    ..T...V...GIR.A.V......FS.Q...YC....G.T.NL............LAA...  60
+
+Query_1    181  PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  360
+Subject_1  61   ............................................................  120
+Subject_3  11   ..A........V........P......S...................I....S.....S.  70
+Subject_2  61   .....S..V.....C.KY..L.....VVW......S....ADR.....Y.VT..SLL.L.  120
+
+Query_1    361  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  540
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+Subject_3  71   A...............K.......Q....H......RR.........Q......L....G  130
+
+Query_1    541  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  720
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+Subject_3  131  ..S.....SP.P.S......                                          150
+Subject_4  6                             ....G...L.GTQ.G..H.......E....NQ...  40
+
+Query_1    721  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  900
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+Subject_4  41   ..L......L....Y.GK........S....R.....R.......ER...R.S.DA...   99
+
+For reading frame -1 of query sequence:
+
+Query_1    732  SRL*CTIIRDRCYQTTVAPSLGEWYLHSTGIPKRRFRLE*ATSRMSTTAVIFCKPRRSKT  553
+Subject_1  321  ...A.D.AHPAALKG.RS.R.TDY                                      344
+Subject_1  141          ..KS.V.LIP.P.-----------R.TY..ALVALNPVSRHYV..         174
+
+Query_1    552  F*SR*VSITSSEA*WHFQLHGVTYKINKWGTQTTWYKSHIAFVALAHTSIKIVTCFNGEV  373
+Subject_4  55                                                          Y..KL  59
+
+Query_1    372  IC  367
+Subject_4  60   ..  61
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> nq2 unrelated query (no hits)
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s4 plain title for the third subject                                  <a href=#Subject_4>18.9</a>    0.013
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>16.9</a>    0.072
+s2 long title words long title words long title words long title ...  <a href=#Subject_2>15.4</a>    0.30 
+
+
+
+For reading frame +2 of query sequence:
+
+Query_2    71   RRFLQKNGRP  100
+Subject_1  272  ..AEEEHN..  281
+
+For reading frame -1 of query sequence:
+
+Query_2    120  LNSDSTLGRPFFCKNRRTELCTSARLALCKPAH  22
+Subject_4  60                      I.N...GS...     70
+Subject_1  21            ..PEIFS.V.RPMRG....IDVR.  44
+Subject_1  410                     I.N.S.GS...     420
+Subject_2  12   IR.ARVTSN..PFSFQ.V.Y.MRG.G.TINLR.  44
+
+For reading frame -2 of query sequence:
+
+Query_2    53   RHVWL  39
+Subject_1  286  Q.I..  290
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20736
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ps_spec.faa).
+    Posted date:  Unknown
+  Number of letters in database: 820
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

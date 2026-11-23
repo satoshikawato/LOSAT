@@ -50,12 +50,12 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 - The PSSM's scores replace the matrix, and its Karlin-Altschul values set the cutoffs, E-values and bit scores.
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.
-- The report formats are 0 to 4, 6, 7 and 10. Other formats are refused.
+- The report formats are 0 to 10 and 20. Formats 12 to 16 and 18 are not yet supported.
 - Also refused with `-in_pssm`:
   - `-ungapped`;
   - `-use_sw_tback` on a search that finds an alignment, where NCBI fails, crashes, never finishes or writes rows that change from one run to the next (a search that finds nothing runs);
   - `-db_gencode 32`;
-  - `-outfmt 11`;
+  - `-outfmt 11`, where NCBI stops with a C++ exception whose report changes from run to run;
   - `-mt_mode 1` with more than one thread and `-db`;
   - a PSSM whose query `-seg` masks completely.
 
@@ -106,7 +106,7 @@ For every option: `losat tblastn -help`.
 | 18 | Organism report |
 | 20 | Comma-separated values with header lines |
 
-With `-in_pssm`, only 0 to 4, 6, 7 and 10 work.
+With `-in_pssm`, 0 to 10 and 20 work.
 
 Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`. A custom list changes them, for example `-outfmt "6 qseqid sseqid pident sframe evalue"`; `delim=` sets the separator. [Output formats](../output-formats.md) describes each format.
 
@@ -128,7 +128,7 @@ LOSAT stops with an error for these `tblastn` settings instead of running someth
 - An infinite `-evalue` (`+inf`, `1e999`), and an `-evalue` of 1.7976931348623157e308 with composition-based statistics (`-comp_based_stats` 1 to 3).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
-- `-html`, `-remote`, `-entrez_query` and `-gilist`.
+- `-remote`, `-entrez_query` and `-gilist`.
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation).
 - The `-in_pssm` settings listed [above](#searching-with-a-pssm).
 

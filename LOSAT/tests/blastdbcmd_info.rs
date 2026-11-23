@@ -9,21 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::ncbi_windows_paths::ncbi_paths_on_windows;
-
-/// `fs::canonicalize` without the `\\?\` prefix that Windows puts on its result: a verbatim path
-/// takes `/` as a character of a name (`{O}/B23.out` below is not a file of the directory then),
-/// and the product prints the paths it lists without the prefix.
-fn canonical(path: &Path) -> PathBuf {
-    let path = fs::canonicalize(path).unwrap();
-    #[cfg(windows)]
-    if let Some(plain) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
-        if plain.as_bytes().get(1) == Some(&b':') {
-            return PathBuf::from(plain);
-        }
-    }
-    path
-}
+use crate::ncbi_windows_paths::{canonical, ncbi_paths_on_windows};
 
 fn tests_dir() -> PathBuf {
     canonical(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"))

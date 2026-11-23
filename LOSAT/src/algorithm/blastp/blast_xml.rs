@@ -56,6 +56,9 @@ pub(crate) struct BlastpXml<'a> {
     /// Every structured format of the call is XML2 or JSON (outfmt 5, which writes every report,
     /// is not among them; the library takes several formats).
     pub only_xml2: bool,
+    /// psiblast's PSSM query of the molecule `other` (`PsiSearch::query_other_coding`): the
+    /// first `Hsp`'s rows throw (`report::tabular::query_sequence_exception`).
+    pub query_other_coding: Option<i32>,
 }
 
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
@@ -183,6 +186,15 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                 })?;
                 sink.hit(&hit, |hsps| {
                     for hsp in lists[range].iter().flat_map(|hsp_list| &hsp_list.hsps) {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:280-300
+                        // The rows read the query's letters, which throw for a query of the
+                        // molecule `other`; `s_BlastXMLAddIteration` catches it.
+                        if let Some(coding) = xml.query_other_coding {
+                            return Err(crate::report::blast_xml::CaughtException(
+                                crate::report::tabular::query_sequence_exception(coding),
+                            )
+                            .into());
+                        }
                         let row = hit_rows
                             .get(next_row)
                             .context("BLASTP report rows do not cover the hit list")?;

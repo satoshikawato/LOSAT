@@ -42,6 +42,7 @@ use crate::report::archive::read::{
     seq_align_id, Archive, ArchiveReader, Message, Search, Severity, Stop,
 };
 use crate::report::archive::writer::FLUSH_BYTES;
+use crate::report::run_files::{OpenFiles, OpenedFile};
 use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
 use crate::report::serial::asn_types::view::V;
@@ -55,13 +56,15 @@ use crate::report::serial::seqalign::{
 use crate::seqdb::{DbList, SeqDb, SeqDbError, SeqType, TaxidList};
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::ParsedSeqId;
+use crate::writedb::cout::CoutBuf;
 use crate::writedb::metadata::{OStreamBuffer, ObjectOStream};
-use crate::writedb::ofstream::{DiskFile, IoState, OutArea, RawFile, Stream};
+use crate::writedb::ofstream::{BasicStream, FileBuf, IoState, StreamBuf};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:506-529
 /// The formatting of the archive `archive` with the command line's `options` and the
 /// application's `settings` (the registry's `[BLAST] BLASTDB`), its reports written to `-out`
-/// (`out` is the standard output), its diagnostics on `diag`; the exit status. The errors are
+/// (`out` is the standard output, `files` the run's files), its diagnostics on `diag`; the exit
+/// status. The errors are
 /// `CATCH_ALL`'s (`super::catch_all`), after what was written before them; the stream writes what
 /// it holds when the run ends (`CArgs` closes the file of `-out`; `cout` is flushed at the
 /// program's end).
@@ -70,6 +73,7 @@ pub(crate) fn format_archive(
     settings: &ApplicationSettings,
     archive: &mut dyn Read,
     out: &mut dyn Write,
+    files: &OpenFiles,
     diag: &mut Diag,
 ) -> i32 {
     let mut run = Run {
@@ -77,6 +81,7 @@ pub(crate) fn format_archive(
         settings,
         output: Output {
             stdout: Some(out),
+            files,
             stream: None,
             formatting: false,
         },
@@ -114,66 +119,69 @@ struct Run<'r, 'o> {
 
 /// The `-out` stream: the standard output until `-out` is opened (`AsOutputFile`, at the first
 /// formatted object), then `cout` or the file's `ofstream` as the release's C++ runtime has them
-/// (`writedb::ofstream`: what they hold, when a write fails, their state and its exceptions).
+/// (`writedb::ofstream`, `writedb::cout`: what they hold, when a write fails, their state and its
+/// exceptions).
 struct Output<'o> {
     /// The standard output until `-out` is opened.
     stdout: Option<&'o mut dyn Write>,
-    /// The opened stream, and whether it is `cout`.
-    stream: Option<(Stream<OutFile<'o>, OutArea>, bool)>,
+    /// The run's files, where `-out` is opened (`OpenFiles::create`).
+    files: &'o OpenFiles,
+    /// The opened stream.
+    stream: Option<BasicStream<OutBuf<'o>>>,
     /// Whether an object's formatter holds the stream (`begin_object`, `end_object`).
     formatting: bool,
 }
 
-/// What the `-out` stream writes to: the file of `-out`, or the standard output (with a buffer
-/// that joins the segments of a call into one write).
-enum OutFile<'o> {
-    Disk(DiskFile),
-    Stdout(&'o mut dyn Write, Vec<u8>),
+/// The buffer of the `-out` stream: the file's (`writedb::ofstream::FileBuf`, the `ofstream` of
+/// an `eOutputFile` argument) or the standard output's (`writedb::cout::CoutBuf`, NCBI's `cout`:
+/// the C library's `stdout`, whose block is the device's, 4096 bytes on a pipe or `/dev/full`;
+/// observed with blast_formatter 2.17.0, a Seq-annot of 2390 bytes failing at its close and one
+/// of 4845 bytes in its write, line RG item F3, agent C6, 2026-11-23,
+/// `remaining-gaps-20261112/F/f3/tmp/c6/pc`). Its stream can be set to throw (`exceptions`).
+enum OutBuf<'o> {
+    File(FileBuf<OpenedFile>),
+    Cout(CoutBuf<'o>),
 }
 
-impl RawFile for OutFile<'_> {
-    fn open(path: &Path) -> std::io::Result<Self> {
-        <DiskFile as RawFile>::open(path).map(OutFile::Disk)
-    }
+impl StreamBuf for OutBuf<'_> {
+    const MASKABLE: bool = true;
 
-    /// The standard output takes all the bytes of a call or fails (its short counts are not
-    /// modelled).
-    fn write(&mut self, segments: &[&[u8]]) -> std::io::Result<usize> {
+    fn put_bytes(&mut self, data: &[u8]) -> bool {
         match self {
-            OutFile::Disk(file) => file.write(segments),
-            OutFile::Stdout(out, joined) => {
-                let taken = match segments {
-                    [one] => {
-                        out.write_all(one)?;
-                        one.len()
-                    }
-                    _ => {
-                        joined.clear();
-                        segments
-                            .iter()
-                            .for_each(|segment| joined.extend_from_slice(segment));
-                        out.write_all(joined)?;
-                        joined.len()
-                    }
-                };
-                out.flush()?;
-                Ok(taken)
-            }
+            OutBuf::File(buf) => StreamBuf::put_bytes(buf, data),
+            OutBuf::Cout(buf) => StreamBuf::put_bytes(buf, data),
         }
     }
 
-    fn seek(&mut self, pos: u64) -> std::io::Result<()> {
+    fn put_byte(&mut self, byte: u8) -> bool {
         match self {
-            OutFile::Disk(file) => file.seek(pos),
-            OutFile::Stdout(..) => Err(std::io::ErrorKind::Unsupported.into()),
+            OutBuf::File(buf) => StreamBuf::put_byte(buf, byte),
+            OutBuf::Cout(buf) => StreamBuf::put_byte(buf, byte),
         }
     }
 
-    /// The standard output is not closed: what it holds is written.
-    fn close(self) -> std::io::Result<()> {
+    fn sync(&mut self) -> bool {
         match self {
-            OutFile::Disk(file) => file.close(),
-            OutFile::Stdout(out, _) => out.flush(),
+            OutBuf::File(buf) => StreamBuf::sync(buf),
+            OutBuf::Cout(buf) => StreamBuf::sync(buf),
+        }
+    }
+
+    /// Never: blast_formatter links NCBI's connection library, which masks SIGPIPE
+    /// (ncbi_socket.c:865-873), so a write to a closed pipe is a failed write like the others
+    /// (observed: blast_formatter 2.17.0 aborts on a closed standard output as on `/dev/full`;
+    /// line RG item F3, agent C6, 2026-11-23).
+    fn closed_pipe(&self) -> bool {
+        false
+    }
+}
+
+impl Drop for OutBuf<'_> {
+    /// At the program's end the C library writes what `stdout` holds, whatever `cout`'s state
+    /// (the file of `-out` is closed by its buffer's own destructor).
+    fn drop(&mut self) {
+        if let OutBuf::Cout(buf) = self {
+            StreamBuf::sync(buf);
         }
     }
 }
@@ -190,24 +198,33 @@ impl<'o> Output<'o> {
             .stdout
             .take()
             .expect("the standard output until -out is opened");
-        let file = files::open_output_file("out", value, stdout)
+        let file = files::open_output_file("out", value, stdout, self.files)
             .map_err(|error| command_line_argument_error(error.message()))?;
-        let (mut stream, file, is_stdout) = match file {
-            OutputFile::Stdout(out) => (Stream::cout(), OutFile::Stdout(out, Vec::new()), true),
-            OutputFile::File(file) => (Stream::file(), OutFile::Disk(DiskFile::from(file)), false),
+        let buf = match file {
+            OutputFile::Stdout(out) => {
+                OutBuf::Cout(CoutBuf::new(out, crate::cli::NcbiStdio::cout()))
+            }
+            OutputFile::File(file) => OutBuf::File(FileBuf::of_file(file)),
+            // LOSAT Web's refusal of a name that it does not write, in blastdbcmd's words
+            // (`OutputFile::Refused`); the command line and the library open every name.
+            OutputFile::Refused(reason) => {
+                return Err(anyhow::anyhow!(crate::seqmasks_io::run::unsupported(
+                    &reason, PROGRAM
+                )))
+            }
         };
-        stream.open_with(move || Ok(file));
-        self.stream = Some((stream, is_stdout));
+        self.stream = Some(BasicStream::with_buf(buf));
         Ok(())
     }
 
     /// The opened stream and whether it is `cout`.
-    fn opened(&mut self) -> (&mut Stream<OutFile<'o>, OutArea>, bool) {
-        let (stream, is_stdout) = self
+    fn opened(&mut self) -> (&mut BasicStream<OutBuf<'o>>, bool) {
+        let stream = self
             .stream
             .as_mut()
             .expect("-out opened at the object's start");
-        (stream, *is_stdout)
+        let is_stdout = matches!(stream.rdbuf(), OutBuf::Cout(_));
+        (stream, is_stdout)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
@@ -240,8 +257,8 @@ impl<'o> Output<'o> {
     /// (`tied`): `cout` writes what it holds first (a file of `-out` does not). The posts of the
     /// loop come between objects, where the stream throws on nothing.
     fn before_diagnostic(&mut self, tied: bool) {
-        if let Some((stream, true)) = &mut self.stream {
-            if tied {
+        if let Some(stream) = &mut self.stream {
+            if tied && matches!(stream.rdbuf(), OutBuf::Cout(_)) {
                 stream.flush();
                 let _ = stream.take_thrown();
             }
@@ -336,7 +353,7 @@ fn is_thrown(error: &anyhow::Error) -> bool {
 /// a throw of the stream is `thrown`. `flush` is `cerr`'s tie to `cout` before a post of a
 /// replaced byte (`tie`): what the buffer and `cout` hold is written; otherwise nothing.
 struct AnnotSink<'b, 'a, 'o> {
-    buffer: &'b mut OStreamBuffer<'a, OutFile<'o>, OutArea>,
+    buffer: &'b mut OStreamBuffer<'a, OutBuf<'o>>,
     tie: bool,
 }
 

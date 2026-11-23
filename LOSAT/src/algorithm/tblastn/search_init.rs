@@ -919,7 +919,8 @@ impl<'a> XTwoHit<'a> {
     }
 
     /// `x_pairs_bf` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`) with the
-    /// walks `walks`.
+    /// walks `walks`; the loop `x_tbn_hitbf::x_hits_steps` unless `LOSAT_X_TBNHITSTEP=0` (read once
+    /// per call), else `x_tbn_hitbf::x_hits_bf`.
     #[allow(clippy::too_many_arguments)]
     #[inline(always)]
     fn x_pairs_bf_on<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks>(
@@ -932,10 +933,46 @@ impl<'a> XTwoHit<'a> {
         pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
         hits: &mut Vec<InitHsp>,
     ) {
+        if super::x_tbn_hitbf::x_hit_steps() {
+            self.x_pairs_bf_with::<C, W, true>(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            )
+        } else {
+            self.x_pairs_bf_with::<C, W, false>(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            )
+        }
+    }
+
+    /// `x_pairs_bf_on` with the loop `x_tbn_hitbf::x_hits::<C, STEPS>`.
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    fn x_pairs_bf_with<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks, const STEPS: bool>(
+        &self,
+        walks: W,
+        cells: &mut [C],
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
         let word_size = self.word_size as i32;
         let mut done = 0;
         while done < pairs.len() {
-            done += super::x_tbn_hitbf::x_hits_bf(
+            done += super::x_tbn_hitbf::x_hits::<C, STEPS>(
                 cells,
                 self.diagonals.offset,
                 self.window,
@@ -1081,11 +1118,11 @@ impl<'a> XTwoHit<'a> {
                 )
             };
             let Some(result) = result else {
-                anyhow::bail!(
-                    "TBLASTN -window_size 0: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                return Err(Self::x_word_past_letters(
+                    self.window,
                     pair.q_off,
-                    pair.s_off
-                );
+                    pair.s_off,
+                ));
             };
             if result.ungapped_data.score >= self.cutoff_scores[context] {
                 hits.push(InitHsp {
@@ -1154,12 +1191,11 @@ impl<'a> XTwoHit<'a> {
                 )
             };
             let Some(result) = result else {
-                anyhow::bail!(
-                    "TBLASTN -window_size {}: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                return Err(Self::x_word_past_letters(
                     self.window,
                     pair.q_off,
-                    pair.s_off
-                );
+                    pair.s_off,
+                ));
             };
             if result.ungapped_data.score >= self.cutoff_scores[context] {
                 hits.push(InitHsp {
@@ -1178,6 +1214,17 @@ impl<'a> XTwoHit<'a> {
             );
         }
         Ok(())
+    }
+
+    // No NCBI counterpart: LOSAT's internal error for a word past the letters, which NCBI's scan
+    // does not give (the one-hit loops of window 0 and below 0). Out of line and by value, so that
+    // the loops keep no copy of a pair for it.
+    #[cold]
+    #[inline(never)]
+    fn x_word_past_letters(window: i32, q_off: u32, s_off: u32) -> anyhow::Error {
+        anyhow::anyhow!(
+            "TBLASTN -window_size {window}: the word at query offset {q_off} and subject offset {s_off} is past the letters (internal error)"
+        )
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:273-313 (stable, as glibc's

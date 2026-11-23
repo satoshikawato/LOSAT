@@ -13,7 +13,8 @@
 //! over the databases of `tests/db_search/idlist` and the lists over `db/pz4`'s header of no
 //! bytes (`db/pzl*`, `make_d1c_blastdbcmd.py`, 2026-11-22; review 1 of D1c-1: string tags of
 //! `PIG` and `BL_ORD_ID` under a list, TI and GI ISAMs NCBI does not initialise, a `SEQIDLIST`
-//! over two volumes, A382-A389). The
+//! over two volumes, A382-A389), and (D1c-1b, 2026-11-23) `-taxids -target_only` over headers
+//! whose lines the list erases (A390-A394, A395). The
 //! expected bytes are NCBI BLAST+ 2.17.0 blastdbcmd's (the release build on the developer machine,
 //! 2026-11-12 and 2026-11-13, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py` and
 //! `make_d1a2_blastdbcmd.py`); the alias files are in `tests/blastdbcmd/db/ak/`, the batch files
@@ -25,18 +26,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// `fs::canonicalize` without the `\\\\?\\` prefix that Windows puts on its result (as
-/// `blastdbcmd_retrieve.rs`).
-fn canonical(path: &Path) -> PathBuf {
-    let path = fs::canonicalize(path).unwrap();
-    #[cfg(windows)]
-    if let Some(plain) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
-        if plain.as_bytes().get(1) == Some(&b':') {
-            return PathBuf::from(plain);
-        }
-    }
-    path
-}
+use crate::ncbi_windows_paths::{
+    alias_list_path_on_windows, blastdbcmd_bytes_on_platform, canonical,
+};
 
 fn run_dir() -> PathBuf {
     canonical(
@@ -118,10 +110,42 @@ fn placed(text: &[u8]) -> Vec<u8> {
     losat::wording::losat_output_bytes(&placed).into_owned()
 }
 
-/// Whether `text` names a path under the run directory (`{R}`) or the tests directory (`{T}`).
-fn holds_root(text: &[u8]) -> bool {
-    text.windows(3)
-        .any(|window| window == b"{R}" || window == b"{T}")
+/// The cases whose messages quote the path of an alias file's list key: the ids, the directory
+/// NCBI joins the value to and the value (`alias_list_path_on_windows`).
+const LIST_PATHS: &[(&[&str], &str, &str)] = &[
+    (
+        &["A205", "A206", "A207", "A219", "A220"],
+        "{R}/db/ak/or",
+        "/losat-oidlist-fixture-missing/none.msk",
+    ),
+    (
+        &["A234"],
+        "{R}/db/m",
+        "/losat-oidlist-fixture-missing/none.msk",
+    ),
+    (&["A230"], "{R}/db/ak/or", "../zz/none.msk"),
+    (
+        &["A296", "A298", "A364"],
+        "{T}/db_search/idlist",
+        "/losat-idlist-fixture-missing/none.txt",
+    ),
+    (&["A358"], "{T}/db_search/idlist", "sub/none.txt"),
+];
+
+/// NCBI's bytes `text` of the case `id` with the command line `words`, frozen on Linux, as
+/// NCBI's code writes them on the platform of the run (`blastdbcmd_bytes_on_platform`,
+/// `LIST_PATHS`).
+fn on_platform(text: &[u8], id: &str, words: &[&str]) -> Vec<u8> {
+    let text = blastdbcmd_bytes_on_platform(text, &["{R}", "{T}"], words);
+    let Some(&(_, dir, value)) = LIST_PATHS.iter().find(|(ids, ..)| ids.contains(&id)) else {
+        return text;
+    };
+    match std::str::from_utf8(&text) {
+        Ok(text) if cfg!(windows) && text.contains("must exist") => {
+            alias_list_path_on_windows(text, dir, value).into_bytes()
+        }
+        _ => text,
+    }
 }
 
 /// The cases: id, words, exit status.
@@ -555,6 +579,13 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A387", &["-db", "../db_search/idlist/gd_gi", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 2),
     ("A388", &["-db", "../db_search/idlist/cv_sq", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 0),
     ("A389", &["-db", "../db_search/idlist/cv_sq", "-dbtype", "prot", "-info"], 0),
+    // D1c-1b: -taxids -target_only reads the headers through the list, which erases the lines without a Seq-id
+    // (ln) and those whose taxids are not the lookup files' (lx); a sequence left without a line is not written.
+    ("A390", &["-db", "../db_search/idlist/lx", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A391", &["-db", "../db_search/idlist/lx", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-target_only"], 0),
+    ("A392", &["-db", "../db_search/idlist/lx", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A393", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-taxids", "9606", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A394", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
 ];
 
 /// A range outside the bit array of the union of the ranges below it, where NCBI clears bits
@@ -614,21 +645,46 @@ fn ranges_outside_the_bit_array_below_them_are_refused() {
     }
 }
 
+/// A string tag of `BL_ORD_ID` on a line of a volume after the first that a taxid list then erases
+/// (`idlist/lt`, review 2 G1 of line RG D1c-1b): NCBI's header read adjusts the tags of every line
+/// before the taxid test and fails on it (NCBI BLAST+ 2.17.0: its exception of the tag, exit 1).
+/// LOSAT refuses it there, as it refuses such a tag in every read (rows db.ordsl.bp.tagq.6 and
+/// db.il.bp.lt.*.rej.6).
+#[test]
+fn a_string_tag_that_a_taxid_list_erases_is_refused() {
+    let config = TestDir::new("taxid-string-tag");
+    let words = [
+        "-db",
+        "../db_search/idlist/lt",
+        "-dbtype",
+        "prot",
+        "-taxids",
+        "10090",
+        "-no_taxid_expansion",
+        "-target_only",
+        "-outfmt",
+        "%o|%a|%T|%t",
+    ];
+    let (stdout, stderr, code) = blastdbcmd(&words, &config.0);
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert_eq!(stdout, b"", "A395: {stderr}");
+    assert_eq!(code, 1, "A395: {stderr}");
+    assert!(
+        stderr.contains("BL_ORD_ID of sequence 1 has a string tag"),
+        "A395: {stderr}"
+    );
+}
+
 #[test]
 fn alias_keys_are_ncbi_s_bytes() {
     let config = TestDir::new("cases");
     for &(id, words, status) in CASES {
-        let (want_out, want_err) = (
-            frozen(&format!("{id}.stdout")),
-            frozen(&format!("{id}.stderr")),
-        );
         // A path in the lines is written with the platform's separators, and `-metadata` cuts
-        // a name at the platform's separator alone.
-        if cfg!(windows)
-            && (words.contains(&"-metadata") || holds_root(&want_out) || holds_root(&want_err))
-        {
-            continue;
-        }
+        // a name at the platform's separator alone (`blastdbcmd_bytes_on_platform`).
+        let (want_out, want_err) = (
+            on_platform(&frozen(&format!("{id}.stdout")), id, words),
+            on_platform(&frozen(&format!("{id}.stderr")), id, words),
+        );
         let (stdout, stderr, code) = blastdbcmd(words, &config.0);
         assert_eq!(
             String::from_utf8_lossy(&stdout),

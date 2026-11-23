@@ -21,14 +21,14 @@ test:
   commands:
     - losat --version
     - losat --help
-    - losat blastn --help
-    - losat blastp --help
-    - losat blastx --help
-    - losat tblastn --help
-    - losat tblastx --help
-    - losat psiblast --help
-    - losat rpsblast --help
-    - losat rpstblastn --help
+    - losat blastn -help
+    - losat blastp -help
+    - losat blastx -help
+    - losat tblastn -help
+    - losat tblastx -help
+    - losat psiblast -help
+    - losat rpsblast -help
+    - losat rpstblastn -help
     - blastn -version
     - blastp -version
     - blastx -version

@@ -272,7 +272,12 @@ impl Search {
     /// query, standard XML, a query by Seq-id), or `-import_search_strategy`'s refusal for
     /// psiblast.
     pub fn read_strategy(&self, strategy: &[u8]) -> Result<Strategy, Error> {
-        let command = self.strategy_command(None)?;
+        // No call has started (`validate` reads its argv so too): the posts of an argument error
+        // are the error's.
+        let command = self.strategy_command(
+            None,
+            &crate::blastinput::ncbi_environment::DiagTarget::Stderr,
+        )?;
         let applied = apply(command, strategy)?;
         let records = read_search_inputs(
             program_of(&applied.command).unwrap_or(self.program()),

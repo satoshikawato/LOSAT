@@ -4,24 +4,12 @@ use crate::wording::QUERY_OPTIONS_ERROR;
 use clap::Args;
 use std::path::PathBuf;
 
-/// The BLASTN tasks that LOSAT runs (case-sensitive): NCBI's nucleotide-nucleotide tasks but
-/// vecscreen (a program of its own). `-task` accepts these and `describe` lists them, in the
-/// order of NCBI's BLASTN page (megablast, dc-megablast, blastn; the Web form's task list), then
-/// blastn-short and rmblastn (blastn's defaults with reward 0 and penalty 0: matrix-only scoring,
-/// `coordination::engine_scoring_pair`).
+/// BLASTN's `-task` (NCBI's nucleotide-nucleotide tasks, vecscreen aside: a program of its own),
+/// for the check of `run_local` (`TaskParser::check`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:211-222
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:57-59
-const BLASTN_TASKS: &[&str] = &[
-    "megablast",
-    "dc-megablast",
-    "blastn",
-    "blastn-short",
-    "rmblastn",
-];
-
-/// BLASTN's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
-pub(crate) const BLASTN_TASK: TaskParser = task_parser("BLASTN", BLASTN_TASKS, &[]);
+pub(crate) const BLASTN_TASK: TaskParser = task_parser("BLASTN", "blastn");
 
 /// The strand(s) of the query that a search covers (`-strand`): the strand of the query's
 /// Seq-loc. A strand that is not searched has a context of length 0 and, in a split search, a
@@ -86,23 +74,20 @@ pub struct BlastnArgs {
     pub(crate) given: crate::cli::GivenArguments<BlastnArgs>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:47
     // `-` is standard input (`blastn/blast_engine/run.rs`).
-    #[arg(long, default_value = "-", value_parser = blastn_input_path(), value_name = "PATH")]
+    #[arg(long, default_value = "-", value_parser = ncbi_path(), value_name = "PATH")]
     pub query: PathBuf,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
     // Optional for the parser: a missing `-subject` is NCBI's error after the parsing
     // (`blastn/blast_engine/run.rs`).
-    #[arg(long, value_parser = blastn_input_path(), value_name = "PATH")]
+    #[arg(long, value_parser = ncbi_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
-    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). The exclusion
-    // is an error of the argument parser: LOSAT's parser reports it with its own text
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The database is searched by
-    // `blastn/blast_engine/database.rs`.
+    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). NCBI's argument reader reports the
+    // exclusion (`cli::reader`). The database is searched by `blastn/blast_engine/database.rs`.
     #[arg(
         long,
         value_name = "NAME",
-        conflicts_with_all = ["subject", "subject_loc"],
         help = "BLAST database name (a nucleotide database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
@@ -135,8 +120,7 @@ pub struct BlastnArgs {
     )]
     pub show_gis: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
-    // not write it yet (`blastinput::app::html_format_check`).
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224), for `-outfmt` 0 to 4 and 18.
     #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
     pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
@@ -151,23 +135,28 @@ pub struct BlastnArgs {
     #[arg(skip)]
     pub id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
-    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    #[arg(long, value_parser = ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
-    // The help texts name the tasks (the Web form shows the short one), so the help does not
-    // repeat clap's list of them; `describe` and the parse errors list `BLASTN_TASKS`.
-    #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn", long_help = "Implemented tasks: megablast, blastn, dc-megablast, blastn-short and rmblastn. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST; rmblastn is blastn with reward 0 and penalty 0 (matrix-only scoring: X-drops as raw scores, a preliminary cutoff by raw score, and a pairwise report with raw scores only). An omitted option takes the default of the task.", value_parser = BLASTN_TASK, hide_possible_values = true)]
+    // The help texts name the tasks (the Web form shows the short one); `describe` lists NCBI's
+    // set (`ncbi_app::args::choices`, in the order of NCBI's BLASTN page).
+    #[arg(
+        long,
+        default_value = "megablast",
+        help = "Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn",
+        long_help = "Implemented tasks: megablast, blastn, dc-megablast, blastn-short and rmblastn. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST; rmblastn is blastn with reward 0 and penalty 0 (matrix-only scoring: X-drops as raw scores, a preliminary cutoff by raw score, and a pairwise report with raw scores only). An omitted option takes the default of the task."
+    )]
     pub task: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:708-730
     // NCBI applies them to any task (`coordination.rs` `determine_template`).
-    #[arg(long, value_name = "TYPE", value_parser = blastn_template_type, requires = "template_length", help = "Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal")]
+    #[arg(long, value_name = "TYPE", value_parser = blastn_template_type, help = "Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal")]
     pub template_type: Option<DiscWordType>,
-    #[arg(long, value_name = "INT", value_parser = blastn_template_length, requires = "template_type", help = "Discontiguous MegaBLAST template length: 16, 18 or 21")]
+    #[arg(long, value_name = "INT", value_parser = ncbi_integer_as::<u8>, help = "Discontiguous MegaBLAST template length: 16, 18 or 21")]
     pub template_length: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-170,288-300
     // An omitted value keeps the default of the task (`coordination.rs`).
-    #[arg(long, value_parser = blastn_word_size, help = "Word size for wordfinder algorithm (default: 28 for megablast, 11 for blastn and dc-megablast, 7 for blastn-short)")]
+    #[arg(long, value_parser = ncbi_integer_as::<usize>, help = "Word size for wordfinder algorithm (default: 28 for megablast, 11 for blastn and dc-megablast, 7 for blastn-short)")]
     pub word_size: Option<usize>,
-    #[arg(long, default_value_t = 1, value_parser = blastn_count)]
+    #[arg(long, default_value_t = 1, value_parser = ncbi_integer_as::<usize>)]
     pub num_threads: usize,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3168-3181
     // `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
@@ -177,7 +166,7 @@ pub struct BlastnArgs {
     // document per batch (`blastn_app.cpp:134-170`, `blastx_app.cpp` `x_RunMTBySplitQuery`);
     // that framing is not reproduced. The value must be 0 to 2 and `-num_threads` must be
     // given with it, as in NCBI (clap's `requires` ignores a default value).
-    #[arg(long, value_name = "int_value", value_parser = crate::blastinput::value_parsers::ncbi_mt_mode, requires = "num_threads", help = "Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output does not depend on it)")]
+    #[arg(long, value_name = "int_value", value_parser = ncbi_integer_as::<u8>, help = "Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output does not depend on it)")]
     pub mt_mode: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3354-3363
     /// `-use_index` as NCBI's handler reads it (`blast_engine::mb_index`): ignored with
@@ -201,23 +190,23 @@ pub struct BlastnArgs {
     pub index_name: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:142-146
     // An omitted value keeps the default of the task (`coordination.rs` `determine_evalue`).
-    #[arg(long, value_parser = blastn_evalue, help = "Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)")]
+    #[arg(long, value_parser = ncbi_double, help = "Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)")]
     pub evalue: Option<f64>,
     /// Percent identity threshold for filtering HSPs (default: 0, no filtering)
     // Blast_HSPTest. The default 0.0 disables it, as NCBI's calloc'ed option does.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
-    #[arg(long = "perc_identity", value_parser = blastn_percentage)]
+    #[arg(long = "perc_identity", value_parser = ncbi_double)]
     pub percent_identity: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2924-2927,2960-2968
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:219,221
     // An omitted value keeps the default hit list size (500, `hitlist_size`) but the
     // pairwise report then shows 250 alignments, so the option has no clap default.
-    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep (default: 500)", conflicts_with_all = ["num_descriptions", "num_alignments"])]
+    #[arg(long, value_parser = ncbi_integer_as::<usize>, help = "Maximum number of aligned sequences to keep (default: 500)")]
     pub max_target_seqs: Option<usize>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
-    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
+    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = ncbi_integer_as::<usize>, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
     pub num_descriptions: Option<usize>,
-    #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
+    #[arg(long = "num_alignments", value_name = "int_value", value_parser = ncbi_integer_as::<usize>, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
     /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
     /// `blastinput::report_counts::FormattingArgs`).
@@ -246,10 +235,10 @@ pub struct BlastnArgs {
     pub max_db_word_count: u8,
     /// Maximum number of HSPs per subject (unlimited when omitted)
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
-    #[arg(long = "max_hsps", value_parser = blastn_count)]
+    #[arg(long = "max_hsps", value_parser = ncbi_integer_as::<usize>)]
     pub max_hsps_per_subject: Option<usize>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-201,313-315: no filter when omitted or 0.
-    #[arg(long = "qcov_hsp_perc", value_parser = blastn_query_coverage, help = "Percent query coverage per hsp")]
+    #[arg(long = "qcov_hsp_perc", value_parser = ncbi_double, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
     // Minimum diagonal separation between HSPs on the same subject (0 = auto, task-specific)
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
@@ -258,20 +247,21 @@ pub struct BlastnArgs {
     // Task resolution owns this internal value; no CLI override.
     #[arg(skip = 0usize)]
     pub min_diag_separation: usize,
-    #[arg(long, value_name = "PATH", value_parser = blastn_output_path())]
+    #[arg(long, value_name = "PATH", value_parser = ncbi_path())]
     pub out: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
     // The search strategy file (`report::archive::strategy`), created by `run` before the other
     // options are read.
-    #[arg(long, value_name = "filename", value_parser = blastn_output_path(), help = "File name to record the search strategy used")]
+    #[arg(long, value_name = "filename", value_parser = ncbi_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3527-3538
     // The search strategy to import (`report::archive::read::import`), read by `run` before the
-    // other options (`import::apply`).
+    // other options (`import::apply`). NCBI's argument reader reports its exclusion of
+    // `-export_search_strategy` (`cli::reader`).
     #[arg(
         long,
         value_name = "filename",
-        conflicts_with = "export_search_strategy",
+        value_parser = ncbi_path(),
         help = "Search strategy to use"
     )]
     pub import_search_strategy: Option<PathBuf>,
@@ -296,19 +286,19 @@ pub struct BlastnArgs {
     // bits; reward 0 with penalty 0 is NCBI's matrix-only scoring (`-task rmblastn`), a reward
     // of 0 or less with another penalty (no valid query) is rejected after NCBI's checks
     // (`scoring.rs`).
-    #[arg(long, value_parser = blastn_reward, help = "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast, 0 for rmblastn; 0 needs penalty 0)")]
+    #[arg(long, value_parser = ncbi_integer, help = "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast, 0 for rmblastn; 0 needs penalty 0)")]
     pub reward: Option<i32>,
-    #[arg(long, value_parser = blastn_penalty, help = "Penalty for a nucleotide mismatch (default: -2 for megablast, 0 for rmblastn, -3 for the other tasks)")]
+    #[arg(long, value_parser = ncbi_integer, help = "Penalty for a nucleotide mismatch (default: -2 for megablast, 0 for rmblastn, -3 for the other tasks)")]
     pub penalty: Option<i32>,
     #[arg(
         long = "gapopen",
-        value_parser = blastn_gap_cost,
+        value_parser = ncbi_integer,
         help = "Cost to open a gap (default: 0 for megablast, 5 for the other tasks)"
     )]
     pub gap_open: Option<i32>,
     #[arg(
         long = "gapextend",
-        value_parser = blastn_gap_cost,
+        value_parser = ncbi_integer,
         help = "Cost to extend a gap (default: 0 for megablast, 2 for the other tasks)"
     )]
     pub gap_extend: Option<i32>,
@@ -356,7 +346,6 @@ pub struct BlastnArgs {
         long = "window_masker_taxid",
         value_name = "window_masker_taxid",
         value_parser = ncbi_integer,
-        conflicts_with = "no_taxid_expansion",
         help = "Enable WindowMasker filtering using a Taxonomic ID"
     )]
     pub window_masker_taxid: Option<i32>,
@@ -403,7 +392,7 @@ pub struct BlastnArgs {
     #[arg(skip)]
     pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
-    #[arg(long, default_value = "both", value_parser = ["both", "plus", "minus"])]
+    #[arg(long, default_value = "both")]
     pub strand: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // Read by the query options handler (`search_cli`), after the filtering handler.
@@ -418,7 +407,6 @@ pub struct BlastnArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
-        conflicts_with_all = crate::blastinput::db_filter::DB_FILTER_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
@@ -429,16 +417,16 @@ pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
     /// If the query range of a hit is enveloped by that of at least this many
     /// higher-scoring hits, delete the hit (default: 0, no culling).
-    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    #[arg(long, value_parser = ncbi_integer)]
     pub culling_limit: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
     // With `-culling_limit` NCBI refuses the command line, LOSAT's parser too (with its own
     // text, as for the other exclusions).
     /// Best Hit algorithm overhang value (recommended value: 0.1)
-    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    #[arg(long, value_parser = ncbi_double, value_name = "float_value")]
     pub best_hit_overhang: Option<f64>,
     /// Best Hit algorithm score edge value (recommended value: 0.1)
-    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    #[arg(long, value_parser = ncbi_double, value_name = "float_value")]
     pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-917,929-929
     /// Perform ungapped alignment only.
@@ -452,11 +440,11 @@ pub struct BlastnArgs {
     // (blast_parameters.c:378-381). The values are bits; NCBI converts them to raw scores once,
     // with the smallest Lambda of the batch (`scoring.rs` `gap_x_dropoffs`, `run.rs`
     // `x_dropoff_init`).
-    #[arg(long, value_parser = blastn_real, help = "X-dropoff value (in bits) for ungapped extensions (default: 20 for blastn, dc-megablast and blastn-short; megablast uses the ungapped cutoff score)")]
+    #[arg(long, value_parser = ncbi_double, help = "X-dropoff value (in bits) for ungapped extensions (default: 20 for blastn, dc-megablast and blastn-short; megablast uses the ungapped cutoff score)")]
     pub xdrop_ungap: Option<f64>,
-    #[arg(long, value_parser = blastn_real, help = "X-dropoff value (in bits) for preliminary gapped extensions (default: 25 for megablast, 30 for the other tasks)")]
+    #[arg(long, value_parser = ncbi_double, help = "X-dropoff value (in bits) for preliminary gapped extensions (default: 25 for megablast, 30 for the other tasks)")]
     pub xdrop_gap: Option<f64>,
-    #[arg(long, value_parser = blastn_real, help = "X-dropoff value (in bits) for final gapped alignment (default: 100)")]
+    #[arg(long, value_parser = ncbi_double, help = "X-dropoff value (in bits) for final gapped alignment (default: 100)")]
     pub xdrop_gap_final: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:663-665,681-685
     // The X-drops keep the task's defaults (megablast's greedy 25 bits). With the gap costs
@@ -472,11 +460,11 @@ pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:475-481,487-497
     // BLASTN has no matrix (no suggested window), so an omitted value keeps the default of the
     // task (`coordination.rs` `determine_window_size`).
-    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm (default: 40 for dc-megablast, 0 for the other tasks)")]
+    #[arg(long, value_parser = ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm (default: 40 for dc-megablast, 0 for the other tasks)")]
     pub window_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:505-511,518-522
     // NCBI refuses a range without a window (`scoring.rs` `check_scoring_options`).
-    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Number of off-diagonals to search for the 2nd hit, use 0 to turn off (default: 0)")]
+    #[arg(long, value_parser = ncbi_integer, help = "Number of off-diagonals to search for the 2nd hit, use 0 to turn off (default: 0)")]
     pub off_diagonal_range: Option<i32>,
     // NCBI blastn has no such option (the LOSAT-only option was removed, AGENTS.md rule 5).
     #[arg(skip = false)]
@@ -494,7 +482,7 @@ pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed when the options
     // are set (`blastinput/app.rs` `parse_formatting_string` and `report_format`).
-    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 18 and 20", "6, 7, 10 and 20", ""))]
+    #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
 
     /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search

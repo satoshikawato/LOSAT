@@ -6038,8 +6038,8 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         // The table reads the ranges of every HSP of each described subject (after its `-html`
         // read of `./.ncbirc`): a row whose range it cannot take stops the report after the
         // query's `Length=` (`described_row_range`).
-        let rows_throw = described_row_range(self.remaps(), descriptions, grouped)
-            .map(EmptyRowsStop::RowRange);
+        let rows_throw =
+            described_row_range(self.remaps(), descriptions, grouped).map(EmptyRowsStop::RowRange);
         write_subject_summary_table_with_sum_n(
             writer,
             descriptions,

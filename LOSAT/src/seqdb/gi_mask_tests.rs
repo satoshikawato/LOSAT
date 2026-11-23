@@ -221,6 +221,27 @@ fn reads_across_chunks_and_windows_are_the_file_s_bytes() {
             assert_eq!(out, bytes[start..start + len], "{start} {len}");
         }
     }
+    // The numbers of the arrays: in one chunk, across a chunk's end, the last ones, outside.
+    for start in (c - 6..c + 2)
+        .chain(2 * c - 6..2 * c + 2)
+        .chain(bytes.len() - 6..bytes.len() - 3)
+    {
+        let want: [u8; 4] = bytes[start..start + 4].try_into().unwrap();
+        assert_eq!(
+            file.u32_at(start as i64).unwrap(),
+            u32::from_ne_bytes(want),
+            "{start}"
+        );
+        assert_eq!(
+            file.mapped::<4>(start as i64).unwrap(),
+            Some(want),
+            "{start}"
+        );
+    }
+    for start in [bytes.len() as i64 - 3, -1] {
+        let error = file.u32_at(start).unwrap_err();
+        assert!(matches!(&error, SeqDbError::Format { .. }), "{error}");
+    }
     // One read over three chunks, the last bytes, and reads outside the file.
     let mut out = vec![0u8; c + 40];
     file.read_at(c as i64 - 20, &mut out).unwrap();

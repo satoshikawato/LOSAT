@@ -120,11 +120,29 @@ impl MappedFile {
         Ok(())
     }
 
+    /// The `N` bytes at `at`: from their chunk, a copy of a constant length, where one chunk
+    /// holds them all (every read of the arrays but one that crosses a chunk's end); otherwise
+    /// [`MappedFile::read_at`], with its error outside the file. The binary searches read the
+    /// arrays a number at a time, which a copy of a length known only at run time made a call
+    /// of `memmove` each (review round of M4c-2, 2026-11-24: 50 % of a masked search's cycles on
+    /// a database of 1,000,000 sequences).
+    fn array_at<const N: usize>(&self, at: i64) -> Result<[u8; N], SeqDbError> {
+        let mut bytes = [0u8; N];
+        if let Ok(start) = u64::try_from(at) {
+            let from = (start % CHUNK) as usize;
+            if from + N <= CHUNK as usize && start + N as u64 <= self.len() {
+                let chunk = self.chunk((start / CHUNK) as usize)?;
+                bytes.copy_from_slice(&chunk[from..from + N]);
+                return Ok(bytes);
+            }
+        }
+        self.read_at(at, &mut bytes)?;
+        Ok(bytes)
+    }
+
     /// The 4 bytes at `at` as a number in the host's order (the arrays of the GI-mask files).
     fn u32_at(&self, at: i64) -> Result<u32, SeqDbError> {
-        let mut bytes = [0u8; 4];
-        self.read_at(at, &mut bytes)?;
-        Ok(u32::from_ne_bytes(bytes))
+        self.array_at::<4>(at).map(u32::from_ne_bytes)
     }
 
     /// [`check_range`] of this file.
@@ -140,6 +158,9 @@ impl MappedFile {
         let end = at.saturating_add(N as i64);
         if at < 0 || end as u64 > mapped_length(self.len()) {
             return Ok(None);
+        }
+        if end as u64 <= self.len() {
+            return self.array_at::<N>(at).map(Some);
         }
         let mut bytes = [0u8; N];
         let held = self.len().saturating_sub(at as u64).min(N as u64) as usize;

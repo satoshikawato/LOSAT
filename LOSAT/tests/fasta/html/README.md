@@ -1,6 +1,6 @@
 # Inputs of the `-html` fixtures
 
-Used by the `html.*` rows of `LOSAT/tests/outfmt0_manifest.tsv` (`-subject`, `-outfmt 0` and `18` with `-html`, line RG
+Used by the `html.*` rows of `LOSAT/tests/outfmt0_manifest.tsv` (`-subject`, `-outfmt 0`, `1` to `4` (line RG T4b) and `18` with `-html`, line RG
 item T4a2). The oracle is NCBI BLAST+ 2.17.0 (`run_oracle.py --freeze --only html.`). Every file is the input of the
 line's NCBI probe (survey T4, `SURVEY_T4.md` §1.2-§1.6 and §1.9), copied byte for byte; the row's `covers` cell names
 the probe case it repeats. Three more inputs of those rows are already in the repository and byte-identical to the

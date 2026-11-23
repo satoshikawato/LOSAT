@@ -2497,7 +2497,7 @@ deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPD
 
 ## `html/`: inputs of the `-html` rows (line RG, item T4a2)
 
-Rows `db.html.*` (`../db_search_manifest/<program>.html.tsv`): `-html` in formats 0 and 18 with `-db`, and the registry
+Rows `db.html.*` (`../db_search_manifest/<program>.html.tsv`): `-html` in formats 0 to 4 and 18 with `-db` (formats 1 to 4: line RG T4b), and the registry
 and environment cases of NCBI's HTML formatter. The inputs are those of the survey T4 of line RG
 (`remaining-gaps-20261112/T/t4`, written by its `scripts/gen.py` and `in2/gen2.py`), copied byte for byte so that the
 frozen bytes can be compared with the survey's runs. The rows also use `of18/ps_ids`, `of18/ns_ids`, `of18/ps_plain`,

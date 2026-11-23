@@ -49,13 +49,29 @@ impl WriteDbFile {
     /// The constructor with `always_create` false: the file is named but created only by
     /// `create_now` (`CWriteDB_File::Create`).
     pub(crate) fn lazy(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
+        Self::named(base_name, extension, Some(index), max_file_size)
+    }
+
+    /// `lazy` with the index -1 (`m_UseIndex` false): the file `<base>.<ext>`, without a
+    /// volume number (the offset and index files of a GI mask, `super::gi_mask`).
+    pub(crate) fn lazy_unindexed(base_name: &str, extension: &str, max_file_size: u64) -> Self {
+        Self::named(base_name, extension, None, max_file_size)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:158-195
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:247-257
+    // A negative index turns the volume number off; a limit of 0 takes the default one.
+    fn named(base_name: &str, extension: &str, index: Option<u32>, max_file_size: u64) -> Self {
         Self {
             stream: OfStream::new(),
             base_name: base_name.to_string(),
             extension: extension.to_string(),
-            index,
-            use_index: true,
-            fname: format!("{}.{extension}", make_short_name(base_name, index)),
+            index: index.unwrap_or(0),
+            use_index: index.is_some(),
+            fname: match index {
+                Some(index) => format!("{}.{extension}", make_short_name(base_name, index)),
+                None => format!("{base_name}.{extension}"),
+            },
             offset: 0,
             max_file_size: if max_file_size == 0 {
                 1000 * 1000 * 1000 - 1
@@ -101,6 +117,15 @@ impl WriteDbFile {
         self.stream.write(data);
         self.offset = end as u32;
         Ok(self.offset)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:204-222
+    /// `Write` for a file whose stream position nothing reads (the files of a GI mask, which
+    /// keep their own lengths, `super::gi_mask`): every byte is written and `m_Offset` wraps
+    /// as NCBI's `unsigned int` does.
+    pub(crate) fn write_unaddressed(&mut self, data: &[u8]) {
+        self.stream.write(data);
+        self.offset = self.offset.wrapping_add(data.len() as u32);
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:103-108

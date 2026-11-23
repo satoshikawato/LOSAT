@@ -98,6 +98,17 @@ pub enum StreamPosition {
     Byte(u64),
 }
 
+/// `GetPosition()`'s text: `line N`, `byte N` (`CObjectIStream::ThrowError1`'s prefix, the
+/// position of `ReplacedChar::message`).
+impl std::fmt::Display for StreamPosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamPosition::Line(line) => write!(f, "line {line}"),
+            StreamPosition::Byte(byte) => write!(f, "byte {byte}"),
+        }
+    }
+}
+
 /// A byte of a VisibleString that NCBI's object stream writes as `#` and reports with
 /// `ERR_POST_X` of subcode 7 with a message, from `Serial_IStream` (error 803.7: the function is in
 /// objistr.cpp).
@@ -143,13 +154,9 @@ impl ReplacedChar {
     /// (the hex digits in upper case without padding, `NumericToString` of `c` in base 16) and the
     /// string when there is one.
     pub fn message(&self) -> Vec<u8> {
-        let position = match self.position {
-            StreamPosition::Line(line) => format!("line {line}"),
-            StreamPosition::Byte(byte) => format!("byte {byte}"),
-        };
         let mut message = format!(
-            "{}\nBad char [0x{:X}] in string at {position}",
-            self.trace, self.byte
+            "{}\nBad char [0x{:X}] in string at {}",
+            self.trace, self.byte, self.position
         )
         .into_bytes();
         if !self.string.is_empty() {
@@ -274,6 +281,13 @@ pub trait Encoder {
     /// length as it was). The other streams parse the buffer first (`CDelayBuffer::Update`), which
     /// LOSAT does not: their error (`SerialError::Unwritten`).
     fn delayed(&mut self, text: &[u8]);
+    /// A member that NCBI's reader kept in a delay buffer of ASN.1 binary and that NCBI's
+    /// `CDelayBuffer::Update` reads again with a message or an error before it writes it
+    /// (`asn_types::write`): LOSAT does not write it (`SerialError::Unwritten`). The default is
+    /// `delayed`'s, the error of the streams that write no delay buffer.
+    fn unread_delayed(&mut self) {
+        self.delayed(&[]);
+    }
     /// The bytes that `flush_to` would hand over (0 for an encoder that cannot flush).
     fn buffered(&self) -> usize {
         0
@@ -764,6 +778,9 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     }
     fn delayed(&mut self, text: &[u8]) {
         self.call(Piece::Raw, |inner| inner.delayed(text));
+    }
+    fn unread_delayed(&mut self) {
+        self.call(Piece::Raw, |inner| inner.unread_delayed());
     }
     fn buffered(&self) -> usize {
         self.inner.buffered()

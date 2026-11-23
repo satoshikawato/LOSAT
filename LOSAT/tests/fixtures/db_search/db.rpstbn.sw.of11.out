@@ -1,0 +1,183 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "tblastn",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">tkcut570"
+                  }
+                }
+              },
+              title "tkcut570"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 570,
+              seq-data ncbi2na '39278C78B4D1F873A7A1AB6272F16B54EF65A80DC5C7E0
+033F3410801A290C04F97FFB024F57E0118CE8EE812818CB05466A60B0F8AAEC612E2F734081C3
+F7B5D522B2E8EC37C3638284BFF448DFB1FB432BE92102B00832E3E591F86A1778D248EFC954C4
+40F9D5331C1D0FB80726D82E4E37908F8C6022915FC6B08F6B063061041B0CE6CA6B9A23B19A49
+396210'H
+            }
+          }
+        }
+      },
+      subject database "rps_mini",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -5 }
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 1
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean TRUE
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        },
+        {
+          name "GapOpeningCost",
+          value integer 11
+        },
+        {
+          name "GapExtensionCost",
+          value integer 1
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 78077
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 800
+          },
+          {
+            id str "blast_score",
+            value int 800
+          },
+          {
+            id str "e_value",
+            value real { 162170974112236, 10, -128 }
+          },
+          {
+            id str "bit_score",
+            value real { 31247086523832, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 190
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 190
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 569,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 189,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 50373036, 10, -9 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 78077",
+      "Effective search space used: 78077",
+      "Length adjustment: 27"
+    }
+  }
+}

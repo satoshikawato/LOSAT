@@ -356,9 +356,9 @@ fn oid_list_files_ncbi_cannot_read_are_refused() {
 
 /// An alias file whose `OID_MASK_TYPE` leaves a sequence without a definition line (line RG
 /// D1b-2): NCBI's makeblastdb stops with a null pointer exception (exit status 255, probe mkbd of
-/// D1b-2, for `ompx`, `tall` and `omnx`), LOSAT refuses the input at that sequence, before any file is written. An
-/// alias whose sequences each keep a line is copied with the lines it keeps (case `B_al_om` of
-/// `blastdb_input_runs_as_makeblastdb`).
+/// D1b-2, for `ompx`, `tall`, `omnx`, `omp4x` and `ntall`), LOSAT refuses the input at that sequence, before any file is written. An
+/// alias whose sequences each keep a line is copied with the lines it keeps (cases `B_al_om`, `B_al_omn`, `B_al_t0`, `B_al_t2`,
+/// `B_al_j2` and `B_al_j5` of `blastdb_input_runs_as_makeblastdb`).
 #[test]
 #[cfg_attr(
     target_os = "wasi",
@@ -371,6 +371,8 @@ fn a_sequence_the_mask_type_leaves_without_a_line_is_refused() {
         ("ompx", "prot", 2),
         ("tall", "prot", 1),
         ("omnx", "nucl", 2),
+        ("omp4x", "prot", 2),
+        ("ntall", "nucl", 1),
     ] {
         let input = format!("tests/db_search/oidmask/{name}");
         let (status, log, err) = makeblastdb(&[
@@ -434,10 +436,13 @@ fn write_column_db(base: &str, prefix: &str, masks: bool) {
         db.extract_bioseq_deflines(&bioseq);
         db.add_sequence(bioseq).unwrap();
         if let (Some(algorithm_id), 2) = (algorithm_id, i) {
-            db.set_mask_data(&[MaskedRanges {
-                algorithm_id,
-                offsets: vec![(1, 4)],
-            }])
+            db.set_mask_data(
+                &[MaskedRanges {
+                    algorithm_id,
+                    offsets: vec![(1, 4)],
+                }],
+                &[],
+            )
             .unwrap();
         }
         if i != 2 {

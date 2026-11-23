@@ -205,8 +205,9 @@ export class WasmEngine implements EngineGateway {
   }
 
   private async launch(active: ActiveRun, request: EngineRunRequest, output: MessagePort): Promise<void> {
-    // A run of -db searches the files of its directory, by their size as the subject's.
-    const searched = request.subject?.bytes.length ?? (request.files ?? []).reduce((total, { file }) => total + file.size, 0);
+    // A run searches its subject and the files of its directory (the database of -db, the repeat database of
+    // BLASTN's -filtering_db), by their size.
+    const searched = (request.subject?.bytes.length ?? 0) + (request.files ?? []).reduce((total, { file }) => total + file.size, 0);
     const threads = chooseThreads(
       request.requestedThreads,
       request.query.bytes.length + searched,

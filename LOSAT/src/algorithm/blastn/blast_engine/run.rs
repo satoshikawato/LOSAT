@@ -6907,10 +6907,12 @@ fn run_local_formats(
         );
     }
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives
-    // them, `api::run`); LOSAT Web has no databases.
+    // them, `api::run`; the WebAssembly adapter, `web_adapter::resolve_blastn_repeat_filter`);
+    // a caller of `run_local` that has not resolved it (`BlastnArgs::resolve_repeat_filter`) has
+    // no repeat search; ABI v1 refuses the option before (`web_api.rs`, `parse_blastn_args`).
     if args.filtering_db.is_some() && args.repeat_filter.is_none() {
         anyhow::bail!(
-            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
+            "-filtering_db (a BLAST database of repeats) needs its repeat filter resolved with the run's settings (BlastnArgs::resolve_repeat_filter)"
         );
     }
     // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
@@ -7262,7 +7264,7 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    args.megablast_index_loaded = megablast_index.check(&args)?;
+    args.megablast_index_loaded = megablast_index.check()?;
     if args.megablast_index_loaded.is_some() {
         mb_index::note_index_use(args.archive.as_ref(), args.strategy.as_ref())?;
     }
@@ -10770,6 +10772,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     two_hits: crate::algorithm::blastn::coordination::determine_window_size(args)
                         as u64,
                 },
+                db_hard_mask.map(|algo_id| (database, algo_id)),
             ))
         }
         _ => None,

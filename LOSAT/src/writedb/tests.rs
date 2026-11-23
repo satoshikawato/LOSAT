@@ -1468,9 +1468,11 @@ fn v5_markers(bytes: &[u8], dir: &str) -> Vec<u8> {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:140-181
 /// `stderr`, NCBI's text from Linux of a run whose `-in` names an alias file with an `OIDLIST`
 /// value that starts with `/`, as NCBI's code writes it on Windows in the form of `v5_markers`
-/// (`\` written as `/`): a value starting with `/` is not absolute there, and NCBI joins it to the
-/// directory of the alias file's first volume with `\` (`SeqDB_CombinePath` changes no separator
-/// of the value), where on Linux the text quotes the value alone.
+/// (`\` written as `/`): a value starting with `/` is not absolute there, so NCBI joins it with
+/// `\` (`SeqDB_CombinePath` changes no separator of the value) to the alias file's directory and,
+/// where that names no file and the first name of `DBLIST` is a volume, to that volume's directory
+/// (`seqdb::alias::compute_masks`; the volumes of these rows are beside their alias files' names),
+/// where on Linux the text quotes the value alone.
 fn oid_list_path_on_windows(stderr: &[u8], words: &[String]) -> Vec<u8> {
     let input = words
         .iter()
@@ -1497,9 +1499,19 @@ fn oid_list_path_on_windows(stderr: &[u8], words: &[String]) -> Vec<u8> {
     if !list.starts_with('/') {
         return stderr.to_vec();
     }
-    let first = volumes.split_whitespace().next().unwrap();
-    let directory = alias.parent().unwrap().join(first);
-    let directory = std::fs::canonicalize(directory.parent().unwrap()).unwrap();
+    let first = alias
+        .parent()
+        .unwrap()
+        .join(volumes.split_whitespace().next().unwrap());
+    let volume = ["pin", "nin"]
+        .iter()
+        .any(|ext| PathBuf::from(format!("{}.{ext}", first.display())).is_file());
+    let directory = if volume {
+        first.parent().unwrap()
+    } else {
+        alias.parent().unwrap()
+    };
+    let directory = std::fs::canonicalize(directory).unwrap();
     let directory = directory.to_string_lossy();
     let directory = directory.strip_prefix(r"\\?\").unwrap_or(&directory);
     replace_bytes(

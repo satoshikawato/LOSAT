@@ -806,6 +806,7 @@ fn every_list_tests_each_line_as_ncbis() {
     // list's give no line (both drop its hits, `SeqDb::keeps_line`).
     let lineless = DeflineSet {
         deflines: vec![defline(Some(5), None)],
+        utf8: false,
     };
     assert_eq!(
         line_mask(Some(&DeflineRule::Seqids(Vec::new())), &[], &lineless),

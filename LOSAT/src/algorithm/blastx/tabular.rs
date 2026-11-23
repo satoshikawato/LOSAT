@@ -35,9 +35,9 @@ use crate::algorithm::common::tabular::FailedValues;
 use crate::cli::NativeError;
 use crate::report::serial::seqalign::{mapped_empty_query_nucleotide, ungapped_interval};
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, SubjectLookup,
-    TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec, TabularSubject,
-    TabularTaxonomy, TabularWriter,
+    coverage_percent, query_coverage_per_hsp, taxdb_warning_line, union_length, DeflineIds,
+    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec,
+    TabularSubject, TabularTaxonomy, TabularWriter,
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
@@ -453,6 +453,16 @@ pub(super) fn write_blastx_tabular(
                 let query_length = options
                     .query_range
                     .map_or(searched_length, |range| range.length());
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1497-1499
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1034-1043
+                // The length against which `hsp_percent_coverage` counts an HSP's residues in its
+                // frame (`qcovhsp`): a third of the searched letters in a gapped search, the
+                // searched letters in an ungapped one (blast_seqalign.cpp:1381-1384).
+                let coverage_length = if options.gapped {
+                    searched_length as i32 / 3
+                } else {
+                    searched_length as i32
+                };
                 let tabular_query =
                     TabularQuery::of_ids(query.believed(), query.shown_id(), query_length);
                 // Several volumes: the merged lists cut once per query (`BatchResults::shown_lists`).
@@ -667,12 +677,12 @@ pub(super) fn write_blastx_tabular(
                                 end_gaps: false,
                                 stored_gaps: [&[], &[]],
                                 qcovhsp: query_coverage_per_hsp(
-                                    options.gapped,
+                                    !options.gapped,
                                     shown_count,
                                     0,
+                                    coverage_length,
                                     mapped.length() as i32,
-                                    searched_length,
-                                    query_length,
+                                    query_length as i32,
                                 ),
                             };
                             (row, tabular_query, tabular_subject)
@@ -743,19 +753,20 @@ pub(super) fn write_blastx_tabular(
                                 end_gaps: true,
                                 stored_gaps: [&[], &[]],
                                 qcovhsp: query_coverage_per_hsp(
-                                    options.gapped,
+                                    !options.gapped,
                                     shown_count,
                                     // The HSP's own ends (`Blast_HSPGetQueryCoverage` of the
                                     // BlastHSP, blast_seqalign.cpp:1223-1224), not the Seq-align's.
                                     raw.q_end - raw.q_start,
-                                    // `-subject`'s mapped empty row has one nucleotide.
+                                    coverage_length,
+                                    // The Seq-align's nucleotides; `-subject`'s mapped empty row
+                                    // has one.
                                     if empty {
                                         1
                                     } else {
                                         (a.qstart - a.qend).abs() + 1
                                     },
-                                    searched_length,
-                                    query_length,
+                                    query_length as i32,
                                 ),
                             };
                             (row, tabular_query, tabular_subject)
@@ -947,46 +958,3 @@ fn write_blastx_tax_report(
     }
     Ok(())
 }
-
-/// `qcovhsp` of an HSP whose query span is `span` residues of its frame and `nucleotides` letters
-/// of the record, in a subject with `hsps` HSPs that have a Seq-align. `searched_length` is the
-/// length of the searched letters (the `-query_loc` interval), `query_length` that of the tabular
-/// `qlen` (the range as given).
-///
-/// A gapped search: the HSP's own Seq-align carries `hsp_percent_coverage`, which
-/// `BLASTHspListToSeqAlign` computes for a translated query against a third of the query's
-/// letters.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1497-1499
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1034-1043
-/// An ungapped search makes one Seq-align of a subject's HSPs, each a Std-seg with its scores,
-/// against the query's letters (`x_UngappedHSPToStdSeg`). The formatter splits a Seq-align of
-/// several into one per HSP that takes the Std-seg's scores; one of a single HSP stays as it is,
-/// its scores on the Std-seg, so that the Seq-align has no `hsp_percent_coverage` and
-/// `x_SetQueryCovSeqalign` counts the Seq-align's span of the query (its nucleotides) against the
-/// query's length, which is the range as given with `-query_loc` (tabular.cpp:786-791).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1381-1384
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3162-3185
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-747
-fn query_coverage_per_hsp(
-    gapped: bool,
-    hsps: usize,
-    span: i32,
-    nucleotides: i32,
-    searched_length: usize,
-    query_length: usize,
-) -> i32 {
-    let searched_length = searched_length as i32;
-    if gapped {
-        hsp_coverage(span, searched_length / 3)
-    } else if hsps > 1 {
-        hsp_coverage(span, searched_length)
-    } else {
-        hsp_coverage(nucleotides, query_length as i32)
-    }
-}
-
-#[cfg(test)]
-#[path = "tabular_tests.rs"]
-mod tests;

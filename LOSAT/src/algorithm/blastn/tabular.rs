@@ -27,8 +27,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::common::GapEditOp;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularHsp, TabularKind,
-    TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
+    coverage_percent, query_coverage_per_hsp, taxdb_warning_line, union_length, TabularHsp,
+    TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 use crate::utils::lower_bound::lower_bound_by;
 
@@ -48,6 +48,9 @@ pub(crate) struct BlastnTabular<'a> {
     pub searched_lengths: &'a [usize],
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
     pub range_length: Option<usize>,
+    /// An ungapped search (`-ungapped`), whose Seq-aligns are Dense-diags (`qcovhsp`,
+    /// `report::tabular::query_coverage_per_hsp`).
+    pub ungapped: bool,
     /// Outfmt 7's `# Database:` text.
     pub database: &'a str,
     pub subjects: TabularSubjects<'a>,
@@ -272,9 +275,17 @@ pub(crate) fn write_blastn_tabular(
                     )
                     .context("BLASTN tabular rows of a final HSP")?;
                 }
+                let span = (hsp.q_end - hsp.q_start + 1) as i32;
                 let row = tabular_hsp(
                     hsp,
-                    coverage_length(hsp, hsp_list.hsps.len(), searched_length, query_length),
+                    query_coverage_per_hsp(
+                        tab.ungapped,
+                        hsp_list.hsps.len(),
+                        span,
+                        searched_length as i32,
+                        span,
+                        query_length as i32,
+                    ),
                     needs
                         .rows
                         .then_some((query_row.as_slice(), subject_row.as_slice())),
@@ -307,7 +318,7 @@ pub(crate) fn write_blastn_tabular(
 }
 
 /// The values of one HSP's row: its Seq-align's coordinates, scores and lengths (`SetFields`),
-/// `rows` when a field shows them.
+/// its `qcovhsp` (`report::tabular::query_coverage_per_hsp`), `rows` when a field shows them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1061-1091
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1121
@@ -315,7 +326,7 @@ pub(crate) fn write_blastn_tabular(
 /// identities are the default row's (`write_hsp_rows`).
 fn tabular_hsp<'r>(
     hsp: &BlastnHsp,
-    coverage_length: usize,
+    qcovhsp: i32,
     rows: Option<(&'r [u8], &'r [u8])>,
 ) -> TabularHsp<'r> {
     let gaps = hsp.gap_info.as_deref().map_or(0, |ops| {
@@ -345,33 +356,7 @@ fn tabular_hsp<'r>(
         // NCBI keeps outside its query context, `pairwise::context_letters`), the gap character.
         end_gaps: false,
         stored_gaps: [&[], &[]],
-        qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, coverage_length as i32),
-    }
-}
-
-/// The query length of `hsp`'s `qcovhsp` in a subject whose Seq-align holds `hsps` HSPs:
-/// `searched_length`, that of the HSP's context, where the Seq-align that the formatter reads
-/// carries `hsp_percent_coverage` (`Blast_HSPGetQueryCoverage` of the context); `query_length`,
-/// the `-query_loc` range as given (`m_QueryLength`, tabular.cpp:787-790), where it carries none.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1308-1309
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3185-3205
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-747
-/// An ungapped search (an HSP without an edit script) makes one Seq-align of a subject's
-/// HSPs, each a Dense-diag with its scores (`x_UngappedHSPToDenseDiag`); the formatter splits
-/// one of several into one per HSP with the Dense-diag's scores, and keeps one of a single
-/// HSP, which has no scores of its own: its span counts against `query_length` (the same
-/// formula). A gapped HSP's Seq-align has its scores. As BLASTX's `query_coverage_per_hsp`.
-fn coverage_length(
-    hsp: &BlastnHsp,
-    hsps: usize,
-    searched_length: usize,
-    query_length: usize,
-) -> usize {
-    if hsp.gap_info.is_none() && hsps == 1 {
-        query_length
-    } else {
-        searched_length
+        qcovhsp,
     }
 }
 

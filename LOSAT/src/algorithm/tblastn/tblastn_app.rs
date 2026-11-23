@@ -2626,6 +2626,7 @@ fn search(
                 .query_range
                 .as_ref()
                 .map(crate::blastinput::seq_range::SequenceRange::length),
+            ungapped: args.ungapped,
             html: resolved.html.clone(),
             is_html: args.html,
         };

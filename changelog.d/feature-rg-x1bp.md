@@ -11,7 +11,8 @@
   now refuses it there after what NCBI BLAST+ writes before: the start of the XML2 and JSON
   documents, outfmt 20's line of field names, and the reports of the query batches before (manual,
   What LOSAT refuses).
-- BLASTN: with `-ungapped` and a `-query_loc` range whose end passes the query's end, `qcovhsp` of
-  a subject's only alignment counts its letters against the range as given, as NCBI BLAST+ 2.17.0
-  does (LOSAT counted them against the searched letters); a subject's several alignments and
-  gapped ones keep the searched letters.
+- BLASTN, BLASTP and TBLASTN: with `-ungapped` and a `-query_loc` range whose end passes the
+  query's end, `qcovhsp` of a subject's only alignment counts its letters against the range as
+  given, as NCBI BLAST+ 2.17.0 does and as BLASTX and TBLASTX already did (LOSAT counted them
+  against the searched letters); a subject's several alignments and gapped ones keep the searched
+  letters.

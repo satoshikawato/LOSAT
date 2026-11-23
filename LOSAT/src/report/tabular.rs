@@ -2556,11 +2556,41 @@ pub fn union_length(ranges: &mut [(u64, u64)]) -> usize {
     total as usize
 }
 
-/// The HSP's query coverage in percent cut to an integer (`qcovhsp`): `x_SetQueryCovSeqalign`
-/// reads the Seq-align's `hsp_percent_coverage` (`Blast_HSPGetQueryCoverage` of the HSP's query
-/// context: `query_span` letters of a context of `query_length`).
-pub fn hsp_coverage(query_span: i32, query_length: i32) -> i32 {
-    crate::report::serial::seqalign::query_coverage(0, query_span, query_length) as i32
+/// The HSP's query coverage in percent cut to an integer (`qcovhsp`), the one rule of every
+/// program: `x_SetQueryCovSeqalign` reads the `hsp_percent_coverage` of the Seq-align that the
+/// formatter gets, which `Blast_HSPGetQueryCoverage` makes of `span`, the HSP's letters in its
+/// query context, and `context_length`, the length that the program's Seq-align builder gives it
+/// (the searched letters; a translated query's span is residues of its frame). Where that
+/// Seq-align has no such score, it counts `seqalign_span`, the Seq-align's own span of the query
+/// (letters of the record: a translated query's nucleotides), against `query_length`, the tabular
+/// query length (`m_QueryLength`: the `-query_loc` range as given, tabular.cpp:786-790).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1447
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1308-1309
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3162-3205
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:518-533
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-747
+/// A gapped search makes one Seq-align per HSP, with its scores. An ungapped search (`ungapped`)
+/// makes one Seq-align of a subject's `hsps` HSPs, each a Dense-diag (BLASTN, BLASTP) or a
+/// Std-seg (the translated programs) with its scores. The formatter splits a Seq-align of several
+/// into one per HSP that takes those scores, and keeps one of a single HSP as it is: its scores
+/// are on the Dense-diag or Std-seg, and `x_GetNamedScore` reads only the Seq-align's own, so the
+/// span counts against `query_length`. In BLASTN, BLASTP and TBLASTN both spans are the HSP's
+/// query letters, so the counts differ only where the range as given passes the record's end.
+pub fn query_coverage_per_hsp(
+    ungapped: bool,
+    hsps: usize,
+    span: i32,
+    context_length: i32,
+    seqalign_span: i32,
+    query_length: i32,
+) -> i32 {
+    let (covered, length) = if ungapped && hsps == 1 {
+        (seqalign_span, query_length)
+    } else {
+        (span, context_length)
+    };
+    crate::report::serial::seqalign::query_coverage(0, covered, length) as i32
 }
 
 #[cfg(test)]

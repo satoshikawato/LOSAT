@@ -135,34 +135,3 @@ fn uniq_coverage_skips_subject_letters_covered_before() {
     assert_eq!(uniq_seq_coverage(&[a, partial]), 100 + 50);
     assert_eq!(uniq_subject_coverage(&[], 100), -1);
 }
-
-// NCBI blast_seqalign.cpp:1308-1309, showalign.cpp:3185-3205 and tabular.cpp:737-747: an
-// ungapped subject's single Dense-diag counts against the range as given (-query_loc
-// 1203-1000000 of a record of 2202 letters: 998798), several against the context (1000), as
-// does a gapped HSP. NCBI BLAST+ 2.17.0 writes qcovhsp 0 for the first (200 letters), 20 for
-// the others (x1bp fix 2 probe, d3mK; arch_multi with -query_loc 1-1000000).
-#[test]
-fn hsp_coverage_follows_the_seq_align_that_the_formatter_reads() {
-    let ungapped = hsp((1203, 1402), (1, 200), false, None);
-    let gapped = hsp(
-        (1203, 1402),
-        (1, 200),
-        false,
-        Some(vec![GapEditOp::Sub(200)]),
-    );
-    assert_eq!(coverage_length(&ungapped, 1, 1000, 998_798), 998_798);
-    assert_eq!(coverage_length(&ungapped, 2, 1000, 998_798), 1000);
-    assert_eq!(coverage_length(&gapped, 1, 1000, 998_798), 1000);
-    let row = tabular_hsp(
-        &ungapped,
-        coverage_length(&ungapped, 1, 1000, 998_798),
-        None,
-    );
-    assert_eq!(row.qcovhsp, 0);
-    let row = tabular_hsp(
-        &ungapped,
-        coverage_length(&ungapped, 2, 1000, 998_798),
-        None,
-    );
-    assert_eq!(row.qcovhsp, 20);
-}

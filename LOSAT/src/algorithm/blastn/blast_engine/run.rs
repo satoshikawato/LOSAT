@@ -6118,6 +6118,7 @@ fn write_custom_tabular(
         query_titles,
         searched_lengths: query_lengths,
         range_length: report.ranges.queries.range_length,
+        ungapped: report.ungapped,
         database: subject_title,
         subjects,
         letters: report.subjects,
@@ -7725,8 +7726,9 @@ fn ungapped_subject_stage(
 /// Dense-diag whatever its start, a gapped search's Dense-seg only at its starts at 0 or past it.
 /// Of a subject set NCBI then maps each Seq-align of the batch to the subject's location in the
 /// search (`s_RemapToSubjectLoc`, blast_seqalign.cpp:1630-1636): the query row of such an HSP maps
-/// to nothing, which throws `CAnnotMapperException` (exit status 255), for an ungapped HSP's
-/// Dense-diag at seq_align_mapper_base.cpp:1292 and for a gapped HSP's Dense-seg at line 2902.
+/// to nothing, which throws `CAnnotMapperException` (exit status 255) at
+/// seq_align_mapper_base.cpp:1292 or 2902 (both seen with `-ungapped`, by task; a gapped HSP's
+/// Dense-seg not reached).
 /// Its start at 0 or past it is shown (`algorithm::blastn::pairwise::context_letters`;
 /// remaining-gaps X1b-p).
 fn left_of_query_refusal(

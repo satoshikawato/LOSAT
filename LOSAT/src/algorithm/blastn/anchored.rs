@@ -79,15 +79,17 @@ impl ReportSequences for AnchoredSequences<'_> {
         // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:304-305
         // The letters of the query's Bioseq at record positions (`QueryRecord::letters`, from
         // position 0), whose `CSeqVector` stops at the record's end.
-        if let Some(record) = self.query_records.record(q_idx) {
-            query_record_letters(
-                crate::report::row_letters::QueryLetters::new(record.letters, None),
-                0,
-                from,
-                to,
-                out,
-            );
-        }
+        let record = self
+            .query_records
+            .record(q_idx)
+            .expect("BLASTN HSP of an unknown query");
+        query_record_letters(
+            crate::report::row_letters::QueryLetters::new(record.letters, None),
+            0,
+            from,
+            to,
+            out,
+        );
     }
 
     fn subject_letters(&self, s_idx: u32, from: u32, to: u32, out: &mut Vec<u8>) {

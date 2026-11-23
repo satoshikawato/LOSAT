@@ -32,8 +32,8 @@ use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularField, TabularHsp,
-    TabularKind, TabularQuery, TabularRows, TabularSpec, TabularWriter,
+    coverage_percent, query_coverage_per_hsp, taxdb_warning_line, union_length, TabularField,
+    TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 use crate::utils::genetic_code::GeneticCode;
 
@@ -446,28 +446,20 @@ pub(super) fn write_tblastx_tabular(
                     rows: rows_read.then_some((qrow.as_slice(), srow.as_slice())),
                     end_gaps: true,
                     stored_gaps: [&[], &[]],
-                    qcovhsp: if group.len() > 1 {
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1222-1225
-                        // The Seq-align of an HSP split from its subject's (the scores of its
-                        // Std-seg): `Blast_HSPGetQueryCoverage` divides the HSP's residues in its
-                        // query frame by the length that `BlastHitList2SeqAlign_OMF` gives, the
-                        // searched query's in nucleotides (`query.GetSeqLength`), about a third
-                        // of the HSP's nucleotide coverage, as NCBI writes it.
-                        hsp_coverage(
-                            i32::try_from(hit.sort_query_end - hit.sort_query_offset)?,
-                            i32::try_from(searched_length)?,
-                        )
-                    } else {
-                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-746
-                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3169-3183
-                        // A subject with one HSP keeps its `diags` Seq-align, whose scores are on
-                        // its Std-seg, and `GetNamedScore` reads the Seq-align's own: the HSP's
-                        // nucleotide span over the query length of `qlen`.
-                        hsp_coverage(
-                            i32::try_from(q_high - q_low + 1)?,
-                            i32::try_from(query_length)?,
-                        )
-                    },
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1222-1225
+                    // An ungapped search: the HSP's residues in its query frame against the
+                    // length that `BlastHitList2SeqAlign_OMF` gives, the searched query's in
+                    // nucleotides (`query.GetSeqLength`), about a third of the HSP's nucleotide
+                    // coverage, as NCBI writes it; a subject's single HSP has the Seq-align's
+                    // nucleotide span over `qlen`.
+                    qcovhsp: query_coverage_per_hsp(
+                        true,
+                        group.len(),
+                        i32::try_from(hit.sort_query_end - hit.sort_query_offset)?,
+                        i32::try_from(searched_length)?,
+                        i32::try_from(q_high - q_low + 1)?,
+                        i32::try_from(query_length)?,
+                    ),
                 };
                 // One printed row is one HSP; the probe marks it without changing it.
                 if let Some(probe) = probe.as_deref_mut() {

@@ -31,9 +31,9 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, SubjectLookup,
-    TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec,
-    TabularSubject, TabularTaxonomy, TabularWriter,
+    coverage_percent, query_coverage_per_hsp, taxdb_warning_line, union_length, DeflineIds,
+    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows,
+    TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
 };
 
 /// What the report needs besides the final hit lists.
@@ -56,6 +56,9 @@ pub(super) struct BlastpTabular<'a> {
     pub searched_lengths: &'a [usize],
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
     pub range_length: Option<usize>,
+    /// An ungapped search (`-ungapped`), whose Seq-aligns are Dense-diags (`qcovhsp`,
+    /// `report::tabular::query_coverage_per_hsp`).
+    pub ungapped: bool,
     /// Outfmt 7's `# Database:` text.
     pub database: &'a str,
     pub subjects: TabularSubjects<'a>,
@@ -813,7 +816,16 @@ fn write_tabular_rows<const RPS: bool>(
                     None => None,
                 };
                 row_index += 1;
-                let mut row = tabular_hsp(hsp, searched_length, rows.map(|(rows, _)| rows));
+                let span = (hsp.q_end + 1 - hsp.q_start) as i32;
+                let qcovhsp = query_coverage_per_hsp(
+                    tab.ungapped,
+                    hsp_list.hsps.len(),
+                    span,
+                    searched_length as i32,
+                    span,
+                    query_length as i32,
+                );
+                let mut row = tabular_hsp(hsp, qcovhsp, rows.map(|(rows, _)| rows));
                 if let Some((_, stored_gaps)) = rows {
                     row.stored_gaps = stored_gaps;
                 }
@@ -888,7 +900,7 @@ fn hsp_rows<'r>(
 }
 
 /// The values of one HSP's row: its Seq-align's coordinates, scores and lengths (`SetFields`),
-/// `rows` when a field shows them.
+/// its `qcovhsp` (`report::tabular::query_coverage_per_hsp`), `rows` when a field shows them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1071-1094
 /// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478
@@ -898,7 +910,7 @@ fn hsp_rows<'r>(
 /// sequences: the frames are 1.
 fn tabular_hsp<'r>(
     hsp: &BlastpHsp,
-    searched_length: usize,
+    qcovhsp: i32,
     rows: Option<(&'r [u8], &'r [u8])>,
 ) -> TabularHsp<'r> {
     TabularHsp {
@@ -916,10 +928,9 @@ fn tabular_hsp<'r>(
         q_frame: 1,
         s_frame: 1,
         rows,
-        // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
         end_gaps: true,
         stored_gaps: [&[], &[]],
-        qcovhsp: hsp_coverage((hsp.q_end + 1 - hsp.q_start) as i32, searched_length as i32),
+        qcovhsp,
     }
 }
 

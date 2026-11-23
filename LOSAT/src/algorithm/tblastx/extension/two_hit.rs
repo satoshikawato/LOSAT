@@ -862,7 +862,7 @@ pub(crate) fn extend_hit_two_hit_outside<S: TbxScore>(
     sc: S,
     q_seq: &[u8],
     qb: InBatch<'_>,
-    chunk: ChunkLetters<'_>,
+    chunk: &ChunkLetters<'_>,
     s_left_off: i32,
     s_right_off: i32,
     q_right_off: usize,

@@ -365,7 +365,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         subject_sent,
         diag_offset,
         sc,
-        x_around,
+        ..
     } = chunk_cx;
     let diag_ptr = diag_array.as_mut_ptr();
 
@@ -520,7 +520,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
                 sc,
                 query,
                 in_batch,
-                x_around,
+                &chunk_cx.x_around,
                 s_left_off,
                 subject_offset as i32,
                 q_raw,
@@ -1427,7 +1427,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
                             sc,
                             query,
                             frame.cx.query_batch.at(ctx_idx, frame.s_idx),
-                            x_around,
+                            &x_around,
                             q_raw,
                             subject_offset as i32,
                             x_dropoff_per_context[ctx_idx],

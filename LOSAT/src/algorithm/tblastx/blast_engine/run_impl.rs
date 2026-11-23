@@ -1222,23 +1222,32 @@ fn check_ncbi_options(
 }
 
 /// The `-outfmt` of the command line (`check_ncbi_options`), as `app::early_format_choice` reads
-/// it: with a search strategy file a value that does not parse is `check_ncbi_options`' to
-/// reject, at its formatting handler.
+/// it: where the argv names a search strategy file a value that does not parse is
+/// `check_ncbi_options`' to reject, at its formatting handler (the command line's run has made the
+/// file then; the checks of the options alone, `check_options`, read the argv as that run).
 fn cli_outfmts(args: &TblastxArgs) -> Result<[crate::blastinput::app::EarlyFormat; 1]> {
     Ok([crate::blastinput::app::early_format_choice(
         &args.outfmt,
-        args.strategy.is_some(),
+        args.export_search_strategy.is_some(),
     )?])
 }
 
-/// The requested formats as NCBI parses `-outfmt` (`check_ncbi_options`).
-fn output_choices(outputs: &ReportOutputs<'_>) -> Result<Vec<crate::blastinput::app::EarlyFormat>> {
+/// The requested formats as NCBI parses `-outfmt` (`check_ncbi_options`), as the command line's
+/// (`cli_outfmts`): where the argv names a search strategy file a value that does not parse is
+/// left to the formatting handler, which reads the arguments' `-outfmt` again (LOSAT Web gives
+/// such a value as the run's one format and as the arguments' `-outfmt`).
+fn output_choices(
+    outputs: &ReportOutputs<'_>,
+    args: &TblastxArgs,
+) -> Result<Vec<crate::blastinput::app::EarlyFormat>> {
     outputs
         .formats
         .iter()
         .map(|format| {
-            crate::blastinput::app::parse_formatting_string(format.outfmt)
-                .map(crate::blastinput::app::EarlyFormat::Parsed)
+            crate::blastinput::app::early_format_choice(
+                format.outfmt,
+                args.export_search_strategy.is_some(),
+            )
         })
         .collect()
 }
@@ -1470,7 +1479,7 @@ pub fn run_local(
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`), with LOSAT's refusals; `check_ncbi_options` and `search` check the formats
     // again, after `-out` is opened, as on the command line.
-    report_formats(outputs, args.out.as_deref())?;
+    report_formats(outputs, &args)?;
     // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
     // saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
@@ -1517,7 +1526,7 @@ fn run_local_formats(
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     let (query_range, counts, html_links) =
-        check_ncbi_options(&args, &output_choices(outputs)?, outputs.diagnostics)?;
+        check_ncbi_options(&args, &output_choices(outputs, &args)?, outputs.diagnostics)?;
     args.report_counts = counts;
     args.html_links = html_links;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
@@ -1563,7 +1572,7 @@ pub fn run_local_database(
     args.find_matrix_file(&settings.matrix_search)?;
     // NCBI parses -outfmt before its option handlers run, with LOSAT's refusals;
     // `check_ncbi_options` and `search` check the formats again, after `-out` is opened.
-    report_formats(outputs, args.out.as_deref())?;
+    report_formats(outputs, &args)?;
     let archive_requested = outputs
         .formats
         .iter()
@@ -1600,7 +1609,7 @@ fn search_database(
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     let (query_range, counts, html_links) =
-        check_ncbi_options(&args, &output_choices(outputs)?, outputs.diagnostics)?;
+        check_ncbi_options(&args, &output_choices(outputs, &args)?, outputs.diagnostics)?;
     args.report_counts = counts;
     args.html_links = html_links;
     let database = open_search_database(&mut args, list.as_ref(), &settings, outputs)?
@@ -1616,16 +1625,18 @@ fn search_database(
 }
 
 /// Each requested format as NCBI parses `-outfmt` before its option handlers run, and LOSAT's
-/// rejection of a format that its TBLASTX does not write (`app::report_format`): the command
-/// line's checks before it opens `-out` (`run`). NCBI's formatting handler comes after
-/// (`check_ncbi_options`, `check_report_formats`).
-fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
-    use crate::blastinput::app;
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        app::report_format(&choice, app::Program::Tblastx, format.side_out(out))?;
-    }
-    Ok(())
+/// rejection of a format that its TBLASTX does not write (`ReportOutputs::early_choices`): the
+/// command line's checks before it opens `-out` (`run`). NCBI's formatting handler comes after
+/// (`check_ncbi_options`, `check_report_formats`), and so does the error of a value left to it
+/// with a search strategy file.
+fn report_formats(outputs: &ReportOutputs<'_>, args: &TblastxArgs) -> Result<()> {
+    outputs
+        .early_choices(
+            crate::blastinput::app::Program::Tblastx,
+            args.out.as_deref(),
+            args.export_search_strategy.is_some(),
+        )
+        .map(drop)
 }
 
 /// Each requested format as NCBI reads `-outfmt`: NCBI's errors, and a rejection of a

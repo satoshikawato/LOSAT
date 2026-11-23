@@ -272,36 +272,145 @@ fn the_names_the_run_has_no_file_for() {
     );
 }
 
+/// The query and subject of each program's rows of `cases.tsv` (of `LOSAT/tests/fasta`).
+fn program_inputs(program: &str) -> (&'static str, &'static str) {
+    match program {
+        "blastp" => ("outfmt11/arch_bp_q.faa", "outfmt11/arch_bp_s.faa"),
+        "blastn" => ("outfmt11/arch_q.fna", "outfmt11/arch_s.fna"),
+        "blastx" => ("outfmt11/arch_q.fna", "outfmt11/arch_bp_s.faa"),
+        "tblastn" => ("outfmt11/arch_tbn_q.faa", "outfmt11/arch_tbn_s.fna"),
+        "tblastx" => ("outfmt11/arch_tbx_q.fna", "outfmt11/arch_tbx_s.fna"),
+        other => panic!("no rows of {other}"),
+    }
+}
+
+/// NCBI's standard error (`ext` "err") or output ("out") of the row `name` of `cases.tsv`, in
+/// LOSAT's words; empty where NCBI wrote none.
+fn frozen_text(name: &str, ext: &str) -> String {
+    let root = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../LOSAT/tests/fixtures/strategy"
+    );
+    let bytes = std::fs::read(format!("{root}/{name}.{ext}")).unwrap_or_default();
+    String::from_utf8(losat::web_adapter::losat_output_bytes(&bytes).into_owned()).unwrap()
+}
+
 /// A run that NCBI ends after its prolog and before its first request (`-query_loc` past the
 /// query's end: `Empty CBlastQueryVector`), with a name that LOSAT refuses at that request: each of
 /// the run's formats (the argv's, then outfmt 6, 7 and 0) holds its own bytes and gets them back at
 /// the run's end, so every stream is that of the run without the option, the argv's own output and
 /// its signals too (review 1 B1: one hold for every format put outfmt 0's prolog into the argv's
-/// tabular or XML output).
+/// tabular or XML output), for each program (review 2 N-c: BLASTX's report stream and the hold
+/// points of BLASTN, TBLASTN and TBLASTX had no test). The argv's outfmt 0 is NCBI's prolog
+/// (`<program>.sub.qlocbig.stdout`).
 #[test]
 fn a_run_that_ends_before_its_first_request_keeps_each_formats_bytes() {
-    let (_, _, query, subject, _) = ROWS[0];
-    for outfmt in ["6", "5", "0", "7"] {
-        let plain = [
-            "blastp",
-            "-query",
-            query,
-            "-subject",
-            subject,
-            "-query_loc",
-            "100000-100100",
-            "-outfmt",
-            outfmt,
-        ];
-        let (plain_result, without) = run_files_of(&plain, query, subject);
-        assert!(plain_result.is_err(), "outfmt {outfmt}");
-        for name in ["-", "/dev/stdout", "/dev/stderr", query] {
-            let mut words = plain.to_vec();
-            words.extend(["-export_search_strategy", name]);
-            let (result, streams) = run_files_of(&words, query, subject);
-            assert_eq!(result, plain_result, "outfmt {outfmt} {name}");
-            assert_eq!(streams, without, "outfmt {outfmt} {name}");
+    for program in ["blastp", "blastn", "blastx", "tblastn", "tblastx"] {
+        let (query, subject) = program_inputs(program);
+        for outfmt in ["6", "5", "0", "7"] {
+            let plain = [
+                program,
+                "-query",
+                query,
+                "-subject",
+                subject,
+                "-query_loc",
+                "100000-100100",
+                "-outfmt",
+                outfmt,
+            ];
+            let (plain_result, without) = run_files_of(&plain, query, subject);
+            assert!(plain_result.is_err(), "{program} outfmt {outfmt}");
+            if outfmt == "0" {
+                let prolog = frozen_text(&format!("{program}.sub.qlocbig.stdout"), "out");
+                assert_eq!(
+                    String::from_utf8_lossy(&without[&0]),
+                    prolog,
+                    "{program}: NCBI's prolog"
+                );
+            }
+            for name in ["-", "/dev/stdout", "/dev/stderr", query] {
+                let mut words = plain.to_vec();
+                words.extend(["-export_search_strategy", name]);
+                let (result, streams) = run_files_of(&words, query, subject);
+                assert_eq!(result, plain_result, "{program} outfmt {outfmt} {name}");
+                assert_eq!(streams, without, "{program} outfmt {outfmt} {name}");
+            }
         }
+    }
+}
+
+/// A `-outfmt` value that does not parse, of an argv that names a search strategy file, is read
+/// where the command line reads it (`losat::web_adapter::early_format_choice`, the one reading of
+/// the command line and the Web): at the program's formatting handler, after the arguments' own
+/// errors (`-subject_loc`, `-query_loc`), so the error of `validate` and of the run is NCBI's for the
+/// argv (`<row>.err` of `cases.tsv`, in LOSAT's words) and the file is NCBI's, empty; without the
+/// option the value's error comes first, as on the command line (the `.plain` rows). Line RG F1w
+/// review 2, S-a: the Web read the value first with the option too.
+#[test]
+fn an_outfmt_that_does_not_parse_fails_where_the_command_line_fails() {
+    let mut rows: Vec<(String, &str, Vec<&str>, bool)> = Vec::new();
+    for program in ["blastp", "blastn", "blastx", "tblastn", "tblastx"] {
+        let words = vec!["-query_loc", "abc", "-outfmt", "abc"];
+        rows.push((format!("{program}.sub.qloc.fabc"), program, words, true));
+        for (tag, outfmt) in [("fx", "x"), ("f99", "99")] {
+            for strategy in [true, false] {
+                let plain = if strategy { "" } else { ".plain" };
+                let name = format!("{program}.sub.qlocrev.{tag}{plain}");
+                let words = vec!["-query_loc", "10-5", "-outfmt", outfmt];
+                rows.push((name, program, words, strategy));
+            }
+        }
+    }
+    let words = vec!["-subject_loc", "abc", "-outfmt", "99"];
+    rows.push(("blastn.sub.sloc.f99".to_string(), "blastn", words, true));
+    rows.push(("blastp.sub.badfmt".to_string(), "blastp", vec!["-outfmt", "99"], true));
+    for (name, program, words, strategy) in &rows {
+        let (query, subject) = program_inputs(program);
+        let mut argv = vec![*program, "-query", query, "-subject", subject];
+        argv.extend(words);
+        if *strategy {
+            argv.extend(["-export_search_strategy", "s.asn"]);
+        }
+        let want = frozen_text(name, "err");
+        assert!(!want.is_empty(), "{name}: NCBI's error");
+        assert_eq!(validate(&argv).unwrap_err(), want, "{name}: validate");
+        let (result, streams) = run_files_of(&argv, query, subject);
+        assert_eq!(result.unwrap_err(), want, "{name}: run");
+        let file = strategy.then(|| ("s.asn".to_string(), frozen(name)));
+        assert_eq!(files(&streams), Vec::from_iter(file), "{name}: files");
+        for stream in [0, 6, 7, STREAM_CUSTOM] {
+            assert!(
+                streams.get(&stream).is_none_or(Vec::is_empty),
+                "{name}: stream {stream}"
+            );
+        }
+    }
+}
+
+/// A run of two searches (`-num_descriptions 3 -num_alignments 2`: outfmt 0's hit list of 3, the
+/// tabular formats' of 500; the argv's outfmt 0 is the second search) with a name that LOSAT refuses
+/// at NCBI's first request: each search has the export of the command line's run of its formats
+/// (decision F1w-5; the other search's receiver keeps nothing), so the run fails with the refusal of
+/// the argv's own search and no output holds a byte, as the CLI's run of the argv (`ROWS[1]`, whose
+/// run with a file the first test checks).
+#[test]
+fn a_two_search_run_refuses_a_name_as_the_command_line() {
+    let (_, _, query, subject, _) = ROWS[1];
+    let words = row_argv(&ROWS[1], "-");
+    let groups = {
+        let (program, command, requested) = parse_run(&words).unwrap();
+        search_groups(&outputs(program, &requested), &command)
+    };
+    assert_eq!(groups.len(), 2, "two searches");
+    let (result, streams) = run_files_of(&words, query, subject);
+    assert_eq!(
+        result.unwrap_err(),
+        "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's BLASTP; give a file name"
+    );
+    assert!(files(&streams).is_empty());
+    for stream in [0, 6, 7] {
+        assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{stream}");
     }
 }
 
@@ -622,4 +731,36 @@ fn the_files_of_a_database_search_are_no_strategy_file() {
         )
     );
     assert!(files(&streams).is_empty());
+}
+
+/// The run's files go to the host once, after the run (`RunFileArchive::emit`): a file handed over
+/// after that is refused, so that a strategy file that the engine hands over late is its error
+/// (LOSAT's internal error of `strategy::end_run`) and not a file lost without one (review 2 of
+/// line RG F1w, N-a).
+#[test]
+fn a_file_handed_over_after_the_runs_files_went_out_is_refused() {
+    use losat::web_adapter::FileReceiver as _;
+    crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+    let archive = RunFileArchive::default();
+    archive.receive(b"s.asn", b"requests").unwrap();
+    archive.emit().unwrap();
+    let late = archive.receive(b"late.asn", b"more").unwrap_err();
+    assert_eq!(
+        late.to_string(),
+        "late.asn came after the run's files were emitted"
+    );
+    archive.emit().unwrap();
+    let mut streams = BTreeMap::new();
+    crate::emit::EMITTED.with(|emitted| {
+        for (stream, bytes) in emitted.borrow().iter() {
+            streams
+                .entry(*stream)
+                .or_insert_with(Vec::new)
+                .extend_from_slice(bytes);
+        }
+    });
+    assert_eq!(
+        files(&streams),
+        [("s.asn".to_string(), b"requests".to_vec())]
+    );
 }

@@ -6800,18 +6800,18 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
 }
 
 /// The report of the CLI's `-outfmt`, read as NCBI reads it before its option handlers run
-/// (`run`; `blastinput/app.rs` `parse_formatting_string`, `report_format`). A format that
+/// (`run`; `blastinput/app.rs` `app::early_format_choice`, `report_format`). A format that
 /// NCBI itself rejects later has no report: the run stops at NCBI's error, the formatting
 /// handler's in `process_options` (AIRR rearrangement, FASTA) or the XInclude formats' in
-/// `search` (13 and 14 to standard output).
+/// `search` (13 and 14 to standard output). Nor has a value that does not parse where the argv
+/// names a search strategy file (`strategy`): the formatting handler reads it again
+/// (`process_options`) and fails there, after the query options.
 fn cli_output_formats(
     outfmt: &str,
     out: Option<&std::path::Path>,
+    strategy: bool,
 ) -> Result<Vec<BlastnOutputFormat>> {
-    output_formats_of(
-        &app::EarlyFormat::Parsed(app::parse_formatting_string(outfmt)?),
-        out,
-    )
+    output_formats_of(&app::early_format_choice(outfmt, strategy)?, out)
 }
 
 /// The report of the choice `choice` that `app::early_format_choice` read (`cli_output_formats`):
@@ -6830,18 +6830,19 @@ fn output_formats_of(
 }
 
 /// The requested output formats of `run_local`, each read as the CLI reads its single
-/// `-outfmt` (`cli_output_formats`): NCBI's parse and LOSAT's refusals, before `-out` is opened. A
-/// format without a report (`app::report_format`: one that NCBI rejects later) is left out, as on
-/// the command line: NCBI's formatting handler rejects it after `-out` is opened
-/// (`process_options`), or `search` (the XInclude formats without a file). `out`: the file of
-/// `api::run_to_file`, or the `-out` of the caller's receiver of the side files of a format
-/// (`FormatOutput::side_out`).
+/// `-outfmt` (`cli_output_formats`; `strategy`: the argv names a search strategy file): NCBI's
+/// parse and LOSAT's refusals, before `-out` is opened. A format without a report
+/// (`app::report_format`: one that NCBI rejects later) is left out, as on the command line: NCBI's
+/// formatting handler rejects it after `-out` is opened (`process_options`), or `search` (the
+/// XInclude formats without a file). `out`: the file of `api::run_to_file`, or the `-out` of the
+/// caller's receiver of the side files of a format (`FormatOutput::side_out`).
 fn parse_output_formats<'a>(
     formats: impl IntoIterator<Item = (&'a str, Option<&'a std::path::Path>)>,
+    strategy: bool,
 ) -> Result<Vec<BlastnOutputFormat>> {
     let mut output_formats = Vec::new();
     for (outfmt, out) in formats {
-        output_formats.extend(cli_output_formats(outfmt, out)?);
+        output_formats.extend(cli_output_formats(outfmt, out, strategy)?);
     }
     Ok(output_formats)
 }
@@ -6967,6 +6968,7 @@ fn run_local_formats(
             .formats
             .iter()
             .map(|format| (format.outfmt, format.side_out(args.out.as_deref()))),
+        args.export_search_strategy.is_some(),
     )?;
     // The thread count is checked before the inputs are read, as on the command line (`run`).
     crate::utils::threading::validate_threads(args.num_threads)?;
@@ -7035,6 +7037,7 @@ pub fn run_local_database(
             .formats
             .iter()
             .map(|format| (format.outfmt, format.side_out(args.out.as_deref()))),
+        args.export_search_strategy.is_some(),
     )?;
     // The archive shares the options handle of the run's search strategy (LOSAT Web's
     // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
@@ -7122,7 +7125,7 @@ pub(crate) fn repeat_search_hits(
             hits: Some(&mut on_hits),
             observer: None,
         };
-        parse_output_formats(std::iter::once(("6", None))).and_then(|output_formats| {
+        parse_output_formats(std::iter::once(("6", None)), false).and_then(|output_formats| {
             search_database(
                 args,
                 query_records,

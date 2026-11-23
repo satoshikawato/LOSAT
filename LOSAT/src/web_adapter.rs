@@ -224,14 +224,14 @@ pub fn open_strategy_file(
 /// Gives the search of `command` (a search of LOSAT Web's run of the argv, `run_local`) the export
 /// of its requests into `file` (`open_strategy_file`), made as the command line's run makes it
 /// (`StrategyExport::for_args`, the program's `StrategyArgs`), with the `HitlistSize` of the argv's
-/// format numbered `outfmt` (the archive's request shares the export's options handle,
-/// `run_local` and `run_local_database`).
-pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: i32) {
+/// format numbered `outfmt`, none for a value that the early reading left to the formatting
+/// handler (`early_format_choice`), as the command line's (the archive's request shares the
+/// export's options handle, `run_local` and `run_local_database`).
+pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: Option<i32>) {
     use crate::report::archive::strategy::{StrategyArgs, StrategyExport};
     let options = crate::report::archive::OptionsHandle::default();
-    let export = |args: &dyn StrategyArgs| {
-        Some(StrategyExport::for_args(args, file, Some(outfmt), &options))
-    };
+    let export =
+        |args: &dyn StrategyArgs| Some(StrategyExport::for_args(args, file, outfmt, &options));
     match command {
         Commands::Blastp(args) => args.strategy = export(&*args),
         Commands::Blastn(args) => args.strategy = export(&*args),
@@ -317,8 +317,8 @@ pub use crate::wording::{
 pub use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, SAM as SAM_FORMAT};
 pub use crate::blastinput::app::Program as EngineProgram;
 pub use crate::blastinput::app::{
-    engine_error, formatting_handler_check, missing_subject_error, parse_formatting_string,
-    report_format,
+    early_format_choice, engine_error, formatting_handler_check, missing_subject_error,
+    parse_formatting_string, report_format, EarlyFormat,
 };
 
 // The hit list sizes of the formats (`blastinput/report_counts.rs`), the scoring matrices that

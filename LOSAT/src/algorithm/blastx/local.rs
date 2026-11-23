@@ -69,7 +69,7 @@ pub fn run_local(
     let requested = requested_formats(outputs);
     let (choices, resolutions) = read_options(&args, &requested)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
-    let archive_requested = choices.iter().any(|choice| choice.number == 11);
+    let archive_requested = choices.iter().any(|choice| choice.number() == Some(11));
     // The archive shares the options handle of the run's search strategy (LOSAT Web's
     // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line
     // (`native::RunSetup::open`).
@@ -104,7 +104,7 @@ fn search_records(
     query_records: &[fasta_reader::FastaRecord],
     query_end: &QueryEnd,
     subject_records: &[fasta_reader::FastaRecord],
-    (choices, resolutions): (Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>),
+    (choices, resolutions): ReadOptions,
     archive: Option<&crate::report::archive::ArchiveHandle>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -139,7 +139,8 @@ fn search_records(
     crate::api::local_blast::open_out(&mut outputs.formats)?;
     check_filtering(args)?;
     let query_range = parse_query_range(args)?;
-    let mut resolved = check_resolutions(args, &choices, resolutions, &mut **diagnostics)?;
+    let (choices, mut resolved) =
+        check_resolutions(args, &choices, resolutions, &mut **diagnostics)?;
     for options in &mut resolved {
         options.query_range = query_range;
     }
@@ -1149,7 +1150,7 @@ pub fn run_local_database(
     args.matrix_search = Some(settings.matrix_search.clone());
     let requested = requested_formats(outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
-    let archive_requested = choices.iter().any(|choice| choice.number == 11);
+    let archive_requested = choices.iter().any(|choice| choice.number() == Some(11));
     // The archive shares the options handle of the run's search strategy (LOSAT Web's
     // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line
     // (`native::RunSetup::open`).
@@ -1185,7 +1186,7 @@ fn search_database(
     query_records: &[fasta_reader::FastaRecord],
     query_end: &QueryEnd,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-    (choices, resolutions): (Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>),
+    (choices, resolutions): ReadOptions,
     archive: Option<&crate::report::archive::ArchiveHandle>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
@@ -1201,7 +1202,8 @@ fn search_database(
     outputs.open_out()?;
     check_filtering(args)?;
     let query_range = parse_query_range(args)?;
-    let mut resolved = check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
+    let (choices, mut resolved) =
+        check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
     // The database opens after the options are processed and before the query is read, as NCBI's
     // `InitializeSubject`.
     let database = BlastxDatabase::open_restricted(
@@ -1406,10 +1408,7 @@ fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 /// records are read: LOSAT Web's refusals and LOSAT's fail here; NCBI's errors of the options
 /// (`SemanticOptionsError`) stay in the resolutions, which the command line reports after the
 /// subjects are read (`native::run_inner`).
-fn read_options(
-    args: &BlastxArgs,
-    outfmts: &[&str],
-) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
+fn read_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
     // `-parse_deflines` is the records' (`run_local`): LOSAT Web reads them with the ids of their
     // deflines since line WQA's sweep, D7, 2026-11-19 (`register_inputs`), so its refusal of
     // records that kept none, which also refused two empty inputs that the command line ends with
@@ -1422,25 +1421,34 @@ fn requested_formats<'o>(outputs: &'o ReportOutputs<'_>) -> Vec<&'o str> {
     outputs.formats.iter().map(|format| format.outfmt).collect()
 }
 
+/// The output formats of a search of records as the command line's early reading reads them
+/// (`app::EarlyFormat`) and the options of each (`read_format_options`), whose NCBI errors
+/// `check_resolutions` reports where the command line does.
+type ReadOptions = (Vec<app::EarlyFormat>, Vec<Result<ResolvedOptions>>);
+
 /// `read_options` without its refusals of what a search of records in memory cannot do. Outfmt 13
 /// and 14 whose side files have no file name to go by get NCBI's error later, where the command
 /// line gives it (`ReportOutputs::xinclude_check`).
-fn read_format_options(
-    args: &BlastxArgs,
-    outfmts: &[&str],
-) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
-    // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`).
+fn read_format_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
+    // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`);
+    // where the argv names a search strategy file a value that does not parse is left to the
+    // formatting handler (`app::early_format_choice`, `check_resolutions`).
     let mut choices = Vec::with_capacity(outfmts.len());
     for &outfmt in outfmts {
-        let choice = app::parse_formatting_string(outfmt)?;
-        app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
+        let choice = app::early_format_choice(outfmt, args.export_search_strategy.is_some())?;
+        choice.report_format(Program::Blastx, args.out.as_deref())?;
         choices.push(choice);
     }
     ensure!(!choices.is_empty(), "no output format was requested");
     // The options of each format: LOSAT's refusals now, NCBI's errors of the options after the
-    // subjects are read (`native::run_inner`).
+    // subjects are read (`native::run_inner`). A value left to the formatting handler has none
+    // (its error comes there first), as the command line's (`native::RunSetup::open`).
     let mut resolutions = Vec::with_capacity(choices.len());
     for choice in &choices {
+        let Some(choice) = choice.parsed() else {
+            resolutions.push(Err(SemanticOptionsError::from(String::new()).into()));
+            continue;
+        };
         match args.resolve_with_format(choice) {
             Err(error) if error.downcast_ref::<SemanticOptionsError>().is_none() => {
                 return Err(error)
@@ -1460,18 +1468,24 @@ fn read_format_options(
 }
 
 /// The checks of the options that the command line makes after the subjects are read, in its
-/// order: the formatting handler's, the hit list size (its warnings and those of an ignored
+/// order: the formatting handler's (a value that the early reading left to it, which LOSAT Web
+/// gives as the run's one format and as the arguments' `-outfmt`, is read again and fails, as the
+/// command line's `native::run_inner`), the hit list size (its warnings and those of an ignored
 /// -num_descriptions, the first format's, to `diagnostics`; formats that need different hit lists
-/// are refused, `run_report_counts`), then NCBI's errors of each format's options.
+/// are refused, `run_report_counts`), then NCBI's errors of each format's options. The formats'
+/// choices and their options.
 fn check_resolutions(
     args: &BlastxArgs,
-    choices: &[app::FormatChoice],
+    early: &[app::EarlyFormat],
     resolutions: Vec<Result<ResolvedOptions>>,
     diagnostics: &mut dyn Write,
-) -> Result<Vec<ResolvedOptions>> {
-    for choice in choices {
-        app::formatting_handler_check(choice, Program::Blastx)?;
+) -> Result<(Vec<app::FormatChoice>, Vec<ResolvedOptions>)> {
+    let mut choices = Vec::with_capacity(early.len());
+    for choice in early {
+        let choice = choice.at_formatting_handler(&args.outfmt)?;
+        app::formatting_handler_check(&choice, Program::Blastx)?;
         app::html_format_check(choice.number, Program::Blastx, args.html)?;
+        choices.push(choice);
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
     let html = app::html_links(args.html, Program::Blastx, args.database_name(), &outfmts)?;
@@ -1484,14 +1498,15 @@ fn check_resolutions(
         &args.formatting,
     )?;
     diagnostics.write_all(&warnings)?;
-    resolutions
+    let resolved = resolutions
         .into_iter()
         .map(|resolution| {
             let mut options = resolution.map_err(options_error)?;
             options.html = html.clone();
             Ok(options)
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    Ok((choices, resolved))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1082-1090

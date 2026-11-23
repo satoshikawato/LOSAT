@@ -677,6 +677,53 @@ fn each_held_stream_gets_its_own_bytes() {
     assert!(sink.0.lock().unwrap().is_empty());
 }
 
+/// A run refused at NCBI's first request (`-`) that ends before it with an exception of NCBI's
+/// that a report's writer carries (the `-html` links' registry, `NcbiException::into_io_error`):
+/// the end takes it for NCBI's error, as the command line's exit does (`cli::native_error_of`,
+/// exit status 255), and the held prolog reaches the stream before the error (review 2 of line
+/// RG F1w, S-b: blastx, blastn and tblastx wrote no byte of NCBI's prolog); LOSAT's refusal drops
+/// it.
+#[test]
+fn an_exception_of_ncbis_from_a_writer_ends_the_run_as_ncbis_error() {
+    let exception = || {
+        anyhow::Error::from(
+            crate::ncbi_exception::NcbiException::new(
+                crate::ncbi_exception::ThrowSite {
+                    file: "src/corelib/ncbireg.cpp",
+                    line: 722,
+                    kind: "CRegistryException::eEntry",
+                    function: None,
+                },
+                "Invalid registry entry format",
+            )
+            .into_io_error(),
+        )
+    };
+    let native = crate::cli::native_error_of(&exception()).expect("NCBI's error");
+    assert_eq!(native.exit, 255);
+    for (error, kept) in [
+        (exception(), &b"<HTML>prolog\n"[..]),
+        (anyhow::anyhow!("a refusal of LOSAT's"), &b""[..]),
+    ] {
+        let export = StrategyExport::for_run(
+            create_strategy_file(Path::new("-"), None, "BLASTX").unwrap(),
+            OptionInputs::new(Program::Blastx, "blastx"),
+            Some(0),
+            HitlistArgs::default(),
+            None,
+            &OptionsHandle::default(),
+        );
+        let sink = Sink::default();
+        let mut stream = hold_report(Some(&export), Box::new(sink.clone()));
+        stream.write_all(b"<HTML>prolog\n").unwrap();
+        let message = error.to_string();
+        let ended = end_run(Some(&export), Err(error)).unwrap_err();
+        assert_eq!(ended.to_string(), message);
+        drop(stream);
+        assert_eq!(&*sink.0.lock().unwrap(), kept, "{message}");
+    }
+}
+
 /// The files that a receiver got (LOSAT Web's run files).
 #[derive(Default)]
 struct Received(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);

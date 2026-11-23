@@ -102,16 +102,16 @@ const EDITED: [&str; 6] = [
     "fixtures/rpsbproc/arch/mfirst_delta.asn",
 ];
 
-/// Every archive among LOSAT's fixtures (the files under `LOSAT/tests` that start with an archive
-/// header: NCBI's `-outfmt 11` output and the files that LOSAT's tests freeze as NCBI's) is read
-/// whole, object by object, and its values written back are its bytes. Left out: the malformed
-/// archives of rpsbproc's tests (`fixtures/rpsbproc/arch/bad`), its copies edited by hand
-/// (`EDITED`), and the `.merged` files of `archive_replaced` (a run's stdout and stderr in one
-/// file, with NCBI's messages inside the archive's text). An archive whose paths the tests
-/// replaced by a placeholder (`has_placeholder`) is compared without the line breaks inside its
-/// strings: NCBI broke those lines where the real path put them.
-/// Whether a fixture holds a placeholder that its test replaces by a path (`@CWD@`,
-/// `{db_dir}`: an upper-case name between `@`, a lower-case one between braces).
+/// The archives of blast_formatter's rows that are broken on purpose (`blast_formatter/cases.tsv`:
+/// a line of garbage after the archive, a file cut in its second object): the rows of NCBI's read
+/// errors.
+const BROKEN: [&str; 2] = [
+    "blast_formatter/in/garbage.asn",
+    "blast_formatter/in/cut2.asn",
+];
+
+/// Whether a fixture holds a placeholder that its test replaces by a path (`@CWD@`, `{db_dir}`: an
+/// upper-case name between `@`, a lower-case one between braces).
 fn has_placeholder(text: &[u8]) -> bool {
     let between = |open: u8, close: u8, letter: fn(&u8) -> bool| {
         text.iter().enumerate().any(|(at, &b)| {
@@ -142,6 +142,14 @@ fn unwrapped(text: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+/// Every archive among LOSAT's fixtures (the files under `LOSAT/tests` that start with an archive
+/// header: NCBI's `-outfmt 11` output and the files that LOSAT's tests freeze as NCBI's) is read
+/// whole, object by object, and its values written back are its bytes. Left out: the malformed
+/// archives of rpsbproc's tests (`fixtures/rpsbproc/arch/bad`) and of blast_formatter's (`BROKEN`),
+/// rpsbproc's copies edited by hand (`EDITED`), and the `.merged` files of `archive_replaced` (a
+/// run's stdout and stderr in one file, with NCBI's messages inside the archive's text). An archive
+/// whose paths the tests replaced by a placeholder (`has_placeholder`) is compared without the line
+/// breaks inside its strings: NCBI broke those lines where the real path put them.
 #[test]
 fn every_archive_of_the_fixtures_is_written_back_as_read() {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -164,7 +172,11 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
             {
                 continue;
             }
-            if EDITED.iter().any(|name| path.ends_with(name)) {
+            if EDITED
+                .iter()
+                .chain(&BROKEN)
+                .any(|name| path.ends_with(name))
+            {
                 continue;
             }
             let text = std::fs::read(&path).expect("a file");
@@ -508,7 +520,7 @@ fn the_request_is_read_as_stored() {
             (ParamSet::Program, "LCaseMask".to_string()),
         ]
     );
-    assert_eq!(hitlist(&request), Ok(500));
+    assert_eq!(hitlist(request), Ok(500));
 
     // The database of a search, as stored, and the residue type `x_SetDatabase` gives it.
     for (name, program, protein, translated) in [

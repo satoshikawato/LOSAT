@@ -150,9 +150,11 @@ pub(crate) fn outfmt_help(written: &str, fields: &str, note: &str) -> String {
 /// What a program that `main_entry` runs before clap reads the command line (the programs of
 /// `ENTRY_NAMES` that are not a `Commands` variant: they read their words with NCBI's argument
 /// reader, `ncbi_app`) says about itself in the top level's `-help`: NCBI's DESCRIPTION line of
-/// the program (its first line; `convert2blastmask`'s continues in NCBI's text).
-fn entry_program_description(name: &str) -> &'static str {
-    match name {
+/// the program (its first line; `convert2blastmask`'s continues in NCBI's text), in LOSAT's words
+/// (`blast_formatter`'s names its version, `wording::losat_text`).
+fn entry_program_description(name: &str) -> std::borrow::Cow<'static, str> {
+    std::borrow::Cow::Borrowed(match name {
+        "blast_formatter" => return crate::wording::losat_text(crate::blast_formatter::description()),
         "blastdbcmd" => "BLAST database client",
         "dustmasker" => "Low complexity region masker based on Symmetric DUST algorithm",
         "segmasker" => "Low complexity region masker based on the SEG algorithm",
@@ -160,10 +162,9 @@ fn entry_program_description(name: &str) -> &'static str {
         "convert2blastmask" => {
             "Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb"
         }
-        "blast_formatter" => "Stand-alone BLAST formatter client, version 2.17.0+",
         "makembindex" => "Create a BLAST database index.",
         _ => "",
-    }
+    })
 }
 
 /// The `after_help` of the top level: the programs that `losat NAME` runs and `Commands` does not

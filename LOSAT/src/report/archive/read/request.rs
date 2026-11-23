@@ -218,7 +218,7 @@ impl Request {
     /// `format-options` in the order of the file (each list in its order, a name as often as it
     /// is stored). The one accessor of the request's options: NCBI's option builder reads the
     /// first two lists in this order, each parameter in turn (`x_ProcessOptions`), and
-    /// `GetParamByName` the first parameter of a name in a list ([`Request::param`]).
+    /// `GetParamByName` the first parameter of a name in a list.
     pub(crate) fn params(&self) -> &[Param] {
         &self.params
     }

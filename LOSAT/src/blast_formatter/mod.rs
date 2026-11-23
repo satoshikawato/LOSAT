@@ -30,6 +30,14 @@ const PROGRAM: &str = "BLAST_FORMATTER";
 /// `OPTIONAL ARGUMENTS` is the usage that `-h` and the argument errors print (probe P2.202).
 const HELP: &str = include_str!("help.txt");
 
+/// NCBI's DESCRIPTION line of `-help` (the line after `DESCRIPTION` in `HELP`), which the top
+/// level's `-help` lists in LOSAT's words (`cli::entry_program_description`).
+pub(crate) fn description() -> &'static str {
+    HELP.split_once("DESCRIPTION\n")
+        .and_then(|(_, rest)| rest.lines().next())
+        .map_or("", str::trim)
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:57-69
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:122-144
 /// blast_formatter as NCBI's application runs it (`ncbi_app`): BLAST's version, BLAST's usage

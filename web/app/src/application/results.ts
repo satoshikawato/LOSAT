@@ -7,7 +7,7 @@
 import type { MessagePlace, OutputPlace, ProgramId, RecordKey, RunOutput, SequenceKind } from 'losat/domain';
 import type { ProgramDescription } from 'losat/ports';
 import { recordName } from '../domain/dataset';
-import { optionValue } from '../domain/argv';
+import { runTask } from '../domain/argv';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type HspTable } from '../domain/hsp-table';
 import { shownScores, splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
 import { customOutfmt, runOutputs } from '../domain/output-format';
@@ -757,9 +757,9 @@ export function noHspReason(state: ResultsState): NoHspReason | undefined {
   return state.subjects.length === 0 ? 'filtered-out' : undefined;
 }
 
-/** The task of a run: the argv's -task, else the default that the engine describes (none for a program without tasks). */
+/** The task of a run (`runTask`): the argv's -task, else the default that the engine describes (none for a program without tasks). */
 export function taskOf(argv: readonly string[], description: ProgramDescription): { task?: string } {
-  const task = optionValue(argv, '-task') ?? description.parameters.find((p) => p.flag === '-task')?.defaultValue;
+  const task = runTask(argv, description.parameters);
   return task === undefined ? {} : { task };
 }
 

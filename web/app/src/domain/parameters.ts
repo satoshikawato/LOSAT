@@ -130,8 +130,16 @@ function togetherValue(program: ProgramDescriptor, flag: string): string | undef
   return undefined;
 }
 
-/** An option's default for a task alone: the engine's resolved value, or else NCBI's default (`describe`'s `default`). */
-function taskDefault(option: EngineOption, task: string): string | undefined {
+/**
+ * An option's default for a task alone, which the search form and the results read: the value that
+ * the engine resolves for the task (`describe`'s `defaults`), or else NCBI's default (`describe`'s
+ * `default`). The engine's value comes first: NCBI's default is the same for every task, while the
+ * engine resolves each task's own (BLASTN's -evalue: 10, blastn-short's 1000).
+ */
+export function taskDefault(
+  option: { readonly defaultValue?: string; readonly resolvedDefault?: Pick<ResolvedDefault, 'byTask'> },
+  task: string,
+): string | undefined {
   return option.resolvedDefault?.byTask[task] ?? option.defaultValue;
 }
 

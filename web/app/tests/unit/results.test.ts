@@ -242,6 +242,12 @@ describe('hitLimits', () => {
     expect(hitLimits(['blastp', '-task', 'blastp-short'], byTask)).toEqual({ maxTargetSeqs: 7 });
     expect(hitLimits(['blastp'], byTask)).toEqual({ maxTargetSeqs: 500 });
     expect(hitLimits(['tblastx'], [{ flag: '-max_target_seqs', resolvedDefault: { byTask: { '': '500' } } }])).toEqual({ maxTargetSeqs: 500 });
+    // -task=blastp-short is the engine's blastp-short (runTask), and the engine's value for the task comes before
+    // NCBI's default, as in the search form (taskDefault).
+    expect(hitLimits(['blastp', '-task=blastp-short'], byTask)).toEqual({ maxTargetSeqs: 7 });
+    const both = [{ flag: '-task', defaultValue: 'blastp' }, { flag: '-max_target_seqs', defaultValue: '500', resolvedDefault: { byTask: { 'blastp-short': '7' } } }];
+    expect(hitLimits(['blastp', '-task', 'blastp-short'], both)).toEqual({ maxTargetSeqs: 7 });
+    expect(hitLimits(['blastp'], both)).toEqual({ maxTargetSeqs: 500 });
   });
 
   // The tabular formats keep -max_target_seqs, else -num_alignments, else the default of -max_target_seqs;

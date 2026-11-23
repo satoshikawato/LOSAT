@@ -1,7 +1,8 @@
 //! The *describe* response (docs/web/abi_v2.md §9), generated from NCBI's argument tables that the
-//! command line's reader reads (the options in the order of its `-help`, their help, defaults and
-//! allowed values: the library API's rows, `losat::web_adapter::described_parameters`), so that the
-//! application shows exactly the options, defaults and allowed values of the command line.
+//! command line's reader reads (the options in the order of the usage line of its `-help`, their
+//! help, defaults and allowed values: the library API's rows,
+//! `losat::web_adapter::described_parameters`), so that the application shows exactly the options,
+//! defaults and allowed values of the command line.
 
 use std::fmt::Write as _;
 use std::sync::{Mutex, PoisonError};

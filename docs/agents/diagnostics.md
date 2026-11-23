@@ -4267,7 +4267,11 @@ Scheduling (each value computed by one thread with the original function; order 
   524,288 positions) and `csr_on_a_pool_at_every_short_length` (0 to 40 words, one letter repeated or random) build
   each table both ways and compare every cell's run with its chain, the presence vector, the counters and the longest
   chain, and `LOSAT/tests/blastn_dc_qs_ahead.rs` compares the reports with `=0`'s at 1 and 4 threads.
-  Evidence: EVIDENCE-TODO.
+  Evidence: ws node 1 (16 cores of one node, memory bound to it), dev d44f18cfa, this change and its `=0` in the
+  same run, alternating, medians: `-task dc-megablast` dmel cDNA 31,168 x dmel 3 Mb `-subject` x0.985 at 16 threads (8 rounds,
+  cycles x0.973), x0.964 at 8 (5, cycles x0.955), x0.970 at 4 (3), x0.999 at 1 (the serial build, unchanged); 5,000 cDNAs x0.996
+  at 16; MG1655 x AP027131 x0.994 at 16 (cycles x0.870), x1.003 at 1 (unchanged path, same instruction count); `=0` within
+  0.6 % of dev; reports identical in every arm; max RSS (VmHWM sampled every 2 ms, 8 rounds) -0.26 % to +0.03 % of dev.
 - `LOSAT_X_DCSEEDLEAN=1` (BLASTN `-task dc-megablast`, and megablast given template options, at two threads or more;
   in the strict set from the pull request that added it, 2026-10-28: `LOSAT_X_DCSEEDLEAN=0` turns it off) changes
   three LOSAT-only parts of dc-megablast's seed stage; each gives the same table, seeds and hits in the same order:

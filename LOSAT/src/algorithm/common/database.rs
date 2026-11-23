@@ -3842,8 +3842,11 @@ struct OffsetSlot {
 }
 
 /// Two loads of one batch's prefetch in the same volume whose order NCBI takes from the addresses
-/// of their Seq-id handles ([`load_before_stop`]), which LOSAT does not reproduce: `first` looks
-/// up the offset error's taxid, `second` the other taxid `taxid` of its slot (or that taxid too).
+/// of their Seq-id handles ([`load_before_stop`]), which LOSAT does not reproduce, named by its
+/// refusal: `first` a load that looks up the offset error's taxid where the group has one (else
+/// the group's first load), or the load read again; `second` another load, one that looks up
+/// the other taxid `taxid` of the slot where the group has one (else `taxid` is the offset
+/// error's).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SlotOrder {
     first: u32,
@@ -4089,20 +4092,27 @@ impl VolumeLookups {
             second: second.blob,
             taxid,
         };
-        let uncertain = |load: &SlotLoad, again: bool| SlotUncertain {
-            ordinal: load.blob,
-            again,
-            after: before.other,
-            order: Some(order),
-        };
-        // A load of a sequence loaded before may be kept by NCBI's scope (`offset_slot`), at a
-        // place LOSAT does not know either.
+        // A load of a sequence loaded before may be kept by NCBI's data loader (`offset_slot`), at
+        // a place LOSAT does not know either: the refusal names that load.
         let mut blobs = std::collections::HashSet::new();
         for load in group {
             if !self.sequential
                 && (self.slot_loads.contains(&load.blob) || !blobs.insert(load.blob))
             {
-                return Err(uncertain(load, true));
+                let other = group
+                    .iter()
+                    .find(|other| other.blob != load.blob)
+                    .map_or(load.blob, |other| other.blob);
+                return Err(SlotUncertain {
+                    ordinal: load.blob,
+                    again: true,
+                    after: before.other,
+                    order: Some(SlotOrder {
+                        first: load.blob,
+                        second: other,
+                        taxid,
+                    }),
+                });
             }
         }
         // Each load's lookups of the slot, a run of one taxid as one: its first and last, and the
@@ -4129,8 +4139,24 @@ impl VolumeLookups {
             .iter()
             .map(|&held_last| unordered_boundary_misses(held_last, counts))
             .collect();
-        if ranges.iter().any(|&range| range != ranges[0]) || ranges[0].0 != ranges[0].1 {
-            return Err(uncertain(first, false));
+        if ranges.iter().any(|&(fewest, most)| fewest != most) {
+            // The group's own order decides.
+            return Err(SlotUncertain {
+                ordinal: first.blob,
+                again: false,
+                after: before.other,
+                order: Some(order),
+            });
+        }
+        if ranges.iter().any(|&range| range != ranges[0]) {
+            // Any order gives the same misses from each state, which an earlier load left open:
+            // that load is the cause (`offset_slot`'s refusal of a load after it).
+            return Err(SlotUncertain {
+                ordinal: first.blob,
+                again: false,
+                after: before.other,
+                order: before.unordered,
+            });
         }
         // The batch's order gives the same number of misses as NCBI's (from `Other` where the slot
         // may hold either: the same number from each).
@@ -4909,20 +4935,34 @@ fn slot_order_message(
     cause: SlotUncertain,
     order: SlotOrder,
 ) -> String {
-    let pair = format!(
-        "database sequences {} and {} of the volume {volume_name}",
-        db.oid(order.first),
-        db.oid(order.second)
-    );
+    let pair = if order.first == order.second {
+        format!(
+            "database sequence {} of the volume {volume_name} twice",
+            db.oid(order.first)
+        )
+    } else {
+        format!(
+            "database sequences {} and {} of the volume {volume_name}",
+            db.oid(order.first),
+            db.oid(order.second)
+        )
+    };
     let taxa = if order.taxid == last {
         format!("taxid {last}")
     } else {
         format!("taxids {last} and {}", order.taxid)
     };
-    let what = if cause.again {
+    let what = if cause.again && (cause.ordinal == order.first || cause.ordinal == order.second) {
         format!(
-            "the prefetch of a query batch reads {pair}, one of them again (NCBI's scope may keep \
-             it)"
+            "the prefetch of a query batch reads {pair}, database sequence {} again (NCBI's data \
+             loader may keep it from an earlier load)",
+            db.oid(cause.ordinal)
+        )
+    } else if cause.again {
+        format!(
+            "the run reads database sequence {} again (NCBI's data loader may keep it from an \
+             earlier load), after the prefetch of a query batch read {pair}",
+            db.oid(cause.ordinal)
         )
     } else if cause.ordinal == order.first {
         format!("the prefetch of a query batch reads {pair}")
@@ -5892,7 +5932,7 @@ pub(crate) fn batch_prefetch<'s, 'b>(
     // A load that throws where a file of the taxonomy database does not open ends the prefetch's
     // loads, which catches it as a `CException` with the warning (line WQA D18b probe 12). The
     // loads write no text then: the taxonomy database never opens.
-    let planned = prefetch_slot_plan(db, run, &loaded, program);
+    let planned = prefetch_slot_plan(db, run, &loaded, failed_lookup.as_ref(), program);
     let reads = match planned.and_then(|planned| {
         load_read_texts(
             db,
@@ -5914,15 +5954,9 @@ pub(crate) fn batch_prefetch<'s, 'b>(
         }
         reads => reads?,
     };
-    if let Some((ordinal, id)) = &failed_lookup {
+    if let Some(stop) = &failed_lookup {
         if reads.iter().any(|read| !read.text.is_empty()) {
-            return Err(parsed_refusal(
-                db.oid(*ordinal),
-                &format!(
-                    "has the Seq-align id {id}, whose lookup in the database fails where NCBI BLAST+ 2.17.0's prefetch loads the batch's subjects, in an order that LOSAT does not reproduce: the taxonomy database's texts of the other subjects of the batch, which the prefetch may load before or not at all, are not known"
-                ),
-                program,
-            ));
+            return Err(failed_lookup_refusal(db, stop, program));
         }
     }
     let mut posts = crate::report::diag_log::Posts::new();
@@ -5931,6 +5965,20 @@ pub(crate) fn batch_prefetch<'s, 'b>(
         posts.lines(&prefetch_warning(program));
     }
     Ok(posts)
+}
+
+/// LOSAT's refusal of a batch's prefetch with a Seq-align id whose lookup fails (`stop`: the
+/// subject's ordinal id and the id, [`batch_prefetch`]) where the other subjects' loads matter:
+/// NCBI's loads end at the failed lookup, and which of them come before it LOSAT does not follow.
+fn failed_lookup_refusal(db: &SeqDb, stop: &(u32, String), program: &str) -> anyhow::Error {
+    let (ordinal, id) = stop;
+    parsed_refusal(
+        db.oid(*ordinal),
+        &format!(
+            "has the Seq-align id {id}, whose lookup in the database fails where NCBI BLAST+ 2.17.0's prefetch loads the batch's subjects, in an order that LOSAT does not reproduce: the taxonomy database's texts of the other subjects of the batch, which the prefetch may load before or not at all, are not known"
+        ),
+        program,
+    )
 }
 
 /// The misses of a batch's prefetch in the slot of the offset error's taxid, by the ordinal id of
@@ -5960,11 +6008,15 @@ impl PrefetchSlots {
 /// key as one step whose order only the boundaries between them decide
 /// ([`VolumeLookups::prefetch_slots`]). LOSAT's refusal where that order changes the texts, or
 /// leaves a slot that a later load's texts depend on (`SlotHolds::Either`). The reads of each
-/// subject are [`load_read_texts`]'s, whose refusals come first.
+/// subject are [`load_read_texts`]'s, whose refusals come first. `stop`: a Seq-align id of the
+/// batch whose lookup fails ([`batch_prefetch`]), where NCBI's loads end, so a load of the slot
+/// that may come after it (one that only looks up the other taxid writes no text, but changes
+/// what the slot holds) is refused ([`failed_lookup_refusal`]).
 fn prefetch_slot_plan(
     db: &SeqDb,
     run: &TaxdbRun,
     loaded: &[(u32, Option<&crate::report::db_subject::ParsedSubject>)],
+    stop: Option<&(u32, String)>,
     program: &str,
 ) -> Result<Option<PrefetchSlots>> {
     if !run.found(db) || db.search_path().is_none() || run.cache_collision(db).is_none() {
@@ -6020,6 +6072,9 @@ fn prefetch_slot_plan(
             lookups,
             order,
         });
+    }
+    if let (Some(stop), false) = (stop, loads.is_empty()) {
+        return Err(failed_lookup_refusal(db, stop, program));
     }
     // A volume whose loads LOSAT orders by their keys only where the batch has at most
     // `PREFETCH_ONE_MAP_IDS` distinct ids and none of its loads' ids is another subject's.

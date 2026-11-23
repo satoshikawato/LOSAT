@@ -3021,3 +3021,60 @@ fn a_database_without_taxids_does_not_hold() {
     assert!(db.taxdb_found());
     assert!(!taxdb_may_refuse(&db));
 }
+
+#[test]
+fn a_prefetch_with_a_failed_lookup_refuses_its_loads_of_the_cache_slot() {
+    // Line NP item O4b2-3, review 1 F1: NCBI's prefetch ends its loads at a Seq-align id whose
+    // lookup fails, so whether it loads sZ (150) before it, which puts 150 in the slot of 99990
+    // without a text, is not known; a later load of 99990 would write the offset error or not.
+    let offset = "Error: [blastp] Error: Offset error at end of taxdb file.\n";
+    let warning = "Warning: [blastp] Error pre-fetching sequence data\n";
+    let cwd = empty_cwd("prefetch_slot_stop");
+    let taxdb = variant("offset_last_past_end");
+    let db = db_search("nz_pc", Some(&taxdb), &cwd);
+    let parsed = parsed_subjects(&db);
+    let throws =
+        parsed[1]
+            .clone()
+            .found_instead(Some(crate::report::db_subject::FoundInstead::ThrowsOnId(
+                "Invalid choice selection".into(),
+            )));
+    assert!(throws.prefetch_fails());
+    let run = TaxdbRun::default();
+    let batch = |subjects: Vec<PrefetchSubject<'_>>| {
+        batch_prefetch(
+            &db,
+            &run,
+            std::iter::empty(),
+            subjects,
+            "BLASTP",
+            &stop_queries(0),
+        )
+        .map(|posts| String::from_utf8(posts.text()).unwrap())
+    };
+    assert_eq!(
+        batch(vec![PrefetchSubject::unflipped(3, Some(&parsed[3]))]).unwrap(),
+        offset
+    );
+    // sM (10090) takes another slot: the batch writes NCBI's warning alone.
+    assert_eq!(
+        batch(vec![
+            PrefetchSubject::unflipped(1, Some(&throws)),
+            PrefetchSubject::unflipped(2, Some(&parsed[2])),
+        ])
+        .unwrap(),
+        warning
+    );
+    let refused = batch(vec![
+        PrefetchSubject::unflipped(1, Some(&throws)),
+        PrefetchSubject::unflipped(0, Some(&parsed[0])),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("whose lookup in the database fails")
+            && refused.contains("may load before or not at all"),
+        "{refused}"
+    );
+    std::fs::remove_dir_all(&cwd).unwrap();
+}

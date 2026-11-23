@@ -764,7 +764,7 @@ fn blastx_description_row_is_the_highest_bit_score() {
 // (`x_pairwise_par::write`): a query's warning comes after the reports written before it,
 // also from a writer that holds its bytes until it is flushed (LOSAT's buffer of the command
 // line, `cli::NcbiOstream::buffered`); a query whose description table reads an HSP with empty
-// rows stops after its `Length=` (`EmptyRowsStop::RowIsEmpty`): its error comes after the
+// rows stops after its `Length=` (`EmptyRowsStop::RowRange`): its error comes after the
 // report's last bytes, and nothing is written after it, no text of a later read either
 // (`QueryWarnings::end_run`); the parallel writer (`x_pairwise_par::write` given a pool, which
 // `LOSAT_X_PAIRWISEPAR` does not turn off here) writes the same bytes.
@@ -893,7 +893,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
         (text, error.to_string())
     };
     let (serial, error) = run(None);
-    assert_eq!(error, "RowIsEmpty");
+    assert_eq!(error, "RowRange(Empty)");
     let warning = serial.find("W1\n").expect("query 1's warning");
     assert!(
         serial[..warning].contains("Query= q0")
@@ -1103,6 +1103,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
                 )],
                 ..Default::default()
             }],
+            utf8: false,
         })
         .unwrap();
         Some(Arc::new(if throws {

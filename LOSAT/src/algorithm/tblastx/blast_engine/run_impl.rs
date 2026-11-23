@@ -3663,8 +3663,8 @@ fn run_batch_loop(
         // One message per query of the batch (`TSearchMessages::ToString` above, after
         // `RemoveDuplicates` in each query's list), `Error: ` first (`GetMessage`).
         // A query without letters keeps its own message (`Sequence contains no data`,
-        // blast_setup_cxx.cpp:631-638, id = the query's index) after the error (id
-        // kBlastMessageNoContext = -1), which `RemoveDuplicates` sorts first
+        // blast_setup_cxx.cpp:631-638, id is the query's index) after the error (context id
+        // `kBlastMessageNoContext`, -1), which `RemoveDuplicates` sorts first
         // (`CSearchMessage::operator<`, blast_types.hpp:295-304).
         if args.scoring_matrix() == TblastxMatrix::Unknown {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
@@ -3769,22 +3769,52 @@ fn run_batch_loop(
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
-            super::super::database::drop_unaligned(database, &mut batch.hits);
+            let aligned = super::super::database::drop_unaligned(database, &mut batch.hits);
+            let earlier = crate::algorithm::common::database::EarlierUtf8::of_batch(
+                start,
+                batch.fetched_utf8,
+                aligned,
+            );
             let ordered = batch.hits.as_slice();
             let read = super::super::database::read_titles(
                 database,
                 ordered,
                 start,
+                earlier,
                 &mut reports.titles.borrow_mut(),
             );
-            if let Err(error) = read {
-                match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
-                    Ok(failure) => {
-                        reports.write_before_failed_batch(outputs, done, &warnings)?;
-                        batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                        return Err(failure.error);
+            match read {
+                // NCBI's warning of its first read of a UTF8String header follows the batch's
+                // reader messages and request posts (`warnings[start]`), before its prefetch.
+                Ok(read) => {
+                    if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
+                        read.as_ref(),
+                        &database.db,
+                        "tblastx",
+                    ) {
+                        warnings[start].append(&posts);
+                        batch_warnings.append(&posts);
                     }
-                    Err(error) => return Err(error),
+                }
+                Err(error) => {
+                    match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+                        Ok(failure) => {
+                            reports.write_before_failed_batch(outputs, done, &warnings)?;
+                            batch_warnings
+                                .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                            if let Some(posts) =
+                                crate::algorithm::common::database::Utf8Read::post_of(
+                                    failure.utf8.as_ref(),
+                                    &database.db,
+                                    "tblastx",
+                                )
+                            {
+                                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                            }
+                            return Err(failure.error);
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             }
         }
@@ -3880,18 +3910,31 @@ fn run_batch_loop(
                     }
                 }};
             }
+            let off = crate::algorithm::common::database::prefetch_off(
+                super::super::database::seq_aligns_of(ordered),
+            );
+            if xml2_prefetch && !run_loads.ended() && off {
+                let (titles, mut reads) = (reports.titles.borrow(), reports.reads.borrow_mut());
+                super::super::database::scope_utf8_hit_reads(
+                    database,
+                    ordered,
+                    &titles,
+                    start,
+                    run_loads.answer().run(),
+                    &mut reads,
+                );
+            }
             if xml2_prefetch
                 && !run_loads.ended()
                 && database.parsed_seqids()
                 && !ordered.is_empty()
-                && !crate::algorithm::common::database::prefetch_off(
-                    super::super::database::seq_aligns_of(ordered),
-                )
+                && !off
             {
                 let scope = || batch_scope(input_start..input_end);
-                // The batches before: their queries (`done.spans`, in the numbering of
-                // `done.hits`), for what their reports load (`database::batch_prefetch_stop`).
-                if let Err(error) = super::super::database::batch_prefetch_stop(
+                // The stop, or the warning of a UTF8String header that a load's lookup reads. The
+                // batches before: their queries (`done.spans`, in the numbering of `done.hits`),
+                // for what their reports load (`database::batch_prefetch_stop`).
+                match super::super::database::batch_prefetch_stop(
                     database,
                     &done.hits,
                     done.searched.len(),
@@ -3911,7 +3954,8 @@ fn run_batch_loop(
                     &reports.titles.borrow(),
                     &crate::algorithm::common::database::PrefetchQueries::new(start, &scope),
                 ) {
-                    prefetch_failed!(error);
+                    Ok(warning) => warnings[start].lines(&warning),
+                    Err(error) => prefetch_failed!(error),
                 }
             }
             if prefetches && !run_loads.ended() && (taxdb_found || database.parsed_seqids()) {
@@ -3931,8 +3975,9 @@ fn run_batch_loop(
                 // the loop and a later batch that fetches still refuses before any report (outfmt
                 // 0's prolog is written before the search).
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
-                    if taxdb_found {
+                    // No prefetch; without `taxdb.bti` the reports' fetches look nothing up, but
+                    // a lookup that reads a UTF8String header posts a warning (`load_read_texts`).
+                    if taxdb_found || database.db.scope_utf8_seen() {
                         debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
                         let stores = reports.stores.borrow();
                         for query in 0..(end - start) as u32 {
@@ -3951,8 +3996,9 @@ fn run_batch_loop(
                             // The first HSP of each subject whose row reads it, in report order (a
                             // subject's HSPs follow each other): the engine's identities are counted
                             // only for `nident` alone, until one of the subject's rows reads it.
-                            // Not a subject whose load throws, nor one that no report reaches
-                            // after it (`database::report_loads`, after the reports before it).
+                            // Not a subject that no report reaches after one whose load throws
+                            // (`HitLoads::reached`; `database::report_loads`, after the reports
+                            // before it).
                             let loads = super::super::database::report_loads(
                                 (database, &run_loads),
                                 &ordered[from..to],
@@ -3963,7 +4009,7 @@ fn run_batch_loop(
                             let shown: Vec<&TblastxHsp> = match rows {
                                 SubjectFetch::Every => ordered[from..to]
                                     .iter()
-                                    .filter(|hsp| loads.loaded(hsp.hit.s_idx as usize))
+                                    .filter(|hsp| loads.reached(hsp.hit.s_idx as usize))
                                     .collect(),
                                 SubjectFetch::Never => Vec::new(),
                                 SubjectFetch::WithIdentities => {
@@ -3971,7 +4017,7 @@ fn run_batch_loop(
                                     ordered[from..to]
                                         .iter()
                                         .filter(|hsp| {
-                                            loads.loaded(hsp.hit.s_idx as usize)
+                                            loads.reached(hsp.hit.s_idx as usize)
                                                 && !read.contains(&hsp.hit.s_idx)
                                                 && identities(hsp) > 0
                                                 && read.insert(hsp.hit.s_idx)
@@ -4706,6 +4752,7 @@ fn search_query_batch<S: TbxScore>(
             searched: true,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
     let t_read_subjects = t_phase_read_subjects.elapsed();
@@ -4735,12 +4782,12 @@ fn search_query_batch<S: TbxScore>(
     // TBLASTX is explicitly ungapped-only (blast_options.c line 869-873):
     //   "Gapped search is not allowed for tblastx"
     //
-    // For bit score and E-value calculation, NCBI uses sbp->kbp (ungapped):
-    //   blast_hits.c line 1833: kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
-    //   blast_hits.c line 1918: same pattern in Blast_HSPListGetBitScores
+    // For bit score and E-value calculation, NCBI uses the ungapped `kbp` table on `sbp`:
+    //   blast_hits.c line 1833 selects `kbp_gap` when gapped or `kbp` when ungapped;
+    //   blast_hits.c line 1918 follows the same selection in `Blast_HSPListGetBitScores`.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:768
-    // For tblastx, gapped_calculation = FALSE, so kbp_ptr = sbp->kbp (ungapped params)
+    // For tblastx, `gapped_calculation` is false, so `kbp_ptr` points to the ungapped `kbp` table on `sbp`.
     // Therefore, ALL calculations (eff_searchsp, cutoff, bit score, E-value) use UNGAPPED params
     //
     // (the contexts' blocks, `QueryContext::karlin_params`).
@@ -4869,7 +4916,7 @@ fn search_query_batch<S: TbxScore>(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-180,261-264;
     // c++/src/algo/blast/core/blast_engine.c:1372-1374,1434-1443
-    // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
+    // When total database length is zero, NCBI updates parameters per subject via `BLAST_OneSubjectUpdateParameters`.
     // The set's numbers are read once per run (`SubjectSetNumbers`: the records' sums, or the
     // database index's numbers).
     let db_length_nucl = numbers.total;
@@ -4878,7 +4925,7 @@ fn search_query_batch<S: TbxScore>(
     // (`SubjectSetNumbers::link_total`).
     let link_db_length_nucl = numbers.link_total;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:535-560
-    // if (valid_context_found) { return 0; } else { return 1; }
+    // NCBI returns success only when at least one valid query context exists.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-178,206-208
     // A batch without a valid context is not searched; each of its queries is reported
     // with the `-1` statistics.
@@ -4888,6 +4935,7 @@ fn search_query_batch<S: TbxScore>(
             searched: false,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
@@ -4941,6 +4989,7 @@ fn search_query_batch<S: TbxScore>(
             searched: false,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
 
@@ -5125,13 +5174,13 @@ fn search_query_batch<S: TbxScore>(
         };
         x_lap.lap(XStage::Translate);
 
-        // [C] BlastOffsetPair *offset_pairs
+        // Reusable buffer for scanned word offset pairs (NCBI `BlastOffsetPair`).
         let offset_pairs = &mut st.offset_pairs;
 
-        // [C] DiagStruct *diag_array = diag->hit_level_array;
+        // Diagonal tracking array for hit extension (NCBI `diag->hit_level_array`).
         let diag_array = &mut st.diag_array;
 
-        // [C] diag_offset = diag->offset;  (reset to window per-subject)
+        // Diagonal offset for this subject (NCBI `diag->offset`, reset to `window` per subject).
         let mut diag_offset: i32 = st.diag_offset;
 
         // The subject's linking parameters (`subject_link::subject_linking_params`), computed once
@@ -5147,7 +5196,8 @@ fn search_query_batch<S: TbxScore>(
         );
 
         // NCBI: Each subject frame gets its own init_hitlist that is reset between frames.
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491 BlastInitHitListReset(init_hitlist)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491
+        // Resets `init_hitlist` via `BlastInitHitListReset` between frames.
         // After each frame, init_hsps are converted and merged into combined_ungapped_hits.
 
         // Statistics for HSP saving analysis (long sequences only)
@@ -5159,8 +5209,8 @@ fn search_query_batch<S: TbxScore>(
         let stats_hsp_filtered_by_hsp_test = 0usize;
         let mut stats_score_distribution: Vec<i32> = Vec::new();
 
-        // NCBI: Combined HSP list across all subject frames
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:438 BlastHSPList* combined_hsp_list
+        // NCBI: Combined HSP list across all subject frames (`combined_hsp_list`).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:438
         let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
 
         // EXPERIMENT (PAIRPAR), dispatch points 2 and 3 (per subject): the unit path, when the
@@ -5490,6 +5540,9 @@ fn search_query_batch<S: TbxScore>(
         searched: true,
         queries: query_stats,
         x_timing,
+        fetched_utf8: fetch_excluded
+            .as_ref()
+            .and_then(crate::algorithm::common::database::FetchExcluded::take_utf8),
     })
 }
 

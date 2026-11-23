@@ -836,10 +836,15 @@ fn run_inner(
         };
         let asks = ReportedAsks::of(&options);
         let titles = match &database {
-            Some(database) => {
-                batch_titles(database, search_subjects, results, options.gapped, asks)
-                    .inspect_err(drop_held)?
-            }
+            Some(database) => batch_titles(
+                database,
+                search_subjects,
+                results,
+                options.gapped,
+                asks,
+                &mut *diagnostics,
+            )
+            .inspect_err(drop_held)?,
             None => None,
         };
         app::check_prefetch_environment(false)?;
@@ -1189,21 +1194,40 @@ fn reported_error(error: anyhow::Error) -> anyhow::Error {
 /// of no Seq-align leave `results` (`ReportedSubjects::drop_unaligned`): NCBI's reader error
 /// stops the run at this batch, with no epilog. `None` where the database's sequences could not be
 /// read (the batch's search failed with that error).
+/// NCBI's warning of its first read of a UTF8String header (`BatchTitles::utf8`, or that of the
+/// failed read) is written to `diagnostics` there: after the batch's reader messages and request
+/// posts, before its prefetch.
 pub(super) fn batch_titles(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
     results: &mut [BatchResults],
     gapped: bool,
     asks: ReportedAsks,
+    diagnostics: &mut dyn Write,
 ) -> Result<Option<super::database::BatchTitles>> {
     use super::x_timing::Run as XRun;
     if matches!(search_subjects, Subjects::Unreadable) {
         return Ok(None);
     }
-    ReportedSubjects::drop_unaligned(database, results, gapped);
+    use crate::algorithm::common::database::{EarlierUtf8, Utf8Read};
+    let first_query = results.first().map_or(0, |results| results.query_ordinal);
+    let fetched = results
+        .iter()
+        .filter_map(|results| results.fetched_utf8)
+        .min()
+        .and_then(|ordinal| database.db.location_of(ordinal));
+    let aligned = ReportedSubjects::drop_unaligned(database, results, gapped);
+    let earlier = EarlierUtf8::of_batch(first_query, fetched, aligned);
     let x_t = super::x_timing::lap();
-    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise);
+    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise, earlier);
     super::x_timing::run(XRun::Titles, x_t);
+    if let Some(posts) = Utf8Read::post_of(
+        Utf8Read::of_read(&titles, |titles| titles.utf8.as_ref()),
+        &database.db,
+        &database.program.to_ascii_lowercase(),
+    ) {
+        posts.write(diagnostics, None)?;
+    }
     titles.map(Some).map_err(reported_error)
 }
 
@@ -1214,8 +1238,8 @@ pub(super) struct BatchPrefetch {
     seq_aligns: usize,
     /// `PRE_FETCH_SEQS_LIMIT` turns it off (`common::database::prefetch_off`).
     pub(super) off: bool,
-    /// It throws at an empty subject row before it loads anything and writes its warning
-    /// (`empty_rows::prefetch_reads_empty_row`).
+    /// It throws at a subject row whose range it cannot take before it loads anything and writes
+    /// its warning (`empty_rows::prefetch_reads_unranged_row`).
     pub(super) fails: bool,
 }
 
@@ -1224,10 +1248,10 @@ pub(super) struct BatchPrefetch {
 /// `report::render_queries_with`). The batch's Seq-aligns: one for each HSP that the reports show
 /// (`has_seqalign`), one for each subject of an ungapped search; where `PRE_FETCH_SEQS_LIMIT`
 /// turns the batch's prefetch off (`shared::prefetch_off`), it reads nothing of a subject that no
-/// report reads (`asks.prefetched`). Where it reads the Seq-aligns and one has an empty subject
-/// row (a subject whose every HSP has length 0, as the mapper leaves it), it throws before it
-/// loads anything and writes its warning: the batch's subjects are then read as with the prefetch
-/// off. A gapped search has no HSP of length 0: its hit lists are not walked for that.
+/// report reads (`asks.prefetched`). Where it reads the Seq-aligns and one has a subject row whose
+/// range it cannot take (an empty one: a subject whose every HSP has length 0, as the mapper leaves
+/// it; one that starts with a gap: RPSTBLASTN's Smith-Waterman redo), it throws before it loads
+/// anything and writes its warning: the batch's subjects are then read as with the prefetch off.
 pub(super) fn batch_prefetch(
     results: &[BatchResults],
     options: &super::args::ResolvedOptions,
@@ -1254,9 +1278,8 @@ pub(super) fn batch_prefetch(
             .sum::<usize>();
     let off = crate::algorithm::common::database::prefetch_off(seq_aligns);
     let fails = !off
-        && !options.gapped
         && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
-        && super::empty_rows::prefetch_reads_empty_row(results, options.gapped, loc);
+        && super::empty_rows::prefetch_reads_unranged_row(results, options.gapped, loc);
     BatchPrefetch {
         seq_aligns,
         off,
@@ -1268,9 +1291,10 @@ impl BatchPrefetch {
     /// What NCBI's BLAST database data loader loaded for the batch, the run's record
     /// (`ReportedSubjects::note_loaded`): `common::database::batch_loads` of its Seq-aligns (every
     /// subject of its Seq-aligns where its prefetch is on, else what the first format's rows read,
-    /// `rows`), and those rows where its prefetch failed before it loaded anything (`fails`,
-    /// BLASTX's own: only its ungapped search leaves a subject row of length 0, whose reports then
-    /// read the subjects as with the prefetch off).
+    /// `rows`), and those rows where its prefetch failed before it loaded anything (`fails`, a
+    /// subject row whose range it cannot take: BLASTX's ungapped HSPs of length 0, RPSTBLASTN's
+    /// alignments that start with a gap; the reports then read the subjects as with the prefetch
+    /// off).
     fn loads(
         &self,
         rows: crate::report::tabular::SubjectFetch,
@@ -1451,8 +1475,9 @@ pub(super) fn reported_batch(
         // subjects it shows, after the query's own warnings
         // (`ReportedSubjects::fetch_by_query`), where the format's rows read
         // their Bioseqs (`TabularSpec::subject_fetch`).
-        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
-        if unfetched && taxdb_found {
+        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up nor, but where a
+        // lookup reads a UTF8String header (`load_read_texts`), post a warning.
+        if unfetched && (taxdb_found || database.db.scope_utf8_seen()) {
             let rows = options
                 .tabular
                 .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
@@ -1501,10 +1526,21 @@ pub(super) fn reported_batch(
         }
     } else if asks.prefetch_runs && !unfetched && database.parsed_seqids() {
         // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the batch's
-        // prefetch only its stop (`ReportedSubjects::batch_prefetch_stop`).
-        reported
+        // prefetch only its stop, or the warning of a UTF8String header that a load's lookup reads
+        // (`ReportedSubjects::batch_prefetch_stop`).
+        let warning = reported
             .batch_prefetch_stop(database, results, options.gapped, prefetch_queries)
             .map_err(reported_error)?;
+        diagnostics.write_all(&warning)?;
+    } else if matches!(options.outfmt, 13..=16) && database.parsed_seqids() {
+        // The XML2 and JSON formats, a batch whose prefetch is off: the `Hit`s load their subjects
+        // one by one.
+        reported.scope_utf8_hit_reads(
+            database,
+            results,
+            options.gapped,
+            crate::report::db_subject::FormatThrow::of_run([asks.throw]),
+        );
     }
     // The batch's prefetch (or its reports' reads one by one) did not stop: the run's record of
     // what NCBI's data loader loaded for it, for a later batch's stop
@@ -1546,6 +1582,36 @@ pub(super) fn reported_batch(
         reported.read_tabular(database, spec, results, options.gapped)?;
     }
     Ok(reported)
+}
+
+/// The error of a batch whose search fails after its reads of header records (`HeaderReadError`
+/// with `utf8`: BLASTX's Smith-Waterman redo that fails the batch after fetches that read a
+/// UTF8String where a VisibleString is expected, `kappa_batch::sw_failed_after`): NCBI's warning
+/// of that read is written to `diagnostics`, where the run has not posted it (`Utf8Read::post`),
+/// after the batch's reader messages and request posts, before the error, which is returned.
+/// Any other error as it is.
+fn failed_batch_reads(
+    error: anyhow::Error,
+    options: &super::args::ResolvedOptions,
+    subjects: Subjects<'_>,
+    diagnostics: &mut dyn Write,
+) -> Result<anyhow::Error> {
+    let header = match error.downcast::<HeaderReadError>() {
+        Ok(header) if header.utf8.is_some() => header,
+        Ok(header) => return Ok(header.into()),
+        Err(error) => return Ok(error),
+    };
+    if let (Some(read), Some(db)) = (&header.utf8, subjects.seqdb()) {
+        let program = if options.rpstblastn.is_some() {
+            "rpstblastn"
+        } else {
+            "blastx"
+        };
+        if let Some(posts) = read.post(db, program) {
+            posts.write(diagnostics, None)?;
+        }
+    }
+    Ok(header.error)
 }
 
 /// Whether an error of a search ends the run as it is: LOSAT's refusal, not an error of NCBI's
@@ -1907,7 +1973,14 @@ pub(super) fn run_query_batches(
                         take(&mut **diagnostics.borrow_mut(), reader_batch, processed)?;
                         let results = match results {
                             Ok(results) => results,
-                            Err(error) => return Err(search_error(error)),
+                            Err(error) => {
+    return Err(search_error(failed_batch_reads(
+        error,
+        options,
+        search_subjects,
+        &mut **diagnostics.borrow_mut(),
+    )?))
+}
                         };
                         if let Some(mut results) = pending.add(start, last, results) {
                             // The flow's searches of the batches after it run on the pool while
@@ -2014,7 +2087,14 @@ pub(super) fn run_query_batches(
                                 let results =
                                     match searched.next().expect("one search per queued batch") {
                                         Ok(results) => results,
-                                        Err(error) => return Err(search_error(error)),
+                                        Err(error) => {
+                                            return Err(search_error(failed_batch_reads(
+                                                error,
+                                                options,
+                                                search_subjects,
+                                                &mut **diagnostics.borrow_mut(),
+                                            )?))
+                                        }
                                     };
                                 if let Some(mut results) =
                                     pending.add(unit.range.start, unit.last, results)
@@ -2101,7 +2181,14 @@ pub(super) fn run_query_batches(
                     let x_t = super::x_timing::lap();
                     let mut results = match searched {
                         Ok(results) => results,
-                        Err(error) => return Err(search_error(error)),
+                        Err(error) => {
+                            return Err(search_error(failed_batch_reads(
+                                error,
+                                options,
+                                search_subjects,
+                                &mut **diagnostics.borrow_mut(),
+                            )?))
+                        }
                     };
                     reader_batch_skipped(&mut results);
                     render(

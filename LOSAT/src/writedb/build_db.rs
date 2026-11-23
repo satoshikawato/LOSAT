@@ -22,6 +22,7 @@ use super::time::LocalTime;
 use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::serial::asn_input::Utf8TagOnce;
 use crate::seqdb::column::MASK_DATA_TITLE;
 use crate::seqdb::{SeqDbError, SeqType};
 use crate::seqid::model::ObjectId;
@@ -51,6 +52,10 @@ pub struct BuildDatabase<'a> {
     /// `m_Id2Leafs` (`SetLeafTaxIds`, with `m_KeepLeafs` set): the leaf taxids of a copied
     /// database's definition lines by the first Seq-id's `AsFastaString`.
     leaf_tax_ids: LeafTaxIds,
+    /// `ERR_POST_X_ONCE` of the run's warning 803.10 of a UTF8String tag (one run is one NCBI
+    /// process): the mask files (`mask_data::process`) and the input database's headers
+    /// (`raw_source::scan_leaf_tax_ids`) post it once between them.
+    utf8_once: Utf8TagOnce,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:852-927
@@ -546,6 +551,7 @@ impl<'a> BuildDatabase<'a> {
             found_matching_masks: false,
             address_order: None,
             leaf_tax_ids: LeafTaxIds::new(),
+            utf8_once: Utf8TagOnce::default(),
         })
     }
 
@@ -851,6 +857,11 @@ impl<'a> BuildDatabase<'a> {
     pub(crate) fn set_leaf_tax_ids(&mut self, taxids: LeafTaxIds) {
         let _ = writeln!(self.log, "Keep Leaf Taxids: T");
         self.leaf_tax_ids = taxids;
+    }
+
+    /// The run's flag of the UTF8String warning, which posts once in a run.
+    pub(crate) fn utf8_once(&mut self) -> &mut Utf8TagOnce {
+        &mut self.utf8_once
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:428-442

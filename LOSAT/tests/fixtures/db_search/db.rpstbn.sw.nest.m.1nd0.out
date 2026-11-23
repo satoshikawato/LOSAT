@@ -1,0 +1,128 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= nest_m
+
+Length=1140
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  250  DQY*ISEKLALVIPARSRIHLGPSHTDHIIIVIVPEPHRKRGLFRIDLTNHAF*S*FYDA  429
+102      95   EK.EAEG.GKE.VK..ALFD                                          114
+103      124                    M.IA.ASLEYMLQ.L                             138
+
+Query_1  430  VSIG*EFMDR*EHLLVRGTVQGGNHDSFSLVRKTIHKDEISEKLPLVN*NNVYYLGQDRD  609
+102      3                NVS.KKVS...D                                      14
+
+Query_1  610  *LFDARDCCATFYYFSRMCHNGARTTAVSGL*RVFYEKAMFVPAVFLLINIFEVRRFACE  789
+101      126                                     SDQQ..S.IHK..              138
+102      53                                             ..IW-VSDL.ME.VK.GK  69
+
+Query_1  790  HWTRDEFNPPCHR*VMAQDQLHY*DNIHHLGENGYKLLYRAYSGTTLYDLTGVRHYCSCS  969
+102      70   N.S                                                           72
+
+Query_1  970  TPIPCFK  990
+102      125  ..YV...  131
+
+For reading frame +2 of query sequence:
+
+Query_1  740   PFSC**IFLRYVDLPANIGPVTSSTLPAIVK*WLKINCIIKITSTTSGRTDISSFIELTV  919
+102      126   .YV.FKDTINRKSNQE.V.IIK..N.                                    151
+
+Query_1  920   VQPSMTSPACVTIVPVPHPYLVSRLCLTNKQCLLPPFSC*YIFLRYVDFPANIGPVTNST  1099
+102      126                                      .YV.FKDTINRKSNQE.V.IIKS.N  150
+
+Query_1  1100  L  1102
+102      151   .  151
+
+For reading frame +3 of query sequence:
+
+Query_1  15   QRTFPPLRRK*RCYRYHCQTLL*TVLPWYQSYISCTLKPTSLWSSCMVIVYGSG*TFVDL  194
+101      128  .QM.S.IHK                                                     136
+
+Query_1  195  RCHQAPLLRSAFPYPRAY*PVLDQ*KTGPRHPGTQPHTSRPLPHRSHYYRYRSRTAP*KG  374
+
+Query_1  375  PLSYRSYKSCILKLVLRCC*YRVRVYGSVRTSAGQRYRPGRQSRFFFPCPQDDSQGRDQ*  554
+
+Query_1  555  KTAPRQLK*RLLPRARPRLTL*CSRLLCNLLLLLPHVSQWCPYHSRIGSLESV  713
+101      132                                    SPIHKLL..TNS.VK.A.K  150
+
+For reading frame -1 of query sequence:
+
+Query_1  1140  MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  961
+
+Query_1  960   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIMQLILSHHLTMAGRVELVTGPMFAG  781
+101      1                                        .........................  25
+101      1                                        .........................  25
+102      29                              LD.K.F.                             35
+103      129                   A.LEYMLQ...----IM..DRPYIGA.I.-..KCRTLE        161
+
+Query_1  780   KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV  601
+101      26    ............................................................  85
+101      26    ............................................................  85
+103      129                                                      A.LEYMLQ.  137
+
+Query_1  600   LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV  421
+101      86    ............................................................  145
+101      86    ............................................................  145
+102      29     LD.K.F.                                                      35
+103      138   ..----IM...                                                   144
+
+Query_1  420   KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDDEGQFFTDLVLVNRL  241
+101      146   .............................................                 190
+101      146   .............................................                 190
+101      97                                                  ..............  110
+103      149                                     ..HIT.GK..                  158
+
+Query_1  240   ADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGND  61
+101      111   ............................................................  170
+
+Query_1  60    NDNNVICVGGAEMYAAACRD  1
+101      171   ....................  190
+103      149            ..HIT.GK..   158
+
+For reading frame -2 of query sequence:
+
+Query_1  191  INKCSARSINYY  156
+103      30   .DE.NQIVLSE.  41
+
+For reading frame -3 of query sequence:
+
+Query_1  1081  PYVCGK  1064
+102      126   ....F.  131
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0500    0.140     1.90     42.6     43.6 
+
+Effective search space used: 161472
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

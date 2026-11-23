@@ -1831,18 +1831,38 @@ impl SeqDb {
     /// adjusts it. True without either (a taxid list keeps at least one line of each sequence it
     /// keeps).
     pub fn keeps_line(&self, ordinal: u32) -> Result<bool, SeqDbError> {
+        self.line_read(ordinal).map(|(kept, _)| kept)
+    }
+
+    /// [`SeqDb::keeps_line`], read as NCBI's `GetSeqIDs` reads the header, with whether the
+    /// record holds a UTF8String where a VisibleString is expected (NCBI's read then posts its
+    /// warning, `Utf8Reads`): false where the reads cannot drop every line, which leaves the
+    /// record unread (`Volume::line_read`).
+    pub fn line_read(&self, ordinal: u32) -> Result<(bool, bool), SeqDbError> {
         if self.filter.is_none() {
-            return Ok(true);
+            return Ok((true, false));
         }
         let at = self.find_volume(ordinal)?;
-        self.volumes[at.volume].keeps_line(at.vol_oid)
+        self.volumes[at.volume].line_read(at.vol_oid)
+    }
+
+    /// The header file of the volume that holds `ordinal` (`None` outside the database, or where
+    /// the file does not open): LOSAT's refusal of a header that NCBI's fetch cannot read names
+    /// it (`algorithm::common::database::FetchExcluded::refusal`).
+    #[cold]
+    pub fn header_file(&self, ordinal: u32) -> Option<PathBuf> {
+        let at = self.find_volume(ordinal).ok()?;
+        let file = self.volumes[at.volume].hdr_file().ok()?;
+        Some(file.path().to_path_buf())
     }
 
     /// [`SeqDb::keeps_line`] of the sequence of OID `oid`, included or not (the Seq-aligns of an
     /// RPS search read their profiles' headers by OID).
     pub fn keeps_line_of_oid(&self, oid: u32) -> Result<bool, SeqDbError> {
         let at = self.locate_oid(oid)?;
-        self.volumes[at.volume].keeps_line(at.vol_oid)
+        self.volumes[at.volume]
+            .line_read(at.vol_oid)
+            .map(|(kept, _)| kept)
     }
 
     /// Whether the database's reads remove a definition line of the sequence of OID `oid`,

@@ -21,6 +21,7 @@ fn the_hit_of_a_subject_whose_lookup_throws_has_the_catch_names_and_the_exceptio
             )],
             ..Default::default()
         }],
+        utf8: false,
     };
     let failure = LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO);
     let exception = failure.exception().unwrap();

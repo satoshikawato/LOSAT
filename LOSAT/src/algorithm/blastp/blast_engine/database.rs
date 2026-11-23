@@ -29,8 +29,11 @@ use anyhow::{bail, Result};
 ))]
 use rayon::prelude::*;
 
+use crate::algorithm::blastp::hsp::BlastCompoHeap;
 use crate::algorithm::common::database as shared;
-pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
+pub(super) use crate::algorithm::common::database::{
+    HeaderReadError, PreliminaryReadError, Utf8Read,
+};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 #[cfg(all(test, unix))]
@@ -119,10 +122,12 @@ impl BlastpDatabase {
         self.rps_units.as_ref()
     }
 
-    /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), for
-    /// the search again of the batches before a failed one.
+    /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), and the
+    /// loads' posts of NCBI's warning of a UTF8String header (`SeqDb::restart_utf8_loads`), for the
+    /// search again of the batches before a failed one.
     pub(super) fn restart_taxonomy(&self) {
         self.taxdb.restart();
+        self.db.restart_utf8_loads();
     }
 
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
@@ -726,6 +731,13 @@ pub(super) struct ListedSubjects {
     /// Whether a read of the redo or of the first Newton problems found a pyrrolysine (O) or a
     /// gap character, by rank (`x_list`).
     x_recounted: Vec<std::sync::atomic::AtomicBool>,
+    /// The subjects of the preliminary hit lists whose header holds a UTF8String where a
+    /// VisibleString is expected, which NCBI's fetches with `check_oid_exclusion` read
+    /// (`exclude_fetched`; `note_fetched`).
+    fetched_utf8: XFetchedUtf8,
+    /// The call's reads before those of its reported sequences that took a UTF8String for a
+    /// VisibleString: of its fetches (`note_fetched`) and of its Seq-aligns (`drop_unaligned`).
+    earlier_utf8: std::sync::Mutex<shared::EarlierUtf8>,
     /// The places of the lists that the redo reaches and its fetch excludes, which left the
     /// preliminary hit lists (`exclude_fetched`), by query and place.
     pub(super) fetch_excluded: Vec<FetchExcludedMatch>,
@@ -740,6 +752,356 @@ pub(super) struct FetchExcludedMatch {
     pub(super) query: usize,
     pub(super) position: usize,
     pub(super) best_evalue: f64,
+}
+
+/// What `exclude_fetched` keeps of the subjects whose header holds a UTF8String where a
+/// VisibleString is expected: each with its query and its place in the order in which the redo
+/// takes its query's lists (`XRedoKey`), and, for each query with one, the ordinal ids of its
+/// kept lists in that order (the redo's positions of its heap's records, `note_fetched`).
+#[derive(Debug, Default)]
+struct XFetchedUtf8 {
+    reads: Vec<XFetchedRead>,
+    orders: Vec<(usize, Vec<u32>)>,
+}
+
+/// One subject of `XFetchedUtf8`: the query of its list, its key in the redo's order, and the
+/// kept lists of its query that come before it there (`shared::redo_fetches`).
+#[derive(Clone, Copy, Debug)]
+struct XFetchedRead {
+    query: usize,
+    key: XRedoKey,
+    kept: bool,
+    before: usize,
+}
+
+/// What `compare_hsp_lists` (`Blast_HitListSortByEvalue`, the order in which the redo takes a
+/// query's lists, cited at `BlastpHitList::sort_by_evalue`) reads of a list: lists without HSPs
+/// last, then the best E-value (`s_EvalueComp`), the first HSP's score, larger first, and the
+/// subject, larger first (the ordinal id: the ranks that the lists hold after `x_list` keep its
+/// order).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct XRedoKey {
+    has_hsps: bool,
+    best_evalue: f64,
+    score: i32,
+    ordinal: u32,
+}
+
+impl XRedoKey {
+    fn of<H: crate::algorithm::blastp::hsp::HitListHsp>(
+        list: &crate::algorithm::blastp::hsp::BlastpHspList<H>,
+    ) -> Self {
+        XRedoKey {
+            has_hsps: !list.hsps.is_empty(),
+            best_evalue: list.best_evalue,
+            score: list.hsps.first().map_or(0, |hsp| hsp.raw_score()),
+            ordinal: list.oid,
+        }
+    }
+
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .has_hsps
+            .cmp(&self.has_hsps)
+            .then_with(|| {
+                crate::algorithm::blastp::hsp::evalue_comp(self.best_evalue, other.best_evalue)
+            })
+            .then_with(|| other.score.cmp(&self.score))
+            .then_with(|| other.ordinal.cmp(&self.ordinal))
+    }
+}
+
+impl XFetchedUtf8 {
+    /// Keeps the subjects `found` of the list of `query` (whose kept lists are `kept`).
+    #[cold]
+    #[inline(never)]
+    fn add<H: crate::algorithm::blastp::hsp::HitListHsp>(
+        &mut self,
+        query: usize,
+        kept: &[crate::algorithm::blastp::hsp::BlastpHspList<H>],
+        found: Vec<(shared::FetchedUtf8, XRedoKey)>,
+    ) {
+        let mut keys: Vec<XRedoKey> = kept.iter().map(XRedoKey::of).collect();
+        keys.sort_unstable_by(XRedoKey::cmp);
+        for (read, key) in found {
+            self.reads.push(XFetchedRead {
+                query,
+                key,
+                kept: read.kept,
+                before: keys.partition_point(|other| other.cmp(&key).is_lt()),
+            });
+        }
+        self.orders
+            .push((query, keys.iter().map(|key| key.ordinal).collect()));
+    }
+
+    /// The first, in NCBI's order of the fetches, of the reads that the ordinary traceback
+    /// (`shared::FetchedUtf8::traceback_first`: every subject, in increasing ordinal) or, with
+    /// `heaps` (as the redo left them), the composition-based redo makes
+    /// (`shared::redo_fetches`: query by query, each in its lists' order), the batches of the
+    /// queries (`batch_of`) one after the other: its query and ordinal id.
+    #[cold]
+    #[inline(never)]
+    fn first(
+        &self,
+        heaps: Option<&[BlastCompoHeap]>,
+        batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
+        ordinals: &[u32],
+    ) -> Option<(usize, u32)> {
+        let Some(heaps) = heaps else {
+            // A batch's traceback, then the next batch's.
+            return self
+                .reads
+                .iter()
+                .min_by_key(|read| (batch_of(read.query).start, read.key.ordinal))
+                .map(|read| (read.query, read.key.ordinal));
+        };
+        self.first_redone(heaps, batch_of, ordinals, &|_| true)
+    }
+
+    /// `first` of the composition-based redo with `heaps`, among the reads that `reached` keeps
+    /// (the fetches before the failure of a batch's redo, `ListedSubjects::fetched_before_failure`).
+    fn first_redone(
+        &self,
+        heaps: &[BlastCompoHeap],
+        batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
+        ordinals: &[u32],
+        reached: &dyn Fn(&XFetchedRead) -> bool,
+    ) -> Option<(usize, u32)> {
+        // The heap of `query` at the turn of a match after `before` of its lists (`order`), as
+        // `shared::redo_fetches` reads it.
+        let heap_at = |query: usize, before: Option<(&[u32], usize)>| {
+            let heap = &heaps[query];
+            let inserted = |record: &&crate::algorithm::blastp::hsp::BlastCompoHeapRecord| {
+                before.is_none_or(|(order, before)| {
+                    let ordinal = ordinals[record.subject_index as usize];
+                    order[..before.min(order.len())].contains(&ordinal)
+                })
+            };
+            shared::RedoHeap {
+                ecutoff: heap.ecutoff,
+                heap_threshold: heap.heap_threshold,
+                inserted_before: heap
+                    .records()
+                    .iter()
+                    .filter(|record| record.best_evalue <= heap.ecutoff)
+                    .filter(inserted)
+                    .count(),
+                ends_early: heap.x_ends_early,
+            }
+        };
+        self.reads
+            .iter()
+            .filter(|read| read.key.has_hsps && reached(read))
+            .filter(|read| {
+                let order = &self
+                    .orders
+                    .iter()
+                    .find(|(of, _)| *of == read.query)
+                    .expect("a query with a read has its order")
+                    .1;
+                // The heaps of the queries before the match's are as the redo left them, those
+                // after it untouched (the redo takes the lists query by query).
+                let redo_heaps: Vec<shared::RedoHeap> = batch_of(read.query)
+                    .filter(|&query| query <= read.query)
+                    .map(|query| {
+                        heap_at(
+                            query,
+                            (query == read.query).then_some((order.as_slice(), read.before)),
+                        )
+                    })
+                    .chain(
+                        batch_of(read.query)
+                            .filter(|&query| query > read.query)
+                            .map(|query| shared::RedoHeap {
+                                inserted_before: 0,
+                                ..heap_at(query, None)
+                            }),
+                    )
+                    .collect();
+                shared::redo_fetches(read.key.best_evalue, &redo_heaps)
+            })
+            .min_by(|a, b| {
+                a.query
+                    .cmp(&b.query)
+                    .then(a.before.cmp(&b.before))
+                    .then(a.kept.cmp(&b.kept))
+                    .then_with(|| a.key.cmp(&b.key))
+            })
+            .map(|read| (read.query, read.key.ordinal))
+    }
+}
+
+/// The notes of the subjects that a call's fetches with `check_oid_exclusion` read (a seqid
+/// list's, `ListedSubjects::note_fetched`) around its traceback: the PSSM's position-based redo
+/// notes those of its own heaps (`pssm_redo`, `pssm_hooks::pssm_traceback`); after the traceback
+/// (`after`) every subject of the ordinary traceback, or those that the composition-based redo's
+/// early termination test leaves (its heaps as it left them).
+pub(super) struct FetchNotes<'a> {
+    listed: Option<&'a ListedSubjects>,
+    database: Option<&'a BlastpDatabase>,
+    /// Whether the PSSM's position-based redo ran and noted its own.
+    pssm_redone: std::cell::Cell<bool>,
+}
+
+impl<'a> FetchNotes<'a> {
+    pub(super) fn new(
+        listed: Option<&'a ListedSubjects>,
+        database: Option<&'a BlastpDatabase>,
+    ) -> Self {
+        Self {
+            listed,
+            database,
+            pssm_redone: std::cell::Cell::new(false),
+        }
+    }
+
+    /// The PSSM's position-based redo of modes 1 to 3 ran, whose heaps `heaps` tell which
+    /// subjects its fetches read.
+    pub(super) fn pssm_redo(&self, heaps: &[BlastCompoHeap]) {
+        self.pssm_redone.set(true);
+        if let (Some(listed), Some(database)) = (self.listed, self.database) {
+            let all = |_: usize| 0..heaps.len();
+            listed.note_fetched(database, Some(heaps), &all);
+        }
+    }
+
+    /// The first fetch of the composition-based redo of the batch `batch` that read a header with a
+    /// UTF8String where a VisibleString is expected, before the batch's Smith-Waterman redo
+    /// failed (`redo_run::sw_batch_failed`) or did not end (`redo_run::sw_endless`) at the turn of
+    /// the list after `before` of the kept lists of query `query` (`usize::MAX`: after the batch's
+    /// last list), with `heaps` as the redo left them: NCBI posted its warning before its error,
+    /// its crash or its endless redo (`HeaderReadError::utf8`).
+    pub(super) fn fetched_before_failure(
+        &self,
+        heaps: &[BlastCompoHeap],
+        batch: std::ops::Range<usize>,
+        query: usize,
+        before: usize,
+    ) -> Option<Utf8Read> {
+        let (listed, database) = (self.listed?, self.database?);
+        if listed.fetched_utf8.reads.is_empty() {
+            return None;
+        }
+        let batch_of = |_: usize| batch.clone();
+        let reached = |read: &XFetchedRead| {
+            batch.contains(&read.query)
+                && (read.query < query || (read.query == query && read.before <= before))
+        };
+        let (_, ordinal) =
+            listed
+                .fetched_utf8
+                .first_redone(heaps, &batch_of, &listed.ordinals, &reached)?;
+        let at = database.db.location_of(ordinal)?;
+        Some(Utf8Read {
+            query: batch.start,
+            path: database.db.utf8_string_path_at(at)?,
+        })
+    }
+
+    /// After the traceback: `heaps`, the composition-based redo's, which made the hit lists where
+    /// the ordinary traceback made none (`ordinary`), the batch of each query being in `batches`
+    /// (`redo_run::kappa_query_batches`).
+    pub(super) fn after<T>(
+        &self,
+        heaps: &[BlastCompoHeap],
+        ordinary: &Option<T>,
+        batches: &[std::ops::Range<usize>],
+    ) {
+        let (Some(listed), Some(database)) = (self.listed, self.database) else {
+            return;
+        };
+        let batch_of = |q_idx: usize| batches[q_idx].clone();
+        if ordinary.is_none() {
+            listed.note_fetched(database, Some(heaps), &batch_of);
+        } else if !self.pssm_redone.get() {
+            listed.note_fetched(database, None, &batch_of);
+        }
+    }
+}
+
+/// The reads of a call's reported subjects' titles (`titles`), one batch after the other, and
+/// their first read of a header with a UTF8String where a VisibleString is expected, the call's
+/// (`utf8`, `shared::CallUtf8`).
+pub(super) struct CallTitles<'a> {
+    database: Option<&'a BlastpDatabase>,
+    /// The call's query batches, each with its searched queries.
+    batches: &'a [crate::blastinput::seq_range::RangedBatch],
+    utf8: shared::CallUtf8,
+}
+
+impl<'a> CallTitles<'a> {
+    pub(super) fn new(
+        database: Option<&'a BlastpDatabase>,
+        batches: &'a [crate::blastinput::seq_range::RangedBatch],
+    ) -> Self {
+        Self {
+            database,
+            batches,
+            utf8: shared::CallUtf8::default(),
+        }
+    }
+
+    /// The titles of the call's reported database subjects, the `listed` ones
+    /// (`ListedSubjects::read_titles`, or with LOSAT_X_BPLISTEDLEAN `x_lean`,
+    /// `x_read_titles_lean`), read one batch after the other: the first queries of the call's
+    /// batches (`shared::HeaderReader::batch_starts`). Their `utf8` is NCBI's first read, in the
+    /// Seq-aligns of the call's batches, of a header with a UTF8String where a VisibleString is
+    /// expected, the call's (`utf8`): its warning comes before anything the batch writes after its
+    /// search (`header_read`), and before an error of the batch's prefetch
+    /// (`HeaderReadError::after_reads`).
+    pub(super) fn titles<'l>(
+        &self,
+        listed: Option<&'l ListedSubjects>,
+        hit_lists: &[Option<BlastpHitList>],
+        x_lean: bool,
+    ) -> Result<Option<ListedTitles<'l>>>
+    where
+        'a: 'l,
+    {
+        let (Some(listed), Some(database)) = (listed, self.database) else {
+            return Ok(None);
+        };
+        let starts: Vec<usize> = self
+            .batches
+            .iter()
+            .map(|batch| batch.searched.start)
+            .collect();
+        let titles = if x_lean {
+            listed.x_read_titles_lean(database, hit_lists, &starts)?
+        } else {
+            listed.read_titles(database, hit_lists, &starts)?
+        };
+        if let Some(read) = &titles.utf8 {
+            let batch = self
+                .batches
+                .iter()
+                .find(|batch| batch.searched.contains(&read.query))
+                .map_or(read.query, |batch| batch.searched.start);
+            self.utf8.note(batch, Some(read));
+        }
+        Ok(Some(titles))
+    }
+
+    /// The call's first read of such a header in its batches' Seq-aligns (`titles`).
+    pub(super) fn utf8(&self) -> Option<&Utf8Read> {
+        self.utf8.read()
+    }
+
+    /// NCBI's warning of that read in the first query of the batch whose Seq-aligns read it, with
+    /// the posts that follow the reader's messages of the batch (`query_warnings::query_posts`),
+    /// where the run has not posted it (a load of the model of the loads may have,
+    /// `shared::load_read_texts`), with the post prefix `program`.
+    pub(super) fn header_read(
+        &self,
+        program: &str,
+    ) -> Option<(usize, crate::report::diag_log::Posts)> {
+        self.utf8.post(
+            self.database.map(BlastpDatabase::seqdb),
+            program,
+            usize::MAX,
+        )
+    }
 }
 
 impl ListedSubjects {
@@ -785,13 +1147,67 @@ impl ListedSubjects {
         let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
             return;
         };
-        for hit_list in hit_lists.iter_mut().flatten() {
+        let mut first = None;
+        for (query, hit_list) in hit_lists.iter_mut().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
             hit_list.hsplist_array.truncate(hit_list.hsplist_count);
             aligned.retain(&mut hit_list.hsplist_array, |list| {
                 Some(self.ordinals[list.oid as usize])
             });
             hit_list.hsplist_count = hit_list.hsplist_array.len();
+            if first.is_none() {
+                first = aligned.first_utf8().map(|at| (query, at));
+            }
         }
+        self.earlier_utf8
+            .lock()
+            .expect("the UTF8String reads are not poisoned")
+            .aligned = first;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575 (cited at
+    // `exclude_fetched`) and blast_traceback.c:1567-1577
+    /// Notes the call's first fetch with `check_oid_exclusion` that read a header with a
+    /// UTF8String where a VisibleString is expected (`XFetchedUtf8::first`): of the ordinary
+    /// traceback, or with `heaps` of the composition-based redo (its heaps as it left them, by
+    /// query), the batch of each query being `batch_of` (`redo_run::kappa_query_batches`). NCBI
+    /// posts its warning there, before the reads of the batch's Seq-aligns (`read_titles`).
+    pub(super) fn note_fetched(
+        &self,
+        database: &BlastpDatabase,
+        heaps: Option<&[BlastCompoHeap]>,
+        batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
+    ) {
+        if self.fetched_utf8.reads.is_empty() {
+            return;
+        }
+        if let Some((query, ordinal)) = self.fetched_utf8.first(heaps, batch_of, &self.ordinals) {
+            self.earlier_utf8
+                .lock()
+                .expect("the UTF8String reads are not poisoned")
+                .fetched = database.db.location_of(ordinal).map(|at| (query, at));
+        }
+    }
+
+    /// The reader of the reported sequences' headers of the call (`read_titles`), whose batches
+    /// start at the queries `batch_starts`, with the call's reads before them that took a
+    /// UTF8String for a VisibleString (`note_fetched`, `drop_unaligned`).
+    fn header_reader<'a>(
+        &self,
+        database: &'a BlastpDatabase,
+        batch_starts: &[usize],
+    ) -> shared::HeaderReader<'a> {
+        let headers = shared::HeaderReader::new(&database.db);
+        headers.batch_starts(batch_starts.to_vec());
+        headers.note_earlier(
+            *self
+                .earlier_utf8
+                .lock()
+                .expect("the UTF8String reads are not poisoned"),
+        );
+        headers
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
@@ -817,10 +1233,11 @@ impl ListedSubjects {
         &'a self,
         database: &'a BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
+        batch_starts: &[usize],
     ) -> Result<ListedTitles<'a>> {
         let mut titles: Vec<Option<shared::StoredTitle>> = vec![None; self.ordinals.len()];
         let mut parsed = ParsedSubjects::default();
-        let headers = shared::HeaderReader::new(&database.db);
+        let headers = self.header_reader(database, batch_starts);
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -877,6 +1294,7 @@ impl ListedSubjects {
             sources,
             parsed: parsed.by_rank,
             program: database.program,
+            utf8: headers.first_utf8(),
         })
     }
 }
@@ -905,15 +1323,18 @@ impl ListedSubjects {
 /// order) without the subjects that NCBI's fetches of the redo or the traceback exclude, in
 /// their order, and the marks of the removed lists, by query and place; LOSAT's refusal where a
 /// subject's header cannot be read there (`shared::FetchExcluded::refusal`).
+/// The subjects whose header holds a UTF8String where a VisibleString is expected come with them
+/// (`XFetchedUtf8`): NCBI's fetches read them (`ListedSubjects::note_fetched`).
 fn exclude_fetched(
     database: &BlastpDatabase,
     hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-) -> Result<Vec<FetchExcludedMatch>> {
+) -> Result<(Vec<FetchExcludedMatch>, XFetchedUtf8)> {
+    let mut fetched = XFetchedUtf8::default();
     let excluded = shared::FetchExcluded::of(&database.db);
     // Without a negative seqid list with ids the fetches exclude nothing: no list is read here.
     if excluded.is_none() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), fetched));
     }
     let refused = |failed| shared::FetchExcluded::refusal(failed, database.program);
     let mut marks = Vec::new();
@@ -930,34 +1351,45 @@ fn exclude_fetched(
             query,
             hit_list,
             read.then_some(&mut marks),
+            &mut fetched,
         )
         .map_err(refused)?;
     }
     for (query, hit_list) in x_compact_hit_lists.iter_mut().enumerate() {
         if let Some(hit_list) = hit_list {
-            leave_fetched(excluded.as_ref(), query, hit_list, Some(&mut marks)).map_err(refused)?;
+            leave_fetched(
+                excluded.as_ref(),
+                query,
+                hit_list,
+                Some(&mut marks),
+                &mut fetched,
+            )
+            .map_err(refused)?;
         }
     }
     // By query; the marks of a query are in place order already (a stable sort).
     marks.sort_by_key(|mark| mark.query);
-    Ok(marks)
+    Ok((marks, fetched))
 }
 
 /// `hit_list` (query `query`'s) without the lists whose subject the fetch excludes
 /// (`shared::FetchMarks`), in their order, each removed list leaving its mark in `marks` (where
 /// the redo reads this list) with the number of kept lists before it; nothing changes where
-/// none is excluded.
+/// none is excluded. The lists whose header holds a UTF8String where a VisibleString is expected
+/// go to `fetched` (read in the same pass, `shared::FetchExcluded::marks_noting`).
 ///
 /// No NCBI counterpart: NCBI keeps these lists in the redo's stream, and its fetch excludes each
 /// subject when the redo reaches it (the reference lines are at `exclude_fetched`).
-fn leave_fetched<H>(
+fn leave_fetched<H: crate::algorithm::blastp::hsp::HitListHsp>(
     excluded: Option<&shared::FetchExcluded<'_>>,
     query: usize,
     hit_list: &mut BlastpHitList<H>,
     mut marks: Option<&mut Vec<FetchExcludedMatch>>,
+    fetched: &mut XFetchedUtf8,
 ) -> std::result::Result<(), (u32, crate::seqdb::SeqDbError)> {
     let lists = &hit_list.hsplist_array[..hit_list.hsplist_count];
-    let fetch = shared::FetchMarks::of(excluded, lists, |list| Some(list.oid))?;
+    let (fetch, found) =
+        shared::FetchMarks::of_noting(excluded, lists, |list| Some(list.oid), XRedoKey::of)?;
     let mut kept = 0;
     let mut removed = false;
     for (index, list) in lists.iter().enumerate() {
@@ -982,6 +1414,13 @@ fn leave_fetched<H>(
             !fetch.excluded(index - 1)
         });
         hit_list.hsplist_count = hit_list.hsplist_array.len();
+    }
+    if !found.is_empty() {
+        fetched.add(
+            query,
+            &hit_list.hsplist_array[..hit_list.hsplist_count],
+            found,
+        );
     }
     Ok(())
 }
@@ -1069,6 +1508,10 @@ pub(super) struct ListedTitles<'a> {
     pub(super) parsed: Vec<Option<Arc<ParsedSubject>>>,
     /// The program that LOSAT's refusals name (`BlastpDatabase::program`).
     program: &'static str,
+    /// The first read of the reads above, in NCBI's order, of a record that holds a UTF8String
+    /// where a VisibleString is expected (`shared::HeaderReader::first_utf8`): NCBI posts its
+    /// warning there, once per process (`shared::Utf8Read::post`).
+    pub(super) utf8: Option<shared::Utf8Read>,
 }
 
 /// The reported subjects with parsed Seq-ids of `ListedSubjects::read_titles`, by rank.
@@ -1406,6 +1849,29 @@ impl ListedTitles<'_> {
         )
     }
 
+    /// `shared::scope_utf8_hit_reads` of the subjects of ranks `ranks` (an XML2 or JSON report's
+    /// `Hit`s, in order, of a batch whose prefetch is off).
+    pub(super) fn scope_utf8_hit_reads(
+        &self,
+        database: &BlastpDatabase,
+        after: Option<crate::report::db_subject::RunThrow>,
+        ranks: impl IntoIterator<Item = usize>,
+    ) -> crate::report::query_warnings::QueryReads {
+        shared::scope_utf8_hit_reads(
+            &database.db,
+            &database.taxdb,
+            after,
+            ranks.into_iter().map(|rank| {
+                (
+                    rank as u32,
+                    self.listed.ordinals[rank],
+                    self.parsed_subject(rank),
+                )
+            }),
+            self.program,
+        )
+    }
+
     /// The searched queries of the first batch of `batches` (each batch's searched queries, in
     /// order) whose prefetch is on (`prefetch`) and reads a subject whose lookup fails on a file
     /// with NCBI's exception (`ParsedSubject::prefetch_stops`): NCBI's prefetch stops the run
@@ -1470,7 +1936,9 @@ impl ListedTitles<'_> {
     /// and the loads of those batches of ranks `loaded` (`shared::batch_loads`, with psiblast's
     /// traceback beyond the cut, which no report reads), recorded where the batch stops. Of both,
     /// the subjects that those reports load (`loads`, `hit_loads` of `before`: not one whose
-    /// `Hit` throws, nor one shown only after it; review 1 of line DBID pfoff-1, H1).
+    /// `Hit` throws, nor one shown only after it; review 1 of line DBID pfoff-1, H1). `Ok`: the
+    /// warning of a UTF8String header that a load of a batch that does not stop posts
+    /// (`shared::batch_prefetch_stop`), for the batch's prefetch posts.
     pub(super) fn batch_prefetch_stop(
         &self,
         database: &BlastpDatabase,
@@ -1479,7 +1947,7 @@ impl ListedTitles<'_> {
         loads: &HitLoads,
         ranks: impl IntoIterator<Item = usize>,
         queries: &shared::PrefetchQueries<'_>,
-    ) -> Result<()> {
+    ) -> Result<Vec<u8>> {
         shared::held_batch_prefetch_stop(
             &database.db,
             &database.taxdb,
@@ -1494,6 +1962,21 @@ impl ListedTitles<'_> {
             self.program,
             queries,
         )
+    }
+
+    /// NCBI's warning of a UTF8String header that a load of the prefetch of the subjects of ranks
+    /// `ranks` (a batch of the XML2 and JSON formats whose prefetch is on and does not stop) posts
+    /// (`shared::scope_utf8_prefetch_post`); empty where none.
+    pub(super) fn scope_utf8_prefetch(
+        &self,
+        database: &BlastpDatabase,
+        ranks: impl IntoIterator<Item = usize>,
+    ) -> Result<Vec<u8>> {
+        let subjects: Vec<shared::PrefetchSubject<'_>> = ranks
+            .into_iter()
+            .map(|rank| self.prefetch_subject(rank))
+            .collect();
+        shared::scope_utf8_prefetch_post(&database.db, &subjects, self.program)
     }
 
     /// The run's record of the subjects of ranks `ranks` that NCBI's BLAST database data loader
@@ -1823,12 +2306,21 @@ impl ListedTitles<'_> {
                     shared::pssm_load_texts(
                         &database.db,
                         &database.taxdb,
+                        self.parsed_subject(rank as usize),
                         blob,
                         &lookups,
                         self.program,
                     )?
                 }
-                None => Vec::new(),
+                // The lookup read the header without a blob (`x_GetOid`'s check of the ids).
+                None => shared::pssm_load_texts(
+                    &database.db,
+                    &database.taxdb,
+                    self.parsed_subject(rank as usize),
+                    ordinal,
+                    &[],
+                    self.program,
+                )?,
             };
             texts.push((rank, text));
         }
@@ -2373,6 +2865,10 @@ pub(super) fn x_titles_allow_blocks(
     >|
      -> bool {
         match deflines {
+            // A record with a UTF8String where a VisibleString is expected reads with NCBI's
+            // warning, which the block whose call reads it first posts where the search of all
+            // queries posts it (`shared::Utf8Read`, in the first query of the batch that reads it;
+            // the blocks write their reports one after the other, and the warning once per run).
             Ok(deflines) => {
                 deflines.len() == 1
                     && deflines[0].replaced_title_bytes == 0
@@ -2502,6 +2998,7 @@ pub(super) fn x_titles_read_allow_blocks(
     >|
      -> bool {
         match deflines {
+            // A UTF8String record as in `x_titles_allow_blocks`.
             Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
             Err(_) => false,
         }
@@ -2580,6 +3077,7 @@ pub(super) fn x_titles_taxids_allow_blocks(
         db.visit_deflines(*range, |_ordinal, deflines| match deflines {
             // The taxid `read_reported_taxonomy` takes of a sequence: its first definition
             // line's.
+            // A UTF8String record as in `x_titles_allow_blocks`.
             Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
             Err(_) => false,
         })

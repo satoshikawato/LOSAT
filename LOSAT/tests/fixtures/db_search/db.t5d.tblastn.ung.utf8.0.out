@@ -1,0 +1,124 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nhd_utf8
+           3 sequences; 1,080 total letters
+
+
+
+Query= q0
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+hd0 record 0 of the T5d databases                                     326     4e-94  1
+
+
+>hd0 record 0 of the T5d databases
+Length=360
+
+ Score = 326 bits (684),  Expect = 4e-94
+ Identities = 120/120 (100%), Positives = 120/120 (100%), Gaps = 0/120 (0%)
+ Frame = +1
+
+Query  1    CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVR  60
+            CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVR
+Sbjct  1    CFNKPDIMGHQNASQQWTCNQRLIYDMMFPYWDRQCFYQAWTSMSRYIFVGNPAVKTCVR  180
+
+Query  61   KVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL  120
+            KVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL
+Sbjct  181  KVRHFYKVALDRGMIWIRNMTAKSWPLQKGQCMQENRSRSYGRATHGHCDEIENFTTYIL  360
+
+
+
+Lambda      K        H
+   0.328    0.136    0.479 
+
+
+Effective search space used: 31827
+
+
+Query= q1
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+hd1 record 1 of the T5d databases                                     331     8e-96  1
+
+
+>hd1 record 1 of the T5d databases
+Length=360
+
+ Score = 331 bits (706),  Expect = 8e-96
+ Identities = 120/120 (100%), Positives = 120/120 (100%), Gaps = 0/120 (0%)
+ Frame = +1
+
+Query  1    RCRKHWDWYRQWCAADKKDLNTRPMSGSNSEQSPKYRHDSTIGDIPWWGLKWYEWDEVSW  60
+            RCRKHWDWYRQWCAADKKDLNTRPMSGSNSEQSPKYRHDSTIGDIPWWGLKWYEWDEVSW
+Sbjct  1    RCRKHWDWYRQWCAADKKDLNTRPMSGSNSEQSPKYRHDSTIGDIPWWGLKWYEWDEVSW  180
+
+Query  61   CLAWYFSYGQTGFDFISVFEEVAQYTIRMIHWKTPTANQQENHVHIFGKFAKGALADFCV  120
+            CLAWYFSYGQTGFDFISVFEEVAQYTIRMIHWKTPTANQQENHVHIFGKFAKGALADFCV
+Sbjct  181  CLAWYFSYGQTGFDFISVFEEVAQYTIRMIHWKTPTANQQENHVHIFGKFAKGALADFCV  360
+
+
+
+Lambda      K        H
+   0.323    0.136    0.507 
+
+
+Effective search space used: 31827
+
+
+Query= q2
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+hd2 record 2 of the T5d databases                                     310     2e-89  1
+
+
+>hd2 record 2 of the T5d databases
+Length=360
+
+ Score = 310 bits (668),  Expect = 2e-89
+ Identities = 120/120 (100%), Positives = 120/120 (100%), Gaps = 0/120 (0%)
+ Frame = +1
+
+Query  1    TGVYAHGIDMFGDTSAHAPYAYNKAVIPMWKKINDHTRPLENRRAMVMWPAFHWIELADD  60
+            TGVYAHGIDMFGDTSAHAPYAYNKAVIPMWKKINDHTRPLENRRAMVMWPAFHWIELADD
+Sbjct  1    TGVYAHGIDMFGDTSAHAPYAYNKAVIPMWKKINDHTRPLENRRAMVMWPAFHWIELADD  180
+
+Query  61   RDWNHTEKMGMSMRDSSQLTDGNPYKGIPMPKHILQRHPYKKNSSKENSQVAYDIVIMHF  120
+            RDWNHTEKMGMSMRDSSQLTDGNPYKGIPMPKHILQRHPYKKNSSKENSQVAYDIVIMHF
+Sbjct  181  RDWNHTEKMGMSMRDSSQLTDGNPYKGIPMPKHILQRHPYKKNSSKENSQVAYDIVIMHF  360
+
+
+
+Lambda      K        H
+   0.320    0.133    0.434 
+
+
+Effective search space used: 31827
+
+
+  Database: nhd_utf8
+    Posted date:  Nov 17, 2026  1:31 AM
+  Number of letters in database: 1,080
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

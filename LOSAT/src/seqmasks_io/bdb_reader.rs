@@ -87,6 +87,10 @@ pub(crate) struct MaskBdbReader {
     path: SearchPath,
     /// Whether the records carry `sequence::GetTitle` (`BdbRecord::get_title`).
     get_title: bool,
+    /// Whether the last record's read of its header may have met a UTF8String for a VisibleString,
+    /// for which NCBI posts its warning 803.10 (`take_utf8_header`): it met one, or it failed (the
+    /// record is read again to see whether one came before the failure).
+    utf8_header: bool,
 }
 
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
@@ -126,6 +130,7 @@ impl MaskBdbReader {
             source_names: Default::default(),
             path,
             get_title: false,
+            utf8_header: false,
         })
     }
 
@@ -133,6 +138,13 @@ impl MaskBdbReader {
     /// (`BdbRecord::get_title`).
     pub(crate) fn ask_get_title(&mut self) {
         self.get_title = true;
+    }
+
+    /// Whether the read of the last record's header may have met a UTF8String for a
+    /// VisibleString (`SeqDb::take_utf8_post_at` finds its member and whether the run posts it
+    /// now): makembindex's post level shows NCBI's warning 803.10, the maskers' does not.
+    pub(crate) fn take_utf8_header(&mut self) -> bool {
+        std::mem::take(&mut self.utf8_header)
     }
 
     /// The OID that `next_record` reads next (makembindex's `CSequenceIStreamBlastDB::oid_`).
@@ -188,6 +200,7 @@ impl MaskBdbReader {
         &mut self,
         letters: bool,
     ) -> Result<Option<(BdbRecord, Option<NucleotideAmbiguity>)>, BdbError> {
+        self.utf8_header = false;
         if self.oid >= self.db.num_seqs() {
             return Ok(None);
         }
@@ -197,7 +210,9 @@ impl MaskBdbReader {
         let error = |error| database_error(error, program);
         // `GetBioseq` builds NCBI's OID list first (`SeqDb::build_oid_list`).
         self.db.build_oid_list().map_err(error)?;
-        let set = self.db.defline_set(oid).map_err(error)?;
+        let set = self.db.defline_set(oid);
+        self.utf8_header = set.as_ref().map_or(true, |set| set.utf8);
+        let set = set.map_err(error)?;
         if set
             .deflines
             .iter()

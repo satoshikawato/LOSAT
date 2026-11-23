@@ -763,6 +763,7 @@ fn every_list_tests_each_line_as_ncbis() {
     let rule = DeflineRule::Taxids([5].into_iter().collect());
     let set = DeflineSet {
         deflines: vec![line_with_id(1), line_with_id(5)],
+        utf8: false,
     };
     assert_eq!(
         line_mask(Some(&rule), &[], &set),
@@ -772,6 +773,7 @@ fn every_list_tests_each_line_as_ncbis() {
     // taxids are not those of the lookup files): the sequence gets no Seq-align.
     let none = DeflineSet {
         deflines: vec![line_with_id(1), line_with_id(2)],
+        utf8: false,
     };
     assert_eq!(
         line_mask(Some(&rule), &[], &none),
@@ -782,6 +784,7 @@ fn every_list_tests_each_line_as_ncbis() {
     // a negative taxid list of none the database holds; review 2 of line RG D1c, R2).
     let bare = DeflineSet {
         deflines: vec![defline(Some(5), None), line_with_id(5)],
+        utf8: false,
     };
     assert_eq!(
         line_mask(Some(&rule), &[], &bare),
@@ -1025,6 +1028,7 @@ fn the_id_tests_of_a_line_alternate_as_ncbis() {
     });
     let set = DeflineSet {
         deflines: vec![line(general("ti", "abc")), line(general("PIG", "abc"))],
+        utf8: false,
     };
     let thrown = line_mask(Some(&rule), &[alias], &set).unwrap_err();
     assert!(thrown

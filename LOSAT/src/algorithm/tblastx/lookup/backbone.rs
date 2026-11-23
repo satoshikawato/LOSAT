@@ -1935,7 +1935,8 @@ fn blast_aa_add_word_hits(
     let query_residue = query_word[0] as usize;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:492-496
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:492-496:
-    // score = matrix[w[0]][w[0]]; then add each matrix[w[i]][w[i]].
+    // Start the self-score with the diagonal matrix entry for the first residue, then sum the
+    // diagonal matrix entries for each remaining residue of the word.
     let mut self_score = lookup_matrix_score(matrix, query_residue, query_residue);
     for residue in query_word.iter().take(word_length).skip(1) {
         let residue = *residue as usize;

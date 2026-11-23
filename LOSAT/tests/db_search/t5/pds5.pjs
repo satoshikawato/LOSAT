@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pds5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pds5",
+  "number-of-letters": 120,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-17T22:55:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49534,
+  "bytes-to-cache": 218,
+  "files": [
+    "pds5.pdb",
+    "pds5.phr",
+    "pds5.pin",
+    "pds5.pog",
+    "pds5.pos",
+    "pds5.pot",
+    "pds5.psq",
+    "pds5.ptf",
+    "pds5.pto"
+  ]
+}

@@ -160,3 +160,31 @@ fn an_old_style_index_over_a_sequence_without_a_line_is_refused() {
     let (_, _, status, files) = run_in_dir("oidmask-omn", &volumes, b"");
     assert_eq!((status, files), (0, vec!["o.00.idx".to_string()]));
 }
+
+/// The database `tests/db_search/t5/nhd_utf8` has a title stored as a UTF8String for a
+/// VisibleString (line RG item T5d): NCBI 2.17.0's makembindex writes its warning 803.10, without
+/// a prefix, at the read of that header, inside the line of the volume (probe of T5d merge 18,
+/// 2026-11-23, Linux x86-64; the old style keeps the index out of the fixtures' directory).
+#[test]
+fn a_utf8_string_of_a_header_is_warned_in_the_volume_s_line() {
+    let input =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/t5/nhd_utf8");
+    let input = input.to_string_lossy().into_owned();
+    let words = [
+        "-old_style_index",
+        "true",
+        "-iformat",
+        "blastdb",
+        "-input",
+        &input,
+    ];
+    let (out, err, status, files) = run_in_dir("utf8", &words, b"");
+    assert_eq!((out.as_str(), status), ("", 0));
+    assert_eq!(files, vec!["o.00.idx".to_string()]);
+    assert_eq!(
+        err,
+        "creating @O@.00.idx...Warning: (803.10) CObjectIStreamAsnBinary: UTF8String data for \
+         VisibleString member Blast-def-line-set.E.title, ASN.1 specification may need an \
+         update\ndone\ncreating @O@.01.idx...removed (empty)\n"
+    );
+}

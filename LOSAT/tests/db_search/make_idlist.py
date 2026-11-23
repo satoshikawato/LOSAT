@@ -38,6 +38,13 @@ Databases (the `.pjs`/`.njs` metadata, with the build's paths and dates, are dro
   and the taxid lookup files (`.pot`, `.ptf`, `.pto`) of a build with lx2.map: OIDs 1 and 2 are 9606 in
   their headers and 10090 in the lookup files, so a taxid list selects them and erases every line.
   `lxq.faa` / `lxq.fna` as for `ln`.
+- `lt` (review 2 of D1c-1b, G1): version 5 of lt.faa in two volumes (`lt.00` OID 0, `lt.01` OID 1), taxids from
+  lt.map: OID 1 holds `ref|NP_300002.1|` (10090) and `gnl|BL_ORD_ID|xyz` (9606), a string tag that NCBI's
+  read of a volume after the first cannot make an OID (its exception), also where a list then erases that line.
+  `ltq.faa` is OID 0's sequence.
+- `lnn` (review 1 of D1c-1b, F1): version 5 of lnn.fna (3 nucleotides, taxids from lnn.map), the only line of
+  OID 0 rewritten to have no Seq-id; OID 0 is `lnnq.fna` (the back-translation of `lnnq.faa`), OID 1 the same
+  with every 37th base changed, OID 2 unrelated.
 
 The list files and alias files are written below (`LISTS`, `ALIASES`). The rows of the -db manifests
 that use them are db.il.*; the blastdbcmd cases A272 on (D/fixtures/make_d1c_blastdbcmd.py).
@@ -51,7 +58,8 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent / "idlist"
 SOURCES = {"g.faa", "g.map", "n.fna", "n.map", "q.faa", "nq.fna", "tz.faa", "pz.faa", "tq.faa", "cv0.faa",
-           "cv1.faa", "ln.faa", "ln.map", "lnq.faa", "lx.faa", "lx.map", "lx2.map", "lxq.faa"}
+           "cv1.faa", "ln.faa", "ln.map", "lnq.faa", "lx.faa", "lx.map", "lx2.map", "lxq.faa", "lt.faa", "lt.map",
+           "ltq.faa", "lnn.fna", "lnn.map", "lnnq.fna", "lnnq.faa"}
 
 # An absolute path that is not a file: printed as it is, the same on every machine.
 MISSING = "/losat-idlist-fixture-missing/none.txt"
@@ -272,11 +280,12 @@ def ber_encode(node):
     return bytes([tag, 0x80 | width]) + len(value).to_bytes(width, "big") + value
 
 
-def drop_seqids(base: Path, lines):
+def drop_seqids(base: Path, lines, kind="p"):
     """Empties the Seq-id list (member `seqid`, [1]) of the definition lines `lines` ({oid: {line}},
-    0-based) of the version 5 protein volume `base` (.phr), with the header offsets of `.pin`."""
-    pin = bytearray(base.with_suffix(".pin").read_bytes())
-    phr = base.with_suffix(".phr").read_bytes()
+    0-based) of the version 5 volume `base` (.phr, or .nhr with `kind` "n"), with the header offsets of
+    its index (.pin, .nin: the same layout up to them)."""
+    pin = bytearray(base.with_suffix(f".{kind}in").read_bytes())
+    phr = base.with_suffix(f".{kind}hr").read_bytes()
     at = 12  # version, sequence type, volume number
     for _ in range(3):  # title, LMDB name, date
         at += 4 + struct.unpack(">i", pin[at:at + 4])[0]
@@ -300,8 +309,8 @@ def drop_seqids(base: Path, lines):
     starts.append(len(out))
     for i, start in enumerate(starts):
         pin[at + 4 * i:at + 4 * i + 4] = struct.pack(">i", start)
-    base.with_suffix(".phr").write_bytes(bytes(out))
-    base.with_suffix(".pin").write_bytes(bytes(pin))
+    base.with_suffix(f".{kind}hr").write_bytes(bytes(out))
+    base.with_suffix(f".{kind}in").write_bytes(bytes(pin))
 
 
 def back_translate(faa: Path, fna: Path):
@@ -315,7 +324,8 @@ def back_translate(faa: Path, fna: Path):
 
 
 def build_d1c1b(mk, common):
-    """The databases of D1c-1b: ln (lines without Seq-ids), lx (header taxids apart from the lookup's)."""
+    """The databases of D1c-1b: ln and lnn (lines without Seq-ids), lx (header taxids apart from the
+    lookup's), lt (a string BL_ORD_ID tag in a later volume)."""
     run([mk, "-in", "ln.faa", "-dbtype", "prot", "-out", "ln", "-title", "ln", *common, "ln.map"])
     drop_seqids(OUT / "ln", {1: {1}, 2: {0}, 3: {0}})
     run([mk, "-in", "lx.faa", "-dbtype", "prot", "-out", "lx2", "-title", "lx", *common, "lx2.map"])
@@ -326,6 +336,10 @@ def build_d1c1b(mk, common):
         path.unlink()
     back_translate(OUT / "lnq.faa", OUT / "lnq.fna")
     back_translate(OUT / "lxq.faa", OUT / "lxq.fna")
+    run([mk, "-in", "lt.faa", "-dbtype", "prot", "-out", "lt", "-title", "lt", *common, "lt.map",
+         "-max_file_sz", "1000B"])
+    run([mk, "-in", "lnn.fna", "-dbtype", "nucl", "-out", "lnn", "-title", "lnn", *common, "lnn.map"])
+    drop_seqids(OUT / "lnn", {0: {0}}, "n")
 
 
 def main():

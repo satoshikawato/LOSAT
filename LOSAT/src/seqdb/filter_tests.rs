@@ -635,7 +635,7 @@ fn a_sequence_kept_without_a_definition_line_gets_no_seq_align() {
 }
 
 #[test]
-fn a_negative_list_with_ids_excludes_its_lineless_sequences_at_the_fetches() {
+fn every_negative_list_excludes_its_lineless_sequences_at_the_fetches() {
     // A negative seqid list keeps a line with an id that is neither a gi nor a ti nor listed.
     // prot_v4's sequences 14 (`gi|1414`) and 28 (`gnl|ti|123`) have one line, with a gi or a
     // ti only, and the one line of sequence 11, `ref|XP_000011.2|`, is the list's

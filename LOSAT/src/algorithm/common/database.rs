@@ -1084,8 +1084,8 @@ impl<'a> LineCheck<'a> {
 pub(crate) struct FetchExcluded<'a>(LineCheck<'a>);
 
 impl<'a> FetchExcluded<'a> {
-    /// The check of `db`'s fetches; `None` where they exclude nothing (no negative seqid list
-    /// with ids).
+    /// The check of `db`'s fetches; `None` where they exclude nothing (no negative seqid
+    /// list).
     pub(crate) fn of(db: &'a SeqDb) -> Option<Self> {
         db.excludes_lineless_at_fetch()
             .then(|| FetchExcluded(LineCheck::new(db)))
@@ -3244,14 +3244,15 @@ pub(crate) fn reports_may_refuse(
      -> std::result::Result<(), ReportRefusal> {
         // A sequence left without a line gets no Seq-align (`SeqAligned`): none of its hits is
         // reported, so it cannot make a report refuse (an error of its header comes below). The
-        // header read here is the filtered one (`SeqDb::keeps_line` decides alike): a set of no
-        // line is such a sequence; only a read that failed is asked again (a seqid list's read
-        // of a sequence it leaves no line refuses; review 1 of line RG D1c-1b, F2).
+        // header read here is the filtered one: a sequence with a line is kept without asking
+        // again (review 1 of line RG D1c-1b, F2). A set of no line and a read that failed ask
+        // `SeqDb::keeps_line` (a volume that filters no line keeps a record of none, and a seqid
+        // list's read of a sequence it leaves no line fails; review 2 of D1c-1b, G3).
         if lineless_dropped
             && match &header {
-                Ok(crate::seqdb::SequenceHeader::Ordinal(lines)) => lines.is_empty(),
-                Ok(crate::seqdb::SequenceHeader::Parsed(set)) => set.deflines.is_empty(),
-                Err(_) => matches!(db.keeps_line(ordinal), Ok(false)),
+                Ok(crate::seqdb::SequenceHeader::Ordinal(lines)) if !lines.is_empty() => false,
+                Ok(crate::seqdb::SequenceHeader::Parsed(set)) if !set.deflines.is_empty() => false,
+                _ => matches!(db.keeps_line(ordinal), Ok(false)),
             }
         {
             return Ok(());

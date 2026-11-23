@@ -667,7 +667,9 @@ impl Volume {
     // accession table of `makeblastdb -input_type blastdb`, or a FASTA id `gnl|BL_ORD_ID|n` of
     // `-parse_seqids`), so on a list of databases or a database of several volumes the OID it
     // found may keep no line, and a line with another id may be kept or removed by the sum
-    // (line DBID ordsl, DECISIONS 55).
+    // (line DBID ordsl, DECISIONS 55). The read adjusts every line before any test, under every
+    // list (a taxid list too): a string tag on a line that the list then erases ends the read
+    // (review 2 G1 of line RG D1c-1b).
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2023-2034
     // The search's list and the alias files' lists attached to the volume test each line's
     // Seq-ids as NCBI's filtered header read does (`filter::line_mask`): an exception of NCBI's
@@ -691,12 +693,19 @@ impl Volume {
         };
         let reads_seqids = alias.is_some() || user.is_some_and(|rule| rule.rule.reads_seqids());
         let adjusted;
-        let set = if volume_start > 0 && reads_seqids && super::has_ordinal_tag(set) {
+        let set = if volume_start > 0 && super::has_ordinal_tag(set) {
             let mut copy = set.clone();
-            super::adjust_ordinal_tags(&mut copy, volume_start)
-                .map_err(|error| error.error(&self.base, volume_start + oid))?;
-            adjusted = copy;
-            &adjusted
+            match super::adjust_ordinal_tags(&mut copy, volume_start) {
+                Ok(_) => {
+                    adjusted = copy;
+                    &adjusted
+                }
+                // A taxid rule compares no Seq-id: NCBI's sum past a signed 32-bit id raises no
+                // exception and changes none of its tests, and the reports adjust the kept lines
+                // again where they read them.
+                Err(super::OrdinalTagError::PastSigned32) if !reads_seqids => set,
+                Err(error) => return Err(error.error(&self.base, volume_start + oid)),
+            }
         } else {
             set
         };

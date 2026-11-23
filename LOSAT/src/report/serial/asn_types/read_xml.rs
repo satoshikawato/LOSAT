@@ -1,7 +1,7 @@
 //! The primitives of NCBI's XML object input stream (`CObjectIStreamXml`) as the object stack of
 //! `read` calls them (`Input`): the ASN.1-style XML of `CObjectIStream::Open` with `eSerial_Xml`
-//! (psiblast's and tblastn's `-in_pssm` of an XML PSSM, `in >> MSerial_Xml`; blast_formatter's
-//! archive), where each type of an ASN.1 module is a tag (`<Seq-id>`), each member of a SEQUENCE
+//! (psiblast's and tblastn's `-in_pssm` of an XML PSSM, read with the XML manipulator;
+//! blast_formatter's archive), where each type of an ASN.1 module is a tag (`<Seq-id>`), each member of a SEQUENCE
 //! or variant of a CHOICE is a tag named by its parent (`<Seq-id_local>`), the elements of a list
 //! of anonymous types are `<Parent_E>`, and an ENUMERATED or BOOLEAN is the attribute
 //! `value="..."` of its tag.
@@ -134,8 +134,11 @@ const SKIP_STACK_TAG_NAME: ThrowSite = xml_site(
     "CSerialException::eIllegalCall",
     "ncbi::CObjectIStreamXml::SkipStackTagName",
 );
-const SKIP_STACK_TAG_CHAR: ThrowSite =
-    xml_site(1559, FORMAT_ERROR, "ncbi::CObjectIStreamXml::SkipStackTagName");
+const SKIP_STACK_TAG_CHAR: ThrowSite = xml_site(
+    1559,
+    FORMAT_ERROR,
+    "ncbi::CObjectIStreamXml::SkipStackTagName",
+);
 const OPEN_TAG: ThrowSite = xml_site(1572, FORMAT_ERROR, "ncbi::CObjectIStreamXml::OpenTag");
 const CLOSE_TAG: ThrowSite = xml_site(1583, FORMAT_ERROR, "ncbi::CObjectIStreamXml::CloseTag");
 const OPEN_STACK_TAG: ThrowSite =
@@ -143,8 +146,11 @@ const OPEN_STACK_TAG: ThrowSite =
 const CLOSE_STACK_TAG: ThrowSite =
     xml_site(1617, FORMAT_ERROR, "ncbi::CObjectIStreamXml::CloseStackTag");
 // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2105-2114
-const UNEXPECTED_MEMBER: ThrowSite =
-    xml_site(2113, FORMAT_ERROR, "ncbi::CObjectIStreamXml::UnexpectedMember");
+const UNEXPECTED_MEMBER: ThrowSite = xml_site(
+    2113,
+    FORMAT_ERROR,
+    "ncbi::CObjectIStreamXml::UnexpectedMember",
+);
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1501 (`ReadChoiceSimple`: "choice
 // variant id expected" when `BeginChoiceVariant` finds none)
 const CHOICE_VARIANT_EXPECTED: ThrowSite = ThrowSite {
@@ -158,8 +164,7 @@ const BOOL_VALUE_EXPECTED: ThrowSite = xml_site(969, FORMAT_ERROR, READ_BOOL);
 const BOOL_NOT_EMPTY: ThrowSite = xml_site(975, FORMAT_ERROR, READ_BOOL);
 const READ_NULL: ThrowSite = xml_site(1047, FORMAT_ERROR, "ncbi::CObjectIStreamXml::ReadNull");
 const SKIP_NULL: ThrowSite = xml_site(2728, FORMAT_ERROR, "ncbi::CObjectIStreamXml::SkipNull");
-const READ_DOUBLE: ThrowSite =
-    xml_site(1040, FORMAT_ERROR, "ncbi::CObjectIStreamXml::ReadDouble");
+const READ_DOUBLE: ThrowSite = xml_site(1040, FORMAT_ERROR, "ncbi::CObjectIStreamXml::ReadDouble");
 const SKIP_S_NUMBER: ThrowSite =
     xml_site(2669, FORMAT_ERROR, "ncbi::CObjectIStreamXml::SkipSNumber");
 const SKIP_U_NUMBER: ThrowSite =
@@ -545,8 +550,8 @@ impl<S: AsnSource> XmlInput<S> {
     /// The member or variant of `items` that the tag in `last_tag` names (`Parent_member`), from
     /// `pos` on.
     fn find_item(&self, items: &(impl Items + ?Sized), pos: usize) -> R<Option<usize>> {
-        let id =
-            skip_stack_tag_char(&self.frames, &self.x.last_tag, 1, b'_').map_err(|e| self.tag_error(e))?;
+        let id = skip_stack_tag_char(&self.frames, &self.x.last_tag, 1, b'_')
+            .map_err(|e| self.tag_error(e))?;
         Ok((pos..items.count()).find(|&index| items.name(index).as_bytes() == id))
     }
 
@@ -1037,7 +1042,14 @@ impl<S: AsnSource> Input for XmlInput<S> {
     /// `BeginClass`: the tag of a class with a name.
     fn begin_class(&mut self) -> R<()> {
         let name = self.top_name();
-        step!(self, if name.is_empty() { Ok(()) } else { self.open_tag(name) })
+        step!(
+            self,
+            if name.is_empty() {
+                Ok(())
+            } else {
+                self.open_tag(name)
+            }
+        )
     }
 
     /// `BeginClassMember` of a SEQUENCE of an ASN.1 module: the member whose tag,
@@ -1061,14 +1073,28 @@ impl<S: AsnSource> Input for XmlInput<S> {
     /// `EndClass`: the closing tag of a class with a name.
     fn end_class(&mut self) -> R<()> {
         let name = self.top_name();
-        step!(self, if name.is_empty() { Ok(()) } else { self.close_tag(name) })
+        step!(
+            self,
+            if name.is_empty() {
+                Ok(())
+            } else {
+                self.close_tag(name)
+            }
+        )
     }
 
     /// `BeginChoice`: the tag of a choice with a name.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2391-2409
     fn begin_choice(&mut self) -> R<()> {
         let name = self.top_name();
-        step!(self, if name.is_empty() { Ok(()) } else { self.open_tag(name) })
+        step!(
+            self,
+            if name.is_empty() {
+                Ok(())
+            } else {
+                self.open_tag(name)
+            }
+        )
     }
 
     /// `BeginChoiceVariant` of a CHOICE of an ASN.1 module: the variant whose tag,
@@ -1098,7 +1124,14 @@ impl<S: AsnSource> Input for XmlInput<S> {
 
     fn end_choice(&mut self) -> R<()> {
         let name = self.top_name();
-        step!(self, if name.is_empty() { Ok(()) } else { self.close_tag(name) })
+        step!(
+            self,
+            if name.is_empty() {
+                Ok(())
+            } else {
+                self.close_tag(name)
+            }
+        )
     }
 
     /// `ReadContainer` of a container without a name calls no `BeginContainer`.
@@ -1157,7 +1190,10 @@ impl<S: AsnSource> Input for XmlInput<S> {
     }
 
     fn read_u32(&mut self) -> R<u32> {
-        step!(self, self.number(u64::from(u32::MAX), false).map(|n| n as u32))
+        step!(
+            self,
+            self.number(u64::from(u32::MAX), false).map(|n| n as u32)
+        )
     }
 
     fn skip_number(&mut self, signed: bool) -> R<()> {

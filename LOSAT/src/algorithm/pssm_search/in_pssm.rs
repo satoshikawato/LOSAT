@@ -214,7 +214,9 @@ pub(crate) fn read_in_pssm(
         PssmFileFormat::BinaryAsn { start } => {
             crate::blastinput::pssm_text::read_pssm_binary(&bytes[start..])
         }
-        PssmFileFormat::Xml { start } => crate::blastinput::pssm_text::read_pssm_xml(&bytes[start..]),
+        PssmFileFormat::Xml { start } => {
+            crate::blastinput::pssm_text::read_pssm_xml(&bytes[start..])
+        }
         PssmFileFormat::Unsupported => {
             return Err(crate::blastinput::app::options_error(
                 "Unsupported format for PSSM",

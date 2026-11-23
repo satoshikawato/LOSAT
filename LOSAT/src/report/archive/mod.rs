@@ -733,6 +733,11 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     }
     fn delayed(&mut self, _: &[u8]) {}
     fn unread_delayed(&mut self) {}
+    /// A delayed member whose read posts replaced bytes: written through `Traced`, which posts
+    /// them.
+    fn delayed_posts(&mut self, _: &[crate::report::serial::encoder::ReplacedChar]) {
+        self.as_is = false;
+    }
     fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
         None
     }

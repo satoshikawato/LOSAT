@@ -73,19 +73,37 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
 /// (`Value::Delayed`): a stream of that format copies them (`WriteClassMember` of the buffer,
 /// `Encoder::data_format`, `Encoder::delayed`); a stream of another format reads them first
 /// (`CDelayBuffer::Update`: `read::read_delayed`, a stream of their format under the frames of
-/// the member) and writes the value read. The read posts a message or fails where NCBI's skip
-/// did not (a VisibleString byte replaced, a number past its storage), which NCBI reports while
-/// it writes: LOSAT does not write such a member (`Encoder::unread_delayed`).
+/// the member) and writes the value read. That read posts where NCBI's skip did not: a
+/// VisibleString byte replaced by `#` (803.7), which NCBI posts before it writes the member
+/// (`Encoder::delayed_posts`), then writes the `#`. A read that fails (a number past its
+/// storage: NCBI's exception from inside its writer, after the bytes it had written) or posts
+/// another message is not written (`Encoder::unread_delayed`).
 fn write_delayed<E: Encoder>(enc: &mut E, ty: u16, encoding: Encoding, bytes: &[u8]) {
     if enc.data_format() == Some(encoding) {
         enc.delayed(bytes);
         return;
     }
     let (class, member) = super::delayed_member(ty);
-    match super::read::read_delayed(encoding, bytes, class, member) {
-        (Ok(value), posts) if posts.is_empty() => write_value(enc, ty, &value),
-        _ => enc.unread_delayed(),
+    let (value, posts) = super::read::read_delayed(encoding, bytes, class, member);
+    let Ok(value) = value else {
+        enc.unread_delayed();
+        return;
+    };
+    if !posts.is_empty() {
+        let replaced: Option<Vec<_>> = posts
+            .into_iter()
+            .map(|post| match post {
+                super::read::Post::BadChar(replaced) => Some(replaced),
+                _ => None,
+            })
+            .collect();
+        let Some(replaced) = replaced else {
+            enc.unread_delayed();
+            return;
+        };
+        enc.delayed_posts(&replaced);
     }
+    write_value(enc, ty, &value);
 }
 
 /// `value` as one document of its type (an object written to a stream after `MSerial_AsnText`:

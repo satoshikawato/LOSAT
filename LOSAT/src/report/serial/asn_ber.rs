@@ -14,7 +14,7 @@
 use super::asn_ber_reader::{
     REAL_DECIMAL, REAL_MINUS_INFINITY, REAL_NOT_A_NUMBER, REAL_PLUS_INFINITY,
 };
-use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
+use super::encoder::{Encoder, Replaced, ReplacedChar, SerialError, Stream, StreamPosition};
 use super::real::double_to_string_posix;
 
 /// `DBL_DIG`: the precision of `WriteDouble` (`WriteDouble2` of `data` with `DBL_DIG`).
@@ -302,6 +302,12 @@ impl Encoder for AsnBinaryEncoder<'_> {
                 "a member read into a delay buffer of another format whose value NCBI reads with a \
                  message or an error",
             ));
+        }
+    }
+
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        if let (None, Some(first)) = (&self.error, posts.first()) {
+            self.error = Some(SerialError::NonVisibleChar(first.byte));
         }
     }
 

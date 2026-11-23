@@ -293,9 +293,23 @@ pub trait Encoder {
     /// read first and written by its values (`CDelayBuffer::Update`, `asn_types::write`).
     fn delayed(&mut self, bytes: &[u8]);
     /// A member that NCBI's reader kept in a delay buffer of another format and that NCBI's
-    /// `CDelayBuffer::Update` reads again with a message or an error before it writes it
-    /// (`asn_types::write`): LOSAT does not write it (`SerialError::Unwritten`).
+    /// `CDelayBuffer::Update` reads again with an error, or with a message that the encoder does
+    /// not post (`delayed_posts`), before it writes it (`asn_types::write`): LOSAT does not write
+    /// it (`SerialError::Unwritten`).
     fn unread_delayed(&mut self);
+    /// The posts of the bytes that `CDelayBuffer::Update`'s read of a delayed member of another
+    /// format replaced (803.7, `ReplacedChar`: the trace of that read's own stack, the position in
+    /// the buffer), which NCBI makes before it writes the member (`WriteLongMember` calls `Update`
+    /// before `WriteClassMember`; `asn_types::write` then writes the value read). `Traced` posts
+    /// them as its own (`Posted`, at what NCBI's buffer had written before the member); an encoder
+    /// that keeps no stack reports them as a byte it replaced (`SerialError::NonVisibleChar`,
+    /// after which its callers write the document again through `Traced`); the default writes
+    /// no such member (`unread_delayed`).
+    // NCBI reference (598d8ae6): c++/src/serial/member.cpp:1084-1103
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        let _ = posts;
+        self.unread_delayed();
+    }
     /// The bytes that `flush_to` would hand over (0 for an encoder that cannot flush).
     fn buffered(&self) -> usize {
         0
@@ -407,6 +421,8 @@ pub struct Traced<E, P = fn(&ReplacedChar) -> std::io::Result<()>> {
     foreign: usize,
     posted: Vec<Posted>,
     post: Option<P>,
+    /// What NCBI's buffer had written when the last member started (`delayed_posts`).
+    member_written: u64,
 }
 
 /// The empty string of the XML stream's messages.
@@ -450,6 +466,7 @@ impl<E: Encoder> Traced<E> {
             handed: 0,
             posted: Vec::new(),
             post: None,
+            member_written: 0,
         }
     }
 
@@ -480,6 +497,7 @@ impl<E: Encoder> Traced<E> {
             foreign: self.foreign,
             posted: self.posted,
             post: Some(post),
+            member_written: self.member_written,
         }
     }
 }
@@ -699,6 +717,7 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
         self.call(Piece::Markup, |inner| inner.end_named());
     }
     fn member(&mut self, name: &str, tag: u8) {
+        self.member_written = self.buffer.as_ref().map_or(0, OutBuffer::written);
         self.frames.push(Frame::Named(name.to_string()));
         self.call(Piece::Markup, |inner| inner.member(name, tag));
     }
@@ -767,6 +786,13 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     }
     fn unread_delayed(&mut self) {
         self.call(Piece::Raw, |inner| inner.unread_delayed());
+    }
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        let written = self.member_written;
+        self.posted.extend(posts.iter().map(|replaced| Posted {
+            written,
+            replaced: replaced.clone(),
+        }));
     }
     fn buffered(&self) -> usize {
         self.inner.buffered()

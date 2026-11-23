@@ -172,8 +172,8 @@ pub(crate) enum NumberStop {
 /// before the check. The position after the bytes taken and the number, or why it stops. The one
 /// port of NCBI's numbers of an input buffer, for the ASN.1 text reader (`Reader::get_number`) and
 /// the XML reader (`xml_reader::XmlReader::get_number`), whose streams read them from the same
-/// buffer. The negation of the largest magnitude wraps to the least number (`-Int4(n)` of
-/// n = 2^31 is the least Int4, likewise in 64 bits).
+/// buffer. The negation of the largest magnitude wraps to the least number (2^31 negated as an
+/// Int4 is the least Int4, likewise in 64 bits).
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
 // (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
 #[inline(always)]
@@ -1247,18 +1247,6 @@ impl<S: AsnSource> Reader<S> {
             NumberStop::Eof => self.end_of_text(),
             NumberStop::Bad => self.bad_number(),
             NumberStop::Overflow => self.number_overflow(),
-        }
-    }
-
-    /// `PeekChar()` at `pos`: the end of the text is [`AsnTextErrorKind::Eof`] at `pos`.
-    #[inline]
-    pub(crate) fn char_at(&mut self, pos: usize) -> Result<u8> {
-        match self.src.byte_at(pos) {
-            Some(c) => Ok(c),
-            None => {
-                self.pos = pos;
-                Err(self.end_of_text())
-            }
         }
     }
 

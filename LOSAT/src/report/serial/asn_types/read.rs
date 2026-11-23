@@ -41,9 +41,9 @@
 //! stack passes on; the `std::exception`s of a reserve; and LOSAT's refusals of what its readers do
 //! not take.
 
-use super::{resolved, EnumValue, Kind, Member, Storage, Value, DELAYED};
 use super::read_xml::{XmlInput, XmlStyle, MISSING_VALUE};
 use super::Encoding;
+use super::{resolved, EnumValue, Kind, Member, Storage, Value, DELAYED};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
 use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{

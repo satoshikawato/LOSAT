@@ -683,6 +683,10 @@ impl<E: Encoder> Encoder for Flushing<'_, E> {
         self.inner.unread_delayed();
         self.flush();
     }
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        self.inner.delayed_posts(posts);
+        self.flush();
+    }
     fn error(&self) -> Option<SerialError> {
         self.inner.error()
     }

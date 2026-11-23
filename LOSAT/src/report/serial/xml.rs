@@ -1047,6 +1047,12 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         ));
     }
 
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        if let Some(first) = posts.first() {
+            self.fail(SerialError::NonVisibleChar(first.byte));
+        }
+    }
+
     /// `WriteBytes` of the object mode: the bytes as upper-case hex digits, unwrapped
     /// (`WriteBytes`, objostrxml.cpp:1702-1709); the other pieces write no OCTET STRING.
     fn octets(&mut self, value: &[u8]) {

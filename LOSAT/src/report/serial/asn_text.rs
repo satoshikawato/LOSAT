@@ -13,7 +13,7 @@
 //! NCBI wrote, `out_buffer::OutBuffer`, which keeps those 80 bytes): either way it holds every
 //! byte that the wrap looks at.
 
-use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
+use super::encoder::{Encoder, Replaced, ReplacedChar, SerialError, Stream, StreamPosition};
 use super::real::write_asn_text_double;
 
 /// The column after which a VisibleString is wrapped (`WrapAt` at 78 with `true`).
@@ -382,6 +382,12 @@ impl Encoder for AsnTextEncoder<'_> {
                 "a member read into a delay buffer of another format whose value NCBI reads with a \
                  message or an error",
             ));
+        }
+    }
+
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        if let (None, Some(first)) = (&self.error, posts.first()) {
+            self.error = Some(SerialError::NonVisibleChar(first.byte));
         }
     }
 

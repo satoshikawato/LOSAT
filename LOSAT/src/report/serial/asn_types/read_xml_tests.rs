@@ -12,7 +12,7 @@ use super::{read_document, type_info, Encoding, Kind, Value};
 use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::asn_text_reader::SliceSource;
-use crate::report::serial::encoder::{Encoder, ReplacedChar, StreamPosition};
+use crate::report::serial::encoder::{Encoder, ReplacedChar, SerialError, StreamPosition, Traced};
 use crate::report::serial::xml::XmlEncoder;
 
 /// What the XML stream reads of `bytes` as the root type `root`, in the ASN.1 style.
@@ -312,7 +312,10 @@ fn control_characters_are_replaced_and_posted_with_their_line() {
     };
     assert_eq!(
         posts,
-        vec![replaced("Dbtag.db", 0x01, line), replaced("Dbtag.db", 0x07, line)]
+        vec![
+            replaced("Dbtag.db", 0x01, line),
+            replaced("Dbtag.db", 0x07, line)
+        ]
     );
     assert_eq!(
         posts[0].line("blast_formatter"),
@@ -507,7 +510,10 @@ fn the_delayed_member_is_kept_unparsed_and_read_on_a_write_of_another_format() {
     };
     assert_eq!(*encoding, Encoding::Xml);
     let bytes = String::from_utf8(bytes.clone()).expect("ASCII");
-    assert!(bytes.trim_start().starts_with("<Auth-list_names_std>"), "{bytes}");
+    assert!(
+        bytes.trim_start().starts_with("<Auth-list_names_std>"),
+        "{bytes}"
+    );
     assert!(bytes.ends_with("</Auth-list_names_std>"), "{bytes}");
     // Written in ASN.1 text: read again, written by its values.
     assert_eq!(text_of(&value, named::AUTH_LIST), AUTH);
@@ -518,32 +524,75 @@ fn the_delayed_member_is_kept_unparsed_and_read_on_a_write_of_another_format() {
     let (value, posts) = read(ctrl.as_bytes(), named::AUTH_LIST);
     assert!(posts.is_empty(), "{posts:?}");
     let value = value.expect("read");
-    // Its read before a text write posts, so LOSAT does not write it.
+    // A text write reads it first; the read posts the byte (803.7) under its own frames, with the
+    // line in the buffer and no string, and the member is written with `#` (NCBI 2.17.0's
+    // psiblast -in_pssm of such an XML PSSM with -out_pssm: "Auth-list.names.std.name.str / Bad
+    // char [0x1] in string at line 6", probe dl_ctrl of line RG-F3 agent D6, 2026-11-23). The
+    // encoder alone reports it as a replaced byte of its own; through `Traced` it is posted.
     let mut out = Vec::new();
     let mut enc = AsnTextEncoder::new(&mut out);
     write_document(&mut enc, named::AUTH_LIST, &value);
-    assert!(enc.error().is_some());
+    assert_eq!(enc.error(), Some(SerialError::NonVisibleChar(1)));
     drop(enc);
-    // The read under NCBI's frames: the post names `Auth-list.names`.
+    let mut out = Vec::new();
+    let mut enc = Traced::new(AsnTextEncoder::new(&mut out), 0);
+    write_document(&mut enc, named::AUTH_LIST, &value);
+    assert_eq!(enc.error(), None);
+    let posted = enc.take_replaced_chars();
+    drop(enc);
+    assert_eq!(
+        String::from_utf8(out).expect("ASCII"),
+        AUTH.replace("Smith", "S#mith")
+    );
     let Value::Sequence(members) = &value else {
         panic!("{value:?}")
     };
     let Value::Delayed { bytes, .. } = &members[0].1 else {
         panic!("{members:?}")
     };
+    let at = bytes.iter().position(|&b| b == 1).expect("the byte");
+    let line = 1 + bytes[..at].iter().filter(|&&b| b == b'\n').count() as u64;
+    assert_eq!(
+        posted,
+        vec![ReplacedChar {
+            trace: "Auth-list.names.std.name.name.last".into(),
+            byte: 1,
+            position: StreamPosition::Line(line),
+            string: Vec::new().into(),
+        }]
+    );
+    // The same read alone.
     let (class, member) = super::delayed_member(super::members(named::AUTH_LIST)[0].ty);
     let (read_again, posts) = read_delayed(Encoding::Xml, bytes, class, member);
     assert!(read_again.is_ok(), "{read_again:?}");
-    match posts.as_slice() {
-        [Post::BadChar(replaced)] => {
-            assert!(
-                replaced.trace.starts_with("Auth-list.names.std.E.name"),
-                "{}",
-                replaced.trace
-            );
-        }
-        other => panic!("{other:?}"),
-    }
+    assert_eq!(posts, vec![Post::BadChar(posted[0].clone())]);
+    // A number past its storage inside it: read without an error, not written in text (NCBI's
+    // exception from its writer, probe dl_ovf: rc 255 after 283 bytes of the PSSM file).
+    let ovf = document.replace(
+        "<Person-id_name>",
+        "<Person-id_dbtag><Dbtag><Dbtag_db>x</Dbtag_db><Dbtag_tag><Object-id>\
+         <Object-id_id>99999999999</Object-id_id></Object-id></Dbtag_tag></Dbtag>\
+         </Person-id_dbtag><Person-id_name>",
+    );
+    let ovf = remove_between(&ovf, "<Person-id_name>", "</Person-id_name>");
+    let (value, posts) = read(ovf.as_bytes(), named::AUTH_LIST);
+    assert!(posts.is_empty(), "{posts:?}");
+    let value = value.expect("read");
+    let mut out = Vec::new();
+    let mut enc = Traced::new(AsnTextEncoder::new(&mut out), 0);
+    write_document(&mut enc, named::AUTH_LIST, &value);
+    assert!(
+        matches!(enc.error(), Some(SerialError::Unwritten(_))),
+        "{:?}",
+        enc.error()
+    );
+}
+
+/// `text` without the first `from` and everything up to and including the next `to`.
+fn remove_between(text: &str, from: &str, to: &str) -> String {
+    let start = text.find(from).expect("from");
+    let end = start + text[start..].find(to).expect("to") + to.len();
+    format!("{}{}", &text[..start], &text[end..])
 }
 
 /// The XML of `value` of the root type `root` (`xml`'s writer).

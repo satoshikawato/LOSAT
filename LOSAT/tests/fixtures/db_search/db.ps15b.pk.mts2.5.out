@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>psiblast</BlastOutput_program>
+  <BlastOutput_version>PSIBLAST 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Alejandro A. Sch&amp;auml;ffer, L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001), &quot;Improving the accuracy of PSI-BLAST protein database searches with composition-based statistics and other refinements&quot;, Nucleic Acids Res. 29:2994-3005.</BlastOutput_reference>
+  <BlastOutput_db>tests/db_search/paja</BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>YP_009220615.1 putative protein kinase [White spot syndrome virus]</BlastOutput_query-def>
+  <BlastOutput_query-len>730</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>BLOSUM62</Parameters_matrix>
+      <Parameters_expect>10</Parameters_expect>
+      <Parameters_gap-open>11</Parameters_gap-open>
+      <Parameters_gap-extend>1</Parameters_gap-extend>
+      <Parameters_filter>F</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>YP_009220615.1 putative protein kinase [White spot syndrome virus]</Iteration_query-def>
+  <Iteration_query-len>730</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|53</Hit_id>
+  <Hit_def>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>53</Hit_accession>
+  <Hit_len>815</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>503.056</Hsp_bit-score>
+      <Hsp_score>1294</Hsp_score>
+      <Hsp_evalue>5.06504e-170</Hsp_evalue>
+      <Hsp_query-from>99</Hsp_query-from>
+      <Hsp_query-to>722</Hsp_query-to>
+      <Hsp_hit-from>189</Hsp_hit-from>
+      <Hsp_hit-to>812</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>271</Hsp_identity>
+      <Hsp_positive>380</Hsp_positive>
+      <Hsp_gaps>30</Hsp_gaps>
+      <Hsp_align-len>639</Hsp_align-len>
+      <Hsp_qseq>YNFNRNKKKRPITIDENQFATLNPTYATDIIKKQQL---------PSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGS---KNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAVGVRKMCVEGFCVEMDFAGISVIDVLNGDLKCKMDENV-VQQPNPSTTSSKPAAELMQDHGSLCRMRDTLYGVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEIVNIVTRLSQQGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGT--DERFFSNHPHTAPEFINSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVSKMYDQEKTNRPRAYEIAPVIGACFPFKDNIAKLFQSPKH</Hsp_qseq>
+      <Hsp_hseq>FNNNSHSKKIITHIPKSQMATKNNSYAADIITSSSSMSYRSNNTKSAIVTRSTTQRHSNN------KYFQQPKRACFQNISLKARVYTPLSILRSQILGGDHLGSLCEPVTETIIIRRDANSLEKWLTLKDTPSYFQRAEVNTNISCAQNSNYSFIRRVANFALIKPIQRVIERYSEIHTNCELAITKSYTLTPNQTRGYKLPDNMWPVGYDGGCDKPTMCVDISPFKTYRNYCTTH-------LDLLYLARDVFKLSQESYERIMKKETTLLFEVSWCCKQWCNNRKGVSRPPHVPEAYFPYTVFITPSERFLEVKLGVYYMLDTGRVIKFMTRPECLTEFVLESLFGFGIQGNLKGAVGVLSVCPEGFCLEMEFAGMALQDVLNGDLNCNLNGPVPPHNQNQHLRIDKP--EMIQHHMAPSKLKGILYNVRMLQVTGNLPDELKKKCTLHITDSHAAVGVANLMRDRFLNQLPFALTEIINIVTRLSQQGLVNPDIKADNIVIDGSTGQPKMIDFGLLLPADYCDKVKRRNNPYPENVYNLYPQTAPEYLQGRMCNEAAMTYGLSYLISFVIATLSSRTTDFAVGSMKTNIKLSFLLGLAYDKCASKRPKPYILTKAIAGCFPLQEKIMKLFLNPKH</Hsp_hseq>
+      <Hsp_midline>+N N + KK    I ++Q AT N +YA DII               ++   S  ++H  N      K F  P  A F  ++LKAR YTPLS+LRS + G  HL S C+ VTET +++R+ +S++KW+ L+  P YF  AE +TNI+    S +  IR+ A   LI  +Q V   Y  I  +C  A  K+     +  R  + P + WPVG+     K    +D SP   +   C  +       + + ++A++VFKLS  + E I++K+TTLL EV+  CK+W + R+ +  P HV   Y    V I PSE +LEVK+GVYYML+TG+VIKFMT  E   EFV E++F   ++G +KGAVGV  +C EGFC+EM+FAG+++ DVLNGDL C ++  V     N      KP  E++Q H +  +++  LY VRMLQ TG LP+ L+ KC   ITDS +A+ +   MR+R LNQLPF L EI+NIVTRLSQQGLVNPDIK+DNIVIDG TGQPKMIDFGL++P       K       E  ++ +P TAPE++   +C+E AMT+GL+YL+  +++ L  RT D +  S+ TNI    ++   YD+  + RP+ Y +   I  CFP ++ I KLF +PKH</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|72</Hit_id>
+  <Hit_def>BDT63570.1 wsv260-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>72</Hit_accession>
+  <Hit_len>826</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>25.0238</Hsp_bit-score>
+      <Hsp_score>53</Hsp_score>
+      <Hsp_evalue>1.30839</Hsp_evalue>
+      <Hsp_query-from>400</Hsp_query-from>
+      <Hsp_query-to>444</Hsp_query-to>
+      <Hsp_hit-from>720</Hsp_hit-from>
+      <Hsp_hit-to>764</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>18</Hsp_identity>
+      <Hsp_positive>28</Hsp_positive>
+      <Hsp_gaps>4</Hsp_gaps>
+      <Hsp_align-len>47</Hsp_align-len>
+      <Hsp_qseq>LEVKVGVYYM--LETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKG</Hsp_qseq>
+      <Hsp_hseq>LQVKTGELMMGPLKT-QLVEYKTNTEKIKLLMAESTTSHQ-EGRMKG</Hsp_hseq>
+      <Hsp_midline>L+VK G   M  L+T +++++ T+ E     + E+  SH  EGRMKG</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>86</Statistics_db-num>
+      <Statistics_db-len>66738</Statistics_db-len>
+      <Statistics_hsp-len>71</Statistics_hsp-len>
+      <Statistics_eff-space>39956488</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>2</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>YP_009220615.1 putative protein kinase [White spot syndrome virus]</Iteration_query-def>
+  <Iteration_query-len>730</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|53</Hit_id>
+  <Hit_def>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>53</Hit_accession>
+  <Hit_len>815</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>1022.31</Hsp_bit-score>
+      <Hsp_score>2642</Hsp_score>
+      <Hsp_evalue>0</Hsp_evalue>
+      <Hsp_query-from>96</Hsp_query-from>
+      <Hsp_query-to>722</Hsp_query-to>
+      <Hsp_hit-from>186</Hsp_hit-from>
+      <Hsp_hit-to>812</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>272</Hsp_identity>
+      <Hsp_positive>381</Hsp_positive>
+      <Hsp_gaps>30</Hsp_gaps>
+      <Hsp_align-len>642</Hsp_align-len>
+      <Hsp_qseq>STPYNFNRNKKKRPITIDENQFATLNPTYATDIIK---------KQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGS---KNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAVGVRKMCVEGFCVEMDFAGISVIDVLNGDLKCKMDENV-VQQPNPSTTSSKPAAELMQDHGSLCRMRDTLYGVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEIVNIVTRLSQQGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGT--DERFFSNHPHTAPEFINSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVSKMYDQEKTNRPRAYEIAPVIGACFPFKDNIAKLFQSPKH</Hsp_qseq>
+      <Hsp_hseq>SRHFNNNSHSKKIITHIPKSQMATKNNSYAADIITSSSSMSYRSNNTKSAIVTRSTTQRHSNN------KYFQQPKRACFQNISLKARVYTPLSILRSQILGGDHLGSLCEPVTETIIIRRDANSLEKWLTLKDTPSYFQRAEVNTNISCAQNSNYSFIRRVANFALIKPIQRVIERYSEIHTNCELAITKSYTLTPNQTRGYKLPDNMWPVGYDGGCDKPTMCVDISPFKTYRNYCTTH-------LDLLYLARDVFKLSQESYERIMKKETTLLFEVSWCCKQWCNNRKGVSRPPHVPEAYFPYTVFITPSERFLEVKLGVYYMLDTGRVIKFMTRPECLTEFVLESLFGFGIQGNLKGAVGVLSVCPEGFCLEMEFAGMALQDVLNGDLNCNLNGPVPPHNQNQHLRIDKP--EMIQHHMAPSKLKGILYNVRMLQVTGNLPDELKKKCTLHITDSHAAVGVANLMRDRFLNQLPFALTEIINIVTRLSQQGLVNPDIKADNIVIDGSTGQPKMIDFGLLLPADYCDKVKRRNNPYPENVYNLYPQTAPEYLQGRMCNEAAMTYGLSYLISFVIATLSSRTTDFAVGSMKTNIKLSFLLGLAYDKCASKRPKPYILTKAIAGCFPLQEKIMKLFLNPKH</Hsp_hseq>
+      <Hsp_midline>S  +N N + KK    I ++Q AT N +YA DII               ++   S  ++H  N      K F  P  A F  ++LKAR YTPLS+LRS + G  HL S C+ VTET +++R+ +S++KW+ L+  P YF  AE +TNI+    S +  IR+ A   LI  +Q V   Y  I  +C  A  K+     +  R  + P + WPVG+     K    +D SP   +   C  +       + + ++A++VFKLS  + E I++K+TTLL EV+  CK+W + R+ +  P HV   Y    V I PSE +LEVK+GVYYML+TG+VIKFMT  E   EFV E++F   ++G +KGAVGV  +C EGFC+EM+FAG+++ DVLNGDL C ++  V     N      KP  E++Q H +  +++  LY VRMLQ TG LP+ L+ KC   ITDS +A+ +   MR+R LNQLPF L EI+NIVTRLSQQGLVNPDIK+DNIVIDG TGQPKMIDFGL++P       K       E  ++ +P TAPE++   +C+E AMT+GL+YL+  +++ L  RT D +  S+ TNI    ++   YD+  + RP+ Y +   I  CFP ++ I KLF +PKH</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|72</Hit_id>
+  <Hit_def>BDT63570.1 wsv260-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>72</Hit_accession>
+  <Hit_len>826</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>54.6884</Hsp_bit-score>
+      <Hsp_score>130</Hsp_score>
+      <Hsp_evalue>8.35637e-10</Hsp_evalue>
+      <Hsp_query-from>393</Hsp_query-from>
+      <Hsp_query-to>444</Hsp_query-to>
+      <Hsp_hit-from>713</Hsp_hit-from>
+      <Hsp_hit-to>764</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>19</Hsp_identity>
+      <Hsp_positive>30</Hsp_positive>
+      <Hsp_gaps>4</Hsp_gaps>
+      <Hsp_align-len>54</Hsp_align-len>
+      <Hsp_qseq>IGPSELYLEVKVGVYYM--LETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKG</Hsp_qseq>
+      <Hsp_hseq>IATNAKQLQVKTGELMMGPLKT-QLVEYKTNTEKIKLLMAESTTSHQ-EGRMKG</Hsp_hseq>
+      <Hsp_midline>I  +   L+VK G   M  L+T +++++ T+ E     + E+  SH  EGRMKG</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>86</Statistics_db-num>
+      <Statistics_db-len>66738</Statistics_db-len>
+      <Statistics_hsp-len>71</Statistics_hsp-len>
+      <Statistics_eff-space>39956488</Statistics_eff-space>
+      <Statistics_kappa>0.0407042880498213</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_1 YP_009220615.1 pu.. :  Query_1 YP_009220615.1 pu.. : Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics </Iteration_message>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

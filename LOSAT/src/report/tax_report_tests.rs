@@ -792,7 +792,7 @@ fn the_html_report_takes_the_scheme_and_the_browser_of_ncbirc() {
     let (subjects, hsps) = t4_query_one();
     let first = |ncbirc: &[u8]| {
         let read = read_registry(ncbirc, Layer::SystemWide).unwrap();
-        let lookups = TaxLookups::with_registry(names.as_ref(), "BLASTP", Some(&read));
+        let lookups = TaxLookups::with_registry(names.as_ref(), "BLASTP", "blastp", Some(&read));
         let out = report_html(&subjects, &hsps[..1], lookups);
         let at = find(&out, b"<tr><th colspan", 0).unwrap();
         String::from_utf8(out[at..find(&out, b"</td><td>subject", at).unwrap()].to_vec()).unwrap()

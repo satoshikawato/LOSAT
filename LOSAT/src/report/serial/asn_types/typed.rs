@@ -104,16 +104,11 @@ impl<I: Input> TypedReader<I> {
             match self.member_pointer(member, false)? {
                 Pointee::Null => {}
                 Pointee::This => {
-                    if let Err(fail) = read(self, index, member.ty) {
-                        // `ReadWithSetFlagMember` takes a missing value of an OPTIONAL or
-                        // DEFAULT member (`read::TypedReader::missing_value`): it is not set.
-                        let taken = I::MISSING_VALUES
-                            && !member.is_ref()
-                            && member.optional()
-                            && is_missing_value(&fail);
-                        if !taken {
-                            return Err(set_flag_error(fail, member));
-                        }
+                    let result = read(self, index, member.ty);
+                    if I::MISSING_VALUES {
+                        Self::missing_value_or_error(result, member)?;
+                    } else if let Err(fail) = result {
+                        return Err(set_flag_error(fail, member));
                     }
                 }
                 Pointee::Other => {
@@ -125,6 +120,21 @@ impl<I: Input> TypedReader<I> {
             self.inp.end_member()?;
         }
         Ok(pos)
+    }
+
+    /// The result of the member `member` read in `ReadWithSetFlagMember` of a stream that throws
+    /// `eMissingValue` (`Input::MISSING_VALUES`): a missing value of an OPTIONAL or DEFAULT member
+    /// is taken, the member not set (`read::TypedReader::missing_value`); any other error is
+    /// rethrown (`set_flag_error`). The other streams test no missing value (`class_members`: a
+    /// branch on the const, so their code is the one it was before the XML stream).
+    #[inline(always)]
+    fn missing_value_or_error(result: R<()>, member: &Member) -> R<()> {
+        match result {
+            Err(fail) if member.is_ref() || !member.optional() || !is_missing_value(&fail) => {
+                Err(set_flag_error(fail, member))
+            }
+            _ => Ok(()),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1500

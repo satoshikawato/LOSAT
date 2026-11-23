@@ -7,7 +7,7 @@
 use super::reader::{seq_id_from_binary, seq_id_from_text};
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_text::AsnTextEncoder;
-use crate::report::serial::asn_text_reader::{Reader as TextReader, SliceSource};
+use crate::report::serial::asn_text_reader::{Frame, Reader as TextReader, SliceSource};
 use crate::report::serial::encoder::Encoder;
 use crate::seqid::ber::{decode_seq_id, Reader};
 use crate::seqid::model::{
@@ -386,7 +386,7 @@ fn the_mask_reader_and_the_text_reader_build_the_same_seq_id() {
         let from_mask = seq_id_from_text(&data).unwrap_or_else(|fail| panic!("{shown}: {fail:?}"));
         let mut reader = TextReader::new(SliceSource::new(&data), "Seq-id", "test reader");
         let from_text = reader
-            .seq_id()
+            .seq_id(&Frame::ROOT)
             .unwrap_or_else(|error| panic!("{shown}: {error}"));
         assert_eq!(from_mask, from_text, "{shown}");
         assert_eq!(from_mask, id, "{shown}");

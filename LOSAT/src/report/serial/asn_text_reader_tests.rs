@@ -88,12 +88,12 @@ fn value<S: AsnSource>(
                 note(r, log, format!("string {}", show(&text)));
             }
             1 => {
-                let text = r.string()?;
+                let text = r.string(&Frame::ROOT)?;
                 note(r, log, format!("visible {}", show(&text)));
             }
             n => {
                 let (mut out, mut bad) = (Vec::new(), Vec::new());
-                r.visible_string(&mut out, true, n == 3, &mut |line, byte, piece| {
+                r.visible_string(&mut out, true, n == 3, &mut |_, line, byte, piece| {
                     bad.push(format!("{line} {byte} {}", show(piece)))
                 })?;
                 note(r, log, format!("pieces {} {bad:?}", show(&out)));
@@ -333,29 +333,71 @@ fn values_split_at_every_byte() {
     );
 }
 
-/// One operation of a literal walk, named as in `LITERAL_WALKS`, and what it read. `blocks` and
-/// `members` are the blocks and SEQUENCEs open at that point.
+/// A frame open in a literal walk (`Frame`, kept by its fields between the operations): a
+/// SEQUENCE being read (`members`), a list (`list`) or a CHOICE's variant (`choice`).
+struct Level {
+    /// Whether it is a SEQUENCE or a list (whose `member` or `item` reads the next of it).
+    block: bool,
+    block_start: bool,
+    names: &'static [&'static str],
+    next: usize,
+}
+
+/// `f` with the frame of the innermost of `levels`, each held by the one before it, the first by
+/// `at`.
+fn in_frames<R>(levels: &[Level], at: &Frame<'_>, f: impl FnOnce(&Frame<'_>) -> R) -> R {
+    match levels.split_first() {
+        None => f(at),
+        Some((level, rest)) => {
+            let frame = Frame {
+                parent: Some(at),
+                names: level.names,
+                next: level.next,
+            };
+            in_frames(rest, &frame, f)
+        }
+    }
+}
+
+/// The names of an operation's argument (`a,b`), kept for the walk.
+fn leaked_names(arg: &str) -> &'static [&'static str] {
+    let names: Vec<&'static str> = arg
+        .split(',')
+        .map(|name| &*Box::leak(name.to_string().into_boxed_str()))
+        .collect();
+    Box::leak(names.into_boxed_slice())
+}
+
+/// One operation of a literal walk, named as in `LITERAL_WALKS`, and what it read. `blocks` are
+/// the blocks open at that point, `levels` the frames (`member` and `item` read the next member
+/// or element of the innermost SEQUENCE or list, whose variants end there).
 fn apply<S: AsnSource>(
     r: &mut Reader<S>,
     op: &'static str,
     blocks: &mut Vec<bool>,
-    members: &mut Vec<Members>,
-    lists: &mut Vec<List>,
+    levels: &mut Vec<Level>,
 ) -> Result<String> {
     let (name, arg) = op.split_once(':').unwrap_or((op, ""));
-    let names: Vec<&'static str> = arg.split(',').collect();
+    let names = leaked_names(arg);
     let values: Vec<(&'static str, i32)> = names
         .iter()
         .filter_map(|value| value.split_once('='))
         .map(|(name, n)| (name, n.parse().unwrap()))
         .collect();
+    if matches!(name, "member" | "item") {
+        let block = levels.iter().rposition(|level| level.block);
+        levels.truncate(block.map_or(0, |block| block + 1));
+    }
     Ok(match name {
         "ws" => format!("ws {:?}", r.skip_white_space()? as char),
         "int4" => format!("int4 {}", r.int4()?),
         "uint4" => format!("uint4 {}", r.uint4()?),
         "int8" => format!("int8 {}", r.int8()?),
         "string" => format!("string {}", show(&r.utf8_string()?)),
-        "visible" => format!("visible {}", show(&r.string()?)),
+        "visible" => {
+            let text = in_frames(levels, &Frame::ROOT, |at| r.string(at))?;
+            format!("visible {}", show(&text))
+        }
         "id" => match r.member_or_tag()? {
             MemberId::Name(id) => format!("id {}", show(r.bytes(id))),
             MemberId::Tag(id) => format!("tag {}", show(r.bytes(id))),
@@ -365,7 +407,18 @@ fn apply<S: AsnSource>(
             None => "type none".into(),
         },
         "ptr" => format!("ptr {:?}", r.pointer_type()?),
-        "choice" => format!("choice {}", r.choice(&names)?),
+        "choice" => {
+            let next = in_frames(levels, &Frame::ROOT, |at| {
+                r.choice(at, names).map(|variant| variant.next)
+            })?;
+            levels.push(Level {
+                block: false,
+                block_start: false,
+                names,
+                next,
+            });
+            format!("choice {}", next - 1)
+        }
         "enum" => format!("enum {:?}", r.enumerated(&values)?),
         "{" => {
             blocks.push(r.start_block()?);
@@ -377,20 +430,57 @@ fn apply<S: AsnSource>(
             blocks.pop();
             "}".into()
         }
-        "members" => {
-            members.push(r.begin_members()?);
-            "members".into()
+        "members" | "list" => {
+            let block_start = in_frames(levels, &Frame::ROOT, |at| {
+                if name == "list" {
+                    r.begin_list(at).map(|list| list.block_start)
+                } else {
+                    r.begin_members(at, names)
+                        .map(|members| members.block_start)
+                }
+            })?;
+            levels.push(Level {
+                block: true,
+                block_start,
+                names: if name == "list" { &[] } else { names },
+                next: 0,
+            });
+            name.into()
         }
-        "member" => {
-            let member = r.next_member(members.last_mut().unwrap(), &names)?;
-            if member.is_none() {
-                members.pop();
+        "member" | "item" => {
+            let (level, outer) = levels.split_last_mut().expect("a SEQUENCE or list is open");
+            let read = in_frames(outer, &Frame::ROOT, |at| {
+                let frame = Frame {
+                    parent: Some(at),
+                    names: level.names,
+                    next: level.next,
+                };
+                if name == "item" {
+                    let mut list = List {
+                        block_start: level.block_start,
+                        frame,
+                    };
+                    let more = r.next_item(&mut list);
+                    level.block_start = list.block_start;
+                    more.map(|more| format!("item {more}"))
+                } else {
+                    let mut members = Members {
+                        block_start: level.block_start,
+                        frame,
+                    };
+                    let member = r.next_member(&mut members);
+                    (level.block_start, level.next) = (members.block_start, members.frame.next);
+                    member.map(|member| format!("member {member:?}"))
+                }
+            })?;
+            if read.ends_with("None") || read.ends_with("false") {
+                levels.pop();
             }
-            format!("member {member:?}")
+            read
         }
         "each" => {
             let mut elements = Vec::new();
-            r.each(|r| {
+            r.each(&Frame::ROOT, |r, _| {
                 elements.push(r.int4()?);
                 Ok(())
             })?;
@@ -400,11 +490,6 @@ fn apply<S: AsnSource>(
             skip_value(r)?;
             "skip".into()
         }
-        "list" => {
-            lists.push(r.begin_list()?);
-            "list".into()
-        }
-        "item" => format!("item {}", r.next_item(lists.last_mut().unwrap())?),
         other => panic!("no operation {other}"),
     })
 }
@@ -414,10 +499,9 @@ fn apply<S: AsnSource>(
 fn literal_walk<S: AsnSource>(src: S, ops: &'static str) -> Vec<String> {
     let mut r = Reader::new(src, "text", "test reader");
     r.trail.root = "Root";
-    let (mut blocks, mut members, mut lists, mut log) =
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut blocks, mut levels, mut log) = (Vec::new(), Vec::new(), Vec::new());
     for op in ops.split_whitespace() {
-        match apply(&mut r, op, &mut blocks, &mut members, &mut lists) {
+        match apply(&mut r, op, &mut blocks, &mut levels) {
             Ok(what) => note(&r, &mut log, what),
             Err(error) => {
                 let what = format!("error {error:?} replaced {}", replaced(&r));
@@ -530,7 +614,7 @@ const LITERAL_WALKS: &[(&[u8], &str, &[&str])] = &[
     ),
     (
         b"{ a { \"x\x7f\", \"\x80\x81\" }, b c \"\x01\" } \"\x02\"",
-        "members member:a,b list item visible item visible item } member:a,b choice:c,d visible member:a,b visible",
+        "members:a,b member list item visible item visible item } member choice:c,d visible member visible",
         &[
             "members @1:1",
             "member Some(0) @3:1",
@@ -610,7 +694,7 @@ const LITERAL_WALKS: &[(&[u8], &str, &[&str])] = &[
     ),
     (
         b"{ a 1, c 2,\n b 3 }",
-        "members member:a,b,c int4 member:a,b,c int4 member:a,b,c",
+        "members:a,b,c member int4 member int4 member",
         &[
             "members @1:1",
             "member Some(0) @3:1",
@@ -622,7 +706,7 @@ const LITERAL_WALKS: &[(&[u8], &str, &[&str])] = &[
     ),
     (
         b"{ a 1,\n x 2 }",
-        "members member:a,b int4 member:a,b",
+        "members:a,b member int4 member",
         &[
             "members @1:1",
             "member Some(0) @3:1",
@@ -632,7 +716,7 @@ const LITERAL_WALKS: &[(&[u8], &str, &[&str])] = &[
     ),
     (
         b"{\n [1] 5 }",
-        "members member:a",
+        "members:a member",
         &[
             "members @1:1",
             "error AsnTextError { line: 2, message: \"a member or variant named by its tag is not supported by LOSAT's test reader\", kind: Unsupported, ncbi: None } replaced [] @6:2",
@@ -640,7 +724,7 @@ const LITERAL_WALKS: &[(&[u8], &str, &[&str])] = &[
     ),
     (
         b"{ a 1\n}",
-        "members member:a,b int4 member:a,b",
+        "members:a,b member int4 member",
         &[
             "members @1:1",
             "member Some(0) @3:1",

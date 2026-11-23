@@ -939,7 +939,7 @@ impl<S: AsnSource> TextInput<S> {
             out,
             kind != StringKind::Utf8,
             skip,
-            &mut |line, byte, piece| {
+            &mut |_, line, byte, piece| {
                 posts.push(StringPost::BadChar {
                     position: StreamPosition::Line(line as u64),
                     byte,

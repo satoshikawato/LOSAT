@@ -6,9 +6,9 @@
 //! grammar of each type stays with its reader; this module reads what every type is made of:
 //! white space and comments, identifiers and `::=`, blocks and their elements, the members of a
 //! SEQUENCE in the order of the module, INTEGER, BOOLEAN, ENUMERATED, VisibleString, OCTET
-//! STRING and REAL values. For a hand-written grammar (rpsbproc's archive reader) it also keeps
-//! the steps of NCBI's object stack at the value being read and the posts of the bytes that its
-//! VisibleStrings read as `#` (`Trail`).
+//! STRING and REAL values. For a hand-written grammar (rpsbproc's archive reader) it also gives
+//! the frames of NCBI's object stack, which the grammar passes down to the values it reads
+//! (`Frame`), and keeps the posts of the bytes that its VisibleStrings read as `#` (`Trail`).
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-243
 //!
@@ -495,27 +495,110 @@ pub(crate) struct Reader<S: AsnSource> {
     document: &'static str,
     /// The reader, for the refusals ("... is not supported by LOSAT's PSSM reader").
     reader: &'static str,
-    /// The hand grammar's object stack and posts (`Trail`).
+    /// The hand grammar's root and posts (`Trail`).
     pub(crate) trail: Trail,
 }
 
 /// What a hand-written grammar over this reader (rpsbproc's archive reader, `rpsbproc::archive`,
-/// with its Seq-ids, `seqid::asn_text`) reads beside the values: the steps of NCBI's object stack
-/// at the value being read, which its helpers keep (`begin_members` and `next_member`, `choice`,
-/// `begin_list` and `next_item`), and the bytes that its VisibleStrings read as `#` (`string`),
-/// each with NCBI's post. NCBI reads every value of its object with its typed reader, whose stack
-/// trace (`GetStackTrace()`) names the member or variant of each frame and `E` for a container's
-/// element; the typed reader of `asn_types::read` keeps its own frames, and is given these steps
-/// for a value that the hand grammar hands to it (`asn_types::read::ObjectStream::read_value`).
+/// with its Seq-ids, `seqid::asn_text`) reads beside the values: the name of the document's type,
+/// at the root of its frames (`Frame`), and the bytes that its VisibleStrings read as `#`
+/// (`string`), each with NCBI's post.
 #[derive(Debug, Default)]
 pub(crate) struct Trail {
     /// The name of the document's type, the first name of a stack trace (`Blast4-archive`).
     pub(crate) root: &'static str,
-    /// The member and variant names and the container elements from the root to the value being
-    /// read.
-    pub(crate) steps: Vec<StackStep<'static>>,
     /// The posts of the bytes read as `#`, in order (`ReplaceVisibleChar`'s 803.7).
     pub(crate) replaced: Vec<ReplacedChar>,
+}
+
+impl Trail {
+    /// The post of a byte that a VisibleString of the hand grammar held by the frame `at` read as
+    /// `#` (`Reader::string`): its line, the byte and the piece that holds it, with the stack trace
+    /// of `at`.
+    #[cold]
+    #[inline(never)]
+    fn post_replaced(&mut self, at: &Frame<'_>, line: usize, byte: u8, piece: &[u8]) {
+        self.replaced.push(ReplacedChar {
+            trace: object_stack_trace(self.root, at.steps()),
+            byte,
+            position: StreamPosition::Line(line as u64),
+            string: piece.into(),
+        });
+    }
+}
+
+/// A frame of NCBI's object stack as a hand grammar passes it down to the reader of the value
+/// that it holds: the member of a SEQUENCE being read (`Members::at`), the variant of a CHOICE
+/// (`Reader::choice`) or the element of a SEQUENCE OF or SET OF (`List::at`), each pointing to the
+/// frame that holds it, down to the object's root (`Frame::ROOT`). NCBI reads every value of its
+/// object with its typed reader, whose stack trace (`GetStackTrace()`) names the member or variant
+/// of each frame and `E` for a container's element; the trace of a frame is made only when a post
+/// needs it (`Reader::string`) or the typed reader reads below it (`Frame::steps`,
+/// `asn_types::read::ObjectStream::read_value`). So a member costs only the position of the
+/// member read, which orders the next (the SEQUENCE's frame takes its parent and names once), an
+/// element nothing (its list's frame is made once), and a variant's frame is stored only when a
+/// reader below it is given it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Frame<'a> {
+    /// The frame that holds this one; `None` at the root.
+    parent: Option<&'a Frame<'a>>,
+    /// The names of the SEQUENCE's members or of the CHOICE's variants in module order; none for
+    /// a container's element and the root.
+    names: &'static [&'static str],
+    /// The position in `names` of the member or variant read, plus one (0 before the first
+    /// member).
+    next: usize,
+}
+
+impl Frame<'static> {
+    /// The object's root, the frame of the document's type (`Trail::root`), which names no step.
+    pub(crate) const ROOT: Frame<'static> = Frame {
+        parent: None,
+        names: &[],
+        next: 0,
+    };
+}
+
+impl<'a> Frame<'a> {
+    /// The frame of an element of the list that `at` holds (`E`).
+    #[inline]
+    fn element(at: &'a Frame<'a>) -> Self {
+        Frame {
+            parent: Some(at),
+            names: &[],
+            next: 0,
+        }
+    }
+
+    /// The position of the variant (`Reader::choice`).
+    #[inline]
+    pub(crate) fn index(&self) -> usize {
+        self.next.wrapping_sub(1)
+    }
+
+    /// The name of the member or variant read (`None` for an element, the root, and a SEQUENCE
+    /// before its first member).
+    pub(crate) fn name(&self) -> Option<&'static str> {
+        self.names.get(self.index()).copied()
+    }
+
+    /// The steps from the root to this frame: a member or variant name, or `E` for an element.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn steps(&self) -> Vec<StackStep<'static>> {
+        let mut steps = Vec::new();
+        let mut frame = self;
+        while let Some(parent) = frame.parent {
+            if frame.names.is_empty() {
+                steps.push(StackStep::Element);
+            } else if let Some(name) = frame.name() {
+                steps.push(StackStep::Member(name));
+            }
+            frame = parent;
+        }
+        steps.reverse();
+        steps
+    }
 }
 
 /// What `ReadMemberId` read: a name, or the digits of a tag in brackets (`[3]`).
@@ -551,21 +634,34 @@ pub(crate) enum PointerType {
 }
 
 /// The members of a SEQUENCE as they are read: each name in turn, in the order of the module.
-pub(crate) struct Members {
+pub(crate) struct Members<'a> {
     block_start: bool,
-    /// The position in the module of the last member read.
-    last: Option<usize>,
-    /// The position on the trail (`Trail::steps`) of the member's step, which `begin_members`
-    /// puts there and `next_member` writes over: the steps below it are those of the SEQUENCE.
-    base: usize,
+    /// The frame of the member being read: the SEQUENCE's member names and the position of the
+    /// last member read, which the next must follow.
+    frame: Frame<'a>,
+}
+
+impl<'a> Members<'a> {
+    /// The frame of the member being read, for the reader of its value.
+    #[inline]
+    pub(crate) fn at(&self) -> &Frame<'a> {
+        &self.frame
+    }
 }
 
 /// The elements of a SEQUENCE OF or SET OF as a hand grammar reads them (`Reader::begin_list`).
-pub(crate) struct List {
+pub(crate) struct List<'a> {
     block_start: bool,
-    /// The position on the trail (`Trail::steps`) of the elements' step (`E`), which
-    /// `begin_list` puts there: the steps below it are those of the list.
-    base: usize,
+    /// The frame of the elements (`E`).
+    frame: Frame<'a>,
+}
+
+impl<'a> List<'a> {
+    /// The frame of the element being read, for the reader of its value.
+    #[inline]
+    pub(crate) fn at(&self) -> &Frame<'a> {
+        &self.frame
+    }
 }
 
 impl<S: AsnSource> Reader<S> {
@@ -1040,24 +1136,36 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// The variant of a CHOICE whose variants are `names` (in module order), as its position;
-    /// a name that is not one of them is an error. The variant's step goes on the trail, until
-    /// the next member or element of the value that holds the CHOICE (`next_member`,
-    /// `next_item`).
+    /// The variant of a CHOICE whose variants are `names` (in module order), held by the frame
+    /// `at`: the variant's frame, whose `index` is its position (`variant`). (Inlined, so that a
+    /// frame that no reader below it is given is never stored.)
+    #[inline]
+    pub(crate) fn choice<'a>(
+        &mut self,
+        at: &'a Frame<'a>,
+        names: &'static [&'static str],
+    ) -> Result<Frame<'a>> {
+        let index = self.variant(names)?;
+        Ok(Frame {
+            parent: Some(at),
+            names,
+            next: index + 1,
+        })
+    }
+
+    /// The position of the variant of a CHOICE whose variants are `names` (in module order); a
+    /// name that is not one of them is an error.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1436-1475
     // (`NextElement` at the choice's start fails at a `}`, which reads as no id here; the variant
     // names of the modules LOSAT reads are their ASN.1 names, `GetChoiceIndex` (:426-442).)
-    pub(crate) fn choice(&mut self, names: &[&'static str]) -> Result<usize> {
+    fn variant(&mut self, names: &[&str]) -> Result<usize> {
         let id = self.member_id_range()?;
         if id.is_empty() {
             return Err(self.error("choice variant id expected"));
         }
         let text = self.bytes(id);
         match names.iter().position(|name| name.as_bytes() == text) {
-            Some(index) => {
-                self.trail.steps.push(StackStep::Member(names[index]));
-                Ok(index)
-            }
+            Some(index) => Ok(index),
             None => {
                 let message = format!("unexpected variant {}", String::from_utf8_lossy(text));
                 Err(self.error(message))
@@ -1106,80 +1214,82 @@ impl<S: AsnSource> Reader<S> {
         self.expect(b'}')
     }
 
-    /// `StartBlock` of a SEQUENCE of a hand grammar, whose members `next_member` reads; the
-    /// trail gets the place of the member's step.
-    pub(crate) fn begin_members(&mut self) -> Result<Members> {
-        let block_start = self.start_block()?;
-        let base = self.trail.steps.len();
-        self.trail.steps.push(StackStep::Member(""));
+    /// `StartBlock` of a SEQUENCE of a hand grammar whose members are `names` (in module order),
+    /// held by the frame `at`; `next_member` reads the members.
+    #[inline]
+    pub(crate) fn begin_members<'a>(
+        &mut self,
+        at: &'a Frame<'a>,
+        names: &'static [&'static str],
+    ) -> Result<Members<'a>> {
         Ok(Members {
-            block_start,
-            last: None,
-            base,
+            block_start: self.start_block()?,
+            frame: Frame {
+                parent: Some(at),
+                names,
+                next: 0,
+            },
         })
     }
 
-    /// The next member of a SEQUENCE whose members are `names` (in module order), as its
-    /// position, with its step on the trail; `None` at the end of the SEQUENCE (its `}` taken).
-    /// A member out of order or not in the module is an error.
-    pub(crate) fn next_member(
-        &mut self,
-        members: &mut Members,
-        names: &[&'static str],
-    ) -> Result<Option<usize>> {
+    /// The next member of the SEQUENCE, as its position (its frame is `members.at()`); `None` at
+    /// the end of the SEQUENCE (its `}` taken). A member out of order or not in the module is an
+    /// error.
+    pub(crate) fn next_member(&mut self, members: &mut Members) -> Result<Option<usize>> {
         let (pos, more) = self.next_element_at(self.pos, &mut members.block_start)?;
         if !more {
-            self.trail.steps.truncate(members.base);
             self.pos = self.expect_at(pos, b'}')?;
             return Ok(None);
         }
-        // The steps of the member before (a CHOICE's variant) end here.
-        self.trail.steps.truncate(members.base + 1);
         let (pos, id) = self.member_or_tag_at(pos)?;
         self.pos = pos;
         let MemberId::Name(id) = id else {
             return Err(self.not_supported("a member or variant named by its tag"));
         };
         let text = self.bytes(id);
-        let Some(index) = names.iter().position(|name| name.as_bytes() == text) else {
+        let Some(index) = members
+            .frame
+            .names
+            .iter()
+            .position(|name| name.as_bytes() == text)
+        else {
             let message = format!("unexpected member {}", String::from_utf8_lossy(text));
             return Err(self.error(message));
         };
-        if members.last.is_some_and(|last| index <= last) {
+        if index < members.frame.next {
             let message = format!("member {} out of order", String::from_utf8_lossy(text));
             return Err(self.error(message));
         }
-        members.last = Some(index);
-        if let Some(step) = self.trail.steps.get_mut(members.base) {
-            *step = StackStep::Member(names[index]);
-        }
+        members.frame.next = index + 1;
         Ok(Some(index))
     }
 
-    /// `StartBlock` of a SEQUENCE OF or SET OF of a hand grammar, whose elements `next_item`
-    /// reads; the trail gets the elements' step (`E`).
-    #[inline(always)]
-    pub(crate) fn begin_list(&mut self) -> Result<List> {
-        let block_start = self.start_block()?;
-        let base = self.trail.steps.len();
-        self.trail.steps.push(StackStep::Element);
-        Ok(List { block_start, base })
+    /// `StartBlock` of a SEQUENCE OF or SET OF of a hand grammar, held by the frame `at`;
+    /// `next_item` reads the elements.
+    #[inline]
+    pub(crate) fn begin_list<'a>(&mut self, at: &'a Frame<'a>) -> Result<List<'a>> {
+        Ok(List {
+            block_start: self.start_block()?,
+            frame: Frame::element(at),
+        })
     }
 
-    /// `NextElement` of the list (`next_element`): the steps of the element before end here,
-    /// and the list's own at its end. (Inlined into the loops over elements, as `next_element`.)
-    #[inline(always)]
+    /// `NextElement` of the list (`next_element`; its frame is `list.at()`).
+    #[inline]
     pub(crate) fn next_item(&mut self, list: &mut List) -> Result<bool> {
-        let more = self.next_element(&mut list.block_start)?;
-        self.trail.steps.truncate(list.base + usize::from(more));
-        Ok(more)
+        self.next_element(&mut list.block_start)
     }
 
-    /// The elements of a SEQUENCE OF or SET OF, each read by `element` and kept by it.
-    pub(crate) fn each(&mut self, mut element: impl FnMut(&mut Self) -> Result<()>) -> Result<()> {
-        let mut list = self.begin_list()?;
+    /// The elements of a SEQUENCE OF or SET OF held by the frame `at`, each read by `element`
+    /// (given its frame) and kept by it.
+    pub(crate) fn each(
+        &mut self,
+        at: &Frame<'_>,
+        mut element: impl FnMut(&mut Self, &Frame<'_>) -> Result<()>,
+    ) -> Result<()> {
+        let mut list = self.begin_list(at)?;
         while self.next_item(&mut list)? {
-            element(self)?;
+            element(self, list.at())?;
         }
         self.end_block()
     }
@@ -1436,45 +1546,29 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// A VisibleString of a hand grammar (and a StringStore, which the text stream reads as one):
-    /// `visible_string`, each byte outside 0x20..0x7E read as `#` and posted with the trail's
-    /// stack trace (`Trail::replaced`), as NCBI's `ReadString` of the type posts it.
+    /// A VisibleString of a hand grammar (and a StringStore, which the text stream reads as one)
+    /// held by the frame `at`: `visible_string`, each byte outside 0x20..0x7E read as `#` and
+    /// posted with the stack trace of `at` (`Trail::replaced`), as NCBI's `ReadString` of the type
+    /// posts it.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:988-991
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (cited at
     // `report::serial::encoder::ReplacedChar`)
-    pub(crate) fn string(&mut self) -> Result<Vec<u8>> {
+    pub(crate) fn string(&mut self, at: &Frame<'_>) -> Result<Vec<u8>> {
         let mut out = Vec::new();
-        let mut bad: Vec<(usize, u8, Vec<u8>)> = Vec::new();
-        let read = self.visible_string(&mut out, true, false, &mut |line, byte, piece| {
-            bad.push((line, byte, piece.to_vec()))
-        });
-        if !bad.is_empty() {
-            self.post_replaced(bad);
-        }
-        read.map(|()| out)
-    }
-
-    /// The posts of the bytes that a VisibleString of the hand grammar read as `#`: the line, the
-    /// byte and the piece that holds it, each with the trail's stack trace.
-    #[cold]
-    #[inline(never)]
-    fn post_replaced(&mut self, bad: Vec<(usize, u8, Vec<u8>)>) {
-        let trace = object_stack_trace(self.trail.root, self.trail.steps.iter().copied());
-        for (line, byte, piece) in bad {
-            self.trail.replaced.push(ReplacedChar {
-                trace: trace.clone(),
-                byte,
-                position: StreamPosition::Line(line as u64),
-                string: piece.into(),
-            });
-        }
+        self.visible_string(
+            &mut out,
+            true,
+            false,
+            &mut move |trail, line, byte, piece| trail.post_replaced(at, line, byte, piece),
+        )?;
+        Ok(out)
     }
 
     /// A UTF8String: its bytes as they are, as NCBI reads that type (`eFNP_Allow`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:988-991
     pub(crate) fn utf8_string(&mut self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
-        self.visible_string(&mut out, false, false, &mut |_, _, _| {})?;
+        self.visible_string(&mut out, false, false, &mut |_, _, _, _| {})?;
         Ok(out)
     }
 
@@ -1490,7 +1584,8 @@ impl<S: AsnSource> Reader<S> {
     /// `ReadStringValue` (`SkipString` when `skip`) of a VisibleString (`visible`) or a
     /// UTF8String: the string's lines joined and `""` read as one quote, appended to `out`
     /// (nothing when skipping). In a VisibleString each byte outside 0x20..0x7E is read as `#`,
-    /// and `bad_char` gets the line, the byte and the piece of the string that NCBI's message
+    /// and `bad_char` gets the reader's trail (where a hand grammar posts it, `string`), the line,
+    /// the byte and the piece of the string that NCBI's message
     /// quotes (`ReplaceVisibleChar`'s post, `report::serial::encoder::ReplacedChar`): the piece
     /// being appended (`AppendStringData`: up to the end of the line, the quote, or 128 bytes;
     /// after `""` the next piece starts with the second quote), none when skipping. The one
@@ -1508,7 +1603,7 @@ impl<S: AsnSource> Reader<S> {
         out: &mut Vec<u8>,
         visible: bool,
         skip: bool,
-        bad_char: &mut dyn FnMut(usize, u8, &[u8]),
+        bad_char: &mut impl FnMut(&mut Trail, usize, u8, &[u8]),
     ) -> Result<()> {
         // `pos` is the start of the run being read (the bytes up to the next line end or quote,
         // which NCBI appends in pieces of 128 bytes from its start), `i` its bytes so far (after
@@ -1574,26 +1669,27 @@ impl<S: AsnSource> Reader<S> {
     #[cold]
     #[inline(never)]
     fn append_run(
-        &self,
+        &mut self,
         run: Range<usize>,
         appended: usize,
         line: usize,
         out: &mut Vec<u8>,
         clean: bool,
         skip: bool,
-        bad_char: &mut dyn FnMut(usize, u8, &[u8]),
+        bad_char: &mut dyn FnMut(&mut Trail, usize, u8, &[u8]),
     ) {
+        let (src, trail) = (&self.src, &mut self.trail);
         if skip {
             if !clean {
-                for &c in self.src.bytes(run) {
+                for &c in src.bytes(run) {
                     if !(b' '..=b'~').contains(&c) {
-                        bad_char(line, c, &[]);
+                        bad_char(trail, line, c, &[]);
                     }
                 }
             }
             return;
         }
-        let data = self.src.bytes(run.start..appended);
+        let data = src.bytes(run.start..appended);
         if clean {
             out.extend_from_slice(data);
             return;
@@ -1603,7 +1699,7 @@ impl<S: AsnSource> Reader<S> {
             for (i, &c) in piece.iter().enumerate() {
                 if !(b' '..=b'~').contains(&c) {
                     out.extend_from_slice(&piece[done..i]);
-                    bad_char(line, c, piece);
+                    bad_char(trail, line, c, piece);
                     out.push(b'#');
                     done = i + 1;
                 }

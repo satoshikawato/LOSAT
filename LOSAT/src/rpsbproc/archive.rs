@@ -23,10 +23,10 @@
 //! (`Bad char`, 803.7, the stack trace of the string), as NCBI's reader does by default
 //! (`eFNP_ReplaceAndWarn` of the parameter `[SERIAL] WRONG_CHARS_READ`, a registry entry, which
 //! the application start rejects in a file and in `NCBI_CONFIG__SERIAL__WRONG_CHARS_READ`); a
-//! UTF8String keeps its bytes. The grammar names its members and variants on the lexical
-//! reader's trail (`asn_text_reader::Trail`), which gives the trace of its strings and the frames
-//! below which the typed reader reads. The posts of an object come before rpsbproc uses it
-//! (`ArchiveRead`).
+//! UTF8String keeps its bytes. The grammar passes the frames of NCBI's object stack down to the
+//! reader of each value (`asn_text_reader::Frame`: the member, variant or element that holds it),
+//! which give the trace of its strings and the frames below which the typed reader reads. The
+//! posts of an object come before rpsbproc uses it (`ArchiveRead`).
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:291-308
 
@@ -34,11 +34,10 @@ use std::io::Read;
 
 use crate::report::serial::asn_input::{Input, Names, TextInput};
 use crate::report::serial::asn_text_reader::{
-    AsnTextError, AsnTextErrorKind, Reader, Result, StreamSource,
+    AsnTextError, AsnTextErrorKind, Frame, Reader, Result, StreamSource,
 };
 use crate::report::serial::asn_types::read::{ObjectStream, Post, ReadError};
 use crate::report::serial::asn_types::{self, table::named};
-use crate::report::serial::encoder::StackStep;
 use crate::report::serial::pssm::{SEQ_INST_MOL, SEQ_INST_REPR};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 
@@ -546,24 +545,20 @@ impl<R: Read> ArchiveStream<R> {
         self.posts.extend(replaced.into_iter().map(Post::BadChar));
     }
 
-    /// The value of the member or variant whose step the trail ends with, of the SEQUENCE or
-    /// CHOICE `parent` of the type table, read by the typed reader as NCBI's reader reads it:
-    /// rpsbproc does not use it, and NCBI's reader fails, posts and reads on in it as in any value
-    /// of its object. Its failure ends the input (NCBI's rpsbproc stops at any exception of its
-    /// reader), except LOSAT's refusal.
+    /// The value of the member or variant of the frame `at`, of the SEQUENCE or CHOICE `parent` of
+    /// the type table, read by the typed reader below the frames of `at` as NCBI's reader reads
+    /// it: rpsbproc does not use it, and NCBI's reader fails, posts and reads on in it as in any
+    /// value of its object. Its failure ends the input (NCBI's rpsbproc stops at any exception of
+    /// its reader), except LOSAT's refusal.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:780-792
     #[cold]
     #[inline(never)]
-    fn typed_member(&mut self, parent: u16) -> Result<()> {
+    fn typed_member(&mut self, parent: u16, at: &Frame<'_>) -> Result<()> {
         self.take_replaced();
-        let steps = std::mem::take(&mut self.r().trail.steps);
-        let Some(StackStep::Member(name)) = steps.last() else {
-            unreachable!("a member or variant is being read");
-        };
+        let name = at.name().expect("a member or variant is being read");
         let ty = asn_types::members(parent)[asn_types::member_index(parent, name)].ty;
         let root = self.r().trail.root;
-        let (value, posts) = self.objects.read_value(ty, root, &steps);
-        self.r().trail.steps = steps;
+        let (value, posts) = self.objects.read_value(ty, root, &at.steps());
         self.posts.extend(posts);
         match value {
             Ok(_) => Ok(()),
@@ -578,8 +573,8 @@ impl<R: Read> ArchiveStream<R> {
         self.r().real()
     }
 
-    fn string(&mut self) -> Result<Vec<u8>> {
-        self.r().string()
+    fn string(&mut self, at: &Frame<'_>) -> Result<Vec<u8>> {
+        self.r().string(at)
     }
 
     /// `ReadFileHeader` and the type check of the root reader, then the object. Each object is
@@ -590,21 +585,17 @@ impl<R: Read> ArchiveStream<R> {
     fn archive_object(&mut self) -> Result<Archive> {
         self.objects.input_mut().new_object();
         let r = self.r();
-        r.trail.steps.clear();
         let id = r.file_header()?;
         if !id.is_empty() && r.bytes(id) != r.trail.root.as_bytes() {
             return Err(r.error("incompatible type"));
         }
-        let mut members = r.begin_members()?;
+        let mut members = r.begin_members(&Frame::ROOT, &["request", "results", "messages"])?;
         let (mut request, mut results) = (None, None);
-        while let Some(index) = self
-            .r()
-            .next_member(&mut members, &["request", "results", "messages"])?
-        {
+        while let Some(index) = self.r().next_member(&mut members)? {
             match index {
-                0 => request = Some(self.request()?),
-                1 => results = Some(self.results()?),
-                _ => self.messages()?,
+                0 => request = Some(self.request(members.at())?),
+                1 => results = Some(self.results(members.at())?),
+                _ => self.messages(members.at())?,
             }
         }
         let (Some((ident, body)), Some(results)) = (request, results) else {
@@ -618,18 +609,18 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:56-63
-    fn request(&mut self) -> Result<(Option<Vec<u8>>, RequestBody)> {
-        let mut members = self.r().begin_members()?;
+    fn request(&mut self, at: &Frame<'_>) -> Result<(Option<Vec<u8>>, RequestBody)> {
+        let mut members = self.r().begin_members(at, &["ident", "body"])?;
         let (mut ident, mut body) = (None, None);
-        while let Some(index) = self.r().next_member(&mut members, &["ident", "body"])? {
+        while let Some(index) = self.r().next_member(&mut members)? {
             match index {
-                0 => ident = Some(self.string()?),
+                0 => ident = Some(self.string(members.at())?),
                 _ => {
-                    let variant = self.r().choice(&REQUEST_BODY)?;
-                    body = Some(if variant == 8 {
-                        RequestBody::QueueSearch(self.queue_search()?)
+                    let variant = self.r().choice(members.at(), &REQUEST_BODY)?;
+                    body = Some(if variant.index() == 8 {
+                        RequestBody::QueueSearch(self.queue_search(&variant)?)
                     } else {
-                        self.typed_member(named::BLAST4_REQUEST_BODY)?;
+                        self.typed_member(named::BLAST4_REQUEST_BODY, &variant)?;
                         RequestBody::Other
                     });
                 }
@@ -642,7 +633,7 @@ impl<R: Read> ArchiveStream<R> {
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:156-166
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:138-142
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:499-503
-    fn queue_search(&mut self) -> Result<QueueSearch> {
+    fn queue_search(&mut self, at: &Frame<'_>) -> Result<QueueSearch> {
         const NAMES: [&str; 8] = [
             "program",
             "service",
@@ -653,7 +644,7 @@ impl<R: Read> ArchiveStream<R> {
             "program-options",
             "format-options",
         ];
-        let mut members = self.r().begin_members()?;
+        let mut members = self.r().begin_members(at, &NAMES)?;
         let (mut program, mut service, mut queries, mut subject) = (None, None, None, None);
         let mut search = QueueSearch {
             program: Vec::new(),
@@ -663,41 +654,42 @@ impl<R: Read> ArchiveStream<R> {
             matrix_name: None,
             evalue_threshold: None,
         };
-        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
+        while let Some(index) = self.r().next_member(&mut members)? {
+            let at = members.at();
             match index {
-                0 => program = Some(self.string()?),
-                1 => service = Some(self.string()?),
+                0 => program = Some(self.string(at)?),
+                1 => service = Some(self.string(at)?),
                 2 => {
                     const QUERIES: [&str; 3] = ["pssm", "seq-loc-list", "bioseq-set"];
-                    let variant = self.r().choice(&QUERIES)?;
-                    queries = Some(if variant == 2 {
-                        Queries::BioseqSet(self.bioseq_set()?)
+                    let variant = self.r().choice(at, &QUERIES)?;
+                    queries = Some(if variant.index() == 2 {
+                        Queries::BioseqSet(self.bioseq_set(&variant)?)
                     } else {
-                        self.typed_member(named::BLAST4_QUERIES)?;
+                        self.typed_member(named::BLAST4_QUERIES, &variant)?;
                         Queries::Other
                     });
                 }
                 3 => {
                     const SUBJECT: [&str; 3] = ["database", "sequences", "seq-loc-list"];
-                    let variant = self.r().choice(&SUBJECT)?;
-                    subject = Some(if variant == 0 {
-                        Subject::Database(self.string()?)
+                    let variant = self.r().choice(at, &SUBJECT)?;
+                    subject = Some(if variant.index() == 0 {
+                        Subject::Database(self.string(&variant)?)
                     } else {
-                        self.typed_member(named::BLAST4_SUBJECT)?;
-                        Subject::Other(SUBJECT[variant])
+                        self.typed_member(named::BLAST4_SUBJECT, &variant)?;
+                        Subject::Other(SUBJECT[variant.index()])
                     });
                 }
                 4 => {
-                    self.string()?;
+                    self.string(at)?;
                 }
                 5 => {
                     search.has_algorithm_options = true;
-                    let (matrix, evalue) = self.parameters()?;
+                    let (matrix, evalue) = self.parameters(at)?;
                     search.matrix_name = matrix;
                     search.evalue_threshold = evalue;
                 }
                 _ => {
-                    self.parameters()?;
+                    self.parameters(at)?;
                 }
             }
         }
@@ -716,16 +708,16 @@ impl<R: Read> ArchiveStream<R> {
     /// `EvalueThreshold`.
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:464-467,505
     // NCBI reference (598d8ae6): c++/src/objects/blast/Blast4_parameters.cpp:186-198
-    fn parameters(&mut self) -> Result<(Option<ParamValue>, Option<ParamValue>)> {
+    fn parameters(&mut self, at: &Frame<'_>) -> Result<(Option<ParamValue>, Option<ParamValue>)> {
         let (mut matrix, mut evalue) = (None, None);
-        let mut items = self.r().begin_list()?;
+        let mut items = self.r().begin_list(at)?;
         while self.r().next_item(&mut items)? {
-            let mut members = self.r().begin_members()?;
+            let mut members = self.r().begin_members(items.at(), &["name", "value"])?;
             let (mut name, mut value) = (None, None);
-            while let Some(index) = self.r().next_member(&mut members, &["name", "value"])? {
+            while let Some(index) = self.r().next_member(&mut members)? {
                 match index {
-                    0 => name = Some(self.string()?),
-                    _ => value = Some(self.blast4_value()?),
+                    0 => name = Some(self.string(members.at())?),
+                    _ => value = Some(self.blast4_value(members.at())?),
                 }
             }
             let (Some(name), Some(value)) = (name, value) else {
@@ -743,9 +735,9 @@ impl<R: Read> ArchiveStream<R> {
 
     /// A `Blast4-value` (the variants listed at `BLAST4_VALUE`).
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:375-378
-    fn blast4_value(&mut self) -> Result<ParamValue> {
-        let variant = self.r().choice(&BLAST4_VALUE)?;
-        let name = BLAST4_VALUE[variant];
+    fn blast4_value(&mut self, at: &Frame<'_>) -> Result<ParamValue> {
+        let variant = self.r().choice(at, &BLAST4_VALUE)?;
+        let name = BLAST4_VALUE[variant.index()];
         match name {
             "big-integer" => {
                 self.r().int8()?;
@@ -755,7 +747,12 @@ impl<R: Read> ArchiveStream<R> {
             }
             "cutoff" => {
                 return Ok(ParamValue::Cutoff(
-                    if self.r().choice(&["e-value", "raw-score"])? == 0 {
+                    if self
+                        .r()
+                        .choice(&variant, &["e-value", "raw-score"])?
+                        .index()
+                        == 0
+                    {
                         Cutoff::EValue(self.real()?)
                     } else {
                         self.r().int4()?;
@@ -772,15 +769,15 @@ impl<R: Read> ArchiveStream<R> {
             "strand-type" => {
                 self.r().enumerated(&BLAST4_STRAND_TYPE)?;
             }
-            "string" => return Ok(ParamValue::String(self.string()?)),
-            _ => self.typed_member(named::BLAST4_VALUE)?,
+            "string" => return Ok(ParamValue::String(self.string(&variant)?)),
+            _ => self.typed_member(named::BLAST4_VALUE, &variant)?,
         }
         Ok(ParamValue::Other(name))
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:287-299
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:433-438,454-457
-    fn results(&mut self) -> Result<Results> {
+    fn results(&mut self, at: &Frame<'_>) -> Result<Results> {
         const NAMES: [&str; 7] = [
             "alignments",
             "phi-alignments",
@@ -791,28 +788,28 @@ impl<R: Read> ArchiveStream<R> {
             "simple-results",
         ];
         let mut results = Results::default();
-        let mut members = self.r().begin_members()?;
-        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
+        let mut members = self.r().begin_members(at, &NAMES)?;
+        while let Some(index) = self.r().next_member(&mut members)? {
+            let at = members.at();
             match index {
-                0 => results.alignments = Some(self.seq_align_set()?),
+                0 => results.alignments = Some(self.seq_align_set(at)?),
                 2 => {
                     let mut masks = Vec::new();
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        masks.push(self.blast4_mask()?);
+                        masks.push(self.blast4_mask(items.at())?);
                     }
                     self.r().end_block()?;
                     results.masks = Some(masks);
                 }
                 3 => {
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        let mut members = self.r().begin_members()?;
-                        let mut seen = 0;
-                        while let Some(index) = self
+                        let mut members = self
                             .r()
-                            .next_member(&mut members, &["lambda", "k", "h", "gapped"])?
-                        {
+                            .begin_members(items.at(), &["lambda", "k", "h", "gapped"])?;
+                        let mut seen = 0;
+                        while let Some(index) = self.r().next_member(&mut members)? {
                             seen += 1;
                             if index == 3 {
                                 self.r().boolean()?;
@@ -827,30 +824,27 @@ impl<R: Read> ArchiveStream<R> {
                     self.r().end_block()?;
                 }
                 4 => {
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        self.string()?;
+                        self.string(items.at())?;
                     }
                     self.r().end_block()?;
                 }
-                _ => self.typed_member(named::BLAST4_GET_SEARCH_RESULTS_REPLY)?,
+                _ => self.typed_member(named::BLAST4_GET_SEARCH_RESULTS_REPLY, at)?,
             }
         }
         Ok(results)
     }
 
-    fn blast4_mask(&mut self) -> Result<Mask> {
-        let mut members = self.r().begin_members()?;
+    fn blast4_mask(&mut self, at: &Frame<'_>) -> Result<Mask> {
+        let mut members = self.r().begin_members(at, &["locations", "frame"])?;
         let (mut first, mut locations, mut frame) = (None, false, false);
-        while let Some(index) = self
-            .r()
-            .next_member(&mut members, &["locations", "frame"])?
-        {
+        while let Some(index) = self.r().next_member(&mut members)? {
             if index == 0 {
                 locations = true;
-                let mut items = self.r().begin_list()?;
+                let mut items = self.r().begin_list(members.at())?;
                 while self.r().next_item(&mut items)? {
-                    let location = self.mask_location()?;
+                    let location = self.mask_location(items.at())?;
                     if first.is_none() {
                         first = Some(location);
                     }
@@ -870,46 +864,46 @@ impl<R: Read> ArchiveStream<R> {
     /// A `Seq-loc` of a mask: the ids of a `packed-int`, the name of another variant.
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:93-101
     // `from` and `to` are `TSeqPos` (unsigned) in NCBI's classes.
-    fn mask_location(&mut self) -> Result<MaskLocation> {
-        let variant = self.r().choice(&SEQ_LOC)?;
-        match SEQ_LOC[variant] {
+    fn mask_location(&mut self, at: &Frame<'_>) -> Result<MaskLocation> {
+        let variant = self.r().choice(at, &SEQ_LOC)?;
+        match SEQ_LOC[variant.index()] {
             "int" => {
-                self.seq_interval()?;
+                self.seq_interval(&variant)?;
                 Ok(MaskLocation::Other("int"))
             }
             "packed-int" => {
                 let mut ids = Vec::new();
-                let mut items = self.r().begin_list()?;
+                let mut items = self.r().begin_list(&variant)?;
                 while self.r().next_item(&mut items)? {
-                    ids.push(self.seq_interval()?);
+                    ids.push(self.seq_interval(items.at())?);
                 }
                 self.r().end_block()?;
                 Ok(MaskLocation::PackedInt(ids))
             }
             name => {
-                self.typed_member(named::SEQ_LOC)?;
+                self.typed_member(named::SEQ_LOC, &variant)?;
                 Ok(MaskLocation::Other(name))
             }
         }
     }
 
     /// A `Seq-interval`: its id.
-    fn seq_interval(&mut self) -> Result<ParsedSeqId> {
-        Ok(self.interval()?.id)
+    fn seq_interval(&mut self, at: &Frame<'_>) -> Result<ParsedSeqId> {
+        Ok(self.interval(at)?.id)
     }
 
     /// A `Seq-interval`.
-    fn interval(&mut self) -> Result<Interval> {
+    fn interval(&mut self, at: &Frame<'_>) -> Result<Interval> {
         const NAMES: [&str; 6] = ["from", "to", "strand", "id", "fuzz-from", "fuzz-to"];
-        let mut members = self.r().begin_members()?;
+        let mut members = self.r().begin_members(at, &NAMES)?;
         let (mut from, mut to, mut strand, mut id) = (None, None, None, None);
-        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
+        while let Some(index) = self.r().next_member(&mut members)? {
             match index {
                 0 => from = Some(self.r().uint4()?),
                 1 => to = Some(self.r().uint4()?),
                 2 => strand = Some(self.r().enumerated(&NA_STRAND)?.1),
-                3 => id = Some(self.r().seq_id()?),
-                _ => self.typed_member(named::SEQ_INTERVAL)?,
+                3 => id = Some(self.r().seq_id(members.at())?),
+                _ => self.typed_member(named::SEQ_INTERVAL, members.at())?,
             }
         }
         match (from, to, id) {
@@ -927,13 +921,13 @@ impl<R: Read> ArchiveStream<R> {
     /// rpsbproc reads more of it, `query::query_row_id`).
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:83-92
     // `starts` and `lens` are `TSeqPos` (unsigned) in NCBI's class (seqalign.def:28-30).
-    fn packed_seg(&mut self) -> Result<()> {
+    fn packed_seg(&mut self, at: &Frame<'_>) -> Result<()> {
         const NAMES: [&str; 8] = [
             "dim", "numseg", "ids", "starts", "present", "lens", "strands", "scores",
         ];
         let mut seen = [false; 8];
-        let mut members = self.r().begin_members()?;
-        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
+        let mut members = self.r().begin_members(at, &NAMES)?;
+        while let Some(index) = self.r().next_member(&mut members)? {
             seen[index] = true;
             match index {
                 0 | 1 => {
@@ -943,11 +937,11 @@ impl<R: Read> ArchiveStream<R> {
                     self.r().octets()?;
                 }
                 _ => {
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(members.at())?;
                     while self.r().next_item(&mut items)? {
                         match index {
                             2 => {
-                                self.r().seq_id()?;
+                                self.r().seq_id(items.at())?;
                             }
                             3 | 5 => {
                                 self.r().uint4()?;
@@ -964,7 +958,7 @@ impl<R: Read> ArchiveStream<R> {
                                     num_ident: None,
                                     score_of_other_type: None,
                                 };
-                                self.align_score(&mut scratch)?;
+                                self.align_score(items.at(), &mut scratch)?;
                             }
                         }
                     }
@@ -982,14 +976,14 @@ impl<R: Read> ArchiveStream<R> {
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:339-358
     // (`ids` comes before `loc` in the module's order, so a location's id is kept only for the
     // first location of a segment without ids while no id is found.)
-    fn std_segs(&mut self) -> Result<StdAlign> {
+    fn std_segs(&mut self, at: &Frame<'_>) -> Result<StdAlign> {
         const NAMES: [&str; 4] = ["dim", "ids", "loc", "scores"];
         let mut align = StdAlign {
             query_id: QueryRowId::Missing,
             hit_id: None,
             segs: Vec::new(),
         };
-        let mut items = self.r().begin_list()?;
+        let mut items = self.r().begin_list(at)?;
         while self.r().next_item(&mut items)? {
             let first = align.segs.is_empty();
             let mut pair = StdPair {
@@ -998,17 +992,17 @@ impl<R: Read> ArchiveStream<R> {
             };
             let mut ids_found = false;
             let mut loc = false;
-            let mut members = self.r().begin_members()?;
-            while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
+            let mut members = self.r().begin_members(items.at(), &NAMES)?;
+            while let Some(index) = self.r().next_member(&mut members)? {
                 match index {
                     0 => {
                         self.r().int4()?;
                     }
                     1 => {
-                        let mut id_items = self.r().begin_list()?;
+                        let mut id_items = self.r().begin_list(members.at())?;
                         let mut count = 0usize;
                         while self.r().next_item(&mut id_items)? {
-                            let id = self.r().seq_id()?;
+                            let id = self.r().seq_id(id_items.at())?;
                             if count == 0 && matches!(align.query_id, QueryRowId::Missing) {
                                 align.query_id = QueryRowId::Id(id);
                             } else if count == 1 && first {
@@ -1021,13 +1015,13 @@ impl<R: Read> ArchiveStream<R> {
                     }
                     2 => {
                         loc = true;
-                        let mut loc_items = self.r().begin_list()?;
+                        let mut loc_items = self.r().begin_list(members.at())?;
                         let mut count = 0usize;
                         while self.r().next_item(&mut loc_items)? {
                             let wanted = count == 0
                                 && !ids_found
                                 && matches!(align.query_id, QueryRowId::Missing);
-                            let (location, id, name) = self.std_loc(wanted)?;
+                            let (location, id, name) = self.std_loc(loc_items.at(), wanted)?;
                             if wanted {
                                 align.query_id = match (location, id) {
                                     (_, Some(id)) => QueryRowId::Id(id),
@@ -1053,9 +1047,9 @@ impl<R: Read> ArchiveStream<R> {
                             num_ident: None,
                             score_of_other_type: None,
                         };
-                        let mut score_items = self.r().begin_list()?;
+                        let mut score_items = self.r().begin_list(members.at())?;
                         while self.r().next_item(&mut score_items)? {
-                            self.align_score(&mut scratch)?;
+                            self.align_score(score_items.at(), &mut scratch)?;
                         }
                         self.r().end_block()?;
                     }
@@ -1075,36 +1069,40 @@ impl<R: Read> ArchiveStream<R> {
     /// single id (`empty`, `whole`, `int`, `pnt`).
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:103-107
     // `point` is `TSeqPos` (unsigned) in NCBI's class.
-    fn std_loc(&mut self, keep_id: bool) -> Result<(StdLoc, Option<ParsedSeqId>, &'static str)> {
-        let variant = self.r().choice(&SEQ_LOC)?;
-        let name = SEQ_LOC[variant];
+    fn std_loc(
+        &mut self,
+        at: &Frame<'_>,
+        keep_id: bool,
+    ) -> Result<(StdLoc, Option<ParsedSeqId>, &'static str)> {
+        let variant = self.r().choice(at, &SEQ_LOC)?;
+        let name = SEQ_LOC[variant.index()];
         let keep = |id: ParsedSeqId| keep_id.then_some(id);
         let (location, id) = match name {
             "null" => {
                 self.r().null()?;
                 (StdLoc::Null, None)
             }
-            "empty" => (StdLoc::Empty, keep(self.r().seq_id()?)),
-            "whole" => (StdLoc::Whole, keep(self.r().seq_id()?)),
+            "empty" => (StdLoc::Empty, keep(self.r().seq_id(&variant)?)),
+            "whole" => (StdLoc::Whole, keep(self.r().seq_id(&variant)?)),
             "int" => {
                 let Interval {
                     from,
                     to,
                     strand,
                     id,
-                } = self.interval()?;
+                } = self.interval(&variant)?;
                 (StdLoc::Int { from, to, strand }, keep(id))
             }
             "pnt" => {
                 const NAMES: [&str; 4] = ["point", "strand", "id", "fuzz"];
-                let mut members = self.r().begin_members()?;
+                let mut members = self.r().begin_members(&variant, &NAMES)?;
                 let (mut point, mut strand, mut id) = (None, None, None);
-                while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
+                while let Some(index) = self.r().next_member(&mut members)? {
                     match index {
                         0 => point = Some(self.r().uint4()?),
                         1 => strand = Some(self.r().enumerated(&NA_STRAND)?.1),
-                        2 => id = Some(self.r().seq_id()?),
-                        _ => self.typed_member(named::SEQ_POINT)?,
+                        2 => id = Some(self.r().seq_id(members.at())?),
+                        _ => self.typed_member(named::SEQ_POINT, members.at())?,
                     }
                 }
                 let (Some(point), Some(id)) = (point, id) else {
@@ -1113,7 +1111,7 @@ impl<R: Read> ArchiveStream<R> {
                 (StdLoc::Pnt { point, strand }, keep(id))
             }
             _ => {
-                self.typed_member(named::SEQ_LOC)?;
+                self.typed_member(named::SEQ_LOC, &variant)?;
                 (StdLoc::Other, None)
             }
         };
@@ -1121,17 +1119,17 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:332-337
-    fn messages(&mut self) -> Result<()> {
-        let mut items = self.r().begin_list()?;
+    fn messages(&mut self, at: &Frame<'_>) -> Result<()> {
+        let mut items = self.r().begin_list(at)?;
         while self.r().next_item(&mut items)? {
-            let mut members = self.r().begin_members()?;
+            let mut members = self.r().begin_members(items.at(), &["code", "message"])?;
             let mut code = false;
-            while let Some(index) = self.r().next_member(&mut members, &["code", "message"])? {
+            while let Some(index) = self.r().next_member(&mut members)? {
                 if index == 0 {
                     self.r().int4()?;
                     code = true;
                 } else {
-                    self.string()?;
+                    self.string(members.at())?;
                 }
             }
             if !code {
@@ -1143,19 +1141,20 @@ impl<R: Read> ArchiveStream<R> {
 
     /// A `Bioseq-set`: its `seq-set`.
     // NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:22-60
-    fn bioseq_set(&mut self) -> Result<Vec<SeqEntry>> {
+    fn bioseq_set(&mut self, at: &Frame<'_>) -> Result<Vec<SeqEntry>> {
         const NAMES: [&str; 9] = [
             "id", "coll", "level", "class", "release", "date", "descr", "seq-set", "annot",
         ];
-        let mut members = self.r().begin_members()?;
+        let mut members = self.r().begin_members(at, &NAMES)?;
         let mut entries = None;
-        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
+        while let Some(index) = self.r().next_member(&mut members)? {
+            let at = members.at();
             match index {
                 0 => {
-                    self.r().object_id()?;
+                    self.r().object_id(at)?;
                 }
                 1 => {
-                    self.r().dbtag()?;
+                    self.r().dbtag(at)?;
                 }
                 2 => {
                     self.r().int4()?;
@@ -1164,62 +1163,63 @@ impl<R: Read> ArchiveStream<R> {
                     self.r().enumerated(&BIOSEQ_SET_CLASS)?;
                 }
                 4 => {
-                    self.string()?;
+                    self.string(at)?;
                 }
                 5 => {
-                    self.r().date()?;
+                    self.r().date(at)?;
                 }
                 6 => {
                     let mut ignored = Query::default();
-                    self.seq_descr(&mut ignored)?;
+                    self.seq_descr(at, &mut ignored)?;
                 }
                 7 => {
                     let mut list = Vec::new();
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        list.push(if self.r().choice(&["seq", "set"])? == 0 {
-                            SeqEntry::Seq(self.bioseq()?)
+                        let entry = self.r().choice(items.at(), &["seq", "set"])?;
+                        list.push(if entry.index() == 0 {
+                            SeqEntry::Seq(self.bioseq(&entry)?)
                         } else {
-                            self.bioseq_set()?;
+                            self.bioseq_set(&entry)?;
                             SeqEntry::Set
                         });
                     }
                     self.r().end_block()?;
                     entries = Some(list);
                 }
-                _ => self.typed_member(named::BIOSEQ_SET)?,
+                _ => self.typed_member(named::BIOSEQ_SET, at)?,
             }
         }
         entries.ok_or_else(|| self.r().error("member seq-set missing"))
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:36-40
-    fn bioseq(&mut self) -> Result<Query> {
+    fn bioseq(&mut self, at: &Frame<'_>) -> Result<Query> {
         let mut query = Query::default();
-        let mut members = self.r().begin_members()?;
-        let (mut ids, mut inst) = (false, false);
-        while let Some(index) = self
+        let mut members = self
             .r()
-            .next_member(&mut members, &["id", "descr", "inst", "annot"])?
-        {
+            .begin_members(at, &["id", "descr", "inst", "annot"])?;
+        let (mut ids, mut inst) = (false, false);
+        while let Some(index) = self.r().next_member(&mut members)? {
+            let at = members.at();
             match index {
                 0 => {
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        let id = self.r().seq_id()?;
+                        let id = self.r().seq_id(items.at())?;
                         query.ids.push(id);
                     }
                     self.r().end_block()?;
                     ids = true;
                 }
-                1 => self.seq_descr(&mut query)?,
+                1 => self.seq_descr(at, &mut query)?,
                 2 => {
-                    self.seq_inst(&mut query)?;
+                    self.seq_inst(at, &mut query)?;
                     inst = true;
                 }
                 _ => {
                     query.has_annot = true;
-                    self.typed_member(named::BIOSEQ)?;
+                    self.typed_member(named::BIOSEQ, at)?;
                 }
             }
         }
@@ -1235,26 +1235,26 @@ impl<R: Read> ArchiveStream<R> {
     // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless the environment sets it, which LOSAT's
     // rpsbproc rejects (`reader_variable`), or a registry file does, which
     // the application start rejects, `ApplicationStart::settings`.)
-    fn seq_descr(&mut self, query: &mut Query) -> Result<()> {
+    fn seq_descr(&mut self, at: &Frame<'_>, query: &mut Query) -> Result<()> {
         let mut count = 0usize;
-        let mut items = self.r().begin_list()?;
+        let mut items = self.r().begin_list(at)?;
         while self.r().next_item(&mut items)? {
             count += 1;
-            let variant = self.r().choice(&SEQDESC)?;
-            match SEQDESC[variant] {
+            let variant = self.r().choice(items.at(), &SEQDESC)?;
+            match SEQDESC[variant.index()] {
                 "title" => {
-                    let title = self.string()?;
+                    let title = self.string(&variant)?;
                     if query.title.is_none() {
                         query.title = Some(title);
                     }
                 }
                 "user" => {
-                    if self.user_object(true)? && query.unread_descriptor.is_none() {
+                    if self.user_object(&variant, true)? && query.unread_descriptor.is_none() {
                         query.unread_descriptor =
                             Some("a CFastaReader user object whose DefLine is not a string");
                     }
                 }
-                _ => self.typed_member(named::SEQDESC)?,
+                _ => self.typed_member(named::SEQDESC, &variant)?,
             }
         }
         self.r().end_block()?;
@@ -1273,29 +1273,26 @@ impl<R: Read> ArchiveStream<R> {
     //
     // `top`: the object is a descriptor's (whose `CFastaReader` DefLine rpsbproc reads). Returns
     // whether it is a `CFastaReader` object with a `DefLine` field whose value is not a string.
-    fn user_object(&mut self, top: bool) -> Result<bool> {
-        let mut members = self.r().begin_members()?;
+    fn user_object(&mut self, at: &Frame<'_>, top: bool) -> Result<bool> {
+        let mut members = self.r().begin_members(at, &["class", "type", "data"])?;
         let (mut fasta_reader, mut type_seen, mut data_seen, mut bad_defline) =
             (false, false, false, false);
-        while let Some(index) = self
-            .r()
-            .next_member(&mut members, &["class", "type", "data"])?
-        {
+        while let Some(index) = self.r().next_member(&mut members)? {
             match index {
                 0 => {
-                    self.string()?;
+                    self.string(members.at())?;
                 }
                 1 => {
                     type_seen = true;
-                    let id = self.r().object_id()?;
+                    let id = self.r().object_id(members.at())?;
                     fasta_reader =
                         top && matches!(id, ObjectId::Str(text) if text == b"CFastaReader");
                 }
                 _ => {
                     data_seen = true;
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(members.at())?;
                     while self.r().next_item(&mut items)? {
-                        bad_defline |= self.user_field(fasta_reader)?;
+                        bad_defline |= self.user_field(items.at(), fasta_reader)?;
                     }
                     self.r().end_block()?;
                 }
@@ -1309,31 +1306,28 @@ impl<R: Read> ArchiveStream<R> {
 
     /// A `User-field` (`User-object` above); `fasta_reader`: the field is one of a descriptor's
     /// `CFastaReader` object. Returns whether it is a `DefLine` field whose value is not a string.
-    fn user_field(&mut self, fasta_reader: bool) -> Result<bool> {
+    fn user_field(&mut self, at: &Frame<'_>, fasta_reader: bool) -> Result<bool> {
         const FIELD_DATA: [&str; 12] = [
             "str", "int", "real", "bool", "os", "object", "strs", "ints", "reals", "oss", "fields",
             "objects",
         ];
-        let mut members = self.r().begin_members()?;
+        let mut members = self.r().begin_members(at, &["label", "num", "data"])?;
         let (mut defline, mut label, mut data, mut bad_defline) = (false, false, false, false);
-        while let Some(index) = self
-            .r()
-            .next_member(&mut members, &["label", "num", "data"])?
-        {
+        while let Some(index) = self.r().next_member(&mut members)? {
             match index {
                 0 => {
                     label = true;
-                    defline =
-                        matches!(self.r().object_id()?, ObjectId::Str(text) if text == b"DefLine");
+                    let id = self.r().object_id(members.at())?;
+                    defline = matches!(id, ObjectId::Str(text) if text == b"DefLine");
                 }
                 1 => {
                     self.r().int4()?;
                 }
                 _ => {
                     data = true;
-                    let variant = self.r().choice(&FIELD_DATA)?;
-                    bad_defline = fasta_reader && defline && variant != 0;
-                    match FIELD_DATA[variant] {
+                    let variant = self.r().choice(members.at(), &FIELD_DATA)?;
+                    bad_defline = fasta_reader && defline && variant.index() != 0;
+                    match FIELD_DATA[variant.index()] {
                         "str" => {
                             self.r().utf8_string()?;
                         }
@@ -1350,23 +1344,31 @@ impl<R: Read> ArchiveStream<R> {
                             self.r().octets()?;
                         }
                         "object" => {
-                            self.user_object(false)?;
+                            self.user_object(&variant, false)?;
                         }
-                        "strs" => self.r().each(|reader| reader.utf8_string().map(drop))?,
-                        "ints" => self.r().each(|reader| reader.int4().map(drop))?,
-                        "reals" => self.r().each(|reader| reader.real().map(drop))?,
-                        "oss" => self.r().each(|reader| reader.octets().map(drop))?,
+                        "strs" => self
+                            .r()
+                            .each(&variant, |reader, _| reader.utf8_string().map(drop))?,
+                        "ints" => self
+                            .r()
+                            .each(&variant, |reader, _| reader.int4().map(drop))?,
+                        "reals" => self
+                            .r()
+                            .each(&variant, |reader, _| reader.real().map(drop))?,
+                        "oss" => self
+                            .r()
+                            .each(&variant, |reader, _| reader.octets().map(drop))?,
                         "fields" => {
-                            let mut items = self.r().begin_list()?;
+                            let mut items = self.r().begin_list(&variant)?;
                             while self.r().next_item(&mut items)? {
-                                self.user_field(false)?;
+                                self.user_field(items.at(), false)?;
                             }
                             self.r().end_block()?;
                         }
                         _ => {
-                            let mut items = self.r().begin_list()?;
+                            let mut items = self.r().begin_list(&variant)?;
                             while self.r().next_item(&mut items)? {
-                                self.user_object(false)?;
+                                self.user_object(items.at(), false)?;
                             }
                             self.r().end_block()?;
                         }
@@ -1382,13 +1384,13 @@ impl<R: Read> ArchiveStream<R> {
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:262-297
     // `length` is `TSeqPos` (unsigned) in NCBI's class.
-    fn seq_inst(&mut self, query: &mut Query) -> Result<()> {
+    fn seq_inst(&mut self, at: &Frame<'_>, query: &mut Query) -> Result<()> {
         const NAMES: [&str; 9] = [
             "repr", "mol", "length", "fuzz", "topology", "strand", "seq-data", "ext", "hist",
         ];
-        let mut members = self.r().begin_members()?;
+        let mut members = self.r().begin_members(at, &NAMES)?;
         let (mut repr, mut mol) = (false, false);
-        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
+        while let Some(index) = self.r().next_member(&mut members)? {
             match index {
                 0 => {
                     self.r().enumerated(&SEQ_INST_REPR)?;
@@ -1405,9 +1407,9 @@ impl<R: Read> ArchiveStream<R> {
                 5 => {
                     self.r().enumerated(&SEQ_INST_STRAND)?;
                 }
-                6 => query.seq_data = Some(self.seq_data()?),
-                7 => self.seq_ext(query)?,
-                _ => self.typed_member(named::SEQ_INST)?,
+                6 => query.seq_data = Some(self.seq_data(members.at())?),
+                7 => self.seq_ext(members.at(), query)?,
+                _ => self.typed_member(named::SEQ_INST, members.at())?,
             }
         }
         if !(repr && mol) {
@@ -1417,13 +1419,13 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     /// A `Seq-data`: its variant and its letters (or bytes).
-    fn seq_data(&mut self) -> Result<(&'static str, Vec<u8>)> {
-        let variant = self.r().choice(&SEQ_DATA)?;
-        let name = SEQ_DATA[variant];
+    fn seq_data(&mut self, at: &Frame<'_>) -> Result<(&'static str, Vec<u8>)> {
+        let variant = self.r().choice(at, &SEQ_DATA)?;
+        let name = SEQ_DATA[variant.index()];
         let data = match name {
-            "iupacna" | "iupacaa" | "ncbieaa" => self.string()?,
+            "iupacna" | "iupacaa" | "ncbieaa" => self.string(&variant)?,
             "gap" => {
-                self.typed_member(named::SEQ_DATA)?;
+                self.typed_member(named::SEQ_DATA, &variant)?;
                 Vec::new()
             }
             _ => self.r().octets()?,
@@ -1438,31 +1440,32 @@ impl<R: Read> ArchiveStream<R> {
     // `Get1LetterSeqData` does not append). The `length` of a literal is `TSeqPos` (unsigned,
     // seq.def:13-14).
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:151,193-194
-    fn seq_ext(&mut self, query: &mut Query) -> Result<()> {
+    fn seq_ext(&mut self, at: &Frame<'_>, query: &mut Query) -> Result<()> {
         const NAMES: [&str; 4] = ["seg", "ref", "map", "delta"];
-        if self.r().choice(&NAMES)? != 3 {
-            return self.typed_member(named::SEQ_EXT);
+        let variant = self.r().choice(at, &NAMES)?;
+        if variant.index() != 3 {
+            return self.typed_member(named::SEQ_EXT, &variant);
         }
-        let mut items = self.r().begin_list()?;
+        let mut items = self.r().begin_list(&variant)?;
         while self.r().next_item(&mut items)? {
-            if self.r().choice(&["loc", "literal"])? == 0 {
-                self.typed_member(named::DELTA_SEQ)?;
+            let item = self.r().choice(items.at(), &["loc", "literal"])?;
+            if item.index() == 0 {
+                self.typed_member(named::DELTA_SEQ, &item)?;
                 continue;
             }
-            let mut members = self.r().begin_members()?;
-            let mut length = false;
-            while let Some(index) = self
+            let mut members = self
                 .r()
-                .next_member(&mut members, &["length", "fuzz", "seq-data"])?
-            {
+                .begin_members(&item, &["length", "fuzz", "seq-data"])?;
+            let mut length = false;
+            while let Some(index) = self.r().next_member(&mut members)? {
                 match index {
                     0 => {
                         self.r().uint4()?;
                         length = true;
                     }
-                    1 => self.typed_member(named::SEQ_LITERAL)?,
+                    1 => self.typed_member(named::SEQ_LITERAL, members.at())?,
                     _ => {
-                        let data = self.seq_data()?;
+                        let data = self.seq_data(members.at())?;
                         if data.0 != "gap" {
                             query.delta_literals.push(data);
                         }
@@ -1477,18 +1480,18 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     /// A `Seq-align-set` (SET OF Seq-align).
-    fn seq_align_set(&mut self) -> Result<Vec<Align>> {
+    fn seq_align_set(&mut self, at: &Frame<'_>) -> Result<Vec<Align>> {
         let mut aligns = Vec::new();
-        let mut items = self.r().begin_list()?;
+        let mut items = self.r().begin_list(at)?;
         while self.r().next_item(&mut items)? {
-            aligns.push(self.seq_align()?);
+            aligns.push(self.seq_align(items.at())?);
         }
         self.r().end_block()?;
         Ok(aligns)
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:22-51
-    fn seq_align(&mut self) -> Result<Align> {
+    fn seq_align(&mut self, at: &Frame<'_>) -> Result<Align> {
         const NAMES: [&str; 7] = ["type", "dim", "score", "segs", "bounds", "id", "ext"];
         let mut align = Align {
             segs: Segs::Other("dendiag"),
@@ -1499,8 +1502,9 @@ impl<R: Read> ArchiveStream<R> {
             score_of_other_type: None,
         };
         let (mut kind, mut segs) = (false, false);
-        let mut members = self.r().begin_members()?;
-        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
+        let mut members = self.r().begin_members(at, &NAMES)?;
+        while let Some(index) = self.r().next_member(&mut members)? {
+            let at = members.at();
             match index {
                 0 => {
                     self.r().enumerated(&SEQ_ALIGN_TYPE)?;
@@ -1510,36 +1514,36 @@ impl<R: Read> ArchiveStream<R> {
                     self.r().int4()?;
                 }
                 2 => {
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        self.align_score(&mut align)?;
+                        self.align_score(items.at(), &mut align)?;
                     }
                     self.r().end_block()?;
                 }
                 3 => {
                     segs = true;
-                    let variant = self.r().choice(&SEQ_ALIGN_SEGS)?;
-                    align.segs = match variant {
-                        1 => Segs::Denseg(self.dense_seg()?),
-                        2 => Segs::Std(Box::new(self.std_segs()?)),
+                    let variant = self.r().choice(at, &SEQ_ALIGN_SEGS)?;
+                    align.segs = match variant.index() {
+                        1 => Segs::Denseg(self.dense_seg(&variant)?),
+                        2 => Segs::Std(Box::new(self.std_segs(&variant)?)),
                         3 => {
-                            self.packed_seg()?;
+                            self.packed_seg(&variant)?;
                             Segs::Other("packed")
                         }
-                        _ => {
-                            self.typed_member(seq_align_segs())?;
-                            Segs::Other(SEQ_ALIGN_SEGS[variant])
+                        index => {
+                            self.typed_member(seq_align_segs(), &variant)?;
+                            Segs::Other(SEQ_ALIGN_SEGS[index])
                         }
                     };
                 }
                 5 => {
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        self.r().object_id()?;
+                        self.r().object_id(items.at())?;
                     }
                     self.r().end_block()?;
                 }
-                _ => self.typed_member(named::SEQ_ALIGN)?,
+                _ => self.typed_member(named::SEQ_ALIGN, at)?,
             }
         }
         if !(kind && segs) {
@@ -1551,13 +1555,13 @@ impl<R: Read> ArchiveStream<R> {
     /// One `Score` of a Seq-align, into the fields `ParseAlignScores` reads.
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:283-289
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_blast.cpp:214-262
-    fn align_score(&mut self, align: &mut Align) -> Result<()> {
-        let mut members = self.r().begin_members()?;
+    fn align_score(&mut self, at: &Frame<'_>, align: &mut Align) -> Result<()> {
+        let mut members = self.r().begin_members(at, &["id", "value"])?;
         let mut name: Option<&'static str> = None;
         let mut value_seen = false;
-        while let Some(index) = self.r().next_member(&mut members, &["id", "value"])? {
+        while let Some(index) = self.r().next_member(&mut members)? {
             if index == 0 {
-                name = match self.r().object_id()? {
+                name = match self.r().object_id(members.at())? {
                     ObjectId::Str(text) => match text.as_slice() {
                         b"score" => Some("score"),
                         b"e_value" => Some("e_value"),
@@ -1570,7 +1574,7 @@ impl<R: Read> ArchiveStream<R> {
                 continue;
             }
             value_seen = true;
-            let is_real = self.r().choice(&["real", "int"])? == 0;
+            let is_real = self.r().choice(members.at(), &["real", "int"])?.index() == 0;
             let wants_real = matches!(name, Some("e_value" | "bit_score"));
             match (name, is_real) {
                 (None, true) => {
@@ -1615,7 +1619,7 @@ impl<R: Read> ArchiveStream<R> {
 
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:74-81
     // `starts` are `TSignedSeqPos` and `lens` `TSeqPos` (unsigned) in NCBI's class.
-    fn dense_seg(&mut self) -> Result<DenseSeg> {
+    fn dense_seg(&mut self, at: &Frame<'_>) -> Result<DenseSeg> {
         const NAMES: [&str; 7] = [
             "dim", "numseg", "ids", "starts", "lens", "strands", "scores",
         ];
@@ -1625,37 +1629,38 @@ impl<R: Read> ArchiveStream<R> {
             lens: Vec::new(),
         };
         let mut seen = [false; 7];
-        let mut members = self.r().begin_members()?;
-        while let Some(index) = self.r().next_member(&mut members, &NAMES)? {
+        let mut members = self.r().begin_members(at, &NAMES)?;
+        while let Some(index) = self.r().next_member(&mut members)? {
             seen[index] = true;
+            let at = members.at();
             match index {
                 0 | 1 => {
                     self.r().int4()?;
                 }
                 2 => {
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        let id = self.r().seq_id()?;
+                        let id = self.r().seq_id(items.at())?;
                         seg.ids.push(id);
                     }
                     self.r().end_block()?;
                 }
                 3 => {
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
                         seg.starts.push(self.r().int4()?);
                     }
                     self.r().end_block()?;
                 }
                 4 => {
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
                         seg.lens.push(self.r().uint4()?);
                     }
                     self.r().end_block()?;
                 }
                 5 => {
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
                         self.r().enumerated(&NA_STRAND)?;
                     }
@@ -1670,9 +1675,9 @@ impl<R: Read> ArchiveStream<R> {
                         num_ident: None,
                         score_of_other_type: None,
                     };
-                    let mut items = self.r().begin_list()?;
+                    let mut items = self.r().begin_list(at)?;
                     while self.r().next_item(&mut items)? {
-                        self.align_score(&mut scratch)?;
+                        self.align_score(items.at(), &mut scratch)?;
                     }
                     self.r().end_block()?;
                 }

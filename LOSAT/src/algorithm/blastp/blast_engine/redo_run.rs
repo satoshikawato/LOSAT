@@ -969,10 +969,11 @@ where
 /// The error of the batch `batch` whose Smith-Waterman redo failed at its last redone match
 /// (`sw_batch_failed`), the redo having taken the lists up to query `q_idx`'s with the heaps
 /// `heaps`: LOSAT's refusal instead where a fetch before it read a header that cannot be read,
-/// which ended NCBI's search there (`FetchNotes::refused_before_failure`).
+/// which ended NCBI's search there (`FetchNotes::refused_before_failure`). The one owner of that
+/// order, for the one-thread loop and the windows' replay (`x_redo_par.rs`, `XSwBatch::pass`).
 #[cold]
 #[inline(never)]
-fn sw_batch_failed_after(
+pub(in crate::algorithm::blastp) fn sw_batch_failed_after(
     fetch_notes: &super::database::FetchNotes<'_>,
     batch: std::ops::Range<usize>,
     heaps: &[BlastCompoHeap],
@@ -987,6 +988,31 @@ fn sw_batch_failed_after(
         batch.start,
         &heaps[batch.start],
         fetch_notes.fetched_before_failure(heaps, batch.clone(), q_idx, usize::MAX),
+    )
+}
+
+/// The error of the batch `batch` whose Smith-Waterman redo does not end at the match after the
+/// kept list `position` of query `q_idx` (`sw_endless`), with the heaps `heaps` as the redo left
+/// them before that match: LOSAT's refusal instead where a fetch before it read a header that
+/// cannot be read, which ended NCBI's search there (`FetchNotes::refused_before_failure`). The one
+/// owner of that order, for the one-thread loop and the windows' replay (`x_redo_par.rs`,
+/// `XSwBatch::redone`).
+#[cold]
+#[inline(never)]
+pub(in crate::algorithm::blastp) fn sw_endless_after(
+    fetch_notes: &super::database::FetchNotes<'_>,
+    batch: std::ops::Range<usize>,
+    heaps: &[BlastCompoHeap],
+    q_idx: usize,
+    position: usize,
+) -> anyhow::Error {
+    if let Some(refusal) = fetch_notes.refused_before_failure(heaps, batch.clone(), q_idx, position)
+    {
+        return refusal;
+    }
+    sw_endless(
+        batch.start,
+        fetch_notes.fetched_before_failure(heaps, batch.clone(), q_idx, position),
     )
 }
 
@@ -1367,26 +1393,13 @@ where
                     &mut None,
                 );
                 let Some(postprocessed) = sw_status.redone(redone, || {
-                    // A fetch before this match that read a header that cannot be read ended
-                    // NCBI's search there.
-                    fetch_notes
-                        .refused_before_failure(
-                            redone_matches,
-                            batch.clone(),
-                            q_idx,
-                            x_match_position,
-                        )
-                        .unwrap_or_else(|| {
-                            sw_endless(
-                                batch.start,
-                                fetch_notes.fetched_before_failure(
-                                    redone_matches,
-                                    batch.clone(),
-                                    q_idx,
-                                    x_match_position,
-                                ),
-                            )
-                        })
+                    sw_endless_after(
+                        fetch_notes,
+                        batch.clone(),
+                        redone_matches,
+                        q_idx,
+                        x_match_position,
+                    )
                 })?
                 else {
                     x_status_position = Some(x_match_position);

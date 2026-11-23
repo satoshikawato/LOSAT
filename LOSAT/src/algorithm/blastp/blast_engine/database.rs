@@ -938,7 +938,9 @@ impl XFetchedUtf8 {
 /// notes those of its own heaps (`pssm_redo`, `pssm_hooks::pssm_traceback`); after the traceback
 /// (`after`) every subject of the ordinary traceback, or those that the composition-based redo's
 /// early termination test leaves (its heaps as it left them). The replay of the parallel redo's
-/// windows (`x_redo_par.rs` `XSwBatch`) reads `fetched_before_failure` as the one-thread loop does.
+/// windows (`x_redo_par.rs` `XSwBatch`) reads `refused_before_failure` and `fetched_before_failure`
+/// through the one-thread loop's errors (`redo_run::sw_batch_failed_after`,
+/// `redo_run::sw_endless_after`).
 pub(in crate::algorithm::blastp) struct FetchNotes<'a> {
     listed: Option<&'a ListedSubjects>,
     database: Option<&'a BlastpDatabase>,

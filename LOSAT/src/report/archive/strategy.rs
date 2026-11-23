@@ -1244,7 +1244,10 @@ pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<
     // The file is complete: LOSAT Web's goes to the run's files now (`ReceivedFile`), and a file
     // that does not get there is LOSAT's internal error instead of a run without it. A refusal of
     // LOSAT's keeps its own text.
-    let handed = strategy.with_state(|state| state.sink.hand_over());
+    // A sink that cannot be cut waits in `Shared::held` (line RG KB5) and is never LOSAT Web's
+    // file (`ReceivedFile::can_cut`), so only the sink that the state holds is handed over.
+    let handed =
+        strategy.with_state(|state| state.sink.as_mut().map_or(Ok(()), |sink| sink.hand_over()));
     let refused = matches!(&ended, Err(error) if crate::cli::NativeError::caught(error).is_none());
     match handed {
         Err(error) if !refused => {

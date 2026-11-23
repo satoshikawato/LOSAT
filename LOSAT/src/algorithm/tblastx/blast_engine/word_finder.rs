@@ -1234,8 +1234,9 @@ fn one_hit_in_batch<S: TbxScore>(
 // `reference_loop` one for `x_pair_par::decide`, and `scan_chunk` takes this function
 // for every chunk.
 /// Scans `chunk` of the frame with NCBI's one-hit word finder (`-window_size 0`) and returns the
-/// chunk's HSP list.
-fn scan_chunk_one_hit<S: TbxScore>(
+/// chunk's HSP list. `AROUND`: the chunk's scan reads letters before it (`x_soft_scan_letters`),
+/// so its words can lie before it.
+fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
     frame: &FrameCx<'_>,
     chunk: SubjectChunk,
     offset_pairs: &mut [OffsetPair],
@@ -1297,6 +1298,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
     // (`x_soft_scan_letters`, `x_scan_ranges`), as in `scan_chunk_plain`.
     let (x_scan_letters, x_lead) =
         x_soft_scan_letters(x_soft, subject, subject_full, &chunk, wordsize as usize);
+    debug_assert_eq!(AROUND, x_lead > 0, "the caller's choice of the loop");
     let x_around = ChunkLetters {
         letters: x_scan_letters,
         lead: x_lead,
@@ -1346,7 +1348,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
                 break;
             }
             // The hits at the chunk's offsets (NCBI's, below 0 before it, as Uint4).
-            if x_lead > 0 {
+            if AROUND {
                 x_pairs_at_chunk(&mut offset_pairs[..hits as usize], x_lead);
             }
             // [C] for (i = 0; i < hits; ++i)
@@ -1421,7 +1423,7 @@ fn scan_chunk_one_hit<S: TbxScore>(
                 // A word before the chunk (a range of masks stored out of order) is extended on
                 // the frame's letters around the chunk, as NCBI's extension reads them
                 // (`extend_hit_one_hit_outside`); its HSP can start before the chunk.
-                if (subject_offset as i32) < 0 {
+                if AROUND && (subject_offset as i32) < 0 {
                     record(
                         crate::algorithm::tblastx::extension::extend_hit_one_hit_outside(
                             sc,
@@ -1531,16 +1533,36 @@ pub(super) fn scan_chunk<S: TbxScore>(
     // The one-hit word finder (`-window_size 0`) has a loop of its own, compiled out of
     // line (`x_out_of_line`) so that this function keeps the two-hit scan's code.
     if window == 0 {
+        // A chunk whose ranges start before it (masks stored out of order,
+        // `common::translated_chunks::scan_lead`) is the only one whose words can lie before it:
+        // only its loop tests for them (`AROUND`).
+        let around = x_soft_calls
+            .and_then(|calls| x_soft_chunk(calls, &chunk))
+            .is_some_and(|ranges| {
+                crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
+            });
         return x_out_of_line(|| {
-            scan_chunk_one_hit(
-                frame,
-                chunk,
-                offset_pairs,
-                diag_array,
-                diag_offset,
-                scan_chunk_size,
-                sc,
-            )
+            if around {
+                scan_chunk_one_hit::<S, true>(
+                    frame,
+                    chunk,
+                    offset_pairs,
+                    diag_array,
+                    diag_offset,
+                    scan_chunk_size,
+                    sc,
+                )
+            } else {
+                scan_chunk_one_hit::<S, false>(
+                    frame,
+                    chunk,
+                    offset_pairs,
+                    diag_array,
+                    diag_offset,
+                    scan_chunk_size,
+                    sc,
+                )
+            }
         });
     }
     // The debug/trace paths exist only in the reference loop.

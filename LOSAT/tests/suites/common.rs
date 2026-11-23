@@ -57,12 +57,16 @@ mod function_size_limit;
 mod library_api;
 #[path = "../library_examples.rs"]
 mod library_examples;
+#[path = "../library_html_posts.rs"]
+mod library_html_posts;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
 #[path = "../llvm_profile.rs"]
 mod llvm_profile;
 #[path = "../makeblastdb_failed_index.rs"]
 mod makeblastdb_failed_index;
+#[path = "../makeblastdb_gi_mask.rs"]
+mod makeblastdb_gi_mask;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]

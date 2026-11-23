@@ -1,0 +1,95 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ps_seg.faa).
+           1 sequences; 260 total letters
+
+
+
+<b>Query=</b> pq_segadj pq_seg with 70-79 lowercase
+
+Length=260
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ps_seg subject 70 Q then random                                       <a href=#Subject_1>502</a>     0.0  
+
+
+><a name=Subject_1></a> ps_seg subject 70 Q then random
+Length=260
+
+ Score = 502 bits (1292),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 257/260 (99%), Positives = 259/260 (99%), Gaps = 0/260 (0%)
+
+Query  1    qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq  60
+            QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
+Sbjct  1    QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ  60
+
+Query  61   <font color="#000000">qqqqqqqqqq</font><font color="#000000">vplqwyrgpk</font>AEVCLNSHCYPLCPDTSPYSITYRIVVIAWPQTAFFYFIE  120
+            QQQQQQQQQQVPLQWYRGPKAEVCLNSHCYPLCPDTSPYS+TYRIVVIAWPQTAFFYFIE
+Sbjct  61   QQQQQQQQQQVPLQWYRGPKAEVCLNSHCYPLCPDTSPYSVTYRIVVIAWPQTAFFYFIE  120
+
+Query  121  ELLDLEQNTLFHRGEDEWKVQLNYADVVIRPGINGINCHAVEQREHIFTPVCFLNKNDCG  180
+            ELLDLEQNTLFHRGEDEWKVQLNYADVVIRPGINGINCHA EQREHIFTPVCFLNKNDCG
+Sbjct  121  ELLDLEQNTLFHRGEDEWKVQLNYADVVIRPGINGINCHAFEQREHIFTPVCFLNKNDCG  180
+
+Query  181  YKLMAHGSIYIWIGHHDINCSVYDASQLAPYWCWVYARRVLEFSWCHLCDGGRVYYETAC  240
+            YKLMAHGSIYIWIGHHDINCSVYDASQLAPYWCWVYARRV+EFSWCHLCDGGRVYYETAC
+Sbjct  181  YKLMAHGSIYIWIGHHDINCSVYDASQLAPYWCWVYARRVVEFSWCHLCDGGRVYYETAC  240
+
+Query  241  DPPCGRPATYTNNETYPWRV  260
+            DPPCGRPATYTNNETYPWRV
+Sbjct  241  DPPCGRPATYTNNETYPWRV  260
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.130    0.427    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 55696
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ps_seg.faa).
+    Posted date:  Unknown
+  Number of letters in database: 260
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

@@ -1,5 +1,6 @@
 //! Public CLI v2 boundary. Clap's double-dash representation is internal only.
 
+use crate::ncbi_app::args::Refusal;
 use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR};
 use std::{ffi::OsString, fmt};
 
@@ -748,6 +749,20 @@ where
             translated.push(format!("--{name}").into());
         }
     }
+    // The order of the options is read only where clap renders a program's help (`-help`, `-h`,
+    // `-help-full`, `-xmlhelp`'s stop, all `--help` or `-h` here): only then is `-html` given its
+    // place (`with_html_help_place`), so a run that renders no help does no work for it (line RG
+    // T4a2 review S1).
+    let help_command;
+    let command = if translated
+        .iter()
+        .any(|word| word == "--help" || word == "-h")
+    {
+        help_command = with_html_help_place(command.clone());
+        &help_command
+    } else {
+        &command
+    };
     let mut matches = match command.clone().try_get_matches_from(&translated) {
         // The words before `-xmlhelp` read, as before `-help`: the entry prints the XML.
         Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
@@ -773,14 +788,42 @@ where
             }
             _ => return Err(error),
         },
+        // NCBI's argument reader reports an exclusion between makeblastdb's arguments before a
+        // missing mandatory one (the first walk of `x_PostCheck`): the words are read again
+        // without the parser's checks to find it.
+        Err(error) if error.kind() == ErrorKind::MissingRequiredArgument => {
+            let unchecked = command
+                .clone()
+                .ignore_errors(true)
+                .try_get_matches_from(&translated);
+            return Err(unchecked
+                .ok()
+                .and_then(|matches| makeblastdb_dependency_error(&matches))
+                .unwrap_or(error));
+        }
         matches => matches?,
     };
+    if let Some(error) = makeblastdb_dependency_error(&matches) {
+        return Err(error);
+    }
     let parsed = T::from_arg_matches_mut(&mut matches)
         .map_err(|error| error.format(&mut command.clone()))?;
     match non_utf8_value {
         Some((scope, name)) => Err(non_utf8_value_error(scope, &name)),
         None => Ok(parsed),
     }
+}
+
+/// makeblastdb's dependencies, checked after the parse as NCBI's argument reader checks them
+/// (`x_PostCheck`), in its order and words (`dependency_error`); the error is the parser's (exit
+/// status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES). `None` for the other programs.
+fn makeblastdb_dependency_error(matches: &clap::ArgMatches) -> Option<clap::Error> {
+    let Some(("makeblastdb", words)) = matches.subcommand() else {
+        return None;
+    };
+    let given = |id: &str| words.value_source(id) == Some(clap::parser::ValueSource::CommandLine);
+    let message = crate::writedb::makeblastdb::dependency_error(&given)?;
+    Some(clap::Error::raw(ErrorKind::ArgumentConflict, message))
 }
 
 /// The value of a word `-name=value` that is not UTF-8: its bytes after the first `=`
@@ -828,10 +871,20 @@ fn refuses_non_utf8_value(scope: &clap::Command, name: &str) -> bool {
 fn non_utf8_value_error(scope: &clap::Command, name: &str) -> clap::Error {
     clap::Error::raw(
         ErrorKind::InvalidUtf8,
-        format!(
-            "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, which is not supported by LOSAT's {}",
-            scope.get_name().to_uppercase()
-        ),
+        non_utf8_value_refusal(&scope.get_name().to_uppercase(), name),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270 (cited at
+// `non_utf8_value_error`)
+/// LOSAT's refusal of the value of `-name` that is not UTF-8 in `program` (its name in LOSAT's
+/// refusals, `MAKEBLASTDB`): NCBI's arguments keep the value's bytes. The one text of it, for the
+/// programs on clap (`non_utf8_value_error`) and those of `ncbi_app`
+/// (`ncbi_app::args::Args::text_values_refusal`).
+pub(crate) fn non_utf8_value_refusal(program: &str, name: &str) -> String {
+    format!(
+        "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, \
+         which is not supported by LOSAT's {program}"
     )
 }
 
@@ -943,85 +996,9 @@ fn render_rpsbproc_text(text: &str) -> String {
     message.replace("'-h'", "'-help'")
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:63-70
-// The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
-// (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
-// (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
-// (DI-6), `-min_raw_gapped_score` (DI-6b), the database masks (`blastinput::db_mask`, series
-// NP M4a-2), `-filtering_db` (`algorithm::blastn::repeat_filter`, line RG item D4) and
-// `-best_hit_overhang` / `-best_hit_score_edge` (series NP O6a).
-const UNPORTED_BLASTN_ARGS: &[&str] = &[
-    "entrez_query",
-    "gilist",
-    "html",
-    "import_search_strategy",
-    "negative_gilist",
-    "remote",
-];
-
-fn is_unported_blastn_arg(name: &str) -> bool {
-    UNPORTED_BLASTN_ARGS.contains(&name)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
-// The options of NCBI blastp 2.17.0+ (-help) that LOSAT's BLASTP does not implement
-// (AGENTS.md rule 2: explicit unsupported errors). `-best_hit_overhang` / `-best_hit_score_edge`
-// are implemented (series NP O6a-2, psiblast's too).
-const UNPORTED_BLASTP_ARGS: &[&str] = &[
-    "entrez_query",
-    "gilist",
-    "html",
-    "import_search_strategy",
-    "ipglist",
-    "negative_gilist",
-    "negative_ipglist",
-    "remote",
-];
-
-fn is_unported_blastp_arg(name: &str) -> bool {
-    UNPORTED_BLASTP_ARGS.contains(&name)
-}
-
 // The rejection of an option that a program does not have: NCBI's options that LOSAT
-// has not ported, the NCBI C++ Toolkit options, and the rest (unknown to NCBI too).
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
-/// psiblast's NCBI arguments that LOSAT does not run: PHI-BLAST (PS8; the ASCII and ASN.1 PSSM
-/// files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
-/// `algorithm::psiblast::in_pssm`, the MSA inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
-/// not run either (`is_unported_blastp_arg`; psiblast has no database masks, NCBI's unknown
-/// arguments of its parser, and no `-mt_mode`).
-/// The search strategy file is written, of a FASTA query and of `-in_pssm` (items F1b-1 and F1b-2
-/// of line RG).
-const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &["phi_pattern"];
-
-fn is_unported_psiblast_arg(name: &str) -> bool {
-    UNPORTED_PSIBLAST_OWN_ARGS.contains(&name) || is_unported_blastp_arg(name)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
-// `algorithm::rpsblast::args`)
-/// rpsblast's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote options and
-/// `-import_search_strategy` of every program.
-const UNPORTED_RPSBLAST_ARGS: &[&str] =
-    &["entrez_query", "html", "import_search_strategy", "remote"];
-
-fn is_unported_rpsblast_arg(name: &str) -> bool {
-    UNPORTED_RPSBLAST_ARGS.contains(&name)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (cited at
-// `algorithm::rpstblastn::args`)
-/// rpstblastn's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote options
-/// and `-import_search_strategy` of every program. The composition-based statistics of a later
-/// item are refused once per run (`rpstblastn::search::TranslatedRpsSearch::check_options`).
-const UNPORTED_RPSTBLASTN_ARGS: &[&str] =
-    &["entrez_query", "html", "import_search_strategy", "remote"];
-
-fn is_unported_rpstblastn_arg(name: &str) -> bool {
-    UNPORTED_RPSTBLASTN_ARGS.contains(&name)
-}
-
+// has not ported (`named_refusal`), the NCBI C++ Toolkit options, and the rest (unknown to NCBI
+// too).
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
     named_refusal(scope.get_name(), name).unwrap_or_else(|| {
         clap::Error::raw(
@@ -1031,106 +1008,37 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     })
 }
 
-/// Whether the reader of the program `scope` (`with_toolkit_file_args` of its command)
-/// refuses NCBI's argument `-name` by name (`named_refusal`, for a name the program does not
-/// define): the arguments that its `-xmlhelp` leaves out of NCBI's XML (`xml_help_text`).
-fn refuses_option(scope: &clap::Command, name: &str) -> bool {
-    let program = scope.get_name();
-    (!scope
-        .get_arguments()
-        .any(|arg| arg.get_long() == Some(name))
-        && named_refusal(program, name).is_some())
-        || RUN_REFUSALS
-            .iter()
-            .any(|refusal| refusal.0 == program && refusal.1 == name)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at
-// blastp's check, `validate_requested_blastp_support`)
-/// NCBI's arguments that a program's parser reads, so that NCBI's own errors about them and the
-/// other arguments come first (tblastn's `-ungapped` with composition-based statistics:
-/// `Composition-adjusted searched are not supported with an ungapped search`), and whose run LOSAT
-/// refuses whatever their value, by name, where NCBI starts the search: the program, the name and
-/// what the refusal says the argument is (`run_refusal`). `-xmlhelp` leaves them out of NCBI's XML
-/// as it leaves the parser's refusals (`refuses_option`).
-pub(crate) const RUN_REFUSALS: &[(&str, &str, &str)] = &[
-    ("psiblast", "use_sw_tback", "the Smith-Waterman traceback"),
-    ("tblastn", "ungapped", "an ungapped search"),
-    (
-        "rpstblastn",
-        "ungapped",
-        "NCBI BLAST+ 2.17.0's rpstblastn crashes after an ungapped search",
-    ),
-];
-
 /// LOSAT's refusal of the run of `-name` in `program` (its name in LOSAT's refusals, `BLASTP`):
-/// the entry of `RUN_REFUSALS`.
+/// what the argument is, from its row of the refusals (`ncbi_app::args::refusal`, `Refusal::Run`).
 pub(crate) fn run_refusal(program: &str, name: &str) -> String {
-    let entry = RUN_REFUSALS
-        .iter()
-        .find(|refusal| refusal.0.eq_ignore_ascii_case(program) && refusal.1 == name);
-    debug_assert!(entry.is_some(), "{program} -{name} is not in RUN_REFUSALS");
-    match entry {
-        Some((_, _, what)) => {
-            format!("-{name} ({what}) is not supported by LOSAT's {program}")
-        }
+    let what = match crate::ncbi_app::args::refusal(&program.to_ascii_lowercase(), name) {
+        Some(Refusal::Run(what)) => Some(what),
+        _ => None,
+    };
+    debug_assert!(what.is_some(), "{program} -{name} is no run refusal");
+    match what {
+        Some(what) => format!("-{name} ({what}) is not supported by LOSAT's {program}"),
         None => format!("-{name} is not supported by LOSAT's {program}"),
     }
 }
 
-/// LOSAT's refusal of NCBI's argument `-name`, which `program` does not define, by name; `None`
-/// for a name that LOSAT does not refuse by name (an unknown option, as NCBI's).
+/// LOSAT's refusal of NCBI's argument `-name`, which `program`'s reader does not define, by name
+/// (`Refusal::Read`, the rows of `ncbi_app::args::refusal`): the program as LOSAT's refusals name
+/// it (`refusal_program_name`) and why, if the row says; `None` for a name that LOSAT does not
+/// refuse by name (an unknown option, as NCBI's).
 fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
-    let refusal = |shown: &str| {
-        Some(clap::Error::raw(
-            ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's {shown}"),
-        ))
+    let Some(Refusal::Read(why)) = crate::ncbi_app::args::refusal(program, name) else {
+        return None;
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
-    // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
-    // The named NCBI options below have no Stage B Rust behavior.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
-    // Product scope explicitly refuses unported NCBI capabilities.
-    if program == "blastx" && is_unported_blastx_arg(name) {
-        return refusal("BLASTX");
-    }
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:246-250
-    // makeblastdb's options that LOSAT's makeblastdb does not serve are named in
-    // its refusal (AGENTS.md rule 2: explicit unsupported errors).
-    if program == "makeblastdb" && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
-    {
-        // `-gi_mask` and `-gi_mask_name` make GI-indexed mask files (makeblastdb.cpp:279-288),
-        // which LOSAT's writer does not write yet (line NP, item M4c); `-mask_data` itself works.
-        if matches!(name, "gi_mask" | "gi_mask_name") {
-            return refusal(
-                "makeblastdb (it writes GI-indexed mask files, which LOSAT does not write yet; -mask_data, -mask_id and -mask_desc work)",
-            );
-        }
-        return refusal("makeblastdb");
-    }
-    if program == "blastn" && is_unported_blastn_arg(name) {
-        return refusal("BLASTN");
-    }
-    if program == "blastp" && is_unported_blastp_arg(name) {
-        return refusal("BLASTP");
-    }
-    if program == "psiblast" && is_unported_psiblast_arg(name) {
-        return refusal("PSIBLAST");
-    }
-    if program == "rpsblast" && is_unported_rpsblast_arg(name) {
-        return refusal("RPSBLAST");
-    }
-    if program == "rpstblastn" && is_unported_rpstblastn_arg(name) {
-        return refusal("RPSTBLASTN");
-    }
-    if program == "tblastx" && is_unported_tblastx_arg(name) {
-        return refusal("TBLASTX");
-    }
-    if program == "tblastn" && is_unported_tblastn_arg(name) {
-        return refusal("TBLASTN");
-    }
-    None
+    let shown = refusal_program_name(program);
+    let shown = match why {
+        Some(why) => format!("{shown} ({why})"),
+        None => shown,
+    };
+    Some(clap::Error::raw(
+        ErrorKind::InvalidValue,
+        format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's {shown}"),
+    ))
 }
 
 /// The text that `-version` or a full version (`-version-full`, `-version-full-xml`,
@@ -1402,12 +1310,11 @@ pub fn printed_text(error: &clap::Error, rpsbproc: bool) -> Option<String> {
         .or_else(|| (!error.use_stderr()).then(|| command_line_message(error, rpsbproc)))
 }
 
-/// What `losat <program> -xmlhelp` prints: NCBI's XML of `program` without the arguments that its
-/// reader refuses by name (`refuses_option`, `ncbi_xmlhelp::print`).
+/// What `losat <program> -xmlhelp` prints: NCBI's XML of `program` without the arguments that
+/// LOSAT refuses (`ncbi_app::args::refusal`, by name or at the run; `ncbi_xmlhelp::print`).
 pub(crate) fn xml_help_text(program: &str) -> Option<String> {
-    let command = with_toolkit_file_args(command_of(program), |name| name == program);
-    let scope = command.find_subcommand(program)?;
-    crate::ncbi_xmlhelp::print(program, |name| refuses_option(scope, name))
+    let refused = |name: &str| crate::ncbi_app::args::refusal(program, name).is_some();
+    crate::ncbi_xmlhelp::print(program, refused)
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2229-2242 (`AddDefaultFileArguments`:
@@ -1453,6 +1360,47 @@ fn with_toolkit_file_args(
     command
 }
 
+/// `command` with `-html` listed in each search program's `-help` right after `-line_length`, as
+/// NCBI BLAST+ 2.17.0's `-help` lists it (`-line_length`, `-html`, `-sorthits`). The field order
+/// of a program's options gives the other places; `-line_length` and `-sorthits` come from the
+/// one `FormattingArgs` that psiblast and rpsblast flatten in too, which have no `-html`, so the
+/// place is given here: the options listed after `-line_length` move down by one. Only clap's
+/// help reads the order, so `parse_command` calls this only for a command line that asks for help.
+fn with_html_help_place(mut command: clap::Command) -> clap::Command {
+    let names: Vec<String> = command
+        .get_subcommands()
+        .filter(|sub| {
+            sub.get_arguments()
+                .any(|arg| arg.get_long() == Some("html"))
+        })
+        .map(|sub| sub.get_name().to_string())
+        .collect();
+    for name in names {
+        command = command.mut_subcommand(name, |mut sub| {
+            let order_of = |sub: &clap::Command, long: &str| {
+                sub.get_arguments()
+                    .find(|arg| arg.get_long() == Some(long))
+                    .map(|arg| (arg.get_id().clone(), arg.get_display_order()))
+            };
+            let (Some((_, line_length)), Some((html, _))) =
+                (order_of(&sub, "line_length"), order_of(&sub, "html"))
+            else {
+                return sub;
+            };
+            let later: Vec<(clap::Id, usize)> = sub
+                .get_arguments()
+                .filter(|arg| arg.get_id() != &html && arg.get_display_order() > line_length)
+                .map(|arg| (arg.get_id().clone(), arg.get_display_order()))
+                .collect();
+            for (id, order) in later {
+                sub = sub.mut_arg(id, |arg| arg.display_order(order + 1));
+            }
+            sub.mut_arg(html, |arg| arg.display_order(line_length + 1))
+        });
+    }
+    command
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:78-88
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
@@ -1460,58 +1408,6 @@ fn with_toolkit_file_args(
 // rpsbproc (item E1c, its own `DryRun`: `rpsbproc::dry_run`), `-help-full` in every program (item
 // E2, `try_parse_from`), the full versions in every program (item E3, `ncbi_version_request`),
 // `-xmlhelp` in every program on the command line (item E2x, `xml_help_program`).
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
-// The options of NCBI tblastn 2.17.0+ (-help) that LOSAT's TBLASTN does not implement
-// (AGENTS.md rule 2: explicit unsupported errors). `-best_hit_overhang` / `-best_hit_score_edge`
-// are implemented (series NP O6a-3).
-const UNPORTED_TBLASTN_ARGS: &[&str] = &[
-    "entrez_query",
-    "gilist",
-    "html",
-    "import_search_strategy",
-    "negative_gilist",
-    "remote",
-];
-
-fn is_unported_tblastn_arg(name: &str) -> bool {
-    UNPORTED_TBLASTN_ARGS.contains(&name)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
-// The options of NCBI tblastx 2.17.0+ (-help) that LOSAT's TBLASTX does not implement
-// (AGENTS.md rule 2: explicit unsupported errors). `-best_hit_overhang` / `-best_hit_score_edge`
-// are implemented (series NP O6a-3).
-const UNPORTED_TBLASTX_ARGS: &[&str] = &[
-    "entrez_query",
-    "gilist",
-    "html",
-    "import_search_strategy",
-    "negative_gilist",
-    "remote",
-];
-
-fn is_unported_tblastx_arg(name: &str) -> bool {
-    UNPORTED_TBLASTX_ARGS.contains(&name)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
-// Named capabilities exist in NCBI but are explicitly outside the BLASTX product scope.
-// `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
-const UNPORTED_BLASTX_ARGS: &[&str] = &[
-    "html",
-    "gilist",
-    "negative_gilist",
-    "entrez_query",
-    "ipglist",
-    "negative_ipglist",
-    "import_search_strategy",
-    "remote",
-];
-
-fn is_unported_blastx_arg(name: &str) -> bool {
-    UNPORTED_BLASTX_ARGS.contains(&name)
-}
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-230
@@ -2143,9 +2039,20 @@ pub(crate) fn create_out_file(
 /// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
 /// that the run already wrote (`post_native_error`) is not written again. A failed write is
 /// dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0 -logfile /dev/full`
-/// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20).
+/// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20). An
+/// error of a report's writer that carries an exception of NCBI's (`NcbiException::into_io_error`:
+/// the `-html` links' registry, `report::formatter_registry::InitConfig`, which NCBI's formatter
+/// reads while it writes) is that exception's report (`NativeError::of_writer`), whichever program
+/// wrote it.
 pub fn exit_on_native_error(error: &anyhow::Error) {
-    if let Some(e) = error.downcast_ref::<NativeError>() {
+    let of_writer = error
+        .downcast_ref::<std::io::Error>()
+        .and_then(crate::ncbi_exception::NcbiException::of_io_error)
+        .map(NativeError::exception);
+    if let Some(e) = of_writer
+        .as_ref()
+        .or_else(|| error.downcast_ref::<NativeError>())
+    {
         if !posted(&e.message) {
             let mut stderr = std::io::stderr();
             let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message));

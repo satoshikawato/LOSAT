@@ -1,0 +1,9 @@
+<h1>Tax BLAST report</h1><pre><b>Query=</b> n1 query &lt;one&gt; &amp; &quot;two&quot; 'three' &amp;amp; &amp;lt;x&amp;gt; &amp;#62; (paren) [brk],
+comma; semi|pipe.dot-dash/slash_under a long title that goes on to
+wrap the Query= line more than once, yes
+
+Length=900
+</pre><table><caption><h2>Organism Report</h2></caption><tr><th>Accession</th><th>Descr</th><th>Score</th><th>E-value</th></tr></table><h1>Tax BLAST report</h1><pre><b>Query=</b> nq2 unrelated query (no hits)
+
+Length=120
+</pre><table><caption><h2>Organism Report</h2></caption><tr><th>Accession</th><th>Descr</th><th>Score</th><th>E-value</th></tr></table>

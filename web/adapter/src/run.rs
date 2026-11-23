@@ -710,13 +710,6 @@ fn blastn_group_check(
     group: &[Output],
 ) -> Result<(), String> {
     use losat::web_adapter::{check_losat_limits, check_scoring_options};
-    // Nor a database of repeats (the engine's own refusal, `run_local`).
-    if args.filtering_db.is_some() {
-        return Err(
-            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
-                .to_string(),
-        );
-    }
     let outfmts: Vec<i32> = group.iter().map(|output| output.number as i32).collect();
     // `process_options` sets the counts that the checks read.
     let (counts, _) = losat::web_adapter::run_report_counts(
@@ -1186,6 +1179,7 @@ fn search(
             // whose lookup throws where the prefetch is off, which `other_outfmts` is for, needs
             // `PRE_FETCH_SEQS_LIMIT`, which LOSAT Web does not set.)
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(writers.iter_mut())
@@ -1519,14 +1513,21 @@ fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
     }
 }
 
-/// Gives a search's command the run's counts source (`window_masker_counts`).
-fn give_counts(
+/// Gives a search's command what the run's start and host provide: the counts source
+/// (`window_masker_counts`) and, for BLASTN's `-filtering_db`, the repeat search that looks its
+/// database up with the run's settings.
+fn give_run_resources(
     command: &mut Commands,
     counts: Option<&Arc<dyn CountsSource>>,
     settings: &ApplicationSettings,
 ) {
-    if let (Commands::Blastn(args), Some(counts)) = (command, counts) {
+    if let (Commands::Blastn(args), Some(counts)) = (&mut *command, counts) {
         give_blastn_counts(args, counts, settings);
+    }
+    // The repeat search of `-filtering_db`, for a `-db` and a `-subject` search alike (a `-db`
+    // search's entry makes the same call).
+    if let Commands::Blastn(args) = command {
+        losat::web_adapter::resolve_blastn_repeat_filter(args, settings);
     }
 }
 
@@ -1786,7 +1787,7 @@ fn search_all(
                 Some(command) => command,
                 None => parse(words)?.1,
             };
-            give_counts(&mut command, counts.as_ref(), settings);
+            give_run_resources(&mut command, counts.as_ref(), settings);
             let mut warnings = Vec::new();
             let result = match streamed && position == 0 {
                 true => search(
@@ -3081,7 +3082,7 @@ mod tests {
             }
         }
         crate::files::release(file).unwrap();
-        // BLASTN's database of repeats is refused too (line RG item D4).
+        // BLASTN's database of repeats is accepted as on the command line (line RG item D4).
         let repeats = [
             "blastn",
             "-query",
@@ -3091,10 +3092,31 @@ mod tests {
             "-filtering_db",
             "repeats",
         ];
-        assert_eq!(
-            validate(&repeats).unwrap_err(),
-            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
+        validate(&repeats).unwrap();
+        // A repeat database whose files are absent: NCBI posts the missing-database error as a
+        // batch warning after the engine prefix (as on the CLI; under WebAssembly its search path
+        // names `/work::`, abi_v2.md §3).
+        let dna = b">q\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
+        let (q_nuc, _) = crate::store::register("blastn", 0, true, dna).unwrap();
+        let (s_nuc, _) = crate::store::register("blastn", 1, true, dna).unwrap();
+        let missing_repeats = crate::store::with_inputs(
+            Program::Blastn,
+            q_nuc,
+            s_nuc,
+            &repeats,
+            Some(true),
+            |queries, end, subjects| run(&repeats, queries, end, subjects),
+        )
+        .unwrap()
+        .unwrap_err();
+        assert!(
+            missing_repeats.starts_with(&ncbi_in_losat_words(
+                "BLAST engine error: Warning: No alias or index file found for nucleotide database [repeats]"
+            )),
+            "{missing_repeats}"
         );
+        crate::store::release(q_nuc).unwrap();
+        crate::store::release(s_nuc).unwrap();
         // `-db` with `-subject` is the parser's conflict, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];
         assert!(validate(&both).unwrap_err().contains("cannot be used with"));
@@ -3665,7 +3687,7 @@ mod tests {
     /// BLASTP's ungapped search in 8 and 11 (Dense-diag Seq-aligns, line NP item O4b) and with an HSP
     /// of length 0 in 5, 8 and 15 (`-window_size 0`, also item O4b), and BLASTN's ungapped search in
     /// SAM (one record per subject, item O4a-2).
-    const FORMAT_ROWS: [(&str, &[&str]); 61] = [
+    const FORMAT_ROWS: [(&str, &[&str]); 62] = [
         (
             "sm1.blastp.x16.soft.5",
             &[
@@ -3998,6 +4020,21 @@ mod tests {
                 "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
                 "-subject_loc",
                 "2-470",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "x5.tblastn.ungapped_cbs0",
+            &[
+                "tblastn",
+                "-query",
+                "tests/db_search/of1/tnq.fa",
+                "-subject",
+                "tests/db_search/of1/tns.fa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
                 "-outfmt",
                 "5",
             ],

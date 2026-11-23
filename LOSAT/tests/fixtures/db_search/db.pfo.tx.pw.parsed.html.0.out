@@ -1,0 +1,95 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>TBLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: multidb ldpn; multidb ldan
+           3 sequences; 1,980 total letters
+
+
+
+<b>Query=</b> q0 none
+
+Length=59
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 5016
+
+
+<b>Query=</b> q1 aéb z
+
+Length=6258
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+loadord the unparsed hit at OID 0                                     <a href=#BL_ORD_ID:0>769</a>     0.0    1
+
+
+><a name=BL_ORD_ID:0></a> loadord the unparsed hit at OID 0
+Length=1043
+
+ Score = 769 bits (1673),  Expect = 0.0
+ Identities = 332/332 (100%), Positives = 332/332 (100%), Gaps = 0/332 (0%)
+ Frame = +3/+3
+
+Query  48    RKSFIKASRARNSIQFKY*RRRVQLPGI*YKLLKAIKRGPNAYREL*SES*EEPKRSINM  227
+             RKSFIKASRARNSIQFKY*RRRVQLPGI*YKLLKAIKRGPNAYREL*SES*EEPKRSINM
+Sbjct  48    RKSFIKASRARNSIQFKY*RRRVQLPGI*YKLLKAIKRGPNAYREL*SES*EEPKRSINM  227
+
+Query  228   NSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRAH  407
+             NSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRAH
+Sbjct  228   NSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRAH  407
+
+Query  408   AGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAAC  587
+             AGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAAC
+Sbjct  408   AGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAAC  587
+
+Query  588   SLDESQAATWAKLVDHVYGIIFKAIDDDGNAK*MRQLEVEMQPNPRKDATDASRWHLQHM  767
+             SLDESQAATWAKLVDHVYGIIFKAIDDDGNAK*MRQLEVEMQPNPRKDATDASRWHLQHM
+Sbjct  588   SLDESQAATWAKLVDHVYGIIFKAIDDDGNAK*MRQLEVEMQPNPRKDATDASRWHLQHM  767
+
+Query  768   HSLCSSK*LINVSYSRFVIMNANVQNKNTHTVKTYVCVELLTHAHTPHTYTRTCIAL*SF  947
+             HSLCSSK*LINVSYSRFVIMNANVQNKNTHTVKTYVCVELLTHAHTPHTYTRTCIAL*SF
+Sbjct  768   HSLCSSK*LINVSYSRFVIMNANVQNKNTHTVKTYVCVELLTHAHTPHTYTRTCIAL*SF  947
+
+Query  948   NPLSALST**QTIHGISKGEIRKLINKIQFES  1043
+             NPLSALST**QTIHGISKGEIRKLINKIQFES
+Sbjct  948   NPLSALST**QTIHGISKGEIRKLINKIQFES  1043
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 1198920
+
+
+<b>Query=</b> q2 two
+
+Length=1620
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+loadord the unparsed hit at OID 0                                     <a href=#BL_ORD_ID:0>773</a>     0.0     1

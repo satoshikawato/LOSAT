@@ -218,12 +218,68 @@ fn the_convert_mode_refuses_what_ncbi_gives_no_one_result_for() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// NCBI's counts writers open `-out` by its bytes (`CSeqMaskerOstatFactory::create` of the
+// argument's string, line RG item K4i-2a): a name that is not UTF-8 is written as given, in the
+// counts mode and in the convert mode, and the counts are those of a name of text. Not on macOS,
+// whose APFS refuses a file name that is not UTF-8 (as `tests/non_utf8_names.rs`).
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn the_counts_modes_write_an_out_name_that_is_not_utf8() {
+    use std::os::unix::ffi::OsStringExt;
+    let run = |line: Vec<OsString>| {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let status = run_with(&line, &mut std::io::empty(), &mut out, &mut err);
+        (status, out, String::from_utf8(err).unwrap())
+    };
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-windowmasker-out-bytes-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let named = |name: &[u8]| {
+        let mut path = dir.clone().into_os_string().into_vec();
+        path.push(b'/');
+        path.extend_from_slice(name);
+        OsString::from_vec(path)
+    };
+    let words = |line: &[&str], out: OsString| -> Vec<OsString> {
+        let mut words: Vec<OsString> = line.iter().map(OsString::from).collect();
+        words.extend(["-out".into(), out]);
+        words
+    };
+    let counts = ["-mk_counts", "-in", "tests/windowmasker/in/cd.fa"];
+    let (status, out, err) = run(words(&counts, named(b"c\xff")));
+    assert_eq!((status, out), (0, Vec::new()), "{err}");
+    let (status, _, err) = run(words(&counts, named(b"c")));
+    assert_eq!(status, 0, "{err}");
+    let written = std::fs::read(named(b"c")).unwrap();
+    assert!(!written.is_empty());
+    assert_eq!(std::fs::read(named(b"c\xff")).unwrap(), written);
+    let convert = [
+        "-convert",
+        "-in",
+        "tests/windowmasker/counts/u4.ascii",
+        "-sformat",
+        "binary",
+    ];
+    let (status, _, err) = run(words(&convert, named(b"b\xff")));
+    assert_eq!(status, 0, "{err}");
+    let (status, _, err) = run(words(&convert, named(b"b")));
+    assert_eq!(status, 0, "{err}");
+    assert_eq!(
+        std::fs::read(named(b"b\xff")).unwrap(),
+        std::fs::read(named(b"b")).unwrap()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // The reader's view of the keys: the eBoolean defaults (`F`, `T`, `false`), the doubles and the
 // integers that a constraint allows.
 #[test]
 fn the_keys_read_as_ncbi_s() {
-    let words =
-        |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
+    let words = |line: &[&str]| -> Vec<OsString> { line.iter().map(OsString::from).collect() };
     let args = crate::ncbi_app::args::parse(
         &TOOL,
         &words(&[

@@ -1470,7 +1470,7 @@ fn the_start_writes_where_ncbi_writes() {
     assert_eq!(writes_of(&loaded, "stderr"), (s("U\nA\n"), s(""), None));
     assert_eq!(writes_of(&loaded, "file"), (s(u), s("U\nA\n"), None));
     assert_eq!(writes_of(&loaded, "nowhere"), (s(u), s(""), None));
-    let failed = start_with(u, ConfigLoad::Failed(s(p)));
+    let failed = start_with(u, ConfigLoad::Failed(s(p).into_bytes()));
     assert_eq!(
         writes_of(&failed, "stderr"),
         (s("U\nP\nU\nP\n"), s(""), Some(2))
@@ -1481,7 +1481,7 @@ fn the_start_writes_where_ncbi_writes() {
     );
     assert_eq!(writes_of(&failed, "nowhere"), (s(u), s(""), Some(2)));
     // Without the usage report's messages.
-    let failed = start_with("", ConfigLoad::Failed(s(p)));
+    let failed = start_with("", ConfigLoad::Failed(s(p).into_bytes()));
     assert_eq!(writes_of(&failed, "stderr"), (s("P\nP\n"), s(""), Some(2)));
     assert_eq!(writes_of(&failed, "file"), (s(""), s("P\nP\n"), Some(2)));
     let loaded = start_with("", ConfigLoad::Loaded(s(a)));
@@ -1491,7 +1491,7 @@ fn the_start_writes_where_ncbi_writes() {
     // The programs with a `CBlastAppDiagHandler`: the report to the target, the replay to
     // stderr.
     for program in ["blastn", "blastp", "blastx", "tblastn", "psiblast"] {
-        let failed = start_of(program, u, ConfigLoad::Failed(s(p)));
+        let failed = start_of(program, u, ConfigLoad::Failed(s(p).into_bytes()));
         assert_eq!(
             writes_of(&failed, "stderr"),
             (s("U\nP\nU\nP\n"), s(""), Some(2))
@@ -1504,13 +1504,13 @@ fn the_start_writes_where_ncbi_writes() {
             writes_of(&failed, "nowhere"),
             (s("U\nU\nP\n"), s(""), Some(2))
         );
-        let failed = start_of(program, "", ConfigLoad::Failed(s(p)));
+        let failed = start_of(program, "", ConfigLoad::Failed(s(p).into_bytes()));
         assert_eq!(writes_of(&failed, "file"), (s(p), s(p), Some(2)));
         let loaded = start_of(program, u, ConfigLoad::Loaded(s(a)));
         assert_eq!(writes_of(&loaded, "file"), (s(u), s("U\nA\n"), None));
     }
     for program in ["tblastx", "rpsblast", "makeblastdb", "blastdbcmd"] {
-        let failed = start_of(program, u, ConfigLoad::Failed(s(p)));
+        let failed = start_of(program, u, ConfigLoad::Failed(s(p).into_bytes()));
         assert_eq!(
             writes_of(&failed, "file"),
             (s(u), s("U\nP\nU\nP\n"), Some(2))
@@ -1595,7 +1595,7 @@ fn rpsbproc_starts_without_the_usage_report() {
     assert_eq!(
         start(&[]).config,
         Ok(ConfigLoad::Failed(
-            crate::wording::losat_text(report).into_owned()
+            crate::wording::losat_text(report).into_owned().into_bytes()
         ))
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -1709,7 +1709,7 @@ fn the_start_reads_the_files_as_ncbi_reads_them() {
     assert_eq!(
         failed.config,
         Ok(ConfigLoad::Failed(
-            crate::wording::losat_text(report).into_owned()
+            crate::wording::losat_text(report).into_owned().into_bytes()
         ))
     );
     std::fs::remove_file(&ncbirc).unwrap();
@@ -1718,7 +1718,7 @@ fn the_start_reads_the_files_as_ncbi_reads_them() {
     assert_eq!(
         failed.config,
         Ok(ConfigLoad::Failed(
-            crate::wording::losat_text(report).into_owned()
+            crate::wording::losat_text(report).into_owned().into_bytes()
         ))
     );
     assert!(application_settings(
@@ -1846,14 +1846,114 @@ fn the_conffile_is_found_as_ncbi_finds_it() {
     for name in [dir.as_os_str(), OsStr::new(""), OsStr::new("no/such.ini")] {
         assert_eq!(
             conf_file_path(name, &search, &FileSystem),
-            Err(ConfFile::NotFound(format!(
-                "Critical: (106.23) Registry file \"{}\" not found, aborting.\n",
-                name.to_string_lossy()
-            ))),
+            Err(ConfFile::NotFound(
+                format!(
+                    "Critical: (106.23) Registry file \"{}\" not found, aborting.\n",
+                    name.to_string_lossy()
+                )
+                .into_bytes()
+            )),
             "{name:?}"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Registry files in memory, by path, with whether each can be opened: no file name is made on
+/// the file system (a name that is not UTF-8 is refused by some of them).
+#[cfg(unix)]
+struct MemoryFiles(Vec<(PathBuf, bool)>);
+
+#[cfg(unix)]
+impl RegistryFiles for MemoryFiles {
+    fn is_file(&self, path: &Path) -> bool {
+        self.0.iter().any(|(name, _)| name == path)
+    }
+
+    fn read(&self, path: &Path) -> Option<std::io::Result<Vec<u8>>> {
+        self.0
+            .iter()
+            .find(|(name, opens)| name == path && *opens)
+            .map(|_| Ok(b"[BLAST]\n".to_vec()))
+    }
+}
+
+/// `conf\xFF` and `dir/conf\xFF`, whose last byte is not UTF-8.
+#[cfg(unix)]
+fn non_utf8_names() -> (OsString, OsString) {
+    let name = crate::utils::os_bytes::os_string_from_bytes(b"conf\xFF".to_vec());
+    let with_dir = crate::utils::os_bytes::os_string_from_bytes(b"dir/conf\xFF".to_vec());
+    assert!(name.to_str().is_none() && with_dir.to_str().is_none());
+    (name, with_dir)
+}
+
+/// The messages and the exit status of `program`'s application start with `-conffile name` over
+/// `files`, written to the standard error.
+#[cfg(unix)]
+fn conffile_start_writes(name: &OsStr, files: &MemoryFiles) -> (Vec<u8>, Option<i32>) {
+    // segmasker's application writes the report once (`replays_collected`).
+    let start =
+        ApplicationStart::with_files("segmasker", &[OsStr::new("-conffile"), name], &[], files);
+    let mut stderr = Vec::new();
+    let status = start
+        .write_config_load(&mut DiagTarget::Stderr, &mut stderr)
+        .unwrap();
+    (stderr, status)
+}
+
+// A `-conffile` name that is not UTF-8 is read as bytes, as NCBI reads it (NCBI BLAST+ 2.17.0,
+// dustmasker, segmasker, convert2blastmask, blastdbcmd, makembindex and windowmasker with
+// `-conffile conf\xFF`, no such file: the post with the raw byte inside the quotes, exit status
+// 255; line RG K4i-2c). No file with such a name is made.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1014-1022 and 1262-1281 (cited at
+// `conf_file_path`).
+#[cfg(unix)]
+#[test]
+fn a_conffile_name_that_is_not_utf8_is_read_as_bytes() {
+    let (name, with_dir) = non_utf8_names();
+    let nothing = MemoryFiles(Vec::new());
+    // No such file: NCBI's post with the name's bytes, exit status 255.
+    let (stderr, status) = conffile_start_writes(&name, &nothing);
+    assert_eq!(
+        stderr,
+        b"Critical: (106.23) Registry file \"conf\xFF\" not found, aborting.\n"
+    );
+    assert_eq!(status, Some(255));
+    assert_eq!(
+        conf_file_path(&name, &[], &nothing),
+        Err(ConfFile::NotFound(
+            b"Critical: (106.23) Registry file \"conf\xFF\" not found, aborting.\n".to_vec()
+        ))
+    );
+    // A name with a directory whose file cannot be opened: NCBI's report with the bytes, exit
+    // status 2 (the report in LOSAT's words, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
+    let unreadable = MemoryFiles(vec![(PathBuf::from(&with_dir), false)]);
+    let (stderr, status) = conffile_start_writes(&with_dir, &unreadable);
+    assert_eq!(
+        stderr,
+        b"Error: Registry file \"dir/conf\xFF\" cannot be opened\nError: (106.15) Application's initialization failed: Registry file \"dir/conf\xFF\" cannot be opened\n"
+    );
+    assert_eq!(status, Some(2));
+    // A file of that name is loaded: nothing is written, whether the name has a directory or is
+    // found in the search path (after the name has been checked where the program runs).
+    let files = MemoryFiles(vec![
+        (PathBuf::from(&with_dir), true),
+        (PathBuf::from(&name), true),
+        (Path::new("/search").join(&name), true),
+    ]);
+    let search = [PathBuf::from("/search")];
+    assert_eq!(
+        conf_file_path(&with_dir, &search, &files),
+        Ok(Some(PathBuf::from(&with_dir)))
+    );
+    assert_eq!(
+        conf_file_path(&name, &search, &files),
+        Ok(Some(Path::new("/search").join(&name)))
+    );
+    for name in [&name, &with_dir] {
+        let (stderr, status) = conffile_start_writes(name, &files);
+        assert_eq!((stderr.as_slice(), status), (&b""[..], None));
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1015 (cited at `preparse`).

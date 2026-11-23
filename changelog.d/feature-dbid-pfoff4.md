@@ -23,9 +23,18 @@
   `-outfmt 0`, where NCBI BLAST+ ends the run at the first description line of such a hit (`BLAST Database error`,
   exit status 2) before a held sequence, LOSAT now writes that output instead of refusing the run. psiblast's PSSM
   (for the next round, or `-out_pssm`), which reads each sequence it includes by its Seq-id after the round's report,
-  is refused the same way where NCBI BLAST+ gives such a held sequence for the read, in every output format: with
-  `-outfmt 8`, `9` and `11`, LOSAT wrote NCBI BLAST+'s warning `Failed to retrieve sequence` there, which NCBI BLAST+
-  does not write.
+  is refused the same way where NCBI BLAST+ gives such a held sequence for the read and takes that sequence's letters
+  for it (where an alignment that the PSSM includes ends within them; a shorter sequence leaves the read failing with
+  NCBI BLAST+'s warning `Failed to retrieve sequence`, which LOSAT writes too), in every output format where the
+  query's batch reads its sequences one by one: with `PRE_FETCH_SEQS_LIMIT`, and with `-outfmt 8`, `9` and `11`, which
+  NCBI BLAST+ does not prefetch for unless `PRE_FETCH_SEQS_LIMIT=2147483647`. There LOSAT wrote the warning, or the
+  sequence as `Unknown`, where NCBI BLAST+ reads the other sequence's letters.
+- psiblast `-outfmt 11` with `PRE_FETCH_SEQS_LIMIT=2147483647`, where the prefetch of a query batch fails at a
+  Seq-id that the database cannot look up: LOSAT now ends the run with NCBI BLAST+'s `BLAST Database error` (exit
+  status 2) instead of writing the archive. psiblast `-outfmt 8`, `9` and `11` that make a PSSM (`-num_iterations 2`
+  or more, or a PSSM saved after the last round) with a taxonomy database with a wrong magic number now write NCBI
+  BLAST+'s error for it where the PSSM reads its sequences, and a BLAST archive saves such an error line with NCBI
+  BLAST+'s code 2 instead of 1.
 - LOSAT's library also refuses a sequence whose Seq-id a database of such a list cannot look up in a call whose
   formats NCBI BLAST+ would end differently after it, with another exit status or another standard error, for
   example `-outfmt 5` (which goes on to the end) with `-outfmt "6 qseqid slen"` (which stops there with

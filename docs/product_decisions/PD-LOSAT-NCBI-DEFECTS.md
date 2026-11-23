@@ -537,7 +537,23 @@
   outfmt 5 of such a sequence is written as BLASTP's, and its PSSM, which reads each sequence that
   it includes by its Seq-align id after the round's reports, in the order of the hit list, refuses
   such a sequence where NCBI gives a held one for it (outfmt 8 wrote NCBI's `Failed to retrieve
-  sequence` for a read that NCBI's scope held: probe of the merge, 6 runs); line
+  sequence` for a read that NCBI's scope held: probe of the merge, 6 runs); review 5 of the item:
+  whether a query batch prefetches has one owner, of the limit, the batch's Seq-align count, the
+  program and the first format (NCBI prefetches for outfmt 8, 9, 11 and 12 only at
+  `PRE_FETCH_SEQS_LIMIT=2147483647`, and psiblast alone before its archive), so psiblast's outfmt
+  8, 9 and 11 read one by one in NCBI's default environment and their PSSM reads are refused where
+  NCBI gives a held sequence for them (H2 and H3: dev's #1538 took those batches for prefetched
+  and wrote the warning, or `Unknown`, where NCBI reads the holder's letters, 548 runs of outfmt 8
+  and 548 of outfmt 11 in the review's probe), psiblast's outfmt 11 at that limit stops where its
+  prefetch throws (exit 2, H4), and the PSSM's loads write the taxonomy database's texts whatever
+  the first format (outfmt 8, 9 and 11 with rounds wrote none where NCBI writes the error of a
+  database with a wrong magic number), which a BLAST archive saves with the severity of the
+  line's header (`code 2` for `Error: `); a held PSSM read is refused only where NCBI's read takes
+  the holder's letters, where the subject range of an HSP that the PSSM includes ends within
+  them (a shorter holder's read throws, and NCBI writes `Failed to retrieve sequence`, as LOSAT
+  does: H1, M4), because LOSAT does not write a holder's letters into the PSSM (line DBID's next
+  item, M3); and the Seq-annot and archive reports, which load nothing, are not loads before a
+  PSSM read (M1); line
   DBID item pfoff-4, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
   after 1.91; first 1.75, then 1.77, 1.79, 1.86, 1.90 and 1.92 at the merges of dev that brought
   line RG item D5b-3's 1.74, line NP item M5's 1.75 and line RG item X4b-2's 1.76, then line RG
@@ -2037,9 +2053,14 @@ file would differ, and NCBI's programs still could not open the database).
   which no later batch is prefetched) or outfmt 5 (since version 1.92, line DBID item pfoff-4: each
   `Hit` of such a sequence is the Seq-align id's FASTA form, `Unknown` and length 0, with HSPs of
   its scores, coordinates 0, the Seq-align's identities and no letters, and the report goes on);
-  in each of these formats, and in psiblast's PSSM read (in every format, after the round's
-  reports and the reads before it in the PSSM, in the order of the hit list; since version 1.92, at
-  the merge of line PS item PS15b-1), it refuses such a sequence where the run loaded before it,
+  in each of these formats, and in psiblast's PSSM read (in every format where the query's batch
+  reads one by one: its prefetch turned off by `PRE_FETCH_SEQS_LIMIT` or, in outfmt 8, 9 and 11
+  without `PRE_FETCH_SEQS_LIMIT=2147483647`, by the format; after the round's reports and the reads
+  before it in the PSSM, in the order of the hit list; where the subject range of an HSP that the
+  PSSM includes ends within the holder's letters, which NCBI's read takes, while a shorter holder's
+  read throws and NCBI writes `Failed to retrieve sequence`; refused because LOSAT does not write
+  a holder's letters into the PSSM; since version 1.92, at the merge of line PS item PS15b-1 and
+  review 5 of item pfoff-4, H1 to H3), it refuses such a sequence where the run loaded before it,
   in NCBI's order and while NCBI keeps it, another sequence of the database whose own lookup
   does not fail
   and that NCBI gives for its Seq-align id without the lookup (listed in the LMDB files that have

@@ -48,6 +48,9 @@ pub struct ParsedSubject {
     /// Whether NCBI's data loader does not serve this sequence for its Seq-align id although
     /// its lookup gives it (`scope_finds_none`).
     scope_finds_none: bool,
+    /// What the data loader makes of the sequence where another of its ids holds the Seq-id of
+    /// the Seq-align id's handle (`HandleLine`, `handle_lookup`).
+    handle_line: Option<HandleLine>,
     /// What NCBI's lookup of the Seq-align id in the database finds where that is not this
     /// sequence (`found_instead`, `fetched`).
     found_instead: Option<FoundInstead>,
@@ -425,13 +428,19 @@ impl ParsedSubject {
             || set
                 .display_defline(&alignment_id)
                 .is_some_and(|shown| shown.index != target);
-        let scope_finds_none = loader_refuses(&set, &alignment_id, target)?;
+        let lookup = handle_lookup(&set, &alignment_id, target);
+        let scope_finds_none = lookup == Some(HandleLookup::NoBioseq);
+        let handle_line = match lookup {
+            Some(HandleLookup::Line(line)) => Some(line),
+            _ => None,
+        };
         Ok(Self {
             set,
             alignment_id,
             target,
             unfetchable,
             scope_finds_none,
+            handle_line,
             found_instead: None,
             weak_match: None,
             also_held: None,
@@ -470,6 +479,7 @@ impl ParsedSubject {
             target: 0,
             unfetchable: false,
             scope_finds_none: false,
+            handle_line: None,
             found_instead: None,
             weak_match: None,
             also_held: None,
@@ -554,7 +564,7 @@ impl ParsedSubject {
     }
 
     /// Whether NCBI's scope gets no Bioseq for the Seq-align id although the lookup gives this
-    /// sequence (`loader_refuses`): the Bioseq handle that the formatters get is empty, and each
+    /// sequence (`handle_lookup`): the Bioseq handle that the formatters get is empty, and each
     /// format writes the `catch` of its read, or skips the subject, as NCBI does (outfmt 0
     /// `Unknown` and `no longer exists in database`, XML `Unknown`, the tabular rows of a failed
     /// lookup, `LookupFailure::empty_handle`); the prefetch and psiblast's PSSM read nothing.
@@ -570,6 +580,37 @@ impl ParsedSubject {
     /// each run; probe `probe_gis` of line RG-KB item 12).
     pub fn description_gi_unset(&self) -> bool {
         self.scope_finds_none && self.show_gis
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1359
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:498
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:926
+    /// LOSAT's refusal of the title that NCBI generates for the subject's Bioseq where its data
+    /// loader makes that Bioseq of another definition line than the Seq-align id's
+    /// (`HandleLine::Other`): the outfmt 0 to 4 description line and the organism report (outfmt
+    /// 18) show that line's title, the heading, the tables and the XML documents the sequence's
+    /// own lines (probe e15_twoline of review 1 of line RG-KB item 12).
+    pub fn handle_title_refusal(&self) -> Option<String> {
+        (self.handle_line == Some(HandleLine::Other)).then(|| {
+            format!(
+                "has the Seq-align id {}, whose Seq-id NCBI BLAST+'s data loader looks up with another chain that a definition line other than the Seq-align id's holds (NCBI BLAST+ 2.17.0's description line and organism report show that line's title)",
+                String::from_utf8_lossy(&self.alignment_fasta())
+            )
+        })
+    }
+
+    /// LOSAT's refusal of a read of the subject's Bioseq where NCBI's load of it throws
+    /// (`HandleLine::Throws`): the formats that read the Bioseq (`fetched`), the prefetch
+    /// (`prefetched`) and psiblast's PSSM (`pssm_read`); the Seq-annots and the archive (outfmt 8,
+    /// 9, 11, 12) read nothing of it.
+    fn handle_load_refusal(&self) -> Option<String> {
+        (self.handle_line == Some(HandleLine::Throws)).then(|| {
+            format!(
+                "has the Seq-align id {}, whose Seq-id NCBI BLAST+'s data loader looks up with another chain that another of its ids matches, while no definition line holds it as NCBI BLAST+ 2.17.0's load reads the ids (its load throws: {} Error: oid headers do not contain target gi/seq_id.)",
+                String::from_utf8_lossy(&self.alignment_fasta()),
+                crate::wording::NCBI_DATABASE_ERROR
+            )
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-411
@@ -729,6 +770,9 @@ impl ParsedSubject {
     /// line the formatters do not find (`unfetchable`), which the PSSM reads by the scope as any
     /// other (review 2 of line DBID pssmread, M2).
     pub fn pssm_read(&self, one_by_one: bool) -> Result<(), String> {
+        if let Some(reason) = self.handle_load_refusal() {
+            return Err(reason);
+        }
         let id = || String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
         match &self.found_instead {
             Some(
@@ -801,6 +845,9 @@ impl ParsedSubject {
     /// `fetched` but for the weak matches: what the lookup of the Seq-align id finds
     /// (`found_instead`), whatever the batch's prefetch.
     fn found_fetched(&self, taxonomy: bool, refused: Option<ThrowRefusal>) -> Result<(), String> {
+        if let Some(reason) = self.handle_load_refusal() {
+            return Err(reason);
+        }
         if self.unfetchable {
             return Err(format!(
                 "has the Seq-align id {}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)",
@@ -876,6 +923,9 @@ impl ParsedSubject {
     // pssmread, H3: `gi|777|gb|YYY00001.1|` of taxid 99990 before `lcl|777 ^A gi|777`).
     /// What NCBI's prefetch reads for this subject where no report shows it (`Prefetched`).
     pub fn prefetched(&self) -> Prefetched {
+        if let Some(reason) = self.handle_load_refusal() {
+            return Prefetched::Failed(reason);
+        }
         let reason = || {
             self.found_instead
                 .as_ref()
@@ -1778,6 +1828,9 @@ impl ParsedSubject {
             if let Err(reason) = self.generated_title_fetched() {
                 return refused(&reason, false);
             }
+            if let Some(reason) = self.handle_title_refusal() {
+                return refused(&reason, true);
+            }
             let title = self.target().title.as_deref().unwrap_or_default();
             generated_title(title, protein, &self.bioseq_facts())
         };
@@ -1824,37 +1877,51 @@ fn handle_changes(id: &ParsedSeqId) -> Option<ParsedSeqId> {
     (handle.chain != pdb.chain).then_some(ParsedSeqId::Pdb(handle))
 }
 
+/// What NCBI's data loader makes of a sequence whose Seq-align id's handle has another chain
+/// (`handle_lookup`, line RG-KB item 12).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HandleLookup {
+    /// No id of the sequence compares equal to the handle's Seq-id: the loader serves no Bioseq
+    /// (`ParsedSubject::scope_finds_none`).
+    NoBioseq,
+    /// Another id of the sequence compares equal to it (`HandleLine`).
+    Line(HandleLine),
+}
+
+/// The Bioseq of a sequence whose Seq-align id's handle another of its ids holds
+/// (`HandleLookup::Line`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HandleLine {
+    /// The Bioseq is made of the definition line that holds the handle's Seq-id
+    /// (`DeflineSet::bioseq_defline`), another than the Seq-align id's
+    /// (`ParsedSubject::handle_title_refusal`).
+    Other,
+    /// No definition line holds it as the load reads the ids (one definition line with the
+    /// chains 321 and 65: its first pdb id is not the handle's): the load throws
+    /// (`ParsedSubject::handle_load_refusal`).
+    Throws,
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:386-431
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/PDB_seq_id.cpp:53-67
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1359
-/// Whether NCBI's data loader serves no Bioseq for the Seq-align id `id` of the sequence of the
-/// definition lines `set` where its lookup gives that sequence (`ParsedSubject::
-/// scope_finds_none`): `x_GetOid` looks up the Seq-id of the id's handle
+/// What NCBI's data loader makes of the Seq-align id `id` of the sequence of the definition lines
+/// `set` where its lookup gives that sequence, `None` where it serves the Bioseq of the Seq-align
+/// id's line (`target`) as for any id: `x_GetOid` looks up the Seq-id of the id's handle
 /// (`seqid::mask_handle::pdb_handle_seq_id`: of a PDB id, its normalized `chain`) and keeps the
 /// sequence only where one of its ids compares equal to that Seq-id, which the stored id does not
-/// where the handle changes its `chain` (line RG-KB item 12). `Err` where another id of the
-/// sequence compares equal to it, which LOSAT does not show: the Bioseq for it is then made of
-/// the definition line that holds it (`DeflineSet::bioseq_defline`), another than the Seq-align
-/// id's (`target`), or NCBI's load throws where no line holds it as that reads the ids (one
-/// definition line with the chains 321 and 65: its first pdb id is not the handle's).
-fn loader_refuses(set: &DeflineSet, id: &ParsedSeqId, target: usize) -> Result<bool, String> {
-    let Some(handle) = handle_changes(id) else {
-        return Ok(false);
-    };
+/// where the handle changes its `chain`; the Bioseq is then made of the definition line that
+/// holds that Seq-id as the load reads the ids.
+fn handle_lookup(set: &DeflineSet, id: &ParsedSeqId, target: usize) -> Option<HandleLookup> {
+    let handle = handle_changes(id)?;
     if !set.ids().any(|held| compare(&handle, held) == Sic::Yes) {
-        return Ok(true);
+        return Some(HandleLookup::NoBioseq);
     }
-    let found = match set.bioseq_defline(&handle) {
-        Some(line) if line == target => return Ok(false),
-        Some(_) => "a definition line other than the Seq-align id's holds (NCBI BLAST+ 2.17.0 shows that line)",
-        None => "another of its ids matches, while no definition line holds it as NCBI BLAST+ 2.17.0's load reads the ids (the load throws)",
-    };
-    let mut fasta = Vec::new();
-    label::fasta(id, &mut fasta);
-    Err(format!(
-        "has the Seq-align id {}, whose Seq-id NCBI BLAST+'s data loader looks up with another chain that {found}",
-        String::from_utf8_lossy(&fasta)
-    ))
+    match set.bioseq_defline(&handle) {
+        Some(line) if line == target => None,
+        Some(_) => Some(HandleLookup::Line(HandleLine::Other)),
+        None => Some(HandleLookup::Line(HandleLine::Throws)),
+    }
 }
 
 /// The ids of every definition line of a subject (`ParsedSubject::all_tabular_ids`); where

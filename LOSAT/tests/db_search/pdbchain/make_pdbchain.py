@@ -6,7 +6,10 @@ directory of NCBI BLAST+ 2.17.0's makeblastdb, NAME one of DATABASES, all by def
 `tests/db_search/pdbchain/pdbchain` (`.phr .pin .psq .pjs .pog .psd .psi`) of CHAINS: one short protein per
 record (`pdup.faa` with one letter changed), with an EMPTY title and the Seq-ids `gb|AB60000<n>.1|` and
 `pdb { mol "1AB<n>", chain <N> }` with NO chain-id; and (line RG-KB item 12) `tests/db_search/pdbchain/pdbonly`,
-the same records with the pdb Seq-id alone.
+the same records with the pdb Seq-id alone, and `tests/db_search/pdbchain/pdbnorm`, the pdb Seq-ids of NORMALIZED
+alone (each record's taxid from `-taxid_map`, TAXIDS): ids whose handle `Normalize` builds anew (a lower-case
+molecule, a release date that normalizes) or whose chain is in 128..255, and ids whose handle keeps them (a date
+that does not normalize: month 16 or a season; a normalized chain that equals the stored one).
 
 Why: NCBI's `CDeflineGenerator::x_SetTitleFromPDB` (c++/src/objmgr/util/create_defline.cpp:1842-1843)
 makes the title of a `pdb` Seq-id without a chain-id from `isprint` of `m_PDBChain` cast to
@@ -29,6 +32,13 @@ a signed char: 65 for 321 and -191, 127 for 383), and serves the sequence only w
 to it, which `CPDB_seq_id::Match` (chain against chain) does not for 321, -191 and 383: outfmt 0 then prints
 `Unknown` and `no longer exists in database...alignment skipped`, XML `Unknown`, and the tabular formats the rows
 of a failed lookup (a null pointer exception at the subject accession).
+
+In `pdbnorm` the handle's chain is `chain-id[0]` read as a signed char for an id that `Normalize` builds anew
+(c++/src/objects/seq/seq_id_tree.cpp `CSeq_id_PDB_Info::Normalize`: a lower-case molecule letter, or a `rel` Date-std
+of year 1-4095, month 1-15, day 1-31, hour 0-30, minute and second 0-62 and no season), and the chain's low byte
+read as a signed char for a chain without a chain-id: chain 66 with chain-id "A" then looks up chain 65, which the
+stored id does not match (no Bioseq), as chain 200 without a chain-id looks up -56. Chain 66 with chain-id "A" and
+a date of month 16 or a season, and chain 65 with chain-id "A" and a date of month 13, load.
 
 The sequence index files (`.psd`, `.psi`) keep the ids as makeblastdb wrote them except that the letter
 that ends a pdb key is the low byte of the stored chain (`GetChain()` cast to `char`, as
@@ -115,13 +125,70 @@ def with_chain(record, chain):
     return record[:inner] + new + record[end - 2:]
 
 
+# The records of `pdbnorm`: (molecule, FASTA chain letter, chain INTEGER, release date, chain-id). The date is
+# None or the Date-std members as {name: value} (year, month, day, season).
+NORMALIZED = [
+    ("1ab6", "A", 66, None, "A"),
+    ("1AB7", "A", 66, {"year": 2000, "month": 13}, "A"),
+    ("1AB8", "C", 200, None, None),
+    ("1AB9", "A", 66, {"year": 2000, "month": 16}, "A"),
+    ("1ABA", "A", 66, {"year": 2000, "season": "spring"}, "A"),
+    ("1ABB", "A", 65, {"year": 2000, "month": 13}, "A"),
+]
+
+# The taxid of each record of `pdbnorm` (`-taxid_map`), so that the organism report (outfmt 18) shows the loaded
+# ones and leaves out those without a Bioseq.
+TAXIDS = [9606, 10090, 9606, 10090, 9606, 10090]
+
 # The databases: name -> whether each record has the gb Seq-id before the pdb one.
-DATABASES = {"pdbchain": True, "pdbonly": False}
+DATABASES = {"pdbchain": True, "pdbonly": False, "pdbnorm": False}
 
 
-def patch(base):
-    """Rewrites the stored deflines of the version 4 protein database `base` (one record each of CHAINS)
-    and the header offsets of its index file."""
+def ctx(tag, content):
+    """A context-specific constructed value `[tag]` of indefinite length, as makeblastdb writes them."""
+    return bytes([0xA0 + tag, 0x80]) + content + b"\x00\x00"
+
+
+def visible(text):
+    return b"\x1a" + bytes([len(text)]) + text.encode("latin-1")
+
+
+def integer(value):
+    content = ber_integer(value)
+    return b"\x02" + bytes([len(content)]) + content
+
+
+DATE_STD = ["year", "month", "day", "season", "hour", "minute", "second"]
+
+
+def with_pdb(record, mol, chain, rel, chain_id):
+    """`record` (a `Blast-def-line-set` of one line whose only Seq-id is `pdb`) with the pdb Seq-id
+    `{ mol, chain, rel (Date std), chain-id }` (a None member left out)."""
+    assert record[:4] == b"\x30\x80\x30\x80", record[:4].hex()
+    at = 4
+    while record[at] != 0xA1:
+        at = tlv_end(record, at)
+    assert record[at:at + 4] == b"\xa1\x80\x30\x80", record[at:at + 4].hex()
+    at += 4
+    assert record[at:at + 4] == b"\xae\x80\x30\x80", record[at:at + 4].hex()
+    seq = at + 2
+    end = tlv_end(record, seq)
+    new = ctx(0, visible(mol))
+    if chain is not None:
+        new += ctx(1, integer(chain))
+    if rel is not None:
+        members = b"".join(ctx(tag, visible(rel[name]) if name == "season" else integer(rel[name]))
+                           for tag, name in enumerate(DATE_STD) if name in rel)
+        new += ctx(2, ctx(1, b"\x30\x80" + members + b"\x00\x00"))
+    if chain_id is not None:
+        new += ctx(3, visible(chain_id))
+    return record[:seq + 2] + new + record[end - 2:]
+
+
+def patch(base, db):
+    """Rewrites the stored deflines of the version 4 protein database `base` (one record each of CHAINS, or
+    of NORMALIZED for `pdbnorm`) and the header offsets of its index file."""
+    rows = NORMALIZED if db == "pdbnorm" else CHAINS
     index = bytearray(open(f"{base}.pin", "rb").read())
     version, = struct.unpack(">I", index[0:4])
     assert version == 4, version
@@ -129,12 +196,16 @@ def patch(base):
     for _ in range(2):  # title, date
         at += 4 + struct.unpack(">I", index[at:at + 4])[0]
     count, = struct.unpack(">I", index[at:at + 4])
-    assert count == len(CHAINS), count
+    assert count == len(rows), count
     at += 4 + 8 + 4  # count, total length, longest sequence
     offsets = list(struct.unpack(f">{count + 1}I", index[at:at + 4 * (count + 1)]))
     headers = open(f"{base}.phr", "rb").read()
     records = [headers[offsets[k]:offsets[k + 1]] for k in range(count)]
-    records = [with_chain(record, chain) for record, (_, _, chain) in zip(records, CHAINS)]
+    if db == "pdbnorm":
+        records = [with_pdb(record, mol, chain, rel, chain_id)
+                   for record, (mol, _, chain, rel, chain_id) in zip(records, rows)]
+    else:
+        records = [with_chain(record, chain) for record, (_, _, chain) in zip(records, rows)]
     offsets = [0]
     for record in records:
         offsets.append(offsets[-1] + len(record))
@@ -143,16 +214,24 @@ def patch(base):
     open(f"{base}.pin", "wb").write(bytes(index))
 
 
-def patch_keys(base):
+def patch_keys(base, db):
     """Rewrites the chain letter that ends the keys of the sequence index `base.psd` (`1ab1 a`, `1ab1|a`,
-    `pdb|1ab1|a`; text lines `key\\x02oid\\n`) to the low byte of the stored chain."""
+    `pdb|1ab1|a`; text lines `key\\x02oid\\n`) to the low byte of the stored chain, for the records without a
+    chain-id (`pdbnorm`'s with one keep the keys of their chain-id, the FASTA letter)."""
     lines = open(f"{base}.psd", "rb").read().split(b"\n")
     assert lines[-1] == b"", lines[-1]
     out = []
     for line in lines[:-1]:
         key, oid = line.rsplit(b"\x02", 1)
-        letter = CHAINS[int(oid)][1].lower().encode()
-        chain = CHAINS[int(oid)][2]
+        if db == "pdbnorm":
+            _, letter, chain, _, chain_id = NORMALIZED[int(oid)]
+            if chain_id is not None:
+                out.append(line)
+                continue
+            letter = letter.lower().encode()
+        else:
+            letter = CHAINS[int(oid)][1].lower().encode()
+            chain = CHAINS[int(oid)][2]
         low = bytes([32 if chain is None else chain & 0xFF]).lower()  # keys are lower case
         if key[-2:] in (b" " + letter, b"|" + letter):
             key = key[:-1] + low
@@ -167,19 +246,28 @@ def main(ncbi_bin, names):
     seq = letters(PDUP)
     for db in names:
         fasta = os.path.join(work, f"{db}.faa")
+        names = [(mol.upper(), letter) for mol, letter, *_ in NORMALIZED] if db == "pdbnorm" else \
+            [(name, letter) for name, letter, _ in CHAINS]
         with open(fasta, "w") as f:
-            for k, (name, letter, _) in enumerate(CHAINS):
+            for k, (name, letter) in enumerate(names):
                 changed = list(seq)
                 at = 10 * (k + 1)
                 changed[at] = "Y" if changed[at] == "W" else "W"
                 gb = f"gb|AB60000{k + 1}.1|" if DATABASES[db] else ""
                 f.write(f">{gb}pdb|{name}|{letter}\n" + "".join(changed) + "\n")
         base = os.path.join(HERE, db)
+        taxids = []
+        if db == "pdbnorm":
+            taxid_map = os.path.join(work, f"{db}.taxids")
+            with open(taxid_map, "w") as f:
+                for (name, letter), taxid in zip(names, TAXIDS):
+                    f.write(f"pdb|{name}|{letter} {taxid}\n")
+            taxids = ["-taxid_map", taxid_map]
         subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
-                        "-blastdb_version", "4", "-title", db, "-out", base],
+                        "-blastdb_version", "4", "-title", db, "-out", base] + taxids,
                        check=True, env=env, stdout=subprocess.DEVNULL)
-        patch(base)
-        patch_keys(base)
+        patch(base, db)
+        patch_keys(base, db)
     for name in os.listdir(work):
         os.remove(os.path.join(work, name))
     os.rmdir(work)

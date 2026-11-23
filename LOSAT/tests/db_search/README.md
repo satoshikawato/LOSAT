@@ -2560,7 +2560,21 @@ for 321 and -191, 127 for 383), and serves no sequence where no stored id `Match
 report is empty for 321, -191 and 383 (`ParsedSubject::scope_finds_none`): outfmt 0 `Unknown` without links and `no
 longer exists in database...alignment skipped`, outfmt 1 to 4 without those subjects, XML the `Hit` and `Hsp` of the
 `catch`, the tabular rows of a failed lookup (`sacc`, `saccver` and the default fields: NCBI's null pointer, LOSAT's
-refusal), no outfmt 18 row; `-show_gis` prints a GI that NCBI never set (refused).
+refusal), no outfmt 18 row; `-show_gis` prints a GI that NCBI never set in a description line (refused where a line
+of such a subject is printed: row `db.pdbchain.only.blastp.0gs`; `-num_descriptions 0` prints none, `.0g`).
+`pdbchain/pdbnorm` (line RG-KB item 12, review 1; rows `db.pdbchain.norm.*`) holds six records whose only Seq-id is a pdb
+one written whole (molecule, chain, release date `rel` as a Date-std, chain-id), each with a taxid of `-taxid_map`
+(9606 or 10090; the organism report rows take `BLASTDB=tests/seqdb/taxdb/good`): `1ab6` (a lower-case molecule)
+chain 66 chain-id `A`, `1AB7` chain 66 chain-id `A` with a date of month 13 (a date that normalizes: year 1-4095,
+month 1-15, day 1-31, hour 0-30, minute and second 0-62, no season), and `1AB8` chain 200 without a chain-id (a chain
+in 128..255, the byte 0xC8 in its label) have no Bioseq (the handle looks up chain 65, 65 and -56); `1AB9` chain 66
+chain-id `A` with month 16, `1ABA` the same with the season `spring` (dates that do not normalize) and `1ABB` chain 65
+chain-id `A` with month 13 (the normalized chain is the stored one) load. Two refusals of a pdb Seq-align id whose
+handle another id of the same sequence holds have no row here (they need two ids of one sequence, which the review
+probe `i12/review/p3` builds): another definition line than the Seq-align id's holds it (NCBI's description line and
+organism report show that line's title; LOSAT refuses where they show it), or no definition line does as NCBI's load
+reads the ids (one line with chain 321 then chain 65: NCBI's load throws `oid headers do not contain target
+gi/seq_id`; LOSAT refuses the formats that read the Bioseq or prefetch it, outfmt 8 is NCBI's).
 - `tn_amb_q.faa` / `tn_amb_s.fna` (rows `db.tn.amb.*`, line O4c): a protein of 80 random letters with an X, a B, a Z
   and a W, and its back-translation with an `RAT` codon (D or N) at the X, the B and a D, an `SAR` codon (E or Q) at
   the Z and `TGA` (a stop in code 1) at the W, between `CC` and `GG`; then (review X2 of line O4c) 32 more letters,

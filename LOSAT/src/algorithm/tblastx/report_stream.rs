@@ -215,7 +215,7 @@ pub(super) fn check(
     // Outfmt 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1): NCBI's exception of a
     // section's merge comes where NCBI's does (`query_anchored::write_section`), and the refusal of
     // a `-db` sequence whose generated id is that of a query of its batch
-    // (`anchored::refuse_anchored_reports`) before that batch's first byte, after the batches
+    // (`anchored::refuse_pairwise_reports`) before that batch's first byte, after the batches
     // before, as NCBI's error in a later batch's format (DECISIONS T3a-7 (2) of line RG, BLASTN's
     // and BLASTP's per batch and block). Under `-parse_deflines` the database check below turns
     // the stream off for a sequence with the id of a query of the run (`database_check`), whose

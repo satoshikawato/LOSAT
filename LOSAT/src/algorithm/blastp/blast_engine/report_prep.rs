@@ -951,34 +951,15 @@ pub(super) fn refuse_unreportable(
         })
         .collect();
     let described = |q_idx: usize, anchored: bool| -> Result<Vec<u32>> {
-        let rows: std::borrow::Cow<'_, [PairwiseHit]> = match pairwise_hits.as_deref() {
-            Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
-            None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
-        };
-        let parsed = listed_titles
-            .as_ref()
-            .map_or(&[][..], |titles| titles.parsed.as_slice());
+        let rows = query_rows(pairwise_hits, rows_of, q_idx)?;
         let mut described: Vec<u32> = Vec::new();
         for &view in &pairwise_views {
             if anchored && view == crate::report::pairwise::PairwiseView::Pairwise {
                 continue;
             }
-            for s_idx in crate::report::pairwise::blastp_described_subjects(
-                view.report_sort(args.sort),
-                psi_found_before
-                    .as_ref()
-                    .map(|found| found.found.as_slice()),
-                args.num_descriptions,
-                q_idx,
-                &rows,
-                |previous, s_idx| {
-                    crate::report::db_subject::rank_joins_as_copy(
-                        parsed,
-                        previous as usize,
-                        s_idx as usize,
-                    )
-                },
-            ) {
+            for s_idx in
+                described_subjects(view, args, &rows, listed_titles, psi_found_before, q_idx)
+            {
                 if !described.contains(&s_idx) {
                     described.push(s_idx);
                 }
@@ -1125,6 +1106,49 @@ pub(super) fn refuse_unreportable(
         titles.refuse_display_ids_of_queries(hit_lists, scopes, |q_idx| described(q_idx, false))?;
     }
     Ok(())
+}
+
+/// The rows of the call's hits that the reports of query `q_idx` read: every query's where the
+/// call made them (`pairwise_hits`), else the query's own (`rows_of`).
+pub(super) fn query_rows<'r>(
+    pairwise_hits: &'r Option<Arc<Vec<PairwiseHit>>>,
+    rows_of: &impl Fn(Range<usize>) -> Result<Vec<PairwiseHit>>,
+    q_idx: usize,
+) -> Result<std::borrow::Cow<'r, [PairwiseHit]>> {
+    Ok(match pairwise_hits.as_deref() {
+        Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
+        None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
+    })
+}
+
+/// The subjects whose description lines the report of query `q_idx` shows in the pairwise view
+/// `view`, by rank: `pairwise::blastp_described_subjects` of the rows `rows` that the reports read
+/// (`query_rows`), sorted by the view's `-sorthits` (none in psiblast and rpsblast), with the
+/// copies of a database record joined (`listed_titles`) and, in psiblast's round after the first,
+/// the lines of its two-part table (`psi_found_before`, `psiblast_round`).
+pub(super) fn described_subjects(
+    view: crate::report::pairwise::PairwiseView,
+    args: &ResolvedBlastpArgs,
+    rows: &[PairwiseHit],
+    listed_titles: &Option<database::ListedTitles<'_>>,
+    psi_found_before: &Option<psi_round::FoundBefore>,
+    q_idx: usize,
+) -> Vec<u32> {
+    let parsed = listed_titles
+        .as_ref()
+        .map_or(&[][..], |titles| titles.parsed.as_slice());
+    crate::report::pairwise::blastp_described_subjects(
+        view.report_sort(args.sort),
+        psi_found_before
+            .as_ref()
+            .map(|found| found.found.as_slice()),
+        args.num_descriptions,
+        q_idx,
+        rows,
+        |previous, s_idx| {
+            crate::report::db_subject::rank_joins_as_copy(parsed, previous as usize, s_idx as usize)
+        },
+    )
 }
 
 // The steps from the final hit lists to the labels of the reports (`ReportSetup`), before the

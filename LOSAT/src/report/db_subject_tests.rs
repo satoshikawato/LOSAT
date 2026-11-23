@@ -2489,7 +2489,10 @@ fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
         assert!(!served.description_line(true).2);
     }
     // Where the handle's Seq-id is held by another definition line than the Seq-align id's, the
-    // Bioseq NCBI builds shows that line: LOSAT refuses it.
+    // Bioseq NCBI builds is made of that line: its title is refused only where the description
+    // line or the organism report shows it; the tables, the heading and the XML documents show
+    // the sequence's own lines (review 1 of line RG-KB item 12, R2: probe `e15_twoline`).
+    use crate::algorithm::common::database::description_line_refusal;
     let other_line = ParsedSubject::new(DeflineSet {
         deflines: vec![
             BlastDefline {
@@ -2504,12 +2507,21 @@ fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
             },
         ],
         utf8: false,
-    });
+    })
+    .unwrap();
+    assert!(!other_line.scope_finds_none());
     assert!(other_line
-        .unwrap_err()
-        .contains("other than the Seq-align id's"));
+        .handle_title_refusal()
+        .unwrap()
+        .contains("a definition line other than the Seq-align id's"));
+    assert!(description_line_refusal(&other_line, HitLoad::Loaded)
+        .unwrap()
+        .contains("description line and organism report"));
+    assert_eq!(other_line.fetched(true, false, HitLoad::Loaded), Ok(()));
+    assert!(matches!(other_line.prefetched(), Prefetched::Itself));
     // One line that holds both chains: NCBI's Bioseq reads the line's first pdb id, which is not
-    // the handle's, so its load throws.
+    // the handle's, so its load throws: refused where a format reads the Bioseq or the prefetch
+    // reads it; the Seq-annots and the archive read nothing of it (outfmt 8 is NCBI's bytes).
     let one_line = ParsedSubject::new(DeflineSet {
         deflines: vec![BlastDefline {
             title: Some(b"t".to_vec()),
@@ -2520,8 +2532,61 @@ fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
             ..BlastDefline::default()
         }],
         utf8: false,
-    });
-    assert!(one_line.unwrap_err().contains("the load throws"));
+    })
+    .unwrap();
+    assert!(one_line
+        .fetched(false, false, HitLoad::Loaded)
+        .unwrap_err()
+        .contains("its load throws"));
+    assert!(matches!(
+        one_line.prefetched(),
+        Prefetched::Failed(reason) if reason.contains("oid headers do not contain target gi/seq_id")
+    ));
+    assert!(one_line.pssm_read(false).is_err());
+    assert_eq!(description_line_refusal(&one_line, HitLoad::Loaded), None);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:886-892
+// The description line of a sequence whose Bioseq the scope does not get prints, with
+// `-show_gis`, a GI that NCBI never sets; a description id longer than 65 bytes pads the line
+// without end. Both are refused only for a sequence whose line a report prints (the first
+// `-num_descriptions`; review 1 of line RG-KB item 12, R1).
+#[test]
+fn a_description_line_is_refused_only_where_a_report_prints_it() {
+    use crate::algorithm::common::database::{description_line_refusal, refuse_described_lines};
+    let unserved = lines(vec![vec![pdb_id("1AB1", Some(321), None)]]);
+    assert_eq!(description_line_refusal(&unserved, HitLoad::Loaded), None);
+    let unserved = unserved.showing_gis(true);
+    assert!(description_line_refusal(&unserved, HitLoad::Loaded)
+        .unwrap()
+        .contains("prints a GI that NCBI BLAST+ 2.17.0 never sets"));
+    let long = lines(vec![vec![ParsedSeqId::Local(ObjectId::Str(
+        "x".repeat(70).into_bytes(),
+    ))]]);
+    assert!(description_line_refusal(&long, HitLoad::Loaded)
+        .unwrap()
+        .contains("longer than 65 bytes"));
+    let served = lines(vec![vec![pdb_id("1AB4", Some(65), None)]]);
+    let parsed = vec![
+        Some(std::sync::Arc::new(served)),
+        Some(std::sync::Arc::new(unserved)),
+    ];
+    let refuse = |described: Vec<u32>| {
+        refuse_described_lines(
+            1,
+            |_| vec![0, 1],
+            |_| Ok(described.clone()),
+            &parsed,
+            |_| HitLoad::Loaded,
+            crate::seqdb::Oid::of_unrestricted,
+            "BLASTP",
+        )
+    };
+    // `-num_descriptions 1`: rank 1 prints no line.
+    assert!(refuse(vec![0]).is_ok());
+    assert!(refuse(vec![]).is_ok());
+    let error = refuse(vec![0, 1]).unwrap_err().to_string();
+    assert!(error.contains("never sets"), "{error}");
 }
 
 #[test]

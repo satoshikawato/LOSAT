@@ -10828,7 +10828,7 @@ fn run_call(
         // (`FormatRefusal::check`) leaves them to the next. The shown subjects are those of the
         // final lists (the rows' subjects).
         let pairwise_shown: Option<std::collections::BTreeSet<usize>> = match outfmt {
-            BlastpReport::Pairwise(_) => {
+            BlastpReport::Pairwise(view) => {
                 let shown: std::collections::BTreeSet<usize> = hit_lists
                     .iter()
                     .flatten()
@@ -10842,7 +10842,25 @@ fn run_call(
                     &shown,
                     subject_records,
                     &prefetched.hit_loads,
-                );
+                )
+                .and_then(|()| match listed_titles.as_ref() {
+                    // What the description lines show, of the subjects whose lines the format
+                    // prints (the first `-num_descriptions`; line RG-KB item 12 review 1).
+                    Some(titles) => {
+                        titles.refuse_described_lines(&hit_lists, &prefetched.hit_loads, |q_idx| {
+                            let rows = report_prep::query_rows(&pairwise_hits, &rows_of, q_idx)?;
+                            Ok(report_prep::described_subjects(
+                                view,
+                                &args,
+                                &rows,
+                                &listed_titles,
+                                &psi_found_before,
+                                q_idx,
+                            ))
+                        })
+                    }
+                    None => Ok(()),
+                });
                 if !format.refusal.check(checked)? {
                     continue;
                 }

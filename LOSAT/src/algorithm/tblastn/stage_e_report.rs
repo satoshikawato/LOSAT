@@ -581,55 +581,80 @@ pub(super) fn render(
     {
         hits_sink(std::sync::Arc::clone(pairwise_hits));
     }
-    // The query-anchored formats (outfmt 1 to 4, line RG T3b), before any format of the call is
-    // written: a reported database sequence that NCBI's scope finds as a query of its batch, by
-    // its Seq-align id (a generated `lcl|Query_N`) or, in a description line, by its display id
+    // Before any format of the call is written, the refusals of what the description lines show
+    // (outfmt 0 to 4, `common::database::refuse_described_lines`, line RG-KB item 12 review 1),
+    // and those of the query-anchored formats (outfmt 1 to 4, line RG T3b): a reported database
+    // sequence that NCBI's scope finds as a query of its batch, by its Seq-align id (a generated
+    // `lcl|Query_N`) or, in a description line, by its display id
     // (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's): NCBI shows the
     // query in its place (with the protein query's letters translated as nucleotides).
-    let anchored_view = outputs.formats.iter().find_map(|format| {
-        crate::blastinput::app::ReportFormat::from_number(format_number(format.outfmt))
-            .and_then(crate::report::pairwise::PairwiseView::of)
-            .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise)
-    });
-    if let (Some(view), Some(rows)) = (anchored_view, pairwise_hits.as_deref()) {
-        if matches!(shown, ShownSubjects::Database { .. }) {
+    let pairwise_views: Vec<crate::report::pairwise::PairwiseView> = outputs
+        .formats
+        .iter()
+        .filter_map(|format| {
+            crate::blastinput::app::ReportFormat::from_number(format_number(format.outfmt))
+                .and_then(crate::report::pairwise::PairwiseView::of)
+        })
+        .collect();
+    if let (ShownSubjects::Database { reported, .. }, Some(rows)) =
+        (shown, pairwise_hits.as_deref())
+    {
+        let parsed = &reported.parsed;
+        let reported_ranks = |q_idx: usize| -> Vec<u32> {
+            hitlists[q_idx]
+                .lists()
+                .iter()
+                .filter(|list| !list.hsps.hsps.is_empty())
+                .filter_map(|list| u32::try_from(list.oid).ok())
+                .collect()
+        };
+        let described = |view: crate::report::pairwise::PairwiseView, q_idx: usize| {
+            crate::report::pairwise::blastp_described_subjects(
+                view.report_sort(formatting.report_sort()),
+                None,
+                report_counts.num_descriptions,
+                q_idx,
+                rows,
+                |previous, s_idx| {
+                    crate::report::db_subject::rank_joins_as_copy(
+                        parsed,
+                        previous as usize,
+                        s_idx as usize,
+                    )
+                },
+            )
+        };
+        let oid_of = |rank: u32| {
+            shown
+                .oid(rank as usize)
+                .expect("a database search names its sequences by OID")
+        };
+        for &view in &pairwise_views {
+            crate::algorithm::common::database::refuse_described_lines(
+                query_records.len(),
+                reported_ranks,
+                |q_idx| Ok(described(view, q_idx)),
+                parsed,
+                |rank| reported.loads.load(rank as usize),
+                oid_of,
+                program,
+            )?;
+        }
+        let anchored_view = pairwise_views
+            .iter()
+            .copied()
+            .find(|view| *view != crate::report::pairwise::PairwiseView::Pairwise);
+        if let Some(view) = anchored_view {
             let batches = crate::blastinput::query_batch::AnchoredBatchScopes::of_starts(
                 query_records,
                 batch_starts,
             );
-            let parsed = shown.parsed_subjects();
             crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
                 query_records.len(),
-                |q_idx| {
-                    hitlists[q_idx]
-                        .lists()
-                        .iter()
-                        .filter(|list| !list.hsps.hsps.is_empty())
-                        .filter_map(|list| u32::try_from(list.oid).ok())
-                        .collect()
-                },
-                |q_idx| {
-                    Ok(crate::report::pairwise::blastp_described_subjects(
-                        view.report_sort(formatting.report_sort()),
-                        None,
-                        report_counts.num_descriptions,
-                        q_idx,
-                        rows,
-                        |previous, s_idx| {
-                            crate::report::db_subject::rank_joins_as_copy(
-                                parsed,
-                                previous as usize,
-                                s_idx as usize,
-                            )
-                        },
-                    ))
-                },
+                reported_ranks,
+                |q_idx| Ok(described(view, q_idx)),
                 parsed,
-                |rank| {
-                    shown
-                        .oid(rank as usize)
-                        .expect("a database search names its sequences by OID")
-                },
+                oid_of,
                 |q_idx| batches.of_query(q_idx),
                 batches.generated(),
                 program,

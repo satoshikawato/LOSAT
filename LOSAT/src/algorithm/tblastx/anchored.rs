@@ -51,7 +51,7 @@ impl ReportSequences for AnchoredSequences<'_> {
     /// A `-subject` record read with `-parse_deflines` that is the query's record
     /// (`subject_is_query_record`, as BLASTN's): its HSPs with the query are one `CAlnMixSeq` of
     /// both rows (`query_anchored::aln_mix`, `fForceTranslation`). A database sequence with the
-    /// query's id is refused before the reports (`refuse_anchored_reports`).
+    /// query's id is refused before the reports (`refuse_pairwise_reports`).
     fn subject_is_query(&self, q_idx: usize, s_idx: u32) -> bool {
         self.database.is_none()
             && match (self.queries.get(q_idx), self.subjects.get(s_idx as usize)) {
@@ -116,16 +116,19 @@ impl ReportSequences for AnchoredSequences<'_> {
     }
 }
 
-/// The refusal of the query-anchored formats (outfmt 1 to 4) of a TBLASTX report call, before
+/// The refusals of a pairwise format of a TBLASTX report call (outfmt 0 to 4, `view`), before
 /// its first byte (`run`, its final hits `hits` in report order with record coordinates and their
-/// Seq-aligns' identities `seqalign_identities`, `-sorthits` and `-sorthsps` `sort`): with `-db`, a
-/// reported sequence that NCBI's scope finds as a query of its batch, by its Seq-align id (a
-/// generated `lcl|Query_N`) or, in a description line, by its display id
-/// (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's, TBLASTN's and
-/// BLASTX's): NCBI shows the query in its place. With the stream of `report_stream` a call is one
-/// query batch (NCBI's scope is the batch's), so the refusal of a generated id comes after the
-/// reports of the batches before. Under `-parse_deflines` a database sequence with the id of a
-/// query of the run turns that stream off (`TblastxDatabase::reports_may_refuse`), so its refusal
+/// Seq-aligns' identities `seqalign_identities`, `-sorthits` and `-sorthsps` `sort`): with `-db`,
+/// a description line that shows what LOSAT does not write as NCBI
+/// (`common::database::refuse_described_lines`, line RG-KB item 12 review 1), and in the
+/// query-anchored formats (outfmt 1 to 4) a reported sequence that NCBI's scope finds as a query
+/// of its batch, by its Seq-align id (a generated `lcl|Query_N`) or, in a description line, by its
+/// display id (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's, TBLASTN's
+/// and BLASTX's): NCBI shows the query in its place. With the stream of `report_stream` a call is
+/// one query batch (NCBI's scope is the batch's), so the refusal of a generated id comes after the
+/// reports of the batches before; a description line that LOSAT refuses turns that stream off
+/// (`common::database::reports_may_refuse`), as does, under `-parse_deflines`, a database sequence
+/// with the id of a query of the run (`TblastxDatabase::reports_may_refuse`), whose refusal
 /// (`common::database::refuse_reported_ids_of_queries`, in the batch loop) comes before the first
 /// batch's reports, as outfmt 0's.
 ///
@@ -133,10 +136,11 @@ impl ReportSequences for AnchoredSequences<'_> {
 /// here: its section is NCBI's (`query_anchored::aln_mix`), also where NCBI's merge throws, which
 /// ends the report after the query's description table with NCBI's exception
 /// (`query_anchored::write_section`, `cli::NativeError::of_writer`).
-pub(crate) fn refuse_anchored_reports(
+pub(crate) fn refuse_pairwise_reports(
     run: &super::blast_engine::TblastxReportRun<'_>,
     hits: &[super::blast_engine::TblastxHsp],
     seqalign_identities: Option<&[u32]>,
+    view: crate::report::pairwise::PairwiseView,
     sort: crate::report::hit_sort::ReportSort,
     num_descriptions: usize,
 ) -> anyhow::Result<()> {
@@ -144,59 +148,74 @@ pub(crate) fn refuse_anchored_reports(
         return Ok(());
     };
     let reported = database.reported;
-    let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::new(
-        run.queries,
-        run.archive_spans.to_vec(),
-    );
     let query_hits = |q_idx: usize| {
         let from = hits.partition_point(|hsp| (hsp.hit.q_idx as usize) < q_idx);
         let to = hits.partition_point(|hsp| (hsp.hit.q_idx as usize) <= q_idx);
         from..to.max(from)
     };
+    let reported_ranks = |q_idx: usize| {
+        let mut ranks: Vec<u32> = Vec::new();
+        for hsp in &hits[query_hits(q_idx)] {
+            if !ranks.contains(&hsp.hit.s_idx) {
+                ranks.push(hsp.hit.s_idx);
+            }
+        }
+        ranks
+    };
+    let described = |q_idx: usize| {
+        // The rows of the query's hits as the report sorts them (`QueryGroup::sorted`, with
+        // TBLASTX's alignment lengths in nucleotides), each with its Seq-align's identities.
+        let range = query_hits(q_idx);
+        let rows: Vec<crate::report::pairwise::PairwiseHit> = hits[range.clone()]
+            .iter()
+            .zip(range)
+            .map(|(hsp, index)| {
+                let mut row = crate::report::pairwise::PairwiseHit::from(hsp.hit.clone());
+                if let Some(identities) = seqalign_identities {
+                    row.seqalign_num_ident = identities[index] as usize;
+                }
+                row
+            })
+            .collect();
+        let indexed: Vec<_> = rows.iter().enumerate().collect();
+        Ok(crate::report::x_pairwise_par::QueryGroup::sorted(
+            &indexed,
+            &[],
+            |previous, s_idx| {
+                crate::report::db_subject::rank_joins_as_copy(
+                    &reported.parsed,
+                    previous as usize,
+                    s_idx as usize,
+                )
+            },
+            sort,
+            true,
+        )
+        .map_or_else(Vec::new, |group| group.described(num_descriptions).to_vec()))
+    };
+    let oid_of = |rank: u32| database.oids.oid(reported.ordinals[rank as usize]);
+    crate::algorithm::common::database::refuse_described_lines(
+        run.queries.len(),
+        reported_ranks,
+        described,
+        &reported.parsed,
+        |rank| reported.loads.load(rank as usize),
+        oid_of,
+        "TBLASTX",
+    )?;
+    if view == crate::report::pairwise::PairwiseView::Pairwise {
+        return Ok(());
+    }
+    let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::new(
+        run.queries,
+        run.archive_spans.to_vec(),
+    );
     crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
         run.queries.len(),
-        |q_idx| {
-            let mut ranks: Vec<u32> = Vec::new();
-            for hsp in &hits[query_hits(q_idx)] {
-                if !ranks.contains(&hsp.hit.s_idx) {
-                    ranks.push(hsp.hit.s_idx);
-                }
-            }
-            ranks
-        },
-        |q_idx| {
-            // The rows of the query's hits as the report sorts them (`QueryGroup::sorted`, with
-            // TBLASTX's alignment lengths in nucleotides), each with its Seq-align's identities.
-            let range = query_hits(q_idx);
-            let rows: Vec<crate::report::pairwise::PairwiseHit> = hits[range.clone()]
-                .iter()
-                .zip(range)
-                .map(|(hsp, index)| {
-                    let mut row = crate::report::pairwise::PairwiseHit::from(hsp.hit.clone());
-                    if let Some(identities) = seqalign_identities {
-                        row.seqalign_num_ident = identities[index] as usize;
-                    }
-                    row
-                })
-                .collect();
-            let indexed: Vec<_> = rows.iter().enumerate().collect();
-            Ok(crate::report::x_pairwise_par::QueryGroup::sorted(
-                &indexed,
-                &[],
-                |previous, s_idx| {
-                    crate::report::db_subject::rank_joins_as_copy(
-                        &reported.parsed,
-                        previous as usize,
-                        s_idx as usize,
-                    )
-                },
-                sort,
-                true,
-            )
-            .map_or_else(Vec::new, |group| group.described(num_descriptions).to_vec()))
-        },
+        reported_ranks,
+        described,
         &reported.parsed,
-        |rank| database.oids.oid(reported.ordinals[rank as usize]),
+        oid_of,
         |q_idx| scopes.of_query(q_idx),
         scopes.generated(),
         "TBLASTX",

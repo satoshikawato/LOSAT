@@ -22,10 +22,11 @@ use crate::report::record::{QueryNames, SubjectNames};
 use anyhow::Result;
 use std::sync::Arc;
 
-/// Refuses the call, before any format of it is written, when one of its query-anchored reports
-/// (outfmt 1 to 4) is a report that NCBI BLAST+ aborts: a query whose own record is one of the
-/// subjects (`-subject`) and a reported database sequence that NCBI's scope finds as a query of its
-/// batch. `rows_of` renders the hits of a range of queries; `pairwise_hits` holds those of every
+/// Refuses the call, before any format of it is written, when a description line of its outfmt 0
+/// to 4 shows what LOSAT does not write as NCBI (`common::database::refuse_described_lines`), or
+/// when one of its query-anchored reports (outfmt 1 to 4) is a report that NCBI BLAST+ aborts: a
+/// query whose own record is one of the subjects (`-subject`) and a reported database sequence that
+/// NCBI's scope finds as a query of its batch. `rows_of` renders the hits of a range of queries; `pairwise_hits` holds those of every
 /// query when the call made them already.
 ///
 /// No NCBI counterpart: the refusal is LOSAT's (PD-LOSAT-NCBI-DEFECTS rule 3); NCBI writes bytes before
@@ -46,6 +47,54 @@ pub(super) fn refuse_anchored_reports(
     // `lcl|Query_N`) or, in a description line, by its display id
     // (`common::database::refuse_query_ids_of_anchored_reports`): NCBI shows the query in its
     // place. NCBI's bytes before an abort depend on its buffers, so LOSAT writes none of the call's.
+    let sort = report.formatting.report_sort();
+    let rows_of_query = |q_idx: usize| -> Result<std::borrow::Cow<'_, [PairwiseHit]>> {
+        Ok(match pairwise_hits {
+            Some(hits) => std::borrow::Cow::Borrowed(hits),
+            None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
+        })
+    };
+    let reported_ranks = |q_idx: usize| -> Vec<u32> {
+        hit_lists[q_idx]
+            .iter()
+            .flat_map(|hit_list| &hit_list.hsplist_array)
+            .filter_map(|list| list.hsps.first().map(|hsp| hsp.s_idx))
+            .collect()
+    };
+    let described = |view: crate::report::pairwise::PairwiseView, q_idx: usize| {
+        let rows = rows_of_query(q_idx)?;
+        Ok(crate::report::pairwise::blastp_described_subjects(
+            view.report_sort(sort),
+            None,
+            report.num_descriptions,
+            q_idx,
+            &rows,
+            |previous, s_idx| {
+                crate::report::db_subject::rank_joins_as_copy(
+                    report.database_parsed,
+                    previous as usize,
+                    s_idx as usize,
+                )
+            },
+        ))
+    };
+    // The description lines of outfmt 0 to 4 (line RG-KB item 12 review 1).
+    if let (Some(ordinals), Some(reader)) = (report.database_ordinals, report.database_reader) {
+        let oids = reader.oid_map();
+        for format in output_formats {
+            if let BlastnOutputFormat::Pairwise(view) = format {
+                crate::algorithm::common::database::refuse_described_lines(
+                    hit_lists.len(),
+                    reported_ranks,
+                    |q_idx| described(*view, q_idx),
+                    report.database_parsed,
+                    |rank| report.database_loads.load(rank as usize),
+                    |rank| oids.oid(ordinals[rank as usize]),
+                    "BLASTN",
+                )?;
+            }
+        }
+    }
     let anchored_view = output_formats.iter().find_map(|format| match format {
         BlastnOutputFormat::Pairwise(view)
             if *view != crate::report::pairwise::PairwiseView::Pairwise =>
@@ -55,13 +104,6 @@ pub(super) fn refuse_anchored_reports(
         _ => None,
     });
     if let Some(view) = anchored_view {
-        let sort = report.formatting.report_sort();
-        let rows_of_query = |q_idx: usize| -> Result<std::borrow::Cow<'_, [PairwiseHit]>> {
-            Ok(match pairwise_hits {
-                Some(hits) => std::borrow::Cow::Borrowed(hits),
-                None => std::borrow::Cow::Owned(rows_of(q_idx..q_idx + 1)?),
-            })
-        };
         if report.database_reader.is_none() {
             for (q_idx, record) in report.queries.iter().enumerate() {
                 if record.believed().is_none_or(|ids| ids.shared.is_none()) {
@@ -113,30 +155,8 @@ pub(super) fn refuse_anchored_reports(
             let oids = reader.oid_map();
             crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
                 hit_lists.len(),
-                |q_idx| {
-                    hit_lists[q_idx]
-                        .iter()
-                        .flat_map(|hit_list| &hit_list.hsplist_array)
-                        .filter_map(|list| list.hsps.first().map(|hsp| hsp.s_idx))
-                        .collect()
-                },
-                |q_idx| {
-                    let rows = rows_of_query(q_idx)?;
-                    Ok(crate::report::pairwise::blastp_described_subjects(
-                        view.report_sort(sort),
-                        None,
-                        report.num_descriptions,
-                        q_idx,
-                        &rows,
-                        |previous, s_idx| {
-                            crate::report::db_subject::rank_joins_as_copy(
-                                report.database_parsed,
-                                previous as usize,
-                                s_idx as usize,
-                            )
-                        },
-                    ))
-                },
+                reported_ranks,
+                |q_idx| described(view, q_idx),
                 report.database_parsed,
                 |rank| oids.oid(ordinals[rank as usize]),
                 |q_idx| batches.of_query(q_idx),

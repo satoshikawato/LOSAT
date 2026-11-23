@@ -1731,6 +1731,36 @@ impl ListedTitles<'_> {
         Ok(())
     }
 
+    /// `common::database::refuse_described_lines` of the subjects with parsed Seq-ids of the
+    /// final hit lists `hit_lists` (`loads`: their loads in the pairwise reports, `HitLoads::load`
+    /// by rank): `described(query)` gives the subjects (by rank) whose description lines the
+    /// query's report shows (`report_prep::described_subjects`).
+    pub(super) fn refuse_described_lines(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        loads: &HitLoads,
+        described: impl FnMut(usize) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        shared::refuse_described_lines(
+            hit_lists.len(),
+            |query| match &hit_lists[query] {
+                Some(hit_list) => {
+                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                    hit_list.hsplist_array[..count]
+                        .iter()
+                        .map(|hsp_list| hsp_list.oid as u32)
+                        .collect()
+                }
+                None => Vec::new(),
+            },
+            described,
+            &self.parsed,
+            |rank| loads.load(rank as usize),
+            |rank| self.oids.oid(self.listed.ordinals[rank as usize]),
+            self.program,
+        )
+    }
+
     /// The stored title of the subject of rank `rank` (empty for a subject in no final hit
     /// list).
     fn title(&self, rank: usize) -> &[u8] {

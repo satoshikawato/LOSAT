@@ -968,62 +968,79 @@ fn write_pairwise(
     let view = options
         .pairwise_view()
         .expect("a pairwise report is outfmt 0 to 4");
-    // The query-anchored formats (outfmt 1 to 4, line RG T3c), before the call's first byte: a
-    // reported database sequence that NCBI's scope finds as a query of its batch, by its Seq-align
-    // id (a generated `lcl|Query_N`) or, in a description line, by its display id
+    // Before the call's first byte, the refusals of what the description lines show
+    // (`common::database::refuse_described_lines`, line RG-KB item 12 review 1) and those of the
+    // query-anchored formats (outfmt 1 to 4, line RG T3c): a reported database sequence that
+    // NCBI's scope finds as a query of its batch, by its Seq-align id (a generated `lcl|Query_N`)
+    // or, in a description line, by its display id
     // (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's and TBLASTN's): NCBI
     // shows the query in its place.
-    if let (true, ShownSubjects::Database { reported, .. }) = (
-        view != crate::report::pairwise::PairwiseView::Pairwise,
-        shown,
-    ) {
-        let ids: Vec<(
-            &str,
-            Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
-        )> = queries
-            .iter()
-            .map(|query| (query.internal_id.as_str(), query.believed()))
-            .collect();
-        let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
-            &ids,
-            batches
-                .iter()
-                .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
-                .collect(),
-        );
-        let mut reported_ranks: Vec<Vec<u32>> = vec![Vec::new(); queries.len()];
-        for hit in hits {
-            let ranks = &mut reported_ranks[hit.hit.q_idx as usize];
-            if !ranks.contains(&hit.hit.s_idx) {
-                ranks.push(hit.hit.s_idx);
-            }
-        }
+    if let ShownSubjects::Database { reported, .. } = shown {
         let parsed = reported.parsed();
-        crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+        let described = |q_idx: usize| {
+            Ok(crate::report::pairwise::blastp_described_subjects(
+                view.report_sort(options.report_sort()),
+                None,
+                options.num_descriptions as usize,
+                q_idx,
+                hits,
+                |previous, s_idx| {
+                    crate::report::db_subject::rank_joins_as_copy(
+                        parsed,
+                        previous as usize,
+                        s_idx as usize,
+                    )
+                },
+            ))
+        };
+        // Asked only where a sequence has a description line that LOSAT refuses.
+        crate::algorithm::common::database::refuse_described_lines(
             queries.len(),
-            |q_idx| std::mem::take(&mut reported_ranks[q_idx]),
             |q_idx| {
-                Ok(crate::report::pairwise::blastp_described_subjects(
-                    view.report_sort(options.report_sort()),
-                    None,
-                    options.num_descriptions as usize,
-                    q_idx,
-                    hits,
-                    |previous, s_idx| {
-                        crate::report::db_subject::rank_joins_as_copy(
-                            parsed,
-                            previous as usize,
-                            s_idx as usize,
-                        )
-                    },
-                ))
+                hits.iter()
+                    .filter(|hit| hit.hit.q_idx as usize == q_idx)
+                    .map(|hit| hit.hit.s_idx)
+                    .collect()
             },
+            described,
             parsed,
+            |rank| reported.loads().load(rank as usize),
             |rank| reported.oid(rank as usize),
-            |q_idx| scopes.of_query(q_idx),
-            scopes.generated(),
             options.program().upper,
         )?;
+        if view != crate::report::pairwise::PairwiseView::Pairwise {
+            let mut reported_ranks: Vec<Vec<u32>> = vec![Vec::new(); queries.len()];
+            for hit in hits {
+                let ranks = &mut reported_ranks[hit.hit.q_idx as usize];
+                if !ranks.contains(&hit.hit.s_idx) {
+                    ranks.push(hit.hit.s_idx);
+                }
+            }
+            let ids: Vec<(
+                &str,
+                Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+            )> = queries
+                .iter()
+                .map(|query| (query.internal_id.as_str(), query.believed()))
+                .collect();
+            let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
+                &ids,
+                batches
+                    .iter()
+                    .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
+                    .collect(),
+            );
+            crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
+                queries.len(),
+                |q_idx| std::mem::take(&mut reported_ranks[q_idx]),
+                described,
+                parsed,
+                |rank| reported.oid(rank as usize),
+                |q_idx| scopes.of_query(q_idx),
+                scopes.generated(),
+                options.program().upper,
+            )?;
+        }
     }
     let config = PairwiseConfig {
         program: "blastx".into(),

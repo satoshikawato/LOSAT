@@ -2290,9 +2290,10 @@ fn write_tblastx_outputs(
     } else {
         Vec::new()
     };
-    // The query-anchored formats (outfmt 1 to 4, line RG T3c): their refusals before any format
-    // of the call is written (`anchored::refuse_anchored_reports`), each such format's
-    // (`FormatRefusal`), and the sequences of their sections, made once.
+    // The pairwise formats (outfmt 0 to 4): their refusals before any format of the call is
+    // written (`anchored::refuse_pairwise_reports`: the description lines', and the query-anchored
+    // formats' of line RG T3c), each such format's (`FormatRefusal`); then the sequences of the
+    // query-anchored sections, made once.
     let anchored_view = |format: &report::TblastxOutputFormat| match format {
         report::TblastxOutputFormat::Pairwise(view)
             if *view != crate::report::pairwise::PairwiseView::Pairwise =>
@@ -2302,13 +2303,14 @@ fn write_tblastx_outputs(
         _ => None,
     };
     for (format, output_format) in outputs.formats.iter_mut().zip(&output_formats) {
-        if let Some(view) = anchored_view(output_format) {
+        if let report::TblastxOutputFormat::Pairwise(view) = output_format {
             format
                 .refusal
-                .check(super::super::anchored::refuse_anchored_reports(
+                .check(super::super::anchored::refuse_pairwise_reports(
                     run,
                     &hits,
                     seqalign_identities.as_deref(),
+                    *view,
                     view.report_sort(args.formatting.report_sort()),
                     args.report_counts.num_descriptions,
                 ))?;

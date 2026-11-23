@@ -23,3 +23,62 @@ fn merges_take_the_linker_as_an_unsigned_sum() {
     insert_merge(&mut list, (40, 50), 1);
     assert_eq!(list, vec![(0, 30), (40, 50)]);
 }
+
+/// The letter-by-letter count of NCBI's `s_FindSegmentWithLongNs` (`Uint4` position and
+/// length), which `long_n_runs` gives block by block.
+fn long_n_runs_by_letter(max_ns: u32, seq: &[u8]) -> Vec<Interval> {
+    let mut runs = Vec::new();
+    let (mut pos, mut ns) = (0u32, 0u32);
+    for &letter in seq {
+        if letter == b'N' {
+            ns = ns.wrapping_add(1);
+        } else {
+            if ns > 0 {
+                if ns > max_ns || pos == 0 {
+                    runs.push((pos, pos.wrapping_add(ns).wrapping_sub(1)));
+                }
+                pos = pos.wrapping_add(ns);
+                ns = 0;
+            }
+            pos = pos.wrapping_add(1);
+        }
+    }
+    if ns > 0 {
+        runs.push((pos, pos.wrapping_add(ns).wrapping_sub(1)));
+    }
+    runs
+}
+
+#[test]
+fn runs_found_block_by_block_are_those_counted_letter_by_letter() {
+    // Runs and gaps of every length around the 16-letter blocks, at every offset, from a fixed
+    // linear congruential sequence.
+    let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut next = |bound: u64| {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
+        (state >> 33) % bound
+    };
+    for _ in 0..4000 {
+        let mut seq = Vec::new();
+        let pieces = next(8);
+        for _ in 0..pieces {
+            let letter = if next(2) == 0 {
+                b'N'
+            } else {
+                b"ACGTn"[next(5) as usize]
+            };
+            let length = [0, 1, 2, 15, 16, 17, 31, 32, 33, 40][next(10) as usize];
+            seq.extend(std::iter::repeat_n(letter, length));
+        }
+        for max_ns in [0, 1, 2, 15, 16, 17, 64, u32::MAX] {
+            assert_eq!(
+                long_n_runs(max_ns, &seq),
+                long_n_runs_by_letter(max_ns, &seq),
+                "{max_ns} {:?}",
+                String::from_utf8_lossy(&seq)
+            );
+        }
+    }
+}

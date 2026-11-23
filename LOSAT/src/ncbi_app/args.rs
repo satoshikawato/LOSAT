@@ -16,6 +16,7 @@ use std::io::Write;
 
 use super::files::{self, OutputFile};
 use super::Tool;
+use crate::report::run_files::OpenFiles;
 
 #[path = "constraint.rs"]
 mod constraint;
@@ -580,6 +581,9 @@ pub(crate) struct Args {
     numbers: BTreeMap<&'static str, Number>,
     /// The names given on the command line, in their order.
     given: Vec<&'static str>,
+    /// Where the files that the program opens by name for writing go (`output_file`): the file
+    /// system, or LOSAT Web's files (`OpenFiles`), which the application gives the arguments.
+    files: OpenFiles,
 }
 
 impl Args {
@@ -679,19 +683,32 @@ impl Args {
         }
     }
 
+    /// The run's files, where the files that the program opens by name for writing go.
+    pub(crate) fn files(&self) -> &OpenFiles {
+        &self.files
+    }
+
+    /// The arguments of a run whose files go to `files` (the application's: `ncbi_app::run_in`).
+    pub(crate) fn with_files(self, files: &OpenFiles) -> Self {
+        Args {
+            files: files.clone(),
+            ..self
+        }
+    }
+
     /// `args[name].AsOutputFile()`: the stream of the `eOutputFile` key `name`, the file of its
-    /// value's bytes as NCBI opens it, `stdout` for `-`, or NCBI's exception when it does not
-    /// open. A `CArgException` thrown in `Run` is reported by the application as one of the
-    /// reader's (`Diag::run_arg_exception`). The stream of an `eInputFile` key is
-    /// `files::open_input_file` of its value, which the programs open where NCBI's `Run` reads
-    /// it.
+    /// value's bytes as NCBI opens it in the run's files (`files`), `stdout` for `-`, or NCBI's
+    /// exception when it does not open. A `CArgException` thrown in `Run` is reported by the
+    /// application as one of the reader's (`Diag::run_arg_exception`). The stream of an
+    /// `eInputFile` key is `files::open_input_file` of its value, which the programs open where
+    /// NCBI's `Run` reads it.
     pub(crate) fn output_file<'a>(
         &self,
         name: &str,
         stdout: &'a mut dyn Write,
     ) -> Result<OutputFile<'a>, ArgException> {
         let value = self.os_value(name).ok_or_else(|| no_value(name))?;
-        files::open_output_file(name, value, stdout)
+        files::open_output_file(name, value, stdout, &self.files)
     }
 
     /// The value of the key `name` as its bytes (`AsString` of a name that a program opens):
@@ -778,6 +795,7 @@ pub(crate) fn parse(tool: &Tool, words: &[OsString]) -> Result<Args, ArgsError> 
         values,
         numbers,
         given,
+        files: OpenFiles::disk(),
     })
 }
 

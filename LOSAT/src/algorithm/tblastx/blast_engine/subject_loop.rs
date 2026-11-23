@@ -196,7 +196,7 @@ impl SubjectEmit<'_> {
 // LOSAT's refusal comes there too (`ErrorAfterBatchReports`; the Owner's decision of 2026-11-16
 // on line RG's Q-X2c: "the results of the query batches before are written"). The run passes on
 // the refusal itself (`FetchRefusal`).
-/// The check of `reevaluation_fetch_keeps` under a negative seqid list with ids: whether the fetch
+/// The check of `reevaluation_fetch_keeps` under a negative seqid list: whether the fetch
 /// of subject `ordinal` keeps it; a header that cannot be read is the batch's failure, after the
 /// reports of the batches before.
 #[inline(never)]

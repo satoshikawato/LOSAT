@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.28 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.29 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -58,9 +58,12 @@
   as a known difference for the v0.2.0 release on the Owner's choice of 2026-11-22, line EB,
   EB DECISIONS 55; the Owner approved its text the same day, with no words: at 22:55 JST the
   Owner pressed "Ready for review" on pull request #1484, which its description named as the
-  Owner's decision on the text); 1.28 2026-11-23 (exception 1 keeps only `-xmlhelp`: argument
-  errors and `-help`/`-h` are NCBI's, line RG item K4i-2b, RG DECISIONS K4i-2, K4i-2b-1 and
-  K4i-2b-2; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  Owner's decision on the text); 1.28 2026-11-23 (exception 10: blastdbcmd's `-metadata` reports
+  a failed write as NCBI's serial stream does, no longer refused; line RG item KC-11b, RG
+  DECISIONS KC-11b-1; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
+  1.29 2026-11-24 (exception 1 keeps only `-xmlhelp`: argument errors and `-help`/`-h` are
+  NCBI's, line RG item K4i-2b, RG DECISIONS K4i-2, K4i-2b-1 and K4i-2b-2; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -90,8 +93,8 @@ BLAST+.
    program's arguments without the arguments that LOSAT refuses by name and the dependencies that
    name them: the definitions of the arguments that LOSAT runs are NCBI's (the Owner's choice of
    2026-11-13, RG DECISIONS E2x-1). LOSAT Web's ABI v1, which is frozen, keeps the argument
-   texts it had ([`docs/web/abi_v1.md`](../web/abi_v1.md) §3). Up to version 1.27 this exception
-   also covered LOSAT's own argument errors (exit status 2) and help texts. Since version 1.28
+   texts it had ([`docs/web/abi_v1.md`](../web/abi_v1.md) §3). Up to version 1.28 this exception
+   also covered LOSAT's own argument errors (exit status 2) and help texts. Since version 1.29
    (line RG item K4i-2b) the programs read their arguments with NCBI's argument reader: an
    argument error prints NCBI's usage and posts (the second post without NCBI's
    `(CArgException::eX) ` part, exception 12) and exits with status 1, and `-help`, `-help-full`
@@ -251,15 +254,19 @@ BLAST+.
    through its serial stream, which reports a failed write (dustmasker's `seqloc_*` and
    `maskinfo_*`: exit status 3, 0 or 134 by the case; segmasker's: 1 or 134, the local official
    release with `-out /dev/full`; windowmasker's: 3 for `seqloc_*`, 134 for `maskinfo_*`, NCBI
-   2.17.0 with `-out /dev/full` on ws, 2026-11-21; convert2blastmask's `maskinfo_*`; blastdbcmd's `-metadata`:
-   exit status 6), LOSAT refuses it (exit status 1). A run whose writes all succeed is identical to NCBI's; so
+   2.17.0 with `-out /dev/full` on ws, 2026-11-21; convert2blastmask's `maskinfo_*`), LOSAT refuses it (exit
+   status 1). blastdbcmd's `-metadata` is not refused since version 1.28: its serial stream, its buffer
+   and the stream under it (the `-out` file's `ofstream`, or `cout`) are NCBI's, so a failed write gives
+   NCBI's lines, file bytes and exit status (6 when the flush of the part of the document that the buffers
+   still hold fails, else 0; 300 runs of NCBI 2.17.0 on a full device and under file size limits,
+   `tests/blastdbcmd_metadata_failures.rs`). A run whose writes all succeed is identical to NCBI's; so
    is a closed pipe that NCBI's writes never reach (a short output read by `head -c 100`).
    Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
    `ends_like_sigpipe`, `flush_before_diagnostic`), `dustmasker::work::run`
    (`Failure::ClosedPipe`), `segmasker::work::run_masks` (`Failure::ClosedPipe`), `windowmasker::work`
    (`Failure::ClosedPipe`), `convert2blastmask::work::run_masks`
    (`Failure::ClosedPipe`), `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`, `Run::post`),
-   `blastdbcmd/metadata.rs`,
+   `blastdbcmd/metadata.rs` (`writedb::metadata::write_metadata`, `writedb::cout`),
    `taxonomy.rs`, `list.rs` and `mod.rs`. Release-notes sentence: When the reader of `losat
    blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s, `losat windowmasker`'s or `losat convert2blastmask`'s output closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).
@@ -414,9 +421,9 @@ BLAST+.
   the command line of those seven programs, makeblastdb and blastdbcmd: the arguments are read
   and checked, then nothing runs, exit status 0, as NCBI's default `DryRun`
   (`ncbiapp.cpp:705-707`, 292-296). An argument error is reported as without `-dryrun`
-  (NCBI's). Until version 1.27 the parser's refusals of an NCBI option that LOSAT does not run, or
+  (NCBI's). Until version 1.28 the parser's refusals of an NCBI option that LOSAT does not run, or
   of a value form it does not read, stayed with `-dryrun` (LOSAT had no definition to check them as
-  NCBI does; line RG DECISIONS E1b-2); since version 1.28 LOSAT's refusals of such an option, and
+  NCBI does; line RG DECISIONS E1b-2); since version 1.29 LOSAT's refusals of such an option, and
   of a value that is not UTF-8, come after NCBI's reader and after the dry run's end, so a dry run
   of such a command line ends with exit status 0 as NCBI's does (line RG DECISIONS K4i-2b-2 (1));
   `losat rpsbproc`, whose dry run reads its arguments, refuses them first. The refusals of registry
@@ -444,7 +451,7 @@ BLAST+.
   only the run reads (the XML input, the archive) do not apply, as NCBI's `DryRun` reads no
   archive (line RG DECISIONS E1c-2). Since version 1.17 `-help-full` is no longer refused: every
   program writes its `-help` text, as NCBI's programs write the bytes of `-help`
-  (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`). Since version 1.28 the
+  (`ncbiapp.cpp:685-697`; NCBI's makeblastdb adds its hidden `-randomize`). Since version 1.29 the
   texts of `-help`, `-help-full` and `-h` are NCBI BLAST+ 2.17.0's frozen texts in LOSAT's words
   (exceptions 12 and 14), and makeblastdb's `-help-full` lists the hidden `-randomize` as NCBI's
   does. The reader stops at `-h`, `-help` and `-help-full` as

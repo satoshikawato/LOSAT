@@ -153,11 +153,11 @@ pub fn run_segmasker(
 }
 
 /// Runs `windowmasker` with the words after the program name, as on the command line: as
-/// [`run_dustmasker`], with the unit counts of `-ustat` (making counts, `-mk_counts`, and
-/// converting them, `-convert`, are refused). `input` is what the command line reads as standard
-/// input (`-in -`, and without `-in`), what it writes to standard output goes to `output` (`-out`
-/// is a file, as there), what it writes to standard error to `diagnostics`, and a failure is an
-/// error whose message is that text without its last newlines. The call runs NCBI's application
+/// [`run_dustmasker`], in its three modes: making unit counts (`-mk_counts`), converting them to
+/// another format (`-convert`), and masking with them (`-ustat`). `input` is what the command line
+/// reads as standard input (`-in -`, and without `-in`), what it writes to standard output goes to
+/// `output` (`-out` is a file, as there), what it writes to standard error to `diagnostics`, and a
+/// failure is an error whose message is that text without its last newlines. The call runs NCBI's application
 /// start, as the command line does (`-logfile`, `-conffile`, `-dryrun`, the versions); `-xmlhelp`,
 /// whose XML only the command line writes, is refused.
 pub fn run_windowmasker(

@@ -1,0 +1,923 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>psiblast</BlastOutput_program>
+  <BlastOutput_version>PSIBLAST 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Alejandro A. Sch&amp;auml;ffer, L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001), &quot;Improving the accuracy of PSI-BLAST protein database searches with composition-based statistics and other refinements&quot;, Nucleic Acids Res. 29:2994-3005.</BlastOutput_reference>
+  <BlastOutput_db>tests/db_search/paja</BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]</BlastOutput_query-def>
+  <BlastOutput_query-len>398</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>BLOSUM62</Parameters_matrix>
+      <Parameters_expect>10</Parameters_expect>
+      <Parameters_gap-open>11</Parameters_gap-open>
+      <Parameters_gap-extend>1</Parameters_gap-extend>
+      <Parameters_filter>F</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]</Iteration_query-def>
+  <Iteration_query-len>398</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|52</Hit_id>
+  <Hit_def>BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>52</Hit_accession>
+  <Hit_len>197</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>132.88</Hsp_bit-score>
+      <Hsp_score>333</Hsp_score>
+      <Hsp_evalue>3.48991e-39</Hsp_evalue>
+      <Hsp_query-from>10</Hsp_query-from>
+      <Hsp_query-to>191</Hsp_query-to>
+      <Hsp_hit-from>4</Hsp_hit-from>
+      <Hsp_hit-to>188</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>79</Hsp_identity>
+      <Hsp_positive>105</Hsp_positive>
+      <Hsp_gaps>9</Hsp_gaps>
+      <Hsp_align-len>188</Hsp_align-len>
+      <Hsp_qseq>TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDL-VLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDC</Hsp_qseq>
+      <Hsp_hseq>TNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQTIRDCVATSV---LSYVDTSNYDYIFIDEGQFFSDLGATCKDWAIKGKRVTVAALDGNYEQQLFPSVIKLIPICDKIEKLSAVCMICNKNEASLTKKYLPYNNTGDDDHHKYDMCVGGTETYCAVCIGC</Hsp_hseq>
+      <Hsp_midline>T  G++ LV GPMFAGKS+ +  IYQ++    K C+F+KH  + RYGC     VTH+G+ I  C   S    L  V     D I IDEGQFF+DL       A KGKR+ +AALDG  +QQ+F  + KL+P  + I KL++ CMIC      +  K  P+     +D+    +CVGG E Y A C  C</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|2</Hit_id>
+  <Hit_def>BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>2</Hit_accession>
+  <Hit_len>813</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>23.0978</Hsp_bit-score>
+      <Hsp_score>48</Hsp_score>
+      <Hsp_evalue>2.1959</Hsp_evalue>
+      <Hsp_query-from>177</Hsp_query-from>
+      <Hsp_query-to>244</Hsp_query-to>
+      <Hsp_hit-from>374</Hsp_hit-from>
+      <Hsp_hit-to>435</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>21</Hsp_identity>
+      <Hsp_positive>35</Hsp_positive>
+      <Hsp_gaps>18</Hsp_gaps>
+      <Hsp_align-len>74</Hsp_align-len>
+      <Hsp_qseq>CVGGAEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLY--GGEYMCFPD----RSSH</Hsp_qseq>
+      <Hsp_hseq>CPGLSDVYGQEFKNLYEKYEK---EGKVRI---------SIEARKLLHNLASAKLETGTPFICFKDTINYRSNH</Hsp_hseq>
+      <Hsp_midline>C G +++Y    ++ Y+K  K   +GK+ +         S +A+ LL N  S     G  ++CF D    RS+H</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|68</Hit_id>
+  <Hit_def>BDT63566.1 hypothetical protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>68</Hit_accession>
+  <Hit_len>1045</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>22.3274</Hsp_bit-score>
+      <Hsp_score>46</Hsp_score>
+      <Hsp_evalue>3.61413</Hsp_evalue>
+      <Hsp_query-from>227</Hsp_query-from>
+      <Hsp_query-to>248</Hsp_query-to>
+      <Hsp_hit-from>273</Hsp_hit-from>
+      <Hsp_hit-to>294</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>9</Hsp_identity>
+      <Hsp_positive>13</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>22</Hsp_align-len>
+      <Hsp_qseq>NSPLYGGEYMCFPDRSSHTGKL</Hsp_qseq>
+      <Hsp_hseq>HSKFYPGEWIYFPPSLSNLSKL</Hsp_hseq>
+      <Hsp_midline>+S  Y GE++ FP   S+  KL</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|74</Hit_id>
+  <Hit_def>BDT63572.1 wsv270-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>74</Hit_accession>
+  <Hit_len>141</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.557</Hsp_bit-score>
+      <Hsp_score>44</Hsp_score>
+      <Hsp_evalue>4.001</Hsp_evalue>
+      <Hsp_query-from>261</Hsp_query-from>
+      <Hsp_query-to>293</Hsp_query-to>
+      <Hsp_hit-from>82</Hsp_hit-from>
+      <Hsp_hit-to>116</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>10</Hsp_identity>
+      <Hsp_positive>20</Hsp_positive>
+      <Hsp_gaps>2</Hsp_gaps>
+      <Hsp_align-len>35</Hsp_align-len>
+      <Hsp_qseq>DHAAHLLFSANRWEVCSKIKQL--LDDGIHVVMDR</Hsp_qseq>
+      <Hsp_hseq>NFGGYILLSGNSGEIISGLGEPRDIDDELHVLSNR</Hsp_hseq>
+      <Hsp_midline>+   ++L S N  E+ S + +   +DD +HV+ +R</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>5</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|58</Hit_id>
+  <Hit_def>BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>58</Hit_accession>
+  <Hit_len>1890</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>22.3274</Hsp_bit-score>
+      <Hsp_score>46</Hsp_score>
+      <Hsp_evalue>4.25344</Hsp_evalue>
+      <Hsp_query-from>55</Hsp_query-from>
+      <Hsp_query-to>119</Hsp_query-to>
+      <Hsp_hit-from>1808</Hsp_hit-from>
+      <Hsp_hit-to>1873</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>16</Hsp_identity>
+      <Hsp_positive>30</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>66</Hsp_align-len>
+      <Hsp_qseq>YGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILID-EGQFFTDLVLVNRLADKGKRIVI</Hsp_qseq>
+      <Hsp_hseq>YGVKLLAIVEMMGHEFASCLTSDMRMNMYNGVGSVVDILSIDNEEERYSIIISINKFILKNIKDVL</Hsp_hseq>
+      <Hsp_midline>YG     IV   G     C T      + + +  VVD++ ID E + ++ ++ +N+   K  + V+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>6</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|25</Hit_id>
+  <Hit_def>BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>25</Hit_accession>
+  <Hit_len>1243</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.9422</Hsp_bit-score>
+      <Hsp_score>45</Hsp_score>
+      <Hsp_evalue>5.05169</Hsp_evalue>
+      <Hsp_query-from>201</Hsp_query-from>
+      <Hsp_query-to>224</Hsp_query-to>
+      <Hsp_hit-from>484</Hsp_hit-from>
+      <Hsp_hit-to>512</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>13</Hsp_identity>
+      <Hsp_positive>16</Hsp_positive>
+      <Hsp_gaps>5</Hsp_gaps>
+      <Hsp_align-len>29</Hsp_align-len>
+      <Hsp_qseq>KGKLVVLEGGDRCGKSTQ-----AKLLLT</Hsp_qseq>
+      <Hsp_hseq>KFKVNVLPDGDQCGNSGEYESMTAHLFLT</Hsp_hseq>
+      <Hsp_midline>K K+ VL  GD+CG S +     A L LT</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>7</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|30</Hit_id>
+  <Hit_def>BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>30</Hit_accession>
+  <Hit_len>1039</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.9422</Hsp_bit-score>
+      <Hsp_score>45</Hsp_score>
+      <Hsp_evalue>5.31429</Hsp_evalue>
+      <Hsp_query-from>305</Hsp_query-from>
+      <Hsp_query-to>316</Hsp_query-to>
+      <Hsp_hit-from>100</Hsp_hit-from>
+      <Hsp_hit-to>111</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>8</Hsp_identity>
+      <Hsp_positive>9</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>12</Hsp_align-len>
+      <Hsp_qseq>RGVDTVEWCSAS</Hsp_qseq>
+      <Hsp_hseq>RGNNTDEWCSLS</Hsp_hseq>
+      <Hsp_midline>RG +T EWCS S</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>8</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|56</Hit_id>
+  <Hit_def>BDT63554.1 wsv440-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>56</Hit_accession>
+  <Hit_len>595</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.557</Hsp_bit-score>
+      <Hsp_score>44</Hsp_score>
+      <Hsp_evalue>6.20497</Hsp_evalue>
+      <Hsp_query-from>15</Hsp_query-from>
+      <Hsp_query-to>54</Hsp_query-to>
+      <Hsp_hit-from>173</Hsp_hit-from>
+      <Hsp_hit-to>212</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>12</Hsp_identity>
+      <Hsp_positive>18</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>40</Hsp_align-len>
+      <Hsp_qseq>VELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETR</Hsp_qseq>
+      <Hsp_hseq>VALLTGAAAGGCGVYSDSAQQSSFNGSWTCLLFHNNKETK</Hsp_hseq>
+      <Hsp_midline>V L+TG    G   Y  +  Q    G+  CL   ++ ET+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>9</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|31</Hit_id>
+  <Hit_def>BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>31</Hit_accession>
+  <Hit_len>771</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.1718</Hsp_bit-score>
+      <Hsp_score>43</Hsp_score>
+      <Hsp_evalue>8.72442</Hsp_evalue>
+      <Hsp_query-from>264</Hsp_query-from>
+      <Hsp_query-to>298</Hsp_query-to>
+      <Hsp_hit-from>291</Hsp_hit-from>
+      <Hsp_hit-to>321</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>11</Hsp_identity>
+      <Hsp_positive>19</Hsp_positive>
+      <Hsp_gaps>4</Hsp_gaps>
+      <Hsp_align-len>35</Hsp_align-len>
+      <Hsp_qseq>AHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSG</Hsp_qseq>
+      <Hsp_hseq>AYMMFSRHRVQSGDCIKQFL----YTIFVRFIYSA</Hsp_hseq>
+      <Hsp_midline>A+++FS +R +    IKQ L    + +  R+ YS </Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>86</Statistics_db-num>
+      <Statistics_db-len>66738</Statistics_db-len>
+      <Statistics_hsp-len>66</Statistics_hsp-len>
+      <Statistics_eff-space>20272584</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>2</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]</Iteration_query-def>
+  <Iteration_query-len>398</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|52</Hit_id>
+  <Hit_def>BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>52</Hit_accession>
+  <Hit_len>197</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>290.003</Hsp_bit-score>
+      <Hsp_score>741</Hsp_score>
+      <Hsp_evalue>3.11209e-100</Hsp_evalue>
+      <Hsp_query-from>10</Hsp_query-from>
+      <Hsp_query-to>191</Hsp_query-to>
+      <Hsp_hit-from>4</Hsp_hit-from>
+      <Hsp_hit-to>188</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>79</Hsp_identity>
+      <Hsp_positive>105</Hsp_positive>
+      <Hsp_gaps>9</Hsp_gaps>
+      <Hsp_align-len>188</Hsp_align-len>
+      <Hsp_qseq>TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDL-VLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDC</Hsp_qseq>
+      <Hsp_hseq>TNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQTIRDCVATSV---LSYVDTSNYDYIFIDEGQFFSDLGATCKDWAIKGKRVTVAALDGNYEQQLFPSVIKLIPICDKIEKLSAVCMICNKNEASLTKKYLPYNNTGDDDHHKYDMCVGGTETYCAVCIGC</Hsp_hseq>
+      <Hsp_midline>T  G++ LV GPMFAGKS+ +  IYQ++    K C+F+KH  + RYGC     VTH+G+ I  C   S    L  V     D I IDEGQFF+DL       A KGKR+ +AALDG  +QQ+F  + KL+P  + I KL++ CMIC      +  K  P+     +D+    +CVGG E Y A C  C</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|58</Hit_id>
+  <Hit_def>BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>58</Hit_accession>
+  <Hit_len>1890</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>25.3713</Hsp_bit-score>
+      <Hsp_score>54</Hsp_score>
+      <Hsp_evalue>0.532418</Hsp_evalue>
+      <Hsp_query-from>46</Hsp_query-from>
+      <Hsp_query-to>113</Hsp_query-to>
+      <Hsp_hit-from>1797</Hsp_hit-from>
+      <Hsp_hit-to>1867</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>17</Hsp_identity>
+      <Hsp_positive>31</Hsp_positive>
+      <Hsp_gaps>3</Hsp_gaps>
+      <Hsp_align-len>71</Hsp_align-len>
+      <Hsp_qseq>FVKHSLETR--YGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILID-EGQFFTDLVLVNRLADK</Hsp_qseq>
+      <Hsp_hseq>FYKFLFDRKQLYGVKLLAIVEMMGHEFASCLTSDMRMNMYNGVGSVVDILSIDNEEERYSIIISINKFILK</Hsp_hseq>
+      <Hsp_midline>F K   + +  YG     IV   G     C T      + + +  VVD++ ID E + ++ ++ +N+   K</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|3</Hit_id>
+  <Hit_def>BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>3</Hit_accession>
+  <Hit_len>1023</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>22.2897</Hsp_bit-score>
+      <Hsp_score>46</Hsp_score>
+      <Hsp_evalue>3.9682</Hsp_evalue>
+      <Hsp_query-from>140</Hsp_query-from>
+      <Hsp_query-to>160</Hsp_query-to>
+      <Hsp_hit-from>379</Hsp_hit-from>
+      <Hsp_hit-to>397</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>8</Hsp_identity>
+      <Hsp_positive>13</Hsp_positive>
+      <Hsp_gaps>2</Hsp_gaps>
+      <Hsp_align-len>21</Hsp_align-len>
+      <Hsp_qseq>YTNSIVKLASKCMICKIDTKE</Hsp_qseq>
+      <Hsp_hseq>YNDKLEKLIAECMV--IDTMY</Hsp_hseq>
+      <Hsp_midline>Y + + KL ++CM+  IDT  </Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|30</Hit_id>
+  <Hit_def>BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>30</Hit_accession>
+  <Hit_len>1039</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.5193</Hsp_bit-score>
+      <Hsp_score>44</Hsp_score>
+      <Hsp_evalue>6.53111</Hsp_evalue>
+      <Hsp_query-from>305</Hsp_query-from>
+      <Hsp_query-to>316</Hsp_query-to>
+      <Hsp_hit-from>100</Hsp_hit-from>
+      <Hsp_hit-to>111</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>8</Hsp_identity>
+      <Hsp_positive>9</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>12</Hsp_align-len>
+      <Hsp_qseq>RGVDTVEWCSAS</Hsp_qseq>
+      <Hsp_hseq>RGNNTDEWCSLS</Hsp_hseq>
+      <Hsp_midline>RG +T EWCS S</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>5</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|25</Hit_id>
+  <Hit_def>BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>25</Hit_accession>
+  <Hit_len>1243</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.5193</Hsp_bit-score>
+      <Hsp_score>44</Hsp_score>
+      <Hsp_evalue>7.95709</Hsp_evalue>
+      <Hsp_query-from>201</Hsp_query-from>
+      <Hsp_query-to>224</Hsp_query-to>
+      <Hsp_hit-from>484</Hsp_hit-from>
+      <Hsp_hit-to>512</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>13</Hsp_identity>
+      <Hsp_positive>16</Hsp_positive>
+      <Hsp_gaps>5</Hsp_gaps>
+      <Hsp_align-len>29</Hsp_align-len>
+      <Hsp_qseq>KGKLVVLEGGDRCGKSTQ-----AKLLLT</Hsp_qseq>
+      <Hsp_hseq>KFKVNVLPDGDQCGNSGEYESMTAHLFLT</Hsp_hseq>
+      <Hsp_midline>K K+ VL  GD+CG S +     A L LT</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>86</Statistics_db-num>
+      <Statistics_db-len>66738</Statistics_db-len>
+      <Statistics_hsp-len>66</Statistics_hsp-len>
+      <Statistics_eff-space>20272584</Statistics_eff-space>
+      <Statistics_kappa>0.0425747100481762</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_1 YP_009220601.1 TK.. :  Query_1 YP_009220601.1 TK.. : Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics </Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>3</Iteration_iter-num>
+  <Iteration_query-ID>Query_2</Iteration_query-ID>
+  <Iteration_query-def>YP_009220615.1 putative protein kinase [White spot syndrome virus]</Iteration_query-def>
+  <Iteration_query-len>730</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|53</Hit_id>
+  <Hit_def>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>53</Hit_accession>
+  <Hit_len>815</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>503.056</Hsp_bit-score>
+      <Hsp_score>1294</Hsp_score>
+      <Hsp_evalue>5.06504e-170</Hsp_evalue>
+      <Hsp_query-from>99</Hsp_query-from>
+      <Hsp_query-to>722</Hsp_query-to>
+      <Hsp_hit-from>189</Hsp_hit-from>
+      <Hsp_hit-to>812</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>271</Hsp_identity>
+      <Hsp_positive>380</Hsp_positive>
+      <Hsp_gaps>30</Hsp_gaps>
+      <Hsp_align-len>639</Hsp_align-len>
+      <Hsp_qseq>YNFNRNKKKRPITIDENQFATLNPTYATDIIKKQQL---------PSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGS---KNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAVGVRKMCVEGFCVEMDFAGISVIDVLNGDLKCKMDENV-VQQPNPSTTSSKPAAELMQDHGSLCRMRDTLYGVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEIVNIVTRLSQQGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGT--DERFFSNHPHTAPEFINSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVSKMYDQEKTNRPRAYEIAPVIGACFPFKDNIAKLFQSPKH</Hsp_qseq>
+      <Hsp_hseq>FNNNSHSKKIITHIPKSQMATKNNSYAADIITSSSSMSYRSNNTKSAIVTRSTTQRHSNN------KYFQQPKRACFQNISLKARVYTPLSILRSQILGGDHLGSLCEPVTETIIIRRDANSLEKWLTLKDTPSYFQRAEVNTNISCAQNSNYSFIRRVANFALIKPIQRVIERYSEIHTNCELAITKSYTLTPNQTRGYKLPDNMWPVGYDGGCDKPTMCVDISPFKTYRNYCTTH-------LDLLYLARDVFKLSQESYERIMKKETTLLFEVSWCCKQWCNNRKGVSRPPHVPEAYFPYTVFITPSERFLEVKLGVYYMLDTGRVIKFMTRPECLTEFVLESLFGFGIQGNLKGAVGVLSVCPEGFCLEMEFAGMALQDVLNGDLNCNLNGPVPPHNQNQHLRIDKP--EMIQHHMAPSKLKGILYNVRMLQVTGNLPDELKKKCTLHITDSHAAVGVANLMRDRFLNQLPFALTEIINIVTRLSQQGLVNPDIKADNIVIDGSTGQPKMIDFGLLLPADYCDKVKRRNNPYPENVYNLYPQTAPEYLQGRMCNEAAMTYGLSYLISFVIATLSSRTTDFAVGSMKTNIKLSFLLGLAYDKCASKRPKPYILTKAIAGCFPLQEKIMKLFLNPKH</Hsp_hseq>
+      <Hsp_midline>+N N + KK    I ++Q AT N +YA DII               ++   S  ++H  N      K F  P  A F  ++LKAR YTPLS+LRS + G  HL S C+ VTET +++R+ +S++KW+ L+  P YF  AE +TNI+    S +  IR+ A   LI  +Q V   Y  I  +C  A  K+     +  R  + P + WPVG+     K    +D SP   +   C  +       + + ++A++VFKLS  + E I++K+TTLL EV+  CK+W + R+ +  P HV   Y    V I PSE +LEVK+GVYYML+TG+VIKFMT  E   EFV E++F   ++G +KGAVGV  +C EGFC+EM+FAG+++ DVLNGDL C ++  V     N      KP  E++Q H +  +++  LY VRMLQ TG LP+ L+ KC   ITDS +A+ +   MR+R LNQLPF L EI+NIVTRLSQQGLVNPDIK+DNIVIDG TGQPKMIDFGL++P       K       E  ++ +P TAPE++   +C+E AMT+GL+YL+  +++ L  RT D +  S+ TNI    ++   YD+  + RP+ Y +   I  CFP ++ I KLF +PKH</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|72</Hit_id>
+  <Hit_def>BDT63570.1 wsv260-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>72</Hit_accession>
+  <Hit_len>826</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>25.0238</Hsp_bit-score>
+      <Hsp_score>53</Hsp_score>
+      <Hsp_evalue>1.30839</Hsp_evalue>
+      <Hsp_query-from>400</Hsp_query-from>
+      <Hsp_query-to>444</Hsp_query-to>
+      <Hsp_hit-from>720</Hsp_hit-from>
+      <Hsp_hit-to>764</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>18</Hsp_identity>
+      <Hsp_positive>28</Hsp_positive>
+      <Hsp_gaps>4</Hsp_gaps>
+      <Hsp_align-len>47</Hsp_align-len>
+      <Hsp_qseq>LEVKVGVYYM--LETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKG</Hsp_qseq>
+      <Hsp_hseq>LQVKTGELMMGPLKT-QLVEYKTNTEKIKLLMAESTTSHQ-EGRMKG</Hsp_hseq>
+      <Hsp_midline>L+VK G   M  L+T +++++ T+ E     + E+  SH  EGRMKG</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|10</Hit_id>
+  <Hit_def>BDT63508.1 wsv001-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>10</Hit_accession>
+  <Hit_len>1283</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>24.6386</Hsp_bit-score>
+      <Hsp_score>52</Hsp_score>
+      <Hsp_evalue>1.58886</Hsp_evalue>
+      <Hsp_query-from>416</Hsp_query-from>
+      <Hsp_query-to>439</Hsp_query-to>
+      <Hsp_hit-from>1165</Hsp_hit-from>
+      <Hsp_hit-to>1205</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>13</Hsp_identity>
+      <Hsp_positive>15</Hsp_positive>
+      <Hsp_gaps>17</Hsp_gaps>
+      <Hsp_align-len>41</Hsp_align-len>
+      <Hsp_qseq>IKFMTDKE-----------------MYCEFVFETVFSHALE</Hsp_qseq>
+      <Hsp_hseq>IKFMCDIEKYLQQEHPHFLKQSNEPFYCRFIIEVVLKKSLE</Hsp_hseq>
+      <Hsp_midline>IKFM D E                  YC F+ E V   +LE</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>22.3274</Hsp_bit-score>
+      <Hsp_score>46</Hsp_score>
+      <Hsp_evalue>9.19252</Hsp_evalue>
+      <Hsp_query-from>407</Hsp_query-from>
+      <Hsp_query-to>424</Hsp_query-to>
+      <Hsp_hit-from>1238</Hsp_hit-from>
+      <Hsp_hit-to>1255</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>7</Hsp_identity>
+      <Hsp_positive>13</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>18</Hsp_align-len>
+      <Hsp_qseq>YYMLETGKVIKFMTDKEM</Hsp_qseq>
+      <Hsp_hseq>YYFIDDETVKKFLSDKQL</Hsp_hseq>
+      <Hsp_midline>YY ++   V KF++DK++</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|79</Hit_id>
+  <Hit_def>BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>79</Hit_accession>
+  <Hit_len>730</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>23.0978</Hsp_bit-score>
+      <Hsp_score>48</Hsp_score>
+      <Hsp_evalue>5.05034</Hsp_evalue>
+      <Hsp_query-from>100</Hsp_query-from>
+      <Hsp_query-to>131</Hsp_query-to>
+      <Hsp_hit-from>69</Hsp_hit-from>
+      <Hsp_hit-to>98</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>13</Hsp_identity>
+      <Hsp_positive>20</Hsp_positive>
+      <Hsp_gaps>2</Hsp_gaps>
+      <Hsp_align-len>32</Hsp_align-len>
+      <Hsp_qseq>NFNRNKKKRPITIDENQFATLNPTYATDIIKK</Hsp_qseq>
+      <Hsp_hseq>NFNSNKKKYAMSVDLNM--RIHFAYASFGVKK</Hsp_hseq>
+      <Hsp_midline>NFN NKKK  +++D N    ++  YA+  +KK</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>5</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|82</Hit_id>
+  <Hit_def>BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>82</Hit_accession>
+  <Hit_len>6062</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>22.7126</Hsp_bit-score>
+      <Hsp_score>47</Hsp_score>
+      <Hsp_evalue>6.04588</Hsp_evalue>
+      <Hsp_query-from>491</Hsp_query-from>
+      <Hsp_query-to>520</Hsp_query-to>
+      <Hsp_hit-from>316</Hsp_hit-from>
+      <Hsp_hit-to>345</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>10</Hsp_identity>
+      <Hsp_positive>16</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>30</Hsp_align-len>
+      <Hsp_qseq>TTSSKPAAELMQDHGSLCRMRDTLYGVRML</Hsp_qseq>
+      <Hsp_hseq>TLKTDPAFTAIRQNSRRCRMEDDVPGLGML</Hsp_hseq>
+      <Hsp_midline>T  + PA   ++ +   CRM D + G+ ML</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>6</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|71</Hit_id>
+  <Hit_def>BDT63569.1 wsv119-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>71</Hit_accession>
+  <Hit_len>923</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>22.7126</Hsp_bit-score>
+      <Hsp_score>47</Hsp_score>
+      <Hsp_evalue>6.53183</Hsp_evalue>
+      <Hsp_query-from>308</Hsp_query-from>
+      <Hsp_query-to>363</Hsp_query-to>
+      <Hsp_hit-from>18</Hsp_hit-from>
+      <Hsp_hit-to>72</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>17</Hsp_identity>
+      <Hsp_positive>27</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>56</Hsp_align-len>
+      <Hsp_qseq>LDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVT</Hsp_qseq>
+      <Hsp_hseq>LDTATRLIKDRLPKNDKGMWPTNITADAVEK-VFKFENMSEDELTKLSINLAKETT</Hsp_hseq>
+      <Hsp_midline>LDT+  L  +RL KN+   W   ++ D + K VFK    + + + +    L  E T</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>7</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|75</Hit_id>
+  <Hit_def>BDT63573.1 wsv271-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>75</Hit_accession>
+  <Hit_len>1283</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>22.7126</Hsp_bit-score>
+      <Hsp_score>47</Hsp_score>
+      <Hsp_evalue>6.71711</Hsp_evalue>
+      <Hsp_query-from>45</Hsp_query-from>
+      <Hsp_query-to>89</Hsp_query-to>
+      <Hsp_hit-from>7</Hsp_hit-from>
+      <Hsp_hit-to>56</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>15</Hsp_identity>
+      <Hsp_positive>23</Hsp_positive>
+      <Hsp_gaps>5</Hsp_gaps>
+      <Hsp_align-len>50</Hsp_align-len>
+      <Hsp_qseq>KSCCSKNATRRSPP----SDSPYSLRPMKR-LKKNNGEVGGKAPPPVTLR</Hsp_qseq>
+      <Hsp_hseq>KHSFKKNGSRRKQPRTSTNDGPAVLQPSKTPSQDNSASHQGESRAPANVR</Hsp_hseq>
+      <Hsp_midline>K    KN +RR  P    +D P  L+P K   + N+    G++  P  +R</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>8</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|5</Hit_id>
+  <Hit_def>BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>5</Hit_accession>
+  <Hit_len>2342</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>22.3274</Hsp_bit-score>
+      <Hsp_score>46</Hsp_score>
+      <Hsp_evalue>8.34192</Hsp_evalue>
+      <Hsp_query-from>468</Hsp_query-from>
+      <Hsp_query-to>485</Hsp_query-to>
+      <Hsp_hit-from>1277</Hsp_hit-from>
+      <Hsp_hit-to>1294</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>7</Hsp_identity>
+      <Hsp_positive>12</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>18</Hsp_align-len>
+      <Hsp_qseq>IDVLNGDLKCKMDENVVQ</Hsp_qseq>
+      <Hsp_hseq>LDVLEKDFNCESDEKIIK</Hsp_hseq>
+      <Hsp_midline>+DVL  D  C+ DE +++</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>9</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|21</Hit_id>
+  <Hit_def>BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>21</Hit_accession>
+  <Hit_len>1516</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>22.3274</Hsp_bit-score>
+      <Hsp_score>46</Hsp_score>
+      <Hsp_evalue>8.36473</Hsp_evalue>
+      <Hsp_query-from>324</Hsp_query-from>
+      <Hsp_query-to>339</Hsp_query-to>
+      <Hsp_hit-from>77</Hsp_hit-from>
+      <Hsp_hit-to>92</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>8</Hsp_identity>
+      <Hsp_positive>12</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>16</Hsp_align-len>
+      <Hsp_qseq>GKGWIKTMSIDHMAKN</Hsp_qseq>
+      <Hsp_hseq>GRGWKKSMSISVLIKH</Hsp_hseq>
+      <Hsp_midline>G+GW K+MSI  + K+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>10</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|45</Hit_id>
+  <Hit_def>BDT63543.1 wsv321-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>45</Hit_accession>
+  <Hit_len>88</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.1718</Hsp_bit-score>
+      <Hsp_score>43</Hsp_score>
+      <Hsp_evalue>9.00209</Hsp_evalue>
+      <Hsp_query-from>259</Hsp_query-from>
+      <Hsp_query-to>291</Hsp_query-to>
+      <Hsp_hit-from>52</Hsp_hit-from>
+      <Hsp_hit-to>83</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>12</Hsp_identity>
+      <Hsp_positive>18</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>33</Hsp_align-len>
+      <Hsp_qseq>DVSSNYETIKQSCIDAKEKASKFLWSNNRTKQP</Hsp_qseq>
+      <Hsp_hseq>DIAAN-NTILACKLNVMEKASIILAEMNKYKNP</Hsp_hseq>
+      <Hsp_midline>D+++N  TI    ++  EKAS  L   N+ K P</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>86</Statistics_db-num>
+      <Statistics_db-len>66738</Statistics_db-len>
+      <Statistics_hsp-len>71</Statistics_hsp-len>
+      <Statistics_eff-space>39956488</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>4</Iteration_iter-num>
+  <Iteration_query-ID>Query_2</Iteration_query-ID>
+  <Iteration_query-def>YP_009220615.1 putative protein kinase [White spot syndrome virus]</Iteration_query-def>
+  <Iteration_query-len>730</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|53</Hit_id>
+  <Hit_def>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>53</Hit_accession>
+  <Hit_len>815</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>1035.01</Hsp_bit-score>
+      <Hsp_score>2675</Hsp_score>
+      <Hsp_evalue>0</Hsp_evalue>
+      <Hsp_query-from>96</Hsp_query-from>
+      <Hsp_query-to>722</Hsp_query-to>
+      <Hsp_hit-from>186</Hsp_hit-from>
+      <Hsp_hit-to>812</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>272</Hsp_identity>
+      <Hsp_positive>381</Hsp_positive>
+      <Hsp_gaps>30</Hsp_gaps>
+      <Hsp_align-len>642</Hsp_align-len>
+      <Hsp_qseq>STPYNFNRNKKKRPITIDENQFATLNPTYATDIIK---------KQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKEKASKFLWSNNRTKQPPSSWWPVGFGS---KNLSVLDTSPLLNWNRLCKNNGKGWIKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMIGPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAVGVRKMCVEGFCVEMDFAGISVIDVLNGDLKCKMDENV-VQQPNPSTTSSKPAAELMQDHGSLCRMRDTLYGVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEIVNIVTRLSQQGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGT--DERFFSNHPHTAPEFINSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVSKMYDQEKTNRPRAYEIAPVIGACFPFKDNIAKLFQSPKH</Hsp_qseq>
+      <Hsp_hseq>SRHFNNNSHSKKIITHIPKSQMATKNNSYAADIITSSSSMSYRSNNTKSAIVTRSTTQRHSNN------KYFQQPKRACFQNISLKARVYTPLSILRSQILGGDHLGSLCEPVTETIIIRRDANSLEKWLTLKDTPSYFQRAEVNTNISCAQNSNYSFIRRVANFALIKPIQRVIERYSEIHTNCELAITKSYTLTPNQTRGYKLPDNMWPVGYDGGCDKPTMCVDISPFKTYRNYCTTH-------LDLLYLARDVFKLSQESYERIMKKETTLLFEVSWCCKQWCNNRKGVSRPPHVPEAYFPYTVFITPSERFLEVKLGVYYMLDTGRVIKFMTRPECLTEFVLESLFGFGIQGNLKGAVGVLSVCPEGFCLEMEFAGMALQDVLNGDLNCNLNGPVPPHNQNQHLRIDKP--EMIQHHMAPSKLKGILYNVRMLQVTGNLPDELKKKCTLHITDSHAAVGVANLMRDRFLNQLPFALTEIINIVTRLSQQGLVNPDIKADNIVIDGSTGQPKMIDFGLLLPADYCDKVKRRNNPYPENVYNLYPQTAPEYLQGRMCNEAAMTYGLSYLISFVIATLSSRTTDFAVGSMKTNIKLSFLLGLAYDKCASKRPKPYILTKAIAGCFPLQEKIMKLFLNPKH</Hsp_hseq>
+      <Hsp_midline>S  +N N + KK    I ++Q AT N +YA DII               ++   S  ++H  N      K F  P  A F  ++LKAR YTPLS+LRS + G  HL S C+ VTET +++R+ +S++KW+ L+  P YF  AE +TNI+    S +  IR+ A   LI  +Q V   Y  I  +C  A  K+     +  R  + P + WPVG+     K    +D SP   +   C  +       + + ++A++VFKLS  + E I++K+TTLL EV+  CK+W + R+ +  P HV   Y    V I PSE +LEVK+GVYYML+TG+VIKFMT  E   EFV E++F   ++G +KGAVGV  +C EGFC+EM+FAG+++ DVLNGDL C ++  V     N      KP  E++Q H +  +++  LY VRMLQ TG LP+ L+ KC   ITDS +A+ +   MR+R LNQLPF L EI+NIVTRLSQQGLVNPDIK+DNIVIDG TGQPKMIDFGL++P       K       E  ++ +P TAPE++   +C+E AMT+GL+YL+  +++ L  RT D +  S+ TNI    ++   YD+  + RP+ Y +   I  CFP ++ I KLF +PKH</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|66</Hit_id>
+  <Hit_def>BDT63564.1 wsv079-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>66</Hit_accession>
+  <Hit_len>788</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>28.8686</Hsp_bit-score>
+      <Hsp_score>63</Hsp_score>
+      <Hsp_evalue>0.0857821</Hsp_evalue>
+      <Hsp_query-from>56</Hsp_query-from>
+      <Hsp_query-to>141</Hsp_query-to>
+      <Hsp_hit-from>396</Hsp_hit-from>
+      <Hsp_hit-to>481</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>17</Hsp_identity>
+      <Hsp_positive>32</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>86</Hsp_align-len>
+      <Hsp_qseq>SPPSDSPYSLRPMKRLKKNNGEVGGKAPPPVTLRLREDYESTPYNFNRNKKKRPITIDENQFATLNPTYATDIIKKQQLPSVSAAS</Hsp_qseq>
+      <Hsp_hseq>TPPSPGTSSGRAVRNLMDNDNMSQQQTPPTLTFQNVKQETSSTTSVPTNSYLTCSTISSTPSTIRSRSYLTCSTISSTPSTIRSRS</Hsp_hseq>
+      <Hsp_midline>+PPS    S R ++ L  N+     + PP +T +  +   S+  +   N      TI        + +Y T         ++ + S</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>22.3202</Hsp_bit-score>
+      <Hsp_score>46</Hsp_score>
+      <Hsp_evalue>7.12205</Hsp_evalue>
+      <Hsp_query-from>56</Hsp_query-from>
+      <Hsp_query-to>184</Hsp_query-to>
+      <Hsp_hit-from>341</Hsp_hit-from>
+      <Hsp_hit-to>472</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>26</Hsp_identity>
+      <Hsp_positive>53</Hsp_positive>
+      <Hsp_gaps>13</Hsp_gaps>
+      <Hsp_align-len>137</Hsp_align-len>
+      <Hsp_qseq>SPPSDSPYSLRPMKRLKKNNGEVGGKAPPPVTLRLREDYESTPY------NFNRNKKKRPITIDENQFATLNPTYATDIIKKQQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTV--NLKARDYTPLSVLRS</Hsp_qseq>
+      <Hsp_hseq>TPPSPGTSSGRVVRNLMDNDNMSQQQTPP--TLTSQNVKQETPIDSDDDSLPDLNNFTPPSPGTSSGRAVRNLMDNDNMSQQQTPPTLTFQNVKQETSSTTSVPTNSYLT---CSTISSTPSTIRSRSYLTCSTISS</Hsp_hseq>
+      <Hsp_midline>+PPS    S R ++ L  N+     + PP  TL  +   + TP         + N    P     +  A  N     ++ ++Q  P+++  +V ++  +          +   C+  S+    +++R Y   S + S</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|30</Hit_id>
+  <Hit_def>BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>30</Hit_accession>
+  <Hit_len>1039</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>23.4758</Hsp_bit-score>
+      <Hsp_score>49</Hsp_score>
+      <Hsp_evalue>3.49943</Hsp_evalue>
+      <Hsp_query-from>545</Hsp_query-from>
+      <Hsp_query-to>586</Hsp_query-to>
+      <Hsp_hit-from>494</Hsp_hit-from>
+      <Hsp_hit-to>533</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>13</Hsp_identity>
+      <Hsp_positive>19</Hsp_positive>
+      <Hsp_gaps>2</Hsp_gaps>
+      <Hsp_align-len>42</Hsp_align-len>
+      <Hsp_qseq>IAIVGKMRERMLNQLPFVLVEIVNIVTRLSQQGLVNPDIKSD</Hsp_qseq>
+      <Hsp_hseq>VGFGSGMTNRKLKK--YAIHCIVNVVKRLIDCGQKKVDVKED</Hsp_hseq>
+      <Hsp_midline>+     M  R L +  + +  IVN+V RL   G    D+K D</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|82</Hit_id>
+  <Hit_def>BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>82</Hit_accession>
+  <Hit_len>6062</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>23.4758</Hsp_bit-score>
+      <Hsp_score>49</Hsp_score>
+      <Hsp_evalue>3.98376</Hsp_evalue>
+      <Hsp_query-from>97</Hsp_query-from>
+      <Hsp_query-to>206</Hsp_query-to>
+      <Hsp_hit-from>4679</Hsp_hit-from>
+      <Hsp_hit-to>4787</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>19</Hsp_identity>
+      <Hsp_positive>31</Hsp_positive>
+      <Hsp_gaps>5</Hsp_gaps>
+      <Hsp_align-len>112</Hsp_align-len>
+      <Hsp_qseq>TPYNFNRNKKKRPITIDENQFATLNPTYATDIIKK--QQLPSVSAASVLRKHRANADTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVK</Hsp_qseq>
+      <Hsp_hseq>TILNNTTETHNRLANLGAKAGVPENAKLHRNVLTSILQMNEDEITRDINDIESKLETRQLRNAFQDLKRSMLISSSSPSSVNAPLSVLMSRTDAANGLLS---TNNDNNIIK</Hsp_hseq>
+      <Hsp_midline>T  N       R   +        N     +++    Q         +          Q R  F     +   + +  +    PLSVL S       L S   T  + N++K</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>86</Statistics_db-num>
+      <Statistics_db-len>66738</Statistics_db-len>
+      <Statistics_hsp-len>71</Statistics_hsp-len>
+      <Statistics_eff-space>39956488</Statistics_eff-space>
+      <Statistics_kappa>0.0411599113916442</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>Query_2 YP_009220615.1 pu.. :  Query_2 YP_009220615.1 pu.. : Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics </Iteration_message>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

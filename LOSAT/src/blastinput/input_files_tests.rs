@@ -59,10 +59,24 @@ fn inflated_names(directory: &std::path::Path) -> Vec<std::path::PathBuf> {
 
 // No NCBI counterpart (line GZ, DECISIONS 3, 4 and 9): a compressed input opens as the
 // inflated bytes, every member / stream / frame of a concatenated file, as a regular file
-// with a position, and leaves no name behind; a plain name opens as it is.
+// with a position, and leaves no name behind; a plain name opens as it is. The inputs lie in a
+// directory of this test's own, where their inflated copies are made (DECISIONS 12), so the check
+// for names left behind reads only this test's: other tests of the process open compressed
+// inputs under `temp_dir()` at the same time, whose names exist there for a moment (the race that
+// line PS's gate of PS15b-1 met, 2026-11-23).
 #[test]
 fn a_compressed_input_opens_as_the_inflated_file_with_every_part() {
-    let plain = temporary("plain.fa", b">q1\nACGT\n>q2\nTTTT\n");
+    let directory = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-input-files-{}-{}-parts",
+        crate::utils::test_dir::process_id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    let plain = directory.join("plain.fa");
+    std::fs::write(&plain, b">q1\nACGT\n>q2\nTTTT\n").unwrap();
     assert_eq!(
         read_all(open_file_input(&plain, "query").unwrap()),
         b">q1\nACGT\n>q2\nTTTT\n"
@@ -73,10 +87,12 @@ fn a_compressed_input_opens_as_the_inflated_file_with_every_part() {
         (Compression::Bzip2, "streams.fa.Bz2"),
         (Compression::Zstd, "frames.fa.zst"),
     ] {
-        let path = temporary(
-            stem,
-            &compressed(compression, &[b">q1\nACGT\n", b">q2\nTTTT\n", b""]),
-        );
+        let path = directory.join(stem);
+        std::fs::write(
+            &path,
+            compressed(compression, &[b">q1\nACGT\n", b">q2\nTTTT\n", b""]),
+        )
+        .unwrap();
         let file = open_file_input(&path, "query").unwrap();
         assert!(has_stream_position(&file), "{stem}");
         assert!(file.metadata().unwrap().is_file(), "{stem}");
@@ -84,10 +100,8 @@ fn a_compressed_input_opens_as_the_inflated_file_with_every_part() {
         std::fs::remove_file(&path).unwrap();
     }
     #[cfg(unix)]
-    assert_eq!(
-        inflated_names(&crate::utils::test_dir::temp_dir()),
-        Vec::<std::path::PathBuf>::new()
-    );
+    assert_eq!(inflated_names(&directory), Vec::<std::path::PathBuf>::new());
+    std::fs::remove_dir(&directory).unwrap();
 }
 
 /// The directory of an open, unlinked file: `/proc/self/fd/N` reads

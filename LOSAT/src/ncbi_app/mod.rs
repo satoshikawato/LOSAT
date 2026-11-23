@@ -39,6 +39,19 @@ pub(crate) struct Tool {
     pub(crate) post_prefix: Option<&'static str>,
     /// The components of its full versions (`CVersionAPI::AddComponentVersion`; windowmasker's).
     pub(crate) components: &'static [crate::ncbi_version::Component],
+    /// NCBI's `-help-full` text where it is not `help` (makeblastdb's, which lists its hidden
+    /// `-randomize`), frozen; `None`: `-help-full` writes `help`, as NCBI's programs without a
+    /// hidden argument do.
+    pub(crate) help_full: Option<&'static str>,
+    /// The description that `-h` writes where it is not the one of `help` (rpsbproc's short
+    /// description, `SetUsageContext` of its `Init`), frozen: the lines after `DESCRIPTION`, each
+    /// with its indentation and line feed (`short_usage`).
+    pub(crate) short_description: Option<&'static str>,
+    /// The exit status of a run whose write of a help text (on the standard output), a usage or an
+    /// argument error's report (on the standard error) fails: rpsbproc's 4, as its failed write of
+    /// a report (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9). `None`: a failed write is dropped,
+    /// as NCBI's programs drop a failed write to `cout` and `cerr`.
+    pub(crate) write_failure: Option<i32>,
     /// What runs in place of `Run` with `-dryrun` (`DryRun`, after `Init`): the work of the
     /// program's `Init` that LOSAT does in its `Run` (makeprofiledb's parameters and files), or
     /// nothing (`None`: exit status 0).
@@ -46,19 +59,31 @@ pub(crate) struct Tool {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
-/// The text of `-h`: the usage and the description of `help` (a `Tool::help`), then NCBI's
-/// pointer to `-help`. The details start with the mandatory arguments (`REQUIRED ARGUMENTS`,
-/// convert2blastmask's) or the optional ones. The description states LOSAT's version
-/// (`help_text`).
-pub(crate) fn short_usage(help: &str) -> String {
+/// The text of `-h`: the usage and the description of `tool`'s `-help` text (`Tool::help`; its
+/// short description in place of the description where the tool has one,
+/// `Tool::short_description`), then NCBI's pointer to `-help`. The details start with the
+/// mandatory arguments (`REQUIRED ARGUMENTS`, convert2blastmask's) or the optional ones. The
+/// description states LOSAT's version (`help_text`).
+pub(crate) fn short_usage(tool: &Tool) -> String {
+    let help = tool.help;
     let end = ["REQUIRED ARGUMENTS", "OPTIONAL ARGUMENTS"]
         .iter()
         .filter_map(|heading| help.find(heading))
         .min()
         .unwrap_or(help.len());
+    const DESCRIPTION: &str = "\nDESCRIPTION\n";
+    let usage = match tool.short_description {
+        Some(description) => {
+            let start = help[..end]
+                .find(DESCRIPTION)
+                .map_or(end, |at| at + DESCRIPTION.len());
+            format!("{}{description}\n", &help[..start])
+        }
+        None => help[..end].to_string(),
+    };
     format!(
         "{}Use '-help' to print detailed descriptions of command line arguments\n",
-        help_text(&help[..end])
+        help_text(&usage)
     )
 }
 
@@ -71,14 +96,63 @@ pub(crate) fn help_text(help: &str) -> std::borrow::Cow<'_, str> {
 /// Where a program's diagnostics go: the target of `-logfile` (`stderr` for `cerr`), and the
 /// standard error stream, on which the usage of an argument error is printed.
 pub(crate) struct Diag<'a> {
-    target: DiagTarget,
+    target: &'a DiagTarget,
     stderr: &'a mut dyn Write,
     tool: &'static Tool,
     /// A copy of the texts written since `start_record` (`take_record`).
     record: Option<Vec<u8>>,
+    /// Whether a write to the standard error failed (`Tool::write_failure`).
+    failed: bool,
+}
+
+impl<'a> Diag<'a> {
+    /// The diagnostics of `tool` that go to `target` (`stderr` for `cerr`), with the standard error
+    /// stream `stderr`. The caller keeps the target for what the program writes after its
+    /// arguments.
+    pub(crate) fn new(
+        target: &'a DiagTarget,
+        stderr: &'a mut dyn Write,
+        tool: &'static Tool,
+    ) -> Self {
+        Diag {
+            target,
+            stderr,
+            tool,
+            record: None,
+            failed: false,
+        }
+    }
+}
+
+/// A standard error stream that notes a failed write (`Diag::failed`).
+struct Noted<'w> {
+    stream: &'w mut dyn Write,
+    failed: &'w mut bool,
+}
+
+impl Write for Noted<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.stream.write(buf);
+        *self.failed |= written.is_err();
+        written
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let flushed = self.stream.flush();
+        *self.failed |= flushed.is_err();
+        flushed
+    }
 }
 
 impl Diag<'_> {
+    /// The standard error stream, which notes a failed write.
+    fn noted(&mut self) -> Noted<'_> {
+        Noted {
+            stream: &mut *self.stderr,
+            failed: &mut self.failed,
+        }
+    }
+
     /// Posts one diagnostic line (`LOG_POST`, `ERR_POST`).
     pub(crate) fn post(&mut self, line: &str) {
         self.post_bytes(line.as_bytes());
@@ -97,7 +171,11 @@ impl Diag<'_> {
         if let Some(record) = &mut self.record {
             record.extend_from_slice(text);
         }
-        self.target.write_text(text, self.stderr);
+        let mut stderr = Noted {
+            stream: &mut *self.stderr,
+            failed: &mut self.failed,
+        };
+        self.target.write_text(text, &mut stderr);
     }
 
     /// Starts keeping a copy of the texts that `write_text` writes (the posts of a read that
@@ -114,8 +192,9 @@ impl Diag<'_> {
     /// Writes `text` to the standard error stream itself (an insertion into `cerr`), not to the
     /// target of `-logfile`: segmasker's report of an exception its `Run` catches.
     pub(crate) fn cerr(&mut self, text: &[u8]) {
-        let _ = self.stderr.write_all(text);
-        let _ = self.stderr.flush();
+        let mut stderr = self.noted();
+        let _ = stderr.write_all(text);
+        let _ = stderr.flush();
     }
 
     /// LOSAT's refusal: a line on the standard error stream itself, not on the target of
@@ -203,19 +282,21 @@ impl Diag<'_> {
     /// reader's entry, `read`, and `run_arg_exception`.
     fn report_arg_exception(&mut self, error: &ArgException, backlog: Option<&str>) -> i32 {
         if error.code != "eNoValue" {
-            let _ = self
-                .stderr
-                .write_all(short_usage(self.tool.help).as_bytes());
+            // One write of the usage and the line of `=`: a caller's writer that fails keeps the
+            // whole text (`api::tools`'s record of the diagnostics), as `write!`'s pieces would not.
+            let mut text = short_usage(self.tool);
             // The diagnostics of a `-logfile` go to a stream that is not `cerr`: NCBI then says
             // where they are.
             if !matches!(self.target, DiagTarget::Stderr) {
-                let _ = writeln!(
-                    self.stderr,
-                    "Error in command-line arguments. See error logs for more details."
+                text.push_str(
+                    "Error in command-line arguments. See error logs for more details.\n",
                 );
             }
-            let _ = write!(self.stderr, "{}\n\n", "=".repeat(72));
-            let _ = self.stderr.flush();
+            text.push_str(&"=".repeat(72));
+            text.push_str("\n\n");
+            let mut stderr = self.noted();
+            let _ = stderr.write_all(text.as_bytes());
+            let _ = stderr.flush();
         }
         let messages = error.messages.iter().map(Vec::as_slice);
         for message in messages.chain(backlog.map(str::as_bytes)) {
@@ -237,38 +318,70 @@ impl Diag<'_> {
 /// producer of these bytes for every caller of the reader.
 ///
 /// - `-h`: the short usage (`short_usage`) on `out`, exit status 0.
-/// - `-help` and `-help-full`: the program's `-help` text (`help_text`) on `out`, exit status 0.
+/// - `-help` and `-help-full`: the program's `-help` text (`help_text`; `-help-full` the text of
+///   `Tool::help_full` where the program has one) on `out`, exit status 0.
 /// - `-xmlhelp`: NCBI's XML of the program's arguments on `out`, made by `xml_help` (the
 ///   command line's; LOSAT's XML leaves out the arguments that LOSAT refuses,
 ///   `ncbi_app::args::refusal`, `cli::xml_help_text`), exit status 0; a caller without it (the
-///   library API) refuses the word (`cli::xml_help_refusal`, line RG DECISIONS E2x-1) on the
-///   standard error, exit status 1.
+///   library API) refuses the word (`ReadEnd::Refused`: `cli::xml_help_refusal`, line RG DECISIONS
+///   E2x-1).
 /// - An argument error (`ArgException`): on `diag`'s standard error, the short usage, then, when
 ///   the diagnostics go to the file of `-logfile`, the line `Error in command-line arguments. See
 ///   error logs for more details.`, then a line of 72 `=` and an empty line; then NCBI's posts of
 ///   the exception on `diag`'s target (the file of `-logfile`, else the standard error): `Error:
 ///   <message>` for each message of the chain, oldest first, and `Error:  <message>` of the
 ///   exception's own (`Diag::report_arg_exception`); exit status 1.
+///
+/// A failed write is dropped, or, for a tool with a status of its own (`Tool::write_failure`:
+/// rpsbproc), ends the run with that status: a failed write of the text on `out` is reported on
+/// the standard error first (`<program> failed to write output: <error>`).
 pub(crate) fn read(
     tool: &'static Tool,
     words: &[OsString],
     out: &mut dyn Write,
     diag: &mut Diag,
     xml_help: Option<fn(&str) -> Option<String>>,
-) -> Result<Args, i32> {
+) -> Result<Args, ReadEnd> {
     let text = match args::parse(tool, words) {
         Ok(args) => return Ok(args),
-        Err(ArgsError::Usage) => short_usage(tool.help),
+        Err(ArgsError::Usage) => short_usage(tool),
         Err(ArgsError::Help) => help_text(tool.help).into_owned(),
+        Err(ArgsError::HelpFull) => help_text(tool.help_full.unwrap_or(tool.help)).into_owned(),
         Err(ArgsError::XmlHelp) => match xml_help.and_then(|xml| xml(tool.program)) {
             Some(xml) => xml,
-            None => return Err(diag.refuse(&crate::cli::xml_help_refusal(tool.refusal_name))),
+            None => {
+                return Err(ReadEnd::Refused(crate::cli::xml_help_refusal(
+                    tool.refusal_name,
+                )))
+            }
         },
         // `eNoValue` (which prints no usage) is not raised by the reader.
-        Err(ArgsError::Invalid(error)) => return Err(diag.report_arg_exception(&error, None)),
+        Err(ArgsError::Invalid(error)) => {
+            let status = diag.report_arg_exception(&error, None);
+            return Err(ReadEnd::Exit(match (diag.failed, tool.write_failure) {
+                (true, Some(failure)) => failure,
+                _ => status,
+            }));
+        }
     };
-    let _ = out.write_all(text.as_bytes());
-    Err(0)
+    if let Err(error) = out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        if let Some(failure) = tool.write_failure {
+            diag.cerr(format!("{} failed to write output: {error}\n", tool.program).as_bytes());
+            return Err(ReadEnd::Exit(failure));
+        }
+    }
+    Err(ReadEnd::Exit(0))
+}
+
+/// How a read of the arguments (`read`) ends where it gives none.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ReadEnd {
+    /// The run ends with this exit status: `read` has written what NCBI writes (the help on the
+    /// standard output, an argument error's report).
+    Exit(i32),
+    /// LOSAT's refusal of a word that the caller does not run (`-xmlhelp` in the library API),
+    /// not written: the caller writes it as its refusals (`Diag::refuse` on the command line).
+    Refused(String),
 }
 
 /// Runs `tool` with `words` (the command line after `losat <program>`), after the command line's
@@ -424,15 +537,11 @@ fn run_app(
         }
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };
-    let mut diag = Diag {
-        target,
-        stderr: err,
-        tool,
-        record: None,
-    };
     // The configuration (the file of `-conffile` in place of `<program>.ini`,
     // `ApplicationStart::of_process`).
-    match start.write_config_load(&mut diag.target, diag.stderr) {
+    let loaded = start.write_config_load(&mut target, err);
+    let mut diag = Diag::new(&target, err, tool);
+    match loaded {
         Ok(None) => {}
         Ok(Some(status)) => return status,
         Err(reason) => return diag.refuse(&reason),
@@ -441,7 +550,8 @@ fn run_app(
     // writes none.
     let args = match read(tool, &words, out, &mut diag, xml_help) {
         Ok(args) => args,
-        Err(status) => return status,
+        Err(ReadEnd::Exit(status)) => return status,
+        Err(ReadEnd::Refused(reason)) => return diag.refuse(&reason),
     };
     let settings = match start.settings() {
         Ok(settings) => settings,

@@ -58,10 +58,10 @@ const CASES: [(&str, &str); 2] = [
 ];
 
 #[test]
-fn an_unknown_strand_is_a_clap_error() {
+fn an_unknown_strand_is_ncbis_argument_error() {
     for value in ["foo", "PLUS", "Both", "", "1"] {
         let output = run(CASES[0].0, CASES[0].1, &["-strand", value]);
-        assert_eq!(output.status.code(), Some(2), "-strand {value:?}");
+        assert_eq!(output.status.code(), Some(1), "-strand {value:?}");
         assert!(output.stdout.is_empty(), "-strand {value:?}");
         assert!(!output.stderr.is_empty(), "-strand {value:?}");
     }

@@ -64,6 +64,19 @@ mod database;
 // `-db_soft_mask` and `-db_hard_mask` (series NP, M4b): the kernels of a masked database search,
 // chosen once per call in place of the kernel (`prelim_run::run_preliminary_with`).
 mod db_masked;
+// What the replay of the parallel redo's windows (`x_redo_par.rs`, built where they run) reads of
+// the one-thread loop's Smith-Waterman redo: the marks of the lists that the redo's fetch excludes
+// and the loop's reader of a query's marks, the errors of a batch and of a match, and the notes
+// that give an error the warning of a header read before it (the status of a query batch is core's
+// `smith_waterman_match::SwBatchStatus`, which both import).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) use {
+    database::{FetchExcludedMatch, FetchNotes},
+    redo_run::{query_fetch_excluded_reached, sw_batch_failed, sw_endless},
+};
 // The kernel of one subject (`BlastpPrelimKernel::search_subject`): its scan and ungapped
 // extensions, then its gapped half, from the subject's letters to its HSP lists.
 mod prelim_kernel;
@@ -3547,14 +3560,9 @@ fn build_pairwise_hits(
             positives: Some(positives),
             gaps: Some(gaps),
             subject_length: Some(subjects[s_idx].aa_len),
-            // The title after its first word, as the other programs give it; the reports take the
-            // subject's title bytes by subject index (`write_blastp_pairwise_report`).
-            subject_title: shown_subjects.title(s_idx).and_then(|title| {
-                title
-                    .iter()
-                    .position(|&byte| byte == b' ')
-                    .map(|space| String::from_utf8_lossy(&title[space + 1..]).into_owned())
-            }),
+            subject_title: shown_subjects
+                .title(s_idx)
+                .and_then(crate::blastinput::fasta_reader::hit_subject_title),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:332-342: the HSP's composition adjustment.
             comp_adjust_method: Some(comp_adjustment_method),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182
@@ -5600,8 +5608,8 @@ fn resolve_for_formats(
         options.outfmt.clear();
         options.num_descriptions = 0;
         options.num_alignments = 0;
-        // The `-html` links belong to the format as well: only the pairwise report reads them
-        // (`blastinput::app::html_links`), so a run of outfmt 0 and 6 has them for 0 alone.
+        // The `-html` links belong to the format as well: only the reports of outfmt 0 to 4 read
+        // them (`blastinput::app::html_links`), so a run of outfmt 0 and 6 has them for 0 alone.
         options.html = None;
         format!("{options:?}")
     };
@@ -5614,8 +5622,8 @@ fn resolve_for_formats(
         if search_options(&resolved) != first_options {
             bail!("the requested output formats resolve to different search options");
         }
-        // The run's `-html` links are those of the format that reads them (outfmt 0, in any
-        // place among the formats).
+        // The run's `-html` links are those of the format that reads them (outfmt 0 to 4, in
+        // any place among the formats).
         first.html = first.html.or(resolved.html);
     }
     first.num_descriptions = shared.num_descriptions;

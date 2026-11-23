@@ -738,12 +738,15 @@ pub(super) struct ListedSubjects {
 /// A preliminary hit list that NCBI's composition-based redo reaches in its stream and whose
 /// subject the redo's fetch then excludes (`exclude_fetched`): the list leaves the query's hit
 /// list, and this mark keeps its place, `position` kept lists of the query before it, with what
-/// the redo reads of it there (its best e-value, the early termination test's).
+/// the redo reads of it there (its best e-value, the early termination test's). The
+/// Smith-Waterman redo's status reads the marks, in the one-thread loop
+/// (`redo_run::one_thread_redo`) and in the replay of the parallel redo's windows
+/// (`x_redo_par.rs`, `XSwBatch`), both through `redo_run::query_fetch_excluded_reached`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct FetchExcludedMatch {
-    pub(super) query: usize,
-    pub(super) position: usize,
-    pub(super) best_evalue: f64,
+pub(in crate::algorithm::blastp) struct FetchExcludedMatch {
+    pub(in crate::algorithm::blastp) query: usize,
+    pub(in crate::algorithm::blastp) position: usize,
+    pub(in crate::algorithm::blastp) best_evalue: f64,
 }
 
 /// What `exclude_fetched` keeps of the subjects whose header holds a UTF8String where a
@@ -928,8 +931,9 @@ impl XFetchedUtf8 {
 /// list's, `ListedSubjects::note_fetched`) around its traceback: the PSSM's position-based redo
 /// notes those of its own heaps (`pssm_redo`, `pssm_hooks::pssm_traceback`); after the traceback
 /// (`after`) every subject of the ordinary traceback, or those that the composition-based redo's
-/// early termination test leaves (its heaps as it left them).
-pub(super) struct FetchNotes<'a> {
+/// early termination test leaves (its heaps as it left them). The replay of the parallel redo's
+/// windows (`x_redo_par.rs` `XSwBatch`) reads `fetched_before_failure` as the one-thread loop does.
+pub(in crate::algorithm::blastp) struct FetchNotes<'a> {
     listed: Option<&'a ListedSubjects>,
     database: Option<&'a BlastpDatabase>,
     /// Whether the PSSM's position-based redo ran and noted its own.
@@ -948,6 +952,16 @@ impl<'a> FetchNotes<'a> {
         }
     }
 
+    /// The notes of a search with neither a seqid list nor a database: none to read.
+    #[cfg(all(
+        test,
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    pub(in crate::algorithm::blastp) fn none() -> FetchNotes<'static> {
+        FetchNotes::new(None, None)
+    }
+
     /// The PSSM's position-based redo of modes 1 to 3 ran, whose heaps `heaps` tell which
     /// subjects its fetches read.
     pub(super) fn pssm_redo(&self, heaps: &[BlastCompoHeap]) {
@@ -964,7 +978,7 @@ impl<'a> FetchNotes<'a> {
     /// the list after `before` of the kept lists of query `query` (`usize::MAX`: after the batch's
     /// last list), with `heaps` as the redo left them: NCBI posted its warning before its error,
     /// its crash or its endless redo (`HeaderReadError::utf8`).
-    pub(super) fn fetched_before_failure(
+    pub(in crate::algorithm::blastp) fn fetched_before_failure(
         &self,
         heaps: &[BlastCompoHeap],
         batch: std::ops::Range<usize>,

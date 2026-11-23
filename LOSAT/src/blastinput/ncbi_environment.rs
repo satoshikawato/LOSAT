@@ -1970,7 +1970,7 @@ pub enum Preparsed<S> {
 /// application start's configuration (`ApplicationStart::of_process`, line RG item E1).
 /// `words` are the arguments after the program's name. This is the one reading of these words:
 /// the command line's entry (the versions, before the configuration load, and the words that
-/// the argument reader gets, `cli::try_parse_from_start`), `ApplicationStart::of_process`,
+/// the argument reader gets, `cli::reader::read_argv`), `ApplicationStart::of_process`,
 /// `cli::ncbi_version_request` and `ncbi_app` read them here, and `log_file` is NCBI's first scan
 /// of `-logfile`.
 pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
@@ -2081,7 +2081,7 @@ impl ApplicationStart {
     /// The application start of `program` in this process (its environment, its registry files
     /// and its facts, `ProcessFacts`): what the command line's entry writes before the program's
     /// arguments are read, and the settings that it leaves (`settings`). The entry makes one
-    /// and gives it to what reads after it (the argument reader, `cli::try_parse_from_start`; the
+    /// and gives it to what reads after it (the argument reader, `cli::reader::read_argv`; the
     /// program's run), as NCBI's application starts once.
     ///
     /// `words` are the arguments after the program's name: the file of their last `-conffile`

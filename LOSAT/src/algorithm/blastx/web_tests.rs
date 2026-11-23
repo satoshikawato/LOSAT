@@ -7,7 +7,7 @@ use super::*;
 fn web_v1_keeps_its_outfmt_values_and_errors() {
     let error = |outfmt: &str| {
         let error = parse_args(&["-outfmt", outfmt]).unwrap_err();
-        crate::cli::render_message(error.downcast_ref::<clap::Error>().unwrap())
+        error.to_string()
     };
     for (outfmt, reason) in [
         ("5", "unsupported BLASTX outfmt: use 0, 6 or 7"),

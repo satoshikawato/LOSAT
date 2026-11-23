@@ -21,10 +21,9 @@
 //! the counts, the score, the triplet and its threshold: `cnt > 0` and the score test are one
 //! comparison (`x_gate_limit`, a conditional move, against the thresholds divided by ten),
 //! `count < thresholds.len()` always holds (`count < len <=
-//! window - 2`), and the body of the condition, which holds on few iterations, is a function of
-//! its own (`x_merge_at`) that derives `pos` and `count` from the iteration's index and walks the
-//! perfect list as one slice (`VecDeque::make_contiguous`), copying the intervals it passes in one
-//! piece.
+//! window - 2`), and the body of the condition, which holds on few iterations, walks the perfect
+//! list as one slice (`VecDeque::make_contiguous`) and records each interval it adds with the index
+//! of the old element it goes before (`XIns`); the list is rebuilt once at the end of the call.
 //!
 //! A full window stays full: each letter pops one triplet and pushes one. While it is full and
 //! holds two or more distinct triplets, `x_run_full` takes the letters with only the scalars that
@@ -247,36 +246,52 @@ fn shift_high(
     true
 }
 
-/// No NCBI counterpart: the state of the merge `find_perfect` makes when the score test of an
-/// iteration holds (the body of that `if` in `XTripletWindow::find_perfect`).
-struct XMerge {
-    max_perfect_score: u32,
-    max_len: usize,
-    read: usize,
-    inserted: bool,
-    old_len: usize,
-    /// `pos` of the first iteration (`L - 1`, or 0); iteration `i` has `pos0.saturating_sub(i)`.
-    pos0: usize,
-    /// `count` of the first iteration (the suffix length); iteration `i` has `count0 + i`.
-    count0: usize,
-    /// One past `stop_`, the end of every interval this call adds.
-    end: usize,
+/// No NCBI counterpart: one interval `find_perfect` adds to the perfect list, with `at`, the
+/// index in the list before the call of the element it goes before.
+#[derive(Clone, Copy)]
+struct XIns {
+    at: usize,
+    start: usize,
+    score: u32,
+    len: usize,
+}
+
+/// No NCBI counterpart: `find_perfect`'s two vectors, kept across its calls so that they are
+/// allocated once per range.
+#[derive(Default)]
+struct XScratch {
+    ins: Vec<XIns>,
+    merged: Vec<PerfectInterval>,
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:123-141,161-163
-/// `XTripletWindow::find_perfect`, reading the window as one slice of the doubled ring. The loop
-/// keeps only the counts, the score, the triplet and its threshold; the body of the score test,
-/// which holds on few iterations, is `x_merge_at` (not inlined, so its state does not take the
-/// loop's registers). `tenths` holds the thresholds divided by ten (`x_tenth_thresholds`), so the
-/// score test compares the score itself. `count < tenths.len()` always holds: `count` runs from the
-/// suffix length to `len - 1`, and `len <= window - 2 = tenths.len()`, so the thresholds of the
-/// iterations are the slice `tenths[suffix_len..len]`.
+/// `XTripletWindow::find_perfect`, reading the window as one slice of the doubled ring. `tenths`
+/// holds the thresholds divided by ten (`x_tenth_thresholds`), so the score test compares the score
+/// itself. `count < tenths.len()` always holds: `count` runs from the suffix length to `len - 1`,
+/// and `len <= window - 2 = tenths.len()`, so the thresholds of the iterations are the slice
+/// `tenths[suffix_len..len]`; iteration `i` has `count = suffix_len + i` and `pos` the start value
+/// lowered `i` times with `saturating_sub(1)`, which is `pos0.saturating_sub(i)`.
+///
+/// The body of the score test is NCBI's, statement by statement, with the perfect list as one
+/// slice (`VecDeque::make_contiguous`, the same elements in the same order). Where NCBI inserts an
+/// interval before the element the walk stopped at, this records the interval with that element's
+/// index (`XIns`), and the list is rebuilt once after the loop: the old elements in their order,
+/// each recorded interval before the element of its index, in the order they were recorded (the
+/// walk only reads the old elements, and indices never fall, so this is NCBI's list). After NCBI's
+/// insertion its walk starts at the new interval, whose ratio of score to length equals the maximum
+/// it has just set, so that step changes nothing; this walk skips it.
+///
+/// The merge was a function of its own before (`x_merge_at`: 24.3 M calls on the 31,168 cDNA
+/// queries of the Ad and Ab cases, 129 instructions per call with its call and its copies of the
+/// walked intervals). Inline, it adds one load per iteration to the loop (a register fewer for it),
+/// and the call costs less: `find_perfect` with the merge 8.59 G instructions before and 8.21 G now
+/// on the cDNA queries, 107.6 M and 113.2 M on the Sakai query (ad-FM-3 harness, callgrind).
 #[inline(never)]
 fn find_perfect(
     h: XHot,
     a: &XArrays,
     tenths: &[u32],
-    merged: &mut Vec<PerfectInterval>,
+    sc: &mut XScratch,
     perfect_list: &mut VecDeque<PerfectInterval>,
 ) {
     let stop = h.stop();
@@ -286,19 +301,14 @@ fn find_perfect(
     }
     let mut counts = a.c_v;
     let mut score = h.r_v;
-    merged.clear();
-    let mut m = XMerge {
-        max_perfect_score: 0,
-        max_len: 0,
-        read: 0,
-        inserted: false,
-        old_len: perfect_list.len(),
-        pos0: h.l.saturating_sub(1),
-        count0: suffix_len,
-        end: stop + 1,
-    };
-    // The same elements in the same order, in one slice (the list is almost always one already).
+    let pos0 = h.l.saturating_sub(1);
+    // One past `stop_`, the end of every interval this call adds.
+    let end = stop + 1;
     let list: &[PerfectInterval] = perfect_list.make_contiguous();
+    let mut max_perfect_score: u32 = 0;
+    let mut max_len: usize = 0;
+    let mut read = 0usize;
+    sc.ins.clear();
     let triplets = &a.ring[h.head + suffix_len..h.head + h.len];
     let limits = &tenths[suffix_len..h.len];
     for (i, (&triplet, &limit)) in triplets.iter().zip(limits).enumerate() {
@@ -306,11 +316,45 @@ fn find_perfect(
         let cnt = counts[idx];
         add_triplet(&mut score, &mut counts, triplet);
         if score > x_gate_limit(cnt, limit) {
-            x_merge_at(&mut m, i, score, merged, list);
+            let pos = pos0.saturating_sub(i);
+            let count = suffix_len + i;
+            while let Some(p) = list.get(read) {
+                if pos > p.start {
+                    break;
+                }
+                if max_perfect_score == 0
+                    || max_len * p.score as usize > max_perfect_score as usize * p.len
+                {
+                    max_perfect_score = p.score;
+                    max_len = p.len;
+                }
+                read += 1;
+            }
+            if max_perfect_score == 0
+                || score as usize * max_len >= max_perfect_score as usize * count
+            {
+                max_perfect_score = score;
+                max_len = count;
+                sc.ins.push(XIns {
+                    at: read,
+                    start: pos,
+                    score,
+                    len: count,
+                });
+            }
         }
     }
-    if m.inserted {
-        merged.extend_from_slice(&list[m.read..]);
+    if !sc.ins.is_empty() {
+        let merged = &mut sc.merged;
+        merged.clear();
+        merged.reserve(list.len() + sc.ins.len());
+        let mut from = 0;
+        for x in &sc.ins {
+            merged.extend_from_slice(&list[from..x.at]);
+            merged.push(PerfectInterval::new(x.start, end, x.score, x.len));
+            from = x.at;
+        }
+        merged.extend_from_slice(&list[from..]);
         perfect_list.clear();
         perfect_list.extend(merged.drain(..));
     }
@@ -354,51 +398,6 @@ fn x_gate_limit(cnt: u8, limit: u32) -> u32 {
         } else {
             u32::MAX
         }
-    }
-}
-
-/// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:125-141
-/// The body of the score test of `XTripletWindow::find_perfect` for iteration `i` (its `pos` and
-/// `count` from `i`), in the same order. `list` is the perfect list as one slice; the intervals the
-/// walk passes are copied to `merged` in one piece after the walk, in the order the C code moves
-/// them one by one (it reads them only, so copying them later gives the same list).
-#[inline(never)]
-fn x_merge_at(
-    m: &mut XMerge,
-    i: usize,
-    score: u32,
-    merged: &mut Vec<PerfectInterval>,
-    list: &[PerfectInterval],
-) {
-    let pos = m.pos0.saturating_sub(i);
-    let count = m.count0 + i;
-    let walk_start = m.read;
-    while let Some(p) = list.get(m.read) {
-        if pos > p.start {
-            break;
-        }
-        if m.max_perfect_score == 0
-            || m.max_len * p.score as usize > m.max_perfect_score as usize * p.len
-        {
-            m.max_perfect_score = p.score;
-            m.max_len = p.len;
-        }
-        m.read += 1;
-    }
-    if m.inserted {
-        merged.extend_from_slice(&list[walk_start..m.read]);
-    }
-    if m.max_perfect_score == 0
-        || score as usize * m.max_len >= m.max_perfect_score as usize * count
-    {
-        m.max_perfect_score = score;
-        m.max_len = count;
-        if !m.inserted {
-            m.inserted = true;
-            merged.reserve(m.old_len + 8);
-            merged.extend_from_slice(&list[..m.read]);
-        }
-        merged.push(PerfectInterval::new(pos, m.end, m.max_perfect_score, count));
     }
 }
 
@@ -504,7 +503,7 @@ impl DustMasker {
         rng: &mut NcbiLfgRandom,
         result: &mut Vec<MaskedInterval>,
         current_start: usize,
-        merged: &mut Vec<PerfectInterval>,
+        scratch: &mut XScratch,
         perfect_list: &mut VecDeque<PerfectInterval>,
     ) -> XFullExit {
         let end = seq.len();
@@ -588,7 +587,7 @@ impl DustMasker {
                     r_v,
                     num_diff: 2,
                 };
-                find_perfect(h, a, &thr[..max], merged, perfect_list);
+                find_perfect(h, a, &thr[..max], scratch, perfect_list);
             }
         };
         let start = pos - delta;
@@ -661,7 +660,7 @@ impl DustMasker {
             thresholds: &self.thresholds,
         };
         let thr = x_tenth_thresholds(k);
-        let mut merged: Vec<PerfectInterval> = Vec::new();
+        let mut scratch = XScratch::default();
 
         while stop > current_start + 2 {
             let mut perfect_list: VecDeque<PerfectInterval> = VecDeque::new();
@@ -695,7 +694,7 @@ impl DustMasker {
                         rng,
                         &mut result,
                         current_start,
-                        &mut merged,
+                        &mut scratch,
                         &mut perfect_list,
                     );
                     (pos, current_triplet, h) = (run.pos, run.current_triplet, run.h);
@@ -738,7 +737,7 @@ impl DustMasker {
 
                 if h.shift_window(&mut a, k, new_triplet, &mut perfect_list) {
                     if h.needs_processing(k) {
-                        find_perfect(h, &a, &thr[..k.max_size], &mut merged, &mut perfect_list);
+                        find_perfect(h, &a, &thr[..k.max_size], &mut scratch, &mut perfect_list);
                     }
                 } else {
                     let mut run = XRun {

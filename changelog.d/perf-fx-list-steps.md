@@ -1,0 +1,1 @@
+- tblastn, tblastx and BLASTX scan their lookup tables faster on x86-64 CPUs with AVX2: one protein against the human genome takes about 3.5 % less time at one thread. Reports do not change.

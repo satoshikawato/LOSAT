@@ -141,7 +141,7 @@ impl<'a> Cursor<'a> {
 // trims `isspace`: also form feed and vertical tab) can empty it only when it is made of
 // those two characters; such a token is reported and dropped.
 /// The tokens of a text list.
-fn read_memory_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> Vec<Vec<u8>> {
+pub(super) fn read_memory_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> Vec<Vec<u8>> {
     let mut sis = Vec::with_capacity(bytes.len() / 7);
     let mut p = 0;
     while p < bytes.len() {

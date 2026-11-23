@@ -527,7 +527,7 @@ pub(crate) fn sw_endless_error(program: &str, why: &str) -> anyhow::Error {
 /// Smith-Waterman redo for an ungapped search too, and its set-up reads the gapped Karlin-Altschul
 /// blocks of every context, which an ungapped search does not make, and crashes (SIGSEGV) at every
 /// query batch NCBI searches, with hits or without, with `-subject` and with `-db`
-/// (PD-LOSAT-NCBI-DEFECTS 1.76 for BLASTX, 1.79 for TBLASTN, 1.84 for BLASTP, rule 3). The caller refuses at the
+/// (PD-LOSAT-NCBI-DEFECTS 1.76 for BLASTX, 1.79 for TBLASTN, 1.86 for BLASTP, rule 3). The caller refuses at the
 /// traceback of the first query batch that is searched, after the reports of the batches before.
 /// Exit status 1, its message.
 ///

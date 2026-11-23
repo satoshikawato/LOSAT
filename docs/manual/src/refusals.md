@@ -423,13 +423,14 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | :--- | :--- |
 | `-binary` | Refused (PSSM files in ASN.1 binary are not read yet). |
 | `-dbtype delta`, `-dbtype cobalt` | Refused. |
+| In a profile with frequency ratios only, a query in a nucleotide coding (`iupacna`, `ncbi2na`, `ncbi4na`) | Refused for now. NCBI's `makeprofiledb` writes the database files and then stops with its conversion error. |
 | `-max_smp_vol 0` | Refused. NCBI's `makeprofiledb` crashes (division by zero). |
 | `-in` naming a directory | Refused. NCBI's `makeprofiledb` never ends. |
 | A profile stored by row (`byRow TRUE`) with more than 28 positions | Refused. NCBI's `makeprofiledb` reads its frequency ratios from outside its data. |
 | A frequency ratio whose value times 10^9 does not fit a 64-bit integer (such as `1e300`), or a list of frequency ratios shorter than the profile for a profile with frequency ratios only | Refused. NCBI's conversion has no defined result, or it reads past the list. |
 | A word score threshold (times the scale factor) that is not a number, a `-scale` beyond 32-bit integers | Refused. |
 | A sequence with only a GI id between sequences with other ids, in a version 5 database with `-index true` | Refused with `makeblastdb`'s message. NCBI's `makeprofiledb` aborts; `-blastdb_version 4` builds it. |
-| A query letter that NCBI's PSSM engine cannot code (a lower-case letter of a profile with frequency ratios only) | Refused. |
+| In a profile with frequency ratios only, a query residue that is not one of the 28 protein codes: in `ncbieaa` a character other than a capital letter, `*` or `-` (such as a lower-case letter), in `iupacaa` a character other than a letter, in `ncbistdaa` a code of 28 or more | Refused. NCBI's `makeprofiledb` writes outside its data, and then crashes or gives a result that depends on the residue. A query whose length does not match, or a matrix that NCBI does not know, gets NCBI's error first. |
 | A query without Seq-ids and without descriptors (a version 4 database with `-index true` stops with NCBI's message) | Refused. NCBI's `makeprofiledb` aborts (version 5), or with `-index false` writes the `gnl\|BL_ORD_ID` id past the end of an empty list. |
 | `-index false` with a query whose first binary definition line has no Seq-id | Refused, as above. |
 | Binary definition lines (a `user` object `ASN1_BlastDefLine`) that are damaged or hold characters that NCBI's reader replaces | Refused. NCBI's `makeprofiledb` stops with its ASN.1 reader's error, or replaces the characters and reports each. |

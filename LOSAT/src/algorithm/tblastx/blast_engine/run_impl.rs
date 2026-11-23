@@ -3760,22 +3760,52 @@ fn run_batch_loop(
         // prefetch is off (below), by query of the batch.
         let mut query_fetches: Vec<Vec<u8>> = Vec::new();
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
-            super::super::database::drop_unaligned(database, &mut batch.hits);
+            let aligned = super::super::database::drop_unaligned(database, &mut batch.hits);
+            let earlier = crate::algorithm::common::database::EarlierUtf8::of_batch(
+                start,
+                batch.fetched_utf8,
+                aligned,
+            );
             let ordered = batch.hits.as_slice();
             let read = super::super::database::read_titles(
                 database,
                 ordered,
                 start,
+                earlier,
                 &mut reports.titles.borrow_mut(),
             );
-            if let Err(error) = read {
-                match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
-                    Ok(failure) => {
-                        reports.write_before_failed_batch(outputs, done, &warnings)?;
-                        batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                        return Err(failure.error);
+            match read {
+                // NCBI's warning of its first read of a UTF8String header follows the batch's
+                // reader messages and request posts (`warnings[start]`), before its prefetch.
+                Ok(read) => {
+                    if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
+                        read.as_ref(),
+                        &database.db,
+                        "tblastx",
+                    ) {
+                        warnings[start].append(&posts);
+                        batch_warnings.append(&posts);
                     }
-                    Err(error) => return Err(error),
+                }
+                Err(error) => {
+                    match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+                        Ok(failure) => {
+                            reports.write_before_failed_batch(outputs, done, &warnings)?;
+                            batch_warnings
+                                .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                            if let Some(posts) =
+                                crate::algorithm::common::database::Utf8Read::post_of(
+                                    failure.utf8.as_ref(),
+                                    &database.db,
+                                    "tblastx",
+                                )
+                            {
+                                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                            }
+                            return Err(failure.error);
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             }
         }
@@ -3871,18 +3901,31 @@ fn run_batch_loop(
                     }
                 }};
             }
+            let off = crate::algorithm::common::database::prefetch_off(
+                super::super::database::seq_aligns_of(ordered),
+            );
+            if xml2_prefetch && !run_loads.ended() && off {
+                let (titles, mut reads) = (reports.titles.borrow(), reports.reads.borrow_mut());
+                super::super::database::scope_utf8_hit_reads(
+                    database,
+                    ordered,
+                    &titles,
+                    start,
+                    run_loads.answer().run(),
+                    &mut reads,
+                );
+            }
             if xml2_prefetch
                 && !run_loads.ended()
                 && database.parsed_seqids()
                 && !ordered.is_empty()
-                && !crate::algorithm::common::database::prefetch_off(
-                    super::super::database::seq_aligns_of(ordered),
-                )
+                && !off
             {
                 let scope = || batch_scope(input_start..input_end);
-                // The batches before: their queries (`done.spans`, in the numbering of
-                // `done.hits`), for what their reports load (`database::batch_prefetch_stop`).
-                if let Err(error) = super::super::database::batch_prefetch_stop(
+                // The stop, or the warning of a UTF8String header that a load's lookup reads. The
+                // batches before: their queries (`done.spans`, in the numbering of `done.hits`),
+                // for what their reports load (`database::batch_prefetch_stop`).
+                match super::super::database::batch_prefetch_stop(
                     database,
                     &done.hits,
                     done.searched.len(),
@@ -3903,7 +3946,8 @@ fn run_batch_loop(
                     &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
                         .after_unrecorded_calls(unrecorded_calls),
                 ) {
-                    prefetch_failed!(error);
+                    Ok(warning) => warnings[start].lines(&warning),
+                    Err(error) => prefetch_failed!(error),
                 }
             }
             if prefetches && !run_loads.ended() && (taxdb_found || database.parsed_seqids()) {
@@ -3923,8 +3967,9 @@ fn run_batch_loop(
                 // the loop and a later batch that fetches still refuses before any report (outfmt
                 // 0's prolog is written before the search).
                 if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    // No prefetch; without `taxdb.bti` the reports' fetches look nothing up.
-                    if taxdb_found {
+                    // No prefetch; without `taxdb.bti` the reports' fetches look nothing up, but
+                    // a lookup that reads a UTF8String header posts a warning (`load_read_texts`).
+                    if taxdb_found || database.db.scope_utf8_seen() {
                         debug_assert!(ordered.is_sorted_by_key(|hsp| hsp.hit.q_idx));
                         let stores = reports.stores.borrow();
                         for query in 0..(end - start) as u32 {
@@ -3943,8 +3988,9 @@ fn run_batch_loop(
                             // The first HSP of each subject whose row reads it, in report order (a
                             // subject's HSPs follow each other): the engine's identities are counted
                             // only for `nident` alone, until one of the subject's rows reads it.
-                            // Not a subject whose load throws, nor one that no report reaches
-                            // after it (`database::report_loads`, after the reports before it).
+                            // Not a subject that no report reaches after one whose load throws
+                            // (`HitLoads::reached`; `database::report_loads`, after the reports
+                            // before it).
                             let loads = super::super::database::report_loads(
                                 &run_loads,
                                 &ordered[from..to],
@@ -3955,7 +4001,7 @@ fn run_batch_loop(
                             let shown: Vec<&TblastxHsp> = match rows {
                                 SubjectFetch::Every => ordered[from..to]
                                     .iter()
-                                    .filter(|hsp| loads.loaded(hsp.hit.s_idx as usize))
+                                    .filter(|hsp| loads.reached(hsp.hit.s_idx as usize))
                                     .collect(),
                                 SubjectFetch::Never => Vec::new(),
                                 SubjectFetch::WithIdentities => {
@@ -3963,7 +4009,7 @@ fn run_batch_loop(
                                     ordered[from..to]
                                         .iter()
                                         .filter(|hsp| {
-                                            loads.loaded(hsp.hit.s_idx as usize)
+                                            loads.reached(hsp.hit.s_idx as usize)
                                                 && !read.contains(&hsp.hit.s_idx)
                                                 && identities(hsp) > 0
                                                 && read.insert(hsp.hit.s_idx)
@@ -4698,6 +4744,7 @@ fn search_query_batch<S: TbxScore>(
             searched: true,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
     let t_read_subjects = t_phase_read_subjects.elapsed();
@@ -4880,6 +4927,7 @@ fn search_query_batch<S: TbxScore>(
             searched: false,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
@@ -4933,6 +4981,7 @@ fn search_query_batch<S: TbxScore>(
             searched: false,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
             x_timing: Vec::new(),
+            fetched_utf8: None,
         });
     }
 
@@ -5482,6 +5531,9 @@ fn search_query_batch<S: TbxScore>(
         searched: true,
         queries: query_stats,
         x_timing,
+        fetched_utf8: fetch_excluded
+            .as_ref()
+            .and_then(crate::algorithm::common::database::FetchExcluded::take_utf8),
     })
 }
 

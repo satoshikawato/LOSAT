@@ -167,6 +167,10 @@ pub(crate) struct TblastxBatch {
     /// batch pipe keeps here for the batch loop to print when it takes the batch; empty
     /// otherwise (the block is printed at the end of the search). No NCBI counterpart.
     pub x_timing: Vec<String>,
+    /// The first of the batch's re-evaluation fetches (`check_oid_exclusion`) that read a header
+    /// with a UTF8String where a VisibleString is expected (`FetchExcluded::excludes`, in
+    /// increasing ordinal): NCBI's warning comes there, before its Seq-aligns' reads.
+    pub fetched_utf8: Option<crate::seqdb::SeqLocation>,
 }
 
 pub(crate) struct WorkerState<S> {

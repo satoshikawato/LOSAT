@@ -6736,16 +6736,17 @@ fn search(
                 Ok(failure) => failure,
                 Err(other) => return other,
             };
-            let searched_start = loop {
+            let (searched_start, failed_end) = loop {
                 let (input_start, searched_start) = batches.start_of(failure.query);
                 // The failed batch's search strategy request, which NCBI writes before its
                 // search: after the requests of the batches before, which their search again
                 // releases with it (`NextRequest`), or alone, before any output.
                 let span = batches.searched_span(failure.query);
+                let failed_end = span.end;
                 if searched_start == 0 {
                     write_alone(span)?;
                     write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
-                    break searched_start;
+                    break (searched_start, failed_end);
                 }
                 // The first search looked the taxonomy up for the batches before (their
                 // prefetch and reports): the search again writes those texts again, from the
@@ -6763,7 +6764,7 @@ fn search(
                     Some(next_request(span)),
                 )) {
                     Ok(earlier) => failure = earlier,
-                    Err(Ok(())) => break searched_start,
+                    Err(Ok(())) => break (searched_start, failed_end),
                     Err(other) => return other,
                 }
             };
@@ -6771,6 +6772,18 @@ fn search(
                 .diagnostics
                 .write_all(&batches.warnings[searched_start])?;
             write_request_posts(&args, &mut *outputs.diagnostics)?;
+            // NCBI's warning of its first read of a UTF8String header, where the failed batch
+            // made it (before its failure; a batch before posted its own in its reports).
+            if let Some(posts) = database.and_then(|database: &database::BlastpDatabase| {
+                database::Utf8Read::post_in(
+                    failure.utf8.as_ref(),
+                    0..failed_end,
+                    database.seqdb(),
+                    args.app.ncbi_name(),
+                )
+            }) {
+                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            }
             Err(failure.error)
         })?;
     } else if batches.stop.is_some() {
@@ -8512,9 +8525,11 @@ fn search_split_query_batches(
             if args.psi_search.is_some() {
                 refusal
             } else {
+                // Before the batch's search: nothing of it read a header.
                 database::HeaderReadError {
                     query: range.start,
                     error: refusal,
+                    utf8: None,
                 }
                 .into()
             }
@@ -9952,6 +9967,7 @@ fn run_call(
     // Item SC2d: a flat table's vectors go to the next block's build here.
     let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
+    let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
@@ -9960,7 +9976,7 @@ fn run_call(
         Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
     } else if ordinary_traceback && args.psi_search.is_some() {
         // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
-        // the position-based redo of modes 1 to 3).
+        // the position-based redo of modes 1 to 3, `FetchNotes::pssm_redo`).
         Some(pssm_hooks::pssm_traceback(
             &args,
             &contexts,
@@ -9974,6 +9990,7 @@ fn run_call(
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             blastp_parallel_pool,
+            &|heaps: &[_]| fetch_notes.pssm_redo(heaps),
             sorts_results,
         )?)
     } else if args.ungapped {
@@ -10054,6 +10071,7 @@ fn run_call(
         fetch_excluded: listed_subjects
             .as_ref()
             .map_or(&[][..], |listed| listed.fetch_excluded.as_slice()),
+        fetch_notes: &fetch_notes,
         x_win_expand,
         ordinary_traceback,
         #[cfg(all(
@@ -10127,6 +10145,7 @@ fn run_call(
             x_ih_pool::x_pooled() - x_pooled_at_start
         );
     }
+    fetch_notes.after(&redone_matches, &ordinary_hit_lists, &kappa_query_batches);
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
     if let Some(ordinary_hit_lists) = ordinary_hit_lists {
@@ -10192,15 +10211,9 @@ fn run_call(
         Some(listed) => &listed.encoded,
         None => subject_set,
     };
-    let listed_titles = match (listed_subjects.as_ref(), database) {
-        (Some(listed), Some(database)) => Some(if x_listed_lean {
-            listed.x_read_titles_lean(database, &hit_lists)?
-        } else {
-            listed.read_titles(database, &hit_lists)?
-        }),
-        _ => None,
-    };
-    report_prep::refuse_prefetch_environment(&setup, outputs)?;
+    let reads = database::CallTitles::new(database, &query_batches);
+    let listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
+    report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
     if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
         titles.refuse_ids_of_queries(&hit_lists, scopes)?;
     }
@@ -10387,7 +10400,8 @@ fn run_call(
         &prep,
         &mut query_warning_lines,
         &mut psiblast_pssms,
-    )?;
+    )
+    .map_err(|error| database::HeaderReadError::after_reads(error, reads.utf8()))?;
     // An ungapped HSP of length 0 at the first letter of a `-subject`'s searched part ends the call
     // with NCBI's exception after the formats' prologs (`empty_alignments`).
     let subject_start_exception = empty_alignments::subject_start_exception(
@@ -10643,6 +10657,7 @@ fn run_call(
             .map_or_else(Vec::new, CallRequests::take_posts),
         prefetched.posts,
         |query| reports.reader_warnings.get(query).map_or(0, Vec::len),
+        reads.header_read(args.app.ncbi_name()),
     );
     for (query, mut posts) in pssm_posts_before.into_iter().enumerate() {
         if let Some(after) = query_posts.get_mut(query).filter(|_| !posts.is_empty()) {

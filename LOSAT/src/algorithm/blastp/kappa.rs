@@ -322,9 +322,11 @@ pub(crate) fn evalue_adjust_contexts(
             let next = context_of(q_idx + 1);
             if let Some(refusal) = refuse {
                 if ctx.is_valid && ctx.aa_len > 0 && next.eff_searchsp == 0.0 {
+                    // Before the batch's redo: none of its fetches read a header.
                     return Err(crate::algorithm::common::database::HeaderReadError {
                         query: batch.start,
                         error: unified_p_without_search_space(refusal, q_idx),
+                        utf8: None,
                     }
                     .into());
                 }

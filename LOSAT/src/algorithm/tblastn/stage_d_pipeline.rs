@@ -113,10 +113,41 @@ pub(super) struct LocalStageDProfile<'a> {
     /// NCBI's fetches with `check_oid_exclusion` of a database search (`database::fetch_excluded`;
     /// `None` without a database or where they exclude nothing): the subjects they exclude leave
     /// the preliminary hit lists before the redo or the traceback.
-    pub fetch_excluded: Option<&'a crate::algorithm::common::database::FetchExcluded<'a>>,
+    pub fetch_excluded: Option<BatchFetches<'a>>,
     /// `-qcov_hsp_perc` (0: none). An ungapped search (`-ungapped`) also reaps each subject's
     /// list by it at the end of the preliminary stage (`ungapped_subject_steps`).
     pub query_cov_hsp_perc: f64,
+}
+
+/// NCBI's fetches with `check_oid_exclusion` of one query batch of a database search: the
+/// search's check (`database::fetch_excluded`, which its batches share) and the note of the
+/// batch's first fetch that read a header with a UTF8String where a VisibleString is expected
+/// (NCBI's warning comes there, before the batch's Seq-aligns: `database::read_titles`).
+#[derive(Clone, Copy)]
+pub(super) struct BatchFetches<'a> {
+    pub excluded: &'a crate::algorithm::common::database::FetchExcluded<'a>,
+    pub utf8: Option<&'a crate::seqdb::Utf8Reads>,
+}
+
+impl BatchFetches<'_> {
+    /// Notes the batch's fetch of `ordinal`, whose header holds a UTF8String where a
+    /// VisibleString is expected (`FetchExcluded::note_fetched`).
+    fn note(&self, ordinal: u32) {
+        if let Some(utf8) = self.utf8 {
+            self.excluded.note_fetched(utf8, ordinal);
+        }
+    }
+
+    /// Whether the batch's fetch of `ordinal` excludes it (`FetchExcluded::excludes`): the fetch
+    /// of an ungapped search's re-evaluation (`ungapped_subject_steps`), which reads every
+    /// subject with HSPs in the subject loop's order, so that its first read of a UTF8String
+    /// header is the least ordinal of them (`FetchExcluded::excludes_noting`, in the batch's note).
+    fn excludes(&self, ordinal: u32) -> Result<bool, crate::seqdb::SeqDbError> {
+        match self.utf8 {
+            Some(utf8) => self.excluded.excludes_noting(ordinal, utf8),
+            None => self.excluded.excludes(ordinal),
+        }
+    }
 }
 
 /// The numbers of a database (`-db`) as NCBI's setup reads them from its sequence source
@@ -1608,7 +1639,6 @@ fn run_local_search_with_redo<R: MatchRedo>(
     } else {
         preliminary_lists.sort_by(|(qa, oa, _), (qb, ob, _)| oa.cmp(ob).then_with(|| qb.cmp(qa)));
     }
-
     // The subject of a list in the stream, for NCBI's fetches with `check_oid_exclusion`.
     let list_ordinal = |(_, oid, _): &(usize, usize, LinkedHspList)| u32::try_from(*oid).ok();
     let fetch_refusal = |failed| FetchExcluded::refusal(failed, "TBLASTN");
@@ -1631,10 +1661,18 @@ fn run_local_search_with_redo<R: MatchRedo>(
         // `blastp::blast_engine::database::exclude_fetched`): the traceback's fetches (`check_oid_exclusion`) exclude a subject that
         // the negative seqid list keeps without a line; its lists leave here, after the trim of
         // `ADAPTIVE_CBS` (an ungapped search returned above).
-        if let Some(excluded) = profile.fetch_excluded {
-            excluded
+        // The traceback fetches every listed subject: the first whose header holds a UTF8String
+        // where a VisibleString is expected posts NCBI's warning (`FetchedUtf8::traceback_first`).
+        if let Some(fetches) = profile.fetch_excluded {
+            let fetched = fetches
+                .excluded
                 .retain(&mut preliminary_lists, list_ordinal)
                 .map_err(fetch_refusal)?;
+            if let Some(ordinal) =
+                crate::algorithm::common::database::FetchedUtf8::traceback_first(&fetched)
+            {
+                fetches.note(ordinal);
+            }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1481-1501
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1707
@@ -1661,9 +1699,18 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // same subjects; their lists stay in the stream as markers (`FetchMarks`): the loops below test
     // a marker's early termination as any list's, and one that passes clears NCBI's status of the
     // Smith-Waterman redo (`SwBatchStatus::excluded_at_fetch`) and is neither redone nor kept.
-    let excluded_at_fetch =
-        FetchMarks::of(profile.fetch_excluded, &preliminary_lists, list_ordinal)
-            .map_err(fetch_refusal)?;
+    // The one read of their headers also gives the subjects whose header holds a UTF8String where
+    // a VisibleString is expected (`fetched_utf8`, in the stream's order): the first that the
+    // redo fetches posts NCBI's warning (`RedoFetchNotes::redo`, after the redo or before the
+    // batch's failure).
+    let (excluded_at_fetch, fetched_utf8) = FetchMarks::of_noting(
+        profile.fetch_excluded.map(|fetches| fetches.excluded),
+        &preliminary_lists,
+        list_ordinal,
+        |(context, _, list)| (*context, list.best_evalue, !list.hsps.is_empty()),
+    )
+    .map_err(fetch_refusal)?;
+    let redo_notes = RedoFetchNotes::new(profile.fetch_excluded, fetched_utf8, &preliminary_lists);
     // A PSSM query's Smith-Waterman redo (`-in_pssm`, composition-based statistics 0) is refused at
     // its first match, the first list that the fetch keeps (the heaps are empty there, so early
     // termination lets it go on): `match_redo::sw_pssm_refusal`.
@@ -1671,6 +1718,11 @@ fn run_local_search_with_redo<R: MatchRedo>(
         && profile.pssm.is_some()
         && (0..preliminary_lists.len()).any(|index| !excluded_at_fetch.excluded(index))
     {
+        // The heaps are empty there: every list with HSPs up to that match is fetched.
+        let first_kept = (0..preliminary_lists.len())
+            .find(|&index| !excluded_at_fetch.excluded(index))
+            .unwrap_or(usize::MAX);
+        redo_notes.first(first_kept);
         return Err(sw_pssm_refusal());
     }
     // With a `-db` stream, the subjects of the lists that the redo fetches, each read
@@ -2096,7 +2148,8 @@ fn run_local_search_with_redo<R: MatchRedo>(
                         ),
                     };
                     let item =
-                        match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)?;
+                        match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)
+                            .inspect_err(|_| redo_notes.redo(&heaps, first + at))?;
                     keep_item(*context, &mut heaps, item);
                 }
             }
@@ -2139,7 +2192,8 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     .reads_heaps(&redo_params)
                     .then_some(&mut heaps[..]),
             );
-            let item = match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)?;
+            let item = match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)
+                .inspect_err(|_| redo_notes.redo(&heaps, index))?;
             keep_item(context, &mut heaps, item);
         }
     }
@@ -2147,11 +2201,13 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // `match_redo::sw_batch_failed`)
     // The status of the last match the Smith-Waterman redo reached fails the batch.
     if R::SMITH_WATERMAN && sw_status.failed() {
+        redo_notes.redo(&heaps, usize::MAX);
         return Err(sw_batch_failed(
             heaps.first().is_some_and(|heap| heap.len() > 0),
         ));
     }
 
+    redo_notes.redo(&heaps, usize::MAX);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
     // Blast_HSPResultsSortByEvalue(results); /* positive local TotLen */
@@ -2171,6 +2227,113 @@ fn run_local_search_with_redo<R: MatchRedo>(
         results.push(hitlist);
     }
     Ok(results)
+}
+
+/// A subject of the batch's lists whose header holds a UTF8String where a VisibleString is
+/// expected (`FetchMarks::of_noting`), with its query, its list's best E-value and whether the
+/// list has HSPs.
+type FetchedRead = (
+    crate::algorithm::common::database::FetchedUtf8,
+    (usize, f64, bool),
+);
+
+/// The notes of a batch's redo of the fetches that read a header with a UTF8String where a
+/// VisibleString is expected: the subjects of such headers (`fetched`, in the stream's order,
+/// `FetchMarks::of_noting`) and the query and subject of each list of the stream (`stream`,
+/// `redo_stream`); nothing is noted without the batch's fetches.
+struct RedoFetchNotes<'a> {
+    fetches: Option<BatchFetches<'a>>,
+    fetched: Vec<FetchedRead>,
+    stream: Vec<(usize, i32)>,
+}
+
+impl<'a> RedoFetchNotes<'a> {
+    fn new<L>(
+        fetches: Option<BatchFetches<'a>>,
+        fetched: Vec<FetchedRead>,
+        lists: &[(usize, usize, L)],
+    ) -> Self {
+        let stream = redo_stream(lists, &fetched);
+        RedoFetchNotes {
+            fetches,
+            fetched,
+            stream,
+        }
+    }
+
+    /// [`note_redo_fetched`] of the lists up to the stream's place `until`, with the heaps
+    /// `heaps`.
+    fn redo(&self, heaps: &[CompoHeap], until: usize) {
+        if let Some(fetches) = self.fetches {
+            note_redo_fetched(fetches, heaps, &self.fetched, &self.stream, until);
+        }
+    }
+
+    /// [`note_first_fetched`] of the lists up to the stream's place `until`.
+    fn first(&self, until: usize) {
+        if let Some(fetches) = self.fetches {
+            note_first_fetched(fetches, &self.fetched, until);
+        }
+    }
+}
+
+/// The query and subject of each list of the redo's stream `lists`, in its order (markers too),
+/// where a subject of `fetched` has a header with a UTF8String where a VisibleString is expected
+/// (`note_redo_fetched`); empty without one.
+#[cold]
+#[inline(never)]
+fn redo_stream<L>(lists: &[(usize, usize, L)], fetched: &[FetchedRead]) -> Vec<(usize, i32)> {
+    if fetched.is_empty() {
+        return Vec::new();
+    }
+    lists
+        .iter()
+        .map(|(context, oid, _)| (*context, *oid as i32))
+        .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575 (cited at
+// `blastp::blast_engine::database::exclude_fetched`)
+/// Notes the batch's first fetch of the redo (composition-based or Smith-Waterman, one loop over
+/// the stream `stream`) that read a header with a UTF8String where a VisibleString is expected
+/// (`fetched`, in the stream's order), of the lists up to the stream's place `until` (the match
+/// whose redo failed the batch, or every list), as `common::database::first_redo_fetch` finds
+/// it, with each query's heap as at the turn (the records of `heaps`, as the redo left them, from
+/// the lists before it).
+#[cold]
+#[inline(never)]
+fn note_redo_fetched(
+    fetches: BatchFetches<'_>,
+    heaps: &[CompoHeap],
+    fetched: &[FetchedRead],
+    stream: &[(usize, i32)],
+    until: usize,
+) {
+    let first =
+        crate::algorithm::common::database::first_redo_fetch(fetched, stream, until, |before| {
+            heaps
+                .iter()
+                .enumerate()
+                .map(|(query, heap)| heap.redo_heap(|oid| before.contains(&(query, oid))))
+                .collect()
+        });
+    if let Some(ordinal) = first {
+        fetches.note(ordinal);
+    }
+}
+
+/// Notes the first fetch, of the lists up to the stream's place `until`, that read a header
+/// with a UTF8String where a VisibleString is expected (`fetched`) where the redo's heaps are
+/// still empty, so that no early termination test ends a list with HSPs.
+#[cold]
+#[inline(never)]
+fn note_first_fetched(fetches: BatchFetches<'_>, fetched: &[FetchedRead], until: usize) {
+    if let Some((read, _)) = fetched
+        .iter()
+        .find(|(read, (_, _, has_hsps))| *has_hsps && read.index <= until)
+    {
+        fetches.note(read.ordinal);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154
@@ -3631,7 +3794,8 @@ struct UngappedSubjectSteps<'a> {
     matrix: ScoringMatrix,
     /// `-qcov_hsp_perc` (0: none).
     query_cov_hsp_perc: f64,
-    fetch_excluded: Option<&'a crate::algorithm::common::database::FetchExcluded<'a>>,
+    /// The batch's fetches with `check_oid_exclusion` (`LocalStageDProfile::fetch_excluded`).
+    fetch_excluded: Option<BatchFetches<'a>>,
 }
 
 impl<'a> UngappedSubjectSteps<'a> {
@@ -3734,7 +3898,9 @@ enum SubjectLinking {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2686-2734
 /// The steps of an ungapped search after the preliminary search of subject `oid` whose list
 /// `linked` kept HSPs: the re-evaluation (`Blast_HSPListReevaluateUngapped`: a subject that the
-/// fetch excludes loses its HSPs; each HSP is scored again on the working query, `frames`, and the
+/// fetch excludes loses its HSPs, and the fetch's read of a header with a UTF8String where a
+/// VisibleString is expected is the batch's, `BatchFetches::excludes`; each HSP is scored again
+/// on the working query, `frames`, and the
 /// translation of the subject's bases with their ambiguities, `TargetTranslation`, cut to its best
 /// part, and deleted below its context's word cutoff), the linking or the e-values again
 /// (`relink`, with the subject's length / 3 as the e-values' length), the reap by the preliminary
@@ -3750,9 +3916,9 @@ fn ungapped_subject_steps(
     linked: &LinkedHspList,
     relink: impl Fn(&[(usize, GappedHsp)]) -> Result<LinkedHspList>,
 ) -> Result<LinkedHspList> {
-    if let Some(excluded) = steps.fetch_excluded {
+    if let Some(fetches) = steps.fetch_excluded {
         let ordinal = u32::try_from(oid)?;
-        let excludes = excluded.excludes(ordinal).map_err(|error| {
+        let excludes = fetches.excludes(ordinal).map_err(|error| {
             crate::algorithm::common::database::FetchExcluded::refusal((ordinal, error), "TBLASTN")
         })?;
         if excludes {

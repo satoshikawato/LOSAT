@@ -2,34 +2,80 @@ use super::*;
 
 use crate::cli::{try_parse_from, Cli, Commands};
 
-// TBLASTN's `-query_gencode` and `-db_gencode`: `genetic_code_number`, then the codes LOSAT
-// builds (32 included, Stage A); "invalid genetic code ID" for what is not a number of 0 to
-// 255 written without a minus sign.
+// TBLASTN's `-db_gencode`: the genetic codes of NCBI's reader and LOSAT's code 32
+// (PD-TLOSAN-LOCAL-GENCODE-32); a value that is no code is NCBI's argument error.
 #[test]
 fn tblastn_genetic_codes_are_read_as_ncbi_reads_them() {
-    for value in [
-        "-0",
-        "-5",
-        "256",
-        "2147483648",
-        "",
-        " 5",
-        "5 ",
-        "5.0",
-        "0x",
-        "0x5",
+    for (value, taken) in [
+        ("1", true),
+        ("+5", true),
+        ("005", true),
+        ("11", true),
+        ("32", true),
+        ("33", true),
+        ("0", false),
+        ("7", false),
+        ("8", false),
+        ("255", false),
+        ("abc", false),
+        ("", false),
+    ] {
+        assert_eq!(parse(&["-db_gencode", value]).is_ok(), taken, "{value:?}");
+    }
+}
+
+/// The posts of an argument error's report (`ArgvError::Report`): what follows NCBI's line of `=`.
+fn posts_of(error: crate::cli::ArgvError) -> String {
+    let crate::cli::ArgvError::Report(bytes) = error else {
+        panic!("not a report: {error:?}");
+    };
+    let text = String::from_utf8(bytes).unwrap();
+    let rule = format!("{}\n\n", "=".repeat(72));
+    text.split_once(&rule)
+        .expect("the line of `=`")
+        .1
+        .to_string()
+}
+
+// NCBI BLAST+ 2.17.0 tblastn `-query <q> -subject <s> -db_gencode <value>` (frozen on the
+// workstation with `env -i`, line RG item K4i-2b round 2): a value that converts but is no code is
+// the constraint's error, one that NCBI's integer reading refuses is its conversion error, with
+// NCBI's posts (in LOSAT's words, `crate::wording::losat_text`). The edge values that the old
+// parser refused with its own text.
+#[test]
+fn tblastn_genetic_code_errors_are_ncbis_posts() {
+    let constraint = |value: &str| {
+        let line = format!(
+            "Argument \"db_gencode\". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `{value}'"
+        );
+        format!("Error: {line}\nError:  (CArgException::eConstraint) {line}\n")
+    };
+    let converted = |value: &str, position: usize| {
+        let line = format!("Argument \"db_gencode\". Argument cannot be converted:  `{value}'");
+        format!(
+            "Error: Cannot convert string '{value}' to Int8 (m_Pos = {position})\nError: {line}\nError:  (CArgException::eConvert) {line}\n"
+        )
+    };
+    let range = "Argument \"db_gencode\". Integer value is out of range:  `2147483648'";
+    for (value, ncbi) in [
+        ("-0", constraint("-0")),
+        ("-5", constraint("-5")),
+        ("256", constraint("256")),
+        ("0x", constraint("0x")),
+        ("0x5", constraint("0x5")),
+        (" 5", converted(" 5", 0)),
+        ("5 ", converted("5 ", 1)),
+        ("5.0", converted("5.0", 1)),
+        (
+            "2147483648",
+            format!("Error: {range}\nError:  (CArgException::eConvert) {range}\n"),
+        ),
     ] {
         assert_eq!(
-            tblastn_genetic_code(value),
-            Err("invalid genetic code ID".to_string()),
+            posts_of(parse(&["-db_gencode", value]).unwrap_err()),
+            crate::wording::losat_text(&ncbi),
             "{value:?}"
         );
-    }
-    for (value, expected) in [("+5", 5), ("005", 5), ("11", 11), ("33", 33)] {
-        assert_eq!(tblastn_genetic_code(value), Ok(expected), "{value}");
-    }
-    for value in ["0", "7", "8", "255"] {
-        assert!(tblastn_genetic_code(value).is_err(), "{value}");
     }
 }
 
@@ -40,7 +86,7 @@ fn lcase_masking_flag_is_explicit() {
     assert!(parse(&["-lcase_masking"]).unwrap().lcase_masking);
 }
 
-fn parse(extra: &[&str]) -> std::result::Result<TblastnArgs, clap::Error> {
+fn parse(extra: &[&str]) -> std::result::Result<TblastnArgs, crate::cli::ArgvError> {
     let mut argv = vec!["losat", "tblastn", "-query", "q.faa", "-subject", "s.fna"];
     argv.extend_from_slice(extra);
     let cli: Cli = try_parse_from(argv)?;
@@ -132,10 +178,19 @@ fn ordinary_defaults_and_code32_are_accepted() {
 // defines ID 32 for the TBLASTN-only product decision.
 #[test]
 fn invalid_codes_are_explicit_errors() {
-    for id in ["0", "7", "8", "17", "20", "34", "255", "256", "abc", "-1"] {
+    // NCBI's reader: an integer outside NCBI's set, a word that is not an integer.
+    for id in ["0", "7", "8", "17", "20", "34", "255", "256", "-1"] {
         let error = parse(&["-db_gencode", id]).unwrap_err().to_string();
-        assert!(error.contains("genetic code"), "{id}: {error}");
+        assert!(
+            error.contains("Argument \"db_gencode\". Illegal value, expected values between: "),
+            "{id}: {error}"
+        );
     }
+    let error = parse(&["-db_gencode", "abc"]).unwrap_err().to_string();
+    assert!(
+        error.contains("Argument \"db_gencode\". Argument cannot be converted:  `abc'"),
+        "{error}"
+    );
 }
 
 // NCBI's checks of the options (c++/src/algo/blast/core/blast_options.c BLAST_ValidateOptions, the option
@@ -361,8 +416,11 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
     ] {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
+    // With a database (`-gilist` excludes `-subject` in NCBI's reader).
     for extra in [&["-gilist", "ids.gil"][..], &["-remote"]] {
-        let error = crate::cli::render_message(&parse(extra).unwrap_err());
+        let mut argv = vec!["losat", "tblastn", "-query", "q.faa", "-db", "db"];
+        argv.extend_from_slice(extra);
+        let error = try_parse_from(argv).unwrap_err().to_string();
         assert!(
             error.contains("is not supported by LOSAT's TBLASTN"),
             "{extra:?}: {error}"
@@ -383,7 +441,7 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
 }
 
 /// The tblastn arguments `-in_pssm <psiblast's frozen PSSM> -subject s.fna <extra>`.
-fn parse_pssm(extra: &[&str]) -> std::result::Result<TblastnArgs, clap::Error> {
+fn parse_pssm(extra: &[&str]) -> std::result::Result<TblastnArgs, crate::cli::ArgvError> {
     let pssm = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/db_search/db.ps.asn.rnd.6.asn"
@@ -485,7 +543,7 @@ fn in_pssm_errors_are_ncbis_and_losats() {
     for extra in [&["-query", "q.faa"][..], &["-query_loc", "1-10"]] {
         let mut argv = vec!["losat", "tblastn", "-in_pssm", pssm, "-subject", "s.fna"];
         argv.extend_from_slice(extra);
-        assert!(try_parse_from::<Cli, _, _>(argv).is_err(), "{extra:?}");
+        assert!(try_parse_from(argv).is_err(), "{extra:?}");
     }
 }
 

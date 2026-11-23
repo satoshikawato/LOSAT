@@ -16,7 +16,7 @@ use crate::blastinput::value_parsers::*;
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
 // `-in_msa` makes the PSSM from an alignment (`in_msa.rs`) and searches it as `-in_pssm` does;
-// `-phi_pattern` is refused by the parser (its rows of `ncbi_app::args::refusal`).
+// `-phi_pattern` is refused by name after the reader (its rows of `ncbi_app::args::refusal`).
 // The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
@@ -25,19 +25,17 @@ use crate::blastinput::value_parsers::*;
 pub struct PsiblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     // `-` (the default) is standard input.
-    #[arg(long, default_value = "-", value_parser = ncbi_input_path(), value_name = "PATH")]
+    #[arg(long, default_value = "-", value_parser = ncbi_path(), value_name = "PATH")]
     pub query: PathBuf,
     // Optional for the parser: a missing `-subject` is NCBI's error after the parsing
     // (`blastinput/app.rs` `missing_subject_error`).
-    #[arg(long, value_parser = ncbi_input_path(), value_name = "PATH")]
+    #[arg(long, value_parser = ncbi_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
-    // The exclusion is an error of the argument parser: LOSAT's parser reports it with its own
-    // text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
+    // NCBI's argument reader reports the exclusion (`cli::reader`).
     #[arg(
         long,
         value_name = "NAME",
-        conflicts_with_all = ["subject", "subject_loc"],
         help = "BLAST database name (a protein database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
@@ -69,7 +67,7 @@ pub struct PsiblastArgs {
     // psiblast's arguments include `CGenericSearchArgs` (psiblast_args.cpp:66-67). The value is
     // blastp's (`BlastpArgs::searchsp`): every round, those of `-in_pssm` too, then runs without
     // the Gumbel block (`ResolvedBlastpArgs::old_fsc`).
-    #[arg(long, value_parser = nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    #[arg(long, value_parser = ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-245, 321-323
     // psiblast's `CGenericSearchArgs` keeps it (psiblast_args.cpp:67; blastp suppresses it). A
@@ -78,49 +76,49 @@ pub struct PsiblastArgs {
     // (`BlastpArgs::sum_stats`, `core::link_hsps`).
     #[arg(long, value_parser = ncbi_boolean, help = "Use sum statistics")]
     pub sum_stats: Option<bool>,
-    #[arg(long, value_parser = psiblast_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
+    #[arg(long, value_parser = ncbi_double, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
-    #[arg(long, value_parser = psiblast_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion]")]
+    #[arg(long, value_parser = ncbi_double, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion]")]
     pub threshold: Option<f64>,
-    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3]")]
+    #[arg(long, value_parser = ncbi_integer, help = "Word size for wordfinder algorithm [default: 3]")]
     pub word_size: Option<i32>,
-    #[arg(long, default_value_t = 1, value_parser = blastn_count)]
+    #[arg(long, default_value_t = 1, value_parser = ncbi_integer_as::<usize>)]
     pub num_threads: usize,
-    #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
+    #[arg(long, value_name = "PATH", value_parser = ncbi_path())]
     pub out: Option<PathBuf>,
     /// The search strategy file (`-export_search_strategy`, cited at
     /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
     /// are read (`-in_pssm` included: the request holds the PSSM, `PsiSearch::request`).
-    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    #[arg(long, value_name = "filename", value_parser = ncbi_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
-    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
+    #[arg(long, value_parser = ncbi_integer_as::<usize>, help = "Maximum number of aligned sequences to keep [default: 500]")]
     pub max_target_seqs: Option<usize>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
-    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
+    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = ncbi_integer_as::<usize>, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
     pub num_descriptions: Option<usize>,
-    #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
+    #[arg(long = "num_alignments", value_name = "int_value", value_parser = ncbi_integer_as::<usize>, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
     /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
     /// `blastinput::report_counts::FormattingArgs`).
     #[command(flatten)]
     pub formatting: crate::blastinput::report_counts::FormattingArgs,
-    #[arg(long = "max_hsps", value_parser = blastn_count)]
+    #[arg(long = "max_hsps", value_parser = ncbi_integer_as::<usize>)]
     pub max_hsps_per_subject: Option<usize>,
-    #[arg(long = "qcov_hsp_perc", value_parser = psiblast_query_coverage, help = "Percent query coverage per hsp")]
+    #[arg(long = "qcov_hsp_perc", value_parser = ncbi_double, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3340
     // psiblast's `CHspFilteringArgs` (psiblast_args.cpp:79), blastp's (`BlastpArgs::culling_limit`):
     // every round culls, the PSSM rounds and `-in_pssm` too (`pssm_hooks::pssm_prelim`).
-    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit")]
+    #[arg(long, value_parser = ncbi_integer, help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit")]
     pub culling_limit: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
     // psiblast's `CHspFilteringArgs`, blastp's (`BlastpArgs::best_hit_overhang`): every round,
     // the PSSM rounds and `-in_pssm` too (`pssm_hooks::pssm_prelim`).
     /// Best Hit algorithm overhang value (recommended value: 0.1)
-    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    #[arg(long, value_parser = ncbi_double, value_name = "float_value")]
     pub best_hit_overhang: Option<f64>,
     /// Best Hit algorithm score edge value (recommended value: 0.1)
-    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    #[arg(long, value_parser = ncbi_double, value_name = "float_value")]
     pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
     // psiblast's `CHspFilteringArgs`, blastp's (`BlastpArgs::subject_besthit`): every round.
@@ -131,19 +129,19 @@ pub struct PsiblastArgs {
     // (cited at `BlastpArgs::xdrop_ungap`)
     // psiblast's `CGenericSearchArgs` (psiblast_args.cpp:67): blastp's X-drops in bits, which
     // every round converts with its own Karlin-Altschul blocks (`pssm_hooks`).
-    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = psiblast_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
+    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
     pub xdrop_ungap: Option<f64>,
-    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = psiblast_real, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
+    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
     pub xdrop_gap: Option<f64>,
-    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = psiblast_real, help = "X-dropoff value (in bits) for final gapped alignment [default: 25]")]
+    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for final gapped alignment [default: 25]")]
     pub xdrop_gap_final: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1058-1079
     // psiblast's `CGapTriggerArgs` (psiblast_args.cpp:105; blastp has none): the cutoff of the
     // ungapped alignments that a gapped extension starts from, in every round
     // (`ResolvedBlastpArgs::gap_trigger_bits`).
-    #[arg(long = "gap_trigger", value_name = "float_value", default_value = "22", value_parser = psiblast_real, help = "Number of bits to trigger gapping")]
+    #[arg(long = "gap_trigger", value_name = "float_value", default_value = "22", value_parser = ncbi_double, help = "Number of bits to trigger gapping")]
     pub gap_trigger: f64,
-    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
+    #[arg(long, value_parser = ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
     #[arg(long, help = "Scoring matrix name [default: BLOSUM62]")]
     pub matrix: Option<String>,
@@ -183,20 +181,19 @@ pub struct PsiblastArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
-        conflicts_with_all = crate::blastinput::db_filter::DB_FILTER_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
-    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 12, 18 and 20", "6, 7, 10 and 20", ""))]
+    #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1147-1152
     #[arg(
         long = "num_iterations",
         default_value = "1",
         value_name = "int_value",
-        value_parser = nonnegative_ncbi_integer,
+        value_parser = ncbi_integer,
         help = "Number of iterations to perform (0 means run until convergence)"
     )]
     pub num_iterations: i32,
@@ -217,7 +214,7 @@ pub struct PsiblastArgs {
     #[arg(
         long,
         default_value = "0.002",
-        value_parser = psiblast_real,
+        value_parser = ncbi_double,
         help = "E-value inclusion threshold for pairwise alignments"
     )]
     pub inclusion_ethresh: f64,
@@ -250,45 +247,36 @@ pub struct PsiblastArgs {
     )]
     pub save_each_pssm: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1231-1247
-    // The exclusions are errors of the argument parser: LOSAT's parser reports them with its own
-    // text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is opened and read with
-    // the options (`algorithm::psiblast::in_pssm`); `-phi_pattern` is refused by the parser
-    // (its rows of `ncbi_app::args::refusal`).
+    // NCBI's argument reader reports the exclusions (`cli::reader`). The file is opened and read with
+    // the options (`algorithm::psiblast::in_pssm`); `-phi_pattern` is refused by name after the reader (its rows of
+    // `ncbi_app::args::refusal`).
     #[arg(
         long = "in_pssm",
         value_name = "psi_chkpt_file",
-        value_parser = ncbi_input_path(),
-        conflicts_with_all = ["query", "query_loc"],
+        value_parser = ncbi_path(),
         help = "PSI-BLAST checkpoint file"
     )]
     pub in_pssm: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1184-1229
     // `msa_exclusions` are `-in_pssm`, `-query`, `-query_loc` and `-phi_pattern`; the last is
-    // refused by name (its rows of `ncbi_app::args::refusal`) before any exclusion is looked at. The
-    // exclusions and requirements are errors of the argument parser, which LOSAT's parser reports
-    // with its own text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is read with
-    // the options (`algorithm::psiblast::in_msa`).
+    // refused by name (its rows of `ncbi_app::args::refusal`) after NCBI's argument reader, which reports the
+    // exclusions and requirements (`cli::reader`). The file is read with the options (`algorithm::psiblast::in_msa`).
     #[arg(
         long = "in_msa",
         value_name = "align_restart",
-        value_parser = ncbi_input_path(),
-        conflicts_with_all = ["query", "query_loc", "in_pssm"],
+        value_parser = ncbi_path(),
         help = "File name of multiple sequence alignment to restart PSI-BLAST"
     )]
     pub in_msa: Option<PathBuf>,
     #[arg(
         long = "msa_master_idx",
         value_name = "index",
-        value_parser = |value: &str| ncbi_integer_at_least(value, 1),
-        requires = "in_msa",
-        conflicts_with_all = ["ignore_msa_master", "query", "query_loc", "in_pssm"],
+        value_parser = ncbi_integer,
         help = "Ordinal number (1-based index) of the sequence to use as a master in the multiple sequence alignment. If not provided, the first sequence in the multiple sequence alignment will be used"
     )]
     pub msa_master_idx: Option<i32>,
     #[arg(
         long = "ignore_msa_master",
-        requires = "in_msa",
-        conflicts_with_all = ["msa_master_idx", "query", "query_loc", "in_pssm"],
         help = "Ignore the master sequence when creating PSSM"
     )]
     pub ignore_msa_master: bool,
@@ -352,7 +340,7 @@ impl PsiblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
-            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::named_refusal`).
+            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::reader::named_refusal`).
             html: false,
             parse_deflines: self.parse_deflines,
             id_scope: None,

@@ -431,7 +431,7 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// blast_args.cpp:2364-2381: `-db` excludes `-subject` (LOSAT's parser reports it);
+// blast_args.cpp:2364-2381: `-db` excludes `-subject` (NCBI's argument reader reports it, exit status 1);
 // blast_args.cpp:2558-2562: neither is NCBI's options error; blast_app_util.hpp:185-203: a
 // database that is not found is LOSAT's `LOSAT database error` (NCBI's `BLAST Database error`), exit status 2.
 #[test]
@@ -445,7 +445,7 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
         .arg(fasta("PemoMJNVA.faa"))
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let output = losat()
         .arg("blastx")
         .arg("-query")

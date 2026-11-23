@@ -217,8 +217,8 @@ fn the_sequence_file_is_read_by_the_first_batch_with_a_valid_context() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// blast_args.cpp:2364-2381: `-db` excludes `-subject` and `-subject_loc` (LOSAT's parser
-// reports it); blast_app_util.hpp:185-203: a database that is not found is NCBI's
+// blast_args.cpp:2364-2381: `-db` excludes `-subject` and `-subject_loc` (NCBI's argument
+// reader reports it, exit status 1); blast_app_util.hpp:185-203: a database that is not found is NCBI's
 // `LOSAT database error` (NCBI's `BLAST Database error`), exit status 2.
 #[test]
 fn database_arguments_are_checked_as_ncbi_checks_them() {
@@ -230,7 +230,7 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
         .arg(fasta("MelaMJNV.fasta"))
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let dir = temp_dir("missing");
     let missing = dir.join("no_such_db");
     let output = losat()

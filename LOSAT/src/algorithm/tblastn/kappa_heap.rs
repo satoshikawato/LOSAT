@@ -79,6 +79,24 @@ impl CompoHeap {
         self.records.len() >= self.threshold && self.worst_evalue <= self.ecutoff
     }
 
+    /// The heap as `common::database::redo_fetches` reads it at a match's turn, `before` telling
+    /// whether a record's subject came before the match in the redo.
+    pub(super) fn redo_heap(
+        &self,
+        before: impl Fn(i32) -> bool,
+    ) -> crate::algorithm::common::database::RedoHeap {
+        crate::algorithm::common::database::RedoHeap {
+            ecutoff: self.ecutoff,
+            heap_threshold: self.threshold,
+            inserted_before: self
+                .records
+                .iter()
+                .filter(|record| record.best_evalue <= self.ecutoff && before(record.subject_index))
+                .count(),
+            ends_early: true,
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:163-211,237-245
     fn heapify_down(&mut self, start: usize) {
         let mut position = start;

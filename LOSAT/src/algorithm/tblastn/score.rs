@@ -235,7 +235,7 @@ impl TbnScore for MatrixScore {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
-    //     subject->sequence, gap_align->sbp, q_start, length, s_start, length);
+    // Selects the gapped alignment start offset from the query and subject windows.
     #[inline(always)]
     fn gapped_start(
         self,
@@ -253,8 +253,8 @@ impl TbnScore for MatrixScore {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 and
     // c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3405-3413,3419-3420,3435-3437
-    // A negative Int4 length read as Uint4 is above HSP_MAX_WINDOW, and q_start + MIN(q_length,
-    // s_length) wraps back to q_start + length, so only the first window is scored: its sum over
+    // A negative Int4 length read as Uint4 is above HSP_MAX_WINDOW, and `q_start` plus `min(q_length,
+    // s_length)` wraps back to `q_start + length`, so only the first window is scored: its sum over
     // the bytes NCBI reads gives q_start + 5 when above 0, else q_start (`gapped_start_int4` of
     // `blastp::gapalign`, which BLASTX shares). BLASTP's own function for this
     // (`blastp::blast_engine`) reads its sequences with the letters past them as the sentinel
@@ -356,7 +356,7 @@ impl TbnScore for MatrixScore {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3953:
-    // status = s_BlastProtGappedAlignment(...);
+    // Computes preliminary gapped protein alignment score via `s_BlastProtGappedAlignment`.
     #[inline(always)]
     fn score_only(
         self,
@@ -385,7 +385,7 @@ impl TbnScore for MatrixScore {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-449:
-    // retval = BlastGetOffsetsForGappedAlignment(...);
+    // Computes gapped alignment starting offsets via `BlastGetOffsetsForGappedAlignment`.
     #[inline(always)]
     fn offsets(
         self,

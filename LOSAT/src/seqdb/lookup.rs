@@ -26,6 +26,8 @@ pub struct IdLookup<'a> {
     /// The LMDB files of a version 5 database; none for version 4.
     entries: Vec<LmdbEntry>,
     isams: Isams<'a>,
+    /// The first read of a candidate's header that `x_CheckVersions` makes (`take_utf8`).
+    utf8: super::Utf8Reads,
 }
 
 /// The ISAMs of each volume (GIs; for version 4 also the strings, the PIGs and the trace ids),
@@ -90,6 +92,7 @@ impl SeqDb {
             db: self,
             entries,
             isams: Isams::Own(VolumeIsams::new(self.volumes.len(), false)),
+            utf8: Default::default(),
         })
     }
 }
@@ -110,6 +113,13 @@ fn opened<T>(
 }
 
 impl IdLookup<'_> {
+    /// The first of the lookups' reads of a header (`x_CheckVersions` of an accession whose
+    /// version the lookup stripped) that took a UTF8String for a VisibleString, which the caller
+    /// takes after its lookup: NCBI posted its warning there (`seqdb::Utf8Reads`).
+    pub fn take_utf8(&self) -> Option<super::Utf8Note> {
+        self.utf8.take()
+    }
+
     /// `x_CheckOrFindOID` of `oid` together with the test that `oid` is `oid0` once NCBI's OID list
     /// is set up (the search's lookups of its reported Seq-ids, after the search): an OID the
     /// database includes.
@@ -246,9 +256,24 @@ impl IdLookup<'_> {
         let local = |oids: Vec<u32>| oids.into_iter().map(|oid| oid as i32).collect();
         let found = |oid: Option<i32>| oid.into_iter().collect();
         Ok(match simplified.id_type {
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2768-2770
+            // `x_CheckVersions` reads the header of each candidate, with the warning of a
+            // UTF8String that its read takes for a VisibleString (`take_utf8`).
             SeqDbIdType::String => match string_isam()? {
                 Some(isam) => local(isam.string_id_to_oids(acc, simplified, &mut |oid| {
-                    let set = volume.defline_set(oid)?;
+                    let read = super::SeqLocation {
+                        volume: at,
+                        vol_oid: oid,
+                        id: self.db.volume_starts[at] + oid,
+                    };
+                    // A read that fails may have posted the warning before (the note's path is
+                    // then that of the string before the failure, `utf8_string_path`).
+                    let set = volume
+                        .defline_set(oid)
+                        .inspect_err(|_| self.utf8.note(0, read))?;
+                    if set.utf8 {
+                        self.utf8.note(0, read);
+                    }
                     Ok(set
                         .deflines
                         .into_iter()
@@ -467,6 +492,7 @@ impl SeqDb {
                 db: self,
                 entries: Vec::new(),
                 isams: Isams::Shared(isams),
+                utf8: Default::default(),
             },
             kept: std::cell::RefCell::new(envs.iter().map(|_| LmdbKept::default()).collect()),
             envs,
@@ -515,6 +541,11 @@ fn is_string_id(id: &ParsedSeqId) -> bool {
 }
 
 impl SeqidLookup<'_> {
+    /// [`IdLookup::take_utf8`] of the lookups of the Seq-align ids.
+    pub fn take_utf8(&self) -> Option<super::Utf8Note> {
+        self.volumes.take_utf8()
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:903-916
     /// `CSeqDB::SeqidToOid`: the OID that NCBI's lookup of the Seq-id `seqid` gives first, the
     /// one whose Bioseq NCBI's BLAST database data loader serves for it

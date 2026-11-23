@@ -29,9 +29,9 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::{
-    anchored, blastp_scan_mode_definition, database, psi_round, pssm_hooks, query_record_masks,
-    query_rows, set_row_masks, write_blastp_tabular_hit_lists, x_soft_subject, BlastpRanges,
-    BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
+    anchored, blastp_scan_mode_definition, database, psi_round, pssm_hooks, query_rows,
+    result_query_masks, set_row_masks, write_blastp_tabular_hit_lists, x_soft_subject,
+    BlastpRanges, BlastpReport, BlastpReports, ShownQueries, ShownSubjects,
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -182,7 +182,8 @@ pub(super) fn write_seqalign(
     };
     seqalign::write_blastp_seqalign(
         serial,
-        args.app == BlastpApp::Rpsblast,
+        // psiblast's own "Blast Type" in every round, and rpsblast's.
+        args.app.program_type(),
         !args.ungapped,
         hit_lists,
         &crate::report::record::QueryNames {
@@ -217,9 +218,12 @@ pub(super) fn write_archive(
 ) -> Result<()> {
     let ReportView {
         args,
+        reports,
         ranges,
         query_frames,
         query_lengths,
+        contexts,
+        gapped_params,
         database,
         listed_subjects,
         listed_parsed,
@@ -236,6 +240,28 @@ pub(super) fn write_archive(
         .archive
         .as_ref()
         .expect("a BLAST archive request has its handle");
+    // psiblast's archive of the call's round (`archive::PsiArchive`).
+    let psi_karlin = args
+        .psi_search
+        .as_deref()
+        .map(|psi| pssm_hooks::psi_karlin(psi, contexts, &gapped_params));
+    let psi = match args.app {
+        BlastpApp::Psiblast => Some(psi_archive(args, reports, database.is_some(), psi_karlin)?),
+        _ => None,
+    };
+    // A PSSM search's blocks are its PSI blocks (`GetPsiUngappedKarlinBlk`,
+    // `GetPsiGappedKarlinBlk`, build_archive.cpp:113-125), which a FASTA query's first round has as
+    // its standard ones (`PsiSearch::ungapped_karlin`).
+    let first_context = |first: usize| {
+        let mut context = first_context(first);
+        if let (Some(karlin), Some((ungapped, gapped))) = (psi_karlin, context.karlin.as_mut()) {
+            *ungapped = karlin.ungapped;
+            if let Some(gapped) = gapped.as_mut() {
+                *gapped = karlin.gapped;
+            }
+        }
+        context
+    };
     let mut writer = format.sink.open()?;
     let subject_names = match (
         listed_subjects.as_ref(),
@@ -252,12 +278,13 @@ pub(super) fn write_archive(
         }
         _ => crate::report::record::SubjectNames::Records(subject_records),
     };
-    let masks = query_record_masks(query_frames, &ranges.query_input.placements);
+    let masks = result_query_masks(args.app, query_frames, &ranges.query_input.placements);
     let spans = batch_spans();
     let call = archive::ArchiveCall {
         handle,
+        psi: psi.as_ref(),
         gapped: !args.ungapped,
-        rps: args.app == BlastpApp::Rpsblast,
+        program_type: args.app.program_type(),
         batches: archive::CallBatches {
             masks: &masks,
             spans: &spans,
@@ -274,12 +301,71 @@ pub(super) fn write_archive(
         warnings
             .as_mut()
             .expect("the BLAST archive writes its posts to the diagnostics"),
-        first_context,
+        &first_context,
         &mut writer,
     )?;
     // Flushed when written, as the other reports are.
     writer.flush()?;
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:259-271
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:525-561
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:150-168
+/// psiblast's archive of the call's round (`WriteArchive` after the round's search, with its
+/// number; `reports.psi_round`, 1 outside the round driver): the request of a PSSM search
+/// (`-in_pssm`, `-in_msa`, a later round) holds the PSSM it searched (`PsiSearch::archive_pssm`)
+/// with the round's `kbp_gap_psi[0]` and `kbp_psi[0]` written back (`karlin`), and the options
+/// the composition-based mode of its set-up (`ArchiveRound::comp_based_stats`). The archive of a
+/// PSSM search builds its request with the PSSM and the run's database, so with `-subject`
+/// (`database` false) NCBI's `CExportStrategy` stops there with its engine error, after the
+/// archives of the rounds before (the bl2seq archive of a FASTA query's first round is another
+/// path, `x_Process_SearchDb` is not reached).
+fn psi_archive(
+    args: &ResolvedBlastpArgs,
+    reports: &BlastpReports<'_>,
+    database: bool,
+    karlin: Option<pssm_hooks::PsiKarlin>,
+) -> Result<archive::PsiArchive> {
+    let number = reports.psi_round.map_or(1, |io| io.state.number() as i32);
+    let pssm = match (args.psi_search.as_deref(), karlin) {
+        (Some(psi), Some(karlin)) => {
+            if !database {
+                return Err(crate::blastinput::app::engine_error(
+                    "Empty reference for CSearchDatabase.",
+                ));
+            }
+            let object = psi
+                .archive_pssm
+                .as_ref()
+                .expect("a PSSM search of a run that writes the archive keeps its PSSM");
+            Some(Arc::new(object.with_final_karlin(
+                crate::report::serial::pssm::FinalKarlin {
+                    lambda: karlin.gapped.lambda,
+                    kappa: karlin.gapped.k,
+                    h: karlin.gapped.h,
+                    lambda_ungapped: karlin.ungapped.lambda,
+                    kappa_ungapped: karlin.ungapped.k,
+                    h_ungapped: karlin.ungapped.h,
+                },
+            )))
+        }
+        _ => None,
+    };
+    let comp_based_stats = pssm.as_ref().map(|_| match args.comp_based_stats.mode {
+        BlastpCompositionMode::NoCompositionBasedStats => 0,
+        BlastpCompositionMode::CompositionBasedStats => 1,
+        BlastpCompositionMode::CompositionMatrixAdjust => 2,
+        BlastpCompositionMode::ForceFullMatrixAdjust => 3,
+    });
+    Ok(archive::PsiArchive {
+        round: crate::report::archive::ArchiveRound {
+            number,
+            comp_based_stats,
+        },
+        pssm,
+    })
 }
 
 /// Outfmt 5 (BLAST XML) and 13 to 16 (the XML2 and JSON documents): the structured report of the
@@ -414,12 +500,18 @@ pub(super) fn write_xml(
             if rps_multi_volume {
                 return Vec::new();
             }
-            crate::report::query_warnings::query_messages(
+            let mut messages = crate::report::query_warnings::query_messages(
                 record.seq(),
                 query_valid[q_idx],
                 reports.x_queries_before + q_idx < reports.identity_warned,
                 filtered_empty && !query_batch_skipped[q_idx],
-            )
+            );
+            // A PSSM search's (psiblast `-in_pssm`, a later round): those of
+            // `PsiBlastSetupScoreBlock` too, as its warning line (`pssm_query_warning`).
+            if let Some(psi) = args.psi_search.as_deref() {
+                messages.extend(psi.setup_messages.iter().cloned());
+            }
+            messages
         })
         .collect();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-224
@@ -427,7 +519,7 @@ pub(super) fn write_xml(
     // volumes takes volume 0's, rpsblast_local.cpp:174-175): XML2 and JSON list none for its
     // queries, which have an alignment set there (`no_alignment_set`).
     let xml_masks: Vec<Vec<crate::report::blast_xml::QueryMask>> =
-        query_record_masks(query_frames, &ranges.query_input.placements)
+        result_query_masks(args.app, query_frames, &ranges.query_input.placements)
             .into_iter()
             .zip(query_batch_skipped)
             .map(|(masks, &skipped)| {
@@ -508,7 +600,10 @@ pub(super) fn write_xml(
         run: crate::report::blast_xml::XmlRun {
             program: args.app.ncbi_name(),
             version: &version,
-            reference: crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
+            reference: match args.app {
+                BlastpApp::Psiblast => crate::report::blast_xml::REFERENCE_COMP_BASED_STATS,
+                _ => crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
+            },
             db_name: db_name.as_deref().unwrap_or(""),
             matrix: Some(&args.matrix_name),
             expect: args.evalue,
@@ -542,6 +637,10 @@ pub(super) fn write_xml(
         epilog: reports.epilog,
         stops: !reports.epilog && reports.last_call,
         only_xml2: xml_only_xml2,
+        query_other_coding: args
+            .psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding),
     };
     // The rows of the queries' HSPs (`query_rows`), one query at a time: the document
     // reads their letters query by query and formats them serially, so a window of
@@ -754,7 +853,8 @@ pub(super) fn write_pairwise(
         database_name: blastp_scan_mode_definition(subject_input_label).into(),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267: options.GetMatrixName(), as typed.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267
+        // Matrix name from `GetMatrixName`, as typed.
         matrix_name: Some(args.matrix_name.clone()),
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
@@ -779,16 +879,11 @@ pub(super) fn write_pairwise(
     if let (Some(_), Some(found)) = (reports.psi_round, psi_found_before.as_ref()) {
         found.refuse_unsure_shown(shown.iter().copied())?;
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
-    // blastp's results carry the query masks; psiblast's `CPsiBlastImpl::Run` returns
-    // the traceback's results without them (psiblast_impl.cpp:150), so its rows show
-    // no lowercase masking.
-    let query_masks = match args.app {
-        BlastpApp::Blastp | BlastpApp::Rpsblast => {
-            let masks = query_record_masks(query_frames, &ranges.query_input.placements);
-            (!masks.iter().all(Vec::is_empty)).then_some(masks)
-        }
-        BlastpApp::Psiblast => None,
+    // The results' query masks (`result_query_masks`: none for psiblast's rounds), which the rows
+    // show in lower case.
+    let query_masks = {
+        let masks = result_query_masks(args.app, query_frames, &ranges.query_input.placements);
+        (!masks.iter().all(Vec::is_empty)).then_some(masks)
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
     // The windows of queries whose rows are made and written together

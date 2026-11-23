@@ -157,7 +157,7 @@ fn latest_of_several_volumes_wins() {
 
 #[test]
 fn twelve_am_is_hour_zero() {
-    // SET_HOUR(value % 12) stores 0 for 12, and AM adds nothing.
+    // `SET_HOUR` stores the hour modulo 12 (so 12 becomes 0), and AM adds nothing.
     assert_eq!(parsed("Oct 12, 2026 12:30 AM"), time(2026, 10, 12, 0, 30));
     assert_eq!(
         date_of(&["Oct 12, 2026 12:30 AM", "Oct 12, 2026  1:00 AM"]),
@@ -171,7 +171,7 @@ fn twelve_am_is_hour_zero() {
 
 #[test]
 fn twelve_pm_is_hour_twelve() {
-    // SET_HOUR(value % 12) stores 0 for 12, and PM adds 12.
+    // `SET_HOUR` stores the hour modulo 12 (so 12 becomes 0), and PM adds 12.
     assert_eq!(parsed("Oct 12, 2026 12:30 PM"), time(2026, 10, 12, 12, 30));
     assert_eq!(
         date_of(&["Oct 12, 2026 11:59 AM", "Oct 12, 2026 12:30 PM"]),
@@ -213,7 +213,7 @@ fn empty_later_date_is_never_later() {
 
 #[test]
 fn number_without_digit_is_caught_and_keeps_current_date() {
-    // t2: NStr::StringToLong("") throws CStringException, caught by GetDate.
+    // t2: `NStr::StringToLong` on an empty string throws `CStringException`, caught by `GetDate`.
     for bad in [
         "Oct xx, 2026  3:22 PM", // day
         "Oct 12, year  3:22 PM", // year

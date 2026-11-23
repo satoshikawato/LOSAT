@@ -1,0 +1,294 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">YP_009220601.1 TK-TMK, chimeric thymidine and
+ thymidylate kinase [White spot syndrome virus]"
+                  }
+                }
+              },
+              title "YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate
+ kinase [White spot syndrome virus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 398,
+              seq-data ncbieaa "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLF
+VKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDG
+TSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKNKG
+KLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIK
+QLLDDGIHVVMDRYYYSGIVFSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARA
+LFLDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">BDT63550.1 thymidine kinase [Pasiphaea japonica
+ whispovirus]"
+                }
+              }
+            },
+            title "BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 197,
+            seq-data ncbieaa "MEPTNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNR
+YGCELTETVTHSGQTIRDCVATSVLSYVDTSNYDYIFIDEGQFFSDLGATCKDWAIKGKRVTVAALDGNYEQQLFPSV
+IKLIPICDKIEKLSAVCMICNKNEASLTKKYLPYNNTGDDDHHKYDMCVGGTETYCAVCIGCANFSFKYLF"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 64156
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 333
+          },
+          {
+            id str "blast_score",
+            value int 333
+          },
+          {
+            id str "e_value",
+            value real { 103016672916354, 10, -55 }
+          },
+          {
+            id str "bit_score",
+            value real { 132879691060523, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 79
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 111
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 462286432160804, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 7,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            9,
+            3,
+            78,
+            -1,
+            81,
+            72,
+            -1,
+            95,
+            104,
+            96,
+            -1,
+            146,
+            154,
+            151
+          },
+          lens {
+            69,
+            3,
+            23,
+            1,
+            50,
+            5,
+            37
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 24
+          },
+          {
+            id str "blast_score",
+            value int 24
+          },
+          {
+            id str "e_value",
+            value real { 474603014256617, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 138530221020605, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 7
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 11
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 502261306532663, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            199,
+            4
+          },
+          lens {
+            18
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 319997691570888, 10, -15 },
+        k { 136979534148589, 10, -15 },
+        h { 405715806848569, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 64156",
+      "Effective search space used: 64156",
+      "Length adjustment: 25"
+    }
+  }
+}

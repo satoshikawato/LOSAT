@@ -675,7 +675,7 @@ pub(crate) fn stats_from_edit_ops_protein(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-596:
-//     adjusted_subject, hsp, score_options, &align_length, sbp);
+// Computes identity and alignment length from the adjusted subject, HSP, and edit script.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:767-811:
 // Reuse the same edit-script walk after SEG-masked traceback.
 pub(crate) fn protein_identities_from_edit_ops(
@@ -1858,7 +1858,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:563-575,634-639
-        //     if (matrix_index == FENCE_SENTRY) { ... break; }
+        // Stop scanning the row immediately upon encountering `FENCE_SENTRY`.
         // SAFETY: the row began empty and capacity covers the captured band.
         // Every visited non-fence cell, including X-drop failures, wrote one
         // byte. The only early break sets row_end_b_index before that write.
@@ -2030,8 +2030,8 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1914-1944
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4549-4554,4620-4643:
-// Int2 BLAST_GappedAlignmentWithTraceback(..., Boolean * fence_hit);
-// if ((! (fence_hit && *fence_hit)) && ...) { /* right extension */ }
+// `BLAST_GappedAlignmentWithTraceback` reports `fence_hit` and skips the right extension if a
+// fence was hit during the left extension.
 pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
     query: &[u8],
     subject: &[u8],
@@ -2194,7 +2194,7 @@ fn gapped_alignment_with_traceback(
     );
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4620-4643:
-    // if ((! (fence_hit && *fence_hit)) && ...) { /* right extension */ }
+    // Skip right extension when `fence_hit` is set during the left extension.
     // The caller must see the fence flag before deciding whether to retry.
     if let Some(out) = fence_hit_out {
         *out = fence_hit;

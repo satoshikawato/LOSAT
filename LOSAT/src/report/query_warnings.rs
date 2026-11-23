@@ -107,7 +107,7 @@ impl SubjectRead {
         if let Some(load) = &mut self.load {
             let mut moved = load.in_ledger(left);
             self.text = moved.place(std::mem::take(&mut self.text));
-            load.opening = moved.opening;
+            (load.lead, load.opening) = (moved.lead, moved.opening);
         }
     }
 }
@@ -118,8 +118,9 @@ impl SubjectRead {
 /// What the load of a read's subject looks up, as far as it decides the texts: NCBI's lookups write
 /// the texts of opening the taxonomy database at the run's first ask, and the offset error at a
 /// volume's first lookup of the taxid whose record begins past the end of `taxdb.btd`
-/// (`TaxDb::offset_error_taxid`; a volume whose cache would ask again is refused,
-/// `TaxdbRun::cache_collision`), nothing else. The model of the reads gives each text to the load
+/// (`TaxDb::offset_error_taxid`; on a database with a volume whose cache can ask again,
+/// `TaxdbRun::cache_collision`, every read is refused and only a batch's prefetch asks, again
+/// where NCBI's order of its loads gives that, so no load is left out there), nothing else. The model of the reads gives each text to the load
 /// that makes the ask, assuming every load it models happens; a load that NCBI does not make (a
 /// BLAST XML `Iteration` or `Hit` that the stream leaves out, `ReadCursor::cut`) leaves its texts
 /// to NCBI's next load that makes the same ask (`LoadTexts`).
@@ -134,42 +135,79 @@ pub struct ReadLoad {
     pub looks_up: bool,
     /// Whether the load looks up the taxid of the offset error.
     pub offset: bool,
-    /// The bytes of the model's text that are the texts of opening (its start).
+    /// The bytes of the model's text that are NCBI's warning of a UTF8String read for a
+    /// VisibleString (its start): the lookup of the load's Seq-align id reads such a header first
+    /// (`ParsedSubject::scope_utf8`, before the blob's taxonomy), and the run posts it here.
+    pub lead: usize,
+    /// The bytes of the model's text after `lead` that are the texts of opening.
     pub opening: usize,
+    /// Whether the lookup of the load's Seq-align id reads such a header: the load takes the
+    /// warning that a load NCBI does not make left (`left_out`).
+    pub scope_utf8: bool,
 }
 
 impl ReadLoad {
-    /// The text that this load writes where it happens, `own` being the model's: before it the
-    /// texts of opening that a load left out (`left_out`) placed, where this load looks a taxid
-    /// up, and after it the offset error that a load of the same volume left out, where this load
-    /// looks that taxid up (the texts of a load are those of opening, then those of its lookups).
-    /// They are NCBI's texts of this load: the asks that the left-out load made in the model are
-    /// this load's first.
+    /// The load of a subject whose Seq-align id's lookup reads a header with a UTF8String where a
+    /// VisibleString is expected and whose blob's taxonomy writes no text (no `taxdb.bti`, or no
+    /// blob), with the run's ledger `texts`.
+    pub fn of_scope_utf8(texts: std::sync::Arc<LoadTexts>) -> Self {
+        ReadLoad {
+            texts,
+            volume: u32::MAX,
+            looks_up: false,
+            offset: false,
+            lead: 0,
+            opening: 0,
+            scope_utf8: true,
+        }
+    }
+
+    /// The text that this load writes where it happens, `own` being the model's: after its
+    /// warning of a UTF8String header (`lead`), or where it has none and its lookup reads such a
+    /// header, the one that a load left out (`left_out`), the texts of opening that a load left
+    /// out placed, where this load looks a taxid up, and after it the offset error that a load of
+    /// the same volume left out, where this load looks that taxid up (the texts of a load are its
+    /// lookup's warning, then those of opening, then those of its lookups). They are NCBI's texts
+    /// of this load: the asks that the left-out load made in the model are this load's first.
     pub fn placed(&self, own: &[u8]) -> Vec<u8> {
         self.with_left_out(own.to_vec()).0
     }
 
     /// `placed` for the model's read of this load (`common::database::subject_read_texts`, a
-    /// batch modelled after a report that left loads out): its text, whose texts of opening are
-    /// then those placed before its own.
+    /// batch modelled after a report that left loads out): its text, whose warning and texts of
+    /// opening are then those placed before its own.
     pub fn place(&mut self, own: Vec<u8>) -> Vec<u8> {
-        let (text, opening) = self.with_left_out(own);
-        self.opening = opening;
+        let (text, lead, opening) = self.with_left_out(own);
+        (self.lead, self.opening) = (lead, opening);
         text
     }
 
-    /// The text of `placed` and the length of its texts of opening.
-    fn with_left_out(&self, own: Vec<u8>) -> (Vec<u8>, usize) {
+    /// `place` of the model's text `own` after the warning `lead` that this load's lookup posts
+    /// (empty where it posts none).
+    pub fn place_after(&mut self, lead: Vec<u8>, own: Vec<u8>) -> Vec<u8> {
+        self.lead = lead.len();
+        let mut text = lead;
+        text.extend(own);
+        self.place(text)
+    }
+
+    /// The text of `placed`, the length of its warning and that of its texts of opening.
+    fn with_left_out(&self, own: Vec<u8>) -> (Vec<u8>, usize, usize) {
         let mut pending = self.texts.pending.lock().expect("the texts of the loads");
-        if pending.opening.is_empty() && pending.offsets.is_empty() {
-            return (own, self.opening);
+        if pending.is_empty() {
+            return (own, self.lead, self.opening);
         }
-        let mut text = Vec::new();
+        let (lead, own) = own.split_at(self.lead.min(own.len()));
+        let mut text = lead.to_vec();
+        if lead.is_empty() && self.scope_utf8 {
+            text.append(&mut pending.utf8);
+        }
+        let lead = text.len();
         if self.looks_up {
             text.append(&mut pending.opening);
         }
-        let opening = text.len() + self.opening;
-        text.extend(own);
+        let opening = text.len() - lead + self.opening;
+        text.extend_from_slice(own);
         if self.offset {
             if let Some(at) = pending
                 .offsets
@@ -179,7 +217,7 @@ impl ReadLoad {
                 text.extend(pending.offsets.remove(at).1);
             }
         }
-        (text, opening)
+        (text, lead, opening)
     }
 
     /// This load with the texts left out in `texts` instead of the run's ledger
@@ -191,11 +229,14 @@ impl ReadLoad {
         }
     }
 
-    /// NCBI does not make this load, whose text in the model is `text`: its texts of opening and
-    /// its offset error go to the next load that makes those asks (`placed`).
+    /// NCBI does not make this load, whose text in the model is `text`: its warning of a
+    /// UTF8String header goes to the next load whose lookup reads such a header, its texts of
+    /// opening and its offset error to the next load that makes those asks (`placed`).
     pub fn left_out(&self, text: &[u8]) {
+        let (lead, text) = text.split_at(self.lead.min(text.len()));
         let (opening, offset) = text.split_at(self.opening.min(text.len()));
         let mut pending = self.texts.pending.lock().expect("the texts of the loads");
+        pending.utf8.extend_from_slice(lead);
         if !opening.is_empty() {
             pending.opening.extend_from_slice(opening);
         }
@@ -238,8 +279,10 @@ impl LoadTexts {
 
     /// Whether no text is left out.
     pub fn is_empty(&self) -> bool {
-        let pending = self.pending.lock().expect("the texts of the loads");
-        pending.opening.is_empty() && pending.offsets.is_empty()
+        self.pending
+            .lock()
+            .expect("the texts of the loads")
+            .is_empty()
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288 (cited at
@@ -296,10 +339,18 @@ impl LoadTexts {
 
 #[derive(Debug, Default)]
 struct PendingTexts {
+    /// NCBI's warning of a UTF8String header that a left-out load's lookup read (`ReadLoad::lead`).
+    utf8: Vec<u8>,
     /// The texts of opening the taxonomy database (empty: none left out).
     opening: Vec<u8>,
     /// By volume, its offset error.
     offsets: Vec<(u32, Vec<u8>)>,
+}
+
+impl PendingTexts {
+    fn is_empty(&self) -> bool {
+        self.utf8.is_empty() && self.opening.is_empty() && self.offsets.is_empty()
+    }
 }
 
 impl SubjectReads {
@@ -1122,15 +1173,24 @@ fn before_report(
 /// after it read the batch and before the batch's search, and the prefetch's after the search:
 /// in the batch's first query, after the reader's messages of the batch (the first
 /// `reader(query)` bytes of its lines), the request's, the prefetch's, then the rest (the query's
-/// own warnings).
+/// own warnings). NCBI's posts of its first read of the reported sequences' headers
+/// (`header_read`: with the first query of the batch whose Seq-aligns read them,
+/// `common::database::Utf8Read`) come after the search, before the prefetch: at the batch's first
+/// query after its request's posts and before its prefetch's.
 pub fn query_posts(
     lines: Vec<Vec<u8>>,
     requests: Vec<(usize, Posts)>,
     prefetches: Vec<(usize, Posts)>,
     reader: impl Fn(usize) -> usize,
+    header_read: Option<(usize, Posts)>,
 ) -> Vec<Posts> {
-    // A batch's prefetch after its request (a stable sort keeps the order of each list).
-    let mut requests: Vec<(usize, Posts)> = requests.into_iter().chain(prefetches).collect();
+    // A batch's first read of a UTF8String header after its request, and its prefetch after both
+    // (a stable sort keeps the order of each list).
+    let mut requests: Vec<(usize, Posts)> = requests
+        .into_iter()
+        .chain(header_read)
+        .chain(prefetches)
+        .collect();
     requests.sort_by_key(|&(first, _)| first);
     let mut requests = requests.into_iter().peekable();
     let mut posts: Vec<Posts> = lines

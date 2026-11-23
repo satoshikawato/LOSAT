@@ -20,7 +20,7 @@ use super::SeqDbError;
 use crate::seqid::ber::{
     fix_visible_chars, int_list, replaced_bytes, BerError, Reader, DEFLINE_LAST_MEMBER,
     DEFLINE_MEMBERS, DEFLINE_SEQID, DEFLINE_TAXID, DEFLINE_TITLE, TAG_CONTEXT_CONSTRUCTED,
-    TAG_NUMBER_MASK, TAG_SEQUENCE,
+    TAG_SEQUENCE,
 };
 use crate::seqid::DeflineSet;
 
@@ -39,6 +39,10 @@ pub struct Defline {
     /// `taxid` of the definition line (NCBI's `TTaxId`, an `int`), 0 when the line has none or
     /// the decode did not read it (`decode_deflines_as` without `want_taxid`).
     pub taxid: i32,
+    /// Whether the record (of every definition line) holds a UTF8String where a VisibleString
+    /// is expected, which NCBI reads with its warning once per process
+    /// (`seqid::ber::utf8_string_path` names the member).
+    pub utf8: bool,
 }
 
 /// `general` is the eleventh alternative of `Seq-id` (seqloc.asn:25-35).
@@ -63,18 +67,33 @@ impl From<BerError> for HeaderError {
     }
 }
 
-/// The reader's error of a record of the header file `path`.
+/// The reader's error of a record of the header file `path`: NCBI's exception where NCBI's
+/// read of the record fails and its report is ported (`SeqDbError::Ncbi`, which NCBI's
+/// applications report as they report any `CException`), else LOSAT's refusal.
 fn format_error(error: BerError, path: &Path) -> SeqDbError {
-    SeqDbError::Format {
-        path: path.to_path_buf(),
-        message: error.to_string(),
+    match error.exception() {
+        Some(exception) => SeqDbError::Ncbi(exception),
+        None => SeqDbError::Format {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        },
     }
 }
 
 impl HeaderError {
-    fn into_seqdb(self, path: &Path) -> SeqDbError {
+    /// The error of the ordinal-id decoders for `record`. Where the record is no valid
+    /// encoding, the error is that of NCBI's read of the whole record (`decode_full_set`, the
+    /// one port of it: NCBI reads every member, `x_GetHdrAsn1`), which fails wherever these
+    /// decoders' checks do; only a check of their own that NCBI's read passes (an ordinal id
+    /// that is negative) keeps their text.
+    #[cold]
+    #[inline(never)]
+    fn into_seqdb(self, record: &[u8], path: &Path) -> SeqDbError {
         match self {
-            HeaderError::Ber(error) => format_error(error, path),
+            HeaderError::Ber(error) => match crate::seqid::ber::decode_full_set(record) {
+                Err(full) => format_error(full, path),
+                Ok(_) => format_error(error, path),
+            },
             HeaderError::ParsedSeqIds => SeqDbError::Unsupported {
                 path: path.to_path_buf(),
                 message: PARSED_SEQIDS.to_string(),
@@ -119,7 +138,7 @@ pub fn decode_deflines_as(
     oid: u32,
     want_taxid: bool,
 ) -> Result<Vec<Defline>, SeqDbError> {
-    decode_ordinal_deflines(record, oid, want_taxid).map_err(|error| error.into_seqdb(path))
+    decode_ordinal_deflines(record, oid, want_taxid).map_err(|error| error.into_seqdb(record, path))
 }
 
 /// Decodes the `Blast-def-line-set` of one sequence with every member and every Seq-id
@@ -144,10 +163,21 @@ fn decode_ordinal_deflines(
     while !ber.at_end(set_end)? {
         deflines.push(decode_defline(&mut ber, oid, want_taxid)?);
     }
-    if !ber.at_record_end() {
-        return Err(ber.error("unexpected data after Blast-def-line-set").into());
+    // Bytes after the set are not read, as in NCBI (`CObjectIStream::EndOfRead`,
+    // `seqid::ber::decode_full_set`).
+    if ber.read_utf8() {
+        mark_utf8(&mut deflines);
     }
     Ok(deflines)
+}
+
+/// Marks the definition lines of a record that holds a UTF8String (`Defline::utf8`).
+#[cold]
+#[inline(never)]
+fn mark_utf8(deflines: &mut [Defline]) {
+    for defline in deflines {
+        defline.utf8 = true;
+    }
 }
 
 fn decode_defline(
@@ -164,15 +194,19 @@ fn decode_defline(
     let mut next_member = DEFLINE_TITLE;
     while !ber.at_end(defline_end)? {
         let tag = ber.tag()?;
-        let member = tag & TAG_NUMBER_MASK;
-        if tag & !TAG_NUMBER_MASK != TAG_CONTEXT_CONSTRUCTED
-            || member < next_member
-            || member > DEFLINE_LAST_MEMBER
+        if tag.class != TAG_CONTEXT_CONSTRUCTED
+            || tag.number < u32::from(next_member)
+            || tag.number > u32::from(DEFLINE_LAST_MEMBER)
         {
             return Err(ber
-                .error(format!("tag 0x{tag:02x} is not a member of Blast-def-line"))
+                .error(format!(
+                    "tag {:#04x}/{} is not a member of Blast-def-line",
+                    tag.class, tag.number
+                ))
                 .into());
         }
+        // Below `DEFLINE_LAST_MEMBER`.
+        let member = tag.number as u8;
         next_member = member + 1;
         let member_end = ber.open()?;
         match member {
@@ -233,14 +267,14 @@ fn decode_defline(
         volume_ordinal,
         replaced_title_bytes: replaced_bytes(stored_title),
         taxid,
+        utf8: false,
     })
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2231-2236
 /// Decodes one `Seq-id`, which must be `general { db "BL_ORD_ID", tag id n }`.
 fn decode_ordinal_id(ber: &mut Reader<'_>) -> Result<u32, HeaderError> {
-    let tag = ber.tag()?;
-    if tag != TAG_CONTEXT_CONSTRUCTED | SEQID_GENERAL {
+    if !ber.take_tag(TAG_CONTEXT_CONSTRUCTED | SEQID_GENERAL)? {
         return Err(HeaderError::ParsedSeqIds);
     }
     let choice_end = ber.open()?;
@@ -255,8 +289,7 @@ fn decode_ordinal_id(ber: &mut Reader<'_>) -> Result<u32, HeaderError> {
     }
 
     let tag_end = ber.open_context(DBTAG_TAG, "Dbtag.tag")?;
-    let object_id = ber.tag()?;
-    if object_id != TAG_CONTEXT_CONSTRUCTED | OBJECT_ID_ID {
+    if !ber.take_tag(TAG_CONTEXT_CONSTRUCTED | OBJECT_ID_ID)? {
         return Err(HeaderError::ParsedSeqIds);
     }
     let id_end = ber.open()?;

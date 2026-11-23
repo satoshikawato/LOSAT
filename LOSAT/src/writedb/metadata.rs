@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::Path;
 
 use super::build_db::VOLUME_EXTENSIONS;
-use super::ofstream::OfStream;
+use super::ofstream::{BasicStream, OfStream, StreamBuf};
 
 /// `CBlast_db_metadata` (`c++/src/objects/blastdb/blastdb.asn:79-97`) as makeblastdb fills it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,13 +77,15 @@ pub(crate) trait JsonOut {
     fn dec_indent_level(&mut self);
 }
 
-/// The bytes of the serialized object.
+/// The bytes of the serialized object (the tests' view of the document).
+#[cfg(test)]
 #[derive(Debug, Default)]
 pub(crate) struct JsonText {
     pub(crate) bytes: Vec<u8>,
     indent_level: usize,
 }
 
+#[cfg(test)]
 impl JsonOut for JsonText {
     type Error = std::convert::Infallible;
     fn put_char(&mut self, c: u8) -> Result<(), Self::Error> {
@@ -185,6 +187,7 @@ impl DbMetadata {
     }
 
     /// The bytes of the metadata file: the object and the line feed of `NcbiEndl`.
+    #[cfg(test)]
     pub(crate) fn to_json(&self) -> Vec<u8> {
         let mut text = JsonText {
             bytes: Vec::with_capacity(512 + 32 * self.files.len()),
@@ -324,13 +327,14 @@ impl IoException {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:46,783-795
-// The JSON writer sets no back limit and no cancel callback, and makeblastdb gives it the
-// stream without ownership (`eNoOwnership`). The line count and line length serve the
+// The JSON writer sets no back limit and no cancel callback, and makeblastdb and blastdbcmd give
+// it the stream without ownership (`eNoOwnership`). The line count and line length serve the
 // line positions and the wrapping of other formats; they write nothing here.
-/// `COStreamBuffer` over the metadata file's `ofstream`.
-pub(crate) struct OStreamBuffer<'a> {
+/// `COStreamBuffer` over the stream the metadata goes to: makeblastdb's metadata file
+/// (`OfStream`), blastdbcmd's `-out` file or standard output (`super::cout`).
+pub(crate) struct OStreamBuffer<'a, B: StreamBuf> {
     /// `m_Output`.
-    output: &'a mut OfStream,
+    output: &'a mut BasicStream<B>,
     /// `m_Closed`.
     closed: bool,
     /// `m_Error`.
@@ -345,8 +349,8 @@ pub(crate) struct OStreamBuffer<'a> {
     current: usize,
 }
 
-impl<'a> OStreamBuffer<'a> {
-    pub(crate) fn new(output: &'a mut OfStream) -> Self {
+impl<'a, B: StreamBuf> OStreamBuffer<'a, B> {
+    pub(crate) fn new(output: &'a mut BasicStream<B>) -> Self {
         Self {
             output,
             closed: false,
@@ -359,7 +363,7 @@ impl<'a> OStreamBuffer<'a> {
     }
 
     /// `m_Output`.
-    pub(crate) fn output(&mut self) -> &mut OfStream {
+    pub(crate) fn output(&mut self) -> &mut BasicStream<B> {
         self.output
     }
 
@@ -467,7 +471,7 @@ impl<'a> OStreamBuffer<'a> {
 // `IncIndentLevel` and `DecIndentLevel` step by 2 (strbuffer.hpp:244-245). The strings of the
 // metadata object are written byte by byte (`x_WriteString`); `PutString` gets the numbers
 // and the escapes, all shorter than 1024 bytes.
-impl JsonOut for OStreamBuffer<'_> {
+impl<B: StreamBuf> JsonOut for OStreamBuffer<'_, B> {
     type Error = IoException;
     fn put_char(&mut self, c: u8) -> Result<(), IoException> {
         let pos = self.skip(1)?;
@@ -501,12 +505,13 @@ const F_WRITE_ERROR: u32 = 1 << 1;
 const F_NOT_OPEN: u32 = 1 << 7;
 
 /// The parts of `CObjectOStreamJson` (`CObjectOStream`) that act on its stream after the
-/// object is written: the fail flags and the close of its destructor.
-struct ObjectOStream<'a> {
+/// object is written: the fail flags and the close of its destructor. Its posts name `program`.
+struct ObjectOStream<'a, B: StreamBuf> {
     /// `m_Output`.
-    output: OStreamBuffer<'a>,
+    output: OStreamBuffer<'a, B>,
     /// `m_Fail`.
     fail: u32,
+    program: &'static str,
 }
 
 /// The `CSerialException` that `ThrowError1` throws over the exception it was given.
@@ -516,26 +521,25 @@ struct SerialException {
     predecessor: IoException,
 }
 
-impl ObjectOStream<'_> {
+impl<B: StreamBuf> ObjectOStream<'_, B> {
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384,495-513
     // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-84
     // NCBI reference (598d8ae6): c++/include/serial/error_codes.hpp:46
     // Every call here comes from the close in the destructor: the frames of the object are
     // gone (an exception pops them on its way out), and in a base class's destructor the
     // virtual `GetPosition` is `CObjectOStream`'s, the byte position, not the line position
-    // of `CObjectOStreamJson`. makeblastdb's diagnostics are "Severity: (code.subcode)
-    // [makeblastdb] text".
+    // of `CObjectOStreamJson`. The diagnostics are "Severity: (code.subcode) [program] text".
     /// `SetFailFlags` with `flags` and a message.
     fn set_fail_flags(&mut self, flags: u32, message: &str, err: &mut dyn Write) {
         let old = self.fail;
         self.fail |= flags;
         if old == 0 && flags != 0 {
-            let _ = writeln!(
-                err,
-                "Error: (802.5) [makeblastdb] CObjectOStream: error at byte {}: stack is empty: \
-                 {message}",
+            let line = format!(
+                "Error: (802.5) [{}] CObjectOStream: error at byte {}: stack is empty: {message}",
+                self.program,
                 self.output.stream_pos()
             );
+            self.post(err, &line, false);
         }
     }
 
@@ -599,26 +603,17 @@ impl ObjectOStream<'_> {
     /// `~CObjectOStream`.
     fn destroy(&mut self, err: &mut dyn Write) {
         if let Err(exc) = self.close(err) {
-            post(
-                err,
-                &format!(
-                    "Error: ({}) [makeblastdb] {}",
-                    exc.predecessor.type_and_code(),
-                    exc.predecessor.msg
-                ),
+            let program = self.program;
+            let (kind, msg) = (exc.predecessor.type_and_code(), exc.predecessor.msg);
+            self.post(err, &format!("Error: ({kind}) [{program}] {msg}"), true);
+            let line = format!("Error: ({SERIAL_IO_ERROR}) [{program}] {}", exc.msg);
+            self.post(err, &line, true);
+            let line = format!(
+                "Error: (802.4) [{program}] Cannot close serializing output stream \
+                 ({SERIAL_IO_ERROR}) {}",
+                exc.msg
             );
-            post(
-                err,
-                &format!("Error: ({SERIAL_IO_ERROR}) [makeblastdb] {}", exc.msg),
-            );
-            post(
-                err,
-                &format!(
-                    "Error: (802.4) [makeblastdb] Cannot close serializing output stream \
-                     ({SERIAL_IO_ERROR}) {}",
-                    exc.msg
-                ),
-            );
+            self.post(err, &line, true);
         }
         self.destroy_buffer(err);
     }
@@ -626,35 +621,40 @@ impl ObjectOStream<'_> {
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:797-811
     // NCBI reference (598d8ae6): c++/include/util/error_codes.hpp:48
     // After `CObjectOStream::Close` the buffer is closed, or the stream failed: this `Close`
-    // writes nothing in makeblastdb's sequence; its report is that of `destroy` for an
-    // exception without predecessor.
+    // writes nothing in makeblastdb's and blastdbcmd's sequences; its report is that of
+    // `destroy` for an exception without predecessor.
     /// `~COStreamBuffer` (a member of the object stream, destroyed after its body).
     fn destroy_buffer(&mut self, err: &mut dyn Write) {
         if let Err(exc) = self.output.close() {
-            post(
-                err,
-                &format!("Error: ({}) [makeblastdb] {}", exc.type_and_code(), exc.msg),
+            let program = self.program;
+            let (kind, msg) = (exc.type_and_code(), exc.msg);
+            self.post(err, &format!("Error: ({kind}) [{program}] {msg}"), true);
+            let line = format!(
+                "Error: (205.2) [{program}] ~COStreamBuffer: exception while closing ({kind}) {msg}"
             );
-            post(
-                err,
-                &format!(
-                    "Error: (205.2) [makeblastdb] ~COStreamBuffer: exception while closing ({}) {}",
-                    exc.type_and_code(),
-                    exc.msg
-                ),
-            );
+            self.post(err, &line, true);
         }
+    }
+
+    /// Writes the diagnostic line `line`, in LOSAT's words when `words` (`crate::wording::
+    /// losat_text`: without the exception's class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
+    /// exception 12). Nothing after a write found a closed pipe: SIGPIPE has ended NCBI's
+    /// process there (`StreamBuf::closed_pipe`).
+    fn post(&mut self, err: &mut dyn Write, line: &str, words: bool) {
+        if self.output.output().rdbuf().closed_pipe() {
+            return;
+        }
+        let line = if words {
+            crate::wording::losat_text(line)
+        } else {
+            line.into()
+        };
+        let _ = err.write_all(format!("{line}\n").as_bytes());
     }
 }
 
 /// `GetType()::GetErrCodeString()` of the serial stream's error of a failed close.
 const SERIAL_IO_ERROR: &str = "CSerialException::eIoError";
-
-/// Writes the diagnostic line `line` in LOSAT's words (`crate::wording::losat_text`: without the
-/// exception's class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
-fn post(err: &mut dyn Write, line: &str) {
-    let _ = writeln!(err, "{}", crate::wording::losat_text(line));
-}
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1306-1318
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
@@ -680,24 +680,43 @@ pub(crate) fn write_metadata_file(
 ) -> Option<&'static str> {
     let name = format!("{new_db}.{}", if is_protein { "pjs" } else { "njs" });
     let mut out = OfStream::create(Path::new(&name));
-    let escaped = {
-        let mut json_out = ObjectOStream {
-            output: OStreamBuffer::new(&mut out),
-            fail: 0,
-        };
-        let result = metadata
-            .write_json(&mut json_out.output)
-            .and_then(|()| json_out.output.flush())
-            .map(|()| {
-                let out = json_out.output.output();
-                out.flush();
-                out.endl();
-            });
-        json_out.destroy(err);
-        result.err()
+    write_metadata(&mut out, metadata, "makeblastdb", err)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1213-1220
+// blastdbcmd writes the object to its `-out` stream as makeblastdb writes it to its file: the
+// same serializer, `json_out->Flush()`, `out.flush()` and `NcbiEndl`, then the serializer's
+// destructor; its `CATCH_ALL` is the same macro.
+/// `metadata` serialized to `out` as `CObjectOStreamJson` writes it, then the line feed of
+/// `NcbiEndl`, with the serializer's diagnostics (naming `program`) to `err`; `Some(message)` for
+/// the `eFlush` exception that ends the program ("BLAST failed to write output: message", exit
+/// status 6). After a write found a closed pipe (`StreamBuf::closed_pipe`, where SIGPIPE ends
+/// NCBI's process) nothing is posted and `None` is returned.
+pub(crate) fn write_metadata<B: StreamBuf>(
+    out: &mut BasicStream<B>,
+    metadata: &DbMetadata,
+    program: &'static str,
+    err: &mut dyn Write,
+) -> Option<&'static str> {
+    let mut json_out = ObjectOStream {
+        output: OStreamBuffer::new(out),
+        fail: 0,
+        program,
     };
-    drop(out);
-    escaped
+    let result = metadata
+        .write_json(&mut json_out.output)
+        .and_then(|()| json_out.output.flush())
+        .map(|()| {
+            let out = json_out.output.output();
+            out.flush();
+            out.endl();
+        });
+    json_out.destroy(err);
+    if json_out.output.output().rdbuf().closed_pipe() {
+        return None;
+    }
+    result
+        .err()
         .filter(|exception| exception.code == IoErrCode::Flush)
         .map(|exception| exception.msg)
 }

@@ -169,27 +169,27 @@ pub fn score_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
         )
     };
 
-    // score DESC (BLAST_CMP(hsp2->score, hsp1->score))
+    // score DESC (via `BLAST_CMP` on HSP scores)
     match b.raw_score.cmp(&a.raw_score) {
         Ordering::Equal => {}
         ord => return ord,
     }
-    // s_start ASC (BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset))
+    // s_start ASC (via `BLAST_CMP` on subject offsets)
     match a_s_offset.cmp(&b_s_offset) {
         Ordering::Equal => {}
         ord => return ord,
     }
-    // s_end DESC (BLAST_CMP(hsp2->subject.end, hsp1->subject.end))
+    // s_end DESC (via `BLAST_CMP` on subject ends)
     match b_s_end.cmp(&a_s_end) {
         Ordering::Equal => {}
         ord => return ord,
     }
-    // q_start ASC (BLAST_CMP(hsp1->query.offset, hsp2->query.offset))
+    // q_start ASC (via `BLAST_CMP` on query offsets)
     match a_q_offset.cmp(&b_q_offset) {
         Ordering::Equal => {}
         ord => return ord,
     }
-    // q_end DESC (BLAST_CMP(hsp2->query.end, hsp1->query.end))
+    // q_end DESC (via `BLAST_CMP` on query ends)
     b_q_end.cmp(&a_q_end)
 }
 

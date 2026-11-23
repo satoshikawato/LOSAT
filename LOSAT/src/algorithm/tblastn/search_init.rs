@@ -11,9 +11,8 @@ use crate::algorithm::blastp::x_ungapped_fast;
 use crate::config::ScoringMatrix;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-163
-// typedef struct BlastUngappedData { Int4 q_start, s_start, length, score; } ...;
-// typedef struct BlastInitHSP { BlastOffsetPair offsets;
-//                              BlastUngappedData* ungapped_data; } ...;
+// Mirrors `BlastUngappedData` (query start, subject start, length, and score) and
+// `BlastInitHSP` (seed offset pair plus ungapped extension data).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct InitHsp {
     pub frame: i8,
@@ -839,7 +838,8 @@ impl<'a> XTwoHit<'a> {
     }
 
     /// `x_pairs_bf` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`) with the
-    /// walks `walks`.
+    /// walks `walks`; the loop `x_tbn_hitbf::x_hits_steps` unless `LOSAT_X_TBNHITSTEP=0` (read once
+    /// per call), else `x_tbn_hitbf::x_hits_bf`.
     #[allow(clippy::too_many_arguments)]
     #[inline(always)]
     fn x_pairs_bf_on<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks>(
@@ -852,10 +852,46 @@ impl<'a> XTwoHit<'a> {
         pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
         hits: &mut Vec<InitHsp>,
     ) {
+        if super::x_tbn_hitbf::x_hit_steps() {
+            self.x_pairs_bf_with::<C, W, true>(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            )
+        } else {
+            self.x_pairs_bf_with::<C, W, false>(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            )
+        }
+    }
+
+    /// `x_pairs_bf_on` with the loop `x_tbn_hitbf::x_hits::<C, STEPS>`.
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    fn x_pairs_bf_with<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks, const STEPS: bool>(
+        &self,
+        walks: W,
+        cells: &mut [C],
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
         let word_size = self.word_size as i32;
         let mut done = 0;
         while done < pairs.len() {
-            done += super::x_tbn_hitbf::x_hits_bf(
+            done += super::x_tbn_hitbf::x_hits::<C, STEPS>(
                 cells,
                 self.diagonals.offset,
                 self.window,

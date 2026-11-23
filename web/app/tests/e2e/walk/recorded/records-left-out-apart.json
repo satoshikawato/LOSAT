@@ -1,0 +1,1 @@
+{"seed": 1, "walk": 0, "browser": "chromium", "steps": [{"kind": "open", "args": [0, 0.1, 0, 0.4]}, {"kind": "combine", "args": [0]}, {"kind": "records", "args": [0, 0.9, 0]}, {"kind": "run", "args": []}], "minOfferedLeftOut": 1}

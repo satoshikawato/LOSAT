@@ -634,11 +634,11 @@ pub(super) fn rps_search(
             units.searches_volumes_bare(),
         ) {
             Ok(None) => {}
-            Ok(Some(counts)) => {
+            Ok(Some(dropped)) => {
                 if unlisted.is_empty() {
                     unlisted = vec![0; hit_lists.len()];
                 }
-                unlisted[batch.clone()].copy_from_slice(&counts);
+                unlisted[batch.clone()].copy_from_slice(&dropped.hsps);
             }
             Err(refusal) => {
                 failed = Some((number, refusal));
@@ -692,9 +692,11 @@ fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error
     if !error.is::<crate::cli::NativeError>() {
         return error;
     }
+    // The traceback fails before the batch's Seq-aligns: NCBI read none of its headers.
     database::HeaderReadError {
         query: run.batches[batch].start,
         error,
+        utf8: None,
     }
     .into()
 }

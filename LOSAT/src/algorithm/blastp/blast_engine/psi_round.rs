@@ -371,6 +371,9 @@ fn run_queries(
                 );
                 let mut search =
                     PsiSearch::from_engine(&current.engine, records[0].clone(), setup_messages);
+                // The PSSM that the round's archive holds (made only for a run that writes one,
+                // `query_pssm`'s `archive`).
+                search.archive_pssm = args.archive.as_ref().and(current.object.clone());
                 // The query source is fixed for the run: a PSSM query's warning label keeps its
                 // title rule in every round (`PsiSearch::warning_title`).
                 search.warning_title = args
@@ -460,7 +463,9 @@ fn run_queries(
                     identity_warned: 0,
                     epilog: false,
                     x_prolog: calls == 0,
-                    x_queries_before: 0,
+                    // The result sets formatted before (`m_QueriesFormatted`): BLAST XML numbers
+                    // each round's `Iteration` after them and writes its header with the first.
+                    x_queries_before: calls,
                     x_xml2_carry: None,
                     last_call: false,
                     psi_round: Some(&io),
@@ -493,6 +498,17 @@ fn run_queries(
                         // NCBI's posts of the bytes replaced in the query's request, which
                         // round 1's report did not place.
                         super::write_request_posts(args, &mut *outputs.diagnostics)?;
+                    }
+                    // NCBI's warning of its first read of a UTF8String header, where the round's
+                    // Seq-aligns made it before the failure (once per run: a round before posted
+                    // its own).
+                    if let Some(posts) = subject_source.database().and_then(|database| {
+                        failure
+                            .utf8
+                            .as_ref()?
+                            .post(database.seqdb(), args.app.ncbi_name())
+                    }) {
+                        posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     }
                     return Err(failure.error);
                 }
@@ -730,7 +746,8 @@ fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238 (cited at
 // `tabular::write_tabular_without_queries`: outfmt 7's count of the result sets formatted)
 /// The epilog of each report after the last round: outfmt 0's, outfmt 7's `# BLAST processed R
-/// queries` (R the rounds formatted, `m_QueriesFormatted`), nothing for outfmt 6, 10 and 20.
+/// queries` (R the rounds formatted, `m_QueriesFormatted`), BLAST XML's end, nothing for outfmt
+/// 6, 8 to 11 and 20.
 fn write_round_epilogs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -762,6 +779,19 @@ fn write_round_epilogs(
         }
         match crate::blastinput::app::parse_formatting_string(format.outfmt)?.number {
             0 => {}
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2246
+            // BLAST XML's end, after the rounds' `Iteration`s (`BlastXmlWriter::finish`).
+            5 => {
+                let mut bytes = Vec::new();
+                crate::report::blast_xml::StructuredXml::finish(
+                    &mut crate::report::blast_xml::BlastXmlWriter::new(rounds),
+                    &mut bytes,
+                )?;
+                let mut writer = format.sink.open()?;
+                writer.write_all(&bytes)?;
+                writer.flush()?;
+                continue;
+            }
             7 => {
                 // The default outfmt 7 (`write_blastp_tabular_hit_lists`' epilog).
                 let mut writer = format.sink.open()?;
@@ -897,8 +927,8 @@ pub(super) fn round_outcome(
         }
         Some(FoundBefore { found, unsure })
     };
-    // NCBI makes the next PSSM after `Advance` when another round follows or the last PSSM is
-    // saved (`itr || GetSaveLastPssm()`), and after a round with alignments only.
+    // NCBI makes the next PSSM after `Advance` when another round follows (`itr`) or the last PSSM
+    // is saved (`GetSaveLastPssm`), and after a round with alignments only.
     let makes_next = if has_alignments {
         let mut after = io.state.clone();
         after.advance(set.clone());
@@ -1145,6 +1175,7 @@ fn next_pssm(
         &|s_idx| keys.key(s_idx),
         ancillary,
         &mut unread,
+        args.archive.is_some(),
     );
     keys.unread_warnings(args.app.ncbi_name(), &unread, warnings);
     pssm

@@ -1835,13 +1835,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             (3, error.clone())
         );
         assert_eq!(
-            stopped(batch_prefetch_stop(
-                &db,
-                &run,
-                alone,
-                "BLASTN",
-                &stop_queries(3)
-            )),
+            stopped(batch_prefetch_stop(&db, &run, alone, "BLASTN", &stop_queries(3)).map(drop)),
             (3, error.clone())
         );
         // With another subject whose load writes the texts of opening the taxonomy database:
@@ -1872,26 +1866,26 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                     error
                 );
                 assert_eq!(
-                    stopped(batch_prefetch_stop(
-                        &db,
-                        &run,
-                        both(),
-                        "BLASTN",
-                        &stop_queries(0)
-                    ))
+                    stopped(
+                        batch_prefetch_stop(&db, &run, both(), "BLASTN", &stop_queries(0))
+                            .map(drop)
+                    )
                     .1,
                     error
                 );
                 assert_eq!(
-                    stopped(held_batch_prefetch_stop(
-                        &db,
-                        &TaxdbRun::default(),
-                        std::iter::empty(),
-                        std::iter::empty(),
-                        both(),
-                        "BLASTN",
-                        &stop_queries(0)
-                    ))
+                    stopped(
+                        held_batch_prefetch_stop(
+                            &db,
+                            &TaxdbRun::default(),
+                            std::iter::empty(),
+                            std::iter::empty(),
+                            both(),
+                            "BLASTN",
+                            &stop_queries(0)
+                        )
+                        .map(drop)
+                    )
                     .1,
                     error
                 );
@@ -1915,7 +1909,8 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                         both(),
                         "BLASTN",
                         &stop_queries(0),
-                    ),
+                    )
+                    .map(drop),
                     held_batch_prefetch_stop(
                         &db,
                         &TaxdbRun::default(),
@@ -1924,7 +1919,8 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                         both(),
                         "BLASTN",
                         &stop_queries(0),
-                    ),
+                    )
+                    .map(drop),
                 ] {
                     assert_eq!(stopped(stop), (0, format!("{open}{error}")));
                 }
@@ -1971,25 +1967,25 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                 )
                 .unwrap();
                 assert_eq!(
-                    stopped(batch_prefetch_stop(
-                        &db,
-                        &run,
-                        both(),
-                        "BLASTN",
-                        &stop_queries(1)
-                    )),
+                    stopped(
+                        batch_prefetch_stop(&db, &run, both(), "BLASTN", &stop_queries(1))
+                            .map(drop)
+                    ),
                     (1, error.clone())
                 );
                 assert_eq!(
-                    stopped(held_batch_prefetch_stop(
-                        &db,
-                        &TaxdbRun::default(),
-                        [subject(other, &None)],
-                        std::iter::empty(),
-                        both(),
-                        "BLASTN",
-                        &stop_queries(1)
-                    )),
+                    stopped(
+                        held_batch_prefetch_stop(
+                            &db,
+                            &TaxdbRun::default(),
+                            [subject(other, &None)],
+                            std::iter::empty(),
+                            both(),
+                            "BLASTN",
+                            &stop_queries(1)
+                        )
+                        .map(drop)
+                    ),
                     (1, error.clone())
                 );
             }
@@ -2002,6 +1998,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             "BLASTN",
             &stop_queries(0),
         )
+        .map(drop)
         .unwrap();
     }
     // Another subject whose lookup throws on its id, which the prefetch catches and which ends
@@ -2044,7 +2041,8 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             [subject(other, &throws), subject(stop as u32, &parsed[stop])],
             "BLASTN",
             &stop_queries(0),
-        ),
+        )
+        .map(drop),
     ] {
         let refused = refused.unwrap_err();
         assert!(!refused.is::<HeaderReadError>());
@@ -2650,7 +2648,7 @@ fn a_cache_collision_with_the_offset_error_is_refused_at_the_first_prefetch() {
     let cwd = empty_cwd("cache_collision");
     let db = db_search("tm_cache150", Some(&variant("offset_last_past_end")), &cwd);
     let run = TaxdbRun::default();
-    assert!(run.prefetch_refused(&db));
+    assert!(run.cache_may_refuse(&db));
     for ordinals in [&[][..], &[0], &[1, 2]] {
         let error = prefetch(&db, &run, ordinals).unwrap_err();
         assert!(error.is::<TaxonomyRefusal>(), "{error:#}");
@@ -2665,16 +2663,143 @@ fn a_cache_collision_with_the_offset_error_is_refused_at_the_first_prefetch() {
     for taxdb in ["good", "bad_magic", "high_bytes_utf8"] {
         let db = db_search("tm_cache150", Some(&variant(taxdb)), &cwd);
         let run = TaxdbRun::default();
-        assert!(!run.prefetch_refused(&db), "{taxdb}");
+        assert!(!run.cache_may_refuse(&db), "{taxdb}");
         assert!(prefetch(&db, &run, &[0, 1, 2]).is_ok(), "{taxdb}");
     }
     let db = db_search("tm_cache150", None, &cwd);
-    assert!(!TaxdbRun::default().prefetch_refused(&db));
+    assert!(!TaxdbRun::default().cache_may_refuse(&db));
     let db = db_search("tm_cache151", Some(&variant("offset_last_past_end")), &cwd);
-    assert!(!TaxdbRun::default().prefetch_refused(&db));
+    assert!(!TaxdbRun::default().cache_may_refuse(&db));
     // The two volumes of tm_2vol hold 99990 alone.
     let db = db_search("tm_2vol", Some(&variant("offset_last_past_end")), &cwd);
-    assert!(!TaxdbRun::default().prefetch_refused(&db));
+    assert!(!TaxdbRun::default().cache_may_refuse(&db));
+    std::fs::remove_dir_all(&cwd).unwrap();
+}
+
+/// `unordered_boundary_misses` against every order of up to seven loads of the four kinds, from a
+/// slot that holds the offset error's taxid or another one (line NP item O4b2-3).
+#[test]
+fn unordered_misses_are_every_order() {
+    // The kinds as (first lookup is `L`, last lookup is `L`).
+    const KINDS: [(bool, bool); 4] = [(true, true), (true, false), (false, true), (false, false)];
+    fn orders(left: &mut [usize; 4], prev_l: bool, misses: usize, out: &mut Vec<usize>) {
+        if left.iter().all(|&n| n == 0) {
+            out.push(misses);
+            return;
+        }
+        for kind in 0..4 {
+            if left[kind] == 0 {
+                continue;
+            }
+            left[kind] -= 1;
+            let (first_l, last_l) = KINDS[kind];
+            orders(left, last_l, misses + usize::from(first_l && !prev_l), out);
+            left[kind] += 1;
+        }
+    }
+    for total in 2..=7usize {
+        for ll in 0..=total {
+            for lo in 0..=total - ll {
+                for ol in 0..=total - ll - lo {
+                    let oo = total - ll - lo - ol;
+                    for held_last in [false, true] {
+                        let mut all = Vec::new();
+                        orders(&mut [ll, lo, ol, oo], held_last, 0, &mut all);
+                        let want = (*all.iter().min().unwrap(), *all.iter().max().unwrap());
+                        let loads = UnorderedLoads { ll, lo, ol, oo };
+                        assert_eq!(
+                            unordered_boundary_misses(held_last, loads),
+                            want,
+                            "{loads:?} held_last={held_last}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A batch's prefetch on a database whose volume holds taxid 99990 (the offset error of
+/// `offset_last_past_end`) and 150 (its slot of NCBI's cache) follows the slot in NCBI's order of
+/// the loads, and refuses only where the addresses of the Seq-id handles decide the texts (line
+/// NP item O4b2-3; the local ids of `nz_pc` and `tm_cache150` are one key of NCBI's map): `nz_pc`
+/// sZ 150, sI 562, sM 10090, sN 99990 writes the offset error once in any order; `tm_cache150`
+/// st1 99990, st2 150, st3 99990 once or twice; st1 and st2 once, and then the slot holds either.
+#[test]
+fn a_prefetch_follows_ncbis_order_of_its_loads_in_the_cache_slot() {
+    let offset = "Error: [blastp] Error: Offset error at end of taxdb file.\n";
+    let cwd = empty_cwd("prefetch_slot");
+    let taxdb = variant("offset_last_past_end");
+    let prefetch = |db: &SeqDb,
+                    run: &TaxdbRun,
+                    parsed: &[crate::report::db_subject::ParsedSubject],
+                    ordinals: &[u32]| {
+        batch_prefetch(
+            db,
+            run,
+            std::iter::empty(),
+            ordinals.iter().map(|&ordinal| {
+                PrefetchSubject::unflipped(ordinal, Some(&parsed[ordinal as usize]))
+            }),
+            "BLASTP",
+            &stop_queries(0),
+        )
+        .map(|posts| String::from_utf8(posts.text()).unwrap())
+    };
+    let db = db_search("nz_pc", Some(&taxdb), &cwd);
+    let parsed = parsed_subjects(&db);
+    for ordinals in [&[0, 1, 2, 3][..], &[3, 2, 1, 0], &[3, 0], &[0, 3]] {
+        let run = TaxdbRun::default();
+        assert!(run.cache_may_refuse(&db));
+        assert_eq!(
+            prefetch(&db, &run, &parsed, ordinals).unwrap(),
+            offset,
+            "{ordinals:?}"
+        );
+    }
+    // A later batch that loads sN again after sZ: NCBI's scope may keep it.
+    let run = TaxdbRun::default();
+    assert_eq!(prefetch(&db, &run, &parsed, &[0, 3]).unwrap(), offset);
+    let again = prefetch(&db, &run, &parsed, &[0, 3])
+        .unwrap_err()
+        .to_string();
+    assert!(again.contains("256-slot taxonomy cache"), "{again}");
+
+    let db = db_search("tm_cache150", Some(&taxdb), &cwd);
+    let parsed = parsed_subjects(&db);
+    let refused = prefetch(&db, &TaxdbRun::default(), &parsed, &[0, 1, 2]).unwrap_err();
+    assert!(refused.is::<TaxonomyRefusal>(), "{refused:#}");
+    let text = format!("{refused:#}");
+    for part in [
+        "the prefetch of a query batch reads database sequences",
+        "taxids 99990 and 150",
+        "same slot of NCBI BLAST+'s 256-slot taxonomy cache",
+        "addresses of their Seq-id handles",
+        "LOSAT's BLASTP",
+    ] {
+        assert!(text.contains(part), "{part}: {text}");
+    }
+    // One batch each: the order of the batches.
+    let run = TaxdbRun::default();
+    assert_eq!(prefetch(&db, &run, &parsed, &[0]).unwrap(), offset);
+    assert_eq!(prefetch(&db, &run, &parsed, &[1]).unwrap(), "");
+    assert_eq!(prefetch(&db, &run, &parsed, &[2]).unwrap(), offset);
+    // st1 and st2 in one batch: once, and the slot then holds 99990 or 150 by their order.
+    let run = TaxdbRun::default();
+    assert_eq!(prefetch(&db, &run, &parsed, &[1, 0]).unwrap(), offset);
+    let later = format!("{:#}", prefetch(&db, &run, &parsed, &[2]).unwrap_err());
+    assert!(
+        later.contains("after the prefetch of a query batch read database sequences"),
+        "{later}"
+    );
+    // Without the offset error, nothing to follow.
+    for name in ["good", "bad_magic"] {
+        let db = db_search("tm_cache150", Some(&variant(name)), &cwd);
+        assert!(
+            prefetch(&db, &TaxdbRun::default(), &parsed, &[0, 1, 2]).is_ok(),
+            "{name}"
+        );
+    }
     std::fs::remove_dir_all(&cwd).unwrap();
 }
 
@@ -2767,6 +2892,7 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
             ordinal: 0,
             again: true,
             after: Some(fetch(0, 150, true)),
+            order: None,
         })
     );
     // M1 (b) (cc_m2): A (L, 150) and B (L), first loads: two texts. Read again, A may put 150
@@ -2787,6 +2913,7 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
             ordinal: 1,
             again: true,
             after: Some(fetch(0, 150, true)),
+            order: None,
         })
     );
     // A first load after such a read again (C of 99990 + 256 * 2 is not L).
@@ -2806,6 +2933,7 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
             ordinal: 4,
             again: false,
             after: Some(fetch(1, 150, true)),
+            order: None,
         })
     );
     // M1 (a) (cc_ax): 150 never looked up: L's reads again write nothing.
@@ -2824,6 +2952,7 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
             ordinal: 0,
             again: true,
             after: Some(fetch(1, 150, false)),
+            order: None,
         })
     );
     // C, then A in another volume (cc_c1 cc_a1), then both again; taxids of other slots.
@@ -2861,7 +2990,9 @@ fn the_pssms_loads_write_the_offset_error_as_the_slot_holds_it() {
         for &ordinal in ordinals {
             let subject = &parsed[ordinal as usize];
             let lookups = blob_taxids(&db, ordinal, Some(subject), ordinal, "PSIBLAST")?;
-            text.extend(pssm_load_texts(&db, &run, ordinal, &lookups, "PSIBLAST")?);
+            text.extend(pssm_load_texts(
+                &db, &run, None, ordinal, &lookups, "PSIBLAST",
+            )?);
         }
         Ok(String::from_utf8(text).unwrap())
     };
@@ -2889,4 +3020,79 @@ fn a_database_without_taxids_does_not_hold() {
     let db = database("sprot", Some(&variant("high_bytes_utf8")));
     assert!(db.taxdb_found());
     assert!(!taxdb_may_refuse(&db));
+}
+
+#[test]
+fn a_prefetch_with_a_failed_lookup_refuses_its_loads_of_the_cache_slot() {
+    // Line NP item O4b2-3, review 1 F1: NCBI's prefetch ends its loads at a Seq-align id whose
+    // lookup fails, so whether it loads sZ (150) before it, which puts 150 in the slot of 99990
+    // without a text, is not known; a later load of 99990 would write the offset error or not.
+    let offset = "Error: [blastp] Error: Offset error at end of taxdb file.\n";
+    let warning = "Warning: [blastp] Error pre-fetching sequence data\n";
+    let cwd = empty_cwd("prefetch_slot_stop");
+    let taxdb = variant("offset_last_past_end");
+    let db = db_search("nz_pc", Some(&taxdb), &cwd);
+    let parsed = parsed_subjects(&db);
+    let throws =
+        parsed[1]
+            .clone()
+            .found_instead(Some(crate::report::db_subject::FoundInstead::ThrowsOnId(
+                "Invalid choice selection".into(),
+            )));
+    assert!(throws.prefetch_fails());
+    let run = TaxdbRun::default();
+    let batch = |subjects: Vec<PrefetchSubject<'_>>| {
+        batch_prefetch(
+            &db,
+            &run,
+            std::iter::empty(),
+            subjects,
+            "BLASTP",
+            &stop_queries(0),
+        )
+        .map(|posts| String::from_utf8(posts.text()).unwrap())
+    };
+    assert_eq!(
+        batch(vec![PrefetchSubject::unflipped(3, Some(&parsed[3]))]).unwrap(),
+        offset
+    );
+    // sM (10090) takes another slot: the batch writes NCBI's warning alone.
+    assert_eq!(
+        batch(vec![
+            PrefetchSubject::unflipped(1, Some(&throws)),
+            PrefetchSubject::unflipped(2, Some(&parsed[2])),
+        ])
+        .unwrap(),
+        warning
+    );
+    let refused = batch(vec![
+        PrefetchSubject::unflipped(1, Some(&throws)),
+        PrefetchSubject::unflipped(0, Some(&parsed[0])),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("whose lookup in the database fails")
+            && refused.contains("may load before or not at all"),
+        "{refused}"
+    );
+    std::fs::remove_dir_all(&cwd).unwrap();
+}
+
+/// NCBI's `CATCH_ALL` takes the `CEofException` of a record that ends before its read enters
+/// the set's elements as a `CIOException` other than `eFlush`: no post, exit status 0 (RG-T5d
+/// fix 1, probe le8); the `CSerialException` of a record cut inside is `Error: what()`, 255.
+#[test]
+fn a_header_record_cut_before_its_elements_ends_the_search_with_exit_status_0() {
+    let path = std::path::Path::new("t.phr");
+    let native = |record: &[u8]| {
+        let error = crate::seqdb::header::decode_full(record, path).unwrap_err();
+        let error = database_error(error, "BLASTP");
+        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+        (native.exit, native.message.is_empty())
+    };
+    assert_eq!(native(&[0x30]), (0, true));
+    assert_eq!(native(&[0x3f]), (0, true));
+    assert_eq!(native(&[0x30, 0x80]), (255, false));
+    assert_eq!(native(&[0x30, 0x80, 0x30, 0x80, 0xbf]), (255, false));
 }

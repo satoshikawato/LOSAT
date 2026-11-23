@@ -1407,7 +1407,6 @@ Window for multiple hits: 40\n\
         false,
         false,
         false,
-        false,
         Some((&links, &mut Vec::new())),
     )
     .unwrap();
@@ -1420,7 +1419,6 @@ Window for multiple hits: 40\n\
         &mut plain,
         "blastp",
         crate::wording::REPORT_VERSION,
-        false,
         false,
         false,
         false,
@@ -1449,7 +1447,6 @@ Window for multiple hits: 40\n\
         false,
         false,
         true,
-        true,
         Some((&links, &mut Vec::new())),
     )
     .unwrap();
@@ -1477,7 +1474,6 @@ fn a_malformed_ncbirc_ends_the_html_prolog_after_the_version_line() {
         false,
         false,
         false,
-        false,
         Some((&links, &mut Vec::new())),
     )
     .unwrap_err();
@@ -1496,7 +1492,6 @@ fn a_malformed_ncbirc_ends_the_html_prolog_after_the_version_line() {
         &mut plain,
         "blastp",
         crate::wording::REPORT_VERSION,
-        false,
         false,
         false,
         false,

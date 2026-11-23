@@ -1945,6 +1945,7 @@ fn search(
                 pairwise_database.as_ref(),
                 args.tabular_taxdb.unwrap_or(false),
                 pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
+                resolved.html.as_deref(),
             )?;
         }
         for range in query_input

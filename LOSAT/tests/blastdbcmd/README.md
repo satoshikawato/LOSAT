@@ -66,6 +66,10 @@ in `%b`, `%d`, `%f` and `%a`.
 `db/pzm.msk` (both OIDs) and `OID_MASK_TYPE` 1, 2 and 0: under a type other than 0 NCBI's header read filters the set
 it read, so the header of no bytes at OID 1 stops every read of it with `Attempt to access NULL pointer.`, as a
 `-taxids` list does; under 0 it writes nothing for it.
+`db/pzlg.pal`, `db/pzln.pal` (a `GILIST` of `pzl5001.txt` and `pzl9.txt`), `db/pzlr.pal` (OID 1 by its range) and
+`db/pzlrg.pal`, `db/pzlrn.pal`, `db/pzlgs.pal` over them (`tests/blastdbcmd_alias_keys.rs`, `A367`-`A377`, line RG D1c-1,
+2026-11-22): an alias file's list attached to the volume filters its header reads too, so OID 1, kept by the range
+beside the list, stops the same way; `pzlgs` names `pz4` itself, so NCBI reads no list below it and filters nothing.
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
   are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /

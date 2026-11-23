@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.85
+- Version: 1.86
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -443,7 +443,12 @@
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.83; first 1.79, then
   1.83 at the merge of dev that brought 1.78 to 1.82 (psiblast line item PS10a, line RG item D5b-5, line NP items
   O4c and M4c-1, psiblast line item PS12c), then 1.84 at the merge of dev that brought line NP item M4b-AX's 1.83);
-  1.85 2026-11-23 (approved exception 27, the Owner's answer of 2026-11-22 22:34 JST to question Q4
+  1.85 2026-11-22 (alias files with `GILIST`, `TILIST` and `SEQIDLIST`, line RG item D1c-1: an
+  explicit rejection of a `SEQIDLIST` token that NCBI warns about, kept under rule 2 by the
+  maintainer (Owner's answer 「Q-D1c-R2=A」, 2026-11-22 22:4x JST); numbered after 1.71; first
+  1.72, then 1.74, 1.78, 1.81, 1.82, 1.83 and 1.85 at the merges of dev that brought 1.72 and 1.73,
+  then 1.74 to 1.77, then 1.78 to 1.80, then 1.81, then 1.82, then 1.83 and 1.84);
+  1.86 2026-11-23 (approved exception 27, the Owner's answer of 2026-11-22 22:34 JST to question Q4
   of line NP's M4b (question Q6 of that day's batch, 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A
   Q10=A Q11=A Q12=A Q13=OK」): with `-db_hard_mask`, TBLASTN and TBLASTX search a reading frame whose
   masks leave it an empty first part (a mask within the first 2 bases of a sequence or within the 1
@@ -452,9 +457,10 @@
   removed; how the 1 or 2 masked bases are read (masked in every frame): the Owner's answer
   「推奨通り」 of 2026-11-23 13:49 JST, on the board, to the report of line NP's session ad-M4b-8 that
   asked Q-ALIGNEX and M4b-3c's question Q6 (recommended A and B), which is Q6 = B; line NP item
-  M4b-3c; numbered after 1.84 (1.83 is line NP item M4b-AX, 1.84 psiblast line item PS10c); first 1.77, then 1.85 at the merge of dev that brought its 1.75 to
-  1.82 (the branch had assumed 1.76 for line NP item M4b-3b; dev's 1.76 and 1.77 are line RG's X4b-2
-  and D3c-3a); the exception numbered 24 at first, then 27 after dev's 24 to 26)
+  M4b-3c; numbered after 1.85 (1.83 is line NP item M4b-AX, 1.84 psiblast line item PS10c, 1.85 line RG
+  item D1c-1); first 1.77, then 1.85 at the merge of dev that brought its 1.75 to 1.82 (the branch had assumed
+  1.76 for line NP item M4b-3b; dev's 1.76 and 1.77 are line RG's X4b-2 and D3c-3a), then 1.86 at the merge
+  of dev that brought line RG item D1c-1's 1.85; the exception numbered 24 at first, then 27 after dev's 24 to 26)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1279,7 +1285,7 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     leaves a frame an empty first part (an empty first part of a frame, then a part that NCBI
     searches as the whole frame; in TBLASTN and TBLASTX this includes an empty mask at 0 before a
     tail mask, which BLASTP and BLASTX search under Q1 as BLASTN does under exception 13), refused
-    (rule 3) until version 1.85, is searched under approved exception 27 (a translated mask that
+    (rule 3) until version 1.86, is searched under approved exception 27 (a translated mask that
     leaves a frame an empty first part). Masks out of
     order, overlapping masks, a mask that ends past its sequence, and in BLASTP and BLASTX a range
     longer than 5,000,000 letters stay refused (rule 3). `blastinput::db_mask::HardScan`,
@@ -1327,7 +1333,7 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     `a_whole_frame_scans_to_the_frame_s_end_and_a_tail_masked_one_its_chunk`
     (`LOSAT/src/algorithm/common/translated_chunks_tests.rs`).
 
-## Approved exception 27 (TBLASTN and TBLASTX `-db_hard_mask`, a mask that leaves a reading frame an empty first part, version 1.85)
+## Approved exception 27 (TBLASTN and TBLASTX `-db_hard_mask`, a mask that leaves a reading frame an empty first part, version 1.86)
 
 The Owner decided on 2026-11-22 at 22:34 JST (words 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A
 Q10=A Q11=A Q12=A Q13=OK」; question Q6 of that batch is question Q4 of line NP's M4b,
@@ -2923,6 +2929,16 @@ file would differ, and NCBI's programs still could not open the database).
   allocator, not of its reader, refused as the reads past an OID list file's page above. Inside the array's last byte the
   clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
   first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
+
+- An alias file's `SEQIDLIST` over a version 4 database (version 1.85, 2026-11-22, line RG item
+  D1c-1; rule 2, the rejection kept by the maintainer: Owner's answer 「Q-D1c-R2=A」, 2026-11-22
+  22:4x JST), in a shape whose
+  NCBI result is deterministic but has no known use: a token of the list that NCBI warns about and
+  drops (a token of form feeds and vertical tabs alone: `WARNING:  <token> is not a valid seqid
+  string.` when NCBI reads the list, at its constructor's scan or at the search's first read under
+  `NSEQ` and `LENGTH`). LOSAT refuses (exit 1) where NCBI reads the list. A list that two volumes
+  or more translate, with an id that a second simplification changes, is read in NCBI's order:
+  the ids simplified again for each later volume and not sorted again (rows `db.il.bp.cv.*`).
 
 - `losat blastn -use_index true` of a megablast search (version 1.65, 2026-11-21, line RG item
   D5b-1, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07), where NCBI's

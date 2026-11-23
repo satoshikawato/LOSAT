@@ -215,10 +215,12 @@ fn log_head(dir: &str) -> String {
 /// directories start with the current one (LOSAT's text of it).
 fn not_found(name: &str) -> String {
     let cwd = std::env::current_dir().unwrap();
+    // NCBI splits the search path at `;` on Windows, at `:` elsewhere.
+    let splitter = if cfg!(windows) { ';' } else { ':' };
     let ncbi = format!(
         "BLAST Database error: No alias or index file found for nucleotide database [{name}] in \
-         search path [{}::]. Please verify the spelling of the BLAST database and its molecule \
-         type.\n",
+         search path [{}{splitter}{splitter}]. Please verify the spelling of the BLAST database \
+         and its molecule type.\n",
         cwd.display()
     );
     String::from_utf8(crate::wording::losat_bytes(ncbi.as_bytes()).into_owned()).unwrap()

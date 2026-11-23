@@ -228,7 +228,9 @@ pub fn run_makembindex(
 /// (`-in -`, and without `-in`), so a database can be built from FASTA in memory. What the command
 /// line writes to standard output goes to `output`, what it writes to standard error to
 /// `diagnostics`. A failure is an error whose message is that text without its last newlines; an
-/// argv that the parser refuses is `Error::Argv`, with the parser's message in the diagnostics too.
+/// argv that the parser refuses is `Error::Argv`, with the parser's message in the diagnostics too
+/// (its usage names `losat`, where the command line names the executable as it was called:
+/// `losat.exe` on Windows).
 /// The call runs NCBI's application start, as the command line does:
 /// the file of `-logfile` gets its messages, the file of `-conffile` is loaded, the versions are
 /// printed to `output`, and `-dryrun` ends the call after the arguments and the settings.

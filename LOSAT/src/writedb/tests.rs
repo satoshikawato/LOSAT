@@ -1464,6 +1464,51 @@ fn v5_markers(bytes: &[u8], dir: &str) -> Vec<u8> {
     lines.join(&b'\n')
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1963-2014
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:140-181
+/// `stderr`, NCBI's text from Linux of a run whose `-in` names an alias file with an `OIDLIST`
+/// value that starts with `/`, as NCBI's code writes it on Windows in the form of `v5_markers`
+/// (`\` written as `/`): a value starting with `/` is not absolute there, and NCBI joins it to the
+/// directory of the alias file's first volume with `\` (`SeqDB_CombinePath` changes no separator
+/// of the value), where on Linux the text quotes the value alone.
+fn oid_list_path_on_windows(stderr: &[u8], words: &[String]) -> Vec<u8> {
+    let input = words
+        .iter()
+        .position(|word| word == "-in")
+        .and_then(|at| words.get(at + 1));
+    let alias = input.and_then(|input| {
+        ["pal", "nal"]
+            .iter()
+            .map(|ext| PathBuf::from(format!("{input}.{ext}")))
+            .find(|path| path.is_file())
+    });
+    let Some(alias) = alias else {
+        return stderr.to_vec();
+    };
+    let text = std::fs::read_to_string(&alias).unwrap();
+    let key = |name: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(name)?.strip_prefix(' '))
+            .map(str::trim)
+    };
+    let (Some(list), Some(volumes)) = (key("OIDLIST"), key("DBLIST")) else {
+        return stderr.to_vec();
+    };
+    if !list.starts_with('/') {
+        return stderr.to_vec();
+    }
+    let first = volumes.split_whitespace().next().unwrap();
+    let directory = alias.parent().unwrap().join(first);
+    let directory = std::fs::canonicalize(directory.parent().unwrap()).unwrap();
+    let directory = directory.to_string_lossy();
+    let directory = directory.strip_prefix(r"\\?\").unwrap_or(&directory);
+    replace_bytes(
+        stderr,
+        format!("'{list}'").as_bytes(),
+        format!("'{}/{list}'", directory.replace('\\', "/")).as_bytes(),
+    )
+}
+
 /// Replays a case of `makeblastdb_v5_cases.rs` through the parser and `run_with` in a directory
 /// of its own: every run's exit status and streams, the log file and every file are
 /// makeblastdb's (the date of the database is the recorded one).
@@ -1499,12 +1544,18 @@ fn run_v5_case(case: &V5Case) {
             &mut err,
         );
         let (out, err) = (v5_markers(&out, &dir), v5_markers(&err, &dir));
+        // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
+        let expected_err = crate::wording::losat_bytes(run.stderr);
+        let expected_err = if cfg!(windows) {
+            oid_list_path_on_windows(&expected_err, &words)
+        } else {
+            expected_err.into_owned()
+        };
         assert!(
-            // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
-            crate::wording::losat_bytes(run.stderr) == err,
+            expected_err == err,
             "{name} run {k}: standard error\n{}\nexpected\n{}",
             show(&err),
-            show(run.stderr)
+            show(&expected_err)
         );
         assert!(
             out == run.stdout,

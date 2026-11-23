@@ -3190,14 +3190,17 @@ fn cli_output(program: &str, words: &[&str]) -> std::process::Output {
 
 /// The rule of `Error` by which the command line's standard error `stderr` is the library's
 /// `diagnostics` (what the search wrote before the failure) and then the message of `error`:
-/// NCBI's message as it is (`"ncbi"`), or LOSAT's refusal after `Error: ` and before a newline
-/// (`"losat"`); `None` when neither gives it.
+/// NCBI's message as it is (`"ncbi"`), LOSAT's refusal after `Error: ` and before a newline
+/// (`"losat"`), or a reader's error (`Error::Input`) without its last newlines (`"reader"`:
+/// `read_input_file`'s message of a file that does not open); `None` when none gives it.
 fn failure_rule(stderr: &[u8], diagnostics: &[u8], error: &Error) -> Option<&'static str> {
     let tail = stderr.strip_prefix(diagnostics)?;
     if tail == error.message() {
         Some("ncbi")
     } else if tail == [b"Error: ", error.message(), b"\n"].concat() {
         Some("losat")
+    } else if matches!(error, Error::Input(_)) && without_last_newlines(tail) == error.message() {
+        Some("reader")
     } else {
         None
     }
@@ -3387,9 +3390,11 @@ fn a_long_organism_report_that_cannot_be_written_fails_as_the_command_lines_out(
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
 /// A directory named as the query or the subject is read as the command line reads it (line LIB
 /// E1, fix 2): it opens and its first read fails, which ends the input, so it holds no record
-/// (`read_input_file`: blastp's query of a directory is NCBI's `Query is Empty!`); a directory
-/// named `.gz`, `.bz2` or `.zst` is refused as not of that format, as the command line refuses
-/// it. Every program, both sides, against the command line in the same test.
+/// (`read_input_file`: blastp's query of a directory is NCBI's `Query is Empty!`); on Windows a
+/// directory does not open, so it is a file that is not accessible, as NCBI's `ifstream` there
+/// opens no directory; a directory named `.gz`, `.bz2` or `.zst` is refused as not of that
+/// format, as the command line refuses it. Every program, both sides, against the command line
+/// in the same test.
 #[test]
 fn a_directory_input_is_read_as_the_command_line_reads_it() {
     let directory = TempPath::new(temp_path("directories"));
@@ -3439,7 +3444,19 @@ fn a_directory_input_is_read_as_the_command_line_reads_it() {
                         }
                     }
                 }
-                if program == Program::Blastp && name == "records" && query == &named {
+                if cfg!(windows) && name == "records" {
+                    let not_accessible = format!(
+                        "Command line argument error: Argument \"{}\". File is not \
+                         accessible:  `{}'\n",
+                        if query == &named { "query" } else { "subject" },
+                        named.display()
+                    );
+                    assert_eq!(
+                        (cli.status.code(), stderr.as_ref()),
+                        (Some(1), not_accessible.as_str()),
+                        "{context}"
+                    );
+                } else if program == Program::Blastp && name == "records" && query == &named {
                     assert_eq!(
                         (cli.status.code(), cli.stderr.as_slice()),
                         (Some(0), b"Warning: [blastp] Query is Empty!\n".as_slice()),
@@ -3449,6 +3466,20 @@ fn a_directory_input_is_read_as_the_command_line_reads_it() {
             }
         }
     }
+}
+
+/// The command line's text `stderr` with the name of the executable as the library writes it:
+/// the parser's usage names the executable as it was called, `losat.exe` on Windows, where the
+/// library (and `examples/library_command_line`) names `losat`.
+fn library_program_name(stderr: &[u8]) -> Vec<u8> {
+    let called = format!("losat{} ", std::env::consts::EXE_SUFFIX);
+    if called == "losat " {
+        return stderr.to_vec();
+    }
+    String::from_utf8(stderr.to_vec())
+        .unwrap()
+        .replace(&called, "losat ")
+        .into_bytes()
 }
 
 /// `run_makeblastdb`'s argv that its parser refuses is a tool's error of the parser's kind (line
@@ -3482,7 +3513,8 @@ fn makeblastdbs_refused_argv_is_a_tools_error() {
             &mut diagnostics,
         )
         .unwrap_err();
-        let cli = cli_output("makeblastdb", words);
+        let mut cli = cli_output("makeblastdb", words);
+        cli.stderr = library_program_name(&cli.stderr);
         assert_eq!(cli.status.code(), Some(2), "{words:?}");
         assert!(matches!(error, Error::Argv(_)), "{words:?}: {error:?}");
         assert_eq!(diagnostics, cli.stderr, "{words:?}");

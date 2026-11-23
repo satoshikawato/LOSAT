@@ -125,7 +125,9 @@ impl LoopBatchSizes {
         }
     }
 
-    /// Whether the sizes follow the extensions of each batch.
+    /// Whether the sizes follow the extensions of each batch (read by the tblastx batch pipe,
+    /// which only the parallel build has).
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     pub(crate) fn mixes(&self) -> bool {
         matches!(self, Self::Mixed { .. })
     }

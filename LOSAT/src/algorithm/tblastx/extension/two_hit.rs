@@ -6,6 +6,8 @@ use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 // Where the context's letters lie in the query batch: NCBI's walks go on past the context's ends
 // (query_batch.rs).
 use super::query_batch::InBatch;
+// The letters around a chunk that NCBI's extensions read for a hit before it or past its end.
+use crate::algorithm::common::translated_chunks::ChunkLetters;
 // The table walks of the two-hit extension (x_two_hit_fast.rs).
 use super::x_two_hit_fast;
 
@@ -842,6 +844,82 @@ pub(super) fn two_hit_walks<S: TbxScore>(
             s_last_off,
         ),
         false,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158, :897 and :841
+/// NCBI's two-hit extension (`s_BlastAaExtendTwoHit`) of a hit whose first hit (`s_left_off`)
+/// lies before its chunk or whose word (at `s_right_off`) goes past the chunk's last letter, with
+/// the scores of `sc`, on the letters around the chunk (`ChunkLetters`, whose type doc gives NCBI's
+/// reads there): the word on the frame's letters, the left walk down to the chunk's first letter
+/// (none where the word's best end is at or before it), the right walk up to the chunk's last
+/// letter. The walks go on into the query batch `qb` past the context's ends as NCBI's do. The
+/// subject offsets are the chunk's (`Int4`, below 0 before it): `(q_start, q_end, s_start, s_end,
+/// score, right_extend, s_last_off)`.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn extend_hit_two_hit_outside<S: TbxScore>(
+    sc: S,
+    q_seq: &[u8],
+    qb: InBatch<'_>,
+    chunk: ChunkLetters<'_>,
+    s_left_off: i32,
+    s_right_off: i32,
+    q_right_off: usize,
+    x_drop: i32,
+) -> (usize, usize, i32, i32, i32, bool, i32) {
+    let mut score = 0i32;
+    let mut seed_score = 0i32;
+    let mut right_d = 0usize;
+    for i in 0..sc.word() {
+        score += sc.score(q_seq[q_right_off + i], chunk.at(s_right_off + i as i32));
+        if score > seed_score {
+            seed_score = score;
+            right_d = i + 1;
+        }
+    }
+    let q_right_off = q_right_off + right_d;
+    let s_right_off = s_right_off + right_d as i32;
+    let (left_score, left_disp) = if s_right_off > 0 {
+        let (max_score, disp, _) = extend_left_ungapped(
+            sc,
+            q_seq,
+            qb,
+            chunk.from_chunk(),
+            q_right_off,
+            s_right_off as usize,
+            0,
+            x_drop,
+        );
+        (max_score, disp as i32)
+    } else {
+        (0, 0)
+    };
+    let (mut right_score, mut right_disp, mut right_extend, mut s_last_off) =
+        (0i32, 0i32, false, s_right_off);
+    if left_disp >= s_right_off - s_left_off {
+        right_extend = true;
+        let (max_score, disp, j, _) = extend_right_ungapped(
+            sc,
+            q_seq,
+            qb,
+            chunk.to_chunk_end(),
+            q_right_off,
+            (chunk.lead as i32 + s_right_off) as usize,
+            left_score,
+            x_drop,
+        );
+        (right_score, right_disp, s_last_off) = (max_score, disp as i32, s_right_off + j as i32);
+    }
+    (
+        q_right_off - left_disp as usize,
+        q_right_off + right_disp as usize,
+        s_right_off - left_disp,
+        s_right_off + right_disp,
+        left_score.max(right_score),
+        right_extend,
+        s_last_off,
     )
 }
 

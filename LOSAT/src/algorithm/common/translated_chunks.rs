@@ -204,6 +204,62 @@ fn soft_chunk_scan_ranges(
     Ok(calls)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306 and
+// c++/src/algo/blast/core/blast_aascan.c:76-77
+// NCBI moves each range of a chunk to the chunk's offsets and raises only the first range's left
+// to 0, so with masks stored out of order (a range's left below the one before it) a later range
+// can start before its chunk. NCBI's scan then reads the frame's letters there, at negative
+// offsets of the chunk, which its hits keep (as Uint4).
+/// The letters before its chunk that the scan of a chunk's `ranges` reads: how far the lowest
+/// left lies below the chunk's start (0 for ranges in order). The scans read the frame from that
+/// many letters before the chunk, on the ranges moved by as many, and give their hits back at the
+/// chunk's offsets (`tblastx::blast_engine::word_finder`, `tblastn::search_seed::x_scan_unit_of`).
+pub(crate) fn scan_lead(ranges: &[(i32, i32)]) -> usize {
+    ranges
+        .iter()
+        .map(|&(left, _)| left)
+        .min()
+        .map_or(0, |left| left.min(0).unsigned_abs() as usize)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158, :897 and :841
+// NCBI's extensions read the word and start the walks wherever the scan's hit lies, also before
+// the chunk (a later range of masks stored out of order) and past its last letter (a first range
+// raised to one word at its left): their subject is the chunk's, so the left walks stop at the
+// chunk's first letter and the right walks at its last, and the word and the letters between are
+// the frame's.
+/// The letters of a chunk's frame around it, as NCBI's extensions read them for a hit that lies
+/// before the chunk or whose word goes past it: `letters` holds the frame from `lead` letters
+/// before the chunk on (to past its end where the frame goes on), and the chunk has `length`
+/// letters. Offsets are the chunk's, as NCBI's (`Int4`, below 0 before the chunk).
+#[derive(Clone, Copy)]
+pub(crate) struct ChunkLetters<'a> {
+    pub(crate) letters: &'a [u8],
+    pub(crate) lead: usize,
+    pub(crate) length: usize,
+}
+
+impl<'a> ChunkLetters<'a> {
+    /// The frame's letter at offset `s` of the chunk.
+    #[inline]
+    pub(crate) fn at(self, s: i32) -> u8 {
+        self.letters[(self.lead as i32 + s) as usize]
+    }
+
+    /// The letters from the chunk's first one on: the subject of the left walks, which stop there.
+    #[inline]
+    pub(crate) fn from_chunk(self) -> &'a [u8] {
+        &self.letters[self.lead..]
+    }
+
+    /// The letters up to the chunk's last one: the subject of the right walks from `lead`
+    /// letters before the chunk, which stop at its end.
+    #[inline]
+    pub(crate) fn to_chunk_end(self) -> &'a [u8] {
+        &self.letters[..self.lead + self.length]
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321, 398-405 and
 // c++/src/algo/blast/core/blast_engine.c:757-762, 814-830, 476-486, 221-311
 // A database sequence of a search with `-db_soft_mask` or `-db_hard_mask` comes with the complement

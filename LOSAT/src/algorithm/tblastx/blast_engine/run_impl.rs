@@ -414,18 +414,46 @@ fn x_soft_chunk<'a>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:816-831. A shorter frame takes the ranges
 // of the longest frame of its strand, so the last word NCBI scans can end on the NULLB after the
 // frame (blast_util.c:438-453, BLAST_GetAllTranslations).
-/// The letters the scan reads: `subject`, and the sentinel after it with `x_soft` ranges.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306,
+// c++/src/algo/blast/core/blast_aascan.c:76-77 and c++/src/algo/blast/core/aa_ungapped.c:499-500
+// NCBI's scan reads the subject's buffer wherever a range points: before the chunk for a later
+// range of masks stored out of order, and past its last letter for a first range raised to one
+// word at its left (the frame's next letters there, on a chunk that is not the frame's last).
+/// The letters the scan of a chunk reads, and how many of them lie before the chunk: `subject`
+/// alone; with `x_soft` ranges the frame from `common::translated_chunks::scan_lead` letters
+/// before the chunk, to `wordsize - 1` letters (at least 1) after it, or to the sentinel after the
+/// frame. The extensions of the hits read the same letters (`word_finder::ChunkCx`).
 #[inline(always)]
 fn x_soft_scan_letters<'a>(
     x_soft: Option<&[(i32, i32)]>,
     subject: &'a [u8],
     subject_full: &'a [u8],
     chunk: &SubjectChunk,
-) -> &'a [u8] {
+    wordsize: usize,
+) -> (&'a [u8], usize) {
     match x_soft {
-        Some(_) => &subject_full[1 + chunk.offset..=1 + chunk.offset + chunk.length],
-        None => subject,
+        Some(ranges) => {
+            let lead = crate::algorithm::common::translated_chunks::scan_lead(ranges);
+            let end = (1 + chunk.offset + chunk.length + wordsize.saturating_sub(1).max(1))
+                .min(subject_full.len());
+            (&subject_full[1 + chunk.offset - lead..end], lead)
+        }
+        None => (subject, 0),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:76-77 and :110
+// NCBI scans from a range's left, which can lie before the chunk, and keeps each hit's offset
+// from the chunk's first letter.
+/// The ranges of a chunk as the scan of its letters from `lead` letters before it reads them
+/// (`x_soft_scan_letters`): each moved by `lead`.
+#[inline(always)]
+fn x_scan_ranges(ranges: &[(i32, i32)], lead: usize) -> Vec<(i32, i32)> {
+    let lead = lead as i32;
+    ranges
+        .iter()
+        .map(|&(left, right)| (left + lead, right + lead))
+        .collect()
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:190-192

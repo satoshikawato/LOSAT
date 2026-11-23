@@ -954,6 +954,8 @@ mod x_db_cut_blocks {
             mask_data: None,
             mask_id: None,
             mask_desc: None,
+            gi_mask: false,
+            gi_mask_name: None,
             randomize: false,
         };
         let now = crate::writedb::time::LocalTime {

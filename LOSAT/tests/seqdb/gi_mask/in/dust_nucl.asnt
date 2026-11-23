@@ -1,0 +1,75 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=20; linker=1",
+  masks {
+    masks {
+      int {
+        from 200,
+        to 260,
+        id gi 1001
+      },
+      packed-int {
+        {
+          from 150,
+          to 209,
+          id gi 1002
+        },
+        {
+          from 310,
+          to 370,
+          id gi 1002
+        }
+      },
+      int {
+        from 180,
+        to 229,
+        id gi 2000000000
+      },
+      int {
+        from 159,
+        to 214,
+        id gi 3000000000
+      },
+      int {
+        from 120,
+        to 179,
+        id genbank {
+          accession "AB000005",
+          version 1
+        }
+      },
+      int {
+        from 210,
+        to 269,
+        id gi 1006
+      },
+      int {
+        from 130,
+        to 199,
+        id gi 999
+      },
+      int {
+        from 140,
+        to 199,
+        id local str "seq9"
+      },
+      int {
+        from 98,
+        to 159,
+        id gi 5
+      },
+      int {
+        from 188,
+        to 264,
+        id gi 1011
+      },
+      int {
+        from 170,
+        to 229,
+        id gi 1012
+      }
+    },
+    more FALSE
+  }
+}

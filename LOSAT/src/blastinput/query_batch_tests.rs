@@ -548,7 +548,7 @@ fn the_xml_matrix_failure_takes_a_refusal_where_ncbi_reads_no_repeated_letters()
     // No repeat: the held report fails with the second query of another Seq-id, as without the
     // scopes.
     assert_eq!(xml_refusal(held, Run, &[(pair, two)]), (None, held));
-    let held = held.unwrap();
+    let held = XmlMatrixFailure::SecondQueryOrEnd { second_id: Some(1) };
     assert_eq!(super::QueryScopes::held_xml_failure(None, held), held);
 }
 

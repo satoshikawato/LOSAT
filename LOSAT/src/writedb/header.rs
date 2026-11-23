@@ -52,32 +52,14 @@ fn close(out: &mut Vec<u8>) {
     out.extend_from_slice(&[0, 0]);
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:393-425
-fn write_length(out: &mut Vec<u8>, length: usize) {
-    if length <= 127 {
-        out.push(length as u8);
-        return;
-    }
-    let bytes = (length as u64).to_be_bytes();
-    let count = bytes.iter().skip_while(|&&byte| byte == 0).count();
-    out.push(0x80 + count as u8);
-    out.extend_from_slice(&bytes[bytes.len() - count..]);
-}
+// The BER length and the Int4 value are those of the ASN.1 binary encoder (`report::serial::
+// asn_ber`), their one writer.
+use crate::report::serial::asn_ber::write_length;
 
-// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:533-554
+/// `WriteInt4`: the universal INTEGER tag and the value (`asn_ber::write_int4_value`).
 fn write_int4(out: &mut Vec<u8>, data: i32) {
     out.push(TAG_INTEGER);
-    let length = if (-0x80..=0x7f).contains(&data) {
-        1
-    } else if (-0x8000..=0x7fff).contains(&data) {
-        2
-    } else if (-0x80_0000..=0x7f_ffff).contains(&data) {
-        3
-    } else {
-        4
-    };
-    out.push(length as u8);
-    out.extend_from_slice(&data.to_be_bytes()[4 - length..]);
+    crate::report::serial::asn_ber::write_int4_value(out, data);
 }
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459

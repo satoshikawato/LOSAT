@@ -36,6 +36,43 @@ const INDEFINITE_LENGTH: u8 = 0x80;
 /// not selected, CXX-5248).
 const REAL_DECIMAL: u8 = 0x00;
 
+/// `WriteLength`: one byte up to 127, else the long form: `0x80 + count` and the `count` bytes of
+/// the length, big-endian, `count` the fewest that hold it (`WriteLongLength` counts 1, 2 or 3
+/// up to 0xFFFFFF, and above that drops the leading zero bytes of the `sizeof(size_t)` bytes, so
+/// 0x1000000 is `84 01 00 00 00`). The one writer of BER lengths: this encoder's and the database
+/// header records' (`writedb::header`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:393-425
+pub(crate) fn write_length(out: &mut Vec<u8>, length: usize) {
+    if length <= 127 {
+        out.push(length as u8);
+        return;
+    }
+    let bytes = (length as u64).to_be_bytes();
+    let count = bytes.len() - (length as u64).leading_zeros() as usize / 8;
+    out.push(0x80 + count as u8);
+    out.extend_from_slice(&bytes[bytes.len() - count..]);
+}
+
+/// `WriteNumberValue` of an `Int4`: the length (1 to 4) and the two's-complement bytes, the
+/// shortest of the ranges of one, two and three bytes, else four. The one writer of them: this
+/// encoder's and the database header records' (`writedb::header`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:533-554
+pub(crate) fn write_int4_value(out: &mut Vec<u8>, value: i32) {
+    let length = if (-0x80..=0x7f).contains(&value) {
+        1
+    } else if (-0x8000..=0x7fff).contains(&value) {
+        2
+    } else if (-0x80_0000..=0x7f_ffff).contains(&value) {
+        3
+    } else {
+        4
+    };
+    out.push(length as u8);
+    out.extend_from_slice(&value.to_be_bytes()[4 - length..]);
+}
+
 /// The ASN.1 binary encoder, appending one document to `out`.
 pub struct AsnBinaryEncoder<'b> {
     out: &'b mut Vec<u8>,
@@ -90,47 +127,14 @@ impl<'b> AsnBinaryEncoder<'b> {
         }
     }
 
-    /// `WriteLength`: one byte up to 127, else `0x80 + count` and the `count` bytes of the
-    /// length, big-endian.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:393-416
+    /// `WriteLength` (`write_length`).
     fn length(&mut self, length: usize) {
-        if length <= 127 {
-            self.out.push(length as u8);
-            return;
-        }
-        let bytes = (length as u64).to_be_bytes();
-        let count = if length <= 0xff {
-            1
-        } else if length <= 0xffff {
-            2
-        } else if length <= 0xff_ffff {
-            3
-        } else {
-            // The `sizeof` of `length`: eight bytes on x86-64 Linux, not the shortest four.
-            8
-        };
-        self.out.push(0x80 + count as u8);
-        self.out.extend_from_slice(&bytes[8 - count..]);
+        write_length(self.out, length);
     }
 
-    /// `WriteNumberValue` of an `Int4`: the length (1 to 4) and the two's-complement bytes, the
-    /// shortest of the ranges of one, two and three bytes, else four.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:533-554
+    /// `WriteNumberValue` of an `Int4` (`write_int4_value`).
     fn number(&mut self, value: i32) {
-        let length = if (-0x80..=0x7f).contains(&value) {
-            1
-        } else if (-0x8000..=0x7fff).contains(&value) {
-            2
-        } else if (-0x80_0000..=0x7f_ffff).contains(&value) {
-            3
-        } else {
-            4
-        };
-        self.out.push(length as u8);
-        self.out
-            .extend_from_slice(&value.to_be_bytes()[4 - length..]);
+        write_int4_value(self.out, value);
     }
 
     /// `BeginClassMember` / `BeginChoiceVariant`: the explicit context tag `[tag]` with an

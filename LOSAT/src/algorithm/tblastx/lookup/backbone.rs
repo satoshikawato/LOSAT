@@ -603,8 +603,10 @@ pub struct BackboneCell16 {
 
 const _: () = assert!(std::mem::size_of::<BackboneCell16>() == 8);
 
-/// PROBE (exp/fx-cellbf, line FX s2): the form of [`BackboneCell16::hits`], fixed at build time
-/// (LOSAT_FXCELL_BUILD, a digit; 0 or unset = dev's branch on the cell's size).
+/// PROBE (exp/fx-cellbf, line FX s2): the form of [`BackboneCell16::hits`] and of the cross stage,
+/// fixed at build time (LOSAT_FXCELL_BUILD, a digit; 0 or unset = dev's): 1 = the list's start by
+/// cmov, its length checked; 2 = 1 + the second piece always stored; 3 = 2 without the release
+/// check; 4 = 1 without the release check.
 pub(crate) const X_FX_CELL: u8 = match option_env!("LOSAT_FXCELL_BUILD") {
     Some(v) => v.as_bytes()[0].wrapping_sub(b'0'),
     None => 0,
@@ -619,12 +621,12 @@ impl XCell for BackboneCell16 {
     // past its end: 6 cells of 8 bytes.
     // PROBE (LOSAT_FXCELL_BUILD=2): the second piece, always read, ends 96 bytes from the start:
     // 98 bytes from the cell's start, 90 past its end: 12 cells.
-    const PAD_CELLS: usize = if X_FX_CELL >= 2 { 12 } else { 6 };
+    const PAD_CELLS: usize = if X_FX_CELL == 2 || X_FX_CELL == 3 { 12 } else { 6 };
     // A list in the overflow array is staged in pieces of 24 hits from its start, and its last
     // piece (1 to 24 hits left) reads up to 23 hits past its end: 24 hits. Every other cell test
     // reads 8 hits at most. PROBE (LOSAT_FXCELL_BUILD=2): a list of at least 4 hits whose second
     // piece is always read reads up to 44 hits past its end: 48.
-    const PAD_HITS: usize = if X_FX_CELL >= 2 { 48 } else { 24 };
+    const PAD_HITS: usize = if X_FX_CELL == 2 || X_FX_CELL == 3 { 48 } else { 24 };
 
     #[inline(always)]
     fn count(&self) -> usize {
@@ -641,7 +643,13 @@ impl XCell for BackboneCell16 {
             let small = numhits <= AA_HITS_PER_CELL;
             let cursor = self.cursor();
             let end = std::hint::select_unpredictable(small, 0, cursor + numhits);
-            assert!(end <= overflow.len(), "cell cursor {cursor} past the overflow array");
+            // LOSAT_FXCELL_BUILD=3 / 4: the check kept for debug builds only (LLVM made the
+            // release check a branch on `small`, the branch this form removes).
+            if X_FX_CELL >= 3 {
+                debug_assert!(end <= overflow.len(), "cell cursor {cursor} past the overflow array");
+            } else {
+                assert!(end <= overflow.len(), "cell cursor {cursor} past the overflow array");
+            }
             let p = std::hint::select_unpredictable(
                 small,
                 self.entries.as_ptr(),

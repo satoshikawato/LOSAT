@@ -1830,7 +1830,7 @@ const _: () = {
     // PROBE (LOSAT_FXCELL_BUILD=2): the second piece's loads end 2 * X_CROSS_PIECE hits from the
     // list's start.
     assert!(
-        crate::algorithm::tblastx::lookup::X_FX_CELL < 2
+        !matches!(crate::algorithm::tblastx::lookup::X_FX_CELL, 2 | 3)
             || (2 + 4 * X_CROSS_PIECE <= (1 + <BackboneCell16 as XCell>::PAD_CELLS) * 8
                 && 2 * X_CROSS_PIECE - 4 <= <BackboneCell16 as XCell>::PAD_HITS)
     )
@@ -3526,7 +3526,7 @@ where
     let cell = Kn::cell(s, table.mask);
     let mut p = hits.as_ptr();
     let mut left = hits.len();
-    if crate::algorithm::tblastx::lookup::X_FX_CELL >= 2 {
+    if matches!(crate::algorithm::tblastx::lookup::X_FX_CELL, 2 | 3) {
         // PROBE (exp/fx-cellbf, LOSAT_FXCELL_BUILD=2): the first two pieces without a branch on
         // the cell's size: the second piece is always stored (its hits, `left - 24` clamped to
         // 0..=24, are what the count advances by), and only a cell of more than 48 hits loops.

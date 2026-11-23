@@ -169,7 +169,7 @@ impl Arguments {
     }
 
     /// The entries of `m_Dependencies`: (first name, dependency, second name).
-    fn dependencies(self) -> impl Iterator<Item = (&'static str, Dep, &'static str)> {
+    pub(crate) fn dependencies(self) -> impl Iterator<Item = (&'static str, Dep, &'static str)> {
         let dependencies = self.dependencies.of(&DEPENDENCIES).iter();
         dependencies.map(|&(first, dep, second)| (first.get(), dep, second.get()))
     }
@@ -319,6 +319,70 @@ fn find_desc(arguments: Arguments, name: &str) -> Option<&'static Desc> {
 pub(crate) enum Dep {
     Requires,
     Excludes,
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3181-3204
+/// The first walk of `x_PostCheck` over the dependencies `deps`, the entries of NCBI's
+/// `m_Dependencies` in the order of its `multimap` (`Arguments::dependencies`), of the arguments
+/// that `given` says were given: the first exclusion between two given arguments is the error
+/// (`Err`, its message, bytes as `arg_message` gives them), else the arguments that the given
+/// ones require, each with its first requester, and those they exclude. The one port of the
+/// walk: the programs on NCBI's reader (`post_check`) and makeblastdb, whose command line LOSAT
+/// reads with its own parser (`writedb::makeblastdb::dependency_error`), use it.
+pub(crate) fn walk_dependencies<'a>(
+    deps: impl IntoIterator<Item = (&'a str, Dep, &'a str)>,
+    given: &dyn Fn(&str) -> bool,
+) -> Result<DependencyWalk<'a>, Vec<u8>> {
+    let mut walk = DependencyWalk::default();
+    for (first, dep, second) in deps {
+        if !given(first) {
+            continue;
+        }
+        match dep {
+            Dep::Requires => {
+                walk.require.entry(second).or_insert(first);
+            }
+            Dep::Excludes => {
+                if given(second) {
+                    return Err(arg_message(
+                        second,
+                        "Incompatible with argument",
+                        first.as_bytes(),
+                    ));
+                }
+                walk.exclude.insert(second);
+            }
+        }
+    }
+    Ok(walk)
+}
+
+/// What [`walk_dependencies`] found: the second walk of `x_PostCheck` goes over the arguments
+/// in the order of their descriptions and asks each one that was not given.
+#[derive(Debug, Default)]
+pub(crate) struct DependencyWalk<'a> {
+    /// The arguments that given ones require, with the first argument that requires each.
+    require: BTreeMap<&'a str, &'a str>,
+    /// The arguments that given ones exclude (they take no default).
+    exclude: BTreeSet<&'a str>,
+}
+
+impl DependencyWalk<'_> {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3270-3276
+    /// The error of the argument `name`, which was not given, when a given argument requires it.
+    pub(crate) fn missing(&self, name: &str) -> Option<Vec<u8>> {
+        let requester = self.require.get(name)?;
+        Some(arg_message(
+            name,
+            "Must be specified, as it is required by argument",
+            requester.as_bytes(),
+        ))
+    }
+
+    /// Whether a given argument excludes the argument `name`.
+    pub(crate) fn excludes(&self, name: &str) -> bool {
+        self.exclude.contains(name)
+    }
 }
 
 /// A `CArgException` with the code name `code` (`eInvalidArg`, ...): `messages` are the
@@ -831,27 +895,8 @@ fn post_check(
     numbers: &mut BTreeMap<&'static str, Number>,
     given: &[&'static str],
 ) -> Result<(), ArgsError> {
-    let mut require: BTreeMap<&str, &str> = BTreeMap::new();
-    let mut exclude: BTreeSet<&str> = BTreeSet::new();
-    for (first, dep, second) in arguments.dependencies() {
-        if !given.contains(&first) {
-            continue;
-        }
-        match dep {
-            Dep::Requires => {
-                require.entry(second).or_insert(first);
-            }
-            Dep::Excludes => {
-                if given.contains(&second) {
-                    return Err(invalid(
-                        "eConstraint",
-                        arg_message(second, "Incompatible with argument", first.as_bytes()),
-                    ));
-                }
-                exclude.insert(second);
-            }
-        }
-    }
+    let walk = walk_dependencies(arguments.dependencies(), &|name| given.contains(&name))
+        .map_err(|message| invalid("eConstraint", message))?;
     // NCBI asks the arguments in the order of its `m_KeyFlagArgs` and stops at the first one that
     // throws; of the arguments that throw, the one first in the usage is the one NCBI names.
     let mut first: Option<(usize, ArgsError)> = None;
@@ -859,16 +904,9 @@ fn post_check(
         if given.contains(&desc.name()) {
             continue;
         }
-        let error = if let Some(requester) = require.get(desc.name()) {
-            invalid(
-                "eConstraint",
-                arg_message(
-                    desc.name(),
-                    "Must be specified, as it is required by argument",
-                    requester.as_bytes(),
-                ),
-            )
-        } else if exclude.contains(desc.name()) {
+        let error = if let Some(message) = walk.missing(desc.name()) {
+            invalid("eConstraint", message)
+        } else if walk.excludes(desc.name()) {
             continue;
         } else if let Some(default) = desc.default() {
             match process_value(desc, default.as_bytes()) {

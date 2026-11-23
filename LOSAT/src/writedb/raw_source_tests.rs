@@ -436,10 +436,13 @@ fn write_column_db(base: &str, prefix: &str, masks: bool) {
         db.extract_bioseq_deflines(&bioseq);
         db.add_sequence(bioseq).unwrap();
         if let (Some(algorithm_id), 2) = (algorithm_id, i) {
-            db.set_mask_data(&[MaskedRanges {
-                algorithm_id,
-                offsets: vec![(1, 4)],
-            }])
+            db.set_mask_data(
+                &[MaskedRanges {
+                    algorithm_id,
+                    offsets: vec![(1, 4)],
+                }],
+                &[],
+            )
             .unwrap();
         }
         if i != 2 {

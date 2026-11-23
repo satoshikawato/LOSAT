@@ -886,7 +886,7 @@ pub(crate) fn extend_hit_two_hit_outside<S: TbxScore>(
             sc,
             q_seq,
             qb,
-            chunk.from_chunk(),
+            chunk.chunk_onward(),
             q_right_off,
             s_right_off as usize,
             0,

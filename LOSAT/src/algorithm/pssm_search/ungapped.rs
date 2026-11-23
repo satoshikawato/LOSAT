@@ -226,7 +226,7 @@ pub(crate) fn pssm_extend_two_hit_outside<R: PssmRows>(
     // Down to the chunk's first letter, none where the word's best end is at or before it.
     let (left_score, left_d) = pssm_extend_left(
         rows,
-        chunk.from_chunk(),
+        chunk.chunk_onward(),
         s_right_off - 1,
         q_right_off - 1,
         dropoff,
@@ -298,7 +298,7 @@ pub(crate) fn pssm_extend_one_hit_outside<R: PssmRows>(
     let s_right_off = q_right_off + (s_off - q_off);
     let (left_score, left_disp) = pssm_extend_left(
         rows,
-        chunk.from_chunk(),
+        chunk.chunk_onward(),
         s_left_off - 1,
         q_left_off - 1,
         dropoff,

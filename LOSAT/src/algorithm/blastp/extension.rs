@@ -554,7 +554,7 @@ fn extend_two_hit_outside_impl<const BLOSUM62: bool>(
     let (left_score, left_d) = extend_left::<BLOSUM62>(
         matrix,
         query,
-        chunk.from_chunk(),
+        chunk.chunk_onward(),
         q_right_off - 1,
         s_right_off - 1,
         dropoff,
@@ -644,7 +644,7 @@ fn extend_one_hit_outside_impl<const BLOSUM62: bool>(
     let (left_score, left_disp) = extend_left::<BLOSUM62>(
         matrix,
         query,
-        chunk.from_chunk(),
+        chunk.chunk_onward(),
         q_left_off - 1,
         s_left_off - 1,
         dropoff,

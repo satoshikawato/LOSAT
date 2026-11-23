@@ -248,7 +248,7 @@ impl<'a> ChunkLetters<'a> {
 
     /// The letters from the chunk's first one on: the subject of the left walks, which stop there.
     #[inline]
-    pub(crate) fn from_chunk(self) -> &'a [u8] {
+    pub(crate) fn chunk_onward(self) -> &'a [u8] {
         &self.letters[self.lead..]
     }
 

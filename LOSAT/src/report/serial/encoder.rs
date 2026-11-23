@@ -184,6 +184,17 @@ pub trait Encoder {
     fn writes_defaults(&self) -> bool {
         false
     }
+    /// `GetDataFormat()`: the encoding of the delay buffers that the stream copies as they were
+    /// read (`CObjectOStream::WriteClassMember` of a `CDelayBuffer` that `HaveFormat` it;
+    /// `asn_types::write`), the one of its `STREAM`; `None` for a stream of no ASN.1 encoding.
+    fn data_format(&self) -> Option<crate::report::serial::asn_input::Encoding> {
+        use crate::report::serial::asn_input::Encoding;
+        Self::STREAM.map(|stream| match stream {
+            Stream::AsnText => Encoding::Text,
+            Stream::AsnBinary => Encoding::Binary,
+            Stream::Xml => Encoding::Xml,
+        })
+    }
     /// `WriteFileHeader` of a type: the start of a document whose top-level object is of the
     /// ASN.1 type `type_name` (`Seq-annot`).
     fn begin_document(&mut self, type_name: &str);
@@ -274,19 +285,17 @@ pub trait Encoder {
     fn utf8_str_replacing(&mut self, value: &[u8]) {
         self.utf8_str(value);
     }
-    /// `WriteClassMember` of an `id` and a `CDelayBuffer`, for a member that NCBI's reader kept in
-    /// a delay buffer (`Auth-list.names`, `asn_types::DELAYED`): in ASN.1 text the bytes read,
-    /// copied as they are (`COStreamBuffer::Write` from a `CByteSourceReader`, which leaves the line
-    /// length as it was). The other streams parse the buffer first (`CDelayBuffer::Update`), which
-    /// LOSAT does not: their error (`SerialError::Unwritten`).
-    fn delayed(&mut self, text: &[u8]);
-    /// A member that NCBI's reader kept in a delay buffer of ASN.1 binary and that NCBI's
+    /// `WriteClassMember` of an `id` and a `CDelayBuffer` of the stream's own format
+    /// (`data_format`), for a member that NCBI's reader kept in a delay buffer (`Auth-list.names`,
+    /// `asn_types::DELAYED`): the bytes read, copied as they are between the member's start and
+    /// end (`Write` of the buffer's source; in ASN.1 text `COStreamBuffer::Write` from a
+    /// `CByteSourceReader`, which leaves the line length as it was). A buffer of another format is
+    /// read first and written by its values (`CDelayBuffer::Update`, `asn_types::write`).
+    fn delayed(&mut self, bytes: &[u8]);
+    /// A member that NCBI's reader kept in a delay buffer of another format and that NCBI's
     /// `CDelayBuffer::Update` reads again with a message or an error before it writes it
-    /// (`asn_types::write`): LOSAT does not write it (`SerialError::Unwritten`). The default is
-    /// `delayed`'s, the error of the streams that write no delay buffer.
-    fn unread_delayed(&mut self) {
-        self.delayed(&[]);
-    }
+    /// (`asn_types::write`): LOSAT does not write it (`SerialError::Unwritten`).
+    fn unread_delayed(&mut self);
     /// The bytes that `flush_to` would hand over (0 for an encoder that cannot flush).
     fn buffered(&self) -> usize {
         0
@@ -665,6 +674,9 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     fn writes_defaults(&self) -> bool {
         self.inner.writes_defaults()
     }
+    fn data_format(&self) -> Option<crate::report::serial::asn_input::Encoding> {
+        self.inner.data_format()
+    }
     fn begin_document(&mut self, type_name: &str) {
         self.root = type_name.to_string();
         self.call(Piece::Header, |inner| inner.begin_document(type_name));
@@ -750,8 +762,8 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     fn utf8_str(&mut self, value: &[u8]) {
         self.string(value, |inner| inner.utf8_str_replacing(value));
     }
-    fn delayed(&mut self, text: &[u8]) {
-        self.call(Piece::Raw, |inner| inner.delayed(text));
+    fn delayed(&mut self, bytes: &[u8]) {
+        self.call(Piece::Raw, |inner| inner.delayed(bytes));
     }
     fn unread_delayed(&mut self) {
         self.call(Piece::Raw, |inner| inner.unread_delayed());

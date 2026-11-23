@@ -274,6 +274,7 @@ fn a_nest_of_any_depth_is_written_without_recursion() {
         fn null(&mut self) {}
         fn utf8_str(&mut self, _: &[u8]) {}
         fn delayed(&mut self, _: &[u8]) {}
+        fn unread_delayed(&mut self) {}
         fn error(&self) -> Option<SerialError> {
             None
         }

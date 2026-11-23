@@ -254,7 +254,12 @@ impl Encoder for JsonEncoder<'_> {
     fn utf8_str(&mut self, _value: &[u8]) {
         self.unwritten("a UTF8String");
     }
-    fn delayed(&mut self, _text: &[u8]) {
+    /// The JSON stream copies no delay buffer (`data_format` is none): `asn_types::write`
+    /// writes the member by its values.
+    fn delayed(&mut self, _bytes: &[u8]) {
+        unreachable!("no delay buffer is of the JSON stream's format")
+    }
+    fn unread_delayed(&mut self) {
         self.unwritten("a member read into a delay buffer");
     }
 

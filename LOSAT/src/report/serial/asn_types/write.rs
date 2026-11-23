@@ -67,15 +67,22 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/member.cpp:1094-1103
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:919-933
 // NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
-/// A delayed member of the type `ty` read from ASN.1 binary (`bytes`): NCBI's stream of another
-/// format reads the buffer first (`CDelayBuffer::Update`, a binary stream over the bytes) and
-/// writes the value read. (The binary stream copies a buffer of its own format; no document that
-/// LOSAT writes in ASN.1 binary holds a value of a PSSM file.) The read posts a message or fails
-/// where NCBI's skip did not (a VisibleString byte replaced, a number past its storage), which
-/// NCBI reports while it writes: LOSAT does not write such a member (`Encoder::unread_delayed`).
-fn write_updated<E: Encoder>(enc: &mut E, ty: u16, bytes: &[u8]) {
-    match super::read::read_ber_value(bytes, ty) {
+/// A delayed member of the type `ty` that the reader kept as the `bytes` of `encoding`
+/// (`Value::Delayed`): a stream of that format copies them (`WriteClassMember` of the buffer,
+/// `Encoder::data_format`, `Encoder::delayed`); a stream of another format reads them first
+/// (`CDelayBuffer::Update`: `read::read_delayed`, a stream of their format under the frames of
+/// the member) and writes the value read. The read posts a message or fails where NCBI's skip
+/// did not (a VisibleString byte replaced, a number past its storage), which NCBI reports while
+/// it writes: LOSAT does not write such a member (`Encoder::unread_delayed`).
+fn write_delayed<E: Encoder>(enc: &mut E, ty: u16, encoding: Encoding, bytes: &[u8]) {
+    if enc.data_format() == Some(encoding) {
+        enc.delayed(bytes);
+        return;
+    }
+    let (class, member) = super::delayed_member(ty);
+    match super::read::read_delayed(encoding, bytes, class, member) {
         (Ok(value), posts) if posts.is_empty() => write_value(enc, ty, &value),
         _ => enc.unread_delayed(),
     }
@@ -136,10 +143,7 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
     // `AsnTextEncoder::delayed`): the delay buffer is written in place of the member's value,
     // without its type.
     if let Value::Delayed { encoding, bytes } = value {
-        match encoding {
-            Encoding::Text => enc.delayed(bytes),
-            Encoding::Binary => write_updated(enc, ty, bytes),
-        }
+        write_delayed(enc, ty, *encoding, bytes);
         return;
     }
     // A named type that is not a SEQUENCE or a CHOICE (an alias, a SEQUENCE OF or SET OF, an

@@ -45,31 +45,28 @@ enum PssmFileFormat {
     TextAsn { start: usize },
     /// `eBinaryASN`: the binary reader reads the stream from `start` (the stream read as `MSerial_AsnBinary`).
     BinaryAsn { start: usize },
+    /// `eXml`: the XML reader reads the stream from `start` (`CObjectIStream::Open(eSerial_Xml, ...)`).
+    Xml { start: usize },
     /// A format that the `switch` sends to "Unsupported format for PSSM" (`eUnknown` and every format but the
     /// three).
     Unsupported,
     /// The guess threw (`TestFormatGlimmer3`'s `NStr::StringToInt`): `CATCH_ALL`'s report (exit status 255).
     Exception(NcbiException),
-    /// LOSAT's refusal (`what`, then `detail` and the path in parentheses): an XML PSSM, or a file whose guess
-    /// reads memory the file does not decide.
+    /// LOSAT's refusal (`what`, then `detail` and the path in parentheses): a file whose guess reads memory the
+    /// file does not decide.
     Refused {
         what: &'static str,
         detail: &'static str,
     },
 }
 
-/// The refusal of a PSSM file that NCBI's XML reader reads.
-const XML_PSSM: &str = "a PSSM file in XML";
 /// The refusal of a guess that reads memory its file does not decide.
 const UNDECIDED_GUESS: &str =
     "a PSSM file whose format NCBI's format guess decides by reading memory past the file";
 
 /// The format that `CFormatGuess` guesses for the stream (`utils::format_guess`, the whole order of `sm_CheckOrder`
 /// without hints) and the `switch` of `CPsiBlastArgs` on it. A test that reads past its data decides nothing here when
-/// the formats it could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`); `eXml`
-/// is refused (the XML reader's first failure is its file header: `CObjectIStreamXml::ReadFileHeader`,
-/// objistrxml.cpp:582-660, with the declaration's attributes and encodings, comments, `DOCTYPE` and namespace
-/// prefixes, not ported).
+/// the formats it could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`).
 fn guess_format(bytes: &[u8]) -> PssmFileFormat {
     let guessed = match FormatGuess::over(bytes).guess_format() {
         Ok(guessed) => guessed,
@@ -92,9 +89,8 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
         Format::BinaryAsn => PssmFileFormat::BinaryAsn {
             start: guessed.stream_pos,
         },
-        Format::Xml => PssmFileFormat::Refused {
-            what: XML_PSSM,
-            detail: "its XML reader is not ported",
+        Format::Xml => PssmFileFormat::Xml {
+            start: guessed.stream_pos,
         },
         _ => PssmFileFormat::Unsupported,
     }
@@ -218,6 +214,7 @@ pub(crate) fn read_in_pssm(
         PssmFileFormat::BinaryAsn { start } => {
             crate::blastinput::pssm_text::read_pssm_binary(&bytes[start..])
         }
+        PssmFileFormat::Xml { start } => crate::blastinput::pssm_text::read_pssm_xml(&bytes[start..]),
         PssmFileFormat::Unsupported => {
             return Err(crate::blastinput::app::options_error(
                 "Unsupported format for PSSM",

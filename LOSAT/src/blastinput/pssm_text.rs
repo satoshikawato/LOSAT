@@ -1,7 +1,7 @@
-//! The reader of a PSSM in ASN.1 text or ASN.1 binary (`PssmWithParameters`, the file of
+//! The reader of a PSSM in ASN.1 text, ASN.1 binary or XML (`PssmWithParameters`, the file of
 //! psiblast's `-out_pssm` and of `-in_pssm`): NCBI's object streams (`CObjectIStreamAsn`,
-//! `CObjectIStreamAsnBinary`) for the types of `report::serial::pssm`, whose writer gives the same
-//! bytes back for a PSSM in ASN.1 text that psiblast wrote.
+//! `CObjectIStreamAsnBinary`, `CObjectIStreamXml`) for the types of `report::serial::pssm`, whose
+//! writer gives the same bytes back for a PSSM in ASN.1 text that psiblast wrote.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1345
 //!
@@ -16,6 +16,9 @@
 //! readers' own limits are refused here (`PssmReadError::Refused`).
 
 use crate::report::serial::asn_input::Names;
+use crate::report::serial::asn_text_reader::SliceSource;
+use crate::report::serial::asn_types::read::ObjectStream;
+use crate::report::serial::asn_types::read_xml::XmlStyle;
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::{
     member_index, members, read_ber_document, read_document, resolved, Kind, Post, ReadError, Value,
@@ -54,6 +57,15 @@ pub(crate) fn read_pssm_binary(bytes: &[u8]) -> PssmRead {
         named::PSSMWITHPARAMETERS,
         Names::PSSM,
     ))
+}
+
+/// [`read_pssm`] of the `PssmWithParameters` object in NCBI's XML at the start of `bytes`
+/// (`CObjectIStream::Open(eSerial_Xml, ...)`, the ASN.1 style).
+pub(crate) fn read_pssm_xml(bytes: &[u8]) -> PssmRead {
+    pssm_read(
+        ObjectStream::xml(SliceSource::new(bytes), XmlStyle::Asn, Names::PSSM)
+            .read_object(named::PSSMWITHPARAMETERS),
+    )
 }
 
 fn pssm_read((value, posts): (Result<Value, ReadError>, Vec<Post>)) -> PssmRead {

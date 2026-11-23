@@ -3221,8 +3221,8 @@ file would differ, and NCBI's programs still could not open the database).
     `s_Blast_HSPGetNumIdentitiesAndPositives`; rows `db.rps.rej.odd.na1.qi11c0`,
     `db.rpstbn.rej.odd.na1.nqi11c0`). Until those rows no fixture row reached E: in N_SC_nq2_c0
     NCBI's run ends at E after a start past `L_pin`, where LOSAT refuses first (the rule-2 item
-    below), and with 12 letters or more the start is column 6, read D (E_NA1_qi12_c0 to
-    E_NA1_qi14_c0). READ is "reads letter B past its score matrix".
+    below), and with 12 letters or more the start is at or past column 6 (`L_pin`), read D
+    (E_NA1_qi12_c0 to E_NA1_qi14_c0). READ is "reads letter B past its score matrix".
 
   A profile whose `L_pin` is `L_rps` never meets them, and a hit that NCBI's preliminary e-value or
   hit list leaves out of the traceback meets none (rows `db.rps.odd.sc.q2.e14`,
@@ -3736,7 +3736,8 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   psiblast line item PS10e, the rule-3 entry of such profiles above; not of the database class
   above; pending the maintainer's decision, the Owner question of the pull request). NCBI's rows
   there are the mapped `.rps` rows from the profile's offset (`blast_traceback.c:1194-1198`), so its
-  run ends with exit 0 and a clean valgrind, but its gapped traceback skips the extension to the
+  run ends with exit 0 and a clean valgrind unless the alignment then reads a profile letter of 28
+  or more (read E of that entry), but its gapped traceback skips the extension to the
   right and ends the HSP before its start (`blast_gapalign.c:4618-4651`), counts the identities on
   the `.psq` bytes after the profile's letters, and prints HSPs whose columns, scores and identities
   disagree (probes N_AA1_nq1_c0: profile columns 1 to 10 of a 6-letter profile; N_AA1_nqt2_c0: a bit
@@ -3744,18 +3745,24 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   the archive's `num_ident` 9 where the tabular formats count 6). LOSAT refuses it for now with the
   text of read D of that entry, "starts an alignment past the consensus" (rows
   `db.rpstbn.rej.odd.aa1.nq1c0` and `db.rpstbn.rej.odd.sc.nq2c0`; in the second NCBI's run goes on
-  to read E of that entry and ends with SIGSEGV, probe N_SC_nq2_c0), as its own arm
+  to read E of that entry and ends with SIGSEGV, probe N_SC_nq2_c0, as in E_NA1_nqi12_c0 to
+  E_NA1_nqi14_c0 of the line's `PR/ps10e/probe2`), as its own arm
   (`ProfileRead::StartInMapping` of `LOSAT/src/algorithm/rps_search/profile.rs`). The other option,
   to print NCBI's bytes, changes besides that arm: the profile's letters (NCBI's traceback reads the
   mapped `.psq` bytes after its `L_pin` letters: the profile's trailing 0, the next profile's
   letters, past the file's end the zeros of its last page; LOSAT holds the `L_pin` letters); the
   traceback's identities and positives on those bytes (`final_hsp` of
   `LOSAT/src/algorithm/pssm_search/traceback0.rs` and the test of read E); the reports' identities
-  on them (`formatter_identities` of `LOSAT/src/algorithm/rps_search/traceback.rs`); and the
+  on them (`formatter_identities` of `LOSAT/src/algorithm/rps_search/traceback.rs`); the
   archive's count of the traceback beside the formatter's recount, which differ there (9 and 6 in
-  N_P6d_nq1_c0). A run such as N_SC_nq2_c0, whose alignment then reads a letter of 28 or more,
+  N_P6d_nq1_c0); and the reports' rows of the profile past its `L_pin` letters, which NCBI's
+  formatter prints as `-` (sseq `IVLARI----` in N_P6d_nq1_c0, `-----B----` in N_AA1_nq1_c0) where
+  LOSAT's renderer indexes the letters (`display_alignment` of
+  `LOSAT/src/algorithm/blastx/report.rs`: sseq, the pairwise rows, btop, the XML and JSON hit
+  sequences). A run such as N_SC_nq2_c0, whose alignment then reads a letter of 28 or more,
   stays refused, at read E. LOSAT's gapped traceback already skips the extension to the right as
-  NCBI's does.
+  NCBI's does. This list is what reading the code found; no such HSP has been run through LOSAT's
+  later stages (the e-values and bit scores, the order of the hits, the reports).
 
 ## Ported (rule 4)
 

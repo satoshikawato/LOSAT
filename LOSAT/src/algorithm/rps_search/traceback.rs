@@ -30,9 +30,12 @@ pub(crate) struct RpsTraceback<'a> {
     /// The concatenated rows and the profiles' offsets.
     pub(crate) rows: &'a [[i32; 28]],
     pub(crate) offsets: &'a [i32],
-    /// NCBI's row after the rows (`RpsVolumeFiles::row_after_rows`), the last entry of its row
-    /// pointers (`TracebackProfile::rows`, `mapped_rows`).
-    pub(crate) row_after_rows: RowAfter,
+    /// The volume's files, whose NCBI row after the rows (`RpsVolumeFiles::row_after_rows`, the
+    /// last entry of its row pointers) the traceback without composition-based statistics reads
+    /// (`TracebackProfile::rows`, `mapped_rows`) through `row_after`.
+    pub(crate) files: &'a crate::seqdb::rps::RpsVolumeFiles,
+    /// That row, read from the `.rps` file when a list first needs it (`row_after`).
+    pub(crate) row_after_rows: std::sync::OnceLock<RowAfter>,
     /// The `.psq` letters of the profiles, read when a list first needs them
     /// (`ProfileLetters`; `TracebackProfile` reads them).
     pub(crate) letters: &'a ProfileLetters<'a>,
@@ -241,6 +244,13 @@ fn stream_lists(
 }
 
 impl RpsTraceback<'_> {
+    /// NCBI's row after the rows, read from the volume's `.rps` file on the first call (only the
+    /// tracebacks without composition-based statistics read it).
+    fn row_after(&self) -> &RowAfter {
+        self.row_after_rows
+            .get_or_init(|| RowAfter::new(self.files.row_after_rows()))
+    }
+
     /// The traceback of the query of letters `query` (without sentinels) and index `q_idx` from
     /// its preliminary hit list.
     ///
@@ -317,7 +327,7 @@ impl RpsTraceback<'_> {
                 // The profile's rows at the database's scale, without the rescale and the K of
                 // composition-based statistics 0 (blast_traceback.c:1184-1198); each HSP aligns
                 // on its frame after the containment test (blast_traceback.c:402-417).
-                let rows = profile.mapped_rows(self.rows, &self.row_after_rows);
+                let rows = profile.mapped_rows(self.rows, self.row_after());
                 let reads = profile.trace_reads(ProfileRead::StartInMapping);
                 let (hsps, stat_length) = trace_hsps(
                     &TraceHsps {
@@ -347,7 +357,7 @@ impl RpsTraceback<'_> {
                 profile.check()?;
                 (hsps, self.gapped, stat_length)
             } else {
-                let profile_rows = profile.rows(self.rows, &self.row_after_rows, self.alphabet)?;
+                let profile_rows = profile.rows(self.rows, self.row_after(), self.alphabet)?;
                 if !rps_rescale_pssm(
                     self.scale,
                     &probabilities,

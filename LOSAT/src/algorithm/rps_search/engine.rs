@@ -519,7 +519,8 @@ impl RpsRun<'_> {
         let traceback = RpsTraceback {
             rows,
             offsets,
-            row_after_rows: super::profile::RowAfter::new(files.row_after_rows()),
+            files,
+            row_after_rows: std::sync::OnceLock::new(),
             letters,
             alphabet: files.alphabet,
             scale,

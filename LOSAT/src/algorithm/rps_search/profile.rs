@@ -39,10 +39,16 @@
 //! traceback's identities on those bytes (`pssm_search::traceback0::final_hsp` and
 //! `ProfileTraceReads::traced` read only `L_pin` letters); the reports' identities on them
 //! (`formatter_identities` of `rps_search::traceback`), and the archive's count of the traceback
-//! against the formatter's recount, which differ there (9 and 6 in probe N_P6d_nq1_c0). Such a
-//! run whose alignment then reads a letter of 28 or more on those bytes still ends at read E,
-//! where NCBI crashes (probe N_SC_nq2_c0). The skipped extension to the right is LOSAT's already
-//! (`pssm_search::gapalign`, its `q_start < query_length` test).
+//! against the formatter's recount, which differ there (9 and 6 in probe N_P6d_nq1_c0); the
+//! reports' rows of the profile past its `L_pin` letters, which NCBI's formatter prints as `-`
+//! (sseq `IVLARI----` in N_P6d_nq1_c0, `-----B----` in N_AA1_nq1_c0) where LOSAT's renderer
+//! indexes the letters (`blastx::report::display_alignment`: sseq, the pairwise rows, btop and
+//! the XML and JSON hit sequences). Such a run whose alignment then reads a letter of 28 or more
+//! on those bytes still ends at read E, where NCBI crashes (probes N_SC_nq2_c0, E_NA1_nqi12_c0 to
+//! E_NA1_nqi14_c0). The skipped extension to the right is LOSAT's already
+//! (`pssm_search::gapalign`, its `q_start < query_length` test). This list is what reading the
+//! code found: no such HSP has been run through LOSAT's later stages (the e-values and bit
+//! scores, the order of the hits, the reports), so it may be short.
 //!
 //! The first read that leaves NCBI's data refuses the query batch (`TracebackProfile::check`, a
 //! traceback error as `RpsPastRows::overran`'s): NCBI ends there with a fault or reads what it does

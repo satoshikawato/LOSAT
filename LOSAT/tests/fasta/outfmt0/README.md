@@ -14,6 +14,10 @@ letters is kept in the repository; the commit is the one that added the files.
   `sa.sam.long.17b` (commit b1543abf2, 2026-10-22); origin of the letters not recorded.
 - `x2c_d7k_*`, `x2c_e7k_*`, `x2c_g48_*`: written by `gen_x2c.py` (kinds d, e, f, g; the script is not in the repository),
   inputs of `tests/tblastx_query_batch.rs` (commit 232ae2d70, 2026-11-16).
+- `x1bp_cov_q.faa`, `x1bp_cov_s.faa`, `x1bp_cov_s.fna`: the record `q_plain` of
+  `../../db_search/residues_q.faa` (142 residues), its residues 11-130, and its residues back-translated between two
+  random flanks of 300 bases (checked: the 426 bases from base 301 translate to `q_plain`); rows `db.x1bp.cov.bp.6` and
+  `db.x1bp.cov.tbn.6` (line RG X1b-p, review 2's probe D, 2026-11-23); the flanks' generator is not in the repository.
 - `x2b_r7_*`, `x2b_r11_*`: pairs of rows `x2b.tblastx.*` (`-window_size 0`, HSPs of length 0 or less); origin not recorded
   (commit f28d5c5a3, 2026-11-14).
 - `x2g_c0037_*` (commit 03b352b90) and `x2g_p0002_q.fna`, `x2g_p0086_*` (commit a8e16bfda), rows `x2g.blastx.*`: pairs of

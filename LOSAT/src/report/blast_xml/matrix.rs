@@ -75,8 +75,8 @@ pub enum XmlMatrixFailure {
     /// id of its own, so the second), in its batch, after its reader messages and search strategy
     /// request and before anything of its reports. Without such a query (or a run that searched no
     /// further), the run fails at its end (`PrintEpilog`) instead of writing the epilog, unless
-    /// another error ends it first. (psiblast's and tblastn `-in_pssm`'s XML formats are not
-    /// written yet, line PS items PS15 and PS15b.)
+    /// another error ends it first. (psiblast's and tblastn `-in_pssm`'s XML2 and JSON
+    /// documents, outfmt 13 to 16, are not written yet, line PS item PS15b-2.)
     SecondQueryOrEnd,
 }
 

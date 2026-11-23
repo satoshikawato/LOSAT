@@ -33,7 +33,7 @@
 //!   refused (a damaged record, which outfmt 5 reads
 //!   in each batch's prefetch, `ReportedSubjects::batch_prefetch`: checked once before the
 //!   first byte, `taxdb_may_refuse`, with the names for XML2 and JSON only), or the run's
-//!   fetches are refused for NCBI's taxonomy cache (`BlastxDatabase::prefetch_refused`: outfmt
+//!   fetches may be refused for NCBI's taxonomy cache (`BlastxDatabase::cache_may_refuse`: outfmt
 //!   5's prefetch, and the XML2 and JSON lookups of a batch that reports a subject with a
 //!   positive taxid, `read_reported_taxonomy`; after the prolog), so that a later batch could
 //!   refuse it,

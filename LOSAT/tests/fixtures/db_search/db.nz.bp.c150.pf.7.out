@@ -1,0 +1,99 @@
+# BLASTP 2.17.0+
+# Query: q1
+# Database: tests/db_search/nz_pc
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 23 hits found
+q1	sZ_nz_pc	0.000	60	60	0	1	60	2	61	3.63e-24	73.9
+q1	sZ_nz_pc	0.000	60	60	0	1	60	6	65	8.51e-23	70.5
+q1	sZ_nz_pc	0.000	60	60	0	1	60	8	67	8.51e-23	70.5
+q1	sZ_nz_pc	0.000	60	60	0	1	60	10	69	8.51e-23	70.5
+q1	sZ_nz_pc	0.000	60	60	0	1	60	12	71	8.51e-23	70.5
+q1	sZ_nz_pc	0.000	60	60	0	1	60	14	73	8.51e-23	70.5
+q1	sZ_nz_pc	0.000	60	60	0	1	60	16	75	8.51e-23	70.5
+q1	sZ_nz_pc	0.000	60	60	0	1	60	18	77	8.51e-23	70.5
+q1	sZ_nz_pc	0.000	60	60	0	1	60	20	79	8.51e-23	70.5
+q1	sZ_nz_pc	0.000	60	60	0	1	60	22	81	8.51e-23	70.5
+q1	sZ_nz_pc	0.000	60	60	0	1	60	24	83	8.51e-23	70.5
+q1	sM_nz_pc	0.000	60	60	0	1	60	2	61	1.56e-23	73.9
+q1	sN_nz_pc	0.000	40	40	0	1	40	2	41	1.87e-15	50.8
+q1	sN_nz_pc	0.000	40	40	0	3	42	2	41	1.87e-15	50.8
+q1	sN_nz_pc	0.000	40	40	0	5	44	2	41	1.87e-15	50.8
+q1	sN_nz_pc	0.000	40	40	0	7	46	2	41	1.87e-15	50.8
+q1	sN_nz_pc	0.000	40	40	0	9	48	2	41	1.87e-15	50.8
+q1	sN_nz_pc	0.000	40	40	0	11	50	2	41	1.87e-15	50.8
+q1	sN_nz_pc	0.000	40	40	0	13	52	2	41	1.87e-15	50.8
+q1	sN_nz_pc	0.000	40	40	0	15	54	2	41	1.87e-15	50.8
+q1	sN_nz_pc	0.000	40	40	0	17	56	2	41	1.87e-15	50.8
+q1	sN_nz_pc	0.000	40	40	0	19	58	2	41	1.87e-15	50.8
+q1	sN_nz_pc	0.000	40	40	0	21	60	2	41	1.87e-15	50.8
+# BLASTP 2.17.0+
+# Query: q2
+# Database: tests/db_search/nz_pc
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 25 hits found
+q2	sM_nz_pc	37.500	160	60	2	1	140	2	141	7.09e-66	184
+q2	sI_nz_pc	100.000	60	0	0	81	140	2	61	5.77e-49	139
+q2	sZ_nz_pc	0.000	60	60	0	1	60	2	61	6.43e-23	73.9
+q2	sZ_nz_pc	0.000	60	60	0	1	60	6	65	1.45e-21	70.5
+q2	sZ_nz_pc	0.000	60	60	0	1	60	8	67	1.45e-21	70.5
+q2	sZ_nz_pc	0.000	60	60	0	1	60	10	69	1.45e-21	70.5
+q2	sZ_nz_pc	0.000	60	60	0	1	60	12	71	1.45e-21	70.5
+q2	sZ_nz_pc	0.000	60	60	0	1	60	14	73	1.45e-21	70.5
+q2	sZ_nz_pc	0.000	60	60	0	1	60	16	75	1.45e-21	70.5
+q2	sZ_nz_pc	0.000	60	60	0	1	60	18	77	1.45e-21	70.5
+q2	sZ_nz_pc	0.000	60	60	0	1	60	20	79	1.45e-21	70.5
+q2	sZ_nz_pc	0.000	60	60	0	1	60	22	81	1.45e-21	70.5
+q2	sZ_nz_pc	0.000	60	60	0	1	60	24	83	1.45e-21	70.5
+q2	sZ_nz_pc	36.364	11	7	0	123	133	53	63	5.4	12.7
+q2	sN_nz_pc	0.000	40	40	0	1	40	2	41	2.31e-14	50.8
+q2	sN_nz_pc	0.000	40	40	0	3	42	2	41	2.31e-14	50.8
+q2	sN_nz_pc	0.000	40	40	0	5	44	2	41	2.31e-14	50.8
+q2	sN_nz_pc	0.000	40	40	0	7	46	2	41	2.31e-14	50.8
+q2	sN_nz_pc	0.000	40	40	0	9	48	2	41	2.31e-14	50.8
+q2	sN_nz_pc	0.000	40	40	0	11	50	2	41	2.31e-14	50.8
+q2	sN_nz_pc	0.000	40	40	0	13	52	2	41	2.31e-14	50.8
+q2	sN_nz_pc	0.000	40	40	0	15	54	2	41	2.31e-14	50.8
+q2	sN_nz_pc	0.000	40	40	0	17	56	2	41	2.31e-14	50.8
+q2	sN_nz_pc	0.000	40	40	0	19	58	2	41	2.31e-14	50.8
+q2	sN_nz_pc	0.000	40	40	0	21	60	2	41	2.31e-14	50.8
+# BLASTP 2.17.0+
+# Query: q3
+# Database: tests/db_search/nz_pc
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+q3	sI_nz_pc	100.000	60	0	0	1	60	2	61	2.32e-50	139
+q3	sM_nz_pc	100.000	60	0	0	1	60	82	141	2.48e-49	139
+q3	sZ_nz_pc	36.364	11	7	0	43	53	53	63	2.1	12.7
+q3	sZ_nz_pc	26.667	15	11	0	37	51	61	75	7.8	11.2
+# BLASTP 2.17.0+
+# Query: q4
+# Database: tests/db_search/nz_pc
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 26 hits found
+q4	sI_nz_pc	100.000	60	0	0	1	60	2	61	5.77e-49	139
+q4	sM_nz_pc	100.000	60	0	0	1	60	82	141	6.20e-48	139
+q4	sM_nz_pc	0.000	60	60	0	81	140	2	61	2.78e-22	73.9
+q4	sZ_nz_pc	0.000	60	60	0	81	140	2	61	6.43e-23	73.9
+q4	sZ_nz_pc	0.000	60	60	0	81	140	6	65	1.45e-21	70.5
+q4	sZ_nz_pc	0.000	60	60	0	81	140	8	67	1.45e-21	70.5
+q4	sZ_nz_pc	0.000	60	60	0	81	140	10	69	1.45e-21	70.5
+q4	sZ_nz_pc	0.000	60	60	0	81	140	12	71	1.45e-21	70.5
+q4	sZ_nz_pc	0.000	60	60	0	81	140	14	73	1.45e-21	70.5
+q4	sZ_nz_pc	0.000	60	60	0	81	140	16	75	1.45e-21	70.5
+q4	sZ_nz_pc	0.000	60	60	0	81	140	18	77	1.45e-21	70.5
+q4	sZ_nz_pc	0.000	60	60	0	81	140	20	79	1.45e-21	70.5
+q4	sZ_nz_pc	0.000	60	60	0	81	140	22	81	1.45e-21	70.5
+q4	sZ_nz_pc	0.000	60	60	0	81	140	24	83	1.45e-21	70.5
+q4	sZ_nz_pc	6.897	58	27	1	43	100	53	83	0.006	21.2
+q4	sN_nz_pc	0.000	40	40	0	81	120	2	41	2.31e-14	50.8
+q4	sN_nz_pc	0.000	40	40	0	83	122	2	41	2.31e-14	50.8
+q4	sN_nz_pc	0.000	40	40	0	85	124	2	41	2.31e-14	50.8
+q4	sN_nz_pc	0.000	40	40	0	87	126	2	41	2.31e-14	50.8
+q4	sN_nz_pc	0.000	40	40	0	89	128	2	41	2.31e-14	50.8
+q4	sN_nz_pc	0.000	40	40	0	91	130	2	41	2.31e-14	50.8
+q4	sN_nz_pc	0.000	40	40	0	93	132	2	41	2.31e-14	50.8
+q4	sN_nz_pc	0.000	40	40	0	95	134	2	41	2.31e-14	50.8
+q4	sN_nz_pc	0.000	40	40	0	97	136	2	41	2.31e-14	50.8
+q4	sN_nz_pc	0.000	40	40	0	99	138	2	41	2.31e-14	50.8
+q4	sN_nz_pc	0.000	40	40	0	101	140	2	41	2.31e-14	50.8
+# BLAST processed 4 queries

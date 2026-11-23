@@ -1527,11 +1527,13 @@ fn custom_tabular_reports_give_the_off_bytes() {
 /// holds taxid 150 beside 99990, the damaged last entry of `tests/seqdb/taxdb/offset_last_past_end`;
 /// line DBID L1c) is asked where NCBI fetches a subject, one query per batch: `qx` and `qy`
 /// (`nz_qxy.fna`, no hits at `-evalue 1e-3`) are not refused (NCBI looks nothing up, the
-/// manifest's `db.nz.cq.bn.*` rows have its bytes), and `qx` then `q2` (`nz_qx2.fna`) are refused
-/// where `q2`'s batch prefetches its subjects (or, with `PRE_FETCH_SEQS_LIMIT=0`, where its report
-/// fetches them): with the switch after `qx`'s report, as the stream's other refusals of a batch's
-/// reported subjects, without it before any report (outfmt 0's prolog is written before the
-/// search).
+/// manifest's `db.nz.cq.bn.*` rows have its bytes), and `qx` then `q2` (`nz_qx2.fna`) with
+/// `PRE_FETCH_SEQS_LIMIT=0` are refused where `q2`'s report fetches its subjects: with the switch
+/// after `qx`'s report, as the stream's other refusals of a batch's reported subjects, without it
+/// before any report (outfmt 0's prolog is written before the search). Where `q2`'s batch
+/// prefetches them, the run ends as NCBI's (line NP item O4b2-3: the loads of `sI` and `sM`
+/// give the same texts in any order, `common::database::prefetch_slot_plan`; the manifest's
+/// `db.nz.cq.bn.c150.b1.x2.*` rows), with the switch as without it.
 #[test]
 fn a_taxonomy_cache_refusal_comes_with_the_first_batch_that_fetches() {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -1573,6 +1575,28 @@ fn a_taxonomy_cache_refusal_comes_with_the_first_batch_that_fetches() {
             batches == 2 && reason == "none",
             "{what}, no hits: {batches} {reason}"
         );
+        // Without the switch every report is written after the loop: none before the refusal.
+        let marker = if outfmt == "0" {
+            "Query= "
+        } else {
+            "# Query: "
+        };
+        if limit.is_none() {
+            let (full, (batches, reason)) = run("nz_qx2.fna");
+            assert_eq!(full.status, Some(0), "{what}, qx and q2: {full:?}");
+            assert!(
+                batches == 2 && reason == "none",
+                "{what}, qx and q2: {batches} {reason}"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&full.report)
+                    .matches(marker)
+                    .count(),
+                2,
+                "{what}, qx and q2: both reports"
+            );
+            continue;
+        }
         let late = args("nz_qx2.fna");
         let late: Vec<&str> = late.iter().map(String::as_str).collect();
         let (off, on, (batches, _)) = refused_late(&what, &late, threads, &extra);
@@ -1582,12 +1606,6 @@ fn a_taxonomy_cache_refusal_comes_with_the_first_batch_that_fetches() {
             String::from_utf8_lossy(&off.stderr)
         );
         assert!(batches >= 1, "{what}");
-        // Without the switch every report is written after the loop: none before the refusal.
-        let marker = if outfmt == "0" {
-            "Query= "
-        } else {
-            "# Query: "
-        };
         assert!(
             !String::from_utf8_lossy(&off.report).contains(marker),
             "{what}: off, no report"

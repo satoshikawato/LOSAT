@@ -573,6 +573,7 @@ fn run_query_pssm_of(
         &SetKey::Index,
         ANCILLARY,
         &mut Vec::new(),
+        false,
     )
 }
 

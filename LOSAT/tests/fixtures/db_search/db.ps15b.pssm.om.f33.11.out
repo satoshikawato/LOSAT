@@ -1,0 +1,20 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "Error: (1204.6) [psiblast] Failed to parse location of"
+    },
+    {
+      code 2,
+      message "Error: (1204.1) [psiblast] Seq-feat ::= { data comment NULL,
+ location int { from 10, to 5, id local id 1 } }"
+    }
+  }
+}

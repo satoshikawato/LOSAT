@@ -806,6 +806,11 @@ async function offeredInput(page: Page, role: Role): Promise<{ name: string; byt
   return { name: download.suggestedFilename(), bytes: readFileSync((await download.path())!) };
 }
 
+/** Whether the browser's name for a saved file is the name `shown`: the same characters, or `_` where it made one. */
+function sameFileName(saved: string, shown: string): boolean {
+  return saved.length === shown.length && [...saved].every((char, i) => char === shown[i] || char === '_');
+}
+
 /** A file that the native CLI is given: its name, its bytes, and whether the page made it. */
 interface CliFile {
   readonly name: string;
@@ -845,14 +850,17 @@ async function filesOf(walker: Walker, run: number, before: Submitted, at: numbe
     if (offered === undefined) {
       throw new StepFailure('made-not-offered', `run ${run}: the ${role} is not the user's file as given (pasted, several files, or records left out), but the page offers no file for it ("${shown[role]}")`);
     }
-    if (userNames.has(offered.name)) {
-      throw new StepFailure('offered-user-name', `run ${run}: the page offers ${offered.name} as the ${role} file, a name that one of the user's files has`);
-    }
-    if (input.name !== undefined && offered.name !== input.name && offered.name !== `${role}_${input.name}`) {
-      throw new StepFailure('offered-name', `run ${run}: the page offers ${offered.name} as the ${role} file; the walk expects ${input.name}`);
-    }
-    if (!shown[role].startsWith(`${offered.name}: `)) {
+    // The name that Run details give the input, which the command line has; the browser saves the file under a name of its own
+    // making (WebKit writes a space as _), so the two are told equal where each character is the same or a made `_`.
+    const shownName = /^(.*): [\d,]+ records?, /.exec(shown[role])?.[1];
+    if (shownName === undefined || !sameFileName(offered.name, shownName)) {
       throw new StepFailure('offered-name', `run ${run}: the page offers ${offered.name} as the ${role} file, but the run's details say "${shown[role]}"`);
+    }
+    if (userNames.has(shownName)) {
+      throw new StepFailure('offered-user-name', `run ${run}: the page offers ${shownName} as the ${role} file, a name that one of the user's files has`);
+    }
+    if (input.name !== undefined && shownName !== input.name && shownName !== `${role}_${input.name}`) {
+      throw new StepFailure('offered-name', `run ${run}: the page offers ${shownName} as the ${role} file; the walk expects ${input.name}`);
     }
     if (Buffer.compare(Buffer.from(input.bytes), offered.bytes) !== 0) {
       throw new StepFailure('offered-bytes', `run ${run}: the ${role} file ${offered.name} that the page offers (${offered.bytes.length} bytes) is not what the walk gave this run (${input.bytes.length} bytes)`);
@@ -860,7 +868,7 @@ async function filesOf(walker: Walker, run: number, before: Submitted, at: numbe
     walker.counts.offered += 1;
     // Of those, the files with records left out (Run details says "without").
     if (((await walker.page.getByTestId(`run-input-${role}-from`).textContent().catch(() => null)) ?? '').includes(' without ')) walker.counts.offeredLeftOut += 1;
-    files[role] = { name: offered.name, bytes: offered.bytes, made: true };
+    files[role] = { name: shownName, bytes: offered.bytes, made: true };
   }
   if (!files.query.made && !files.subject.made && files.query.name === files.subject.name && Buffer.compare(Buffer.from(files.query.bytes), Buffer.from(files.subject.bytes)) !== 0) {
     // Two of the user's own files of one name with different records: the command names both by one name (the user's own naming, D21).

@@ -35,7 +35,7 @@ pub use reader::ArgvError;
 mod stdio_buffer;
 pub use stdio_buffer::{NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
 
-// The process's standard output with no buffer of Rust's, for every writer of the command line.
+// The process's standard output with no buffer of Rust's, under the command line's writers.
 mod standard_output;
 pub(crate) use standard_output::standard_output;
 

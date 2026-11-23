@@ -15,10 +15,10 @@
 //! runs and the C++ standard's text on the stream state, not from the source of a C++ runtime or
 //! of a C library.
 //!
-//! The output under it is the process's standard output with no buffer of Rust's
-//! (`crate::cli::standard_output`), so a failure that passes before the exit (`EAGAIN` on a
-//! non-blocking standard output) loses the bytes of the failed write here as NCBI's buffer does
-//! (line RG item KC-11b-2).
+//! On the command line the output under it is the process's standard output with no buffer
+//! of Rust's (`crate::cli::standard_output`). A failure that passes before the exit (`EAGAIN`
+//! on a non-blocking standard output) loses the bytes of the failed write there too, as NCBI's
+//! buffer does (line RG item KC-11b-2).
 
 use std::io::Write;
 

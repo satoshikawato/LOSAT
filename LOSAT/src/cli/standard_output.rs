@@ -5,11 +5,15 @@
 //! passed (`EAGAIN` on a non-blocking standard output, a device that gets space back). NCBI's
 //! programs lose those bytes: a failed write leaves glibc's buffer of `cout` empty
 //! (`crate::writedb::cout`). [`standard_output`] passes each write to the device at once and
-//! keeps nothing (line RG item KC-11b-2). What is lost when a write fails is decided by the
-//! writer above it: NCBI's buffer and stream state (`crate::writedb::cout`,
-//! `crate::ncbi_app::files::Ostream`, rpsbproc's report) drop the bytes as NCBI's do. A
-//! `std::io::BufWriter` keeps them, so no writer of standard output puts one directly over a
-//! device that can fail.
+//! keeps nothing (line RG item KC-11b-2). A write's error is the device's (a full device, a
+//! descriptor opened only for reading), as NCBI's write gets it.
+//!
+//! What a failed write loses is up to the writer above. The stream states of NCBI
+//! (`crate::writedb::cout`, `crate::ncbi_app::files::Ostream`, rpsbproc's report) drop the
+//! bytes of the failed write and write nothing after it. Where that cuts the output follows
+//! each writer's own write sizes; NCBI's for the tools' records are item T8a's (line RG-T5).
+//! A `std::io::BufWriter` keeps the bytes. The search report stream still has one over this
+//! device until T6a (#1508).
 //!
 //! The library leaves the process's standard output to `Stdout`, which its caller shares.
 
@@ -21,9 +25,10 @@ enum Device {
     /// Descriptor 1 (`STD_OUTPUT_HANDLE` on Windows) viewed as a file and never closed.
     #[cfg(any(unix, windows, target_os = "wasi"))]
     Raw(std::mem::ManuallyDrop<std::fs::File>),
-    /// A Windows console (`GetConsoleMode` succeeds on the handle). Rust's `Stdout` writes the
-    /// UTF-8 to it as UTF-16, and this flushes it after each write. A console write that fails
-    /// does not succeed later.
+    /// A Windows console (`GetConsoleMode` succeeds on the handle). Rust's `Stdout` writes to it
+    /// with the console's wide-character call: UTF-8 is converted to UTF-16, and bytes that are
+    /// not UTF-8 are refused (`InvalidData`). This flushes it after each write, so its line
+    /// buffer holds nothing between writes.
     #[cfg(windows)]
     Console(std::io::Stdout),
     /// No standard output: a Windows process started without the handle, or a target that has
@@ -77,28 +82,11 @@ pub(crate) fn standard_output() -> StandardOutput {
     }
 }
 
-/// Whether `error` comes from a descriptor or handle that is not open. Rust's `Stdout` counts
-/// such a write as done, and so does [`StandardOutput`].
-#[cfg(any(unix, windows, target_os = "wasi"))]
-fn is_closed_descriptor(error: &std::io::Error) -> bool {
-    #[cfg(unix)]
-    let closed = rustix::io::Errno::BADF.raw_os_error();
-    // WASI preview 1's `errno::badf`.
-    #[cfg(target_os = "wasi")]
-    let closed = 8;
-    #[cfg(windows)]
-    let closed = windows_sys::Win32::Foundation::ERROR_INVALID_HANDLE as i32;
-    error.raw_os_error() == Some(closed)
-}
-
 impl std::io::Write for StandardOutput {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match &mut self.0 {
             #[cfg(any(unix, windows, target_os = "wasi"))]
-            Device::Raw(file) => match std::io::Write::write(&mut **file, buf) {
-                Err(error) if is_closed_descriptor(&error) => Ok(buf.len()),
-                written => written,
-            },
+            Device::Raw(file) => std::io::Write::write(&mut **file, buf),
             #[cfg(windows)]
             Device::Console(stdout) => {
                 std::io::Write::write_all(stdout, buf)?;

@@ -393,8 +393,9 @@ pub(crate) fn run(
     start: &ApplicationStart,
     body: Body,
 ) -> i32 {
-    // The process's standard output without Rust's buffer (`cli::standard_output`): a failed
-    // write's bytes are lost as NCBI's are (`Ostream`, blastdbcmd's `-metadata`).
+    // The process's standard output without Rust's buffer (`cli::standard_output`): the
+    // writers' stream states (`Ostream`, blastdbcmd's `-metadata`) drop a failed write's bytes
+    // and write nothing after it, as NCBI's streams do.
     let mut out = crate::cli::standard_output();
     let stderr = std::io::stderr();
     let mut err = stderr.lock();

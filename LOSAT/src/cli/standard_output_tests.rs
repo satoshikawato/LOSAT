@@ -34,35 +34,22 @@ fn each_write_reaches_the_device_at_once_and_nothing_is_held() {
     std::fs::remove_file(&path).unwrap();
 }
 
+/// A write's error is the device's: on a descriptor opened only for reading (`1<file`) the
+/// write fails, as NCBI's does (it reports the failure). Rust's `Stdout` counts it as done.
 #[cfg(unix)]
 #[test]
-fn a_descriptor_that_is_not_open_counts_as_written_and_other_errors_do_not() {
-    let closed = std::io::Error::from_raw_os_error(rustix::io::Errno::BADF.raw_os_error());
-    assert!(is_closed_descriptor(&closed));
-    for other in [
-        rustix::io::Errno::AGAIN,
-        rustix::io::Errno::NOSPC,
-        rustix::io::Errno::PIPE,
-    ] {
-        assert!(!is_closed_descriptor(&std::io::Error::from_raw_os_error(
-            other.raw_os_error()
-        )));
+fn a_write_to_a_descriptor_opened_for_reading_fails() {
+    let path = scratch_file("read-only");
+    let file = std::fs::File::open(&path).unwrap();
+    let mut out = StandardOutput(Device::Raw(std::mem::ManuallyDrop::new(file)));
+    let error = out.write(b"text").unwrap_err();
+    assert_eq!(
+        error.raw_os_error(),
+        Some(rustix::io::Errno::BADF.raw_os_error())
+    );
+    #[allow(irrefutable_let_patterns)]
+    if let StandardOutput(Device::Raw(file)) = out {
+        drop(std::mem::ManuallyDrop::into_inner(file));
     }
-    assert!(!is_closed_descriptor(
-        &std::io::ErrorKind::WouldBlock.into()
-    ));
-}
-
-#[cfg(windows)]
-#[test]
-fn a_handle_that_is_not_open_counts_as_written_and_other_errors_do_not() {
-    use windows_sys::Win32::Foundation::{ERROR_DISK_FULL, ERROR_INVALID_HANDLE, ERROR_NO_DATA};
-    assert!(is_closed_descriptor(&std::io::Error::from_raw_os_error(
-        ERROR_INVALID_HANDLE as i32
-    )));
-    for other in [ERROR_DISK_FULL, ERROR_NO_DATA] {
-        assert!(!is_closed_descriptor(&std::io::Error::from_raw_os_error(
-            other as i32
-        )));
-    }
+    std::fs::remove_file(&path).unwrap();
 }

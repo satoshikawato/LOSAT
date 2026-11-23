@@ -555,14 +555,16 @@ pub(crate) struct Members {
     block_start: bool,
     /// The position in the module of the last member read.
     last: Option<usize>,
-    /// The steps of the trail above the SEQUENCE's members (`Trail::steps`).
+    /// The position on the trail (`Trail::steps`) of the member's step, which `begin_members`
+    /// puts there and `next_member` writes over: the steps below it are those of the SEQUENCE.
     base: usize,
 }
 
 /// The elements of a SEQUENCE OF or SET OF as a hand grammar reads them (`Reader::begin_list`).
 pub(crate) struct List {
     block_start: bool,
-    /// The steps of the trail above the elements (`Trail::steps`).
+    /// The position on the trail (`Trail::steps`) of the elements' step (`E`), which
+    /// `begin_list` puts there: the steps below it are those of the list.
     base: usize,
 }
 
@@ -1104,11 +1106,16 @@ impl<S: AsnSource> Reader<S> {
         self.expect(b'}')
     }
 
+    /// `StartBlock` of a SEQUENCE of a hand grammar, whose members `next_member` reads; the
+    /// trail gets the place of the member's step.
     pub(crate) fn begin_members(&mut self) -> Result<Members> {
+        let block_start = self.start_block()?;
+        let base = self.trail.steps.len();
+        self.trail.steps.push(StackStep::Member(""));
         Ok(Members {
-            block_start: self.start_block()?,
+            block_start,
             last: None,
-            base: self.trail.steps.len(),
+            base,
         })
     }
 
@@ -1121,11 +1128,13 @@ impl<S: AsnSource> Reader<S> {
         names: &[&'static str],
     ) -> Result<Option<usize>> {
         let (pos, more) = self.next_element_at(self.pos, &mut members.block_start)?;
-        self.trail.steps.truncate(members.base);
         if !more {
+            self.trail.steps.truncate(members.base);
             self.pos = self.expect_at(pos, b'}')?;
             return Ok(None);
         }
+        // The steps of the member before (a CHOICE's variant) end here.
+        self.trail.steps.truncate(members.base + 1);
         let (pos, id) = self.member_or_tag_at(pos)?;
         self.pos = pos;
         let MemberId::Name(id) = id else {
@@ -1141,26 +1150,27 @@ impl<S: AsnSource> Reader<S> {
             return Err(self.error(message));
         }
         members.last = Some(index);
-        self.trail.steps.push(StackStep::Member(names[index]));
+        if let Some(step) = self.trail.steps.get_mut(members.base) {
+            *step = StackStep::Member(names[index]);
+        }
         Ok(Some(index))
     }
 
     /// `StartBlock` of a SEQUENCE OF or SET OF of a hand grammar, whose elements `next_item`
-    /// reads.
+    /// reads; the trail gets the elements' step (`E`).
     pub(crate) fn begin_list(&mut self) -> Result<List> {
-        Ok(List {
-            block_start: self.start_block()?,
-            base: self.trail.steps.len(),
-        })
+        let block_start = self.start_block()?;
+        let base = self.trail.steps.len();
+        self.trail.steps.push(StackStep::Element);
+        Ok(List { block_start, base })
     }
 
-    /// `NextElement` of the list (`next_element`), with the element's step (`E`) on the trail.
+    /// `NextElement` of the list (`next_element`): the steps of the element before end here,
+    /// and the list's own at its end.
+    #[inline]
     pub(crate) fn next_item(&mut self, list: &mut List) -> Result<bool> {
         let more = self.next_element(&mut list.block_start)?;
-        self.trail.steps.truncate(list.base);
-        if more {
-            self.trail.steps.push(StackStep::Element);
-        }
+        self.trail.steps.truncate(list.base + usize::from(more));
         Ok(more)
     }
 
@@ -1369,6 +1379,7 @@ impl<S: AsnSource> Reader<S> {
     /// byte there is a lower-case letter, else a number (`ReadInt4`). The one reader of both for
     /// the archive reader and the object streams (`asn_input`), which look it up in their values.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
+    #[inline]
     pub(crate) fn enum_word(&mut self) -> Result<EnumWord> {
         let (pos, c) = self.white_space_at(self.pos)?;
         if !c.is_ascii_lowercase() {
@@ -1509,10 +1520,13 @@ impl<S: AsnSource> Reader<S> {
             // Whether the run holds a byte that a VisibleString reads as `#`.
             let mut clean = true;
             let (end, c) = self.src.scan(pos + i, |c| {
-                if matches!(c, b'\r' | b'\n' | b'"') {
+                if (b' '..=b'~').contains(&c) {
+                    return c != b'"';
+                }
+                if matches!(c, b'\r' | b'\n') {
                     return false;
                 }
-                clean &= !visible || (b' '..=b'~').contains(&c);
+                clean &= !visible;
                 true
             });
             let Some(c) = c else {
@@ -1524,7 +1538,12 @@ impl<S: AsnSource> Reader<S> {
                 self.line = line;
                 return Err(self.unended_string(start_line));
             };
-            self.append_run(pos..end, end, line, out, clean, skip, bad_char);
+            // A run without such a byte is appended whole (nothing when skipping).
+            if !clean {
+                self.append_run(pos..end, end, line, out, clean, skip, bad_char);
+            } else if !skip {
+                out.extend_from_slice(self.src.bytes(pos..end));
+            }
             pos = end + 1;
             i = 0;
             if c == b'"' {
@@ -1551,7 +1570,8 @@ impl<S: AsnSource> Reader<S> {
     /// is one that the string reads as `#` (then the run is appended whole). A skipped string
     /// appends nothing and posts each such byte of the whole run without a piece (`SkipString`).
     #[allow(clippy::too_many_arguments)]
-    #[inline]
+    #[cold]
+    #[inline(never)]
     fn append_run(
         &self,
         run: Range<usize>,

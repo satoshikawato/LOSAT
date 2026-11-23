@@ -2266,10 +2266,10 @@ fn a_pssm_query_is_the_command_lines() {
     assert!(outcome.reports[0].bytes == stdout);
     assert!(std::fs::read(&api_file).unwrap() == std::fs::read(&cli_file).unwrap());
     // Each format is checked as the command line checks it alone: psiblast's `-in_pssm` writes
-    // outfmt 0, 5 to 11 and 20 (`in_pssm::check_in_pssm_options`; the others are item PS15b-2's),
-    // whatever the order of the formats.
+    // outfmt 0 to 12, 18 and 20 (`in_pssm::check_in_pssm_options`; the XML2 and JSON documents
+    // are the second part of item PS15b-2), whatever the order of the formats.
     let search = validate(Program::Psiblast, &[]).unwrap();
-    for formats in [&["6", "1"][..], &["1", "6"], &["0", "15"]] {
+    for formats in [&["6", "16"][..], &["16", "6"], &["0", "15"]] {
         let error =
             run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
         assert!(

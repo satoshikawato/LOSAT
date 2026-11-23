@@ -124,6 +124,9 @@ pub(super) struct PreparedXml {
     /// (`PsiSearch::bioseq_letters`), which the rows show and the counts compare as they are
     /// (`row_letters::QueryLetters`); a run of such a query has no other.
     query_bioseq: Option<std::sync::Arc<[u8]>>,
+    /// A PSSM query of the molecule `other` (`PsiSearch::query_other_coding`): the first `Hsp`'s
+    /// rows throw (`report::tabular::query_sequence_exception`).
+    query_other_coding: Option<i32>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89,101-103
@@ -351,6 +354,7 @@ pub(super) fn prepare(
         xml2: xml2_run,
         taxa_notes: taxa.notes,
         query_bioseq: pssm.and_then(|psi| psi.bioseq_letters.clone()),
+        query_other_coding: pssm.and_then(|psi| psi.query_other_coding),
     })
 }
 
@@ -591,6 +595,15 @@ impl PreparedXml {
                             let subject_seq = subject_letters.nt(oid);
                             let mut translation = TargetTranslation::of(subject_seq, &code);
                             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:280-300
+                                // The rows read the query's letters, which throw for a query of
+                                // the molecule `other`; `s_BlastXMLAddIteration` catches it.
+                                if let Some(coding) = self.query_other_coding {
+                                    return Err(crate::report::blast_xml::CaughtException(
+                                        crate::report::tabular::query_sequence_exception(coding),
+                                    )
+                                    .into());
+                                }
                                 let hsp = &linked.hsp;
                                 let frame = i32::from(hsp.frame);
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1087-1105:

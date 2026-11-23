@@ -5591,7 +5591,7 @@ fn resolve_for_formats(
         .any(|&number| args.app.list_cut(number) != args.app.list_cut(numbers[0]))
     {
         bail!(
-            "output formats that cut the hit lists differently in one search (outfmt 11 keeps the search's lists, psiblast's outfmt 5 cuts them before each round's PSSM) are not supported by LOSAT's {}; request them in separate runs",
+            "output formats that cut the hit lists differently in one search (outfmt 11 and 18 keep the search's lists, psiblast's outfmt 5 and 13 to 16 cut them before each round's PSSM) are not supported by LOSAT's {}; request them in separate runs",
             args.app.name()
         );
     }

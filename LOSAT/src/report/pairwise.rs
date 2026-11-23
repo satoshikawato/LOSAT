@@ -53,9 +53,9 @@ pub struct PairwiseConfig {
     /// report, with the run's links and the report's OIDs (`html_ids::HtmlReport`, made only with
     /// `-html`); `None`: the plain report.
     pub html: Option<super::html_ids::HtmlReport>,
-    /// A query whose sequence NCBI's alignment display cannot read (psiblast's PSSM query of the
-    /// molecule `other`): the alignments of outfmt 0 are one line each. `None` for every other
-    /// report.
+    /// A query whose sequence NCBI's alignment display cannot read (psiblast's and tblastn's PSSM
+    /// query of the molecule `other`): the alignments of outfmt 0 are one line each, the
+    /// query-anchored section of outfmt 1 to 4 a line feed. `None` for every other report.
     pub unreadable_query: Option<UnreadableQuery>,
 }
 
@@ -4694,6 +4694,13 @@ fn write_anchored_section<W: Write>(
     q_idx: usize,
     hsps_of: impl FnOnce(&dyn super::query_anchored::ReportSequences) -> super::query_anchored::Hsps,
 ) -> io::Result<()> {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2058-2112
+    // A query whose sequence the display cannot read (`UnreadableQuery`): the merge's add of each
+    // HSP throws and is caught, so no frame has a merge; the line feed before the frames comes,
+    // then each frame's vector throws on its empty merge and is caught too.
+    if config.unreadable_query.is_some() {
+        return writer.write_all(b"\n");
+    }
     let (PairwiseView::QueryAnchored { identity, anchored }, Some(sequences)) =
         (config.view, anchored)
     else {
@@ -5526,6 +5533,22 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let config = self.config;
+        // A PSSM query whose letters the display cannot read (`UnreadableQuery`): NCBI's line in
+        // place of each alignment.
+        if let Some(id) = config.unreadable_query_id(self.parsed_subjects, s_idx) {
+            return write_database_subject_alignments_part(
+                writer,
+                probe,
+                DatabaseHeading::Skipped(&id),
+                false,
+                &group.subject_hits[&s_idx],
+                &group.subject_hit_indices[&s_idx],
+                part,
+                None,
+                place,
+                |_, _, _| unreachable!("a skipped alignment is written by its line"),
+            );
+        }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3650-3668:
         // display leaves an extra blank line after each translated HSP.
         let write_hsp = |writer: &mut W, hit: &PairwiseHit, hsp_index: HspIndex| {

@@ -74,9 +74,9 @@ pub enum XmlMatrixFailure {
     /// the run's second searched query's: its batch fails, after its reader messages and search
     /// strategy request and before anything of its reports. A run of one searched query fails at
     /// its end (`PrintEpilog`) instead of writing the epilog, unless another error ends it first.
-    /// (psiblast's and tblastn `-in_pssm`'s XML2 and JSON documents, outfmt 13 to 16, are not
-    /// written yet, line PS item PS15b-2: there a later query of the same Seq-id would be
-    /// accumulated with the first.)
+    /// (psiblast's XML2 and JSON documents, outfmt 13 to 16, are not written yet, line PS item
+    /// PS15b-2's second part: there a later query of the same Seq-id would be accumulated with
+    /// the first; tblastn's `-in_pssm` search has one query.)
     SecondQueryOrEnd,
 }
 

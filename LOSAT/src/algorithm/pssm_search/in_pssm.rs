@@ -757,9 +757,9 @@ pub(crate) fn psi_search_and_object_of(
             .map_or(0, |last| last + 1);
         title[..end].to_vec()
     };
-    // `other` (255): psiblast searches it as a protein (NCBI's query set-up refuses only the
-    // nucleotide molecules). tblastn's query is checked as before.
-    let mol_other = if query.inst.mol.1 == 255 && reader.program == "PSIBLAST" {
+    // `other` (255): psiblast and tblastn search it as a protein (NCBI's query set-up refuses
+    // only the nucleotide molecules; item PS15b-2 of line PS for tblastn).
+    let mol_other = if query.inst.mol.1 == 255 {
         match query.inst.seq_data.as_ref() {
             // The coding that NCBI's object manager converts (`CSeq_data::E_Choice`).
             Some(SeqData::Iupacaa(_)) => Some(2),

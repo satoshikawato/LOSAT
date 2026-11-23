@@ -106,11 +106,10 @@ pub(crate) fn check_in_pssm_options(
     {
         return Ok(());
     }
-    // The pairwise report, the tabular reports 6, 7, 10 and 20, BLAST XML, the Seq-annots of
-    // outfmt 8 and 9 and the archive (the others are item PS15b-2's).
+    // The formats that LOSAT's psiblast writes (`args::writes_outfmt`).
     if let Some(number) = outfmts
         .iter()
-        .find(|number| !matches!(number, 0 | 5..=11 | 20))
+        .find(|&&number| !super::args::writes_outfmt(number))
     {
         let option = if psi.from_msa { "-in_msa" } else { "-in_pssm" };
         bail!("output format {number} with {option} is not supported by LOSAT's PSIBLAST yet");

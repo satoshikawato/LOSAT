@@ -1018,6 +1018,9 @@ pub(super) fn write_pairwise(
                         .as_ref()
                         .map(|found| found.found.as_slice()),
                 },
+                anchored_sequences.as_ref().map(|sequences| {
+                    sequences as &dyn crate::report::query_anchored::ReportSequences
+                }),
             )
             .map_err(crate::cli::NativeError::of_writer)?;
             continue;

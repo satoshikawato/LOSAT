@@ -359,7 +359,7 @@ impl XPairLutQuery {
                 };
                 let k = lookup_chain_num_used(offset_list) as u32;
                 let list = lists[idx].get_or_insert_with(|| {
-                    // blast_aalookup.c:490: w = query + offset_list[2];
+                    // blast_aalookup.c:490: query word starting at the first stored offset (`offset_list[2]`).
                     let first =
                         usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
                     x_target_list(

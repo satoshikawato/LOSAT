@@ -13,9 +13,8 @@
 #![allow(dead_code)]
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.h:83-89
-//     eQueryOnly,
-//     eQueryAndSubject,
-//     eQueryOnlyStrandIndifferent
+// Indexing modes: query only (`eQueryOnly`), query and subject (`eQueryAndSubject`),
+// or query only ignoring strand (`eQueryOnlyStrandIndifferent`).
 /// Which offsets an interval tree uses as the key for each HSP inserted into it
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IndexMethod {
@@ -29,10 +28,8 @@ pub enum IndexMethod {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:41-45
-//     eIntervalTreeLeft,
-//     eIntervalTreeRight,
-//     eIntervalTreeNeither
-// };
+// Tree navigation directions: left (`eIntervalTreeLeft`), right (`eIntervalTreeRight`),
+// or neither (`eIntervalTreeNeither`).
 /// Which half of a node's range for tree navigation
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum IntervalDirection {
@@ -66,11 +63,11 @@ pub struct TreeHsp {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:539-546
     pub query_frame: i32,
     pub query_length: i32,
-    /// Query strand offset (for context comparison)
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:819 - in_q_start != tree_q_start
+    /// Query strand offset (for context comparison; compares incoming and tree query starts).
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:819
     pub query_context_offset: i32,
-    /// Subject frame sign (positive = forward, negative = reverse)
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:823 - SIGN(subject.frame)
+    /// Subject frame sign (positive = forward, negative = reverse; sign of subject frame).
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:823
     pub subject_frame_sign: i32,
 }
 
@@ -582,7 +579,7 @@ impl BlastIntervalTree {
         let midpt = ((parent.leftend as i64 + parent.rightend as i64) / 2) as i32;
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:102-109
-        //     new_node->leftend = (Int4) midpt + 1;  // <-- +1 is CRITICAL
+        // The right child starts at one past `midpt` (the +1 offset is critical).
         let (leftend, rightend) = match which_half {
             IntervalDirection::Left => (parent.leftend, midpt),
             IntervalDirection::Right => (midpt + 1, parent.rightend), // +1 is CRITICAL
@@ -723,7 +720,8 @@ impl BlastIntervalTree {
 
         let mut root_idx = root_index;
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:338 - while (1)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:338
+        // Walk down the interval tree until reaching a leaf or match.
         loop {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:343-366
             // Compare against every HSP in this node's midpoint list first.
@@ -753,7 +751,7 @@ impl BlastIntervalTree {
                 match result {
                     Some(EndpointResult::KeepTree) => return true,
                     Some(EndpointResult::KeepInput) => {
-                        // Remove worse HSP from list: list_node->midptr = tmp_index
+                        // Unlink the worse HSP from the list by updating `midptr` to `next_idx`.
                         self.nodes[list_idx].midptr = next_idx;
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:361-362
                         // The list unlink is the line above; the flag only tells the grid index
@@ -846,7 +844,8 @@ impl BlastIntervalTree {
 
         let mut root_idx = 0usize;
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:447 - while (1)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:447
+        // Walk down the interval tree to test containment against midpoint lists.
         loop {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:455-461
             // Compare against every HSP in this node's midpoint tree first.
@@ -1125,7 +1124,8 @@ impl BlastIntervalTree {
         let mut current_region_start = region_start;
         let mut current_region_end = region_end;
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:603 - while (1)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:603
+        // Descend the interval tree until inserting or splitting the target interval.
         loop {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:608-609
             let middle = {

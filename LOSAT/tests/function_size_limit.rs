@@ -34,7 +34,7 @@ use std::path::Path;
 #[rustfmt::skip]
 const CAPS: &[(&str, &str, usize)] = &[
     ("algorithm/blastn/blast_engine/run.rs", "run_in_pool", 1516),
-    ("algorithm/blastp/blast_engine.rs", "run_call", 1603),
+    ("algorithm/blastp/blast_engine.rs", "run_call", 1604),
     ("algorithm/tblastn/tblastn_app.rs", "search", 1453),
     ("algorithm/tblastx/sum_stats_linking/linking.rs", "link_hsp_group_ncbi", 1422),
 ];

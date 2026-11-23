@@ -1414,7 +1414,7 @@ mod x_avx2 {
                 m,
             );
             if b0 == first0 {
-                // score = MININT at the start of the row.
+                // Initial score is `MININT` at the start of the row.
                 h0 = _mm256_blend_epi32::<0x01>(h0, minv);
             }
             // Column gap in the column that is a multiple of 10 (at most one per block).
@@ -2212,7 +2212,7 @@ mod x_w128_16 {
         // Diagonal: prev[b - 1] + matrix_row[col[b]].
         let mut h0 = adds16(load(prev_p.add(b0).sub(1)), m);
         if FIRST {
-            // score = MININT at the start of the row.
+            // Initial score is `MININT` at the start of the row.
             h0 = blend8(h0, c.minv, c.lane0);
         }
         // Column gap (`i16::MIN` outside the columns that are multiples of 10).

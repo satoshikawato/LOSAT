@@ -1,0 +1,1 @@
+- Reject unbackticked C and C++ statements and expressions in source comments (`LOSAT/tests/check_foreign_quotes.py`) and reword existing comment hits across the tree.

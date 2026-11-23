@@ -88,6 +88,11 @@
   where a report writes a name whose bytes come from past the mapping, and wrote the others as NCBI
   writes them where it completes, which lines DBID and RG item T5 refused at every lookup
   (approved exception 14 of PD-LOSAT-NCBI-DEFECTS, which the Owner decided on 2026-11-15); on
+  2026-11-16 line RG item T5d wrote NCBI's exception where NCBI's read of a header record fails,
+  which LOSAT refused, and on 2026-11-17 its fix 1 read the header records with a UTF8String or a
+  tag in the long form as NCBI reads them, which it had refused, its fix 2 wrote NCBI's warning of
+  such a record also where NCBI's fetches or its version check of an accession read it, and its
+  fix 3 where NCBI's scope reads it for another sequence that holds a reported sequence's id; on
   2026-11-17 line DBID item v4late looked a Seq-align id up in a version 4 search's ISAM files in
   the volumes' order up to the first one that holds it, never a later one, as NCBI's lookup
   returns there, where LOSAT stopped with NCBI's `Error: Could not open input file` at a later
@@ -805,7 +810,58 @@ search code with a different subject source.
   title that gives no word), `# Database:` of outfmt 7 with the `-db` value as given.
 - Errors: NCBI's texts and exit statuses for a database that is not found or cannot be
   read, at the point where NCBI reports them (a header file is first read when the reports
-  of a query batch are made).
+  of a query batch are made). A header record that NCBI's object stream fails on (a damaged
+  record, or one that another writer encoded so: a taxid of another type or outside `int`, a
+  tag or a length NCBI's reader does not take, a record cut short) gives NCBI's
+  `CSerialException`, made where NCBI throws it (position, message, code, the frames of NCBI's
+  object stack and the backlog `error while reading <member>` of each member with a set flag),
+  as each program reports it: the search programs `Error: <what()>` with exit status 255, after
+  the outfmt 0 prolog and the reports of the batches before the batch whose reports read the
+  record (a record cut inside its first tag or length, the opening bytes of its set of
+  definition lines, throws NCBI's `CEofException`, which `CATCH_ALL` takes as a `CIOException`
+  and does not post: the run ends there with exit status 0, fix 1 of item T5d; a record cut
+  after them, before its first definition line, gives the exception of NCBI's `HandleEOF` with
+  exit status 255 as any other cut record, fix 2); blastdbcmd `Error: [blastdbcmd] <GetMsg()>` with exit status 1 after the records
+  before; segmasker `<what()>` (exit 1); dustmasker NCBI's report of each exception and its
+  `Application's execution failed` line (exit 3). A record that no report reads fails nothing
+  (NCBI reads no header when it opens a database). Line RG item T5d. Two encodings that
+  makeblastdb does not write are read as NCBI reads them (fix 1 of item T5d): a UTF8String where
+  a VisibleString is expected, as the VisibleString (`SERIAL_READ_ANY_VISIBLESTRING_TAG`), with
+  NCBI's warning `Warning: (803.10) [<program>] CObjectIStreamAsnBinary: UTF8String data for
+  VisibleString member <member>, ASN.1 specification may need an update` once per run
+  (`ERR_POST_X_ONCE`) where NCBI first reads such a record, whichever read it is: in the search
+  programs where a batch's search or Seq-aligns read it (after the batch's reader messages,
+  before its prefetch and its reports; a message of the BLAST archive). Under a negative seqid
+  list with ids NCBI's traceback and composition-based redo read the header of each subject they
+  fetch (the redo only those its early termination test leaves), also of one that no report shows
+  (fix 2 of item T5d); a seqid list's Seq-aligns read every final hit, also one that gets no
+  Seq-align; the version check of an accession reads its candidates. NCBI's scope reads the
+  header of the sequence that the lookup of a reported sequence's Seq-align id gives first, where
+  that is another one (the data loader's `x_GetOid`, fix 3 of item T5d): in every format that
+  reads the subject's Bioseq and where the batch's prefetch loads it (also a table of fields that
+  read nothing of it, and outfmt 8 with `PRE_FETCH_SEQS_LIMIT=2147483647`), not in the archive nor
+  the Seq-annots without the prefetch; another holder after the subject is not read. A sequence
+  that differs from the subject only by such a string is the subject to every report. The
+  warning comes at the load of that id (fix 4 of item T5d): in the batch's prefetch after the
+  taxonomy database's texts of the loads before it in NCBI's order of the Seq-id handles (by packed
+  number), before a failed lookup's `Error pre-fetching sequence data` and a stopping prefetch's
+  `BLAST Database error`; where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off, inside the
+  report at its first read of the subject (outfmt 0's description line, a tabular row, a BLAST XML,
+  XML2 or JSON `Hit`; psiblast's PSSM after the round's report where the report reads nothing of
+  it), and in the prefetch of a batch that the limit leaves on with a format that reads nothing of
+  the subject. Refused there: two such loads whose warnings name different members (two of one
+  member write the same bytes in either order, fix 5), or that load and one that asks the taxonomy
+  database where the batch writes a text of it, whose order NCBI takes from the addresses of its
+  Seq-id infos (one packed number, or neither packed: NCBI 2.17.0 wrote the warning before the texts of
+  opening in one run and after them in the next, blastx probe `gt.bad_magic`, fix 4) or that LOSAT
+  does not know (a batch of more than 200 Seq-align ids, as line DBID loadord's stops). A
+  prefetch whose loads end at a lookup that throws on its id (`Error pre-fetching sequence data`)
+  before that load does not make it, so it writes no warning (fix 5 of item T5d): the warning comes
+  at the run's next load of the id (a later batch's prefetch) or not at all; a report that reads the
+  subjects reads the one whose lookup throws too, which LOSAT refuses. In blastdbcmd before the
+  record's text, and before `Entry not found` where the version check of `-entry` or
+  `-entry_batch` read it; segmasker and dustmasker write none. A tag in the long form is read
+  with no message (`PeekLongTag`), or fails as NCBI's read does.
 - `-db` with `-subject` or `-subject_loc` is a usage error (LOSAT's parser text and exit
   status 2; NCBI prints its usage and exits 1). LOSAT Web rejects `-db` until stage DB-7.
 

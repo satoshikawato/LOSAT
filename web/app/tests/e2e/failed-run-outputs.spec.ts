@@ -17,7 +17,7 @@ import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { openFiles, openParameters, openSearch, paste, pickRun, program, submit, waitStatus } from './support/search';
+import { inputNames, madeName, openFiles, openParameters, openSearch, paste, pickRun, program, submit, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
 
@@ -38,13 +38,13 @@ async function downloaded(page: Page, click: () => Promise<void>): Promise<Buffe
 }
 
 /** The file that the native CLI writes with `-out` for the run's command line (`outfmt` in the options), and its status. */
-function nativeFile(options: readonly string[]): { readonly file: Buffer; readonly status: number | null } | undefined {
+function nativeFile(options: readonly string[], names: { readonly query: string; readonly subject: string }): { readonly file: Buffer; readonly status: number | null } | undefined {
   if (NATIVE === undefined) return undefined;
   mkdirSync(test.info().outputPath(), { recursive: true });
   const directory = mkdtempSync(join(test.info().outputPath(), 'native-'));
-  writeFileSync(join(directory, 'query.fa'), QUERY);
-  writeFileSync(join(directory, 'subject.fa'), SUBJECT);
-  const cli = spawnSync(NATIVE, ['blastp', '-query', 'query.fa', '-subject', 'subject.fa', ...options, '-num_threads', '1', '-out', 'out.txt'], { cwd: directory });
+  writeFileSync(join(directory, names.query), QUERY);
+  writeFileSync(join(directory, names.subject), SUBJECT);
+  const cli = spawnSync(NATIVE, ['blastp', '-query', names.query, '-subject', names.subject, ...options, '-num_threads', '1', '-out', 'out.txt'], { cwd: directory });
   return { file: readFileSync(join(directory, 'out.txt')), status: cli.status };
 }
 
@@ -85,7 +85,16 @@ for (const [outfmt, tab] of [
     expect(text.length).toBeGreaterThan(0);
     const saved = await downloaded(page, () => outputs.getByTestId('export-output').click());
     expect(saved.toString('utf8')).toBe(text);
-    const cli = nativeFile(outfmt === undefined ? [] : ['-outfmt', outfmt]);
+    // The command names the pasted inputs by the run's own names, and the failed run still offers them as files (DECISIONS 44; the
+    // review of round 5, L1): the user needs them to run the command.
+    const names = inputNames((await outputs.getByTestId('result-command').textContent()) ?? '');
+    expect(names.query).toMatch(new RegExp(`^${madeName(1, 'blastp', 'query')}$`));
+    const queryFile = await downloaded(page, () => outputs.getByTestId('outputs-query-download').click());
+    expect(queryFile.toString('utf8')).toBe(QUERY);
+    await expect(outputs.getByTestId('outputs-query-download')).toHaveText(`Download ${names.query}`);
+    const subjectFile = await downloaded(page, () => outputs.getByTestId('outputs-subject-download').click());
+    expect(subjectFile.toString('utf8')).toBe(SUBJECT);
+    const cli = nativeFile(outfmt === undefined ? [] : ['-outfmt', outfmt], names);
     if (cli === undefined) test.info().annotations.push({ type: 'skip', description: `The bytes of the CLI's file: ${NO_NATIVE_REASON}` });
     else {
       expect(cli.status, 'the native CLI fails the same command line').toBe(3);

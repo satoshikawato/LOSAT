@@ -172,8 +172,7 @@ fn x_greedy_alignment_on_a_used_scratch_equals_a_new_scratch() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:500-526,571-576
-// if (fence_hit && *fence_hit) { return 0; }
-// C writes into persistent scratch before the fence return.
+// Returning zero on a fence sentinel leaves the rows written so far in persistent scratch.
 #[test]
 fn non_affine_fence_retains_written_scratch() {
     for traceback in [false, true] {

@@ -101,10 +101,15 @@ pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
 pub(crate) fn seqalign_scores(evalue: f64, bit_score: f64) -> (f64, f64) {
     let evalue = seqalign_evalue(evalue);
     (
-        if evalue >= 0.0 { evalue } else { -1.0 },
+        if evalue >= 0.0 { evalue } else { ABSENT_EVALUE },
         if bit_score >= 0.0 { bit_score } else { -1.0 },
     )
 }
+
+/// The E-value that the readers of a Seq-align take where it has none (`GetAlnScores`). A list
+/// that `seqalign_scores` made carries it for such an HSP; no other value of such a list is
+/// negative (a negative E-value is 0 in a Seq-align).
+pub(crate) const ABSENT_EVALUE: f64 = -1.0;
 pub(crate) const GAP_VALUE: i32 = -1;
 const BLAST_ALIGNMENT_DIM: i32 = 2;
 

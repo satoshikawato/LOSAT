@@ -1817,19 +1817,62 @@ fn prefetch_seqs_limit() -> Option<i32> {
     crate::blastinput::app::prefetch_seqs_limit().ok().flatten()
 }
 
-/// Whether a Seq-id of the sequence `ordinal` of `db` is one `CSeq_id_Handle` with the key
-/// `handle` (`seqid::mask_handle::mask_handle_key`).
-fn holds_handle(db: &SeqDb, ordinal: u32, handle: &[u8]) -> bool {
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1372, 1439
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/cached_sequence.cpp:58, 75-110
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:257-290, 441-462
+// The BLAST database data loader loads a sequence for the id it is asked for (the blob is the OID
+// with that id's handle) and asks its volume for the Bioseq with that id as the target: the
+// Bioseq's ids are those of the first definition line that holds the target, so NCBI's scope
+// indexes that line's ids alone; the loader registers in `m_Ids` the handle of every Seq-id of
+// every definition line of the set (`RegisterIds` of the whole ASN.1 set that the Bioseq carries).
+// Every load of a reported subject in NCBI's searches is a load by its Seq-align id (the reports,
+// the batches' prefetch, psiblast's PSSM reads; `GetBioseq` of an OID without a target, whose
+// Bioseq takes the first line's ids, puts nothing into a scope there), so the scope knows a
+// sequence by the line of its own Seq-align id (review 3 of line DBID pfoff-4, M1). A load of a
+// holder that the loader gives for a failing subject's id targets the line of that id; LOSAT
+// refuses every such hold (`ParsedSubject::fetched`), so nothing after it is written.
+/// The definition lines of a sequence in which one of NCBI's two places that answer a load before
+/// its lookup finds its ids (`report::db_subject::ScopeHolders`): the one owner of that choice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lines {
+    /// Every line: the BLAST database data loader's `m_Ids`, by exact handle.
+    Every,
+    /// The line by which a load by the sequence's own Seq-align id makes its Bioseq
+    /// (`DeflineSet::bioseq_defline` of `DeflineSet::alignment_id`; none where no line holds it,
+    /// where that load throws): NCBI's scope, by every handle that matches the id it is asked
+    /// for.
+    Loaded,
+}
+
+impl Lines {
+    /// The Seq-ids of these lines of the set `set`, in order.
+    fn ids(
+        self,
+        set: &crate::seqid::DeflineSet,
+    ) -> impl Iterator<Item = &crate::seqid::ParsedSeqId> {
+        let loaded = match self {
+            Lines::Every => None,
+            Lines::Loaded => Some(set.alignment_id().and_then(|id| set.bioseq_defline(id))),
+        };
+        set.deflines
+            .iter()
+            .enumerate()
+            .filter(move |&(at, _)| loaded.is_none_or(|line| line == Some(at)))
+            .flat_map(|(_, defline)| &defline.ids)
+    }
+}
+
+/// Whether a Seq-id of the lines `lines` of the sequence `ordinal` of `db` is one `CSeq_id_Handle`
+/// with the key `handle` (`seqid::mask_handle::mask_handle_key`).
+fn holds_handle(db: &SeqDb, ordinal: u32, handle: &[u8], lines: Lines) -> bool {
     let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = db.read_header(ordinal) else {
         return false;
     };
-    set.deflines
-        .iter()
-        .flat_map(|defline| &defline.ids)
-        .any(|id| {
-            crate::seqid::mask_handle::mask_handle_key(id)
-                .is_ok_and(|key| key.as_deref() == Some(handle))
-        })
+    let held = lines.ids(&set).any(|id| {
+        crate::seqid::mask_handle::mask_handle_key(id)
+            .is_ok_and(|key| key.as_deref() == Some(handle))
+    });
+    held
 }
 
 /// The words of a lookup's error `error` in LOSAT's own refusal texts: NCBI's message where it
@@ -1855,10 +1898,14 @@ struct CaseHolders<'r, 'd> {
 
 impl<'r, 'd> CaseHolders<'r, 'd> {
     /// The OIDs, of `oids` (every OID of the lookup of the Seq-align id) and those found in
-    /// another letter case, of the sequences that hold an id that NCBI's scope takes for it: a
-    /// scope key of it, or for one found under a key in another letter case, an id of its own
-    /// handle. In their order, each as often as found.
-    fn holders<'s>(&'s self, oids: &'s [u32]) -> impl Iterator<Item = u32> + use<'s, 'r, 'd> {
+    /// another letter case, of the sequences whose lines `lines` hold an id that NCBI's scope
+    /// takes for it: a scope key of it, or for one found under a key in another letter case, an
+    /// id of its own handle. In their order, each as often as found.
+    fn holders<'s>(
+        &'s self,
+        oids: &'s [u32],
+        lines: Lines,
+    ) -> impl Iterator<Item = u32> + use<'s, 'r, 'd> {
         let reader = self.reader;
         oids.iter()
             .chain(&self.folded)
@@ -1869,9 +1916,14 @@ impl<'r, 'd> CaseHolders<'r, 'd> {
                 if variant {
                     self.handle
                         .as_deref()
-                        .is_some_and(|handle| reader.holds_handle(other, handle))
+                        .is_some_and(|handle| holds_handle(reader.db, other, handle, lines))
                 } else {
-                    reader.holds_key(other, &self.keys, crate::seqid::defline_set::scope_keys)
+                    reader.holds_key(
+                        other,
+                        &self.keys,
+                        crate::seqid::defline_set::scope_keys,
+                        lines,
+                    )
                 }
             })
             .map(|(oid, _)| oid)
@@ -1889,11 +1941,12 @@ enum WeakMatches {
 }
 
 impl WeakMatches {
-    /// The OIDs found that hold an id of a weak key (`id_scope::kind_keys`), in their order, each
-    /// as often as found.
+    /// The OIDs found whose lines `lines` hold an id of a weak key (`id_scope::kind_keys`), in
+    /// their order, each as often as found.
     fn holders<'s, 'a>(
         &'s self,
         reader: &'s HeaderReader<'a>,
+        lines: Lines,
     ) -> impl Iterator<Item = u32> + use<'s, 'a> {
         let (keys, oids): (&[u64], &[u32]) = match self {
             WeakMatches::Found { keys, oids } => (keys, oids),
@@ -1904,6 +1957,7 @@ impl WeakMatches {
                 reader.db.ordinal_of(oid),
                 keys,
                 crate::seqid::id_scope::kind_keys,
+                lines,
             )
         })
     }
@@ -2193,8 +2247,11 @@ impl<'a> HeaderReader<'a> {
         // The first was compared above. Besides a sequence given instead, any other holder
         // (also a copy of the subject's record) is one the scope can read for it.
         let mut also_held = None;
+        // Every line: of a lookup that does not fail LOSAT asks the two places as one, the data
+        // loader's every line among them (`Lines`), so a holder that only the loader may give is
+        // refused too.
         for other in in_case
-            .holders(&oids)
+            .holders(&oids, Lines::Every)
             .filter(|&oid| oid != own && Some(oid) != first)
             .map(|oid| self.db.ordinal_of(oid))
         {
@@ -2250,21 +2307,24 @@ impl<'a> HeaderReader<'a> {
     // at `stop_lookup_unsure`)
     // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:864-880 (cited at `found_instead`)
     // NCBI's scope finds a Bioseq it holds for the Seq-align id before the data loader looks it
-    // up, by the id's handle, an id that it takes for it, or a weak match, and the loader gives a
-    // sequence it loaded for every Seq-id of it (`RegisterIds`), by the handle, so where the run
-    // loaded such a holder before, the lookup that fails is not made (reviews 1 and 2 of line DBID
-    // pfoff-4, H1 and H2, H1 and M1; `ParsedSubject::held_before` asks the order and the lifetime
-    // of each place).
+    // up, by the id's handle, an id that it takes for it, or a weak match, among the ids of the
+    // definition line that each Bioseq was loaded by (`Lines::Loaded`), and the loader gives a
+    // sequence it loaded for every Seq-id of every line of it (`RegisterIds`), by the handle, so
+    // where the run loaded such a holder before, the lookup that fails is not made (reviews 1 to 3
+    // of line DBID pfoff-4, H1 and H2, H1 and M1, M1; `ParsedSubject::held_before` asks the order
+    // and the lifetime of each place).
     /// For `found_instead` where NCBI's lookup of the Seq-align id of the sequence `ordinal`,
     /// `subject`, fails on a file: the other sequences of the database that NCBI may give for it
     /// without the lookup ([`crate::report::db_subject::ScopeHolders`]), found in the LMDB files that
     /// have the accession table (`SeqidLookup::in_indexed_files`: a file without it holds no text
     /// id, and NCBI's lookup fails there), as the stop of a prefetch finds them
-    /// ([`stop_lookup_unsure`]): the scope's, by the searches of a lookup that does not fail
-    /// (every OID of the lookup and the keys in another letter case, [`HeaderReader::case_holders`],
-    /// with the scope keys) and of its weak matches ([`HeaderReader::weak_matches`]); of those, the
-    /// data loader's hold an id of the Seq-align id's handle (`seqid::mask_handle::mask_handle_key`;
-    /// every one where the id has no handle that a function can know). Each list keeps the
+    /// ([`stop_lookup_unsure`]), by the searches of a lookup that does not fail (every OID of the
+    /// lookup and the keys in another letter case, [`HeaderReader::case_holders`], with the scope
+    /// keys): the scope's, those whose definition line of their own Seq-align id (`Lines::Loaded`)
+    /// holds a scope key of it, with those of its weak matches ([`HeaderReader::weak_matches`]) by
+    /// that line; the data loader's, those whose lines (any, `Lines::Every`) hold an id of the
+    /// Seq-align id's handle (`seqid::mask_handle::mask_handle_key`; every one where the id has no
+    /// handle that a function can know). Each list keeps the
     /// sequences whose own Seq-align id's lookup does not fail (a load of one by that id would
     /// throw and load nothing). `Holders::Unknown` where a list fails on a file, and for the scope's
     /// where the weak matches cannot be listed.
@@ -2326,10 +2386,12 @@ impl<'a> HeaderReader<'a> {
         let handle = crate::seqid::mask_handle::mask_handle_key(id)
             .ok()
             .flatten();
-        let loader = list(&mut in_case.holders(&oids).filter(|&oid| {
-            handle
-                .as_deref()
-                .is_none_or(|handle| self.holds_handle(self.db.ordinal_of(oid), handle))
+        // The loader knows every line of a sequence it loaded, the scope the line of its load
+        // (`Lines`; review 3 of line DBID pfoff-4, M1).
+        let loader = list(&mut in_case.holders(&oids, Lines::Every).filter(|&oid| {
+            handle.as_deref().is_none_or(|handle| {
+                holds_handle(self.db, self.db.ordinal_of(oid), handle, Lines::Every)
+            })
         }));
         let scope = match weak {
             WeakMatches::Unlisted => Holders::Unknown(
@@ -2337,7 +2399,9 @@ impl<'a> HeaderReader<'a> {
                     .to_owned(),
             ),
             weak => Holders::Listed(list(
-                &mut in_case.holders(&oids).chain(weak.holders(self)),
+                &mut in_case
+                    .holders(&oids, Lines::Loaded)
+                    .chain(weak.holders(self, Lines::Loaded)),
             )),
         };
         ScopeHolders {
@@ -2410,7 +2474,7 @@ impl<'a> HeaderReader<'a> {
         Ok(match self.weak_matches(lookup, subject, oids)? {
             WeakMatches::Unlisted => Some(WeakMatch::Unlisted),
             weak => weak
-                .holders(self)
+                .holders(self, Lines::Every)
                 .filter(|&oid| oid != own)
                 .map(|oid| self.db.ordinal_of(oid))
                 .find(|&other| self.copy_of(subject, ordinal, other) == RecordCopy::Differs)
@@ -2466,33 +2530,26 @@ impl<'a> HeaderReader<'a> {
         Ok(WeakMatches::Found { keys, oids: found })
     }
 
-    /// Whether a Seq-id of the sequence `ordinal` is one `CSeq_id_Handle` with the key `handle`
-    /// (`seqid::mask_handle::mask_handle_key`).
-    fn holds_handle(&self, ordinal: u32, handle: &[u8]) -> bool {
-        holds_handle(self.db, ordinal, handle)
-    }
-
-    /// Whether a Seq-id of the sequence `ordinal` has one of the keys `keys` that `key_of` gives
-    /// (`defline_set::scope_keys`: NCBI's scope can show it for a Seq-align id of those keys;
-    /// `id_scope::kind_keys`: for a Seq-align id whose `weak_keys` they are).
+    /// Whether a Seq-id of the lines `lines` of the sequence `ordinal` has one of the keys `keys`
+    /// that `key_of` gives (`defline_set::scope_keys`: NCBI's scope can show it for a Seq-align id
+    /// of those keys; `id_scope::kind_keys`: for a Seq-align id whose `weak_keys` they are).
     fn holds_key(
         &self,
         ordinal: u32,
         keys: &[u64],
         key_of: fn(&crate::seqid::model::ParsedSeqId, &mut Vec<u64>),
+        lines: Lines,
     ) -> bool {
         let Ok(crate::seqdb::SequenceHeader::Parsed(set)) = self.db.read_header(ordinal) else {
             return false;
         };
         let mut held = Vec::new();
-        set.deflines
-            .iter()
-            .flat_map(|defline| &defline.ids)
-            .any(|id| {
-                held.clear();
-                key_of(id, &mut held);
-                held.iter().any(|key| keys.contains(key))
-            })
+        let holds = lines.ids(&set).any(|id| {
+            held.clear();
+            key_of(id, &mut held);
+            held.iter().any(|key| keys.contains(key))
+        });
+        holds
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1130-1139
@@ -6253,7 +6310,7 @@ fn stop_lookup_unsure(
     let holds = |oid: u32| {
         handle
             .as_deref()
-            .is_none_or(|handle| holds_handle(db, db.ordinal_of(oid), handle))
+            .is_none_or(|handle| holds_handle(db, db.ordinal_of(oid), handle, Lines::Every))
     };
     let lookup = db.seqid_lookup()?;
     // The first reason, and every sequence that may be given instead (by OID).

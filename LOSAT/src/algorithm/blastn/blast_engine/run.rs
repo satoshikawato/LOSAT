@@ -8268,6 +8268,7 @@ fn run_in_pool(
     let run_loads = crate::report::db_subject::RunLoads::new(database::after_throw(
         &output_formats,
         outputs.other_outfmts,
+        args.html_links.is_some(),
     ));
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
@@ -9734,7 +9735,11 @@ fn write_reports_untimed(
                 letters,
                 database::parsed_shown(output_formats),
                 (
-                    database::after_throw(output_formats, outputs.other_outfmts),
+                    database::after_throw(
+                        output_formats,
+                        outputs.other_outfmts,
+                        args.html_links.is_some(),
+                    ),
                     database::pairwise_reading(
                         output_formats,
                         args.formatting.report_sort(),

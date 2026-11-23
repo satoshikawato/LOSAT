@@ -878,20 +878,24 @@ pub(crate) fn hit_identities(
 /// run's `RunLoads`): the stop of a batch's prefetch (`batch_prefetch_stop`) and the reports
 /// (`reported_subjects`) ask it of the run's formats alike (review 2 of line DBID pfoff-1, N-M2),
 /// with the call's refusal over the `-outfmt` values of its other searches, `others`
-/// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
+/// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`); `html`: the run has `-html` links
+/// (`TblastxArgs::html_links`, which the writer's `PairwiseConfig::html` gets too).
 pub(crate) fn after_throw<'a>(
     outfmts: impl IntoIterator<Item = &'a str>,
     others: &[&str],
+    html: bool,
 ) -> crate::report::db_subject::FormatThrow {
     crate::report::db_subject::FormatThrow::of_outfmts(
         outfmts,
         crate::blastinput::app::Program::Tblastx,
         crate::report::archive::options::RequestKind::Tblastx,
+        html,
     )
     .of_search(
         others,
         crate::blastinput::app::Program::Tblastx,
         crate::report::archive::options::RequestKind::Tblastx,
+        html,
     )
 }
 

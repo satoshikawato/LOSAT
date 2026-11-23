@@ -1099,10 +1099,13 @@ impl ReportedAsks {
                         crate::report::db_subject::ThrowRefusal::Format,
                     ),
                     |format| {
+                        // With `-html` where the run has its links (the writer's
+                        // `PairwiseConfig::html`).
                         crate::report::db_subject::FormatThrow::of(
                             format,
                             options.tabular,
                             crate::blastinput::app::Program::Blastx,
+                            options.html.is_some(),
                         )
                     },
                 ),
@@ -1136,6 +1139,7 @@ impl ReportedAsks {
             others,
             crate::blastinput::app::Program::Blastx,
             crate::report::archive::options::RequestKind::Blastx,
+            options.iter().any(|options| options.html.is_some()),
         );
         asks.prefetched = options
             .first()

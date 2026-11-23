@@ -151,14 +151,15 @@ impl BlastnOutputFormat {
         }
     }
 
-    /// What the format does with a subject whose lookup throws where its batch's prefetch is off:
-    /// `report::db_subject::FormatThrow::of` of its format and field list, the one answer of every
-    /// program.
-    pub(crate) fn format_throw(&self) -> crate::report::db_subject::FormatThrow {
+    /// What the format does with a subject whose lookup throws where its batch's prefetch is off,
+    /// with `-html` where `html`: `report::db_subject::FormatThrow::of` of its format and field
+    /// list, the one answer of every program.
+    pub(crate) fn format_throw(&self, html: bool) -> crate::report::db_subject::FormatThrow {
         crate::report::db_subject::FormatThrow::of(
             self.report_format(),
             self.tabular_spec(),
             crate::blastinput::app::Program::Blastn,
+            html,
         )
     }
 

@@ -323,16 +323,19 @@ pub(super) fn prefetch_reported_subjects(
                 (database, ranges.x_ordinal_base),
                 reported_lists,
                 batch_prefetch,
+                // With `-html` where the run has its links (as the writer's `PairwiseConfig::html`).
                 crate::report::db_subject::FormatThrow::of_outfmts(
                     outputs.formats.iter().map(|format| format.outfmt),
                     crate::blastinput::app::Program::Blastp,
                     args.app.request_kind(),
+                    args.html.is_some(),
                 )
                 // The call's refusal, over the formats of its other searches too.
                 .of_search(
                     outputs.other_outfmts,
                     crate::blastinput::app::Program::Blastp,
                     args.app.request_kind(),
+                    args.html.is_some(),
                 ),
                 |query| {
                     pairwise_reading.map_or_else(Default::default, |reading| {

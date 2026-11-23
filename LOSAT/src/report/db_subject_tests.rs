@@ -713,7 +713,8 @@ fn the_formats_say_what_loads_after_a_throw() {
     assert_eq!(report.load(3), HitLoad::Throws);
     assert_eq!(report.load(4), HitLoad::Unread);
     // The formats' answers.
-    let of = |outfmt: &str| FormatThrow::of_outfmt(outfmt, Program::Blastp, RequestKind::Blastp);
+    let of =
+        |outfmt: &str| FormatThrow::of_outfmt(outfmt, Program::Blastp, RequestKind::Blastp, false);
     let writes = |after| FormatThrow::Writes(RunThrow::every_row(after));
     // The tables of `sacc` or `saccver` (the default fields too) end the run where a report's
     // first row throws (`tabular::first_thrown_row_ends_run`).
@@ -762,18 +763,18 @@ fn the_formats_say_what_loads_after_a_throw() {
     assert_eq!(of("17"), FormatThrow::Refused(ThrowRefusal::Format));
     // Pairwise: the first shown alignment ends the run, a later one is skipped; query-anchored:
     // any shown alignment ends the run.
-    assert_eq!(of("0"), writes(AfterThrow::SkipsAlignment));
+    assert_eq!(of("0"), writes(AfterThrow::SkipsAlignment { html: false }));
     for anchored in ["1", "2", "3", "4"] {
         assert_eq!(
             of(anchored),
-            writes(AfterThrow::EndsAtAlignment),
+            writes(AfterThrow::EndsAtAlignment { html: false }),
             "{anchored}"
         );
     }
     // BLASTN's `pident` and `nident` read nothing of the subject.
     for unread in ["6 qseqid pident", "6 qseqid nident"] {
         assert_eq!(
-            FormatThrow::of_outfmt(unread, Program::Blastn, RequestKind::Blastn),
+            FormatThrow::of_outfmt(unread, Program::Blastn, RequestKind::Blastn, false),
             FormatThrow::Unread,
             "{unread}"
         );
@@ -784,6 +785,7 @@ fn the_formats_say_what_loads_after_a_throw() {
             outfmts.iter().copied(),
             Program::Blastp,
             RequestKind::Blastp,
+            false,
         )
     };
     let after = |outfmts: &[&str]| answer(outfmts).run();
@@ -839,11 +841,11 @@ fn the_formats_say_what_loads_after_a_throw() {
         "16",
         "18",
     ] {
-        let alone = FormatThrow::of_outfmt(single, Program::Blastp, RequestKind::Blastp);
+        let alone = FormatThrow::of_outfmt(single, Program::Blastp, RequestKind::Blastp, false);
         assert!(matches!(alone, FormatThrow::Writes(_)), "{single}");
         assert_eq!(answer(&[single]), alone, "{single}");
         assert_eq!(
-            alone.of_search(&[], Program::Blastp, RequestKind::Blastp),
+            alone.of_search(&[], Program::Blastp, RequestKind::Blastp, false),
             alone,
             "{single}"
         );
@@ -913,7 +915,9 @@ fn the_formats_say_what_loads_after_a_throw() {
     );
     assert_eq!(
         after(&["0", "0"]),
-        Some(RunThrow::every_row(AfterThrow::SkipsAlignment))
+        Some(RunThrow::every_row(AfterThrow::SkipsAlignment {
+            html: false
+        }))
     );
 }
 
@@ -1175,8 +1179,13 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
 fn the_call_refuses_a_throw_over_all_its_searches() {
     use crate::blastinput::app::Program;
     let search = |own: &[&str], others: &[&str]| {
-        FormatThrow::of_outfmts(own.iter().copied(), Program::Blastp, RequestKind::Blastp)
-            .of_search(others, Program::Blastp, RequestKind::Blastp)
+        FormatThrow::of_outfmts(
+            own.iter().copied(),
+            Program::Blastp,
+            RequestKind::Blastp,
+            false,
+        )
+        .of_search(others, Program::Blastp, RequestKind::Blastp, false)
     };
     let writes = |after| FormatThrow::Writes(RunThrow::every_row(after));
     // One search: its own answer.
@@ -2382,18 +2391,66 @@ fn the_model_and_the_writer_end_the_run_at_the_same_alignment() {
     let every = usize::MAX;
     // Outfmt 0 ends at its first alignment where it throws, not after `-sorthits` moves a
     // loaded one first, nor with no alignment shown.
-    assert_eq!(end(AfterThrow::SkipsAlignment, None, every, false), Some(0));
-    assert_eq!(end(AfterThrow::SkipsAlignment, Some(1), every, false), None);
-    assert_eq!(end(AfterThrow::SkipsAlignment, None, 0, false), None);
-    assert_eq!(end(AfterThrow::SkipsAlignment, None, every, true), None);
+    assert_eq!(
+        end(
+            AfterThrow::SkipsAlignment { html: false },
+            None,
+            every,
+            false
+        ),
+        Some(0)
+    );
+    assert_eq!(
+        end(
+            AfterThrow::SkipsAlignment { html: false },
+            Some(1),
+            every,
+            false
+        ),
+        None
+    );
+    assert_eq!(
+        end(AfterThrow::SkipsAlignment { html: false }, None, 0, false),
+        None
+    );
+    assert_eq!(
+        end(
+            AfterThrow::SkipsAlignment { html: false },
+            None,
+            every,
+            true
+        ),
+        None
+    );
     // Outfmt 1 to 4 end at the first shown alignment that throws, a local one too, unless
     // the cut leaves none.
     assert_eq!(
-        end(AfterThrow::EndsAtAlignment, Some(1), every, false),
+        end(
+            AfterThrow::EndsAtAlignment { html: false },
+            Some(1),
+            every,
+            false
+        ),
         Some(1)
     );
-    assert_eq!(end(AfterThrow::EndsAtAlignment, None, every, true), Some(0));
-    assert_eq!(end(AfterThrow::EndsAtAlignment, Some(1), 1, false), None);
+    assert_eq!(
+        end(
+            AfterThrow::EndsAtAlignment { html: false },
+            None,
+            every,
+            true
+        ),
+        Some(0)
+    );
+    assert_eq!(
+        end(
+            AfterThrow::EndsAtAlignment { html: false },
+            Some(1),
+            1,
+            false
+        ),
+        None
+    );
     for other in [
         AfterThrow::EndsRun,
         AfterThrow::EndsReport,
@@ -2466,7 +2523,7 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     let ends_second: [&[usize]; 3] = [&[0, 1, 2], &[3, 4], &[5]];
     assert_eq!(
         loads(
-            run(AfterThrow::SkipsAlignment),
+            run(AfterThrow::SkipsAlignment { html: false }),
             three(every, every, ends_second)
         ),
         [L, T, L, T, L, U]
@@ -2474,31 +2531,43 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     // A first alignment that loads: the throwing ones are skipped and the run goes on.
     let skips: [&[usize]; 3] = [&[0, 1, 2], &[4, 3], &[5]];
     assert_eq!(
-        loads(run(AfterThrow::SkipsAlignment), three(every, every, skips)),
+        loads(
+            run(AfterThrow::SkipsAlignment { html: false }),
+            three(every, every, skips)
+        ),
         [L, T, L, T, L, L]
     );
     // `-num_alignments 0`: no alignment section, nothing ends.
     assert_eq!(
         loads(
-            run(AfterThrow::SkipsAlignment),
+            run(AfterThrow::SkipsAlignment { html: false }),
             three(every, 0, ends_second)
         ),
         [L, T, L, T, L, L]
     );
     // Outfmt 1 to 4: the first report's second alignment ends the run.
     assert_eq!(
-        loads(run(AfterThrow::EndsAtAlignment), three(every, every, skips)),
+        loads(
+            run(AfterThrow::EndsAtAlignment { html: false }),
+            three(every, every, skips)
+        ),
         [L, T, L, U, U, U]
     );
     // `-num_alignments 1`: only the first alignment is shown, which loads; 3 throws in the
     // description lines alone.
     assert_eq!(
-        loads(run(AfterThrow::EndsAtAlignment), three(every, 1, skips)),
+        loads(
+            run(AfterThrow::EndsAtAlignment { html: false }),
+            three(every, 1, skips)
+        ),
         [L, T, L, T, L, L]
     );
     // `-num_descriptions 0`: only the alignments up to the end load, and 2 is never reached.
     assert_eq!(
-        loads(run(AfterThrow::EndsAtAlignment), three(0, every, skips)),
+        loads(
+            run(AfterThrow::EndsAtAlignment { html: false }),
+            three(0, every, skips)
+        ),
         [L, T, U, U, U, U]
     );
     // The description lines that a report shows are its writer's (`PairwiseReads::described`,
@@ -2515,14 +2584,17 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
         }),
     );
     assert_eq!(
-        loads(run(AfterThrow::SkipsAlignment), vec![two_part]),
+        loads(
+            run(AfterThrow::SkipsAlignment { html: false }),
+            vec![two_part]
+        ),
         [U, U, L, U, L, U]
     );
     // A batch that prefetches loads every subject it shows, where `-num_descriptions 0
     // -num_alignments 1` reads the first alignment alone of a batch that does not.
     assert_eq!(
         loads(
-            run(AfterThrow::SkipsAlignment),
+            run(AfterThrow::SkipsAlignment { html: false }),
             vec![
                 report(false, &[0, 2, 4], 0, 1),
                 report(true, &[5, 1, 3], 0, 1)
@@ -2533,7 +2605,7 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     // After the run's end a batch that prefetches loads nothing either.
     assert_eq!(
         loads(
-            run(AfterThrow::SkipsAlignment),
+            run(AfterThrow::SkipsAlignment { html: false }),
             vec![
                 report(true, &[1, 0], every, every),
                 report(false, &[2, 3, 4, 5], every, every)
@@ -2552,11 +2624,14 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
         }),
     );
     assert_eq!(
-        loads(run(AfterThrow::SkipsAlignment), vec![copies]),
+        loads(
+            run(AfterThrow::SkipsAlignment { html: false }),
+            vec![copies]
+        ),
         [U, U, U, T, L, L]
     );
     // A later call's reports read nothing after the end (`RunLoads`).
-    let calls = RunLoads::new(run(AfterThrow::SkipsAlignment));
+    let calls = RunLoads::new(run(AfterThrow::SkipsAlignment { html: false }));
     let first = calls.loads(
         LoadsBefore::NONE,
         [report(true, &[3, 4], every, every)],
@@ -2814,7 +2889,10 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
             }),
         )]
     };
-    for after in [AfterThrow::SkipsAlignment, AfterThrow::EndsAtAlignment] {
+    for after in [
+        AfterThrow::SkipsAlignment { html: false },
+        AfterThrow::EndsAtAlignment { html: false },
+    ] {
         assert_eq!(
             loads(LoadsBefore::NONE, after, pairwise(vec![0, 1, 2], 3)),
             [L, H(Some(holder)), L, L, L],

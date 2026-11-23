@@ -190,13 +190,16 @@ impl PairwiseView {
     }
 
     /// What the format's report does after a subject whose lookup throws where its batch's
-    /// prefetch is off (`report::db_subject::AfterThrow`): outfmt 0 skips the alignments of such a
-    /// subject (or ends the run at its first alignment), 1 to 4 end the run at the first.
-    pub fn after_throw(self) -> crate::report::db_subject::AfterThrow {
+    /// prefetch is off (`report::db_subject::AfterThrow`), with `-html` where `html`: outfmt 0
+    /// skips the alignments of such a subject (or ends the run at its first alignment), 1 to 4 end
+    /// the run at the first; with `-html` the run ends at its description line
+    /// (`AfterThrow::description_end`). The one answer of the model of the loads
+    /// (`db_subject::FormatThrow::of`) and of the writers (`PairwiseConfig::after_throw`).
+    pub fn after_throw(self, html: bool) -> crate::report::db_subject::AfterThrow {
         use crate::report::db_subject::AfterThrow;
         match self {
-            Self::Pairwise => AfterThrow::SkipsAlignment,
-            Self::QueryAnchored { .. } => AfterThrow::EndsAtAlignment,
+            Self::Pairwise => AfterThrow::SkipsAlignment { html },
+            Self::QueryAnchored { .. } => AfterThrow::EndsAtAlignment { html },
         }
     }
 
@@ -243,6 +246,25 @@ impl PairwiseConfig {
     /// The run's `-html` data of the report's prolog (`write_prolog`), `None` for the plain report.
     pub(crate) fn html_links(&self) -> Option<&super::html_ids::HtmlLinks> {
         self.html.as_ref().map(|report| &*report.links)
+    }
+
+    /// What the report does after a subject whose lookup throws (`PairwiseView::after_throw` of
+    /// its view, with `-html` where it has its links).
+    pub(crate) fn after_throw(&self) -> crate::report::db_subject::AfterThrow {
+        self.view.after_throw(self.html.is_some())
+    }
+
+    /// The `-html` report with what it does after a throw (`after_throw`), for its description
+    /// table (`HtmlRows`); `None` for the plain report.
+    pub(crate) fn html_rows(
+        &self,
+    ) -> Option<(
+        &super::html_ids::HtmlReport,
+        crate::report::db_subject::AfterThrow,
+    )> {
+        self.html
+            .as_ref()
+            .map(|report| (report, self.after_throw()))
     }
 }
 
@@ -2011,10 +2033,13 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     show_sum_n: bool,
     columns: Option<SortColumns>,
     place: super::query_warnings::ReportHook<'_, W>,
-    // `-html`: the rows' links, the subjects with parsed Seq-ids by subject index and what the
-    // report's loads do at each subject (`HtmlRows`).
+    // `-html`: the rows' links with what the report does after a throw, the subjects with parsed
+    // Seq-ids by subject index and what the report's loads do at each subject (`HtmlRows`).
     html: Option<(
-        &super::html_ids::HtmlReport,
+        (
+            &super::html_ids::HtmlReport,
+            crate::report::db_subject::AfterThrow,
+        ),
         &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
         &crate::report::db_subject::HitLoads,
     )>,
@@ -2033,8 +2058,9 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
             )
         },
         place,
-        html.map(|(report, parsed, loads)| HtmlRows {
+        html.map(|((report, after), parsed, loads)| HtmlRows {
             report,
+            after,
             parsed,
             loads,
         }),
@@ -3452,8 +3478,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 )
             },
             place,
-            self.config.html.as_ref().map(|report| HtmlRows {
+            self.config.html_rows().map(|(report, after)| HtmlRows {
                 report,
+                after,
                 parsed: self.parsed_subjects,
                 loads: self.loads,
             }),
@@ -3782,14 +3809,14 @@ fn write_description_table<W: Write>(
     }
     writeln!(writer)?;
     writeln!(writer)?;
+    // Where the `-html` rows end the run (`HtmlRows::end`).
+    let end = html.and_then(|html| html.end(&rows.iter().map(|row| row.0).collect::<Vec<_>>()));
     for (index, (s_idx, best, total, sum_n, values)) in rows.iter().enumerate() {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1587-1589
         // Each line loads its subject (`x_GetDeflineInfo` of `x_DisplayDeflineTableBody`) after
         // the lines before it are written (`QueryWarnings::subject_read`).
         place(super::query_warnings::ReportPlace::Load(*s_idx), writer)?;
-        if let Some(html) = html {
-            html.end_at_thrown(*s_idx)?;
-        }
+        super::x_pairwise_par::end_here(end, index)?;
         let bits = format_bitscore_ncbi(best.hit.bit_score);
         match html {
             None => {
@@ -4037,24 +4064,29 @@ impl DescriptionLabel {
 #[derive(Clone, Copy)]
 struct HtmlRows<'a> {
     report: &'a super::html_ids::HtmlReport,
+    /// What the report does after a throw (`PairwiseConfig::after_throw`), where its description
+    /// lines end the run (`AfterThrow::description_end`).
+    after: crate::report::db_subject::AfterThrow,
     parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
     /// What the report's loads do at each subject, by subject (`HitLoads::thrown`).
     loads: &'a crate::report::db_subject::HitLoads,
 }
 
-impl HtmlRows<'_> {
+impl<'a> HtmlRows<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1611
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3904-3907
-    /// The end of the run at the `-html` row of subject `s_idx` where its load throws
-    /// (`HitLoads::thrown`): the `catch` of the row's load makes the row's link, whose
-    /// `GetIDUrl` loads the subject again with the scope, and that throw leaves the report. The
-    /// writer's error is the load's exception (as `x_pairwise_par::end_here`), after the rows
-    /// before it and the row's own read; the plain row is the `catch`'s `Unknown`.
-    fn end_at_thrown(self, s_idx: u32) -> io::Result<()> {
-        match self.loads.thrown(s_idx as usize) {
-            Some(exception) => Err(exception.clone().into_io_error()),
-            None => Ok(()),
-        }
+    /// Where the `-html` rows of the subjects `described` (in their order) end the run: the
+    /// position of the first whose load throws (`HitLoads::thrown`) and its exception, as the
+    /// report's answer says (`AfterThrow::description_end`, which the model of the loads asks
+    /// too): the `catch` of the row's load makes the row's link, whose `GetIDUrl` loads the
+    /// subject again with the scope, and that throw leaves the report. The writer returns the
+    /// exception there as its error (`x_pairwise_par::end_here`), after the rows before it and the
+    /// row's own read; the plain row is the `catch`'s `Unknown`.
+    fn end(self, described: &[u32]) -> Option<(usize, &'a crate::ncbi_exception::NcbiException)> {
+        let at = self.after.description_end(described.iter(), |&s_idx| {
+            self.loads.thrown(s_idx as usize).is_some()
+        })?;
+        Some((at, self.loads.thrown(described[at] as usize)?))
     }
 
     /// The start of the `-html` description row of rank `rank` (from 1) for the subject `s_idx`
@@ -4146,8 +4178,12 @@ fn write_blastn_description_table<W: Write>(
     protein: bool,
     columns: Option<SortColumns>,
     place: super::query_warnings::ReportHook<'_, W>,
-    // `-html`: the report's links and OIDs (`PairwiseConfig::html`).
-    html: Option<&super::html_ids::HtmlReport>,
+    // `-html`: the report's links and OIDs (`PairwiseConfig::html`), with what it does after a
+    // throw (`PairwiseConfig::html_rows`).
+    html: Option<(
+        &super::html_ids::HtmlReport,
+        crate::report::db_subject::AfterThrow,
+    )>,
     loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     write_description_table(
@@ -4174,8 +4210,9 @@ fn write_blastn_description_table<W: Write>(
             )
         },
         place,
-        html.map(|report| HtmlRows {
+        html.map(|(report, after)| HtmlRows {
             report,
+            after,
             parsed,
             loads,
         }),
@@ -4494,7 +4531,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             place,
-            self.config.html.as_ref(),
+            self.config.html_rows(),
             self.loads,
         )?;
         writeln!(writer)
@@ -5060,7 +5097,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             place,
-            self.config.html.as_ref(),
+            self.config.html_rows(),
             self.loads,
         )?;
         writeln!(writer)
@@ -5421,7 +5458,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             place,
-            self.config.html.as_ref(),
+            self.config.html_rows(),
             self.loads,
         )?;
         writeln!(writer)
@@ -5915,7 +5952,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             !self.options.gapped && self.options.sum_stats,
             self.config.sort_columns(query.query_length),
             place,
-            self.config.html.as_ref().map(|report| {
+            self.config.html_rows().map(|report| {
                 let parsed = match self.database {
                     Some((_, _, parsed, _)) => parsed,
                     None => self.records_parsed,

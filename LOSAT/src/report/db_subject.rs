@@ -198,11 +198,17 @@ pub enum WeakMatch {
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
 // NCBI's scope answers a load by an id before its BLAST database data loader: from its index of
 // the Bioseqs it holds, by the id's own handle, then by every handle that matches it, weak matches
-// included (`GetMatchingHandles` with `eAllowWeakMatch`); the formatter empties that index after
-// each query batch (`ResetScopeHistory`), but for outfmt 5. Then the loader answers from its
-// `m_Ids`, the exact handle of every Seq-id of each sequence it loaded (`RegisterIds`), kept for
-// the run, before it looks the id up (`SeqidToOid`), which is what fails on a file (review 2 of
-// line DBID pfoff-4, H1 and M1).
+// included (`GetMatchingHandles` with `eAllowWeakMatch`); a Bioseq's ids there are those of the
+// definition line that its load targets, the line of its own Seq-align id
+// (`common::database::Lines::Loaded`); the formatter empties that index after each query batch
+// (`ResetScopeHistory`), but for outfmt 5. Then the loader answers from its `m_Ids`, the exact
+// handle of every Seq-id of every definition line of each sequence it loaded (`RegisterIds`), kept
+// for the run, before it looks the id up (`SeqidToOid`), which is what fails on a file (review 2
+// of line DBID pfoff-4, H1 and M1; review 3, M1: `gi|7051|ref|XP_900001.1|` ^A
+// `gi|7052|ref|NP_100001.1|` holds `ref|NP_100001.1|` by the loader and not `ref|NP_100001|` or
+// `emb|NP_100001.1|` by the scope, which knows its first line; with `ref|XP_900002.1|` ^A
+// `gi|7053|ref|NP_100001.1|`, whose Seq-align id is the gi of its second line, the scope holds
+// both).
 /// The other sequences of the database that hold an id by which NCBI's run may give one of them
 /// for the Seq-align id of a subject whose lookup fails on a file (`FoundInstead::Failed`) without
 /// that lookup, in the two places that answer before it, each with its own keys and lifetime, as
@@ -213,17 +219,19 @@ pub enum WeakMatch {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScopeHolders {
     /// The holders of an id of the Seq-align id's own `CSeq_id_Handle`
-    /// (`seqid::mask_handle::mask_handle_key`), which the BLAST database data loader gives for it
-    /// from the ids of the sequences that it loaded (`m_Ids`) for the rest of the run, in every
-    /// format.
+    /// (`seqid::mask_handle::mask_handle_key`) in any of their definition lines, which the BLAST
+    /// database data loader gives for it from the ids of the sequences that it loaded (`m_Ids`)
+    /// for the rest of the run, in every format.
     pub loader: Holders,
-    /// The holders of an id that NCBI's scope finds for it in its index: an id that it takes for
-    /// it (`defline_set::scope_keys`: the accession and version in any alternative and letter
-    /// case, a name of an id without an accession; the loader's holders among them) or one that
-    /// it matches weakly (`id_scope::weak_keys`: the versions of an accession without one, a name
-    /// with or without an accession, in any alternative), which the scope holds from their load to
-    /// the end of the query batch (`ResetScopeHistory`), to the end of the run in outfmt 5
-    /// (`RunThrow::keeps_scope`).
+    /// The holders of an id that NCBI's scope finds for it in its index, in the definition line by
+    /// which their load made their Bioseq (the line of their own Seq-align id,
+    /// `common::database::Lines::Loaded`; review 3 of line DBID pfoff-4, M1): an id that it takes
+    /// for it (`defline_set::scope_keys`: the accession and version in any alternative and letter
+    /// case, a name of an id without an accession; the loader's holders by that line among them)
+    /// or one that it matches weakly (`id_scope::weak_keys`: the versions of an accession without
+    /// one, a name with or without an accession, in any alternative), which the scope holds from
+    /// their load to the end of the query batch (`ResetScopeHistory`), to the end of the run in
+    /// outfmt 5 (`RunThrow::keeps_scope`).
     pub scope: Holders,
 }
 
@@ -408,8 +416,10 @@ impl SeenLoads {
     /// [`ParsedSubject::held_before`] of `subject` after these loads, in a run whose scope NCBI
     /// keeps for the whole run where `keeps_scope` (outfmt 5): the calls before loaded any
     /// sequence into the loader, and into the scope only where it is kept. A holder that either
-    /// place gives is in the batch's scope from then on (the loader's answer loads its Bioseq
-    /// there), with every id it holds: one that LOSAT does not name counts as any sequence.
+    /// place gives is noted in the batch's scope from then on (the loader's answer loads its
+    /// Bioseq there, of the definition line of the failing id, which LOSAT notes as a load of the
+    /// holder: no output depends on it, `ParsedSubject::fetched` refuses every hold); one that
+    /// LOSAT does not name counts as any sequence.
     fn held(&mut self, subject: &ParsedSubject, keeps_scope: bool) -> Option<Option<DbSequence>> {
         let held = self.held_now(subject, keeps_scope);
         if let Some(holder) = held {
@@ -800,6 +810,12 @@ impl ParsedSubject {
     pub fn scope_holders(mut self, holders: ScopeHolders) -> Self {
         self.failed_holders = holders;
         self
+    }
+
+    /// The holders that `scope_holders` gave. Read by tests only: the walks ask `held_before`.
+    #[cfg(test)]
+    pub fn failed_holders(&self) -> &ScopeHolders {
+        &self.failed_holders
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-396 (cited
@@ -2373,18 +2389,20 @@ pub enum AfterThrow {
     /// (outfmt 18, `CTaxFormat::x_InitTaxInfoMap`'s `catch`) leaves the HSP out and goes on.
     WritesRow,
     /// The pairwise report, outfmt 0: the `catch` of the description line writes it with the
-    /// Seq-align id and `Unknown` (`ParsedSubject::thrown_description`) and the report goes on;
+    /// Seq-align id and `Unknown` (`ParsedSubject::thrown_description`) and the report goes on,
+    /// but with `-html` (`html`), where the run ends there ([`AfterThrow::description_end`]);
     /// then `GetDbType` loads the subject of the first alignment shown, without a `catch` for an
     /// id that is not local: where it throws, the run ends after the query's description lines
     /// (`alignment_end`); otherwise the `catch` of each alignment writes NCBI's skipped line in
     /// place of each alignment of a subject that throws (`report::pairwise::DatabaseHeading::
     /// Thrown`), and the report goes on.
-    SkipsAlignment,
+    SkipsAlignment { html: bool },
     /// The query-anchored reports, outfmt 1 to 4: the description lines as outfmt 0's
-    /// (`SkipsAlignment`); then `GetDbType` and the merge load the subject of each alignment shown,
-    /// in order, without a `catch`: the run ends after the query's description lines at the first
-    /// that throws (`alignment_end`).
-    EndsAtAlignment,
+    /// (`SkipsAlignment`, with `html` alike; LOSAT refuses `-html` with these formats before the
+    /// search, `blastinput::app::html_format_check`); then `GetDbType` and the merge load the
+    /// subject of each alignment shown, in order, without a `catch`: the run ends after the
+    /// query's description lines at the first that throws (`alignment_end`).
+    EndsAtAlignment { html: bool },
 }
 
 impl AfterThrow {
@@ -2393,8 +2411,36 @@ impl AfterThrow {
     pub fn is_pairwise(self) -> bool {
         matches!(
             self,
-            AfterThrow::SkipsAlignment | AfterThrow::EndsAtAlignment
+            AfterThrow::SkipsAlignment { .. } | AfterThrow::EndsAtAlignment { .. }
         )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1611 (cited at
+    // `report::pairwise::HtmlRows::end`)
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3904-3907
+    // With `-html`, the `catch` of a description line's load makes the line's link, and
+    // `GetIDUrl` loads the subject again by the same id outside any `catch` of the report: the
+    // throw leaves the formatter and NCBI's application ends with it (`CATCH_ALL`, exit status 2,
+    // `BLAST Database error: <message>`), with no alignment, and no report after it (line RG item
+    // T4a2; review 3 of line DBID pfoff-4, M2: 81 `-html` runs of NCBI BLAST+ 2.17.0 end there).
+    // The `catch` of an alignment makes no link (showalign.cpp:1950-1981), so the alignments do as
+    // without `-html`, and so does a report without description lines (`-num_descriptions 0`).
+    /// Where the description lines of a pairwise report end the run: the position, among the hits
+    /// whose lines it shows, in their order (`described`), of the first whose load throws
+    /// (`throws`, asked in that order up to it), with `-html` (`html` of `SkipsAlignment` and
+    /// `EndsAtAlignment`); `None` without it, for the other writers, and where none throws. The one
+    /// decision of the model of the loads ([`HitLoads::of`], with the lookups and holds) and of the
+    /// writer (`report::pairwise::HtmlRows`, with the loads).
+    pub fn description_end<K>(
+        self,
+        described: impl IntoIterator<Item = K>,
+        throws: impl FnMut(K) -> bool,
+    ) -> Option<usize> {
+        match self {
+            AfterThrow::SkipsAlignment { html: true }
+            | AfterThrow::EndsAtAlignment { html: true } => described.into_iter().position(throws),
+            _ => None,
+        }
     }
 
     /// Where the alignments of a pairwise report (outfmt 0 to 4) end the run: the position, among
@@ -2412,11 +2458,11 @@ impl AfterThrow {
     ) -> Option<usize> {
         let mut aligned = aligned.into_iter();
         match self {
-            AfterThrow::SkipsAlignment => aligned
+            AfterThrow::SkipsAlignment { .. } => aligned
                 .next()
                 .filter(|&first| throws(first) && !local(first))
                 .map(|_| 0),
-            AfterThrow::EndsAtAlignment => aligned.position(throws),
+            AfterThrow::EndsAtAlignment { .. } => aligned.position(throws),
             AfterThrow::EndsRun
             | AfterThrow::EndsReport
             | AfterThrow::WritesHit
@@ -2495,11 +2541,14 @@ impl From<Vec<Option<usize>>> for ReportKeys {
 /// holder's). `keeps_scope`: the run writes outfmt 5, whose formatter keeps NCBI's scope for the
 /// whole run (`CBlastFormat::ResetScopeHistory` empties it after each query batch for every other
 /// format), so that a sequence that NCBI's scope finds for a subject whose lookup fails holds it
-/// in a later batch too ([`ScopeHolders::scope`]; review 2 of line DBID pfoff-4, M1). A call of the
-/// library with outfmt 5 and another format takes the scope of the outfmt 5 run for both
-/// ([`FormatThrow::and`]): a subject that that run holds is refused whatever the other format
-/// (LOSAT does not write the holder's record for it), and one that it does not hold is held in
-/// no run of the call, whose scope holds no more, so each run throws where the call throws.
+/// in a later batch too ([`ScopeHolders::scope`]; review 2 of line DBID pfoff-4, M1). The formats
+/// of one search of a call of the library, outfmt 5 and another, take the scope of the outfmt 5
+/// run for all ([`FormatThrow::and`]): a subject that that run holds is refused whatever the other
+/// format (LOSAT does not write the holder's record for it), and one that it does not hold is held
+/// in no run of those formats, whose scope holds no more, so each run throws where the search
+/// throws. The call's searches by hit list size each walk with their own formats' answer
+/// ([`FormatThrow::of_search`] keeps it where the call does not refuse), each format's own NCBI
+/// run (review 3 of line DBID pfoff-4, L1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunThrow {
     pub after: AfterThrow,
@@ -2598,18 +2647,20 @@ pub enum FormatThrow {
 impl FormatThrow {
     /// What the format `format` does, with its field list `spec` (`None` for a format without
     /// one, and for the default outfmt 6 and 7, whose `saccver` is a field of the subject block),
-    /// in `program`'s reports.
+    /// in `program`'s reports, with `-html` where `html` (the pairwise reports',
+    /// `PairwiseView::after_throw`).
     pub fn of(
         format: crate::blastinput::app::ReportFormat,
         spec: Option<&super::tabular::TabularSpec>,
         program: crate::blastinput::app::Program,
+        html: bool,
     ) -> Self {
         use crate::blastinput::app::ReportFormat;
         if let Some(kind) = super::blast_xml2::Xml2Kind::of(format) {
             return FormatThrow::Writes(RunThrow::every_row(kind.after_throw()));
         }
         if let Some(view) = super::pairwise::PairwiseView::of(format) {
-            return FormatThrow::Writes(RunThrow::every_row(view.after_throw()));
+            return FormatThrow::Writes(RunThrow::every_row(view.after_throw(html)));
         }
         match format {
             ReportFormat::Tabular
@@ -2634,14 +2685,15 @@ impl FormatThrow {
 
     /// What the `-outfmt` value `outfmt` does in `program`'s reports, as NCBI reads it
     /// (`app::parse_formatting_string`; a value that NCBI refuses is refused) and `app`'s
-    /// formatter writes it (`TabularSpec::of_app`).
+    /// formatter writes it (`TabularSpec::of_app`), with `-html` where `html`.
     pub fn of_outfmt(
         outfmt: &str,
         program: crate::blastinput::app::Program,
         app: crate::report::archive::options::RequestKind,
+        html: bool,
     ) -> Self {
         match parsed_outfmt(outfmt, app) {
-            Some((format, spec)) => Self::of(format, spec.as_ref(), program),
+            Some((format, spec)) => Self::of(format, spec.as_ref(), program, html),
             None => FormatThrow::Refused(ThrowRefusal::Format),
         }
     }
@@ -2728,24 +2780,25 @@ impl FormatThrow {
     }
 
     /// [`FormatThrow::of_formats`] of the `-outfmt` values `outfmts` of `program`'s run in `app`'s
-    /// application.
+    /// application, with `-html` where `html`.
     pub fn of_outfmts<'a>(
         outfmts: impl IntoIterator<Item = &'a str>,
         program: crate::blastinput::app::Program,
         app: crate::report::archive::options::RequestKind,
+        html: bool,
     ) -> Self {
         Self::of_formats(
             outfmts
                 .into_iter()
-                .map(|outfmt| Self::of_outfmt(outfmt, program, app)),
+                .map(|outfmt| Self::of_outfmt(outfmt, program, app, html)),
         )
     }
 
     /// The answer of one search of a call, whose own formats answer `self`: the call's refusal
     /// where the formats of the whole call refuse the throw together, `self` with those that the
     /// call's other searches write (`others`, their `-outfmt` values of `program` in `app`'s
-    /// application: `api::run`'s searches by hit list size, `ReportOutputs::other_outfmts`; none
-    /// on the command line), else `self`. A call has one result: the rule is the call's, so that
+    /// application, with the call's `-html` where `html`: `api::run`'s searches by hit list size,
+    /// `ReportOutputs::other_outfmts`; none on the command line), else `self`. A call has one result: the rule is the call's, so that
     /// the split of its formats by `-num_descriptions` and `-num_alignments` does not change it
     /// (review 3 of line DBID pfoff-3, N2). A search whose own formats read nothing keeps
     /// `Unread` where the call does not refuse.
@@ -2754,12 +2807,13 @@ impl FormatThrow {
         others: &[&str],
         program: crate::blastinput::app::Program,
         app: crate::report::archive::options::RequestKind,
+        html: bool,
     ) -> Self {
         let call = Self::of_formats(
             std::iter::once(self).chain(
                 others
                     .iter()
-                    .map(|outfmt| Self::of_outfmt(outfmt, program, app)),
+                    .map(|outfmt| Self::of_outfmt(outfmt, program, app, html)),
             ),
         );
         match call {
@@ -2961,7 +3015,8 @@ impl HitLoads {
     /// - `SkipsAlignment` and `EndsAtAlignment` (outfmt 0 to 4): a report that reads one by one
     ///   gives its reads as its writer makes them (`ReportKeys::Pairwise`,
     ///   `x_pairwise_par::QueryGroup::read_order`): each description line loads its subject or
-    ///   throws, then the alignments load theirs up to the one that ends the run, if any
+    ///   throws (with `-html` the first that throws ends the run, `AfterThrow::description_end`),
+    ///   then the alignments load theirs up to the one that ends the run, if any
     ///   (`pairwise_report`); one whose batch prefetches gives its entries in any order.
     ///
     /// A report whose batch prefetches loads every subject (a lookup that throws stops the
@@ -3145,10 +3200,12 @@ impl HitLoads {
     /// The loads of one pairwise report (outfmt 0 to 4, `AfterThrow::is_pairwise`, whose run does
     /// `run` after a throw) in a batch whose prefetch is off, whose reads are `reads` (its
     /// writer's own answers, `x_pairwise_par::QueryGroup::read_order`): unless the run ended
-    /// before (`ended`), its description lines load the subjects of the hits that they show, then
-    /// its alignments those of its first `reads.aligned` hits up to the one whose load ends the
-    /// run (`AfterThrow::alignment_end`, which `ended` then records), each in that order after
-    /// the loads `seen`, to which it adds its own. A subject whose lookup throws (`lookup_throws`)
+    /// before (`ended`), its description lines load the subjects of the hits that they show, up to
+    /// the one whose load ends the run with `-html` (`AfterThrow::description_end`, the writer's
+    /// answer too; then nothing after it loads), then its alignments those of its first
+    /// `reads.aligned` hits up to the one whose load ends the run (`AfterThrow::alignment_end`),
+    /// each in that order after the loads `seen`, to which it adds its own; `ended` records either
+    /// end. A subject whose lookup throws (`lookup_throws`)
     /// loads nothing there, nor do the copies in its hit, unless NCBI's scope gives a sequence
     /// loaded before for it at one of its reads (`held_before`: it is held, and an alignment of
     /// it ends nothing); every subject that neither loads is passed.
@@ -3196,20 +3253,32 @@ impl HitLoads {
             now
         };
         if !ended.get() {
-            for &hit in &reads.described {
-                read(hit);
+            // With `-html` the description lines end the run at the first whose load throws
+            // (`AfterThrow::description_end`, the writer's answer): nothing after it loads.
+            let description_end = run
+                .after
+                .description_end(reads.described.iter().copied(), |hit| {
+                    matches!(read(hit), Read::Throws)
+                });
+            if description_end.is_some() {
+                ended.set(true);
+            } else {
+                // The description lines that the end above did not read (all, without `-html`).
+                for &hit in &reads.described {
+                    read(hit);
+                }
+                let end = run.after.alignment_end(
+                    0..reads.aligned,
+                    |hit| matches!(read(hit), Read::Throws),
+                    |hit| first(hit).is_some_and(ParsedSubject::alignment_id_is_local),
+                );
+                // The alignments that the report reaches, each read once more where the end above
+                // did not read it (`SkipsAlignment` reads the first alone there).
+                for hit in 0..end.map_or(reads.aligned, |end| end + 1) {
+                    read(hit);
+                }
+                ended.set(end.is_some());
             }
-            let end = run.after.alignment_end(
-                0..reads.aligned,
-                |hit| matches!(read(hit), Read::Throws),
-                |hit| first(hit).is_some_and(ParsedSubject::alignment_id_is_local),
-            );
-            // The alignments that the report reaches, each read once more where the end above did
-            // not read it (`SkipsAlignment` reads the first alone there).
-            for hit in 0..end.map_or(reads.aligned, |end| end + 1) {
-                read(hit);
-            }
-            ended.set(end.is_some());
         }
         for (hit, keys) in reads.hits.iter().enumerate() {
             let now = state.borrow()[hit];

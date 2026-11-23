@@ -1973,18 +1973,23 @@ impl QueryFetches<'_> {
 /// What the formats `output_formats` do after a subject whose lookup throws where its batch's
 /// prefetch is off (`FormatThrow::of_formats`, for `hit_loads` and the run's `RunLoads`), with the
 /// call's refusal over the `-outfmt` values of its other searches, `others`
-/// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`).
+/// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`); `html`: the run has `-html` links
+/// (`BlastnArgs::html_links`, which the writers' `PairwiseConfig::html` gets too).
 pub(super) fn after_throw(
     output_formats: &[BlastnOutputFormat],
     others: &[&str],
+    html: bool,
 ) -> crate::report::db_subject::FormatThrow {
     crate::report::db_subject::FormatThrow::of_formats(
-        output_formats.iter().map(BlastnOutputFormat::format_throw),
+        output_formats
+            .iter()
+            .map(|format| format.format_throw(html)),
     )
     .of_search(
         others,
         crate::blastinput::app::Program::Blastn,
         crate::report::archive::options::RequestKind::Blastn,
+        html,
     )
 }
 

@@ -832,20 +832,23 @@ fn parsed_shown(
 /// What the formats `formats` do after a subject whose lookup throws where its batch's prefetch is
 /// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads), with the call's refusal over
 /// the `-outfmt` values of its other searches, `others` (`FormatThrow::of_search`,
-/// `ReportOutputs::other_outfmts`).
+/// `ReportOutputs::other_outfmts`); `html`: the run has `-html` links (`ResolvedTblastnArgs::html`,
+/// which the writer's `PairwiseConfig::html` gets too).
 fn after_throw(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-    others: &[&str],
+    (others, html): (&[&str], bool),
 ) -> crate::report::db_subject::FormatThrow {
     crate::report::db_subject::FormatThrow::of_outfmts(
         formats.iter().map(|format| format.outfmt),
         crate::blastinput::app::Program::Tblastn,
         crate::report::archive::options::RequestKind::Tblastn,
+        html,
     )
     .of_search(
         others,
         crate::blastinput::app::Program::Tblastn,
         crate::report::archive::options::RequestKind::Tblastn,
+        html,
     )
 }
 
@@ -902,12 +905,11 @@ fn pairwise_read_order<'l>(
 /// and where they join hits `refuse_joined_hits`; where only the prefetch reads a subject, a batch
 /// of `batches`, the query ranges of the batches of `hitlists`, whose prefetch is on reports it;
 /// what the formats do after a `Hit` that throws, `after_throw`, with the call's refusal over the
-/// `-outfmt` values of its other searches, `others`, for the one answer of what the reports load,
-/// `hit_loads`, with how the pairwise reports read each query's subjects, `pairwise`, after the
-/// loads of the calls before, whose loads nothing here records, `TaxdbRun::calls_before`). The
-/// packed
-/// subjects are read from the database (`SubjectLetters::Stream`, one read each) instead of
-/// cloned from the copy.
+/// `-outfmt` values of its other searches and whether it has `-html` links, `call`, for the one
+/// answer of what the reports load, `hit_loads`, with how the pairwise reports read each query's
+/// subjects, `pairwise`, after the loads of the calls before, whose loads nothing here records,
+/// `TaxdbRun::calls_before`). The packed subjects are read from the database
+/// (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
     database: &TblastnDatabase,
@@ -916,7 +918,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-    others: &[&str],
+    call: (&[&str], bool),
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
     gapped: bool,
@@ -947,7 +949,7 @@ pub(super) fn reported_subjects(
         Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
         _ => None,
     };
-    let after = after_throw(formats, others);
+    let after = after_throw(formats, call);
     // A pairwise report's reads, of the subjects' lengths (`pairwise_read_order`), where its
     // batch reads them one by one.
     let pairwise_keys = |query: usize| -> Result<Option<crate::report::db_subject::PairwiseReads>> {

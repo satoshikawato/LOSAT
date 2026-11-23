@@ -558,24 +558,24 @@ export class Coordinator {
     key: string,
     maxBytes: number,
   ): Promise<{ readonly bytes: Uint8Array; readonly totalSize: number; readonly truncated: boolean }> {
-    const entry = this.toolOutputEntry(runId, key);
-    const end = Math.min(entry.size, Math.max(0, maxBytes));
+    const { size } = this.toolOutputEntry(runId, key);
+    const end = Math.min(size, Math.max(0, maxBytes));
     const bytes = await this.deps.data.readToolOutputRange(runId, key, 0, end);
-    return { bytes, totalSize: entry.size, truncated: entry.size > end };
+    return { bytes, totalSize: size, truncated: size > end };
   }
 
   /** Returns an OPFS/storage-backed `File` for a committed tool run's output. */
   async getToolOutputFile(runId: string, key: string, fileName?: string): Promise<File> {
-    const entry = this.toolOutputEntry(runId, key);
-    return this.deps.data.getToolOutputFile(runId, key, fileName ?? entry.name);
+    const name = fileName ?? this.toolOutputEntry(runId, key).name;
+    return this.deps.data.getToolOutputFile(runId, key, name);
   }
 
   /** Streams a committed tool run output to a browser download without buffering the full file in page JS memory. */
   async exportToolOutput(runId: string, key: string): Promise<void> {
     const view = this.findTool(runId);
     if (view === undefined || view.record.exitStatus === undefined) throw new Error('the run has no outputs');
-    const entry = this.toolOutputEntry(runId, key);
-    const baseName = key === 'stdout' ? 'stdout.txt' : key === 'stderr' ? 'stderr.txt' : entry.name;
+    const { name } = this.toolOutputEntry(runId, key);
+    const baseName = key === 'stdout' ? 'stdout.txt' : key === 'stderr' ? 'stderr.txt' : name;
     const downloadName = toolOutputFileName(view.snapshot, baseName);
     const file = await this.deps.data.getToolOutputFile(runId, key, downloadName);
     if (this.deps.downloader.saveBlob !== undefined) {

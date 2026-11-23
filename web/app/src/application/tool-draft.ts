@@ -142,12 +142,23 @@ export class ToolDraft {
     this.scheduleValidation();
   }
 
+  private patchStageValues(
+    values: ToolDraftState['values'],
+    stage: WindowMaskerStage,
+    mutate: (next: Record<string, FieldValue>) => void,
+  ): ToolDraftState['values'] {
+    const next: Record<string, FieldValue> = { ...values[stage] };
+    mutate(next);
+    return { ...values, [stage]: Object.freeze(next) };
+  }
+
   setField(flag: string, value: FieldValue): void {
     const state = this.state.get();
     const { stage, values, outNames, outEdited } = state;
-    const nextStageValues: Record<string, FieldValue> = { ...values[stage] };
-    if (value === undefined || value === '' || value === false) delete nextStageValues[flag];
-    else nextStageValues[flag] = value;
+    const nextValues = this.patchStageValues(values, stage, (next) => {
+      if (value === undefined || value === '' || value === false) delete next[flag];
+      else next[flag] = value;
+    });
 
     let nextOutNames = outNames;
     if (flag === '-sformat' && (stage === 'mk_counts' || stage === 'convert') && !outEdited[stage]) {
@@ -157,7 +168,7 @@ export class ToolDraft {
       };
     }
     this.set({
-      values: { ...values, [stage]: Object.freeze(nextStageValues) },
+      values: nextValues,
       outNames: nextOutNames,
       message: undefined,
     });
@@ -204,11 +215,12 @@ export class ToolDraft {
     const state = this.state.get();
     const { stage, values, extra, description, runFiles } = state;
     const optionFlags = new Set(stageOptionParameters(description, stage).map((param) => param.flag));
-    const nextStageValues: Record<string, FieldValue> = { ...values[stage] };
-    for (const flag of optionFlags) delete nextStageValues[flag];
+    const nextValues = this.patchStageValues(values, stage, (next) => {
+      for (const flag of optionFlags) delete next[flag];
+    });
     const nextRunFiles = runFiles.filter((entry) => entry.flag === undefined || !optionFlags.has(entry.flag));
     this.set({
-      values: { ...values, [stage]: Object.freeze(nextStageValues) },
+      values: nextValues,
       extra: { ...extra, [stage]: '' },
       runFiles: Object.freeze(nextRunFiles),
       runFilesError: undefined,

@@ -280,26 +280,15 @@ export class ResultsBrowser {
       const ready =
         isTerminal(run.status) &&
         (run.status === 'completed' || (run.status === 'failed' && run.record.exitStatus !== undefined));
-      if (ready) {
-        this.state.set({
-          ...INITIAL,
-          filters,
-          runId,
-          phase: 'ready',
-          toolRun: run,
-          ...(grammar === undefined ? {} : { grammar }),
-        });
-      } else {
-        this.state.set({
-          ...INITIAL,
-          filters,
-          runId,
-          phase: 'unavailable',
-          toolRun: run,
-          message: unavailableMessage(run),
-          ...(grammar === undefined ? {} : { grammar }),
-        });
-      }
+      this.state.set({
+        ...INITIAL,
+        filters,
+        runId,
+        phase: ready ? 'ready' : 'unavailable',
+        toolRun: run,
+        ...(ready ? {} : { message: unavailableMessage(run) }),
+        ...(grammar === undefined ? {} : { grammar }),
+      });
       if (grammar === undefined) this.describeToolGrammar(token, run.snapshot.tool);
       return;
     }
@@ -389,20 +378,21 @@ export class ResultsBrowser {
 
   private describeToolGrammar(token: number, tool: string): void {
     const fallback: OptionGrammar = { takesValue: toolTakesValue(undefined) };
+    const apply = (grammar: OptionGrammar): void => {
+      if (token === this.loadToken) this.set({ grammar });
+    };
     if (this.deps.describeTool === undefined) {
       this.toolGrammars.set(tool, fallback);
-      if (token === this.loadToken) this.set({ grammar: fallback });
+      apply(fallback);
       return;
     }
     this.deps.describeTool(tool).then(
       (description) => {
         const grammar: OptionGrammar = { takesValue: toolTakesValue(description) };
         this.toolGrammars.set(tool, grammar);
-        if (token === this.loadToken) this.set({ grammar });
+        apply(grammar);
       },
-      () => {
-        if (token === this.loadToken) this.set({ grammar: fallback });
-      },
+      () => apply(fallback),
     );
   }
 

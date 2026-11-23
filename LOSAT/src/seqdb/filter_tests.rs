@@ -987,11 +987,14 @@ fn a_meta_page_that_cannot_be_read_gives_mdb_env_opens_text() {
             source,
         })
     };
+    // Code 5 is EIO on Linux, whose text NCBI gives; on Windows (`ERROR_ACCESS_DENIED`) LOSAT
+    // has no NCBI text for a code (`ncbi_strerror`), and the error stays LOSAT's own.
     match lmdb_open_error(&file, unreadable(std::io::Error::from_raw_os_error(5))) {
-        SeqDbError::NotFound(text) => assert_eq!(
+        SeqDbError::NotFound(text) if !cfg!(windows) => assert_eq!(
             text,
             b"LMDB runtime error: mdb_env_open: Input/output error"
         ),
+        error if cfg!(windows) => assert!(error.is_unreadable(), "{error:?}"),
         other => panic!("{other:?}"),
     }
     let error = lmdb_open_error(

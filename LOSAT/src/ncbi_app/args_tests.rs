@@ -794,10 +794,9 @@ fn the_refusals_and_the_sets_come_from_the_tables() {
     );
     // tblastn's `-ungapped` runs (line NP item O4c).
     assert_eq!(refusal("tblastn", "ungapped"), None);
-    assert!(matches!(
-        refusal("makeblastdb", "gi_mask_name"),
-        Some(Refusal::Read(Some(why))) if why.starts_with("it writes GI-indexed mask files")
-    ));
+    // makeblastdb's `-gi_mask` and `-gi_mask_name` run (line NP item M4c-1): it refuses none.
+    assert_eq!(refusal("makeblastdb", "gi_mask"), None);
+    assert_eq!(refusal("makeblastdb", "gi_mask_name"), None);
     // The programs on NCBI's reader refuse none of their arguments.
     // (No count of the rows: un-refusing an argument is deleting its row of `REFUSED`.)
     let rows = refusals();

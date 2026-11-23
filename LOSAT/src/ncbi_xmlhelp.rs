@@ -37,6 +37,10 @@ const PROGRAMS: &[(&str, &str)] = &[
     ),
     ("makembindex", include_str!("ncbi_xmlhelp/makembindex.xml")),
     (
+        "makeprofiledb",
+        include_str!("ncbi_xmlhelp/makeprofiledb.xml"),
+    ),
+    (
         "blast_formatter",
         include_str!("ncbi_xmlhelp/blast_formatter.xml"),
     ),

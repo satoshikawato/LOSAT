@@ -399,6 +399,7 @@ impl PreparedXml {
     ) -> Result<()> {
         let run = self.positives.as_ref().map(|positives| XmlRun {
             program: "tblastn",
+            app: "tblastn",
             version: concat!("TBLASTN ", crate::wording::report_version!()),
             reference: REFERENCE_GAPPED_BLAST,
             db_name: &self.db_name,
@@ -624,7 +625,7 @@ impl PreparedXml {
             // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
             // query leaves its partial bytes in `buf`, which the error return drops.
             if let Some(post) =
-                crate::report::blast_xml::writer::caught_post(written, &*document, run.program)?
+                crate::report::blast_xml::writer::caught_post(written, &*document, run.app)?
             {
                 posts.caught(post);
             }

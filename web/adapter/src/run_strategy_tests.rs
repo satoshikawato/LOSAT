@@ -197,8 +197,8 @@ fn the_files_name_is_a_path_of_the_working_directory() {
         let words = ["blastp", "-import_search_strategy", name];
         let (program, _, supplied) = crate::run::parse_imported(&words).unwrap();
         assert_eq!(program.name(), "blastp");
-        let supplied = supplied.expect("a strategy");
-        assert!(!supplied.queries.is_empty() && !supplied.subjects.is_empty());
+        let texts = supplied.expect("a strategy").take().unwrap();
+        assert!(!texts.queries.is_empty() && !texts.subjects.is_empty());
     }
     files::release(handle).unwrap();
 }
@@ -215,9 +215,9 @@ fn the_argvs_own_inputs_override_the_strategys() {
         "q.faa",
     ];
     let (_, _, supplied) = crate::run::parse_imported(&words).unwrap();
-    let supplied = supplied.unwrap();
-    assert!(supplied.queries.is_empty(), "the argv's -query overrides");
-    assert!(!supplied.subjects.is_empty());
+    let texts = supplied.unwrap().take().unwrap();
+    assert!(texts.queries.is_empty(), "the argv's -query overrides");
+    assert!(!texts.subjects.is_empty());
     files::release(handle).unwrap();
 }
 
@@ -272,5 +272,51 @@ fn a_strategy_of_a_database_is_a_run_of_db() {
             .unwrap_or_default(),
         frozen(cells[5])
     );
+    files::release(handle).unwrap();
+}
+
+/// A run imports its strategy once (R2-N3 of review 2): the host's calls for it (`start`,
+/// `validate`, `register_inputs`, `run`) and the readings of the argv in each of them (the
+/// start's `inputs_together`, `searches_database` and `prints`, the checks of the handles, the
+/// second search of a run) take copies of the arguments of the one import, and its warnings come
+/// once, as the command line writes them. The next run of the argv is another run: it imports
+/// again.
+#[test]
+fn a_run_imports_its_strategy_once() {
+    let (_, file, out, err) = rows()
+        .into_iter()
+        .find(|(program, ..)| program == "blastp")
+        .expect("the row of blastp");
+    let bytes = std::fs::read(format!("{}/ss/{file}", fixtures())).unwrap();
+    let handle = register_strategy("once.ss", &bytes);
+    let words = ["blastp", "-import_search_strategy", "once.ss"];
+    let imports = || crate::imported::IMPORTS.with(std::cell::Cell::get);
+    let before = imports();
+    assert!(crate::run::start_json(&words)
+        .unwrap()
+        .contains("\"register_inputs\":true"));
+    crate::run::validate(&words).unwrap();
+    assert_eq!(imports() - before, 1, "the start and the validation");
+    for run in 1..=2 {
+        let streams = run_imported(&words, b"", b"").unwrap();
+        assert_eq!(
+            imports() - before,
+            run,
+            "the inputs and the run of run {run}: one import per run"
+        );
+        assert_eq!(
+            streams.get(&0).cloned().unwrap_or_default(),
+            frozen(&out),
+            "run {run}: the report"
+        );
+        assert_eq!(
+            streams
+                .get(&STREAM_DIAGNOSTICS)
+                .cloned()
+                .unwrap_or_default(),
+            frozen(&err),
+            "run {run}: the warnings are the command line's, once"
+        );
+    }
     files::release(handle).unwrap();
 }

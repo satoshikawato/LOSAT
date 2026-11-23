@@ -1779,13 +1779,15 @@ pub(crate) fn write_document<D: SeqAnnotDocument>(
 /// that NCBI's ASN.1 text or binary stream writes as `#` with an error message (the default
 /// `eFNP_ReplaceAndWarn`: a database title, a `-parse_deflines` local id with DEL, ...) is
 /// written again through `Traced` (`write_document_to`), with NCBI's posts of those bytes (the
-/// search program's prefix) on `diagnostics`; a document without one is written as before.
+/// prefix of the running application `app`) on `diagnostics`; a document without one is written
+/// as before.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:268-279
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_query_to(
     format: SerialFormat,
     run: &RunRecord<'_>,
+    app: &str,
     query: &QueryRecord<'_>,
     subjects: &[SubjectRecord<'_>],
     hsps: &[HspRecord<'_>],
@@ -1802,16 +1804,14 @@ pub(crate) fn write_query_to(
         subjects,
         hsps,
     };
-    // The prefix of the posts: `options::RequestKind::application`, the one table of the
-    // applications' names.
-    let prefix = crate::report::archive::options::RequestKind::from(run.program).application();
-    write_document_to(format, &document, Some(prefix), buf, writer, diagnostics)
+    // The prefix of the posts: the running application `app`.
+    write_document_to(format, &document, Some(app), buf, writer, diagnostics)
 }
 
 /// Writes the Seq-annot of `document` (`write_document`) to `writer` through `buf`, which is
 /// cleared first. A document with a string byte that NCBI's ASN.1 text or binary stream writes
 /// as `#` with an error message is written again through `Traced` (`write_document_posting`),
-/// with NCBI's posts of those bytes (the diagnostic prefix `prefix`: the search program's,
+/// with NCBI's posts of those bytes (the diagnostic prefix `prefix`: the running application's,
 /// none for blast_formatter) on `diagnostics`; a document without one is written as it is.
 pub(crate) fn write_document_to<D: SeqAnnotDocument>(
     format: SerialFormat,
@@ -1940,6 +1940,7 @@ fn write_traced<E: Encoder, D: SeqAnnotDocument>(
 pub(crate) fn write_hit_list_seqaligns<'a, L>(
     format: SerialFormat,
     run: &RunRecord<'_>,
+    app: &str,
     hit_lists: &'a [Option<L>],
     queries: &QueryNames<'_>,
     writer: &mut dyn Write,
@@ -1959,6 +1960,7 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
         write_query_to(
             format,
             run,
+            app,
             &queries.record(q_idx),
             &subject_records,
             &hsp_records,

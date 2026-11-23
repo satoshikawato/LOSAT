@@ -46,6 +46,46 @@ fn catch_all_reports_a_seqdb_exception_as_a_database_error() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-229
+// `CATCH_ALL`'s clause of a `CBlastException`: the options' code exits 1, a message that names
+// a failed allocation exits 4 with the report of running out of memory, any other exits 3.
+#[test]
+fn catch_all_reports_a_blast_exception_by_its_code_and_message() {
+    use crate::ncbi_exception::{NcbiException, ThrowSite};
+    let exception = |kind: &'static str, message: &str| {
+        NativeError::exception(&NcbiException::new(
+            ThrowSite {
+                file: "src/algo/blast/api/blast_options_cxx.cpp",
+                line: 1,
+                kind,
+                function: None,
+            },
+            message,
+        ))
+    };
+    let options = exception("CBlastException::eInvalidOptions", "Out of memory");
+    assert_eq!(
+        (options.exit, options.message),
+        (1, b"LOSAT options error: Out of memory\n".to_vec())
+    );
+    for message in ["Out of memory", "x: Failed to allocate 8 bytes"] {
+        let error = exception("CBlastException::eCoreBlastError", message);
+        assert_eq!(error.exit, 4, "{message}");
+        assert_eq!(
+            error.message,
+            format!("BLAST ran out of memory: {message}\n").into_bytes()
+        );
+    }
+    let engine = exception(
+        "CRemoteBlastException::eServiceNotAvailable",
+        "out of memory",
+    );
+    assert_eq!(
+        (engine.exit, engine.message),
+        (3, b"LOSAT engine error: out of memory\n".to_vec())
+    );
+}
+
 #[test]
 fn the_organism_reports_file_buffer_writes_at_its_8191st_byte() {
     // probe `T/t2/fix1` `f1.d5.*` and `stdout_probe.sh`: NCBI exits 0 for a report that its

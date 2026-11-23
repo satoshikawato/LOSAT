@@ -84,6 +84,7 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.max_intron_length = args.max_intron_length.unwrap_or(0);
     inputs.db_gencode = i32::from(args.db_gencode);
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
+    inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -425,7 +426,6 @@ pub(super) fn write_tblastn_archives(
 /// line keeps and its table of the strategy's setters over its own options.
 impl import::StrategyArgs for TblastnArgs {
     const PROGRAM: Program = Program::Tblastn;
-    const APP: &'static str = "tblastn";
 
     fn runs(program: EProgram) -> bool {
         program == EProgram::Tblastn
@@ -511,10 +511,6 @@ impl import::StrategyArgs for TblastnArgs {
             outfmt: &self.outfmt,
             import: &mut self.import,
         }
-    }
-
-    fn one_thread(&mut self) {
-        self.num_threads = 1;
     }
 
     fn set_task(&mut self, task: &str) {

@@ -211,7 +211,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         // JSON documents leave its report out (`Xml2Document::report`), and the post of the
         // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
         // query leaves its partial bytes in `buf`, which the error return drops.
-        match crate::report::blast_xml::writer::caught_post(written, &*document, xml.run.program) {
+        match crate::report::blast_xml::writer::caught_post(written, &*document, xml.run.app) {
             Ok(Some(post)) => posts.caught(post),
             Ok(None) => {}
             Err(error) => {

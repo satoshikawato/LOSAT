@@ -10,6 +10,7 @@ fn run_dustmasker_words(words: Vec<OsString>) -> (i32, Vec<u8>, Vec<u8>) {
         help: include_str!("../dustmasker/help.txt"),
         post_prefix: None,
         components: &[],
+        dry_run: None,
     };
     fn body(
         args: &Args,
@@ -131,6 +132,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
         post_prefix: None,
         components: &[],
+        dry_run: None,
     };
     let mut stderr = Vec::new();
     let mut diag = Diag {

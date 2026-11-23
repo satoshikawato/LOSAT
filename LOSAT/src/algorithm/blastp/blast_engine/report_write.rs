@@ -507,6 +507,7 @@ pub(super) fn write_xml(
     let xml = blast_xml::BlastpXml {
         run: crate::report::blast_xml::XmlRun {
             program: args.app.ncbi_name(),
+            app: args.app.ncbi_name(),
             version: &version,
             reference: crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
             db_name: db_name.as_deref().unwrap_or(""),

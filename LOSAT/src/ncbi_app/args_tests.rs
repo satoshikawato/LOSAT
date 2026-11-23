@@ -18,6 +18,7 @@ fn tool(program: &'static str) -> Tool {
         "convert2blastmask" => include_str!("../convert2blastmask/help.txt"),
         "makembindex" => include_str!("../makembindex/help.txt"),
         "windowmasker" => include_str!("../windowmasker/help.txt"),
+        "makeprofiledb" => include_str!("../makeprofiledb/help.txt"),
         "blast_formatter" => include_str!("../blast_formatter/help.txt"),
         _ => "",
     };
@@ -27,17 +28,19 @@ fn tool(program: &'static str) -> Tool {
         help,
         post_prefix: None,
         components: &[],
+        dry_run: None,
     }
 }
 
 /// The programs that run on this reader (`ncbi_app`).
-const ON_THE_READER: [&str; 7] = [
+const ON_THE_READER: [&str; 8] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
     "convert2blastmask",
     "makembindex",
     "windowmasker",
+    "makeprofiledb",
     "blast_formatter",
 ];
 
@@ -248,13 +251,15 @@ fn every_argument_of_the_xml_is_in_its_table() {
         }
     }
     // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), makembindex's 6,
-    // windowmasker's 16 and blast_formatter's 6 (its counts and sort keys).
-    assert_eq!(constraints, 169 + 6 + 16 + 6);
+    // windowmasker's 16, makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid) and
+    // blast_formatter's 6 (its counts and sort keys).
+    assert_eq!(constraints, 169 + 6 + 16 + 4 + 6);
     // rpsbproc's 8 aliases; the 1,294 entries of the dependencies of the 14 programs,
-    // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3 and
-    // blast_formatter's 6 (its 3 exclusions, each in both directions).
+    // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3,
+    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other) and blast_formatter's 6 (its
+    // 3 exclusions, each in both directions).
     assert_eq!(aliases, 8);
-    assert_eq!(dependencies, 1294 + 76 + 3 + 6);
+    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 6);
 }
 
 /// Which class a constraint is.

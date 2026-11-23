@@ -308,6 +308,10 @@ pub struct OptionInputs {
     /// An imported strategy's parameters as its setters record them, in the file's order
     /// (`CBlastOptionsBuilder::GetSearchOptions`): they replace the command line's classes.
     pub imported: Option<Vec<Param>>,
+    /// NCBI's name of the running application where it is not the kind's: the application of
+    /// a command line that imports another program's strategy, whose posts all carry its prefix
+    /// (`ArchiveRequest::application`); `None`: the kind's own (`RequestKind::application`).
+    pub application: Option<&'static str>,
     /// psiblast's `-ignore_msa_master` (`CPsiBlastArgs`, always recorded).
     pub ignore_msa_master: bool,
 }
@@ -363,6 +367,7 @@ impl OptionInputs {
             gap_trigger: 22.0,
             num_iterations: None,
             imported: None,
+            application: None,
             ignore_msa_master: false,
         }
     }

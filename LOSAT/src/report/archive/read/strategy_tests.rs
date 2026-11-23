@@ -334,3 +334,153 @@ fn the_crafted_files_of_the_survey_end_as_ncbis() {
     }
     assert!(checked >= 60, "{checked} cases");
 }
+
+/// F2-Q1 (Owner 2026-11-20 「Q1=C」, PD-LOSAT-NCBI-DEFECTS exception 27): the import keeps the
+/// command line's `-num_threads` for the strategy's subjects, which the run searches once with
+/// them (`tests/import_search_strategy.rs` checks that the bytes are the `-num_threads 1` ones),
+/// also where blastn runs a TBLASTX strategy.
+#[test]
+fn a_strategys_subjects_keep_the_threads_of_the_command_line() {
+    use crate::cli::Commands;
+    let dir = fixtures("strategy/import/ss");
+    for (program, file) in [
+        ("blastn", "blastn.sub.ss"),
+        ("blastp", "blastp.sub.ss"),
+        ("blastx", "blastx.sub.ss"),
+        ("tblastn", "tblastn.sub.ss"),
+        ("tblastx", "tblastx.sub.ss"),
+        ("blastn", "tblastx.sub.ss"),
+    ] {
+        let path = dir.join(file);
+        let argv = [
+            "losat",
+            program,
+            "-import_search_strategy",
+            path.to_str().unwrap(),
+            "-num_threads",
+            "4",
+        ];
+        let cli = crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv)
+            .unwrap_or_else(|error| panic!("{program} {file}: {error}"));
+        let mut posted = Vec::new();
+        let command = super::import::apply(cli.command, None, &mut posted)
+            .unwrap_or_else(|error| panic!("{program} {file}: {error:#}"));
+        let threads = match &command {
+            Commands::Blastn(args) => args.num_threads,
+            Commands::Blastp(args) => args.num_threads,
+            Commands::Blastx(args) => usize::try_from(args.num_threads).unwrap(),
+            Commands::Tblastn(args) => args.num_threads,
+            Commands::Tblastx(args) => args.num_threads,
+            _ => panic!("{program} {file}: not a search"),
+        };
+        assert_eq!(threads, 4, "{program} {file}");
+    }
+}
+
+/// One import of the strategy `file` by the running program `running` with `options`: the command.
+fn imported(running: &str, file: &str, options: &[&str]) -> crate::cli::Commands {
+    let path = fixtures("strategy/import/ss").join(file);
+    let mut argv = vec![
+        "losat",
+        running,
+        "-import_search_strategy",
+        path.to_str().unwrap(),
+    ];
+    argv.extend_from_slice(options);
+    let cli = crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv)
+        .unwrap_or_else(|error| panic!("{running} {file}: {error}"));
+    let mut posted = Vec::new();
+    super::import::apply(cli.command, None, &mut posted)
+        .unwrap_or_else(|error| panic!("{running} {file}: {error:#}"))
+}
+
+/// R2-B1 (review 2 of F2): a strategy of another program runs inside the running application,
+/// whose identity the one typed value `ImportRun::app` carries into the run: the engine of the
+/// strategy's program reads it (`app()`), not its own program's.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:543-549
+#[test]
+fn a_cross_program_import_carries_the_running_application() {
+    use crate::blastinput::app::Program;
+    use crate::cli::Commands;
+    for (running, file, expected) in [
+        ("blastn", "tblastx.db.ss", Program::Blastn),
+        ("blastx", "tblastx.db.ss", Program::Blastx),
+        ("tblastx", "blastn.db.ss", Program::Tblastx),
+        ("tblastx", "blastx.db.ss", Program::Tblastx),
+        ("blastn", "blastn.db.ss", Program::Blastn),
+        ("tblastx", "tblastx.db.ss", Program::Tblastx),
+    ] {
+        let (app, own, import) = match imported(running, file, &[]) {
+            Commands::Blastn(args) => (args.app(), Program::Blastn, args.import),
+            Commands::Blastx(args) => (args.app(), Program::Blastx, args.import),
+            Commands::Tblastx(args) => (args.app(), Program::Tblastx, args.import),
+            _ => panic!("{running} {file}: not a search"),
+        };
+        assert_eq!(app, expected, "{running} {file}: the running application");
+        assert_eq!(
+            import.expect("the import's run state").app,
+            expected,
+            "{running} {file}"
+        );
+        assert_eq!(
+            (own == expected),
+            file.starts_with(running),
+            "{running} {file}: whether the engine is the running program's"
+        );
+    }
+}
+
+/// R2-B1: the formatting handler's warnings of the run carry the running application's name, the
+/// BLASTN engine's (tblastx running a blastn strategy) as the TBLASTX engine's
+/// (`run_impl_tests`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2947-2989
+#[test]
+fn the_warnings_of_a_cross_program_run_name_the_running_application() {
+    use crate::cli::Commands;
+    let Commands::Blastn(args) = imported(
+        "tblastx",
+        "blastn.db.ss",
+        &[
+            "-outfmt",
+            "6",
+            "-line_length",
+            "30",
+            "-max_target_seqs",
+            "3",
+        ],
+    ) else {
+        panic!("tblastx running a blastn strategy");
+    };
+    let (_, warnings) = crate::algorithm::blastn::scoring::report_counts_of(&args, &[6]).unwrap();
+    assert_eq!(
+        String::from_utf8(warnings).unwrap(),
+        "Warning: [tblastx] The parameter -line_length is not applicable for output formats > 4 .\n\
+         Warning: [tblastx] Examining 5 or more matches is recommended\n"
+    );
+}
+
+/// R2-B1: BLAST XML and JSON cite the megablast paper by the options' task, the pairwise report
+/// by the formatter of the running application (BLASTN's makes it with `-task megablast`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:653-668
+#[test]
+fn the_xml_reference_follows_the_options_and_the_pairwise_one_the_application() {
+    use crate::cli::Commands;
+    for (running, pairwise) in [("blastn", true), ("tblastx", false)] {
+        let Commands::Blastn(args) = imported(running, "blastn.db.ss", &[]) else {
+            panic!("{running} running a blastn strategy");
+        };
+        assert_eq!(args.task, "megablast", "{running}");
+        assert!(
+            args.structured_megablast_reference(),
+            "{running}: XML, JSON"
+        );
+        assert_eq!(
+            args.pairwise_megablast_reference(),
+            pairwise,
+            "{running}: outfmt 0"
+        );
+    }
+}

@@ -85,6 +85,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.max_intron_length = args.max_intron_length;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
+    inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
     inputs.hitlist_size = hitlist_size;
     inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
     inputs
@@ -472,7 +473,6 @@ pub(crate) fn write_blastx_archive(
 /// line keeps and its table of the strategy's setters over its own options.
 impl import::StrategyArgs for BlastxArgs {
     const PROGRAM: Program = Program::Blastx;
-    const APP: &'static str = "blastx";
 
     fn runs(program: EProgram) -> bool {
         program == EProgram::Blastx
@@ -560,10 +560,6 @@ impl import::StrategyArgs for BlastxArgs {
             outfmt: &self.outfmt,
             import: &mut self.import,
         }
-    }
-
-    fn one_thread(&mut self) {
-        self.num_threads = 1;
     }
 
     fn set_task(&mut self, task: &str) {

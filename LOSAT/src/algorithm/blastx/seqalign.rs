@@ -97,6 +97,7 @@ pub(super) fn write_blastx_seqalign(
             write_query_to(
                 format,
                 &run,
+                options.app_name,
                 &query_record,
                 &subject_records,
                 &hsp_records,

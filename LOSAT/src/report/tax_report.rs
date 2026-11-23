@@ -617,7 +617,8 @@ pub struct TaxLookups {
     /// silently.
     db: Option<TaxNamesDb>,
     program: String,
-    /// The program's name in lower case, as NCBI's messages show it.
+    /// The running application's name in lower case, the prefix of NCBI's messages
+    /// (`SetDiagPostPrefix`).
     lower: String,
     /// What each lookup of a taxid found (`None`: it threw) and the texts it writes.
     answers: std::collections::HashMap<i32, (Option<TaxNames>, Vec<String>)>,
@@ -633,14 +634,15 @@ pub struct TaxLookups {
 }
 
 impl TaxLookups {
-    /// The lookups of a batch through the run's database that `names` carries
+    /// The lookups of a batch of the application `app` through the run's database that `names` carries
     /// (`TabularNames::for_report`; `None`: no `taxdb.bti` on the search path), with what the
     /// reports read of `./.ncbirc`. LOSAT refuses a `./.ncbirc` that NCBI's report cannot read
     /// (it reads the file for every query) before the batch's first byte.
-    pub fn new(names: Option<&TabularNames>, program: &str) -> Result<Self> {
+    pub fn new(names: Option<&TabularNames>, program: &str, app: &str) -> Result<Self> {
         Ok(Self::with_registry(
             names,
             program,
+            app,
             read_ncbirc(program)?.as_ref(),
         ))
     }
@@ -649,9 +651,10 @@ impl TaxLookups {
     fn with_registry(
         names: Option<&TabularNames>,
         program: &str,
+        app: &str,
         registry: Option<&crate::blastinput::ncbi_registry::RegistryRead>,
     ) -> Self {
-        let lower = program.to_ascii_lowercase();
+        let lower = app.to_ascii_lowercase();
         TaxLookups {
             db: names.and_then(TabularNames::report_db).cloned(),
             program: program.to_owned(),
@@ -997,7 +1000,8 @@ pub fn write_report(
 /// `parsed`, `plain` and `protein`), the lookups of the run's database that
 /// `names` carries (`TaxLookups::new`) and the reports (`TaxReport::new`), all made before the
 /// batch's first byte; `loads` what the reports load of each subject (`None`: every subject).
-/// `program` names the program in LOSAT's refusals and NCBI's messages.
+/// `program` names the program in LOSAT's refusals, and `app` the running application, NCBI's
+/// messages' prefix.
 #[allow(clippy::too_many_arguments)]
 pub fn report_batch<'a>(
     queries: &[TaxQuery<'_>],
@@ -1007,6 +1011,7 @@ pub fn report_batch<'a>(
     loads: Option<&crate::report::db_subject::HitLoads>,
     names: Option<&TabularNames>,
     program: &str,
+    app: &str,
 ) -> Result<TaxReport> {
     let table = SubjectTable::new(queries, parsed, plain, protein, loads, program)
         .with_loads_that_throw(
@@ -1014,7 +1019,7 @@ pub fn report_batch<'a>(
                 .and_then(TabularNames::report_db)
                 .is_some_and(|db| db.loads_throw),
         );
-    TaxReport::new(queries, &table, TaxLookups::new(names, program)?)
+    TaxReport::new(queries, &table, TaxLookups::new(names, program, app)?)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1034

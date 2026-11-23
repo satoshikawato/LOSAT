@@ -164,6 +164,7 @@ fn entry_program_description(name: &str) -> std::borrow::Cow<'static, str> {
             "Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb"
         }
         "makembindex" => "Create a BLAST database index.",
+        "makeprofiledb" => "Application to create databases for rpsblast, cobalt and deltablast",
         _ => "",
     })
 }
@@ -1510,25 +1511,23 @@ impl NativeError {
             || e.kind().starts_with("CRemoteBlastException::")
         {
             let msg = e.get_msg();
+            let has = |text: &[u8]| msg.windows(text.len()).any(|part| part == text);
             return if e.kind() == "CBlastException::eInvalidOptions" {
                 NativeError {
                     exit: 1,
                     message: [OPTIONS_ERROR.as_bytes(), b" ", msg, b"\n"].concat(),
                 }
-            } else if [b"Out of memory".as_slice(), b"Failed to allocate"]
-                .iter()
-                .any(|text| msg.windows(text.len()).any(|window| window == *text))
-            {
-                // The memory texts: `BLAST ran out of memory: ` and the message, exit status 4
-                // (`BLAST_OUT_OF_MEMORY`); NCBI's words, as makeblastdb's own report of memory.
+            } else if has(b"Out of memory") || has(b"Failed to allocate") {
+                // The message names an allocation that failed: exit status 4
+                // (`BLAST_OUT_OF_MEMORY`), the report of `out_of_memory` with the message.
                 NativeError {
                     exit: 4,
-                    message: [b"BLAST ran out of memory: ".as_slice(), msg, b"\n"].concat(),
+                    message: [crate::wording::OUT_OF_MEMORY.as_bytes(), b": ", msg, b"\n"].concat(),
                 }
             } else {
                 NativeError {
                     exit: 3,
-                    message: [ENGINE_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
+                    message: [ENGINE_ERROR.as_bytes(), b" ", msg, b"\n"].concat(),
                 }
             };
         }

@@ -214,7 +214,11 @@ impl DustMasker {
         let stop = stop.min(seq.len() - 1);
         let start = start.min(stop);
         if self.window <= X_RING {
-            self.x_mask_range(seq, start, stop, rng)
+            if x_dustreg_on() {
+                self.x_mask_range_regs(seq, start, stop, rng)
+            } else {
+                self.x_mask_range(seq, start, stop, rng)
+            }
         } else {
             self.mask_range_reference(seq, start, stop, rng)
         }
@@ -963,6 +967,15 @@ impl<'a> TripletWindow<'a> {
         }
     }
 }
+
+/// No NCBI counterpart: whether `LOSAT_X_DUSTREG` is on (read once per process).
+fn x_dustreg_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DUSTREG"))
+}
+
+#[path = "x_dust_regs.rs"]
+mod x_dust_regs;
 
 #[cfg(test)]
 #[path = "dust_tests.rs"]

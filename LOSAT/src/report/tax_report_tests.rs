@@ -35,7 +35,7 @@ fn names(variant: Option<&str>) -> Option<TabularNames> {
 
 /// The lookups of `names` without a `./.ncbirc` (the test process's directory is not read).
 fn lookups(names: Option<&TabularNames>) -> TaxLookups {
-    TaxLookups::with_registry(names, "BLASTP", None)
+    TaxLookups::with_registry(names, "BLASTP", "blastp", None)
 }
 
 struct Subjects(Vec<Vec<TaxDefline>>);

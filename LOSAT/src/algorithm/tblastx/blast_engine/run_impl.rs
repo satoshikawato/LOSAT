@@ -902,16 +902,18 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match args.database_name() {
-        Some(_) => match args
-            .db_filter
-            .resolve(&settings, "tblastx", &mut *diagnostics)
-        {
-            Ok(list) => list,
-            Err(error) => {
-                write_run_error_archive(&args, archive.as_ref(), &error);
-                return Err(error);
+        Some(_) => {
+            match args
+                .db_filter
+                .resolve(&settings, args.app().ncbi_name(), &mut *diagnostics)
+            {
+                Ok(list) => list,
+                Err(error) => {
+                    write_run_error_archive(&args, archive.as_ref(), &error);
+                    return Err(error);
+                }
             }
-        },
+        }
         None => None,
     };
     // `-db`: no subject file; the database is opened after the options are processed
@@ -1164,7 +1166,7 @@ fn check_ncbi_options(
     choices: &[crate::blastinput::app::EarlyFormat],
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<(Option<SequenceRange>, ReportCounts)> {
-    use crate::blastinput::app::{formatting_handler_check, options_error, Program};
+    use crate::blastinput::app::{formatting_handler_check_of_run, options_error, Program};
     args.seg_spec()?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1975-1991 (the
     // query options handler reads the strand before the range)
@@ -1186,13 +1188,13 @@ fn check_ncbi_options(
     let mut outfmts = Vec::with_capacity(choices.len());
     for choice in choices {
         let choice = choice.at_formatting_handler(&args.outfmt)?;
-        formatting_handler_check(&choice, Program::Tblastx)?;
+        formatting_handler_check_of_run(&choice, args.app(), Program::Tblastx)?;
         outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report
     // (`blastinput::report_counts`), with the handler's warnings.
     let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
-        "tblastx",
+        args.app().ncbi_name(),
         &outfmts,
         args.max_target_seqs,
         args.num_descriptions,
@@ -1297,6 +1299,7 @@ fn open_search_database(
                 list,
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
+                args.app().ncbi_name(),
             )?
             .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
@@ -1435,9 +1438,9 @@ fn search_cli(
     );
     query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
-        outputs
-            .diagnostics
-            .write_all(b"Warning: [tblastx] Query is Empty!\n")?;
+        outputs.diagnostics.write_all(
+            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
+        )?;
         // NCBI returns from `Run` here, before its `PrintErrorArchive`: the message is not an
         // archive's.
         if let Some(handle) = &args.archive {
@@ -1607,9 +1610,9 @@ fn search_database(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // The handler of the database arguments reads the list before the other handlers (`run`).
-    let list = args
-        .db_filter
-        .resolve(&settings, "tblastx", &mut *outputs.diagnostics)?;
+    let list =
+        args.db_filter
+            .resolve(&settings, args.app().ncbi_name(), &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     let (query_range, counts) =
@@ -1650,12 +1653,16 @@ fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) ->
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
 /// The formatting handler checks the custom delimiter of each format that LOSAT writes too
 /// (`formatting_handler_check`; the command line's comes before, in `check_ncbi_options`).
-fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
+fn check_report_formats(
+    outputs: &ReportOutputs<'_>,
+    out: Option<&std::path::Path>,
+    running: crate::blastinput::app::Program,
+) -> Result<()> {
     use crate::blastinput::app;
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::report_format(&choice, app::Program::Tblastx, format.side_out(out))?;
-        app::formatting_handler_check(&choice, app::Program::Tblastx)?;
+        app::formatting_handler_check_of_run(&choice, running, app::Program::Tblastx)?;
     }
     // The XInclude formats without a file, the one check of every program (`ReportOutputs`).
     outputs.xinclude_check(out)
@@ -1677,9 +1684,9 @@ fn search(
     // reported an empty query file and read its queries; the records of the other callers
     // get NCBI's warning for an input without records.
     if query_records.is_empty() && matches!(reading, QueryReading::Records) {
-        outputs
-            .diagnostics
-            .write_all(b"Warning: [tblastx] Query is Empty!\n")?;
+        outputs.diagnostics.write_all(
+            format!("Warning: [{}] Query is Empty!\n", args.app().ncbi_name()).as_bytes(),
+        )?;
         return Ok(());
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:136-137
@@ -1702,13 +1709,13 @@ fn search(
         } => crate::blastinput::input_files::write_empty_subject_warnings_by_length(
             records,
             |index| stores[index].len(),
-            "tblastx",
+            args.app().ncbi_name(),
             outputs.diagnostics,
         )?,
         SubjectSource::Fasta { records, .. } => {
             crate::blastinput::input_files::write_empty_subject_warnings(
                 records,
-                "tblastx",
+                args.app().ncbi_name(),
                 outputs.diagnostics,
             )?
         }
@@ -1726,13 +1733,14 @@ fn search(
     let db_mask = match (&source, args.db_mask.option()) {
         (SubjectSource::Database(database), Some(option)) => database.resolve_mask_option(
             &option,
+            args.app().ncbi_name(),
             args.archive.as_ref(),
             args.strategy.as_ref(),
             outputs.diagnostics,
         )?,
         _ => None,
     };
-    check_report_formats(outputs, args.out.as_deref())?;
+    check_report_formats(outputs, args.out.as_deref(), args.app())?;
     // LOSAT's refusals of the masked search (`-db_hard_mask`) come where NCBI starts the search,
     // after its checks.
     if let (SubjectSource::Database(database), Some(mask)) = (&source, db_mask.as_ref()) {
@@ -2606,6 +2614,7 @@ fn write_tblastx_outputs(
                         warnings
                             .as_mut()
                             .expect("a Seq-annot writes its posts to the diagnostics"),
+                        run.args.app().ncbi_name(),
                     )?
                 }
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
@@ -4052,7 +4061,7 @@ fn run_batch_loop(
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
             let text = crate::report::query_warnings::query_warning(
-                "tblastx",
+                reports.args.app().ncbi_name(),
                 reports.args.first_query_ordinal + input.ordinal(index),
                 query,
                 &messages,
@@ -4372,7 +4381,7 @@ impl BatchReports<'_> {
                 .args
                 .subject_taxdb
                 .as_ref()
-                .map(|taxdb| taxdb.report_names("TBLASTX")),
+                .map(|taxdb| taxdb.report_names(self.args.app().ncbi_name())),
             _ => None,
         };
         let written = write_tblastx_outputs(
@@ -4447,6 +4456,7 @@ impl BatchReports<'_> {
                         super::super::tabular::write_tabular_prolog(
                             spec,
                             self.args.tabular_taxdb.unwrap_or(false),
+                            self.args.app().ncbi_name(),
                             &mut writer,
                             &mut *outputs.diagnostics,
                         )?;

@@ -523,6 +523,7 @@ impl losat::api::Search
 pub fn losat::api::Search::argv(&self) -> &[alloc::string::String]
 pub fn losat::api::Search::dry_run(&self) -> bool
 pub fn losat::api::Search::program(&self) -> losat::api::Program
+impl losat::api::Search
 pub fn losat::api::Search::read_strategy(&self, &[u8]) -> core::result::Result<losat::api::Strategy, losat::api::Error>
 impl core::clone::Clone for losat::api::Search
 pub fn losat::api::Search::clone(&self) -> losat::api::Search

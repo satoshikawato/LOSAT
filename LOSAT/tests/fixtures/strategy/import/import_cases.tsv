@@ -604,3 +604,33 @@ Y.blastp.imp.nd.f2.sorthsps1	blastp	-import_search_strategy {ss}/bp_hl600.ss -nu
 Y.blastp.imp.na.ll	blastp	-import_search_strategy {ss}/bp_hl600.ss -num_alignments 300 -line_length 30	0	7b5484983946a4c5	7be9fb54a2a019f0
 Y.blastp.imp.mts501.ll	blastp	-import_search_strategy {ss}/bp_hl600.ss -max_target_seqs 501 -line_length 30	0	39de21324836dfef	7be9fb54a2a019f0
 Y.blastp.imp.mts501.f2.sorthsps1	blastp	-import_search_strategy {ss}/bp_hl600.ss -max_target_seqs 501 -outfmt 2 -sorthsps 1	0	0134fccac78bd190	2a238be296f16dd1
+C.tblastx.from.blastn.db.f6ll	tblastx	-import_search_strategy {ss}/blastn.db.ss -outfmt 6 -line_length 30	0	0b1c9dbcc4a2e903	31c7f3749fd6ff50
+C.tblastx.from.blastn.db.f6nd	tblastx	-import_search_strategy {ss}/blastn.db.ss -outfmt 6 -num_descriptions 3	0	0b1c9dbcc4a2e903	8e4000011ced7968
+C.tblastx.from.blastx.db.mts3	tblastx	-import_search_strategy {ss}/blastx.db.ss -max_target_seqs 3	0	9df0120fd047fcb6	60bc17f015176ddc
+C.blastn.from.tblastx.db.mts2	blastn	-import_search_strategy {ss}/tblastx.db.ss -max_target_seqs 2	0	f153bc90307b54d1	afa2f2aa8e30d50e
+C.blastx.from.tblastx.db.f7sort	blastx	-import_search_strategy {ss}/tblastx.db.ss -outfmt 7 -sorthits 1	0	30c4e3e0bd37feb7	c0a9b9c156919837
+C.blastx.from.tblastx.db.f6sorthsps	blastx	-import_search_strategy {ss}/tblastx.db.ss -outfmt 6 -sorthsps 1	0	6b1b62178d0765f5	c823c18b190370b9
+C.tblastx.from.blastn.db.many	tblastx	-import_search_strategy {ss}/blastn.db.ss -evalue 1 -seg yes -max_target_seqs 3 -outfmt 6	0	0b1c9dbcc4a2e903	2c062fdb273202e8
+C.blastn.from.tblastx.db.nt4	blastn	-import_search_strategy {ss}/tblastx.db.ss -num_threads 4	0	f153bc90307b54d1	c7d9e175b47ef7bc
+C.tblastx.from.blastn.db.f17	tblastx	-import_search_strategy {ss}/blastn.db.ss -outfmt 17	1	-	b01bddefcaad80c8
+C.blastx.from.tblastx.db.f17	blastx	-import_search_strategy {ss}/tblastx.db.ss -outfmt 17	1	-	b01bddefcaad80c8
+C.tblastx.from.blastx.db.f17	tblastx	-import_search_strategy {ss}/blastx.db.ss -outfmt 17	1	-	b01bddefcaad80c8
+C.tblastx.from.blastn.db.f5	tblastx	-import_search_strategy {ss}/blastn.db.ss -outfmt 5	0	be936b407c761075	d6dbca01209bf9a6
+C.tblastx.from.blastn.db.f15	tblastx	-import_search_strategy {ss}/blastn.db.ss -outfmt 15	0	25bdd7ef52af8c1a	d6dbca01209bf9a6
+C.tblastx.from.blastn.db.f16	tblastx	-import_search_strategy {ss}/blastn.db.ss -outfmt 16	0	7ff917e64d6989c1	d6dbca01209bf9a6
+C.tblastx.from.blastn.sub.f5	tblastx	-import_search_strategy {ss}/blastn.sub.ss -outfmt 5	0	371e32e6913302cd	d6dbca01209bf9a6
+C.tblastx.from.blastn.task_dcmb.f5	tblastx	-import_search_strategy {ss}/blastn.task_dcmb.ss -outfmt 5	0	06621bc155f10be1	d6dbca01209bf9a6
+C.blastn.from.tblastx.db.f5	blastn	-import_search_strategy {ss}/tblastx.db.ss -outfmt 5	0	a018b199efe52709	c7d9e175b47ef7bc
+C.blastn.from.tblastx.db.f15	blastn	-import_search_strategy {ss}/tblastx.db.ss -outfmt 15	0	eda5da4191558c54	c7d9e175b47ef7bc
+C.blastn.from.tblastx.db.f16	blastn	-import_search_strategy {ss}/tblastx.db.ss -outfmt 16	0	67bf9d70cf11b3c1	c7d9e175b47ef7bc
+C.blastx.from.tblastx.db.f5	blastx	-import_search_strategy {ss}/tblastx.db.ss -outfmt 5	0	a018b199efe52709	aadd0ca47f19a2cc
+C.tblastx.from.blastx.db.f5	tblastx	-import_search_strategy {ss}/blastx.db.ss -outfmt 5	0	4498e9dd418cead3	d6dbca01209bf9a6
+C.tblastx.from.blastn.db.f7	tblastx	-import_search_strategy {ss}/blastn.db.ss -outfmt 7	0	0489e9d52dcef5a5	d6dbca01209bf9a6
+C.blastn.from.tblastx.db.f7	blastn	-import_search_strategy {ss}/tblastx.db.ss -outfmt 7	0	30c4e3e0bd37feb7	c7d9e175b47ef7bc
+C.tblastx.from.blastx.db.f7	tblastx	-import_search_strategy {ss}/blastx.db.ss -outfmt 7	0	1448f7a3665597f0	d6dbca01209bf9a6
+C.tblastx.from.blastn.db.f0	tblastx	-import_search_strategy {ss}/blastn.db.ss	0	7d416daf860e5ef5	d6dbca01209bf9a6
+S2.blastp.hlneg	blastp	-import_search_strategy {ss}/s2.blastp.hlneg.ss	1	-	3cf3f2a04b816de9
+S2.blastn.hlneg	blastn	-import_search_strategy {ss}/s2.blastn.hlneg.ss	1	-	99507eae13ed3b51
+S2.tblastx.hlneg	tblastx	-import_search_strategy {ss}/s2.tblastx.hlneg.ss	1	-	c92901850ff6ced5
+S2.blastn.from.tblastx.hlneg	blastn	-import_search_strategy {ss}/s2.tblastx.hlneg.ss	1	-	99507eae13ed3b51
+S2.blastn.word_neg	blastn	-import_search_strategy {ss}/s2.blastn.word_neg.ss	1	-	9ef2cb38cec78e27

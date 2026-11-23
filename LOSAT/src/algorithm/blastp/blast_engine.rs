@@ -2426,7 +2426,11 @@ impl<'a> SubjectIdFields<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:271-327
-fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
+/// The Seq-aligns NCBI makes of the results `hit_lists`: one for each HSP of a `gapped` search,
+/// one for each subject of an ungapped one (`-ungapped`, `shared::subject_seq_aligns`), which
+/// the prefetch counts against `PRE_FETCH_SEQS_LIMIT` (`shared::prefetch_off`). Outfmt 7's
+/// count takes those of the formatter, one for each HSP in both modes (`gapped` true).
+fn blastp_seq_aligns(hit_lists: &[Option<BlastpHitList>], gapped: bool) -> usize {
     hit_lists
         .iter()
         .filter_map(|hit_list| hit_list.as_ref())
@@ -2435,7 +2439,12 @@ fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
                 .hsplist_array
                 .iter()
                 .take(hit_list.hsplist_count)
-                .map(|hsp_list| hsp_list.hsps.len())
+                .map(|hsp_list| {
+                    crate::algorithm::common::database::subject_seq_aligns(
+                        hsp_list.hsps.len(),
+                        gapped,
+                    )
+                })
                 .sum::<usize>()
         })
         .sum()
@@ -2547,8 +2556,11 @@ fn write_blastp_tabular_hit_lists(
                 context,
                 &query_titles[q_idx],
                 &crate::report::tabular::STD_FIELDS,
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:763-764
+                // The formatter splits an ungapped search's Seq-align of a subject into one for
+                // each HSP before the header counts them.
                 hits_found.map_or_else(
-                    || blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt)),
+                    || blastp_seq_aligns(std::slice::from_ref(hit_list_opt), true),
                     |found| found[q_idx],
                 ),
                 query_batch_skipped[q_idx],
@@ -5974,6 +5986,7 @@ fn search(
             database.name(),
             option,
             args.app.name(),
+            args.app.ncbi_name(),
             archive,
             args.strategy.as_ref(),
             &mut |text| match archive {

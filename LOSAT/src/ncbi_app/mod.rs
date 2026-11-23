@@ -38,6 +38,10 @@ pub(crate) struct Tool {
     pub(crate) post_prefix: Option<&'static str>,
     /// The components of its full versions (`CVersionAPI::AddComponentVersion`; windowmasker's).
     pub(crate) components: &'static [crate::ncbi_version::Component],
+    /// What runs in place of `Run` with `-dryrun` (`DryRun`, after `Init`): the work of the
+    /// program's `Init` that LOSAT does in its `Run` (makeprofiledb's parameters and files), or
+    /// nothing (`None`: exit status 0).
+    pub(crate) dry_run: Option<Body>,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
@@ -174,6 +178,14 @@ impl Diag<'_> {
         self.report_arg_exception(&error, Some("Application's execution failed"))
     }
 
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:675-690
+    /// A `CArgException` that the program's `Init` throws (makeprofiledb's `AsInputFile`,
+    /// `AsOutputFile`): reported as the reader's argument errors are, without a backlog; exit
+    /// status 1.
+    pub(crate) fn init_arg_exception(&mut self, error: ArgException) -> i32 {
+        self.report_arg_exception(&error, None)
+    }
+
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1086-1112
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7877-7888
     // With `eDPF_Severity` alone each exception of the chain is posted as `Error: <text>`, oldest
@@ -277,7 +289,7 @@ pub(crate) fn run(
         (&mut std::io::stdin(), &mut out, &mut err),
         body,
         // The command line's `-xmlhelp`: NCBI's XML without the arguments that LOSAT refuses
-        // (the programs of `ncbi_app` refuse none, `ncbi_xmlhelp_tests`).
+        // (of the programs of `ncbi_app`, makeprofiledb's `-binary` at its run, `ncbi_xmlhelp_tests`).
         (start, Some(crate::cli::xml_help_text)),
     );
     let _ = out.flush();
@@ -390,7 +402,16 @@ fn run_app(
     // in a run first). NCBI BLAST+ 2.17.0 dustmasker: `-in missing.fa -dryrun` and
     // `-infmt blastdb -in missing -dryrun` give exit status 0 and no output.
     if dryrun {
-        return 0;
+        return match tool.dry_run {
+            Some(init) => init(
+                &args,
+                &settings,
+                &mut files::Cin::new(input),
+                out,
+                &mut diag,
+            ),
+            None => 0,
+        };
     }
     // The programs read their values as text (`Args::value`): one that is not UTF-8 is refused
     // where NCBI's `Run` starts, after the reader's errors and `-dryrun`, which runs no body.

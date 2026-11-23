@@ -68,6 +68,8 @@ pub fn import_name(command: &Commands) -> Option<&Path> {
 /// another program that the command line does not run or with a PSSM query is refused as there.
 pub fn apply(command: Commands, bytes: &[u8]) -> Result<Applied, Error> {
     use crate::report::archive::read::import;
+    #[cfg(test)]
+    tests::APPLIED.with(|count| count.set(count.get() + 1));
     if !import::imports(&command) {
         return Err(Error::Input(
             b"-import_search_strategy is not supported by this program of LOSAT".to_vec(),
@@ -190,8 +192,14 @@ pub fn take_warnings(command: &mut Commands) -> Vec<u8> {
 pub struct Strategy {
     program: Program,
     argv: Vec<String>,
-    /// The strategy file's bytes, applied again for each of the search's calls (`command`).
-    bytes: Vec<u8>,
+    /// The arguments of the engine's import of the strategy file, made once when the strategy is
+    /// read: each of the search's calls takes a copy (`command`). The sequence texts are not here
+    /// (they became the records below), and each copy has the import's warnings, which a call
+    /// takes for itself (`take_warnings`). Nothing changes them after the read, so a call that
+    /// panics leaves them whole: the strategy stays unwind-safe, as [`Inputs`](super::Inputs) and
+    /// [`Batches`](super::Batches) that refer to it are, although the arguments hold trait objects
+    /// (the window masker's counts source).
+    applied: std::panic::AssertUnwindSafe<Commands>,
     queries: Vec<FastaRecord>,
     /// How the reading of the strategy's queries ended (`InputRecords::query_end`), which the
     /// search meets where the command line's query batches meet it.
@@ -229,10 +237,11 @@ impl Strategy {
                     .into(),
             ));
         }
-        // The engine's import over the file again: `Commands` has no copy, and the arguments of
-        // a call are the import's of that call (its warnings); the strategy's sequence texts of
-        // the call are dropped here, as the call searches the records read once.
-        let mut command = apply(search.strategy_command(None)?, &self.bytes)?.command;
+        // The import was made once, at the reading of the strategy (`Search::read_strategy`): the
+        // arguments of a call are a copy of it, with the import's warnings for the call, and no
+        // sequence text, as the call searches the records read once. The search's `-out` is the
+        // only thing of the call that the copy takes.
+        let mut command = self.applied.0.clone();
         if let Some(path) = search.out_path() {
             set_out(&mut command, path);
         }
@@ -250,8 +259,9 @@ impl Search {
     /// `-query_loc`, `-parse_deflines`, `-lcase_masking`, `-strand` ...), and the others are
     /// ignored with NCBI's warnings, which the search writes to its diagnostics first. The
     /// strategy's queries and subjects (or its database) are the inputs of
-    /// [`Inputs::strategy`](super::Inputs::strategy); a strategy with subjects is searched with
-    /// one thread whatever `-num_threads` says, as on the command line.
+    /// [`Inputs::strategy`](super::Inputs::strategy); a strategy's subjects are searched once
+    /// with the argv's `-num_threads`, and the output is that of `-num_threads 1`, as on the
+    /// command line.
     ///
     /// A strategy of another program runs as that program where the command line runs it so
     /// (blastn and blastx with a TBLASTX strategy, tblastx with a BLASTX or BLASTN one): the
@@ -275,7 +285,7 @@ impl Search {
         Ok(Strategy {
             program: self.program(),
             argv: self.argv().to_vec(),
-            bytes: strategy.to_vec(),
+            applied: std::panic::AssertUnwindSafe(applied.command),
             queries: records.query,
             query_end: records.query_end,
             subjects: records.subject,
@@ -283,3 +293,7 @@ impl Search {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "strategy_tests.rs"]
+mod tests;

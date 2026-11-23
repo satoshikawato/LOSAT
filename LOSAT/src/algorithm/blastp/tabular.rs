@@ -580,6 +580,7 @@ pub(super) fn write_blastp_tax_report(
         loads,
         tab.names,
         tab.app.name(),
+        tab.app.ncbi_name(),
     )?;
     write_report(writer, warnings, &queries, &report)?;
     Ok(())

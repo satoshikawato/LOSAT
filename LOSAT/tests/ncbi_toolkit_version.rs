@@ -59,7 +59,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 /// NCBI's is `<program>: 2.17.0+` (rpsbproc
 /// `0.5.1`, the maskers `1.0.0`, makembindex `2.17.0`), probes `vf`, and its XML and JSON
 /// `version_info` have NCBI's numbers; LOSAT's have LOSAT's), and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 17] = [
+const PROGRAMS: [(&str, &str); 18] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -76,6 +76,7 @@ const PROGRAMS: [(&str, &str); 17] = [
     ("windowmasker", "-out"),
     ("convert2blastmask", "-out"),
     ("makembindex", "-input"),
+    ("makeprofiledb", "-out"),
     ("blast_formatter", "-out"),
 ];
 
@@ -355,7 +356,10 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                         (Some(0), text.clone(), 0),
                         "{program} {words:?}"
                     );
-                } else if matches!(program, "rpsblast" | "rpstblastn" | "rpsbproc") {
+                } else if matches!(
+                    program,
+                    "rpsblast" | "rpstblastn" | "rpsbproc" | "makeprofiledb"
+                ) {
                     // Not in the library.
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);

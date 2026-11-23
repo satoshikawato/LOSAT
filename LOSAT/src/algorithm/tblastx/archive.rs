@@ -83,6 +83,7 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);
     inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
+    inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:957
     // The argument has a default, so the list always holds it; a value other than 0 stops the run
     // before any archive (`check_ncbi_options`).
@@ -387,7 +388,6 @@ pub(super) fn write_tblastx_archives(
 /// table takes without a change.
 impl import::StrategyArgs for TblastxArgs {
     const PROGRAM: Program = Program::Tblastx;
-    const APP: &'static str = "tblastx";
 
     fn runs(program: EProgram) -> bool {
         program == EProgram::Tblastx
@@ -475,10 +475,6 @@ impl import::StrategyArgs for TblastxArgs {
             outfmt: &self.outfmt,
             import: &mut self.import,
         }
-    }
-
-    fn one_thread(&mut self) {
-        self.num_threads = 1;
     }
 
     fn set_task(&mut self, _task: &str) {}

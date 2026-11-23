@@ -51,6 +51,7 @@ static TOOL: Tool = Tool {
     help: HELP,
     post_prefix: None,
     components: &[],
+    dry_run: None,
 };
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592

@@ -294,6 +294,47 @@ fn report_formats_defer_ncbis_own_errors() {
     assert!(report_format(&choice(END_VALUE), Program::Blastp, None).is_err());
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2875-2878: the check
+// reads the running application's flag; the search of a strategy of another program is the
+// engine's, which writes SAM for BLASTN only (LOSAT's refusal for a translated search).
+#[test]
+fn the_sam_check_of_a_cross_program_run_reads_the_running_application() {
+    let sam = FormatChoice {
+        number: SAM,
+        spec: String::new(),
+        delimiter: String::new(),
+    };
+    for app in PROGRAMS {
+        for engine in PROGRAMS {
+            let checked = formatting_handler_check_of_run(&sam, app, engine);
+            if app != Program::Blastn {
+                // NCBI's own error, whichever program's search runs.
+                assert_eq!(
+                    message(checked.unwrap_err()),
+                    format!(
+                        "1 LOSAT query/options error: SAM format is only applicable to blastn\n{USER_MANUAL_FOOTER}\n"
+                    ),
+                    "{app:?} running {engine:?}"
+                );
+            } else if engine == Program::Blastn {
+                assert!(checked.is_ok(), "{app:?} running {engine:?}");
+            } else {
+                // LOSAT's refusal, in `report_format`'s words, of SAM for the translated search.
+                assert_eq!(
+                    checked.unwrap_err().to_string(),
+                    format!(
+                        "output format 17 is not supported by LOSAT's {}",
+                        engine.name()
+                    )
+                );
+            }
+        }
+    }
+    for program in PROGRAMS {
+        assert_eq!(program.ncbi_name(), program.name().to_ascii_lowercase());
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and c++/src/app/blast/blast_app_util.cpp:888-899.
 #[test]
 fn ncbis_later_format_errors_are_its_messages() {

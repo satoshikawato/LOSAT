@@ -235,9 +235,9 @@ the WASI imports.
   warning): the argv then names no `-query` and no `-subject`, and the host registers the inputs
   with `losat_web2_register_inputs` (the *start* response's `register_inputs` is true), giving
   empty bytes for an input that the strategy supplies; the engine takes the strategy's FASTA in its
-  place and returns the *inputs* JSON of those records. A strategy with subjects is searched
-  with one thread whatever `-num_threads` says, as the CLI's import does (the approved exception of
-  DECISIONS F2-Q1). A strategy whose subject is a database is the CLI's `-db` run of the browser
+  place and returns the *inputs* JSON of those records. A strategy's subjects are searched
+  once with the argv's `-num_threads`, and the output is that of `-num_threads 1`, as with the CLI's
+  import (the approved exception of DECISIONS F2-Q1). A strategy whose subject is a database is the CLI's `-db` run of the browser
   (version 12, §4): the *start* field `database` is true, the host gives no subject bytes to
   `losat_web2_register_inputs` and the run no subject handle, and the engine opens the database by the strategy's name in the run's working
   directory, as the CLI does; a module of version 11 or earlier refuses it as it refuses `-db`. A strategy of another

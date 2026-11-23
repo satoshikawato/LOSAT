@@ -995,6 +995,7 @@ fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, V
             super::write_query_to(
                 format,
                 &run,
+                "blastp",
                 &query(id, 140),
                 &subjects,
                 &hsps,

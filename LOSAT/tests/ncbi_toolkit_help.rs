@@ -45,7 +45,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 }
 
 /// The programs and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 15] = [
+const PROGRAMS: [(&str, &str); 16] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -60,6 +60,7 @@ const PROGRAMS: [(&str, &str); 15] = [
     ("dustmasker", "-out"),
     ("segmasker", "-out"),
     ("windowmasker", "-out"),
+    ("makeprofiledb", "-out"),
     ("blast_formatter", "-out"),
 ];
 
@@ -214,6 +215,11 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                     // blast_formatter's `-rid` is refused at the run, where NCBI asks its servers.
                     message = String::from_utf8_lossy(&run_in(&dir, program, &[&word, "X"]).stderr)
                         .into_owned();
+                } else if refused.status.code() == Some(0) && program == "makeprofiledb" {
+                    // makeprofiledb's `-binary`, refused where its run starts (after `Init`).
+                    let words = ["-in", "p.fa", "-out", "db", &word];
+                    message =
+                        String::from_utf8_lossy(&run_in(&dir, program, &words).stderr).into_owned();
                 } else if refused.status.code() == Some(0) && program != "rpstblastn" {
                     let search = ["-query", "p.fa", "-subject", subject, &word];
                     let cbs = ["-comp_based_stats", "0"];

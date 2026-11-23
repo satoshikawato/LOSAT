@@ -35,8 +35,8 @@ use super::{resolved, EnumValue, Kind, Member, Storage, Value};
 use crate::ncbi_exception::{NcbiException, Severity};
 use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{
-    throw_error, utf8_tag_message, EnumItems, Fail, Input, Items, Names, StringKind, StringPost,
-    TextInput, Utf8TagOnce, R,
+    read_with_set_flag_member, throw_error, utf8_tag_message, EnumItems, Fail, Input, Items, Names,
+    StringKind, StringPost, TextInput, Utf8TagOnce, R,
 };
 use crate::report::serial::asn_text_reader::{AsnSource, SliceSource};
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep};
@@ -66,25 +66,24 @@ pub(crate) enum Post {
 
 impl Post {
     /// The line that a BLAST application of NCBI posts on its standard error, with its
-    /// diagnostic prefix `prefix` (the program's name in lower case; none for blast_formatter,
-    /// which sets none): the one owner of each post's text (`ReplacedChar::post`,
-    /// `ncbi_exception::error_post_line`).
-    pub(crate) fn line(&self, prefix: Option<&str>) -> Vec<u8> {
+    /// diagnostic prefix `program` (the program's name in lower case, if it has one): the one owner of each
+    /// post's text (`ReplacedChar::post`, `ncbi_exception::error_post_line`).
+    pub(crate) fn line(&self, program: Option<&str>) -> Vec<u8> {
         match self {
-            Post::BadChar(replaced) => replaced.post(prefix),
+            Post::BadChar(replaced) => replaced.post(program),
             Post::Error(text) => {
-                crate::ncbi_exception::error_post_line(None, prefix, text.as_bytes())
+                crate::ncbi_exception::error_post_line(None, program, text.as_bytes())
             }
             Post::Utf8Tag(trace) => crate::ncbi_exception::post_line(
                 Severity::Warning,
                 Some("803.10"),
-                prefix,
+                program,
                 utf8_tag_message(trace).as_bytes(),
             ),
             Post::UnendedByteBlock => crate::ncbi_exception::post_line(
                 Severity::Error,
                 Some("803.4"),
-                prefix,
+                program,
                 UNENDED_BYTE_BLOCK.as_bytes(),
             ),
         }
@@ -321,13 +320,15 @@ struct TypedReader<I: Input> {
 enum Open {
     /// The end of `ReadObject` of the type `target`: the hooks of its class (not after a skip).
     Value { target: u16, skip: bool },
-    /// A SEQUENCE reading the member at `reading` (`members`).
+    /// A SEQUENCE reading the member at `reading` (`members`), inside the member's frame, the
+    /// `frames`-th.
     Sequence {
         ty: u16,
         members: &'static [Member],
         skip: bool,
         values: Vec<(u16, Value)>,
         reading: usize,
+        frames: usize,
     },
     /// A CHOICE reading its variant.
     Choice { index: u16 },
@@ -423,6 +424,15 @@ impl<I: Input> TypedReader<I> {
         }
     }
 
+    /// The frames above the `depth`-th left (`leave`) with `error`.
+    fn unwind(&mut self, depth: usize, mut error: Fail) -> Fail {
+        while self.frames.len() > depth {
+            let frame = self.pop_frame();
+            error = self.leave(frame, error);
+        }
+        error
+    }
+
     fn set_member(&mut self, name: &'static str) {
         if let Some(top) = self.frames.last_mut() {
             top.member = Some(name);
@@ -498,11 +508,24 @@ impl<I: Input> TypedReader<I> {
                     self.resume(held, value)
                 }
                 Err(mut error) => {
-                    self.open.truncate(open);
-                    while self.frames.len() > frames {
-                        let frame = self.pop_frame();
-                        error = self.leave(frame, error);
+                    // From the innermost value out: the frames inside each member being read, then
+                    // the member's `ReadWithSetFlagMember` (`member_error`).
+                    while self.open.len() > open {
+                        if let Some(Open::Sequence {
+                            members,
+                            skip,
+                            reading,
+                            frames: depth,
+                            ..
+                        }) = self.open.pop()
+                        {
+                            error = self.unwind(depth, error);
+                            if !skip {
+                                error = member_error(error, &members[reading]);
+                            }
+                        }
                     }
+                    error = self.unwind(frames, error);
                     return Err(error);
                 }
             };
@@ -559,6 +582,7 @@ impl<I: Input> TypedReader<I> {
                 skip,
                 mut values,
                 reading,
+                frames: _,
             } => {
                 // `EndClassMember`, in the member's frame.
                 self.inp.end_member()?;
@@ -637,6 +661,7 @@ impl<I: Input> TypedReader<I> {
                 skip,
                 values,
                 reading: index,
+                frames: self.frames.len(),
             });
             if let Some(start) = start {
                 self.open.push(Open::Delayed { start });
@@ -896,6 +921,15 @@ impl<I: Input> TypedReader<I> {
         }
         Ok(Value::Octets(value?))
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:715-755
+/// What reading `member` makes of `error`: `ReadWithSetFlagMember` of a member with a set flag
+/// (`Member::has_set_flag`; not a delayed one, whose value is read later, `ReadLongMember`, and
+/// not a skipped one, `SkipSimpleMember`: neither catches), `asn_input::read_with_set_flag_member`.
+fn member_error(error: Fail, member: &Member) -> Fail {
+    let set_flag = member.has_set_flag() && member.flags & super::DELAYED == 0;
+    read_with_set_flag_member(error, set_flag, member.name())
 }
 
 /// The type `ty` refers to after its aliases (the index of `resolved(ty)`), for the hooks.

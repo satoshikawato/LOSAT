@@ -44,6 +44,7 @@ pub(crate) fn write_blastn_seqalign(
     subject_placements: &Placements,
     writer: &mut dyn Write,
     warnings: &mut QueryWarnings<'_>,
+    app: &str,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
@@ -54,6 +55,7 @@ pub(crate) fn write_blastn_seqalign(
     write_hit_list_seqaligns(
         format,
         &run,
+        app,
         hit_lists,
         queries,
         writer,

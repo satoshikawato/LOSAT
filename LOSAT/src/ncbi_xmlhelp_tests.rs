@@ -236,13 +236,14 @@ fn the_library_refuses_xmlhelp() {
         &mut dyn std::io::Write,
         &mut dyn std::io::Write,
     ) -> i32;
-    let readers: [(&str, RunWith); 7] = [
+    let readers: [(&str, RunWith); 8] = [
         ("BLASTDBCMD", crate::blastdbcmd::run_with),
         ("DUSTMASKER", crate::dustmasker::run_with),
         ("SEGMASKER", crate::segmasker::run_with),
         ("WINDOWMASKER", crate::windowmasker::run_with),
         ("CONVERT2BLASTMASK", crate::convert2blastmask::run_with),
         ("MAKEMBINDEX", crate::makembindex::run_with),
+        ("MAKEPROFILEDB", crate::makeprofiledb::run_with),
         ("BLAST_FORMATTER", crate::blast_formatter::run_with),
     ];
     for (shown, run_with) in readers {
@@ -263,9 +264,11 @@ fn the_library_refuses_xmlhelp() {
 }
 
 // The readers of blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask,
-// makembindex and blast_formatter (`ncbi_app`) read every argument of NCBI's XML (none is
-// refused by name; blast_formatter refuses `-rid` at the run, so its XML lacks it): the argument
-// with a value `1` for a key, then `-h`, writes the usage or an error of the value, never NCBI's
+// makembindex, makeprofiledb and blast_formatter (`ncbi_app`) read every argument of NCBI's XML
+// (none is refused by name; their XML is NCBI's whole but for makeprofiledb's `-binary`, which
+// its run refuses, `Refusal::Run`, and blast_formatter's `-rid`, which its run refuses): the
+// argument with a value `1` for a key, then `-h`, writes the usage or an error of the value,
+// never NCBI's
 // `Unknown argument` or a refusal.
 #[test]
 fn the_ncbi_readers_read_every_argument_of_the_xml() {
@@ -275,13 +278,14 @@ fn the_ncbi_readers_read_every_argument_of_the_xml() {
         &mut dyn std::io::Write,
         &mut dyn std::io::Write,
     ) -> i32;
-    let readers: [(&str, RunWith); 7] = [
+    let readers: [(&str, RunWith); 8] = [
         ("blastdbcmd", crate::blastdbcmd::run_with),
         ("dustmasker", crate::dustmasker::run_with),
         ("segmasker", crate::segmasker::run_with),
         ("windowmasker", crate::windowmasker::run_with),
         ("convert2blastmask", crate::convert2blastmask::run_with),
         ("makembindex", crate::makembindex::run_with),
+        ("makeprofiledb", crate::makeprofiledb::run_with),
         ("blast_formatter", crate::blast_formatter::run_with),
     ];
     for (program, run_with) in readers {

@@ -34,10 +34,11 @@ pub struct FormattingArgs {
     pub sort_hits: Option<u8>,
     #[arg(long = "sorthsps", value_name = "sort_hsps", value_parser = formatting_sort_option, help = "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0")]
     pub sort_hsps: Option<u8>,
-    /// The hit list size that the formatting handler starts from (`opt.GetHitlistSize()`): an
-    /// imported search strategy's `HitlistSize`, `None` for the default 500.
+    /// The hit list size that the formatting handler starts from (`opt.GetHitlistSize()`, an
+    /// `int`): an imported search strategy's `HitlistSize` as the file gives it, a value below 1
+    /// included, `None` for the default 500.
     #[arg(skip)]
-    pub hitlist_start: Option<usize>,
+    pub hitlist_start: Option<i32>,
 }
 
 impl FormattingArgs {
@@ -45,10 +46,20 @@ impl FormattingArgs {
     /// `HitlistSize`) when neither `-max_target_seqs` nor the report counts set it: the start of
     /// the formatting handler ([`FormattingArgs::hitlist_start`], 500 by default).
     pub fn recorded_hitlist_start(&self) -> i32 {
-        self.hitlist_start
-            .map_or(BLAST_HITLIST_SIZE as i32, |size| {
-                i32::try_from(size).unwrap_or(i32::MAX)
-            })
+        self.hitlist_start.unwrap_or(BLAST_HITLIST_SIZE as i32)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1511-1517
+    /// The hit list size the formatting handler starts from, as the count of
+    /// [`report_counts_from`]: [`FormattingArgs::hitlist_start`], or 500. A size below 1 counts
+    /// as 0: the handler keeps only a size above 500 ([`kept_hitlist_counts`]), and a size the
+    /// command line does not replace meets only the few-matches warning (below 5) and the
+    /// options' check (below 1, `No hits are being saved`), which take every size below 1 alike.
+    pub fn hitlist_start_count(&self) -> usize {
+        self.hitlist_start.map_or(BLAST_HITLIST_SIZE, |size| {
+            usize::try_from(size).unwrap_or(0)
+        })
     }
 
     /// The width of the pairwise alignment rows (`m_LineLength`): `-line_length`, or NCBI's
@@ -350,7 +361,7 @@ pub fn run_report_counts_with(
         .iter()
         .map(|&outfmt| {
             report_counts_from(
-                formatting.hitlist_start.unwrap_or(BLAST_HITLIST_SIZE),
+                formatting.hitlist_start_count(),
                 outfmt,
                 max_target_seqs,
                 num_descriptions,

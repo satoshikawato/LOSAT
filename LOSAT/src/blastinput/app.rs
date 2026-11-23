@@ -366,6 +366,17 @@ impl Program {
         }
     }
 
+    /// NCBI's name of the program, as its diagnostics prefix reads it (`Warning: [blastn] ...`).
+    pub fn ncbi_name(self) -> &'static str {
+        match self {
+            Program::Blastn => "blastn",
+            Program::Blastp => "blastp",
+            Program::Blastx => "blastx",
+            Program::Tblastn => "tblastn",
+            Program::Tblastx => "tblastx",
+        }
+    }
+
     /// Whether NCBI's formatting arguments of the program have `eIsSAM` (blastn only).
     pub fn is_sam(self) -> bool {
         self == Program::Blastn
@@ -567,6 +578,34 @@ pub fn formatting_handler_check_with(choice: &FormatChoice, is_sam: bool) -> any
             }
         }
     }
+}
+
+/// `formatting_handler_check` of a search that the program `engine` runs for the running
+/// application `app`: NCBI's checks read the running application's flags (`eIsSAM` of `app`), and
+/// the search is the strategy's (`engine`'s: tblastx running a blastn strategy, blastn running a
+/// tblastx one). A format that `app`'s handler accepts and LOSAT's `engine` does not write is
+/// LOSAT's refusal (`report_format`'s words): SAM of a translated search. NCBI's SAM formatter
+/// converts the Std-seg alignments of a translated search into Dense-segs, which fails where the
+/// HSPs of one alignment change a row's strand (one exception for each such alignment and no
+/// report, the case of the frozen strategies); LOSAT writes no SAM report for a translated
+/// search, so the run is refused where NCBI's formatter starts.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2875-2878
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-753
+pub fn formatting_handler_check_of_run(
+    choice: &FormatChoice,
+    app: Program,
+    engine: Program,
+) -> anyhow::Result<()> {
+    formatting_handler_check(choice, app)?;
+    if choice.number == SAM && !engine.is_sam() {
+        anyhow::bail!(
+            "output format {} is not supported by LOSAT's {}",
+            choice.number,
+            engine.name()
+        );
+    }
+    Ok(())
 }
 
 /// NCBI's error for the XInclude formats (13 and 14) written to standard output, after

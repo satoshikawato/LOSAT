@@ -54,7 +54,7 @@ There is one section for each program, and one for the five search programs toge
 | `-ipglist`, `-negative_ipglist` | `blastp`, `blastx`, `psiblast` | Out of scope (IPG lists) |
 | `-import_search_strategy` | All search programs | Out of scope (needs NCBI servers) |
 | `-html` | All search programs | Not yet supported |
-| `-use_sw_tback` | `blastx`, `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY` / `-ungapped`), `tblastn` (with `-ungapped`), `tblastn -in_pssm` (when a match is found) | Refused |
+| `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY`), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes and where NCBI reads freed memory |
 | `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (`0, 6, 7, 10, 20`; `-in_pssm` / `-in_msa`: `0, 6, 7`) |

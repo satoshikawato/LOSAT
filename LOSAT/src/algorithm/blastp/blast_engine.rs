@@ -1960,8 +1960,9 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
             bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
         }
-        // `-ungapped` (which only `-comp_based_stats 0` allows) runs no redo: NCBI crashes at the
-        // traceback of each query batch it searches, and LOSAT refuses there
+        // `-ungapped` (which only `-comp_based_stats 0` allows): NCBI crashes at the redo's set-up
+        // in the traceback of each query batch it searches, before any match is redone, and LOSAT
+        // refuses there
         // (`redo_run::sw_ungapped_refusal`, in `run_call`), after the reports of the batches
         // before, which have no valid context. A run without such a batch ends as NCBI's does.
         if !args.ungapped && !args.comp_based_stats.is_enabled() {

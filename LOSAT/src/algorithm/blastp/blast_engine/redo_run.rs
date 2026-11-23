@@ -1022,7 +1022,7 @@ fn sw_endless(batch_start: usize) -> anyhow::Error {
 
 /// LOSAT's refusal of `-use_sw_tback` with `-ungapped`, on which NCBI crashes at the traceback of
 /// every query batch it searches, with hits or without (`smith_waterman_match::sw_ungapped_error`,
-/// BLASTX's and TBLASTN's too; NCBI BLAST+ 2.17.0 on ws, line NP item O4b2-2, 2026-11-23). The
+/// BLASTX's and TBLASTN's too; NCBI BLAST+ 2.17.0 from Bioconda, line NP item O4b2-2, 2026-11-23). The
 /// batch whose first query is `batch_start` is the call's first with a valid context (the search
 /// of all queries: an ungapped search plans no blocks and splits no query); the batches before it
 /// have none, and NCBI reports them with their warnings and does not search them. As

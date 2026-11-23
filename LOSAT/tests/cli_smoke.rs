@@ -213,8 +213,8 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
 // Karlin blocks that an ungapped search does not have and crashes at the traceback of each query
 // batch it searches (line NP, items O4b and O4b2-2): LOSAT refuses there, with the text that
 // BLASTX and TBLASTN refuse it with, not before the search (and not with the refusal of
-// `-use_sw_tback` without composition-based statistics above, which an ungapped search, running
-// no redo, never meets). A query without a valid context (only `X`) is not searched, and its run
+// `-use_sw_tback` without composition-based statistics above: NCBI crashes at the redo's set-up,
+// before any match is redone). A query without a valid context (only `X`) is not searched, and its run
 // is the run without `-use_sw_tback`. The NCBI bytes are the fixture rows `db.ung.sw.*`.
 #[test]
 fn blastp_ungapped_smith_waterman_traceback_is_refused_at_a_searched_batch() {
@@ -257,7 +257,7 @@ fn blastp_ungapped_smith_waterman_traceback_is_refused_at_a_searched_batch() {
     );
     assert!(
         !stderr.contains("without composition-based statistics"),
-        "an ungapped search runs no redo: {stderr}"
+        "NCBI crashes before any match is redone: {stderr}"
     );
     assert!(refused.stdout.is_empty(), "nothing is written: {stderr}");
     assert!(

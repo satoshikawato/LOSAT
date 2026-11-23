@@ -610,7 +610,7 @@ Explicit rejections (rule 3):
   of the batch before, row `db.x4.chunk.gap_anchor.6`; rows `db.x4.chunk.empty.*` and
   `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
-  `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
+  `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.83 at the first query batch NCBI searches), compressed-lookup thresholds that
   exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
@@ -2260,7 +2260,7 @@ file would differ, and NCBI's programs still could not open the database).
   `smith_waterman_match::sw_ungapped_error`; rows `db.tn.rej.ungapped.sw.*`, anchor
   `db.tn.ungapped.ac.b1.nosw.7`). BLASTP refuses it in the same way since version 1.83 (line NP item
   O4b2-2; before, before the first byte: decision D3 above), with the same text for `blastp`: NCBI BLAST+
-  2.17.0 on ws, 2026-11-23, crashes at the first query batch it searches and reports the batches
+  2.17.0 from Bioconda, 2026-11-23, crashes at the first query batch it searches and reports the batches
   before it, whose queries give no Karlin-Altschul parameters (rows `db.ung.sw.*`). With `-use_sw_tback` LOSAT's BLASTX searches a query batch
   of NCBI's reader as one unit (the batch's status, its first query's heap and the contexts that
   index the heaps are per batch), and gives the outcome of `-num_threads 1` at every thread count.

@@ -93,7 +93,7 @@ fn error_text(result: &Result<()>) -> Option<String> {
 
 /// The text of the error of a redo that does not end, in the batch that starts at `batch_start`.
 fn endless_in(batch_start: usize) -> Option<String> {
-    error_text(&Err(sw_endless(batch_start)))
+    error_text(&Err(sw_endless(batch_start, None)))
 }
 
 /// The text of the error of the batch that starts at `batch_start` and fails at its end, its first
@@ -103,7 +103,7 @@ fn batch_failed_text(batch_start: usize, holds: bool) -> Option<String> {
     if holds {
         first_query.insert(list(0, 1e-9, false), 1e-9, 40, 0);
     }
-    error_text(&Err(sw_batch_failed(batch_start, &first_query)))
+    error_text(&Err(sw_batch_failed(batch_start, &first_query, None)))
 }
 
 /// The replay of the X-drop redo's window.
@@ -120,7 +120,7 @@ fn replay(
         lists,
         heaps,
         batches,
-        &mut XSwBatch::new(&[]),
+        &mut XSwBatch::new(&[], &FetchNotes::none()),
         &mut None,
     )
 }
@@ -469,6 +469,7 @@ fn drive_expanding(
         false,
         expand,
         &[],
+        &FetchNotes::none(),
         &mut |lists, _, window, _| {
             window_seen(lists, window);
             window
@@ -1654,6 +1655,7 @@ fn sw_drive_expanding(
         false,
         expand,
         excluded,
+        &FetchNotes::none(),
         &mut |lists, heaps, window, _| {
             window_seen(lists, window);
             window
@@ -1766,7 +1768,7 @@ fn sw_one_thread_excluded(
                     }
                     SwKind::Purged => failed = false,
                     SwKind::Failed => failed = true,
-                    SwKind::Endless => return Err(sw_endless(batch.start)),
+                    SwKind::Endless => return Err(sw_endless(batch.start, None)),
                     SwKind::NotAsked => unreachable!(),
                 }
             }
@@ -1776,7 +1778,7 @@ fn sw_one_thread_excluded(
             failed &= !reached(mark, heaps);
         }
         if failed && q_idx + 1 == batch.end {
-            return Err(sw_batch_failed(batch.start, &heaps[batch.start]));
+            return Err(sw_batch_failed(batch.start, &heaps[batch.start], None));
         }
     }
     Ok(())

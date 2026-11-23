@@ -144,7 +144,7 @@ pub fn adjust_initial_hsp_offsets(
     hsp_q_absolute: i32, // Absolute coordinate in concatenated buffer
     frame_base: i32,     // Context start position (absolute)
 ) -> i32 {
-    // NCBI: init_hsp->ungapped_data->q_start -= query_start;
+    // Subtract the context's query start offset from `q_start` to make it context-relative.
     hsp_q_absolute - frame_base
 }
 
@@ -220,7 +220,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
 
         // NCBI: s_AdjustInitialHSPOffsets (c++/src/algo/blast/core/blast_gapalign.c:2384-2392)
         // Convert absolute coordinates to context-relative coordinates
-        // where query_start = query_info->contexts[context].query_offset
+        // by subtracting the `query_offset` of the context in `query_info`.
         let q_start_relative =
             adjust_initial_hsp_offsets(init_hsp.q_start_absolute, ctx.frame_base);
         let q_end_relative = adjust_initial_hsp_offsets(init_hsp.q_end_absolute, ctx.frame_base);
@@ -242,24 +242,19 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             q_seed_relative >= 0,
             "NCBI BLAST requires non-negative ungapped query seed offset"
         );
-        assert!(
-            init_hsp.s_start >= 0,
-            "NCBI BLAST requires non-negative ungapped subject start"
-        );
+        // The subject's offsets are the chunk's, NCBI's `Int4`: below 0 for an HSP or a seed
+        // before its chunk (a range of masks stored out of order,
+        // `common::translated_chunks::scan_lead`), until the chunk's offset moves them
+        // (`adjust_tblastx_chunk_subject_offsets`).
         if !INT4_ENDS {
             assert!(
                 init_hsp.s_end > init_hsp.s_start,
                 "NCBI BLAST requires positive ungapped subject span"
             );
         }
-        assert!(
-            init_hsp.s_seed >= 0,
-            "NCBI BLAST requires non-negative ungapped subject seed offset"
-        );
 
         // NCBI: Blast_HSPInit (c++/src/algo/blast/core/blast_hits.c:150-189)
-        // query.offset = ungapped_data->q_start (context-relative, 0-based)
-        // query.end = ungapped_data->length + ungapped_data->q_start
+        // Sets `query.offset` to the 0-based context-relative `q_start` and `query.end` to `q_start` plus `length`.
         //
         // In LOSAT, q_start_relative is context-relative coordinate (0-based).
         // No NCBI counterpart: the record holds these `i32` (NCBI `Int4`) offsets in `u32`
@@ -273,18 +268,13 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             u32::try_from(q_end_relative)
                 .expect("NCBI BLAST requires non-negative ungapped query end")
         };
-        let ss = u32::try_from(init_hsp.s_start)
-            .expect("NCBI BLAST requires non-negative ungapped subject start");
-        let se = if INT4_ENDS {
-            0
-        } else {
-            u32::try_from(init_hsp.s_end)
-                .expect("NCBI BLAST requires non-negative ungapped subject end")
-        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:150-189
+        // The subject's chunk offsets in two's complement (`UngappedHit::s_start_int4`).
+        let ss = init_hsp.s_start as u32;
+        let se = if INT4_ENDS { 0 } else { init_hsp.s_end as u32 };
         let q_seed = u32::try_from(q_seed_relative)
             .expect("NCBI BLAST requires non-negative ungapped query seed");
-        let s_seed = u32::try_from(init_hsp.s_seed)
-            .expect("NCBI BLAST requires non-negative ungapped subject seed");
+        let s_seed = init_hsp.s_seed as u32;
 
         // Offsets are already 0-based in query/subject->sequence buffers.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4768, c++/src/algo/blast/core/blast_aascan.c:110-113.
@@ -356,11 +346,13 @@ fn sort_converted_hsps_by_score_ncbi(ungapped_hits: &mut [UngappedHit]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
+// The subject's offset and end are read as NCBI's `Int4` (`UngappedHit::s_start_int4`: below 0 in a
+// chunk's list for an HSP before its chunk; elsewhere below 2^31, where the two orders agree).
 pub(crate) fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit) -> Ordering {
     b.raw_score
         .cmp(&a.raw_score)
-        .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
-        .then_with(|| b.s_aa_end.cmp(&a.s_aa_end))
+        .then_with(|| a.s_start_int4().cmp(&b.s_start_int4()))
+        .then_with(|| b.s_end_int4().cmp(&a.s_end_int4()))
         .then_with(|| a.q_aa_start.cmp(&b.q_aa_start))
         .then_with(|| b.q_aa_end.cmp(&a.q_aa_end))
 }
@@ -406,7 +398,7 @@ where
 pub(crate) fn score_compare_ungapped_hits_int4(a: &UngappedHit, b: &UngappedHit) -> Ordering {
     b.raw_score
         .cmp(&a.raw_score)
-        .then_with(|| a.s_aa_start.cmp(&b.s_aa_start))
+        .then_with(|| a.s_start_int4().cmp(&b.s_start_int4()))
         .then_with(|| b.s_end_int4().cmp(&a.s_end_int4()))
         .then_with(|| a.q_aa_start.cmp(&b.q_aa_start))
         .then_with(|| b.q_end_int4().cmp(&a.q_end_int4()))

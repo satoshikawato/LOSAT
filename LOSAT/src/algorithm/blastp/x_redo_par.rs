@@ -199,7 +199,7 @@ use crate::utils::threading::SearchPool;
 
 use super::blast_engine::{
     preliminary_hit_from_local_match_hsp, query_fetch_excluded_reached, sw_batch_failed,
-    sw_endless, FetchExcludedMatch,
+    sw_endless, FetchExcludedMatch, FetchNotes,
 };
 use super::gapalign::{BlastpPreliminaryHsp, GapAlignScratch};
 use super::hsp::{
@@ -1393,10 +1393,14 @@ where
 /// to 0 unless the early termination test ends that list (line RG X4-excl,
 /// `XRedoParSearch::sw_excluded`); at the batch's end a failed status fails the search there
 /// (`redo_run::sw_batch_failed`), and the next batch starts at 0. It is kept across windows: a
-/// window may end inside a batch.
+/// window may end inside a batch. Both errors carry the warning of a header that the batch's
+/// fetches read before them, as the one-thread loop's do (`FetchNotes::fetched_before_failure`,
+/// on the heaps as the replay left them, which are the loop's there).
 struct XSwBatch<'a> {
     /// The marks of the excluded lists of the queries that the replay has not passed yet.
     excluded: &'a [FetchExcludedMatch],
+    /// The notes of the subjects that the search's fetches read.
+    notes: &'a FetchNotes<'a>,
     /// The query of the last match replayed, if any.
     query: Option<usize>,
     /// The place of that query's last match whose redo set the status, if any.
@@ -1406,9 +1410,10 @@ struct XSwBatch<'a> {
 }
 
 impl<'a> XSwBatch<'a> {
-    fn new(excluded: &'a [FetchExcludedMatch]) -> Self {
+    fn new(excluded: &'a [FetchExcludedMatch], notes: &'a FetchNotes<'a>) -> Self {
         Self {
             excluded,
+            notes,
             query: None,
             status_position: None,
             status: SwBatchStatus::default(),
@@ -1459,7 +1464,13 @@ impl<'a> XSwBatch<'a> {
             }
             if next.is_none_or(|next| !batch.contains(&next)) {
                 if self.status.failed() {
-                    return Err(sw_batch_failed(batch.start, &heaps[batch.start]));
+                    let utf8 = self.notes.fetched_before_failure(
+                        heaps,
+                        batch.clone(),
+                        batch.end - 1,
+                        usize::MAX,
+                    );
+                    return Err(sw_batch_failed(batch.start, &heaps[batch.start], utf8));
                 }
                 self.status = SwBatchStatus::default();
             }
@@ -1469,19 +1480,26 @@ impl<'a> XSwBatch<'a> {
         Ok(())
     }
 
-    /// A match of the query of the last `pass`, at `position` in its preliminary list, that the
-    /// redo reaches, with its redo's `result`: it sets the batch's status
-    /// (`SwBatchStatus::redone`). The match's result where its redo ended, none where it failed,
-    /// the error of a redo that does not end in the batch that starts at `batch_start`
-    /// (`redo_run::sw_endless`), any other error as it is.
+    /// A match `matched` of the query of the last `pass` that the redo reaches, with its redo's
+    /// `result`: it sets the batch's status (`SwBatchStatus::redone`). The match's result where
+    /// its redo ended, none where it failed, the error of a redo that does not end in the
+    /// match's batch (`redo_run::sw_endless`, on `heaps` as the replay left them before the
+    /// match), any other error as it is.
     fn redone(
         &mut self,
-        position: usize,
-        batch_start: usize,
+        matched: XMatch,
+        query_batches: &[Range<usize>],
+        heaps: &[BlastCompoHeap],
         result: Result<BlastpPostprocessResult>,
     ) -> Result<Option<BlastpPostprocessResult>> {
-        self.status_position = Some(position);
-        self.status.redone(result, || sw_endless(batch_start))
+        self.status_position = Some(matched.position);
+        let notes = self.notes;
+        let batch = query_batches[matched.q_idx].clone();
+        self.status.redone(result, || {
+            let utf8 =
+                notes.fetched_before_failure(heaps, batch.clone(), matched.q_idx, matched.position);
+            sw_endless(batch.start, utf8)
+        })
     }
 }
 
@@ -1508,7 +1526,6 @@ fn x_replay<const SW: bool>(
     for (index, &matched) in matches.iter().enumerate() {
         let computed = results.next().expect("one result per match");
         let local_match = x_local_match(lists, matched);
-        let batch_start = query_batches[matched.q_idx].start;
         if SW {
             batch.pass(Some(matched.q_idx), query_batches, heaps)?;
         }
@@ -1562,7 +1579,7 @@ fn x_replay<const SW: bool>(
         let postprocessed = if SW {
             // A match the redo reaches sets the batch's status; a failed redo leaves it without
             // alignments.
-            match batch.redone(matched.position, batch_start, result)? {
+            match batch.redone(matched, query_batches, heaps, result)? {
                 Some(postprocessed) => postprocessed,
                 None => continue,
             }
@@ -1588,7 +1605,8 @@ fn x_replay<const SW: bool>(
 /// preliminary list is released after the replay of the window that holds its last match. With
 /// `expand`, the compact lists are expanded ahead of each window. With `SW` (the Smith-Waterman
 /// redo) the replay keeps the query batches' status across the windows (`XSwBatch`, with the
-/// excluded lists `sw_excluded`), and the batch of the last match ends after the last window.
+/// excluded lists `sw_excluded` and the notes `notes` of the search's fetches), and the batch of
+/// the last match ends after the last window.
 #[allow(clippy::too_many_arguments)]
 fn x_redo_windows<const SW: bool>(
     lists: &mut [Option<BlastpHitList>],
@@ -1598,6 +1616,7 @@ fn x_redo_windows<const SW: bool>(
     timing: bool,
     mut expand: Option<&mut XExpandAhead<'_>>,
     sw_excluded: &[FetchExcludedMatch],
+    notes: &FetchNotes<'_>,
     compute: &mut dyn FnMut(
         &[Option<BlastpHitList>],
         &[BlastCompoHeap],
@@ -1631,7 +1650,7 @@ fn x_redo_windows<const SW: bool>(
     // to the one that drops them took at most `caps[q]` new jobs at risk of q.
     let budget = limits.jobs.max(limits.at_risk_jobs);
     let mut caps = vec![limits.at_risk_jobs; lists.len()];
-    let mut sw_batch = XSwBatch::new(sw_excluded);
+    let mut sw_batch = XSwBatch::new(sw_excluded, notes);
     // With `SW`: what the last replay left to the next window.
     let mut carry: Option<XCarry> = None;
     // With a carry and no match of the stream left, the window holds the carry only.
@@ -1788,6 +1807,7 @@ fn x_redo<P>(
     lists: &mut [Option<BlastpHitList>],
     heaps: &mut [BlastCompoHeap],
     expand: Option<&mut XExpandAhead<'_>>,
+    notes: &FetchNotes<'_>,
 ) -> Result<XCounts>
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
@@ -1798,9 +1818,9 @@ where
     // every query (`-use_sw_tback`): chosen once here, so the X-drop redo's windows are compiled
     // without the Smith-Waterman steps.
     if (search.build_redo_align_params)(0)?.smith_waterman {
-        x_redo_with::<P, true>(search, lists, heaps, expand)
+        x_redo_with::<P, true>(search, lists, heaps, expand, notes)
     } else {
-        x_redo_with::<P, false>(search, lists, heaps, expand)
+        x_redo_with::<P, false>(search, lists, heaps, expand, notes)
     }
 }
 
@@ -1810,6 +1830,7 @@ fn x_redo_with<P, const SW: bool>(
     lists: &mut [Option<BlastpHitList>],
     heaps: &mut [BlastCompoHeap],
     expand: Option<&mut XExpandAhead<'_>>,
+    notes: &FetchNotes<'_>,
 ) -> Result<XCounts>
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
@@ -1842,6 +1863,7 @@ where
         search.timing,
         expand,
         search.sw_excluded,
+        notes,
         &mut |lists, heaps, window, carried| {
             let (results, lpt_ran) =
                 x_compute_window::<P, SW>(search, lists, heaps, window, carried, &shared, lpt);
@@ -1898,18 +1920,20 @@ fn x_print_timing(counts: &XCounts) {
 /// (the redone heaps of the search). The preliminary lists are released after their redo, as the
 /// one-thread loop releases them. With `compact` (one
 /// entry per query), a query's compact list stands for its list until the windows expand it; none
-/// is left afterwards. Returns the number of lists released.
+/// is left afterwards. The Smith-Waterman redo's errors read the notes `notes` of the search's
+/// fetches (`XSwBatch`). Returns the number of lists released.
 pub(crate) fn x_redo_par_run<P>(
     search: &XRedoParSearch<'_, P>,
     lists: &mut [Option<BlastpHitList>],
     compact: Option<&mut [Option<BlastpHitList<XPrelimHsp>>]>,
     heaps: &mut [BlastCompoHeap],
+    notes: &FetchNotes<'_>,
 ) -> Result<usize>
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
 {
     let mut expand = compact.map(|compact| XExpandAhead::new(lists, compact));
-    let counts = x_redo(search, lists, heaps, expand.as_mut())?;
+    let counts = x_redo(search, lists, heaps, expand.as_mut(), notes)?;
     if search.timing {
         x_print_timing(&counts);
     }

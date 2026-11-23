@@ -431,6 +431,58 @@ fn frozen_stdout(row: &ManifestRow) -> Vec<u8> {
         .expect("read the frozen stdout")
 }
 
+// The rows `db.t5d.blastp.sw*` (`tests/db_search_manifest/blastp.t5d.tsv`, line RG item T5d merge
+// 6): a header with a UTF8String title that the redo's fetch reads before the batch's failed
+// Smith-Waterman redo, whose warning comes before the batch's error (`Traceback failed`, exit
+// status 3). Above one thread the error comes from the replay of `x_redo_par`'s windows
+// (`XSwBatch::pass`), which reads the warning as the one-thread loop does
+// (`FetchNotes::fetched_before_failure`). Each row exits with its status and writes the frozen
+// NCBI stdout at one thread, with the warning in its stderr; at 2, 4 and 8 threads, and at 8 with
+// `LOSAT_X_BPREDOPAR=0`, every run writes the stdout and stderr of the one-thread run.
+#[test]
+fn t5d_sw_rows_warn_before_the_error_above_one_thread() {
+    let rows = manifest_rows("blastp.t5d.tsv", "db.t5d.");
+    let sw_rows: Vec<&ManifestRow> = rows
+        .iter()
+        .filter(|row| row.row_id.starts_with("db.t5d.blastp.sw"))
+        .collect();
+    assert_eq!(sw_rows.len(), 3, "the rows db.t5d.blastp.sw*");
+    for row in sw_rows {
+        let row_id = &row.row_id;
+        let first = row_run(row, 1, &[]);
+        assert_eq!(
+            first.0,
+            Some(row.rc),
+            "{row_id} n1: {}",
+            String::from_utf8_lossy(&first.2)
+        );
+        assert_eq!(
+            first.1,
+            frozen_stdout(row),
+            "{row_id} n1: the frozen NCBI stdout"
+        );
+        assert!(
+            String::from_utf8_lossy(&first.2).contains("UTF8String data for VisibleString"),
+            "{row_id} n1: the warning: {}",
+            String::from_utf8_lossy(&first.2)
+        );
+        for (threads, env) in [
+            (2, &[][..]),
+            (4, &[][..]),
+            (8, &[][..]),
+            (8, &[("LOSAT_X_BPREDOPAR", "0")][..]),
+        ] {
+            let again = row_run(row, threads, env);
+            assert_eq!(
+                again,
+                first,
+                "{row_id} n{threads} {env:?}: {}",
+                String::from_utf8_lossy(&again.2)
+            );
+        }
+    }
+}
+
 // The rows `db.x4excl.*` (`tests/db_search_manifest/blastp.x4excl.tsv`, line RG item X4-excl): a
 // `-negative_seqidlist` that keeps a subject of a version 5 database (`tests/db_search/x4excl`)
 // without any of its definition lines, so NCBI's fetch excludes that subject's match at the redo,

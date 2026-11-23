@@ -30,6 +30,9 @@ No NCBI counterpart: test inputs. Usage: python3 build_nq.py [OUT_DIR] (default:
 - wide.faa and wide.fna (series PR, item PS12m): the 190 residues of the first profile of `rps_mini` (the fragment
   that build_wide.py tiles into `rps_wide`), and their back-translation (seed 21, no flanks, one strand): the
   queries that hit each tile of `rps_wide`.
+- nest_p.fna and nest_m.fna (series PR, item PS12c, review B1): nest.faa (the first profile's source twice, nested;
+  rpsblast's rows `db.rps.mini.sw.nest.*`) back-translated (seed 31, no flanks), on the plus and on the minus strand.
+  With `-use_sw_tback` its second Smith-Waterman alignment starts with a gap in the profile's row.
 """
 
 import random
@@ -173,6 +176,11 @@ def wide(proteins: list[tuple[str, str]]) -> str:
     return fasta([(title.split()[0], back_translate(letters, random.Random(21)))])
 
 
+def nest(proteins: list[tuple[str, str]]) -> tuple[str, str]:
+    letters = back_translate(proteins[0][1], random.Random(31))
+    return fasta([("nest_p", letters)]), fasta([("nest_m", reverse_complement(letters))])
+
+
 def main() -> int:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE
     proteins = read_fasta(HERE / "q40.faa")
@@ -184,6 +192,9 @@ def main() -> int:
     (out / "nwin0.fna").write_text(nwin(proteins, 36, 13, 110))
     (out / "nfirst.fna").write_text(nfirst(window))
     (out / "wide.fna").write_text(wide(read_fasta(HERE / "wide.faa")))
+    nest_p, nest_m = nest(read_fasta(HERE / "nest.faa"))
+    (out / "nest_p.fna").write_text(nest_p)
+    (out / "nest_m.fna").write_text(nest_m)
     return 0
 
 

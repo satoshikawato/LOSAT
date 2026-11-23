@@ -4020,7 +4020,8 @@ Scheduling (each value computed by one thread with the original function; order 
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per
   block of 256 diagonals instead of three on x86_64 CPUs with AVX2, BMI1, BMI2 and LZCNT
   (`blastn/alignment/x_greedy_row_fuse.rs`, argument in its header). Pass 1 also keeps each diagonal's eight-byte load
-  offsets and whether either lies outside its sequence; the eight-byte slide test, which pass 2 ran as a vector loop over
+  offsets (the `seq1` one as -1 where the diagonal takes no eight-byte test) and the sum of its two sequence indices;
+  the eight-byte slide test, which pass 2 ran as a vector loop over
   the block whose lanes went back and forth between vector and general registers (line F s5, probe P6), runs as scalar
   code inside the pass over the diagonals, for the surviving diagonals only. The same cells, state and
   `x_greedy_cell_slow` calls in the same order; the unit tests compare the two builds and the plain build on random single

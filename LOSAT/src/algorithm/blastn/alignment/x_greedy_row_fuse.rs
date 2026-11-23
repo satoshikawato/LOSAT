@@ -14,12 +14,12 @@
 //! -> 12.3 cycles per cell of the band; the measurements are in the `LOSAT_X_GREEDYROWFUSE` entry
 //! of `docs/agents/diagnostics.md`).
 //!
-//! Why the result is the same. Pass 3 is the pass 3 of `x_greedy_row_impl` statement by
-//! statement: the same cells written with the same values in increasing `k`, the same
-//! `x_greedy_cell_slow` calls and the same `x_past_seq1_end` diagonals in the same order, the
-//! same updates of `diag_lower`, `curr_extent` and the cell that set it, and the same state left
-//! at the end. It differs only in
-//! where the slide length of a surviving diagonal comes from, and that length is the same value:
+//! Why the result is the same. Pass 3 does what the pass 3 of `x_greedy_row_impl` does: the same
+//! cells written with the same values in increasing `k`, the same `x_greedy_cell_slow` calls and
+//! the same `x_past_seq1_end` diagonals in the same order, the same updates of `diag_lower`,
+//! `curr_extent` and the cell that set it, and the same state left at the end. It differs in where
+//! the slide length of a surviving diagonal comes from, which is the same value (the first three
+//! items), and in where it holds some of its values (the last item):
 //!
 //! - Pass 2 of `x_greedy_row_impl` gives -1 ("`x_greedy_cell_slow`") when `unfit < 0`, i.e. when
 //!   `seq1_index < 0`, `seq2_index < 0`, `len1 - 8 - seq1_index < 0` or `len2 - 8 - seq2_index <
@@ -30,7 +30,7 @@
 //!   both give -1 for every diagonal. Pass 1 stores the `seq1` load offset `at1` as -1 for these
 //!   diagonals and for the dropped ones (their `seq2_index` of -1 is above `len2 - 8` as u32);
 //!   any other `at1` is at most `len1 - 8`, not negative as an i32. So `at1 >= 0` is the test of
-//!   the three passes (kept, both inside, `inline_ok`), and with `at1 < 0` pass 2 tests `start <
+//!   the three passes (kept, both inside, `inline_ok`), and with `at1 < 0` pass 3 tests `start <
 //!   0` before anything else, as they do.
 //! - Otherwise both read the same eight bytes of each sequence (`seq[at .. at + 8]`, or
 //!   `seq[len - 8 - at .. len - at]` for `REVERSE`), and compute the same `diff`, `bits`,
@@ -44,7 +44,7 @@
 //!   64`, `index == 8`, which is above the minimum; an `index` of 0-7 is above the minimum exactly
 //!   when it is above `longest_match_run`. Both read `longest_match_run` once per block, before
 //!   pass 3 (which may raise it through `x_greedy_cell_slow`).
-//! - The rest of pass 2 holds the same values in other places. It writes `current` through a
+//! - The rest of pass 3 holds the same values in other places. It writes `current` through a
 //!   pointer to the block and keeps the cell that set `curr_extent` as an offset in the block
 //!   (`X_NO_CELL` survives the wrapping subtraction and addition of the block start); it takes
 //!   `seq1_index + seq2_index` of each diagonal from pass 1 instead of adding `block_first + i`

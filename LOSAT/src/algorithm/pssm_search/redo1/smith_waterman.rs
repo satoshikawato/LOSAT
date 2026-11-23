@@ -435,7 +435,7 @@ impl RedoMatch<'_> {
             hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
             best_evalue = best_evalue.min(hsp.e_value);
         }
-        redone.retain(|hsp| hsp.e_value <= self.expect_value);
+        redone.retain(|hsp| !(hsp.e_value > self.expect_value));
         let first = redone.first()?;
         let best_score = first.align.score;
         let template = &hsps[0];

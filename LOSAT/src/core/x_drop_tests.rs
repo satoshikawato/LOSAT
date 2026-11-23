@@ -104,3 +104,34 @@ fn the_kernels_size_x_drops_below_their_limit() {
         "{error}"
     );
 }
+
+// Line PS item PS7c: the gapped X-drops of a Karlin-Altschul block that NCBI holds invalid
+// (a Lambda, K or H that is not above 0, or a NaN) are 0: the smallest Lambda starts at 2^31 - 1.
+#[test]
+fn a_gapped_block_that_is_not_valid_gives_zero_x_drops() {
+    let block = |lambda: f64, k: f64, h: f64| crate::stats::tables::KarlinParams {
+        lambda,
+        k,
+        h,
+        ..Default::default()
+    };
+    assert_eq!(extension_lambda(&block(0.267, 0.041, 0.14)), 0.267);
+    for invalid in [
+        block(f64::NAN, 0.041, 0.14),
+        block(f64::NEG_INFINITY, 0.041, 0.14),
+        block(0.267, f64::NAN, 0.14),
+        block(0.267, -0.041, 0.14),
+        block(0.267, 0.041, f64::NAN),
+        block(0.267, 0.041, f64::NEG_INFINITY),
+        block(0.267, 0.041, 0.0),
+    ] {
+        assert_eq!(extension_lambda(&invalid), f64::from(i32::MAX));
+    }
+    // An infinite Lambda is valid for NCBI's test, and its X-drops are 0 as well.
+    let infinite = extension_lambda(&block(f64::INFINITY, 0.041, 0.14));
+    assert_eq!(infinite, f64::INFINITY);
+    assert_eq!(
+        gapped_x_dropoffs(15.0, 25.0, infinite),
+        gapped_x_dropoffs(15.0, 25.0, f64::from(i32::MAX))
+    );
+}

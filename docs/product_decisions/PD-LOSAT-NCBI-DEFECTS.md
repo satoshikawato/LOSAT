@@ -374,10 +374,9 @@
   the explicit rejections, rule 3, of a binary PSSM's string or byte block whose length passes the
   end of the file and is 1 GiB to 2^47 bytes, the class of 1.52, and of a query whose letters are
   missing or whose number is not its Seq-inst's `length`, on which NCBI crashes or writes past its
-  buffer for most lengths and which it answers for one less than the letters, an answer LOSAT does
-  not yet give; and a refusal that is not a
-  rule-3 item, of a PSSM's Karlin-Altschul values that are not finite numbers where LOSAT does not
-  yet compute NCBI's output of them; Owner-delegated, standing instruction 2026-09-29, restated
+  buffer for most lengths and which it answers for one less than the letters, an answer that LOSAT gives
+  since line PS item PS7c; Karlin-Altschul values that are not finite numbers are searched as NCBI
+  does since PS7c; Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07; numbered after 1.76; first 1.71, then 1.72, 1.74, 1.76 and 1.77 at the merges of dev that brought line DBID item
   pfoff-3's 1.71, line NP items M5a and M5b's 1.72 and line RG item X4b-1's 1.73, then line RG item D5b-3's 1.74 and
   line NP item M5's 1.75, then line RG item X4b-2's 1.76);
@@ -2402,27 +2401,23 @@ file would differ, and NCBI's programs still could not open the database).
   reserve that throws is posted first (`Error: (803.4) [psiblast] unended byte block`), as in
   NCBI (rows `db.ber.ps.block_*`). A query whose letters are missing or whose number is not the
   `length` of its Seq-inst ("a PSSM query whose letters are missing or of another length than its
-  Seq-inst is not supported by LOSAT's PSIBLAST", or TBLASTN; refused in the text form before):
+  Seq-inst (NCBI BLAST+ 2.17.0 writes outside its query buffer or crashes unless there is one letter more than the Seq-inst's length) is not supported by LOSAT's PSIBLAST", or TBLASTN; refused in the text form before):
   for a query of 30 letters NCBI 2.17.0's psiblast ends by a signal with the lengths 31, 60 and
   255 (SIGSEGV), 0, 1, 2, 10 and 4,294,967,295 (SIGABRT), and writes past its buffer with 28
   (valgrind: an invalid write) though it exits 0. With 29, one less than the letters, NCBI answers
   (exit 0, clean under valgrind) in ASN.1 text and binary alike: it searches the 29 letters with
-  the PSSM, and its E-values are those of a query of 29 letters. LOSAT does not yet give that
-  answer (the PSSM of 30 columns over a query of 29 letters belongs to line PS: hand-off
-  `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md` of line RG), so it is refused too. Not a rule-3 item but
+  the PSSM, and its E-values are those of a query of 29 letters. LOSAT gives that answer since
+  line PS item PS7c (the query is searched as its first 29 letters), and refuses the other lengths. Not a rule-3 item but
   a refusal: with `-out_pssm`, author names (`Auth-list` `names`) of a binary PSSM, which NCBI keeps
   in a delay buffer and reads again only while it writes them, where that read posts a message or
   fails (NCBI reports it in the middle of the file it writes; not ported). The warning of a
   UTF8String tag (803.10) is not one of them: NCBI posts it once per process, when it first reads
   the file, so the second read posts nothing and the names are written. Also not a rule-3 item
   but a refusal, of the text form too: a gapped `lambda` of `PLUS-INFINITY`, a gapped `lambda`,
-  `kappa` or `h` of `NOT-A-NUMBER`, and psiblast's `lambdaUngapped` of `PLUS-INFINITY` ("a PSSM
-  whose gapped Karlin-Altschul parameter lambda is infinite (LOSAT does not yet compute the hits,
-  E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it) ..."). NCBI goes on with them
-  (E-values 0.0, bit scores `inf` or -1.0); LOSAT's search wrote NaN or found other hits, and its
-  arithmetic of these values belongs to line PS (hand-off `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md`
-  of line RG), which lifts the refusal when it computes NCBI's output. `MINUS-INFINITY` stays in the
-  refusal of a negative gapped value above. Tests:
+  `kappa` or `h` of `NOT-A-NUMBER`, a negative gapped value, and psiblast's `lambdaUngapped` of
+  `PLUS-INFINITY` were refused here while LOSAT did not compute NCBI's output of them. Since line PS
+  item PS7c LOSAT does: NCBI goes on with these values (E-values 0.0, bit scores `inf` or -1.0) and
+  so does LOSAT, so none of them is refused now. Tests:
   `LOSAT/src/algorithm/pssm_search/in_pssm_tests.rs`,
   `LOSAT/src/report/serial/asn_types/read_ber_tests.rs` and `write_tests.rs`; fixture rows
   `db.ber.ps.*` and `db.ber.tbn.*`.

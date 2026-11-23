@@ -6,8 +6,8 @@ The working records of those lines (plans, state, decision logs) are kept outsid
 This file gives each cited ID one row: what it is, its state, its main pull requests, and the document
 in this repository that holds its fullest record ("external" when there is none).
 
-As of dev b2217b2b9 with line PS's PS12c (2026-11-23): 240 IDs cited in the tree, 146 of them in
-`CHANGELOG.md`, `changelog.d/` and `docs/`; 195 rows below. State: 154 done, 41 in progress, 0 stopped.
+As of dev b2217b2b9 with line PS's PS12c (2026-11-23): 241 IDs cited in the tree, 147 of them in
+`CHANGELOG.md`, `changelog.d/` and `docs/`; 196 rows below. State: 154 done, 42 in progress, 0 stopped.
 
 - `python3 scripts/line_ids.py list --all` lists the IDs the tree cites, with the number of citing
   lines and the first one; `python3 scripts/line_ids.py check` names the IDs that `CHANGELOG.md`,
@@ -164,6 +164,7 @@ As of dev b2217b2b9 with line PS's PS12c (2026-11-23): 240 IDs cited in the tree
 | `PS6b` | PS stage 6b: psiblast -in_msa with an alignment in FASTA (with gaps), PHYLIP, NEXUS, Sequin or MultAlin format (the scanners, the sequence names, the defline titles and `[name=value]` modifiers, the NEXUS FORMAT characters), byte for byte as NCBI BLAST+ 2.17.0; the few inputs on which NCBI crashes, loops without end or reads memory that the file does not give are refused by name. | in progress | none | changelog entry `feature-ps-ps6b` |
 | `PS6c` | PS stage 6c: psiblast -outfmt 0 with a PSSM query whose molecule type is `other` (`-in_msa` with a `molecule=other` modifier, or an `-in_pssm` file): the whole report with NCBI BLAST+ 2.17.0's line `Sequence with id <id> no longer exists in database...alignment skipped` in place of each alignment, byte for byte. | in progress | none | changelog entry `feature-ps-ps6c` |
 | `PS7` | PS stage 7: tblastn -in_pssm (PSI-TBLASTN): tblastn's search with the PSSM's scores and Karlin-Altschul values (composition-based statistics 0, no sum statistics unless -sum_stats true, genetic code 1), -subject and -db, outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps7` |
+| `PS7c` | PS item 7c: psiblast and tblastn `-in_pssm` with Karlin-Altschul values that are negative, infinite or not a number (ASN.1 text and binary) and with a query whose Seq-inst length is one less than its letters, byte for byte as NCBI BLAST+ 2.17.0 (apart from the version line). | in progress | none | changelog entry `feature-ps-ps7c` |
 | `PS11` | PS stage 11 (series PR): `losat rpsblast`, NCBI BLAST+ 2.17.0 rpsblast against profile databases (makeprofiledb -dbtype rps); split into PS11a and PS11b. | in progress | none | changelog entry `feature-ps-ps11` |
 | `PS11a` | PS stage 11a: `losat rpsblast` without composition-based statistics (-comp_based_stats 0, F, f, D, d; any mode on a database without frequency ratios, as NCBI runs it) on one-volume profile databases (version 4 and 5, 26 and 28 columns, any whole scale), outfmt 0, 6, 7 and 10, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | done | #941 | changelog entry `feature-ps-ps11` |
 | `PS11b` | PS stage 11b: `losat rpsblast` with composition-based statistics 1, 2 and 3 (the default 1; `.freq` ratios, the PSSM redo), databases of several volumes (merged per query as NCBI does), `-dbsize` and the 32-bit score bound, byte for byte as NCBI BLAST+ 2.17.0 at every thread count. | in progress | none | changelog entry `feature-ps-ps11b` |

@@ -90,6 +90,21 @@ pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
         evalue
     }
 }
+/// The E-value and the bit score that a Seq-align's readers get for an HSP whose search made
+/// `evalue` and `bit_score`: a Seq-align carries the E-value after `seqalign_evalue` (every value
+/// below 1e-180, a negative one too, is 0) where that is 0 or above, so only a NaN is missing, and
+/// the bit score only where it is 0 or above; the readers' defaults for a score the Seq-align
+/// lacks are -1 (`CAlignFormatUtil::GetAlnScores`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1197
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:820-826
+pub(crate) fn seqalign_scores(evalue: f64, bit_score: f64) -> (f64, f64) {
+    let evalue = seqalign_evalue(evalue);
+    (
+        if evalue >= 0.0 { evalue } else { -1.0 },
+        if bit_score >= 0.0 { bit_score } else { -1.0 },
+    )
+}
 pub(crate) const GAP_VALUE: i32 = -1;
 const BLAST_ALIGNMENT_DIM: i32 = 2;
 

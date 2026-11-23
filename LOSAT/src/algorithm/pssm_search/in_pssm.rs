@@ -453,6 +453,7 @@ fn stopped_as_query_joins_scope(
         split_setup: None,
         from_msa: false,
         query_other_coding: None,
+        query_tail: Vec::new(),
     };
     let file = InPssmFile {
         object: pssm,
@@ -754,11 +755,20 @@ pub(crate) fn psi_search_and_object_of(
     // reads (`query_residues`); the record keeps it as `-`, which the reports show and count as a
     // residue (`report::row_letters`). Lower-case iupacaa letters are searched as their capitals,
     // which the record holds; the reports read the Bioseq's own (`PsiSearch::bioseq_letters`).
-    let letters = residues.letters;
+    let mut letters = residues.letters;
     let length = query.inst.length.map_or(-1, i64::from);
-    if letters.is_empty() || letters.len() as i64 != length {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:485-640
+    // A query with one letter more than its Seq-inst's `length` is searched as its first `length`
+    // letters: NCBI sizes the query's buffer by the length and the copy of the letters with their
+    // sentinels fills it exactly (the last letter lies where the closing sentinel would), so the
+    // search, its search space and its E-values are those of a query of `length` letters, and the
+    // PSSM keeps its columns (NCBI BLAST+ 2.17.0, line PS item PS7c: `ps7c/` s3, every report
+    // format, `-db` and `-subject`, psiblast and tblastn, valgrind clean). With one letter less
+    // or two more, or a short `length`, NCBI writes or reads out of bounds or crashes (below).
+    let one_over = length >= 1 && letters.len() as i64 == length + 1;
+    if letters.is_empty() || (letters.len() as i64 != length && !one_over) {
         return Err(reader.refuse(
-            "a PSSM query whose letters are missing or of another length than its Seq-inst",
+            "a PSSM query whose letters are missing or of another length than its Seq-inst (NCBI BLAST+ 2.17.0 writes outside its query buffer or crashes unless there is one letter more than the Seq-inst's length)",
         ));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:240-261
@@ -832,7 +842,7 @@ pub(crate) fn psi_search_and_object_of(
     // The frequency ratios (`psi_matrix->freq_ratios`, 28 per position, 0.0 past the file's
     // rows), which the position-based composition-based statistics read; none when the PSSM has
     // none (NCBI's then stay zero).
-    let freq_ratios = match pssm.pssm.intermediate_data.as_ref() {
+    let mut freq_ratios = match pssm.pssm.intermediate_data.as_ref() {
         Some(data) if reads_values && !data.freq_ratios.is_empty() => convert_2_matrix(
             &data.freq_ratios,
             rows_n as usize,
@@ -852,6 +862,24 @@ pub(crate) fn psi_search_and_object_of(
         kappa: stat(final_data.map(|data| data.kappa)),
         h: stat(final_data.map(|data| data.h)),
     };
+    // A query of one letter more than its length (above): the search reads the first `length`
+    // columns and letters; the PSSM object that the run writes keeps all of them.
+    let mut bioseq = residues.bioseq;
+    let mut query_tail = Vec::new();
+    if one_over {
+        if ratios_only && reads_values {
+            return Err(reader.refuse(
+                "a PSSM of frequency ratios only whose query has one letter more than its Seq-inst's length (NCBI BLAST+ 2.17.0's PSSM engine then computes the scores of all the letters)",
+            ));
+        }
+        let keep = length as usize;
+        query_tail = letters.split_off(keep);
+        rows.truncate(keep);
+        freq_ratios.truncate(keep);
+        if let Some(text) = bioseq.as_mut() {
+            text.truncate(keep);
+        }
+    }
     let mut computed = None;
     if ratios_only && reads_values {
         match scores_from_freq_ratios(&letters, &freq_ratios, reader)? {
@@ -869,69 +897,17 @@ pub(crate) fn psi_search_and_object_of(
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:110-112
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:43-50
-    // NCBI takes a negative value of the file into `kbp_psi` or `kbp_gap_psi` (0 is
-    // `kInvalidStat`: the query's BLOSUM62 value). A `kbp_psi` that is not valid stops the search's
-    // setup with NCBI's error of a query without Karlin-Altschul parameters
+    // NCBI takes every value of the file into `kbp_psi` or `kbp_gap_psi` as it is (0 is
+    // `kInvalidStat`: the query's BLOSUM62 value), a negative one, `PLUS-INFINITY`,
+    // `MINUS-INFINITY` and `NOT-A-NUMBER` (text or binary) too. A `kbp_psi` that is not valid
+    // stops the search's setup with NCBI's error of a query without Karlin-Altschul parameters
     // (`blastp::blast_engine::psiblast_stop_at_invalid_query`, line PS DECISIONS 30). A
-    // `kbp_gap_psi` that is not valid does not stop NCBI: it runs with it (no gapped X-drop, a
-    // cutoff of 1, E-values of -1), an output without meaning, refused as a PSSM whose scaling gives
-    // no Karlin-Altschul parameters is (line PS DECISIONS 28), unless the setup stops first. NCBI's
-    // check of the PSSM's file (`validation_error`) comes first.
-    //
-    // A value that is not a finite number (ASN.1 `PLUS-INFINITY`, `MINUS-INFINITY`,
-    // `NOT-A-NUMBER`, in text or binary) NCBI takes in the same way: an ungapped one that is not
-    // above 0 (`NOT-A-NUMBER` too) makes `kbp_psi` invalid, as `PsiSearch::ungapped_karlin_valid`
-    // holds it. Where NCBI then goes on, LOSAT's search does not yet compute what NCBI computes
-    // from a gapped `lambda` of `PLUS-INFINITY`, a gapped `NOT-A-NUMBER` or psiblast's
-    // `lambdaUngapped` of `PLUS-INFINITY` (line RG D3c-3a, `D/d3/c3a/probe/realtext`: NCBI's
-    // E-values 0.0 and bit scores `inf` or -1.0, its hits; handed to line PS,
-    // `D/d3/c3a/HANDOFF_PS_nonfinite_lambda.md`): refused with the negative values. Gapped `kappa`
-    // and `h` of `PLUS-INFINITY` and the other ungapped values of `PLUS-INFINITY` give NCBI's
-    // output; tblastn reads `lambdaUngapped` only for its word X-drop, where it gives NCBI's too.
-    let ungapped_invalid = [
-        stats.lambda_ungapped,
-        stats.kappa_ungapped,
-        stats.h_ungapped,
-    ]
-    .into_iter()
-    .flatten()
-    .any(|value| value.is_nan() || value <= 0.0);
-    let unusable = |name: &'static str, value: Option<f64>| match value {
-        Some(value) if value < 0.0 => Some((name, "negative")),
-        Some(value) if value.is_nan() => Some((name, "not a number")),
-        Some(value) if value == f64::INFINITY && name == "lambda" => Some((name, "infinite")),
-        _ => None,
-    };
-    let gapped_unusable = unusable("lambda", stats.lambda)
-        .or_else(|| unusable("kappa", stats.kappa))
-        .or_else(|| unusable("h", stats.h));
-    let ungapped_unusable = (reader.program == PssmReader::PSIBLAST.program
-        && stats.lambda_ungapped == Some(f64::INFINITY))
-    .then_some(("lambdaUngapped", "infinite"));
-    if validation_error.is_none()
-        && scores_error.is_none()
-        && setup_error.is_none()
-        && !ungapped_invalid
-    {
-        match (gapped_unusable, ungapped_unusable) {
-            (Some((name, "negative")), _) => {
-                return Err(reader.refuse(format!(
-                    "a PSSM whose gapped Karlin-Altschul parameter {name} is negative (NCBI BLAST+ 2.17.0 goes on with a Karlin-Altschul block that it holds invalid)"
-                )));
-            }
-            (Some((name, what)), _) | (None, Some((name, what))) => {
-                let kind = if name == "lambdaUngapped" {
-                    "ungapped"
-                } else {
-                    "gapped"
-                };
-                return Err(reader.refuse(format!(
-                    "a PSSM whose {kind} Karlin-Altschul parameter {name} is {what} (LOSAT does not yet compute the hits, E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it)"
-                )));
-            }
-            (None, None) => {}
-        }
-    }
+    // `kbp_gap_psi` that is not valid does not stop NCBI: it runs with it, and LOSAT does the same:
+    // the gapped X-drops are 0 (`core::x_drop::extension_lambda`), the E-values are NCBI's
+    // (`report::serial::seqalign::seqalign_scores`), and the footer omits the block
+    // (`report::pairwise`). The word X-drop of an ungapped `lambda` that is `PLUS-INFINITY` is
+    // 0 and takes the cutoff (`pssm_search::prelim`). NCBI's check of the PSSM's file
+    // (`validation_error`) comes first.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:533-557
     // The search strategy's request holds the object that the application read, which
     // `SaveSearchStrategy` serializes before `CPsiBlastImpl` computes the scores of a PSSM of
@@ -949,7 +925,7 @@ pub(crate) fn psi_search_and_object_of(
         freq_ratios,
         stats,
         query: query_record_of(ids, title, &letters),
-        bioseq_letters: residues.bioseq.map(std::sync::Arc::from),
+        bioseq_letters: bioseq.map(std::sync::Arc::from),
         query_ids: ids.to_vec(),
         validation_error,
         scores_error,
@@ -963,6 +939,7 @@ pub(crate) fn psi_search_and_object_of(
         split_setup: None,
         from_msa: false,
         query_other_coding: mol_other,
+        query_tail,
     };
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI

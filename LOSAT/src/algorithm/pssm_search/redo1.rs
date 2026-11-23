@@ -678,7 +678,7 @@ impl RedoMatch<'_> {
                 best_evalue
             }
         };
-        redone.retain(|hsp| hsp.e_value <= self.expect_value);
+        redone.retain(|hsp| !(hsp.e_value > self.expect_value));
         let first = redone.first()?;
         let best_score = first.align.score;
         // NCBI's test that `best_evalue` is at most `hitParams->options->expect_value` passes: the
@@ -927,7 +927,7 @@ impl RedoMatch<'_> {
                 best_evalue
             }
         };
-        redone.retain(|hsp| hsp.e_value <= self.expect_value);
+        redone.retain(|hsp| !(hsp.e_value > self.expect_value));
         let first = redone.first()?;
         let best_score = first.align.score;
         let template = &hsps[0];

@@ -2930,13 +2930,20 @@ fn psiblast_pssms(
             psi_gapped: gapped,
         };
         let mut unread = Vec::new();
+        let query_letters = [
+            record.seq(),
+            args.psi_search
+                .as_deref()
+                .map_or(&[][..], |psi| psi.query_tail.as_slice()),
+        ]
+        .concat();
         let made = query_pssm(
             request,
             scoring,
             gapped,
             args.inclusion_ethresh,
             PssmQueryRecord {
-                letters: record.seq(),
+                letters: &query_letters,
                 id: &id,
                 title: record.title(),
             },

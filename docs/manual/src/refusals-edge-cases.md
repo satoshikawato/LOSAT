@@ -167,8 +167,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 
 - A PSSM of frequency ratios only, written by row. NCBI reads the scores it computes for it in the wrong order.
 - A PSSM whose position-based scaling gives score frequencies but no Karlin-Altschul parameters. NCBI goes on with a Lambda of -1.
-- A PSSM with a negative gapped Karlin-Altschul value (`lambda`, `kappa` or `h`). NCBI goes on with a block it holds invalid. A negative ungapped value (`lambdaUngapped`, `kappaUngapped` or `hUngapped`) gets NCBI's error of a query without Karlin-Altschul parameters, as in NCBI.
-- A PSSM whose gapped `lambda` is infinite (`PLUS-INFINITY`), whose gapped `lambda`, `kappa` or `h` is not a number (`NOT-A-NUMBER`), or, with psiblast, whose `lambdaUngapped` is infinite, in ASN.1 text or binary. NCBI goes on with these values; LOSAT does not yet compute the hits, E-values and bit scores that NCBI computes from them. `MINUS-INFINITY` is a negative value (above); an ungapped value that is not a number gets NCBI's error of a query without Karlin-Altschul parameters, as in NCBI.
+- A PSSM with a negative ungapped Karlin-Altschul value (`lambdaUngapped`, `kappaUngapped` or `hUngapped`) or an ungapped value that is not a number gets NCBI's error of a query without Karlin-Altschul parameters, as in NCBI. Gapped values that are negative, infinite or not a number, and `lambdaUngapped` of `PLUS-INFINITY`, in ASN.1 text or binary, are searched as in NCBI: the hits, E-values (`0.0`), bit scores (`inf`, `-1.0`) and report footers are NCBI's.
 - A PSSM of frequency ratios only from which NCBI's PSSM engine makes no scaled scores. NCBI does not finish or stops with an error.
 - A query without a Seq-id, with a Geninfo import id (`gim|`, which NCBI cannot resolve), or with a database ordinal (`gnl|BL_ORD_ID|n`).
 - A query with a local Seq-id among other Seq-ids (NCBI's reports then show it as no FASTA query is shown), with an empty local id, or with a Seq-id that has neither an accession nor a name.
@@ -177,6 +176,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - A score outside -32,768 to 32,767.
 - A PSSM whose columns' largest scores add up to 2^30 or more. Every PSSM of fewer than 19,800 columns passes.
 - A query whose letters give no Karlin-Altschul parameters. NCBI crashes.
+- A PSSM query whose Seq-inst `length` is not its number of letters, except a `length` that is one less than the letters: that query is searched as its first `length` letters, as in NCBI. With other lengths (two or more fewer, more, 0 to 10, 255, 2^32 - 1) NCBI writes outside its query buffer or crashes.
 - A PSSM without a query, and query Seq-data other than `iupacaa`, `ncbieaa` and `ncbistdaa`.
 - A query without letters, or whose number of letters is not the `length` of its Seq-inst. For most such lengths NCBI crashes or writes past its buffer (seen with 0, 1, 2, 10, 28, 31, 60, 255 and 4,294,967,295 for 30 letters). With a `length` one less than the letters (29 for 30), NCBI searches that many letters; LOSAT does not yet give this answer.
 - A PSSM in ASN.1 binary form that ends inside a string or a byte block (OCTET STRING or BIT STRING) whose length asks for 1 GiB or more and less than 2^47 bytes. Whether NCBI's allocation succeeds depends on the host's memory; at 2^47 bytes or more, NCBI's `BLAST ran out of memory` (exit status 4) is written, as in NCBI.

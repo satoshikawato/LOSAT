@@ -2169,26 +2169,33 @@ fn write_blastp_query_footer_spacing<W: Write>(
         );
     };
     writeln!(writer)?;
-    writeln!(writer, "Lambda      K        H        a         alpha")?;
-    write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
-    write_ncbi_ka_field(writer, ungapped_karlin.k)?;
-    write_ncbi_ka_field(writer, ungapped_karlin.h)?;
-    write_ncbi_ka_field(writer, gumbel.a_un)?;
-    write_ncbi_ka_field(writer, gumbel.alpha_un)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:52-60
+    // A block whose Lambda is not 0 or above (negative, or a NaN that a PSSM's file gave) is not
+    // kept in the query's results, and its part of the footer is not written.
+    if ungapped_karlin.lambda >= 0.0 {
+        writeln!(writer, "Lambda      K        H        a         alpha")?;
+        write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
+        write_ncbi_ka_field(writer, ungapped_karlin.k)?;
+        write_ncbi_ka_field(writer, ungapped_karlin.h)?;
+        write_ncbi_ka_field(writer, gumbel.a_un)?;
+        write_ncbi_ka_field(writer, gumbel.alpha_un)?;
+        writeln!(writer)?;
+    }
     writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer, "Gapped")?;
-    writeln!(
-        writer,
-        "Lambda      K        H        a         alpha    sigma"
-    )?;
-    write_ncbi_ka_field(writer, gapped_karlin.lambda)?;
-    write_ncbi_ka_field(writer, gapped_karlin.k)?;
-    write_ncbi_ka_field(writer, gapped_karlin.h)?;
-    write_ncbi_ka_field(writer, gumbel.a)?;
-    write_ncbi_ka_field(writer, gumbel.alpha)?;
-    write_ncbi_ka_field(writer, gumbel.sigma)?;
-    writeln!(writer)?;
+    if gapped_karlin.lambda >= 0.0 {
+        writeln!(writer, "Gapped")?;
+        writeln!(
+            writer,
+            "Lambda      K        H        a         alpha    sigma"
+        )?;
+        write_ncbi_ka_field(writer, gapped_karlin.lambda)?;
+        write_ncbi_ka_field(writer, gapped_karlin.k)?;
+        write_ncbi_ka_field(writer, gapped_karlin.h)?;
+        write_ncbi_ka_field(writer, gumbel.a)?;
+        write_ncbi_ka_field(writer, gumbel.alpha)?;
+        write_ncbi_ka_field(writer, gumbel.sigma)?;
+        writeln!(writer)?;
+    }
     writeln!(writer)?;
     writeln!(
         writer,
@@ -3142,6 +3149,20 @@ pub struct BlastnPairwiseReport {
     pub subject_sources: Vec<super::defline::SourceTaxname>,
 }
 
+/// The bit score and E-value that the description table shows for a subject whose best HSP is
+/// `best`: NCBI keeps the highest bit score from 0 and the E-value of the HSP that raised it, so a
+/// subject whose HSPs all have a bit score of 0 or less (a PSSM whose gapped Karlin-Altschul block
+/// is not valid gives -1) shows 0.0 and 0.0.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4261-4309
+fn table_scores(best: &PairwiseHit) -> (f64, f64) {
+    if best.hit.bit_score > 0.0 {
+        (best.hit.bit_score, best.hit.e_value)
+    } else {
+        (0.0, 0.0)
+    }
+}
+
 // The description table of a report: BLASTN's, BLASTP's, TBLASTN's and TBLASTX's
 // (`write_blastn_description_table`), BLASTX's
 // (`write_subject_summary_table_with_sum_n`), which differ only in the line that names a
@@ -3218,8 +3239,8 @@ fn write_description_table<W: Write>(
     let mut max_total = "Total".len();
     let mut max_sum_n = 1;
     for (index, (_, best, total, sum_n, _)) in rows.iter().enumerate() {
-        max_score = max_score.max(format_bitscore_ncbi(best.hit.bit_score).len());
-        max_evalue = max_evalue.max(format_evalue_ncbi(best.hit.e_value).len());
+        max_score = max_score.max(format_bitscore_ncbi(table_scores(best).0).len());
+        max_evalue = max_evalue.max(format_evalue_ncbi(table_scores(best).1).len());
         max_sum_n = max_sum_n.max(sum_n.to_string().len());
         let total_len = format_total_bitscore_ncbi(*total).len();
         if index + 1 == rows.len() && last_row_counted {
@@ -3282,7 +3303,7 @@ fn write_description_table<W: Write>(
         write!(
             writer,
             "  {:<max_score$}",
-            format_bitscore_ncbi(best.hit.bit_score)
+            format_bitscore_ncbi(table_scores(best).0)
         )?;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:940-956
         if let Some(values) = values {
@@ -3297,7 +3318,7 @@ fn write_description_table<W: Write>(
         write!(
             writer,
             "  {:<max_evalue$}",
-            format_evalue_ncbi(best.hit.e_value)
+            format_evalue_ncbi(table_scores(best).1)
         )?;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:961-965
         if show_sum_n {
@@ -3564,7 +3585,8 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
     trailing: bool,
 ) -> io::Result<()> {
     writeln!(writer)?;
-    if let Some((ungapped, _)) = karlin {
+    // (A block whose Lambda is not 0 or above is not written, as in `write_blastp_query_footer_spacing`.)
+    if let Some((ungapped, _)) = karlin.filter(|(ungapped, _)| ungapped.lambda >= 0.0) {
         writeln!(writer, "Lambda      K        H")?;
         write_ncbi_ka_field(writer, ungapped.lambda)?;
         write_ncbi_ka_field(writer, ungapped.k)?;
@@ -3574,7 +3596,10 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
     writeln!(writer)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1130-1159
     // An ungapped search has no gapped Karlin block (`kbp_gap` is not made).
-    if let Some((_, gapped_block)) = karlin.filter(|_| gapped) {
+    if let Some((_, gapped_block)) = karlin
+        .filter(|_| gapped)
+        .filter(|(_, gapped_block)| gapped_block.lambda >= 0.0)
+    {
         writeln!(writer, "Gapped")?;
         writeln!(writer, "Lambda      K        H")?;
         write_ncbi_ka_field(writer, gapped_block.lambda)?;

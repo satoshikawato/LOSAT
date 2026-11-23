@@ -389,6 +389,11 @@ fn run_queries(
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.query_other_coding);
+                // And the letter past its Seq-inst's length (`PsiSearch::query_tail`).
+                search.query_tail = args
+                    .psi_search
+                    .as_deref()
+                    .map_or_else(Vec::new, |psi| psi.query_tail.clone());
                 // A query that NCBI splits: round 1's query, which the round searches, and the query
                 // of its set-up (`RoundQuery::split`).
                 let (query_now, split_setup) = if split {
@@ -1130,13 +1135,23 @@ fn next_pssm(
         }
     };
     let mut unread = Vec::new();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:240-261
+    // The PSSM engine reads the query's whole Seq-data, also the letter past a Seq-inst `length`
+    // that is one less than the letters (`PsiSearch::query_tail`).
+    let query_letters = [
+        record.seq(),
+        args.psi_search
+            .as_deref()
+            .map_or(&[][..], |psi| psi.query_tail.as_slice()),
+    ]
+    .concat();
     let pssm = query_pssm(
         &io.request,
         scoring,
         table_gapped,
         args.inclusion_ethresh,
         PssmQueryRecord {
-            letters: record.seq(),
+            letters: &query_letters,
             id: &id,
             title: record.title(),
         },

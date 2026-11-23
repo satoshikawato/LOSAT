@@ -341,7 +341,7 @@ describe('writtenValue', () => {
 
 describe("knownDefault: the defaults that the engine resolves (describe's defaults)", () => {
   // describe.json is the reactor's describe; its `defaults` come from the engine's resolution
-  // (web/adapter/src/defaults.rs, whose tests check each value against the CLI's help).
+  // (web/adapter/src/defaults.rs, whose tests check each value that NCBI's argument table gives a default against it).
   const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
   const optionsOf = (id: ProgramId) => toProgramDescription(described[id]).parameters;
   const blastn = programById('blastn');

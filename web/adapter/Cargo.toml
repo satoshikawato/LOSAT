@@ -16,7 +16,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 losat = { path = "../../LOSAT", default-features = false }
-clap = { version = "4.5", features = ["derive"] }
 # The SHA-256 of a named input file (`files.rs`), counted over its chunks as they come.
 sha2 = { version = "0.10", default-features = false }
 

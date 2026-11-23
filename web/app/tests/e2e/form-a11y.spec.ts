@@ -198,6 +198,13 @@ test('two "?" helps are not open by the pointer at once, where one "?" is inside
   const helps = page.locator('[role="tooltip"].help');
   await open.hover();
   await expect(helps).toHaveCount(1);
+  // The box around a "?" and its help can hold another "?" (blastp's -lcase_masking in the box of
+  // -soft_masking, 1024 pixels wide). NCBI's help of -gapopen, "Cost to open a gap" (line RG item
+  // K4i-3a), ends before the "?" of -gapextend beside it, so the test makes that help wider (the
+  // page's policy refuses a style sheet of the test, not a style set on the element).
+  await page.getByTestId('param-gapopen-help').evaluate((help: HTMLElement) => {
+    help.style.width = '36em';
+  });
   // Across the box of the first help, onto the second "?": a pointer move at a time, so that the
   // two helps are never open together.
   const from = await middle(open);

@@ -2892,3 +2892,79 @@ fn a_database_without_taxids_does_not_hold() {
     assert!(db.taxdb_found());
     assert!(!taxdb_may_refuse(&db));
 }
+
+/// Review 3 of line DBID pfoff-4, M1 and L2: the sequences that NCBI may give for a Seq-align id
+/// whose lookup fails on a file, without that lookup (`HeaderReader::failed_holders`), in lists
+/// of `tests/db_search/multidb` beside `pU`, whose unparsed volume makes the lookup of a text id
+/// fail (NCBI BLAST+ 2.17.0 holds or throws as rows `db.pfo.bp.*.held.*` of
+/// `db_search_manifest/blastp.pfo.tsv` show). The data loader gives a sequence it loaded that
+/// holds the id's own handle in any of its definition lines (`Lines::Every`); the scope one that
+/// holds an id it takes for it, or matches it weakly, in the line its load made the Bioseq of (the
+/// line of the sequence's own Seq-align id, `Lines::Loaded`). Holders by their Seq-align ids.
+#[test]
+fn the_scope_holds_the_line_of_a_load_and_the_loader_every_line() {
+    use crate::report::db_subject::{Holders, ParsedSubject};
+    let cwd = empty_cwd("failed_holders");
+    let open = |names: &str| {
+        let search = SearchPath::new(&cwd, None, None).unwrap();
+        let list: Vec<String> = names
+            .split(' ')
+            .map(|name| {
+                let path = root().join("db_search/multidb").join(name);
+                path.to_str().unwrap().to_owned()
+            })
+            .collect();
+        SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+    };
+    let subject = |db: &SeqDb, ordinal: u32| -> Option<std::sync::Arc<ParsedSubject>> {
+        match read_header(&HeaderReader::new(db), ordinal, 0, "BLASTP").unwrap() {
+            ReportedHeader::Parsed(subject) => Some(subject),
+            _ => None,
+        }
+    };
+    let id = |subject: &ParsedSubject| String::from_utf8(subject.alignment_fasta()).unwrap();
+    let names = |db: &SeqDb, holders: &Holders| match holders {
+        Holders::Listed(listed) => listed
+            .iter()
+            .map(|holder| id(&subject(db, holder.ordinal()).unwrap()))
+            .collect::<Vec<_>>(),
+        Holders::Unknown(why) => panic!("unknown holders: {why}"),
+    };
+    // (list, the failing Seq-align id, the loader's holders, the scope's holders)
+    let cases: [(&str, &str, &[&str], &[&str]); 7] = [
+        // A weak holder (gi|5001|ref|NP_100001.1| for the unversioned id) and one of another type
+        // (gi|5004|emb|NP_100001.1| for ref): the scope's only.
+        ("vpP zzgpP pU", "ref|NP_100001|", &[], &["gi|5001"]),
+        ("epP pP pU", "ref|NP_100001.1|", &[], &["gi|5004"]),
+        // A holder of the id's own handle (gi|7022|gnl|TDB|TAG1): both places.
+        ("gnpF zgpH pU", "gnl|TDB|TAG1", &["gi|7022"], &["gi|7022"]),
+        // zmdpH: gi|7051|ref|XP_900001.1| then gi|7052|ref|NP_100001.1|, loaded by its first
+        // line (its Seq-align id gi|7051): the loader's holder of ref|NP_100001.1| by the second
+        // line, the scope's of nothing (review 3's families mdP, mdV and mdE).
+        ("pP zmdpH pU", "ref|NP_100001.1|", &["gi|7051"], &[]),
+        ("vpP zmdpH pU", "ref|NP_100001|", &[], &[]),
+        ("enpF zmdpH pU", "emb|NP_100001.1|", &[], &[]),
+        // zmgpH: ref|XP_900002.1| then gi|7053|ref|NP_100001.1|, loaded by its second line (the
+        // line of its Seq-align id gi|7053): the scope's weak holder by that line.
+        ("vpP zmgpH pU", "ref|NP_100001|", &[], &["gi|7053"]),
+    ];
+    for (list, failing, loader, scope) in cases {
+        let db = open(list);
+        let failed = (0..db.num_seqs())
+            .filter_map(|ordinal| subject(&db, ordinal))
+            .find(|subject| id(subject) == failing)
+            .unwrap_or_else(|| panic!("{list}: no {failing}"));
+        assert!(
+            matches!(
+                failed.found(),
+                Some(crate::report::db_subject::FoundInstead::Failed(_))
+            ),
+            "{list}: {:?}",
+            failed.found()
+        );
+        let holders = failed.failed_holders();
+        assert_eq!(names(&db, &holders.loader), loader, "{list}: loader");
+        assert_eq!(names(&db, &holders.scope), scope, "{list}: scope");
+    }
+    std::fs::remove_dir_all(&cwd).unwrap();
+}

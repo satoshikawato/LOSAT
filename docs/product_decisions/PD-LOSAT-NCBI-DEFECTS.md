@@ -471,8 +471,15 @@
   output with the holder equals the one without it (M2); and a call of the library is also
   refused where a format that reads nothing of the sequence, or one whose run goes on and posts
   nothing, comes with one whose run ends there, a pairwise report, or outfmt 15 or 16, which post
-  the error on standard error (M3); line DBID item pfoff-4,
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.85; first
+  the error on standard error (M3); review 3 of the item: NCBI's scope holds a sequence by the ids
+  of the definition line that its load made its Bioseq of (the line of its own Seq-align id: its
+  first line with a gi, else its first line), its data loader by the ids of every line (M1: a
+  holder whose other line holds an id that the scope takes for the Seq-align id or matches weakly,
+  `gi|7052|ref|NP_100001.1|` after `gi|7051|ref|XP_900001.1|`, leaves it thrown, as NCBI does,
+  where this version refused it at first), and with `-html` outfmt 0 ends the run at the first
+  description line of such a sequence (exit 2), so a holder after it is not refused (M2); line
+  DBID item pfoff-4, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  numbered after 1.85; first
   1.75, then 1.77, 1.79 and 1.86 at the merges of dev that brought line RG item D5b-3's 1.74, line NP
   item M5's 1.75 and line RG item X4b-2's 1.76, then line RG items D3c-3a's 1.77 and D5b-5's 1.78, then
   line NP item O4c's 1.79, line PS item PS12c's 1.80, line NP item M4c-1's 1.81, psiblast line item
@@ -1857,11 +1864,13 @@ file would differ, and NCBI's programs still could not open the database).
   order and while NCBI keeps it, another sequence of the database whose own lookup does not fail
   and that NCBI gives for its Seq-align id without the lookup (listed in the LMDB files that have
   the accession table), from one of two places: NCBI's data loader keeps the ids of every
-  sequence that it loaded for the whole run and gives that sequence for an id of the same type,
-  accession and version (`gi|5001|ref|NP_100001.1|` for `ref|NP_100001.1|`), and NCBI's scope
-  keeps the sequences that it loaded until the end of the query batch (in outfmt 5 until the end
-  of the run) and gives one of them also for an id of another type of the same accession and
-  version (`emb|NP_100001.1|` for `ref|NP_100001.1|`) or for a weak match (the versions of an
+  definition line of every sequence that it loaded for the whole run and gives that sequence for
+  an id of the same type, accession and version (`gi|5001|ref|NP_100001.1|` for
+  `ref|NP_100001.1|`), and NCBI's scope keeps the sequences that it loaded, each with the ids of
+  the definition line that its load made its Bioseq of (the line of its own Seq-align id: its
+  first line with a gi, else its first line; since version 1.86, review 3 of item pfoff-4, M1),
+  until the end of the query batch (in outfmt 5 until the end of the run) and gives one of them
+  also for an id of another type of the same accession and version (`emb|NP_100001.1|` for `ref|NP_100001.1|`) or for a weak match (the versions of an
   accession without one, `ref|NP_100001.1|` for `ref|NP_100001|`; an id of the same name,
   `gb|AAA09999.1|LOCUSN` for `gb||LOCUSN`; in a version 5 database LOSAT cannot list the weak
   matches of a name or of a `pir` or `prf` id and takes any sequence loaded in that time); before
@@ -1880,7 +1889,9 @@ file would differ, and NCBI's programs still could not open the database).
   row that ends NCBI's run at the null pointer of `sacc` or `saccver` is not reached; review 2 of
   item pfoff-4, H1 and M1: the weak matches, which LOSAT wrote as `Unknown` in outfmt 0, 5, 6, 7
   and 18, and the scope's holders only while NCBI keeps them, so a sequence of another type or a
-  weak match loaded in an earlier batch leaves it thrown outside outfmt 5, as NCBI's run does).
+  weak match loaded in an earlier batch leaves it thrown outside outfmt 5, as NCBI's run does;
+  review 3 of item pfoff-4, M2: with `-html` outfmt 0 ends NCBI's run at the first description
+  line of such a sequence, exit 2, so a holder after that line is not reached).
   Where the holder comes first in its report, NCBI's output can equal what LOSAT wrote before
   (a table's row of a thrown lookup repeats the previous row's names, here the holder's), and
   those runs are refused too (review 2 of item pfoff-4, M2: 534 runs of the review's

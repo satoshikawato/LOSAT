@@ -15,7 +15,13 @@
   BLAST+ does not have there). Where that sequence is loaded only later in the report, or only in an earlier query
   batch where NCBI BLAST+ no longer gives it (another type or an unversioned Seq-id, outside `-outfmt 5`), NCBI
   BLAST+ and LOSAT write `Unknown` as before. Some runs where that sequence comes first in the report, whose output
-  NCBI BLAST+ writes the same either way and LOSAT wrote correctly before, are now refused too.
+  NCBI BLAST+ writes the same either way and LOSAT wrote correctly before, are now refused too. A database sequence
+  with several definition lines counts here by the line that NCBI BLAST+ loads it by (the line of its first `gi`, else
+  its first line) for another type or an unversioned Seq-id, and by any line for the same Seq-id, as in NCBI BLAST+:
+  beside `gi|7051|ref|XP_900001.1|` with a second line `gi|7052|ref|NP_100001.1|`, LOSAT writes `Unknown` for
+  `emb|NP_100001.1|` and `ref|NP_100001|` again, as NCBI BLAST+ does, and refuses `ref|NP_100001.1|`. With `-html` and
+  `-outfmt 0`, where NCBI BLAST+ ends the run at the first description line of such a hit (`BLAST Database error`,
+  exit status 2) before a held sequence, LOSAT now writes that output instead of refusing the run.
 - LOSAT's library also refuses a sequence whose Seq-id a database of such a list cannot look up in a call whose
   formats NCBI BLAST+ would end differently after it, with another exit status or another standard error, for
   example `-outfmt 5` (which goes on to the end) with `-outfmt "6 qseqid slen"` (which stops there with

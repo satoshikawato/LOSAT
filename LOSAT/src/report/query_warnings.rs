@@ -1455,9 +1455,26 @@ pub fn replaced_o_message(sequence: &[u8]) -> Option<String> {
 /// c++/include/algo/blast/api/blast_types.hpp:180-184 (`GetMessage` with true)
 pub fn invalid_residues_error(positions: &[usize]) -> Option<String> {
     let list = residue_positions(positions)?;
-    Some(format!(
-        "Warning: Invalid residues found at positions {list} "
-    ))
+    Some(setup_error(&format!(
+        "Invalid residues found at positions {list}"
+    )))
+}
+
+/// The set-up's error of a query whose descriptors hold an empty reference: NCBI's
+/// `CBlastQuerySourceBioseqSet::GetTitle` reads the variant of each, and the null-pointer exception
+/// (`ncbi_exception::NULL_POINTER`) is the query's warning, as `invalid_residues_error`'s.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:344-372
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-543
+pub fn null_descriptor_error() -> String {
+    setup_error(crate::ncbi_exception::NULL_POINTER)
+}
+
+/// The text of the set-up's error of one query whose one message is `message`: its severity
+/// (`Warning`) and a space after it (`TSearchMessages::ToString`, cited at
+/// `invalid_residues_error`).
+fn setup_error(message: &str) -> String {
+    format!("Warning: {message} ")
 }
 
 /// The list of residue positions of NCBI's `GetSequenceProtein` messages: the first, then up to

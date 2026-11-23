@@ -104,7 +104,7 @@ export interface Walker {
   readonly problems: string[];
   notes: string[];
   /** The outputs compared with the native CLI, the runs that ended each way, and the completed runs whose inputs the walk could not tell apart. */
-  readonly counts: { compared: number; completed: number; failed: number; cancelled: number; refused: number; unmatched: number };
+  readonly counts: { compared: number; completed: number; failed: number; cancelled: number; refused: number; unmatched: number; offered: number; offeredLeftOut: number };
 }
 
 /** WebKit's report of a <select>'s own inline style (see `watch`). */
@@ -122,7 +122,7 @@ export async function watch(page: Page, fixtures: FixtureLibrary, outDir: string
     runs: 0,
     problems: [],
     notes: [],
-    counts: { compared: 0, completed: 0, failed: 0, cancelled: 0, refused: 0, unmatched: 0 },
+    counts: { compared: 0, completed: 0, failed: 0, cancelled: 0, refused: 0, unmatched: 0, offered: 0, offeredLeftOut: 0 },
   };
   const engine = page.context().browser()?.browserType().name();
   page.on('pageerror', (error) => walker.problems.push(`page-error: ${error.message}`));
@@ -839,6 +839,9 @@ async function filesOf(walker: Walker, run: number, before: Submitted, shown: Re
         throw new StepFailure('offered-bytes', `run ${run}: the ${role} file ${offered.name} that the page offers (${offered.bytes.length} bytes) is none of the inputs that the walk's form holds (${before.inputs[role].map((input) => `${input.name} ${input.bytes.length} bytes`).join(', ') || 'none'})`);
       }
       files[role] = { name: offered.name, bytes: offered.bytes };
+      walker.counts.offered += 1;
+      // Of those, the files with records left out (Run details says "without").
+      if (((await walker.page.getByTestId(`run-input-${role}-from`).textContent().catch(() => null)) ?? '').includes(' without ')) walker.counts.offeredLeftOut += 1;
       continue;
     }
     const input = inputOf(before.inputs[role], shown[role]);

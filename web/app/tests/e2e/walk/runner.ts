@@ -151,8 +151,8 @@ export async function walkTest(
   await testInfo.attach('walk-steps.json', { body: JSON.stringify(file, null, 1), contentType: 'application/json' });
   for (const note of result.notes) testInfo.annotations.push({ type: 'walk note', description: note });
   if (result.counts !== undefined) {
-    const { compared, completed, failed, cancelled, refused, unmatched } = result.counts;
-    const line = `runs: ${completed} completed, ${failed} failed, ${cancelled} cancelled, ${refused} presses refused; outputs equal to the native CLI's: ${compared}; completed runs not compared (inputs of one name): ${unmatched}`;
+    const { compared, completed, failed, cancelled, refused, unmatched, offered, offeredLeftOut } = result.counts;
+    const line = `runs: ${completed} completed, ${failed} failed, ${cancelled} cancelled, ${refused} presses refused; outputs equal to the native CLI's: ${compared}; completed runs not compared (inputs of one name): ${unmatched}; files of LOSAT's that the page offered and the CLI ran on (records left out, several files, pasted text): ${offered}, with records left out: ${offeredLeftOut}`;
     testInfo.annotations.push({ type: 'walk runs', description: line });
     if (TRACE) console.log(line);
   }

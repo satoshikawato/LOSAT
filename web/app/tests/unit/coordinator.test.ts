@@ -337,7 +337,7 @@ describe('Coordinator', () => {
   it('keeps what a made input is made of, and saves its bytes under its name', async () => {
     const { coordinator, saved } = setup(new ManualEngine());
     const pasted = (await coordinator.enqueue(request)).runId!;
-    expect(viewOf(coordinator, pasted)!.snapshot.query.from).toEqual([{ name: 'pasted text', records: 1, leftOut: [] }]);
+    expect(viewOf(coordinator, pasted)!.snapshot.query.from).toEqual([{ name: 'pasted text', records: 1, leftOut: [], leftOutCount: 0 }]);
     const file = new File(['>chr1\nACGTACGT\n'], 'genome.fa');
     const given = (await coordinator.enqueue({ ...request, subject: { file } })).runId!;
     expect(viewOf(coordinator, given)!.snapshot.subject.from).toBeUndefined();

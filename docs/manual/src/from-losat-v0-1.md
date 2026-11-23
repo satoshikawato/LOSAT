@@ -41,6 +41,13 @@ A search that v0.1.0 supported gives NCBI BLAST+ 2.17.0's output in v0.2.0 too. 
 | Libraries and WebAssembly | Internal only | A public Rust library (`losat::api`), a Python package (`pylosat` on PyPI), and a WebAssembly npm package (`losat`, built from the repository) ([Using LOSAT as a library](library.md)) |
 | Web GUI | not part of the release | Preview ([Platforms and WebAssembly](platforms.md)) |
 
+### Speed and memory since v0.1.0
+
+Across all four search modes present in v0.1.0 (`blastn`, `tblastx`, `megablast`, and `blastp`), v0.2.0 runs `5.5×` to `45.5×` faster and uses `2.8×` to `50.3×` less peak resident memory at 16 threads while bringing `megablast` and `tblastx` into exact byte-for-byte parity with NCBI BLAST+ 2.17.0 (see [Threads, speed and memory](performance.md) for the full v0.2.0 benchmark suite):
+
+<img class="figure-for-light" src="images/fig6_v01_to_v02.png" alt="Wall time and peak memory of LOSAT v0.1.0, NCBI BLAST+ 2.17.0, and LOSAT v0.2.0 across all four v0.1.0 search modes at 16 threads" width="100%">
+<img class="figure-for-dark" src="images/fig6_v01_to_v02_dark.png" alt="Wall time and peak memory of LOSAT v0.1.0, NCBI BLAST+ 2.17.0, and LOSAT v0.2.0 across all four v0.1.0 search modes at 16 threads (dark theme)" width="100%">
+
 ### Databases and `-db`
 
 In v0.1.0 you could not search a database. Now every search program except `rpsblast` and `rpstblastn` reads either `-subject` or `-db`, and these two read only `-db`, as in NCBI. See [BLAST databases](databases.md).

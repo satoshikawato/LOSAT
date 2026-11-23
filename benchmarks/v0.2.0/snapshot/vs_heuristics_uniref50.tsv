@@ -1,0 +1,23 @@
+query_set	arm_id	tool	mode	indexed	threads	wall_s	max_rss_gib	rss_anon_gib	recall_uncapped	recall_best_hit	exact_ncbi_parity	build_note
+q100	losat_bp	LOSAT	blastp	no	32	407.04	0.126	0.116	1.0	1.0	yes	LOSAT 995281681
+q100	losat_fast	LOSAT	blastp-fast	no	32	28.05	0.151	0.141	0.891	1.0	yes_fast	LOSAT 995281681
+q100	ncbi_def	NCBI BLAST+	blastp	no	32	1067.88	13.395	0.195	1.0	1.0	baseline	NCBI BLAST+ 2.17.0
+q100	ncbi_fast	NCBI BLAST+	blastp-fast	no	32	91.67	13.385	0.194	0.891	1.0	baseline_fast	NCBI BLAST+ 2.17.0
+q100	dmnd_def	DIAMOND	default	no	32	39.58	5.027	5.027	0.647	1.0	no	DIAMOND 2.2.8
+q100	dmnd_ms	DIAMOND	--more-sensitive	no	32	162.82	9.004	9.004	0.897	1.0	no	DIAMOND 2.2.8
+q100	dmnd_us	DIAMOND	--ultra-sensitive	no	32	836.25	3.57	3.57	0.941	1.0	no	DIAMOND 2.2.8
+q100	mmseqs_s57_noidx	MMseqs2	-s 5.7 (no index)	no	32	244.79	94.907	94.92	0.855	0.99	no	MMseqs2 18.8cc5c
+q100	mmseqs_s75_noidx	MMseqs2	-s 7.5 (no index)	no	32	265.71	115.739	115.755	0.912	0.99	no	MMseqs2 18.8cc5c
+q100	mmseqs_s57_idx	MMseqs2	-s 5.7 (101 GiB idx)	yes	32	14.44	94.686	10.574	0.855	0.99	no	MMseqs2 18.8cc5c
+q100	mmseqs_s75_idx	MMseqs2	-s 7.5 (101 GiB idx)	yes	32	93.84	198.996	114.884	0.912	0.99	no	MMseqs2 18.8cc5c
+q1000	losat_bp	LOSAT	blastp	no	32	3873.54	0.342	0.332	1.0	1.0	yes	LOSAT 995281681
+q1000	losat_fast	LOSAT	blastp-fast	no	32	214.36	0.362	0.353	0.862	1.0	yes_fast	LOSAT 995281681
+q1000	ncbi_def	NCBI BLAST+	blastp	no	32	10692.28	15.966	0.251	1.0	1.0	baseline	NCBI BLAST+ 2.17.0
+q1000	ncbi_fast	NCBI BLAST+	blastp-fast	no	32	860.47	15.965	0.27	0.862	1.0	baseline_fast	NCBI BLAST+ 2.17.0
+q1000	dmnd_def	DIAMOND	default	no	32	51.61	5.688	5.688	0.592	0.998	no	DIAMOND 2.2.8
+q1000	dmnd_ms	DIAMOND	--more-sensitive	no	32	220.91	7.645	7.645	0.857	0.998	no	DIAMOND 2.2.8
+q1000	dmnd_us	DIAMOND	--ultra-sensitive	no	32	1467.36	5.582	5.582	0.904	0.998	no	DIAMOND 2.2.8
+q1000	mmseqs_s57_noidx	MMseqs2	-s 5.7 (no index)	no	32	259.9	104.097	104.114	0.818	0.995	no	MMseqs2 18.8cc5c
+q1000	mmseqs_s75_noidx	MMseqs2	-s 7.5 (no index)	no	32	349.33	116.586	116.604	0.858	0.995	no	MMseqs2 18.8cc5c
+q1000	mmseqs_s57_idx	MMseqs2	-s 5.7 (101 GiB idx)	yes	32	29.64	102.805	18.541	0.818	0.995	no	MMseqs2 18.8cc5c
+q1000	mmseqs_s75_idx	MMseqs2	-s 7.5 (101 GiB idx)	yes	32	170.74	199.967	115.706	0.858	0.995	no	MMseqs2 18.8cc5c

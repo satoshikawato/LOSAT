@@ -14,7 +14,7 @@ use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 const K_PSI_NEAR_IDENTICAL: f64 = 0.94;
 const K_PSI_IDENTICAL: f64 = 1.0;
 const K_QUERY_INDEX: usize = 0;
-const K_EPSILON: f64 = 0.0001;
+pub(super) const K_EPSILON: f64 = 0.0001;
 const K_PSI_SCALE_FACTOR: i32 = 200;
 const K_POSIT_SCALING_PERCENT: f64 = 0.05;
 const K_POSIT_SCALING_NUM_ITERATIONS: u32 = 10;
@@ -24,7 +24,7 @@ const EFFECTIVE_ALPHABET: usize = 20;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2065-2066
 const MAX_IND_OBSERVATIONS: usize = 400;
-const PSEUDO_MAX: f64 = 1000000.0;
+pub(super) const PSEUDO_MAX: f64 = 1000000.0;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/ncbi_math.h:161
 const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
@@ -32,8 +32,8 @@ const NCBIMATH_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's lite
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_stat.h:122
 const BLAST_SCORE_MAX: i32 = i16::MAX as i32;
 
-const GAP: u8 = ncbistdaa::GAP;
-const X: u8 = ncbistdaa::X;
+pub(super) const GAP: u8 = ncbistdaa::GAP;
+pub(super) const X: u8 = ncbistdaa::X;
 const STAR: u8 = ncbistdaa::STOP;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441
@@ -215,7 +215,7 @@ impl SequenceWeights {
 pub(super) struct InternalPssm {
     pssm: Vec<[i32; BLASTAA_SIZE]>,
     scaled_pssm: Vec<[i32; BLASTAA_SIZE]>,
-    freq_ratios: Vec<[f64; BLASTAA_SIZE]>,
+    pub(super) freq_ratios: Vec<[f64; BLASTAA_SIZE]>,
     pseudocounts: Vec<f64>,
 }
 
@@ -736,7 +736,7 @@ pub(super) fn compute_freq_ratios(
                 &expno,
             );
             column_counts = if pseudo_count == 0 {
-                column_specific_pseudocounts(seq_weights, p, sbp.background, observations)
+                column_specific_pseudocounts(&seq_weights.match_weights[p], sbp.background, observations)
             } else {
                 pseudo_count as f64
             };
@@ -747,30 +747,76 @@ pub(super) fn compute_freq_ratios(
         } else {
             column_counts
         };
-        for r in 0..BLASTAA_SIZE {
-            if query_is_x || seq_weights.std_prob[r] <= K_EPSILON {
-                internal.freq_ratios[p][r] = 0.0;
-                continue;
-            }
-            let beta = pseudo_weight;
-            internal.pseudocounts[p] = beta;
-            let mut pseudo = 0.0;
-            for i in 0..BLASTAA_SIZE {
-                if sbp.matrix[r][i] != BLAST_SCORE_MIN {
-                    pseudo += seq_weights.match_weights[p][i] * sbp.freq_ratios[r][i];
-                }
-            }
-            pseudo *= beta;
-            let numerator =
-                observations * seq_weights.match_weights[p][r] / seq_weights.std_prob[r] + pseudo;
-            let denominator = observations + beta;
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2162-2166
-            if nsg_compatibility_mode && denominator == 0.0 {
-                return Err(PsiError::Unknown);
-            }
-            let q_over_p_estimate = numerator / denominator;
-            internal.freq_ratios[p][r] = q_over_p_estimate * seq_weights.std_prob[r];
+        column_freq_ratios(
+            ColumnPseudocounts {
+                query_is_x,
+                pseudo_weight,
+                observations,
+            },
+            &seq_weights.match_weights[p],
+            &seq_weights.std_prob,
+            sbp,
+            nsg_compatibility_mode,
+            &mut internal.freq_ratios[p],
+            Some(&mut internal.pseudocounts[p]),
+        )?;
+    }
+    Ok(())
+}
+
+/// What the frequency ratios of one column read besides its weighted residue frequencies
+/// (`s_columnSpecificPseudocounts` and the effective number of observations of the column).
+#[derive(Clone, Copy)]
+pub(super) struct ColumnPseudocounts {
+    /// The query's letter at the column is X: the column's ratios are 0.
+    pub(super) query_is_x: bool,
+    /// The weight of the pseudocounts (`pseudoWeight`).
+    pub(super) pseudo_weight: f64,
+    /// The observations (`alpha` of the 2001 paper's equation 2).
+    pub(super) observations: f64,
+}
+
+/// The frequency ratios of one column (the loop over the residues of `_PSIComputeFreqRatios` and
+/// of `_PSIComputeFreqRatiosFromCDs`, one function for both: the arithmetic is the same, in the
+/// same order): `match_weights` are the column's weighted residue frequencies, `ratios` receives
+/// its 28 ratios, `pseudocounts` the column's weight of the pseudocounts, set at the first residue
+/// whose standard probability is not near zero (the alignment path's diagnostics read it).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2127-2176
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2231-2283
+pub(super) fn column_freq_ratios(
+    column: ColumnPseudocounts,
+    match_weights: &[f64; BLASTAA_SIZE],
+    std_prob: &[f64; BLASTAA_SIZE],
+    sbp: &PsiScoreBlk,
+    nsg_compatibility_mode: bool,
+    ratios: &mut [f64; BLASTAA_SIZE],
+    mut pseudocounts: Option<&mut f64>,
+) -> Result<(), PsiError> {
+    for r in 0..BLASTAA_SIZE {
+        if column.query_is_x || std_prob[r] <= K_EPSILON {
+            ratios[r] = 0.0;
+            continue;
         }
+        let beta = column.pseudo_weight;
+        if let Some(pseudocounts) = pseudocounts.as_deref_mut() {
+            *pseudocounts = beta;
+        }
+        let mut pseudo = 0.0;
+        for i in 0..BLASTAA_SIZE {
+            if sbp.matrix[r][i] != BLAST_SCORE_MIN {
+                pseudo += match_weights[i] * sbp.freq_ratios[r][i];
+            }
+        }
+        pseudo *= beta;
+        let numerator = column.observations * match_weights[r] / std_prob[r] + pseudo;
+        let denominator = column.observations + beta;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2162-2166
+        if nsg_compatibility_mode && denominator == 0.0 {
+            return Err(PsiError::Unknown);
+        }
+        let q_over_p_estimate = numerator / denominator;
+        ratios[r] = q_over_p_estimate * std_prob[r];
     }
     Ok(())
 }
@@ -855,9 +901,8 @@ const CHAR_ORDER: [usize; EFFECTIVE_ALPHABET] = [
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:3086-3118
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:3014-3060
-fn column_specific_pseudocounts(
-    seq_weights: &SequenceWeights,
-    column: usize,
+pub(super) fn column_specific_pseudocounts(
+    match_weights: &[f64; BLASTAA_SIZE],
     background: &[f64; 20],
     observations: f64,
 ) -> f64 {
@@ -869,7 +914,7 @@ fn column_specific_pseudocounts(
     let mut intermediate_sums = [0.0; EFFECTIVE_ALPHABET];
     let mut overall_sum = 0.0;
     for c in 0..EFFECTIVE_ALPHABET {
-        let initial = seq_weights.match_weights[column][CHAR_ORDER[c]];
+        let initial = match_weights[CHAR_ORDER[c]];
         intermediate_sums[c] = initial * observations + background[c] * K_PSEUDO_SMALL_INITIAL;
         overall_sum += intermediate_sums[c];
     }

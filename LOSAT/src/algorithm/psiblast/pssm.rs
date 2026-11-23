@@ -543,6 +543,7 @@ pub(crate) fn error_code_to_string(error: PsiError) -> &'static str {
         PsiError::ImpalaScoreRange => "Unknown error code returned from PSSM engine: 1",
         // makeprofiledb refuses the PSSM before this text is written.
         PsiError::ScalingUndefined => "The scaling of the PSSM leaves defined behaviour",
+        PsiError::BadProfile => "Errors in conserved domain profile",
     }
 }
 

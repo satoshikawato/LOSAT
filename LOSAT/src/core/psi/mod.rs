@@ -11,7 +11,10 @@
 //! matches to pseudocounts, sigma, the interval sizes and the number of matching sequences of each
 //! position.
 
+mod cd_stages;
 mod stages;
+
+pub(crate) use cd_stages::{create_pssm_from_cdd, CdCell, CdColumn, PsiCdMsa};
 
 use crate::utils::matrix::BLASTAA_SIZE;
 
@@ -185,6 +188,8 @@ pub(crate) enum PsiError {
     /// score past `int`, a factor that grows without end, `fillSfp` without a score below
     /// `BLAST_SCORE_MAX`): the caller refuses the PSSM (`stages::pssm_from_freq_ratios_engine`).
     ScalingUndefined,
+    /// `PSIERR_BADPROFILE`: a conserved domain's column that is not valid (`_PSIValidateCdMSA`).
+    BadProfile,
 }
 
 /// The `PSIBlastOptions` that the engine's stages read besides the pseudocount: the options of the

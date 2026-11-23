@@ -2141,18 +2141,25 @@ pub(crate) fn build_disc_mb_lookup_kept(
                 x_offsets,
                 x_qs,
             ),
-            None => (
-                x_dc_csr::build(
-                    &words,
-                    hashsize,
-                    &mut pv_array,
-                    pv_array_bts,
-                    &mut helper_array,
-                    x_offsets,
-                    x_qs,
-                ),
-                false,
-            ),
+            None => {
+                // EXPERIMENT (LOSAT_X_DCQSAHEAD): no pool (one thread): the serial build places as
+                // before.
+                if x_dc_csr::qs_ahead_on() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_DCQSAHEAD", false);
+                }
+                (
+                    x_dc_csr::build(
+                        &words,
+                        hashsize,
+                        &mut pv_array,
+                        pv_array_bts,
+                        &mut helper_array,
+                        x_offsets,
+                        x_qs,
+                    ),
+                    false,
+                )
+            }
         };
         let csr = match x_keep {
             Some(keep) => csr.x_kept(keep, (x_length, x_dirty)),

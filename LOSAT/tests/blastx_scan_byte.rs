@@ -306,6 +306,12 @@ fn the_scan_on_presence_bytes_gives_the_reports_of_the_scans_before() {
                     blastx(&args, &[DIRECT, ("LOSAT_X_CHAINRUN", "0")]),
                     Some(default_sides(sparse)),
                 ),
+                // The AVX2 candidate stage without its list in steps (`LOSAT_X_LISTSTEP=0`).
+                (
+                    "direct, no list steps",
+                    blastx(&args, &[DIRECT, ("LOSAT_X_LISTSTEP", "0")]),
+                    Some(default_sides(sparse)),
+                ),
                 // The default: the fused loop where it pays (AVX2), the direct loop elsewhere.
                 ("default", blastx(&args, &[]), None),
             ] {

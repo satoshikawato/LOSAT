@@ -29,9 +29,6 @@ const ADAPTER_OWNED: [&str; 6] = [
     "index_name",
 ];
 
-/// Genetic codes are small integers; every accepted one is below this bound.
-const GENETIC_CODE_PROBE: u32 = 64;
-
 /// The options of `program` that the browser's searches of records take none of (tblastn's
 /// `-in_pssm`, which the browser refuses until line PS's PSW1; the search strategy file
 /// `-export_search_strategy`, until line RG's F1w gives it as a side file): the browser's list
@@ -130,15 +127,9 @@ fn describe_program(program: Program) -> Result<String, String> {
         {
             continue;
         }
-        // The engine's own parser decides which codes it accepts.
-        let flag = format!("-{long}");
-        let accepted: Vec<u32> = (0..GENETIC_CODE_PROBE)
-            .filter(|code| {
-                let code = code.to_string();
-                crate::run::parse(&[program.name(), "-query", "q", "-subject", "s", &flag, &code])
-                    .is_ok()
-            })
-            .collect();
+        // The codes of the key's constraint in the engine's argument tables (NCBI's, and LOSAT's
+        // 32 of tblastn's `-db_gencode`).
+        let accepted = losat::web_adapter::genetic_codes(program.name(), long).unwrap_or_default();
         let _ = write!(out, ",\"{key}\":[");
         for (index, code) in accepted.iter().enumerate() {
             if index > 0 {

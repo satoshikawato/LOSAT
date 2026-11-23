@@ -167,8 +167,9 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
         ),
         (9, 1, 18.0, 15)
     );
-    assert!(limit(&["-ungapped", "-comp_based_stats", "F"])
-        .contains("not supported by LOSAT's TBLASTN"));
+    // `-ungapped` with composition-based statistics F (0): NCBI's ungapped search, which
+    // LOSAT runs (line O4c).
+    assert!(check_options(&parse(&["-ungapped", "-comp_based_stats", "F"]).unwrap()).is_ok());
     // NCBI's tblastn crashes with IDENTITY's compressed lookup table.
     for extra in [
         &["-task", "tblastn-fast", "-matrix", "IDENTITY"][..],
@@ -570,6 +571,46 @@ fn the_x_drops_reach_the_search_or_ncbis_errors() {
             .resolve()
             .unwrap();
         assert!(check_search_limits(&resolved).is_ok());
+    }
+}
+
+// NCBI BLAST+ 2.17.0 with `-ungapped -comp_based_stats 0` (line O4c): a `-matrix` name that
+// NCBI's tables do not have reaches the setup of the first batch, which fails with NCBI's
+// engine error (`SetupEngineError::unknown_matrix`); one that the matrix loader reads as
+// IDENTITY without a table aborts there, which LOSAT refuses; a gapped search refuses both
+// with NCBI's options error first.
+#[test]
+fn an_ungapped_search_keeps_a_matrix_of_no_table_for_its_setup() {
+    use crate::algorithm::tblastx::args::TblastxMatrix;
+    let ungapped = |matrix: &str| {
+        parse(&["-ungapped", "-comp_based_stats", "0", "-matrix", matrix])
+            .unwrap()
+            .resolve()
+            .unwrap()
+    };
+    let resolved = ungapped("FOO");
+    assert_eq!(resolved.unknown_matrix, Some(TblastxMatrix::Unknown));
+    assert!(check_search_limits(&resolved).is_ok());
+    let scoring = search_settings(&resolved).unwrap().scoring;
+    assert!(scoring.unknown_matrix);
+    assert_eq!(scoring.matrix, ScoringMatrix::Blosum62);
+    for matrix in ["BLOSUM62", "pam30", "IDENTITY"] {
+        let resolved = ungapped(matrix);
+        assert_eq!(resolved.unknown_matrix, None, "{matrix}");
+        assert!(!search_settings(&resolved).unwrap().scoring.unknown_matrix);
+    }
+    let resolved = ungapped("identityx");
+    assert_eq!(resolved.unknown_matrix, Some(TblastxMatrix::Aborts));
+    let error = check_search_limits(&resolved).unwrap_err().to_string();
+    assert!(
+        error.contains("-matrix identityx is read as IDENTITY") && error.contains("TBLASTN"),
+        "{error}"
+    );
+    for matrix in ["FOO", "IDENTITYX"] {
+        assert!(
+            parse(&["-matrix", matrix]).unwrap().resolve().is_err(),
+            "{matrix}"
+        );
     }
 }
 

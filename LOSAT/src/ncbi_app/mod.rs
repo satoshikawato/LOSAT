@@ -38,6 +38,10 @@ pub(crate) struct Tool {
     pub(crate) post_prefix: Option<&'static str>,
     /// The components of its full versions (`CVersionAPI::AddComponentVersion`; windowmasker's).
     pub(crate) components: &'static [crate::ncbi_version::Component],
+    /// What runs in place of `Run` with `-dryrun` (`DryRun`, after `Init`): the work of the
+    /// program's `Init` that LOSAT does in its `Run` (makeprofiledb's parameters and files), or
+    /// nothing (`None`: exit status 0).
+    pub(crate) dry_run: Option<Body>,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
@@ -167,6 +171,14 @@ impl Diag<'_> {
         self.report_arg_exception(&error, Some("Application's execution failed"))
     }
 
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:675-690
+    /// A `CArgException` that the program's `Init` throws (makeprofiledb's `AsInputFile`,
+    /// `AsOutputFile`): reported as the reader's argument errors are, without a backlog; exit
+    /// status 1.
+    pub(crate) fn init_arg_exception(&mut self, error: ArgException) -> i32 {
+        self.report_arg_exception(&error, None)
+    }
+
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1086-1112
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7877-7888
     // With `eDPF_Severity` alone each exception of the chain is posted as `Error: <text>`, oldest
@@ -174,7 +186,8 @@ impl Diag<'_> {
     // and the text of the newest exception that has its main text: the one the reader threw (a
     // backlog has none).
     /// NCBI's report of the argument error `error` (the backlog `backlog` added, when `Run`
-    /// threw it): the usage, the line of `=` and the posts; exit status 1.
+    /// threw it): the usage, the line of `=` and the posts; exit status 1. Its callers are the
+    /// reader's entry, `read`, and `run_arg_exception`.
     fn report_arg_exception(&mut self, error: &ArgException, backlog: Option<&str>) -> i32 {
         if error.code != "eNoValue" {
             let _ = self
@@ -191,14 +204,58 @@ impl Diag<'_> {
             let _ = write!(self.stderr, "{}\n\n", "=".repeat(72));
             let _ = self.stderr.flush();
         }
-        for message in error.messages.iter().map(String::as_str).chain(backlog) {
-            self.post(&format!("Error: {message}"));
+        let messages = error.messages.iter().map(Vec::as_slice);
+        for message in messages.chain(backlog.map(str::as_bytes)) {
+            self.post_bytes(&[b"Error: ".as_slice(), message].concat());
         }
         // NCBI's `Error:  (CArgException::<code>) <message>`, in LOSAT's words (`crate::wording`:
         // without the class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
-        self.post(&format!("Error:  {}", error.message()));
+        self.post_bytes(&[b"Error:  ".as_slice(), error.message()].concat());
         1
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-697
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1086-1112 (cited at
+// `Diag::report_arg_exception`)
+/// NCBI's reader of `tool`'s arguments `words` (`args::parse`, the words that the application
+/// leaves to it: `ncbi_environment::preparse`) with what NCBI's application writes for each
+/// outcome; the arguments, or the exit status of the command line that the reader ends. The one
+/// producer of these bytes for every caller of the reader.
+///
+/// - `-h`: the short usage (`short_usage`) on `out`, exit status 0.
+/// - `-help` and `-help-full`: the program's `-help` text (`help_text`) on `out`, exit status 0.
+/// - `-xmlhelp`: NCBI's XML of the program's arguments on `out`, made by `xml_help` (the
+///   command line's; LOSAT's XML leaves out the arguments that LOSAT refuses,
+///   `ncbi_app::args::refusal`, `cli::xml_help_text`), exit status 0; a caller without it (the
+///   library API) refuses the word (`cli::xml_help_refusal`, line RG DECISIONS E2x-1) on the
+///   standard error, exit status 1.
+/// - An argument error (`ArgException`): on `diag`'s standard error, the short usage, then, when
+///   the diagnostics go to the file of `-logfile`, the line `Error in command-line arguments. See
+///   error logs for more details.`, then a line of 72 `=` and an empty line; then NCBI's posts of
+///   the exception on `diag`'s target (the file of `-logfile`, else the standard error): `Error:
+///   <message>` for each message of the chain, oldest first, and `Error:  <message>` of the
+///   exception's own (`Diag::report_arg_exception`); exit status 1.
+pub(crate) fn read(
+    tool: &'static Tool,
+    words: &[OsString],
+    out: &mut dyn Write,
+    diag: &mut Diag,
+    xml_help: Option<fn(&str) -> Option<String>>,
+) -> Result<Args, i32> {
+    let text = match args::parse(tool, words) {
+        Ok(args) => return Ok(args),
+        Err(ArgsError::Usage) => short_usage(tool.help),
+        Err(ArgsError::Help) => help_text(tool.help).into_owned(),
+        Err(ArgsError::XmlHelp) => match xml_help.and_then(|xml| xml(tool.program)) {
+            Some(xml) => xml,
+            None => return Err(diag.refuse(&crate::cli::xml_help_refusal(tool.refusal_name))),
+        },
+        // `eNoValue` (which prints no usage) is not raised by the reader.
+        Err(ArgsError::Invalid(error)) => return Err(diag.report_arg_exception(&error, None)),
+    };
+    let _ = out.write_all(text.as_bytes());
+    Err(0)
 }
 
 /// Runs `tool` with `words` (the command line after `losat <program>`), after the command line's
@@ -224,7 +281,9 @@ pub(crate) fn run(
         words,
         (&mut std::io::stdin(), &mut out, &mut err),
         body,
-        (start, Some(ncbi_xml)),
+        // The command line's `-xmlhelp`: NCBI's XML without the arguments that LOSAT refuses
+        // (of the programs of `ncbi_app`, makeprofiledb's `-binary` at its run, `ncbi_xmlhelp_tests`).
+        (start, Some(crate::cli::xml_help_text)),
     );
     let _ = out.flush();
     let _ = err.flush();
@@ -251,14 +310,14 @@ pub(crate) type Body = fn(
 ///
 /// The order is NCBI's: the diagnostic file of `-logfile` is opened first (append; stderr when
 /// it cannot be opened), then `-version` and the full versions are read (the first one is
-/// printed, in the library API too, whatever the bytes of the other words, `ncbi_version::print`;
-/// a word that is not UTF-8 is refused after them), then the configuration is loaded (the file of
-/// `-conffile` in place of `<program>.ini`; its messages go where the diagnostics go; a
-/// `<program>.ini` that NCBI reports as malformed ends the run with exit status 2: g_reg probes
-/// `o2`, `inibad_null`), then the arguments; an argument error prints the usage and a line of `=`
-/// on stderr and NCBI's report of the exception as diagnostics. `-xmlhelp`, whose XML only the
-/// command line writes, is refused where the reader takes it, and `-dryrun` ends the run with exit
-/// status 0 after the arguments and the settings. Then `body` runs.
+/// printed, in the library API too, whatever the bytes of the other words, `ncbi_version::print`),
+/// then the configuration is loaded (the file of `-conffile` in place of `<program>.ini`; its
+/// messages go where the diagnostics go; a `<program>.ini` that NCBI reports as malformed ends the
+/// run with exit status 2: g_reg probes `o2`, `inibad_null`), then the arguments (`read`, which
+/// writes what NCBI writes for a help word and an argument error); `-xmlhelp`, whose XML only the
+/// command line writes, is refused where the reader takes it. `-dryrun` ends the run with exit
+/// status 0 after the arguments and the settings. A value that is not UTF-8 is refused where the
+/// body would start (`Args::text_values_refusal`). Then `body` runs.
 pub(crate) fn run_with(
     tool: &'static Tool,
     words: &[OsString],
@@ -278,12 +337,6 @@ pub(crate) fn run_with(
         }
     }
     run_app(tool, words, (input, out, err), body, (&start, None))
-}
-
-/// NCBI's XML of `program`'s arguments, whole: the readers of `ncbi_app` refuse no argument of
-/// NCBI's by name (`ncbi_xmlhelp_tests`).
-fn ncbi_xml(program: &str) -> Option<String> {
-    crate::ncbi_xmlhelp::print(program, |_| false)
 }
 
 /// The run of `run` and `run_with` after the application start `start` (whose usage report's
@@ -313,19 +366,6 @@ fn run_app(
         }
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };
-    let Some(words) = words
-        .iter()
-        .map(|word| word.to_str().map(str::to_string))
-        .collect::<Option<Vec<String>>>()
-    else {
-        let _ = writeln!(
-            err,
-            "Error: a word of the command line is not UTF-8; NCBI BLAST+ reads its bytes, which \
-             is not supported by LOSAT's {}",
-            tool.refusal_name
-        );
-        return 1;
-    };
     let mut diag = Diag {
         target,
         stderr: err,
@@ -339,27 +379,11 @@ fn run_app(
         Ok(Some(status)) => return status,
         Err(reason) => return diag.refuse(&reason),
     }
-    let args = match args::parse(tool, &words) {
+    // NCBI's XML, which the command line's run writes (`cli::xml_help_text`); the library API
+    // writes none.
+    let args = match read(tool, &words, out, &mut diag, xml_help) {
         Ok(args) => args,
-        Err(ArgsError::Usage) => {
-            let _ = out.write_all(short_usage(tool.help).as_bytes());
-            return 0;
-        }
-        Err(ArgsError::Help) => {
-            let _ = out.write_all(help_text(tool.help).as_bytes());
-            return 0;
-        }
-        // NCBI's XML, which the command line's run writes (`ncbi_xml`); the library API writes
-        // none (`cli::xml_help_refusal`, line RG DECISIONS E2x-1).
-        Err(ArgsError::XmlHelp) => match xml_help.and_then(|xml| xml(tool.program)) {
-            Some(xml) => {
-                let _ = out.write_all(xml.as_bytes());
-                return 0;
-            }
-            None => return diag.refuse(&crate::cli::xml_help_refusal(tool.refusal_name)),
-        },
-        // `eNoValue` (which prints no usage) is not raised by the reader.
-        Err(ArgsError::Invalid(error)) => return diag.report_arg_exception(&error, None),
+        Err(status) => return status,
     };
     let settings = match start.settings() {
         Ok(settings) => settings,
@@ -371,7 +395,21 @@ fn run_app(
     // in a run first). NCBI BLAST+ 2.17.0 dustmasker: `-in missing.fa -dryrun` and
     // `-infmt blastdb -in missing -dryrun` give exit status 0 and no output.
     if dryrun {
-        return 0;
+        return match tool.dry_run {
+            Some(init) => init(
+                &args,
+                &settings,
+                &mut files::Cin::new(input),
+                out,
+                &mut diag,
+            ),
+            None => 0,
+        };
+    }
+    // The programs read their values as text (`Args::value`): one that is not UTF-8 is refused
+    // where NCBI's `Run` starts, after the reader's errors and `-dryrun`, which runs no body.
+    if let Some(refusal) = args.text_values_refusal(tool) {
+        return diag.refuse(&refusal);
     }
     body(
         &args,

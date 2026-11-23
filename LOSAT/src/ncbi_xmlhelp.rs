@@ -6,8 +6,9 @@
 //! DECISIONS E2x-1, the Owner's choice of 2026-11-13): the arguments that LOSAT runs keep NCBI's
 //! definitions, byte for byte (their types, defaults, constraints, groups and dependencies), and
 //! an argument that LOSAT ports is written again as it stops being refused. The names to leave
-//! out are the program reader's own refusals (`cli::refuses_option`; the readers of
-//! `ncbi_app` refuse none), so the XML describes what the reader takes.
+//! out are LOSAT's refusals, by name or at the run (`ncbi_app::args::refusal`, read by
+//! `cli::xml_help_text`; the readers of `ncbi_app` refuse none), so the XML describes what the
+//! reader takes.
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690
 // The XML of each program as NCBI BLAST+ 2.17.0 prints it (the official x64-linux build; the
@@ -35,6 +36,10 @@ const PROGRAMS: &[(&str, &str)] = &[
         include_str!("ncbi_xmlhelp/convert2blastmask.xml"),
     ),
     ("makembindex", include_str!("ncbi_xmlhelp/makembindex.xml")),
+    (
+        "makeprofiledb",
+        include_str!("ncbi_xmlhelp/makeprofiledb.xml"),
+    ),
 ];
 
 /// NCBI 2.17.0's `-xmlhelp` of `program`, unchanged.

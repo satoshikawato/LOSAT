@@ -1,6 +1,7 @@
 // Reading the outfmt 0 text that the engine wrote (plan §4.5). Only the subject heading's
 // title is cut out for the subject list; the detail shows the heading and the HSP's
-// section as written.
+// section as written. The text of a run made with -html is htmlShownText's (outfmt0-html.ts),
+// a module of its own that the viewer loads only for such a run.
 
 /**
  * The title of a subject heading (the bytes of an HSP's `out0_subject` range): the text

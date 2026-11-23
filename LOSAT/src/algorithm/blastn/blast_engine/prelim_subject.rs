@@ -496,7 +496,8 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // return for an empty list, blast_gapalign.c:3706-3707,3826-3831).
 
     // NCBI architecture: Collect all ungapped hits first, then process in score-descending order
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824
+    // Asserts that `init_hitlist` is sorted by score (`Blast_InitHitListIsSortedByScore`).
     // This is critical for correct containment checking: high-score HSPs must be processed first
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
     let ungapped_hits = &mut subject_scratch.ungapped_hits;

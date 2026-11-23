@@ -291,8 +291,7 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
                 // REMOVED to match NCBI BLAST behavior
 
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:656-672
-                // Two-hit filter: check if there's a previous hit within window_size
-                // NCBI: if (s_off_pos < last_hit) return 0;  // hit within explored area
+                // Two-hit filter: skip hits that fall before `last_hit` within the already explored area.
                 let diag_idx = if use_array_indexing {
                     diag as usize
                 } else {

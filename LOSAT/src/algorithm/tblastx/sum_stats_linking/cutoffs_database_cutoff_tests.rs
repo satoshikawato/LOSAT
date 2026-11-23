@@ -1,6 +1,7 @@
 use super::*;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:998-1082
-// if (db_length > subject_length) { y_variable = log((double)db_length / subject_length)*kbp->K/gap_decay_rate; }
+// When `db_length` exceeds `subject_length`, `y_variable` scales by the log of their ratio times
+// `K` divided by `gap_decay_rate`.
 // Expected values evaluated from the extracted NCBI C function.
 #[test]
 fn complete_database_changes_linking_cutoff() {

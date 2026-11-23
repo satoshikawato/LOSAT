@@ -41,6 +41,62 @@ fn v4_oids(name: &str) -> impl Fn(&str) -> String {
     }
 }
 
+/// NCBI's version check of an accession (`x_CheckVersions`) reads the header of each
+/// candidate (`GetSeqIDs`), and its read of a record with a UTF8String title posts NCBI's
+/// warning before the lookup's own message (review 2 of RG-T5d, D2): `IdLookup::take_utf8`
+/// names the read; a lookup of the stored version reads no header.
+#[cfg(unix)]
+#[test]
+fn the_version_check_of_an_accession_notes_its_utf8_string_reads() {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/blastdbcmd/db");
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-vcheck-utf8-{}-{:?}",
+        crate::utils::test_dir::process_id(),
+        std::thread::current().id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    for ext in ["pin", "psq", "psd", "psi"] {
+        std::fs::copy(
+            source.join(format!("d4.{ext}")),
+            dir.join(format!("d4.{ext}")),
+        )
+        .unwrap();
+    }
+    // The title tag of OID 1 (`XP_800001.1 dup one a`) made a UTF8String's.
+    let index = std::fs::read(dir.join("d4.pin")).unwrap();
+    let word = |at: usize| u32::from_be_bytes(index[at..at + 4].try_into().unwrap()) as usize;
+    let mut at = 8;
+    for _ in 0..2 {
+        at += 4 + word(at);
+    }
+    let first_header = at + 4 + 8 + 4;
+    let mut header = std::fs::read(source.join("d4.phr")).unwrap();
+    let title = word(first_header + 4) + 6;
+    assert_eq!(header[title], 0x1a);
+    header[title] = 0x0c;
+    std::fs::write(dir.join("d4.phr"), header).unwrap();
+    let db = SeqDb::open(dir.join("d4").to_str().unwrap(), SeqType::Protein).unwrap();
+    let lookup = db.id_lookup().unwrap();
+    // A version that no sequence holds: the candidates' headers (`XP_800001.1` and `.2`, OIDs 1
+    // and 256) are read, the first with the warning.
+    assert!(accession_to_oids_v4(&lookup, "XP_800001.3")
+        .unwrap()
+        .is_empty());
+    let note = lookup.take_utf8().expect("the read of OID 1");
+    assert_eq!(
+        db.take_utf8_post_at(note.at).as_deref(),
+        Some("Blast-def-line-set.E.title")
+    );
+    assert!(lookup.take_utf8().is_none());
+    // The stored version: no header is read.
+    assert_eq!(
+        accession_to_oids_v4(&lookup, "XP_800001.1").unwrap(),
+        vec![1]
+    );
+    assert!(lookup.take_utf8().is_none());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn ordinal_ids_of_version4_are_read_without_files() {
     let oids = v4_oids("p4n");

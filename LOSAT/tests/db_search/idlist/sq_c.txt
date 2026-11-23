@@ -1,0 +1,4 @@
+ref|NP_000103.1|
+sp|P20106.1|N6_HUMAN
+lcl|loc7
+pdb|1ABC|A

@@ -43,6 +43,11 @@ pub(super) enum Stop {
     NcbiBytes(Vec<u8>),
     /// LOSAT's refusal: a diagnostic line, exit status 1.
     Refused(String),
+    /// Not an end: NCBI's warning of a UTF8String that its read of a record took for a
+    /// VisibleString (the member it names, `seqid::ber::utf8_string_path`), posted at its first
+    /// such read (`Source::deflines`), before the record's text. `Run::write` posts it and
+    /// writes the record again; the warning is posted once.
+    Utf8Post(String),
     /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`):
     /// the retrieval ends at once, exit status 0, no message. Any other failed write is
     /// dropped by the `Ostream` and the retrieval goes on.
@@ -61,10 +66,12 @@ impl Stop {
 }
 
 impl From<SeqDbError> for Stop {
-    /// A reader error inside the request: NCBI's own (`CSeqDBException`, or the `CFileException`
-    /// of a lookup file) is caught like any exception there (exit status 1, not the 2 of an error
-    /// at opening), with its message (`SeqDbError::ncbi_request_message`); LOSAT's is its error of
-    /// a file that cannot be read or a refusal (`common::database::losat_reader_error`).
+    /// A reader error inside the request: NCBI's own (`CSeqDBException`, the `CFileException`
+    /// of a lookup file, or another exception such as the `CSerialException` of a header record
+    /// that NCBI's read fails on) is caught like any exception there (exit status 1, not the 2 of
+    /// an error at opening), with its message (`GetMsg()`, `SeqDbError::ncbi_request_message`);
+    /// LOSAT's is its error of a file that cannot be read or a refusal
+    /// (`common::database::losat_reader_error`).
     fn from(error: SeqDbError) -> Stop {
         match error.ncbi_request_message() {
             Some(text) => Stop::NcbiBytes(text),
@@ -130,6 +137,23 @@ impl<'a> Source<'a> {
         }
     }
 
+    /// NCBI's warning of the UTF8String that its read of the header at `at` takes for a
+    /// VisibleString (`Stop::Utf8Post` of the member, `seqid::ber::utf8_string_path`), where
+    /// the run has not posted it (`SeqDb::take_utf8_post`: once per process).
+    #[cold]
+    #[inline(never)]
+    fn utf8_post(&self, at: SeqLocation) -> Option<Stop> {
+        self.db.take_utf8_post_at(at).map(Stop::Utf8Post)
+    }
+
+    /// The stop of a read of the header at `at` that failed with `error`: NCBI's warning first
+    /// where its read took a UTF8String before the failure (`utf8_post`), else the error.
+    #[cold]
+    #[inline(never)]
+    fn failed_read(&self, at: SeqLocation, error: crate::seqdb::SeqDbError) -> Stop {
+        self.utf8_post(at).unwrap_or_else(|| error.into())
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:411-425
     // Every read of the formatters finds the sequence by NCBI's OID (`FindVol`), not by the
     // OID list: the OID of a PIG that an alias file's range leaves out is read as any other
@@ -155,25 +179,41 @@ impl<'a> Source<'a> {
     }
 
     /// `GetHdr` of `oid`: the definition lines with their Seq-ids; `None`, NCBI's null set, for a
-    /// stored header of no bytes ([`Source::null_set`]).
+    /// stored header of no bytes ([`Source::null_set`]). The first read of a record with a
+    /// UTF8String where a VisibleString is expected gives NCBI's warning first (`Stop::Utf8Post`),
+    /// also where the read then fails.
     pub fn deflines(&self, oid: u32) -> Result<Option<DeflineSet>, Stop> {
         let at = self.at(oid)?;
-        let Some(set) = self.db.header_set_at(at)? else {
+        let read = self.db.header_set_at(at);
+        let Some(set) = read.map_err(|error| self.failed_read(at, error))? else {
             return self.null_set(at);
         };
-        check_read_bytes(oid, &set)?;
+        self.check_read(oid, at, &set)?;
         Ok(Some(set))
     }
 
     /// `GetHdr` of `oid` and the header that `GetBioseq` keeps in the Bioseq's user object
-    /// (`SeqDb::defline_set_with_header_at`); `None` as for [`Source::deflines`].
+    /// (`SeqDb::defline_set_with_header_at`); `None` and NCBI's warning as for
+    /// [`Source::deflines`].
     pub fn deflines_with_header(&self, oid: u32) -> Result<Option<(DeflineSet, Vec<u8>)>, Stop> {
         let at = self.at(oid)?;
-        let Some((set, header)) = self.db.defline_set_with_header_at(at)? else {
+        let read = self.db.defline_set_with_header_at(at);
+        let Some((set, header)) = read.map_err(|error| self.failed_read(at, error))? else {
             return self.null_set(at);
         };
-        check_read_bytes(oid, &set)?;
+        self.check_read(oid, at, &set)?;
         Ok(Some((set, header)))
+    }
+
+    /// The checks of a set read from the header at `at`: NCBI's warning of its first UTF8String
+    /// read (`utf8_post`), then the refusal of bytes NCBI reads as '#' (`check_read_bytes`).
+    fn check_read(&self, oid: u32, at: SeqLocation, set: &DeflineSet) -> Result<(), Stop> {
+        if set.utf8 {
+            if let Some(post) = self.utf8_post(at) {
+                return Err(post);
+            }
+        }
+        check_read_bytes(oid, set)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1997-2003
@@ -345,6 +385,14 @@ impl Output<'_, '_> {
     pub fn post(&mut self, message: &str) -> Result<(), Stop> {
         self.out.flush().map_err(Stop::write)?;
         self.diag.err_post(message);
+        Ok(())
+    }
+
+    /// NCBI's warning of a UTF8String read for the VisibleString member `path`
+    /// (`Diag::post_utf8_string`), after the output so far, as `post`.
+    pub fn post_utf8_string(&mut self, path: &str) -> Result<(), Stop> {
+        self.out.flush().map_err(Stop::write)?;
+        self.diag.post_utf8_string(path);
         Ok(())
     }
 
@@ -527,6 +575,12 @@ pub(super) fn process(
         }
         Err(Stop::Refused(reason)) => diag.refuse(&reason),
         Err(Stop::ClosedPipe) => 0,
+        // `Run::write` posts it and writes the record again: it ends no retrieval.
+        Err(Stop::Utf8Post(path)) => {
+            debug_assert!(false, "a post that no write took");
+            diag.post_utf8_string(&path);
+            0
+        }
     }
 }
 
@@ -896,7 +950,7 @@ fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
     let simplified = seqdb_simplify_accession(id.as_bytes()).map_err(|error| {
         Stop::NcbiBytes(match error {
             SimplifyError::SeqId(error) => error.message,
-            SimplifyError::Exception(message) => message,
+            SimplifyError::Exception(exception) => exception.get_msg().to_vec(),
         })
     })?;
     lookup
@@ -972,6 +1026,51 @@ impl Run<'_, '_, '_> {
         if self.formatter.reads_deflines() {
             self.source.db.build_oid_list()?;
         }
+        match self
+            .formatter
+            .write(self.source, oid, config, target, &mut self.output)
+        {
+            Err(Stop::Utf8Post(path)) => self.write_after_utf8_post(&path, oid, config, target),
+            written => written,
+        }
+    }
+
+    /// `x_GetOids` of `id` (`get_oids`) with NCBI's warning of a UTF8String that the version check
+    /// of its lookup read for a VisibleString (`IdLookup::take_utf8`, `x_CheckVersions`), where
+    /// NCBI posts it: after the output so far, before the lookup's own message.
+    fn get_oids(&mut self, id: &str) -> Result<Lookup, Stop> {
+        let found = get_oids(self.ids, id);
+        if let Some(note) = self.ids.lookup.as_ref().and_then(IdLookup::take_utf8) {
+            self.post_utf8_read(note.at)?;
+        }
+        Ok(found)
+    }
+
+    /// NCBI's warning of a read of the header at `at` that took a UTF8String for a
+    /// VisibleString, where the run has not posted it: after the output so far (`cerr`'s tie).
+    #[cold]
+    #[inline(never)]
+    fn post_utf8_read(&mut self, at: SeqLocation) -> Result<(), Stop> {
+        if let Some(path) = self.source.db.take_utf8_post_at(at) {
+            self.output.post_utf8_string(&path)?;
+        }
+        Ok(())
+    }
+
+    /// `write` of the sequence `oid` whose first read posts NCBI's warning of a UTF8String
+    /// (`Stop::Utf8Post` of the member `path`), before the record's text (the formatters read the
+    /// definition lines before they write): after the output so far, as `cerr`'s tie flushes it;
+    /// then the record again, which posts nothing (once per process).
+    #[cold]
+    #[inline(never)]
+    fn write_after_utf8_post(
+        &mut self,
+        path: &str,
+        oid: u32,
+        config: &Config,
+        target: Option<&str>,
+    ) -> Result<(), Stop> {
+        self.output.post_utf8_string(path)?;
         self.formatter
             .write(self.source, oid, config, target, &mut self.output)
     }
@@ -1000,7 +1099,7 @@ impl Run<'_, '_, '_> {
         };
         let mut err_found = 0;
         for query in &queries {
-            match get_oids(self.ids, query) {
+            match self.get_oids(query)? {
                 Lookup::Oids(oids) => {
                     for oid in oids {
                         self.write(oid, config, self.target_only.then_some(query))?;
@@ -1056,9 +1155,16 @@ impl Run<'_, '_, '_> {
             }
         } else {
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1362-1376
-            for id in &ids {
+            // The version checks of the lookups read their candidates' headers before anything
+            // is written (`IdLookup::take_utf8`: NCBI's warning of a UTF8String there).
+            let resolved: Result<(), Stop> = ids.iter().try_for_each(|id| {
                 oids.push(accession_to_oids_v4(lookup, id)?.first().copied());
+                Ok(())
+            });
+            if let Some(note) = lookup.take_utf8() {
+                self.post_utf8_read(note.at)?;
             }
+            resolved?;
         }
         let mut err_found = false;
         for (i, id) in ids.iter().enumerate() {
@@ -1092,7 +1198,7 @@ impl Run<'_, '_, '_> {
                 self.post(&format!("Skipped {id}"))?;
                 continue;
             }
-            match get_oids(self.ids, id) {
+            match self.get_oids(id)? {
                 Lookup::Oids(oids) => {
                     for oid in oids {
                         self.write(oid, config, None)?;

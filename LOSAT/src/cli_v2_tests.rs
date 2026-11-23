@@ -165,7 +165,7 @@ fn canonical_options_for_every_program() {
                 assert_eq!(a.max_target_seqs, Some(9));
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:55-62
-            // blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);
+            // blast_args.cpp:2726-2731 registers the optional `kArgMaxTargetSequences` key.
             Commands::Tblastn(a) => {
                 assert_eq!(a.num_threads, 4);
                 assert_eq!(a.evalue, Some(0.001));
@@ -722,7 +722,8 @@ fn defaults_and_task_overrides_remain_distinct() {
     assert_eq!(args.max_hsps_per_subject, None);
     assert_eq!(args.word_size, None);
     assert_eq!(args.resolve().unwrap().max_hsps_per_subject, 0);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-387: Create(eBlastp, locality).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-387
+    // Creates the default `eBlastp` options handle for the chosen locality.
     assert_eq!(args.task, "blastp");
     assert_eq!(args.resolve().unwrap().evalue, 10.0);
     let Commands::Blastp(a) = parse("blastp", &["-task", "blastp"]).unwrap().command else {

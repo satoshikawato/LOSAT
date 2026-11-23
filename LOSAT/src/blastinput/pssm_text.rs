@@ -10,10 +10,12 @@
 //! NCBI's grammar, ranges, replacements and messages (`Post`) and NCBI's errors (`ReadError`). The
 //! typed model is then made of the value (`pssm_of`): the members LOSAT's search reads, typed, and
 //! the others kept as the generic reader's values: also a query `Seq-entry` that is a `set` and
-//! `Seq-data` other than `iupacaa`, `ncbieaa` and `ncbistdaa`, which NCBI's object manager takes
-//! (or stops at) before NCBI reads them; the PSSM search refuses them after the object manager's
-//! step, for a run that goes on (`pssm_search::in_pssm::psi_search_and_object`). Only the
-//! readers' own limits are refused here (`PssmReadError::Refused`).
+//! `Seq-data` other than `iupacaa`, `ncbieaa`, `ncbistdaa` and the nucleotide `iupacna`, `ncbi2na`
+//! and `ncbi4na` (which makeprofiledb's database writer converts), which NCBI's object manager
+//! takes (or stops at) before NCBI reads them; the PSSM search refuses them, and the nucleotide
+//! codings, after the object manager's step, for a run that goes on
+//! (`pssm_search::in_pssm::psi_search_and_object`). Only the readers' own limits are refused here
+//! (`PssmReadError::Refused`).
 
 use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::table::named;
@@ -244,13 +246,17 @@ fn seq_inst(mut value: Value) -> SeqInst {
         Some(data) => {
             let (variant, mut value) = choice(data);
             let index = u16::try_from(variant).expect("a CHOICE variant");
+            let mut octets = |name: &str| match &mut value {
+                Value::Octets(codes) => std::mem::take(codes),
+                other => unreachable!("{name} is an OCTET STRING, not {other:?}"),
+            };
             Some(match members(named::SEQ_DATA)[variant].name() {
+                "iupacna" => SeqData::Iupacna(string(value)),
                 "iupacaa" => SeqData::Iupacaa(string(value)),
+                "ncbi2na" => SeqData::Ncbi2na(octets("NCBI2na")),
+                "ncbi4na" => SeqData::Ncbi4na(octets("NCBI4na")),
                 "ncbieaa" => SeqData::Ncbieaa(string(value)),
-                "ncbistdaa" => SeqData::Ncbistdaa(match &mut value {
-                    Value::Octets(codes) => std::mem::take(codes),
-                    other => unreachable!("NCBIstdaa is an OCTET STRING, not {other:?}"),
-                }),
+                "ncbistdaa" => SeqData::Ncbistdaa(octets("NCBIstdaa")),
                 _ => SeqData::Other(Value::Choice(index, Box::new(value))),
             })
         }

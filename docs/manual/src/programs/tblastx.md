@@ -86,6 +86,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 ## Differences from NCBI BLAST+
 
 - With `-db_hard_mask`, a reading frame whose first part, from its first letter, ends at a mask with no other part of the frame after it (masks at or near either end of a sequence) is searched over that part alone. NCBI BLAST+ 2.17.0 reads the masked letters of the frame there and can crash or report other alignments, some of them many times. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+- With `-db_hard_mask`, a sequence with a mask within its first two bases, or within the one or two bases after its last whole codon, or with an empty mask at its start, is searched: the reading frame that such a mask leaves an empty part at its start is searched whole, and the masked bases stay masked in every reading frame. NCBI BLAST+ 2.17.0 crashes on it in every run. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - With `-subject` and a `-db_gencode` other than 1, LOSAT translates the subject with that code (see [Genetic code of the subject](#genetic-code-of-the-subject)). See [the decision record on genetic codes for local tblastx subjects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md).
 - On large genome pairs with the default options, NCBI BLAST+ 2.17.0 turns a cutoff that is out of the range of a double into a word cutoff of 1. In the runs we made (a 1.2 Mb query against a 5.5 Mb genome) it ran out of memory or time and wrote nothing. LOSAT keeps the equal finite cutoff and writes the hits. Where the cutoff stays finite, both give the same bytes. With an extreme `-searchsp` and `-evalue` on small inputs, NCBI BLAST+ reports more rows than LOSAT. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - In format 0, a subject title that consists only of punctuation is written; NCBI BLAST+ crashes on it. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
@@ -99,7 +100,6 @@ LOSAT stops with an error for these `tblastx` settings instead of running someth
 - An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension would pass into the next frame of the query.
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation.
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
-- `-db_hard_mask` on a database with a sequence whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example).
 
 ## Examples
 

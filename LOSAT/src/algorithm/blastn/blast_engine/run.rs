@@ -3284,9 +3284,9 @@ fn purge_prelim_hits_with_common_endpoints(mut hsps: Vec<PrelimHit>) -> Vec<Prel
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:540-557
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2455-2535
-    // Preliminary BLASTN HSPs use purge=TRUE, so common-start/common-end
+    // Preliminary BLASTN HSPs run with `purge` enabled, so common-start/common-end
     // duplicates are deleted, not trimmed. The full traceback stage still uses
-    // the later purge=FALSE/TRUE passes over final HSPs with edit scripts.
+    // the later trim (`purge` disabled) then delete (`purge` enabled) passes over final HSPs with edit scripts.
     qsort_prelim_hits_by(&mut hsps, query_offset_compare_prelim_hits);
     // In place: `dedup_by` drops an HSP that matches the last one kept, as the copy into a
     // second vector did.
@@ -6938,25 +6938,32 @@ fn run_local_formats(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
-    // database is read from files by the command line only.
+    // `run_local` searches subject records (the library, `api::run`; the WebAssembly adapter,
+    // `web/adapter`; ABI v1, which refuses `-db` before in `web_api.rs`, `parse_blastn_args`);
+    // a `-db` search runs through `run_local_database` (or the command line's `run`).
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
+        anyhow::bail!("-db (a database search) is run by run_local_database, not run_local");
     }
-    // The counts file of `-window_masker_db` comes from the caller's counts source (LOSAT
-    // Web's registered inputs); a caller that gives none has no file to read. The file of
-    // `-window_masker_taxid` is looked for in the caller's directory (the registry's that the
-    // command line read; LOSAT Web's directory of registered inputs) and source.
+    // The counts file of `-window_masker_db` is read through the caller's counts source
+    // (`BlastnArgs::window_masker_counts`: `api::run` gives `FileCounts`; `web/adapter` gives
+    // its registered counts files); a caller of `run_local` that sets none has no counts
+    // source; ABI v1 refuses `-window_masker_db` before (`web_api.rs`, `parse_blastn_args`).
     if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
         anyhow::bail!(
-            "-window_masker_db (a WindowMasker counts file) is not supported in the browser yet"
+            "-window_masker_db (a WindowMasker counts file) needs its counts source set before calling run_local (BlastnArgs::window_masker_counts)"
         );
     }
+    // The counts file of `-window_masker_taxid` (non-zero) is looked up through the caller's
+    // registry (`BlastnArgs::window_masker_registry`, from the run's settings) and counts
+    // source (`BlastnArgs::window_masker_counts`: `api::run` gives `FileCounts`; `web/adapter`
+    // gives its registered counts files); a caller of `run_local` that omits either cannot
+    // resolve the taxid; ABI v1 refuses `-window_masker_taxid` before (`web_api.rs`,
+    // `parse_blastn_args`).
     if args.window_masker_taxid.is_some_and(|taxid| taxid != 0)
         && (args.window_masker_registry.is_none() || args.window_masker_counts.is_none())
     {
         anyhow::bail!(
-            "-window_masker_taxid (a directory of WindowMasker counts files) is not supported in the browser yet"
+            "-window_masker_taxid (a directory of WindowMasker counts files) needs its registry and counts source set before calling run_local (BlastnArgs::window_masker_registry, BlastnArgs::window_masker_counts)"
         );
     }
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives
@@ -7953,6 +7960,10 @@ struct QueryBatch {
     /// `run_in_pool` writes to standard error when it takes the batch, where the search wrote
     /// them before.
     timing: String,
+    /// The first of the batch's fetches with `check_oid_exclusion` (the traceback's, or the
+    /// ungapped re-evaluation's) that read a header with a UTF8String where a VisibleString is
+    /// expected: NCBI's warning comes there, before its Seq-aligns' reads (`read_titles`).
+    fetched_utf8: Option<crate::seqdb::SeqLocation>,
 }
 
 /// Which of NCBI's stages `search_query_batch` runs for its queries.
@@ -8778,8 +8789,10 @@ fn run_in_pool(
                     );
                 }
             }
-            database::drop_unaligned(database, &mut batch_hit_lists);
-            if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
+            let read = (&mut titles, &mut warnings[start]);
+            if let Err(error) =
+                database.batch_titles(batch.fetched_utf8, &mut batch_hit_lists, read)
+            {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,
                     // LOSAT's refusal: the warnings of the batches read so far, as for the
@@ -8977,8 +8990,8 @@ fn run_in_pool(
                 // stream's other refusals of a batch's reported subjects; without it every
                 // report is written after the loop, so the refusal comes before any report.
                 let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                    if !taxdb_found {
-                        // No prefetch, and the reports' fetches look nothing up.
+                    if !taxdb_found && !database.db.scope_utf8_seen() {
+                        // No prefetch, and the reports' fetches look nothing up nor post a warning.
                         Ok(Posts::new())
                     } else {
                         fetches
@@ -9052,22 +9065,18 @@ fn run_in_pool(
             {
                 // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the
                 // batch's prefetch (where it is on and loads a sequence) only its stop
-                // (`BlastnDatabase::batch_prefetch_stop`).
-                let seq_aligns = database::seq_aligns_of(&batch_hit_lists, !args.ungapped);
-                (seq_aligns > 0 && !crate::algorithm::common::database::prefetch_off(seq_aligns))
-                    .then(|| {
-                        database
-                            .batch_prefetch_stop(
-                                &titles,
-                                &hit_lists,
-                                &batch_spans,
-                                run_loads.answer(),
-                                &batch_hit_lists,
-                                !args.ungapped,
-                                &prefetch_queries,
-                            )
-                            .map(|()| Posts::new())
-                    })
+                // (`BlastnDatabase::xml2_prefetch`, with NCBI's scope at the batch's prefetch as
+                // above).
+                database.xml2_prefetch(
+                    &titles,
+                    &hit_lists,
+                    &batch_spans,
+                    run_loads.answer(),
+                    &batch_hit_lists,
+                    !args.ungapped,
+                    &prefetch_queries,
+                    &mut query_reads[start..],
+                )
             } else {
                 None
             };
@@ -11000,6 +11009,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                 subject_statistics: &subject_statistics,
                 subject_space_overflow: &subject_space_overflow,
             });
+    // The batch's first fetch that read a UTF8String header (`SubjectPasses::fetched_utf8`).
+    let fetched_utf8 = crate::seqdb::Utf8Reads::default();
     // The passes over the batch's subjects (`subject_passes::SubjectPasses`), built once.
     let passes = subject_passes::SubjectPasses {
         args,
@@ -11011,6 +11022,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         prelim_hitlist_size,
         hitlist_size,
         db_hard_mask,
+        fetched_utf8: &fetched_utf8,
     };
 
     // The batch's results, read after its subjects are searched.
@@ -11024,6 +11036,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         context_karlin: context_karlin.clone(),
         query_eff_searchsp: query_eff_searchsp.clone(),
         timing: String::new(),
+        fetched_utf8: fetched_utf8.first().map(|note| note.at),
     };
     // The preliminary pass over the subjects (`SubjectPasses::prelim_pass`); its error is the database's
     // read error as it is, reported before the masks' read errors below.

@@ -690,10 +690,13 @@ fn databases_that_need_unread_data_are_rejected() {
     }
     let db = SeqDb::open(&db_name("prot_v4"), SeqType::Protein).unwrap();
     assert!(!db.has_parsed_seqids().unwrap());
-    let (name, key) = ("alias_gilist", "GILIST");
+    // A GILIST without NSEQ and LENGTH is read where the database opens (the scan of its
+    // totals): its missing file is NCBI's memory map error.
+    let name = "alias_gilist";
     let error = open_error(name, SeqType::Protein);
     assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
+        matches!(&error, SeqDbError::MemoryMap(message)
+            if String::from_utf8_lossy(message).ends_with("some.gil'")),
         "{name}: {error}"
     );
     // NCBI counts prot_v4 twice here (30 sequences reported, 20 read): the volume is opened
@@ -1647,31 +1650,29 @@ fn header_records_are_decoded() {
             .unwrap_err()
             .is_parsed_seqids());
     }
-    // A damaged record with such an id is a parsed one here; its error comes from the decoder of
-    // every Seq-id (`decode_full`), when a report reads it, as for any other parsed Seq-id.
+    // A record with bytes after the set and such an id is a parsed one here; the bytes after the
+    // set are not read, as NCBI's `EndOfRead` does not (line RG item T5d).
     let mut trailing = defline_record(b"title", &bl_ord_id(&[5]));
     trailing.push(0);
     assert!(decode_defline_set(&trailing, path, 0)
         .unwrap_err()
         .is_parsed_seqids());
-    assert!(matches!(
-        decode_defline_set(&trailing, path, 5),
-        Err(SeqDbError::Format { .. })
-    ));
+    assert!(decode_defline_set(&trailing, path, 5).is_ok());
     // A negative ordinal id, a cut record, bytes after the record.
     assert!(matches!(
         decode(&defline_record(b"title", &bl_ord_id(&[0xff]))),
         Err(SeqDbError::Format { .. })
     ));
+    // A cut record is NCBI's error of its stream's end (`HandleEOF`, line RG item T5d).
     for cut in 1..first.len() {
         assert!(
-            matches!(decode(&first[..cut]), Err(SeqDbError::Format { .. })),
+            matches!(decode(&first[..cut]), Err(SeqDbError::Ncbi(_))),
             "record cut at {cut}"
         );
     }
     let mut trailing = first.clone();
     trailing.push(0);
-    assert!(matches!(decode(&trailing), Err(SeqDbError::Format { .. })));
+    assert_eq!(decode(&trailing).unwrap(), decode(&first).unwrap());
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:117-139
@@ -1731,7 +1732,9 @@ fn every_filtering_alias_key_is_rejected() {
     let dir = temp_dir("keys");
     copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
     let name = dir.join("keyed").to_str().unwrap().to_string();
-    for key in ["GILIST", "TILIST", "SEQIDLIST", "TAXIDLIST", "MEMB_BIT"] {
+    // The id lists are read: a missing file is NCBI's memory map error, and a version 4
+    // database reads no TAXIDLIST (it still makes NCBI scan the totals).
+    for key in ["GILIST", "TILIST", "SEQIDLIST"] {
         std::fs::write(
             dir.join("keyed.pal"),
             format!("TITLE t\nDBLIST prot_v4\n{key} 1\n"),
@@ -1739,10 +1742,28 @@ fn every_filtering_alias_key_is_rejected() {
         .unwrap();
         let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
         assert!(
-            matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
+            matches!(&error, SeqDbError::MemoryMap(message)
+                if String::from_utf8_lossy(message).ends_with("/1'")),
             "{key}: {error}"
         );
     }
+    std::fs::write(
+        dir.join("keyed.pal"),
+        "TITLE t\nDBLIST prot_v4\nTAXIDLIST 1\n",
+    )
+    .unwrap();
+    assert_eq!(SeqDb::open(&name, SeqType::Protein).unwrap().num_seqs(), 10);
+    // MASKLIST is read (the GI-indexed masks, `gi_mask_list`); MEMB_BIT stays refused.
+    std::fs::write(
+        dir.join("keyed.pal"),
+        "TITLE t\nDBLIST prot_v4\nMEMB_BIT 1\n",
+    )
+    .unwrap();
+    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
+    assert!(
+        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("MEMB_BIT")),
+        "{error}"
+    );
     // Keys NCBI's CSeqDB does not apply are ignored: an unknown key, MAX_SEQ_LENGTH and
     // VDBLIST.
     std::fs::write(
@@ -2140,18 +2161,20 @@ fn header_members_lengths_and_bytes() {
     assert_eq!(deflines[0].title, b"t");
     assert_eq!(deflines[0].volume_ordinal, 3);
 
-    // Members out of order, and values nested too deeply in a skipped member.
+    // Members out of order, and values nested too deeply in a skipped member: NCBI's read of the
+    // record stops before them, at the taxid that follows no seqid (line RG item T5d).
     let mut out_of_order = vec![0x30, 0x80, 0x30, 0x80, 0xa2, 0x80, 0x02, 0x01, 0x00, 0, 0];
     out_of_order.extend_from_slice(&[0xa0, 0x80, 0x1a, 0x01, b't', 0, 0]);
     assert!(matches!(
         decode(&out_of_order),
-        Err(SeqDbError::Format { .. })
+        Err(SeqDbError::Ncbi(exception))
+            if exception.text() == b"byte 6: member seqid expected ( at Blast-def-line-set.[].[].taxid)"
     ));
     let mut deep = vec![0x30, 0x80, 0x30, 0x80, 0xa2, 0x80];
     deep.extend(std::iter::repeat_n([0x30u8, 0x80], 100_000).flatten());
     assert!(matches!(
         decode(&deep),
-        Err(SeqDbError::Format { message, .. }) if message.contains("nested too deeply")
+        Err(SeqDbError::Ncbi(exception)) if exception.get_msg() == b"byte 6: member seqid expected"
     ));
 
     // Bytes outside ' ' ..= '~' in a title are read as '#', as NCBI reads them.

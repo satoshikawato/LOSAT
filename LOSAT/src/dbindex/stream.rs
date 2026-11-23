@@ -211,6 +211,9 @@ pub(crate) struct BlastDbStream {
     /// The buffers of the masks' reads, kept from one sequence to the next
     /// (`SeqDb::mask_ranges_in`).
     mask_block: MaskBlock,
+    /// NCBI's warning 803.10 of the read of a header that took a UTF8String for a VisibleString
+    /// (without its line feed), once in the run, to be posted before the sequence's messages.
+    warnings: Vec<Vec<u8>>,
 }
 
 /// The exception or refusal of a database error of the reader.
@@ -252,6 +255,7 @@ impl BlastDbStream {
             reader,
             filter: None,
             mask_block: MaskBlock::default(),
+            warnings: Vec::new(),
         };
         stream.filter = match filter {
             Filter::None => None,
@@ -340,6 +344,24 @@ impl BlastDbStream {
     }
 }
 
+impl BlastDbStream {
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:296-310
+    /// NCBI's warning 803.10 of the read of the header of `oid` (`GetBioseq`), when it met a
+    /// UTF8String for a VisibleString before any failure and the run has not posted it
+    /// (`SeqDb::take_utf8_post_at`): without a prefix, as makembindex's diagnostics print it
+    /// (NCBI 2.17.0 probe of line RG item T5d, merge 18).
+    #[cold]
+    fn post_utf8_string(&mut self, oid: u32) {
+        let db = self.reader.db();
+        let Some(path) = db.location_of(oid).and_then(|at| db.take_utf8_post_at(at)) else {
+            return;
+        };
+        let line = crate::seqid::ber::utf8_string_warning(None, &path);
+        self.warnings
+            .push(line.strip_suffix(b"\n").unwrap_or(&line).to_vec());
+    }
+}
+
 impl SequenceStream for BlastDbStream {
     /// `CSequenceIStreamBlastDB::next()`: the sequence of the current OID and, with a filter,
     /// its masks as one packed location (`GetMaskData`: `[first, second)` ranges become
@@ -347,8 +369,11 @@ impl SequenceStream for BlastDbStream {
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:99-135
     fn next(&mut self) -> Result<Option<Rc<SeqData>>, StreamError> {
         let oid = self.reader.next_oid();
-        let Some((record, ambiguity)) = self.reader.next_record_by_ranges().map_err(bdb_error)?
-        else {
+        let read = self.reader.next_record_by_ranges();
+        if self.reader.take_utf8_header() {
+            self.post_utf8_string(oid);
+        }
+        let Some((record, ambiguity)) = read.map_err(bdb_error)? else {
             return Ok(None);
         };
         let length = ambiguity.length();
@@ -414,6 +439,10 @@ impl SequenceStream for BlastDbStream {
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:138-139
     fn putback(&mut self) {
         self.reader.putback();
+    }
+
+    fn take_warnings(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.warnings)
     }
 }
 

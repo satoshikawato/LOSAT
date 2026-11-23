@@ -553,9 +553,8 @@ pub(crate) enum PointerType {
 /// The members of a SEQUENCE as they are read: each name in turn, in the order of the module.
 pub(crate) struct Members {
     block_start: bool,
-    /// The least position in the module that the next member may have (one past the last
-    /// member read).
-    next: usize,
+    /// The position in the module of the last member read.
+    last: Option<usize>,
     /// The position on the trail (`Trail::steps`) of the member's step, which `begin_members`
     /// puts there and `next_member` writes over: the steps below it are those of the SEQUENCE.
     base: usize,
@@ -1054,13 +1053,9 @@ impl<S: AsnSource> Reader<S> {
             return Err(self.error("choice variant id expected"));
         }
         let text = self.bytes(id);
-        match names
-            .iter()
-            .enumerate()
-            .find(|(_, name)| name.as_bytes() == text)
-        {
-            Some((index, &name)) => {
-                self.trail.steps.push(StackStep::Member(name));
+        match names.iter().position(|name| name.as_bytes() == text) {
+            Some(index) => {
+                self.trail.steps.push(StackStep::Member(names[index]));
                 Ok(index)
             }
             None => {
@@ -1119,7 +1114,7 @@ impl<S: AsnSource> Reader<S> {
         self.trail.steps.push(StackStep::Member(""));
         Ok(Members {
             block_start,
-            next: 0,
+            last: None,
             base,
         })
     }
@@ -1138,30 +1133,25 @@ impl<S: AsnSource> Reader<S> {
             self.pos = self.expect_at(pos, b'}')?;
             return Ok(None);
         }
+        // The steps of the member before (a CHOICE's variant) end here.
+        self.trail.steps.truncate(members.base + 1);
         let (pos, id) = self.member_or_tag_at(pos)?;
         self.pos = pos;
         let MemberId::Name(id) = id else {
             return Err(self.not_supported("a member or variant named by its tag"));
         };
         let text = self.bytes(id);
-        let Some((index, &name)) = names
-            .iter()
-            .enumerate()
-            .find(|(_, name)| name.as_bytes() == text)
-        else {
+        let Some(index) = names.iter().position(|name| name.as_bytes() == text) else {
             let message = format!("unexpected member {}", String::from_utf8_lossy(text));
             return Err(self.error(message));
         };
-        if index < members.next {
+        if members.last.is_some_and(|last| index <= last) {
             let message = format!("member {} out of order", String::from_utf8_lossy(text));
             return Err(self.error(message));
         }
-        members.next = index + 1;
-        // The steps of the member before (a CHOICE's variant) end here, and the member's step
-        // takes the place that `begin_members` gave it.
-        self.trail.steps.truncate(members.base + 1);
-        if let Some(step) = self.trail.steps.last_mut() {
-            *step = StackStep::Member(name);
+        members.last = Some(index);
+        if let Some(step) = self.trail.steps.get_mut(members.base) {
+            *step = StackStep::Member(names[index]);
         }
         Ok(Some(index))
     }

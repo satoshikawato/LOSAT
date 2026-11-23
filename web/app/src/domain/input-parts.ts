@@ -39,11 +39,11 @@ export function leavesOut(parts: readonly InputPart[] | undefined): boolean {
 }
 
 /**
- * Whether the page has something to tell of what an input is made of: records left out, or several parts. Pasted text with
- * nothing left out is the text that was pasted: its row already says its records.
+ * Whether the page tells what an input is made of: for every file that LOSAT makes (InputSnapshot.from: pasted text, several
+ * files, a file with records left out), whose name is the run's own and says nothing of it (DECISIONS 44).
  */
 export function worthSaying(parts: readonly InputPart[] | undefined): parts is readonly InputPart[] {
-  return parts !== undefined && (parts.length > 1 || leavesOut(parts));
+  return parts !== undefined;
 }
 
 /**

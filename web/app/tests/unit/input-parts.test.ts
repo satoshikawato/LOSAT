@@ -32,9 +32,9 @@ describe('input parts', () => {
     expect(leavesOut(undefined)).toBe(false);
   });
 
-  it('has something to tell for records left out or several parts, not for pasted text alone', () => {
+  it('has something to tell for every file of LOSAT\'s (the name is the run\'s own), not for the user\'s file as given', () => {
     expect(worthSaying(undefined)).toBe(false);
-    expect(worthSaying([part('pasted text', 3, [])])).toBe(false);
+    expect(worthSaying([part('pasted text', 3, [])])).toBe(true);
     expect(worthSaying([part('pasted text', 2, ['r2'])])).toBe(true);
     expect(worthSaying([part('a.fa', 1, []), part('b.fa', 1, [])])).toBe(true);
   });

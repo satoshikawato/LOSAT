@@ -104,7 +104,10 @@ class ManualEngine implements EngineGateway {
   /** The text that the next runs print in place of a search (`RuntimeInfo.printed`). */
   printed?: Uint8Array;
 
+  /** How many times the engine was asked to describe a program. */
+  described = 0;
   async describe() {
+    this.described += 1;
     return { program: 'blastn' as const, formats: [6] as const, parameters: [] };
   }
   async start(): Promise<StartResult> {
@@ -990,6 +993,16 @@ describe('Coordinator', () => {
     // The user's own name is kept as it is, and the argv names what the run holds.
     expect(snapshots.map((snapshot) => snapshot.subject.name)).toEqual(['My file.fa', 'My file.fa']);
     for (const snapshot of snapshots) expect(snapshot.argv.slice(1, 5)).toEqual(['-query', snapshot.query.name, '-subject', 'My file.fa']);
+  });
+
+  it('asks the engine to describe a program once for the requests of a press', async () => {
+    const engine = new ManualEngine();
+    const { coordinator } = setup(engine);
+    await coordinator.enqueueAll([request, request, request, request]);
+    expect(engine.described).toBe(1);
+    // A press of its own asks again (a description is not kept between presses: the engine may change).
+    await coordinator.enqueueAll([request]);
+    expect(engine.described).toBe(2);
   });
 
   it('numbers the runs of two enqueues made at once one after the other, and names them by those numbers', async () => {

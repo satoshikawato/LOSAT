@@ -317,7 +317,7 @@ async function toAlignments(id: HspId): Promise<void> {
               <template v-else>
                 <dt>Subjects</dt>
                 <dd data-testid="results-subjects">
-                  {{ selected.snapshot.subject.name }}, {{ plural(selected.snapshot.subject.records.length, 'record') }}
+                  {{ inputLabel(selected.snapshot.subject) }}, {{ plural(selected.snapshot.subject.records.length, 'record') }}
                 </dd>
               </template>
             </template>

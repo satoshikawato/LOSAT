@@ -28,6 +28,7 @@ import {
   type EngineInput,
   type EnginePhase,
   type HspRecord,
+  type ProgramDescription,
   type StartResult,
   type ValidationResult,
 } from 'losat/ports';
@@ -169,7 +170,7 @@ export class Coordinator {
    */
   async enqueueAll(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
     if (requests.length === 0) return { ok: false, message: 'There is nothing to search.' };
-    // One at a time: a made input is named by its run's number and time, which are known before the argv is built (see `named`) and
+    // One at a time: a made input is named by its run's number and time, which are known before the argv is built (`inputName`) and
     // must stay the run's own until its snapshot is made.
     const turn = this.enqueueTurn.then(() => this.enqueueInTurn(requests));
     this.enqueueTurn = turn.then(() => undefined, () => undefined);
@@ -179,6 +180,8 @@ export class Coordinator {
   private async enqueueInTurn(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
     const prepared: Prepared[] = [];
     const queuedAt = this.deps.now();
+    // The engine's description of a program, asked once for the requests of this press (a group has one program).
+    const descriptions = new Map<ProgramId, Promise<ProgramDescription | undefined>>();
     // Each registry file read once, with its SHA-256, for the requests of a group that share it.
     const reads = new Map<File, Promise<{ readonly file: Blob; readonly sha256: string }>>();
     for (const [index, request] of requests.entries()) {
@@ -190,7 +193,7 @@ export class Coordinator {
       try {
         // The task of the run's names is the argv's, whatever the names of the inputs: a made input is named after the task is known.
         const probe = buildArgv({ program: request.program, queryName: 'query.fa', subjectName: 'subject.fa', parameters: request.parameters, extra: request.extra ?? [] });
-        const task = await this.taskOfArgv(request.program, probe);
+        const task = await this.taskOfArgv(request.program, probe, descriptions);
         const run = { number, program: request.program, task, queuedAt };
         queryName = inputName(request.query, 'query', run);
         subjectName = inputName(request.subject, 'subject', run);
@@ -423,9 +426,16 @@ export class Coordinator {
     return this.taskOfArgv(snapshot.program, snapshot.argv);
   }
 
-  private async taskOfArgv(program: ProgramId, argv: readonly string[]): Promise<string | undefined> {
+  /** `descriptions` keeps what the engine said of each program, for the requests of one press. */
+  private async taskOfArgv(
+    program: ProgramId,
+    argv: readonly string[],
+    descriptions: Map<ProgramId, Promise<ProgramDescription | undefined>> = new Map(),
+  ): Promise<string | undefined> {
+    let asked = descriptions.get(program);
+    if (asked === undefined) descriptions.set(program, (asked = this.deps.engine.describe(program).catch(() => undefined)));
     // Without the engine's default task the name has none; the file is still saved.
-    const description = await this.deps.engine.describe(program).catch(() => undefined);
+    const description = await asked;
     return description === undefined ? optionValue(argv, '-task') : taskOf(argv, description).task;
   }
 
@@ -503,7 +513,7 @@ export class Coordinator {
         runInput = this.deps.data.buildRunInput(revisionIds);
       }
       const { bytes, sha256, records } = await runInput;
-      // Pasted text is a file that LOSAT made (`query.fa`): the page offers it with the run (line WQA's D22, 2026-11-23).
+      // Pasted text is a file that LOSAT made, named by the run (`inputName`): the page offers it with the run (line WQA's D22, DECISIONS 44).
       const from = 'dataset' in input ? input.dataset.from : 'text' in input ? [{ name: 'pasted text', records: records.length, leftOut: [], leftOutCount: 0 }] : undefined;
       return Object.freeze({ name, bytes, sha256, revisionIds, records, ...(from === undefined ? {} : { from: Object.freeze(from) }) });
     } catch (error) {

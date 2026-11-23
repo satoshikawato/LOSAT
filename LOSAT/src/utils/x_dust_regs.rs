@@ -28,10 +28,14 @@
 //!
 //! A full window stays full: each letter pops one triplet and pushes one. While it is full and
 //! holds two or more distinct triplets, `x_run_full` takes the letters with only the scalars that
-//! change (`head`, the suffix length, `r_w`, `r_v`, `num_diff`): `start` rises with `pos`, `L`
-//! follows from the suffix length, and `needs_processing` is one comparison with a table of
-//! thresholds that has `u32::MAX` past its end (`x_tenth_thresholds`). The window's first letters,
-//! the rare `shift_high` branch and the run after a uniform window go through `XHot`, as before.
+//! change (`head`, the suffix length, `r_w`, `r_v`): `start` rises with `pos`, `L` follows from the
+//! suffix length, `needs_processing` is one comparison with a table of thresholds that has
+//! `u32::MAX` past its end (`x_tenth_thresholds`), and the count of distinct triplets is not kept,
+//! because a full window holds one distinct triplet exactly when its pair count `r_w` is the largest
+//! a window of that length can have (`x_run_full`). `save_masked_regions`, which this loop calls on
+//! few letters, is a call of its own there (`x_save_regions`), so its values do not take the
+//! registers of the loop's scalars. The window's first letters, the rare `shift_high` branch and the
+//! run after a uniform window go through `XHot`, as before.
 //!
 //! Why the result is the same. Every method below is the `XTripletWindow` method of the same name
 //! with the same statements in the same order on the same integers; only where the values live
@@ -448,6 +452,24 @@ enum XFullExit {
 }
 
 impl DustMasker {
+    /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:185-208
+    /// `save_masked_regions` for `x_run_full`, as a call of its own. The loop calls it only on the
+    /// letters where the perfect list is not empty (2 % of the Sakai query's letters), but where it
+    /// was inlined into the loop, the values it uses took registers, and five of the loop's scalars
+    /// (`pos`, the last triplet, `head`, `r_w`, the count of distinct triplets) were stored to the
+    /// stack and loaded again on every letter (ad-FM-3, 2026-11-23, listing of the loop: 68 to 75
+    /// instructions per letter, 57 to 64 without the inlined call).
+    #[inline(never)]
+    fn x_save_regions(
+        &self,
+        result: &mut Vec<MaskedInterval>,
+        wstart: usize,
+        offset: usize,
+        perfect_list: &mut VecDeque<PerfectInterval>,
+    ) {
+        self.save_masked_regions(result, wstart, offset, perfect_list);
+    }
+
     /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:229-262, c++/src/algo/dustmask/symdust.cpp:76-114
     /// The letters of the loop of `x_mask_range` while the window is full (its length `max_size`)
     /// and holds two or more distinct triplets before each letter: the loop's save, triplet and
@@ -455,13 +477,21 @@ impl DustMasker {
     /// statements on the same values), then `needs_processing` and `find_perfect`. A full window
     /// stays full (each letter pops one triplet and pushes one), so the run keeps no length, and
     /// the scalars it carries are the ones that change: `head`, the suffix length `sl` (from `L` up to
-    /// `stop`),
-    /// `r_w`, `r_v` and `num_diff`. `start` rises by one with `pos` on every letter, so it is
+    /// `stop`), `r_w` and `r_v`. `start` rises by one with `pos` on every letter, so it is
     /// `pos - delta` for the run's `delta`; `L` is `start + max_size - sl`. With `stop = start +
     /// max_size` (`XHot::stop`), `shift_window`'s updates of `L` and `stop` (`L` up by one where it
     /// equals `start`, then `start` and `stop` up by one) leave `sl` the same where `sl == max_size`
     /// and raise it by one otherwise; each step of the suffix trim raises `L`, so it lowers `sl`, and
-    /// the trim reads the ring at `sl - 1` (`XHot::shift_window`'s `off`).
+    /// the trim takes the suffix's triplets from its oldest, at `sl - 1` (`XHot::shift_window`'s
+    /// `off`), toward the newest.
+    ///
+    /// The count of distinct triplets (`num_diff`) is not carried. The run's only use of it is the
+    /// test after each letter for a window with at most one distinct triplet, and in a full window
+    /// that test is `r_w == max_size * (max_size - 1) / 2`: `r_w` is the number of pairs of equal
+    /// triplets, the sum over the triplets of `c * (c - 1) / 2` for their counts `c`, which add up to
+    /// `max_size`; the sum of the squares of counts with a fixed total is the square of the total
+    /// when one count holds all of it and smaller otherwise, so `r_w` takes that value exactly when
+    /// one triplet fills the window. When the run ends, the count is taken from `c_w` for `XHot`.
     #[allow(clippy::too_many_arguments)]
     #[inline(always)]
     fn x_run_full(
@@ -486,16 +516,17 @@ impl DustMasker {
         let mut sl = run.h.stop() - run.h.l;
         let mut r_w = run.h.r_w;
         let mut r_v = run.h.r_v;
-        let mut num_diff = run.h.num_diff;
+        // `r_w` of a full window with one distinct triplet (the doc above).
+        let uniform_r_w = (max * (max - 1) / 2) as u32;
         let exit = loop {
             if pos >= end {
                 break XFullExit::End;
             }
             // A letter that leaves the window with at most one distinct triplet ends the run
             // (`Uniform`), and the run starts with two or more.
-            debug_assert!(num_diff > 1);
+            debug_assert!(r_w != uniform_r_w);
             if !perfect_list.is_empty() {
-                self.save_masked_regions(result, pos - delta, current_start, perfect_list);
+                self.x_save_regions(result, pos - delta, current_start, perfect_list);
             }
             let triplet = ((cur << 2) & 0x3F) + x_code(seq[pos], rng);
             cur = triplet;
@@ -505,7 +536,6 @@ impl DustMasker {
             let old = (a.ring[(head + max - 1) & (2 * X_RING - 1)] & 63) as usize;
             a.c_w[old] -= 1;
             r_w -= a.c_w[old] as u32;
-            num_diff -= (a.c_w[old] == 0) as u32;
             // `L` is `start` (the suffix is the whole window): NCBI moves `L` up with `start` and
             // takes the triplet out of the suffix's counts, and the suffix keeps its length.
             // Otherwise the suffix gains the pushed triplet. Which case holds changes on about 3 %
@@ -522,22 +552,22 @@ impl DustMasker {
             a.ring[head] = triplet;
             a.ring[head + X_RING] = triplet;
             let idx = (triplet & 63) as usize;
-            num_diff += (a.c_w[idx] == 0) as u32;
             add_triplet(&mut r_w, &mut a.c_w, triplet);
             add_triplet(&mut r_v, &mut a.c_v, triplet);
 
             if a.c_v[idx] > k.low_k {
-                loop {
-                    let t = a.ring[(head + sl - 1) & (2 * X_RING - 1)];
+                // The suffix is `ring[head..head + sl]`, newest first; NCBI's loop stops at the
+                // pushed triplet or where the suffix is empty, as this walk does.
+                for &t in a.ring[head..head + sl].iter().rev() {
                     rem_triplet(&mut r_v, &mut a.c_v, t);
                     sl -= 1;
-                    if t == triplet || sl == 0 {
+                    if t == triplet {
                         break;
                     }
                 }
             }
 
-            if num_diff <= 1 {
+            if r_w == uniform_r_w {
                 let start = pos - delta;
                 perfect_list.clear();
                 perfect_list.push_front(PerfectInterval::new(start, start + max + 1, 0, 0));
@@ -547,6 +577,8 @@ impl DustMasker {
             // `XHot::needs_processing` (`x_tenth_thresholds`).
             if r_w > thr[sl & (X_RING - 1)] {
                 let start = pos - delta;
+                // `find_perfect` does not read `num_diff`; the window has two or more distinct
+                // triplets here (the test above).
                 let h = XHot {
                     head,
                     len: max,
@@ -554,7 +586,7 @@ impl DustMasker {
                     l: start + max - sl,
                     r_w,
                     r_v,
-                    num_diff,
+                    num_diff: 2,
                 };
                 find_perfect(h, a, &thr[..max], merged, perfect_list);
             }
@@ -569,7 +601,7 @@ impl DustMasker {
             l: start + max - sl,
             r_w,
             r_v,
-            num_diff,
+            num_diff: a.c_w.iter().filter(|&&c| c != 0).count() as u32,
         };
         exit
     }

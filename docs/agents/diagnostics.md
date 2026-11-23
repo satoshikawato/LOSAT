@@ -450,6 +450,7 @@ export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DP32=1
+export LOSAT_X_DPEDGE=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
@@ -823,6 +824,19 @@ Same values, faster computation:
   its time and max RSS (same-run A/B against dev of megablast, blastn, dc-megablast, blastp, blastx, tblastn
   and tblastx: CPU x0.9988-x1.0023, user instructions x0.99994-x1.00082; blastx over 31 pairs x1.0001,
   where dev against itself gives x0.9997).
+- `LOSAT_X_DPEDGE=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
+  added it, 2026-11-24; `=0` returns to the previous kernel) the 8-bit 256-bit X-drop kernel
+  (`align8`) masks the lanes at and past the end of the matrix (`limit`: the end of `B`, or the
+  fence) only in the one block that crosses it, the row's last; the other blocks no longer test
+  `limit`, select a mask (all ones there) and AND it into H. Every lane holds the same value, so
+  results and edit scripts do not change (the argument is at the head of `utils/x_xdrop_avx2.rs`;
+  the fuzz test against the scalar NCBI loops runs both instances). On the workstation (one core
+  unless noted, median, same run against dev 9ba71edbf): blastn (31,168 Drosophila cDNAs x 3 Mb
+  genome) x0.972 with 2.8 % fewer user instructions, blastp (WSSV x PajaWSV) x0.989,
+  blastn-short x0.999, the blastn case at 16 threads x0.996 and dc-megablast at 16 threads x0.989;
+  megablast runs no `align8` (the same instruction count, x0.9993 cycles); max RSS the same. Line FN
+  s7 measured seven row-frame items of `align8` one by one and in 14 combinations; this one was the
+  only item faster on both the traceback and the score-only rows.
 - `LOSAT_X_DPEMASK=1` (with the 256-bit AVX2 kernel, speed; in the strict set from the pull request that
   added it, 2026-10-19; `=0` returns to the previous kernel) the 8-bit
   256-bit X-drop kernel (`align8`: blastp's and the translated programs' score-only DP, blastn's

@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 
 use crate::library_examples::example_binary;
 use crate::masker_fixtures::{shell_words, take_variables};
-use crate::ncbi_windows_paths::ncbi_paths_on_windows;
+use crate::ncbi_windows_paths::{alias_list_path_on_windows, ncbi_paths_on_windows};
 
 /// `tests/makembindex`.
 fn fixtures() -> PathBuf {
@@ -328,6 +328,14 @@ fn run(binary: &Path, case: &Case, tag: &str) -> (Run, PathBuf) {
     (run, dir)
 }
 
+/// The rows whose error quotes the missing `OIDLIST` of `in/olmiss.nal` or `in/olmissl.nal`
+/// (`expected`).
+const OIDLIST_ROWS: [&str; 3] = [
+    "oidlist_new_miss_n8",
+    "oidlist_old_miss_n8",
+    "oidlist_old_missl_n8",
+];
+
 /// NCBI's run of `case` in `dir`: the frozen bytes with `@CWD@` read as `dir`, the standard
 /// error in LOSAT's words (`losat::wording`).
 fn expected(case: &Case, dir: &Path) -> Run {
@@ -346,6 +354,17 @@ fn expected(case: &Case, dir: &Path) -> Run {
         text.replace("@CWD@", &dir.to_string_lossy()).into_bytes()
     };
     let err = losat::wording::losat_bytes(&fs::read(file("err")).unwrap()).into_owned();
+    // The rows whose `-input` is an alias file of `OIDLIST /losat-oidlist-fixture-missing/none.msk`
+    // (`in/olmiss.nal`, `in/olmissl.nal`): on Windows NCBI joins that value to the alias file's
+    // directory, the run's (`alias_list_path_on_windows`; its `DBLIST` names the alias `mvdb/mv`,
+    // so the directory stays the alias file's: `seqdb::alias::compute_masks`).
+    let err = if cfg!(windows) && OIDLIST_ROWS.contains(&case.name.as_str()) {
+        let text = String::from_utf8(err).unwrap();
+        alias_list_path_on_windows(&text, "@CWD@", "/losat-oidlist-fixture-missing/none.msk")
+            .into_bytes()
+    } else {
+        err
+    };
     (
         here(fs::read(file("out")).unwrap()),
         here(err),

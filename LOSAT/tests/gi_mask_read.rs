@@ -1,8 +1,10 @@
 //! LOSAT's readers of the GI-indexed masks (`makeblastdb -gi_mask`: the alias file's `MASKLIST`,
 //! the `.gni`/`.gno`/`.gnd` files) against NCBI BLAST+ 2.17.0 (the official Linux x64 release):
-//! `blastdbcmd` (`-info`, `-outfmt %m`, `-mask_sequence_with`), `blastn` with `-db_soft_mask` and
-//! `-db_hard_mask`, and a plain search of each program family, on the databases that NCBI's
-//! makeblastdb built (`tests/seqdb/gi_mask_read`, `tests/seqdb/make_gi_mask_read_fixtures.py`).
+//! `blastdbcmd` (`-info`, `-outfmt %m`, `-mask_sequence_with`), `blastn`, `blastp`, `blastx`,
+//! `tblastn` and `tblastx` with `-db_soft_mask` and `-db_hard_mask` (the protein programs' database
+//! masks read through the same `seqdb::mask` entry), and a plain search of each program family, on
+//! the databases that NCBI's makeblastdb built (`tests/seqdb/gi_mask_read`,
+//! `tests/seqdb/make_gi_mask_read_fixtures.py`).
 //! The exit status, standard output and standard error of every case of `cases.tsv` equal NCBI's
 //! (its messages in LOSAT's words, `losat::wording::losat_output_bytes`).
 //!

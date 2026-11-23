@@ -247,6 +247,21 @@ def cases():
         ["psiblast", "-query", "{R}/pq.fa", "-db", "db", "-seg", "no", "-outfmt", "6"])
     add("bp_svp_plain", "svp", "svp", "-",
         ["blastp", "-query", "{R}/pq.fa", "-db", "db", "-seg", "no", "-outfmt", "6"])
+
+    # The protein programs' database masks (series NP, M4b) read the GI masks through the same
+    # entry (`seqdb::mask`): blastp and blastx on the protein databases, tblastn and tblastx on the
+    # nucleotide ones, soft and hard, by id and by name.
+    prot = {"blastp": "{R}/pq.fa", "blastx": "{R}/q.fa", "tblastn": "{R}/pq.fa", "tblastx": "{R}/q.fa"}
+    short = {"blastp": "bp", "blastx": "bx", "tblastn": "tbn", "tblastx": "tbx"}
+    masked = [("blastp", "m09", "pm1"), ("blastp", "svp", "pm1"), ("blastx", "m09", "pm1"),
+              ("tblastn", "m01", "m1"), ("tblastn", "sv5", "gm1"), ("tblastx", "m01", "m2"),
+              ("tblastx", "sv5", "gm1")]
+    for program, db, name in masked:
+        for kind in ("soft", "hard"):
+            for algo, fmt in (("0", "6"), (name, "0")):
+                add(f"{short[program]}_{db}_{kind}{algo}_f{fmt}", db, db, "-",
+                    [program, "-query", prot[program], "-db", "db", "-seg", "no",
+                     f"-db_{kind}_mask", algo, "-outfmt", fmt])
     return rows
 
 

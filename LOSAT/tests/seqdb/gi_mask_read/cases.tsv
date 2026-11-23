@@ -104,3 +104,31 @@ bp_m09_plain	m09	m09	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-outfmt	6
 bx_m09_plain	m09	m09	-	blastx	-query	{R}/q.fa	-db	db	-seg	no	-outfmt	6
 psi_m09_plain	m09	m09	-	psiblast	-query	{R}/pq.fa	-db	db	-seg	no	-outfmt	6
 bp_svp_plain	svp	svp	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-outfmt	6
+bp_m09_soft0_f6	m09	m09	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+bp_m09_softpm1_f0	m09	m09	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	pm1	-outfmt	0
+bp_m09_hard0_f6	m09	m09	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+bp_m09_hardpm1_f0	m09	m09	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	pm1	-outfmt	0
+bp_svp_soft0_f6	svp	svp	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+bp_svp_softpm1_f0	svp	svp	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	pm1	-outfmt	0
+bp_svp_hard0_f6	svp	svp	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+bp_svp_hardpm1_f0	svp	svp	-	blastp	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	pm1	-outfmt	0
+bx_m09_soft0_f6	m09	m09	-	blastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+bx_m09_softpm1_f0	m09	m09	-	blastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	pm1	-outfmt	0
+bx_m09_hard0_f6	m09	m09	-	blastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+bx_m09_hardpm1_f0	m09	m09	-	blastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	pm1	-outfmt	0
+tbn_m01_soft0_f6	m01	m01	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+tbn_m01_softm1_f0	m01	m01	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	m1	-outfmt	0
+tbn_m01_hard0_f6	m01	m01	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+tbn_m01_hardm1_f0	m01	m01	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	m1	-outfmt	0
+tbn_sv5_soft0_f6	sv5	sv5	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+tbn_sv5_softgm1_f0	sv5	sv5	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_soft_mask	gm1	-outfmt	0
+tbn_sv5_hard0_f6	sv5	sv5	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+tbn_sv5_hardgm1_f0	sv5	sv5	-	tblastn	-query	{R}/pq.fa	-db	db	-seg	no	-db_hard_mask	gm1	-outfmt	0
+tbx_m01_soft0_f6	m01	m01	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+tbx_m01_softm2_f0	m01	m01	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	m2	-outfmt	0
+tbx_m01_hard0_f6	m01	m01	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+tbx_m01_hardm2_f0	m01	m01	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	m2	-outfmt	0
+tbx_sv5_soft0_f6	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	0	-outfmt	6
+tbx_sv5_softgm1_f0	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	gm1	-outfmt	0
+tbx_sv5_hard0_f6	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
+tbx_sv5_hardgm1_f0	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	gm1	-outfmt	0

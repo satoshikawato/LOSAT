@@ -193,7 +193,9 @@ multi-volume version 5 and 4, protein, a database without masks, a description o
 exception 25). It then freezes what NCBI's programs print for each row of `gi_mask_read/cases.tsv` (name, databases,
 directory under the root, environment, words): `blastdbcmd -info`, `-outfmt %m`, `-mask_sequence_with`, `blastn
 -db_soft_mask` / `-db_hard_mask` by id and name, from another directory, with `BLASTDB`, by absolute name, through an
-alias file over the database and as `-db 'db db'`, and a plain search of each program family. `gi_mask_read/db/<db>/`
+alias file over the database and as `-db 'db db'`, a plain search of each program family, and (rows added
+2026-11-23) `blastp`, `blastx`, `tblastn` and `tblastx` with `-db_soft_mask` / `-db_hard_mask` by id (`-outfmt 6`)
+and by name (`-outfmt 0`) on the protein databases `m09`, `svp` and the nucleotide databases `m01`, `sv5`. `gi_mask_read/db/<db>/`
 holds the databases (the root `<R>` in their text files), `gi_mask_read/expected/<case>.{rc,stdout,stderr}` the runs
 (the root as `<R>`), `gi_mask_read/in/` the queries. `bdc_m09_msw_0` (a protein in FASTA with masks) is approved
 difference 5 of PD-LOSAT-BLASTDBCMD-DEVIATIONS: NCBI's headers with the letters of NCBI's `-outfmt %s` run, NCBI's

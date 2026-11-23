@@ -2236,7 +2236,7 @@ fn replays_collected(program: &str) -> bool {
 fn replays_to_stderr(program: &str) -> bool {
     matches!(
         program,
-        "blastn" | "blastp" | "blastx" | "tblastn" | "psiblast"
+        "blastn" | "blastp" | "blastx" | "tblastn" | "psiblast" | "deltablast"
     )
 }
 

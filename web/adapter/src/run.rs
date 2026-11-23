@@ -40,6 +40,7 @@ impl Program {
             "psiblast" => Err("psiblast is not available in the browser (ABI v2)".into()),
             "rpsblast" => Err("rpsblast is not available in the browser (ABI v2)".into()),
             "rpstblastn" => Err("rpstblastn is not available in the browser (ABI v2)".into()),
+            "deltablast" => Err("deltablast is not available in the browser (ABI v2)".into()),
             other => Err(format!("unknown program '{other}'")),
         }
     }
@@ -147,6 +148,7 @@ fn outfmt_of(command: &mut Commands) -> &mut String {
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {
             unreachable!("rejected by Program::parse")
@@ -265,6 +267,7 @@ fn names_subjects(command: &Commands) -> bool {
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => {
             unreachable!("rejected by Program::parse")
@@ -393,6 +396,7 @@ fn database_of(command: &Commands) -> Option<&str> {
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => None,
     }
@@ -898,6 +902,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => [None; 3],
     }
@@ -916,6 +921,7 @@ fn num_threads(command: &Commands) -> usize {
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => 1,
     }
@@ -996,6 +1002,7 @@ fn handler_warnings(program: Program, command: &Commands, number: u32) -> Vec<u8
         Commands::Psiblast(_)
         | Commands::Rpsblast(_)
         | Commands::Rpstblastn(_)
+        | Commands::Deltablast(_)
         | Commands::Makedb(_)
         | Commands::Rpsbproc(_) => Vec::new(),
     }
@@ -1270,6 +1277,7 @@ fn search(
             Commands::Psiblast(_)
             | Commands::Rpsblast(_)
             | Commands::Rpstblastn(_)
+            | Commands::Deltablast(_)
             | Commands::Makedb(_)
             | Commands::Rpsbproc(_) => {
                 unreachable!("rejected by Program::parse")

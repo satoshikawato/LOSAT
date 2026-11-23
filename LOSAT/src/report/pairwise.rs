@@ -1378,7 +1378,10 @@ pub fn write_hsp_info<W: Write>(
     // An HSP of a linked set (psiblast's `-sum_stats true`) has its "sum_n" score, the set's size.
     let expect = expect_label(hit.sum_n);
     // psiblast's first round has blastp's methods; rpsblast's redo marks its HSPs likewise.
-    if matches!(config.program.as_str(), "blastp" | "psiblast" | "rpsblast") {
+    if matches!(
+        config.program.as_str(),
+        "blastp" | "psiblast" | "deltablast" | "rpsblast"
+    ) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3600-3603
         let method = match hit.comp_adjust_method {
             Some(1) => ", Method: Composition-based stats.",
@@ -2316,7 +2319,7 @@ const HTML_SUFFIX: &[u8] = b"</PRE>\n</BODY>\n</HTML>\n";
 /// any other name (its tasks).
 pub(crate) fn blastp_family_program(program: &str) -> &str {
     match program {
-        "psiblast" | "rpsblast" => program,
+        "psiblast" | "deltablast" | "rpsblast" => program,
         _ => "blastp",
     }
 }

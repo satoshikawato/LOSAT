@@ -77,8 +77,15 @@
 //! - (vi) The order. Within a stage the seeds reach each map with S never decreasing: the strips
 //!   in order (the owner's `run_strips`; each partition its strips, or its pieces of a strip, in
 //!   order with one folder at a time), a strip's words in subject order, a word's two templates
-//!   at the same S, a masked subject's ranges in ascending order (`plan_strips`), and a partition
-//!   gets a subsequence of the stage's seeds. `put` asserts it in debug builds.
+//!   at the same S, a masked subject's ranges in the order they are scanned (`plan_strips`), and
+//!   a partition gets a subsequence of the stage's seeds. The ranges' order is the one input
+//!   where this fails: a subject of `-db` with `-db_soft_mask` keeps its stored masks' order
+//!   (`subject_split.rs`), so its ranges can step back (S goes back to a range's start after a
+//!   later range), and NCBI scans them in that order; which cells its chains still hold then
+//!   depends on the order of their take-overs, so no per-diagonal map can follow them. The stage
+//!   sends such a chunk to the chains (`x_pair_seed_disc.rs` `latest_ranges_ascend`), on every
+//!   path that folds on the maps (the owner's fold, the partitions', one thread or many), as it
+//!   does a chunk without the bounds of (ii). `put` asserts the order in debug builds.
 //! - (vii) Stages, chunks and the offset clear. A map lives from stage to stage in the subject
 //!   scratch (`x_pair_seed_part.rs` `PartScratch`, `PartState`). A stage's levels are at most its
 //!   offset plus its chunk's length, and NCBI moves the offset past that plus w after every chunk,
@@ -95,7 +102,9 @@
 //! and in the eighth lanes the bucket's `stash_until` and its slots' `hit_saved` bits); a home
 //! bucket chosen by the high bits of the diagonal times a Fibonacci constant (NCBI's bucket is
 //! the diagonal modulo 512, the partition of `LOSAT_X_PAIRPARFOLD` that bucket modulo the
-//! partitions, so the diagonals of a partition share their low bits); a stash of `STASH` entries
+//! partitions, so the diagonals of a partition share their low bits), whose slots `find` and `put`
+//! compare at once (`lanes_mask`: two 128-bit compares on x86_64 and on wasm32 with simd128, lane
+//! by lane elsewhere); a stash of `STASH` entries
 //! for a bucket without a free slot, and the buckets doubled when the stash is full and they are
 //! fewer than twice the entries, keeping the live entries (`grow`). The fold brings in the home bucket of the seed `AHEAD` places ahead
 //! (`prefetch`). A slot is free when its level is below the seed's bound (dead, (ii)) or the slot
@@ -130,7 +139,10 @@ pub(super) const AHEAD: usize = 8;
 const MISS: u32 = 7;
 const STASHED: u32 = 8;
 
-// No NCBI counterpart: counters of LOSAT_TIMING (the map's growths and its largest size).
+// No NCBI counterpart: counters of LOSAT_TIMING (the stages folded on the maps, the chunks sent to
+// the chains because their scan ranges step back, the map's growths and its largest size).
+static STAGES: AtomicU64 = AtomicU64::new(0);
+static BACK: AtomicU64 = AtomicU64::new(0);
 static GROWS: AtomicU64 = AtomicU64::new(0);
 static MOST_BUCKETS: AtomicU64 = AtomicU64::new(0);
 
@@ -183,6 +195,8 @@ impl Found {
 pub(super) struct DiagLatest {
     buckets: Vec<Bucket>,
     bits: u32,
+    /// `32 - bits`, the shift of `home`.
+    shift: u32,
     stash: Vec<Entry>,
     /// The slots and stash entries that hold an entry, live or dead (at least the live entries).
     entries: usize,
@@ -198,6 +212,7 @@ impl Default for DiagLatest {
         DiagLatest {
             buckets: Vec::new(),
             bits: 0,
+            shift: 32,
             stash: Vec::new(),
             entries: 0,
             top: i32::MIN,
@@ -210,19 +225,83 @@ impl Default for DiagLatest {
 /// Bit k set where lane k of `lanes` is `v`.
 #[inline(always)]
 fn eq_mask(lanes: &[i32; 8], v: i32) -> u32 {
-    let mut mask = 0u32;
-    for (k, &lane) in lanes.iter().enumerate() {
-        mask |= u32::from(lane == v) << k;
-    }
-    mask
+    lanes_mask::<false>(lanes, v)
 }
 
 /// Bit k set where lane k of `lanes` is below `v`.
 #[inline(always)]
 fn lt_mask(lanes: &[i32; 8], v: i32) -> u32 {
+    lanes_mask::<true>(lanes, v)
+}
+
+/// Bit k set where lane k of `lanes` is below `v` (`LT`) or is `v`: two 128-bit compares and one
+/// mask where the target has them (x86_64's SSE2, wasm32's simd128), else `scalar_mask`. The
+/// compiler does not make the loop over the lanes into the compares (it kept about 30
+/// instructions of scalar compares and shuffles per mask, against 10).
+#[inline(always)]
+fn lanes_mask<const LT: bool>(lanes: &[i32; 8], v: i32) -> u32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        use core::arch::x86_64::{
+            _mm_cmpeq_epi32, _mm_cmplt_epi32, _mm_loadu_si128, _mm_movemask_epi8, _mm_packs_epi16,
+            _mm_packs_epi32, _mm_set1_epi32,
+        };
+        // SAFETY: SSE2 is part of every x86_64 target; the two loads read the 32 bytes of
+        // `lanes`.
+        unsafe {
+            let v = _mm_set1_epi32(v);
+            let lo = _mm_loadu_si128(lanes.as_ptr().cast());
+            let hi = _mm_loadu_si128(lanes.as_ptr().add(4).cast());
+            let (lo, hi) = if LT {
+                (_mm_cmplt_epi32(lo, v), _mm_cmplt_epi32(hi, v))
+            } else {
+                (_mm_cmpeq_epi32(lo, v), _mm_cmpeq_epi32(hi, v))
+            };
+            // lanes of all ones or zeros, narrowed to one byte each (saturation keeps them)
+            let words = _mm_packs_epi32(lo, hi);
+            _mm_movemask_epi8(_mm_packs_epi16(words, words)) as u32 & 0xff
+        }
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        use core::arch::wasm32::{i32x4_bitmask, i32x4_eq, i32x4_lt, i32x4_splat, v128_load};
+        // SAFETY: the two loads read the 32 bytes of `lanes` (no alignment needed).
+        let (lo, hi) = unsafe {
+            (
+                v128_load(lanes.as_ptr().cast()),
+                v128_load(lanes.as_ptr().add(4).cast()),
+            )
+        };
+        let v = i32x4_splat(v);
+        let (lo, hi) = if LT {
+            (i32x4_lt(lo, v), i32x4_lt(hi, v))
+        } else {
+            (i32x4_eq(lo, v), i32x4_eq(hi, v))
+        };
+        u32::from(i32x4_bitmask(lo)) | (u32::from(i32x4_bitmask(hi)) << 4)
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    )))]
+    {
+        scalar_mask::<LT>(lanes, v)
+    }
+}
+
+/// `lanes_mask` lane by lane (the targets without the compares, and the tests' reference).
+#[cfg(any(
+    test,
+    not(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    ))
+))]
+#[inline(always)]
+fn scalar_mask<const LT: bool>(lanes: &[i32; 8], v: i32) -> u32 {
     let mut mask = 0u32;
     for (k, &lane) in lanes.iter().enumerate() {
-        mask |= u32::from(lane < v) << k;
+        mask |= u32::from(if LT { lane < v } else { lane == v }) << k;
     }
     mask
 }
@@ -255,6 +334,7 @@ impl DiagLatest {
         self.buckets.clear();
         self.buckets.resize(1 << bits, EMPTY);
         self.bits = bits;
+        self.shift = 32 - bits;
         self.stash.clear();
         self.entries = 0;
         self.top = i32::MIN;
@@ -272,8 +352,8 @@ impl DiagLatest {
     /// The home bucket of `diag`: the high bits of its product with a Fibonacci constant.
     #[inline(always)]
     fn home(&self, diag: i32) -> usize {
-        debug_assert!((1..=32).contains(&self.bits));
-        ((diag as u32).wrapping_mul(0x9E37_79B1) >> (32 - self.bits)) as usize
+        debug_assert!((1..=32).contains(&self.bits) && self.shift == 32 - self.bits);
+        ((diag as u32).wrapping_mul(0x9E37_79B1) >> self.shift) as usize
     }
 
     /// Brings `diag`'s home bucket toward the core (a hint only).
@@ -496,12 +576,23 @@ impl DiagLatest {
     }
 }
 
+/// No NCBI counterpart: counts a chunk of the strips stage that has the level bounds
+/// (`x_pair_seed_disc.rs` `latest_bound`): folded on the maps when its scan ranges `ascend`, else
+/// sent to the chains (`latest_ranges_ascend`).
+pub(super) fn count_stage(ascend: bool) {
+    let counter = if ascend { &STAGES } else { &BACK };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
 /// No NCBI counterpart: the fields of the `[TIMING] x_dc_latest:` line (after the stage's
-/// `x_pairpardisc_seed:` line while the switch is on): the maps' growths and the most buckets a
-/// map had.
+/// `x_pairpardisc_seed:` line while the switch is on): the stages folded on the maps, the chunks
+/// whose scan ranges step back (sent to the chains), the maps' growths and the most buckets a map
+/// had.
 pub(super) fn timing_fields() -> String {
     format!(
-        " grows={} buckets={}",
+        " stages={} back={} grows={} buckets={}",
+        STAGES.load(Ordering::Relaxed),
+        BACK.load(Ordering::Relaxed),
         GROWS.load(Ordering::Relaxed),
         MOST_BUCKETS.load(Ordering::Relaxed)
     )

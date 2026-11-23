@@ -3,7 +3,9 @@
 
 use super::super::super::x_diag_lv::LvSeeds;
 use super::super::super::{diag_hash_insert_window, DiagHashTable};
-use super::{DiagLatest, Found, MIN_BITS, MISS, SLOTS, STASH, STASHED};
+use super::{
+    eq_mask, lt_mask, scalar_mask, DiagLatest, Found, MIN_BITS, MISS, SLOTS, STASH, STASHED,
+};
 use std::collections::HashMap;
 
 /// A xorshift generator (the tests' inputs only).
@@ -284,4 +286,40 @@ fn the_map_decides_as_the_chains_outside_the_band() {
     }
     assert!(taken_over > 0, "no cell was taken over");
     assert!(band_differ > 0, "the band showed no difference");
+}
+
+// The masks of the 128-bit compares (`lanes_mask` on x86_64 and wasm32 with simd128) are the lane
+// by lane masks: lanes and values drawn from a few values around each other and the ends of `i32`
+// (`NO_DIAG` and `NO_LEVEL` are `i32::MIN`), every lane equal, below and above.
+#[test]
+fn the_lane_masks_are_the_lane_by_lane_masks() {
+    let mut rng = Rng(0x3A5C_0FF1);
+    let values = [
+        i32::MIN,
+        i32::MIN + 1,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        i32::MAX - 1,
+        i32::MAX,
+    ];
+    let pick = |rng: &mut Rng| values[(rng.next() % values.len() as u64) as usize];
+    let (mut some_eq, mut some_lt) = (0, 0);
+    for _ in 0..200_000 {
+        let lanes: [i32; 8] = std::array::from_fn(|_| pick(&mut rng));
+        let v = pick(&mut rng);
+        let (eq, lt) = (eq_mask(&lanes, v), lt_mask(&lanes, v));
+        assert_eq!(eq, scalar_mask::<false>(&lanes, v), "{lanes:?} == {v}");
+        assert_eq!(lt, scalar_mask::<true>(&lanes, v), "{lanes:?} < {v}");
+        some_eq += usize::from(eq != 0 && eq != 0xff);
+        some_lt += usize::from(lt != 0 && lt != 0xff);
+    }
+    assert!(some_eq > 1000 && some_lt > 1000);
+    for v in values {
+        assert_eq!(eq_mask(&[v; 8], v), 0xff);
+        assert_eq!(lt_mask(&[v; 8], v), 0);
+    }
 }

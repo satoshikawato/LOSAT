@@ -143,6 +143,43 @@ fn latest_bound(x: &Inputs<'_>) -> Option<i32> {
     (bound0 != i32::MIN && seeds.bound(first + x.s_len) != i32::MIN).then_some(bound0)
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
+/// EXPERIMENT (LOSAT_X_DCLATEST) whether the chunk's scan ranges, in the order the stage scans
+/// them (`plan_strips`: the reference's walk, `first_scan_range` and the ranges after it), never
+/// step back: each range with positions starts at or past the last position of the one before.
+/// The maps need S never decreasing (module comment of `x_dc_latest.rs`, (vi)). A subject of
+/// `-db` with `-db_soft_mask` has the complement of its stored masks in their stored order
+/// (`subject_split.rs`), which can step back (masks stored 600-699 then 100-199); NCBI scans them
+/// in that order, and which cells its chains still hold after the step back depends on the order
+/// of their take-overs, so such a chunk goes to the chains. One pass over the chunk's ranges.
+fn latest_ranges_ascend(x: &Inputs<'_>, template_length: usize) -> bool {
+    if x.subject_seq_ranges.is_empty() {
+        return true;
+    }
+    let first = super::super::first_scan_range(
+        x.subject_seq_ranges,
+        x.s_len,
+        template_length,
+        template_length,
+        x.subject_masked,
+    );
+    let mut last: Option<usize> = None;
+    let mut ascend = true;
+    super::super::scan_subject_kmers_with_offsets(
+        x.subject_seq_ranges,
+        template_length,
+        template_length,
+        first,
+        |start, end| {
+            if last.is_some_and(|last| start < last) {
+                ascend = false;
+            }
+            last = Some(end);
+        },
+    );
+    ascend
+}
+
 /// No NCBI counterpart: whether LOSAT_TIMING is set (read once). The stages time themselves when
 /// it is; a chunk without a pool, one of many on one thread with LOSAT_X_BNDCONE, does not read the
 /// environment again.
@@ -415,13 +452,16 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
     cut.stop.get()
 }
 
-/// No NCBI counterpart (the layout of the table only): where `fold_two_hit_t` keeps the
+/// No NCBI counterpart (the layout of the table only): where `fold_two_hit_on` keeps the
 /// diagonals' inserts. `Chains` is NCBI's diagonal hash (`DiagHashTable`, the code before
 /// LOSAT_X_DCLATEST), `Latest` the map of each diagonal's latest insert of that switch
 /// (`x_dc_latest.rs`). The fold makes the same statements in the same order on either.
 trait FoldTable {
-    /// A hint for the seed `latest::AHEAD` places after the one being folded (nothing for the
-    /// chains).
+    /// Whether the fold gives `ahead` the seed `latest::AHEAD` places after the one being folded
+    /// (not for the chains, whose fold then has no code for it).
+    const AHEAD: bool = false;
+
+    /// A hint for the seed `latest::AHEAD` places after the one being folded.
     #[inline(always)]
     fn ahead(&self, _seed: &Seed) {}
 
@@ -560,6 +600,8 @@ impl<'a> Latest<'a> {
 }
 
 impl FoldTable for Latest<'_> {
+    const AHEAD: bool = true;
+
     #[inline(always)]
     fn ahead(&self, seed: &Seed) {
         self.map
@@ -628,10 +670,10 @@ fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
     out: &mut part::PartOut,
     pos: &[u32],
 ) {
-    fold_two_hit_t::<PT, LEAN, _>(
+    fold_two_hit_t::<PT, LEAN, MEMO, true>(
         x,
         seeds,
-        &mut Chains::<PT, LEAN, MEMO, true>::new(x, diag_hash),
+        diag_hash,
         ungapped_hits,
         timing,
         scan_pause_ns,
@@ -641,13 +683,70 @@ fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
     );
 }
 
-/// `fold_two_hit` on the table `table`: EXPERIMENT (LOSAT_X_DCSEEDLEAN) on the chains without
-/// `TRACK` the inserts of a partition do not record the buckets they change (`part::insert_t`; the
-/// merge then writes back every bucket of the partition); EXPERIMENT (LOSAT_X_DCLATEST) on the
-/// map of the latest inserts (`Latest`) the inserts change no `DiagHashTable`, and the fold brings
-/// in the map's bucket of the seed `latest::AHEAD` places ahead.
+/// `fold_two_hit`; EXPERIMENT (LOSAT_X_DCSEEDLEAN): without `TRACK` the inserts of a partition
+/// do not record the buckets they change (`part::insert_t`; the merge then writes back every
+/// bucket of the partition). The function of the fold on the chains, `diag_hash` its argument
+/// (`fold_two_hit_on` inlined with `Chains`), as before LOSAT_X_DCLATEST.
 #[allow(clippy::too_many_arguments)]
-fn fold_two_hit_t<const PT: bool, const LEAN: bool, T: FoldTable>(
+fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>(
+    x: &Inputs<'_>,
+    seeds: &[Seed],
+    diag_hash: &mut DiagHashTable,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    scan_pause_ns: &mut u64,
+    counts: &mut FoldCounts,
+    out: &mut part::PartOut,
+    pos: &[u32],
+) {
+    fold_two_hit_on::<PT, LEAN, _>(
+        x,
+        seeds,
+        &mut Chains::<PT, LEAN, MEMO, TRACK>::new(x, diag_hash),
+        ungapped_hits,
+        timing,
+        scan_pause_ns,
+        counts,
+        out,
+        pos,
+    );
+}
+
+/// EXPERIMENT (LOSAT_X_DCLATEST): `fold_two_hit` on the map of the latest inserts `map` (the
+/// owner's, or with `PT` a partition's): the inserts change no `DiagHashTable`, and the fold brings
+/// in the map's bucket of the seed `latest::AHEAD` places ahead. The function of the fold on a
+/// map, `map` its argument (`fold_two_hit_on` inlined with `Latest`).
+#[allow(clippy::too_many_arguments)]
+fn fold_two_hit_latest<const PT: bool, const LEAN: bool>(
+    x: &Inputs<'_>,
+    seeds: &[Seed],
+    map: &mut DiagLatest,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    scan_pause_ns: &mut u64,
+    counts: &mut FoldCounts,
+    out: &mut part::PartOut,
+    pos: &[u32],
+) {
+    fold_two_hit_on::<PT, LEAN, _>(
+        x,
+        seeds,
+        &mut Latest::new(x, map),
+        ungapped_hits,
+        timing,
+        scan_pause_ns,
+        counts,
+        out,
+        pos,
+    );
+}
+
+/// The body of `fold_two_hit_t` and `fold_two_hit_latest` on the table `table`, inlined into each
+/// (so that the table's fields and the place `find` gave a seed stay in registers, and the
+/// diagonal hash is the function's own argument as before the table was a parameter).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn fold_two_hit_on<const PT: bool, const LEAN: bool, T: FoldTable>(
     x: &Inputs<'_>,
     seeds: &[Seed],
     table: &mut T,
@@ -675,8 +774,10 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, T: FoldTable>(
     counts.seeds += seeds.len() as u64;
     for (x_k, seed) in seeds.iter().enumerate() {
         // EXPERIMENT (LOSAT_X_DCLATEST): the map's bucket of a later seed (a hint only).
-        if let Some(later) = seeds.get(x_k + latest::AHEAD) {
-            table.ahead(later);
+        if T::AHEAD {
+            if let Some(later) = seeds.get(x_k + latest::AHEAD) {
+                table.ahead(later);
+            }
         }
         // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the seed's place in the stage.
         let x_key = if PT { out.key(pos, x_k) } else { 0 };
@@ -1074,10 +1175,10 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool, const MAP: bool>(
             } = st;
             if MAP {
                 // EXPERIMENT (LOSAT_X_DCLATEST): the partition's map.
-                fold_two_hit_t::<true, LEAN, _>(
+                fold_two_hit_latest::<true, LEAN>(
                     x,
                     seeds,
-                    &mut Latest::new(x, map),
+                    map,
                     hits,
                     timing,
                     scan_pause_ns,
@@ -1137,10 +1238,10 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool, const MAP: bool>(
                 let map = owner
                     .as_deref_mut()
                     .expect("LOSAT_X_DCLATEST: a stage without the owner's map");
-                fold_two_hit_t::<false, LEAN, _>(
+                fold_two_hit_latest::<false, LEAN>(
                     x,
                     seeds,
-                    &mut Latest::new(x, map),
+                    map,
                     hits,
                     timing,
                     scan_pause_ns,
@@ -1211,10 +1312,10 @@ fn seed_stage_lists<const LEAN: bool, const MEMO: bool, const MAP: bool>(
         } = st;
         if MAP {
             // EXPERIMENT (LOSAT_X_DCLATEST): the partition's map.
-            fold_two_hit_t::<true, LEAN, _>(
+            fold_two_hit_latest::<true, LEAN>(
                 x,
                 seeds,
-                &mut Latest::new(x, map),
+                map,
                 hits,
                 timing,
                 scan_pause_ns,
@@ -1223,10 +1324,10 @@ fn seed_stage_lists<const LEAN: bool, const MEMO: bool, const MAP: bool>(
                 pos,
             );
         } else {
-            fold_two_hit_t::<true, LEAN, _>(
+            fold_two_hit_t::<true, LEAN, MEMO, false>(
                 x,
                 seeds,
-                &mut Chains::<true, LEAN, MEMO, false>::new(x, hash),
+                hash,
                 hits,
                 timing,
                 scan_pause_ns,
@@ -1297,8 +1398,17 @@ pub(super) fn run(
     crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", true);
     reach_lean(true);
     // EXPERIMENT (LOSAT_X_DCLATEST): the folds keep maps of the latest inserts (every chunk of
-    // the stage has the bounds, `latest_bound`).
-    let latest = if latest_on() { latest_bound(x) } else { None };
+    // the stage has the bounds, `latest_bound`), unless the chunk's scan ranges step back
+    // (`latest_ranges_ascend`: those go to the chains).
+    let latest = if latest_on() {
+        latest_bound(x).filter(|_| {
+            let ascend = latest_ranges_ascend(x, disc.template_length);
+            latest::count_stage(ascend);
+            ascend
+        })
+    } else {
+        None
+    };
     reach_latest(latest.is_some());
     if super::super::x_diag_lv::lv2_on() {
         // (the maps keep no memo)

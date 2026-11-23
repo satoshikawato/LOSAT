@@ -1029,6 +1029,8 @@ struct Traced<'t, T> {
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 impl<T: FoldTable> FoldTable for Traced<'_, T> {
+    const AHEAD: bool = T::AHEAD;
+
     fn ahead(&self, seed: &Seed) {
         self.inner.ahead(seed);
     }
@@ -1206,7 +1208,7 @@ fn the_fold_on_the_map_makes_the_decisions_of_the_chains() {
                         let mut hash = plain_table(w, diag_offset as i32);
                         let (mut reads, mut inserts, mut hits) =
                             (Vec::new(), Vec::new(), Vec::new());
-                        fold_two_hit_t::<false, false, _>(
+                        fold_two_hit_on::<false, false, _>(
                             &xw,
                             &seeds,
                             &mut Traced {
@@ -1226,7 +1228,7 @@ fn the_fold_on_the_map_makes_the_decisions_of_the_chains() {
                         map.begin(lv.bound(diag_offset as usize));
                         let (mut map_reads, mut map_inserts, mut map_hits) =
                             (Vec::new(), Vec::new(), Vec::new());
-                        fold_two_hit_t::<false, false, _>(
+                        fold_two_hit_on::<false, false, _>(
                             &xw,
                             &seeds,
                             &mut Traced {
@@ -1412,4 +1414,242 @@ fn disc_two_hit_stage_on_maps_gives_the_hits_of_the_chains() {
             }
         }
     }
+}
+
+// EXPERIMENT (LOSAT_X_DCLATEST): masked subjects whose scan ranges are out of order, as a subject
+// of `-db` with `-db_soft_mask` keeps its stored masks' order (`subject_split.rs`): `mask_case`'s
+// ranges rotated, reversed, two swapped, or one starting a position before the last position of
+// the one before. The seeds' S then steps back, and the decision of `run` (`latest_bound`, then
+// `latest_ranges_ascend`) sends the chunk to the chains. At the edges of the rule the ranges in
+// order, unmasked, touching (a range starting at the last position of the one before) or with a
+// range too short to scan placed out of order keep S from stepping back and take the maps. Seed by
+// seed the fold the decision picks makes the reads, inserts and hits of the reference fold on the
+// chains over the seeds in scan order (NCBI's); this holds for the first kind only because the
+// decision picks the chains (`put` asserts the order of S in debug builds). The parent's `run`
+// on 2 and 4 threads then gives the reference's hits, and the reference's table where the chunk
+// went to the chains (the maps' stage leaves the table as it was).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[test]
+fn a_chunk_whose_ranges_step_back_goes_to_the_chains() {
+    let mut rng = Lcg(0x0BAC_C5EE);
+    let (mut to_chains, mut to_maps) = (0, 0);
+    for (case_no, (word_size, word_type, template_length)) in [
+        (11usize, DiscWordType::Coding, 16usize),
+        (12, DiscWordType::Optimal, 18),
+        (11, DiscWordType::TwoTemplates, 21),
+        (12, DiscWordType::Coding, 21),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let plain = make_case(&mut rng, 20_000);
+        let mut c = mask_case(&mut rng, plain);
+        let lookup = build_disc_mb_lookup(
+            &ctx_refs(&c),
+            &c.offsets,
+            word_size,
+            template_length,
+            word_type,
+            &c.masks,
+            c.concat.len(),
+        );
+        let tl = template_length as i32;
+        let sorted = c.seq_ranges.clone();
+        // two neighbouring ranges with seeds, both long enough to scan
+        let sorted_seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, 40, 40));
+        let seeded = |(left, right): (i32, i32)| {
+            right - left > 2 * tl
+                && sorted_seeds
+                    .iter()
+                    .any(|seed| (left..=right - tl).contains(&(seed.s as i32)))
+        };
+        let k = (1..sorted.len() - 2)
+            .find(|&k| seeded(sorted[k]) && seeded(sorted[k + 1]))
+            .expect("two ranges with seeds");
+        fn with(r: &[(i32, i32)], f: impl FnOnce(&mut Vec<(i32, i32)>)) -> Vec<(i32, i32)> {
+            let mut r = r.to_vec();
+            f(&mut r);
+            r
+        }
+        // (the variant, its ranges, masked, whether its ranges step back)
+        let variants: Vec<(&str, Vec<(i32, i32)>, bool, bool)> = vec![
+            ("in order", sorted.clone(), true, false),
+            ("unmasked", vec![(0, c.s_len as i32)], false, false),
+            (
+                "rotated",
+                with(&sorted, |r| {
+                    let half = r.len() / 2;
+                    r.rotate_left(half)
+                }),
+                true,
+                true,
+            ),
+            ("reversed", with(&sorted, |r| r.reverse()), true, true),
+            ("swapped", with(&sorted, |r| r.swap(k, k + 1)), true, true),
+            (
+                "one back",
+                with(&sorted, |r| r[k + 1].0 = r[k].1 - tl - 1),
+                true,
+                true,
+            ),
+            (
+                "touching",
+                with(&sorted, |r| r[k + 1].0 = r[k].1 - tl),
+                true,
+                false,
+            ),
+            (
+                "short one back",
+                with(&sorted, |r| r.insert(k + 2, (r[k].0, r[k].0 + tl - 1))),
+                true,
+                false,
+            ),
+        ];
+        for (name, ranges, masked, steps_back) in variants {
+            c.seq_ranges = ranges;
+            c.masked = masked;
+            let diag_offset = 37 + rng.below(1000) as isize;
+            let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, diag_offset, 40));
+            // S steps back only where the ranges do (and does, with the seeds of these sequences,
+            // where whole ranges come out of order)
+            let seeds_back = seeds.windows(2).any(|p| p[1].s < p[0].s);
+            assert!(
+                !seeds_back || steps_back,
+                "case {case_no} {name}: the seeds' order"
+            );
+            if matches!(name, "rotated" | "reversed" | "swapped") {
+                assert!(seeds_back, "case {case_no} {name}: the seeds' order");
+            }
+            for w in [template_length + 1, 40] {
+                let at = format!("case {case_no} {name} w {w}");
+                let x = inputs(&c, &lookup, diag_offset, w);
+                let lv = super::super::super::x_diag_lv::LvSeeds::new(true, template_length, w);
+                assert_eq!(
+                    latest_ranges_ascend(&x, template_length),
+                    !steps_back,
+                    "{at}"
+                );
+                let decided =
+                    latest_bound(&x).filter(|_| latest_ranges_ascend(&x, template_length));
+                assert_eq!(decided.is_none(), steps_back, "{at}: the decision");
+                // the reference: the chains, seed by seed
+                let mut hash = plain_table(w, diag_offset as i32);
+                let (mut reads, mut inserts, mut hits) = (Vec::new(), Vec::new(), Vec::new());
+                fold_two_hit_on::<false, false, _>(
+                    &x,
+                    &seeds,
+                    &mut Traced {
+                        inner: Chains::<false, false, false, true>::new(&x, &mut hash),
+                        seeds: lv,
+                        reads: &mut reads,
+                        inserts: &mut inserts,
+                    },
+                    &mut hits,
+                    None,
+                    &mut 0,
+                    &mut FoldCounts::default(),
+                    &mut part::PartOut::default(),
+                    &[],
+                );
+                let reference = hash_state(&hash);
+                if w == 40 {
+                    assert!(hits.len() > 5, "{at}: too few hits");
+                }
+                // the fold the decision picks
+                let (mut got_reads, mut got_inserts, mut got_hits) =
+                    (Vec::new(), Vec::new(), Vec::new());
+                let mut got_hash = plain_table(w, diag_offset as i32);
+                let mut map = DiagLatest::default();
+                match decided {
+                    Some(bound0) => {
+                        to_maps += 1;
+                        map.begin(bound0);
+                        fold_two_hit_on::<false, false, _>(
+                            &x,
+                            &seeds,
+                            &mut Traced {
+                                inner: Latest::new(&x, &mut map),
+                                seeds: lv,
+                                reads: &mut got_reads,
+                                inserts: &mut got_inserts,
+                            },
+                            &mut got_hits,
+                            None,
+                            &mut 0,
+                            &mut FoldCounts::default(),
+                            &mut part::PartOut::default(),
+                            &[],
+                        );
+                    }
+                    None => {
+                        to_chains += 1;
+                        fold_two_hit_on::<false, false, _>(
+                            &x,
+                            &seeds,
+                            &mut Traced {
+                                inner: Chains::<false, false, false, true>::new(&x, &mut got_hash),
+                                seeds: lv,
+                                reads: &mut got_reads,
+                                inserts: &mut got_inserts,
+                            },
+                            &mut got_hits,
+                            None,
+                            &mut 0,
+                            &mut FoldCounts::default(),
+                            &mut part::PartOut::default(),
+                            &[],
+                        );
+                    }
+                }
+                assert_eq!(got_reads, reads, "{at}: reads");
+                assert_eq!(got_inserts, inserts, "{at}: inserts");
+                assert_eq!(hit_keys(&got_hits), hit_keys(&hits), "{at}: hits");
+                // the decision point itself
+                for threads in [2usize, 4] {
+                    let pool = rayon::ThreadPoolBuilder::new()
+                        .num_threads(threads)
+                        .build()
+                        .unwrap();
+                    pool.install(|| {
+                        let mut table = plain_table(w, diag_offset as i32);
+                        let before = hash_state(&table);
+                        let mut stage_hits = Vec::new();
+                        let mut fold_scratch = PartScratch::default();
+                        let (mut levels, mut lens) = (Vec::new(), Vec::new());
+                        let ran = run(
+                            &x,
+                            &mut table,
+                            DiagArray {
+                                levels: &mut levels,
+                                lens: &mut lens,
+                                length: 0,
+                                mask: 0,
+                                size: 0,
+                            },
+                            &mut stage_hits,
+                            &mut fold_scratch,
+                        );
+                        assert_eq!(ran, on(), "{at} threads {threads}");
+                        if ran {
+                            assert_eq!(
+                                hit_keys(&stage_hits),
+                                hit_keys(&hits),
+                                "{at} threads {threads}: the stage's hits"
+                            );
+                            let on_maps = latest_on() && !steps_back;
+                            assert_eq!(
+                                hash_state(&table),
+                                if on_maps { before } else { reference.clone() },
+                                "{at} threads {threads}: the stage's table"
+                            );
+                        }
+                    });
+                }
+            }
+        }
+    }
+    assert!(to_chains > 0 && to_maps > 0);
 }

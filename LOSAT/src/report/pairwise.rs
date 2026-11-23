@@ -4599,8 +4599,9 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
 }
 
 /// The query-anchored section (`query_anchored::write_section`) of query `q_idx` in the view of
-/// `config` (outfmt 1 to 4), of the HSPs that `hsps_of` makes with the report's sequences
-/// `anchored` (`QuerySections::alignments` of each program).
+/// `config` (outfmt 1 to 4; with `-html`, `PairwiseConfig::html`, the rows' mask spans), of the
+/// HSPs that `hsps_of` makes with the report's sequences `anchored` (`QuerySections::alignments`
+/// of each program).
 fn write_anchored_section<W: Write>(
     writer: &mut W,
     config: &PairwiseConfig,
@@ -4617,7 +4618,11 @@ fn write_anchored_section<W: Write>(
     };
     super::query_anchored::write_section(
         writer,
-        super::query_anchored::View { identity, anchored },
+        super::query_anchored::View {
+            identity,
+            anchored,
+            html: config.html.is_some(),
+        },
         config.line_length,
         &hsps_of(sequences),
         &super::query_anchored::OfQuery { sequences, q_idx },

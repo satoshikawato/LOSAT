@@ -786,11 +786,16 @@ pub(super) fn end_here(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1881-1885
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1907-1914
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4188-4212
 /// The start of the alignment of aligned subject `s_idx` at position `position` of the query's
 /// alignments, at its `place`s, before its heading (after `end_here`): its load
 /// (`ReportPlace::Load`); before the first alignment, with `-html`, the read of `./.ncbirc` that
 /// `x_InitAlignParams` makes after `GetDbType` loads the first alignment's subject, before that
-/// load where its Seq-align id is local (`GetDbType` does not load it; its heading does).
+/// load where its Seq-align id is local (`GetDbType` does not load it; its heading does). The
+/// query-anchored section's loads (outfmt 1 to 4) start the same way: `DisplaySeqalign` reads
+/// the file before its merge, which loads each aligned subject (its heading's load in the
+/// pairwise report).
 fn alignment_start<S: QuerySections, W: Write>(
     sections: &S,
     position: usize,
@@ -897,13 +902,14 @@ fn write_serial<S: QuerySections, W: Write>(
                 // The merge loads every aligned subject before the section's first byte
                 // (`merged_subject` after each load); without one (`-num_alignments 0`) there is
                 // no section (`DisplaySeqalign` returns at once). A load that throws ends the run
-                // there (`alignment_end`).
+                // there (`alignment_end`). With `-html` the section reads `./.ncbirc` where the
+                // pairwise alignments do, at the first load (`alignment_start`).
                 let aligned = group.aligned(sections.num_alignments());
                 let end = alignment_end(sections, group);
                 if !aligned.is_empty() {
                     for (position, &s_idx) in aligned.iter().enumerate() {
                         end_here(end, position)?;
-                        place(ReportPlace::Load(s_idx), &mut *writer)?;
+                        alignment_start(sections, position, s_idx, &mut *writer, &mut place)?;
                         sections.merged_subject(writer, group, s_idx)?;
                     }
                     sections.alignments(writer, q_idx, group)?;
@@ -1168,7 +1174,7 @@ fn format_piece<S: QuerySections>(
             let end = alignment_end(sections, group);
             for (position, &s_idx) in group.aligned(sections.num_alignments()).iter().enumerate() {
                 end_here(end, position)?;
-                mark(ReportPlace::Load(s_idx), &mut buffer)?;
+                alignment_start(sections, position, s_idx, &mut buffer, &mut mark)?;
                 sections.merged_subject(&mut buffer, group, s_idx)?;
             }
             sections.alignments(&mut buffer, piece.query, group)

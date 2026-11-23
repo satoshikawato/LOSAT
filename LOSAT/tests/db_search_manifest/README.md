@@ -120,7 +120,8 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   `-in_pssm`, those with the alignment's master options and no `-in_msa`, those with `-export_search_strategy`, those
   with a standard-input query, and those with `cwd=` or a token of `PROCESS_SETTINGS` (FMTCFG, NCBI, GETURL_DEBUG, NCBI_DONT_USE_NCBIRC): the API's contract
   (`LOSAT/src/api/mod.rs:78-86`) names what a call reads of its process, and these formatter settings are not among
-  them; `-html` reaches the library's host, LOSAT Web, in T4b (line RG, decision T4-1).
+  them; the library's host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that
+  the argv names (`docs/web/abi_v2.md` §3), so no Web run has them.
 - `check_wasm_threading.py`: a few rows by id, every psiblast row and blastx's rows of outfmt 5 and 13 to 16; no row of
   outfmt 0 or 18 (the `-html` rows) and no psiblast `-html` row (psiblast refuses `-html`).
 - The Rust tests that read this directory read named program files (`blastp.tsv`, `psiblast.tsv`, `blastx.tsv`,

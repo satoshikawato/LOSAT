@@ -442,11 +442,11 @@ freeze those rows alone (`--only` takes any id prefix, so `--only sa.multi.megab
 one row). A row that needs NCBI's settings of its process (the `-html` rows of a run directory's `.ncbirc`,
 FMTCFG, `$NCBI`, GETURL_DEBUG or NCBI_DONT_USE_NCBIRC) is a row of `db_search_manifest/` with the tokens `cwd=DIR`
 and `NAME=VALUE` (its README.md), which `freeze` and `check` run alike and `check --library` skips;
-`outfmt0_manifest.tsv` has no such row (`run_oracle.py` refuses those variables). Of the readers of
-`outfmt0_manifest.tsv`, `check_losat.py` (with `--library` too) runs its `-html` rows, and the Web's checks
+`outfmt0_manifest.tsv` has no such row (`run_oracle.py` refuses those variables). The readers of
+`outfmt0_manifest.tsv`, `check_losat.py` (with `--library` too) and the Web's checks
 (`web/adapter/tools/v_abi_cases.py`, `web/adapter/src/run.rs`, `run_local_blastx.rs`, web/app's
-`hsp-correspondence.test.ts` and verification table) skip them: `-html` reaches the Web in T4b (line RG,
-decision T4-1). The fixture directories carry a `.gitattributes` with `-text` for the binary `.out` files. `--jobs` overlaps independent
+`hsp-correspondence.test.ts` and verification table), run its `-html` rows as the others: LOSAT Web takes
+`-html` (line RG, decision T4a2-5). The fixture directories carry a `.gitattributes` with `-text` for the binary `.out` files. `--jobs` overlaps independent
 comparison processes; it does not change a search's requested thread count.
 The frozen runner uses a 3600-second per-search deadline, configurable with a
 positive `--timeout-seconds`; long genome cases can exceed a 900-second limit.

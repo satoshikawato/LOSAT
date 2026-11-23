@@ -1169,7 +1169,6 @@ fn check_ncbi_options(
     for choice in choices {
         let choice = choice.at_formatting_handler(&args.outfmt)?;
         formatting_handler_check(&choice, Program::Tblastx)?;
-        crate::blastinput::app::html_format_check(choice.number, Program::Tblastx, args.html)?;
         outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report

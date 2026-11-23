@@ -4866,11 +4866,11 @@ struct BlastnReportInputs<'a> {
     epilog: bool,
     /// `-show_gis` (the labels of the query-anchored sections, outfmt 1 to 4).
     show_gis: bool,
-    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`); None without
-    /// `-html` or outfmt 0.
+    /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
+    /// without `-html` or any of those formats.
     html: Option<Arc<crate::report::html_ids::HtmlLinks>>,
-    /// `-html` (`BlastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 and 18
-    /// reports (the organism report takes no links).
+    /// `-html` (`BlastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 to 4 and
+    /// 18 reports (the organism report takes no links).
     is_html: bool,
     /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
     /// before the search (`write_pairwise_prologs`).
@@ -5670,7 +5670,7 @@ fn post_process_hits_and_write(
         &hit_lists,
         pairwise_hits.as_deref().map(Vec::as_slice),
         &subject_titles,
-        // The query-anchored formats show no `-html` spans (they refuse `-html`).
+        // The check reads the hits' segments only, not the rows' masks of `-html`'s spans.
         &|queries| rows_of(queries, None),
     )?;
     // The queries' result warnings that a structured first format does not write are each later
@@ -6868,7 +6868,6 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastn)?;
-        app::html_format_check(choice.number, Program::Blastn, args.html)?;
         outfmts.push(choice.number);
     }
     args.html_links = app::html_links(args.html, Program::Blastn, args.database_name(), &outfmts)?;
@@ -7815,7 +7814,7 @@ struct ShownSubjects {
     /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
     /// (`BlastnArgs::tabular_taxdb`; not found where it was not asked).
     tabular_taxdb_found: bool,
-    /// The run's `-html` data for the outfmt 0 prolog (`BlastnArgs::html_links`,
+    /// The run's `-html` data for the outfmt 0 to 4 prolog (`BlastnArgs::html_links`,
     /// `write_blastn_pairwise_prolog`); `None`: the plain prolog.
     html_links: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
 }

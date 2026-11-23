@@ -87,11 +87,11 @@ pub(super) struct TabularInputs {
     pub names: Option<TabularNames>,
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
     pub range_length: Option<usize>,
-    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`; its pairwise
-    /// writer reads them here too, `stage_e_report::write_pairwise`); None without them.
+    /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`; their
+    /// pairwise writer reads them here too, `stage_e_report::write_pairwise`); None without them.
     pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
-    /// `-html` (`TblastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 and 18
-    /// reports (the organism report takes no links).
+    /// `-html` (`TblastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 to 4 and
+    /// 18 reports (the organism report takes no links).
     pub is_html: bool,
 }
 

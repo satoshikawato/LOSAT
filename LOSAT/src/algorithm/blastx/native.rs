@@ -372,7 +372,6 @@ fn run_inner(
     // A value that the early reading left to this handler (`EarlyFormat::Deferred`) fails here.
     let choice = choice.at_formatting_handler(&args.outfmt)?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
-    app::html_format_check(choice.number, Program::Blastx, args.html)?;
     let html = app::html_links(
         args.html,
         Program::Blastx,

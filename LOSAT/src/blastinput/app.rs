@@ -562,43 +562,27 @@ pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyh
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-/// LOSAT's refusal of `-html` with the format `number` when it is 1 to 4 (the query-anchored
-/// alignments), until item T4b of line RG writes their HTML: one check for the five programs, made
-/// where each one's formatting handler checks the format (`formatting_handler_check`), with the
-/// program's option `html`. The refusal's form is that of `cli::run_refusal`.
-pub fn html_format_check(number: i32, program: Program, html: bool) -> anyhow::Result<()> {
-    if html
-        && (output_format::QUERY_ANCHORED_IDENTITIES
-            ..=output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES)
-            .contains(&number)
-    {
-        anyhow::bail!(
-            "-html (with -outfmt 1, 2, 3 or 4) is not supported by LOSAT's {}",
-            program.name()
-        );
-    }
-    Ok(())
-}
-
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1453-1460,1535-1553
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:494
 /// The `-html` links of a run (`report::html_ids::HtmlLinks`), `None` without `-html` or when
 /// none of the run's formats `formats` links ids: the `./.ncbirc` of the prolog's references and
 /// of each query's description table and alignments (`FormatterNcbirc::read`) and NCBI's
 /// formatter registry (`InitConfig::read`:
 /// `FMTCFG`, `NCBI`, `GETURL_DEBUG` and the file), read once per run where each program checks
-/// its formats (`html_format_check`), so that LOSAT's refusal of the file comes before the first
-/// byte; `database` is the `-db` value as NCBI keeps it (`database_name()`, `None` for
+/// its formats (`formatting_handler_check`), so that LOSAT's refusal of the file comes before
+/// the first byte; `database` is the `-db` value as NCBI keeps it (`database_name()`, `None` for
 /// `-subject`). One function for the five programs; the links go where the option went
-/// (`PairwiseConfig::html`). NCBI calls `InitConfig` only from the id links of the pairwise
-/// report (outfmt 0; 1 to 4 are refused with `-html`, `html_format_check`): the organism report
-/// (outfmt 18) takes the option alone (`CBlastFormat::m_IsHTML`), so a run of it reads no file.
+/// (`PairwiseConfig::html`). NCBI calls `InitConfig` only from the id links of the report of
+/// formats 0 to 4, which share the description table and its id links (`PrintOneResultSet` writes
+/// the table of the pairwise report and of the query-anchored ones alike): the organism report (outfmt 18) takes the
+/// option alone (`CBlastFormat::m_IsHTML`), so a run of it reads no file.
 pub(crate) fn html_links(
     html: bool,
     program: Program,
     database: Option<&str>,
     formats: &[i32],
 ) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
-    if !html || !formats.contains(&output_format::PAIRWISE) {
+    if !html || !formats_link_ids(formats) {
         return Ok(None);
     }
     let lower = program.name().to_ascii_lowercase();
@@ -619,6 +603,14 @@ pub(crate) fn html_links(
             ),
         },
     )))
+}
+
+/// Whether one of the formats `formats` writes the description table with its `-html` id links
+/// (`html_links`): the pairwise report (0) and the query-anchored ones (1 to 4).
+fn formats_link_ids(formats: &[i32]) -> bool {
+    formats
+        .iter()
+        .any(|number| (PAIRWISE..=FLAT_QUERY_ANCHORED_NO_IDENTITIES).contains(number))
 }
 
 /// NCBI's error for the XInclude formats (13 and 14) written to standard output, after

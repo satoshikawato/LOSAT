@@ -90,6 +90,7 @@ fn section(probe: &Probe, rows: &[(u32, u32, u32, u32, i8, &str)], format: u8) -
     let view = View {
         identity: matches!(format, 1 | 3),
         anchored: matches!(format, 1 | 2),
+        html: false,
     };
     let mut out = Vec::new();
     write_section(&mut out, view, 60, &hsps(probe, rows), probe).expect("the section");

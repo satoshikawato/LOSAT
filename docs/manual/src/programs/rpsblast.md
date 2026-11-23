@@ -15,7 +15,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 ## Input
 
 - **Query.** A protein FASTA file with `-query` (`-query -` reads the standard input). Several queries are searched in one run. `-query_loc START-STOP` searches part of the query. A query may have up to 5,000,000 letters.
-- **Database.** `-db` names a profile database made by NCBI's `makeprofiledb`, given without file extension. LOSAT reads the `.rps`, `.loo`, `.aux` and `.freq` files of the database. It does not write profile databases.
+- **Database.** `-db` names a profile database made by `makeprofiledb` (NCBI's or [LOSAT's](makeprofiledb.md)), given without file extension. LOSAT reads the `.rps`, `.loo`, `.aux` and `.freq` files of the database.
 - **One volume or several.** A database can be a single volume or many volumes with an alias file (`.pal`) that lists them. Give the alias name, as for NCBI's CDD, which comes in many volumes. The volumes are searched one after the other and the hits are merged for each query.
 - **Where to get CDD.** NCBI publishes CDD at ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/. Download the prebuilt RPS-BLAST database there (at the time of writing, the archive `Cdd_LE.tar.gz`), unpack it, and give the path of its `Cdd` database as `-db`. The database has `.freq` files, so the default composition-based statistics work.
 

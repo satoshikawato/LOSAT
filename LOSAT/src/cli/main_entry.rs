@@ -125,6 +125,11 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("makembindex") {
         std::process::exit(crate::makembindex::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1920-1923
+    // `losat makeprofiledb` too.
+    if let Some(start) = started("makeprofiledb") {
+        std::process::exit(crate::makeprofiledb::run(&argv[2..], start));
+    }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
     if argv

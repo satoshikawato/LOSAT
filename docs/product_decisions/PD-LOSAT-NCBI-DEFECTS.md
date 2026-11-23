@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.82
+- Version: 1.83
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -416,11 +416,21 @@
   and line DBID's 1.71, then line NP's 1.72 and line RG's 1.73, then line RG's 1.74 and line
   NP's 1.75, then the 1.76 to 1.80 of lines RG, NP and PS; the exception numbered 18 at first,
   then 20, 22 and 23);
-  1.82 2026-11-22 (alias files with `GILIST`, `TILIST` and `SEQIDLIST`, line RG item D1c-1: an
+  1.82 2026-11-22 (approved exception 26, makeprofiledb's word table past `Int4`, psiblast line item
+  PS10a: the scaled word score threshold and the neighbouring-word score sums of `-dbtype rps` computed
+  in 64 bits; proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's
+  rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; pending the
+  maintainer's acceptance; and the explicit rejections, rule 3, of `losat makeprofiledb`, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.81; first
+  1.72, then 1.73, 1.74, 1.75, 1.76, 1.77, 1.78, 1.79, 1.80, 1.81 and 1.82 at the merges of dev that brought line NP
+  items M5a and M5b's 1.72, then line RG item X4b-1's 1.73, line RG item D5b-3's 1.74, line NP item M5's 1.75, line
+  RG item X4b-2's 1.76, line RG item D3c-3a's 1.77, line RG item D5b-5's 1.78, line NP item O4c's 1.79, line PS
+  item PS12c's 1.80 and line NP item M4c-1's 1.81, and after exception 25; the exception numbered 22 at first, then 24, 25 and 26)
+  1.83 2026-11-22 (alias files with `GILIST`, `TILIST` and `SEQIDLIST`, line RG item D1c-1: an
   explicit rejection of a `SEQIDLIST` token that NCBI warns about, kept under rule 2 by the
   maintainer (Owner's answer 「Q-D1c-R2=A」, 2026-11-22 22:4x JST); numbered after 1.71; first
-  1.72, then 1.74, 1.78, 1.81 and 1.82 at the merges of dev that brought 1.72 and 1.73, then 1.74
-  to 1.77, then 1.78 to 1.80, then 1.81)
+  1.72, then 1.74, 1.78, 1.81, 1.82 and 1.83 at the merges of dev that brought 1.72 and 1.73, then 1.74
+  to 1.77, then 1.78 to 1.80, then 1.81, then 1.82)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2759,7 +2769,7 @@ file would differ, and NCBI's programs still could not open the database).
   clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
   first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
 
-- An alias file's `SEQIDLIST` over a version 4 database (version 1.82, 2026-11-22, line RG item
+- An alias file's `SEQIDLIST` over a version 4 database (version 1.83, 2026-11-22, line RG item
   D1c-1; rule 2, the rejection kept by the maintainer: Owner's answer 「Q-D1c-R2=A」, 2026-11-22
   22:4x JST), in a shape whose
   NCBI result is deterministic but has no known use: a token of the list that NCBI warns about and
@@ -2832,6 +2842,48 @@ file would differ, and NCBI's programs still could not open the database).
     checks uninitialised; an `obinary` file with units of 1 or 2 letters, whose empty array NCBI
     reads past; a FASTA record or database sequence of 4,294,967,296 letters or more, whose
     positions NCBI counts in 32 bits.
+- `losat makeprofiledb -dbtype rps` (version 1.82, 2026-11-22, psiblast line item PS10a, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07): where NCBI's makeprofiledb 2.17.0 crashes,
+  aborts, never ends or reads memory that is not its data. LOSAT refuses each (exit 1, "... is not
+  supported by LOSAT's MAKEPROFILEDB") where NCBI's run meets it; the rows are those of the line's
+  oracle (`PR/ps10/oracle/cases.tsv`) and of its review.
+  - `-max_smp_vol` 0, or a negative value that gives 0 volumes: NCBI divides by the number of
+    volumes (`makeprofiledb.cpp:1336-1337`; SIGFPE, rows V05 and RN03).
+  - `-in` naming a directory: NCBI's loop over the list's lines (`makeprofiledb.cpp:585`) never ends
+    (row O16).
+  - A `-taxid_map` file with a line of white space only: NCBI crashes (SIGSEGV, row RX06).
+  - A profile stored by row (`byRow TRUE`) with more than 28 positions: NCBI's `.freq` file reads the
+    frequency ratios past their matrix of 28 rows (rows S_byrow and S_fbyrow); a profile with
+    frequency ratios only whose list is shorter than the profile: NCBI iterates its list past the end
+    (row S_ffrs).
+  - A frequency ratio whose value times 10^9 does not fit a 64-bit integer (row S_frhuge), a word
+    score threshold that is not a number after the scaling, a `-scale` whose ceiling does not fit
+    `int`: NCBI's conversions of them have no defined result.
+  - A profile with frequency ratios only whose query letter NCBI's sequence conversion leaves
+    uninitialized (a lower-case letter), whose matrix has no frequency ratios, or whose query has no
+    ungapped Karlin block (NCBI's engine reads `kbp_psi[0]`, a null pointer).
+  - `-scale 1` on frequency ratios whose scaling search does not converge: NCBI's search never ends
+    (review rows RF_BLOSUM45_s1, RF_BLOSUM50_s1, RF_BLOSUM80_s1, RF_tiny1).
+  - A query that has only GI ids between queries with other ids, in a version 5 database with
+    `-index true`: NCBI's LMDB writer aborts (rows I01g and I01x; makeblastdb's refusal of the same
+    shape).
+  - A query without Seq-ids and without descriptors, in a version 5 database with `-index true`:
+    NCBI's taxonomy writer aborts as it closes after the error (row RI03); with `-index false`
+    (version 4 or 5), and for a query whose first binary definition line has no Seq-id, NCBI writes the
+    `gnl|BL_ORD_ID` id into the first element of an empty list (`writedb_impl.cpp:865-874`; exit 0, rows
+    RI03x, RI04 and RB02x). In a version 4 database with `-index true` NCBI's duplicate check stops
+    with `Duplicate seq_ids are found:` (exit 255, rows RI02 and RI02b), which LOSAT writes as NCBI does
+    (rule 2).
+  - An error after which the database's writer fails again as it closes: NCBI's destructor closes the
+    writer during the unwinding and the second exception ends the process (`makeprofiledb.cpp:334-377`;
+    `terminate`, exit 134). Rows RZ07 (an empty `-out` in version 5 with an input file after the first
+    missing), RB03 and RB03b (a binary definition line set without lines in version 5) and RI03.
+  - A profile stored by row without scores whose query length is 4,294,967,295 with `numColumns -1`:
+    the `int` length is -1, NCBI's matrix has no row (`makeprofiledb.cpp:144-156`) and its extra row is
+    written at index -1 (`makeprofiledb.cpp:1106-1167`; SIGSEGV, row RL05). The other shapes of a length
+    past `int` are written as NCBI writes them (rule 2: rows RL01 to RL04, RL06 and RL07).
+  - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
+    counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 
@@ -3203,6 +3255,29 @@ out of the search are not read.
     with every masked letter replaced at random). Unit tests `a_masked_letter_ends_a_run_and_pairs_no_hits` and
     `the_masks_are_of_their_own_sequence` (`LOSAT/src/dbindex/search_tests.rs`), and the placement
     tests of `LOSAT/src/algorithm/blastn/blast_engine/mb_index_seeds_tests.rs`.
+
+## Approved exception 26 (makeprofiledb's word table past `Int4`, psiblast line item PS10a, version 1.82)
+
+Version 1.82, proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's
+rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; pending the
+maintainer's acceptance. Its version is in the list at the top; elsewhere it is cited by its number and
+name, "approved exception 26 (makeprofiledb's word table past `Int4`)". Psiblast line item PS10a.
+
+25. **A word score threshold that, times the profile's scaling factor, does not fit `Int4`, and
+    neighbouring-word score sums past `Int4`.** makeprofiledb indexes the words of every profile of a
+    volume with `s_AddPSSMNeighboringWords` (`blast_aalookup.c:623-748`), whose threshold is the
+    double `scale_factor * wordScoreThreshold` stored in an `Int4` (`makeprofiledb.cpp:928-937`,
+    `1465-1469`) and whose recursion adds the profile's `Int4` scores in an `Int4`. A double past
+    `Int4` converted to `Int4` is undefined behavior; NCBI BLAST+ 2.17.0's x86-64 build gives INT_MIN,
+    so every word of the profile is a hit (oracle rows V25, S_cwstbig, S_cwstbig1: a `.loo` of
+    5,178,168 or 1,841,556 bytes where the threshold's value gives 524,344). Scores large enough that
+    a word's sum passes `Int4` (row S_scedge) wrap (signed overflow, undefined) and keep or drop the
+    word by the wrapped value. LOSAT keeps the threshold and the sums in 64 bits
+    (`algorithm::pssm_search::lookup`, `makeprofiledb::rps_files::word_threshold`), so a word is kept
+    by its score: the table NCBI builds with the threshold's value. A threshold that is not a number
+    after the scaling stays refused (rule 3). The recursion is the one psiblast and tblastn
+    `-in_pssm` use; their PSSM scores stay within `BLAST_SCORE_MIN..=BLAST_SCORE_MAX` and their
+    threshold is an `Int4`, so their sums never leave `Int4` and their output does not change.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

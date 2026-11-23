@@ -106,7 +106,7 @@ See [dustmasker](programs/dustmasker.md), [segmasker](programs/segmasker.md), [w
 | --- | --- |
 | [`blastn`](programs/blastn.md), [`tblastx`](programs/tblastx.md), [`tblastn`](programs/tblastn.md) | Nucleotide |
 | [`blastp`](programs/blastp.md), [`blastx`](programs/blastx.md), [`psiblast`](programs/psiblast.md) | Protein |
-| [`rpsblast`](programs/rpsblast.md), [`rpstblastn`](programs/rpstblastn.md) | A profile database, such as NCBI's CDD (files `.rps`, `.loo`, `.aux`; one or several volumes). LOSAT does not provide `makeprofiledb`: use NCBI's databases. |
+| [`rpsblast`](programs/rpsblast.md), [`rpstblastn`](programs/rpstblastn.md) | A profile database, such as NCBI's CDD (files `.rps`, `.loo`, `.aux`, `.freq`; one or several volumes): NCBI's, or one built by [`makeprofiledb`](programs/makeprofiledb.md). |
 | [`blastdbcmd`](programs/blastdbcmd.md) | Either; `-dbtype` chooses when a name exists for both. |
 | [`dustmasker`](programs/dustmasker.md) (`-infmt blastdb`) | Nucleotide |
 | [`windowmasker`](programs/windowmasker.md) (`-infmt blastdb`) | Nucleotide |

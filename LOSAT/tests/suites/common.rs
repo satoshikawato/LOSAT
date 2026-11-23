@@ -75,6 +75,8 @@ mod makeblastdb_past_32_bits;
 mod makeblastdb_rename_lock;
 #[path = "../makembindex_fixtures.rs"]
 mod makembindex_fixtures;
+#[path = "../makeprofiledb_fixtures.rs"]
+mod makeprofiledb_fixtures;
 #[path = "../masker_fixtures.rs"]
 mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]

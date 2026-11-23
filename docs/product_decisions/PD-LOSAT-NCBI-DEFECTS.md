@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.87
+- Version: 1.88
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -458,7 +458,14 @@
   numbered after 1.85; first 1.80, then 1.84 at the merge of psiblast line item PS10c, which brought
   dev's 1.80 to 1.82 and PS10c's 1.83, then 1.85 at the merge of dev that brought line NP item
   M4b-AX's 1.83 and PS10c's 1.84, then 1.86 at the merge of dev that brought line RG item D1c-1's 1.85);
-  1.87 2026-11-23 (approved exception 27, the Owner's answer of 2026-11-22 22:34 JST to question Q4
+  1.87 2026-11-23 (BLASTP `-ungapped -comp_based_stats 0 -use_sw_tback`, line NP item O4b2-2: the explicit
+  rejection of decision D3 comes at the traceback of the first query batch that NCBI searches, after the
+  reports of the batches before, the form of 1.76 and 1.79, instead of before the first byte; a run that
+  searches no batch ends as NCBI's does; no new exception, rule 3; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.86; first 1.83, then 1.84 at the merge of dev that brought line NP
+  item M4b-AX's 1.83, then 1.86 at the merge of dev that brought 1.84 and 1.85, then 1.87 at the merge of dev
+  that brought psiblast line item PS10d's 1.86);
+  1.88 2026-11-23 (approved exception 27, the Owner's answer of 2026-11-22 22:34 JST to question Q4
   of line NP's M4b (question Q6 of that day's batch, 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A
   Q10=A Q11=A Q12=A Q13=OK」): with `-db_hard_mask`, TBLASTN and TBLASTX search a reading frame whose
   masks leave it an empty first part (a mask within the first 2 bases of a sequence or within the 1
@@ -467,11 +474,11 @@
   removed; how the 1 or 2 masked bases are read (masked in every frame): the Owner's answer
   「推奨通り」 of 2026-11-23 13:49 JST, on the board, to the report of line NP's session ad-M4b-8 that
   asked Q-ALIGNEX and M4b-3c's question Q6 (recommended A and B), which is Q6 = B; line NP item
-  M4b-3c; numbered after 1.86 (1.83 is line NP item M4b-AX, 1.84 psiblast line item PS10c, 1.85 line RG
-  item D1c-1, 1.86 psiblast line item PS10d); first 1.77, then 1.85 at the merge of dev that brought its 1.75 to
+  M4b-3c; numbered after 1.87 (1.83 is line NP item M4b-AX, 1.84 psiblast line item PS10c, 1.85 line RG
+  item D1c-1, 1.86 psiblast line item PS10d, 1.87 line NP item O4b2-2); first 1.77, then 1.85 at the merge of dev that brought its 1.75 to
   1.82 (the branch had assumed 1.76 for line NP item M4b-3b; dev's 1.76 and 1.77 are line RG's X4b-2 and
   D3c-3a), then 1.86 at the merge of dev that brought line RG item D1c-1's 1.85, then 1.87 at the merge of dev
-  that brought PS10d's 1.86; the exception numbered 24 at first, then 27 after dev's 24 to 26)
+  that brought PS10d's 1.86, then 1.88 at the merge of dev that brought O4b2-2's 1.87; the exception numbered 24 at first, then 27 after dev's 24 to 26)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -681,7 +688,7 @@ Explicit rejections (rule 3):
   of the batch before, row `db.x4.chunk.gap_anchor.6`; rows `db.x4.chunk.empty.*` and
   `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
-  `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
+  `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
   exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
@@ -1296,7 +1303,7 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     leaves a frame an empty first part (an empty first part of a frame, then a part that NCBI
     searches as the whole frame; in TBLASTN and TBLASTX this includes an empty mask at 0 before a
     tail mask, which BLASTP and BLASTX search under Q1 as BLASTN does under exception 13), refused
-    (rule 3) until version 1.87, is searched under approved exception 27 (a translated mask that
+    (rule 3) until version 1.88, is searched under approved exception 27 (a translated mask that
     leaves a frame an empty first part). Masks out of
     order, overlapping masks, a mask that ends past its sequence, and in BLASTP and BLASTX a range
     longer than 5,000,000 letters stay refused (rule 3). `blastinput::db_mask::HardScan`,
@@ -1344,7 +1351,7 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     `a_whole_frame_scans_to_the_frame_s_end_and_a_tail_masked_one_its_chunk`
     (`LOSAT/src/algorithm/common/translated_chunks_tests.rs`).
 
-## Approved exception 27 (TBLASTN and TBLASTX `-db_hard_mask`, a mask that leaves a reading frame an empty first part, version 1.87)
+## Approved exception 27 (TBLASTN and TBLASTX `-db_hard_mask`, a mask that leaves a reading frame an empty first part, version 1.88)
 
 The Owner decided on 2026-11-22 at 22:34 JST (words 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A
 Q10=A Q11=A Q12=A Q13=OK」; question Q6 of that batch is question Q4 of line NP's M4b,
@@ -2430,7 +2437,10 @@ file would differ, and NCBI's programs still could not open the database).
   does (exit 1, "-use_sw_tback with -ungapped, on which NCBI BLAST+ 2.17.0's tblastn crashes at every
   query batch it searches, is not supported by LOSAT's TBLASTN"; one producer of the text,
   `smith_waterman_match::sw_ungapped_error`; rows `db.tn.rej.ungapped.sw.*`, anchor
-  `db.tn.ungapped.ac.b1.nosw.7`). With `-use_sw_tback` LOSAT's BLASTX searches a query batch
+  `db.tn.ungapped.ac.b1.nosw.7`). BLASTP refuses it in the same way since version 1.87 (line NP item
+  O4b2-2; before, before the first byte: decision D3 above), with the same text for `blastp`: NCBI BLAST+
+  2.17.0 from Bioconda, 2026-11-23, crashes at the first query batch it searches and reports the batches
+  before it, whose queries give no Karlin-Altschul parameters (rows `db.ung.sw.*`). With `-use_sw_tback` LOSAT's BLASTX searches a query batch
   of NCBI's reader as one unit (the batch's status, its first query's heap and the contexts that
   index the heaps are per batch), and gives the outcome of `-num_threads 1` at every thread count.
   Fixture rows `db.x4b2.*`; `LOSAT/tests/blastx_sw_tback.rs`; inputs `LOSAT/tests/fasta/x4b2` and

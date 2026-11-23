@@ -218,12 +218,68 @@ fn the_convert_mode_refuses_what_ncbi_gives_no_one_result_for() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// NCBI's counts writers open `-out` by its bytes (`CSeqMaskerOstatFactory::create` of the
+// argument's string, line RG item K4i-2a): a name that is not UTF-8 is written as given, in the
+// counts mode and in the convert mode, and the counts are those of a name of text. Not on macOS,
+// whose APFS refuses a file name that is not UTF-8 (as `tests/non_utf8_names.rs`).
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn the_counts_modes_write_an_out_name_that_is_not_utf8() {
+    use std::os::unix::ffi::OsStringExt;
+    let run = |line: Vec<OsString>| {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let status = run_with(&line, &mut std::io::empty(), &mut out, &mut err);
+        (status, out, String::from_utf8(err).unwrap())
+    };
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-windowmasker-out-bytes-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let named = |name: &[u8]| {
+        let mut path = dir.clone().into_os_string().into_vec();
+        path.push(b'/');
+        path.extend_from_slice(name);
+        OsString::from_vec(path)
+    };
+    let words = |line: &[&str], out: OsString| -> Vec<OsString> {
+        let mut words: Vec<OsString> = line.iter().map(OsString::from).collect();
+        words.extend(["-out".into(), out]);
+        words
+    };
+    let counts = ["-mk_counts", "-in", "tests/windowmasker/in/cd.fa"];
+    let (status, out, err) = run(words(&counts, named(b"c\xff")));
+    assert_eq!((status, out), (0, Vec::new()), "{err}");
+    let (status, _, err) = run(words(&counts, named(b"c")));
+    assert_eq!(status, 0, "{err}");
+    let written = std::fs::read(named(b"c")).unwrap();
+    assert!(!written.is_empty());
+    assert_eq!(std::fs::read(named(b"c\xff")).unwrap(), written);
+    let convert = [
+        "-convert",
+        "-in",
+        "tests/windowmasker/counts/u4.ascii",
+        "-sformat",
+        "binary",
+    ];
+    let (status, _, err) = run(words(&convert, named(b"b\xff")));
+    assert_eq!(status, 0, "{err}");
+    let (status, _, err) = run(words(&convert, named(b"b")));
+    assert_eq!(status, 0, "{err}");
+    assert_eq!(
+        std::fs::read(named(b"b\xff")).unwrap(),
+        std::fs::read(named(b"b")).unwrap()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // The reader's view of the keys: the eBoolean defaults (`F`, `T`, `false`), the doubles and the
 // integers that a constraint allows.
 #[test]
 fn the_keys_read_as_ncbi_s() {
-    let words =
-        |line: &[&str]| -> Vec<String> { line.iter().map(|word| word.to_string()).collect() };
+    let words = |line: &[&str]| -> Vec<OsString> { line.iter().map(OsString::from).collect() };
     let args = crate::ncbi_app::args::parse(
         &TOOL,
         &words(&[
@@ -267,4 +323,159 @@ fn the_dependencies_are_ncbi_s() {
     }
     assert!(list.windows(2).all(|pair| pair[0].0 <= pair[1].0));
     assert_eq!(list[0], ("checkdup", Dep::Excludes, "ustat"));
+}
+
+/// A run of LOSAT Web (`run_in`, `RunFiles::Receiver`) gives the bytes of the command line's run in
+/// the same directory (here the crate's, `run_with` on the file system): the exit status, the
+/// standard output and error, and each file that the run writes (`-out FILE`, `-logfile FILE`),
+/// which the receiver gets under its name in place of the disk; the files of `-mk_counts` (binary,
+/// with `-t_low_pct`, which a named file alone takes), `-convert` and the masking; a folder that the
+/// directory does not have opens no counts file (NCBI's writer then loses the counts) and no masking
+/// output (NCBI's `File is not accessible`); `-xmlhelp` prints NCBI's XML, as the command line's run
+/// does (line NP WW3a, 2026-11-22).
+#[test]
+fn a_run_of_losat_web_writes_the_files_of_the_command_line() {
+    use crate::report::run_files::{FileReceiver, RunFiles};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct Kept(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
+    impl FileReceiver for Kept {
+        fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+            self.0.lock().unwrap().push((name.to_vec(), bytes.to_vec()));
+            Ok(())
+        }
+    }
+    let disk = crate::utils::test_dir::temp_dir()
+        .join(format!("ww3a-wm-{}", crate::utils::test_dir::process_id()));
+    std::fs::create_dir_all(&disk).unwrap();
+    let fasta = "tests/winmask/fasta/dm2L_3k.fa";
+    let counts = "tests/winmask/counts/dm2L_u9.binary";
+    let rows: [&[&str]; 5] = [
+        &[
+            "-mk_counts",
+            "-in",
+            fasta,
+            "-unit",
+            "5",
+            "-sformat",
+            "binary",
+            "-t_low_pct",
+            "50",
+            "-out",
+            "@/c.counts",
+            "-logfile",
+            "@/run.log",
+        ],
+        &[
+            "-convert",
+            "-in",
+            "tests/windowmasker/counts/u4.ascii",
+            "-sformat",
+            "obinary",
+            "-out",
+            "@/c.obinary",
+        ],
+        &[
+            "-ustat",
+            counts,
+            "-in",
+            fasta,
+            "-outfmt",
+            "fasta",
+            "-out",
+            "@/masked.fa",
+        ],
+        &[
+            "-mk_counts",
+            "-in",
+            fasta,
+            "-unit",
+            "5",
+            "-out",
+            "ww3a-no-such-folder/c.counts",
+        ],
+        &[
+            "-ustat",
+            counts,
+            "-in",
+            fasta,
+            "-out",
+            "ww3a-no-such-folder/masked.fa",
+        ],
+    ];
+    for row in rows {
+        // The command line's names under a directory of the disk; LOSAT Web's in the working
+        // directory, as the run's own names.
+        let named = |prefix: &str| -> Vec<String> {
+            row.iter().map(|word| word.replace('@', prefix)).collect()
+        };
+        let cli = named(disk.to_str().unwrap());
+        let web = named(".");
+        let cli_words: Vec<OsString> = cli.iter().map(OsString::from).collect();
+        let web_words: Vec<OsString> = web.iter().map(OsString::from).collect();
+        let (mut cli_out, mut cli_err) = (Vec::new(), Vec::new());
+        let cli_status = run_with(
+            &cli_words,
+            &mut std::io::empty(),
+            &mut cli_out,
+            &mut cli_err,
+        );
+        let kept = Arc::new(Kept::default());
+        let (mut web_out, mut web_err) = (Vec::new(), Vec::new());
+        let web_status = run_in(
+            &web_words,
+            &RunFiles::Receiver(kept.clone()),
+            &mut std::io::empty(),
+            &mut web_out,
+            &mut web_err,
+        );
+        assert_eq!(web_status, cli_status, "{row:?}");
+        assert_eq!(web_out, cli_out, "{row:?}");
+        let disk_prefix = format!("{}/", disk.to_str().unwrap());
+        assert_eq!(
+            String::from_utf8(web_err).unwrap(),
+            String::from_utf8(cli_err)
+                .unwrap()
+                .replace(&disk_prefix, "./"),
+            "{row:?}"
+        );
+        let mut made: Vec<(Vec<u8>, Vec<u8>)> = std::fs::read_dir(&disk)
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                let name = format!("./{}", path.file_name().unwrap().to_str().unwrap());
+                let bytes = std::fs::read(&path).unwrap();
+                std::fs::remove_file(&path).unwrap();
+                (name.into_bytes(), bytes)
+            })
+            .collect();
+        let mut given = kept.0.lock().unwrap().clone();
+        made.sort();
+        given.sort();
+        assert_eq!(given, made, "{row:?}");
+        assert_eq!(
+            row.iter().filter(|word| word.starts_with('@')).count(),
+            made.len(),
+            "{row:?}"
+        );
+    }
+    std::fs::remove_dir_all(&disk).unwrap();
+    let mut out = Vec::new();
+    let status = run_in(
+        &[OsString::from("-xmlhelp")],
+        &RunFiles::Disk,
+        &mut std::io::empty(),
+        &mut out,
+        &mut Vec::new(),
+    );
+    assert_eq!(
+        (status, out),
+        (
+            0,
+            crate::ncbi_xmlhelp::print("windowmasker", |_| false)
+                .unwrap()
+                .into_bytes()
+        )
+    );
 }

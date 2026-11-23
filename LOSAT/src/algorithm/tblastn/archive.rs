@@ -160,8 +160,8 @@ pub(super) struct ArchiveRender<'a> {
 /// `EffectiveSearchSpace` option: `batch_searched_space`).
 struct FirstContext {
     /// The ungapped and the gapped block; `None` when the first query has no valid context
-    /// (both blocks are then missing).
-    karlin: Option<(KarlinParams, KarlinParams)>,
+    /// (both blocks are then missing). An ungapped search has no gapped block (`None`).
+    karlin: Option<(KarlinParams, Option<KarlinParams>)>,
     /// The effective search space and length adjustment of that context (0 without one).
     search_space: i64,
     length_adjustment: i64,
@@ -274,10 +274,15 @@ pub(super) struct ArchiveData<'a> {
     pub ungapped_karlin: &'a [KarlinParams],
     pub query_validity: &'a [bool],
     pub query_batch_skipped: &'a [bool],
-    pub gapped: KarlinParams,
+    /// The gapped Karlin-Altschul values; `None` for an ungapped search, which makes no gapped
+    /// block (NCBI's `kbp_gap` is not set up).
+    pub gapped: Option<KarlinParams>,
     pub seg: Option<&'a SegParams>,
     pub mask_lowercase: bool,
     pub ranges: &'a ReportRanges<'a>,
+    /// The run's program type (`RunRecord::program_type`, `in_pssm::program_type`): PSI-TBLASTN's
+    /// results carry no query masks (`report::record::carries_query_masks`).
+    pub program_type: Option<crate::report::record::ProgramType>,
 }
 
 /// Calls `each` with the queries and the archive of each batch of `spans`, in order
@@ -299,8 +304,8 @@ fn for_each_batch(
         let first = span.start;
         let searched = !data.query_batch_skipped[first];
         // Only a searched batch has results masks (the search made them): they are computed per
-        // batch.
-        let masks = if searched {
+        // batch; a PSSM search's results have none.
+        let masks = if searched && crate::report::record::carries_query_masks(data.program_type) {
             query_record_masks(records, first, data.seg, data.mask_lowercase, data.ranges)
         } else {
             Vec::new()
@@ -337,7 +342,12 @@ fn for_each_batch(
             }
         };
         let ka_blocks = match &context.karlin {
-            Some((ungapped, gapped)) => [ka_block(ungapped, false), ka_block(gapped, true)],
+            Some((ungapped, gapped)) => [
+                ka_block(ungapped, false),
+                gapped
+                    .as_ref()
+                    .map_or(KaBlock::missing(true), |gapped| ka_block(gapped, true)),
+            ],
             None => [KaBlock::missing(false), KaBlock::missing(true)],
         };
         requests.with_batch(records, data.ranges.queries.get(first), |request| {
@@ -353,6 +363,7 @@ fn for_each_batch(
                     &data.queries[first],
                     data.query_validity[first],
                 ),
+                round: None,
             };
             each(span, &batch)
         })?;
@@ -373,9 +384,11 @@ pub(super) fn write_tblastn_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastn,
-        rps: false,
         db_title: data.shown.db_title(),
-        gapped: true,
+        // NCBI's `CBlastFormatUtil`/`CBlastSeqalign` builds Std-seg diagonals for an ungapped
+        // translated search (`report::serial::seqalign`).
+        gapped: data.gapped.is_some(),
+        program_type: None,
     };
     for_each_batch(data, render.spans, |span, batch| {
         for index in span.clone() {
@@ -385,9 +398,9 @@ pub(super) fn write_tblastn_archives(
         let mut aligns = TblastnAligns {
             run: RunRecord {
                 program: run.program,
-                rps: run.rps,
                 db_title: run.db_title,
                 gapped: run.gapped,
+                program_type: run.program_type,
             },
             queries: data.queries,
             first,

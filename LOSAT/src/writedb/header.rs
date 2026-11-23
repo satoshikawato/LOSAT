@@ -17,6 +17,8 @@ const TAG_SEQUENCE: u8 = (1 << 5) | 16;
 const TAG_CONTEXT_CONSTRUCTED: u8 = (2 << 6) | (1 << 5);
 const INDEFINITE_LENGTH_BYTE: u8 = 0x80;
 
+// The BER lengths and integer values are the ASN.1 binary encoder's, their one writer.
+use crate::report::serial::asn_ber::{write_int4_value, write_int8_value, write_length};
 use crate::seqid::model::{Date, ObjectId, ParsedSeqId, PatentNumber, TextseqId};
 use crate::seqid::DeflineSet;
 use crate::utils::byte_search::find_first;
@@ -52,32 +54,10 @@ fn close(out: &mut Vec<u8>) {
     out.extend_from_slice(&[0, 0]);
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:393-425
-fn write_length(out: &mut Vec<u8>, length: usize) {
-    if length <= 127 {
-        out.push(length as u8);
-        return;
-    }
-    let bytes = (length as u64).to_be_bytes();
-    let count = bytes.iter().skip_while(|&&byte| byte == 0).count();
-    out.push(0x80 + count as u8);
-    out.extend_from_slice(&bytes[bytes.len() - count..]);
-}
-
-// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:533-554
+/// `WriteInt4`: the universal INTEGER tag and the value (`asn_ber::write_int4_value`).
 fn write_int4(out: &mut Vec<u8>, data: i32) {
     out.push(TAG_INTEGER);
-    let length = if (-0x80..=0x7f).contains(&data) {
-        1
-    } else if (-0x8000..=0x7fff).contains(&data) {
-        2
-    } else if (-0x80_0000..=0x7f_ffff).contains(&data) {
-        3
-    } else {
-        4
-    };
-    out.push(length as u8);
-    out.extend_from_slice(&data.to_be_bytes()[4 - length..]);
+    write_int4_value(out, data);
 }
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
@@ -113,26 +93,26 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
 /// appended to `bad`.
 pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleChar>) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + title.len());
-    // Blast-def-line-set ::= SEQUENCE OF Blast-def-line
+    // Outer `Blast-def-line-set` sequence of `Blast-def-line` entries.
     open(&mut out, TAG_SEQUENCE);
-    // Blast-def-line ::= SEQUENCE
+    // Single `Blast-def-line` sequence.
     open(&mut out, TAG_SEQUENCE);
-    // title VisibleString OPTIONAL
+    // Optional `title` field (VisibleString).
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_TITLE);
     write_visible_string(&mut out, title, bad);
     close(&mut out);
-    // seqid SEQUENCE OF Seq-id
+    // `seqid` list of `Seq-id` entries.
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_SEQID);
     open(&mut out, TAG_SEQUENCE);
-    // Seq-id ::= CHOICE { ..., general Dbtag, ... }
+    // `Seq-id` choice variant `general` (`Dbtag`).
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | SEQID_GENERAL);
-    // Dbtag ::= SEQUENCE { db VisibleString, tag Object-id }
+    // `Dbtag` sequence containing `db` (VisibleString) and `tag` (`Object-id`).
     open(&mut out, TAG_SEQUENCE);
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DBTAG_DB);
     write_visible_string(&mut out, b"BL_ORD_ID", &mut Vec::new());
     close(&mut out);
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DBTAG_TAG);
-    // Object-id ::= CHOICE { id INTEGER, str VisibleString }
+    // `Object-id` choice variant `id` (integer; alternative is `str`).
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | OBJECT_ID_ID);
     write_int4(&mut out, oid as i32);
     close(&mut out);
@@ -141,7 +121,7 @@ pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleCha
     close(&mut out);
     close(&mut out);
     close(&mut out);
-    // taxid INTEGER OPTIONAL
+    // Optional `taxid` integer field.
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_TAXID);
     write_int4(&mut out, taxid);
     close(&mut out);
@@ -165,19 +145,11 @@ pub struct BadChar {
     pub string: Vec<u8>,
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:556-597
 // `WriteInt8` writes the universal INTEGER tag first (objostrasnb.cpp:716-724; no
-// `m_CStyleBigInt` in makeblastdb's stream).
+// `m_CStyleBigInt` in makeblastdb's stream), then the value (`asn_ber::write_int8_value`).
 fn write_int8(out: &mut Vec<u8>, data: i64) {
     out.push(TAG_INTEGER);
-    let length = (1..8usize)
-        .find(|&bytes| {
-            let bits = 8 * bytes as u32 - 1;
-            (-(1i64 << bits)..(1i64 << bits)).contains(&data)
-        })
-        .unwrap_or(8);
-    out.push(length as u8);
-    out.extend_from_slice(&data.to_be_bytes()[8 - length..]);
+    write_int8_value(out, data);
 }
 
 /// The BER writer of a whole `Blast-def-line-set` (`*deflines` streamed to `oss` through

@@ -157,6 +157,7 @@ fn saved_code1_link_lists_match_ncbi_score_order_num_and_double_evalue() {
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
                 eff_searchsp_override: None,
+                ungapped: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: (subject_nt_length / 3) as i32,
@@ -302,6 +303,7 @@ fn scaled_postredo_relink_and_reap_match_ncbi_trace() {
             scale_factor: 1.0,
             gumbel: Some(&gumbel),
             eff_searchsp_override: None,
+            ungapped: None,
         },
         LocalParameterCall::Initial {
             min_subject_length: 2_125,
@@ -575,6 +577,7 @@ fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
             scale_factor: 1.0,
             gumbel: Some(&gumbel),
             eff_searchsp_override: None,
+            ungapped: None,
         },
         LocalParameterCall::Initial {
             min_subject_length: 120,
@@ -609,6 +612,7 @@ fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
         gap_xdrop: 38,
         gapped_cutoff: &hit_cutoff,
         hsp_num_max: i32::MAX as usize,
+        gapped: true,
         subject_besthit: false,
     };
     let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
@@ -694,8 +698,8 @@ fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3383-3427,
     // 3525-3535; composition_adjustment/redo_alignment.c:64,1560-1580;
     // composition_adjustment/compo_heap.c:252-275,330-391,405-410:
-    // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
-    //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
+    // When `BlastCompo_EarlyTermination` triggers on a local match's best E-value
+    // against the redone matches, frees that HSP list (`Blast_HSPListFree`) and continues.
     let would_rows: Vec<_> = kappa_trace
         .lines()
         .filter(|line| line.starts_with("K_TRACE_HEAP_WOULD\t"))
@@ -1098,7 +1102,6 @@ fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
                     num_ident: i32::try_from(identities[index]).unwrap(),
                     num_positives: stats[index].1,
                     report_num_ident: identities[index],
-                    report_num_positives: stats[index].1,
                     report_mismatches: i64::try_from(stats[index].3).unwrap(),
                     align_length: stats[index].2,
                     mismatches: stats[index].3,
@@ -1457,4 +1460,60 @@ fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
         );
         assert_eq!(expected, edits[edit_index]);
     }
+}
+
+// TBLASTN's even-gap linking (`link_even_gap_translated`) passes each HSP's subject frame and
+// its context's values to `core::link_hsps::even_gap_link_hsps` (whose tests check the
+// linking itself): two HSPs in order on both sequences link on subject frames of one sign and
+// stay apart on frames of opposite signs; the list comes back sorted by score with the
+// contexts and the input positions of its HSPs.
+#[test]
+fn even_gap_translated_linking_keeps_each_hsps_frame_and_context() {
+    use crate::core::link_hsps::{EvenGapLinkParams, LinkCutoffs};
+    let params = EvenGapLinkParams::ungapped_translated_subject(LinkCutoffs {
+        cutoff_small_gap: 0,
+        cutoff_big_gap: 1,
+        gap_prob: 0.0,
+    });
+    let kbp = [lookup_protein_params_ungapped(ScoringMatrix::Blosum62)];
+    let lengths = [LocalContextLength {
+        length_adjustment: 40,
+        eff_searchsp: 260 * 960,
+        subject_stat_length: 960,
+    }];
+    let hsp = |frame, (q_start, q_end), (s_start, s_end), score| GappedHsp {
+        frame,
+        score,
+        q_start,
+        q_end,
+        q_gapped_start: q_start,
+        s_start,
+        s_end,
+        s_gapped_start: s_start,
+    };
+    let pair = |f1: i8, f2: i8| {
+        [
+            (0, hsp(f1, (200, 260), (500, 560), 60)),
+            (0, hsp(f2, (10, 60), (20, 70), 80)),
+        ]
+    };
+    let link = |input: &[(usize, GappedHsp)]| {
+        link_even_gap_translated(input, &[300], &lengths, 3000, &kbp, &params).unwrap()
+    };
+    let same = link(&pair(1, 3));
+    assert_eq!(
+        same.hsps
+            .iter()
+            .map(|l| (l.context, l.hsp.score, l.num, l.source_index))
+            .collect::<Vec<_>>(),
+        [(0, 80, 2, 1), (0, 60, 2, 0)]
+    );
+    assert_eq!(same.hsps[0].hsp.frame, 3);
+    assert_eq!(same.best_evalue, same.hsps[0].evalue);
+    let apart = link(&pair(-1, 3));
+    assert!(apart.hsps.iter().all(|l| l.num == 1), "{:?}", apart.hsps);
+    // NCBI's empty list returns at once (link_hsps.c:1774-1777).
+    let empty = link(&[]);
+    assert!(empty.hsps.is_empty());
+    assert_eq!(empty.best_evalue.to_bits(), 0.0f64.to_bits());
 }

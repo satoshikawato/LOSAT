@@ -584,7 +584,7 @@ fn posts_equal_what_makeblastdb_posts() {
                         }
                         warned = true;
                     }
-                    posted.extend_from_slice(&post.line("makeblastdb"));
+                    posted.extend_from_slice(&post.line(Some("makeblastdb")));
                 }
             };
             let complete = |list: &MaskList| {

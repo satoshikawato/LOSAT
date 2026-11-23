@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pfx_utf8",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pfx_utf8",
+  "number-of-letters": 360,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-17T05:18:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49946,
+  "bytes-to-cache": 484,
+  "files": [
+    "pfx_utf8.pdb",
+    "pfx_utf8.phr",
+    "pfx_utf8.pin",
+    "pfx_utf8.pog",
+    "pfx_utf8.pos",
+    "pfx_utf8.pot",
+    "pfx_utf8.psq",
+    "pfx_utf8.ptf",
+    "pfx_utf8.pto"
+  ]
+}

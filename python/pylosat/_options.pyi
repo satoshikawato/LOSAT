@@ -30,6 +30,8 @@ class BlastnOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -159,6 +161,8 @@ class BlastpOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -265,6 +269,8 @@ class BlastxOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -367,6 +373,8 @@ class TblastnOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int
@@ -478,6 +486,8 @@ class TblastxOptions(TypedDict, total=False):
     """Effective length of the database"""
     show_gis: bool
     """Show NCBI GIs in deflines?"""
+    html: bool
+    """Produce HTML output?"""
     parse_deflines: bool
     """Should the query and subject defline(s) be parsed?"""
     searchsp: int

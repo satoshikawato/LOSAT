@@ -50,12 +50,12 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 - The PSSM's scores replace the matrix, and its Karlin-Altschul values set the cutoffs, E-values and bit scores.
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.
-- The report formats are 0 to 4, 6, 7 and 10. Other formats are refused.
+- The report formats are 0 to 10 and 20. Formats 12 to 16 and 18 are not yet supported.
 - Also refused with `-in_pssm`:
   - `-ungapped`;
   - `-use_sw_tback` on a search that finds an alignment, where NCBI fails, crashes, never finishes or writes rows that change from one run to the next (a search that finds nothing runs);
   - `-db_gencode 32`;
-  - `-outfmt 11`;
+  - `-outfmt 11`, where NCBI stops with a C++ exception whose report changes from run to run;
   - `-mt_mode 1` with more than one thread and `-db`;
   - a PSSM whose query `-seg` masks completely.
 
@@ -80,6 +80,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-sum_stats` | `true` | Use sum statistics for groups of alignments |
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
 | `-window_size` | 40 | Two-hit window; 0 selects the one-hit method |
+| `-ungapped` | off | Search without gaps (with `-comp_based_stats 0`) |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
 | `-best_hit_overhang`, `-best_hit_score_edge` | off (0.1 for the one not given) | Keep only the best alignments for each region of the query (the Best Hit algorithm). Values above 0 and below 0.5; not with `-culling_limit` |
 | `-subject_besthit` | off | Keep only the best alignment of each subject for each part of the query |
@@ -105,13 +106,14 @@ For every option: `losat tblastn -help`.
 | 18 | Organism report |
 | 20 | Comma-separated values with header lines |
 
-With `-in_pssm`, only 0 to 4, 6, 7 and 10 work.
+With `-in_pssm`, 0 to 10 and 20 work.
 
 Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`. A custom list changes them, for example `-outfmt "6 qseqid sseqid pident sframe evalue"`; `delim=` sets the separator. [Output formats](../output-formats.md) describes each format.
 
 ## Differences from NCBI BLAST+
 
 - With `-db_hard_mask`, a reading frame whose first part, from its first letter, ends at a mask with no other part of the frame after it (masks at or near either end of a sequence) is searched over that part alone. NCBI BLAST+ 2.17.0 reads the masked letters of the frame there and can crash or report other alignments. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+- With `-db_hard_mask`, a sequence with a mask within its first two bases, or within the one or two bases after its last whole codon, or with an empty mask at its start, is searched: the reading frame that such a mask leaves an empty part at its start is searched whole, and the masked bases stay masked in every reading frame. NCBI BLAST+ 2.17.0 crashes on it in every run. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - With `-subject` and a `-db_gencode` other than 1, LOSAT translates the subject with that code (see [Genetic code of the subject](#genetic-code-of-the-subject)). See [the decision record on genetic code 32 for local tblastn subjects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-TLOSAN-LOCAL-GENCODE-32.md).
 - `-db_gencode 32` is accepted (without `-in_pssm`). NCBI BLAST+ 2.17.0 rejects it.
 - With `-window_size 0` and a low `-threshold`, NCBI BLAST+ can read memory past its buffers and crash. LOSAT reads the letters past the end as the end marker. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
@@ -121,14 +123,13 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `tblastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-ungapped`.
-- With `-use_sw_tback`, the rare query and subject pairs on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
-- An `-evalue` of 1.7976931348623157e308 or more.
+- `-use_sw_tback` with `-ungapped`, and with `-use_sw_tback` the rare query and subject pairs on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
+- With `-ungapped`, a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`, or a matrix file that NCBI BLAST+ finds.
+- An infinite `-evalue` (`+inf`, `1e999`), and an `-evalue` of 1.7976931348623157e308 with composition-based statistics (`-comp_based_stats` 1 to 3).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
-- `-db_hard_mask` on a database with a sequence whose masks leave a reading frame an empty part at its start, followed by a part that NCBI searches as the whole frame (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example).
-- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback.
+- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation).
 - The `-in_pssm` settings listed [above](#searching-with-a-pssm).
 
 ## Examples

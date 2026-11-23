@@ -345,8 +345,6 @@ fn sum_statistics_and_an_ungapped_search_are_refused_before_the_reports() {
     let mut search = TranslatedRpsSearch {
         search: RpsSearch::default(),
         ungapped: false,
-        use_sw_tback: false,
-        comp_based_stats: "0".to_string(),
         several_volumes: false,
         costs: None,
         strategy_db_length: None,
@@ -569,8 +567,6 @@ fn a_volumes_refusal_leaves_the_earlier_batches_to_meet_later_volumes() {
     let mut search = TranslatedRpsSearch {
         search: RpsSearch::default(),
         ungapped: false,
-        use_sw_tback: false,
-        comp_based_stats: "0".to_string(),
         several_volumes: true,
         costs: None,
         strategy_db_length: None,
@@ -684,7 +680,9 @@ fn a_profile_of_the_reported_seq_id_past_the_cut_is_reported() {
     assert_eq!(oids(&joined), [1, 1, 0]);
     let mut apart = vec![Some(hit_list(&[twin, other, copy]))];
     assert_eq!(
-        report_ordinal_ids(db, &mut apart, 1, PROGRAM, true).unwrap(),
+        report_ordinal_ids(db, &mut apart, 1, PROGRAM, true)
+            .unwrap()
+            .map(|dropped| dropped.hsps),
         Some(vec![1])
     );
     assert_eq!(oids(&apart), [1, 0]);
@@ -741,8 +739,6 @@ fn a_batchs_cutoff_refusal_comes_before_an_earlier_querys_search_error() {
     let mut search = TranslatedRpsSearch {
         search: RpsSearch::default(),
         ungapped: false,
-        use_sw_tback: false,
-        comp_based_stats: "0".to_string(),
         several_volumes: false,
         costs: None,
         strategy_db_length: None,

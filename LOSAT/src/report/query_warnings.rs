@@ -29,6 +29,12 @@ pub struct QueryWarnings<'a> {
     /// The posts of each query whose later lines (`Posts::later`) this format's reports write,
     /// and the format's receiver of them (`with_later`).
     later: Option<(&'a [Posts], &'a mut Vec<u8>)>,
+    /// Where a `-html` report's own posts go apart from `sink` (`with_html_posts`), `None`: to
+    /// `sink`.
+    html_posts: Option<&'a mut dyn Write>,
+    /// The report's place among its search's formats (`for_report`), which keeps the first call
+    /// of each report's id links (`formatter_registry::InitConfig::call_posts`).
+    report: usize,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
@@ -101,7 +107,7 @@ impl SubjectRead {
         if let Some(load) = &mut self.load {
             let mut moved = load.in_ledger(left);
             self.text = moved.place(std::mem::take(&mut self.text));
-            load.opening = moved.opening;
+            (load.lead, load.opening) = (moved.lead, moved.opening);
         }
     }
 }
@@ -112,8 +118,9 @@ impl SubjectRead {
 /// What the load of a read's subject looks up, as far as it decides the texts: NCBI's lookups write
 /// the texts of opening the taxonomy database at the run's first ask, and the offset error at a
 /// volume's first lookup of the taxid whose record begins past the end of `taxdb.btd`
-/// (`TaxDb::offset_error_taxid`; a volume whose cache would ask again is refused,
-/// `TaxdbRun::cache_collision`), nothing else. The model of the reads gives each text to the load
+/// (`TaxDb::offset_error_taxid`; on a database with a volume whose cache can ask again,
+/// `TaxdbRun::cache_collision`, every read is refused and only a batch's prefetch asks, again
+/// where NCBI's order of its loads gives that, so no load is left out there), nothing else. The model of the reads gives each text to the load
 /// that makes the ask, assuming every load it models happens; a load that NCBI does not make (a
 /// BLAST XML `Iteration` or `Hit` that the stream leaves out, `ReadCursor::cut`) leaves its texts
 /// to NCBI's next load that makes the same ask (`LoadTexts`).
@@ -128,42 +135,79 @@ pub struct ReadLoad {
     pub looks_up: bool,
     /// Whether the load looks up the taxid of the offset error.
     pub offset: bool,
-    /// The bytes of the model's text that are the texts of opening (its start).
+    /// The bytes of the model's text that are NCBI's warning of a UTF8String read for a
+    /// VisibleString (its start): the lookup of the load's Seq-align id reads such a header first
+    /// (`ParsedSubject::scope_utf8`, before the blob's taxonomy), and the run posts it here.
+    pub lead: usize,
+    /// The bytes of the model's text after `lead` that are the texts of opening.
     pub opening: usize,
+    /// Whether the lookup of the load's Seq-align id reads such a header: the load takes the
+    /// warning that a load NCBI does not make left (`left_out`).
+    pub scope_utf8: bool,
 }
 
 impl ReadLoad {
-    /// The text that this load writes where it happens, `own` being the model's: before it the
-    /// texts of opening that a load left out (`left_out`) placed, where this load looks a taxid
-    /// up, and after it the offset error that a load of the same volume left out, where this load
-    /// looks that taxid up (the texts of a load are those of opening, then those of its lookups).
-    /// They are NCBI's texts of this load: the asks that the left-out load made in the model are
-    /// this load's first.
+    /// The load of a subject whose Seq-align id's lookup reads a header with a UTF8String where a
+    /// VisibleString is expected and whose blob's taxonomy writes no text (no `taxdb.bti`, or no
+    /// blob), with the run's ledger `texts`.
+    pub fn of_scope_utf8(texts: std::sync::Arc<LoadTexts>) -> Self {
+        ReadLoad {
+            texts,
+            volume: u32::MAX,
+            looks_up: false,
+            offset: false,
+            lead: 0,
+            opening: 0,
+            scope_utf8: true,
+        }
+    }
+
+    /// The text that this load writes where it happens, `own` being the model's: after its
+    /// warning of a UTF8String header (`lead`), or where it has none and its lookup reads such a
+    /// header, the one that a load left out (`left_out`), the texts of opening that a load left
+    /// out placed, where this load looks a taxid up, and after it the offset error that a load of
+    /// the same volume left out, where this load looks that taxid up (the texts of a load are its
+    /// lookup's warning, then those of opening, then those of its lookups). They are NCBI's texts
+    /// of this load: the asks that the left-out load made in the model are this load's first.
     pub fn placed(&self, own: &[u8]) -> Vec<u8> {
         self.with_left_out(own.to_vec()).0
     }
 
     /// `placed` for the model's read of this load (`common::database::subject_read_texts`, a
-    /// batch modelled after a report that left loads out): its text, whose texts of opening are
-    /// then those placed before its own.
+    /// batch modelled after a report that left loads out): its text, whose warning and texts of
+    /// opening are then those placed before its own.
     pub fn place(&mut self, own: Vec<u8>) -> Vec<u8> {
-        let (text, opening) = self.with_left_out(own);
-        self.opening = opening;
+        let (text, lead, opening) = self.with_left_out(own);
+        (self.lead, self.opening) = (lead, opening);
         text
     }
 
-    /// The text of `placed` and the length of its texts of opening.
-    fn with_left_out(&self, own: Vec<u8>) -> (Vec<u8>, usize) {
+    /// `place` of the model's text `own` after the warning `lead` that this load's lookup posts
+    /// (empty where it posts none).
+    pub fn place_after(&mut self, lead: Vec<u8>, own: Vec<u8>) -> Vec<u8> {
+        self.lead = lead.len();
+        let mut text = lead;
+        text.extend(own);
+        self.place(text)
+    }
+
+    /// The text of `placed`, the length of its warning and that of its texts of opening.
+    fn with_left_out(&self, own: Vec<u8>) -> (Vec<u8>, usize, usize) {
         let mut pending = self.texts.pending.lock().expect("the texts of the loads");
-        if pending.opening.is_empty() && pending.offsets.is_empty() {
-            return (own, self.opening);
+        if pending.is_empty() {
+            return (own, self.lead, self.opening);
         }
-        let mut text = Vec::new();
+        let (lead, own) = own.split_at(self.lead.min(own.len()));
+        let mut text = lead.to_vec();
+        if lead.is_empty() && self.scope_utf8 {
+            text.append(&mut pending.utf8);
+        }
+        let lead = text.len();
         if self.looks_up {
             text.append(&mut pending.opening);
         }
-        let opening = text.len() + self.opening;
-        text.extend(own);
+        let opening = text.len() - lead + self.opening;
+        text.extend_from_slice(own);
         if self.offset {
             if let Some(at) = pending
                 .offsets
@@ -173,7 +217,7 @@ impl ReadLoad {
                 text.extend(pending.offsets.remove(at).1);
             }
         }
-        (text, opening)
+        (text, lead, opening)
     }
 
     /// This load with the texts left out in `texts` instead of the run's ledger
@@ -185,11 +229,14 @@ impl ReadLoad {
         }
     }
 
-    /// NCBI does not make this load, whose text in the model is `text`: its texts of opening and
-    /// its offset error go to the next load that makes those asks (`placed`).
+    /// NCBI does not make this load, whose text in the model is `text`: its warning of a
+    /// UTF8String header goes to the next load whose lookup reads such a header, its texts of
+    /// opening and its offset error to the next load that makes those asks (`placed`).
     pub fn left_out(&self, text: &[u8]) {
+        let (lead, text) = text.split_at(self.lead.min(text.len()));
         let (opening, offset) = text.split_at(self.opening.min(text.len()));
         let mut pending = self.texts.pending.lock().expect("the texts of the loads");
+        pending.utf8.extend_from_slice(lead);
         if !opening.is_empty() {
             pending.opening.extend_from_slice(opening);
         }
@@ -232,8 +279,10 @@ impl LoadTexts {
 
     /// Whether no text is left out.
     pub fn is_empty(&self) -> bool {
-        let pending = self.pending.lock().expect("the texts of the loads");
-        pending.opening.is_empty() && pending.offsets.is_empty()
+        self.pending
+            .lock()
+            .expect("the texts of the loads")
+            .is_empty()
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288 (cited at
@@ -290,10 +339,18 @@ impl LoadTexts {
 
 #[derive(Debug, Default)]
 struct PendingTexts {
+    /// NCBI's warning of a UTF8String header that a left-out load's lookup read (`ReadLoad::lead`).
+    utf8: Vec<u8>,
     /// The texts of opening the taxonomy database (empty: none left out).
     opening: Vec<u8>,
     /// By volume, its offset error.
     offsets: Vec<(u32, Vec<u8>)>,
+}
+
+impl PendingTexts {
+    fn is_empty(&self) -> bool {
+        self.utf8.is_empty() && self.opening.is_empty() && self.offsets.is_empty()
+    }
 }
 
 impl SubjectReads {
@@ -346,9 +403,26 @@ fn reads_of(reads: &[QueryReads], query: usize) -> &[SubjectRead] {
 /// formats into a buffer, marked at the buffer's length.
 pub type SubjectReadHook<'r, W> = &'r mut dyn FnMut(u32, &mut W) -> io::Result<()>;
 
-/// A [`SubjectReadHook`] that writes nothing (the tests of the writers).
-#[cfg(test)]
-pub fn no_subject_reads<W>(_subject: u32, _writer: &mut W) -> io::Result<()> {
+/// A place of a pairwise report (outfmt 0 to 4) where NCBI writes to the run's diagnostics between
+/// the report's bytes, after the report written before it (`cerr`, tied to `cout`): the load of a
+/// subject (`Load`: its read's text, `QueryWarnings::subject_read`) or, with `-html`, a read of
+/// NCBI's formatter registries (`Html`: `report::html_ids::HtmlPost`, whose text the run's
+/// `-html` links give, `HtmlLinks::posts_of`). The writers call their `ReportHook` at each, in the
+/// report's order; one that formats into a buffer keeps them with their offsets
+/// (`x_pairwise_par::format_piece`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReportPlace {
+    Load(u32),
+    Html(crate::report::html_ids::HtmlPost),
+}
+
+/// The pairwise writers' call at each `ReportPlace` of a query's report, with the report written so
+/// far (`x_pairwise_par::at_place`, or a writer's own marks).
+pub type ReportHook<'r, W> = &'r mut dyn FnMut(ReportPlace, &mut W) -> io::Result<()>;
+
+/// A [`ReportHook`] that writes nothing: of a writer without `-html` that reads no subject
+/// through it (psiblast's headings), and of the tests of the writers.
+pub fn no_places<W>(_place: ReportPlace, _writer: &mut W) -> io::Result<()> {
     Ok(())
 }
 
@@ -770,6 +844,11 @@ fn write_reads(
     })
 }
 
+/// The error of a `-html` pairwise report that posts on the diagnostics without the run's warnings
+/// (`report_posts` gives them to every such report): LOSAT's internal error, not a silent loss.
+pub const HTML_POSTS_WITHOUT_WARNINGS: &str =
+    "LOSAT internal error: a -html report posts on the diagnostics, but its format writes no warnings";
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:756-759
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1160
 /// Whether the writer of a report of format `format` posts on the run's diagnostics while it
@@ -779,9 +858,11 @@ fn write_reads(
 /// exceptions of their streams, `write_hit_posts`, and the taxonomy database's messages at their
 /// `Hit`s), the BLAST archive (NCBI's posts, which it saves as messages) and the Seq-annots of
 /// outfmt 8, 9 and 12 (the posts of the bytes that NCBI's stream replaces,
-/// `serial::seqalign::write_query_to`). A writer that posts without warnings is LOSAT's internal
-/// error (`write_hit_posts`), not a silent loss.
-pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>) -> bool {
+/// `serial::seqalign::write_query_to`), and the pairwise report of a run with `-html` (`html`: the
+/// posts of its reads of NCBI's formatter registries, `ReportPlace::Html`). A writer that posts
+/// without warnings is LOSAT's internal error (`write_hit_posts`, `x_pairwise_par::at_place`), not
+/// a silent loss.
+pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>, html: bool) -> bool {
     use crate::blastinput::app::ReportFormat;
     matches!(
         format,
@@ -796,7 +877,7 @@ pub fn report_posts(format: Option<crate::blastinput::app::ReportFormat>) -> boo
                 | ReportFormat::AsnBinary
                 | ReportFormat::JsonSeqalign
         )
-    )
+    ) || (html && format == Some(ReportFormat::Pairwise))
 }
 
 /// Writes `text` to `sink` after `report` is flushed (nothing for an empty text).
@@ -807,6 +888,53 @@ fn write_after(report: &mut dyn Write, sink: &mut dyn Write, text: &[u8]) -> io:
     report.flush()?;
     sink.write_all(text)?;
     sink.flush()
+}
+
+/// Where the posts of a `-html` report's reads of NCBI's formatter registries go: `posts`, the
+/// sink that a caller sets apart for them (`ReportOutputs::html_posts` of a library call's later
+/// search, the diagnostics of a later format of BLASTX), else `diagnostics`, the run's. The one
+/// owner of that rule, for the reports' writers (`QueryWarnings::html_posts_sink`) and for the
+/// prologs' references that post before a search or with its first batch (blastx's
+/// `report::write_prolog`, tblastn's and tblastx's prolog writers; line RG T4a2 fix round 3,
+/// review e N1).
+pub(crate) fn html_posts_sink<'s, W: Write + ?Sized>(
+    posts: Option<&'s mut W>,
+    diagnostics: &'s mut W,
+) -> &'s mut W {
+    match posts {
+        Some(posts) => posts,
+        None => diagnostics,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
+// NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:543-544
+/// Writes `text`, what a read of NCBI's formatter registries posts in a `-html` report, to
+/// `posts` (`html_posts_sink`); before it, the report written so far (`report`) is flushed where
+/// the post goes to the standard error. NCBI's posts go to `cerr` (its default handler), which
+/// the C++ library ties to `cout`, so the report reaches standard output first; the posts of a
+/// run whose messages follow `-logfile` (tblastx, rpsblast, rpstblastn:
+/// `ncbi_environment::run_messages_follow_log`) go to that file and flush nothing, which LOSAT
+/// knows by the standard error that the file replaced (`ncbi_environment::terminal_stderr`).
+/// NCBI BLAST+ 2.17.0 (line RG T4a2 review e S1, probe `T/t4/review_t4a2_e/out/txlog.rep.*`,
+/// `tblastx -html -logfile` with both streams in one pipe): `GETURL_DEBUG`'s `REGISTRY:` line
+/// after the version line's flush (166 bytes), where a flush at each post put it after the
+/// first description table's head (1,037). A library call's posts go to its diagnostics, never
+/// a process stream: its report is flushed before each, as the command line's without
+/// `-logfile`.
+pub(crate) fn write_html_post<R: Write + ?Sized>(
+    report: &mut R,
+    posts: &mut dyn Write,
+    text: &[u8],
+) -> io::Result<()> {
+    if text.is_empty() {
+        return Ok(());
+    }
+    if crate::blastinput::ncbi_environment::terminal_stderr().is_none() {
+        report.flush()?;
+    }
+    posts.write_all(text)?;
+    posts.flush()
 }
 
 impl Drop for QueryWarnings<'_> {
@@ -858,6 +986,35 @@ impl<'a> QueryWarnings<'a> {
         }
     }
 
+    /// Writes `text`, what a read of NCBI's formatter registries posts in a `-html` report
+    /// (`ReportPlace::Html`), to the sink of the report's posts (`html_posts_sink`), after the
+    /// report written so far (`report`) where the post flushes it (`write_html_post`).
+    pub fn html_post(&mut self, text: &[u8], report: &mut dyn Write) -> io::Result<()> {
+        write_html_post(report, self.html_posts_sink(), text)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3410-3412
+    /// Writes `line`, what NCBI's formatter writes to the process's standard error itself in a
+    /// `-html` report (`InitConfig`'s `REGISTRY:` line, not a post): with C's `fprintf` to
+    /// `stderr`, which does not flush `cout`, so the report written so far is not flushed (in a
+    /// pipe of both streams the line comes before the report's bytes since its last flush; line
+    /// RG T4a2 fix round 2, review c C4: NCBI BLAST+ 2.17.0 writes it after the prolog's last
+    /// `NcbiEndl`, probes `T/t4/fix2/out/c4.*`). It goes to the terminal where the run's messages
+    /// follow `-logfile` (tblastx: `ncbi_environment::terminal_stderr`, the standard error before
+    /// the command line made it the file; NCBI's posts go to the file, its own line to the
+    /// terminal), else to the sink of the report's posts (`html_posts_sink`). A library call's
+    /// messages have no terminal of their own: that sink.
+    pub fn html_stderr_line(&mut self, line: &[u8]) -> io::Result<()> {
+        match crate::blastinput::ncbi_environment::terminal_stderr() {
+            Some(mut terminal) => terminal.write_all(line),
+            None => {
+                let sink = self.html_posts_sink();
+                sink.write_all(line)?;
+                sink.flush()
+            }
+        }
+    }
+
     /// The report of query `query` reads subject `subject` here (`ReadCursor::subject_read`),
     /// after the report written so far (`report`).
     pub fn subject_read(
@@ -885,7 +1042,45 @@ impl<'a> QueryWarnings<'a> {
             sink,
             reads: None,
             later: None,
+            html_posts: None,
+            report: 0,
         }
+    }
+
+    /// These warnings for the report of the search's `report`th format (from 0), whose `-html`
+    /// id links call `InitConfig` as a run of that format alone calls it
+    /// (`formatter_registry::InitConfig::call_posts`): the first call of each report writes the
+    /// call's posts and its `GETURL_DEBUG` line (NCBI's `m_Reg` is a static of the process, which
+    /// a run of one format has; line RG T4a2 fix round 2, review c C3 = review d D5, a library
+    /// call of formats 0 and 0).
+    pub fn for_report(mut self, report: usize) -> Self {
+        self.report = report;
+        self
+    }
+
+    /// These warnings with `posts` (`Some`) as the sink of the posts of a `-html` report's reads
+    /// of NCBI's formatter registries (`html_post`, `html_stderr_line`, the prolog's references:
+    /// `pairwise::html_with_diagnostics`), where `sink` takes texts that the call writes elsewhere:
+    /// the repeats of a later search of a library call (`ReportOutputs::html_posts`) and the
+    /// standard error of a later format of BLASTX (`algorithm::blastx::local`), so that each
+    /// report posts what a run of its format alone posts, also in a call of several formats
+    /// (line RG T4a2 fix round 2, review c C3 = review d D5). `None` leaves them on `sink`.
+    pub fn with_html_posts(mut self, posts: Option<&'a mut dyn Write>) -> Self {
+        if posts.is_some() {
+            self.html_posts = posts;
+        }
+        self
+    }
+
+    /// The report's place among its search's formats (`for_report`).
+    pub(crate) fn report(&self) -> usize {
+        self.report
+    }
+
+    /// The sink of the `-html` report's own posts (`with_html_posts`, else `sink`:
+    /// `query_warnings::html_posts_sink`).
+    pub(crate) fn html_posts_sink(&mut self) -> &mut dyn Write {
+        html_posts_sink(self.html_posts.as_deref_mut(), &mut *self.sink)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
@@ -978,15 +1173,24 @@ fn before_report(
 /// after it read the batch and before the batch's search, and the prefetch's after the search:
 /// in the batch's first query, after the reader's messages of the batch (the first
 /// `reader(query)` bytes of its lines), the request's, the prefetch's, then the rest (the query's
-/// own warnings).
+/// own warnings). NCBI's posts of its first read of the reported sequences' headers
+/// (`header_read`: with the first query of the batch whose Seq-aligns read them,
+/// `common::database::Utf8Read`) come after the search, before the prefetch: at the batch's first
+/// query after its request's posts and before its prefetch's.
 pub fn query_posts(
     lines: Vec<Vec<u8>>,
     requests: Vec<(usize, Posts)>,
     prefetches: Vec<(usize, Posts)>,
     reader: impl Fn(usize) -> usize,
+    header_read: Option<(usize, Posts)>,
 ) -> Vec<Posts> {
-    // A batch's prefetch after its request (a stable sort keeps the order of each list).
-    let mut requests: Vec<(usize, Posts)> = requests.into_iter().chain(prefetches).collect();
+    // A batch's first read of a UTF8String header after its request, and its prefetch after both
+    // (a stable sort keeps the order of each list).
+    let mut requests: Vec<(usize, Posts)> = requests
+        .into_iter()
+        .chain(header_read)
+        .chain(prefetches)
+        .collect();
     requests.sort_by_key(|&(first, _)| first);
     let mut requests = requests.into_iter().peekable();
     let mut posts: Vec<Posts> = lines

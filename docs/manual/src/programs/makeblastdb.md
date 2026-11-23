@@ -36,6 +36,8 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-mask_data` | none | Masks from `dustmasker`, `segmasker`, `windowmasker` or `convert2blastmask` (comma-separated files, ASN.1 text or binary). |
 | `-mask_id` | the name in the mask file | Comma-separated names for the masking algorithms. A name cannot be a number. |
 | `-mask_desc` | none | Comma-separated free-text descriptions of the algorithms. |
+| `-gi_mask` | off | Write the masks as GI-indexed mask files instead of the mask column (see [GI-indexed masks](#gi-indexed-masks)). Needs `-parse_seqids`; not with `-mask_id`. |
+| `-gi_mask_name` | the `-mask_data` names | Comma-separated names of the GI-indexed mask files, one for each mask file. Needs `-mask_data` and `-gi_mask`. |
 | `-max_file_sz` | `3000000000` | Largest size of one database file, in bytes. A larger database is split into volumes. |
 | `-logfile` | standard output and error | Write the log and messages to this file (appended). |
 | `-metadata_output_prefix` | none | Path written before each file name in the JSON metadata (`.pjs`, `.njs`), for a database that will be read from another directory. The path separator (`/`, `\` on Windows) is added when the value does not end with one. |
@@ -72,6 +74,19 @@ A mask finds its sequence by the same id as in NCBI BLAST+. Build with `-parse_s
 
 A mask file that is damaged stops with makeblastdb's own error and exit status. A text in it with a byte outside the visible ASCII range is stored with `#` in the byte's place, and the run reports it, as makeblastdb does.
 
+### GI-indexed masks
+
+`-gi_mask` writes the masks of each mask file into six files of their own instead of the mask column: `NAME.gmd` and `NAME.gnd` (the masked ranges), `NAME.gmo` and `NAME.gno` (the GIs of the masked sequences) and `NAME.gmi` and `NAME.gni` (their index). `NAME` is the mask file's entry of `-gi_mask_name`, or the mask file's name as you typed it; it is a path from the current directory, not from the database. The database gets an alias file (`.nal` or `.pal`) whose `MASKLIST` line names these files. Only sequences with a GI get masks: the masks of other sequences are left out without a message, and a mask file that reached no sequence with a GI writes no files and is left out of `MASKLIST`.
+
+The files, messages and exit status are those of NCBI's `makeblastdb` 2.17.0, with one difference:
+
+- A database in one volume opens. NCBI's `makeblastdb` writes an alias file that names the database by its full path, which NCBI's programs take for another alias file: no program can open that database, and the build ends with `BLAST Database error: Illegal configuration: DB alias files are mutually recursive.` and exit status 2. LOSAT's alias file names the volume by its file name (`DBLIST db` for `-out db`), as the alias file of a database in several volumes names its volumes. The build then ends as one of several volumes does, with the metadata file (`.njs`, `.pjs`) and exit status 0, and NCBI's programs read the database and its masks. Every other file is NCBI's.
+- An alias file that NCBI's `makeblastdb` left from such a build cannot be read when the old database is removed, by NCBI or by LOSAT. A new build with `-gi_mask` writes its own alias file over it. A build without `-gi_mask` keeps it and ends with the error above, as NCBI's does: delete the `.nal` or `.pal` file first.
+
+NCBI's programs look for the GI-mask files from the current directory and the `BLASTDB` path, not from the database's directory, so they find them when they run where the build ran (or with `BLASTDB` set to that directory, or with an absolute `-gi_mask_name`).
+
+LOSAT's own programs do not read GI-indexed masks yet: `blastn`, `blastdbcmd` and the other readers refuse a database whose alias file has `MASKLIST` (see [What LOSAT refuses](../refusals.md)).
+
 ### Hash index
 
 `-hash_index` writes the sequence hash index (`.phi`/`.phd`, `.nhi`/`.nhd`). `blastdbcmd -outfmt %h` prints the hash of each sequence.
@@ -88,7 +103,8 @@ A mask file that is damaged stops with makeblastdb's own error and exit status. 
 - Without `-title` the new database takes the title of the input database. With several input databases, give `-title`.
 - The sequences keep their definition lines (ids, tax ids, membership and leaf tax ids), their PIGs, the masks of every algorithm and the data of other columns. The ids are always indexed, as with `-parse_seqids`.
 - An alias name keeps the sequences its OID ranges and lists keep. Under `OID_MASK_TYPE 1` the definition lines with a predicted RefSeq accession are left out, as in NCBI; a sequence left with no line is refused (NCBI's `makeblastdb` stops with a null-pointer report).
-- `-taxid`, `-taxid_map`, `-mask_data`, `-hash_index` and `-oid_masks` work as for FASTA input. `-taxid_map` still needs `-parse_seqids` on the command line.
+- `-taxid`, `-taxid_map`, `-mask_data`, `-gi_mask`, `-hash_index` and `-oid_masks` work as for FASTA input. `-taxid_map` and `-gi_mask` still need `-parse_seqids` on the command line.
+- With `-gi_mask` the masks of the input databases go to GI-indexed mask files too, one set for each of their algorithms, named after the algorithm and its id in the input (`dust11` and so on), as NCBI's `makeblastdb` names them. A sequence's masks go under the GIs of all its definition lines.
 - `-randomize` (hidden in `makeblastdb`'s help, and in LOSAT's) copies the sequences in a random order, which depends on the second of the clock. LOSAT reads the clock when the build starts; `makeblastdb` reads it when the copy starts, after reading the input's definition lines. With the same second the order is the one `makeblastdb` 2.17.0 gives on Linux. `makeblastdb` on Windows and macOS shuffles with other C++ libraries, whose order has not been compared. With another `-input_type`, `-randomize` stops with `makeblastdb`'s error.
 - With `-title` or several names, an input name that is not a database is reported (`Unable to open input NAME as BLAST db`), and the build stops with the database error. A single name without `-title` that is not a database stops the build earlier, when its title is read, with the database error alone. Both are as in `makeblastdb`.
 
@@ -100,19 +116,21 @@ A mask file that is damaged stops with makeblastdb's own error and exit status. 
 | --- | --- |
 | `.pin` `.phr` `.psq` (protein), `.nin` `.nhr` `.nsq` (nucleotide) | Index, headers and sequences. |
 | `.pjs` `.njs` | JSON metadata. |
-| `.pal` `.nal` | Alias file, only for a database in several volumes. |
+| `.pal` `.nal` | Alias file, for a database in several volumes or built with `-gi_mask`. |
 | `.pdb` `.ptf` `.pot` `.pto` (protein), `.ndb` `.ntf` `.not` `.nto` (nucleotide) | Version 5 only: the lookup tables for ids and tax ids. |
 | `.psi` `.psd` (protein), `.nsi` `.nsd` (nucleotide) | With `-parse_seqids` in version 4: id indexes. |
 | `.pog` (protein), `.nog` (nucleotide) | With `-parse_seqids`, in version 4 and in version 5: id data. |
 | `.pos` (protein), `.nos` (nucleotide) | With `-parse_seqids` in version 5: ids of each sequence. |
 | `.phi` `.phd` (protein), `.nhi` `.nhd` (nucleotide) | With `-hash_index`. |
 | `.naa` `.nab` `.nac` (nucleotide), `.paa` `.pab` `.pac` (protein) | With `-mask_data`: the mask column. |
+| `.gmd` `.gnd` `.gmo` `.gno` `.gmi` `.gni` | With `-gi_mask`: the GI-indexed masks, named after `-gi_mask_name` (see [GI-indexed masks](#gi-indexed-masks)). Data files of more than one volume are numbered (`NAME.00.gmd`, ...). |
 
-The sequence and header files have the same bytes as NCBI's. The index and metadata files differ only in the creation date they record.
+The sequence and header files have the same bytes as NCBI's. The index and metadata files differ only in the creation date they record. So do the GI-mask index files (`.gmi`, `.gni`) and the alias files. The alias file of a database in one volume built with `-gi_mask` names the volume where NCBI's names the database's full path (see [GI-indexed masks](#gi-indexed-masks)).
 
 ## Differences from NCBI BLAST+
 
 - A `-in` file made of several bzip2 streams or zstd frames is read to the end. NCBI's `makeblastdb` stops after the first stream and drops the rest without a message. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+- `-gi_mask` on a database in one volume: LOSAT's alias file names the volume by its file name, so the database opens and the build ends normally (exit status 0, with the metadata file). NCBI's names the database by its full path, which no program can open, and ends with exit status 2. See [GI-indexed masks](#gi-indexed-masks) and [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - When the database path (`-out`) contains a space or a double quote, or when an old database of the same name has to be replaced, LOSAT removes and replaces the old files as one database, where `makeblastdb` treats the path as a list of names. Normal names are not affected. See [the decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md).
 - Database files are compared with `makeblastdb` 2.17.0 on Linux x86-64. On Windows and macOS LOSAT follows NCBI's source where the file layout depends on the platform (the LMDB page size, the size of a `long`); those files have not been compared with NCBI's builds there. The order of `-randomize` is the Linux builds' on every platform: NCBI's Windows and macOS builds shuffle with their own C++ libraries.
 
@@ -120,7 +138,7 @@ The full list is on [Differences from NCBI BLAST+](../differences.md).
 
 ## What LOSAT refuses
 
-- `-gi_mask` and `-gi_mask_name`: each stops with an error that names the option.
+- `-gi_mask` with two mask files whose GI-mask files are the same files (one `-gi_mask_name` twice, or two names of one path), when both would write one data file at the same time. NCBI's files then depend on how its C++ runtime buffers two streams on one file. LOSAT stops at the sequence where the second would start writing that file (see [What LOSAT refuses](../refusals.md)). Where one of the two writes nothing, or their data files are written one after the other, LOSAT writes NCBI's files.
 - `-input_type asn1_txt` and `asn1_bin`. `fasta` and `blastdb` work.
 - A FASTA record of 4,294,967,296 letters or more whose letters NCBI would build into a sequence.
 - NCBI settings that change which ids are parsed or which titles are stored (`[BLAST] LONG_SEQID`, a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids`, `DIAG_*` variables and other `NCBI_CONFIG_*` entries).

@@ -15,12 +15,11 @@ use anyhow::Result;
 
 use crate::blastinput::aln_reader::{read_alignment, Alignment, AlnBioseq, AlnError, Mol, SetMol};
 use crate::blastinput::app::{engine_error, query_error};
-use crate::config::{ProteinScoringSpec, ScoringMatrix};
+use crate::config::ScoringMatrix;
 use crate::core::psi::{
-    create_pssm_with_options, KarlinBlk, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiOptions,
-    PsiScoreBlk,
+    create_pssm_with_options, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiOptions, PsiScoreBlk,
 };
-use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::ncbi_exception::NcbiException;
 use crate::report::serial::pssm::{PssmQuery, SeqData, SeqEntry, SeqInst, Seqdesc};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 
@@ -130,11 +129,9 @@ fn iupacaa_to_ncbistdaa(letter: u8) -> u8 {
 /// `CPsiBlastInputClustalW::x_ExtractQueryForPssm`: the first Bioseq, in the file's order, of
 /// the query's length whose letters as NCBIstdaa are the query's; `None` where no Bioseq is
 /// (a `*` in the query: IUPACaa has none). A Bioseq of that length that is a nucleotide one stops
-/// the run (`CSeqportUtil::Convert` cannot convert it).
+/// the run (`CSeqportUtil::Convert` cannot convert it: `writedb::convert::unknown_conversion`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:189-201
-/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:225
-/// (The throw of a conversion that no function covers; NCBI BLAST+ 2.17.0, PS6 corpus `e.len1`, `n.q`.)
 fn query_bioseq<'a>(
     bioseqs: &'a [AlnBioseq],
     query: &[u8],
@@ -144,15 +141,7 @@ fn query_bioseq<'a>(
             continue;
         }
         if bioseq.mol == Mol::Nucleotide {
-            return Err(NcbiException::new(
-                ThrowSite {
-                    file: "src/util/sequtil/sequtil_convert_imp.cpp",
-                    line: 225,
-                    kind: "CSeqUtilException::Invalid coding",
-                    function: Some("ncbi::CSeqConvert_imp::Convert"),
-                },
-                "Unknown conversion.",
-            ));
+            return Err(crate::writedb::convert::unknown_conversion());
         }
         if bioseq
             .letters
@@ -355,93 +344,25 @@ fn engine_msa(aligned: &QueryRows<'_>) -> PsiMsa {
 }
 
 /// The score block of `CPssmEngine::x_InitializeScoreBlock` for the matrix and gap costs that the
-/// engine reads ([`MsaScoring`]'s accessors) and the query: NCBI's errors of a matrix it does not
-/// know and of gap costs that the matrix's table does not hold, with the gapped block
-/// `kbp_gap_psi` copies. `None` for IDENTITY, whose table has no frequency ratios (the engine
-/// stops there).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-520
-/// The ungapped calculation writes its message for a query whose parameters it cannot compute
-/// and its status is then replaced by the gapped calculation's:
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2783-2790
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3557-3562
-/// The engine throws the first message that was written, so with gap costs that the matrix does
-/// not have the error is the ungapped calculation's for such a query and the gap costs' for any
-/// other (whose allowed values follow as further messages); with gap costs that the matrix has,
-/// the status is 0 and the engine goes on without the query's block (`ungapped_karlin_valid`).
-/// NCBI BLAST+ 2.17.0, PS6 corpus `b.gap.bad`, `o.ok.matrix`; review probes `k.X20.badgap`,
-/// `z.x20.go0.ge5`.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:566-570
+/// engine reads ([`MsaScoring`]'s accessors) and the query
+/// (`pssm_search::in_pssm::engine_score_block`), NCBI's errors as the engine's.
 fn score_block(
     scoring: &MsaScoring<'_>,
     query: &[u8],
 ) -> Result<(ScoringMatrix, Option<PsiScoreBlk>)> {
-    let matrix_name = scoring.engine_matrix_name();
-    let Ok(matrix) = matrix_name.parse::<ScoringMatrix>() else {
-        return Err(engine_error("Unknown error code -1"));
-    };
-    let spec = ProteinScoringSpec {
-        matrix,
-        gap_open: scoring.engine_gap_existence(),
-        gap_extend: scoring.engine_gap_extension(),
-    };
-    if !crate::stats::tables::protein_scoring_supported(&spec) {
-        if !ungapped_karlin_valid(matrix, query) {
-            return Err(engine_error(
-                crate::report::query_warnings::INVALID_QUERY_MESSAGE,
-            ));
-        }
-        return Err(engine_error(&format!(
-            "Gap existence and extension values of {} and {} not supported for {}",
-            spec.gap_open,
-            spec.gap_extend,
-            matrix_name.to_ascii_uppercase()
-        )));
-    }
-    let params = crate::stats::tables::lookup_protein_params(&spec);
-    let gapped = KarlinBlk {
-        lambda: params.lambda,
-        k: params.k,
-        h: params.h,
-    };
-    let sbp = if matrix == ScoringMatrix::Identity {
-        None
-    } else {
-        Some(crate::algorithm::pssm_search::in_pssm::score_block(
-            matrix, gapped,
-        )?)
-    };
-    Ok((matrix, sbp))
+    crate::algorithm::pssm_search::in_pssm::engine_score_block(
+        scoring.engine_matrix_name(),
+        scoring.engine_gap_existence(),
+        scoring.engine_gap_extension(),
+        query,
+    )?
+    .map_err(|message| engine_error(&message))
 }
 
-/// Whether the ungapped Karlin-Altschul parameters of the query's composition can be computed:
-/// NCBI's score block leaves the query's context invalid where they cannot (a query of `X`
-/// alone, or of letters that no positive score pairs with the standard composition), and the
-/// engine then reads a null block.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2786
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:514-520 (the ungapped
-/// calculation's status is replaced by the gapped one's, so the failure goes unreported and the
-/// run goes on with `kbp_psi[0]` null; `s_PSISavePssm` and the scaling read it: NCBI BLAST+ 2.17.0
-/// ends with SIGSEGV, PS6 corpus `r.ch.q.allX`, `x.in.allx.60`, `x.in.allO`)
+/// Whether the ungapped Karlin-Altschul parameters of the query's composition can be computed
+/// (`pssm_search::in_pssm::query_ungapped_block`).
 fn ungapped_karlin_valid(matrix: ScoringMatrix, query: &[u8]) -> bool {
-    let (_, loscore, hiscore) = crate::algorithm::pssm_search::in_pssm::score_table(matrix);
-    let mut sentinelled = Vec::with_capacity(query.len() + 2);
-    sentinelled.push(0);
-    sentinelled.extend_from_slice(query);
-    sentinelled.push(0);
-    let composition = crate::stats::karlin_calc::compute_aa_composition(&sentinelled, query.len());
-    let standard = crate::stats::karlin_calc::compute_std_aa_composition();
-    let profile = crate::stats::karlin_calc::compute_score_freq_profile_for_matrix(
-        &composition,
-        &standard,
-        loscore,
-        hiscore,
-        matrix,
-    );
-    crate::stats::karlin_calc::compute_karlin_params_ungapped(&profile).is_ok()
+    crate::algorithm::pssm_search::in_pssm::query_ungapped_block(matrix, query).is_some()
 }
 
 /// LOSAT's refusal of a master sequence that is the start of a longer sequence above it in the

@@ -3,16 +3,18 @@
 //! (`NcbiGetlineEOL`, c++/src/corelib/ncbistre.cpp) reads from them, on each platform NCBI
 //! builds for.
 
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{Read, Write};
 
 use super::args::{arg_message, ArgException};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::run_files::{Created, OpenFiles, OpenedFile, Unopened};
 
 /// The exception of a file argument whose stream does not open.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-621
-fn not_accessible(name: &str, value: &str) -> ArgException {
+fn not_accessible(name: &str, value: &[u8]) -> ArgException {
     ArgException::new(
         "eNoFile",
         arg_message(name, "File is not accessible", value),
@@ -232,9 +234,9 @@ pub(crate) fn open_input_file<'a>(
     let source = if value == "-" {
         Source::Stdin(stdin)
     } else if value.is_empty() {
-        return Err(not_accessible(name, value));
+        return Err(not_accessible(name, value.as_bytes()));
     } else {
-        let file = File::open(value).map_err(|_| not_accessible(name, value))?;
+        let file = File::open(value).map_err(|_| not_accessible(name, value.as_bytes()))?;
         Source::File(TextReader::new(file, LineEnds::HOST))
     };
     Ok(InputFile { source })
@@ -261,10 +263,13 @@ pub(crate) fn read_input_file(
         return Ok(Vec::new());
     }
     let mut file =
-        open_input_file(name, value, stdin).map_err(|error| error.message().to_string())?;
+        open_input_file(name, value, stdin).map_err(|error| error.message_text().into_owned())?;
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|_| not_accessible(name, value).message().to_string())?;
+    file.read_to_end(&mut bytes).map_err(|_| {
+        not_accessible(name, value.as_bytes())
+            .message_text()
+            .into_owned()
+    })?;
     Ok(bytes)
 }
 
@@ -292,11 +297,25 @@ pub(crate) fn input_lines(bytes: &[u8], platform: LineEnds) -> Vec<&[u8]> {
 }
 
 /// The stream of an `eOutputFile` argument (`AsOutputFile()`): the standard output, or the file,
-/// made or emptied. On Windows NCBI's stream of a text output (opened without `fBinary`) writes
-/// each `\n` as `\r\n`; LOSAT's programs write their bytes as they are on every platform.
+/// made or emptied (`OpenFiles::create`: on the file system, or LOSAT Web's file). On
+/// Windows NCBI's stream of a text output (opened without `fBinary`) writes each `\n` as `\r\n`;
+/// LOSAT's programs write their bytes as they are on every platform.
 pub(crate) enum OutputFile<'a> {
     Stdout(&'a mut dyn Write),
-    File(File),
+    File(OpenedFile),
+    /// LOSAT's refusal of a name that LOSAT Web does not write (`Created::Refused`), which the
+    /// program reports before it writes (`refusal`); every write fails.
+    Refused(String),
+}
+
+impl OutputFile<'_> {
+    /// LOSAT's refusal of the file's name, which the program reports in place of its run.
+    pub(crate) fn refusal(&self) -> Option<&str> {
+        match self {
+            OutputFile::Refused(reason) => Some(reason),
+            _ => None,
+        }
+    }
 }
 
 impl Write for OutputFile<'_> {
@@ -304,6 +323,7 @@ impl Write for OutputFile<'_> {
         match self {
             OutputFile::Stdout(out) => out.write(buf),
             OutputFile::File(file) => file.write(buf),
+            OutputFile::Refused(reason) => Err(refused_write(reason)),
         }
     }
 
@@ -311,6 +331,7 @@ impl Write for OutputFile<'_> {
         match self {
             OutputFile::Stdout(out) => out.write_all(buf),
             OutputFile::File(file) => file.write_all(buf),
+            OutputFile::Refused(reason) => Err(refused_write(reason)),
         }
     }
 
@@ -318,8 +339,14 @@ impl Write for OutputFile<'_> {
         match self {
             OutputFile::Stdout(out) => out.flush(),
             OutputFile::File(file) => file.flush(),
+            OutputFile::Refused(_) => Ok(()),
         }
     }
+}
+
+/// The error of a write to a refused output (`OutputFile::Refused`).
+fn refused_write(reason: &str) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Unsupported, reason.to_string())
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799 (`CArg_OutputFile` opens a
@@ -419,23 +446,30 @@ impl Write for Ostream<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799
-/// `AsOutputFile()` of the argument `name` whose value is `value`: `-` is `stdout`, the empty
-/// name opens nothing, and another name makes or empties the file (`IOS_BASE::out`, without
-/// `fCreatePath`). `Err` is NCBI's `eNoFile`.
+/// `AsOutputFile()` of the argument `name` whose value is `value`, the name's bytes: `-` is
+/// `stdout`, the empty name opens nothing, and another name makes or empties the file
+/// (`IOS_BASE::out`, without `fCreatePath`) of the run's files `files` (`OpenFiles::create`: the
+/// file system on the command line and in the library, LOSAT Web's files; a name of the standard
+/// output is `stdout` there). `Err` is NCBI's `eNoFile`, which quotes the bytes.
 pub(crate) fn open_output_file<'a>(
     name: &str,
-    value: &str,
+    value: &OsStr,
     stdout: &'a mut dyn Write,
+    files: &OpenFiles,
 ) -> Result<OutputFile<'a>, ArgException> {
     if value == "-" {
         return Ok(OutputFile::Stdout(stdout));
     }
+    let bytes = value.as_encoded_bytes();
     if value.is_empty() {
-        return Err(not_accessible(name, value));
+        return Err(not_accessible(name, bytes));
     }
-    File::create(value)
-        .map(OutputFile::File)
-        .map_err(|_| not_accessible(name, value))
+    match files.create(value) {
+        Ok(Created::File(file)) => Ok(OutputFile::File(file)),
+        Ok(Created::Stdout) => Ok(OutputFile::Stdout(stdout)),
+        Ok(Created::Refused(reason)) => Ok(OutputFile::Refused(reason)),
+        Err(Unopened) => Err(not_accessible(name, bytes)),
+    }
 }
 
 #[cfg(test)]

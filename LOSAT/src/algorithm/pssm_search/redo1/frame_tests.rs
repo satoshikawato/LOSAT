@@ -32,7 +32,7 @@ fn windows(
     hsps: &[BlastpPreliminaryHsp],
     subject_length: i32,
 ) -> Vec<((i32, i32, i32), Vec<usize>)> {
-    frame_windows(hsps, 20, subject_length)
+    frame_windows::<FrameRedo>(hsps, 20, subject_length)
         .into_iter()
         .map(|(w, order)| ((w.begin, w.end, w.frame), order))
         .collect()
@@ -65,7 +65,7 @@ fn encode(text: &str) -> Vec<u8> {
 }
 
 // redo_alignment.c:644-765 (cited at `windows_from_translated_aligns`): one window per alignment,
-// [MAX(0, matchStart - 200), MIN(translated length, matchEnd + 200)) in its frame, with the
+// `[max(0, matchStart - 200), min(translated length, matchEnd + 200))` in its frame, with the
 // translated length of `GET_NUCL_LENGTH` of the buffer's length; sorted by query, frame, begin
 // and end (glibc's stable sort), a window joined into the next one of its frame that it reaches
 // (the next one's alignments first), each window's alignments by score, then the windows by
@@ -114,7 +114,7 @@ fn the_frame_copy_is_ncbis() {
     // 20 + 20 bytes).
     let subject = pattern(121);
     let frame = align_in(-1, (6, 12));
-    let buffer = frame_range(
+    let buffer = frame_range::<FrameRedo>(
         &run,
         &subject,
         window(5, 20, -1),
@@ -131,7 +131,8 @@ fn the_frame_copy_is_ncbis() {
     // arithmetic reads 30 nucleotides, frame -3 as the 9 bytes from byte 52, the buffer's end.
     let subject = pattern(61);
     let frame = align_in(-3, (0, 4));
-    let buffer = frame_range(&run, &subject, window(0, 9, -3), &frame, false, &mut biased);
+    let buffer =
+        frame_range::<FrameRedo>(&run, &subject, window(0, 9, -3), &frame, false, &mut biased);
     assert_eq!(buffer.len(), 63);
     assert_eq!(&buffer[1..10], &subject[52..61]);
     assert!(buffer[10..].iter().all(|&b| b == 0) && buffer[0] == 0);
@@ -140,7 +141,7 @@ fn the_frame_copy_is_ncbis() {
     let mut subject = encode(&format!("{}*{}", "ACDEFGHIKLMNPQRSTVWY", "A".repeat(19)));
     subject.resize(121, ncbistdaa::A);
     let mut biased = true;
-    let buffer = frame_range(
+    let buffer = frame_range::<FrameRedo>(
         &run,
         &subject,
         window(0, 19, 2),
@@ -151,7 +152,7 @@ fn the_frame_copy_is_ncbis() {
     assert!(biased);
     assert!(buffer[1..20].iter().all(|&b| b == ncbistdaa::X));
     assert_eq!(buffer[20], 0);
-    let buffer = frame_range(
+    let buffer = frame_range::<FrameRedo>(
         &run,
         &subject,
         window(0, 20, 1),
@@ -182,15 +183,18 @@ fn the_window_composition_is_ncbis() {
     // reads [71, 125).
     data[1 + 50] = ncbistdaa::STOP;
     data[1 + 145] = ncbistdaa::STOP;
-    let composition = window_composition(&data, window(0, 150, 1), &align_in(1, (100, 120)));
+    let composition =
+        window_composition::<FrameRedo>(&data, window(0, 150, 1), &align_in(1, (100, 120)));
     assert_eq!(composition.num_true_amino_acids, 54);
     // A stop 10 letters after the alignment: the range ends at the alignment's end.
-    let composition = window_composition(&data, window(0, 150, 1), &align_in(1, (100, 135)));
+    let composition =
+        window_composition::<FrameRedo>(&data, window(0, 150, 1), &align_in(1, (100, 135)));
     assert_eq!(composition.num_true_amino_acids, 135 - 71);
     // A window [50, 40) (`-strand plus`: the alignment [250, 260) past the frame's 40 letters):
     // its letters read from byte 1 + 50, a stop at letter 100 of the window: [121, 210).
     data[1 + 50 + 100] = ncbistdaa::STOP;
-    let composition = window_composition(&data, window(50, 40, 1), &align_in(1, (250, 260)));
+    let composition =
+        window_composition::<FrameRedo>(&data, window(50, 40, 1), &align_in(1, (250, 260)));
     assert_eq!(composition.num_true_amino_acids, 89);
 }
 

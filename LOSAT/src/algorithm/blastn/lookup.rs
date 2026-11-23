@@ -1263,9 +1263,9 @@ pub fn build_pv_direct_lookup(
                     }
 
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
-                    // Adds ALL hits without any frequency limit - no query-side filtering
-                    // if (backbone[index] == NULL) { initialize new chain }
-                    // else { use existing chain, realloc if full }
+                    // Adds ALL hits without any frequency limit - no query-side filtering:
+                    // initializes a new chain when the backbone slot is null, or appends to the
+                    // existing chain (reallocating when full).
                     let idx = current_kmer as usize;
                     if idx < table_size {
                         counts[idx] = counts[idx].saturating_add(1);
@@ -2132,17 +2132,24 @@ pub(crate) fn build_disc_mb_lookup_kept(
                 &mut helper_array,
                 x_offsets,
             ),
-            None => (
-                x_dc_csr::build(
-                    &words,
-                    hashsize,
-                    &mut pv_array,
-                    pv_array_bts,
-                    &mut helper_array,
-                    x_offsets,
-                ),
-                false,
-            ),
+            None => {
+                // EXPERIMENT (LOSAT_X_DCQSAHEAD): no pool (one thread): the serial build places as
+                // before.
+                if x_dc_csr::qs_ahead_on() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_DCQSAHEAD", false);
+                }
+                (
+                    x_dc_csr::build(
+                        &words,
+                        hashsize,
+                        &mut pv_array,
+                        pv_array_bts,
+                        &mut helper_array,
+                        x_offsets,
+                    ),
+                    false,
+                )
+            }
         };
         let csr = match x_keep {
             Some(keep) => csr.x_kept(keep, (x_length, x_dirty)),

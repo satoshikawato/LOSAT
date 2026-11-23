@@ -1,0 +1,21 @@
+# BLASTN 2.17.0+
+# Query: n1 query <one> & "two" 'three' &amp; &lt;x&gt; &#62; (paren) [brk], comma; semi|pipe.dot-dash/slash_under a long title that goes on to wrap the Query= line more than once, yes
+# Database: tests/db_search/of18/ns_ids
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 11 hits found
+n1	XM_000101.1	100.000	450	0	0	1	450	1	450	0.0	832
+n1	XM_000101.1	83.660	459	58	15	451	900	900	1350	1.60e-119	416
+n1	XM_000111.1	100.000	300	0	0	1	300	1	300	3.24e-161	555
+n1	XM_000111.1	100.000	30	0	0	601	630	601	630	4.01e-11	56.5
+n1	s3_local_identifier	87.665	454	48	7	151	600	1	450	3.29e-151	521
+n1	XM_000109.1	88.811	286	30	2	91	375	1	285	1.64e-99	350
+n1	testdb:tag_s8	84.564	298	40	6	1	295	1	295	1.01e-81	291
+n1	AB000106.1	86.296	270	33	4	301	568	1	268	1.01e-81	291
+n1	XM_000105.1	86.475	244	25	7	1	240	1	240	7.92e-73	261
+n1	CAA00102.2	77.714	350	64	12	1	343	1	343	4.87e-55	202
+n1	AB000110.1	85.000	180	27	0	601	780	1	180	1.76e-49	183
+# BLASTN 2.17.0+
+# Query: nq2 unrelated query (no hits)
+# Database: tests/db_search/of18/ns_ids
+# 0 hits found
+# BLAST processed 2 queries

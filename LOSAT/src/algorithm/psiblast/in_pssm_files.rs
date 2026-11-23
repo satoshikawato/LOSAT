@@ -69,19 +69,19 @@ pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> InPssmRou
     }
 }
 
+/// The refusal of a PSSM whose matrix name NCBI cannot write (`InPssmFile::matrix_name_unwritable`),
+/// where `writer` names what writes it: `with -out_pssm` here, and the archive of `-outfmt 11`
+/// (`algorithm::psiblast::in_pssm::check_in_pssm_options`).
+pub(crate) fn matrix_name_refusal(writer: &str) -> String {
+    format!(
+        "a PSSM of frequency ratios only without params.rpsdbparams {writer} (NCBI BLAST+ cannot write the matrix name it lacks and stops with a C++ exception) is not supported by LOSAT's PSIBLAST"
+    )
+}
+
 /// The refusals of `rounds_input`.
 fn written_back_refusal(file: &InPssmFile, request: &PssmRequest) -> Result<()> {
-    if request.asn_path.is_some() {
-        let rpsdbparams = file
-            .object
-            .params
-            .as_ref()
-            .is_some_and(|params| params.rpsdbparams.is_some());
-        if file.computed && !rpsdbparams {
-            bail!(
-                "a PSSM of frequency ratios only without params.rpsdbparams with -out_pssm (NCBI BLAST+ cannot write the matrix name it lacks and stops with a C++ exception) is not supported by LOSAT's PSIBLAST"
-            );
-        }
+    if request.asn_path.is_some() && file.matrix_name_unwritable() {
+        bail!("{}", matrix_name_refusal("with -out_pssm"));
     }
     if request.ascii_path.is_some() {
         check_long_ascii(&file.object)?;
@@ -123,7 +123,10 @@ fn ascii_letters_defined(object: &PssmWithParameters) -> bool {
         Some(SeqData::Ncbieaa(text)) => text
             .iter()
             .all(|&c| c.is_ascii_uppercase() || c == b'*' || c == b'-'),
-        Some(SeqData::Other(_)) | None => true,
+        Some(
+            SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_),
+        )
+        | None => true,
     }
 }
 
@@ -216,7 +219,10 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
             .iter()
             .map(|letter| LETTERS.iter().position(|c| c == letter).unwrap_or(0) as u8)
             .collect(),
-        Some(SeqData::Other(_)) | None => Vec::new(),
+        Some(
+            SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_),
+        )
+        | None => Vec::new(),
     }
 }
 

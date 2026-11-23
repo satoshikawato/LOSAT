@@ -54,6 +54,13 @@ class Outputs implements OutputPort {
   exportPrinted(runId: string): Promise<void> {
     return new Promise((resolve, reject) => this.printedExports.push({ runId, resolve, reject }));
   }
+
+  /** The saves of the file of a run's query or subject (InputSnapshot.from), by run and role. */
+  readonly inputExports: Array<{ readonly runId: string; readonly role: 'query' | 'subject'; resolve(): void; reject(error: unknown): void }> = [];
+
+  exportInput(runId: string, role: 'query' | 'subject'): Promise<void> {
+    return new Promise((resolve, reject) => this.inputExports.push({ runId, role, resolve, reject }));
+  }
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -284,6 +291,20 @@ describe('OutputSaver', () => {
     await settle();
     expect(saver.problem.get()).toBe('');
     outputs.printedExports[1]!.reject(new Error('x'));
+    await settle();
+    expect(saver.problem.get()).toBe('');
+  });
+
+  it("saves the file of a run's query or subject, and says why it was not saved (line WQA's D22)", async () => {
+    const outputs = new Outputs();
+    const saver = new OutputSaver(outputs);
+    void saver.saveInput(run(1), 'query');
+    expect(outputs.inputExports[0]).toMatchObject({ runId: 'r1', role: 'query' });
+    outputs.inputExports[0]!.reject(new Error('the run has no such file'));
+    await settle();
+    expect(saver.problem.get()).toBe('Not saved: the run has no such file');
+    void saver.saveInput(run(1), 'subject');
+    outputs.inputExports[1]!.resolve();
     await settle();
     expect(saver.problem.get()).toBe('');
   });

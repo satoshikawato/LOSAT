@@ -76,11 +76,7 @@ impl<I: Input> TypedReader<I> {
                 Pointee::Null => {}
                 Pointee::This => {
                     if let Err(fail) = read(self, index, member.ty) {
-                        return Err(if member.is_ref() {
-                            fail
-                        } else {
-                            set_flag_error(fail, member)
-                        });
+                        return Err(set_flag_error(fail, member));
                     }
                 }
                 Pointee::Other => {

@@ -81,7 +81,7 @@ pub(super) struct RedoParamsBuilder<'a> {
     pub(super) ideal_ungapped_lambda: f64,
     pub(super) x_drop_gapped_final: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2228-2236
-    //                              self->startFreqRatios, self->ungappedLambda);
+    // Initializes `Blast_MatrixInfo` from `startFreqRatios` and `ungappedLambda`.
     // This non-position-based initial matrix is invariant within this search.
     // Initialize at the existing first params request, preserving no-hit/error
     // boundaries, and clone completed values into independently mutable params.
@@ -242,6 +242,10 @@ pub(super) struct RedoInputs<'a, P> {
     /// status of the Smith-Waterman redo reads them (`one_thread_redo`); the X-drop redo has no
     /// status, so its paths read the lists without them.
     pub(super) fetch_excluded: &'a [super::database::FetchExcludedMatch],
+    /// The notes of the call's fetches that read a header with a UTF8String: the error of a
+    /// batch whose Smith-Waterman redo fails or does not end comes after NCBI's warning of the
+    /// first of them that the batch made before (`FetchNotes::fetched_before_failure`).
+    pub(super) fetch_notes: &'a super::database::FetchNotes<'a>,
     pub(super) x_win_expand: bool,
     pub(super) ordinary_traceback: bool,
     #[cfg(all(
@@ -989,7 +993,11 @@ where
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:444-457
 #[cold]
 #[inline(never)]
-fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::Error {
+fn sw_batch_failed(
+    batch_start: usize,
+    first_query: &BlastCompoHeap,
+    utf8: Option<super::database::Utf8Read>,
+) -> anyhow::Error {
     let error = crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
         "blastp",
         first_query.n > 0,
@@ -997,6 +1005,7 @@ fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::
     super::database::HeaderReadError {
         query: batch_start,
         error,
+        utf8,
     }
     .into()
 }
@@ -1012,10 +1021,54 @@ fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::
 /// are written"). Exit status 1, its message.
 #[cold]
 #[inline(never)]
-fn sw_endless(batch_start: usize) -> anyhow::Error {
+fn sw_endless(batch_start: usize, utf8: Option<super::database::Utf8Read>) -> anyhow::Error {
     super::database::HeaderReadError {
         query: batch_start,
+        utf8,
         error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error("blastp", "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"),
+    }
+    .into()
+}
+
+/// LOSAT's refusal of `-use_sw_tback` with `-ungapped`, on which NCBI crashes at the traceback of
+/// every query batch it searches, with hits or without (`smith_waterman_match::sw_ungapped_error`,
+/// BLASTX's and TBLASTN's too; NCBI BLAST+ 2.17.0 from Bioconda, line NP item O4b2-2, 2026-11-23):
+/// at the ungapped finish of the search of all queries (an ungapped search plans no blocks and
+/// splits no query), the error of the call's first query batch with a valid context, and `Ok` for
+/// a call without one or without `use_sw_tback`. The batches before it have no valid context, and
+/// NCBI reports them with their warnings and does not search them. As [`sw_batch_failed`], the
+/// error follows their reports (`database::HeaderReadError`), and a run without a searched batch
+/// ends as NCBI's does. Exit status 1, its message.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
+pub(super) fn sw_ungapped_check(
+    use_sw_tback: bool,
+    query_batches: &[crate::blastinput::seq_range::RangedBatch],
+    query_batch_skipped: &[bool],
+) -> Result<()> {
+    if !use_sw_tback {
+        return Ok(());
+    }
+    match query_batches
+        .iter()
+        .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start])
+    {
+        Some(batch) => Err(sw_ungapped_refusal(batch.searched.start)),
+        None => Ok(()),
+    }
+}
+
+/// The refusal of [`sw_ungapped_check`] at the batch whose first query is `batch_start`.
+#[cold]
+#[inline(never)]
+fn sw_ungapped_refusal(batch_start: usize) -> anyhow::Error {
+    // NCBI crashes at the redo's set-up, before its fetches read a header of the batch.
+    super::database::HeaderReadError {
+        query: batch_start,
+        error: crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error(
+            "blastp",
+        ),
+        utf8: None,
     }
     .into()
 }
@@ -1102,6 +1155,7 @@ where
         evalue_adjust_contexts,
         build_redo_align_params,
         fetch_excluded,
+        fetch_notes,
         ..
     } = *redo;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
@@ -1159,7 +1213,16 @@ where
         }
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
             if sw_status.failed() && q_idx + 1 == batch.end {
-                return Err(sw_batch_failed(batch.start, &redone_matches[batch.start]));
+                return Err(sw_batch_failed(
+                    batch.start,
+                    &redone_matches[batch.start],
+                    fetch_notes.fetched_before_failure(
+                        redone_matches,
+                        batch.clone(),
+                        q_idx,
+                        usize::MAX,
+                    ),
+                ));
             }
             continue;
         };
@@ -1261,7 +1324,17 @@ where
                     sw_scratch,
                     &mut |evalue, score| redone_match.would_insert(evalue, score, s_idx),
                 );
-                let Some(postprocessed) = sw_status.redone(redone, || sw_endless(batch.start))?
+                let Some(postprocessed) = sw_status.redone(redone, || {
+                    sw_endless(
+                        batch.start,
+                        fetch_notes.fetched_before_failure(
+                            redone_matches,
+                            batch.clone(),
+                            q_idx,
+                            x_match_position,
+                        ),
+                    )
+                })?
                 else {
                     x_status_position = Some(x_match_position);
                     continue;
@@ -1312,7 +1385,16 @@ where
         // the batch (`Traceback failed`, traceback_stage.cpp:251-253), or crashes NCBI's clean-up
         // when the batch's first query holds a redone match (`sw_batch_failed`).
         if sw_status.failed() && q_idx + 1 == batch.end {
-            return Err(sw_batch_failed(batch.start, &redone_matches[batch.start]));
+            return Err(sw_batch_failed(
+                batch.start,
+                &redone_matches[batch.start],
+                fetch_notes.fetched_before_failure(
+                    redone_matches,
+                    batch.clone(),
+                    q_idx,
+                    usize::MAX,
+                ),
+            ));
         }
     }
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search keeps the store for the next block only as

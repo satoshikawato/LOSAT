@@ -54,10 +54,10 @@ pub struct UngappedHit {
     /// NCBI ELinkOrderingMethod: 0 = small gaps, 1 = large gaps
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c
     pub ordering_method: u8,
-    /// NCBI: H->linked_set - TRUE if this HSP is part of a multi-HSP chain
+    /// Whether this HSP belongs to a multi-HSP chain (NCBI `H->linked_set`).
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c lines 959-962, 972
     pub linked_set: bool,
-    /// NCBI: H->start_of_chain - TRUE if this HSP is the head of a chain
+    /// Whether this HSP is the head of a chain (NCBI `H->start_of_chain`).
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c line 955
     pub start_of_chain: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:63-65
@@ -96,7 +96,24 @@ pub struct UngappedHit {
 // of 0 or less scores 0, below every cutoff: blast_hits.c:687-699, 449-453). Nothing after that
 // sees such an HSP; without sum statistics only the E-value of the first call and the reap by it
 // read one, and neither reads its ends.
+// In a chunk's list, from the conversion (`blast_gapalign::convert_init_hsps_unsorted`) to the move
+// by the chunk's offset (`blast_engine/run_impl.rs`, `adjust_tblastx_chunk_subject_offsets`), the
+// fields `s_aa_start`, `s_aa_end` and `s_seed_off` hold NCBI's chunk-local `Int4` the same way: below
+// 0 for an HSP or a seed before its chunk, which only the scan of a range of masks stored out of order
+// gives (`common::translated_chunks::scan_lead`); the move leaves them at 0 or more.
 impl UngappedHit {
+    /// NCBI's `subject.offset` (`Int4`).
+    #[inline]
+    pub(crate) fn s_start_int4(&self) -> i32 {
+        self.s_aa_start as i32
+    }
+
+    /// NCBI's `subject.gapped_start` (`Int4`).
+    #[inline]
+    pub(crate) fn s_seed_int4(&self) -> i32 {
+        self.s_seed_off as i32
+    }
+
     /// NCBI's `query.end` (`Int4`).
     #[inline]
     pub(crate) fn q_end_int4(&self) -> i32 {

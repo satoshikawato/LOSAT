@@ -3,9 +3,9 @@ use super::*;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2369-2382,
 // 2439-2448:
-// for (i=0; i<num_queries; i++) if (kbp_gap[i] != NULL &&
-//     if (contexts[index].is_valid) { near_identical_cutoff =
-//         (1.74*NCBIMATH_LN2)/kbp_gap[index]->Lambda; break; }
+// Minimum gapped Lambda scans across all valid query contexts, whereas
+// `near_identical_cutoff` stops at the first valid context's gapped Lambda
+// (1.74 times `NCBIMATH_LN2` divided by Lambda).
 #[test]
 fn first_valid_lambda_differs_from_minimum_redo_lambda() {
     let gapped = [

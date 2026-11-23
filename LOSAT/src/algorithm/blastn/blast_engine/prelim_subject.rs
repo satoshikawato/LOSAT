@@ -395,6 +395,9 @@ pub(super) struct PrelimSubject<'a> {
     pub(super) x_prelim_subject: &'a XPrelimSubject<'a>,
     pub(super) subject_masked: bool,
     pub(super) dbseq_chunk_overlap: usize,
+    /// A database sequence of a search with a MegaBLAST database index and `-db_hard_mask`: the
+    /// index's seeds placed into its hard chunks (`mb_index_seeds::HardSeeds`).
+    pub(super) hard_index: Option<&'a super::mb_index_seeds::HardSeeds>,
 }
 
 /// The search of one chunk of a subject (one turn of the chunk loop): the chunk's ranges and packed
@@ -493,7 +496,8 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     // return for an empty list, blast_gapalign.c:3706-3707,3826-3831).
 
     // NCBI architecture: Collect all ungapped hits first, then process in score-descending order
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824
+    // Asserts that `init_hitlist` is sorted by score (`Blast_InitHitListIsSortedByScore`).
     // This is critical for correct containment checking: high-score HSPs must be processed first
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
     let ungapped_hits = &mut subject_scratch.ungapped_hits;
@@ -1460,6 +1464,20 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     // `-db_hard_mask` takes its chunks from its hard ranges (`HardSplitState`, in the worker's
     // scratch; series NP, M4a-2b decision H1) in an instance of its own, so the chunk loops of
     // every other subject are the base's and the subject pays one test of the mask's kind (`HARD`).
+    let hard = matches!(db_mask, Some((_, _, MaskKind::Hard)));
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1727-1734 (cited at
+    // `IndexSeeds::is_indexed`)
+    // The seeds of a sequence of an index volume with `-db_hard_mask`, placed into its hard
+    // chunks before they are searched (the Owner's answer C to Q-HARDIDX).
+    let hard_index = match batch.mb_index {
+        Some(index) if hard && index.is_indexed(s_idx as u32) => Some(index.hard_seeds(
+            s_idx as u32,
+            s_len_full,
+            &subject_scratch.db_hard_split.ranges,
+            dbseq_chunk_overlap,
+        )),
+        _ => None,
+    };
     let prelim_subject = PrelimSubject {
         s_idx,
         s_id,
@@ -1467,8 +1485,9 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         x_prelim_subject: &x_prelim_subject,
         subject_masked,
         dbseq_chunk_overlap,
+        hard_index: hard_index.as_ref(),
     };
-    let mut combined_prelim_hits = if matches!(db_mask, Some((_, _, MaskKind::Hard))) {
+    let mut combined_prelim_hits = if hard {
         collect_subject_prelim::<UNGAPPED, true>(
             scan,
             &prelim_subject,

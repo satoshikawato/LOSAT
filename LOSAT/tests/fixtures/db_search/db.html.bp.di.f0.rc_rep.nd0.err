@@ -1,0 +1,9 @@
+Warning: (110.8) [blastp] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3
+Warning: (110.8) [blastp] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3
+Warning: (110.8) [blastp] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3
+Warning: (110.8) [blastp] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3
+Warning: (110.8) [blastp] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3
+REGISTRY: .ncbirc
+Warning: [blastp] Query_2 qx only X letters: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+Warning: (110.8) [blastp] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3
+Warning: (110.8) [blastp] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3

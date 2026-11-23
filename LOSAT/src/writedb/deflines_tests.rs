@@ -2,8 +2,8 @@ use super::*;
 use crate::seqid::model::{ObjectId, TextseqId};
 
 fn parsed(defline: &[u8], ids: Vec<ParsedSeqId>, title: Option<&[u8]>) -> ParsedIds {
-    // The DefLine field is PrintableString(defline); for these lines (no backslash,
-    // no control byte but ^A and tab) that is the line with \1 and \t escapes.
+    // The DefLine field encodes the defline as an ASN.1 `PrintableString`; for these lines (no
+    // backslash, no control byte except ^A and tab) that is the line with \1 and \t escapes.
     let mut field = Vec::new();
     for &c in defline {
         match c {
@@ -138,4 +138,22 @@ fn large_gis_skip_the_sequence_and_log_the_last_gi() {
         ),
         Some(7)
     );
+}
+
+// makeprofiledb's query with a descriptor stated as NULL (`Seqdesc::Empty`, line RG item D3c-3b's
+// reader): NCBI's `x_GetBioseqBinaryHeader` dereferences each descriptor, so the definition lines
+// are refused before any is made, wherever the empty one stands.
+#[test]
+fn a_descriptor_stated_as_null_makes_no_definition_lines() {
+    for descr in [
+        vec![Seqdesc::Empty],
+        vec![Seqdesc::Title(b"t".to_vec()), Seqdesc::Empty],
+        vec![Seqdesc::Empty, Seqdesc::Title(b"t".to_vec())],
+    ] {
+        assert_eq!(
+            bioseq_deflines(&[], &descr),
+            Err(BioseqDeflinesError::NullDescriptor),
+            "{descr:?}"
+        );
+    }
 }

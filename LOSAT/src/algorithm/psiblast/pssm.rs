@@ -295,6 +295,10 @@ pub(crate) struct PssmScoring<'a> {
 /// `-out_ascii_pssm`.
 #[derive(Debug)]
 pub(crate) struct QueryPssm {
+    /// The `PssmWithParameters` of the PSSM, made for its ASN.1 text (`-out_pssm`) and for
+    /// psiblast's archive (outfmt 11), whose request of the round that searches the PSSM holds it
+    /// (`PsiSearch::archive_pssm`); `None` when neither is written.
+    pub(crate) object: Option<std::sync::Arc<PssmWithParameters>>,
     pub(crate) asn: Option<Vec<u8>>,
     /// NCBI's posts of the bytes that its stream replaces in the ASN.1 text (a query title
     /// outside the visible ASCII range; `report::serial::pssm::asn_text_posting`), which come
@@ -314,7 +318,8 @@ pub(crate) struct QueryPssm {
 /// `rounds::SetKey`), the round's ancillary data, and the gapped block of the matrix and gap
 /// costs (`gapped`, the score block's `kbp_gap_std[0]`). `unread` receives the subject of each
 /// Seq-align whose letters cannot be read, in order (NCBI's warning `Failed to retrieve
-/// sequence`, `input_msa`), also where the PSSM then fails.
+/// sequence`, `input_msa`), also where the PSSM then fails. `archive`: the run's archive holds the
+/// PSSM's object (`QueryPssm::object`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast.cpp:110-150
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:380-404
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:131-148
@@ -347,6 +352,7 @@ pub(crate) fn query_pssm(
     key: &dyn Fn(u32) -> SetKey,
     ancillary: PssmAncillary,
     unread: &mut Vec<u32>,
+    archive: bool,
 ) -> Result<QueryPssm> {
     let mut sbp = score_block(scoring.matrix, gapped)?;
     sbp.set_ungapped_statistical_params(ancillary.psi_gapped);
@@ -366,20 +372,29 @@ pub(crate) fn query_pssm(
     let pssm =
         psi::create_pssm_with_diagnostics(&msa, request.pseudocount, &sbp, request.diagnostics())
             .map_err(|error| crate::blastinput::app::engine_error(error_code_to_string(error)))?;
-    let (asn, asn_posts) = match request.asn_path {
-        Some(_) => {
-            let value = pssm_with_parameters(&pssm, letters, &query, scoring, request.pseudocount);
-            let (asn, posts) = crate::report::serial::pssm::asn_text_posting(&value)
+    let object = (request.asn_path.is_some() || archive).then(|| {
+        std::sync::Arc::new(pssm_with_parameters(
+            &pssm,
+            letters,
+            &query,
+            scoring,
+            request.pseudocount,
+        ))
+    });
+    let (asn, asn_posts) = match (&request.asn_path, &object) {
+        (Some(_), Some(value)) => {
+            let (asn, posts) = crate::report::serial::pssm::asn_text_posting(value)
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
             (Some(asn), posts)
         }
-        None => (None, Vec::new()),
+        _ => (None, Vec::new()),
     };
     let ascii = request
         .ascii_path
         .as_ref()
         .map(|_| print_ascii_pssm(&pssm, letters, ancillary));
     Ok(QueryPssm {
+        object,
         asn,
         asn_posts,
         ascii,
@@ -524,6 +539,10 @@ pub(crate) fn error_code_to_string(error: PsiError) -> &'static str {
         PsiError::NoUngappedKarlinBlock => {
             "The ungapped Karlin-Altschul block of the query is not available"
         }
+        // `x_ErrorCodeToString(1)`: `_IMPALAScaleMatrix`'s status (makeprofiledb).
+        PsiError::ImpalaScoreRange => "Unknown error code returned from PSSM engine: 1",
+        // makeprofiledb refuses the PSSM before this text is written.
+        PsiError::ScalingUndefined => "The scaling of the PSSM leaves defined behaviour",
     }
 }
 

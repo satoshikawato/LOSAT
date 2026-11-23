@@ -3,14 +3,16 @@
 
 #[cfg(test)]
 use super::search_seed::encode_tblastn_lookup_query;
-use crate::algorithm::blastp::extension::extend_two_hit;
+use crate::algorithm::blastp::extension::{
+    extend_two_hit, extend_two_hit_outside, BlastpOneHitUngappedResult, BlastpTwoHitUngappedResult,
+    ChunkLetters,
+};
 use crate::algorithm::blastp::x_ungapped_fast;
 use crate::config::ScoringMatrix;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-163
-// typedef struct BlastUngappedData { Int4 q_start, s_start, length, score; } ...;
-// typedef struct BlastInitHSP { BlastOffsetPair offsets;
-//                              BlastUngappedData* ungapped_data; } ...;
+// Mirrors `BlastUngappedData` (query start, subject start, length, and score) and
+// `BlastInitHSP` (seed offset pair plus ungapped extension data).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct InitHsp {
     pub frame: i8,
@@ -143,6 +145,30 @@ pub(super) struct XTwoHit<'a> {
     /// The table of those walks for a matrix other than BLOSUM62 (`x_tbn_ungap`); `None` for
     /// BLOSUM62 and for the reference.
     x_ungap_matrix: Option<&'static x_ungapped_fast::MatrixTable>,
+    /// The letters around the unit's chunk for the extensions of its hits outside the chunk
+    /// (`x_set_around`); `None` for a unit whose scan gives no such hit.
+    x_around: Option<XAround>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306 (cited at
+// `ChunkLetters`)
+/// A copy of the letters around a unit's chunk (`ChunkLetters`): made only for a unit whose scan
+/// reads letters before its chunk (masks stored out of order), so that the finder, which lives
+/// longer than a unit's letters, holds them for that unit.
+struct XAround {
+    letters: Vec<u8>,
+    lead: usize,
+    length: usize,
+}
+
+impl XAround {
+    fn letters(&self) -> ChunkLetters<'_> {
+        ChunkLetters {
+            letters: &self.letters,
+            lead: self.lead,
+            length: self.length,
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1096
@@ -193,6 +219,22 @@ pub(super) trait XUngapWalks: Copy {
         dropoff: i32,
         word_size: usize,
     ) -> Option<Option<crate::algorithm::blastp::extension::BlastpTwoHitUngappedResult>>;
+
+    /// The extension of a hit outside its chunk (`XTwoHit::x_two_hit_around`) with these walks:
+    /// a PSSM's own (`score::XPssmWalks`); `None` for a matrix's walks, whose extension there is
+    /// the matrix's (`blastp::extension::extend_two_hit_outside`, the reference of the walks).
+    #[allow(clippy::too_many_arguments)]
+    fn two_hit_around(
+        self,
+        _chunk: ChunkLetters<'_>,
+        _s_left_off: i32,
+        _s_right_off: i32,
+        _q_right_off: i32,
+        _dropoff: i32,
+        _word_size: i32,
+    ) -> Option<BlastpTwoHitUngappedResult> {
+        None
+    }
 }
 
 /// BLOSUM62's walks (`x_ungapped_fast::two_hit`).
@@ -316,7 +358,88 @@ impl<'a> XTwoHit<'a> {
             word_size,
             x_ungap_fast,
             x_ungap_matrix,
+            x_around: None,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306
+    /// The letters around the next unit's chunk (`ChunkLetters`) for the extensions of its hits
+    /// outside the chunk (`x_two_hit_around`, `x_one_hit_around`), or `None` for a unit whose
+    /// scan gives no such hit (a copy; `None` frees it).
+    pub(super) fn x_set_around(&mut self, around: Option<ChunkLetters<'_>>) {
+        self.x_around = around.map(|around| XAround {
+            letters: around.letters.to_vec(),
+            lead: around.lead,
+            length: around.length,
+        });
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1158 (cited
+    // at `blastp::extension::extend_two_hit_outside`)
+    /// The extension of `pairs_on` for a hit whose first hit (`s_left_off`) lies before its
+    /// unit's chunk, on the letters around the chunk (`x_set_around`): the walks' own (a PSSM's)
+    /// or the matrix's. `None` for a unit without those letters (none has such a hit).
+    #[cold]
+    #[inline(never)]
+    fn x_two_hit_around<W: XUngapWalks>(
+        &self,
+        walks: W,
+        s_left_off: i32,
+        s_right_off: i32,
+        q_right_off: i32,
+        dropoff: i32,
+    ) -> Option<BlastpTwoHitUngappedResult> {
+        let around = self.x_around.as_ref()?.letters();
+        let word_size = self.word_size as i32;
+        let walked = if self.x_ungap_fast {
+            walks.two_hit_around(
+                around,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                dropoff,
+                word_size,
+            )
+        } else {
+            None
+        };
+        Some(walked.unwrap_or_else(|| {
+            extend_two_hit_outside(
+                self.matrix,
+                self.query_sequence,
+                around,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                dropoff,
+                word_size,
+            )
+        }))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-791,1020-1083 (cited
+    // at `blastp::extension::extend_one_hit_outside`)
+    /// The extension of `one_hit_on` for a word (at `s_off`) before its unit's chunk, on the
+    /// letters around the chunk (`x_set_around`); `None` for a unit without them.
+    #[cold]
+    #[inline(never)]
+    fn x_one_hit_around<S: super::score::TbnScore>(
+        &self,
+        score: S,
+        q_off: i32,
+        s_off: i32,
+        dropoff: i32,
+    ) -> Option<BlastpOneHitUngappedResult> {
+        let around = self.x_around.as_ref()?.letters();
+        score.one_hit_around(
+            self.query_sequence,
+            around,
+            q_off,
+            s_off,
+            dropoff,
+            self.word_size as i32,
+            self.matrix,
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:608-609
@@ -438,9 +561,11 @@ impl<'a> XTwoHit<'a> {
     }
 
     /// `pairs` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`) with the walks
-    /// `walks`.
+    /// `walks`. Always inlined: `x_pairs_bf_on` calls it for one pair at a time, and a call of its
+    /// own set up the finder's fields for every such pair (78 instructions in a `tblastn` run of
+    /// 2.26 million such calls).
     #[allow(clippy::too_many_arguments)]
-    #[inline]
+    #[inline(always)]
     fn pairs_on<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks>(
         &self,
         walks: W,
@@ -485,26 +610,35 @@ impl<'a> XTwoHit<'a> {
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
+            let s_left_off = previous + word_size_i32;
             let reference = || {
                 extend_two_hit(
                     self.matrix,
                     self.query_sequence,
                     subject_sequence,
-                    (previous + word_size_i32) as usize,
+                    s_left_off as usize,
                     s as usize,
                     q as usize,
                     self.x_dropoffs[context],
                     word_size,
                 )
             };
+            // A first hit before the chunk (masks stored out of order): the extension on the
+            // letters around the chunk. A word past the chunk's last letter of a first range raised
+            // to one word at its left (aa_ungapped.c:495-500) is never extended: it is the unit's
+            // first word scanned, so it starts its diagonal, and every later word of the unit
+            // starts at least a word before the chunk's end
+            // (`tblastx::blast_engine::word_finder::two_hit_one_hit` gives the reasons).
             // EXPERIMENT (LOSAT_X_TBNUNGAP): the byte-table walks (`x_tbn_ungap`); `None` = an
             // extension outside the table's range, which runs the reference.
-            let result = if self.x_ungap_fast {
+            let result = if s_left_off < 0 {
+                self.x_two_hit_around(walks, s_left_off, s, q, self.x_dropoffs[context])
+            } else if self.x_ungap_fast {
                 walks
                     .two_hit(
                         self.query_sequence,
                         subject_sequence,
-                        (previous + word_size_i32) as usize,
+                        s_left_off as usize,
                         s as usize,
                         q as usize,
                         self.x_dropoffs[context],
@@ -704,7 +838,8 @@ impl<'a> XTwoHit<'a> {
     }
 
     /// `x_pairs_bf` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`) with the
-    /// walks `walks`.
+    /// walks `walks`; the loop `x_tbn_hitbf::x_hits_steps` unless `LOSAT_X_TBNHITSTEP=0` (read once
+    /// per call), else `x_tbn_hitbf::x_hits_bf`.
     #[allow(clippy::too_many_arguments)]
     #[inline(always)]
     fn x_pairs_bf_on<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks>(
@@ -717,10 +852,46 @@ impl<'a> XTwoHit<'a> {
         pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
         hits: &mut Vec<InitHsp>,
     ) {
+        if super::x_tbn_hitbf::x_hit_steps() {
+            self.x_pairs_bf_with::<C, W, true>(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            )
+        } else {
+            self.x_pairs_bf_with::<C, W, false>(
+                walks,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            )
+        }
+    }
+
+    /// `x_pairs_bf_on` with the loop `x_tbn_hitbf::x_hits::<C, STEPS>`.
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    fn x_pairs_bf_with<C: super::x_tbn_hitbf::XDiagCell, W: XUngapWalks, const STEPS: bool>(
+        &self,
+        walks: W,
+        cells: &mut [C],
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
         let word_size = self.word_size as i32;
         let mut done = 0;
         while done < pairs.len() {
-            done += super::x_tbn_hitbf::x_hits_bf(
+            done += super::x_tbn_hitbf::x_hits::<C, STEPS>(
                 cells,
                 self.diagonals.offset,
                 self.window,
@@ -768,8 +939,9 @@ impl<'a> XTwoHit<'a> {
         // The cells are taken out for the loop over them and put back (a move of the vector).
         let mut entries =
             std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
+        let around = self.x_around.is_some();
         let done = match &mut entries {
-            XDiagCells::Packed(cells) => self.one_hit_on(
+            XDiagCells::Packed(cells) if around => self.one_hit_on::<_, _, true>(
                 score,
                 cells,
                 frame,
@@ -778,7 +950,25 @@ impl<'a> XTwoHit<'a> {
                 pairs,
                 hits,
             ),
-            XDiagCells::Pair(cells) => self.one_hit_on(
+            XDiagCells::Packed(cells) => self.one_hit_on::<_, _, false>(
+                score,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) if around => self.one_hit_on::<_, _, true>(
+                score,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) => self.one_hit_on::<_, _, false>(
                 score,
                 cells,
                 frame,
@@ -793,8 +983,14 @@ impl<'a> XTwoHit<'a> {
     }
 
     /// `x_pairs_one_hit` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`).
+    /// `AROUND`: the unit has the letters around its chunk (`x_set_around`), the only unit whose
+    /// words can lie before its chunk; the other units' loop has no test for them.
     #[allow(clippy::too_many_arguments)]
-    fn one_hit_on<S: super::score::TbnScore, C: super::x_tbn_hitbf::XDiagCell>(
+    fn one_hit_on<
+        S: super::score::TbnScore,
+        C: super::x_tbn_hitbf::XDiagCell,
+        const AROUND: bool,
+    >(
         &self,
         score: S,
         cells: &mut [C],
@@ -820,17 +1016,27 @@ impl<'a> XTwoHit<'a> {
                 continue;
             }
             let context = self.context_offsets.partition_point(|&offset| offset <= q) - 1;
-            // The scanner gives words inside the unit, so the extension always runs (`None` is
-            // a word past the slices, which NCBI's scan does not give).
-            let Some(result) = score.one_hit(
-                self.query_sequence,
-                subject_sequence,
-                q as usize,
-                s as usize,
-                self.x_dropoffs[context],
-                word_size,
-                self.matrix,
-            ) else {
+            // The scanner gives words inside the unit or, for masks stored out of order, before
+            // its chunk (the extension on the letters around it), so the extension always runs
+            // (`None` is a word past the slices, which NCBI's scan does not give).
+            debug_assert!(
+                AROUND || s >= 0,
+                "a word before a unit without letters before it"
+            );
+            let result = if AROUND && s < 0 {
+                self.x_one_hit_around(score, q, s, self.x_dropoffs[context])
+            } else {
+                score.one_hit(
+                    self.query_sequence,
+                    subject_sequence,
+                    q as usize,
+                    s as usize,
+                    self.x_dropoffs[context],
+                    word_size,
+                    self.matrix,
+                )
+            };
+            let Some(result) = result else {
                 anyhow::bail!(
                     "TBLASTN -window_size 0: the word at query offset {} and subject offset {} is past the letters (internal error)",
                     pair.q_off,

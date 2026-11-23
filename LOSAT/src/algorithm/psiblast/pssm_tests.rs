@@ -431,6 +431,48 @@ fn fixed_formats_as_the_c_library() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:52-60 (cited at
+// `ancillary_blocks`).
+#[test]
+fn a_gapped_block_of_a_lambda_below_zero_or_not_a_number_is_left_out_of_the_footer() {
+    let block = |lambda| KarlinBlk {
+        lambda,
+        ..BLOSUM62_11_1
+    };
+    let labels = |ancillary: PssmAncillary| -> Vec<&'static str> {
+        ancillary_blocks(&ancillary)
+            .iter()
+            .map(|(label, _)| label.trim_end())
+            .collect()
+    };
+    let all = PssmAncillary {
+        ungapped: BLOSUM62_11_1,
+        gapped: BLOSUM62_11_1,
+        psi_ungapped: BLOSUM62_11_1,
+        psi_gapped: BLOSUM62_11_1,
+    };
+    assert_eq!(labels(all).len(), 4);
+    for lambda in [f64::NEG_INFINITY, f64::NAN, -1.0] {
+        let gapped_out = PssmAncillary {
+            gapped: block(lambda),
+            psi_gapped: block(lambda),
+            ..all
+        };
+        assert_eq!(labels(gapped_out), ["Standard Ungapped", "PSI Ungapped"]);
+        // An ungapped block is printed as it stands.
+        let ungapped_odd = PssmAncillary {
+            psi_ungapped: block(lambda),
+            ..all
+        };
+        assert_eq!(labels(ungapped_odd).len(), 4);
+    }
+    let infinite = PssmAncillary {
+        psi_gapped: block(f64::INFINITY),
+        ..all
+    };
+    assert_eq!(labels(infinite).len(), 4);
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:191-327 (cited at
 // `print_ascii_pssm`).
 #[test]

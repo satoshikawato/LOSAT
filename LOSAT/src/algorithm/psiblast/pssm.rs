@@ -749,13 +749,27 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
                 .as_ref()
                 .expect(REQUESTED),
         }),
-        &[
-            ("Standard Ungapped    ", ancillary.ungapped),
-            ("Standard Gapped      ", ancillary.gapped),
-            ("PSI Ungapped         ", ancillary.psi_ungapped),
-            ("PSI Gapped           ", ancillary.psi_gapped),
-        ],
+        &ancillary_blocks(&ancillary),
     )
+}
+
+/// The blocks that the footer of a computed PSSM prints. A gapped block whose Lambda is below 0
+/// or not a number is not there (the ancillary data keeps a block only where its Lambda is 0 or
+/// more), while an ungapped one is printed as it stands, as NCBI BLAST+ 2.17.0 does in the
+/// rounds after the first (found by probe: `-in_pssm` files with each non-finite value,
+/// `-num_iterations 2` and 3).
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:52-60
+fn ancillary_blocks(ancillary: &PssmAncillary) -> Vec<(&'static str, KarlinBlk)> {
+    let kept = |block: KarlinBlk| block.lambda >= 0.0;
+    let mut blocks = vec![("Standard Ungapped    ", ancillary.ungapped)];
+    if kept(ancillary.gapped) {
+        blocks.push(("Standard Gapped      ", ancillary.gapped));
+    }
+    blocks.push(("PSI Ungapped         ", ancillary.psi_ungapped));
+    if kept(ancillary.psi_gapped) {
+        blocks.push(("PSI Gapped           ", ancillary.psi_gapped));
+    }
+    blocks
 }
 
 /// The columns that the long form of `PrintAsciiPssm` prints (a PSSM with its information
@@ -849,11 +863,6 @@ pub(crate) fn write_ascii_pssm(
     out.push_str("\n\n");
     out.push_str("                      K         Lambda\n");
     for (label, block) in blocks {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:52-60
-        // The ancillary data has no block whose Lambda is below 0 or not a number.
-        if block.lambda.is_nan() || block.lambda < 0.0 {
-            continue;
-        }
         let _ = writeln!(
             out,
             "{label}{}     {}",

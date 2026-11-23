@@ -451,12 +451,32 @@ fn a_record_past_32_bits() {
         let Some(MaskReadError::SeqMap {
             error: found,
             length: found_length,
+            id,
         }) = read.error
         else {
             panic!("{:?}", read.error)
         };
-        assert_eq!((found, found_length), (error, length));
+        assert_eq!((found, found_length, id.as_str()), (error, length, "lcl|2"));
     }
+    // A raw sequence of 4294967295 letters (`kInvalidSeqPos`) throws at once; one letter
+    // fewer is read (its letters are not built here: 4 GiB).
+    let raw = |length| SeqInst::Raw {
+        length,
+        seq_data: SeqData::Ncbi4na(Vec::new()),
+    };
+    assert_eq!(
+        seq_map_error(&raw(4_294_967_295)),
+        Some(SeqMapError::InvalidRawLength)
+    );
+    assert_eq!(seq_map_error(&raw(4_294_967_294)), None);
+    assert_eq!(
+        String::from_utf8(seq_map_exception(SeqMapError::InvalidRawLength).ncbi_what()).unwrap(),
+        format!(
+            "NCBI C++ Exception:\n    T0 \"{}/src/objmgr/seq_map.cpp\", line 367: Error: \
+             (CSeqMapException::eSeqDataError) Invalid sequence length\n",
+            crate::ncbi_exception::NCBI_BUILD_ROOT
+        )
+    );
     assert_eq!(
         String::from_utf8(seq_vector_exception(14).ncbi_what()).unwrap(),
         format!(

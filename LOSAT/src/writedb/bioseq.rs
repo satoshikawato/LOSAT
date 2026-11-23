@@ -65,13 +65,10 @@ pub enum DeltaFix {
     /// A protein whose gaps stayed a delta (their sum wrapped to 0 past 2^32): NCBI throws
     /// "Protein delta sequences are not supported." (`CMultisourceException`).
     ProteinDelta,
-    /// The length of the raw sequence made of the delta, `int length = seq8na.size()`, the sum
-    /// of its pieces (a gap of unknown length is one letter) modulo 2^32, which the database
-    /// takes; `seq_data` holds that many letters.
+    /// The length of the raw sequence made of the delta, `int length = seq8na.size()` as a
+    /// `TSeqPos`: the sum of its pieces (a gap of unknown length is one letter) modulo 2^32,
+    /// which the database takes; `seq_data` holds that many letters.
     Length(u64),
-    /// That sum modulo 2^32 is 2^31 or more, a negative `int` that NCBI converts with as a
-    /// `TSeqPos`: LOSAT refuses it (`size` is the sum).
-    PastInt { size: u64 },
 }
 
 /// The parts of a Bioseq of `CFastaReader` with the flags `fRequireID` and `fParseRawID` that the

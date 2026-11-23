@@ -3,7 +3,9 @@
 
 use std::io::Read;
 
-use crate::seqmasks_io::fasta_reader::{MaskFastaReader, MaskReadError};
+use crate::seqmasks_io::fasta_reader::{
+    seq_map_exception, MaskFastaReader, MaskReadError, SeqMapError,
+};
 
 use super::work::{Failure, Record, SequenceSource};
 
@@ -33,9 +35,18 @@ impl<R: Read> SequenceSource for FastaSource<R> {
                 MaskReadError::Read(error) => read_failure(error),
                 MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
                 MaskReadError::Std(what) => Failure::Std(what),
-                MaskReadError::SeqMap { error, .. } => {
-                    Failure::Ncbi(crate::seqmasks_io::fasta_reader::seq_map_exception(error))
-                }
+                // NCBI's dustmasker crashes on a raw sequence of 4294967295 letters (SIGSEGV,
+                // survey 11d dm4).
+                MaskReadError::SeqMap {
+                    error: SeqMapError::InvalidRawLength,
+                    id,
+                    ..
+                } => Failure::Refused(super::work::unsupported(&format!(
+                    "a FASTA record of 4,294,967,295 letters, counting the letters of its gap \
+                     lines ({id}; NCBI's object manager takes that length for an invalid \
+                     position)"
+                ))),
+                MaskReadError::SeqMap { error, .. } => Failure::Ncbi(seq_map_exception(error)),
             })?;
         Ok(record.map(|record| Record {
             ids: record.ids,

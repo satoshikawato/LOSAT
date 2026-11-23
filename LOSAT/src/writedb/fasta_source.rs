@@ -264,12 +264,13 @@ fn extract_title(
 /// codes of a literal are those of its letters (`pack::append_ncbi8na`).
 ///
 /// NCBI appends every piece to `seq8na`, a gap as that many NCBI8na 15 and a gap of unknown
-/// length as one, and converts the first `int length = seq8na.size()` of them: the sum of the
-/// pieces modulo 2^32, which past 2^32 letters (gaps that wrapped NCBI's `TSeqPos`) is shorter
-/// than the pieces, and can differ from `Seq-inst.length` (one letter for each gap of unknown
-/// length, and the pieces of a record whose wrapped gap positions repeat or skip residues).
-/// Only those letters are made here (NCBI makes all of the pieces' letters first). A sum
-/// whose `int` is negative is refused (`DeltaFix::PastInt`).
+/// length as one, and takes `int length = seq8na.size()` as the `TSeqPos` of the letters it
+/// converts and of `Seq-inst.length`: the sum of the pieces modulo 2^32 (an `int` that is
+/// negative there is the same `TSeqPos`). Past 2^32 letters (gaps that wrapped NCBI's
+/// `TSeqPos`) that is fewer than the pieces hold, and it can differ from `Seq-inst.length`
+/// (one letter for each gap of unknown length, and the pieces of a record whose wrapped gap
+/// positions repeat or skip residues). Only those letters are made here (NCBI makes all of the
+/// pieces' letters first).
 ///
 /// The length of a delta is the one its gap lines state, up to 2,147,483,647 residues
 /// for a few bytes of input, and NCBI reserves `seq8na` for it at once. Where that
@@ -299,13 +300,12 @@ fn fix_bioseq_deltas(
                     DeltaSeq::Literal(segment) => u64::from(segment.length),
                 }
             });
-            let Ok(int_length) = usize::try_from(size as u32 as i32) else {
-                return Ok((length, None, Some(DeltaFix::PastInt { size })));
-            };
+            // Below 2^32, so a `usize` on every target.
+            let letters = (size % (1 << 32)) as usize;
             let mut seq8na = Vec::new();
-            seq8na.try_reserve_exact(int_length)?;
+            seq8na.try_reserve_exact(letters)?;
             for piece in pieces {
-                let room = int_length - seq8na.len();
+                let room = letters - seq8na.len();
                 if room == 0 {
                     break;
                 }
@@ -323,7 +323,7 @@ fn fix_bioseq_deltas(
                 }
             }
             let seq4na = pack::ncbi8na_to_ncbi4na(&seq8na)?;
-            let fix = (int_length as u64 != length).then_some(DeltaFix::Length(int_length as u64));
+            let fix = (letters as u64 != length).then_some(DeltaFix::Length(letters as u64));
             (length, Some(SeqData::Ncbi4na(seq4na)), fix)
         }
     })

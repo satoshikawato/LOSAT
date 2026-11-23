@@ -726,7 +726,7 @@ impl<'a> BuildDatabase<'a> {
                     self.output_db.post_extracted_deflines(&headers);
                     self.taxids.fix_tax_id(&mut headers);
                     if let Some(fix) = bioseq.delta_fix.take() {
-                        self.delta_fix(fix, &mut bioseq, &bioseq_id, &mut *warn)?;
+                        self.delta_fix(fix, &mut bioseq, &mut *warn)?;
                     }
                     if bioseq.seq_data.is_some() {
                         // `bs->GetId()`: the ids after `AddSequences`' edit of the ones of the
@@ -748,7 +748,7 @@ impl<'a> BuildDatabase<'a> {
                     // of `-taxid` (or 0); `-taxid_map` requires `-parse_seqids`.
                     self.output_db.extract_bioseq_deflines(&bioseq);
                     if let Some(fix) = bioseq.delta_fix.take() {
-                        self.delta_fix(fix, &mut bioseq, &bioseq_id, &mut *warn)?;
+                        self.delta_fix(fix, &mut bioseq, &mut *warn)?;
                     }
                     if bioseq.seq_data.is_some() {
                         // `bs->GetId()` is the `local id N` that `CFastaReader` numbers the
@@ -1056,7 +1056,7 @@ impl<'a> BuildDatabase<'a> {
     /// `s_FixBioseqDeltas` on a delta that `Seq-inst.length` does not describe
     /// (`Bioseq::delta_fix`), after the definition lines (`x_EditAndAddBioseq`), whose
     /// diagnostics come first where it throws: the length of the raw sequence it made, or its
-    /// throw for a protein delta, or LOSAT's refusal of a sum of pieces past `int`.
+    /// throw for a protein delta.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:297-304,370,395-397
     #[cold]
@@ -1064,7 +1064,6 @@ impl<'a> BuildDatabase<'a> {
         &mut self,
         fix: DeltaFix,
         bioseq: &mut Bioseq,
-        bioseq_id: &str,
         warn: Warn<'_>,
     ) -> Result<(), WriteDbError> {
         let error = match fix {
@@ -1092,12 +1091,6 @@ impl<'a> BuildDatabase<'a> {
                     .concat(),
                 ))
             }
-            DeltaFix::PastInt { size } => WriteDbError::Other(format!(
-                "a delta sequence whose pieces hold {} letters ({bioseq_id}; NCBI converts \
-                 their count modulo 2^32 as a 32-bit int, here negative) is not supported by \
-                 LOSAT's makeblastdb",
-                crate::ncbi_str::with_commas(size)
-            )),
         };
         self.post_diagnostics(warn);
         Err(error)

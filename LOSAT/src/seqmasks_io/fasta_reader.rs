@@ -27,9 +27,10 @@
 //!   3; segmasker writes `e.what()` and a line feed and exits with 1); `Read(std::io::Error)`,
 //!   a failed read of the input; `OutOfMemory`, the `std::bad_alloc` of a gap line's length;
 //!   `Std(what)`, another standard exception of the reader (the `std::out_of_range` of a record
-//!   past NCBI's 32-bit positions); `SeqMap { error, length }`, the object manager's exception
-//!   for a record whose gaps NCBI keeps as delta pieces because their sum wraps NCBI's 32-bit
-//!   length to 0 (`seq_map_error`), which the programs report as NCBI's do.
+//!   past NCBI's 32-bit positions); `SeqMap { error, length, id }`, the object manager's
+//!   exception for a record of 4294967295 letters or one whose gaps NCBI keeps as delta pieces
+//!   because their sum wraps NCBI's 32-bit length to 0 (`seq_map_error`), which the programs
+//!   report as NCBI's do (dustmasker, which crashes on the first, refuses it).
 //! - Warnings (`writedb::fasta_source::reader::ReaderWarning`, passed to a
 //!   `FnMut(ReaderWarning<'_>)`): `Line(message)`, which NCBI writes as the line `message`
 //!   (`LOG_POST`), and `SeqId(warning)`, which it writes as `Warning: (1306.<subcode>)
@@ -94,10 +95,14 @@ pub(crate) enum MaskReadError {
     /// Another standard exception of the reader, its `what()`: the `std::out_of_range` of a
     /// record past NCBI's `TSeqPos` (`ReadError::OutOfRange`).
     Std(String),
-    /// The `CSeqMap` exception of a record of `length` letters (`Seq-inst.length`) whose gaps
-    /// stayed delta pieces past NCBI's `TSeqPos` (`seq_map_error`), thrown where the program
-    /// reads its letters.
-    SeqMap { error: SeqMapError, length: u64 },
+    /// The `CSeqMap` exception of a record of `length` letters (`Seq-inst.length`), whose first
+    /// id is `id` (its FASTA label), past NCBI's `TSeqPos` (`seq_map_error`), thrown where the
+    /// program reads its letters.
+    SeqMap {
+        error: SeqMapError,
+        length: u64,
+        id: String,
+    },
 }
 
 /// `CMaskFastaReader`.
@@ -169,14 +174,25 @@ impl<R: Read> MaskFastaReader<R> {
         }
         match result {
             Ok(record) => {
-                // Without `fParseGaps` gaps stay pieces only where their sum wraps NCBI's
-                // `TSeqPos` to 0 past 2^32 letters (`RecordState::assemble_seq`).
+                // A raw sequence of 4294967295 letters, or gaps that stayed pieces (without
+                // `fParseGaps` only where their sum wraps NCBI's `TSeqPos` to 0 past 2^32
+                // letters, `RecordState::assemble_seq`), meet the map's errors.
                 if let Some(error) = seq_map_error(&record.inst) {
-                    self.reader = None;
-                    let SeqInst::Delta { length, .. } = record.inst else {
-                        unreachable!("only a delta meets a map error")
+                    let (SeqInst::Delta { length, .. } | SeqInst::Raw { length, .. }) =
+                        record.inst
+                    else {
+                        unreachable!("only a raw sequence or a delta meets a map error")
                     };
-                    return Err(MaskReadError::SeqMap { error, length });
+                    let mut id = Vec::new();
+                    if let Some(first) = record_ids(record.ids, record.local_id, reader).first() {
+                        crate::seqid::label::fasta(first, &mut id);
+                    }
+                    self.reader = None;
+                    return Err(MaskReadError::SeqMap {
+                        error,
+                        length,
+                        id: String::from_utf8_lossy(&id).into_owned(),
+                    });
                 }
                 Ok(Some(mask_record(record, reader)))
             }
@@ -204,10 +220,15 @@ impl<R: Read> MaskFastaReader<R> {
     }
 }
 
-/// The exceptions of NCBI's object manager (`CSeqMap`) when a `CSeqVector` reads a delta whose
-/// gaps stayed pieces past 2^32 letters (their sum wrapped NCBI's `TSeqPos` to 0).
+/// The exceptions of NCBI's object manager (`CSeqMap`) when a `CSeqVector` reads a raw sequence
+/// of 4294967295 letters, or a delta whose gaps stayed pieces past 2^32 letters (their sum
+/// wrapped NCBI's `TSeqPos` to 0).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SeqMapError {
+    /// A raw sequence of 4294967295 letters (`kInvalidSeqPos`, a record whose gap lines make
+    /// that length): the map's one data segment has the length it cannot resolve. segmasker
+    /// reports it as it is (survey 11d sm4), dustmasker crashes (SIGSEGV, dm4).
+    InvalidRawLength,
     /// A gap of 4294967295 (`kInvalidSeqPos`), whose length the map cannot resolve.
     InvalidLength,
     /// A piece whose end wraps the 32-bit position or reaches `kInvalidSeqPos`.
@@ -222,13 +243,20 @@ const INVALID_SEQ_POS: u64 = u32::MAX as u64;
 /// segments in order up to the position read, so those that start before the length: a
 /// segment whose length is `kInvalidSeqPos` throws first, then one whose end wraps or is
 /// `kInvalidSeqPos`. dustmasker, windowmasker and makembindex report it, segmasker's
-/// `CanGetRange` turns it into its own (`seq_vector_exception`). Only a delta with gap pieces
-/// meets it (`RecordState::assemble_seq`).
+/// `CanGetRange` turns that of a delta into its own (`seq_vector_exception`). A raw sequence
+/// meets it only with 4294967295 letters, a delta only with gap pieces
+/// (`RecordState::assemble_seq`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:343-370,403-428
 pub(crate) fn seq_map_error(inst: &SeqInst) -> Option<SeqMapError> {
-    let SeqInst::Delta { length, pieces, .. } = inst else {
-        return None;
+    let (length, pieces) = match inst {
+        SeqInst::Raw { length, .. } if *length == INVALID_SEQ_POS => {
+            return Some(SeqMapError::InvalidRawLength);
+        }
+        SeqInst::Delta {
+            length, pieces, ..
+        } => (length, pieces),
+        _ => return None,
     };
     let mut start = 0u64;
     for piece in pieces {
@@ -256,7 +284,9 @@ pub(crate) fn seq_map_error(inst: &SeqInst) -> Option<SeqMapError> {
 /// NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:366-367,416-418
 pub(crate) fn seq_map_exception(error: SeqMapError) -> NcbiException {
     let (line, message) = match error {
-        SeqMapError::InvalidLength => (367, "Invalid sequence length"),
+        SeqMapError::InvalidRawLength | SeqMapError::InvalidLength => {
+            (367, "Invalid sequence length")
+        }
         SeqMapError::PositionOverflow => (417, "Sequence position overflow"),
     };
     NcbiException::new(
@@ -280,10 +310,23 @@ pub(crate) fn seq_vector_exception(length: u64) -> NcbiException {
             file: "src/objmgr/seq_vector_ci.cpp",
             line: 731,
             kind: "CSeqVectorException::eSeqDataError",
-            function: Some("ncbi::objects::CSeqVector_CI::GetSeqData()"),
+            function: Some("ncbi::objects::CSeqVector_CI::GetSeqData"),
         },
         format!("CSeqVector_CI::GetSeqData: cannot get seq-data in range: 0-{length}"),
     )
+}
+
+/// The ids of a record that `reader` read (see `mask_record`).
+fn record_ids<R: Read>(
+    ids: Vec<ParsedSeqId>,
+    local_id: u64,
+    reader: &FastaReader<R>,
+) -> Vec<ParsedSeqId> {
+    if reader.parses_ids() {
+        ids
+    } else {
+        vec![ParsedSeqId::Local(ObjectId::Id(local_id as i32))]
+    }
 }
 
 /// The ids, the title and the letters of a record that `reader` read.
@@ -291,13 +334,8 @@ pub(crate) fn seq_vector_exception(length: u64) -> NcbiException {
 /// Without `-parse_seqids` the reader generated the record's id (`CSeqIdGenerator`, cited at
 /// `reader::RecordState::parse_def_line`): a local id, counting the records from 1.
 fn mask_record<R: Read>(record: Record, reader: &mut FastaReader<R>) -> MaskRecord {
-    let ids = if reader.parses_ids() {
-        record.ids
-    } else {
-        vec![ParsedSeqId::Local(ObjectId::Id(record.local_id as i32))]
-    };
     MaskRecord {
-        ids,
+        ids: record_ids(record.ids, record.local_id, reader),
         title: record.title_descr,
         letters: iupac_letters(record.inst, reader),
     }

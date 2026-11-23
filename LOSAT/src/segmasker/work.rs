@@ -13,7 +13,9 @@ use crate::seqdb::mask::FilterProgram;
 use crate::seqdb::SeqType;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{iupacaa_letters, prints_title, BdbError, MaskBdbReader};
-use crate::seqmasks_io::fasta_reader::{MaskFastaReader, MaskReadError};
+use crate::seqmasks_io::fasta_reader::{
+    seq_map_exception, seq_vector_exception, MaskFastaReader, MaskReadError, SeqMapError,
+};
 use crate::seqmasks_io::run::{
     finish, post_read_texts, serial_write_failure, write_failure, RunFailure,
 };
@@ -305,10 +307,15 @@ impl Source<'_> {
                         MaskReadError::Read(error) => read_failure(error),
                         MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
                         MaskReadError::Std(what) => Failure::Std(what),
-                        // `CanGetRange` catches the map's exception.
-                        MaskReadError::SeqMap { length, .. } => Failure::Caught(
-                            crate::seqmasks_io::fasta_reader::seq_vector_exception(length),
-                        ),
+                        // The map of a raw sequence throws as it is; `CanGetRange` catches
+                        // that of a delta.
+                        MaskReadError::SeqMap {
+                            error: error @ SeqMapError::InvalidRawLength,
+                            ..
+                        } => Failure::Caught(seq_map_exception(error)),
+                        MaskReadError::SeqMap { length, .. } => {
+                            Failure::Caught(seq_vector_exception(length))
+                        }
                     })?;
                 Ok(record.map(|record| Record {
                     ids: record.ids,

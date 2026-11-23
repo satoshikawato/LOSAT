@@ -82,6 +82,16 @@ fn fate(bioseq: &Bioseq) -> Fate {
     Fate::Stored
 }
 
+/// `bioseq` with the length that `s_FixBioseqDeltas` gives its data, as
+/// `CBuildDatabase::delta_fix` sets it after `fate`'s tests (`Bioseq::delta_fix`).
+fn fixed(mut bioseq: Bioseq) -> Bioseq {
+    if let Some(DeltaFix::Length(length)) = bioseq.delta_fix {
+        bioseq.length = length;
+        bioseq.delta_fix = None;
+    }
+    bioseq
+}
+
 /// Reads `input` to its end as `CBuildDatabase::AddFasta` does: the source, `fate` for
 /// each sequence, and `No sequences added` (build_db.cpp:1410-1412).
 fn run<R: Read>(input: R, protein: bool) -> Outcome {
@@ -104,7 +114,7 @@ fn run<R: Read>(input: R, protein: bool) -> Outcome {
         };
         assert_eq!(bioseq.is_aa, protein);
         match fate(&bioseq) {
-            Fate::Stored => outcome.added.push(bioseq),
+            Fate::Stored => outcome.added.push(fixed(bioseq)),
             Fate::Ignored(id) => outcome.ignored.push(id),
             Fate::Error(message) => {
                 outcome.error = Some(message);
@@ -297,7 +307,7 @@ fn one(input: &[u8], protein: bool) -> Bioseq {
 #[test]
 fn seq_data_choice_and_bytes() {
     let data = |input: &[u8], protein| {
-        let bioseq = one(input, protein);
+        let bioseq = fixed(one(input, protein));
         (bioseq.length, bioseq.seq_data)
     };
     // One or two unambiguous bases are NCBI4na (the writer adds an empty ambiguity block:
@@ -831,8 +841,8 @@ fn read_error_ends_the_reading() {
 }
 
 /// The letters of a delta, and the error that makeblastdb reports as "BLAST ran out of
-/// memory" (not an abort) where they cannot be allocated; a sum of pieces past NCBI's `int`
-/// is LOSAT's refusal.
+/// memory" (not an abort) where they cannot be allocated; of a sum of pieces past 2^32 the
+/// letters modulo 2^32 are made.
 #[test]
 fn a_delta_that_cannot_be_allocated_is_an_error() {
     let delta = |gap: u64| SeqInst::Delta {
@@ -851,11 +861,15 @@ fn a_delta_that_cannot_be_allocated_is_an_error() {
         fix_bioseq_deltas(delta(2)).unwrap(),
         (3, Some(SeqData::Ncbi4na(vec![0x1f, 0xf0])), None)
     );
-    // NCBI converts `int length = seq8na.size()` letters: past 2^31 (modulo 2^32) it is
-    // negative, which LOSAT refuses.
+    // NCBI converts the `TSeqPos` of `int length = seq8na.size()`, the sum modulo 2^32, letters
+    // and makes it the length; LOSAT makes only those letters.
     assert_eq!(
-        fix_bioseq_deltas(delta(u64::MAX - 1)).unwrap(),
-        (u64::MAX, None, Some(DeltaFix::PastInt { size: u64::MAX }))
+        fix_bioseq_deltas(delta((1 << 32) + 1)).unwrap(),
+        (
+            (1 << 32) + 2,
+            Some(SeqData::Ncbi4na(vec![0x1f])),
+            Some(DeltaFix::Length(2))
+        )
     );
     let error = SourceError::out_of_memory();
     assert_eq!(error.kind, SourceErrorKind::OutOfMemory);

@@ -610,7 +610,7 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
     await expect(`${JSON.stringify(described, null, 1)}\n`).toMatchFileSnapshot('../../src/infra/fake/describe.json');
   });
 
-  it("FakeEngine's windowmasker-xmlhelp.xml is the reactor's windowmasker -xmlhelp", async () => {
+  it("FakeEngine's windowmasker-xmlhelp.json is the reactor's windowmasker -xmlhelp", async () => {
     const abi = await open();
     const chunks: Uint8Array[] = [];
     const status = abi.tool(['windowmasker', '-xmlhelp'], {

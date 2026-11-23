@@ -287,7 +287,7 @@ fn frame_names_are_added_as_ncbi_adds_them_one_by_one() {
             for name in names {
                 one_by_one(&mut stack, name);
             }
-            let expected = (!stack.is_empty()).then(|| format!(" at {stack}"));
+            let expected = (!stack.is_empty()).then(|| format!(" at {stack}").into_boxed_str());
             assert_eq!(e.extra, expected, "{kept:?} {split}");
         }
     }

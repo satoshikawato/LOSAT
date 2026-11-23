@@ -502,7 +502,8 @@ impl StrategyExport {
         options: OptionsHandle,
         refusal: Option<String>,
     ) -> Self {
-        Self(Arc::new(Shared {
+        let can_cut = sink.can_cut();
+        let export = Self(Arc::new(Shared {
             request: ArchiveRequest::for_inputs(inputs, database),
             options,
             hold: refusal.is_some().then(ReportHold::default),
@@ -519,7 +520,15 @@ impl StrategyExport {
                 pending: Vec::new(),
                 unreached: std::collections::VecDeque::new(),
             }),
-        }))
+        }));
+        if !can_cut {
+            let mut open = HOLDING
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            open.retain(|shared| shared.strong_count() > 0);
+            open.push(Arc::downgrade(&export.0));
+        }
+        export
     }
 
     /// The export of a run into its strategy file (`open_strategy_file`), buffered: the program's
@@ -766,6 +775,56 @@ impl StrategyExport {
     /// of a later batch is written.
     pub fn stop_after(&self, queries_end: usize) {
         self.with_state(|state| state.stop = state.stop.min(queries_end));
+    }
+}
+
+// No NCBI counterpart: NCBI's process does not panic; a panic is LOSAT's own failure.
+/// The exports whose sinks cannot be cut (`State::held`: their requests wait in memory until the
+/// run reaches their batches), for the panic hook (`install_panic_hook`).
+static HOLDING: Mutex<Vec<std::sync::Weak<Shared>>> = Mutex::new(Vec::new());
+
+// No NCBI counterpart (see `HOLDING`).
+/// Makes a panic of the command line end each strategy file as LOSAT's refusals end it
+/// (`end_run`): the requests held for a sink that cannot be cut (a FIFO, a pipe) are written, so
+/// it gets every request made, as a regular file has them (each request is written and flushed to
+/// such a file when it is made). The release profile ends the process at a panic (`panic =
+/// "abort"`), so no `end_run` and no destructor runs after it, only the panic hook. A build that
+/// unwinds may catch a panic and go on (the first phase of `blastx`'s batches, which raises it
+/// again where the unit is written): there the hook could write requests of a run that then ends
+/// with NCBI's error, so it is installed only where a panic ends the process. The command line's
+/// entry (`cli::main_entry`) calls it once, before the program runs.
+pub fn install_panic_hook() {
+    if !cfg!(panic = "abort") {
+        return;
+    }
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        previous(info);
+        write_held_at_panic();
+    }));
+}
+
+/// The panic hook's part (`install_panic_hook`): the exports of `HOLDING` (`write_held_of`).
+fn write_held_at_panic() {
+    let open = match HOLDING.try_lock() {
+        Ok(open) => open,
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return,
+    };
+    write_held_of(&open);
+}
+
+/// Writes every held request of each live export of `open`. An export whose state the panicking
+/// thread itself holds (a panic inside its lock) or another thread holds at that moment is left as
+/// it is: the hook must not wait.
+fn write_held_of(open: &[std::sync::Weak<Shared>]) {
+    for shared in open.iter().filter_map(std::sync::Weak::upgrade) {
+        let mut state = match shared.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => continue,
+        };
+        let _ = state.write_held(|_| true);
     }
 }
 

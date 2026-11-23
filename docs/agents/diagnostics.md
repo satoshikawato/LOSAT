@@ -7126,7 +7126,8 @@ Scheduling (each value computed by one thread with the original function; order 
   (the early-termination guess on the heaps as they are then), each worker (one per thread of the pool, as for the
   batches, at most one per match: the loop's thread keeps one) takes the next match offered,
   and the loop takes a match's result when it reaches it, redoing other offered matches while one is still being
-  redone; the helpers leave once every match is taken. Why: each batch waited at its join for its longest redo; with
+  redone; the helpers leave once every match is taken, and a thread with nothing to redo spins, yields, then sleeps
+  50 us at a time (`Ahead::x_new_napping`; a wasm thread keeps yielding). Why: each batch waited at its join for its longest redo; with
   one batch end live the threads stood idle there (BLASTX `-use_sw_tback`, 200 queries of q200k against the 40
   proteins of `ov_atha` at BATCH_SIZE 40000 and 4 threads: 2,103 matches in about 20 batches, 662 s of user time in
   222 s of wall time, 74 % of the threads). Exactness: a match's result does not depend on the worker or the time it

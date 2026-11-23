@@ -156,9 +156,9 @@ impl Runtime<'_> {
         } else {
             Vec::new()
         };
-        // `x_workers` has one entry per pool thread (with the flow, per thread of the unit), or one
-        // per match where there are fewer matches (`x_kappa_workers`); none outside a pool
-        // (asking Rayon for the thread count there would start its global pool).
+        // `x_workers` has one entry per pool thread, or one per match where there are fewer
+        // matches (`x_kappa_workers`); none outside a pool (asking Rayon for the thread count
+        // there would start its global pool).
         // No NCBI counterpart: size of one speculative batch (scheduling only); it does not
         // change any value NCBI computes.
         #[cfg(feature = "parallel")]
@@ -178,9 +178,10 @@ impl Runtime<'_> {
         // takes the next one offered, and the loop takes a match's result when it reaches it
         // (redoing other offered matches while one is still being redone). No thread waits for
         // the longest match of a batch. The workers (`x_kappa_workers`: one per thread of the
-        // unit, at most one per match) are the loop's thread's and one per helper. A match's
-        // result does not depend on who redoes it or when (`x_speculate_match`), so the schedule
-        // changes the time only.
+        // pool, at most one per match) are the loop's thread's and one per helper. A thread with
+        // nothing to redo spins, yields, then sleeps 50 us at a time (`Ahead::x_new_napping`). A
+        // match's result does not depend on who redoes it or when (`x_speculate_match`), so the
+        // schedule changes the time only.
         #[cfg(feature = "parallel")]
         let (x_workers, mut x_own, x_helpers) = if !x_workers.is_empty() && x_flow {
             let mut all = x_workers
@@ -194,7 +195,7 @@ impl Runtime<'_> {
         #[cfg(feature = "parallel")]
         let x_ahead = x_own
             .is_some()
-            .then(|| crate::utils::xahead::Ahead::x_new_leaving(x_batch));
+            .then(|| crate::utils::xahead::Ahead::x_new_napping(x_batch));
         #[cfg(feature = "parallel")]
         let (x_options, x_subjects, x_db_length) = (self.options, self.subjects, self.db_length);
         // No NCBI counterpart: the flow's redo of one match ahead, by the statements of the

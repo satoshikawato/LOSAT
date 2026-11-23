@@ -323,8 +323,9 @@ const NCBI_TASKS: &[&str] = &[
 impl TaskParser {
     /// The check of a task that a caller of `run_local` set itself (the command line's parser
     /// makes it at parsing), as NCBI's options factory makes it: the name in lower case (the
-    /// engine compares it exactly), then a task of NCBI's set of the program; LOSAT's refusal for another task of NCBI's factory (another program's, which NCBI's API
-    /// would set up); NCBI's error for a name NCBI does not know.
+    /// engine compares it exactly), then a task of NCBI's set of the program; LOSAT's refusal
+    /// for another task of NCBI's factory (another program's, which NCBI's API would set up);
+    /// NCBI's error for a name NCBI does not know.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:336-342
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:662-673

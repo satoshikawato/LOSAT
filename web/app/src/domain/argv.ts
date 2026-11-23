@@ -68,6 +68,15 @@ export const COMBINED_NAMES = Object.freeze({ query: 'combined_query.fa', subjec
  */
 export const INCLUDED_PREFIX = 'included_';
 
+/**
+ * A file name as every browser saves it (line WQA's D22, review round 5): white space, `\ / : * ? " < > |` and control
+ * characters are written `_`. A file that LOSAT made has such a name, so that the command names the file that the user gets by
+ * the download (WebKit saves a space as `_`, all three browsers `: " < > | ?`). The user's own file names stay as they are.
+ */
+export function savedFileName(name: string): string {
+  return name.replace(/[\s\\/:*?"<>|\u0000-\u001f\u007f]/g, '_');
+}
+
 export interface ArgvInput {
   readonly program: ProgramId;
   readonly queryName: string;

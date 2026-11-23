@@ -13,6 +13,8 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect } from '@playwright/test';
+import { BUILD_HAS_ENGINE } from './support/browser';
+import { NATIVE } from './support/native';
 import { test } from './support/test';
 import { coverageOf, planWalk, PR_SEED, WALK_KINDS, type PlanLevel } from './walk/plan';
 import { replayFile, shrinkLimits, walkTest, type WalkFile } from './walk/runner';
@@ -57,15 +59,16 @@ if (replay !== undefined) {
 
 // Recorded walks that the drawn ones rarely reach (walk/recorded/*.json, replays of walk files): an input that is not the user's
 // file as given (a file with records left out, line WQA's D22) must be named and offered as a file of its own, and the CLI must
-// give the stored bytes on the shown command with the offered file. Run in every browser, whatever the seed.
-if (replay === undefined) {
+// give the stored bytes on the shown command with the offered file. Run in every browser, whatever the seed, but only with the engine
+// and the native CLI: without them (the app jobs) no such case is checked.
+if (replay === undefined && BUILD_HAS_ENGINE && NATIVE !== undefined) {
   const directory = join(process.cwd(), 'tests/e2e/walk/recorded');
   for (const name of readdirSync(directory).filter((file) => file.endsWith('.json')).sort()) {
     const recorded = JSON.parse(readFileSync(join(directory, name), 'utf8')) as WalkFile;
     test(`recorded walk ${name.replace(/\.json$/, '')} (${recorded.steps.length} steps)`, async ({ page, browser, browserName }, testInfo) => {
       // a recorded walk has up to three runs of the engine, some tens of seconds each on a loaded machine
       test.setTimeout(WALK_MS(recorded.steps.length) + 180_000);
-      await walkTest({ page, browser, browserName }, testInfo, { seed: recorded.seed, walk: recorded.walk, steps: recorded.steps, shrink: { replays: 0, ms: 0 } });
+      await walkTest({ page, browser, browserName }, testInfo, { seed: recorded.seed, walk: recorded.walk, steps: recorded.steps, shrink: { replays: 0, ms: 0 }, ...(recorded.minOfferedLeftOut === undefined ? {} : { minOfferedLeftOut: recorded.minOfferedLeftOut }) });
     });
   }
 }

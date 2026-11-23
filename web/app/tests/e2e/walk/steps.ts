@@ -806,11 +806,6 @@ async function offeredInput(page: Page, role: Role): Promise<{ name: string; byt
   return { name: download.suggestedFilename(), bytes: readFileSync((await download.path())!) };
 }
 
-/** Whether the browser's name for a saved file is the name `shown`: the same characters, or `_` where it made one. */
-function sameFileName(saved: string, shown: string): boolean {
-  return saved.length === shown.length && [...saved].every((char, i) => char === shown[i] || char === '_');
-}
-
 /** A file that the native CLI is given: its name, its bytes, and whether the page made it. */
 interface CliFile {
   readonly name: string;
@@ -844,23 +839,37 @@ async function filesOf(walker: Walker, run: number, before: Submitted, at: numbe
       if (!shown[role].startsWith(`${input.name}: `)) {
         throw new StepFailure('input-unmatched', `run ${run}: the ${role} the walk gave is the file ${input.name}; Run details say "${shown[role]}"`);
       }
-      files[role] = { name: input.name!, bytes: input.bytes, made: false };
+      files[role] = { name: input.name, bytes: input.bytes, made: false };
       continue;
     }
     if (offered === undefined) {
       throw new StepFailure('made-not-offered', `run ${run}: the ${role} is not the user's file as given (pasted, several files, or records left out), but the page offers no file for it ("${shown[role]}")`);
     }
-    // The name that Run details give the input, which the command line has; the browser saves the file under a name of its own
-    // making (WebKit writes a space as _), so the two are told equal where each character is the same or a made `_`.
+    // The name that Run details give the input is the command line's name, and the browser saves the file under exactly that name.
     const shownName = /^(.*): [\d,]+ records?, /.exec(shown[role])?.[1];
-    if (shownName === undefined || !sameFileName(offered.name, shownName)) {
+    if (shownName === undefined || shownName !== offered.name) {
       throw new StepFailure('offered-name', `run ${run}: the page offers ${offered.name} as the ${role} file, but the run's details say "${shown[role]}"`);
     }
     if (userNames.has(shownName)) {
       throw new StepFailure('offered-user-name', `run ${run}: the page offers ${shownName} as the ${role} file, a name that one of the user's files has`);
     }
-    if (input.name !== undefined && shownName !== input.name && shownName !== `${role}_${input.name}`) {
+    // The model's name, or with the role put into it where the run's two names would meet.
+    const withRole = input.name.startsWith('included_') ? `included_${role}_${input.name.slice('included_'.length)}` : `${role}_${input.name}`;
+    if (shownName !== input.name && shownName !== withRole) {
       throw new StepFailure('offered-name', `run ${run}: the page offers ${shownName} as the ${role} file; the walk expects ${input.name}`);
+    }
+    // A file with records left out is that file's own: Run details say From that file, without those records, and the count.
+    if (input.from !== undefined) {
+      const fromText = ((await walker.page.getByTestId(`run-input-${role}-from`).textContent().catch(() => null)) ?? '').trim();
+      const { file, leftOutIds, included, total } = input.from;
+      const count = (n: number): string => n.toLocaleString('en-US');
+      if (
+        !fromText.startsWith(`From ${file} without `) ||
+        !leftOutIds.every((id) => fromText.includes(id)) ||
+        !fromText.includes(`(${count(included)} of ${count(total)} records)`)
+      ) {
+        throw new StepFailure('offered-from', `run ${run}: the ${role} is ${file} without ${leftOutIds.join(', ')} (${included} of ${total} records); Run details say "${fromText}"`);
+      }
     }
     if (Buffer.compare(Buffer.from(input.bytes), offered.bytes) !== 0) {
       throw new StepFailure('offered-bytes', `run ${run}: the ${role} file ${offered.name} that the page offers (${offered.bytes.length} bytes) is not what the walk gave this run (${input.bytes.length} bytes)`);

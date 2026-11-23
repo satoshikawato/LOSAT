@@ -1457,6 +1457,56 @@ describe('SearchDraft submit', () => {
     expect(datasetOf(request!, 'subject')).toMatchObject({ name: 'included_subject_q.fa', from: [{ name: 'q.fa', records: 2, leftOut: ['r1'], leftOutCount: 1 }] });
   });
 
+  // Line WQA's D22, review round 5 (M1): the browsers save a file under a name of their own, so a made name has none of the characters they change.
+  it('writes white space and the characters that a browser changes on saving as _ in a made name, and keeps the user\'s own names', async () => {
+    const names: readonly [string, string][] = [
+      ['two genes.fna', 'included_two_genes.fna'],
+      ['a\tb.fa', 'included_a_b.fa'],
+      ['a:b.fa', 'included_a_b.fa'],
+      ['a"b.fa', 'included_a_b.fa'],
+      ['a<b>c.fa', 'included_a_b_c.fa'],
+      ['a|b?.fa', 'included_a_b_.fa'],
+      ['a*b.fa', 'included_a_b.fa'],
+      ['a\\b.fa', 'included_a_b.fa'],
+      ['a/b.fa', 'included_a_b.fa'],
+      ['a\u0001b\u007f.fa', 'included_a_b_.fa'],
+      ['a\u00a0b.fa', 'included_a_b.fa'],
+      ['safe-name_1.fa', 'included_safe-name_1.fa'],
+    ];
+    for (const [name, made] of names) {
+      const { draft, requests } = setup();
+      draft.addFiles('query', [file(name, '>r1\nACGT\n>r2\nACGT\n')]);
+      draft.addFiles('subject', [file('s.fa', '>s\nACGT\n')]);
+      await draft.idle();
+      // The user's own file name, as given.
+      expect(draft.inputName('query')).toBe(name);
+      draft.setIncluded('query', sourceOf(draft, 'query').key, [1], false);
+      await draft.idle();
+      expect(draft.inputName('query')).toBe(made);
+      expect(await draft.submit()).toMatchObject({ ok: true });
+      // The name of the dataset is the one of the argv, and the card's From text keeps the user's own name.
+      expect(datasetOf(requests[0]![0]!, 'query')).toMatchObject({ name: made, from: [{ name }] });
+    }
+  });
+
+  it('keeps two different made names apart where they become the same name', async () => {
+    const { draft } = setup();
+    draft.addFiles('query', [file('x y.fa', '>r1\nACGT\n>r2\nACGT\n')]);
+    draft.addFiles('subject', [file('x_y.fa', '>s1\nACGT\n>s2\nACGT\n')]);
+    await draft.idle();
+    draft.setIncluded('query', sourceOf(draft, 'query').key, [1], false);
+    draft.setIncluded('subject', sourceOf(draft, 'subject').key, [1], false);
+    await draft.idle();
+    // Both are `included_x_y.fa`: each takes its role.
+    expect([draft.inputName('query'), draft.inputName('subject')]).toEqual(['included_query_x_y.fa', 'included_subject_x_y.fa']);
+    expect(runNames({ name: 'included_x_y.fa', made: true }, { name: 'included_x_y.fa', made: true })).toEqual({
+      query: 'included_query_x_y.fa',
+      subject: 'included_subject_x_y.fa',
+    });
+    // A made name that is the user's other file of the same name once it is written: the made one takes its role.
+    expect(runNames({ name: 'included_x_y.fa', made: true }, { name: 'included_x_y.fa', made: false })).toEqual({ query: 'included_query_x_y.fa', subject: 'included_x_y.fa' });
+  });
+
   it('does not give a made name that the user gave to the other input', async () => {
     const { draft } = setup();
     draft.addFiles('query', [file('q.fa', '>r1\nACGT\n>r2\nACGT\n')]);

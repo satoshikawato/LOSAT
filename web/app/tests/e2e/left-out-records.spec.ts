@@ -288,3 +288,21 @@ test('the same file in both roles with other records left out gets two names; a 
   expect(plain.bytes.toString('utf8')).toBe(WITHOUT_R2);
   await expectNative(page, 2, 'losat blastn -query included_q.fa -subject s.fa', [plain, { name: 's.fa', bytes: SUBJECT }]);
 });
+
+test('a file name with a space: the made name is the one the browser saves, and the command runs on it (D22, round 5)', async ({ page }) => {
+  await program(page, 'blastn');
+  await openFiles(page, 'query', [{ name: 'two genes.fna', text: QUERY }]);
+  await openFiles(page, 'subject', [{ name: 's.fa', text: SUBJECT }]);
+  await leaveOut(page, 'query', 1);
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const shown = 'losat blastn -query included_two_genes.fna -subject s.fa';
+  expect(await shownCommand(page, 1)).toBe(`${shown} -outfmt 6`);
+  // Download All and the Outputs link save the file under the name of the command, whatever the browser does to a name.
+  const file = await offered(page, 'query');
+  expect(file.name).toBe('included_two_genes.fna');
+  expect(file.bytes.toString('utf8')).toBe(WITHOUT_R2);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('outputs-query-download').click()]);
+  expect(download.suggestedFilename()).toBe('included_two_genes.fna');
+  await expectNative(page, 1, shown, [file, { name: 's.fa', bytes: SUBJECT }]);
+});

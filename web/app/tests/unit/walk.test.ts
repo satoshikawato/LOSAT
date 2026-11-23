@@ -6,6 +6,7 @@ import { alphabetOf, makeFixtures, pickFor, XSS_PAYLOAD } from '../e2e/walk/fixt
 import {
   emptyModel,
   expectedInputs,
+  savedName,
   includedBytes,
   joinedBytes,
   parseShellWords,
@@ -164,7 +165,13 @@ describe('walk model', () => {
     expect(expectedInputs(model.query, 'query', 'nucleotide', [0]).map(({ name, made }) => ({ name, made }))).toEqual([{ name: 'a.fa', made: false }]);
     const left = withIncluded(model, 'query', 'nucleotide', 0, 1, false);
     // The page names the file of the records itself: the model does not.
-    expect(expectedInputs(left.query, 'query', 'nucleotide', [0]).map(({ name, made }) => ({ name, made }))).toEqual([{ name: undefined, made: true }]);
+    expect(expectedInputs(left.query, 'query', 'nucleotide', [0]).map(({ name, made, from }) => ({ name, made, from }))).toEqual([
+      { name: 'included_a.fa', made: true, from: { file: 'a.fa', leftOutIds: ['b'], included: 1, total: 2 } },
+    ]);
+    // The name is written as a browser saves it; the From text is the user's file name.
+    expect(savedName('two genes.fna')).toBe('two_genes.fna');
+    expect(savedName('a:b"c<d>e|f?g*h\\i/j\tk\u0001l.fa')).toBe('a_b_c_d_e_f_g_h_i_j_k_l.fa');
+    expect(savedName('safe-1.fa')).toBe('safe-1.fa');
     // Included again, and in the other reading: the user's file.
     expect(expectedInputs(withIncluded(left, 'query', 'nucleotide', 0, 1, true).query, 'query', 'nucleotide', [0])[0]!.made).toBe(false);
     expect(expectedInputs(left.query, 'query', 'protein', [0])[0]!.made).toBe(false);

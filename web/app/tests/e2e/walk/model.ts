@@ -116,11 +116,16 @@ export function joinedBytes(sources: readonly ModelSource[], reading: Reading): 
 
 export interface ExpectedInput {
   /**
-   * The name that the command line gives the input where the model knows it: the user's file as given, `query.fa`, `combined_*.fa`
-   * (the role may be put before it where two names would meet). Undefined for the file of one source with records left out: the page
-   * names a file of its own (line WQA's D22) and the walk takes that name from the file that the page offers.
+   * The name that the command line gives the input: the user's file as given, `query.fa`, `combined_*.fa`, or `included_` and the
+   * user's file name for a file with records left out, with white space and `\ / : * ? " < > |` and control characters written `_`
+   * as every browser saves a file (line WQA's D22). The role may be put before it where two names would meet.
    */
-  readonly name: string | undefined;
+  readonly name: string;
+  /**
+   * The user's file that an input with records left out is made of, which Run details' From text names: `From <file> without <the
+   * first IDs left out> (<included> of <total> records)`; the walk's own count, so that a name or words of another source fail.
+   */
+  readonly from?: { readonly file: string; readonly leftOutIds: readonly string[]; readonly included: number; readonly total: number };
   readonly bytes: Uint8Array;
   /**
    * Whether the input is not the user's file as given: pasted text, several sources together, or a source with records left out.
@@ -128,6 +133,22 @@ export interface ExpectedInput {
    * from the walk's own record of what it gave, not by the application's code.
    */
   readonly made: boolean;
+}
+
+/** A file name as the browsers save it: white space, `\ / : * ? " < > |` and control characters as `_` (written here from the rule, not taken from the app). */
+export function savedName(name: string): string {
+  return [...name].map((char) => (/\s/.test(char) || '\\/:*?"<>|'.includes(char) || char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f ? '_' : char)).join('');
+}
+
+/** The first word of each record's title line, for the records left out (at most three, as the page names). */
+function fromOf(source: ModelSource, reading: Reading): NonNullable<ExpectedInput['from']> {
+  const excluded = source.excluded[reading] ?? new Set<number>();
+  const ranges = recordRanges(source.bytes);
+  const ids = ranges
+    .filter((_, index) => excluded.has(index))
+    .slice(0, 3)
+    .map(([start, end]) => /^>\s*(\S*)/.exec(new TextDecoder().decode(source.bytes.subarray(start, Math.min(end, start + 200))))?.[1] ?? '');
+  return { file: source.name, leftOutIds: ids, included: ranges.length - excluded.size, total: ranges.length };
 }
 
 /** Whether the source's bytes that a run searches are not the file's own: pasted text, or records left out. */
@@ -145,7 +166,8 @@ export function expectedInputs(role: RoleModel, roleName: Role, reading: Reading
   const sources = role.sources.filter((_, index) => ready.includes(index));
   if (sources.length === 0) return [];
   const single = (source: ModelSource): ExpectedInput => ({
-    name: source.origin === 'paste' || (source.excluded[reading]?.size ?? 0) === 0 ? source.name : undefined,
+    name: source.origin === 'paste' || (source.excluded[reading]?.size ?? 0) === 0 ? source.name : `included_${savedName(source.name)}`,
+    ...(source.origin !== 'paste' && (source.excluded[reading]?.size ?? 0) > 0 ? { from: fromOf(source, reading) } : {}),
     bytes: includedBytes(source, reading),
     made: madeOf(source, reading),
   });

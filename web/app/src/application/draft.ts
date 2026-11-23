@@ -47,7 +47,7 @@ import {
 } from '../domain/accession';
 import { MOST_LEFT_OUT_IDS } from '../domain/input-parts';
 import type { InputPart } from '../domain/run';
-import { buildArgv, COMBINED_NAMES, INCLUDED_PREFIX, PASTED_NAMES, splitOptions } from '../domain/argv';
+import { buildArgv, COMBINED_NAMES, INCLUDED_PREFIX, PASTED_NAMES, savedFileName, splitOptions } from '../domain/argv';
 import { endsInput, includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
 import { parseTaxid, type CountsOrigin } from '../domain/counts';
 import type { ExampleId } from '../domain/examples';
@@ -1931,7 +1931,8 @@ function isFileAsGiven(sources: readonly DraftSource[]): boolean {
  * files (the `Input:` line of a subject set in outfmt 0 to 4 and 7, SAM's command line), so the argv names the file the user gave
  * (line WQA's D21, S3-3 and the review's F1, 2026-11-23). The user's file with records left out is not that file: its name would
  * make the command search other bytes than the run did, so the argv names the file of the included records, `included_` and the
- * name (the plain one: the bytes are not compressed), as `combined_query.fa` names several inputs together and `query.fa` pasted
+ * name (the plain one: the bytes are not compressed; white space and the characters that a browser changes on saving written `_`,
+ * `savedFileName`, so that the command names the file the user gets), as `combined_query.fa` names several inputs together and `query.fa` pasted
  * text; the page offers these files with the run (line WQA's D22, 2026-11-23). `runNames` keeps the two names of a run apart.
  */
 function nameOf(sources: readonly DraftSource[], role: InputRole): string {
@@ -1939,7 +1940,7 @@ function nameOf(sources: readonly DraftSource[], role: InputRole): string {
   if (isFileAsGiven(read)) return read[0]!.file.name;
   if (read.length > 1) return COMBINED_NAMES[role];
   const [source] = read;
-  return source === undefined || source.origin === 'paste' ? PASTED_NAMES[role] : `${INCLUDED_PREFIX}${source.name}`;
+  return source === undefined || source.origin === 'paste' ? PASTED_NAMES[role] : `${INCLUDED_PREFIX}${savedFileName(source.name)}`;
 }
 
 /** An input's name in the argv, and whether it names a file that LOSAT made (not the user's file as given). */

@@ -5767,7 +5767,10 @@ fn refused_batch_stop(
                 .map(|query| {
                     let ordinal = input.ordinal(query);
                     let whole = (input_records[ordinal].seq(), input.placements.offset(query));
-                    (&searched[query], first[ordinal - input_done].then_some(whole))
+                    (
+                        &searched[query],
+                        first[ordinal - input_done].then_some(whole),
+                    )
                 })
                 .collect();
             refused_batch_setup_error(args, database, subject_records, &batch)
@@ -8549,8 +8552,7 @@ fn search_split_query_batches(
         // failures and the reads (`split_steps::call_steps` puts them where a split batch meets
         // them first), so the steps have none: a chunk's validity is read only where D13 decides.
         let stop = |refusal: anyhow::Error| split_steps::batch_failure(args, range.start, refusal);
-        let mut steps =
-            SplitBatchSteps::new(args.app.name(), &chunks, sizes, None, Ok(()), &stop)?;
+        let mut steps = SplitBatchSteps::new(args.app.name(), &chunks, sizes, None, Ok(()), &stop)?;
         let mut merged: Vec<Option<BlastpHitList>> = (0..range.len()).map(|_| None).collect();
         // The options' search spaces of the batch's contexts (one per query), which every chunk
         // reads by its own context index (`SplitQuery_SetEffectiveSearchSpace`, cited at
@@ -8568,8 +8570,8 @@ fn search_split_query_batches(
                 range.start,
                 chunk,
             );
-            let valid = !steps.gap_step_pending(subjects_in_hand)
-                || split_steps::chunk_valid(args, &parts);
+            let valid =
+                !steps.gap_step_pending(subjects_in_hand) || split_steps::chunk_valid(args, &parts);
             if steps.before_read(chunk, valid)? == ChunkStep::Skip {
                 continue;
             }
@@ -9547,48 +9549,16 @@ fn run_call(
         });
     }
 
-    // A split first searched batch meets its chunks' stops and the setup's failures in NCBI's
-    // order (`split_steps::call_steps`); otherwise the checks below are the first searched batch's.
-    let batches = split_steps::CallBatches(&query_batches, &query_batch_skipped, &query_lengths);
-    let steps = split_steps::call_steps(&call_in, subject_source, subjects, &contexts, batches)?;
-    let reads = steps.reads(|text| setup_error(outputs, query_chunk, "", text))?;
-    // A database without sequences (makeblastdb builds none; a volume whose index holds
-    // no sequence) and without an alias file's LENGTH or STATS_TOTLEN
-    // (`SeqDb::first_oid_read_fails`): NCBI opens it, writes the outfmt 0 prolog, reads the
-    // first query batch and fails in that batch's preliminary search, where its reader cannot
-    // map the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
-    // A first batch of invalid queries only is not searched: the batches up to the first one that
-    // is are reported before the error (`unsearched_batches_then_engine_error`); a call of invalid
-    // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
-    // and the empty database: exit 0).
-    if let Some(database) = database.filter(|database| {
-        database.first_oid_read_fails()
-            && (query_chunk || query_batch_skipped.iter().any(|skipped| !skipped))
-    }) {
-        return Err(setup_error(
-            outputs,
-            query_chunk,
-            database.name(),
-            "Database memory map file error",
-        ));
-    }
-
-    // The database's extent (`call_setup::db_extent`) and NCBI's error of its setup's average
-    // subject length (`call_setup::setup_fails`, after LOSAT's refusal of a count of 0).
-    let extent = call_setup::db_extent(&args, database, subjects)?;
-    // The setup of the first searched batch fails: NCBI has written the outfmt 0 prolog and the
-    // batch's reader messages (`preliminary_search_error`; NCBI 2.17.0 blastp and psiblast
-    // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
-    // batch of invalid queries only, which NCBI does not search, the error follows the reports of
-    // the batches before the first searched one (`unsearched_batches_then_engine_error`).
-    if call_setup::setup_fails(&args, &extent, &contexts)? {
-        return Err(setup_error(
-            outputs,
-            query_chunk,
-            "",
-            crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
-        ));
-    }
+    // The setup of the first searched batch before the call's search, in NCBI's order
+    // (`split_steps::first_batch_setup`: a split batch's steps, the read of OID 0, the checks).
+    let first_error = |name: &str, text: &str| setup_error(outputs, query_chunk, name, text);
+    let (reads, extent) = split_steps::first_batch_setup(
+        &call_in,
+        (subject_source, subjects),
+        &contexts,
+        split_steps::CallBatches(&query_batches, &query_batch_skipped, &query_lengths),
+        first_error,
+    )?;
     let call_setup::BlastpDbExtent {
         total_db_len,
         sorts_results,

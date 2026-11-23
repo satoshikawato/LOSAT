@@ -185,28 +185,48 @@ fn a_split_batch_meets_its_chunk_steps_in_ncbis_order() {
             .expect("no empty chunk")
     };
     let mut failing = steps(None, fails());
-    assert_eq!(failing.before_read(&chunks[0], false).unwrap(), ChunkStep::Skip);
-    assert!(is_setup_error(failing.before_read(&chunks[1], true).unwrap_err()));
+    assert_eq!(
+        failing.before_read(&chunks[0], false).unwrap(),
+        ChunkStep::Skip
+    );
+    assert!(is_setup_error(
+        failing.before_read(&chunks[1], true).unwrap_err()
+    ));
     assert!(failing.unmet_checks().is_none());
     let mut passing = steps(None, Ok(()));
     for chunk in &chunks {
         assert_eq!(passing.before_read(chunk, true).unwrap(), ChunkStep::Read);
-        passing.before_search(true).expect("a positive pair has no gap");
+        passing
+            .before_search(true)
+            .expect("a positive pair has no gap");
     }
     // The setup's read of OID 0 ends the stage before the chunk's validity and the checks.
     let mut setup_read = steps(Some(ReadFails::Setup), fails());
-    assert_eq!(setup_read.before_read(&chunks[0], false).unwrap(), ChunkStep::End);
+    assert_eq!(
+        setup_read.before_read(&chunks[0], false).unwrap(),
+        ChunkStep::End
+    );
     // The search's read comes after the checks of the first valid chunk.
     let mut search_read = steps(Some(ReadFails::Search), fails());
-    assert_eq!(search_read.before_read(&chunks[0], false).unwrap(), ChunkStep::Skip);
-    assert!(is_setup_error(search_read.before_read(&chunks[1], true).unwrap_err()));
+    assert_eq!(
+        search_read.before_read(&chunks[0], false).unwrap(),
+        ChunkStep::Skip
+    );
+    assert!(is_setup_error(
+        search_read.before_read(&chunks[1], true).unwrap_err()
+    ));
     let mut search_read = steps(Some(ReadFails::Search), Ok(()));
-    assert_eq!(search_read.before_read(&chunks[0], true).unwrap(), ChunkStep::End);
+    assert_eq!(
+        search_read.before_read(&chunks[0], true).unwrap(),
+        ChunkStep::End
+    );
     // No chunk with a valid context: nothing is read, and the traceback's own setup meets the
     // checks that no chunk met.
     let mut unread = steps(Some(ReadFails::Search), fails());
     assert!(!split_batch_reaches_read(&mut unread, &chunks, |_| Ok(false)).unwrap());
-    assert!(is_setup_error(unread.unmet_checks().expect("the checks no chunk met")));
+    assert!(is_setup_error(
+        unread.unmet_checks().expect("the checks no chunk met")
+    ));
     let mut unread = steps(Some(ReadFails::Search), Ok(()));
     assert!(!split_batch_reaches_read(&mut unread, &chunks, |_| Ok(false)).unwrap());
     assert!(unread.unmet_checks().is_none());
@@ -224,7 +244,9 @@ fn a_split_batch_meets_its_chunk_steps_in_ncbis_order() {
         &stop,
     )
     .expect("no empty chunk");
-    assert!(is_stop(again_steps.before_read(&again[0], true).unwrap_err()));
+    assert!(is_stop(
+        again_steps.before_read(&again[0], true).unwrap_err()
+    ));
     let pair = split_protein_batch(&[300, 300], sizes(453, 227)).expect("split");
     assert!(!protein_chunk_would_be_split(&pair, sizes(453, 227)));
     // `CHUNK_SIZE=-1 OVERLAP_CHUNK_SIZE=-200` on 398 residues: chunks [0, 100) and [300, 398),
@@ -236,12 +258,16 @@ fn a_split_batch_meets_its_chunk_steps_in_ncbis_order() {
         .map(|chunk| (chunk.queries[0].from, chunk.queries[0].to))
         .collect();
     assert_eq!(ranges, vec![(0, 100), (300, 398)]);
-    let mut gap_steps =
-        SplitBatchSteps::new("BLASTP", &gaps, sizes(-1, -200), None, Ok(()), &stop)
-            .expect("each chunk holds a query");
+    let mut gap_steps = SplitBatchSteps::new("BLASTP", &gaps, sizes(-1, -200), None, Ok(()), &stop)
+        .expect("each chunk holds a query");
     assert!(!gap_steps.gap_step_pending(false));
     assert!(gap_steps.gap_step_pending(true));
-    assert_eq!(gap_steps.before_read(&gaps[0], true).unwrap(), ChunkStep::Read);
-    gap_steps.before_search(false).expect("no subject in hand: nothing is lost");
+    assert_eq!(
+        gap_steps.before_read(&gaps[0], true).unwrap(),
+        ChunkStep::Read
+    );
+    gap_steps
+        .before_search(false)
+        .expect("no subject in hand: nothing is lost");
     assert!(is_stop(gap_steps.before_search(true).unwrap_err()));
 }

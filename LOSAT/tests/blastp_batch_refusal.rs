@@ -41,7 +41,14 @@ struct Run {
 /// `losat blastp -query QUERY -db tests/db_search/paja -outfmt OUTFMT -num_threads THREADS` with
 /// `env` as the only variables that choose a code path or NCBI's batches and chunks.
 fn search(query: &str, outfmt: &str, threads: usize, env: &[(&str, &str)]) -> Run {
-    search_in("blastp", query, &["-db", "tests/db_search/paja"], outfmt, threads, env)
+    search_in(
+        "blastp",
+        query,
+        &["-db", "tests/db_search/paja"],
+        outfmt,
+        threads,
+        env,
+    )
 }
 
 /// `search` of `program` against the subjects `subjects` (arguments, paths under the manifest
@@ -76,7 +83,11 @@ fn search_in(
     let subjects: Vec<std::ffi::OsString> = subjects
         .iter()
         .map(|&arg| {
-            let value = if paths { path(arg).into_os_string() } else { arg.into() };
+            let value = if paths {
+                path(arg).into_os_string()
+            } else {
+                arg.into()
+            };
             paths = matches!(arg, "-db" | "-subject" | "-negative_seqidlist");
             value
         })
@@ -258,7 +269,12 @@ const NO_SUBJECT: [&str; 4] = [
     "-negative_seqidlist",
     "tests/db_search/seqidlist/sl_tfp_all.txt",
 ];
-const SHORT: [&str; 4] = ["-subject", "tests/db_search/q1c/avg_s.faa", "-searchsp", "1000"];
+const SHORT: [&str; 4] = [
+    "-subject",
+    "tests/db_search/q1c/avg_s.faa",
+    "-searchsp",
+    "1000",
+];
 
 // The gaps (PD-LOSAT-NCBI-DEFECTS 1.87, line RG item X-bpgap): refused only where the search of the
 // batch's first chunk with a valid context would read subjects in hand. A database left without a
@@ -270,7 +286,10 @@ const SHORT: [&str; 4] = ["-subject", "tests/db_search/q1c/avg_s.faa", "-searchs
 fn a_negative_pair_that_leaves_gaps_without_a_subject_or_a_valid_chunk_is_searched_on() {
     let second = "tests/fasta/x4/chunk_second.faa";
     for threads in [1, 4] {
-        for (program, query) in [("blastp", second), ("psiblast", "tests/fasta/x4/chunk_gapvalid.faa")] {
+        for (program, query) in [
+            ("blastp", second),
+            ("psiblast", "tests/fasta/x4/chunk_gapvalid.faa"),
+        ] {
             let plain = search_in(program, query, &NO_SUBJECT, "7", threads, &[]);
             let gaps = search_in(program, query, &NO_SUBJECT, "7", threads, &GAP);
             assert_eq!(gaps.code, Some(0), "{program} n{threads}: {}", gaps.stderr);
@@ -278,8 +297,17 @@ fn a_negative_pair_that_leaves_gaps_without_a_subject_or_a_valid_chunk_is_search
             assert_eq!(gaps.stderr, plain.stderr, "{program} n{threads}");
         }
         let valid_in_gap = search("tests/fasta/x4/chunk_gapvalid.faa", "7", threads, &GAP);
-        assert_eq!(valid_in_gap.code, Some(0), "n{threads}: {}", valid_in_gap.stderr);
-        assert!(valid_in_gap.stdout.contains("# 0 hits found"), "n{threads}: {}", valid_in_gap.stdout);
+        assert_eq!(
+            valid_in_gap.code,
+            Some(0),
+            "n{threads}: {}",
+            valid_in_gap.stderr
+        );
+        assert!(
+            valid_in_gap.stdout.contains("# 0 hits found"),
+            "n{threads}: {}",
+            valid_in_gap.stdout
+        );
     }
 }
 
@@ -293,7 +321,11 @@ fn a_split_batch_without_a_valid_chunk_meets_the_tracebacks_setup() {
     for threads in [1, 4] {
         let short = search_in("blastp", query, &SHORT, "7", threads, &GAP);
         assert_eq!(short.code, Some(3), "n{threads}: {}", short.stderr);
-        assert!(short.stderr.ends_with("Traceback failed\n"), "n{threads}: {}", short.stderr);
+        assert!(
+            short.stderr.ends_with("Traceback failed\n"),
+            "n{threads}: {}",
+            short.stderr
+        );
         let unread = search_in(
             "blastp",
             query,
@@ -303,7 +335,11 @@ fn a_split_batch_without_a_valid_chunk_meets_the_tracebacks_setup() {
             &GAP,
         );
         assert_eq!(unread.code, Some(0), "n{threads}: {}", unread.stderr);
-        assert!(unread.stdout.contains("# 0 hits found"), "n{threads}: {}", unread.stdout);
+        assert!(
+            unread.stdout.contains("# 0 hits found"),
+            "n{threads}: {}",
+            unread.stdout
+        );
     }
 }
 
@@ -342,8 +378,17 @@ fn the_chunk_stops_come_before_the_setup_failures() {
         ] {
             for subjects in [&empty[..], &SHORT[..]] {
                 let run = search_in("blastp", query, subjects, "6", threads, env);
-                assert_eq!(run.code, Some(1), "{subjects:?} {env:?} n{threads}: {}", run.stderr);
-                assert!(run.stderr.contains(message), "{subjects:?} {env:?} n{threads}: {}", run.stderr);
+                assert_eq!(
+                    run.code,
+                    Some(1),
+                    "{subjects:?} {env:?} n{threads}: {}",
+                    run.stderr
+                );
+                assert!(
+                    run.stderr.contains(message),
+                    "{subjects:?} {env:?} n{threads}: {}",
+                    run.stderr
+                );
                 assert_eq!(run.stdout, "", "{subjects:?} {env:?} n{threads}");
             }
         }
@@ -353,7 +398,11 @@ fn the_chunk_stops_come_before_the_setup_failures() {
         let plain = search(&all_x, "7", 1, &[]);
         let run = search(&all_x, "7", 1, env);
         assert_eq!(run.code, Some(0), "{env:?}: {}", run.stderr);
-        assert_eq!((run.stdout, run.stderr), (plain.stdout, plain.stderr), "{env:?}");
+        assert_eq!(
+            (run.stdout, run.stderr),
+            (plain.stdout, plain.stderr),
+            "{env:?}"
+        );
     }
     for file in [ql, tk, all_x] {
         let _ = std::fs::remove_file(file);

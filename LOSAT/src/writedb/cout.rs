@@ -13,6 +13,11 @@
 //! last line feed fails exits with status 0 and no message). This model is written from those
 //! runs and the C++ standard's text on the stream state, not from the source of a C++ runtime or
 //! of a C library.
+//!
+//! Those failures last (every later write fails too). On the command line the writer is Rust's
+//! standard output, whose own buffer keeps up to 1023 bytes of a write that fails: a failure that
+//! passes before the exit (`EAGAIN` on a non-blocking standard output) would write them late,
+//! where NCBI's buffer drops them (line RG item KC-11b-2: a standard output without that buffer).
 
 use std::io::Write;
 

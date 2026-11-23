@@ -253,8 +253,8 @@ BLAST+.
    2.17.0 with `-out /dev/full` on ws, 2026-11-21; convert2blastmask's `maskinfo_*`), LOSAT refuses it (exit
    status 1). blastdbcmd's `-metadata` is not refused since version 1.28: its serial stream, its buffer
    and the stream under it (the `-out` file's `ofstream`, or `cout`) are NCBI's, so a failed write gives
-   NCBI's lines, file bytes and exit status (6 when the flush of a document the buffers hold fails, else
-   0; 300 runs of NCBI 2.17.0 on a full device and under file size limits,
+   NCBI's lines, file bytes and exit status (6 when the flush of the part of the document that the buffers
+   still hold fails, else 0; 300 runs of NCBI 2.17.0 on a full device and under file size limits,
    `tests/blastdbcmd_metadata_failures.rs`). A run whose writes all succeed is identical to NCBI's; so
    is a closed pipe that NCBI's writes never reach (a short output read by `head -c 100`).
    Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;

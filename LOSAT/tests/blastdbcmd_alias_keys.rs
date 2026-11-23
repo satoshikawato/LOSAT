@@ -25,7 +25,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::ncbi_windows_paths::{blastdbcmd_bytes_on_platform, canonical};
+use crate::ncbi_windows_paths::{
+    alias_list_path_on_windows, blastdbcmd_bytes_on_platform, canonical,
+};
 
 fn run_dir() -> PathBuf {
     canonical(
@@ -107,7 +109,44 @@ fn placed(text: &[u8]) -> Vec<u8> {
     losat::wording::losat_output_bytes(&placed).into_owned()
 }
 
-/// Whether `text` names a path under the run directory (`{R}`) or the tests directory (`{T}`).
+/// The cases whose messages quote the path of an alias file's list key: the ids, the directory
+/// NCBI joins the value to and the value (`alias_list_path_on_windows`).
+const LIST_PATHS: &[(&[&str], &str, &str)] = &[
+    (
+        &["A205", "A206", "A207", "A219", "A220"],
+        "{R}/db/ak/or",
+        "/losat-oidlist-fixture-missing/none.msk",
+    ),
+    (
+        &["A234"],
+        "{R}/db/m",
+        "/losat-oidlist-fixture-missing/none.msk",
+    ),
+    (&["A230"], "{R}/db/ak/or", "../zz/none.msk"),
+    (
+        &["A296", "A298", "A364"],
+        "{T}/db_search/idlist",
+        "/losat-idlist-fixture-missing/none.txt",
+    ),
+    (&["A358"], "{T}/db_search/idlist", "sub/none.txt"),
+];
+
+/// NCBI's bytes `text` of the case `id` with the command line `words`, frozen on Linux, as
+/// NCBI's code writes them on the platform of the run (`blastdbcmd_bytes_on_platform`,
+/// `LIST_PATHS`).
+fn on_platform(text: &[u8], id: &str, words: &[&str]) -> Vec<u8> {
+    let text = blastdbcmd_bytes_on_platform(text, &["{R}", "{T}"], words);
+    let Some(&(_, dir, value)) = LIST_PATHS.iter().find(|(ids, ..)| ids.contains(&id)) else {
+        return text;
+    };
+    match std::str::from_utf8(&text) {
+        Ok(text) if cfg!(windows) && text.contains("must exist") => {
+            alias_list_path_on_windows(text, dir, value).into_bytes()
+        }
+        _ => text,
+    }
+}
+
 /// The cases: id, words, exit status.
 #[rustfmt::skip]
 const CASES: &[(&str, &[&str], i32)] = &[
@@ -605,8 +644,8 @@ fn alias_keys_are_ncbi_s_bytes() {
         // A path in the lines is written with the platform's separators, and `-metadata` cuts
         // a name at the platform's separator alone (`blastdbcmd_bytes_on_platform`).
         let (want_out, want_err) = (
-            blastdbcmd_bytes_on_platform(&frozen(&format!("{id}.stdout")), &["{R}"], words),
-            blastdbcmd_bytes_on_platform(&frozen(&format!("{id}.stderr")), &["{R}"], words),
+            on_platform(&frozen(&format!("{id}.stdout")), id, words),
+            on_platform(&frozen(&format!("{id}.stderr")), id, words),
         );
         let (stdout, stderr, code) = blastdbcmd(words, &config.0);
         assert_eq!(

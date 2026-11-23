@@ -8,6 +8,7 @@
 #![cfg(target_os = "linux")]
 
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -73,13 +74,34 @@ fn run(where_: &str, prefix: usize, limit: &str, dir: &Path) -> (i32, Vec<u8>, O
         .output()
         .unwrap();
     let file = (limit != "full").then(|| fs::read(&target).unwrap());
-    (output.status.code().unwrap(), output.stderr, file)
+    // An instrumented build's profile is a file too, which the limit stops (`llvm_profile`).
+    let stderr = crate::llvm_profile::without_profile_errors(&output.stderr);
+    (output.status.code().unwrap(), stderr, file)
+}
+
+/// The run's temporary directory, removed when the test ends (also when it fails).
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 #[test]
 fn a_metadata_write_that_fails_is_reported_as_ncbi_reports_it() {
-    let dir = std::env::temp_dir().join(format!("losat-metadata-failures-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
+    let temp = TempDir(
+        std::env::temp_dir().join(format!("losat-metadata-failures-{}", std::process::id())),
+    );
+    let dir = &temp.0;
+    fs::create_dir_all(dir).unwrap();
+    // NCBI's rows were taken on a file system of 4096-byte blocks: standard output's buffer (and
+    // so where a write of the `std` rows fails) follows the block of the file it writes to.
+    assert_eq!(
+        fs::metadata(dir).unwrap().blksize(),
+        4096,
+        "the rows need a temporary directory (TMPDIR) on a file system of 4096-byte blocks"
+    );
     let rows = fs::read_to_string(run_dir().join("metadata_failures.tsv")).unwrap();
     let mut checked = 0;
     for row in rows.lines().filter(|line| !line.starts_with('#')) {
@@ -87,7 +109,7 @@ fn a_metadata_write_that_fails_is_reported_as_ncbi_reports_it() {
         let [where_, prefix, limit, status, size, hash, stderr] = fields[..] else {
             panic!("row {row:?}");
         };
-        let (code, err, file) = run(where_, prefix.parse().unwrap(), limit, &dir);
+        let (code, err, file) = run(where_, prefix.parse().unwrap(), limit, dir);
         let want_err =
             losat::wording::losat_output_bytes(stderr.replace("\\n", "\n").as_bytes()).into_owned();
         assert_eq!(
@@ -107,5 +129,4 @@ fn a_metadata_write_that_fails_is_reported_as_ncbi_reports_it() {
         checked += 1;
     }
     assert_eq!(checked, 300);
-    let _ = fs::remove_dir_all(&dir);
 }

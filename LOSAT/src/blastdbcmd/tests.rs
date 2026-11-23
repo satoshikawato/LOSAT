@@ -181,9 +181,10 @@ fn diagnostics_come_after_the_output_written_before_them() {
 
 // NCBI 2.17.0 writing `-metadata` to a full standard output (line RG KC-11b-1): a document
 // that its serializer holds whole fails at the flush of `json_out->Flush()`, which `CATCH_ALL`
-// reports, exit status 6; on a terminal (line-buffered) the serializer's write of the document
-// fails first and its destructor posts that, exit status 0. The `-out` file and the documents
-// longer than the buffers are `tests/blastdbcmd_metadata_failures.rs`.
+// reports, exit status 6. On a terminal `crate::cli::NcbiBuffer` writes each line, so the
+// serializer's write of the document fails first and its destructor posts that, exit status 0:
+// the model's result (no NCBI run had a terminal whose writes fail). The `-out` file and the
+// documents longer than the buffers are `tests/blastdbcmd_metadata_failures.rs`.
 #[test]
 fn a_failed_write_of_the_metadata_is_ncbi_s_report() {
     let db = fixture_db("dustmasker/db/basic");

@@ -5,7 +5,7 @@
   reads the process's standard input any more.
 - `losat blastdbcmd`: after a failed write of the retrieved sequences (a full disk) the retrieval
   goes on, as NCBI's does, so an id that is not found later is still reported (`Skipped`, exit
-  status 1); a failed write of `-metadata` ends with an error instead of exit status 0.
+  status 1).
 - `losat blastdbcmd` and `losat dustmasker` stop at once when the reader of their output closes
   the pipe (`| head`), with exit status 0 and no message, where NCBI's programs are ended by
   SIGPIPE. blastdbcmd writes its error lines after the output written before them, as NCBI does

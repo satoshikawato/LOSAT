@@ -103,8 +103,9 @@ fn run_body(
             return 1;
         }
     };
-    // NCBI's `ostream` of `-out` for every mode: a failed write drops the later ones, and a
-    // closed pipe ends the program where SIGPIPE ends NCBI's (`files::Ostream`).
+    // NCBI's `ostream` of `-out` for every mode but `-metadata`, which takes `out_file` itself
+    // (`metadata::metadata`): a failed write drops the later ones, and a closed pipe ends the
+    // program where SIGPIPE ends NCBI's (`files::Ostream`).
     let mut out = Ostream::new(&mut out_file);
     let path = match SearchPath::from_environment(registry) {
         Ok(path) => path,

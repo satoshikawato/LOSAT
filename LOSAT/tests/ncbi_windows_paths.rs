@@ -64,6 +64,26 @@ pub(crate) fn ncbi_paths_on_windows(text: &str, roots: &[&str]) -> String {
     out
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1963-2014
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:2016-2090
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:140-181
+/// `text`, NCBI's bytes from Linux after `ncbi_paths_on_windows`, with the path of an alias
+/// file's list key (`OIDLIST`, `GILIST`, `TILIST`, `SEQIDLIST`) quoted (`'...'`) as NCBI's code
+/// writes it on Windows: the alias file's directory `dir` (for an `OIDLIST` NCBI does not find
+/// there, its first volume's; written with `/` and the placeholders of the test) joined with `\`
+/// to the key's `value` as the alias file has it (`SeqDB_CombinePath` changes no separator, and a
+/// value starting with `/` is not absolute on Windows: on Linux the text quotes it alone).
+pub(crate) fn alias_list_path_on_windows(text: &str, dir: &str, value: &str) -> String {
+    let dir = dir.replace('/', "\\");
+    let linux = if value.starts_with('/') {
+        format!("'{value}'")
+    } else {
+        format!("'{dir}\\{}'", value.replace('/', "\\"))
+    };
+    assert!(text.contains(&linux), "{linux} in {text}");
+    text.replace(&linux, &format!("'{dir}\\{value}'"))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1712-1722
 /// `text`, NCBI's `-metadata` JSON from Linux for the `-db` value `db`, as NCBI's code writes it
 /// on Windows: `"dbname"` holds each name of the list (`db` split at spaces) after its last

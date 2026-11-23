@@ -90,7 +90,9 @@ pub(super) fn metadata(
     // `cout` (`writedb::metadata::write_metadata`, `writedb::ofstream`, `writedb::cout`).
     // blastdbcmd 2.17.0 writing to a full device or under a file size limit gives these bytes
     // and exit statuses (line RG KC-11b-1). A closed pipe ends the program silently, where
-    // SIGPIPE ends NCBI's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+    // SIGPIPE ends NCBI's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). `cout`'s buffer
+    // follows this process's standard output (its block size, a terminal or not), also in the
+    // library API, whose writer takes the same bytes at other times.
     let mut posts = Vec::new();
     let escaped = match out {
         OutputFile::File(file) => {

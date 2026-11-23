@@ -58,7 +58,7 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 
 - **What you see.** LOSAT searches the sequence and writes its alignments. NCBI crashes.
 - **When.** `tblastn` or `tblastx` with `-db_hard_mask` on a sequence with a mask within its first two bases, or within the one or two bases after its last whole codon (for example [1200, 1202) of 1,202 bases), or with an empty mask at its start. Such a mask leaves a reading frame an empty part at its start.
-- **Why.** NCBI then searches the rest of that frame as the whole frame and frees memory that it did not allocate, in every run. LOSAT searches the frame as outside the mask, and the masked bases stay masked in every frame, as for every other mask. So LOSAT's result is NCBI's result for the same database without that short mask and with its bases stored as `N`, which is also what NCBI gives where another mask of the sequence avoids the crash.
+- **Why.** NCBI then searches the rest of that frame as the whole frame and frees memory that it did not allocate, in every run. LOSAT searches the frame as a frame without a mask, and the masked bases stay masked in every frame, as for every other mask. In the cases checked, LOSAT's result is NCBI's result for the same database with that short mask dropped and its bases stored as `N`, which is also what NCBI gives where another mask of the sequence avoids the crash. NCBI's preliminary search reads such a stored `N` as a random base, where LOSAT reads the real base, so a result can differ from that run.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### Titles made only of punctuation

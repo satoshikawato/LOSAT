@@ -4,9 +4,13 @@ rows (PD-LOSAT-NCBI-DEFECTS exception 27) in dbmaskt/ (README.md there), from db
 
 A mask that leaves a reading frame an empty first part (within the first two bases of a sequence, within the one or
 two bases after its last whole codon, or an empty mask at 0) makes NCBI BLAST+ 2.17.0 crash in every run. The near
-input of each such mask is the same database with that mask removed and its bases stored as N, so that they stay
-masked in every frame, as they are in the database with the mask (and in NCBI's own runs where another mask avoids
-the crash: ncbi-parity-20261019/M/m4b3c/Q4B_PROGRESS.md). Writes:
+input of each such mask is the same database with that mask dropped and its bases stored as N (the Owner's answer
+Q6 = B of 2026-11-23: the bases stay masked in every frame; the literal mask removal, with the real bases kept, is
+reading A and gives other rows), as in NCBI's own runs where another mask avoids the crash
+(ncbi-parity-20261019/M/m4b3c/Q4B_PROGRESS.md). It equals LOSAT's reading only as long as NCBI's preliminary stage
+reads no masked residue: makeblastdb stores an N as a random base, which differs from the real one at every masked
+position here, and the near input's seed scan and early extensions read that base where LOSAT reads the real one.
+Writes:
 - edge_n13.fna, edge_n14.fna, edge_n15.fna, edge_n31.fna: edge.fna with the bases of te's masks 13 (e2 [1200, 1202)),
   14 (e3 [0, 1)), 15 (e3 [1, 2)) and 31's [1200, 1201) of e4 stored as N; edge_nq4.fna: e3's bases 1196-1199 as N;
 - hedge4_<name>.asnt (algorithm 11 of each database): n13, n14, n15 the last 3 bases of e5 (10 bases, a sequence

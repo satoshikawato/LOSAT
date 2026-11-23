@@ -344,7 +344,7 @@ pub enum HardScan {
     /// masks at 0 too) is searched over that chunk alone, at every word (`HardMaskShape::TailMask`
     /// is never refused here: the same NCBI defect as BLASTN's [`TAIL_MASK_SEARCHED_WORD`]
     /// (PD-LOSAT-NCBI-DEFECTS exception 13), approved for these programs at every word as exception
-    /// 18; the Owner's answer Q1 = B of M4b, 2026-11-21). A hard range longer than `MAX_DBSEQ_LEN`,
+    /// 21; the Owner's answer Q1 = B of M4b, 2026-11-21). A hard range longer than `MAX_DBSEQ_LEN`,
     /// which NCBI cuts into chunks that its merge joins across their overlap, is refused
     /// (`HardMaskShape::LongRange`), as is a mask that ends past the sequence
     /// (`HardMaskShape::PastEnd`). A chunk shorter than the word is searched as NCBI searches it,
@@ -362,8 +362,9 @@ pub enum HardScan {
     /// (`common::translated_chunks::translated_db_mask_chunks`; PD-LOSAT-NCBI-DEFECTS exception
     /// 21, the Owner's answers Q1 = B and Q2 = B of M4b, 2026-11-21), and a frame whose masks
     /// leave it an empty first part before that branch is searched as its chunks give it, the
-    /// whole frame after the empty part (exception 27, the Owner's answer Q4 = B of M4b,
-    /// 2026-11-22: NCBI BLAST+ 2.17.0 searches the frame and then frees memory that it did not
+    /// whole frame after the empty part (exception 27, the Owner's answers Q4 = B of M4b,
+    /// 2026-11-22, and Q6 = B, 2026-11-23, which keeps the 1 or 2 masked bases masked in every
+    /// frame: NCBI BLAST+ 2.17.0 searches the frame and then frees memory that it did not
     /// allocate). Both engines join the chunks of a frame longer than `MAX_DBSEQ_LEN` across
     /// their overlap, as for an unmasked subject (no `LongRange`), and a chunk shorter than a word
     /// gives no hit in either scan, as NCBI's (the one-hit scan reads no word of it,

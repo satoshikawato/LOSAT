@@ -5,18 +5,17 @@
 //! `-import_search_strategy` (one Blast4-get-search-strategy-reply, or else one Blast4-request,
 //! `ExtractBlast4Request`).
 //!
-//! The guess is the one port of `CFormatGuess` (`utils::format_guess`); the text reader is the
-//! generic reader of the type table (`read`) on a stream read in blocks (`StreamSource`), so one
-//! object at a time is in memory. Binary ASN.1 and XML are recognised and left to their callers:
-//! a front end that reads them into the table's values would take the input from
-//! [`Guessed::into_parts`].
+//! The guess is the one port of `CFormatGuess` (`utils::format_guess`); the text is read by the
+//! generic reader of the type table (`read::ObjectStream`) on a stream read in blocks
+//! (`StreamSource`), so one object at a time is in memory. Binary ASN.1 and XML are recognised and
+//! left to their callers, which take the input from [`Guessed::into_parts`].
 
 use std::io::{Read as IoRead, Seek, SeekFrom};
 
-use super::read::{read_object, Read};
-use super::Value;
+use super::read::ObjectStream;
 use crate::ncbi_exception::NcbiException;
-use crate::report::serial::asn_text_reader::{Reader, StreamSource};
+use crate::report::serial::asn_input::{Names, TextInput};
+use crate::report::serial::asn_text_reader::StreamSource;
 use crate::utils::format_guess::{Format, FormatGuess, Stop};
 
 /// The encoding of a serial stream, as the readers of NCBI's archives and strategies take
@@ -26,7 +25,7 @@ use crate::utils::format_guess::{Format, FormatGuess, Stop};
 pub(crate) enum Encoding {
     /// `eTextASN`: read by [`ObjectStream`].
     Text,
-    /// `eBinaryASN`: recognised; LOSAT has no binary reader of the table's types yet.
+    /// `eBinaryASN`: recognised; the caller reads it (`read::ObjectStream::binary`) or refuses it.
     Binary,
     /// `eXml`: recognised; LOSAT has no XML reader of the table's types yet.
     Xml,
@@ -91,9 +90,10 @@ pub(crate) fn guess_encoding<R: IoRead>(input: R) -> Guessed<R> {
 }
 
 impl<R: IoRead> Guessed<R> {
-    /// The text reader of the stream (a new `CObjectIStreamAsn` of the file), from where the guess left it.
-    pub(crate) fn into_text(self) -> ObjectStream<R> {
-        ObjectStream::new(self.input, &self.taken[self.start..])
+    /// The text reader of the stream (a new `CObjectIStreamAsn` of the file), from where the
+    /// guess left it, whose refusals call the text by `names`.
+    pub(crate) fn into_text(self, names: Names) -> TextStream<R> {
+        text_stream(self.input, &self.taken[self.start..], names)
     }
 
     /// The stream from where the guess left it: the bytes the guess took from there, and the
@@ -104,72 +104,34 @@ impl<R: IoRead> Guessed<R> {
     }
 }
 
-/// The objects of an ASN.1 text stream, read one at a time: one reader for the whole stream, as
-/// NCBI keeps one object stream (its line count and its buffer go on from one object to the
-/// next).
-pub(crate) struct ObjectStream<R: IoRead> {
-    r: Reader<StreamSource<R>>,
-    /// A read failed: NCBI's stream has its fail flags set, and its `EndOfData` is true from
-    /// then on.
-    failed: bool,
+/// The objects of an ASN.1 text stream read in blocks, one at a time: one reader for the whole
+/// stream (`read::ObjectStream`), as NCBI keeps one object stream (its buffer goes on from one
+/// object to the next).
+pub(crate) type TextStream<R> = ObjectStream<TextInput<StreamSource<R>>>;
+
+/// The objects of `input`, whose first bytes `first` were already taken from it, which LOSAT's
+/// refusals call by `names`.
+pub(crate) fn text_stream<R: IoRead>(input: R, first: &[u8], names: Names) -> TextStream<R> {
+    ObjectStream::text(StreamSource::new(input, first), names)
 }
 
-impl<R: IoRead> ObjectStream<R> {
-    /// The objects of `input`, whose first bytes `first` were already taken from it.
-    pub(crate) fn new(input: R, first: &[u8]) -> Self {
-        ObjectStream {
-            r: Reader::new(
-                StreamSource::new(input, first),
-                "ASN.1 text",
-                "ASN.1 text reader",
-            ),
-            failed: false,
-        }
-    }
-
-    /// `EndOfData()`: whether no object follows. True after a failed read and at the end of the
-    /// input; otherwise the white space and comments are skipped, and the end of the input in
-    /// them (or an unclosed comment) is the end too. Anything else, garbage included, is the start
-    /// of an object for the next read.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:98-109
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
-    // (`m_Input.EndOfData()` and `HasMore()` of `CIStreamBuffer` ask whether a byte follows,
-    // reading the stream for one: the end of the input here.)
-    #[cfg(test)]
-    pub(crate) fn end_of_data(&mut self) -> bool {
-        use crate::report::serial::asn_text_reader::AsnSource;
-        if self.failed || self.r.src.byte_at(self.r.pos).is_none() {
-            return true;
-        }
-        self.r.skip_white_space().is_err()
-    }
-
-    /// `in >> object` of the root type `root`: one object, from its file header (`Read`), with
-    /// the messages posted. The stream stands after the object's last byte; a failed read leaves
-    /// it failed (`end_of_data`).
-    pub(crate) fn read(&mut self, root: u16) -> Read<Value> {
-        let read = read_object(&mut self.r, root);
-        if read.0.is_err() {
-            self.failed = true;
-        }
-        read
-    }
-
+impl<R: IoRead> TextStream<R> {
     /// The text after what was read: the bytes the stream holds from there, then the input
     /// after them.
     pub(crate) fn into_rest(self) -> (Vec<u8>, R) {
-        let pos = self.r.pos;
-        self.r.src.into_rest(pos)
+        let r = self.into_input().r;
+        let pos = r.pos;
+        r.src.into_rest(pos)
     }
 
     /// The bytes the stream keeps.
     #[cfg(test)]
     pub(crate) fn buffered(&self) -> usize {
-        self.r.src.buffered()
+        self.input().r.src.buffered()
     }
 }
 
-impl<R: IoRead + Seek> ObjectStream<R> {
+impl<R: IoRead + Seek> TextStream<R> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2302
     /// The seek to the start that follows a failed read of a strategy reply: the input from its
     /// start, for a new guess and read; the error of an input that cannot seek (a pipe), whose

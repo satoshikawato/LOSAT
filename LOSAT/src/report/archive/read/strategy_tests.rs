@@ -10,6 +10,7 @@ use super::options::{import_request, EProgram, SeqRange, Setter};
 use super::queries::{render_queries, Text};
 use super::request::{ParamSet, Queries, Request};
 use crate::report::archive::fields;
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::{read_document, Value};
@@ -26,7 +27,7 @@ fn fixtures(dir: &str) -> std::path::PathBuf {
 /// The request of a strategy file's text (`Blast4-request`), read as the import reads its first
 /// object; `None` when the text reader fails.
 fn request(text: &[u8]) -> Option<Request> {
-    let (value, posts) = read_document(text, named::BLAST4_REQUEST);
+    let (value, posts) = read_document(text, named::BLAST4_REQUEST, Names::STRATEGY);
     assert!(posts.is_empty(), "{posts:?}");
     Some(Request::from_strategy(value.ok()?).unwrap_or_else(|stop| panic!("{stop:?}")))
 }
@@ -249,7 +250,7 @@ fn the_crafted_files_of_the_survey_end_as_ncbis() {
         let text = std::fs::read(dir.join(format!("{case}.ss"))).unwrap();
         let (program, change) = case.split_once('.').unwrap();
         if kind == "read" {
-            let (value, _) = read_document(&text, named::BLAST4_REQUEST);
+            let (value, _) = read_document(&text, named::BLAST4_REQUEST, Names::STRATEGY);
             assert!(value.is_err(), "{case}");
             checked += 1;
             continue;

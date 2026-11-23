@@ -298,6 +298,35 @@ pub enum TblastxMatrix {
     Aborts,
 }
 
+// NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:157-161
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3103-3105,3136
+/// What NCBI's score block makes of the `-matrix` name `name` of an ungapped search (TBLASTX's,
+/// and TBLASTN's with `-ungapped`; `TblastxArgs::scoring_matrix` tells the rules): a matrix of the
+/// tables, a name that the matrix loader reads as IDENTITY without a table (NCBI aborts), or a
+/// name that it does not know (looked for as a file).
+pub(crate) fn ungapped_matrix(name: &str) -> TblastxMatrix {
+    if let Ok(matrix) = name.parse::<crate::config::ScoringMatrix>() {
+        return TblastxMatrix::Table(matrix);
+    }
+    let identity = name
+        .get(..8)
+        .is_some_and(|start| start.eq_ignore_ascii_case("identity"));
+    if identity {
+        TblastxMatrix::Aborts
+    } else {
+        TblastxMatrix::Unknown
+    }
+}
+
+/// LOSAT's refusal of a search with a batch whose `-matrix` name `name` the matrix loader reads
+/// as IDENTITY without IDENTITY's statistics table (`TblastxMatrix::Aborts`), where NCBI BLAST+
+/// 2.17.0 aborts when it sets up the batch; `program` is the program's name in capitals.
+pub(crate) fn identity_named_matrix_refusal(name: &str, program: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "-matrix {name} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's {program}"
+    )
+}
+
 impl TblastxArgs {
     /// The `-matrix` name as typed, BLOSUM62 when omitted (the pairwise report prints it so).
     pub fn matrix_name(&self) -> &str {
@@ -317,18 +346,7 @@ impl TblastxArgs {
     /// NCBI 2.17.0 aborts for a file that it finds (`SURVEY_scoring.md` §1.3), which LOSAT
     /// refuses (`matrix_file`).
     pub fn scoring_matrix(&self) -> TblastxMatrix {
-        let name = self.matrix_name();
-        if let Ok(matrix) = name.parse::<crate::config::ScoringMatrix>() {
-            return TblastxMatrix::Table(matrix);
-        }
-        let identity = name
-            .get(..8)
-            .is_some_and(|start| start.eq_ignore_ascii_case("identity"));
-        if identity {
-            TblastxMatrix::Aborts
-        } else {
-            TblastxMatrix::Unknown
-        }
+        ungapped_matrix(self.matrix_name())
     }
 
     /// Looks up the file that NCBI reads for an `Unknown` matrix (`scoring_matrix`) with `search`

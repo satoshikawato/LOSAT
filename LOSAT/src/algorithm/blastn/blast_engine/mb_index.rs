@@ -12,8 +12,9 @@
 //! indexed search only while `-use_index` still holds), which LOSAT does with NCBI's bytes. When
 //! an index loads, NCBI searches with it, as LOSAT does (`mb_index_seeds`, line RG items D5b-2
 //! and D5b-3: also an index of only some database volumes, whose other volumes the search scans,
-//! and the two-hit search), except with `-db_hard_mask` ([`MegablastIndex::check`]; item D5b-5),
-//! and LOSAT refuses the index files whose reading NCBI leaves undefined or crashes on.
+//! and the two-hit search; with `-db_hard_mask` the seeds placed into the hard ranges, item D5b-5,
+//! the Owner's answer C to Q-HARDIDX), and LOSAT refuses the index files whose reading NCBI leaves
+//! undefined or crashes on.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -72,26 +73,14 @@ pub(super) fn refusal(what: &str) -> anyhow::Error {
 
 impl MegablastIndex {
     /// The index that the search uses, or LOSAT's refusal of a search that NCBI runs with an
-    /// index LOSAT does not search with: the loader's refusals, and a used index with the
-    /// database's hard masking (`-db_hard_mask` as the formatter resolved it: NCBI places the
-    /// index's seeds by its unmasked chunks, item D5b-5, the Owner's question Q-HARDIDX).
-    pub(super) fn check(&self, args: &BlastnArgs) -> Result<Option<Arc<LoadedIndex>>> {
+    /// index LOSAT does not search with (the loader's refusals). With `-db_hard_mask` the search
+    /// places the index's seeds into the hard ranges (`mb_index_seeds::HardSeeds`; item D5b-5,
+    /// the Owner's answer C to Q-HARDIDX).
+    pub(super) fn check(&self) -> Result<Option<Arc<LoadedIndex>>> {
         match self {
             Self::NotUsed => Ok(None),
             Self::Refused(what) => Err(refusal(what)),
-            Self::Used(index) => {
-                let first = &index.volumes[0].path;
-                let hard = args
-                    .db_mask_resolved
-                    .as_ref()
-                    .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard);
-                if hard {
-                    return Err(refusal(&format!(
-                        "a MegaBLAST database index ({first}) and -db_hard_mask"
-                    )));
-                }
-                Ok(Some(Arc::clone(index)))
-            }
+            Self::Used(index) => Ok(Some(Arc::clone(index))),
         }
     }
 }

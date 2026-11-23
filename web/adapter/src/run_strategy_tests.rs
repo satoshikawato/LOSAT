@@ -81,7 +81,10 @@ fn run_imported(
         |queries, query_end, subjects| run(words, queries, query_end, subjects),
     );
     crate::store::release(query_handle).unwrap();
-    crate::store::release(subject_handle).unwrap();
+    // A run of `-db` has the subject handle 0, which names no input.
+    if subject_handle != 0 {
+        crate::store::release(subject_handle).unwrap();
+    }
     result??;
     let mut streams = BTreeMap::new();
     crate::emit::EMITTED.with(|emitted| {
@@ -228,4 +231,46 @@ fn validate_reads_the_strategy_where_the_command_line_does() {
     let error =
         crate::run::validate(&["blastp", "-import_search_strategy", "validated.ss"]).unwrap_err();
     assert!(error.contains("File is not accessible"), "{error}");
+}
+
+/// A strategy whose subject is a database is the browser's run of `-db` (line WQA D12a): the
+/// *start* field `database` is true, the host gives no subject bytes and the run no subject
+/// handle, and the engine opens the database by the strategy's name in the run's working
+/// directory, as the command line does (row `I.blastn.db.alone`; the name made absolute here, as
+/// the test's working directory is not `LOSAT/`: the report names the database by its title).
+#[test]
+fn a_strategy_of_a_database_is_a_run_of_db() {
+    let table = std::fs::read_to_string(format!("{}/import_cases.tsv", fixtures())).unwrap();
+    let cells: Vec<&str> = table
+        .lines()
+        .find(|line| line.starts_with("I.blastn.db.alone\t"))
+        .expect("the row")
+        .split('\t')
+        .collect();
+    let text = std::fs::read_to_string(format!("{}/ss/blastn.db.ss", fixtures())).unwrap();
+    let database = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../LOSAT/tests/db_search/arch_snucl"
+    );
+    assert!(text.contains("\"tests/db_search/arch_snucl\""));
+    let text = text.replace("\"tests/db_search/arch_snucl\"", &format!("\"{database}\""));
+    let handle = register_strategy("blastn.db.ss", text.as_bytes());
+    let words = ["blastn", "-import_search_strategy", "blastn.db.ss"];
+    assert!(crate::run::searches_database(&words));
+    assert!(crate::run::start_json(&words)
+        .unwrap()
+        .ends_with(",\"database\":true}"));
+    let streams = run_imported(&words, b"", b"").unwrap();
+    assert_eq!(
+        streams.get(&0).cloned().unwrap_or_default(),
+        frozen(cells[4])
+    );
+    assert_eq!(
+        streams
+            .get(&STREAM_DIAGNOSTICS)
+            .cloned()
+            .unwrap_or_default(),
+        frozen(cells[5])
+    );
+    files::release(handle).unwrap();
 }

@@ -8,7 +8,7 @@
 //!
 //! [`MaskFileReader`] reads such a file as `makeblastdb` does: the format is guessed
 //! once per file (`reader.rs`, `guess.rs`), then the objects follow one another in ASN.1 text
-//! (`text.rs`) or binary (`ber.rs`); `schema.rs` has the types.
+//! or binary (the primitives of `report::serial::asn_input`); `schema.rs` has the types.
 //!
 //! What a mask names. Every Seq-id of a file is a [`ParsedSeqId`] of any alternative of the
 //! `Seq-id` CHOICE (`local`, `gibbsq`, `gibbmt`, `giim`, `genbank`, `embl`, `pir`, `swissprot`,
@@ -45,7 +45,6 @@
 //! the binary. That last one is refused where makeblastdb dereferences it (`process`), after the
 //! masks before it and after any error of the reader in the rest of its object.
 
-mod ber;
 mod guess;
 mod reader;
 mod schema;
@@ -53,7 +52,6 @@ mod schema;
 mod seq_id_tests;
 #[cfg(test)]
 mod tests;
-mod text;
 
 pub(crate) use reader::{MaskFileError, MaskFileFormat, MaskFileReader, MaskPost};
 

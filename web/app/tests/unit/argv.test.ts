@@ -15,6 +15,7 @@ import {
   RESERVED_FLAGS,
   shellWords,
   splitOptions,
+  userArgv,
   toShellCommand,
 } from '../../src/domain/argv';
 import { PROGRAMS } from '../../src/domain/programs';
@@ -131,7 +132,8 @@ describe('buildArgv', () => {
     }
   });
 
-  // BLASTN's -filtering_db searches a BLAST database of repeats, which the browser build cannot read.
+  // BLASTN's -filtering_db searches a BLAST database of repeats: the engine reads it from the run's directory, but the
+  // form has no input for its files yet (D4-W2, with WQA D12b; Owner 2026-11-22).
   it('refuses the database of repeats of BLASTN, also written -flag=value', () => {
     for (const words of [['-filtering_db', 'repeats'], ['-filtering_db=repeats']]) {
       expect(extra('blastn', words)).toThrow(/^-filtering_db \(a BLAST database of repeats\) is not supported in the browser yet$/);
@@ -317,5 +319,27 @@ describe('refusedFields', () => {
   it('names "Additional options" for the messages about its text', () => {
     expect(fields("Additional options: a quote (') is not closed", "-strand 'plus")).toEqual({ extra: true, flags: [] });
     expect(fields("Additional options: '' is not accepted", "''")).toEqual({ extra: true, flags: [] });
+  });
+});
+
+// Line WQA's D20, 2026-11-23: a run that printed the command line's help or version is shown as the command the user typed.
+describe('userArgv', () => {
+  const argv = ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-version-full', '-num_threads', '2'];
+  it('leaves out the placeholder inputs of a printed run, which read none', () => {
+    expect(userArgv({ argv, prints: 'version' })).toEqual(['blastn', '-version-full', '-num_threads', '2']);
+    expect(userArgv({ argv: ['blastp', '-query', 'q.fa', '-subject', 's.fa', '-h'], prints: 'help' })).toEqual(['blastp', '-h']);
+  });
+  it('keeps the options and the words of Additional options, such as -conffile and -outfmt', () => {
+    expect(userArgv({ argv: ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-help', '-conffile', 's.ini', '-outfmt', '17'], prints: 'help' })).toEqual([
+      'blastn',
+      '-help',
+      '-conffile',
+      's.ini',
+      '-outfmt',
+      '17',
+    ]);
+  });
+  it('is the argv itself for a search', () => {
+    expect(userArgv({ argv })).toBe(argv);
   });
 });

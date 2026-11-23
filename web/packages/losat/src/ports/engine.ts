@@ -178,7 +178,8 @@ export interface EngineRunRequest {
   /**
    * The files of the run's working directory (docs/web/abi_v2.md §3), which the engine opens by the names that the argv
    * gives, as the command line opens them in its directory: the files of the BLAST database of `-db`, `taxdb.*`, the
-   * lists of its filters (`-seqidlist`, `-taxidlist`, `-gilist` and their negatives). The engine reads each in place,
+   * lists of its filters (`-seqidlist`, `-taxidlist`, `-gilist` and their negatives), and BLASTN's database of repeats
+   * (`-filtering_db`, with `-db` or a `subject`; line RG item D4). The engine reads each in place,
    * the bytes that it asks for at a time; none is copied whole (line WQA D12a, 2026-11-20).
    */
   readonly files?: readonly DirectoryFile[];

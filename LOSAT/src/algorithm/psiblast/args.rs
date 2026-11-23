@@ -16,7 +16,7 @@ use crate::blastinput::value_parsers::*;
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
 // `-in_msa` makes the PSSM from an alignment (`in_msa.rs`) and searches it as `-in_pssm` does;
-// `-phi_pattern` is refused by the parser (`cli.rs` `is_unported_psiblast_arg`).
+// `-phi_pattern` is refused by the parser (its rows of `ncbi_app::args::refusal`).
 // The values are
 // read as NCBI's argument parser reads them (`value_parsers.rs`); the checks that NCBI makes
 // after reading them are blastp's (`BlastpArgs::check_options`, with psiblast's program).
@@ -253,7 +253,7 @@ pub struct PsiblastArgs {
     // The exclusions are errors of the argument parser: LOSAT's parser reports them with its own
     // text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is opened and read with
     // the options (`algorithm::psiblast::in_pssm`); `-phi_pattern` is refused by the parser
-    // (`cli.rs` `is_unported_psiblast_arg`).
+    // (its rows of `ncbi_app::args::refusal`).
     #[arg(
         long = "in_pssm",
         value_name = "psi_chkpt_file",
@@ -264,7 +264,7 @@ pub struct PsiblastArgs {
     pub in_pssm: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1184-1229
     // `msa_exclusions` are `-in_pssm`, `-query`, `-query_loc` and `-phi_pattern`; the last is
-    // refused by name (`cli.rs` `is_unported_psiblast_arg`) before any exclusion is looked at. The
+    // refused by name (its rows of `ncbi_app::args::refusal`) before any exclusion is looked at. The
     // exclusions and requirements are errors of the argument parser, which LOSAT's parser reports
     // with its own text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The file is read with
     // the options (`algorithm::psiblast::in_msa`).
@@ -365,7 +365,7 @@ impl PsiblastArgs {
             threshold: self.threshold,
             word_size: self.word_size,
             num_threads: self.num_threads,
-            // psiblast has no `-mt_mode` (`cli.rs` `is_unported_psiblast_arg`).
+            // psiblast has no `-mt_mode` (its rows of `ncbi_app::args::refusal`).
             mt_mode: None,
             out: self.out,
             max_target_seqs: self.max_target_seqs,

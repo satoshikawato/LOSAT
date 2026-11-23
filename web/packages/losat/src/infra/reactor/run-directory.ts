@@ -11,7 +11,8 @@
 // browser's storage. The Node hosts of LOSAT's tests give the engine the same view from the OS
 // (LOSAT/tests/wasi_thread_worker.js, `preopens: { "/work": directory }`).
 //
-// LOSAT opens a database file once for a run (LOSAT/src/seqdb/file.rs: on WASI, a seek and a read under a lock) and
+// LOSAT opens a database file when a search needs it (once for a run; the repeat database of BLASTN's -filtering_db at
+// each query batch) (LOSAT/src/seqdb/file.rs: on WASI, a seek and a read under a lock) and
 // reads it from the search's threads. A descriptor that one thread opened must therefore be read on another: each
 // thread worker has a WASI shim of its own, so the descriptors live in a table in memory that every thread of the instance shares (`table`, a
 // SharedArrayBuffer for the threaded module), each entry the index of the file in the run's list and its position.

@@ -30,6 +30,7 @@ use super::request::{Queries, Request, Subject};
 use crate::cli::{Commands, NativeError};
 use crate::ncbi_exception::NcbiException;
 use crate::report::archive::options::{Param, ParamValue};
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::read::ReadError;
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
 use crate::report::serial::asn_types::table::named;
@@ -121,6 +122,7 @@ fn read_error(error: ReadError, program: &str) -> anyhow::Error {
         // without a post and with its status, 0.
         ReadError::Eof => NativeError::silent_end().into(),
         ReadError::Std(what) => NativeError::std_exception(what).into(),
+        ReadError::OutOfMemory => NativeError::out_of_memory().into(),
         ReadError::Unsupported(what) => unported(&what, program),
     }
 }
@@ -164,8 +166,8 @@ fn extract_request<R: IoRead + Seek>(input: R, program: &str) -> Result<Value> {
     // here is a failed attempt too.
     let first = match guessed.encoding {
         Ok(Encoding::Text) => {
-            let mut stream = guessed.into_text();
-            let (read, posts) = stream.read(named::BLAST4_GET_SEARCH_STRATEGY_REPLY);
+            let mut stream = guessed.into_text(Names::STRATEGY);
+            let (read, posts) = stream.read_object(named::BLAST4_GET_SEARCH_STRATEGY_REPLY);
             match read {
                 Ok(value) => {
                     no_posts(&posts, program)?;
@@ -207,8 +209,8 @@ fn extract_request<R: IoRead + Seek>(input: R, program: &str) -> Result<Value> {
         // not read, which the import reports as its read failure.
         return Err(failed_to_read());
     }
-    let mut stream = guessed.into_text();
-    let (read, posts) = stream.read(named::BLAST4_REQUEST);
+    let mut stream = guessed.into_text(Names::STRATEGY);
+    let (read, posts) = stream.read_object(named::BLAST4_REQUEST);
     no_posts(&posts, program)?;
     read.map_err(|error| read_error(error, program))
 }
@@ -1566,7 +1568,7 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
                 }
             } else if start.has_subjects() {
                 // The Owner's decision F2-Q1 (2026-11-20 「Q1=C」, PD-LOSAT-NCBI-DEFECTS exception
-                // 22): a strategy's subjects are searched once, as with `-num_threads 1`, whatever
+                // 25): a strategy's subjects are searched once, as with `-num_threads 1`, whatever
                 // `-num_threads` says (NCBI searches them once per thread or aborts: its thread
                 // check reads only the command line's `-subject`). The one place of the rule, for
                 // every program and caller.

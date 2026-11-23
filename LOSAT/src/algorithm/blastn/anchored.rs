@@ -42,14 +42,20 @@ pub(crate) struct AnchoredSequences<'a> {
     pub(crate) hit_lists: &'a [Option<BlastnHitList>],
 }
 
-/// Appends the half-open masks `masks` as inclusive positions.
+/// Appends the half-open masks `masks` as inclusive positions (`shown_masks`).
 fn push_masks(masks: &[crate::utils::dust::MaskedInterval], out: &mut Vec<Mask>) {
-    out.extend(
-        masks
-            .iter()
-            .filter(|mask| mask.start < mask.end)
-            .map(|mask| (mask.start as u32, mask.end as u32 - 1, 0)),
-    );
+    out.extend(shown_masks(masks));
+}
+
+/// The half-open masks `masks` as inclusive positions (`Mask`), those of no position left out:
+/// the masks of the query-anchored reports and of outfmt 0's rows (`pairwise::Rows`).
+pub(crate) fn shown_masks(
+    masks: &[crate::utils::dust::MaskedInterval],
+) -> impl Iterator<Item = Mask> + '_ {
+    masks
+        .iter()
+        .filter(|mask| mask.start < mask.end)
+        .map(|mask| (mask.start as u32, mask.end as u32 - 1, 0))
 }
 
 impl ReportSequences for AnchoredSequences<'_> {

@@ -6938,25 +6938,32 @@ fn run_local_formats(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
-    // database is read from files by the command line only.
+    // `run_local` searches subject records (the library, `api::run`; the WebAssembly adapter,
+    // `web/adapter`; ABI v1, which refuses `-db` before in `web_api.rs`, `parse_blastn_args`);
+    // a `-db` search runs through `run_local_database` (or the command line's `run`).
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
+        anyhow::bail!("-db (a database search) is run by run_local_database, not run_local");
     }
-    // The counts file of `-window_masker_db` comes from the caller's counts source (LOSAT
-    // Web's registered inputs); a caller that gives none has no file to read. The file of
-    // `-window_masker_taxid` is looked for in the caller's directory (the registry's that the
-    // command line read; LOSAT Web's directory of registered inputs) and source.
+    // The counts file of `-window_masker_db` is read through the caller's counts source
+    // (`BlastnArgs::window_masker_counts`: `api::run` gives `FileCounts`; `web/adapter` gives
+    // its registered counts files); a caller of `run_local` that sets none has no counts
+    // source; ABI v1 refuses `-window_masker_db` before (`web_api.rs`, `parse_blastn_args`).
     if args.window_masker_db.is_some() && args.window_masker_counts.is_none() {
         anyhow::bail!(
-            "-window_masker_db (a WindowMasker counts file) is not supported in the browser yet"
+            "-window_masker_db (a WindowMasker counts file) needs its counts source set before calling run_local (BlastnArgs::window_masker_counts)"
         );
     }
+    // The counts file of `-window_masker_taxid` (non-zero) is looked up through the caller's
+    // registry (`BlastnArgs::window_masker_registry`, from the run's settings) and counts
+    // source (`BlastnArgs::window_masker_counts`: `api::run` gives `FileCounts`; `web/adapter`
+    // gives its registered counts files); a caller of `run_local` that omits either cannot
+    // resolve the taxid; ABI v1 refuses `-window_masker_taxid` before (`web_api.rs`,
+    // `parse_blastn_args`).
     if args.window_masker_taxid.is_some_and(|taxid| taxid != 0)
         && (args.window_masker_registry.is_none() || args.window_masker_counts.is_none())
     {
         anyhow::bail!(
-            "-window_masker_taxid (a directory of WindowMasker counts files) is not supported in the browser yet"
+            "-window_masker_taxid (a directory of WindowMasker counts files) needs its registry and counts source set before calling run_local (BlastnArgs::window_masker_registry, BlastnArgs::window_masker_counts)"
         );
     }
     // The database of `-filtering_db` is looked up with the caller's settings (the library gives

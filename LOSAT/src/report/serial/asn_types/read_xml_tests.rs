@@ -389,11 +389,13 @@ fn namespace_prefixes_and_nil_are_read_as_ncbi_reads_them() {
     for bad in [nil("nil=\"x\"", ""), nil("xs:nil=\"x\"", schema)] {
         match read(bad.as_bytes(), named::DBTAG).0 {
             Err(ReadError::Exception(e)) => {
+                // The report in LOSAT's words: NCBI's `(m_Pos = 0)` is `(position 0)`
+                // (`crate::wording`).
                 let report = String::from_utf8_lossy(&e.ncbi_what()).into_owned();
                 assert!(
-                    report.contains("NStr::StringToBool() - String cannot be converted to bool")
-                        && report.contains("(m_Pos = 0)")
-                        && report.contains("Member name= db"),
+                    report.contains(
+                        "NStr::StringToBool() - String cannot be converted to bool (position 0)"
+                    ) && report.contains("Member name= db"),
                     "{report}"
                 );
             }

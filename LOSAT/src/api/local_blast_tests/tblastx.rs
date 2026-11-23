@@ -130,6 +130,7 @@ fn unsupported_formats_fail_before_searching() {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![
                 FormatOutput {
                     outfmt: "6",
@@ -177,6 +178,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
         let mut diagnostics = Vec::new();
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -249,6 +251,7 @@ fn run_local_outputs(
     let result = {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -309,6 +312,7 @@ fn a_word_size_of_zero_is_ncbis_core_error() {
     let result = {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -372,6 +376,7 @@ fn a_word_size_of_one_searches() {
         let result = {
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,

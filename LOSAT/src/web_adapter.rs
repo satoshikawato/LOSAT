@@ -26,6 +26,11 @@ pub use crate::cli::{
     command_line_message, printed_text, Cli, Commands, NativeError, WEB_V2_PROGRAMS,
 };
 
+// The values that NCBI's arguments allow, as LOSAT's argument tables give them (`ncbi_app::args`,
+// made from each program's NCBI XML): the genetic codes that `describe` lists and the tasks whose
+// defaults it resolves.
+pub use crate::ncbi_app::args::{genetic_codes, string_values};
+
 /// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
 /// as the command line reads it after its application start, NCBI's single-dash options included.
 /// A run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads

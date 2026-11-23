@@ -429,7 +429,7 @@ fn rejected_headers_leave_the_index_uninitialised() {
             "{name}"
         );
         let mut ids = [SiOid::new(records[0].0.clone())];
-        let error = isam.ids_to_oids(0, &mut ids).unwrap_err();
+        let error = isam.ids_to_oids(0, &mut ids, &mut false).unwrap_err();
         assert_eq!(
             error.ncbi_message().unwrap(),
             b"Error: Unable to use ISAM index in batch mode.",
@@ -448,7 +448,7 @@ fn rejected_headers_leave_the_index_uninitialised() {
         // An empty list needs no index.
         isam.negative_scan(0, 100, &mut [], &mut NegativeOids::new())
             .unwrap();
-        isam.ids_to_oids(0, &mut []).unwrap();
+        isam.ids_to_oids(0, &mut [], &mut false).unwrap();
     }
     // A memory-only index (page size 1) does not check the data file's length.
     let mut memory_only = index.clone();
@@ -1103,7 +1103,7 @@ fn check_batch(isam: &StringIsam, lines: &[(Vec<u8>, u32)], rng: &mut Rng, vol_s
     for i in (1..ids.len()).rev() {
         ids.swap(i, rng.below(i + 1));
     }
-    isam.ids_to_oids(vol_start, &mut ids).unwrap();
+    isam.ids_to_oids(vol_start, &mut ids, &mut false).unwrap();
     assert!(ids.windows(2).all(|w| w[0].si <= w[1].si));
     for entry in &ids {
         let possible = expected_batch(lines, &entry.si, vol_start);
@@ -1159,7 +1159,7 @@ fn positive_batch_picks_the_first_or_the_last_line_of_a_key_and_skips_translated
     for page_size in [1usize, 2, 3, 64] {
         let isam = build_isam(&dir.0, &format!("l{page_size}"), &records, page_size);
         let mut ids = vec![SiOid::new("b"), SiOid::new("b"), SiOid::new("d")];
-        isam.ids_to_oids(100, &mut ids).unwrap();
+        isam.ids_to_oids(100, &mut ids, &mut false).unwrap();
         assert_eq!(ids[0].oid, Some(120), "page size {page_size}");
         assert_eq!(ids[1].oid, Some(120), "page size {page_size}");
         assert_eq!(ids[2].oid, None);
@@ -1167,7 +1167,7 @@ fn positive_batch_picks_the_first_or_the_last_line_of_a_key_and_skips_translated
         // lines: after `index` is stepped the line at `index` is used as it is.
         if page_size >= 4 {
             let mut ids = vec![SiOid::new("a"), SiOid::new("b")];
-            isam.ids_to_oids(100, &mut ids).unwrap();
+            isam.ids_to_oids(100, &mut ids, &mut false).unwrap();
             assert_eq!(ids[1].oid, Some(105), "page size {page_size}");
         }
         // An entry that has an OID is left alone.
@@ -1178,7 +1178,7 @@ fn positive_batch_picks_the_first_or_the_last_line_of_a_key_and_skips_translated
                 oid: Some(3),
             },
         ];
-        isam.ids_to_oids(100, &mut ids).unwrap();
+        isam.ids_to_oids(100, &mut ids, &mut false).unwrap();
         assert_eq!(ids[0].oid, Some(101));
         assert_eq!(ids[1].oid, Some(3));
     }
@@ -1194,7 +1194,9 @@ fn insure_order_sorts_like_std_string() {
         SiOid::new(""),
         SiOid::new("ab"),
     ];
-    insure_order(&mut ids);
+    let mut sorted = false;
+    insure_order(&mut ids, &mut sorted);
+    assert!(sorted);
     let order: Vec<&[u8]> = ids.iter().map(|e| e.si.as_slice()).collect();
     assert_eq!(
         order,
@@ -1207,6 +1209,20 @@ fn insure_order_sorts_like_std_string() {
             b"b".as_slice()
         ]
     );
+}
+
+/// `InsureOrder` sorts a list only while its order flag is unset (`m_CurrentOrder`): a list
+/// that was put in order and then changed (NCBI's second simplification of an alias file's
+/// list) stays as it is.
+#[test]
+fn insure_order_keeps_a_list_whose_flag_is_set() {
+    let mut ids = vec![SiOid::new("b"), SiOid::new("a")];
+    let mut sorted = true;
+    insure_order(&mut ids, &mut sorted);
+    assert_eq!(ids[0].si, b"b");
+    let mut sorted = false;
+    insure_order(&mut ids, &mut sorted);
+    assert_eq!(ids[0].si, b"a");
 }
 
 // ---------------------------------------------------------------------------------------------

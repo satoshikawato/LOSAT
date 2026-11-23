@@ -205,18 +205,21 @@ impl OpenFiles {
     /// where that command line cannot open it (a directory, a folder that the run's directory does
     /// not have, a directory of root's); and LOSAT's refusal of the names whose writes LOSAT Web
     /// does not reproduce (`Created::Refused`).
-    pub(crate) fn create(&self, name: &str) -> Result<Created, Unopened> {
+    pub(crate) fn create(&self, name: &(impl AsRef<OsStr> + ?Sized)) -> Result<Created, Unopened> {
+        let name = name.as_ref();
         let Some(table) = &self.0 else {
             return File::create(name)
                 .map(|file| Created::File(OpenedFile::Disk(file)))
                 .map_err(|_| Unopened);
         };
-        match output_name(name.as_bytes(), &run_directory_entry) {
+        let bytes = name.as_encoded_bytes();
+        let name = name.display();
+        match output_name(bytes, &run_directory_entry) {
             OutputName::Unopened => Err(Unopened),
             OutputName::File => {
-                let key = output_key(name.as_bytes()).expect("a file of output_name has a path");
+                let key = output_key(bytes).expect("a file of output_name has a path");
                 Ok(Created::File(OpenedFile::Shared(table.open(
-                    name.as_bytes(),
+                    bytes,
                     key,
                     Opening::Create,
                 ))))

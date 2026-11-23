@@ -105,6 +105,7 @@ Strategy files:
 - With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, or a small query and database) can reach it.
 - With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, and with LOSAT's `LOSAT engine error: Traceback failed`. A later match of a database sequence that `-negative_seqidlist` keeps without any of its definition lines (NCBI skips its alignment) clears that failure, as in NCBI, unless by then every query of the batch already holds `-max_target_seqs` alignments with e-values of 0.002 or less and the match's preliminary e-value is above 0.01.
 - For both, LOSAT writes the results of the query batches before and then stops with the error.
+- With `-use_sw_tback` and `-ungapped`, NCBI's traceback still sets up the Smith-Waterman alignment, reads gapped statistics that an ungapped search never computes, and crashes at every query batch it searches, with hits or without. LOSAT refuses at the first query batch that it searches, as `blastx` does. Batches before it whose queries give no Karlin-Altschul parameters are reported first, and a run without a searched batch ends as NCBI's does.
 - With `-ungapped -window_size 0` and a low `-threshold`, `-outfmt 1` to `4` is refused for a one-hit ungapped alignment of length 0 among the alignments shown, where NCBI's merge of the query-anchored alignments frees memory that it still reads. NCBI crashed in every such run we made but one; LOSAT writes that one. Every other format writes NCBI's report of such an alignment (apart from the version line, which names LOSAT).
 - With `-ungapped` and a database, the 5,000,000-residue limit is checked against the longest sequence of the database, also when a sequence list or an alias file leaves that sequence out of the search.
 
@@ -125,7 +126,7 @@ Strategy files:
 
 ## tblastn
 
-- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback makes NCBI read the translation of the subject's frame, which it never makes for a subject this short. NCBI then crashes.
+- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation) makes NCBI read the translation of the subject's frame, which it never makes for a subject this short. NCBI then crashes.
 - In practice this happens with `-window_size 0`: no frame of such a subject, three letters at most, holds two words that do not overlap.
 - With `-window_size 0` (the one-hit word finder) and a low `-threshold`, LOSAT refuses the cases below.
 - Two gapped starts of one-hit alignments of negative length that lie at the end of their 5,000,000-letter part of a frame, or past it. NCBI never finishes on them.
@@ -137,7 +138,8 @@ Strategy files:
 - Where that part, from the frame's first letter, ends before the frame's last letter instead (masks at or near either end of a sequence), LOSAT searches the part alone; see [Differences](differences.md).
 - With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, `-dbsize`, or a small query and subject) can reach it.
 - With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, and with LOSAT's `LOSAT engine error: Traceback failed`.
-- For both `tblastn` cases, LOSAT writes the results of the query batches before and then stops with the error.
+- With `-use_sw_tback` and `-ungapped`, NCBI's traceback still sets up the Smith-Waterman alignment, reads gapped statistics that an ungapped search never computes, and crashes at every query batch it searches, with hits or without. LOSAT refuses at the first query batch that it searches, as `blastx` does.
+- For these `tblastn` cases, LOSAT writes the results of the query batches before and then stops with the error.
 
 ## tblastx
 

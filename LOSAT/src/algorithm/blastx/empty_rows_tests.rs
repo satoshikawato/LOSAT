@@ -1,15 +1,25 @@
 use super::*;
 use crate::ncbi_exception::NCBI_BUILD_ROOT;
 
-// NCBI BLAST+ 2.17.0 (the official Linux x64 release), rows db.x2g.bx.f0616.0 and
-// db.x2g.bx.f0616.subj.6: `CATCH_ALL`'s report of the two exceptions.
+// NCBI BLAST+ 2.17.0 (the official Linux x64 release), rows db.x2g.bx.f0616.0,
+// db.x2g.bx.f0616.subj.6 and db.rpstbn.sw.nest.p.0: `CATCH_ALL`'s report of the three exceptions.
 #[test]
 fn the_exceptions_are_ncbis_reports() {
     // NCBI's reports in LOSAT's words (`crate::wording::losat_text`).
     assert_eq!(
-        crate::cli::NativeError::exception(&row_is_empty()).message,
+        crate::cli::NativeError::exception(&row_range_exception(RowRangeError::Empty)).message,
         crate::wording::losat_text(&format!(
             "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/seq/../seqalign/Seq_align.cpp\", line 227: Error: (CSeqalignException::eInvalidAlignment) CSeq_align::GetSeqRange(): Row is empty\n\n"
+        ))
+        .as_bytes()
+    );
+    assert_eq!(
+        crate::cli::NativeError::exception(&row_range_exception(
+            RowRangeError::SeqidsNotConsistent
+        ))
+        .message,
+        crate::wording::losat_text(&format!(
+            "Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/seq/../seqalign/Seq_align.cpp\", line 186: Error: (CSeqalignException::eInvalidRowNumber) CSeq_align::GetSeqRange(): Row seqids not consistent. Cannot determine range.\n\n"
         ))
         .as_bytes()
     );
@@ -241,4 +251,47 @@ fn the_mapped_nucleotide_follows_the_strand() {
     assert_eq!(mapped_empty_query_nucleotide(119, -1), 118);
     assert_eq!(mapped_empty_query_nucleotide(81, 1), 81);
     assert_eq!(mapped_empty_query_nucleotide(0, 1), 0);
+}
+
+// Line PS item PS12d (`PR/ps12d/scripts/gcmp.sh`, NCBI BLAST+ 2.17.0): RPSTBLASTN's
+// Smith-Waterman alignment of nest_p.fna that starts with 95 gaps in the profile's row (`Ins`
+// first: the query's letters against the gap). Its Std-seg has no location in that row's first
+// segment: `GetSeqRange` of the subject row throws `Row seqids not consistent`, the query row's is
+// taken; a gap at the end or in the middle leaves both. A `Del` first is the query row's.
+#[test]
+fn a_row_that_starts_with_a_gap_has_no_range() {
+    use crate::common::GapEditOp::{Del, Ins, Sub};
+    let gapped = |ops| super::super::results::Hsp {
+        edit_script: ops,
+        ..ungapped(0, 285)
+    };
+    let starts = gapped(vec![Ins(95), Sub(190)]);
+    assert_eq!(row_range(&starts, AlignRow::Query), None);
+    assert_eq!(
+        row_range(&starts, AlignRow::Subject),
+        Some(RowRangeError::SeqidsNotConsistent)
+    );
+    assert_eq!(
+        rows_range(&starts),
+        Some(RowRangeError::SeqidsNotConsistent)
+    );
+    let query_first = gapped(vec![Del(3), Sub(190)]);
+    assert_eq!(
+        row_range(&query_first, AlignRow::Query),
+        Some(RowRangeError::SeqidsNotConsistent)
+    );
+    assert_eq!(row_range(&query_first, AlignRow::Subject), None);
+    for ops in [
+        vec![Sub(190), Ins(95)],
+        vec![Sub(90), Del(5), Sub(100)],
+        Vec::new(),
+    ] {
+        assert_eq!(rows_range(&gapped(ops.clone())), None, "{ops:?}");
+    }
+    // An HSP of length 0: both rows empty, the query's first.
+    assert_eq!(rows_range(&ungapped(4, 4)), Some(RowRangeError::Empty));
+    assert_eq!(
+        row_range(&ungapped(4, 4), AlignRow::Subject),
+        Some(RowRangeError::Empty)
+    );
 }

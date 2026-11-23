@@ -51,12 +51,12 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
   - Values that are negative, infinite (`PLUS-INFINITY`) or not a number (`NOT-A-NUMBER`) are used as NCBI BLAST+ uses them (E-values `0.0`, bit scores `inf` or `-1.0`). A query whose Seq-inst `length` is one less than its letters is searched as its first `length` letters.
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.
-- The report formats are 0 to 4, 6, 7 and 10. Other formats are refused.
+- The report formats are 0 to 10 and 20. Formats 12 to 16 and 18 are not yet supported.
 - Also refused with `-in_pssm`:
   - `-ungapped`;
   - `-use_sw_tback` on a search that finds an alignment, where NCBI fails, crashes, never finishes or writes rows that change from one run to the next (a search that finds nothing runs);
   - `-db_gencode 32`;
-  - `-outfmt 11`;
+  - `-outfmt 11`, where NCBI stops with a C++ exception whose report changes from run to run;
   - `-mt_mode 1` with more than one thread and `-db`;
   - a PSSM whose query `-seg` masks completely.
 
@@ -107,7 +107,7 @@ For every option: `losat tblastn -help`.
 | 18 | Organism report |
 | 20 | Comma-separated values with header lines |
 
-With `-in_pssm`, only 0 to 4, 6, 7 and 10 work.
+With `-in_pssm`, 0 to 10 and 20 work.
 
 Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`. A custom list changes them, for example `-outfmt "6 qseqid sseqid pident sframe evalue"`; `delim=` sets the separator. [Output formats](../output-formats.md) describes each format.
 

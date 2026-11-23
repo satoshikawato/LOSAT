@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.90
+- Version: 1.91
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -493,7 +493,15 @@
   early, and the bytes after the set are not read; line RG item T5d, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; written 2026-11-16 as 1.39, renumbered at the merges
   with dev to 1.44, 1.46, 1.47, 1.50, 1.51, 1.52, 1.68, 1.70, 1.71, 1.72, 1.73, 1.74, 1.75, 1.78, 1.81,
-  1.82, 1.83, 1.85, 1.86, 1.89 and then 1.90, numbered after 1.89)
+  1.82, 1.83, 1.85, 1.86, 1.89 and then 1.90, numbered after 1.89);
+  1.91 2026-11-23 (RPSTBLASTN `-use_sw_tback`, line PS item PS12d: the Smith-Waterman alignment
+  that starts with a gap in the profile's row, refused by 1.80, ported under rule 2; a start with
+  a gap in the query's row, which no search was found to give, stays refused; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.90; first 1.82, then 1.83
+  at the merge of dev that brought psiblast line item PS10a's 1.82, then 1.89 at the merge of dev that
+  brought 1.83 to 1.88 (line NP items M4b-AX, O4b2-2 and M4b-3c, psiblast line items PS10c and PS10d, line RG
+  item D1c-1), then 1.91 at the merge of dev that brought line NP item M4b-T2's 1.89 and line RG
+  item T5d's 1.90)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1565,18 +1573,26 @@ file would differ, and NCBI's programs still could not open the database).
 ## Reproduced as NCBI (rule 2)
 
 - RPSTBLASTN `-use_sw_tback`: a Smith-Waterman alignment that starts with a gap (version 1.80,
-  2026-11-22, line PS item PS12c, review B1, Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07): with forbidden ranges NCBI's redo can give a profile's second alignment that
-  starts with a gap in the profile's row (row `db.rpstbn.rej.swgap`: `nest.faa`, the profile's
-  source twice, nested, back-translated). Its Std-seg's first segment has no location in that row,
-  so `CSeq_align::GetSeqRange` takes no id from it and throws "Row seqids not consistent" on the
-  row (`Seq_align.cpp:171-191`). The output is deterministic: the prefetch warns (every format but
-  8, 9, 11 and 12; outfmt 6 not with `PRE_FETCH_SEQS_LIMIT=0`), outfmt 0 to 4 stop after the query's
-  `Length=` (the description table) with exit status 255, 13 and 14 too, BLAST XML, JSON and XML2
-  stop their document with the exception (exit status 0), and the tables and the Seq-aligns are
-  the alignments as made. rpsblast's Dense-seg has a location in every segment. LOSAT refuses such
-  a profile with the query batch that holds it, as the endless redo of 1.80 (below), until line PS
-  item PS12d writes these reports (rule 2); the X-drop redo's alignments start with a substitution.
+  2026-11-22, line PS item PS12c, review B1; ported in version 1.91, 2026-11-23, line PS item
+  PS12d; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): with forbidden
+  ranges NCBI's redo can give a profile's second alignment that starts with a gap in the profile's
+  row (rows `db.rpstbn.sw.nest.*`: `nest.faa`, the profile's source twice, nested,
+  back-translated, on both strands and as two queries of one batch). Its Std-seg's first segment
+  has no location in that row, so `CSeq_align::GetSeqRange` takes no id from it and throws "Row
+  seqids not consistent" on the row (`Seq_align.cpp:171-191`) wherever a report reads it. The
+  output is deterministic: the prefetch, which reads the profile's row of every Seq-align, warns
+  (every format but 8, 9, 11 and 12; not with `PRE_FETCH_SEQS_LIMIT=0`), outfmt 0 to 4 stop after
+  the query's `Length=` (the description table reads both rows) with exit status 255, 13 and 14
+  too, BLAST XML, JSON and XML2 stop their document with the exception (exit status 0), and the
+  tables, the Seq-aligns and outfmt 0 to 4 without the description table are the alignments as
+  made, the leading gap shown as end gaps (spaces) in outfmt 0. LOSAT writes these reports as
+  NCBI's: one predicate of the rows whose range `GetSeqRange` cannot take (an empty row, a row
+  that starts with a gap; `report::serial::seqalign::std_seg_row_range`) stops each reader of a
+  row where NCBI's stops (BLASTX's owner of these rows, which RPSTBLASTN's reports share). An
+  alignment that starts with a gap in the query's row was not found (series PR item PS12d's grids
+  of profiles and queries); LOSAT refuses it, with the query batch that holds the profile, as the
+  endless redo of 1.80 (below). rpsblast's Dense-seg has a location in every segment; the X-drop
+  redo's alignments start with a substitution.
 
 - BLASTP unified P-values, `-comp_based_stats 1u`, `2u` and `3u` (version 1.54, 2026-11-20, line RG
   item X5, DECISIONS X5-1): for a query that has a next query in its query batch, NCBI adjusts the

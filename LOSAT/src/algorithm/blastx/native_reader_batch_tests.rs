@@ -28,6 +28,7 @@ fn unit_results(queries: usize, skipped: bool) -> Vec<BatchResults> {
         search_skipped: skipped,
         request_space: None,
         unlisted: Vec::new(),
+        unlisted_subject_row_throws: false,
         shown: Vec::new(),
         gapped_k: None,
         fetched_utf8: None,

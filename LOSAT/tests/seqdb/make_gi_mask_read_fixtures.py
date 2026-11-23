@@ -273,9 +273,12 @@ def cases():
         add(f"raw_{db}", db, db, "-",
             ["makeblastdb", "-in", "db", "-input_type", "blastdb", "-dbtype", dbtype, "-out", "copy"])
         add(f"raw_{db}_info", db, db, "-", bdc("-db", "copy", "-dbtype", dbtype, "-info"))
-        add(f"raw_{db}_masks", db, db, "-",
-            bdc("-db", "copy", "-dbtype", dbtype, "-entry", "all", "-outfmt",
-                "%a" + "".join(f" %m{i}" for i in ids)))
+        # One `%m` a row: with two, NCBI takes the first one's algorithm for both and leaves the
+        # second one's digits in the text, an approved difference of LOSAT's (item 4 of
+        # PD-LOSAT-BLASTDBCMD-DEVIATIONS).
+        for i in ids:
+            add(f"raw_{db}_m{i}", db, db, "-",
+                bdc("-db", "copy", "-dbtype", dbtype, "-entry", "all", "-outfmt", f"%a %m{i}"))
     add("raw_m01_hard12", "m01", "m01", "-", bn("-db", "copy", "-db_hard_mask", "12", "-outfmt", "6"))
     # The GI-mask files are looked for from the current directory, as for every reader.
     add("raw_m01_parent", "m01", ".", "-",

@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.27 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.28 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -58,7 +58,9 @@
   as a known difference for the v0.2.0 release on the Owner's choice of 2026-11-22, line EB,
   EB DECISIONS 55; the Owner approved its text the same day, with no words: at 22:55 JST the
   Owner pressed "Ready for review" on pull request #1484, which its description named as the
-  Owner's decision on the text)
+  Owner's decision on the text); 1.28 2026-11-23 (exception 10: blastdbcmd's `-metadata` reports
+  a failed write as NCBI's serial stream does, no longer refused; line RG item KC-11b, RG
+  DECISIONS KC-11b-1; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -248,15 +250,19 @@ BLAST+.
    through its serial stream, which reports a failed write (dustmasker's `seqloc_*` and
    `maskinfo_*`: exit status 3, 0 or 134 by the case; segmasker's: 1 or 134, the local official
    release with `-out /dev/full`; windowmasker's: 3 for `seqloc_*`, 134 for `maskinfo_*`, NCBI
-   2.17.0 with `-out /dev/full` on ws, 2026-11-21; convert2blastmask's `maskinfo_*`; blastdbcmd's `-metadata`:
-   exit status 6), LOSAT refuses it (exit status 1). A run whose writes all succeed is identical to NCBI's; so
+   2.17.0 with `-out /dev/full` on ws, 2026-11-21; convert2blastmask's `maskinfo_*`), LOSAT refuses it (exit
+   status 1). blastdbcmd's `-metadata` is not refused since version 1.28: its serial stream, its buffer
+   and the stream under it (the `-out` file's `ofstream`, or `cout`) are NCBI's, so a failed write gives
+   NCBI's lines, file bytes and exit status (6 when the flush of the part of the document that the buffers
+   still hold fails, else 0; 300 runs of NCBI 2.17.0 on a full device and under file size limits,
+   `tests/blastdbcmd_metadata_failures.rs`). A run whose writes all succeed is identical to NCBI's; so
    is a closed pipe that NCBI's writes never reach (a short output read by `head -c 100`).
    Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
    `ends_like_sigpipe`, `flush_before_diagnostic`), `dustmasker::work::run`
    (`Failure::ClosedPipe`), `segmasker::work::run_masks` (`Failure::ClosedPipe`), `windowmasker::work`
    (`Failure::ClosedPipe`), `convert2blastmask::work::run_masks`
    (`Failure::ClosedPipe`), `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`, `Run::post`),
-   `blastdbcmd/metadata.rs`,
+   `blastdbcmd/metadata.rs` (`writedb::metadata::write_metadata`, `writedb::cout`),
    `taxonomy.rs`, `list.rs` and `mod.rs`. Release-notes sentence: When the reader of `losat
    blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s, `losat windowmasker`'s or `losat convert2blastmask`'s output closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).

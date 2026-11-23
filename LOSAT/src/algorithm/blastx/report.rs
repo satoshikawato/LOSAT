@@ -1092,9 +1092,10 @@ fn write_pairwise(
     Ok(())
 }
 
-/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0
-/// (`EmptyRowsStop`) is NCBI's exception, `Row is empty` where the sorts or the description table
-/// read the HSP's empty rows (after the query's `Length=`), `CreateDensegFromStdseg` where they or
+/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0 or at a
+/// row that starts with a gap (`EmptyRowsStop`) is NCBI's exception, `CSeq_align::GetSeqRange`'s
+/// where the sorts or the description table read such a row (after the query's `Length=`;
+/// `empty_rows::row_range_exception`), `CreateDensegFromStdseg` where they or
 /// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
 /// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
 /// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
@@ -1105,8 +1106,8 @@ fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
         .get_ref()
         .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
     {
-        Some(EmptyRowsStop::RowIsEmpty) => {
-            NativeError::exception(&super::empty_rows::row_is_empty()).into()
+        Some(EmptyRowsStop::RowRange(error)) => {
+            NativeError::exception(&super::empty_rows::row_range_exception(*error)).into()
         }
         Some(EmptyRowsStop::StdSegLengths) => {
             NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
@@ -1491,12 +1492,24 @@ pub(crate) fn write_epilog(
         )?;
     } else if options.outfmt == 5 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
-        super::blast_xml::write_xml_epilog(writer, diagnostics, queries, None)?;
+        super::blast_xml::write_xml_epilog(
+            writer,
+            diagnostics,
+            options.program().lower,
+            queries,
+            None,
+        )?;
     } else if xml2.is_some() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2219 and
         // :2419-2423, :2440-2445: the report a `-subject` run holds back, then the end of the
         // document.
-        super::blast_xml::write_xml_epilog(writer, diagnostics, queries, xml2)?;
+        super::blast_xml::write_xml_epilog(
+            writer,
+            diagnostics,
+            options.program().lower,
+            queries,
+            xml2,
+        )?;
     } else if options.outfmt == 7 {
         // The warning of the epilog's formatter, for a field list that shows a plural name of
         // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).

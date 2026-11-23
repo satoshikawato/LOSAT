@@ -85,6 +85,10 @@ pub struct BatchResults {
     /// (`rps_search::volumes::report_ordinal_ids`): outfmt 7's count and the prefetch's limit
     /// still count them (`BatchResults::unlisted_hsps`). Empty where none left.
     pub unlisted: Vec<usize>,
+    /// RPSTBLASTN: whether one of those HSPs starts with a gap in the profile's row
+    /// (`rps_search::volumes::Unlisted::subject_row_throws`), where NCBI's prefetch throws
+    /// (`empty_rows::prefetch_reads_unranged_row`).
+    pub unlisted_subject_row_throws: bool,
     /// RPSTBLASTN over several volumes: the number of each query's merged lists that the
     /// formatter's cut to the hit list size keeps, which counts following lists whose Seq-align
     /// ids match as one subject (`database::ReportedSubjects::for_batch`,
@@ -734,6 +738,7 @@ impl PreliminarySink for Runtime<'_> {
             search_skipped: true,
             request_space: None,
             unlisted: Vec::new(),
+            unlisted_subject_row_throws: false,
             shown: Vec::new(),
             gapped_k: None,
         });
@@ -1105,6 +1110,7 @@ impl PreliminarySink for Runtime<'_> {
             search_skipped: false,
             request_space: None,
             unlisted: Vec::new(),
+            unlisted_subject_row_throws: false,
             shown: Vec::new(),
             gapped_k: None,
         });

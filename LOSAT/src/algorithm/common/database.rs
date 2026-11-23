@@ -5535,9 +5535,9 @@ pub(crate) fn batch_prefetch<'s, 'b>(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:778-786
-/// NCBI's warning where the prefetch of a query batch fails ([`batch_prefetch`], and BLASTX's
-/// Seq-align of empty subject rows, `blastx::empty_rows::prefetch_reads_empty_row`): the one
-/// producer of its text.
+/// NCBI's warning where the prefetch of a query batch fails ([`batch_prefetch`], and BLASTX's and
+/// RPSTBLASTN's Seq-align of a subject row whose range it cannot take,
+/// `blastx::empty_rows::prefetch_reads_unranged_row`): the one producer of its text.
 pub(crate) fn prefetch_warning(program: &str) -> Vec<u8> {
     // A post of NCBI's main thread (`ncbi_exception::post_line`: the header alone after the run's diagnostic
     // stream failed).

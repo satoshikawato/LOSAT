@@ -634,11 +634,11 @@ pub(super) fn rps_search(
             units.searches_volumes_bare(),
         ) {
             Ok(None) => {}
-            Ok(Some(counts)) => {
+            Ok(Some(dropped)) => {
                 if unlisted.is_empty() {
                     unlisted = vec![0; hit_lists.len()];
                 }
-                unlisted[batch.clone()].copy_from_slice(&counts);
+                unlisted[batch.clone()].copy_from_slice(&dropped.hsps);
             }
             Err(refusal) => {
                 failed = Some((number, refusal));

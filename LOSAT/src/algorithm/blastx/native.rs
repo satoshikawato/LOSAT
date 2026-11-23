@@ -1177,8 +1177,8 @@ pub(super) struct BatchPrefetch {
     seq_aligns: usize,
     /// `PRE_FETCH_SEQS_LIMIT` turns it off (`common::database::prefetch_off`).
     pub(super) off: bool,
-    /// It throws at an empty subject row before it loads anything and writes its warning
-    /// (`empty_rows::prefetch_reads_empty_row`).
+    /// It throws at a subject row whose range it cannot take before it loads anything and writes
+    /// its warning (`empty_rows::prefetch_reads_unranged_row`).
     pub(super) fails: bool,
 }
 
@@ -1187,10 +1187,10 @@ pub(super) struct BatchPrefetch {
 /// `report::render_queries_with`). The batch's Seq-aligns: one for each HSP that the reports show
 /// (`has_seqalign`), one for each subject of an ungapped search; where `PRE_FETCH_SEQS_LIMIT`
 /// turns the batch's prefetch off (`shared::prefetch_off`), it reads nothing of a subject that no
-/// report reads (`asks.prefetched`). Where it reads the Seq-aligns and one has an empty subject
-/// row (a subject whose every HSP has length 0, as the mapper leaves it), it throws before it
-/// loads anything and writes its warning: the batch's subjects are then read as with the prefetch
-/// off. A gapped search has no HSP of length 0: its hit lists are not walked for that.
+/// report reads (`asks.prefetched`). Where it reads the Seq-aligns and one has a subject row whose
+/// range it cannot take (an empty one: a subject whose every HSP has length 0, as the mapper leaves
+/// it; one that starts with a gap: RPSTBLASTN's Smith-Waterman redo), it throws before it loads
+/// anything and writes its warning: the batch's subjects are then read as with the prefetch off.
 pub(super) fn batch_prefetch(
     results: &[BatchResults],
     options: &super::args::ResolvedOptions,
@@ -1217,9 +1217,8 @@ pub(super) fn batch_prefetch(
             .sum::<usize>();
     let off = crate::algorithm::common::database::prefetch_off(seq_aligns);
     let fails = !off
-        && !options.gapped
         && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
-        && super::empty_rows::prefetch_reads_empty_row(results, options.gapped, loc);
+        && super::empty_rows::prefetch_reads_unranged_row(results, options.gapped, loc);
     BatchPrefetch {
         seq_aligns,
         off,
@@ -1231,9 +1230,10 @@ impl BatchPrefetch {
     /// What NCBI's BLAST database data loader loaded for the batch, the run's record
     /// (`ReportedSubjects::note_loaded`): `common::database::batch_loads` of its Seq-aligns (every
     /// subject of its Seq-aligns where its prefetch is on, else what the first format's rows read,
-    /// `rows`), and those rows where its prefetch failed before it loaded anything (`fails`,
-    /// BLASTX's own: only its ungapped search leaves a subject row of length 0, whose reports then
-    /// read the subjects as with the prefetch off).
+    /// `rows`), and those rows where its prefetch failed before it loaded anything (`fails`, a
+    /// subject row whose range it cannot take: BLASTX's ungapped HSPs of length 0, RPSTBLASTN's
+    /// alignments that start with a gap; the reports then read the subjects as with the prefetch
+    /// off).
     fn loads(
         &self,
         rows: crate::report::tabular::SubjectFetch,

@@ -867,3 +867,21 @@ fn a_batchs_cutoff_refusal_comes_before_its_search_errors() {
     };
     assert!(error.to_string().starts_with(scale_refusal), "{error}");
 }
+
+// Line PS item PS12d: RPSTBLASTN refuses a Smith-Waterman alignment (switched back) that starts
+// with a gap in the query's row (`Del` first) and reports one that starts with a gap in the
+// profile's row (`Ins` first, nest_p.fna's, written as NCBI BLAST+ 2.17.0's).
+#[test]
+fn only_a_query_row_gap_start_is_refused() {
+    use super::super::redo::starts_with_query_gap;
+    use crate::common::GapEditOp::{Del, Ins, Sub};
+    let with = |ops: Vec<crate::common::GapEditOp>| {
+        let mut hsp = hsp(0, 1e-5, 0, 99);
+        hsp.gap_info = Some(ops);
+        hsp
+    };
+    assert!(starts_with_query_gap(&with(vec![Del(3), Sub(97)])));
+    assert!(!starts_with_query_gap(&with(vec![Ins(95), Sub(5)])));
+    assert!(!starts_with_query_gap(&with(vec![Sub(97), Del(3)])));
+    assert!(!starts_with_query_gap(&hsp(0, 1e-5, 0, 99)));
+}

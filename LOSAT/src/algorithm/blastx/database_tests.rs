@@ -135,6 +135,7 @@ fn one_query(lists: &[(usize, i32)]) -> Vec<BatchResults> {
         search_skipped: false,
         request_space: None,
         unlisted: Vec::new(),
+        unlisted_subject_row_throws: false,
         shown: Vec::new(),
         gapped_k: None,
     }]

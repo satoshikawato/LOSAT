@@ -657,7 +657,7 @@ impl TranslatedRpsSearch {
                 units.searches_volumes_bare(),
             )
             .and_then(|unlisted| {
-                state.unlisted = unlisted.unwrap_or_default();
+                state.unlisted = unlisted;
                 if self.strategy {
                     state.request_space(units, options, &gapped)
                 } else {
@@ -760,8 +760,8 @@ struct WindowBatch {
     /// computed with.
     lengths: Option<(i64, i32)>,
     /// The HSPs of each query's profiles that left its merged list past the formatter's cut
-    /// (`report_ordinal_ids`; `BatchResults::unlisted`).
-    unlisted: Vec<usize>,
+    /// (`report_ordinal_ids`; `BatchResults::unlisted` and `unlisted_subject_row_throws`).
+    unlisted: Option<crate::algorithm::rps_search::volumes::Unlisted>,
     /// The queries' footer K with composition-based statistics (`footer_gapped_k`).
     gapped_k: Option<Vec<f64>>,
 }
@@ -776,7 +776,7 @@ impl WindowBatch {
             hit_lists: vec![None; queries],
             request_space: None,
             lengths: None,
-            unlisted: Vec::new(),
+            unlisted: None,
             gapped_k: None,
         }
     }
@@ -835,7 +835,14 @@ impl WindowBatch {
             parameters,
             search_skipped: false,
             request_space: self.request_space,
-            unlisted: self.unlisted,
+            unlisted_subject_row_throws: self
+                .unlisted
+                .as_ref()
+                .is_some_and(|unlisted| unlisted.subject_row_throws),
+            unlisted: self
+                .unlisted
+                .map(|unlisted| unlisted.hsps)
+                .unwrap_or_default(),
             shown: Vec::new(),
             gapped_k: self.gapped_k,
         }
@@ -919,6 +926,7 @@ fn unsearched_batch(
         search_skipped: true,
         request_space: None,
         unlisted: Vec::new(),
+        unlisted_subject_row_throws: false,
         shown: Vec::new(),
         gapped_k: None,
     }

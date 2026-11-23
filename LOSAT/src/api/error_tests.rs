@@ -50,3 +50,40 @@ fn the_debug_form_of_an_error_is_its_kind_and_its_escaped_message() {
         "Argv(\n    \"x\",\n)"
     );
 }
+
+// An exception of NCBI's that a report's writer raises mid-report (`-html` with a `./.ncbirc` that
+// does not parse: the formatter's registry, `report::formatter_registry`) is the command line's
+// report of it, `Error: `, the exception's text and its newlines, whichever program wrote the
+// report (line RG T4b: the messages of blastn, blastx and tblastx lacked the `Error: ` and the
+// last newline). The expected bytes are NCBI's: the `CATCH_ALL` part of the frozen standard error
+// of the fixture row `db.html.bp.di.f0.rc_bad.use` (NCBI BLAST+ 2.17.0 in the run directory of that
+// `./.ncbirc`), in LOSAT's words, as the fixtures' checker reads it (`wording::losat_bytes`).
+#[test]
+fn an_exception_of_a_report_s_writer_is_the_command_line_s_report_of_it() {
+    use crate::blastinput::ncbi_registry::{read_registry, Layer};
+    let frozen = crate::wording::losat_bytes(include_bytes!(
+        "../../tests/fixtures/db_search/db.html.bp.di.f0.rc_bad.use.err"
+    ));
+    // The application's `Critical` post of its own read of the file comes first, then a blank line.
+    let at = frozen
+        .windows(8)
+        .position(|window| window == b"\nError: ")
+        .expect("the CATCH_ALL report")
+        + 1;
+    let expected = &frozen[at..];
+    let exception = read_registry(
+        include_bytes!("../../tests/db_search/html/rc/bad/.ncbirc"),
+        Layer::SystemWide,
+    )
+    .expect("a read")
+    .error
+    .expect("the syntax error");
+    let error = anyhow::Error::from(exception.into_io_error());
+    assert_eq!(
+        String::from_utf8_lossy(Error::search(&error).message()),
+        String::from_utf8_lossy(expected)
+    );
+    // The command line's report is the same function's (`cli::NativeError::caught`).
+    let native = crate::cli::NativeError::caught(&error).expect("CATCH_ALL's report");
+    assert_eq!((native.exit, &native.message[..]), (255, expected));
+}

@@ -1,0 +1,554 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/ps_spec.faa).
+           4 sequences; 820 total letters
+
+
+
+<b>Query=</b> w1
+a.b|c_d/e(f)g[h]{i}`j;k:l!m?na.b|c_d/e(f)g[h]{i}`j;k:l!m?na.b|c_d/e
+(f)g[h]{i}`j;k:l!m?na.b|c_d/e(f)g[h]{i}`j;k:l!m?n
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_1    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_1    61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_1    121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_1    181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_1    241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w2 aaaa  bbbb  cccc  dddd  aaaa  bbbb  cccc  dddd  aaaa  bbbb  cccc
+ dddd  aaaa  bbbb  cccc  dddd  aaaa  bbbb  cccc  dddd  aaaa  bbbb
+ cccc  dddd
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_2    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_2    61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_2    121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_2    181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_2    241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w3
+zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+zzzzzzz end
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_3    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_3    61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_3    121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_3    181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_3    241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w4
+yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+(zzzzzzzzzzzzzzzzzzzzzzzz)qqqqqqqqqqqqqqqqqqqq
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_4    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_4    61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_4    121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_4    181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_4    241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w5
+&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;
+&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_5    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_5    61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_5    121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_5    181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_5    241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w6
+a&amp;b&lt;c&gt;d&quot;ea&amp;b&lt;c&gt;d&quot;ea&amp;b&lt;c&gt;d&quot;ea&amp;b&lt;c&gt;d&quot;ea&amp;b&lt;c&gt;d&quot;ea&amp;b&lt;c&gt;d&quot;ea&amp;b&lt;c&gt;d&quot;ea&amp;b&lt;c
+&gt;d&quot;ea&amp;b&lt;c&gt;d&quot;ea&amp;b&lt;c&gt;d&quot;ea&amp;b&lt;c&gt;d&quot;ea&amp;b&lt;c&gt;d&quot;e
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_6    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_6    61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_6    121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_6    181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_6    241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w7 a
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_7    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_7    61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_7    121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_7    181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_7    241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w8
+üüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüü
+üüüüüü
+üüüüüüüüüüüüüüüüüüüüüüüüüüüüüü
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_8    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_8    61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_8    121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_8    181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_8    241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w9
+a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,
+a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_9    1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_9    61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_9    121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_9    181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_9    241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w10
+ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-
+ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_10   1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_10   61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_10   121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_10   181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_10   241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w11
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
+next sentence here
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_11   1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_11   61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_11   121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_11   181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_11   241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w12
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx's
+word and more words after it
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_12   1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_12   61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_12   121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_12   181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_12   241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+<b>Query=</b> w13
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|
+y|zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109
+
+
+
+Query_13   1    CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGR  60
+Subject_1  1    ............................................................  60
+
+Query_13   61   PARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVK  120
+Subject_1  61   ............................................................  120
+
+Query_13   121  VSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHL  180
+Subject_1  121  ..............................PP.                             153
+Subject_1  302                                 .............A....Y....CDIA.P  330
+
+Query_13   181  AALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCT  240
+Subject_1  331  .....TR.....D.P...I.......D.................RA..L..I.VS.D...  390
+
+Query_13   241  SKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN  300
+Subject_1  391  ..T...A...V..D.........S..S..........S.....G.....S.VT.......  450
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 183696
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/ps_spec.faa).
+    Posted date:  Unknown
+  Number of letters in database: 820
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

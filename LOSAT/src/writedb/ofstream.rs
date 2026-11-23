@@ -68,7 +68,9 @@
 //! * `exceptions(mask)` sets the mask and then calls `clear(rdstate())`; `clear` and `setstate`
 //!   throw `ios_base::failure` when the new state has a bit of the mask (the standard's text). The
 //!   model records the throw ([`Stream::take_thrown`]); an operation that throws ends there, as
-//!   each operation here ends with its state change. makeblastdb sets no mask.
+//!   each operation here ends with its state change. makeblastdb sets no mask: only a stream of
+//!   blast_formatter's buffer ([`OutArea`]) has `exceptions`; a database file's ([`FileArea`])
+//!   tests no mask.
 //!
 //! blast_formatter's standard output (`cout`, synchronized with the C library's `stdout`) is a
 //! stream of the same rules whose buffer is the C library's `stdout` ([`Stream::cout`]): what
@@ -218,6 +220,10 @@ pub(crate) trait PutArea {
     fn put_byte<F: RawFile>(&mut self, file: &mut F, held: &mut Vec<u8>, byte: u8) -> bool;
     /// `sync` wrote all that was held.
     fn synced(&mut self) {}
+    /// Whether a stream of this buffer can be set to throw (`exceptions`: blast_formatter's
+    /// `-out` and standard output, [`OutArea`]). A database file's stream ([`FileArea`]) never is
+    /// (makeblastdb sets no mask), so its state changes test none.
+    const MASKABLE: bool = true;
 }
 
 /// `basic_filebuf`'s put area of `PUT_AREA` bytes: a file (the rules at the top).
@@ -225,6 +231,8 @@ pub(crate) trait PutArea {
 pub(crate) struct FileArea;
 
 impl PutArea for FileArea {
+    const MASKABLE: bool = false;
+
     fn put_bytes<F: RawFile>(&mut self, file: &mut F, held: &mut Vec<u8>, data: &[u8]) -> bool {
         if data.len() < PUT_AREA - held.len().min(PUT_AREA) {
             held.extend_from_slice(data);
@@ -445,6 +453,13 @@ impl<F: RawFile> Stream<F, OutArea> {
     pub(crate) fn cout_of(stdio: crate::cli::NcbiStdio) -> Self {
         Self::with_area(OutArea::Cout(crate::cli::NcbiBuffer::new(stdio)))
     }
+
+    /// `exceptions(mask)`: the mask set, then `clear(rdstate())`, which throws when the state
+    /// already has a bit of `mask`.
+    pub(crate) fn set_exceptions(&mut self, mask: IoState) {
+        self.exceptions = mask;
+        self.clear(self.state);
+    }
 }
 
 impl<F: RawFile, B: PutArea> Stream<F, B> {
@@ -498,22 +513,16 @@ impl<F: RawFile, B: PutArea> Stream<F, B> {
         self.check_exceptions();
     }
 
-    /// `exceptions(mask)`: the mask set, then `clear(rdstate())`, which throws when the state
-    /// already has a bit of `mask`.
-    pub(crate) fn set_exceptions(&mut self, mask: IoState) {
-        self.exceptions = mask;
-        self.clear(self.state);
-    }
-
     /// Whether the stream threw `ios_base::failure` since the last call (a state change that met
     /// `exceptions`), which is then forgotten.
     pub(crate) fn take_thrown(&mut self) -> bool {
         std::mem::take(&mut self.thrown)
     }
 
-    /// The throw of `clear`: the state has a bit of `exceptions`.
+    /// The throw of `clear`: the state has a bit of `exceptions` (a stream whose buffer can be
+    /// set to throw, [`PutArea::MASKABLE`]).
     fn check_exceptions(&mut self) {
-        if self.state.0 & self.exceptions.0 != 0 {
+        if B::MASKABLE && self.state.0 & self.exceptions.0 != 0 {
             self.thrown = true;
         }
     }

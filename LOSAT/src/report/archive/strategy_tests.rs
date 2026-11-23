@@ -679,7 +679,7 @@ fn each_held_stream_gets_its_own_bytes() {
 
 /// A run refused at NCBI's first request (`-`) that ends before it with an exception of NCBI's
 /// that a report's writer carries (the `-html` links' registry, `NcbiException::into_io_error`):
-/// the end takes it for NCBI's error, as the command line's exit does (`cli::native_error_of`,
+/// the end takes it for NCBI's error, as the command line's exit does (`cli::NativeError::caught`,
 /// exit status 255), and the held prolog reaches the stream before the error (review 2 of line
 /// RG F1w, S-b: blastx, blastn and tblastx wrote no byte of NCBI's prolog); LOSAT's refusal drops
 /// it.
@@ -700,7 +700,7 @@ fn an_exception_of_ncbis_from_a_writer_ends_the_run_as_ncbis_error() {
         )
     };
     let error = exception();
-    let native = crate::cli::native_error_of(&error).expect("NCBI's error");
+    let native = crate::cli::NativeError::caught(&error).expect("NCBI's error");
     assert_eq!(native.exit, 255);
     for (error, kept) in [
         (exception(), &b"<HTML>prolog\n"[..]),

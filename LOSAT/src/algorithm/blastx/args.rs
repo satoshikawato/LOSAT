@@ -71,8 +71,7 @@ pub struct BlastxArgs {
     )]
     pub show_gis: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
-    // not write it yet (`blastinput::app::html_format_check`).
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224), for `-outfmt` 0 to 4 and 18.
     #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
     pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
@@ -434,8 +433,8 @@ impl ResolvedOptions {
     }
 
     /// How the pairwise report reads each query's subjects, as its writer reads them
-    /// (`PairwiseView::reading` of `-sorthits`, `-sorthsps`, `-num_descriptions` and
-    /// `-num_alignments`), `None` for the other formats.
+    /// (`PairwiseView::reading` of `-sorthits`, `-sorthsps`, `-num_descriptions`,
+    /// `-num_alignments` and `-html`), `None` for the other formats.
     pub(crate) fn pairwise_reading(&self) -> Option<crate::report::pairwise::PairwiseReading> {
         self.pairwise_view().map(|view| {
             view.reading(
@@ -444,6 +443,7 @@ impl ResolvedOptions {
                     descriptions: usize::try_from(self.num_descriptions).unwrap_or(0),
                     alignments: usize::try_from(self.num_alignments).unwrap_or(0),
                 },
+                self.html.is_some(),
             )
         })
     }
@@ -555,11 +555,11 @@ pub struct ResolvedOptions {
     pub outfmt: u8,
     /// `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4) show a sequence's GI.
     pub show_gis: bool,
-    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`); None without
-    /// `-html` or outfmt 0, and for rpstblastn, which has no `-html`.
+    /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
+    /// without `-html` or any of those formats, and for rpstblastn, which has no `-html`.
     pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
-    /// outfmt 0 and 18 reports (the organism report takes no links).
+    /// outfmt 0 to 4 and 18 reports (the organism report takes no links).
     pub is_html: bool,
     /// The tabular report with a field list or a delimiter (outfmt 6 and 7), or outfmt 10 or
     /// 20 (`TabularSpec::of_app`); `None` for the default outfmt 6 and 7 (the `std` fields and a

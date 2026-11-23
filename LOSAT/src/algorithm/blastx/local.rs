@@ -1485,7 +1485,6 @@ fn check_resolutions(
     for choice in early {
         let choice = choice.at_formatting_handler(&args.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastx)?;
-        app::html_format_check(choice.number, Program::Blastx, args.html)?;
         choices.push(choice);
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();

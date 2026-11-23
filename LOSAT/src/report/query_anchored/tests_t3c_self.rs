@@ -109,6 +109,7 @@ fn section(
     let view = View {
         identity: matches!(format, 1 | 3),
         anchored: matches!(format, 1 | 2),
+        html: false,
     };
     let mut out = Vec::new();
     write_section(&mut out, view, 60, &hsps, probe).expect("the section");
@@ -1346,6 +1347,7 @@ fn thrown(
     let view = View {
         identity: true,
         anchored: true,
+        html: false,
     };
     let mut out = Vec::new();
     let error = write_section(&mut out, view, 60, &hsps, probe).expect_err("NCBI's merge throws");

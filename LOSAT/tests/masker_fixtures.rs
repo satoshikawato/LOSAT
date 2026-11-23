@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::library_examples::example_binary;
-use crate::ncbi_windows_paths::ncbi_paths_on_windows;
+use crate::ncbi_windows_paths::{alias_list_path_on_windows, canonical, ncbi_paths_on_windows};
 
 /// The fixtures of `program`.
 fn fixtures(program: &str) -> PathBuf {
@@ -394,6 +394,41 @@ fn counts_directory(program: &str, case: &Case) -> bool {
             .is_some_and(|name| !name.trim().is_empty() && fixtures(program).join(name).is_dir())
 }
 
+/// The rows whose error quotes an `OIDLIST` value that starts with `/`, which NCBI joins to a
+/// directory on Windows (`alias_list_path_on_windows`): the program, the row, that directory
+/// relative to the program's fixtures and the value. The directory is the alias file's, or, where
+/// the first name of its `DBLIST` is a volume, that volume's (`seqdb::alias::compute_masks`):
+/// `n_miss` and `n_missl` name the alias `tfn`, `p_miss` and `p_missl` the volume `tfp`.
+const OIDLIST_ROWS: &[(&str, &str, &str, &str)] = &[
+    (
+        "dustmasker",
+        "db_oidlist_miss_interval",
+        "../db_search/oidlist",
+        MISSING_OIDLIST,
+    ),
+    (
+        "dustmasker",
+        "db_oidlist_missl_interval",
+        "../db_search/oidlist",
+        MISSING_OIDLIST,
+    ),
+    (
+        "segmasker",
+        "db_oidlist_miss_interval",
+        "../db_search/taxfilter",
+        MISSING_OIDLIST,
+    ),
+    (
+        "segmasker",
+        "db_oidlist_missl_interval",
+        "../db_search/taxfilter",
+        MISSING_OIDLIST,
+    ),
+];
+
+/// The `OIDLIST` value of `tests/db_search/oidlist/{n,p}_miss{,l}` (make_oidlist.py `MISSING`).
+const MISSING_OIDLIST: &str = "/losat-oidlist-fixture-missing/none.msk";
+
 /// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen; the standard
 /// output and error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8:
 /// `-xmlhelp`'s version of the program, the prefixes).
@@ -420,6 +455,17 @@ fn expected_row(program: &str, name: &str) -> Streams {
         here(err)
     } else {
         err
+    };
+    let err = match OIDLIST_ROWS
+        .iter()
+        .find(|(each, row, ..)| *each == program && *row == name)
+    {
+        Some(&(_, _, dir, value)) if cfg!(windows) => {
+            let dir = canonical(&fixtures(program).join(dir));
+            let text = String::from_utf8(err).unwrap();
+            alias_list_path_on_windows(&text, &dir.to_string_lossy(), value).into_bytes()
+        }
+        _ => err,
     };
     (
         losat::wording::losat_output_bytes(&fs::read(file("out")).unwrap()).into_owned(),

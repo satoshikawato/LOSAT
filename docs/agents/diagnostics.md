@@ -434,6 +434,7 @@ export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXKAONCE=1
 export LOSAT_X_BXKAPPAFIT=1
 export LOSAT_X_BXPOOLN1=1
+export LOSAT_X_BXREDOFLOW=1
 export LOSAT_X_BXSCANBYTE=1
 export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_BXTASKRES=1
@@ -7113,6 +7114,21 @@ Scheduling (each value computed by one thread with the original function; order 
   x1.017, x 8 proteins at 64 x1.011) were run 3's clock, which moved in 2.35 ms steps, and read x0.990-0.997 in run 4.
   The switch is not reached on 800 cDNAs x 2 proteins (no batch end with two matches) and takes the reference side on
   AP027131 x AP027133 and the fly rows.
+- `LOSAT_X_BXREDOFLOW=1` (BLASTX, speed of the composition redo; in the strict set from the pull request that
+  added it: on unless `=0` or `LOSAT_X_DEFAULT=0`; acts wherever the redo's matches are redone ahead on the pool,
+  `LOSAT_X_BXPAR`'s rule: a batch end in a pool of 2+ threads with 2 or more matches, not `-use_sw_tback` in e-value
+  mode): the matches ahead are redone as a flow (`utils::xahead`, `runtime/kappa_batch.rs`) instead of in fork-join
+  batches of 32 matches per worker. The loop's thread offers the next 32 x workers matches as it walks the stream
+  (the early-termination guess on the heaps as they are then), each worker (one per pool thread, the batches' own:
+  the loop's thread keeps one) takes the next match offered, and the loop takes a match's result when it reaches it,
+  redoing other offered matches while one is still being redone; the helpers leave once every match is taken. Why:
+  each batch waited at its join for its longest redo; with one batch end live the threads stood idle there (BLASTX
+  `-use_sw_tback`, 200 queries of q200k against the 40 proteins of `ov_atha` at BATCH_SIZE 40000 and 4 threads: 2,103
+  matches in about 20 batches, 662 s of user time in 222 s of wall time, 74 % of the threads). Exactness: a match's
+  result does not depend on the worker or the time it is redone (`x_speculate_match`: a result that read its
+  predecessor's matrix is dropped and the match is redone in stream order, as with the batches); the loop tests and
+  inserts in stream order as before. `tests/blastx_unit_cap.rs` compares the reports with the switch on and off at 2,
+  4 and 8 threads with one thread's, and `LOSAT_TIMING`'s `ahead=` counts the matches the flow redid ahead.
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

@@ -208,7 +208,8 @@ pub(crate) fn x_bx_par_rule(rule: impl FnOnce() -> bool) -> bool {
 // redo_align_params_tld and matrix_tld. It is used by one thread at a time.
 // One pool slot's Kappa state.  SAFETY of `Send`: the only non-Send field is the `context` cell of
 // the gapping parameters, which `redo_context_observed` fills for one synchronous call and restores
-// before returning; the state is only reached through its mutex.
+// before returning; the state is only reached through its mutex, or (`LOSAT_X_BXREDOFLOW`,
+// `kappa_batch.rs`) owned by the one thread that runs the flow's loop or one of its helpers.
 #[cfg(feature = "parallel")]
 struct XKappaWorker(KappaState);
 #[cfg(feature = "parallel")]

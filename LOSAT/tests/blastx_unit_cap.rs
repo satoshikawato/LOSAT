@@ -7,8 +7,10 @@
 //! the cap: `LOSAT_X_BXCAPFILL`), their lookup tables built on the threads the cap leaves them
 //! (`LOSAT_X_BXBUILDPAR`), and the fused loop's context table made once per lookup table
 //! (`LOSAT_X_BXCTXONCE`; `src/algorithm/blastx/x_bx_mem.rs`, `src/algorithm/tblastx/lookup/x_lut_direct.rs`,
-//! `src/algorithm/blastx/x_seed_diag.rs`), and a batch end making no more composition-redo workers
-//! than it has matches (`LOSAT_X_BXKAPPAFIT`, `src/algorithm/blastx/runtime.rs`).
+//! `src/algorithm/blastx/x_seed_diag.rs`), a batch end making no more composition-redo workers
+//! than it has matches (`LOSAT_X_BXKAPPAFIT`, `src/algorithm/blastx/runtime.rs`), and the redo's
+//! matches made ahead as a flow instead of in fork-join batches (`LOSAT_X_BXREDOFLOW`,
+//! `src/algorithm/blastx/runtime/kappa_batch.rs`).
 //!
 //! They are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
 //! thread computes what, and the vectors the tables are built on, not what is computed, so the
@@ -195,6 +197,7 @@ const ALL_OFF: &[(&str, &str)] = &[
     ("LOSAT_X_BXDIAGKEEP", "0"),
     ("LOSAT_X_BXKAPPAFIT", "0"),
     ("LOSAT_X_BXPOOLN1", "0"),
+    ("LOSAT_X_BXREDOFLOW", "0"),
     ("LOSAT_X_BXUNITCAP", "0"),
 ];
 
@@ -572,5 +575,80 @@ fn few_subjects_give_the_report_without_kappa_fit() {
     let (query, set) = inputs_from(&dir, 0, 8, 4_000, 40);
     let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
     assert!(sides(&dir, &query, &args, 2, &[], "LOSAT_X_BXKAPPAFIT").1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The matches the composition redo's flow made ahead in one search (`LOSAT_TIMING`'s `ahead=` of
+/// both `[TIMING] blastx_batch_end_*` lines).
+fn redone_ahead(query: &Path, args: &[&str], threads: u32, env: &[(&str, &str)]) -> u64 {
+    let output = losat()
+        .arg("blastx")
+        .arg("-query")
+        .arg(query)
+        .args(args)
+        .args(["-num_threads", &threads.to_string()])
+        .envs(env.iter().copied())
+        .env("LOSAT_TIMING", "1")
+        .output()
+        .expect("run LOSAT");
+    assert!(
+        output.status.success(),
+        "{args:?} {env:?}: LOSAT_TIMING run failed"
+    );
+    String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter(|line| line.starts_with("[TIMING] blastx_batch_end_"))
+        .map(|line| {
+            let count = line
+                .split("ahead=")
+                .nth(1)
+                .expect("the batch end line counts the matches made ahead");
+            count.trim_end_matches(')').parse::<u64>().unwrap()
+        })
+        .sum()
+}
+
+#[test]
+fn the_redo_flow_gives_the_report_of_one_thread() {
+    // One query of 9,000 letters (one batch searched with the pool inside) against 40 and 595
+    // proteins, and eight of 4,000 against 40 (batch ends with fewer matches than threads), with
+    // the X-drop redo of the default and with -use_sw_tback (cutoff-score mode: the matches are
+    // redone ahead). The report at 2, 4 and 8 threads with the composition redo's flow
+    // (LOSAT_X_BXREDOFLOW) and with its fork-join batches (=0) equals the report at one thread.
+    let dir = temp_dir("redo-flow");
+    for (pieces, length, proteins, sw) in [
+        (1, 9_000, 40, false),
+        (1, 9_000, 40, true),
+        (1, 9_000, 595, false),
+        (8, 4_000, 40, false),
+    ] {
+        let (query, set) = inputs_from(&dir, 0, pieces, length, proteins);
+        let mut args = vec!["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+        if sw {
+            args.push("-use_sw_tback");
+        }
+        let reference = blastx(&query, &args, 1, &[]);
+        assert!(
+            reference.iter().filter(|&&b| b == b'\n').count() > 2,
+            "{pieces} x {length} against {proteins}, sw {sw}: too few hits to test"
+        );
+        for threads in [2, 4, 8] {
+            for env in [&[][..], &[("LOSAT_X_BXREDOFLOW", "0")][..]] {
+                assert!(
+                    blastx(&query, &args, threads, env) == reference,
+                    "{pieces} x {length} against {proteins}, sw {sw}, {threads} threads, {env:?}: \
+                     report differs"
+                );
+            }
+        }
+    }
+    // The flow made matches ahead; with =0 the batches did and the flow none.
+    let (query, set) = inputs_from(&dir, 0, 1, 9_000, 595);
+    let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+    assert!(redone_ahead(&query, &args, 4, &[]) > 0);
+    assert_eq!(
+        redone_ahead(&query, &args, 4, &[("LOSAT_X_BXREDOFLOW", "0")]),
+        0
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

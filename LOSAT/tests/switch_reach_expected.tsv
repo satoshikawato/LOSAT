@@ -79,6 +79,7 @@ LOSAT_X_BXKAPPAFIT	blastx	conditional	required	required	a batch end at 2+ thread
 LOSAT_X_BXPAR	blastx	conditional	required	required	2+ threads (1 thread leaves reference code)
 LOSAT_X_BXPOOL	blastx	conditional	required	required	2+ threads
 LOSAT_X_BXPOOLN1	blastx	conditional	required	required	word-size-3 tables outside diagnostics mode: own = a search on 1 thread (tables built and freed without the pool), ref = 2+ threads (pooled)
+LOSAT_X_BXREDOFLOW	blastx	always			acts wherever BXPAR's speculative composition redo runs (its sides are BXPAR's): the matches redone ahead as a flow instead of in fork-join batches
 LOSAT_X_BXSCANBYTE	blastx	conditional	required	gap	direct loop only (every batch where neither BXCROSS's nor BXCROSS128's cell test runs, or with BXCROSS=0; short queries, <6.7 hits per cell, BXDIAGMIN, elsewhere): every table with AVX2, sparse tables on x86 without AVX2 and Wasm, nothing on aarch64; ref gap: with AVX2 every table takes it; without AVX2 tables with hits in over 3/10 of backbone cells (tests/blastx_scan_byte.rs reaches it with =3)
 LOSAT_X_BXSUBJFLOW	blastx	conditional	required	required	2+ threads, more than k (64; fewer inside a batch BXCAPFILL caps) subjects, window_size + 2x longest subject <= 2^28, no diagnostics
 LOSAT_X_BXTASKRES	blastx	conditional	required	gap	where the subject flow runs (BXSUBJFLOW: 2+ threads, more than k subjects): every flow's tasks cut by residues; ref gap: recorded only where the subjects' lengths cannot be read (an index read error), their total length is 0, or the subjects do not fit u32

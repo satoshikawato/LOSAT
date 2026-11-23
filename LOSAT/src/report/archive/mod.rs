@@ -778,11 +778,13 @@ pub(crate) fn seq_id_written_as_is(
 /// or XML file in ASN.1 binary, of a text or binary file in XML), which NCBI's
 /// `CDelayBuffer::Update` reads again before it writes it, when that read fails
 /// (`Encoder::unread_delayed`: NCBI ends the run with its exception after the part of the archive
-/// that its buffer had written) or posts a replaced byte (`Encoder::delayed_posts`, which NCBI
-/// posts while it writes the archive). A buffer of the stream's own format is copied
-/// (`Encoder::delayed`); the other values are written as NCBI writes them (line RG-F3, PR 2: the
-/// XML stream's anonymous SEQUENCE and CHOICE, NULL and UTF8String, the binary stream's
-/// UTF8String and its NaN and infinite REALs; line PS item PS15b-1's probe XA, 2026-11-23).
+/// that its buffer had written). A read that posts a replaced byte is written: through `Traced`
+/// (`pssm_written_as_is`), which posts it where NCBI does, while it writes the archive, so the
+/// archive's messages do not hold it (line RG-F3, PR 2: probe AR dlpost). A buffer of the
+/// stream's own format is copied (`Encoder::delayed`); the other values are written as NCBI
+/// writes them (line RG-F3, PR 2: the XML stream's anonymous SEQUENCE and CHOICE, NULL and
+/// UTF8String, the binary stream's UTF8String and its NaN and infinite REALs; line PS item
+/// PS15b-1's probe XA, 2026-11-23).
 struct PssmGaps {
     encoding: ArchiveEncoding,
     gap: Option<&'static str>,
@@ -817,10 +819,12 @@ impl crate::report::serial::encoder::Encoder for PssmGaps {
     fn unread_delayed(&mut self) {
         if self.gap.is_none() && self.encoding != ArchiveEncoding::Nothing {
             self.gap = Some(
-                "a member read into a delay buffer of another format that NCBI reads again with an error or a message",
+                "a member read into a delay buffer of another format that NCBI reads again with an error",
             );
         }
     }
+    /// Written through `Traced` (`pssm_written_as_is`).
+    fn delayed_posts(&mut self, _: &[crate::report::serial::encoder::ReplacedChar]) {}
     fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
         None
     }

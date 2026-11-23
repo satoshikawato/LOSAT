@@ -971,6 +971,19 @@ pub(crate) fn psi_search_and_object_of(
     .then(|| PssmQueryRequest {
         pssm: std::sync::Arc::new(pssm.clone()),
     });
+    // NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
+    // That ASN.1 text write reads each delay buffer of another format (`CDelayBuffer::Update`):
+    // one whose read fails stops NCBI with its exception after part of the strategy file (rc
+    // 255; line RG-F3, PR 2: probe AR5 SO), refused before any output as `-out_pssm` refuses it
+    // (`algorithm::psiblast::in_pssm_files`).
+    if let Some(request) = &request {
+        let text = crate::report::archive::ArchiveEncoding::Text;
+        if crate::report::archive::pssm_unwritten(text, &request.pssm).is_some() {
+            return Err(reader.refuse(
+                "-export_search_strategy with a PSSM whose author names (a member read into a delay buffer of another format) NCBI reads again with an error (NCBI BLAST+ writes part of the file and stops with a C++ exception)",
+            ));
+        }
+    }
     let search = PsiSearch {
         pssm: QueryPssm { rows },
         freq_ratios,

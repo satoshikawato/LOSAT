@@ -544,7 +544,7 @@ fn fixture_pssm(path: &str) -> crate::report::serial::pssm::PssmWithParameters {
 #[test]
 fn the_archive_streams_gaps_of_a_pssm_files_members() {
     const READ_AGAIN: Option<&str> = Some(
-        "a member read into a delay buffer of another format that NCBI reads again with an error or a message",
+        "a member read into a delay buffer of another format that NCBI reads again with an error",
     );
     // (file, the gap of the XML, ASN.1 binary and ASN.1 text archives)
     for (path, xml, binary, text) in [
@@ -560,14 +560,10 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
         // A frequency ratio of PLUS-INFINITY in a PSSM file in ASN.1 binary.
         ("pssm/ps9_ber_real_list_pinf.asnb", None, None, None),
         // A delayed `Auth-list.names` with a control byte in a name: copied by the stream of its
-        // own format, read again with NCBI's post (803.7) by the others.
-        (
-            "pssm/ps9_xml_bin_dl_ctrl.asnb",
-            READ_AGAIN,
-            None,
-            READ_AGAIN,
-        ),
-        ("pssm/ps9_xml_dl_ctrl.xml", None, READ_AGAIN, READ_AGAIN),
+        // own format, read again with NCBI's post (803.7) by the others, which write it through
+        // `Traced`.
+        ("pssm/ps9_xml_bin_dl_ctrl.asnb", None, None, None),
+        ("pssm/ps9_xml_dl_ctrl.xml", None, None, None),
         // One whose number is past its storage: read again with an error.
         ("pssm/ps9_xml_dl_ovf.xml", None, READ_AGAIN, READ_AGAIN),
     ] {
@@ -585,6 +581,21 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
             "{path}"
         );
     }
+}
+
+/// A delayed member of another format whose read posts a replaced byte is written through
+/// `Traced` in every archive (`pssm_written_as_is`), which posts it while it writes; a buffer of
+/// the archive's own format is copied without a read.
+#[test]
+fn an_archive_writes_a_delayed_member_that_posts_through_traced() {
+    let posting = fixture_pssm("pssm/ps9_xml_dl_ctrl.xml");
+    assert!(pssm_written_as_is(ArchiveEncoding::Xml, &posting));
+    assert!(!pssm_written_as_is(ArchiveEncoding::Binary, &posting));
+    let posting = fixture_pssm("pssm/ps9_xml_bin_dl_ctrl.asnb");
+    assert!(pssm_written_as_is(ArchiveEncoding::Binary, &posting));
+    assert!(!pssm_written_as_is(ArchiveEncoding::Xml, &posting));
+    let quiet = fixture_pssm("pssm/ps9_xml_dl_base.xml");
+    assert!(pssm_written_as_is(ArchiveEncoding::Binary, &quiet));
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84

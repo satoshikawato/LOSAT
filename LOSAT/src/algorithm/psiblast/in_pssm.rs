@@ -117,8 +117,8 @@ pub(crate) fn check_in_pssm_options(
     }
     // The archive's request holds the PSSM that the search holds (`PsiSearch::archive_pssm`):
     // `-in_pssm`'s object, whose delayed member of another format the archive's stream does not
-    // write yet where NCBI reads it again with an error or a message
-    // (`report::archive::pssm_unwritten`; the later rounds' PSSMs keep its query).
+    // write yet where NCBI's read of it fails (`report::archive::pssm_unwritten`; the later
+    // rounds' PSSMs keep its query).
     if outfmts.contains(&crate::blastinput::app::output_format::ARCHIVE_FORMAT) {
         if let (Some(handle), Some(pssm)) = (args.archive.as_ref(), psi.archive_pssm.as_deref()) {
             // NCBI's stream stops at the matrix name that a PSSM of frequency ratios only lacks,

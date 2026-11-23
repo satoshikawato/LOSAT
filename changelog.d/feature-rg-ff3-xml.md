@@ -15,5 +15,8 @@
   PSSM files that LOSAT refused there: unnamed SEQUENCE and CHOICE values (a User-object descriptor,
   annotations), NULL, UTF8String (in XML with NCBI's message for a control byte), NaN and infinite
   real numbers in ASN.1 binary, and author names, copied as they were read when the file has the
-  archive's format and read again otherwise, as NCBI BLAST+ 2.17.0 does. Still refused: author names
-  in another format than the archive whose read gives a message or fails.
+  archive's format and read again otherwise, with NCBI's message (803.7) for a byte outside the
+  visible ASCII range, as NCBI BLAST+ 2.17.0 does. After `-out_pssm` or `-export_search_strategy`,
+  which write the PSSM in ASN.1 text first, the archive and a second `-out_pssm` file write the names
+  as that first write read them, and the message comes once, as in NCBI. Still refused: author names
+  in another format than the archive whose read fails (a number too large for its type).

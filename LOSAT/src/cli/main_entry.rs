@@ -146,8 +146,11 @@ fn run_main_entry() -> Result<()> {
         }
         match crate::cli::install_shims(argv.get(2).map(std::ffi::OsString::as_os_str)) {
             Ok(paths) => {
+                // The names made, a line each, as the help text goes out (a failed write drops
+                // the line; the shims are made).
+                let mut out = crate::cli::standard_output();
                 for path in paths {
-                    println!("{}", path.display());
+                    write_dropping_errors(&mut out, &format!("{}\n", path.display()));
                 }
                 return Ok(());
             }

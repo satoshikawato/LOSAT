@@ -345,3 +345,89 @@ fn errors_end_with_makeblastdb_s_exit_codes_and_prefixes() {
         assert_eq!(error.to_string(), text);
     }
 }
+
+/// A device that records each write and fails the writes whose numbers (from 1) are listed,
+/// once each, with `EAGAIN` (a failure that passes).
+struct Writes {
+    writes: Vec<Vec<u8>>,
+    fail: Vec<usize>,
+    count: usize,
+}
+
+impl Write for Writes {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.count += 1;
+        if self.fail.contains(&self.count) {
+            return Err(std::io::ErrorKind::WouldBlock.into());
+        }
+        self.writes.push(buf.to_vec());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Writes the first lines of a log as `BuildDatabase::new` inserts them.
+fn write_log_head(log: &mut dyn Write) {
+    let (time, name) = ("T", "/d/x");
+    let _ = writeln!(log, "\n\nBuilding a new DB, current time: {time}");
+    let _ = writeln!(log, "New DB name:   {name}");
+    let _ = log
+        .write_all(b"New DB title:  ")
+        .and_then(|()| log.write_all(b"x.fa"))
+        .and_then(|()| log.write_all(b"\n"));
+    let _ = writeln!(log, "Keep MBits: T");
+    let _ = writeln!(log);
+}
+
+/// The log on standard output is NCBI's `cout` with an `endl` at each line's end: a pipe or a
+/// file gets each line in one write at its `endl` (line RG item KC-11b-2).
+#[test]
+fn each_line_of_the_log_reaches_standard_output_in_one_write() {
+    let mut device = Writes {
+        writes: Vec::new(),
+        fail: Vec::new(),
+        count: 0,
+    };
+    let stream = crate::cli::NcbiStdio::Cout {
+        block: 4096,
+        lines: false,
+    };
+    let mut log = EndlLog(super::super::cout::cout(&mut device, stream));
+    write_log_head(&mut log);
+    log.flush().unwrap();
+    drop(log);
+    let lines: Vec<&[u8]> = vec![
+        b"\n\nBuilding a new DB, current time: T\n",
+        b"New DB name:   /d/x\n",
+        b"New DB title:  x.fa\n",
+        b"Keep MBits: T\n",
+        b"\n",
+    ];
+    assert_eq!(device.writes, lines);
+}
+
+/// A write of the log that fails loses its line, and the stream writes nothing after it
+/// (`badbit`), even where the device takes the later writes (line RG item KC-11b-2).
+#[test]
+fn after_a_failed_write_the_log_writes_nothing() {
+    for failed in 1..=5 {
+        let mut device = Writes {
+            writes: Vec::new(),
+            fail: vec![failed],
+            count: 0,
+        };
+        let stream = crate::cli::NcbiStdio::Cout {
+            block: 4096,
+            lines: false,
+        };
+        let mut log = EndlLog(super::super::cout::cout(&mut device, stream));
+        write_log_head(&mut log);
+        log.flush().unwrap();
+        drop(log);
+        assert_eq!(device.count, failed, "write {failed}");
+        assert_eq!(device.writes.len(), failed - 1, "write {failed}");
+    }
+}

@@ -31,10 +31,13 @@ pub(crate) mod main_entry;
 pub(crate) mod reader;
 pub use reader::ArgvError;
 
-// NCBI's buffers of a report stream (`NcbiStdio`, `NcbiBuffer`) and the command line's standard
-// output under them (`standard_output`).
+// NCBI's buffers of a report stream (`NcbiStdio`, `NcbiBuffer`).
 mod stdio_buffer;
-pub use stdio_buffer::{standard_output, NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
+pub use stdio_buffer::{NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
+
+// The process's standard output with no buffer of Rust's, for every writer of the command line.
+mod standard_output;
+pub(crate) use standard_output::standard_output;
 
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
 /// it.
@@ -1079,22 +1082,8 @@ impl std::io::Write for NcbiReportBuffer {
         report.buffer.sputn(buf.len(), &report.held);
         let written = report.held.len() - report.buffer.held();
         if written > 0 {
-            if let Err(error) = report
-                .inner
-                .write_all(&report.held[..written])
-                .and_then(|()| report.inner.flush())
-            {
-                // A failed write leaves glibc's buffer of standard output empty
-                // (`writedb::cout`): its bytes and the rest of the insertion are lost, and
-                // neither a later write nor the exit's flush writes them. What the `-out` file's
-                // `basic_filebuf` keeps then is not observed (a failure there that passes before
-                // the exit), and it keeps them as before.
-                if let NcbiStdio::Cout { .. } = report.buffer.stream() {
-                    report.held.clear();
-                    report.buffer.flush();
-                }
-                return Err(error);
-            }
+            report.inner.write_all(&report.held[..written])?;
+            report.inner.flush()?;
             report.held.drain(..written);
         }
         Ok(buf.len())
@@ -1363,15 +1352,13 @@ pub fn report_destination(
         (Some(file), false) => hold_report_send(strategy, file),
         (None, true) => Box::new(NcbiReportBuffer::standard_output(hold_report_send(
             strategy,
-            Box::new(standard_output()),
+            report_standard_output(),
         ))),
         (None, false) => hold_report_send(strategy, report_standard_output()),
     }
 }
 
-/// Standard output as the report's stream (`ReportStream::inner`): LOSAT's buffer over the
-/// process's standard output (`standard_output`; the organism report's is NCBI's buffer,
-/// `report_destination`).
+/// Standard output as the report's stream (`ReportStream::inner`).
 ///
 /// NCBI writes the report to `cout`; when the process starts with its standard output
 /// closed (`>&-`), its first write fails (outfmt 0: "BLAST failed to write output", exit
@@ -1381,7 +1368,7 @@ pub fn report_destination(
 /// there and the run succeeds (approved exception 6 of
 /// `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, accepted by the maintainer in session S08b).
 pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
-    Box::new(std::io::BufWriter::new(standard_output()))
+    Box::new(std::io::BufWriter::new(std::io::stdout()))
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99

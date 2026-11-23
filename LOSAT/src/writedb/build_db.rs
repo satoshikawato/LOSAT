@@ -516,7 +516,11 @@ impl<'a> BuildDatabase<'a> {
             now.log_time()
         );
         let _ = writeln!(log, "New DB name:   {output_dbname}");
-        let _ = log.write_all(&[b"New DB title:  ".as_slice(), title, b"\n"].concat());
+        // Three insertions, as NCBI's `<< "New DB title:  " << title << endl`.
+        let _ = log
+            .write_all(b"New DB title:  ")
+            .and_then(|()| log.write_all(title))
+            .and_then(|()| log.write_all(b"\n"));
         let _ = writeln!(log, "Sequence type: {mol_type}");
         if delete_blast_db(&output_dbname, is_protein)? {
             let _ = writeln!(

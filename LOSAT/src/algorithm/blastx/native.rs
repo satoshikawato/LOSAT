@@ -324,7 +324,7 @@ fn run_inner(
             let destination: Box<dyn Write> = crate::report::archive::strategy::hold_report(
                 strategy.as_ref(),
                 match out_file {
-                    None => Box::new(crate::cli::standard_output()),
+                    None => Box::new(io::stdout().lock()),
                     Some(path) => Box::new(create(path)?),
                 },
             );
@@ -2294,7 +2294,7 @@ fn write_run_error_archive(
             Some(path) => crate::cli::create_out_file(path, None)
                 .ok()
                 .map(|file| Box::new(file) as Box<dyn Write>),
-            None => Some(Box::new(crate::cli::standard_output())),
+            None => Some(Box::new(io::stdout().lock())),
         };
     if let Some(mut destination) = destination {
         let _ = crate::report::archive::write_error_archive_after_post(

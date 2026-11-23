@@ -1166,16 +1166,22 @@ fn add_fasta(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1167-1171
-// Every line of the log ends with `endl`, which flushes the stream, so the
-// log and the messages of the standard error stream reach a common
-// destination (`2>&1`) in the order of the events. The log goes to the
-// process's standard output without a buffer (`cli::standard_output`): each
-// write reaches it at once, and a failed one is lost as NCBI's is.
+// The log is `cout` (`m_LogFile`) and every line of it ends with `endl`, which flushes the
+// stream, so the log and the messages of the standard error stream reach a common destination
+// (`2>&1`) in the order of the events. `EndlLog` writes it as NCBI's `cout`
+// (`writedb::cout`) over the process's standard output with no buffer of Rust's
+// (`cli::standard_output`): a line reaches the device in NCBI's writes, a write that fails
+// loses what the buffer held, and the stream writes nothing after it (`badbit`; line RG item
+// KC-11b-2).
 /// Runs `losat makeblastdb` with the settings of its application start and returns the exit code.
 pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
     let stdin = std::io::stdin();
     let stderr = std::io::stderr();
-    let mut out = crate::cli::standard_output();
+    let mut device = crate::cli::standard_output();
+    let mut out = EndlLog(super::cout::cout(
+        &mut device,
+        crate::cli::NcbiStdio::cout(),
+    ));
     let mut err = stderr.lock();
     let now = LocalTime::now();
     let status = run_with(
@@ -1187,8 +1193,34 @@ pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
         &mut out,
         &mut err,
     );
+    // The exit's flush of `cout`.
     let _ = out.flush();
     status
+}
+
+/// makeblastdb's log on NCBI's `cout`: each write is an insertion (`<<`), and a write that
+/// ends a line ends it with `endl` (the new line, then a flush), as every line of NCBI's log
+/// does. The stream's state is not reported: NCBI's makeblastdb does not read it.
+struct EndlLog<'a>(super::cout::Cout<'a>);
+
+impl Write for EndlLog<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match buf.strip_suffix(b"\n") {
+            Some(text) => {
+                if !text.is_empty() {
+                    self.0.insert(text);
+                }
+                self.0.endl();
+            }
+            None => self.0.insert(buf),
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush();
+        Ok(())
+    }
 }
 
 /// The registry entry `[BLAST] BLASTDB` of `settings` that `run_with` takes: `None` when the

@@ -338,7 +338,7 @@ pub(super) fn render(
         "TBLASTN"
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
-    // Blast_HSPListSortByEvalue(hsp_list); /* during Seq-align conversion */
+    // Sorts each HSP list by E-value (`Blast_HSPListSortByEvalue`) during Seq-align conversion.
     for hitlist in hitlists.iter_mut() {
         hitlist.sort_hsps_for_report();
         hitlist.drop_zero_score_hsps();
@@ -996,7 +996,7 @@ fn write_tabular(
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1266-1338:
-            // if (align_set) { m_Ostream << "# " << num_hits << " hits found\n"; }
+            // Writes the hit-count comment line to `m_Ostream` only when an alignment set exists.
             // A skipped search has a null alignment set, so the count line
             // is omitted. An ordinary searched no-hit query retains it.
             if !search_skipped {
@@ -1485,7 +1485,8 @@ fn write_pairwise(
         database_name: shown.name().into(),
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267: options.GetMatrixName(), as typed.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267
+        // Matrix name from `GetMatrixName`, as typed.
         matrix_name: Some(matrix_name.to_string()),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,

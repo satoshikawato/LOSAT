@@ -120,9 +120,9 @@ pub fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, Strin
     };
 
     // CLI v2 requires the complete mode token. NCBI blast_args.cpp:879-883:
-    // if (program == eBlastp && compo_mode != eNoCompositionBasedStats &&
-    //     tolower(comp_stat_string[1]) == 'u') { opt.SetUnifiedP(1); }
-    // The sole suffix is lowercase u, and only on enabled modes.
+    // for BLASTP with composition-based statistics enabled, NCBI accepts 'u' or 'U'
+    // (it lowercases first) to enable unified p-values (`SetUnifiedP`); LOSAT accepts
+    // only lowercase 'u', and only on enabled modes.
     let unified_p = match (chars.next(), chars.next()) {
         (None, None) => false,
         (Some('u'), None) if mode != BlastpCompositionMode::NoCompositionBasedStats => true,

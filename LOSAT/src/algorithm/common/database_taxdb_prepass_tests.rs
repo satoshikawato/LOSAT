@@ -1835,13 +1835,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             (3, error.clone())
         );
         assert_eq!(
-            stopped(batch_prefetch_stop(
-                &db,
-                &run,
-                alone,
-                "BLASTN",
-                &stop_queries(3)
-            )),
+            stopped(batch_prefetch_stop(&db, &run, alone, "BLASTN", &stop_queries(3)).map(drop)),
             (3, error.clone())
         );
         // With another subject whose load writes the texts of opening the taxonomy database:
@@ -1872,26 +1866,26 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                     error
                 );
                 assert_eq!(
-                    stopped(batch_prefetch_stop(
-                        &db,
-                        &run,
-                        both(),
-                        "BLASTN",
-                        &stop_queries(0)
-                    ))
+                    stopped(
+                        batch_prefetch_stop(&db, &run, both(), "BLASTN", &stop_queries(0))
+                            .map(drop)
+                    )
                     .1,
                     error
                 );
                 assert_eq!(
-                    stopped(held_batch_prefetch_stop(
-                        &db,
-                        &TaxdbRun::default(),
-                        std::iter::empty(),
-                        std::iter::empty(),
-                        both(),
-                        "BLASTN",
-                        &stop_queries(0)
-                    ))
+                    stopped(
+                        held_batch_prefetch_stop(
+                            &db,
+                            &TaxdbRun::default(),
+                            std::iter::empty(),
+                            std::iter::empty(),
+                            both(),
+                            "BLASTN",
+                            &stop_queries(0)
+                        )
+                        .map(drop)
+                    )
                     .1,
                     error
                 );
@@ -1915,7 +1909,8 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                         both(),
                         "BLASTN",
                         &stop_queries(0),
-                    ),
+                    )
+                    .map(drop),
                     held_batch_prefetch_stop(
                         &db,
                         &TaxdbRun::default(),
@@ -1924,7 +1919,8 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                         both(),
                         "BLASTN",
                         &stop_queries(0),
-                    ),
+                    )
+                    .map(drop),
                 ] {
                     assert_eq!(stopped(stop), (0, format!("{open}{error}")));
                 }
@@ -1971,25 +1967,25 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                 )
                 .unwrap();
                 assert_eq!(
-                    stopped(batch_prefetch_stop(
-                        &db,
-                        &run,
-                        both(),
-                        "BLASTN",
-                        &stop_queries(1)
-                    )),
+                    stopped(
+                        batch_prefetch_stop(&db, &run, both(), "BLASTN", &stop_queries(1))
+                            .map(drop)
+                    ),
                     (1, error.clone())
                 );
                 assert_eq!(
-                    stopped(held_batch_prefetch_stop(
-                        &db,
-                        &TaxdbRun::default(),
-                        [subject(other, &None)],
-                        std::iter::empty(),
-                        both(),
-                        "BLASTN",
-                        &stop_queries(1)
-                    )),
+                    stopped(
+                        held_batch_prefetch_stop(
+                            &db,
+                            &TaxdbRun::default(),
+                            [subject(other, &None)],
+                            std::iter::empty(),
+                            both(),
+                            "BLASTN",
+                            &stop_queries(1)
+                        )
+                        .map(drop)
+                    ),
                     (1, error.clone())
                 );
             }
@@ -2002,6 +1998,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             "BLASTN",
             &stop_queries(0),
         )
+        .map(drop)
         .unwrap();
     }
     // Another subject whose lookup throws on its id, which the prefetch catches and which ends
@@ -2044,7 +2041,8 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             [subject(other, &throws), subject(stop as u32, &parsed[stop])],
             "BLASTN",
             &stop_queries(0),
-        ),
+        )
+        .map(drop),
     ] {
         let refused = refused.unwrap_err();
         assert!(!refused.is::<HeaderReadError>());
@@ -2861,7 +2859,9 @@ fn the_pssms_loads_write_the_offset_error_as_the_slot_holds_it() {
         for &ordinal in ordinals {
             let subject = &parsed[ordinal as usize];
             let lookups = blob_taxids(&db, ordinal, Some(subject), ordinal, "PSIBLAST")?;
-            text.extend(pssm_load_texts(&db, &run, ordinal, &lookups, "PSIBLAST")?);
+            text.extend(pssm_load_texts(
+                &db, &run, None, ordinal, &lookups, "PSIBLAST",
+            )?);
         }
         Ok(String::from_utf8(text).unwrap())
     };
@@ -2889,4 +2889,22 @@ fn a_database_without_taxids_does_not_hold() {
     let db = database("sprot", Some(&variant("high_bytes_utf8")));
     assert!(db.taxdb_found());
     assert!(!taxdb_may_refuse(&db));
+}
+
+/// NCBI's `CATCH_ALL` takes the `CEofException` of a record that ends before its read enters
+/// the set's elements as a `CIOException` other than `eFlush`: no post, exit status 0 (RG-T5d
+/// fix 1, probe le8); the `CSerialException` of a record cut inside is `Error: what()`, 255.
+#[test]
+fn a_header_record_cut_before_its_elements_ends_the_search_with_exit_status_0() {
+    let path = std::path::Path::new("t.phr");
+    let native = |record: &[u8]| {
+        let error = crate::seqdb::header::decode_full(record, path).unwrap_err();
+        let error = database_error(error, "BLASTP");
+        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+        (native.exit, native.message.is_empty())
+    };
+    assert_eq!(native(&[0x30]), (0, true));
+    assert_eq!(native(&[0x3f]), (0, true));
+    assert_eq!(native(&[0x30, 0x80]), (255, false));
+    assert_eq!(native(&[0x30, 0x80, 0x30, 0x80, 0xbf]), (255, false));
 }

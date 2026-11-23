@@ -111,6 +111,10 @@ pub(super) struct SubjectPasses<'a> {
     /// The algorithm of `-db_hard_mask`, whose masked letters the traceback and the ungapped
     /// re-evaluation of a database sequence read as 'B' (`database::mask_hard_letters`; decision H2).
     pub(super) db_hard_mask: Option<i32>,
+    /// The batch's first fetch with `check_oid_exclusion` that read a header with a UTF8String
+    /// where a VisibleString is expected (`QueryBatch::fetched_utf8`; the batch's one note, which
+    /// `special_subject`'s copies share).
+    pub(super) fetched_utf8: &'a crate::seqdb::Utf8Reads,
 }
 
 impl SubjectPasses<'_> {
@@ -706,6 +710,16 @@ impl SubjectPasses<'_> {
                         })
                     }
                 };
+                // The re-evaluation's fetches read every sequence with HSPs, in the order of
+                // the subject loop: the first that took a UTF8String for a VisibleString
+                // (`FetchExcluded::excludes`) is the batch's first read of one.
+                if let Some(at) = ungapped
+                    .as_ref()
+                    .and_then(|stage| stage.excluded.as_ref())
+                    .and_then(crate::algorithm::common::database::FetchExcluded::take_utf8)
+                {
+                    self.fetched_utf8.note(0, at);
+                }
                 // An ungapped search's first error of reading a sequence again, after the
                 // blocks' own.
                 searched.and_then(|()| {
@@ -761,9 +775,18 @@ impl SubjectPasses<'_> {
                 // fetches nothing here; its re-evaluation excluded them, `prelim_pass`).
                 if !UNGAPPED {
                     if let Some(excluded) = database::fetch_excluded(database) {
-                        excluded
+                        let fetched = excluded
                             .retain(&mut listed, |(ordinal, _)| Some(*ordinal))
                             .map_err(database::fetch_refusal)?;
+                        // The traceback fetches every listed sequence (its first read of a
+                        // UTF8String header: `FetchedUtf8::traceback_first`).
+                        if let Some(ordinal) =
+                            crate::algorithm::common::database::FetchedUtf8::traceback_first(
+                                &fetched,
+                            )
+                        {
+                            excluded.note_fetched(self.fetched_utf8, ordinal);
+                        }
                     }
                 }
                 let found = database::traceback_listed(

@@ -362,7 +362,7 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
         offset_pairs_len,
     } = drive;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
-    // while (scan_range[1] <= scan_range[2]) { hits = scansub(...); }
+    // Repeatedly invoke `scansub` while the active scan range remains non-empty.
     if use_serial_scan_chunks {
         loop {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:452-584
@@ -379,7 +379,7 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
             // of the chunk's scan.
             let scan_size = tblastx_scan_chunk_size_for_run(chunk.length, num_threads);
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
-            // while (scan_range[1] <= scan_range[2]) { hits = scansub(...); }
+            // Repeatedly invoke `scansub` while the active scan range remains non-empty.
             crate::utils::threading::report_stage(
                 "tblastx",
                 "serial_scan_chunks",
@@ -484,7 +484,7 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
                 SubjectChunkStatus::Ok(chunk) => chunk,
             };
 
-            // NCBI: BlastInitHitListReset(init_hitlist) - reset per chunk.
+            // Reset the initial hit list for each subject chunk (NCBI `BlastInitHitListReset`).
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
             let result = scan_chunk(chunk, offset_pairs, diag_array, diag_offset, None, sc);
             add_chunk_result(&mut sums, result);

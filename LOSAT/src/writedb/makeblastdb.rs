@@ -1168,15 +1168,14 @@ fn add_fasta(
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1167-1171
 // Every line of the log ends with `endl`, which flushes the stream, so the
 // log and the messages of the standard error stream reach a common
-// destination (`2>&1`) in the order of the events. The standard output of
-// the Rust library is line buffered whatever it is connected to; the log
-// goes to it without another buffer.
+// destination (`2>&1`) in the order of the events. The log goes to the
+// process's standard output without a buffer (`cli::standard_output`): each
+// write reaches it at once, and a failed one is lost as NCBI's is.
 /// Runs `losat makeblastdb` with the settings of its application start and returns the exit code.
 pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
     let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
     let stderr = std::io::stderr();
-    let mut out = stdout.lock();
+    let mut out = crate::cli::standard_output();
     let mut err = stderr.lock();
     let now = LocalTime::now();
     let status = run_with(

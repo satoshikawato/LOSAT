@@ -80,6 +80,105 @@ fn stdout_is_terminal() -> bool {
     std::io::stdout().is_terminal()
 }
 
+/// The process's standard output as LOSAT's command line writes it (`standard_output`): each
+/// write goes to the descriptor (the handle on Windows) at once and nothing of it is held, so the
+/// bytes of a write that fails are lost there, as the bytes of NCBI's buffer are (a failed write
+/// leaves glibc's buffer of `cout` empty: `crate::writedb::cout`), and no later write or the exit
+/// writes them. Rust's `Stdout` keeps up to 1023 bytes of a failed write in its line buffer and
+/// writes them when a later write or the exit's flush succeeds (a failure that passes: `EAGAIN` on
+/// a non-blocking standard output, a device that gets space back; line RG item KC-11b-2). The
+/// writers that hold bytes as NCBI's buffers do (`NcbiBuffer`: `NcbiReportBuffer`, rpsbproc's
+/// report, blastdbcmd's `-metadata`) and LOSAT's own `BufWriter`s are over it. The library leaves
+/// the process's standard output to `Stdout`, which its caller shares.
+pub struct StandardOutput(Device);
+
+/// Where `StandardOutput` writes.
+enum Device {
+    /// Descriptor 1 (`STD_OUTPUT_HANDLE` on Windows) viewed as a file and never closed.
+    Raw(std::mem::ManuallyDrop<std::fs::File>),
+    /// A Windows console, through Rust's `Stdout` (which writes UTF-8 to it as UTF-16), flushed
+    /// at each write: a console's writes do not fail and pass.
+    #[cfg(windows)]
+    Console(std::io::Stdout),
+    /// No standard output (a Windows process started without the handle): the writes succeed and
+    /// go nowhere, as Rust's `Stdout` makes them.
+    #[cfg(windows)]
+    Missing,
+}
+
+/// The process's standard output, written without a buffer (`StandardOutput`). The Rust standard
+/// library writes its `Stdout` the same way under its line buffer (descriptor 1 in a
+/// `ManuallyDrop`; on Windows the handle, a console as UTF-16), as `blastinput::input_files`
+/// reads the standard input.
+pub fn standard_output() -> StandardOutput {
+    #[cfg(any(unix, target_os = "wasi"))]
+    {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        // SAFETY: descriptor 1 is open for the whole process (on Unix the Rust runtime opens
+        // `/dev/null` there before `main` when it was closed; on WASI it is the host's standard
+        // output) and LOSAT never closes it. The `File` is held in a `ManuallyDrop` that is never
+        // dropped, so it only borrows the descriptor: it is never closed through this `File`.
+        let file = unsafe { std::fs::File::from_raw_fd(std::io::stdout().as_raw_fd()) };
+        StandardOutput(Device::Raw(std::mem::ManuallyDrop::new(file)))
+    }
+    #[cfg(windows)]
+    {
+        use std::io::IsTerminal;
+        use std::os::windows::io::{AsRawHandle, FromRawHandle};
+        let stdout = std::io::stdout();
+        let handle = stdout.as_raw_handle();
+        if handle.is_null() {
+            return StandardOutput(Device::Missing);
+        }
+        if stdout.is_terminal() {
+            return StandardOutput(Device::Console(stdout));
+        }
+        // SAFETY: the standard output handle is open for the whole process and LOSAT never
+        // closes it. The `File` is held in a `ManuallyDrop` that is never dropped, so it only
+        // borrows the handle: it is never closed through this `File`.
+        let file = unsafe { std::fs::File::from_raw_handle(handle) };
+        StandardOutput(Device::Raw(std::mem::ManuallyDrop::new(file)))
+    }
+}
+
+/// Whether `error` is the one of a descriptor or handle that is not open, whose writes Rust's
+/// `Stdout` reports as done (and `StandardOutput` too).
+fn is_closed_descriptor(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    let closed = rustix::io::Errno::BADF.raw_os_error();
+    // WASI preview 1's `errno::badf`.
+    #[cfg(target_os = "wasi")]
+    let closed = 8;
+    #[cfg(windows)]
+    let closed = windows_sys::Win32::Foundation::ERROR_INVALID_HANDLE as i32;
+    #[cfg(not(any(unix, windows, target_os = "wasi")))]
+    let closed = i32::MIN;
+    error.raw_os_error() == Some(closed)
+}
+
+impl std::io::Write for StandardOutput {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match &mut self.0 {
+            Device::Raw(file) => match std::io::Write::write(&mut **file, buf) {
+                Err(error) if is_closed_descriptor(&error) => Ok(buf.len()),
+                written => written,
+            },
+            #[cfg(windows)]
+            Device::Console(stdout) => {
+                std::io::Write::write_all(stdout, buf)?;
+                std::io::Write::flush(stdout)?;
+                Ok(buf.len())
+            }
+            #[cfg(windows)]
+            Device::Missing => Ok(buf.len()),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// How many bytes follow the last newline among the last `scan` bytes of `stream`, if there is one.
 fn bytes_after_newline(stream: &[u8], scan: usize) -> Option<usize> {
     let tail = &stream[stream.len().saturating_sub(scan)..];

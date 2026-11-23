@@ -17,8 +17,9 @@
 // The NCBI BLAST+ release that LOSAT's output follows. This is the one place in the code that
 // names the release: `-version` says "output compatible with blast 2.17.0", and `crate::wording`
 // maps NCBI's version statement (`BLASTN 2.17.0+` in the freezes) to LOSAT's (`BLASTN (LOSAT
-// 0.2.0)`, the Owner 2026-11-21 「Q1=B」). NCBI's frozen `-help` texts (`blastdbcmd/help.txt`,
-// `rpstblastn/help.txt`) and `-xmlhelp` files carry it too and are printed through that mapping.
+// 0.2.0)`, the Owner 2026-11-21 「Q1=B」). NCBI's frozen `-help` texts of every program that has
+// one (the search programs' `help.txt`, `blastdbcmd/help.txt`, `writedb/makeblastdb_help.txt`)
+// and its `-xmlhelp` files carry it too and are printed through that mapping.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:81-83
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/version.hpp:53-62
@@ -107,6 +108,9 @@ pub(crate) mod rpsbproc;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod web_api;
+// The words of a request of LOSAT Web's ABI v1 (frozen), read as v1 reads them.
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) mod web_v1_argv;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
 pub(crate) mod cli;

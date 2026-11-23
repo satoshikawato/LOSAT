@@ -68,7 +68,10 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   oracle output. `check` cuts `<row_id>.copies.out` again and fails the row when that is not `<row_id>.out`, then compares LOSAT's
   run of the row's own query file with `<row_id>.out` as for any `ncbi` row.
 - `kind losat-rejection`: LOSAT exits with rc, stdout is empty, stderr contains the text after `expect: ` in covers
-  (to a ` | ` or the end); the hash columns are empty. A refusal after reports that NCBI writes too has stdout
+  (to a ` | ` or the end), in the library's run (`check --library`) the text after `library-expect: ` where covers has
+  one: the library checks an argv before it knows the inputs (`api::validate`), so a refusal that comes from an input's
+  word on the command line (NCBI's exclusion of `-phi_pattern` by `-in_msa`) is the library's message of the argv
+  alone; the hash columns are empty. A refusal after reports that NCBI writes too has stdout
   cells: NCBI's stdout of the same command, or with `ncbi-near: ROW_ID` that of the `ncbi` row ROW_ID of the same
   outfmt (a near input that NCBI runs to its end, for example the copy row of the batches that LOSAT writes before it
   refuses, or line WQA D10's near input, whose refused batch NCBI's reader stops at), and with

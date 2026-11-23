@@ -35,7 +35,7 @@ which runs blastp's; the library runs psiblast through blastp's `run_local*`.
 
 ```mermaid
 flowchart LR
-  bin["losat binary<br/>main.rs → main_entry"] --> cli["cli<br/>(clap, Commands)"]
+  bin["losat binary<br/>main.rs → main_entry"] --> cli["cli<br/>(NCBI's reader, clap, Commands)"]
   cli --> run["&lt;program&gt;::run"]
   lib["library users<br/>python/, LOSAT/examples"] --> api["api<br/>(run, run_batches, ...)"]
   api --> lb["api::local_blast"]
@@ -49,10 +49,13 @@ flowchart LR
 ```
 
 - The binary: `main.rs` only calls `main_entry` (`cli/main_entry.rs`, re-exported at the crate
-  root). `main_entry` reads a few words before clap (`blastdbcmd`, `--install-shims`, `-version`),
-  then `cli::try_parse_from`, then dispatches on `cli::Commands` to the program.
-  `losat blastdbcmd` bypasses clap and reads its arguments as NCBI's `blastdbcmd` does
-  (`blastdbcmd::run`).
+  root). `main_entry` reads a few words before the arguments (`blastdbcmd`, `--install-shims`,
+  `-version`), then reads the program's arguments with NCBI's argument reader (`ncbi_app`,
+  through `cli::reader`: the help, the argument errors and the usage are NCBI's), then LOSAT's
+  refusals of what it does not run, then clap converts the arguments that NCBI's reader read into
+  the program's types (`cli::try_parse_from` for the callers that run no application start), and
+  dispatches on `cli::Commands` to the program. `losat blastdbcmd` and the other tools read their
+  arguments with NCBI's reader alone (`blastdbcmd::run`).
 - The library: `api` is the only documented module of the crate (`lib.rs`). It reads FASTA
   records, validates a command line and runs it through `api::local_blast`, which re-exports the
   programs' `run_local*` functions. A library search writes nothing to the process's standard
@@ -76,7 +79,7 @@ number (the Web adapter and the tests name them); the `losat` binary calls one h
 | `algorithm` | the search programs, one directory each ([Programs](#programs)) | `app/blast/*_app.cpp` and the per-program code of `algo/blast/core` |
 | `api` | the library API; `api::local_blast` routes reports to outputs | `algo/blast/api` (`CLocalBlast`) |
 | `blastinput` | NCBI's application layer: FASTA reader, query batches, ranges, input files, the environment and registry check, value parsers | `algo/blast/blastinput` |
-| `cli` | the command line's entry `main_entry`, clap `Cli` and `Commands`, NCBI-style `-help` and `-version`, `NativeError` and the exit, the report stream | `blastinput/blast_args.cpp`, `cmdline_flags.cpp`, `blast_app_util.hpp` |
+| `cli` | the command line's entry `main_entry`, NCBI's argument reader for the ten programs on clap (`cli::reader`), clap `Cli` and `Commands` (the conversion of the arguments), NCBI's `-help` and `-version`, `NativeError` and the exit, the report stream | `blastinput/blast_args.cpp`, `cmdline_flags.cpp`, `blast_app_util.hpp` |
 | `core` | ports of `core/` that several programs share: encoding, composition-based statistics, HSP filters, the PSSM engine | `algo/blast/core`, `algo/blast/composition_adjustment` |
 | `stats` | Karlin-Altschul parameters, length adjustment, search space, Spouge's finite-size correction, sum statistics, the matrix tables | `core/blast_stat.c`, `core/blast_setup.c` (`BLAST_CalcEffLengths`) |
 | `report` | every output format: pairwise, tabular, XML, XML2, JSON, archive, SAM, serial ASN.1 | `objtools/align_format`, `algo/blast/format` |
@@ -126,7 +129,7 @@ flowchart TD
 The dashed edges carry the output-routing types of `api::local_blast` (`OutputSink`,
 `ReportOutputs`, ...), the error type `cli::NativeError` with `cli::post_native_error`,
 `cli::ReportStream`, `cli::inaccessible`, `cli::report_standard_output` and, in the Web ABI v1
-paths of blastx and tblastn, the command-line parser, and the archive, serial, tabular-check and
+paths of blastx and tblastn, the command-line argument reader, and the archive, serial, tabular-check and
 warning helpers of `report` that `blastinput` uses. Edges that
 the diagram leaves out also close the cycle: `core` → `common` (`GapEditOp`), `common` → `api` and
 `report` (its writers), `sequence` → `core` and `seqdb`, `seqdb` → `writedb` (one helper),
@@ -550,8 +553,8 @@ wherever it happens (`panic = "abort"` in the release profile).
 | Status | NCBI's meaning (`app/blast/blast_app_util.hpp`) | LOSAT |
 | :--- | :--- | :--- |
 | 0 | success | success |
-| 1 | input error (`BLAST query/options error:`, `Command line argument error:`, ...) | the same errors, and every LOSAT refusal (`Error: ...`) |
-| 2 | database error (`BLAST Database error:`) | the same; also clap's parser errors (NCBI exits 1 there, an approved difference) |
+| 1 | input error (`BLAST query/options error:`, `Command line argument error:`, ...) | the same errors, NCBI's argument errors (usage and `Error: ...`), and every LOSAT refusal (`Error: ...`) |
+| 2 | database error (`BLAST Database error:`) | the same |
 | 3 | engine error (`BLAST engine error:`) | the same |
 | 4 | out of memory | makeblastdb only; the search programs abort on a failed allocation |
 | 5 | network error | not used (no `-remote`) |

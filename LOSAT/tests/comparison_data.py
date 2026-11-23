@@ -130,8 +130,8 @@ def result_paths(case, extension="out"):
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054,3225-3236
-#     (program == eTblastn || program == eTblastx)) opt.SetDbGeneticCode(...);
-#     m_NumThreads != CThreadable::kMinNumThreads) m_NumThreads = ...;
+# Apply `SetDbGeneticCode` for `eTblastn` and `eTblastx`, and reset `m_NumThreads`
+# to `CThreadable::kMinNumThreads` when local subject input is used.
 # Use the DB oracle for TBLASTX distributions, but preserve local-subject
 # NCBI distributions for BLASTN and BLASTP independently of timing targets.
 def distribution_result_paths(case, extension="out"):
@@ -150,7 +150,7 @@ def distribution_result_paths(case, extension="out"):
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
-# ITERATE(list<ETabularField>, iter, m_FieldsToShow) { ... x_PrintField(*iter); }
+# Print each selected tabular field in `m_FieldsToShow` in order via `x_PrintField`.
 # Evidence binds successful status to the exact ordered output of this invocation.
 def sha256(path):
     with Path(path).open("rb") as handle:

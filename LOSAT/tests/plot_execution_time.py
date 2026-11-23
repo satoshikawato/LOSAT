@@ -43,7 +43,7 @@ def parse_time(filepath):
 def main():
     data = []
     # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
-    #     m_NumThreads != CThreadable::kMinNumThreads) m_NumThreads = ...;
+    # Reset `m_NumThreads` to `CThreadable::kMinNumThreads` when local subject input is used.
     # Timing uses each successful recorded invocation independently. Output
     # equality belongs to the separately selected hit-distribution oracle and
     # must not discard a valid database-search wall time.
@@ -85,7 +85,7 @@ def main():
         "Execution Time: BLAST+ vs LOSAT Native/Wasm\n"
         "One run per condition; includes startup and Wasm compilation\n"
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239
-        #     m_NumThreads != CThreadable::kMinNumThreads) { m_NumThreads = ...; }
+        # Reset `m_NumThreads` to `CThreadable::kMinNumThreads` when local subject input is used.
         f"BLAST+ n1/n{LOSAT_THREADS}: prebuilt -db searches; database construction excluded",
         y=1.12, fontsize=12,
     )

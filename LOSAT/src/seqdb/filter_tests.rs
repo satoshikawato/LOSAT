@@ -744,6 +744,7 @@ fn a_rule_that_keeps_no_line_keeps_every_line() {
     let rule = DeflineRule::Taxids([5].into_iter().collect());
     let set = DeflineSet {
         deflines: vec![line_with_id(1), line_with_id(5)],
+        utf8: false,
     };
     assert_eq!(
         line_mask(Some(&rule), &[], &set),
@@ -751,6 +752,7 @@ fn a_rule_that_keeps_no_line_keeps_every_line() {
     );
     let none = DeflineSet {
         deflines: vec![line_with_id(1), line_with_id(2)],
+        utf8: false,
     };
     assert_eq!(
         line_mask(Some(&rule), &[], &none),
@@ -760,6 +762,7 @@ fn a_rule_that_keeps_no_line_keeps_every_line() {
     // none of it.
     let bare = DeflineSet {
         deflines: vec![defline(Some(5), None), line_with_id(5)],
+        utf8: false,
     };
     assert_eq!(
         line_mask(Some(&rule), &[], &bare),
@@ -978,6 +981,7 @@ fn the_id_tests_of_a_line_alternate_as_ncbis() {
     });
     let set = DeflineSet {
         deflines: vec![line(general("ti", "abc")), line(general("PIG", "abc"))],
+        utf8: false,
     };
     let thrown = line_mask(Some(&rule), &[alias], &set).unwrap_err();
     assert!(thrown

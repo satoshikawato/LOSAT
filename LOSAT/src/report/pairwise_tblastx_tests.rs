@@ -1100,6 +1100,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
                 )],
                 ..Default::default()
             }],
+            utf8: false,
         })
         .unwrap();
         Some(Arc::new(if throws {

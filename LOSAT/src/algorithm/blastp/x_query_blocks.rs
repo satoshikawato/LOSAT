@@ -75,7 +75,11 @@
 //!   the same place, but run only in the search of all queries: such a sequence has parsed
 //!   Seq-ids, whose definition lines `database::x_titles_allow_blocks` never takes.
 //! - nothing else is written to standard error while a block is searched (only the debug trace and
-//!   `LOSAT_TIMING`'s lines, which each block prints for itself).
+//!   `LOSAT_TIMING`'s lines, which each block prints for itself). NCBI's warning of a header record
+//!   with a UTF8String where a VisibleString is expected (once per run) comes from the block whose
+//!   call first reads such a record, in the first query of the batch that reads it, where the
+//!   search of all queries posts it (`common::database::Utf8Read`; RG-T5d fix 2: such a database
+//!   no longer keeps the block search off).
 //!
 //! With `-db` the kernel runs over the database's subjects one after the other on one diagonal
 //! table (`blast_engine/database.rs` `search_blocks`, whose blocks start at the one-thread

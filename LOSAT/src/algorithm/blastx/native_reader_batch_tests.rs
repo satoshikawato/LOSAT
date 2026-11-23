@@ -30,6 +30,7 @@ fn unit_results(queries: usize, skipped: bool) -> Vec<BatchResults> {
         unlisted: Vec::new(),
         shown: Vec::new(),
         gapped_k: None,
+        fetched_utf8: None,
     }]
 }
 

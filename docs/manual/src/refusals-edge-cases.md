@@ -42,6 +42,11 @@ Two queries or two subjects with one id (`-parse_deflines`):
 - A PSSM query whose ids are not one local id is shown with its ids even without `-parse_deflines`. A database sequence with one of them (`sp|P69905.2|` against a PSSM of `swissprot P69905.2`) is refused with or without the option, because NCBI shows the PSSM query for it.
 - A `-subject` record with one of those ids is refused under `-parse_deflines`, because NCBI's `tblastn` fails there.
 
+Database header records (the definition lines of a sequence):
+
+- A header record that NCBI cannot read (damaged, cut short, or with a tag, length or tax id that NCBI's reader does not take) is not refused. Each program writes NCBI's error where NCBI does, after the reports of the query batches before it. A record cut inside its first tag or length ends the run there with exit status 0, as in NCBI. A record that no report reads fails nothing.
+- A UTF8String where a VisibleString is expected is read as NCBI reads it, with NCBI's warning `(803.10)` once per run, where NCBI first reads such a record (none in `segmasker` and `dustmasker`). A tag in the long form is read with no message.
+
 Databases with parsed ids (the error names the sequence). No comparison with NCBI on its swissprot, pdbaa, 18S_fungal_sequences and 16S_ribosomal_RNA was refused. The full list is in [the decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md#databases-with-parsed-seq-ids-version-13-line-dbid).
 
 - An id that NCBI's report code does not find, or finds on another sequence first, is refused in outfmt 0, 5, 6, 7, 10, 13 to 17 and 20. Examples are `gnl|PIG|` and `gim|` ids; in version 4 `bbs|` and `nat|` ids; `gb|X|` after `gb|X.1|`; in version 5 `lcl|300` after `bbs|300`.
@@ -58,6 +63,8 @@ Databases with parsed ids (the error names the sequence). No comparison with NCB
 - `psiblast` compares sequences by NCBI's id handles in its inclusion sets, in a PSSM made by its rounds or by `-save_pssm_after_last_round` with `-out_pssm` or `-out_ascii_pssm`, and in the two-part table of outfmt 0.
 - There it refuses two sequences whose ids the handles can take for one sequence, such as ids that differ only in letter case, or one accession under `gb`, `emb` and `dbj`. It refuses a `gim|` id in such a PSSM. It refuses two copies of one record with another hit between them, where NCBI crashes.
 - Ids and titles that NCBI cannot write are refused, such as an outfmt 0 description id of 65 bytes or more.
+- Where NCBI's lookup of a reported sequence's id first reads the header record of another sequence that has a UTF8String (a database list built with `-parse_seqids`), the warning `(803.10)` comes where NCBI loads that id: in the batch's prefetch, among the taxonomy database's texts of its other loads, or inside the report where `PRE_FETCH_SEQS_LIMIT` turns the prefetch off.
+- Refused there: a prefetch in which NCBI orders two such loads whose warnings name different members, or such a load and one whose taxonomy database writes a text, by the memory addresses of its id records (two ids with one packed number, such as `gb|X00005.1|` and `emb|Y00005.1|`, or two ids that it does not pack), and a prefetch of more than 200 ids, whose order LOSAT does not know. NCBI writes such loads in another order from one run to the next.
 - Titles that NCBI makes from taxonomy data are written as NCBI writes them: an empty title from the organism's name, and the end of a protein title ending in `]` rewritten from the first tax id (`alpha, partial [Bacillus sp.]` becomes `alpha [Bacillus sp.]`).
 - A version 5 list of databases (`-db "a b"`), some with and some without the accession table of `makeblastdb -parse_seqids`, is refused together with a damaged `taxdb.bti` or `taxdb.btd` that writes text. NCBI's loads of other sequences then write such text or fail on their ids, in all five programs.
 - With `-outfmt 5` it is also refused when a tax id is looked up after a batch whose XML report NCBI cuts at a query title or id outside US-ASCII (`blastp`, `blastn`, `tblastn`, `tblastx`).

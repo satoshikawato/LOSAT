@@ -2,7 +2,7 @@
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:122-148
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:163-174;
 // c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
-// SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); // blastn / dc-megablast
+// `blastn` and `dc-megablast` configure ungapped X-drop to `BLAST_UNGAPPED_X_DROPOFF_NUCL`.
 // Traditional megablast leaves this option zero and uses the word cutoff.
 pub const X_DROP_UNGAPPED: i32 = 20;
 pub const X_DROP_GAPPED_NUCL: i32 = 30; // BLAST_GAP_X_DROPOFF_NUCL (blastn, non-greedy)
@@ -33,10 +33,11 @@ pub const SCAN_RANGE_MEGABLAST: usize = 0;
 // The dynamic calculation uses gap_trigger (bit score 27.0) and cutoff_score_max (from E-value).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:752
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:343-344: gap_trigger calculation
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:368-374: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:368-374
+// Caps the scaled `gap_trigger` cutoff at `cutoff_score_max`.
 // These constants are kept for backward compatibility but are no longer used in the main code path.
-pub const MIN_UNGAPPED_SCORE_MEGABLAST: i32 = 20; // DEPRECATED: the cutoff is MIN(gap_trigger * scale_factor, cutoff_score_max) (ncbi_cutoffs.rs)
-pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // DEPRECATED: the cutoff is MIN(gap_trigger * scale_factor, cutoff_score_max) (ncbi_cutoffs.rs)
+pub const MIN_UNGAPPED_SCORE_MEGABLAST: i32 = 20; // DEPRECATED: cutoff is `gap_trigger * scale_factor` capped at `cutoff_score_max` (ncbi_cutoffs.rs)
+pub const MIN_UNGAPPED_SCORE_BLASTN: i32 = 50; // DEPRECATED: cutoff is `gap_trigger * scale_factor` capped at `cutoff_score_max` (ncbi_cutoffs.rs)
 
 /// Maximum word size for direct address table (4^14 = 268M entries = ~6GB, too large)
 pub const MAX_DIRECT_LOOKUP_WORD_SIZE: usize = 13;

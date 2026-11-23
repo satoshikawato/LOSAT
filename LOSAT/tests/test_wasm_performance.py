@@ -1,7 +1,7 @@
 """Gate negatives; no algorithm emulation or replacement expected output.
 
 NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108:
-  x_PrintField(*iter); ... m_Ostream << "\n";
+Each tabular row writes its fields in order via `x_PrintField` and ends with a newline on `m_Ostream`.
 NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:794-808:
 Synthetic subprocesses exercise the harness only, never certify a search.
 """

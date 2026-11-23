@@ -84,8 +84,7 @@ pub(crate) fn compute_backbone_size(
     alphabet_size: usize,
     charsize: usize,
 ) -> usize {
-    // NCBI: for (i=0;i<word_length;i++) backbone_size |= (alphabet_size-1) << (i*charsize);
-    //       backbone_size++;
+    // Pack the maximum residue code into each of `word_length` slots of width `charsize`, then add 1.
     let mut backbone_size: usize = 0;
     for i in 0..word_length {
         backbone_size |= (alphabet_size - 1) << (i * charsize);
@@ -108,16 +107,14 @@ pub(crate) fn compute_mask(word_length: usize, charsize: usize) -> usize {
 #[cfg(test)]
 #[inline(always)]
 pub fn pv_test(pv: &[u32], index: usize) -> bool {
-    // NCBI PV_TEST macro:
-    // lookup[(index) >> PV_ARRAY_BTS] & (1U << (index & PV_ARRAY_MASK))
+    // NCBI `PV_TEST` macro: test the bit for `index` in the presence vector `pv`.
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57
     (pv[index >> PV_ARRAY_BTS] & (1u32 << (index & PV_ARRAY_MASK))) != 0
 }
 
 #[inline(always)]
 pub(crate) fn pv_set(pv: &mut [u32], index: usize) {
-    // NCBI PV_SET macro:
-    // lookup[(index) >> PV_ARRAY_BTS] |= (1U << (index & PV_ARRAY_MASK))
+    // NCBI `PV_SET` macro: set the bit for `index` in the presence vector `pv`.
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-50
     pv[index >> PV_ARRAY_BTS] |= 1u32 << (index & PV_ARRAY_MASK);
 }

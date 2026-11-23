@@ -222,6 +222,15 @@ pub(crate) fn write_blastn_tabular(
             // (`QueryWarnings::subject_read`), before those of the row's own lookups. A table
             // that reads a subject whose load throws outside the subject block ends the run at
             // its first row (`TabularWriter::ends_run`).
+            if fetches {
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    if warnings.reads_with_texts(q_idx) {
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        warnings.subject_read(q_idx, hsp_list.oid, &mut *writer)?;
+                    }
+                }
+            }
             if let Some(end) = table.ends_run(
                 &subject,
                 crate::blastinput::app::Program::Blastn,
@@ -232,15 +241,6 @@ pub(crate) fn write_blastn_tabular(
                         warnings.end_run();
                     }
                 }));
-            }
-            if fetches && !subject.throws() {
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    if warnings.reads_with_texts(q_idx) {
-                        writer.write_all(&buf)?;
-                        buf.clear();
-                        warnings.subject_read(q_idx, hsp_list.oid, &mut *writer)?;
-                    }
-                }
             }
             for hsp in &hsp_list.hsps {
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,

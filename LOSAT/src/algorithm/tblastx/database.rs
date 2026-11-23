@@ -51,7 +51,7 @@ const PROGRAM: &str = "TBLASTX";
 /// The database of a `-db` search: the opened database and its name as NCBI keeps it
 /// (`TblastxArgs::database_name`: the `-db` value without white space at its ends).
 pub(crate) struct TblastxDatabase {
-    db: SeqDb,
+    pub(crate) db: SeqDb,
     name: String,
     /// Whether the first header of some volume holds parsed Seq-ids (`shared::check_seqids`).
     parsed: bool,
@@ -364,13 +364,15 @@ pub(crate) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 /// The final HSPs `ordered` of a query batch (report order) without those of the sequences that
 /// NCBI makes no Seq-align of (`shared::SeqAligned`): after the cut of each query's hit list to
 /// the hit list size, before `read_titles`.
-pub(crate) fn drop_unaligned(database: &TblastxDatabase, ordered: &mut Vec<TblastxHsp>) {
+pub(crate) fn drop_unaligned(
+    database: &TblastxDatabase,
+    ordered: &mut Vec<TblastxHsp>,
+) -> Option<crate::seqdb::SeqLocation> {
     // tblastx fetches every subject with HSPs with `check_oid_exclusion` (the ungapped
     // re-evaluation of a nucleotide subject: `run_impl::search_query_batch`).
-    let Some(mut aligned) = shared::SeqAligned::of(&database.db, true) else {
-        return;
-    };
+    let mut aligned = shared::SeqAligned::of(&database.db, true)?;
     aligned.retain(ordered, |hsp| Some(hsp.hit.s_idx));
+    aligned.first_utf8()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
@@ -378,14 +380,18 @@ pub(crate) fn drop_unaligned(database: &TblastxDatabase, ordered: &mut Vec<Tblas
 /// batch name (in report order: query by query, in hit-list order; the subject index is the
 /// ordinal id, the query index counts from the batch's first query `first_query`) into
 /// `titles` (`common::database::read_header`). A reader error of NCBI's own is a
-/// `HeaderReadError` (it fails the batch); LOSAT's refusals are errors of their own.
+/// `HeaderReadError` (it fails the batch); LOSAT's refusals are errors of their own. The first
+/// read of a record with a UTF8String where a VisibleString is expected is returned
+/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.
 pub(crate) fn read_titles(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     first_query: usize,
+    earlier: shared::EarlierUtf8,
     titles: &mut DatabaseTitles,
-) -> Result<()> {
+) -> Result<Option<shared::Utf8Read>> {
     let headers = shared::HeaderReader::new(&database.db);
+    headers.note_earlier(earlier);
     // A subject's HSPs follow each other: one look-up per run of them.
     let mut previous = None;
     for hsp in ordered {
@@ -401,7 +407,7 @@ pub(crate) fn read_titles(
         )?;
         titles.insert(ordinal, title);
     }
-    Ok(())
+    Ok(headers.first_utf8())
 }
 
 /// The stores of the sequences that the reported hits of the query batches read so far name, by
@@ -529,11 +535,51 @@ pub(crate) fn subject_read_texts(
     shared::subject_read_texts(&database.db, &database.taxdb, subjects, rows_open, PROGRAM)
 }
 
+/// The XML2 and JSON formats, a batch whose prefetch is off, whose reported hits are `ordered` (in
+/// report order, by ordinal id, each HSP's `q_idx` counted from the batch's first query `start`):
+/// each query's report's `Hit` loads (`shared::scope_utf8_hit_reads`), into `reads` by query of the
+/// run.
+pub(crate) fn scope_utf8_hit_reads(
+    database: &TblastxDatabase,
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+    start: usize,
+    after: Option<crate::report::db_subject::RunThrow>,
+    reads: &mut Vec<crate::report::query_warnings::QueryReads>,
+) {
+    if !database.db.scope_utf8_seen() {
+        return;
+    }
+    let parsed = |ordinal: u32| match titles.get(&ordinal) {
+        Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+        _ => None,
+    };
+    let mut from = 0;
+    while from < ordered.len() {
+        let query = ordered[from].hit.q_idx;
+        let to = from + ordered[from..].partition_point(|hsp| hsp.hit.q_idx == query);
+        let subjects = ordered[from..to]
+            .iter()
+            .map(|hsp| (hsp.hit.s_idx, hsp.hit.s_idx, parsed(hsp.hit.s_idx)));
+        let query_reads =
+            shared::scope_utf8_hit_reads(&database.db, &database.taxdb, after, subjects, PROGRAM);
+        if !query_reads.is_empty() {
+            let index = start + query as usize;
+            if reads.len() <= index {
+                reads.resize_with(index + 1, Vec::new);
+            }
+            reads[index] = query_reads;
+        }
+        from = to;
+    }
+}
+
 /// The ordinal ids of the subjects that one query's report reads one by one, in the order of its
-/// reads: those of its rows that read them, `shown` (loaded ones, in report order), or for the
-/// pairwise report (`pairwise`: how it reads them) those that it shows of the query's hits
-/// `ordered` in the order that it reads them (`pairwise_read_order`, `PairwiseReads::subjects`),
-/// but those that it does not load (`loads`).
+/// reads: those of its rows that read them, `shown` (those that a report reaches, in report
+/// order), or for the pairwise report (`pairwise`: how it reads them) those that it shows of the
+/// query's hits `ordered` in the order that it reads them (`pairwise_read_order`,
+/// `PairwiseReads::subjects`), but those that no report reaches (`HitLoads::reached`: a load that
+/// throws has read the candidates' headers, `common::database::load_read_texts`).
 pub(crate) fn read_ordinals(
     shown: &[&TblastxHsp],
     ordered: &[TblastxHsp],
@@ -545,7 +591,7 @@ pub(crate) fn read_ordinals(
         Some(reading) => pairwise_read_order(ordered, titles, reading)
             .subjects()
             .into_iter()
-            .filter(|&ordinal| loads.loaded(ordinal))
+            .filter(|&ordinal| loads.reached(ordinal))
             .map(|ordinal| ordinal as u32)
             .collect(),
         None => shown.iter().map(|hsp| hsp.hit.s_idx).collect(),
@@ -630,7 +676,9 @@ pub(crate) fn batch_prefetch(
 /// `before_spans`), of the subjects that those reports load (`hit_loads` of the batches before
 /// alone, of `batches_prefetch`, the reports' own answer, with `after` and the hits' engine
 /// `identities`, `hit_identities`; review 2 of line DBID pfoff-1, N-M2), which TBLASTX writes
-/// after the stop (the XML formats are not streamed, `report_stream`).
+/// after the stop (the XML formats are not streamed, `report_stream`). `Ok`: the warning of a
+/// UTF8String header that a load of a batch that does not stop posts
+/// (`shared::batch_prefetch_stop`), for the batch's prefetch posts.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn batch_prefetch_stop(
     database: &TblastxDatabase,
@@ -642,7 +690,7 @@ pub(crate) fn batch_prefetch_stop(
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
-) -> Result<()> {
+) -> Result<Vec<u8>> {
     let prefetch = batches_prefetch(before, before_queries, before_spans);
     let loads = hit_loads(before, &prefetch, (after, None), titles, identities);
     shared::held_batch_prefetch_stop(

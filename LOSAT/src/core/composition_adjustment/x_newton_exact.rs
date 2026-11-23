@@ -673,7 +673,7 @@ fn optimize(
             t = prof_add(3, t, on);
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:575-578,581-583,587-587
-            // ---- SolveReNewtonSystem(resids_x, resids_z)
+            // ---- `SolveReNewtonSystem` over `resids_x` and `resids_z`
             // workspace = resids_x * dinv; resids_z -= A workspace (column sums
             // over i, row sums over j); resids_z[39] -= grad_re . workspace.
             let mut s39 = resids_z[M - 1];
@@ -695,7 +695,8 @@ fn optimize(
             resids_z[M - 1] = s39;
             solve_structured(&mut resids_z, &factor);
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:593-602
-            // resids_x += grad_re * z[39]; MultiplyByAtranspose(1.0, resids_x, 1.0, z); *= dinv
+            // Back-substitute into `resids_x`: add the relative-entropy gradient term and
+            // `MultiplyByAtranspose` contribution, then scale by `dinv`.
             let z_re = resids_z[M - 1];
             for i in 0..N {
                 let base = i * N;
@@ -715,7 +716,7 @@ fn optimize(
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:781-785
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:230-238
-            // ---- Nlm_StepBound(x, 400, resids_x, 1 / 0.95) * 0.95, then Nlm_AddVectors
+            // ---- Step bound (`Nlm_StepBound` on `x` and `resids_x` with initial cap 1 / 0.95) scaled by 0.95, then `Nlm_AddVectors`
             let mut ratios = [0.0f64; NN];
             for k in 0..NN {
                 ratios[k] = -x[k] / resids_x[k];

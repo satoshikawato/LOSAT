@@ -132,7 +132,7 @@ fn batched_extensions_equal_scan_unit() {
                 if group.lookup.longest_chain <= 0 {
                     continue;
                 }
-                let unit = XUnit { f, k: 0, chunk, g };
+                let unit = pp.x_unit(&inp, f, 0, chunk, g);
                 let mut reference: Vec<InitHSP> = Vec::new();
                 pp.scan_unit::<_, _, false>(
                     &unit,

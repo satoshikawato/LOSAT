@@ -44,7 +44,8 @@ const GENETIC_CODES: [i32; 26] = [
 ];
 
 /// Whether `code` is a genetic code that `CArgAllowGeneticCodeInteger` allows: the one list of
-/// them, for this reader and for the programs on clap (`blastinput::value_parsers::genetic_code`).
+/// them, for this reader and for BLASTX's check of a code that a library caller set
+/// (`blastx::query_setup`).
 pub(crate) fn is_genetic_code(code: i32) -> bool {
     GENETIC_CODES.contains(&code)
 }
@@ -199,7 +200,7 @@ pub(super) fn strings(values: Span) -> impl Iterator<Item = &'static str> {
 }
 
 /// The values of a set of integers (rows of `INTEGER_VALUES`).
-fn integers(values: Span) -> &'static [i32] {
+pub(super) fn integers(values: Span) -> &'static [i32] {
     values.of(&super::INTEGER_VALUES)
 }
 

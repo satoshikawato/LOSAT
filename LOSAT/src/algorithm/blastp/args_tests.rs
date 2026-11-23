@@ -45,18 +45,20 @@ fn the_database_name_loses_the_white_space_at_its_ends() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-349: parse the same single string as the public CLI.
 fn parse_cli<'a>(args: impl IntoIterator<Item = &'a str>) -> TestCli {
-    crate::cli::try_parse_from(args).unwrap()
+    match crate::cli::try_parse_from(args).unwrap().command {
+        crate::cli::Commands::Blastp(args) => TestCli {
+            command: TestCommand::Blastp(args),
+        },
+        command => panic!("not blastp: {command:?}"),
+    }
 }
 
-#[derive(clap::Parser, Debug)]
+#[derive(Debug)]
 struct TestCli {
-    #[command(subcommand)]
     command: TestCommand,
 }
 
-impl crate::cli::ProgramParser for TestCli {}
-
-#[derive(clap::Subcommand, Debug)]
+#[derive(Debug)]
 enum TestCommand {
     Blastp(BlastpArgs),
 }

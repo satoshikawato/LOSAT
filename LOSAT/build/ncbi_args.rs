@@ -232,6 +232,36 @@ const REFUSED: &[(&str, &str, Refused)] = &[
 /// build checks that each is a key of `CArgAllowGeneticCodeInteger`.
 const GENETIC_CODE_32: [(&str, &str); 1] = [("tblastn", "db_gencode")];
 
+// No NCBI counterpart: line RG DECISIONS K4i-2b-1 (2). The values of a set (`CArgAllow_Strings`,
+// `CArgAllowStringSet`) in the order in which LOSAT's descriptions of a program (`api::describe`,
+// LOSAT Web's) list them, where it is not the XML's: blastn's `-task` and `-template_type` in the
+// order of NCBI's Web page (docs/web/ncbi_ui_mapping.md), the search programs' `-strand` as LOSAT
+// listed it. NCBI's reader and usage keep the XML's order. The build checks that each row is a
+// permutation of the set of the key of each of its programs.
+const DISPLAY_ORDER: [(&[&str], &str, &[&str]); 3] = [
+    (
+        &["blastn"],
+        "task",
+        &[
+            "megablast",
+            "dc-megablast",
+            "blastn",
+            "blastn-short",
+            "rmblastn",
+        ],
+    ),
+    (
+        &["blastn", "blastx", "tblastx"],
+        "strand",
+        &["both", "plus", "minus"],
+    ),
+    (
+        &["blastn"],
+        "template_type",
+        &["coding", "optimal", "coding_and_optimal"],
+    ),
+];
+
 /// One dependency of the XML: the first name, the `Dep` variant of `ncbi_app::args`, the second
 /// name.
 type Dependency = (String, &'static str, String);
@@ -270,6 +300,7 @@ struct Tables {
     string_values: Vec<String>,
     integer_values: Vec<i32>,
     refusals: Vec<String>,
+    display_orders: Vec<String>,
     programs: Vec<String>,
 }
 
@@ -430,6 +461,7 @@ impl Tables {
         let integers: Vec<String> = self.integer_values.iter().map(i32::to_string).collect();
         array("INTEGER_VALUES", "i32", &integers);
         array("REFUSALS", "(Text, Refused)", &self.refusals);
+        array("DISPLAY_ORDERS", "(Text, Text, Span)", &self.display_orders);
         array("PROGRAMS", "(Text, Arguments)", &self.programs);
         out
     }
@@ -465,6 +497,15 @@ pub fn write_tables(manifest_dir: &Path, out_dir: &Path) {
             }
         }
         tables.program(program, &arguments, &dependencies);
+        tables.display_orders(program, &arguments);
+    }
+    for (row_programs, name, _) in DISPLAY_ORDER {
+        for program in row_programs {
+            assert!(
+                tables.display_orders_of(program, name),
+                "DISPLAY_ORDER: no XML has {program} -{name}"
+            );
+        }
     }
     let rows = REFUSED
         .iter()
@@ -479,6 +520,49 @@ pub fn write_tables(manifest_dir: &Path, out_dir: &Path) {
     let target = out_dir.join("ncbi_args.rs");
     let out = tables.write();
     fs::write(&target, out).unwrap_or_else(|error| panic!("{}: {error}", target.display()));
+}
+
+impl Tables {
+    /// The rows of `DISPLAY_ORDER` of `program`: each a permutation of its key's set of strings in
+    /// `arguments`, written to `DISPLAY_ORDERS`.
+    fn display_orders(&mut self, program: &str, arguments: &[Argument]) {
+        for (row_programs, name, values) in DISPLAY_ORDER {
+            if !row_programs.contains(&program) {
+                continue;
+            }
+            let argument = arguments
+                .iter()
+                .find(|argument| argument.name == name)
+                .unwrap_or_else(|| panic!("DISPLAY_ORDER: {program} has no -{name}"));
+            let set = match &argument.constraint {
+                Some(Spec::Strings(set) | Spec::StringSet(set)) => set,
+                _ => panic!("DISPLAY_ORDER: {program} -{name} is no set of strings"),
+            };
+            let (mut sorted, mut shown) = (set.clone(), values.to_vec());
+            sorted.sort();
+            shown.sort_unstable();
+            assert!(
+                sorted == shown,
+                "DISPLAY_ORDER: {program} -{name} lists {values:?}, its set is {set:?}"
+            );
+            let first = self.string_values.len();
+            for value in values {
+                let text = self.text(value);
+                self.string_values.push(text);
+            }
+            let span = Self::span(first, self.string_values.len());
+            let row = format!("({}, {}, {span})", self.text(program), self.text(name));
+            self.display_orders.push(row);
+        }
+    }
+
+    /// Whether the row of `DISPLAY_ORDER` of `program`'s `name` was written.
+    fn display_orders_of(&mut self, program: &str, name: &str) -> bool {
+        let row = format!("({}, {}, ", self.text(program), self.text(name));
+        self.display_orders
+            .iter()
+            .any(|written| written.starts_with(&row))
+    }
 }
 
 /// Checks the rows of `REFUSED` of `program`: each names an argument of its XML (`arguments`),

@@ -1,5 +1,6 @@
 use super::*;
 use crate::api::{validate, Program};
+use crate::blastinput::ncbi_environment::DiagTarget;
 
 // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
@@ -34,20 +35,20 @@ fn groups_follow_the_hit_list_sizes() {
     let inputs = Inputs::new(&[], &[]);
     let plain = validate(Program::Blastp, &[])
         .unwrap()
-        .command(inputs)
+        .command(inputs, &DiagTarget::Stderr)
         .unwrap();
     assert_eq!(search_groups(&plain, &[6, 0, 7]), vec![vec![0, 1, 2]]);
     // -num_alignments changes the pairwise formats' hit list size only: two searches, the
     // tabular formats first.
     let split = validate(Program::Blastp, &["-num_alignments", "1"])
         .unwrap()
-        .command(inputs)
+        .command(inputs, &DiagTarget::Stderr)
         .unwrap();
     assert_eq!(search_groups(&split, &[0, 6, 7]), vec![vec![1, 2], vec![0]]);
     // -max_target_seqs sets every format's size.
     let same = validate(Program::Blastp, &["-max_target_seqs", "5"])
         .unwrap()
-        .command(inputs)
+        .command(inputs, &DiagTarget::Stderr)
         .unwrap();
     assert_eq!(search_groups(&same, &[0, 6]), vec![vec![0, 1]]);
 }
@@ -58,8 +59,12 @@ fn groups_follow_the_hit_list_sizes() {
 #[test]
 fn groups_follow_the_cuts_of_the_hit_lists() {
     let inputs = Inputs::new(&[], &[]);
-    let command =
-        |program, options: &[&str]| validate(program, options).unwrap().command(inputs).unwrap();
+    let command = |program, options: &[&str]| {
+        validate(program, options)
+            .unwrap()
+            .command(inputs, &DiagTarget::Stderr)
+            .unwrap()
+    };
     let psiblast = command(Program::Psiblast, &[]);
     assert_eq!(search_groups(&psiblast, &[6, 11]), vec![vec![0], vec![1]]);
     assert_eq!(search_groups(&psiblast, &[11, 6]), vec![vec![0], vec![1]]);

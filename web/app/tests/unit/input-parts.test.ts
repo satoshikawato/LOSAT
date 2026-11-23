@@ -11,13 +11,13 @@ describe('input parts', () => {
     expect(leftOutIds(['r2', 'r5', 'r7'])).toBe('r2, r5 and r7');
     expect(leftOutIds(['r2', 'r5', 'r7', 'r8', 'r9'])).toBe('r2, r5, r7 and 2 more');
     // A part keeps the first IDs and their number.
-    expect(leftOutIds(['r2', 'r5', 'r7'], 1_000_000)).toBe('r2, r5, r7 and 999997 more');
+    expect(leftOutIds(['r2', 'r5', 'r7'], 1_000_000)).toBe('r2, r5, r7 and 999,997 more');
   });
 
   it('says the records that a file holds of those it has', () => {
     expect(partText(part('q.fa', 2, ['r2']))).toBe('q.fa without r2 (2 of 3 records)');
     expect(partText(part('q.fa.gz', 1, ['r1 (#2)']))).toBe('q.fa.gz without r1 (#2) (1 of 2 records)');
-    expect(partText(part('big.fa', 10, ['x1', 'x2', 'x3'], 1_000_000))).toBe('big.fa without x1, x2, x3 and 999997 more (10 of 1000010 records)');
+    expect(partText(part('big.fa', 10, ['x1', 'x2', 'x3'], 1_000_000))).toBe('big.fa without x1, x2, x3 and 999,997 more (10 of 1,000,010 records)');
     expect(partText(part('b.fa', 3, []))).toBe('b.fa (3 records)');
     expect(partText(part('pasted text', 1, []))).toBe('pasted text (1 record)');
   });

@@ -48,7 +48,7 @@ import {
 import { MOST_LEFT_OUT_IDS } from '../domain/input-parts';
 import type { InputPart } from '../domain/run';
 import { buildArgv, COMBINED_NAMES, INCLUDED_PREFIX, PASTED_NAMES, splitOptions } from '../domain/argv';
-import { includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
+import { endsInput, includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
 import { parseTaxid, type CountsOrigin } from '../domain/counts';
 import type { ExampleId } from '../domain/examples';
 import { inputLead, type InputLead } from '../domain/input-format';
@@ -1542,7 +1542,7 @@ export class SearchDraft {
     if (role !== 'query' || draft.mode !== 'combined' || cannotFollow(draft.sources, source)) return [];
     const at = draft.sources.findIndex((s) => s.key === source.key);
     const before = draft.sources.slice(0, Math.max(0, at)).filter((s) => s.status === 'ready');
-    return before.some((s) => s.base?.readerError !== undefined) ? [] : before;
+    return before.some((s) => endsInput(s.base)) ? [] : before;
   }
 
   /**
@@ -1840,18 +1840,22 @@ export function includedOf(source: DraftSource): readonly DatasetRecord[] {
  */
 function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[] {
   return readSources(sources.filter((source) => source.status === 'ready')).filter(
-    (source) => includedOf(source).length > 0 || source.base?.readerError !== undefined,
+    (source) => includedOf(source).length > 0 || endsInput(source.base),
   );
 }
 
 /**
  * The sources that a run's input reads, in order: up to and with the first whose reading ends with the reader's error, which
  * ends the input, the engine reading no record after it (`DataService.runInputBytes`, line WQA's D10, 2026-11-19). The one
- * place of that rule in the draft: the readiness of a source after it (combinedSources) and the words that say what the input
- * is made of (fromOf, line WQA's D22) take their sources from it, so that the words name what the bytes hold.
+ * place in the draft that cuts a list of sources there: the readiness of a source after it (combinedSources), the name of the
+ * input (nameOf) and the words that say what it is made of (fromOf, line WQA's D22) take their sources from it, so that the name
+ * and the words name what the bytes hold. `sourcesBefore` and `queryEndBefore` ask the same question of one source, with
+ * `endsInput`, the one test of it (domain/dataset.ts). `DataService.runInputBytes` is the data layer's own reading of the same
+ * revisions: it needs the error's offset to keep the bytes after the records, and it is outside the draft (a layer, and held by
+ * D17), so it tests the same field there.
  */
 function readSources(sources: readonly DraftSource[]): readonly DraftSource[] {
-  const stop = sources.findIndex((source) => source.base?.readerError !== undefined);
+  const stop = sources.findIndex((source) => endsInput(source.base));
   return stop < 0 ? sources : sources.slice(0, stop + 1);
 }
 
@@ -1885,7 +1889,7 @@ export function cannotFollowText(source: DraftSource): string {
 export function queryEndBefore(sources: readonly DraftSource[], source: DraftSource): DraftSource | undefined {
   for (const before of sources) {
     if (before.key === source.key) return undefined;
-    if (before.status === 'ready' && before.base?.readerError !== undefined && !cannotFollow(sources, before)) return before;
+    if (before.status === 'ready' && endsInput(before.base) && !cannotFollow(sources, before)) return before;
   }
   return undefined;
 }
@@ -1914,7 +1918,9 @@ export function noSequenceOf(source: DraftSource): 'none' | 'excluded' | undefin
 
 /** Whether the sources are one file of the user's, with every record in: the bytes of the run's input are the file's own. */
 function isFileAsGiven(sources: readonly DraftSource[]): boolean {
-  return sources.length === 1 && sources[0]!.origin === 'file' && sources[0]!.excluded.length === 0;
+  // Of the sources that the run reads: a Combined input whose first file ends with the reader's error is that file.
+  const read = readSources(sources);
+  return read.length === 1 && read[0]!.origin === 'file' && read[0]!.excluded.length === 0;
 }
 
 /**
@@ -1929,9 +1935,10 @@ function isFileAsGiven(sources: readonly DraftSource[]): boolean {
  * text; the page offers these files with the run (line WQA's D22, 2026-11-23). `runNames` keeps the two names of a run apart.
  */
 function nameOf(sources: readonly DraftSource[], role: InputRole): string {
-  if (isFileAsGiven(sources)) return sources[0]!.file.name;
-  if (sources.length > 1) return COMBINED_NAMES[role];
-  const [source] = sources;
+  const read = readSources(sources);
+  if (isFileAsGiven(read)) return read[0]!.file.name;
+  if (read.length > 1) return COMBINED_NAMES[role];
+  const [source] = read;
   return source === undefined || source.origin === 'paste' ? PASTED_NAMES[role] : `${INCLUDED_PREFIX}${source.name}`;
 }
 

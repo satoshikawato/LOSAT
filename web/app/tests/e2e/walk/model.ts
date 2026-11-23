@@ -115,32 +115,47 @@ export function joinedBytes(sources: readonly ModelSource[], reading: Reading): 
 }
 
 export interface ExpectedInput {
-  readonly name: string;
+  /**
+   * The name that the command line gives the input where the model knows it: the user's file as given, `query.fa`, `combined_*.fa`
+   * (the role may be put before it where two names would meet). Undefined for the file of one source with records left out: the page
+   * names a file of its own (line WQA's D22) and the walk takes that name from the file that the page offers.
+   */
+  readonly name: string | undefined;
   readonly bytes: Uint8Array;
+  /**
+   * Whether the input is not the user's file as given: pasted text, several sources together, or a source with records left out.
+   * The page must offer such a file, and must not offer one for an input that is the user's file (line WQA's D22). Decided here
+   * from the walk's own record of what it gave, not by the application's code.
+   */
+  readonly made: boolean;
+}
+
+/** Whether the source's bytes that a run searches are not the file's own: pasted text, or records left out. */
+function madeOf(source: ModelSource, reading: Reading): boolean {
+  return source.origin === 'paste' || (source.excluded[reading]?.size ?? 0) > 0;
 }
 
 /**
  * The inputs that the role's runs search in a mode that reads the role as `reading`, given the
  * role's sources that the page read (`ready`, by index; a source it could not read is no input):
  * one when searched together, one per source when apart, but a source whose records are all left
- * out, which has nothing to search alone (src/application/draft.ts `inputGroups`). The names are those of the user's files and
- * of `query.fa` and `combined_*.fa`; a file of LOSAT's with records left out has a name that the page makes (steps.ts `filesOf`).
+ * out, which has nothing to search alone (src/application/draft.ts `inputGroups`).
  */
 export function expectedInputs(role: RoleModel, roleName: Role, reading: Reading, ready: readonly number[]): ExpectedInput[] {
   const sources = role.sources.filter((_, index) => ready.includes(index));
   if (sources.length === 0) return [];
-  if (sources.length === 1) return [{ name: nameOf(sources[0]!), bytes: includedBytes(sources[0]!, reading) }];
+  const single = (source: ModelSource): ExpectedInput => ({
+    name: source.origin === 'paste' || (source.excluded[reading]?.size ?? 0) === 0 ? source.name : undefined,
+    bytes: includedBytes(source, reading),
+    made: madeOf(source, reading),
+  });
+  if (sources.length === 1) return [single(sources[0]!)];
   if (role.mode === 'separate') {
     return sources
-      .map((source) => ({ name: nameOf(source), bytes: includedBytes(source, reading), records: recordRanges(source.bytes).length }))
-      .filter((input) => input.bytes.length > 0 || input.records === 0)
-      .map(({ name, bytes }) => ({ name, bytes }));
+      .filter((source) => includedBytes(source, reading).length > 0 || recordRanges(source.bytes).length === 0)
+      .map(single);
   }
-  return [{ name: COMBINED_NAMES[roleName], bytes: joinedBytes(sources, reading) }];
-}
-
-function nameOf(source: ModelSource): string {
-  return source.name;
+  return [{ name: COMBINED_NAMES[roleName], bytes: joinedBytes(sources, reading), made: true }];
 }
 
 function concat(parts: readonly Uint8Array[]): Uint8Array {

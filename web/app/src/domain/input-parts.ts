@@ -11,18 +11,21 @@ function listOf(words: readonly string[]): string {
 }
 
 /** "r2", "r2 and r5", "r2, r5, r7 and 4 more": the first IDs of `count` records. */
-export function leftOutIds(ids: readonly string[], count: number = ids.length): string {
+export function leftOutIds(ids: readonly string[], total: number = ids.length): string {
   const named = ids.slice(0, MOST_LEFT_OUT_IDS);
-  const more = count - named.length;
-  return more > 0 ? `${named.join(', ')} and ${more} more` : listOf(named);
+  const more = total - named.length;
+  return more > 0 ? `${named.join(', ')} and ${count(more)} more` : listOf(named);
 }
 
-const records = (count: number): string => `${count} ${count === 1 ? 'record' : 'records'}`;
+/** A count as the source card writes it: 1,000,010. */
+const count = (n: number): string => n.toLocaleString('en-US');
+
+const records = (n: number): string => `${count(n)} ${n === 1 ? 'record' : 'records'}`;
 
 /** "q.fa without r2 (2 of 3 records)"; "b.fa (3 records)" where nothing is left out. */
 export function partText(part: InputPart): string {
   if (part.leftOutCount === 0) return `${part.name} (${records(part.records)})`;
-  return `${part.name} without ${leftOutIds(part.leftOut, part.leftOutCount)} (${part.records} of ${records(part.records + part.leftOutCount)})`;
+  return `${part.name} without ${leftOutIds(part.leftOut, part.leftOutCount)} (${count(part.records)} of ${records(part.records + part.leftOutCount)})`;
 }
 
 /** What the input is made of, as `partText` says each part: "a.fa (2 records) and b.fa without b2 (1 of 2 records)". */

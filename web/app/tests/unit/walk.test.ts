@@ -158,6 +158,24 @@ describe('walk model', () => {
     expect(withPaste(model, 'query', '').query.sources.map((source) => source.name)).toEqual(['a.fa']);
   });
 
+  // Line WQA's D22, review round 3 (M1): the model says which inputs are the user's files and which the page makes.
+  it('marks an input as made (pasted, several, or with records left out) or as the user\'s file as given', () => {
+    let model = withFiles(emptyModel(), 'query', [{ name: 'a.fa', bytes: text('>a\nAC\n>b\nGT\n') }]);
+    expect(expectedInputs(model.query, 'query', 'nucleotide', [0]).map(({ name, made }) => ({ name, made }))).toEqual([{ name: 'a.fa', made: false }]);
+    const left = withIncluded(model, 'query', 'nucleotide', 0, 1, false);
+    // The page names the file of the records itself: the model does not.
+    expect(expectedInputs(left.query, 'query', 'nucleotide', [0]).map(({ name, made }) => ({ name, made }))).toEqual([{ name: undefined, made: true }]);
+    // Included again, and in the other reading: the user's file.
+    expect(expectedInputs(withIncluded(left, 'query', 'nucleotide', 0, 1, true).query, 'query', 'nucleotide', [0])[0]!.made).toBe(false);
+    expect(expectedInputs(left.query, 'query', 'protein', [0])[0]!.made).toBe(false);
+    model = withPaste(model, 'query', '>q\nAC\n');
+    expect(expectedInputs(model.query, 'query', 'nucleotide', [0, 1]).map(({ made }) => made)).toEqual([true]);
+    expect(expectedInputs(withMode(model, 'query', 'separate').query, 'query', 'nucleotide', [0, 1]).map(({ name, made }) => ({ name, made }))).toEqual([
+      { name: 'query.fa', made: true },
+      { name: 'a.fa', made: false },
+    ]);
+  });
+
   it('reads a pasted text as its text box gives it: line ends as LF', () => {
     const model = withPaste(emptyModel(), 'query', '>q\r\nAC\r\nGT\r>r\nTT\n');
     expect(decode(model.query.sources[0]!.bytes)).toBe('>q\nAC\nGT\n>r\nTT\n');

@@ -2088,6 +2088,25 @@ describe('SearchDraft submit', () => {
     ]);
   });
 
+  // Review round 3, L2: the name follows the sources that the run reads, as the words do.
+  it('names a Combined input by the sources that the run reads: a first file that ends with the reader\'s error is that file as given', async () => {
+    const { draft, requests } = setup();
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.addFiles('query', [new File(['>a\nACGT\n>b\n$$$$\n'], 'bad.fa'), new File(['>c\nACGT\n'], 'after.fa')]);
+    await draft.idle();
+    expect(draft.inputName('query')).toBe('bad.fa');
+    expect(await draft.submit()).toMatchObject({ ok: true });
+    const query = datasetOf(requests[0]![0]!, 'query');
+    expect(query.name).toBe('bad.fa');
+    expect(query.from).toBeUndefined();
+    // With a record of it left out, it is the file of the records that the run reads.
+    draft.setIncluded('query', sourceOf(draft, 'query', 0).key, [0], false);
+    await draft.idle();
+    expect(draft.inputName('query')).toBe('included_bad.fa');
+    await draft.submit();
+    expect(datasetOf(requests[1]![0]!, 'query')).toMatchObject({ name: 'included_bad.fa', from: [{ name: 'bad.fa', leftOut: ['a'], leftOutCount: 1 }] });
+  });
+
   it('keeps the first IDs of the records left out, and their number', async () => {
     const { draft, requests } = setup();
     const records = Array.from({ length: 8 }, (_, i) => `>r${i + 1}\nACGT\n`).join('');

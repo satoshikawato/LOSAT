@@ -1,0 +1,57 @@
+
+                                          Tax BLAST report                                          
+
+Query= q1
+
+Length=60
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                Mus musculus (house mouse) [rodents]                                
+ sM_nz_pc  subject sM                                                                  73.9  2e-23   
+
+                                          Tax BLAST report                                          
+
+Query= q2
+
+Length=140
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                Mus musculus (house mouse) [rodents]                                
+ sM_nz_pc  subject sM                                                                  184   7e-66   
+
+                                Escherichia coli () [enterobacteria]                                
+ sI_nz_pc  subject sI                                                                  139   6e-49   
+
+                                          Tax BLAST report                                          
+
+Query= q3
+
+Length=60
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                Escherichia coli () [enterobacteria]                                
+ sI_nz_pc  subject sI                                                                  139   2e-50   
+
+                                Mus musculus (house mouse) [rodents]                                
+ sM_nz_pc  subject sM                                                                  139   2e-49   
+
+                                          Tax BLAST report                                          
+
+Query= q4
+
+Length=140
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                Escherichia coli () [enterobacteria]                                
+ sI_nz_pc  subject sI                                                                  139   6e-49   
+
+                                Mus musculus (house mouse) [rodents]                                
+ sM_nz_pc  subject sM                                                                  139   6e-48   

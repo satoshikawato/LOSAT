@@ -213,3 +213,20 @@ fn a_failed_write_of_the_metadata_is_ncbi_s_report() {
         assert_eq!(run_on(&words, "", &mut ClosedPipe), (0, String::new()));
     }
 }
+
+/// A `-out` that LOSAT Web does not write is refused in the other programs' words (windowmasker,
+/// makeprofiledb), not as a database (`output_refusal`, `OutputFile::Refused`).
+#[test]
+fn a_refused_output_reads_as_the_other_programs_refusal() {
+    let reason = "an output file 'x' that is the standard error, a device or a file of procfs \
+                  (LOSAT Web writes no such file)";
+    assert_eq!(
+        output_refusal(reason),
+        "an output file 'x' that is the standard error, a device or a file of procfs (LOSAT Web \
+         writes no such file) is not supported by LOSAT's BLASTDBCMD"
+    );
+    assert_eq!(
+        output_refusal(reason),
+        crate::seqmasks_io::run::unsupported(reason, PROGRAM)
+    );
+}

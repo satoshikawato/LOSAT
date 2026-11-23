@@ -1158,6 +1158,7 @@ impl<S: AsnSource> Reader<S> {
 
     /// `StartBlock` of a SEQUENCE OF or SET OF of a hand grammar, whose elements `next_item`
     /// reads; the trail gets the elements' step (`E`).
+    #[inline(always)]
     pub(crate) fn begin_list(&mut self) -> Result<List> {
         let block_start = self.start_block()?;
         let base = self.trail.steps.len();
@@ -1166,8 +1167,8 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// `NextElement` of the list (`next_element`): the steps of the element before end here,
-    /// and the list's own at its end.
-    #[inline]
+    /// and the list's own at its end. (Inlined into the loops over elements, as `next_element`.)
+    #[inline(always)]
     pub(crate) fn next_item(&mut self, list: &mut List) -> Result<bool> {
         let more = self.next_element(&mut list.block_start)?;
         self.trail.steps.truncate(list.base + usize::from(more));
@@ -1379,7 +1380,7 @@ impl<S: AsnSource> Reader<S> {
     /// byte there is a lower-case letter, else a number (`ReadInt4`). The one reader of both for
     /// the archive reader and the object streams (`asn_input`), which look it up in their values.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
-    #[inline]
+    #[inline(always)]
     pub(crate) fn enum_word(&mut self) -> Result<EnumWord> {
         let (pos, c) = self.white_space_at(self.pos)?;
         if !c.is_ascii_lowercase() {

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.91
+- Version: 1.92
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -502,7 +502,12 @@
   at the merge of dev that brought psiblast line item PS10a's 1.82, then 1.89 at the merge of dev that
   brought 1.83 to 1.88 (line NP items M4b-AX, O4b2-2 and M4b-3c, psiblast line items PS10c and PS10d, line RG
   item D1c-1), then 1.91 at the merge of dev that brought line NP item M4b-T2's 1.89 and line RG
-  item T5d's 1.90)
+  item T5d's 1.90);
+  1.92 2026-11-24 (BLASTP `-ungapped` under a negative seqid list, line NP item O4b2-4: the
+  sequence that the list keeps while removing all its lines, of 1.34, stays in its hit list
+  through the traceback's culling and best hit pipes and the prune to the hit list size and
+  leaves at its Seq-align, as BLASTX's does, where 1.34 removed it before the traceback; rule 2;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1741,15 +1746,20 @@ file would differ, and NCBI's programs still could not open the database).
   (blast_hits.c:2651-2665). The sequence is searched and counts in the statistics; a gapped
   search's preliminary hit list holds it, and it takes no place in the final one; an ungapped
   search of a nucleotide database frees its HSPs before the preliminary hit list. A protein
-  subject of an ungapped search (blastx `-ungapped`) is fetched by none of them and leaves at the
-  Seq-aligns, as a positive list's does. Versions 1.6, 1.29 and 1.32 made this an explicit
+  subject of an ungapped search (blastx and blastp `-ungapped`) is fetched by none of them and
+  leaves at the Seq-aligns, as a positive list's does: it keeps its place in the hit list through
+  the traceback's culling and best hit pipes (its HSPs cull those of other subjects) and the prune
+  to the hit list size (`blast_traceback.c:1720-1777`, `blast_seqalign.cpp:1582-1586`; version
+  1.92 for BLASTP, rows `db.ll2.bp.ug.*`). Versions 1.6, 1.29 and 1.32 made this an explicit
   rejection; version 1.34 reproduces it in the six search programs, each of which removes such
   subjects where NCBI fetches them (`SeqDb::excludes_lineless_at_fetch`,
   `algorithm::common::database::FetchExcluded`; line DBID item lineless2). Under such a list
   NCBI's fetch reads the header of every subject it fetches, so a header that cannot be read
   (a damaged record, a `BL_ORD_ID` line with a string tag in a later volume) ends NCBI's search
   there (exit 255 in the traceback, `BLAST engine error` in the ungapped re-evaluation) even
-  where the subject is not reported; LOSAT refuses such a search at the same place. The
+  where the subject is not reported; LOSAT refuses such a search at the same place. An ungapped
+  search of a protein database reads such a header at the Seq-aligns only, where the subject is
+  in the final hit list. The
   composition-based redo fetches only the matches that its early termination test leaves, and
   LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
   NCBI ends it without reading that header.

@@ -1,0 +1,3 @@
+Error: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1754905306566/work/c++/src/serial/objistrasnb.cpp", line 216: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedTagValue() - byte 0: Unexpected tag: 17, expected: 16 ( at Blast-def-line-set.[])
+

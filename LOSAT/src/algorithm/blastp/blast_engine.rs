@@ -9997,6 +9997,7 @@ fn run_call(
             database,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
+            !args.ungapped,
         )?),
         None => None,
     };
@@ -10259,12 +10260,12 @@ fn run_call(
         rps_multi_volume,
         sorts_results,
     );
-    // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a
-    // subject that the seqid list keeps without a definition line (line DBID item lineless).
-    // psiblast's lists are cut to the preliminary size here; the formatter's cut to
-    // `-max_target_seqs` below takes the Seq-aligns, so such a subject takes no place there.
+    // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a subject
+    // that the seqid list keeps without a definition line (line DBID item lineless; `-ungapped`:
+    // also under a negative list). psiblast's lists are cut to the preliminary size here; the
+    // formatter's cut to `-max_target_seqs` below takes the Seq-aligns: no place for it there.
     if let (Some(listed), Some(database)) = (listed_subjects.as_ref(), database) {
-        listed.drop_unaligned(database, &mut hit_lists);
+        listed.drop_unaligned(database, &mut hit_lists, !args.ungapped);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:267-275
     // A database: the definition lines of the final hit lists are read first, where NCBI

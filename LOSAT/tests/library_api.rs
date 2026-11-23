@@ -1528,8 +1528,9 @@ fn the_pssm_files_are_the_command_lines() {
             "{context}: the batches' files"
         );
     }
-    // A call whose formats take two searches (`-num_descriptions` with a report and a table) would
-    // write the files of two searches: refused before any search.
+    // A call whose formats take two searches (`-num_descriptions` with a report and a table, or
+    // psiblast's outfmt 5 or 11 with another format: their hit lists are cut apart) would write the
+    // files of two searches: refused before any search.
     let search = validate(
         Program::Psiblast,
         &[
@@ -1539,15 +1540,25 @@ fn the_pssm_files_are_the_command_lines() {
         .concat(),
     )
     .unwrap();
-    let error = run_collect(&search, inputs, &["0", "6"]).unwrap_err();
-    assert!(
-        matches!(&error, Error::Argv(_))
+    let refused = |error: &Error| {
+        matches!(error, Error::Argv(_))
             && error.to_string().starts_with(
-                "-out_pssm is not accepted by the library API with formats of two hit list sizes"
-            ),
-        "{error}"
-    );
+                "-out_pssm is not accepted by the library API with formats that take two searches",
+            )
+    };
+    let error = run_collect(&search, inputs, &["0", "6"]).unwrap_err();
+    assert!(refused(&error), "{error}");
     assert!(take_files(&directory).is_empty());
+    let other_cuts = validate(
+        Program::Psiblast,
+        &[&["-num_iterations", "2"][..], &files].concat(),
+    )
+    .unwrap();
+    for formats in [["11", "6"], ["5", "6"]] {
+        let error = run_collect(&other_cuts, inputs, &formats).unwrap_err();
+        assert!(refused(&error), "{formats:?}: {error}");
+        assert!(take_files(&directory).is_empty(), "{formats:?}");
+    }
     // One format, or formats of one hit list size, search once.
     run_collect(&search, inputs, &["6", "7"]).unwrap();
     assert!(!take_files(&directory).is_empty());
@@ -2255,18 +2266,26 @@ fn a_pssm_query_is_the_command_lines() {
     assert!(outcome.reports[0].bytes == stdout);
     assert!(std::fs::read(&api_file).unwrap() == std::fs::read(&cli_file).unwrap());
     // Each format is checked as the command line checks it alone: psiblast's `-in_pssm` writes
-    // outfmt 0, 6 and 7 (`in_pssm::check_in_pssm_options`), whatever the order of the formats.
+    // outfmt 0, 5 to 11 and 20 (`in_pssm::check_in_pssm_options`; the others are item PS15b-2's),
+    // whatever the order of the formats.
     let search = validate(Program::Psiblast, &[]).unwrap();
-    for formats in [&["6", "10"][..], &["10", "6"], &["0", "20"]] {
+    for formats in [&["6", "1"][..], &["1", "6"], &["0", "15"]] {
         let error =
             run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
         assert!(
             error
                 .to_string()
-                .contains("with -in_pssm is not supported by LOSAT's PSIBLAST"),
+                .contains("is not supported by LOSAT's PSIBLAST yet"),
             "{formats:?}: {error}"
         );
     }
+    let outcome = run_collect(
+        &search,
+        Inputs::pssm_database(&pssm, &database),
+        &["6", "10", "20"],
+    )
+    .unwrap();
+    assert_eq!(outcome.reports.len(), 3);
     // A PSSM file the command line cannot read is its error, and so is `-query_loc` with it.
     let missing = directory.join("none.asn");
     let search = validate(Program::Psiblast, &[]).unwrap();

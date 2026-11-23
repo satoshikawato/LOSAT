@@ -231,14 +231,20 @@ fn a_stream_that_does_not_open_is_ncbi_s_exception() {
     );
     let mut stdout = Vec::new();
     assert!(matches!(
-        open_output_file("out", std::ffi::OsStr::new("-"), &mut stdout),
+        open_output_file(
+            "out",
+            std::ffi::OsStr::new("-"),
+            &mut stdout,
+            &OpenFiles::disk()
+        ),
         Ok(OutputFile::Stdout(_))
     ));
     assert_eq!(
         open_output_file(
             "out",
             std::ffi::OsStr::new("/no/such/dir/x.out"),
-            &mut stdout
+            &mut stdout,
+            &OpenFiles::disk()
         )
         .err()
         .unwrap()

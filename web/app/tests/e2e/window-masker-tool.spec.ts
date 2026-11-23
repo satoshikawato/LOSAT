@@ -534,7 +534,8 @@ test.describe('WindowMasker with real reactors and native CLI', () => {
     copyFileSync(u4ObPath, join(nativeDir, 'u4.obinary'));
     copyFileSync(u4AscPath, join(nativeDir, 'u4.ascii'));
 
-    await pickCounts(page, 'convert', 'u4.obinary', u4ObPath);
+    const pickObCounts = () => pickCounts(page, 'convert', 'u4.obinary', u4ObPath);
+    await pickObCounts();
     await setSformat(page, 'binary');
     await setOutName(page, 'c.counts');
     await submitWm(page);
@@ -560,7 +561,7 @@ test.describe('WindowMasker with real reactors and native CLI', () => {
     expect(sha256(convStdActual.stdout), 'v_ascii_to_obinary vs NCBI').toBe(sha256(convStdFrozen.stdout));
 
     await showWmTab(page);
-    await pickCounts(page, 'convert', 'u4.obinary', u4ObPath);
+    await pickObCounts();
     await setSformat(page, 'ascii');
     await page.getByTestId('wm-param-meta').fill('replaced note');
     await setOutName(page, '-');

@@ -526,7 +526,7 @@ export class ToolDraft {
     return { tool: 'windowmasker', stage: state.stage, argv, directory: [], prints };
   }
 
-  private oneReq(stage: WindowMaskerStage, argv: readonly string[], directory: readonly ToolDirectoryFile[]): ToolRequest[] {
+  private req(stage: WindowMaskerStage, argv: readonly string[], directory: readonly ToolDirectoryFile[]): ToolRequest[] {
     return [{ tool: 'windowmasker', stage, argv, directory }];
   }
 
@@ -540,9 +540,9 @@ export class ToolDraft {
 
     if (stage === 'convert') {
       const counts = await this.resolveCountsChoice(state.convertSource, 'Choose a counts file to convert.');
-      const directory = assembleDirectory([counts, ...baseExtraDir]);
+      const dir = assembleDirectory([counts, ...baseExtraDir]);
       const argv = this.buildArgv(state, extraWords, { inputName: counts.name });
-      return this.oneReq(stage, argv, directory);
+      return this.req(stage, argv, dir);
     }
 
     const ustatFile =
@@ -551,9 +551,9 @@ export class ToolDraft {
     if (!this.usesFastaBox(state)) {
       const inputName = state.blastDbIn.trim();
       if (inputName === '') throw new Error('Enter an input name or open files.');
-      const directory = assembleDirectory([...(ustatFile === undefined ? [] : [ustatFile]), ...baseExtraDir]);
+      const dir = assembleDirectory([...(ustatFile === undefined ? [] : [ustatFile]), ...baseExtraDir]);
       const argv = this.buildArgv(state, extraWords, { inputName, ustatName: ustatFile?.name });
-      return this.oneReq(stage, argv, directory);
+      return this.req(stage, argv, dir);
     }
 
     if (state.fastaFiles.some((entry) => entry.status === 'inflating')) {

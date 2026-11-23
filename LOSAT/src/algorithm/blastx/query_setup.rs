@@ -91,6 +91,25 @@ pub(crate) fn unit_ranges(
     }
 }
 
+/// The places a unit of `records` takes (`unit_ranges`; no NCBI counterpart, scheduling only): for
+/// a reader batch searched whole (`searches_batch_whole`), the parts `batch_ranges` would make of
+/// it, whose letters its search holds at once (a lookup table, a preparation and the workers'
+/// diagonal tables of all of them); 1 for every other unit. The batch flow keeps the places
+/// searched at a time to the threads (`native.rs`, `x_flow`), and such a batch is left the threads
+/// of its places (`search::x_bx_mem::whole_batch_threads`).
+#[cfg(feature = "parallel")]
+pub(crate) fn unit_places(
+    records: &[FastaRecord],
+    options: &ResolvedOptions,
+    db: Option<&crate::seqdb::SeqDb>,
+) -> usize {
+    if !records.is_empty() && searches_batch_whole(options, db) {
+        batch_ranges(records, BATCH_SIZE).len()
+    } else {
+        1
+    }
+}
+
 /// Whether BLASTX searches each reader batch of a search of `db` (`None`: `-subject`) as one
 /// unit (`unit_ranges`): with `-use_sw_tback`, and where the `-db_hard_mask` walk keeps a database
 /// sequence apart (`keeps_sequences_apart`). NCBI's Smith-Waterman redo keeps state over the whole

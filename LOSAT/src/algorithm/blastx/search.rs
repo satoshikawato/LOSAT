@@ -189,6 +189,18 @@ fn x_search_core(
             .map_or(records.len(), |shape| shape.query_count),
     )?;
     let ranges = unit_ranges(records, options, subjects.seqdb());
+    // Dispatch point (LOSAT_X_BXCAPFILL, LOSAT_X_BXBUILDPAR, in the strict set): a reader batch
+    // searched whole is left the threads of its places (x_bx_mem::whole_batch_threads) for its
+    // contexts' blocks, its lookup table's build and its subjects. `None` for every other unit.
+    #[cfg(feature = "parallel")]
+    let x_whole = x_bx_mem::whole_batch_threads(
+        pool,
+        options,
+        subjects.len(),
+        super::query_setup::unit_places(records, options, subjects.seqdb()),
+    );
+    #[cfg(not(feature = "parallel"))]
+    let x_whole: Option<usize> = None;
     // The units of a reader batch (`records`) are prepared first, together, and the values NCBI
     // takes of the whole query batch are reduced (`reader_batch.rs`); each unit is then searched
     // from its preparation. A caller that searches the units one by one has prepared them
@@ -216,7 +228,7 @@ fn x_search_core(
             None => {
                 let UnitPrep {
                     prepared, params, ..
-                } = super::reader_batch::prepare_lone_unit(queries, options)?;
+                } = super::reader_batch::prepare_lone_unit(queries, options, x_whole.is_some())?;
                 (prepared, params)
             }
         };
@@ -331,7 +343,7 @@ fn x_search_core(
             // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a capped wave's chunks build
             // their tables on the threads the cap leaves each (x_bx_mem.rs).
             let x_parts =
-                x_bx_mem::build_parts(pool, options, x_cap.is_some(), subjects.len(), false);
+                x_bx_mem::build_parts(pool, options, x_cap.is_some(), subjects.len(), false, None);
             let mut x_next = 0;
             while x_next < chunks.len() {
                 let x_wave = x_cap.map(|(k, _)| x_bx_mem::chunk_wave(pool, k));
@@ -486,7 +498,8 @@ fn x_search_core(
             // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a batch of the capped batch
             // flow builds its table on the threads the cap leaves it (x_bx_mem.rs).
             #[cfg(feature = "parallel")]
-            let x_parts = x_bx_mem::build_parts(pool, options, false, subjects.len(), true);
+            let x_parts =
+                x_bx_mem::build_parts(pool, options, false, subjects.len(), true, x_whole);
             #[cfg(not(feature = "parallel"))]
             let x_parts = 1;
             let lookup = BxLookup::x_new_in_parts(batch, &params, options, x_parts)?;
@@ -511,7 +524,7 @@ fn x_search_core(
                 1
             };
             #[cfg(feature = "parallel")]
-            let x_flow_k = x_subject_flow::chosen(pool, options, subjects);
+            let x_flow_k = x_subject_flow::chosen(pool, options, subjects, x_whole);
             // Dispatch point (LOSAT_X_BXDIAGKEEP, in the strict set): the flow's helpers run on the
             // tables their threads keep (x_bx_mem.rs); only where the flow searches the subjects
             // (the waves below then have nothing to do).
@@ -555,9 +568,9 @@ fn x_search_core(
             let x_flowed = if let Some(x_k) = x_flow_k {
                 let x_t = super::x_timing::lap();
                 // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): a batch of one task of the
-                // capped batch flow has helpers for the threads the cap leaves it
-                // (x_bx_mem::flow_threads).
-                let x_threads = x_bx_mem::flow_threads(pool, options, subjects.len());
+                // capped batch flow has helpers for the threads the cap leaves it, a reader batch
+                // searched whole for the threads of its places (x_bx_mem::flow_threads).
+                let x_threads = x_bx_mem::flow_threads(pool, options, subjects.len(), x_whole);
                 let helper_tables = if x_keep {
                     (1..x_threads)
                         .map(|_| {
@@ -585,7 +598,7 @@ fn x_search_core(
                     helper_tables,
                     xdrop,
                     x_containment,
-                    x_bx_mem::in_capped_batch(pool),
+                    x_bx_mem::in_capped_batch(pool) || x_whole.is_some(),
                     sink,
                 )?;
                 super::x_timing::batch(XBatch::ScanPar, x_t);

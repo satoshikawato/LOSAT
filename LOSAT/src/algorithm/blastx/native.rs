@@ -1842,7 +1842,7 @@ pub(super) fn run_query_batches(
                     &|queries: &[super::input::FastaRecord],
                       layout: Option<&std::sync::Arc<ReaderBatchShape>>| match layout {
                         Some(layout) => prepare_unit(queries, layout, options, search_subjects),
-                        None => prepare_lone_unit(queries, options),
+                        None => prepare_lone_unit(queries, options, false),
                     },
                     &|unit: &XUnit, alone: bool| {
                         let queries = unit.queries();
@@ -2255,10 +2255,11 @@ struct XUnit {
     batch: std::sync::Arc<Vec<FastaRecord>>,
     range: std::ops::Range<usize>,
     last: bool,
-    /// The places the unit takes in the flow (`x_flow`): the search units that `batch_ranges`
-    /// makes of its letters, more than one only for a reader batch of more than one such unit
-    /// searched whole (`query_setup::searches_batch_whole`), whose search holds a lookup table, a
-    /// preparation and the workers' diagonal tables of all its letters; 1 for every other unit.
+    /// The places the unit takes in the flow (`x_flow`, `query_setup::unit_places`): the search
+    /// units that `batch_ranges` makes of its letters, more than one only for a reader batch of
+    /// more than one such unit searched whole (`query_setup::searches_batch_whole`), whose search
+    /// holds a lookup table, a preparation and the workers' diagonal tables of all its letters; 1
+    /// for every other unit.
     places: usize,
     /// Phase 1 of the unit's reader batch when the batch has several units (or, in the capped batch
     /// flow, `LOSAT_X_BXCAPFILL`, is the unit itself), and the unit's place in it. `None`: the unit
@@ -2341,11 +2342,7 @@ impl XUnit {
         let db = subjects.seqdb();
         let ranges = super::query_setup::unit_ranges(&batch, options, db);
         let count = ranges.len();
-        let places = if count == 1 && super::query_setup::searches_batch_whole(options, db) {
-            super::query_setup::batch_ranges(&batch, BATCH_SIZE).len()
-        } else {
-            1
-        };
+        let places = super::query_setup::unit_places(&batch, options, db);
         let ahead = ahead
             && count == 1
             && batch.iter().map(|q| q.sequence.len()).sum::<usize>() <= 2 * BATCH_SIZE;

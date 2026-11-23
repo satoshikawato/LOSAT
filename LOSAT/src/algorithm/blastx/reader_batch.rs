@@ -298,13 +298,16 @@ pub(crate) fn prepare_unit(
 /// A reader batch of one unit prepared: its queries translated and filtered, and the statistical
 /// blocks of its contexts. `search::search_core` prepares such a batch with it when it is searched,
 /// and the capped batch flow (`LOSAT_X_BXCAPFILL`, `x_bx_mem.rs`) ahead of its search. Such a batch
-/// has no shape (its unit's values are the batch's) and no cutoff minima to reduce.
+/// has no shape (its unit's values are the batch's) and no cutoff minima to reduce. `on_pool`: a
+/// reader batch searched whole, whose contexts' blocks are computed on the pool
+/// (`parameters::score_block_for_in`).
 pub(crate) fn prepare_lone_unit(
     queries: &[FastaRecord],
     options: &ResolvedOptions,
+    on_pool: bool,
 ) -> Result<UnitPrep> {
     let prepared = prepare_queries(queries, options)?;
-    let params = score_block_for(&prepared, options.scoring);
+    let params = super::parameters::score_block_for_in(&prepared, options.scoring, on_pool);
     Ok(UnitPrep {
         prepared,
         params,

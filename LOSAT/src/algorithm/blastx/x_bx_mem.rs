@@ -64,8 +64,9 @@
 //!   4.47 / 3.38 s and 309 / 316 MB without, NCBI 140.7 s and 386 MB at one thread; 50 proteins
 //!   unchanged); the Owner chose K = 1 for this table whatever the subjects (2026-11-14,
 //!   `docs/decisions/OWNER_DECISIONS.md`).
-//! - `LOSAT_X_BXCAPFILL[=f]` (built-in f = 4; acts only where `LOSAT_X_BXUNITCAP` caps): the capped
-//!   units keep the threads busy with few subjects too. A capped unit's subjects run as tasks of
+//! - `LOSAT_X_BXCAPFILL[=f]` (built-in f = 4; acts where `LOSAT_X_BXUNITCAP` caps, and for a
+//!   reader batch searched whole, below): the capped units keep the threads busy with few subjects
+//!   too. A capped unit's subjects run as tasks of
 //!   `capped_subjects_per_task` subjects: f tasks for each of the `ceil(threads / K)` threads a unit
 //!   is left, at least one subject and at most the size without the cap (64 for the batch flow's
 //!   subject flow, 16 for the chunk waves; a set keeps that size from 64 x f x ceil(threads / K)
@@ -102,7 +103,8 @@
 //!   batch's residues in its results (21 MiB; the report reads the contexts alone). NCBI makes the
 //!   table for each query (`s_CreateWordArray`, blast_kappa.c:2235-2272); the test reads the same
 //!   words from the residues (`redo_alignment::x_test_near_identical_on_residues`).
-//! - `LOSAT_X_BXBUILDPAR` (acts where `LOSAT_X_BXUNITCAP` caps): the lookup table of a capped unit
+//! - `LOSAT_X_BXBUILDPAR` (acts where `LOSAT_X_BXUNITCAP` caps, and for a reader batch searched
+//!   whole, below): the lookup table of a capped unit
 //!   is built on `ceil(threads / K)` tasks of the pool (the threads a unit is left), its passes by
 //!   ranges of source cells (`tblastx/lookup/x_lut_direct.rs` `x_partitioned_passes`, which gives
 //!   the argument that the table is the one-thread build's), instead of on the unit's thread
@@ -121,6 +123,24 @@
 //!   units on 4 threads, little idle) its builds took 6 % more instructions than the bucket fill
 //!   on one thread and the run 2-4 % more time. The vectors are a set the pool of BLASTX's tables
 //!   lends (`LOSAT_X_BXCLUTPOOL`), the stripes writing the `u16` offsets.
+//! - A reader batch searched whole (`-use_sw_tback`, or a `-db_hard_mask` walk that keeps a
+//!   sequence apart: `query_setup::searches_batch_whole`) takes the places of the units the split
+//!   would make of it (`query_setup::unit_places`), so that the batch flow searches no more letters
+//!   at a time than with the split's units, and one of more places than the threads (K under the
+//!   cap) with no other such batch. It is left the threads of its places (`whole_batch_threads`:
+//!   one per place without the cap, a unit's share under it, at most all of them). These threads
+//!   take its subjects as the flow's tasks, `LOSAT_X_BXCAPFILL`'s f tasks for each of them
+//!   (`flow_subjects_per_task`, `flow_threads`; the helpers leave once every task is claimed, as
+//!   inside the capped flow), build its lookup table in as many parts (`LOSAT_X_BXBUILDPAR`), and
+//!   compute its contexts' Karlin blocks on the pool (`parameters::score_block_for_in`), the work
+//!   that the split's units had done side by side. Without them such a batch searched its subjects
+//!   on one thread (two inside the capped flow) wherever they make one task of the flow (64
+//!   subjects or fewer, the 40 proteins of `ov_atha`), and built its table and its blocks on one,
+//!   also when it was searched alone. NCBI searches one query batch at a time, all its threads
+//!   taking the batch's subjects from one source
+//!   (`CBlastPrelimSearch::x_LaunchMultiThreadedSearch`, prelim_stage.cpp:142-180). The other units'
+//!   schedule is unchanged: a unit of one place searched alone with the pool inside (the end of the
+//!   input, one long query) keeps tasks of 64 subjects.
 //!
 //! Exactness. A subject's computation depends on the subject and the query chunk alone, not on the
 //! diagonal table it runs on, while no diagonal offset passes 2^30 (`x_subject_flow.rs`, module
@@ -363,15 +383,54 @@ pub(crate) fn flow_unit_cap(
     })
 }
 
+/// No NCBI counterpart (scheduling only): the threads a reader batch searched whole of `places`
+/// places (`query_setup::unit_places`, more than one) is left on `pool`: those of its places, each
+/// standing for the threads a unit of one place is left (in the batch flow without the cap, one:
+/// such a unit is searched on its own thread; inside the capped batch flow, `unit_share`), and at
+/// most the pool's. The batch flow keeps the places searched at a time to the threads, or to K
+/// under the cap (`native.rs`, `x_flow`), so the batches searched whole side by side are left
+/// at most the pool's threads together, and one of more places than that, searched with no other
+/// unit of several places, is left all of them. Such a batch is one query chunk (NCBI splits no
+/// batch of several queries): the threads go to its subjects (`flow_subjects_per_task`,
+/// `flow_threads`) and the build of its lookup table (`build_parts`), as NCBI's threads share the
+/// subjects of the one batch it searches at a time. `None`: a unit of one place, whose schedule
+/// this does not change.
+pub(crate) fn whole_batch_threads(
+    pool: &crate::utils::threading::SearchPool<'_>,
+    options: &ResolvedOptions,
+    subjects: usize,
+    places: usize,
+) -> Option<usize> {
+    if places <= 1 || !pool.enabled() {
+        return None;
+    }
+    let threads = pool.threads();
+    let one = match search_cap_k(threads, options, subjects) {
+        Some((k, _)) if in_capped_batch(pool) => {
+            unit_share(threads, k, one_task_bound(options, subjects))
+        }
+        _ => 1,
+    };
+    Some(places.saturating_mul(one).min(threads))
+}
+
 /// No NCBI counterpart: subjects per task of the subject flow in a chunk of a batch searched with
-/// the pool inside: `most`, or inside the capped batch flow (`in_capped_batch`) the size of
-/// `flow_unit_cap`'s tasks.
+/// the pool inside: `most`; inside the capped batch flow (`in_capped_batch`) the size of
+/// `flow_unit_cap`'s tasks; for a reader batch searched whole (`whole`: the threads it is left,
+/// `whole_batch_threads`) the size that gives it f tasks for each of them (`LOSAT_X_BXCAPFILL`).
 pub(crate) fn flow_subjects_per_task(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,
     subjects: usize,
     most: usize,
+    whole: Option<usize>,
 ) -> usize {
+    if let Some(share) = whole {
+        if cap_fill().is_some() {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXCAPFILL", true);
+        }
+        return capped_subjects_per_task(share, subjects, most);
+    }
     match search_cap_k(pool.threads(), options, subjects) {
         Some((k, _)) if in_capped_batch(pool) => capped_subjects_per_task(
             unit_share(pool.threads(), k, one_task_bound(options, subjects)),
@@ -383,13 +442,18 @@ pub(crate) fn flow_subjects_per_task(
 }
 
 /// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`): the threads the subject flow of a
-/// batch searched on `pool` takes (its own and the helpers): the pool's, and for a batch of one task
-/// of the capped batch flow (`one_task`) the threads the cap leaves it.
+/// batch searched on `pool` takes (its own and the helpers): the pool's, for a batch of one task
+/// of the capped batch flow (`one_task`) the threads the cap leaves it, and for a reader batch
+/// searched whole those it is left (`whole`, `whole_batch_threads`).
 pub(crate) fn flow_threads(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,
     subjects: usize,
+    whole: Option<usize>,
 ) -> usize {
+    if let Some(share) = whole {
+        return share;
+    }
     match search_cap_k(pool.threads(), options, subjects) {
         Some((k, _)) if in_capped_batch(pool) && one_task_bound(options, subjects) => {
             unit_share(pool.threads(), k, true)
@@ -439,13 +503,15 @@ fn build_par_on() -> bool {
 /// capped batch flow), else 1 (the build on one thread). K is the one the search keeps to
 /// (`search_cap_k`: `LOSAT_X_BXUNITCAP`'s, at most `LOSAT_X_BXCLUTCAP`'s with the compressed table
 /// and `LOSAT_X_BXW4CAP`'s with the 4-letter one). `whole_batch`: the unit is a whole batch (not a
-/// chunk of a split query's waves).
+/// chunk of a split query's waves). `whole`: a reader batch searched whole, built on the threads
+/// it is left (`whole_batch_threads`) with the cap or without.
 pub(crate) fn build_parts(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,
     capped: bool,
     subjects: usize,
     whole_batch: bool,
+    whole: Option<usize>,
 ) -> usize {
     if !build_par_on() {
         return 1;
@@ -453,12 +519,14 @@ pub(crate) fn build_parts(
     let k = search_cap_k(pool.threads(), options, subjects)
         .map(|(k, _)| k)
         .filter(|_| capped || in_capped_batch(pool));
-    let parts = k.map_or(1, |k| {
-        unit_share(
-            pool.threads(),
-            k,
-            whole_batch && one_task_bound(options, subjects),
-        )
+    let parts = whole.unwrap_or_else(|| {
+        k.map_or(1, |k| {
+            unit_share(
+                pool.threads(),
+                k,
+                whole_batch && one_task_bound(options, subjects),
+            )
+        })
     });
     crate::utils::xreach::x_reach!("LOSAT_X_BXBUILDPAR", parts > 1);
     parts

@@ -1572,10 +1572,7 @@ fn sw_job_match(test: XSwTest<'_>, oid: u32, case: SwCase) -> XComputed {
         XSwTest::Heap(heap, before) => {
             x_sw_heap_test(heap, before, (case.evalue, case.score, oid), deferred)
         }
-        XSwTest::Continued(asked) => {
-            assert_eq!(asked, (case.evalue, case.score), "the continued test");
-            true
-        }
+        XSwTest::Continued => true,
     };
     let result = if case.kind == SwKind::NotAsked || !answer(&mut deferred) {
         no_alignment()
@@ -1672,7 +1669,15 @@ fn sw_drive_expanding(
                             .partition_point(|other| other.q_idx < matched.q_idx);
                         let test =
                             match window.continued.binary_search_by_key(&index, |&(at, _)| at) {
-                                Ok(found) => XSwTest::Continued(window.continued[found].1),
+                                Ok(found) => {
+                                    let case = cases[matched.q_idx][matched.position];
+                                    assert_eq!(
+                                        window.continued[found].1,
+                                        (case.evalue, case.score),
+                                        "the continued test"
+                                    );
+                                    XSwTest::Continued
+                                }
                                 Err(_) => XSwTest::Heap(&heaps[matched.q_idx], index - first),
                             };
                         sw_job_match(

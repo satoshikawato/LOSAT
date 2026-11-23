@@ -1008,9 +1008,9 @@ enum XSwTest<'h> {
     /// From the query's heap as the window's start left it, with the query's matches in the window
     /// before this one (`x_sw_heap_test`).
     Heap(&'h BlastCompoHeap, usize),
-    /// A continuation (`XCarry`): TRUE, as the replay answered the test with this E-value and
-    /// score; the redo resumes past the test (`x_redo_match_sw`), so it is not asked again.
-    Continued((f64, i32)),
+    /// A continuation (`XCarry`): TRUE, as the replay answered the test that the match's job left
+    /// open; the redo resumes past the test (`x_redo_match_sw`), so it is not asked again.
+    Continued,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3621
@@ -1052,7 +1052,7 @@ fn x_redo_match_sw<P>(
     let mut kept = None;
     let resume = match test {
         XSwTest::Heap(..) => None,
-        XSwTest::Continued(_) => {
+        XSwTest::Continued => {
             Some(resume.expect("a continuation resumes from the state that its job kept"))
         }
     };
@@ -1087,7 +1087,7 @@ fn x_redo_match_sw<P>(
                 }
             }
             // BLASTP's match has one window, whose one test the continuation resumes past.
-            XSwTest::Continued(_) => unreachable!("a continuation's heap test is asked again"),
+            XSwTest::Continued => unreachable!("a continuation's heap test is asked again"),
         },
         &mut kept,
     );
@@ -1208,12 +1208,18 @@ where
                         let at = job.start + index;
                         let (test, resume) =
                             match window.continued.binary_search_by_key(&at, |&(at, _)| at) {
-                                Ok(found) => (
-                                    XSwTest::Continued(window.continued[found].1),
-                                    carried[at]
-                                        .as_ref()
-                                        .and_then(|stopped| stopped.resume.as_deref()),
-                                ),
+                                Ok(found) => {
+                                    let stopped = carried[at].as_ref();
+                                    debug_assert_eq!(
+                                        stopped.and_then(|stopped| stopped.deferred),
+                                        Some(window.continued[found].1),
+                                        "a continuation resumes from the test that was continued"
+                                    );
+                                    (
+                                        XSwTest::Continued,
+                                        stopped.and_then(|stopped| stopped.resume.as_deref()),
+                                    )
+                                }
                                 Err(_) => (XSwTest::Heap(&heaps[q_idx], before_job + index), None),
                             };
                         x_redo_match_sw(

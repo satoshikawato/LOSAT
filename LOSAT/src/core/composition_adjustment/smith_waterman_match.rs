@@ -493,7 +493,16 @@ pub(crate) enum SwHeapAnswer {
     /// reached): the redo goes on as on FALSE, which is NCBI's redo of the match where the answer
     /// is FALSE, and keeps the state that the test found (`SwMatchResume`), from which it resumes
     /// where the answer is TRUE. At most one test of a call (the tests after it, on the FALSE
-    /// answer's way, are answered; BLASTP's match has one window, so one test).
+    /// answer's way, are answered; BLASTP's match has one window, so one test). Only that redo
+    /// leaves a test open, and it is built with the threads (`parallel`, and `wasm-threads` on
+    /// wasm32); the other builds answer every test.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(dead_code)
+    )]
     Deferred,
 }
 

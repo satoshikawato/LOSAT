@@ -417,9 +417,10 @@ fn outcome(run: &Run) -> std::result::Result<&BlastRedoOneMatchResult, String> {
 
 // Random matches of the query's parts: one to three copies of a part in the subject, each with
 // letters changed at random and an HSP of its own, after a first letter W or D or none; the query
-// with a first W or without; composition modes 1, 2 and 3; `-evalue` 10, or 1e6, at which a score
+// with a first W or without; composition modes 1, 2 and 3; `-evalue` 10; 1e6, at which a score
 // of 0 is significant, so that a match of two or more HSPs fails or never ends (by the first
-// cell). A heap test left open ends the call as its FALSE does, and the call resumed from the state
+// cell); or 1e-100, at which no first round is significant, so the heap is never asked (the
+// call keeps no state). A heap test left open ends the call as its FALSE does, and the call resumed from the state
 // that it kept ends as the TRUE answer does (alignments, p-value, lambda ratio, the matrix left,
 // or the failed or endless redo), without asking the heap again.
 #[test]
@@ -463,7 +464,14 @@ fn a_redo_resumed_at_its_open_heap_test_equals_the_redo_answered_true() {
         }
         let subject = encode(&subject_text);
         let p = params_in(modes[rng.below(modes.len())], false, 1);
-        let evalues = (1e6, if rng.below(3) == 0 { 1e6 } else { 10.0 });
+        let evalues = (
+            1e6,
+            match rng.below(4) {
+                0 => 1e6,
+                1 => 1e-100,
+                _ => 10.0,
+            },
+        );
         let call = |resume: Option<&SwMatchResume>, heap: &mut dyn FnMut() -> SwHeapAnswer| {
             run_from(&query, &subject, &hsps, &p, evalues, resume, heap)
         };

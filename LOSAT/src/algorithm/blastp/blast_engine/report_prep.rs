@@ -445,6 +445,17 @@ pub(super) fn prefetch_reported_subjects(
                 |words, outfmt| words.or(outfmt.printed_ids()),
             ),
         )?;
+        // A PSSM read whose failing lookup NCBI answers with a sequence loaded before (by the
+        // run's record, the reports and the reads before it), as a report's (`HitLoad::Held`):
+        // after the reports' refusals, as NCBI reads the PSSM after the round's reports.
+        if let (true, Some(database)) = (pssm_made, database) {
+            titles.check_pssm_holds(
+                (database, ranges.x_ordinal_base),
+                pssm_reads,
+                batch_prefetch,
+                (after_throw, &hit_loads, reported_lists),
+            )?;
+        }
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
     // Before the reports of a batch NCBI fetches every subject that the batch reports, and with

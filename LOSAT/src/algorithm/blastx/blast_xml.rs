@@ -1502,7 +1502,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 .iter()
                                 .filter(|hsp| has_seqalign(hsp, options.gapped))
                             {
-                                let identities = read_num_ident(hsp.identity as i64, false);
+                                let identities = read_num_ident(hsp.identity as i64, None);
                                 // The `catch` of an HSP whose subject's lookup throws comes before
                                 // NCBI reads its rows (`HspSink::reads_alignment`).
                                 if hsps.unaligned([XmlHsp::unaligned(

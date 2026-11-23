@@ -316,6 +316,19 @@ impl LoadsBefore {
         }
     }
 
+    /// These loads, then `run` (ordinal ids) of other query batches and `in_batch` of this
+    /// record's batch: the loads of a walk before the next one (psiblast's PSSM reads after the
+    /// round's reports, `ListedTitles::check_pssm_holds` of BLASTP).
+    pub fn and_loads(mut self, run: Vec<u32>, in_batch: Vec<u32>) -> Self {
+        self.recorded.extend(run.iter().chain(&in_batch));
+        self.recorded.sort_unstable();
+        self.recorded.dedup();
+        self.in_batch.extend(in_batch);
+        self.in_batch.sort_unstable();
+        self.in_batch.dedup();
+        self
+    }
+
     /// No record, after calls whose loads no record holds where `unrecorded`.
     pub fn after_calls(unrecorded: bool) -> Self {
         LoadsBefore {

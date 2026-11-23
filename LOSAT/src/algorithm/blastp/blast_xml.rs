@@ -48,9 +48,9 @@ pub(crate) struct BlastpXml<'a> {
     pub searched: Vec<bool>,
     /// The program, for the refusals' messages (`BLASTP`).
     pub program: &'static str,
-    /// The program is psiblast, whose Seq-align of an HSP of 0 identities has no `num_ident`
-    /// (`serial::seqalign::read_num_ident`).
-    pub psiblast: bool,
+    /// The app's program type (`BlastpApp::program_type`, `RunRecord::program_type`): psiblast's
+    /// Seq-align of an HSP of 0 identities has no `num_ident` (`serial::seqalign::read_num_ident`).
+    pub program_type: Option<crate::report::record::ProgramType>,
     /// Whether the document ends with this call.
     pub epilog: bool,
     /// Whether the run stops after this call: no epilog and no later report call (the block
@@ -203,7 +203,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                             .context("BLASTP report rows do not cover the hit list")?;
                         next_row += 1;
                         let identities =
-                            read_num_ident(row.seqalign_num_ident as i64, xml.psiblast);
+                            read_num_ident(row.seqalign_num_ident as i64, xml.program_type);
                         if hsps.unaligned([XmlHsp::unaligned(
                             hsp.raw_score,
                             hsp.bit_score,

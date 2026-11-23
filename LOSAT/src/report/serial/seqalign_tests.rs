@@ -1263,16 +1263,24 @@ fn replaced_bytes_of_a_long_string_share_it() {
 
 // Line DBID pfoff-4: BLAST XML's `catch` of an HSP whose subject's lookup throws writes the
 // Seq-align's identities as `GetAlnScores` reads them: the count, or -1 where the Seq-align has
-// no `num_ident` (a count below 0; psiblast's 0, which NCBI sets to -1 first).
+// no `num_ident` (a count below 0; psiblast's 0, which NCBI sets to -1 first), the one rule of
+// the Seq-annot formats too (`seq_align_num_ident`).
 #[test]
 fn the_identities_of_a_seq_align_as_ncbi_reads_them() {
-    use super::seqalign::read_num_ident;
-    assert_eq!(read_num_ident(66, false), 66);
-    assert_eq!(read_num_ident(0, false), 0);
-    assert_eq!(read_num_ident(-1, false), -1);
-    assert_eq!(read_num_ident(0, true), -1);
-    assert_eq!(read_num_ident(5, true), 5);
-    assert_eq!(read_num_ident(i64::from(i32::MAX) + 1, false), i32::MAX);
+    use super::seqalign::{read_num_ident, seq_align_num_ident};
+    use crate::report::record::ProgramType;
+    let psiblast = Some(ProgramType::PsiBlast);
+    assert_eq!(read_num_ident(66, None), 66);
+    assert_eq!(read_num_ident(0, None), 0);
+    assert_eq!(read_num_ident(-1, None), -1);
+    assert_eq!(read_num_ident(0, psiblast), -1);
+    assert_eq!(read_num_ident(5, psiblast), 5);
+    assert_eq!(read_num_ident(0, Some(ProgramType::PsiTblastn)), 0);
+    assert_eq!(read_num_ident(i64::from(i32::MAX) + 1, None), i32::MAX);
+    // The score the Seq-annot formats write: none where XML's `catch` reads -1.
+    assert_eq!(seq_align_num_ident(0, psiblast), None);
+    assert_eq!(seq_align_num_ident(0, Some(ProgramType::RpsBlast)), Some(0));
+    assert_eq!(seq_align_num_ident(-1, None), None);
 }
 
 /// A PSSM search's Seq-annot names its program type (`Blast Type`: psiblast 10, psitblastn 11,

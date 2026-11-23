@@ -374,7 +374,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                             identities.map_or(hsp.hit.num_ident as i64, |identities| {
                                 i64::from(identities[query_start + index])
                             }),
-                            false,
+                            None,
                         );
                         if hsps.unaligned([XmlHsp::unaligned(
                             hsp.hit.raw_score,

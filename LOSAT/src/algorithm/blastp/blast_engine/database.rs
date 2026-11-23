@@ -2117,11 +2117,25 @@ impl ListedTitles<'_> {
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
             let kept = cut(query).min(count);
             let mut beyond = Vec::new();
+            // The PSSM's reads of the query in their order, where its batch reads one by one and
+            // one of them may be given another sequence without its failing lookup
+            // (`check_pssm_holds`).
+            let mut order = Vec::new();
+            let mut may_hold = false;
             for (index, hsp_list) in hit_list.hsplist_array[..count]
                 .iter()
                 .enumerate()
                 .filter(|(_, hsp_list)| pssm_includes(hsp_list, inclusion_ethresh))
             {
+                if let Some(subject) = self
+                    .parsed_subject(hsp_list.oid as usize)
+                    .filter(|_| prefetch.reads_one_by_one(query))
+                {
+                    order.push(hsp_list.oid as usize);
+                    may_hold |= subject
+                        .held_before((|_| true, true), (|_| true, true))
+                        .is_some();
+                }
                 if self.parsed_subject(hsp_list.oid as usize).is_none() {
                     if throws {
                         by_ordinal.insert(hsp_list.oid as usize);
@@ -2147,6 +2161,9 @@ impl ListedTitles<'_> {
                     reads.loads.resize_with(query + 1, || None);
                 }
                 reads.loads[query] = Some(QueryLoads { kept, beyond });
+            }
+            if may_hold {
+                reads.holds.push((query, order));
             }
         }
         // The blob that each read of a subject with parsed Seq-ids loads, whose taxids NCBI looks
@@ -2226,6 +2243,111 @@ impl ListedTitles<'_> {
             }
         }
         Ok(reads)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:259-299 (cited at
+    // `report_prep::report_values`: a round's reports, then the PSSM for the next round)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450
+    // The PSSM reads each included subject by its Seq-align id in the order of the hit list, after
+    // the round's reports, in NCBI's scope of the query's batch and its BLAST database data loader:
+    // where the lookup of the id fails on a file, a sequence loaded before that holds the id (by
+    // its handle in the loader, or an id that the scope takes for it) is given without the lookup,
+    // so nothing throws and the PSSM takes that sequence's letters, with no warning (probe of line
+    // DBID pfoff-4's merge 7, `h2.Z.21.nb.it2.8`: `gi|5001|ref|NP_100001.1|`, read before
+    // `ref|NP_100001.1|` of a list with a database without the accession table, is read for it;
+    // `h2.G.21.b1.it2.8`: the second query's read, after the first query's PSSM loaded it).
+    /// LOSAT's refusal of a PSSM read whose Seq-align id's lookup fails on a file where NCBI gives
+    /// another sequence for it without the lookup, as the reports' (`HitLoad::Held`,
+    /// `ParsedSubject::fetched`): the reads of each query of `reads.holds` (`pssm_reads`), in their
+    /// order, after the loads of the run's record (`shared::TaxdbRun::loads_before`), the loads
+    /// of the call's reports (`report`: the call's answer `FormatThrow`, which reads nothing for
+    /// the Seq-annot formats and the archive, and its walk `HitLoads` of the reported hit lists
+    /// `reported`, each query's report in the scope of its batch, numbered from `batch_base`),
+    /// and the PSSM reads of the call's queries before. A round whose PSSM is made asks it.
+    pub(super) fn check_pssm_holds(
+        &self,
+        (database, batch_base): (&BlastpDatabase, usize),
+        reads: &PssmReads,
+        prefetch: &shared::BatchPrefetch,
+        (run, hit_loads, reported): (
+            crate::report::db_subject::FormatThrow,
+            &HitLoads,
+            &[Option<BlastpHitList>],
+        ),
+    ) -> Result<()> {
+        use crate::report::db_subject::{
+            AfterThrow, FormatThrow, HitLoad, ReportKeys, ReportRead, RunThrow,
+        };
+        let reports_read = !matches!(run, FormatThrow::Unread);
+        let ordinal = |rank: usize| self.listed.ordinals[rank];
+        // The ordinal ids that the call's report of `query` loads.
+        let report_loads = |query: usize| -> Vec<u32> {
+            if !reports_read {
+                return Vec::new();
+            }
+            let Some(Some(hit_list)) = reported.get(query) else {
+                return Vec::new();
+            };
+            hit_list.hsplist_array[..hit_list.hsplist_count.min(hit_list.hsplist_array.len())]
+                .iter()
+                .filter_map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize))
+                .filter(|&rank| self.parsed_subject(rank).is_some() && hit_loads.loaded(rank))
+                .map(ordinal)
+                .collect()
+        };
+        for (query, order) in &reads.holds {
+            let read = prefetch.report_read(*query, batch_base);
+            // The reports and PSSM reads of the call's queries before (psiblast's call has one
+            // query), in this query's batch or another, then this query's report, in its batch.
+            let (mut other, mut in_batch) = (Vec::new(), Vec::new());
+            for before in 0..*query {
+                let loads = if prefetch.report_read(before, batch_base).batch == read.batch {
+                    &mut in_batch
+                } else {
+                    &mut other
+                };
+                loads.extend(report_loads(before));
+                loads.extend(reads.one_by_one(before).iter().map(|&rank| ordinal(rank)));
+            }
+            in_batch.extend(report_loads(*query));
+            let before = database
+                .taxdb
+                .loads_before(read.batch)
+                .and_loads(other, in_batch);
+            let walk = HitLoads::of(
+                before,
+                FormatThrow::Writes(RunThrow {
+                    keeps_scope: run.run().is_some_and(|run| run.keeps_scope),
+                    ..RunThrow::every_row(AfterThrow::WritesRow)
+                }),
+                [(
+                    ReportRead {
+                        one_by_one: true,
+                        batch: read.batch,
+                    },
+                    ReportKeys::Entries(order.iter().map(|&rank| Some(rank)).collect()),
+                )],
+                |rank| self.parsed_subject(rank),
+                |_, _| 1,
+            );
+            for &rank in order {
+                let load = walk.load(rank);
+                if !matches!(load, HitLoad::Held(_)) {
+                    continue;
+                }
+                let Some(subject) = self.parsed_subject(rank) else {
+                    continue;
+                };
+                if let Err(reason) = subject.fetched(false, false, load) {
+                    return Err(shared::parsed_refusal(
+                        self.oids.oid(ordinal(rank)),
+                        &format!("{reason}, and is in psiblast's PSSM, whose letters NCBI BLAST+ 2.17.0 reads by that id (also beyond -max_target_seqs)"),
+                        self.program,
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1142-1182
@@ -3162,6 +3284,11 @@ pub(super) struct PssmReads {
     /// PSSM of a query whose batch reads one by one reads by their Seq-align ids, before the cut
     /// (`one_by_one`).
     one_by_one: Vec<Vec<usize>>,
+    /// The queries (of the call) whose batch reads one by one and one of whose PSSM's reads fails
+    /// on a file where NCBI may give another sequence for it without the lookup
+    /// (`ParsedSubject::held_before`), each with the ranks of its reads with parsed Seq-ids in
+    /// their order (`ListedTitles::check_pssm_holds`).
+    holds: Vec<(usize, Vec<usize>)>,
 }
 
 /// What the PSSM's reads of a query need beyond its hit list after the formatter's cut

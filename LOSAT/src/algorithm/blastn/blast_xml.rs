@@ -175,7 +175,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 })?;
                 sink.hit(&hit, |hsps| {
                     for hsp in lists[range].iter().flat_map(|hsp_list| &hsp_list.hsps) {
-                        let identities = read_num_ident(hsp.num_ident as i64, false);
+                        let identities = read_num_ident(hsp.num_ident as i64, None);
                         if hsps.unaligned([XmlHsp::unaligned(
                             hsp.raw_score,
                             hsp.bit_score,

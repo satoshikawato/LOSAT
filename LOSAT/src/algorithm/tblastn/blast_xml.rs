@@ -600,7 +600,7 @@ impl PreparedXml {
                                         linked.hsp.score,
                                         payload.bit_score,
                                         seqalign_evalue(linked.evalue),
-                                        read_num_ident(i64::from(payload.num_ident), false),
+                                        read_num_ident(i64::from(payload.num_ident), program_type),
                                     )
                                 },
                             );
@@ -671,7 +671,7 @@ impl PreparedXml {
                                     query_step: 1,
                                     alignment_identities: read_num_ident(
                                         i64::from(payload.num_ident),
-                                        false,
+                                        program_type,
                                     ),
                                 })?;
                             }

@@ -532,7 +532,12 @@
   holder whose other line holds an id that the scope takes for the Seq-align id or matches weakly,
   `gi|7052|ref|NP_100001.1|` after `gi|7051|ref|XP_900001.1|`, leaves it thrown, as NCBI does,
   where this version refused it at first), and with `-html` outfmt 0 ends the run at the first
-  description line of such a sequence (exit 2), so a holder after it is not refused (M2); line
+  description line of such a sequence (exit 2), so a holder after it is not refused (M2); at the
+  merge of dev that brought line PS item PS15b-1 (psiblast's outfmt 5, 8, 9 and 11), psiblast's
+  outfmt 5 of such a sequence is written as BLASTP's, and its PSSM, which reads each sequence that
+  it includes by its Seq-align id after the round's reports, in the order of the hit list, refuses
+  such a sequence where NCBI gives a held one for it (outfmt 8 wrote NCBI's `Failed to retrieve
+  sequence` for a read that NCBI's scope held: probe of the merge, 6 runs); line
   DBID item pfoff-4, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
   after 1.91; first 1.75, then 1.77, 1.79, 1.86, 1.90 and 1.92 at the merges of dev that brought
   line RG item D5b-3's 1.74, line NP item M5's 1.75 and line RG item X4b-2's 1.76, then line RG
@@ -2032,8 +2037,11 @@ file would differ, and NCBI's programs still could not open the database).
   which no later batch is prefetched) or outfmt 5 (since version 1.92, line DBID item pfoff-4: each
   `Hit` of such a sequence is the Seq-align id's FASTA form, `Unknown` and length 0, with HSPs of
   its scores, coordinates 0, the Seq-align's identities and no letters, and the report goes on);
-  in each of these formats it refuses such a sequence where the run loaded before it, in NCBI's
-  order and while NCBI keeps it, another sequence of the database whose own lookup does not fail
+  in each of these formats, and in psiblast's PSSM read (in every format, after the round's
+  reports and the reads before it in the PSSM, in the order of the hit list; since version 1.92, at
+  the merge of line PS item PS15b-1), it refuses such a sequence where the run loaded before it,
+  in NCBI's order and while NCBI keeps it, another sequence of the database whose own lookup
+  does not fail
   and that NCBI gives for its Seq-align id without the lookup (listed in the LMDB files that have
   the accession table), from one of two places: NCBI's data loader keeps the ids of every
   definition line of every sequence that it loaded for the whole run and gives that sequence for

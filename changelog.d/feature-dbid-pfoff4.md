@@ -1,7 +1,7 @@
 - A `-db` list of version 5 databases made with and without `makeblastdb -parse_seqids`, where `PRE_FETCH_SEQS_LIMIT`
   turns a query batch's prefetch off and a query's report reads a parsed Seq-id that a database of the list cannot
-  look up: BLAST XML (`-outfmt 5`) now gives the results of NCBI BLAST+ instead of LOSAT's refusal, in BLASTP, BLASTN
-  (every task), BLASTX, TBLASTN and TBLASTX. The hit of such a sequence shows its Seq-id (`ref|NP_100001.1|`), the
+  look up: BLAST XML (`-outfmt 5`) now gives the results of NCBI BLAST+ instead of LOSAT's refusal, in BLASTP, psiblast
+  (each round), BLASTN (every task), BLASTX, TBLASTN and TBLASTX. The hit of such a sequence shows its Seq-id (`ref|NP_100001.1|`), the
   name and accession `Unknown` and the length 0; each of its alignments keeps its number, scores and E-value, with the
   coordinates 0, the number of identities and no sequence letters. The report goes on with the next hit and the run
   ends normally (exit status 0), as NCBI BLAST+'s does. `-outfmt 17` keeps the refusal, and LOSAT's library still
@@ -21,7 +21,11 @@
   beside `gi|7051|ref|XP_900001.1|` with a second line `gi|7052|ref|NP_100001.1|`, LOSAT writes `Unknown` for
   `emb|NP_100001.1|` and `ref|NP_100001|` again, as NCBI BLAST+ does, and refuses `ref|NP_100001.1|`. With `-html` and
   `-outfmt 0`, where NCBI BLAST+ ends the run at the first description line of such a hit (`BLAST Database error`,
-  exit status 2) before a held sequence, LOSAT now writes that output instead of refusing the run.
+  exit status 2) before a held sequence, LOSAT now writes that output instead of refusing the run. psiblast's PSSM
+  (for the next round, or `-out_pssm`), which reads each sequence it includes by its Seq-id after the round's report,
+  is refused the same way where NCBI BLAST+ gives such a held sequence for the read, in every output format: with
+  `-outfmt 8`, `9` and `11`, LOSAT wrote NCBI BLAST+'s warning `Failed to retrieve sequence` there, which NCBI BLAST+
+  does not write.
 - LOSAT's library also refuses a sequence whose Seq-id a database of such a list cannot look up in a call whose
   formats NCBI BLAST+ would end differently after it, with another exit status or another standard error, for
   example `-outfmt 5` (which goes on to the end) with `-outfmt "6 qseqid slen"` (which stops there with

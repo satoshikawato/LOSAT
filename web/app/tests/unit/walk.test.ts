@@ -6,7 +6,6 @@ import { alphabetOf, makeFixtures, pickFor, XSS_PAYLOAD } from '../e2e/walk/fixt
 import {
   emptyModel,
   expectedInputs,
-  savedName,
   includedBytes,
   joinedBytes,
   parseShellWords,
@@ -142,43 +141,39 @@ describe('walk model', () => {
     expect(decode(joinedBytes([source('>a\nAC'), source('>b\nGT\n'), source('>c\nTT\n', [0]), source('>d\nCC\n')], 'nucleotide'))).toBe('>a\nAC\n>b\nGT\n>d\nCC\n');
   });
 
-  it('names the inputs as the command line does: the pasted text, one file, or several together or apart', () => {
+  it('names the inputs that the user gave, and leaves the made ones (pasted text, several together) to the run\'s own name', () => {
     let model = withPaste(emptyModel(), 'query', '>q\nAC\n');
-    expect(expectedInputs(model.query, 'query', 'nucleotide', [0]).map((input) => input.name)).toEqual(['query.fa']);
+    expect(expectedInputs(model.query, 'nucleotide', [0]).map((input) => input.name)).toEqual([undefined]);
     model = withFiles(model, 'query', [{ name: 'a.fa', bytes: text('>a\nGG\n') }]);
-    expect(expectedInputs(model.query, 'query', 'nucleotide', [0, 1]).map((input) => input.name)).toEqual(['combined_query.fa']);
-    expect(expectedInputs(model.query, 'query', 'nucleotide', [1]).map((input) => input.name)).toEqual(['a.fa']);
+    expect(expectedInputs(model.query, 'nucleotide', [0, 1]).map((input) => input.name)).toEqual([undefined]);
+    expect(expectedInputs(model.query, 'nucleotide', [1]).map((input) => input.name)).toEqual(['a.fa']);
     model = withMode(model, 'query', 'separate');
-    expect(expectedInputs(model.query, 'query', 'nucleotide', [0, 1]).map((input) => input.name)).toEqual(['query.fa', 'a.fa']);
+    expect(expectedInputs(model.query, 'nucleotide', [0, 1]).map((input) => input.name)).toEqual([undefined, 'a.fa']);
     // Apart, an input whose records are all left out is no run of its own.
     const apart = withIncluded(model, 'query', 'nucleotide', 1, 0, false);
-    expect(expectedInputs(apart.query, 'query', 'nucleotide', [0, 1]).map((input) => input.name)).toEqual(['query.fa']);
-    expect(expectedInputs(withMode(apart, 'query', 'combined').query, 'query', 'nucleotide', [0, 1]).map((input) => input.name)).toEqual(['combined_query.fa']);
+    expect(expectedInputs(apart.query, 'nucleotide', [0, 1]).map((input) => input.name)).toEqual([undefined]);
+    expect(expectedInputs(withMode(apart, 'query', 'combined').query, 'nucleotide', [0, 1]).map((input) => input.name)).toEqual([undefined]);
     model = withIncluded(withPaste(model, 'query', '>q\nAC\n>r\nGT\n'), 'query', 'nucleotide', 0, 0, false);
-    expect(decode(expectedInputs(model.query, 'query', 'nucleotide', [0])[0]!.bytes)).toBe('>r\nGT\n');
+    expect(decode(expectedInputs(model.query, 'nucleotide', [0])[0]!.bytes)).toBe('>r\nGT\n');
     expect(withPaste(model, 'query', '').query.sources.map((source) => source.name)).toEqual(['a.fa']);
   });
 
   // Line WQA's D22, review round 3 (M1): the model says which inputs are the user's files and which the page makes.
   it('marks an input as made (pasted, several, or with records left out) or as the user\'s file as given', () => {
     let model = withFiles(emptyModel(), 'query', [{ name: 'a.fa', bytes: text('>a\nAC\n>b\nGT\n') }]);
-    expect(expectedInputs(model.query, 'query', 'nucleotide', [0]).map(({ name, made }) => ({ name, made }))).toEqual([{ name: 'a.fa', made: false }]);
+    expect(expectedInputs(model.query, 'nucleotide', [0]).map(({ name, made }) => ({ name, made }))).toEqual([{ name: 'a.fa', made: false }]);
     const left = withIncluded(model, 'query', 'nucleotide', 0, 1, false);
-    // The page names the file of the records itself: the model does not.
-    expect(expectedInputs(left.query, 'query', 'nucleotide', [0]).map(({ name, made, from }) => ({ name, made, from }))).toEqual([
-      { name: 'included_a.fa', made: true, from: { file: 'a.fa', leftOutIds: ['b'], included: 1, total: 2 } },
+    // The run names the file of the records (the walk builds the name from its own record of the run): the model gives none.
+    expect(expectedInputs(left.query, 'nucleotide', [0]).map(({ name, made, from }) => ({ name, made, from }))).toEqual([
+      { name: undefined, made: true, from: { file: 'a.fa', leftOutIds: ['b'], included: 1, total: 2 } },
     ]);
-    // The name is written as a browser saves it; the From text is the user's file name.
-    expect(savedName('two genes.fna')).toBe('two_genes.fna');
-    expect(savedName('a:b"c<d>e|f?g*h\\i/j\tk\u0001l.fa')).toBe('a_b_c_d_e_f_g_h_i_j_k_l.fa');
-    expect(savedName('safe-1.fa')).toBe('safe-1.fa');
     // Included again, and in the other reading: the user's file.
-    expect(expectedInputs(withIncluded(left, 'query', 'nucleotide', 0, 1, true).query, 'query', 'nucleotide', [0])[0]!.made).toBe(false);
-    expect(expectedInputs(left.query, 'query', 'protein', [0])[0]!.made).toBe(false);
+    expect(expectedInputs(withIncluded(left, 'query', 'nucleotide', 0, 1, true).query, 'nucleotide', [0])[0]!.made).toBe(false);
+    expect(expectedInputs(left.query, 'protein', [0])[0]!.made).toBe(false);
     model = withPaste(model, 'query', '>q\nAC\n');
-    expect(expectedInputs(model.query, 'query', 'nucleotide', [0, 1]).map(({ made }) => made)).toEqual([true]);
-    expect(expectedInputs(withMode(model, 'query', 'separate').query, 'query', 'nucleotide', [0, 1]).map(({ name, made }) => ({ name, made }))).toEqual([
-      { name: 'query.fa', made: true },
+    expect(expectedInputs(model.query, 'nucleotide', [0, 1]).map(({ made }) => made)).toEqual([true]);
+    expect(expectedInputs(withMode(model, 'query', 'separate').query, 'nucleotide', [0, 1]).map(({ name, made }) => ({ name, made }))).toEqual([
+      { name: undefined, made: true },
       { name: 'a.fa', made: false },
     ]);
   });

@@ -12,6 +12,7 @@
 // LOSAT_WEB_WALK_SHRINK_REPLAYS the replays a failing walk may use to shrink.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE } from './support/native';
@@ -58,11 +59,12 @@ if (replay !== undefined) {
 }
 
 // Recorded walks that the drawn ones rarely reach (walk/recorded/*.json, replays of walk files): an input that is not the user's
-// file as given (a file with records left out, line WQA's D22) must be named and offered as a file of its own, and the CLI must
+// file as given (a file with records left out, line WQA's D22) must be named by its run and offered as a file of its own, and the CLI must
 // give the stored bytes on the shown command with the offered file. Run in every browser, whatever the seed, but only with the engine
 // and the native CLI: without them (the app jobs) no such case is checked.
 if (replay === undefined && BUILD_HAS_ENGINE && NATIVE !== undefined) {
-  const directory = join(process.cwd(), 'tests/e2e/walk/recorded');
+  // Beside this file, whatever the directory that the run was started in.
+  const directory = fileURLToPath(new URL('./walk/recorded/', import.meta.url));
   for (const name of readdirSync(directory).filter((file) => file.endsWith('.json')).sort()) {
     const recorded = JSON.parse(readFileSync(join(directory, name), 'utf8')) as WalkFile;
     test(`recorded walk ${name.replace(/\.json$/, '')} (${recorded.steps.length} steps)`, async ({ page, browser, browserName }, testInfo) => {

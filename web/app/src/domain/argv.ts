@@ -56,26 +56,11 @@ function refusedWord(program: ProgramId, word: string): string | undefined {
 }
 
 /**
- * The -query / -subject names of inputs that are not one file of the user's as given (plan §5.3): pasted text, and
- * several inputs searched together; a file with records left out has INCLUDED_PREFIX and its name. The page offers each of
- * these files with the run (InputSnapshot.from).
+ * The names that stand for a pasted text in the source list and in the argv that the form validates. The argv of a run names a
+ * file that LOSAT makes (pasted text, several files, a file with records left out) by the run's own name (`inputFileName`:
+ * `losat-run3-blastn-20261123T101530Z.query.fa`; line WQA's D22, DECISIONS 44), which the run has only when it is queued.
  */
 export const PASTED_NAMES = Object.freeze({ query: 'query.fa', subject: 'subject.fa' } as const);
-export const COMBINED_NAMES = Object.freeze({ query: 'combined_query.fa', subject: 'combined_subject.fa' } as const);
-/**
- * The start of the name of a file of the user's with records left out (`included_q.fa` for `q.fa`): the file's own name
- * would name bytes that the run did not search (line WQA's D22, 2026-11-23).
- */
-export const INCLUDED_PREFIX = 'included_';
-
-/**
- * A file name as every browser saves it (line WQA's D22, review round 5): white space, `\ / : * ? " < > |` and control
- * characters are written `_`. A file that LOSAT made has such a name, so that the command names the file that the user gets by
- * the download (WebKit saves a space as `_`, all three browsers `: " < > | ?`). The user's own file names stay as they are.
- */
-export function savedFileName(name: string): string {
-  return name.replace(/[\s\\/:*?"<>|\u0000-\u001f\u007f]/g, '_');
-}
 
 export interface ArgvInput {
   readonly program: ProgramId;

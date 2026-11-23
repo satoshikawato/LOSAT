@@ -45,3 +45,14 @@ export function leavesOut(parts: readonly InputPart[] | undefined): boolean {
 export function worthSaying(parts: readonly InputPart[] | undefined): parts is readonly InputPart[] {
   return parts !== undefined && (parts.length > 1 || leavesOut(parts));
 }
+
+/**
+ * What an input is called in a list of runs (the run picker): the user's file by its name; a file that LOSAT made by what it is
+ * made of, not by its long name (`losat-run3-blastn-20261123T101530Z.query.fa`): "pasted text", "a.fa + b.fa", "q.fa, some records
+ * left out".
+ */
+export function inputLabel(input: { readonly name: string; readonly from?: readonly InputPart[] | undefined }): string {
+  if (input.from === undefined) return input.name;
+  const names = input.from.map((part) => part.name).join(' + ');
+  return leavesOut(input.from) ? `${names}, some records left out` : names;
+}

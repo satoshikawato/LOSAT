@@ -13,7 +13,7 @@ import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
-import { fromText, leavesOut } from '../domain/input-parts';
+import { fromText, inputLabel, leavesOut } from '../domain/input-parts';
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
 import { isTerminal } from '../domain/run';
@@ -185,9 +185,9 @@ watch(
 function runLabel(run: RunView): string {
   const { number, program, query, subject, prints } = run.snapshot;
   const status = run.status === 'completed' ? '' : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
-  // The inputs are named as the user gave them (a compressed file by its own name). A run that prints the command line's help
+  // The inputs are named as the user gave them (a compressed file by its own name), a file that LOSAT made by what it is made of. A run that prints the command line's help
   // or version reads none, so it names none (line WQA's D21, the review of D20's F2, 2026-11-23).
-  const files = prints === undefined ? ` · ${query.name} vs ${subject.name}` : '';
+  const files = prints === undefined ? ` · ${inputLabel(query)} vs ${inputLabel(subject)}` : '';
   return `Run ${number} · ${programById(program).label}${files}${status}`;
 }
 

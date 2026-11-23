@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromText, leavesOut, leftOutIds, partText, worthSaying } from '../../src/domain/input-parts';
+import { fromText, inputLabel, leavesOut, leftOutIds, partText, worthSaying } from '../../src/domain/input-parts';
 
 // Line WQA's D22 (2026-11-23): the words that say which records an input leaves out.
 const part = (name: string, records: number, leftOut: string[], leftOutCount = leftOut.length) => ({ name, records, leftOut, leftOutCount });
@@ -37,5 +37,12 @@ describe('input parts', () => {
     expect(worthSaying([part('pasted text', 3, [])])).toBe(false);
     expect(worthSaying([part('pasted text', 2, ['r2'])])).toBe(true);
     expect(worthSaying([part('a.fa', 1, []), part('b.fa', 1, [])])).toBe(true);
+  });
+
+  it('calls a file of LOSAT\'s by what it is made of in a list of runs, and the user\'s file by its name', () => {
+    expect(inputLabel({ name: 'q.fa' })).toBe('q.fa');
+    expect(inputLabel({ name: 'losat-run1-blastn-20261123T101530Z.query.fa', from: [part('pasted text', 1, [])] })).toBe('pasted text');
+    expect(inputLabel({ name: 'x', from: [part('a.fa', 2, []), part('b.fa', 1, [])] })).toBe('a.fa + b.fa');
+    expect(inputLabel({ name: 'x', from: [part('q.fa', 2, ['r2'])] })).toBe('q.fa, some records left out');
   });
 });

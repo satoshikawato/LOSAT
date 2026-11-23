@@ -13,7 +13,7 @@ import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { chooseRun, openFiles, openSearch, paste, program, showRecords, storedOutputs, submit, waitStatus, type Role } from './support/search';
+import { chooseRun, inputNames, madeName, openFiles, openSearch, paste, program, showRecords, storedOutputs, submit, waitStatus, type Role } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 
@@ -121,6 +121,18 @@ async function expectNative(page: Page, run: number, shown: string, files: reado
   }
 }
 
+/** The names that the Run details of run `run` give its inputs in the command, and the command's words as the page writes them. */
+async function namesOf(page: Page, run: number): Promise<{ query: string; subject: string }> {
+  await chooseRun(page, run);
+  await page.getByTestId('results-view-details').click();
+  return inputNames((await page.getByTestId('run-argv').textContent()) ?? '');
+}
+
+/** A file that the page makes is named with the run's own prefix and the role (DECISIONS 44). */
+function expectMade(name: string, run: number, role: Role): void {
+  expect(name).toMatch(new RegExp(`^${madeName(run, 'blastn', role)}$`));
+}
+
 test('a query with a record left out: the command names the file of the records searched, the page offers it and names the record (D22)', async ({ page, browserName }) => {
   await program(page, 'blastn');
   await openFiles(page, 'query', [{ name: 'q.fa', text: QUERY }]);
@@ -129,16 +141,18 @@ test('a query with a record left out: the command names the file of the records 
   await shownThen(page, 'query-panel', 'query-card', browserName, () => expect(page.getByTestId('query-source-0-summary')).toContainText('(2 included)'));
   await submit(page);
   await waitStatus(page, 1, 'completed');
-  const shown = 'losat blastn -query included_q.fa -subject s.fa';
 
-  await chooseRun(page, 1);
-  await expect(page.getByTestId('run-1-option')).toHaveText('Run 1 · BLASTN · included_q.fa vs s.fa');
+  const names = await namesOf(page, 1);
+  expectMade(names.query, 1, 'query');
+  // The user's file as given keeps the user's name (D21).
+  expect(names.subject).toBe('s.fa');
+  const shown = `losat blastn -query ${names.query} -subject s.fa`;
+  await expect(page.getByTestId('run-1-option')).toHaveText('Run 1 · BLASTN · q.fa, some records left out vs s.fa');
   await expect(page.getByTestId('results-query-from')).toHaveText('q.fa without r2 (2 of 3 records)');
   await expect(page.getByTestId('results-subject-from')).toHaveCount(0);
-  await page.getByTestId('results-view-details').click();
   await shownThen(page, 'run-details', 'run-details', browserName, async () => {
-    await expect(page.getByTestId('run-argv')).toHaveText('blastn -query included_q.fa -subject s.fa');
-    await expect(page.getByTestId('run-input-query')).toContainText('included_q.fa: 2 records, ');
+    await expect(page.getByTestId('run-argv')).toHaveText(`blastn -query ${names.query} -subject s.fa`);
+    await expect(page.getByTestId('run-input-query')).toContainText(`${names.query}: 2 records, `);
     await expect(page.getByTestId('run-input-query-from')).toHaveText('From q.fa without r2 (2 of 3 records)');
     for (const format of [0, 6, 7]) await expect(page.getByTestId(`run-command-${format}`)).toHaveText(`${shown} -outfmt ${format}`);
     // The subject is the user's file as given: its row says nothing more.
@@ -148,20 +162,20 @@ test('a query with a record left out: the command names the file of the records 
   await page.getByTestId('results-view-outputs').click();
   await shownThen(page, 'results-outputs', 'outputs', browserName, async () => {
     expect(await shownCommand(page, 1)).toBe(`${shown} -outfmt 6`);
-    await expect(page.getByTestId('outputs-query-file')).toContainText('-query included_q.fa is q.fa without r2 (2 of 3 records).');
+    await expect(page.getByTestId('outputs-query-file')).toContainText(`-query ${names.query} is q.fa without r2 (2 of 3 records).`);
     await expect(page.getByTestId('outputs-subject-file')).toHaveCount(0);
   });
 
   // The file that the page offers holds the records searched, under the name of the command.
   const file = await offered(page, 'query');
-  expect(file.name).toBe('included_q.fa');
+  expect(file.name).toBe(names.query);
   expect(file.bytes.toString('utf8')).toBe(WITHOUT_R2);
   await page.getByTestId('results-download-all').click();
   await expect(page.getByTestId('results-download-subject')).toHaveCount(0);
   await page.keyboard.press('Escape');
   // Outputs offers it too.
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('outputs-query-download').click()]);
-  expect(download.suggestedFilename()).toBe('included_q.fa');
+  expect(download.suggestedFilename()).toBe(names.query);
   expect(readFileSync((await download.path())!).toString('utf8')).toBe(WITHOUT_R2);
 
   await expectNative(page, 1, shown, [file, { name: 's.fa', bytes: SUBJECT }]);
@@ -202,18 +216,19 @@ test('a subject with a record left out is named and offered as the query is; sev
   await leaveOut(page, 'subject', 0);
   await submit(page);
   await waitStatus(page, 1, 'completed');
-  const shown = 'losat blastn -query q.fa -subject included_s.fa';
-  await chooseRun(page, 1);
+  const names = await namesOf(page, 1);
+  expect(names.query).toBe('q.fa');
+  expectMade(names.subject, 1, 'subject');
+  const shown = `losat blastn -query q.fa -subject ${names.subject}`;
   await expect(page.getByTestId('results-subject-from')).toHaveText('s.fa without s1 (2 of 3 records)');
   await expect(page.getByTestId('results-query-from')).toHaveCount(0);
-  await page.getByTestId('results-view-details').click();
   await expect(page.getByTestId('run-input-subject-from')).toHaveText('From s.fa without s1 (2 of 3 records)');
   await expect(page.getByTestId('run-input-query-from')).toHaveCount(0);
   await page.getByTestId('results-view-outputs').click();
   expect(await shownCommand(page, 1)).toBe(`${shown} -outfmt 6`);
-  await expect(page.getByTestId('outputs-subject-file')).toContainText('-subject included_s.fa is s.fa without s1 (2 of 3 records).');
+  await expect(page.getByTestId('outputs-subject-file')).toContainText(`-subject ${names.subject} is s.fa without s1 (2 of 3 records).`);
   const file = await offered(page, 'subject');
-  expect(file.name).toBe('included_s.fa');
+  expect(file.name).toBe(names.subject);
   expect(file.bytes.toString('utf8')).toBe(WITHOUT_S1);
   // outfmt 0 and 7 write the subject's name too (`Input:`): they equal the CLI's on this file.
   await expectNative(page, 1, shown, [{ name: 'q.fa', bytes: QUERY }, file]);
@@ -229,27 +244,31 @@ test('a subject with a record left out is named and offered as the query is; sev
   await leaveOut(page, 'subject', 1, 1);
   await submit(page);
   await waitStatus(page, 2, 'completed');
-  const together = 'losat blastn -query query.fa -subject combined_subject.fa';
-  await chooseRun(page, 2);
+  const second = await namesOf(page, 2);
+  expectMade(second.query, 2, 'query');
+  expectMade(second.subject, 2, 'subject');
+  // Another run, other names: a folder that holds both runs' files holds each under its own name.
+  expect(second.subject).not.toBe(names.subject);
+  const together = `losat blastn -query ${second.query} -subject ${second.subject}`;
+  await expect(page.getByTestId('run-2-option')).toHaveText('Run 2 · BLASTN · pasted text vs a.fa + b.fa, some records left out');
   await expect(page.getByTestId('results-subject-from')).toHaveText('a.fa (2 records) and b.fa without b2 (1 of 2 records)');
-  await page.getByTestId('results-view-details').click();
   await expect(page.getByTestId('run-input-subject-from')).toHaveText('From a.fa (2 records) and b.fa without b2 (1 of 2 records)');
-  // Pasted text with nothing left out is what was pasted: no line of its own, only the file in Download All.
+  // Pasted text with nothing left out is what was pasted: no line of its own, but its file is offered like any file of LOSAT's.
   await expect(page.getByTestId('run-input-query-from')).toHaveCount(0);
   await page.getByTestId('results-view-outputs').click();
   expect(await shownCommand(page, 2)).toBe(`${together} -outfmt 6`);
-  await expect(page.getByTestId('outputs-query-file')).toHaveCount(0);
-  await expect(page.getByTestId('outputs-subject-file')).toContainText('-subject combined_subject.fa is a.fa (2 records) and b.fa without b2 (1 of 2 records).');
+  await expect(page.getByTestId('outputs-query-file')).toContainText(`-query ${second.query} is pasted text (3 records).`);
+  await expect(page.getByTestId('outputs-subject-file')).toContainText(`-subject ${second.subject} is a.fa (2 records) and b.fa without b2 (1 of 2 records).`);
   const pasted = await offered(page, 'query');
   const combined = await offered(page, 'subject');
-  expect(pasted.name).toBe('query.fa');
+  expect(pasted.name).toBe(second.query);
   expect(pasted.bytes.toString('utf8')).toBe(QUERY);
-  expect(combined.name).toBe('combined_subject.fa');
+  expect(combined.name).toBe(second.subject);
   expect(combined.bytes.toString('utf8')).toBe(a + record('b1', R3 + sequence(55, 150)));
   await expectNative(page, 2, together, [pasted, combined]);
 });
 
-// Review M1: one name for two inputs could not be run on the offered files; and a compressed file is named as the user gave it.
+// Review M1: two inputs of one run have two names (the roles); a compressed file is read for what it holds.
 test('the same file in both roles with other records left out gets two names; a compressed file with a record left out (D22)', async ({ page }) => {
   await program(page, 'blastn');
   await openFiles(page, 'query', [{ name: 'q.fa', text: QUERY }]);
@@ -258,19 +277,22 @@ test('the same file in both roles with other records left out gets two names; a 
   await leaveOut(page, 'subject', 0);
   await submit(page);
   await waitStatus(page, 1, 'completed');
-  const shown = 'losat blastn -query included_query_q.fa -subject included_subject_q.fa';
-  await chooseRun(page, 1);
-  await expect(page.getByTestId('run-1-option')).toHaveText('Run 1 · BLASTN · included_query_q.fa vs included_subject_q.fa');
+  const names = await namesOf(page, 1);
+  expectMade(names.query, 1, 'query');
+  expectMade(names.subject, 1, 'subject');
+  expect(names.query).not.toBe(names.subject);
+  const shown = `losat blastn -query ${names.query} -subject ${names.subject}`;
+  await expect(page.getByTestId('run-1-option')).toHaveText('Run 1 · BLASTN · q.fa, some records left out vs q.fa, some records left out');
   await page.getByTestId('results-view-outputs').click();
   expect(await shownCommand(page, 1)).toBe(`${shown} -outfmt 6`);
   const query = await offered(page, 'query');
   const subject = await offered(page, 'subject');
-  expect([query.name, subject.name]).toEqual(['included_query_q.fa', 'included_subject_q.fa']);
+  expect([query.name, subject.name]).toEqual([names.query, names.subject]);
   expect(query.bytes.toString('utf8')).toBe(WITHOUT_R2);
   expect(subject.bytes.toString('utf8')).toBe(record('r2', R2) + record('r3', R3));
   await expectNative(page, 1, shown, [query, subject]);
 
-  // A compressed query with a record left out: the argv names the plain file of the records, the page the file given.
+  // A compressed query with a record left out: the file of the records is plain, named by the run, and From names the file given.
   await page.getByTestId('tab-search').click();
   await page.getByTestId('query-source-0-remove').click();
   await page.getByTestId('subject-source-0-remove').click();
@@ -279,30 +301,64 @@ test('the same file in both roles with other records left out gets two names; a 
   await leaveOut(page, 'query', 1);
   await submit(page);
   await waitStatus(page, 2, 'completed');
-  await chooseRun(page, 2);
-  await page.getByTestId('results-view-details').click();
-  await expect(page.getByTestId('run-argv')).toHaveText('blastn -query included_q.fa -subject s.fa');
+  const second = await namesOf(page, 2);
+  expectMade(second.query, 2, 'query');
+  await expect(page.getByTestId('run-argv')).toHaveText(`blastn -query ${second.query} -subject s.fa`);
   await expect(page.getByTestId('run-input-query-from')).toHaveText('From q.fa.gz without r2 (2 of 3 records)');
   const plain = await offered(page, 'query');
-  expect(plain.name).toBe('included_q.fa');
+  expect(plain.name).toBe(second.query);
   expect(plain.bytes.toString('utf8')).toBe(WITHOUT_R2);
-  await expectNative(page, 2, 'losat blastn -query included_q.fa -subject s.fa', [plain, { name: 's.fa', bytes: SUBJECT }]);
+  await expectNative(page, 2, `losat blastn -query ${second.query} -subject s.fa`, [plain, { name: 's.fa', bytes: SUBJECT }]);
 });
 
-test('a file name with a space: the made name is the one the browser saves, and the command runs on it (D22, round 5)', async ({ page }) => {
+// Review of round 5, M1 and M2 (DECISIONS 44): whatever the user's file is called, the file that the browser saves has the name that
+// the command gives it, because the name is the run's own (letters, digits, `-` and `.`), never derived from the user's.
+for (const user of ['two genes.fna', 'seqs', '50%id.fa', 'q~1.fa', 'reads.fa.', 'a:b"c.fa']) {
+  test(`the saved file has the command's name for a file with a record left out, ${JSON.stringify(user)} (D22)`, async ({ page }) => {
+    await program(page, 'blastn');
+    await openFiles(page, 'query', [{ name: user, text: QUERY }]);
+    await openFiles(page, 'subject', [{ name: 's.fa', text: SUBJECT }]);
+    await leaveOut(page, 'query', 1);
+    await submit(page);
+    await waitStatus(page, 1, 'completed');
+    const names = await namesOf(page, 1);
+    expectMade(names.query, 1, 'query');
+    await page.getByTestId('results-view-outputs').click();
+    const file = await offered(page, 'query');
+    expect(file.name, 'Download All saves the query under the name of the command').toBe(names.query);
+    const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('outputs-query-download').click()]);
+    expect(download.suggestedFilename(), 'the link in Outputs saves it under that name too').toBe(names.query);
+    expect(file.bytes.toString('utf8')).toBe(WITHOUT_R2);
+    await expectNative(page, 1, `losat blastn -query ${names.query} -subject s.fa`, [file, { name: 's.fa', bytes: SUBJECT }]);
+  });
+}
+
+test('the saved file has the command\'s name for a pasted query and for a combined query; two runs give two names (D22)', async ({ page }) => {
   await program(page, 'blastn');
-  await openFiles(page, 'query', [{ name: 'two genes.fna', text: QUERY }]);
-  await openFiles(page, 'subject', [{ name: 's.fa', text: SUBJECT }]);
-  await leaveOut(page, 'query', 1);
+  await paste(page, 'query', QUERY);
+  await openFiles(page, 'subject', [{ name: 'a.fa', text: SUBJECT }, { name: 'b.fa', text: WITHOUT_S1 }]);
   await submit(page);
   await waitStatus(page, 1, 'completed');
-  const shown = 'losat blastn -query included_two_genes.fna -subject s.fa';
-  expect(await shownCommand(page, 1)).toBe(`${shown} -outfmt 6`);
-  // Download All and the Outputs link save the file under the name of the command, whatever the browser does to a name.
-  const file = await offered(page, 'query');
-  expect(file.name).toBe('included_two_genes.fna');
-  expect(file.bytes.toString('utf8')).toBe(WITHOUT_R2);
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('outputs-query-download').click()]);
-  expect(download.suggestedFilename()).toBe('included_two_genes.fna');
-  await expectNative(page, 1, shown, [file, { name: 's.fa', bytes: SUBJECT }]);
+  const first = await namesOf(page, 1);
+  expectMade(first.query, 1, 'query');
+  expectMade(first.subject, 1, 'subject');
+  await page.getByTestId('results-view-outputs').click();
+  const pasted = await offered(page, 'query');
+  const combined = await offered(page, 'subject');
+  expect([pasted.name, combined.name]).toEqual([first.query, first.subject]);
+  await expectNative(page, 1, `losat blastn -query ${first.query} -subject ${first.subject}`, [pasted, combined]);
+  // The same input again, with another record left out: another run, another file under another name (it never replaces the first).
+  await page.getByTestId('tab-search').click();
+  await showRecords(page, 'subject');
+  await page.getByTestId('subject-source-0-record-0').uncheck();
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  const second = await namesOf(page, 2);
+  expectMade(second.query, 2, 'query');
+  expect(second.query).not.toBe(first.query);
+  expect(second.subject).not.toBe(first.subject);
+  await page.getByTestId('results-view-outputs').click();
+  const again = await offered(page, 'subject');
+  expect(again.name).toBe(second.subject);
+  expect(again.bytes.toString('utf8')).not.toBe(combined.bytes.toString('utf8'));
 });

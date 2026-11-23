@@ -326,7 +326,9 @@ describe('Coordinator', () => {
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(snapshot.argv).toContain('10');
     expect(snapshot.argv).not.toContain('1e-50');
-    expect(snapshot.query.name).toBe('query.fa');
+    // Pasted text is a file that the run names: its own prefix (number, program, time) and the role (DECISIONS 44).
+    expect(snapshot.query.name).toBe('losat-run1-blastn-19700101T000001Z.query.fa');
+    expect(snapshot.argv.slice(1, 5)).toEqual(['-query', snapshot.query.name, '-subject', snapshot.subject.name]);
     expect(snapshot.subject.sha256).toBe(createHash('sha256').update('>s\nACGT\n').digest('hex'));
     expect(snapshot.subject.records).toEqual([{ id: 's', length: 4 }]);
     expect(snapshot.subject.revisionIds).toHaveLength(1);
@@ -343,7 +345,8 @@ describe('Coordinator', () => {
     expect(viewOf(coordinator, given)!.snapshot.subject.from).toBeUndefined();
     await expect(coordinator.exportInput(given, 'subject')).rejects.toThrow('a file of yours as you gave it');
     await coordinator.exportInput(pasted, 'query');
-    expect(saved).toEqual([{ fileName: 'query.fa', text: '>q\nACGT\n', type: 'text/plain' }]);
+    expect(saved).toEqual([{ fileName: viewOf(coordinator, pasted)!.snapshot.query.name, text: '>q\nACGT\n', type: 'text/plain' }]);
+    expect(saved[0]!.fileName).toMatch(/^losat-run1-blastn-\d{8}T\d{6}Z\.query\.fa$/);
   });
 
   it('reads a chosen file by reference and names the input after it', async () => {
@@ -351,7 +354,8 @@ describe('Coordinator', () => {
     const file = new File(['>chr1 genome\nACGTACGT\n>chr2\nGG\n'], 'genome.fa');
     const runId = (await coordinator.enqueue({ ...request, subject: { file } })).runId!;
     const snapshot = viewOf(coordinator, runId)!.snapshot;
-    expect(snapshot.argv).toEqual(['blastn', '-query', 'query.fa', '-subject', 'genome.fa']);
+    expect(snapshot.argv).toEqual(['blastn', '-query', snapshot.query.name, '-subject', 'genome.fa']);
+    expect(snapshot.query.name).toMatch(/^losat-run1-blastn-\d{8}T\d{6}Z\.query\.fa$/);
     expect(snapshot.subject.name).toBe('genome.fa');
     expect(snapshot.subject.records).toEqual([
       { id: 'chr1', length: 8 },
@@ -494,7 +498,8 @@ describe('Coordinator', () => {
     const runId = (await coordinator.enqueue({ ...request, program: 'blastx', subject: { text: '>s\nMKLV\n' } })).runId!;
     await waitFor(coordinator, runId, 'completed');
     const snapshot = viewOf(coordinator, runId)!.snapshot;
-    expect(snapshot.argv).toEqual(['blastx', '-query', 'query.fa', '-subject', 'subject.fa']);
+    expect(snapshot.argv).toEqual(['blastx', '-query', snapshot.query.name, '-subject', snapshot.subject.name]);
+    expect(snapshot.subject.name).toMatch(/^losat-run1-blastx-blastx-\d{8}T\d{6}Z\.subject\.fa$/);
     expect(snapshot.subject.records).toEqual([{ id: 's', length: 4 }]);
   });
 
@@ -681,8 +686,8 @@ describe('Coordinator', () => {
     const runId = (await coordinator.enqueue({ ...request, query: { text: '' }, subject: { text: '' }, extra: ['-version'] })).runId!;
     const snapshot = viewOf(coordinator, runId)!.snapshot;
     expect(snapshot.prints).toBe('version');
-    expect(snapshot.query).toMatchObject({ name: 'query.fa', bytes: new Uint8Array(0), records: [], revisionIds: [] });
-    expect(snapshot.subject).toMatchObject({ name: 'subject.fa', bytes: new Uint8Array(0), records: [], revisionIds: [] });
+    expect(snapshot.query).toMatchObject({ bytes: new Uint8Array(0), records: [], revisionIds: [] });
+    expect(snapshot.subject).toMatchObject({ bytes: new Uint8Array(0), records: [], revisionIds: [] });
     await waitFor(coordinator, runId, 'running');
     engine.finish(runId);
     await waitFor(coordinator, runId, 'completed');
@@ -940,7 +945,14 @@ describe('Coordinator', () => {
     const group = await coordinator.enqueueAll([titled, titled]);
     const snapshots = group.runIds!.map((id) => viewOf(coordinator, id)!.snapshot);
     expect(snapshots.map((snapshot) => snapshot.title)).toEqual(['Plasmid screen', 'Plasmid screen']);
-    expect(snapshots[0]!.argv).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa']);
+    // Each run of the group has its own number, so its own names (the same time).
+    expect(snapshots.map((snapshot) => snapshot.argv.slice(1, 5))).toEqual(
+      snapshots.map((snapshot) => ['-query', snapshot.query.name, '-subject', snapshot.subject.name]),
+    );
+    expect(snapshots.map((snapshot) => snapshot.query.name)).toEqual([
+      expect.stringMatching(/^losat-run1-blastn-.*\.query\.fa$/),
+      expect.stringMatching(/^losat-run2-blastn-.*\.query\.fa$/),
+    ]);
     for (const title of [undefined, '', '   ']) {
       const runId = (await coordinator.enqueue(title === undefined ? request : { ...request, title })).runId!;
       expect('title' in viewOf(coordinator, runId)!.snapshot).toBe(false);
@@ -958,6 +970,37 @@ describe('Coordinator', () => {
     const runId = (await coordinator.enqueue(request)).runId!;
     expect(viewOf(coordinator, runId)!.snapshot.number).toBe(1);
     expect(viewOf(coordinator, runId)!.snapshot.group).toBeUndefined();
+  });
+
+  // DECISIONS 44 (line WQA's D22): every input that the page makes is named with the run's own prefix and its role, in the argv that
+  // runs and in the file that the page saves; the user's file as given keeps the user's name (D21).
+  it('names a made input after its run: the prefix of the run\'s outputs and the role, each run of a group its own', async () => {
+    const { coordinator, data } = setup(new ManualEngine());
+    const made = async (text: string) => ({ dataset: { revisionIds: [(await data.indexSource((await data.addSource(new File([text], 'x.fa'))).sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId], from: [{ name: 'x.fa', records: 1, leftOut: [], leftOutCount: 1 }] } });
+    const given = { file: new File(['>g\nACGT\n'], 'My file.fa') };
+    const group = await coordinator.enqueueAll([
+      { ...request, query: await made('>a\nACGT\n'), subject: given, parameters: [['-task', 'blastn']] },
+      { ...request, query: await made('>b\nACGT\n'), subject: given, parameters: [['-task', 'blastn']] },
+    ]);
+    const snapshots = group.runIds!.map((id) => viewOf(coordinator, id)!.snapshot);
+    expect(snapshots.map((snapshot) => snapshot.query.name)).toEqual([
+      'losat-run1-blastn-blastn-19700101T000001Z.query.fa',
+      'losat-run2-blastn-blastn-19700101T000001Z.query.fa',
+    ]);
+    // The user's own name is kept as it is, and the argv names what the run holds.
+    expect(snapshots.map((snapshot) => snapshot.subject.name)).toEqual(['My file.fa', 'My file.fa']);
+    for (const snapshot of snapshots) expect(snapshot.argv.slice(1, 5)).toEqual(['-query', snapshot.query.name, '-subject', 'My file.fa']);
+  });
+
+  it('numbers the runs of two enqueues made at once one after the other, and names them by those numbers', async () => {
+    const { coordinator } = setup(new ManualEngine());
+    const [first, second] = await Promise.all([coordinator.enqueueAll([request, request]), coordinator.enqueueAll([request])]);
+    const names = [...first.runIds!, ...second.runIds!].map((id) => viewOf(coordinator, id)!.snapshot).map((snapshot) => [snapshot.number, snapshot.query.name.slice(0, 15)]);
+    expect(names).toEqual([
+      [1, 'losat-run1-blas'],
+      [2, 'losat-run2-blas'],
+      [3, 'losat-run3-blas'],
+    ]);
   });
 
   it('drops the sources that it makes of text and files once the snapshots have their inputs (SURVEY #15)', async () => {

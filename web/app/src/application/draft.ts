@@ -47,7 +47,7 @@ import {
 } from '../domain/accession';
 import { MOST_LEFT_OUT_IDS } from '../domain/input-parts';
 import type { InputPart } from '../domain/run';
-import { buildArgv, COMBINED_NAMES, INCLUDED_PREFIX, PASTED_NAMES, savedFileName, splitOptions } from '../domain/argv';
+import { buildArgv, PASTED_NAMES, splitOptions } from '../domain/argv';
 import { endsInput, includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
 import { parseTaxid, type CountsOrigin } from '../domain/counts';
 import type { ExampleId } from '../domain/examples';
@@ -889,14 +889,15 @@ export class SearchDraft {
     return words;
   }
 
-  /** The name of the role's input in the argv of a combined search (plan §5.3). */
+  /**
+   * The name of the role's input in the argv that the form validates (plan §5.3): the user's file name for the user's file as
+   * given (D21); for a file that LOSAT makes (pasted text, several files, a file with records left out) a placeholder, because
+   * the run names it after its number and time, which the run has only when "Run LOSAT" starts it (Coordinator.enqueueAll;
+   * line WQA's D22, DECISIONS 44).
+   */
   inputName(role: InputRole): string {
-    const sources = (r: InputRole) => this.role(r).sources.filter((source) => source.status !== 'failed');
-    const [query, subject] = [sources('query'), sources('subject')];
-    return runNames(
-      { name: nameOf(query, 'query'), made: !isFileAsGiven(query) },
-      { name: nameOf(subject, 'subject'), made: !isFileAsGiven(subject) },
-    )[role];
+    const sources = this.role(role).sources.filter((source) => source.status !== 'failed');
+    return isFileAsGiven(sources) ? readSources(sources)[0]!.file.name : PASTED_NAMES[role];
   }
 
   /**
@@ -1008,18 +1009,16 @@ export class SearchDraft {
     const state = this.state.get();
     const conffile = registryName(state.start) === undefined ? undefined : state.conffiles[program];
     const resolved = {
-      query: await Promise.all(groups.query.map((sources) => this.resolveGroup('query', sources))),
-      subject: await Promise.all(groups.subject.map((sources) => this.resolveGroup('subject', sources))),
+      query: await Promise.all(groups.query.map((sources) => this.resolveGroup(sources))),
+      subject: await Promise.all(groups.subject.map((sources) => this.resolveGroup(sources))),
     };
     const requests: SearchRequest[] = [];
     for (const query of resolved.query) {
       for (const subject of resolved.subject) {
-        // The two names of one run differ, unless they are the user's own (runNames).
-        const names = runNames({ name: query.name, made: query.from !== undefined }, { name: subject.name, made: subject.from !== undefined });
         requests.push({
           program,
-          query: { dataset: { ...query, name: names.query } },
-          subject: { dataset: { ...subject, name: names.subject } },
+          query: { dataset: query },
+          subject: { dataset: subject },
           parameters,
           ...(extra.length === 0 ? {} : { extra }),
           requestedThreads: threads,
@@ -1214,13 +1213,14 @@ export class SearchDraft {
   }
 
   /**
-   * An input of a run, from its sources: the name that its file has, the revisions and what it is made of. What it is made of
-   * is made here, when the run is resolved, not when the runs are counted (runCount): it reads the record tables.
+   * An input of a run, from its sources: the user's file name where it is the user's file as given, otherwise (it is a file that
+   * LOSAT makes) what it is made of, and the revisions. The name of a made input is the run's, given by the coordinator. What it
+   * is made of is made here, when the run is resolved, not when the runs are counted (runCount): it reads the record tables.
    */
-  private async resolveGroup(role: InputRole, sources: readonly DraftSource[]) {
+  private async resolveGroup(sources: readonly DraftSource[]) {
     const revisionIds = await Promise.all(sources.map((source) => this.revisionFor(source)));
     const from = fromOf(sources);
-    return { name: nameOf(sources, role), revisionIds, ...(from === undefined ? {} : { from }) };
+    return from === undefined ? { name: readSources(sources)[0]!.file.name, revisionIds } : { revisionIds, from };
   }
 
   // --- asynchronous work ------------------------------------------------------------------
@@ -1848,7 +1848,7 @@ function combinedSources(sources: readonly DraftSource[]): readonly DraftSource[
  * The sources that a run's input reads, in order: up to and with the first whose reading ends with the reader's error, which
  * ends the input, the engine reading no record after it (`DataService.runInputBytes`, line WQA's D10, 2026-11-19). The one
  * place in the draft that cuts a list of sources there: the readiness of a source after it (combinedSources), the name of the
- * input (nameOf) and the words that say what it is made of (fromOf, line WQA's D22) take their sources from it, so that the name
+ * input (inputName) and the words that say what it is made of (fromOf, line WQA's D22) take their sources from it, so that the name
  * and the words name what the bytes hold. `sourcesBefore` and `queryEndBefore` ask the same question of one source, with
  * `endsInput`, the one test of it (domain/dataset.ts). `DataService.runInputBytes` is the data layer's own reading of the same
  * revisions: it needs the error's offset to keep the bytes after the records, and it is outside the draft (a layer, and held by
@@ -1921,53 +1921,6 @@ function isFileAsGiven(sources: readonly DraftSource[]): boolean {
   // Of the sources that the run reads: a Combined input whose first file ends with the reader's error is that file.
   const read = readSources(sources);
   return read.length === 1 && read[0]!.origin === 'file' && read[0]!.excluded.length === 0;
-}
-
-/**
- * The name that an input has in the argv, where the command line writes the name of a file: the name of a file whose
- * bytes are what the run searches. The user's own file name, as the command line is typed, where the input is that file as
- * given: a file named `.gz`, `.bz2` or `.zst` is inflated for the engine (the card's `name` is the plain one), but the engine's
- * run takes the bytes of its inputs, not files, and writes the names of its argv where the command line writes the names of its
- * files (the `Input:` line of a subject set in outfmt 0 to 4 and 7, SAM's command line), so the argv names the file the user gave
- * (line WQA's D21, S3-3 and the review's F1, 2026-11-23). The user's file with records left out is not that file: its name would
- * make the command search other bytes than the run did, so the argv names the file of the included records, `included_` and the
- * name (the plain one: the bytes are not compressed; white space and the characters that a browser changes on saving written `_`,
- * `savedFileName`, so that the command names the file the user gets), as `combined_query.fa` names several inputs together and `query.fa` pasted
- * text; the page offers these files with the run (line WQA's D22, 2026-11-23). `runNames` keeps the two names of a run apart.
- */
-function nameOf(sources: readonly DraftSource[], role: InputRole): string {
-  const read = readSources(sources);
-  if (isFileAsGiven(read)) return read[0]!.file.name;
-  if (read.length > 1) return COMBINED_NAMES[role];
-  const [source] = read;
-  return source === undefined || source.origin === 'paste' ? PASTED_NAMES[role] : `${INCLUDED_PREFIX}${savedFileName(source.name)}`;
-}
-
-/** An input's name in the argv, and whether it names a file that LOSAT made (not the user's file as given). */
-export interface NamedInput {
-  readonly name: string;
-  readonly made: boolean;
-}
-
-/**
- * The names of the two inputs of one run (line WQA's D22, review M1, 2026-11-23): a command that names two inputs by one name
- * cannot be run on the files that the page offers, which then hold other bytes under one name. A file that LOSAT made takes
- * its role into its name (`included_query_q.fa`) where the other input has the same name: both made (the same file in both
- * roles with other records left out), or the other the user's own file of that name (the role makes the name longer than the
- * other's). The user's own names stay as they are.
- */
-export function runNames(query: NamedInput, subject: NamedInput): Record<InputRole, string> {
-  if (query.name !== subject.name) return { query: query.name, subject: subject.name };
-  // The same name: a file of LOSAT's takes its role, which makes it differ from the other's name; the user's own stays.
-  return {
-    query: query.made ? withRole(query.name, 'query') : query.name,
-    subject: subject.made ? withRole(subject.name, 'subject') : subject.name,
-  };
-}
-
-/** `included_q.fa` -> `included_query_q.fa`; `query.fa` -> `query_query.fa`. */
-function withRole(name: string, role: InputRole): string {
-  return name.startsWith(INCLUDED_PREFIX) ? `${INCLUDED_PREFIX}${role}_${name.slice(INCLUDED_PREFIX.length)}` : `${role}_${name}`;
 }
 
 /**

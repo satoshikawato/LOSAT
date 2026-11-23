@@ -653,7 +653,7 @@ async function submitted(walker: Walker): Promise<Submitted> {
   for (const role of ROLES) {
     const cards = await sourceCards(page, role);
     const ready = cards.flatMap((card, index) => (card.status === 'ready' ? [index] : []));
-    inputs[role] = expectedInputs(walker.model[role], role, alphabetOf(walker.program, role), ready);
+    inputs[role] = expectedInputs(walker.model[role], alphabetOf(walker.program, role), ready);
   }
   const expectedRuns = ROLES.reduce((product, role) => product * Math.max(1, inputs[role].length), 1);
   return { inputs, changed, extraFlags, values, expectedRuns };
@@ -806,6 +806,24 @@ async function offeredInput(page: Page, role: Role): Promise<{ name: string; byt
   return { name: download.suggestedFilename(), bytes: readFileSync((await download.path())!) };
 }
 
+/**
+ * The walk's own account of the name that run `run` gives a file that it makes (line WQA's D22, DECISIONS 44): `losat-run<N>-<program>
+ * [-<task>]-<UTC time>.<role>.fa`. The number is the run's (the walk counts its runs) and the program the one it chose; the task and
+ * the time of "Run LOSAT" cannot be known beforehand, so they are read from the name that the page gives the run's outfmt 6 file
+ * (which has the number and program too: they must be the walk's). Not the app's function.
+ */
+async function madeNameOf(walker: Walker, run: number, role: Role): Promise<string> {
+  const { page } = walker;
+  await page.getByTestId('results-download-all').click();
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('results-download-menu').getByTestId('results-download-6').click()]);
+  const saved = download.suggestedFilename();
+  const parts = /^losat-run(\d+)-([a-z]+)(?:-(.+?))?-(\d{8}T\d{6}Z)\.outfmt6\.txt$/.exec(saved);
+  if (parts === null || Number(parts[1]) !== run || parts[2] !== walker.program) {
+    throw new StepFailure('output-prefix', `run ${run} of ${walker.program}: the page names its outfmt 6 file ${saved}`);
+  }
+  return `losat-run${run}-${walker.program}${parts[3] === undefined ? '' : `-${parts[3]}`}-${parts[4]}.${role}.fa`;
+}
+
 /** A file that the native CLI is given: its name, its bytes, and whether the page made it. */
 interface CliFile {
   readonly name: string;
@@ -817,10 +835,10 @@ interface CliFile {
  * The file of each role that the command line names, for the native CLI, for run number `at` of the press's group (the draft makes
  * the group with the query outer and the subject inner: src/application/draft.ts `prepareAndEnqueue`). The walk's model says, from what
  * the walk gave, what the run's input is (`expectedInputs`) and whether it is made or the user's file as given. The page must offer a
- * file exactly for a made input (Download All), under a name that is none of the user's file names (it would name other bytes) and that
+ * file exactly for a made input (Download All), under the run's own name (`madeNameOf`), which is none of the user's file names (it would name other bytes) and that
  * Run details shows, holding exactly the run's own expected bytes; it must offer none for a file as given, which the CLI gets by its
- * own name. The CLI then runs the command that the page shows on the files that the page offers, as the user would. The names of the
- * made files are not modelled here, but `query.fa` and `combined_*.fa`, whose role may be put before them.
+ * own name. The CLI then runs the command that the page shows on the files that the page offers, as the user would. The name of a made
+ * file is the run's prefix and the role (`madeNameOf`), built here from the walk's own record of the run.
  */
 async function filesOf(walker: Walker, run: number, before: Submitted, at: number, shown: Record<Role, string>): Promise<Record<Role, CliFile> | undefined> {
   const subjects = Math.max(1, before.inputs.subject.length);
@@ -839,13 +857,14 @@ async function filesOf(walker: Walker, run: number, before: Submitted, at: numbe
       if (!shown[role].startsWith(`${input.name}: `)) {
         throw new StepFailure('input-unmatched', `run ${run}: the ${role} the walk gave is the file ${input.name}; Run details say "${shown[role]}"`);
       }
-      files[role] = { name: input.name, bytes: input.bytes, made: false };
+      files[role] = { name: input.name!, bytes: input.bytes, made: false };
       continue;
     }
     if (offered === undefined) {
       throw new StepFailure('made-not-offered', `run ${run}: the ${role} is not the user's file as given (pasted, several files, or records left out), but the page offers no file for it ("${shown[role]}")`);
     }
-    // The name that Run details give the input is the command line's name, and the browser saves the file under exactly that name.
+    // The name that Run details give the input is the command line's name, and the browser saves the file under exactly that name,
+    // which is the run's own prefix and the role: the same for the file of the run's other inputs of the same kind of no other run.
     const shownName = /^(.*): [\d,]+ records?, /.exec(shown[role])?.[1];
     if (shownName === undefined || shownName !== offered.name) {
       throw new StepFailure('offered-name', `run ${run}: the page offers ${offered.name} as the ${role} file, but the run's details say "${shown[role]}"`);
@@ -853,10 +872,9 @@ async function filesOf(walker: Walker, run: number, before: Submitted, at: numbe
     if (userNames.has(shownName)) {
       throw new StepFailure('offered-user-name', `run ${run}: the page offers ${shownName} as the ${role} file, a name that one of the user's files has`);
     }
-    // The model's name, or with the role put into it where the run's two names would meet.
-    const withRole = input.name.startsWith('included_') ? `included_${role}_${input.name.slice('included_'.length)}` : `${role}_${input.name}`;
-    if (shownName !== input.name && shownName !== withRole) {
-      throw new StepFailure('offered-name', `run ${run}: the page offers ${shownName} as the ${role} file; the walk expects ${input.name}`);
+    const expectedName = await madeNameOf(walker, run, role);
+    if (shownName !== expectedName) {
+      throw new StepFailure('offered-name', `run ${run}: the page offers ${shownName} as the ${role} file; the walk expects ${expectedName}`);
     }
     // A file with records left out is that file's own: Run details say From that file, without those records, and the count.
     if (input.from !== undefined) {

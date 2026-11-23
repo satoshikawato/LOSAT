@@ -14,6 +14,7 @@ use losat::web_adapter::{
     RecordSource,
 };
 
+use crate::imported::Supplied;
 use crate::json;
 use crate::run::Program;
 use crate::scan;
@@ -395,17 +396,18 @@ pub fn register_inputs(
     // An argv with `-import_search_strategy` takes the inputs that the strategy carries and the
     // argv does not override (`Supplied`), in place of the bytes that the host gives for them (it
     // gives none: the argv has no `-query` or `-subject` of its own).
-    let (query, subject) = match &supplied {
-        Some(supplied) => (
-            if supplied.queries.is_empty() {
+    let texts = supplied.as_ref().map(Supplied::take).transpose()?;
+    let (query, subject) = match &texts {
+        Some(texts) => (
+            if texts.queries.is_empty() {
                 query
             } else {
-                &supplied.queries
+                &texts.queries
             },
-            if supplied.subjects.is_empty() {
+            if texts.subjects.is_empty() {
                 subject
             } else {
-                &supplied.subjects
+                &texts.subjects
             },
         ),
         None => (query, subject),

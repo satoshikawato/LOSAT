@@ -17,6 +17,7 @@ use crate::emit::{
     emit, StreamWriter, STREAM_CUSTOM, STREAM_DIAGNOSTICS, STREAM_HITS, STREAM_PRINTED,
     STREAM_RESPONSE, STREAM_RUN_FILES,
 };
+use crate::imported::Supplied;
 use crate::json;
 
 /// The programs that ABI v2 runs.
@@ -201,18 +202,11 @@ fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
     }
 }
 
-/// The queries and the subjects (FASTA bytes) that the argv's search strategy carries and the argv
-/// does not override with its own `-query` or `-subject`: empty for an input that the strategy
-/// does not give (`parse_printing`).
-pub struct Supplied {
-    pub queries: Vec<u8>,
-    pub subjects: Vec<u8>,
-}
-
 /// What the engine's CLI parser makes of an argv (`parse_printing`).
 enum Parsed {
     /// The program's arguments (boxed: they are far larger than a text), and with an
-    /// `-import_search_strategy NAME` what the registered strategy file carries as inputs.
+    /// `-import_search_strategy NAME` the run's import of the registered strategy file, which has
+    /// what it carries as inputs (`Supplied::take`).
     Command(Program, Box<Commands>, Option<Supplied>),
     /// The text that the command line prints to its standard output in place of a run, where the
     /// reader stopped at a help word (`-h`, `-help`, `-help-full`, `--help`, `-xmlhelp`, the words
@@ -264,20 +258,13 @@ fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
             name.display()
         )
     })?;
-    let applied =
-        losat::web_adapter::import_strategy(command, &bytes).map_err(|error| error.to_string())?;
-    // The strategy's program, which reads the inputs and runs (`losat::web_adapter::program_of`).
-    let program = match losat::web_adapter::program_of(&applied.command) {
-        Some(applied) => Program::parse(applied.name())?,
-        None => program,
-    };
-    let supplied = Supplied {
-        queries: applied.queries,
-        subjects: applied.subjects,
-    };
+    // The import is the run's, made once (`imported`): a reading of the same argv over the same
+    // file takes a copy of its arguments. The strategy's program reads the inputs and runs
+    // (`losat::web_adapter::program_of`).
+    let supplied = Supplied::of(words, program, command, &bytes)?;
     Ok(Parsed::Command(
-        program,
-        Box::new(applied.command),
+        supplied.program(),
+        Box::new(supplied.command()),
         Some(supplied),
     ))
 }
@@ -1681,6 +1668,8 @@ pub fn run(
     // The run's files (the file of `-logfile`), after the run, whether it failed or not.
     let handed = started.map_or(Ok(()), CallerStart::finish);
     let emitted = handed.and_then(|()| files.emit());
+    // The run's import of its search strategy ends with it (`imported`).
+    crate::imported::end_run();
     result.and(emitted.map_err(|error| format!("the files of the run: {error}")))
 }
 

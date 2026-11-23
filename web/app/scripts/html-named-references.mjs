@@ -1,5 +1,5 @@
 // Writes src/domain/html-named-references.ts, the named character references of HTML that the
-// viewer decodes in the outfmt 0 text of a run made with -html (domain/outfmt0.ts,
+// viewer decodes in the outfmt 0 text of a run made with -html (domain/outfmt0-html.ts,
 // htmlShownText), from the table of the WHATWG HTML Living Standard (section "Named character
 // references"; https://html.spec.whatwg.org/entities.json). The standard says the table will
 // never change. Run after a download of that file: node scripts/html-named-references.mjs entities.json

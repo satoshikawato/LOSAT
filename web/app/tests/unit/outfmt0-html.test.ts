@@ -7,7 +7,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LEGACY_NAMES, NAMED_REFERENCES } from '../../src/domain/html-named-references';
-import { headingTitle, htmlShownText } from '../../src/domain/outfmt0';
+import { headingTitle } from '../../src/domain/outfmt0';
+import { htmlShownText } from '../../src/domain/outfmt0-html';
 
 const fixture = (name: string) => readFileSync(resolve(import.meta.dirname, '../../../../LOSAT/tests/fixtures/outfmt0', name), 'utf8');
 

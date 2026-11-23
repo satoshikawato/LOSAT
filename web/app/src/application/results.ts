@@ -9,7 +9,6 @@ import type { ProgramDescription } from 'losat/ports';
 import { recordName } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type HspTable } from '../domain/hsp-table';
-import { htmlShownText } from '../domain/outfmt0';
 import { shownScores, splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
 import { customOutfmt, runOutputs } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
@@ -521,14 +520,14 @@ export class ResultsBrowser {
   /**
    * The outfmt 0 bytes of a range of the loaded run as text. A run made with `-html` has NCBI's HTML there;
    * the viewer shows the text that a browser displays (as its HTML tokenizer reads it: `htmlShownText`), the
-   * one place that reads outfmt 0 ranges. The stored bytes and the export stay as written.
+   * one place that reads outfmt 0 ranges. The stored bytes and the export stay as written. `htmlShownText`
+   * and its table of named character references are loaded here, while the range is read, so that only a
+   * run made with `-html` loads them (domain/outfmt0-html.ts).
    */
   private readOutfmt0(loaded: LoadedRun, range: readonly [number, number]): Promise<string> {
-    const html = flagGiven(loaded.run.snapshot.argv, '-html');
-    return this.deps.data.readOutputRange(loaded.run.snapshot.runId, 0, range[0], range[1]).then((bytes) => {
-      const text = decoder.decode(bytes);
-      return html ? htmlShownText(text) : text;
-    });
+    const read = this.deps.data.readOutputRange(loaded.run.snapshot.runId, 0, range[0], range[1]).then((bytes) => decoder.decode(bytes));
+    if (!flagGiven(loaded.run.snapshot.argv, '-html')) return read;
+    return Promise.all([read, import('../domain/outfmt0-html')]).then(([text, { htmlShownText }]) => htmlShownText(text));
   }
 
   /**

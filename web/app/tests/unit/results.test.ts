@@ -1030,7 +1030,8 @@ describe('ResultsBrowser', () => {
     it('shows the text that the HTML displays in the detail, the lists and the Range read, and keeps the stored bytes', async () => {
       const { results } = setup({ specs, argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-html'] });
       await results.open('r1');
-      await settle();
+      // The first range read of such a run also loads the module that reads its HTML (domain/outfmt0-html.ts).
+      await expect.poll(() => results.state.get().detail?.state, { timeout: 10_000 }).toBe('ready');
       const state = results.state.get();
       expect(state.detail).toMatchObject({ state: 'ready', heading: PLAIN_HEADING });
       expect(state.detail!.section).toBe(' Score = 90 bits\n\nQuery  1  acgt  50\n');
@@ -1038,8 +1039,7 @@ describe('ResultsBrowser', () => {
       expect(headingTitle(state.detail!.heading!)).toBe('s1 subject <one> &lt; "q"');
       expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 0 })).toBe(' Score = 90 bits\n\nQuery  1  acgt  50\n');
       results.requestHeadings([1]);
-      await settle();
-      expect(results.state.get().headings.get(1)).toBe(PLAIN_HEADING);
+      await expect.poll(() => results.state.get().headings.get(1)).toBe(PLAIN_HEADING);
     });
 
     it('shows a run without -html as written, a plain title with a literal &lt; included', async () => {

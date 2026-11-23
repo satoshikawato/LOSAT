@@ -120,6 +120,9 @@ pub(crate) struct Desc {
     constraint: Option<Constraint>,
     /// `AddKey` (a key without `optional="true"`): the key must be given (`CArgDescMandatory`).
     mandatory: bool,
+    /// `<description>`: the argument's comment, which NCBI's `-help` prints; kept for the programs
+    /// that LOSAT's descriptions list (`described`).
+    description: Option<Text>,
 }
 
 impl Desc {
@@ -291,6 +294,51 @@ pub fn choices(program: &str, name: &str) -> Option<Vec<String>> {
 /// DECISIONS K4i-2b-1 (3)).
 pub fn default_value(program: &str, name: &str) -> Option<&'static str> {
     find_desc(arguments(program)?, name)?.default()
+}
+
+/// One argument that LOSAT's descriptions of a program list (`described`), as NCBI's tables give
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Described {
+    /// The name, without its dash.
+    pub(crate) name: &'static str,
+    pub(crate) kind: Kind,
+    /// `<default>` (`default_value`).
+    pub(crate) default: Option<&'static str>,
+    /// The values of its set (`choices`); empty for a key of another constraint or none, and for
+    /// a flag.
+    pub(crate) choices: Vec<String>,
+    /// `<description>`: NCBI's comment of the argument, which its `-help` prints (NCBI's words).
+    pub(crate) description: &'static str,
+}
+
+// No NCBI counterpart: line RG DECISIONS K4i-3-1. NCBI's `-help` lists the arguments in the order
+// of its usage (`usage_position`), each with its comment.
+/// The arguments of `tool`'s program that LOSAT's descriptions of it list (the library API's
+/// `describe`, LOSAT Web's): every argument of its XML (the arguments of every NCBI application,
+/// the help flags, `-logfile`, `-conffile`, `-version`, ..., are not in its tables) but those that
+/// LOSAT refuses by name (`Refusal::Read`), in the order of NCBI's `-help` (`usage_position` in
+/// `Tool::help`). A program whose tables keep no comments (`DESCRIBED` in `build/ncbi_args.rs`)
+/// lists none.
+pub(crate) fn described(tool: &Tool) -> impl Iterator<Item = Described> {
+    let descs = arguments(tool.program).map_or(&[][..], Arguments::descs);
+    let mut listed: Vec<(usize, Described)> = descs
+        .iter()
+        .filter(|desc| !matches!(refusal(tool.program, desc.name()), Some(Refusal::Read(_))))
+        .filter_map(|desc| {
+            let name = desc.name();
+            let described = Described {
+                name,
+                kind: desc.kind,
+                default: desc.default(),
+                choices: choices(tool.program, name).unwrap_or_default(),
+                description: desc.description?.get(),
+            };
+            Some((usage_position(tool.help, name), described))
+        })
+        .collect();
+    listed.sort_by_key(|(position, _)| *position);
+    listed.into_iter().map(|(_, described)| described)
 }
 
 // The tables (`TEXT`, `HELP_FLAGS`, `FILE_ARGUMENTS`, `DESCS`, `ALIASES`, `DEPENDENCIES`,

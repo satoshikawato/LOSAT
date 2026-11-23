@@ -2,22 +2,22 @@
 //!
 //! NCBI builds each program's options once, as `CArgDescriptions` (`SetArgumentDescriptions`),
 //! and prints them from there (`PrintUsage`); LOSAT's argument tables are NCBI's (generated from
-//! each program's `-xmlhelp` XML, `ncbi_app::args`), and `describe` takes the defaults and the
-//! allowed values from them, the options, their help and value kinds from the clap definitions
-//! that convert them, so a caller shows exactly what the command line reads and holds no table
-//! of its own (LOSAT Web ABI v2 *describe*, docs/web/abi_v2.md §9, reads the same).
+//! each program's `-xmlhelp` XML, `ncbi_app::args`), which the command line's reader reads, and
+//! `describe` takes every part of an option from them (line RG DECISIONS K4i-3-1): the options
+//! and their order (the `-help`'s), their value kinds, defaults and allowed values, and their help
+//! (NCBI's comment, in LOSAT's words), so a caller shows exactly what the command line reads and
+//! holds no table of its own (LOSAT Web ABI v2 *describe*, docs/web/abi_v2.md §9, reads the same
+//! rows).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
 #![warn(missing_docs, unused)]
 
-use clap::CommandFactory;
-
 use super::program::Program;
 use super::search::{alignment_owned, file_options, API_OWNED};
-use crate::cli::Cli;
+use crate::ncbi_app::args::Kind;
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbiargs.hpp:588-598
-/// What an option's value is, from the type that the command line's parser makes of it.
+/// What an option's value is: its type in NCBI's argument tables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ValueKind {
@@ -41,7 +41,8 @@ pub enum ValueKind {
 pub struct Parameter {
     /// The flag with its single dash, as on the command line (`-evalue`).
     pub flag: String,
-    /// The help text of the command line.
+    /// The help text of the command line: NCBI's comment of the option, which its `-help`
+    /// prints, in LOSAT's words.
     pub help: String,
     /// Whether the flag takes a value (`-evalue 1e-5`) or stands alone (`-ungapped`).
     pub takes_value: bool,
@@ -64,7 +65,7 @@ pub struct Description {
     /// The described program.
     pub program: Program,
     /// The options that an argv of the library API may hold, in the order of the command
-    /// line's help: every option of the program but those the API sets itself (`-query`,
+    /// line's `-help`: every option of the program but those the API sets itself (`-query`,
     /// `-subject`, `-db`, `-in_pssm`, `-out`, `-outfmt`; `search::API_OWNED`; psiblast's
     /// `-in_msa`, `search::alignment_owned`) and the search strategy file, which it refuses
     /// (`search::file_options`). psiblast's `-msa_master_idx` and `-ignore_msa_master` are
@@ -85,81 +86,51 @@ fn accepted_gencodes(program: Program, name: &str) -> Vec<u32> {
     crate::ncbi_app::args::genetic_codes(program.name(), name).unwrap_or_default()
 }
 
-/// The kind of the value of `arg`, from the type its parser makes.
-fn value_kind(arg: &clap::Arg) -> ValueKind {
-    use std::any::TypeId;
-    if !arg.get_action().takes_values() {
-        return ValueKind::Flag;
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2387-2400
+/// The kind of a value of NCBI's type `kind` (`CArgDescriptions::GetTypeName`: an `Int8` or an
+/// `Integer` is an integer, a `File_In` or a `File_Out` a file's name).
+fn value_kind(kind: Kind) -> ValueKind {
+    match kind {
+        Kind::Flag => ValueKind::Flag,
+        Kind::Boolean => ValueKind::Boolean,
+        Kind::Int8 | Kind::Integer => ValueKind::Integer,
+        Kind::Double => ValueKind::Real,
+        Kind::InputFile | Kind::OutputFile => ValueKind::Path,
+        Kind::Text => ValueKind::Text,
     }
-    let parser = arg.get_value_parser();
-    let made = parser.type_id();
-    let is_one_of = |types: &[TypeId]| types.iter().any(|candidate| made == *candidate);
-    if is_one_of(&[TypeId::of::<bool>()]) {
-        ValueKind::Boolean
-    } else if is_one_of(&[
-        TypeId::of::<u8>(),
-        TypeId::of::<u32>(),
-        TypeId::of::<u64>(),
-        TypeId::of::<usize>(),
-        TypeId::of::<i32>(),
-        TypeId::of::<i64>(),
-    ]) {
-        ValueKind::Integer
-    } else if is_one_of(&[TypeId::of::<f32>(), TypeId::of::<f64>()]) {
-        ValueKind::Real
-    } else if is_one_of(&[TypeId::of::<std::path::PathBuf>()]) {
-        ValueKind::Path
-    } else {
-        ValueKind::Text
-    }
+}
+
+/// Every option of `program` that LOSAT's descriptions list, in the order of the command line's
+/// help (`ncbi_app::args::described`): `describe`'s, and those the library API sets itself. LOSAT
+/// Web's *describe* lists these rows but those that its adapter sets (`web_adapter`).
+pub(crate) fn parameters(program: Program) -> impl Iterator<Item = Parameter> {
+    let tool =
+        crate::cli::reader::tool(program.name()).expect("every API program is on NCBI's reader");
+    crate::ncbi_app::args::described(tool).map(|argument| Parameter {
+        flag: format!("-{}", argument.name),
+        help: crate::wording::losat_text(argument.description).into_owned(),
+        takes_value: argument.kind != Kind::Flag,
+        value_kind: value_kind(argument.kind),
+        default: argument.default.map(str::to_string),
+        choices: argument.choices,
+    })
 }
 
 /// The options of `program`, read from the engine's argument definitions.
 pub fn describe(program: Program) -> Description {
-    let root = Cli::command();
-    let command = root
-        .find_subcommand(program.name())
-        .expect("every API program is a command of the CLI");
-    let mut parameters = Vec::new();
-    for arg in command.get_arguments() {
-        let Some(long) = arg.get_long() else { continue };
-        if matches!(long, "help" | "version")
-            || API_OWNED.contains(&long)
-            || file_options(program).contains(&long)
-            || alignment_owned(program).contains(&long)
-        {
-            continue;
-        }
-        // The default and the values that NCBI's argument reader allows (its tables, line RG
-        // DECISIONS K4i-2b-1): none for a flag.
-        let name = program.name();
-        parameters.push(Parameter {
-            flag: format!("-{long}"),
-            help: arg.get_help().map(ToString::to_string).unwrap_or_default(),
-            takes_value: arg.get_action().takes_values(),
-            value_kind: value_kind(arg),
-            default: crate::ncbi_app::args::default_value(name, long).map(str::to_string),
-            choices: crate::ncbi_app::args::choices(name, long).unwrap_or_default(),
-        });
-    }
-    let has = |long: &str| {
-        command
-            .get_arguments()
-            .any(|arg| arg.get_long() == Some(long))
+    let owned = |flag: &str| {
+        let name = flag.trim_start_matches('-');
+        API_OWNED.contains(&name)
+            || file_options(program).contains(&name)
+            || alignment_owned(program).contains(&name)
     };
     Description {
         program,
-        parameters,
-        query_gencodes: if has("query_gencode") {
-            accepted_gencodes(program, "query_gencode")
-        } else {
-            Vec::new()
-        },
-        subject_gencodes: if has("db_gencode") {
-            accepted_gencodes(program, "db_gencode")
-        } else {
-            Vec::new()
-        },
+        parameters: parameters(program)
+            .filter(|parameter| !owned(&parameter.flag))
+            .collect(),
+        query_gencodes: accepted_gencodes(program, "query_gencode"),
+        subject_gencodes: accepted_gencodes(program, "db_gencode"),
     }
 }
 

@@ -132,3 +132,16 @@ tbx_sv5_soft0_f6	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	
 tbx_sv5_softgm1_f0	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_soft_mask	gm1	-outfmt	0
 tbx_sv5_hard0_f6	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	0	-outfmt	6
 tbx_sv5_hardgm1_f0	sv5	sv5	-	tblastx	-query	{R}/q.fa	-db	db	-seg	no	-db_hard_mask	gm1	-outfmt	0
+raw_m01	m01	m01	-	makeblastdb	-in	db	-input_type	blastdb	-dbtype	nucl	-out	copy
+raw_m01_info	m01	m01	-	blastdbcmd	-db	copy	-dbtype	nucl	-info
+raw_m01_masks	m01	m01	-	blastdbcmd	-db	copy	-dbtype	nucl	-entry	all	-outfmt	%a %m11 %m12
+raw_sv5	sv5	sv5	-	makeblastdb	-in	db	-input_type	blastdb	-dbtype	nucl	-out	copy
+raw_sv5_info	sv5	sv5	-	blastdbcmd	-db	copy	-dbtype	nucl	-info
+raw_sv5_masks	sv5	sv5	-	blastdbcmd	-db	copy	-dbtype	nucl	-entry	all	-outfmt	%a %m11
+raw_svp	svp	svp	-	makeblastdb	-in	db	-input_type	blastdb	-dbtype	prot	-out	copy
+raw_svp_info	svp	svp	-	blastdbcmd	-db	copy	-dbtype	prot	-info
+raw_svp_masks	svp	svp	-	blastdbcmd	-db	copy	-dbtype	prot	-entry	all	-outfmt	%a %m21
+raw_m01_hard12	m01	m01	-	blastn	-query	{R}/q.fa	-dust	no	-db	copy	-db_hard_mask	12	-outfmt	6
+raw_m01_parent	m01	.	-	makeblastdb	-in	m01/db	-input_type	blastdb	-dbtype	nucl	-out	m01/copy_up
+raw_m01_two	m01	m01	-	makeblastdb	-in	db db	-input_type	blastdb	-dbtype	nucl	-title	t2	-out	copy2
+raw_m01_two_info	m01	m01	-	blastdbcmd	-db	copy2	-info

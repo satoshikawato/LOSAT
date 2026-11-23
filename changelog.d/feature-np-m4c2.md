@@ -5,3 +5,5 @@
   its alias file). With `-db_soft_mask` or `-db_hard_mask` on such a database, the search programs write NCBI's
   `-num_threads 1` output at every thread count, where NCBI's own blastn stops or crashes in some runs on more than
   one thread. A protein in FASTA with such masks is masked over its whole length, as for masks in columns.
+- `losat makeblastdb -input_type blastdb` with such a database as its one input copies its GI-indexed masks into the
+  copy's mask column, with NCBI's algorithm ids, as NCBI's `makeblastdb` does.

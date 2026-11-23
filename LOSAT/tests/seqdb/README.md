@@ -195,7 +195,9 @@ directory under the root, environment, words): `blastdbcmd -info`, `-outfmt %m`,
 -db_soft_mask` / `-db_hard_mask` by id and name, from another directory, with `BLASTDB`, by absolute name, through an
 alias file over the database and as `-db 'db db'`, a plain search of each program family, and (rows added
 2026-11-23) `blastp`, `blastx`, `tblastn` and `tblastx` with `-db_soft_mask` / `-db_hard_mask` by id (`-outfmt 6`)
-and by name (`-outfmt 0`) on the protein databases `m09`, `svp` and the nucleotide databases `m01`, `sv5`. `gi_mask_read/db/<db>/`
+and by name (`-outfmt 0`) on the protein databases `m09`, `svp` and the nucleotide databases `m01`, `sv5`; the rows
+`raw_*` copy `m01`, `sv5` and `svp` with `makeblastdb -input_type blastdb` and read the copies back (`-info`, `%m`,
+a hard-masked search), from another directory, and with `-in 'db db'` (the rows run in order in one root). `gi_mask_read/db/<db>/`
 holds the databases (the root `<R>` in their text files), `gi_mask_read/expected/<case>.{rc,stdout,stderr}` the runs
 (the root as `<R>`), `gi_mask_read/in/` the queries. `bdc_m09_msw_0` (a protein in FASTA with masks) is approved
 difference 5 of PD-LOSAT-BLASTDBCMD-DEVIATIONS: NCBI's headers with the letters of NCBI's `-outfmt %s` run, NCBI's

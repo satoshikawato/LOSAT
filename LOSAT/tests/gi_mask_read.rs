@@ -15,7 +15,10 @@
 //! 2026-10-13), also where NCBI's blastn with GI-indexed masks stops or crashes in some runs on
 //! more than one thread. A round trip builds `m01` (four volumes) and `sv5` (one volume) with
 //! `losat makeblastdb` and runs their cases again: the bytes are NCBI's but for the date of the
-//! database (`Date:` of `-info`, `Posted date:` of the pairwise report).
+//! database (`Date:` of `-info`, `Posted date:` of the pairwise report). The rows `raw_*` copy
+//! `m01`, `sv5` and `svp` with `makeblastdb -input_type blastdb` (the GI masks become the copy's
+//! mask columns, as NCBI's raw database source registers them) and read the copies back, with
+//! the copies' dates and the log's clock masked.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp,
 //! c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:117-139 (`LOSAT/src/seqdb/gi_mask.rs`).
@@ -225,7 +228,32 @@ fn describe(got: &(i32, Vec<u8>, Vec<u8>), want: &(i32, Vec<u8>, Vec<u8>)) -> St
 }
 
 fn is_search(case: &Case) -> bool {
-    case.words[0] != "blastdbcmd"
+    !["blastdbcmd", "makeblastdb"].contains(&case.words[0].as_str())
+}
+
+/// The rows `raw_*` copy a database with `makeblastdb -input_type blastdb` and read the copy back:
+/// the copy's date (`without_dates`), the log's clock (`current time: `) and the time the copy
+/// took (`added N sequences in S seconds.`) are masked.
+fn comparable(case: &Case, out: (i32, Vec<u8>, Vec<u8>)) -> (i32, Vec<u8>, Vec<u8>) {
+    if !case.name.starts_with("raw_") {
+        return out;
+    }
+    let text = String::from_utf8_lossy(&without_dates(&out.1)).into_owned();
+    let stdout = text
+        .split_inclusive('\n')
+        .map(|line| {
+            if let Some(at) = line.find("current time: ") {
+                return format!("{}current time: <T>\n", &line[..at]);
+            }
+            match line.find(" sequences in ") {
+                Some(at) if line.ends_with(" seconds.\n") => {
+                    format!("{} sequences in <S> seconds.\n", &line[..at])
+                }
+                _ => line.to_string(),
+            }
+        })
+        .collect::<String>();
+    (out.0, stdout.into_bytes(), out.2)
 }
 
 /// Every case of the table, and the searches again with `-num_threads 4`, whose reference is
@@ -238,13 +266,13 @@ fn readers_give_ncbi_s_output_on_ncbi_s_databases() {
         for db in &case.dbs {
             put_database(&root.0, db);
         }
-        let want = expected(&case.name);
-        let got = run(&root.0, &case, &[]);
+        let want = comparable(&case, expected(&case.name));
+        let got = comparable(&case, run(&root.0, &case, &[]));
         if got != want {
             problems.push(format!("{}: {}", case.name, describe(&got, &want)));
         }
         if is_search(&case) {
-            let got = run(&root.0, &case, &["-num_threads", "4"]);
+            let got = comparable(&case, run(&root.0, &case, &["-num_threads", "4"]));
             if got != want {
                 problems.push(format!("{} n4: {}", case.name, describe(&got, &want)));
             }
@@ -287,17 +315,18 @@ fn readers_give_ncbi_s_output_on_losat_s_databases() {
     let mut ran = 0;
     for case in cases() {
         let own = case.dbs.iter().all(|db| db == "m01" || db == "sv5");
+        // `copy2` is the copy of `-in 'db db'`, made by a row skipped here.
         let alias = case
             .words
             .iter()
-            .any(|word| word == "al" || word == "db db");
+            .any(|word| word == "al" || word == "db db" || word == "copy2");
         if !own || alias {
             continue;
         }
         ran += 1;
-        let want = expected(&case.name);
+        let want = comparable(&case, expected(&case.name));
         let want = (want.0, without_dates(&want.1), want.2);
-        let got = run(&root.0, &case, &[]);
+        let got = comparable(&case, run(&root.0, &case, &[]));
         let got = (got.0, without_dates(&got.1), got.2);
         if got != want {
             problems.push(format!("{}: {}", case.name, describe(&got, &want)));

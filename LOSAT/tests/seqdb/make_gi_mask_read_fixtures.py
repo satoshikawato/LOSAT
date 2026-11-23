@@ -34,7 +34,8 @@ Output files:
                       metadata) the root is `<R>`
   cases.tsv           one row per read: name, databases it needs (comma separated), the directory
                       it runs in (relative to the root), environment (`-` or `NAME=VALUE`), then the
-                      program and its words, one per field
+                      program and its words, one per field; the rows run in order in one root, so
+                      a `makeblastdb -input_type blastdb` row's copy is there for the rows after it
   expected/<case>.rc, .stdout, .stderr
                       NCBI's exit status, standard output and error, the root as `<R>`; for the
                       cases of `DEVIATION_5` the standard output is the approved difference 5 of
@@ -262,6 +263,28 @@ def cases():
                 add(f"{short[program]}_{db}_{kind}{algo}_f{fmt}", db, db, "-",
                     [program, "-query", prot[program], "-db", "db", "-seg", "no",
                      f"-db_{kind}_mask", algo, "-outfmt", fmt])
+
+    # `makeblastdb -input_type blastdb` (series RG, D3c) reads the input's masks through the same
+    # entry: a GI-mask database's GI masks become the copy's mask columns, with the ids and names
+    # that NCBI's raw database source registers (`dust11`, `dust12`, `seg21`). These rows run in
+    # table order in one root: each copy is read back by the rows after it.
+    for db, dbtype, ids in (("m01", "nucl", ("11", "12")), ("sv5", "nucl", ("11",)),
+                            ("svp", "prot", ("21",))):
+        add(f"raw_{db}", db, db, "-",
+            ["makeblastdb", "-in", "db", "-input_type", "blastdb", "-dbtype", dbtype, "-out", "copy"])
+        add(f"raw_{db}_info", db, db, "-", bdc("-db", "copy", "-dbtype", dbtype, "-info"))
+        add(f"raw_{db}_masks", db, db, "-",
+            bdc("-db", "copy", "-dbtype", dbtype, "-entry", "all", "-outfmt",
+                "%a" + "".join(f" %m{i}" for i in ids)))
+    add("raw_m01_hard12", "m01", "m01", "-", bn("-db", "copy", "-db_hard_mask", "12", "-outfmt", "6"))
+    # The GI-mask files are looked for from the current directory, as for every reader.
+    add("raw_m01_parent", "m01", ".", "-",
+        ["makeblastdb", "-in", "m01/db", "-input_type", "blastdb", "-dbtype", "nucl", "-out", "m01/copy_up"])
+    # Two names: MASKLIST is passed over, the copy has no masks.
+    add("raw_m01_two", "m01", "m01", "-",
+        ["makeblastdb", "-in", "db db", "-input_type", "blastdb", "-dbtype", "nucl", "-title", "t2",
+         "-out", "copy2"])
+    add("raw_m01_two_info", "m01", "m01", "-", bdc("-db", "copy2", "-info"))
     return rows
 
 

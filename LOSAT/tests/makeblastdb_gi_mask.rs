@@ -25,7 +25,7 @@
 //! makeblastdb prints its usage; LOSAT's message holds the sentence of makeblastdb's).
 //!
 //! The expectations of a single-volume database built with `-gi_mask` are NCBI's run with the one
-//! change of PD-LOSAT-NCBI-DEFECTS approved exception 23 (`single_volume_exception` of the
+//! change of PD-LOSAT-NCBI-DEFECTS approved exception 25 (`single_volume_exception` of the
 //! script): the alias file's `DBLIST` names the volume by its file name, and the run ends as a
 //! successful one, with the metadata file of NCBI's `blastdbcmd -metadata` for that database.
 //!
@@ -571,7 +571,7 @@ fn losat(dir: &Path, command: &str) -> (i32, String, String) {
 }
 
 /// The database of one volume that `losat makeblastdb -gi_mask` writes opens (its alias file
-/// names the volume by its file name, PD-LOSAT-NCBI-DEFECTS approved exception 23), and LOSAT's
+/// names the volume by its file name, PD-LOSAT-NCBI-DEFECTS approved exception 25), and LOSAT's
 /// programs that read sequences stop on its `MASKLIST` with LOSAT's refusal, before they print
 /// anything: they do not read GI masks yet (line NP item M4c-2).
 #[test]

@@ -197,8 +197,8 @@ fn retain_unremoved<T>(items: &mut Vec<T>, removed: &[bool]) {
 /// test is false at the first call (`start` and `stop` 0) for fewer than 12 bases and stays so,
 /// and it returns the translation it never made (`calloc`'d to NULL) plus 1, from which every
 /// caller reads next. TBLASTN's traceback reads (`tblastn::search_gapped::TargetTranslation`) and
-/// TBLASTX's ungapped re-evaluation (`blast_hits.c:2700-2705`) refuse there
-/// (`x_untranslated_frame_refusal`).
+/// the ungapped re-evaluation of TBLASTX and TBLASTN `-ungapped` (`blast_hits.c:2700-2705`) refuse
+/// there (`x_untranslated_frame_refusal`).
 #[inline]
 pub(crate) fn target_translation_never_made(subject_length: usize) -> bool {
     subject_length / 3 <= 3
@@ -207,7 +207,7 @@ pub(crate) fn target_translation_never_made(subject_length: usize) -> bool {
 /// The refusal of `program`'s `step` (the NCBI step that reads the translation) of an alignment
 /// on a subject whose frames NCBI never translates (`target_translation_never_made`): NCBI BLAST+
 /// 2.17.0 reads from address 1 on (NULL + 1) and dies with SIGSEGV (PD-LOSAT-NCBI-DEFECTS 1.46 for
-/// TBLASTN, 1.51 for TBLASTX, rule 3).
+/// TBLASTN, 1.79 for TBLASTN `-ungapped`, 1.51 for TBLASTX, rule 3).
 #[cold]
 #[inline(never)]
 pub(crate) fn x_untranslated_frame_refusal(program: &str, step: &str) -> anyhow::Error {

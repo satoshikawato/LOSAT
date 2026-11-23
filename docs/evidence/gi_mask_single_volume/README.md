@@ -1,4 +1,4 @@
-# A single-volume `makeblastdb -gi_mask` database whose alias file names its volume (PD-LOSAT-NCBI-DEFECTS exception 23)
+# A single-volume `makeblastdb -gi_mask` database whose alias file names its volume (PD-LOSAT-NCBI-DEFECTS exception 25)
 
 Line NP item M4c-1, 2026-11-20. NCBI BLAST+ 2.17.0 (the official Linux x86-64 build, `BLAST_USAGE_REPORT=false`),
 `probe.sh` in this directory (inputs: `nucl.fa`, `prot.fa` and their dustmasker/segmasker masks of

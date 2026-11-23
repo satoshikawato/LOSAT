@@ -121,13 +121,6 @@ pub struct MakedbArgs {
     pub randomize: bool,
 }
 
-/// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
-/// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
-/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`,
-/// `-mask_desc`, `-metadata_output_prefix`, `-oid_masks`, `-randomize`, `-gi_mask` and
-/// `-gi_mask_name` are read: none is refused today.
-pub const UNSUPPORTED_OPTIONS: [&str; 0] = [];
-
 /// How `losat makeblastdb` ends when it does not build a database, or cannot
 /// open the one it built.
 #[derive(Debug)]
@@ -495,9 +488,11 @@ pub(crate) fn dependency_error(given: &dyn Fn(&str) -> bool) -> Option<String> {
     if !makeblastdb_dependencies().any(|(first, _, _)| given(first)) {
         return None;
     }
+    // The words of a message are the tables' names, ASCII: its bytes are its text.
+    let text = |message: Vec<u8>| String::from_utf8_lossy(&message).into_owned();
     let walk = match walk_dependencies(makeblastdb_dependencies(), given) {
         Ok(walk) => walk,
-        Err(message) => return Some(message),
+        Err(message) => return Some(text(message)),
     };
     for (name, mandatory) in MAKEBLASTDB_ARGUMENTS {
         let required = walk.missing(name);
@@ -505,7 +500,7 @@ pub(crate) fn dependency_error(given: &dyn Fn(&str) -> bool) -> Option<String> {
             continue;
         }
         // A required argument that is missing, or a missing mandatory one (the parser's error).
-        return required;
+        return required.map(text);
     }
     None
 }

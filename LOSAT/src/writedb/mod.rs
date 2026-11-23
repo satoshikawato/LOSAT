@@ -26,8 +26,8 @@
 //! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
 //! `-parse_seqids`. With `-gi_mask` (and `-gi_mask_name`) the masks go instead to the GI-indexed
 //! files of each algorithm (`gi_mask`), and the database gets an alias file that names them.
-//! `losat makeblastdb` refuses no option of makeblastdb 2.17.0 by name today
-//! (`makeblastdb::UNSUPPORTED_OPTIONS`); `-oid_masks` writes the OID mask files (`oid_list`);
+//! `losat makeblastdb` refuses no option of makeblastdb 2.17.0 by name today (no row of
+//! `ncbi_app::args::refusal`); `-oid_masks` writes the OID mask files (`oid_list`);
 //! `-metadata_output_prefix` names the files of the metadata file
 //! (`metadata::metadata_user_path`).
 //!
@@ -160,7 +160,7 @@ impl WriteDbError {
             WriteDbError::Exception(e) => text("Error: ", &e.what()),
             WriteDbError::Other(message) => text("Error: ", message.as_bytes()),
             WriteDbError::Unsupported(message) => text("losat makeblastdb: ", message.as_bytes()),
-            WriteDbError::OutOfMemory => b"BLAST ran out of memory".to_vec(),
+            WriteDbError::OutOfMemory => crate::wording::OUT_OF_MEMORY.as_bytes().to_vec(),
             WriteDbError::Io { path, source } => [
                 b"Error: ".as_slice(),
                 &crate::utils::os_bytes::path_bytes(path),

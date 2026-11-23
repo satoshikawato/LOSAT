@@ -52,10 +52,8 @@ pub(super) fn tax_id_list(
         (None, Some(file)) => {
             let Ok(bytes) = read_input_file("taxidlist", file, stdin) else {
                 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-                diag.post(&format!(
-                    "Command line argument error: {}",
-                    arg_message("taxidlist", "File is not accessible", file)
-                ));
+                let message = arg_message("taxidlist", "File is not accessible", file.as_bytes());
+                diag.post_bytes(&[b"Command line argument error: ".as_slice(), &message].concat());
                 return Err(Ended(1));
             };
             input_lines(&bytes, LineEnds::HOST)

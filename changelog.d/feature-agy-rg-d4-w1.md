@@ -1,0 +1,1 @@
+- The WebAssembly engine and the `losat` npm package run BLASTN `-filtering_db` (a BLAST database of repeats) with `-db` or `-subject`, from the files in the run's directory, and write the same bytes as the command line; LOSAT Web's form still refuses the option until it has an input for the database's files.

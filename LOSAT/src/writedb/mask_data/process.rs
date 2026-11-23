@@ -50,6 +50,7 @@ use std::path::{Path, PathBuf};
 
 use super::MaskedRangeSet;
 use crate::ncbi_str::{string_to_int, truncate_spaces_str};
+use crate::report::serial::asn_input::Utf8TagOnce;
 use crate::writedb::build_db::BuildDatabase;
 use crate::writedb::fasta_source::Warn;
 use crate::writedb::makeblastdb::MakedbError;
@@ -235,7 +236,7 @@ pub(crate) fn process_mask_data(
         }
     }
 
-    let mut utf8_warned = false;
+    let mut utf8_once = Utf8TagOnce::default();
     for (i, &file) in file_list.iter().enumerate() {
         let path: PathBuf = match options.root {
             Some(root) => root.join(file),
@@ -255,7 +256,7 @@ pub(crate) fn process_mask_data(
         let mut algo_id: Option<i32> = None;
         loop {
             let next = reader.next_info();
-            write_posts(&mut reader, warn, &mut utf8_warned);
+            write_posts(&mut reader, warn, &mut utf8_once);
             let Some(first_obj) = next? else {
                 break;
             };
@@ -309,7 +310,7 @@ pub(crate) fn process_mask_data(
                 }
 
                 let next = reader.next_list();
-                write_posts(&mut reader, warn, &mut utf8_warned);
+                write_posts(&mut reader, warn, &mut utf8_once);
                 masks = next?;
             }
         }
@@ -319,15 +320,12 @@ pub(crate) fn process_mask_data(
 
 /// Writes on standard error what NCBI's serial reader posted while `reader` read its last object
 /// (also when it then failed), in the order posted: before makeblastdb does anything with the
-/// object or the error. The warning of a UTF8String tag is `ERR_POST_X_ONCE`, once per run
-/// (`utf8_warned`), whichever file it is in.
-fn write_posts(reader: &mut MaskFileReader, warn: Warn<'_>, utf8_warned: &mut bool) {
+/// object or the error. The warning of a UTF8String tag is posted once per run (`utf8_once`),
+/// whichever file it is in.
+fn write_posts(reader: &mut MaskFileReader, warn: Warn<'_>, utf8_once: &mut Utf8TagOnce) {
     for post in reader.take_posts() {
-        if matches!(post, MaskPost::Utf8Tag(_)) {
-            if *utf8_warned {
-                continue;
-            }
-            *utf8_warned = true;
+        if matches!(post, MaskPost::Utf8Tag(_)) && !utf8_once.first() {
+            continue;
         }
         let line = post.line();
         warn(line.strip_suffix(b"\n").unwrap_or(&line));

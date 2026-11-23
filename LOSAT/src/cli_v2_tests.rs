@@ -1700,7 +1700,7 @@ fn unported_ncbi_options_are_rejected_explicitly() {
 // BLASTN's (series NP, M4a-2), BLASTP's, BLASTX's (series NP, M4b), TBLASTN's and TBLASTX's (M4b
 // PR 2) `-db_soft_mask` and `-db_hard_mask`: strings, each excluding the other, `-subject` and
 // `-subject_loc` (conflicts of LOSAT's parser, where NCBI prints its usage; probes o04, o05, o06
-// of the M4a-2 survey); neither is a refusal of the run (`RUN_REFUSALS`, series NP, M4a-2b).
+// of the M4a-2 survey); neither is refused (`ncbi_app::args::refusal`, series NP, M4a-2b).
 #[test]
 fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
     let masks = |program: &str, words: &[&str]| {
@@ -1735,10 +1735,10 @@ fn the_nucleotide_and_protein_database_programs_take_the_database_masks() {
                 "{program} {words:?}"
             );
         }
-        assert!(!crate::cli::RUN_REFUSALS
-            .iter()
-            .any(|&(refused, name, _)| refused == program
-                && (name == "db_hard_mask" || name == "db_soft_mask")));
+        for name in ["db_hard_mask", "db_soft_mask"] {
+            let refusal = crate::ncbi_app::args::refusal(program, name);
+            assert_eq!(refusal, None, "{program} -{name}");
+        }
     }
 }
 
@@ -1997,8 +1997,10 @@ fn tblastx_takes_a_database_and_its_size() {
 
 #[test]
 fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
-    // Decision D12 (AUTHORITY.md): an -evalue of DBL_MAX or more crashes NCBI's blastp and
-    // tblastn on some inputs. blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
+    // Decision D12 (AUTHORITY.md): an infinite -evalue, and DBL_MAX with the composition-based
+    // redo, which crashes NCBI's blastp and tblastn on some inputs
+    // (`protein_options_check::check_evalue_limit`); without the redo NCBI runs DBL_MAX (line
+    // O4c's review D1). blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
     // NCBI's int wraps or crashes NCBI; LOSAT computes the size without the overflow and runs
     // (PD-LOSAT-NCBI-DEFECTS exception 19).
     let blastp = |words: &[&str]| {
@@ -2016,6 +2018,7 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     for words in [
         &["-evalue", "+inf"][..],
         &["-evalue", "1e999"],
+        &["-evalue", "1e999", "-comp_based_stats", "0"],
         &["-evalue", "1.7976931348623157e308"],
     ] {
         let error = format!("{:#}", blastp(words).unwrap_err());
@@ -2027,6 +2030,12 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     for words in [
         &["-evalue", "1e308"][..],
         &["-evalue", "1.7976931348623156e308"],
+        &[
+            "-evalue",
+            "1.7976931348623157e308",
+            "-comp_based_stats",
+            "0",
+        ],
         &["-max_target_seqs", "2147483647"],
         &["-max_target_seqs", "1073741798"],
         // Past NCBI's `int` overflow of the preliminary hit list size (LOSAT computes it without).
@@ -2048,6 +2057,30 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
         "{error}"
     );
     tblastn(&["-evalue", "1e308"]).unwrap();
+    for words in [
+        &[
+            "-evalue",
+            "1.7976931348623157e308",
+            "-comp_based_stats",
+            "0",
+        ][..],
+        &[
+            "-evalue",
+            "1.7976931348623157e308",
+            "-ungapped",
+            "-comp_based_stats",
+            "0",
+        ],
+    ] {
+        tblastn(words).unwrap();
+    }
+    for words in [
+        &["-evalue", "+inf", "-comp_based_stats", "0"][..],
+        &["-evalue", "1e999", "-ungapped", "-comp_based_stats", "0"],
+    ] {
+        let error = format!("{:#}", tblastn(words).unwrap_err());
+        assert!(error.contains("an infinite -evalue"), "{words:?}: {error}");
+    }
 }
 
 #[test]

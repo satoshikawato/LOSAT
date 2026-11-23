@@ -78,6 +78,8 @@ open("ones.msk", "wb").write(struct.pack(">I", 7) + b"\xff")
 open("onesn.msk", "wb").write(struct.pack(">I", 3) + b"\xff")
 # OIDs 0, 3, 4, 6 and 7: every sequence keeps a line under the type (ompart.pal, makeblastdb -input_type blastdb)
 open("nol.msk", "wb").write(struct.pack(">I", 7) + b"\x9b")
+# nucleotide twin: a list is read per volume, so local OIDs 0 and 3 of each of omn's two volumes (global 0, 3, 4, 7)
+open("noln.msk", "wb").write(struct.pack(">I", 3) + b"\x9b")
 PY
 
 # --- hand-written alias files over the protein database
@@ -105,6 +107,7 @@ al tall.pal "DBLIST omp" "OIDLIST ones.msk" "OID_MASK_TYPE 1" "NSEQ 8" "LENGTH 1
 al ompart.pal "TITLE omp partly erased" "DBLIST omp" "OIDLIST nol.msk" "OID_MASK_TYPE 1"
 # --- over the nucleotide database: a per-volume list (bits past each volume's end are ignored)
 al ntall.nal "DBLIST omn" "OIDLIST onesn.msk" "OID_MASK_TYPE 1"
+al ompartn.nal "TITLE omn partly erased" "DBLIST omn" "OIDLIST noln.msk" "OID_MASK_TYPE 1"
 # --- omb (version 4, -oid_masks 1) and ombx (blastdb_aliastool -oid_masks 1): OID 0 has a normal line and a
 # predicted one whose title holds the byte 0x80, OID 1 a normal line, OID 2 a predicted one with 0x80 (masked out by
 # omb.pxm). makeblastdb writes '#' for such a byte, so the stored "bad#" is patched back to "bad\x80" (as a header that

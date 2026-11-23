@@ -4,6 +4,7 @@
 
 use super::{index_annots, Abort, AnnotOutcome, Refusal};
 use crate::ncbi_exception::NCBI_BUILD_ROOT;
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::{read_document, table::named, Value};
 
 /// The index of the annotations `annots` (each the text of a `Seq-annot`) for psiblast.
@@ -11,8 +12,11 @@ fn index(annots: &[&str]) -> Result<AnnotOutcome, Refusal> {
     let values: Vec<Value> = annots
         .iter()
         .map(|text| {
-            let (value, posts) =
-                read_document(format!("Seq-annot ::= {text}").as_bytes(), named::SEQ_ANNOT);
+            let (value, posts) = read_document(
+                format!("Seq-annot ::= {text}").as_bytes(),
+                named::SEQ_ANNOT,
+                Names::PSSM,
+            );
             assert!(posts.is_empty(), "{posts:?}");
             value.unwrap_or_else(|error| panic!("{text}: {error:?}"))
         })
@@ -786,6 +790,7 @@ fn nests_of_any_depth_are_walked_without_recursion() {
                 let (value, posts) = read_document(
                     text.as_bytes(),
                     root,
+                    Names::PSSM,
                 );
                 assert!(posts.is_empty(), "{posts:?}");
                 value.expect("read")

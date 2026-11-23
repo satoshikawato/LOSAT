@@ -168,7 +168,7 @@ run's exit status, standard output and error
 `gi_mask/expected/<case>.{rc,stdout,stderr,files}`; `gi_mask/db/<case>/` keeps the files that `-gi_mask` writes or
 changes (GI-mask files, alias, metadata, mask column, log) and, for six cases, the volume files too.
 These are NCBI's bytes but in one place, the script's `single_volume_exception` (PD-LOSAT-NCBI-DEFECTS approved
-exception 23, the Owner's decision of 2026-11-20): for a database of one volume NCBI's alias file names the database
+exception 25, the Owner's decision of 2026-11-20): for a database of one volume NCBI's alias file names the database
 itself by its absolute path (`DBLIST <C>/db`), which no program can open, and makeblastdb ends with `DB alias files
 are mutually recursive` (exit status 2, no metadata file). LOSAT names the volume by its file name (`DBLIST db`). So
 after each such run the script changes that line in the run directory (before the next case of a chain runs) and,

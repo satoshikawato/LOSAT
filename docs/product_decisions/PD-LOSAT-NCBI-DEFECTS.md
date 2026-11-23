@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.91
+- Version: 1.92
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -502,7 +502,11 @@
   at the merge of dev that brought psiblast line item PS10a's 1.82, then 1.89 at the merge of dev that
   brought 1.83 to 1.88 (line NP items M4b-AX, O4b2-2 and M4b-3c, psiblast line items PS10c and PS10d, line RG
   item D1c-1), then 1.91 at the merge of dev that brought line NP item M4b-T2's 1.89 and line RG
-  item T5d's 1.90)
+  item T5d's 1.90);
+  1.92 2026-11-24 (under a negative seqid list, a subject whose header NCBI's fetch cannot read
+  ends the search only where the composition-based or Smith-Waterman redo fetches it, rule 2: its
+  list stays in the redo's stream, line RG item D1c-1c; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1750,9 +1754,13 @@ file would differ, and NCBI's programs still could not open the database).
   (a damaged record, a `BL_ORD_ID` line with a string tag in a later volume) ends NCBI's search
   there (exit 255 in the traceback, `BLAST engine error` in the ungapped re-evaluation) even
   where the subject is not reported; LOSAT refuses such a search at the same place. The
-  composition-based redo fetches only the matches that its early termination test leaves, and
-  LOSAT checks every subject of the preliminary hit lists, so it may refuse such a search where
-  NCBI ends it without reading that header.
+  composition-based redo (and the Smith-Waterman redo) fetches only the matches that its early
+  termination test leaves: since version 1.92 such a subject's list stays in the redo's stream
+  (also one whose lines LOSAT refuses where it reads them) and LOSAT refuses the search only
+  where NCBI's redo fetches it, after the reports of the query batches before (as NCBI's
+  search ends in that batch), so a search whose redo frees that match unfetched writes NCBI's
+  output (BLASTP, PSIBLAST, BLASTX, TBLASTN; line RG item
+  D1c-1c, rows `db.il.*.lr*`, `db.il.*.ls*`).
 
 - TBLASTX, an ungapped extension that reaches the end of its query frame (version 1.40,
   2026-11-17, line RG item X2c, Owner-delegated): `s_BlastAaExtendLeft` and

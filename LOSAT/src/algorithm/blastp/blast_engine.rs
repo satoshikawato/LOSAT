@@ -10237,7 +10237,7 @@ fn run_call(
             x_ih_pool::x_pooled() - x_pooled_at_start
         );
     }
-    fetch_notes.after(&redone_matches, &ordinary_hit_lists, &kappa_query_batches);
+    fetch_notes.after(&redone_matches, &ordinary_hit_lists, &kappa_query_batches)?;
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
     if let Some(ordinary_hit_lists) = ordinary_hit_lists {

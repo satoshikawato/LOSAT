@@ -955,6 +955,30 @@ where
     Ok(())
 }
 
+/// The error of the batch `batch` whose Smith-Waterman redo failed at its last redone match
+/// (`sw_batch_failed`), the redo having taken the lists up to query `q_idx`'s with the heaps
+/// `heaps`: LOSAT's refusal instead where a fetch before it read a header that cannot be read,
+/// which ended NCBI's search there (`FetchNotes::refused_before_failure`).
+#[cold]
+#[inline(never)]
+fn sw_batch_failed_after(
+    fetch_notes: &super::database::FetchNotes<'_>,
+    batch: std::ops::Range<usize>,
+    heaps: &[BlastCompoHeap],
+    q_idx: usize,
+) -> anyhow::Error {
+    if let Some(refusal) =
+        fetch_notes.refused_before_failure(heaps, batch.clone(), q_idx, usize::MAX)
+    {
+        return refusal;
+    }
+    sw_batch_failed(
+        batch.start,
+        &heaps[batch.start],
+        fetch_notes.fetched_before_failure(heaps, batch.clone(), q_idx, usize::MAX),
+    )
+}
+
 /// NCBI's error of a query batch whose Smith-Waterman redo (`smith_waterman_match::SwRedoFailed`)
 /// fails at the batch's last redone match: NCBI's one-thread redo keeps the status of its last
 /// match (`status_code_tld[0]`; a failed earlier match is dropped and the next redone match sets
@@ -1213,15 +1237,11 @@ where
         }
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
             if sw_status.failed() && q_idx + 1 == batch.end {
-                return Err(sw_batch_failed(
-                    batch.start,
-                    &redone_matches[batch.start],
-                    fetch_notes.fetched_before_failure(
-                        redone_matches,
-                        batch.clone(),
-                        q_idx,
-                        usize::MAX,
-                    ),
+                return Err(sw_batch_failed_after(
+                    fetch_notes,
+                    batch.clone(),
+                    redone_matches,
+                    q_idx,
                 ));
             }
             continue;
@@ -1325,15 +1345,26 @@ where
                     &mut |evalue, score| redone_match.would_insert(evalue, score, s_idx),
                 );
                 let Some(postprocessed) = sw_status.redone(redone, || {
-                    sw_endless(
-                        batch.start,
-                        fetch_notes.fetched_before_failure(
+                    // A fetch before this match that read a header that cannot be read ended
+                    // NCBI's search there.
+                    fetch_notes
+                        .refused_before_failure(
                             redone_matches,
                             batch.clone(),
                             q_idx,
                             x_match_position,
-                        ),
-                    )
+                        )
+                        .unwrap_or_else(|| {
+                            sw_endless(
+                                batch.start,
+                                fetch_notes.fetched_before_failure(
+                                    redone_matches,
+                                    batch.clone(),
+                                    q_idx,
+                                    x_match_position,
+                                ),
+                            )
+                        })
                 })?
                 else {
                     x_status_position = Some(x_match_position);
@@ -1385,15 +1416,11 @@ where
         // the batch (`Traceback failed`, traceback_stage.cpp:251-253), or crashes NCBI's clean-up
         // when the batch's first query holds a redone match (`sw_batch_failed`).
         if sw_status.failed() && q_idx + 1 == batch.end {
-            return Err(sw_batch_failed(
-                batch.start,
-                &redone_matches[batch.start],
-                fetch_notes.fetched_before_failure(
-                    redone_matches,
-                    batch.clone(),
-                    q_idx,
-                    usize::MAX,
-                ),
+            return Err(sw_batch_failed_after(
+                fetch_notes,
+                batch.clone(),
+                redone_matches,
+                q_idx,
             ));
         }
     }

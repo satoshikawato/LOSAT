@@ -896,15 +896,18 @@ impl PreliminarySink for Runtime<'_> {
         // negative seqid list keeps without a line (`FetchExcluded`): its lists leave the closed
         // stream before the redo or the traceback reads it. An ungapped search fetches no protein
         // subject; its such hits leave at the Seq-aligns (`ReportedSubjects::drop_unaligned`).
-        // A header that the fetch cannot read ends NCBI's search: LOSAT's refusal
-        // (`FetchExcluded::refusal`). The Smith-Waterman redo (`-use_sw_tback`, `sw_redo`) keeps
-        // such lists in the stream as markers, which clear its batch's status
-        // (`kappa_batch`), and notes its UTF8String reads from the same read of the headers.
+        // A header that the fetch cannot read ends NCBI's search where a fetch reads it: LOSAT's
+        // refusal (`FetchExcluded::refusal_at`) there; its list stays in the stream
+        // (`fetched_unreadable`), as the redo's early termination test may free it unfetched.
+        // The Smith-Waterman redo (`-use_sw_tback`, `sw_redo`) keeps such lists in the stream as
+        // markers, which clear its batch's status (`kappa_batch`), and notes its UTF8String reads
+        // from the same read of the headers.
         // The subjects whose header holds a UTF8String where a VisibleString is expected, with
         // the query of their list, its best E-value and whether it has HSPs, and the lists left in
         // the stream's order (their query and subject) where there is one: the batch's first such
         // fetch is NCBI's warning (`fetched_utf8`; the redo's, `kappa_batch::redo_fetched`).
         let mut fetched_reads = Vec::new();
+        let mut fetched_unreadable = Vec::new();
         let mut fetched_order = Vec::new();
         let mut fetched_utf8 = None;
         let sw_redo = self.options.use_sw_tback && self.options.gapped;
@@ -914,27 +917,37 @@ impl PreliminarySink for Runtime<'_> {
                 .seqdb()
                 .and_then(crate::algorithm::common::database::FetchExcluded::of)
             {
-                stream
-                    .retain_closed(|lists| {
-                        let found = excluded.retain_noting(
-                            lists,
-                            |list| u32::try_from(list.oid).ok(),
-                            |list| (list.query_index, list.best_evalue, !list.hsps.is_empty()),
-                        )?;
-                        if !found.is_empty() {
-                            fetched_order = lists
-                                .iter()
-                                .map(|list| (list.query_index, list.oid))
-                                .collect();
-                        }
-                        fetched_reads = found;
-                        Ok(())
-                    })
-                    .map_err(|failed| {
-                        crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
-                    })?;
+                stream.retain_closed(|lists| {
+                    let found = excluded.retain_noting(
+                        lists,
+                        |list| u32::try_from(list.oid).ok(),
+                        |list| (list.query_index, list.best_evalue, !list.hsps.is_empty()),
+                    );
+                    if !found.utf8.is_empty() || !found.unreadable.is_empty() {
+                        fetched_order = lists
+                            .iter()
+                            .map(|list| (list.query_index, list.oid))
+                            .collect();
+                    }
+                    fetched_reads = found.utf8;
+                    fetched_unreadable = found.unreadable;
+                });
                 // The traceback fetches every subject of the stream.
                 if self.options.composition == 0 {
+                    if let Some(ordinal) =
+                        crate::algorithm::common::database::FetchedUtf8::traceback_first(
+                            &fetched_unreadable
+                                .iter()
+                                .map(|(read, _)| *read)
+                                .collect::<Vec<_>>(),
+                        )
+                    {
+                        return Err(crate::algorithm::common::database::FetchExcluded::refusal_at(
+                            excluded.db(),
+                            ordinal,
+                            "BLASTX",
+                        ));
+                    }
                     fetched_utf8 = crate::algorithm::common::database::FetchedUtf8::traceback_first(
                         &fetched_reads
                             .iter()
@@ -1022,7 +1035,12 @@ impl PreliminarySink for Runtime<'_> {
                 queries: &mut queries,
                 heaps: &mut heaps,
                 inactive_heaps: &mut inactive_heaps,
-                fetched: (&fetched_reads, &fetched_order, &mut redo_fetched),
+                fetched: (
+                    &fetched_reads,
+                    &fetched_unreadable,
+                    &fetched_order,
+                    &mut redo_fetched,
+                ),
             };
             x_t_finish = if sw_redo {
                 self.kappa_redo_batch::<true>(kappa_batch)?

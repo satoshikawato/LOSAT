@@ -33,14 +33,14 @@ impl ListedSubjects {
     /// of the residues; the subjects of both are renamed to their ranks. The subjects that NCBI's
     /// fetches of the redo or the traceback exclude leave both lists first, each list leaving a
     /// mark of its place (`exclude_fetched`, `fetch_excluded`; a header that the fetch cannot read
-    /// is LOSAT's refusal).
+    /// is LOSAT's refusal where the redo or the traceback fetches it, `note_fetched`).
     pub(in crate::algorithm::blastp::blast_engine) fn x_list(
         database: &BlastpDatabase,
         hit_lists: &mut [Option<BlastpHitList>],
         x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Self> {
         let (fetch_excluded, fetched_utf8) =
-            super::exclude_fetched(database, hit_lists, x_compact_hit_lists)?;
+            super::exclude_fetched(database, hit_lists, x_compact_hit_lists);
         let ordinals = listed_ordinals(hit_lists, x_compact_hit_lists);
         let x_lengths = ordinals
             .iter()

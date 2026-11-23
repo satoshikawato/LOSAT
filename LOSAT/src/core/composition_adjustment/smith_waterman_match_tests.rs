@@ -380,7 +380,6 @@ fn an_excluded_list_clears_the_status_unless_early_termination_stops_it() {
         &lists,
         |&oid| Some(oid),
         |_| (),
-    )
-    .expect("no header to read");
+    );
     assert!((0..=lists.len()).all(|index| !marks.excluded(index)));
 }

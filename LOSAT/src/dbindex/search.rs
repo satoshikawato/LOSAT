@@ -268,13 +268,126 @@ impl TrackedSeed {
     }
 }
 
-/// `CTrackedSeeds<NHITS>` of one local id: the tracked seeds in diagonal order with the
-/// cursor `it_` (an index into `seeds`; `std::list` inserts before it and erases at it), and the
-/// saved seeds of each chunk of the local id.
+/// `CTrackedSeeds<NHITS>` of one local id: the tracked seeds in diagonal order with the cursor
+/// `it_`, and the saved seeds of each chunk of the local id.
 struct TrackedSeeds {
-    seeds: Vec<TrackedSeed>,
-    it: usize,
+    seeds: SeedList,
     hitlists: Vec<Option<Vec<Seed>>>,
+}
+
+/// `CTrackedSeeds`' `std::list` of tracked seeds and its cursor `it_`: one buffer of the seeds in
+/// order with a gap of unused slots (`gap_start..gap_end`), and the slot of the seed at the cursor
+/// (`at`: never in the gap; the buffer's end at the list's end) and of the first seed (`first`).
+/// The gap moves to the cursor only when a seed is inserted or erased there: a step of the cursor
+/// and its return to the start move no seed, and an insertion or an erasure moves the seeds between
+/// it and the last one, so that a long list (many diagonals of one local id at once) costs per root
+/// what a short one does.
+#[derive(Default)]
+struct SeedList {
+    buf: Vec<TrackedSeed>,
+    gap_start: usize,
+    gap_end: usize,
+    at: usize,
+    first: usize,
+}
+
+impl SeedList {
+    /// The seed at the cursor (`*it_`), `None` at the end.
+    #[inline(always)]
+    fn at(&self) -> Option<TrackedSeed> {
+        self.buf.get(self.at).copied()
+    }
+
+    /// `++it_` (not at the end).
+    #[inline(always)]
+    fn step(&mut self) {
+        self.at += 1;
+        if self.at == self.gap_start {
+            self.at = self.gap_end;
+        }
+    }
+
+    /// `it_ = seeds_.begin()`.
+    #[inline(always)]
+    fn rewind(&mut self) {
+        self.at = self.first;
+    }
+
+    /// The gap moved to the cursor (the seed at the cursor then just after it).
+    #[inline(always)]
+    fn gap_to_cursor(&mut self) {
+        if self.at < self.gap_start {
+            let moved = self.gap_start - self.at;
+            self.buf
+                .copy_within(self.at..self.gap_start, self.gap_end - moved);
+            self.gap_start = self.at;
+            self.gap_end -= moved;
+        } else if self.at > self.gap_end {
+            let moved = self.at - self.gap_end;
+            self.buf.copy_within(self.gap_end..self.at, self.gap_start);
+            self.gap_start += moved;
+            self.gap_end = self.at;
+        }
+        self.at = self.gap_end;
+    }
+
+    /// `it_ = seeds_.erase(it_)` (not at the end).
+    #[inline(never)]
+    fn erase(&mut self) {
+        self.gap_to_cursor();
+        self.gap_end += 1;
+        self.at = self.gap_end;
+        self.edited();
+    }
+
+    /// `seeds_.insert(it_, seed)`: before the cursor.
+    #[inline(never)]
+    fn insert(&mut self, seed: TrackedSeed) {
+        self.gap_to_cursor();
+        if self.gap_start == self.gap_end {
+            let grow = self.buf.len().max(8);
+            self.buf.splice(
+                self.gap_start..self.gap_start,
+                std::iter::repeat_n(seed, grow),
+            );
+            self.gap_end += grow;
+            self.at = self.gap_end;
+        }
+        self.buf[self.gap_start] = seed;
+        self.gap_start += 1;
+        self.edited();
+    }
+
+    /// The seed before the cursor.
+    #[inline(always)]
+    fn before_cursor(&mut self) -> Option<&mut TrackedSeed> {
+        let before = if self.at == self.gap_end {
+            self.gap_start.checked_sub(1)?
+        } else {
+            self.at.checked_sub(1)?
+        };
+        Some(&mut self.buf[before])
+    }
+
+    /// `seeds_.erase(--it_)`: the seed before the cursor.
+    #[inline(never)]
+    fn erase_before_cursor(&mut self) {
+        self.gap_to_cursor();
+        self.gap_start -= 1;
+        self.edited();
+    }
+
+    /// `first` after an insertion or an erasure.
+    #[inline(always)]
+    fn edited(&mut self) {
+        self.first = if self.gap_start == 0 { self.gap_end } else { 0 };
+    }
+
+    /// The seeds in order.
+    fn into_ordered(mut self) -> Vec<TrackedSeed> {
+        self.buf.drain(self.gap_start..self.gap_end);
+        self.buf
+    }
 }
 
 /// The subject map of a volume as the search reads it (`CSubjectMap`).
@@ -632,8 +745,7 @@ fn search_with_limit(
     let (masked, lid_masks) = volume_masked_letters(volume, &map, masks);
     let mut lids: Vec<TrackedSeeds> = (0..num_lids)
         .map(|lid| TrackedSeeds {
-            seeds: Vec::new(),
-            it: 0,
+            seeds: SeedList::default(),
             hitlists: vec![None; map.num_chunks(lid)],
         })
         .collect();
@@ -767,7 +879,7 @@ fn search_rounds(
             for part in round {
                 search.process_roots(&part.roots[lid])?;
             }
-            search.tracked.it = 0;
+            search.tracked.seeds.rewind();
             Ok(())
         })?;
         let roots: u64 = round.iter().map(|part| part.kept).sum();
@@ -1226,10 +1338,10 @@ impl<'s, 'a> LidSearch<'s, 'a> {
             }
         }
         if self.qoff != root.qoff {
-            self.tracked.it = 0;
+            self.tracked.seeds.rewind();
             self.qoff = root.qoff;
         } else if u64::from(root.soff) >= min_offset && root.soff < self.soff {
-            self.tracked.it = 0;
+            self.tracked.seeds.rewind();
         }
         if self.qstop <= root.qoff {
             let segments = self.shared.segments;
@@ -1500,10 +1612,11 @@ impl<'s, 'a> LidSearch<'s, 'a> {
     /// `CTrackedSeeds<ONE_HIT>::EvalAndUpdate` of `seed`: the tracked seeds before the seed's
     /// diagonal are passed (those that end before its query offset saved and dropped); false
     /// when a tracked seed lies on its diagonal (the cursor then after it).
+    #[inline(always)]
     fn eval_and_update_one_hit(&mut self, seed: &TrackedSeed) -> Result<bool, Corrupt> {
         loop {
             let tracked = &mut *self.tracked;
-            let Some(&it) = tracked.seeds.get(tracked.it) else {
+            let Some(it) = tracked.seeds.at() else {
                 return Ok(true);
             };
             let step = seed.qoff.wrapping_sub(it.qoff);
@@ -1512,11 +1625,10 @@ impl<'s, 'a> LidSearch<'s, 'a> {
                 return Ok(true);
             }
             if it.qright < seed.qoff {
-                let at = tracked.it;
-                tracked.seeds.remove(at);
+                tracked.seeds.erase();
                 self.save_seed(&it)?;
             } else {
-                tracked.it += 1;
+                tracked.seeds.step();
                 if it_soff_corr == seed.soff {
                     return Ok(false);
                 }
@@ -1546,7 +1658,7 @@ impl<'s, 'a> LidSearch<'s, 'a> {
         let hkey_width = self.shared.hkey_width as SeqPos;
         loop {
             let tracked = &mut *self.tracked;
-            let Some(&it) = tracked.seeds.get(tracked.it) else {
+            let Some(it) = tracked.seeds.at() else {
                 return Ok(true);
             };
             let step = seed.qoff.wrapping_sub(it.qoff);
@@ -1557,14 +1669,11 @@ impl<'s, 'a> LidSearch<'s, 'a> {
             if u64::from(it.qright.wrapping_add(seed.len)).wrapping_add(reach)
                 < u64::from(seed.qright)
             {
-                let at = tracked.it;
-                tracked.seeds.remove(at);
+                tracked.seeds.erase();
                 self.check_and_save_seed(&it)?;
             } else if it.qright < seed.qoff {
                 if self.check_and_save_seed(&it)? {
-                    let tracked = &mut *self.tracked;
-                    let at = tracked.it;
-                    tracked.seeds.remove(at);
+                    self.tracked.seeds.erase();
                 } else {
                     if it_soff_corr == seed.soff
                         && it.len > 0
@@ -1576,10 +1685,10 @@ impl<'s, 'a> LidSearch<'s, 'a> {
                     {
                         seed.second_hit = it.qright;
                     }
-                    self.tracked.it += 1;
+                    self.tracked.seeds.step();
                 }
             } else {
-                tracked.it += 1;
+                tracked.seeds.step();
                 if it_soff_corr == seed.soff {
                     return Ok(false);
                 }
@@ -1609,9 +1718,7 @@ impl<'s, 'a> LidSearch<'s, 'a> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:600-604
     /// `AppendSimple` of `seed`: tracked before the cursor.
     fn append_simple(&mut self, seed: TrackedSeed) {
-        let tracked = &mut *self.tracked;
-        tracked.seeds.insert(tracked.it, seed);
-        tracked.it += 1;
+        self.tracked.seeds.insert(seed);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:606-640
@@ -1620,10 +1727,8 @@ impl<'s, 'a> LidSearch<'s, 'a> {
     /// further; any other seed of the word size is tracked before the cursor.
     fn append(&mut self, seed: TrackedSeed) {
         let word_size = self.shared.options.word_size;
-        let tracked = &mut *self.tracked;
-        if tracked.it > 0 {
-            let prev = tracked.it - 1;
-            let tmp = &mut tracked.seeds[prev];
+        let seeds = &mut self.tracked.seeds;
+        if let Some(tmp) = seeds.before_cursor() {
             let step = seed.qoff.wrapping_sub(tmp.qoff);
             let bs_soff_corr = tmp.soff.wrapping_add(step);
             if bs_soff_corr == seed.soff {
@@ -1632,19 +1737,16 @@ impl<'s, 'a> LidSearch<'s, 'a> {
                         tmp.len = tmp.len.wrapping_sub(tmp.qright.wrapping_sub(seed.qright));
                     }
                     if u64::from(tmp.len) < word_size {
-                        tracked.seeds.remove(prev);
-                        tracked.it -= 1;
+                        seeds.erase_before_cursor();
                     } else {
                         tmp.qright = seed.qright;
                     }
                 }
             } else if u64::from(seed.len) >= word_size {
-                tracked.seeds.insert(tracked.it, seed);
-                tracked.it += 1;
+                seeds.insert(seed);
             }
         } else if u64::from(seed.len) >= word_size {
-            tracked.seeds.insert(tracked.it, seed);
-            tracked.it += 1;
+            seeds.insert(seed);
         }
     }
 
@@ -1676,7 +1778,7 @@ impl<'s, 'a> LidSearch<'s, 'a> {
     /// `Finalize()` of the local id: every tracked seed in order saved (the one-hit search) or
     /// checked and saved if it qualifies (the two-hit search).
     fn finalize(mut self) -> Result<(), Corrupt> {
-        let seeds = std::mem::take(&mut self.tracked.seeds);
+        let seeds = std::mem::take(&mut self.tracked.seeds).into_ordered();
         for seed in &seeds {
             if self.shared.options.two_hits == 0 {
                 self.save_seed(seed)?;

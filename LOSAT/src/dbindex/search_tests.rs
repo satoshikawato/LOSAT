@@ -479,3 +479,69 @@ fn sixteen_query_letters_pack_as_four_bytes() {
     assert_eq!(query_bytes16(&[0; 15], 0), None);
     assert_eq!(query_bytes16(&[0; 16], -1), None);
 }
+
+#[test]
+fn the_seed_list_moves_as_a_list_with_a_cursor() {
+    // NCBI's std::list and its cursor, as a Vec and an index, against SeedList under the same
+    // random steps, insertions, erasures at and before the cursor, changes of the seed before it
+    // and returns to the start.
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move |n: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % n
+    };
+    for _ in 0..200 {
+        let (mut model, mut it) = (Vec::<TrackedSeed>::new(), 0usize);
+        let mut list = SeedList::default();
+        for step in 0..400u32 {
+            match next(6) {
+                0 if it < model.len() => {
+                    it += 1;
+                    list.step();
+                }
+                1 if it < model.len() => {
+                    model.remove(it);
+                    list.erase();
+                }
+                2 => {
+                    let seed = TrackedSeed::new(step, next(1000) as u32, 12, step + 11);
+                    model.insert(it, seed);
+                    it += 1;
+                    list.insert(seed);
+                }
+                3 if it > 0 => {
+                    if next(2) == 0 {
+                        model[it - 1].qright += 1;
+                        list.before_cursor().unwrap().qright += 1;
+                    } else {
+                        model.remove(it - 1);
+                        it -= 1;
+                        list.erase_before_cursor();
+                    }
+                }
+                4 => {
+                    it = 0;
+                    list.rewind();
+                }
+                _ => {}
+            }
+            assert_eq!(list.at(), model.get(it).copied());
+            let gap = list.gap_end - list.gap_start;
+            assert!(list.at < list.gap_start || list.at >= list.gap_end || gap == 0);
+            assert_eq!(list.buf.len() - gap, model.len());
+            let before = if list.at >= list.gap_end {
+                list.at - gap
+            } else {
+                list.at
+            };
+            assert_eq!(before, it);
+            assert_eq!(
+                list.before_cursor().copied(),
+                it.checked_sub(1).map(|at| model[at])
+            );
+        }
+        assert_eq!(list.into_ordered(), model);
+    }
+}

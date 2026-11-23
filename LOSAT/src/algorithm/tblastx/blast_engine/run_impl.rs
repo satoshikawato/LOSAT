@@ -414,18 +414,46 @@ fn x_soft_chunk<'a>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:816-831. A shorter frame takes the ranges
 // of the longest frame of its strand, so the last word NCBI scans can end on the NULLB after the
 // frame (blast_util.c:438-453, BLAST_GetAllTranslations).
-/// The letters the scan reads: `subject`, and the sentinel after it with `x_soft` ranges.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306,
+// c++/src/algo/blast/core/blast_aascan.c:76-77 and c++/src/algo/blast/core/aa_ungapped.c:499-500
+// NCBI's scan reads the subject's buffer wherever a range points: before the chunk for a later
+// range of masks stored out of order, and past its last letter for a first range raised to one
+// word at its left (the frame's next letters there, on a chunk that is not the frame's last).
+/// The letters the scan of a chunk reads, and how many of them lie before the chunk: `subject`
+/// alone; with `x_soft` ranges the frame from `common::translated_chunks::scan_lead` letters
+/// before the chunk, to `wordsize - 1` letters (at least 1) after it, or to the sentinel after the
+/// frame. The extensions of the hits read the same letters (`word_finder::ChunkCx`).
 #[inline(always)]
 fn x_soft_scan_letters<'a>(
     x_soft: Option<&[(i32, i32)]>,
     subject: &'a [u8],
     subject_full: &'a [u8],
     chunk: &SubjectChunk,
-) -> &'a [u8] {
+    wordsize: usize,
+) -> (&'a [u8], usize) {
     match x_soft {
-        Some(_) => &subject_full[1 + chunk.offset..=1 + chunk.offset + chunk.length],
-        None => subject,
+        Some(ranges) => {
+            let lead = crate::algorithm::common::translated_chunks::scan_lead(ranges);
+            let end = (1 + chunk.offset + chunk.length + wordsize.saturating_sub(1).max(1))
+                .min(subject_full.len());
+            (&subject_full[1 + chunk.offset - lead..end], lead)
+        }
+        None => (subject, 0),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:76-77 and :110
+// NCBI scans from a range's left, which can lie before the chunk, and keeps each hit's offset
+// from the chunk's first letter.
+/// The ranges of a chunk as the scan of its letters from `lead` letters before it reads them
+/// (`x_soft_scan_letters`): each moved by `lead`.
+#[inline(always)]
+fn x_scan_ranges(ranges: &[(i32, i32)], lead: usize) -> Vec<(i32, i32)> {
+    let lead = lead as i32;
+    ranges
+        .iter()
+        .map(|&(left, right)| (left + lead, right + lead))
+        .collect()
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:190-192
@@ -761,26 +789,30 @@ fn frame_subject_besthit(frame_hits: &mut Vec<UngappedHit>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3037-3051 (`Blast_HSPListAdjustOffsets`)
-// For every TBLASTX chunk list; the subject end is NCBI's `Int4` (`UngappedHit::s_end_int4`: an
-// HSP of the one-hit word finder of length 0 or less may end before its start, below 0 in a
-// frame's first chunk).
+// For every TBLASTX chunk list; the subject's offset, end and seed are NCBI's `Int4`
+// (`UngappedHit::s_start_int4`, `s_end_int4`, `s_seed_int4`): an HSP or a seed before its chunk
+// (masks stored out of order) starts below 0, and an HSP of the one-hit word finder of length 0 or
+// less may end before its start, below 0 in a frame's first chunk. Such a start lies in the frame
+// (a range starts at the frame's first letter or after it), so the moved start is 0 or more.
 fn adjust_tblastx_chunk_subject_offsets(hits: &mut [UngappedHit], offset: usize) {
     if offset == 0 {
         return;
     }
     let offset_int4 = i32::try_from(offset)
         .expect("a subject chunk's offset fits i32 (NCBI's BlastSeg offset is Int4)");
+    let moved = |chunk_offset: i32, what: &str| -> i32 {
+        chunk_offset
+            .checked_add(offset_int4)
+            .unwrap_or_else(|| panic!("{what}: a subject offset fits i32 (NCBI's Int4)"))
+    };
     for hit in hits {
         let q_end = hit.q_end_int4();
-        let s_end = hit
-            .s_end_int4()
-            .checked_add(offset_int4)
-            .expect("s_aa_end: a subject end fits i32 (NCBI's BlastSeg end is Int4)");
-        hit.s_aa_start = u32::try_from(hit.s_aa_start as usize + offset)
-            .expect("s_aa_start: a subject offset fits u32 (NCBI's BlastSeg offset is Int4)");
+        let s_end = moved(hit.s_end_int4(), "s_aa_end");
+        hit.s_aa_start = u32::try_from(moved(hit.s_start_int4(), "s_aa_start"))
+            .expect("s_aa_start: an HSP starts in its frame (NCBI's BlastSeg offset)");
         hit.set_int4_ends(q_end, s_end);
-        hit.s_seed_off = u32::try_from(hit.s_seed_off as usize + offset)
-            .expect("s_seed_off: a subject offset fits u32 (NCBI's gapped_start is Int4)");
+        hit.s_seed_off = u32::try_from(moved(hit.s_seed_int4(), "s_seed_off"))
+            .expect("s_seed_off: a seed lies in its frame (NCBI's gapped_start)");
     }
 }
 

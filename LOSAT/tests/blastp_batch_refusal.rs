@@ -20,7 +20,7 @@
 //! without the hits in the gap; the maintainer kept that setting refused (PD-LOSAT-NCBI-DEFECTS
 //! version 1.1), and LOSAT refuses where the search of that batch's first chunk with a valid
 //! context would read subjects in hand, after batch 1's report (review 3 of X4, row
-//! `db.x4.chunk.neg.gap.6`; the step of TBLASTN's since PD-LOSAT-NCBI-DEFECTS 1.90, line RG item
+//! `db.x4.chunk.neg.gap.6`; the step of TBLASTN's since PD-LOSAT-NCBI-DEFECTS 1.92, line RG item
 //! X-bpgap).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
@@ -276,7 +276,7 @@ const SHORT: [&str; 4] = [
     "1000",
 ];
 
-// The gaps (PD-LOSAT-NCBI-DEFECTS 1.90, line RG item X-bpgap): refused only where the search of the
+// The gaps (PD-LOSAT-NCBI-DEFECTS 1.92, line RG item X-bpgap): refused only where the search of the
 // batch's first chunk with a valid context would read subjects in hand. A database left without a
 // subject, and a query whose letters are valid only in the gap (`x4/chunk_gapvalid.faa`: 100 X, the
 // TK-TMK protein's letters 101 to 300, 98 X: neither chunk has a valid context), are searched on and

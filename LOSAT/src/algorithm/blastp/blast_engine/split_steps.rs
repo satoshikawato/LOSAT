@@ -105,7 +105,13 @@ pub(super) fn batch_failure(
     if args.psi_search.is_some() {
         error
     } else {
-        HeaderReadError { query, error }.into()
+        // Before the batch's search: nothing of it read a header.
+        HeaderReadError {
+            query,
+            error,
+            utf8: None,
+        }
+        .into()
     }
 }
 

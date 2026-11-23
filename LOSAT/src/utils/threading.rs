@@ -370,7 +370,7 @@ impl CallerCallback {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668
-// /* Use a local diagnostics structure ... shared between multiple threads */
+// Diagnostics state is kept thread-local rather than shared across worker threads.
 // LOSAT_WASI_THREADS_DEBUG is read once per process, as LOSAT's other switches are: the stage
 // reports run once per subject chunk, and a read of the environment there cost about 340
 // instructions each (3 % of a megablast search of 20,000 short subjects).
@@ -398,7 +398,7 @@ fn report_pool(program: &str, requested: usize, pool: usize) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668
-// /* Use a local diagnostics structure ... shared between multiple threads */
+// Diagnostics state is kept thread-local rather than shared across worker threads.
 // Record stage selection separately from the already verified pool size.
 // The test is taken where the stage runs (blastn reports a stage for every subject chunk); the
 // line is written out of line.
@@ -410,7 +410,7 @@ pub fn report_stage(program: &str, stage: &str, work_items: usize, parallel: boo
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1668
-// /* Use a local diagnostics structure ... shared between multiple threads */
+// Diagnostics state is kept thread-local rather than shared across worker threads.
 // The line of `report_stage`, written only when LOSAT_WASI_THREADS_DEBUG is on.
 #[cold]
 #[inline(never)]

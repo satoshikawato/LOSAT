@@ -168,7 +168,7 @@ pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
         } = unsafe { p.read() };
         // SAFETY: p < end, so p + 1 <= end.
         p = unsafe { p.add(1) };
-        // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
+        // Map the hit diagonal (`query_offset` minus `subject_offset`) into the unit table.
         // Unit cell: the raw diagonal minus the unit's lowest one (`XUnmasked`: no mask;
         // LOSAT_X_TBXUNITMASK's `XMasked`: masked to the table).
         let cell = cells.cell(query_offset, subject_offset);
@@ -181,13 +181,12 @@ pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
         // which goes to `rare` below.
         let d = subject_offset.wrapping_sub(raw) as i32;
         let candidate = (d as u32).wrapping_add(k) < k;
-        // [C] if (diag_array[diag_coord].flag), or a hit past both tests.
+        // Dispatch flagged cells or hits passing both distance tests to `rare`.
         if ((raw as i32) < 0) | candidate {
             rare(cell, query_offset, subject_offset);
             continue;
         }
-        // [C] if (diff >= window) last_hit = subject_offset + diag_offset;
-        // [C] if (diff < wordsize) continue;
+        // Update `last_hit` when outside the window, or keep the existing entry on an overlapping hit.
         let next = if d >= 0 {
             subject_offset.wrapping_add(window_u)
         } else {
@@ -264,10 +263,10 @@ unsafe fn x_hits_bf_split<C: XCells>(
         } = unsafe { p.read() };
         // SAFETY: p < end, so p + 1 <= end.
         p = unsafe { p.add(1) };
-        // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
+        // Map the hit diagonal (`query_offset` minus `subject_offset`) into the unit table.
         let cell = cells.cell(query_offset, subject_offset);
         debug_assert!(cell < width, "unit diagonal outside its table");
-        // [C] if (diag_array[diag_coord].flag), or a hit past both tests.
+        // Dispatch flagged cells or hits passing both distance tests to `rare`.
         rare(cell, query_offset, subject_offset);
     }
 }
@@ -298,7 +297,7 @@ unsafe fn x_hits_bf_run<C: XCells>(
             q_off: query_offset,
             s_off: subject_offset,
         } = unsafe { p.read() };
-        // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
+        // Map the hit diagonal (`query_offset` minus `subject_offset`) into the unit table.
         let cell = cells.cell(query_offset, subject_offset);
         debug_assert!(cell < width, "unit diagonal outside its table");
         // SAFETY: cell < width (the caller's bound; a masked cell is at most the mask, width - 1).
@@ -308,12 +307,11 @@ unsafe fn x_hits_bf_run<C: XCells>(
         // s - L and diff - wordsize for a flag-0 cell (module doc).
         let d = subject_offset.wrapping_sub(raw) as i32;
         let candidate = (d as u32).wrapping_add(k) < k;
-        // [C] if (diag_array[diag_coord].flag), or a hit past both tests: `rare`.
+        // Return to the caller (`rare`) on flagged cells or hits passing both distance tests.
         if ((raw as i32) < 0) | candidate {
             return p;
         }
-        // [C] if (diff >= window) last_hit = subject_offset + diag_offset;
-        // [C] if (diff < wordsize) continue;
+        // Update `last_hit` when outside the window, or keep the existing entry on an overlapping hit.
         let next = if d >= 0 {
             subject_offset.wrapping_add(window_u)
         } else {

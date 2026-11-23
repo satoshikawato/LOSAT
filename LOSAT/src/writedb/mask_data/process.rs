@@ -236,7 +236,6 @@ pub(crate) fn process_mask_data(
         }
     }
 
-    let mut utf8_once = Utf8TagOnce::default();
     for (i, &file) in file_list.iter().enumerate() {
         let path: PathBuf = match options.root {
             Some(root) => root.join(file),
@@ -256,7 +255,7 @@ pub(crate) fn process_mask_data(
         let mut algo_id: Option<i32> = None;
         loop {
             let next = reader.next_info();
-            write_posts(&mut reader, warn, &mut utf8_once);
+            write_posts(&mut reader, warn, db.utf8_once());
             let Some(first_obj) = next? else {
                 break;
             };
@@ -310,7 +309,7 @@ pub(crate) fn process_mask_data(
                 }
 
                 let next = reader.next_list();
-                write_posts(&mut reader, warn, &mut utf8_once);
+                write_posts(&mut reader, warn, db.utf8_once());
                 masks = next?;
             }
         }
@@ -320,8 +319,8 @@ pub(crate) fn process_mask_data(
 
 /// Writes on standard error what NCBI's serial reader posted while `reader` read its last object
 /// (also when it then failed), in the order posted: before makeblastdb does anything with the
-/// object or the error. The warning of a UTF8String tag is posted once per run (`utf8_once`),
-/// whichever file it is in.
+/// object or the error. The warning of a UTF8String tag is posted once per run (`utf8_once`, the
+/// run's: `BuildDatabase::utf8_once`), whichever file it is in.
 fn write_posts(reader: &mut MaskFileReader, warn: Warn<'_>, utf8_once: &mut Utf8TagOnce) {
     for post in reader.take_posts() {
         if matches!(post, MaskPost::Utf8Tag(_)) && !utf8_once.first() {

@@ -786,8 +786,53 @@ and dustmasker rows `db_t5c_taxid_*`): `t5/make_t5.py NCBI_BIN --taxid-only` wri
 `ids/pdup.faa` and `ids/ndup.fna`) and rewrites the `taxid [2]` of the first record (and the header offsets of the
 index): `app42` (the application INTEGER tag `0x42`) and `sx9` (nine content bytes, seven of them sign extension),
 which NCBI's `ReadInt4` reads as 9606, and `big5` (2^31 in five bytes), on which NCBI fails (`eOverflow`: `TTaxId` is
-an `int`) wherever it reads the header: exit 255 in the reports of the record (LOSAT's `losat-rejection` rows, exit 1),
-`Error: [blastdbcmd] error while reading taxid` (exit 1). Probe: `remaining-gaps-20261112/T/taxid_t5c.md`.
+an `int`) wherever it reads the header: exit 255 in the reports of the record (since line RG item T5d NCBI's rows
+`db.t5.taxid.*.big5.*`, which LOSAT refused), `Error: [blastdbcmd] error while reading taxid` (exit 1). Probe:
+`remaining-gaps-20261112/T/taxid_t5c.md`.
+
+Header records that NCBI's read fails on (line RG item T5d; rows `db.t5d.*`, blastdbcmd cases `T523`, `T524`, `T527`, `T528`, `T541` and `T542` (`T525` and `T526` before the merge with item T5c), segmasker and
+dustmasker rows `db_t5d_*`): `t5/make_t5.py NCBI_BIN --header-only` writes `t5/hd.faa` and `t5/hd.fna` (three records, the
+nucleotides the codons of the proteins), the queries `t5/hd_q.*` (query n hits record n) and `t5/hd_q1.*` (record 1 alone), and
+the version 4 databases `t5/phd_<name>` and `t5/nhd_<name>` (`-taxid 9606`) whose record of OID 1 is edited: `vstr` (the taxid's
+tag a VisibleString), `extra` (data where the taxid's end is expected), `prim` (the taxid's tag primitive), `big5` (2^31), `title`
+(the title's tag an OctetString), `cut` (the record without its last four bytes), `seqid` (`-parse_seqids`, `lcl|hd<n>`: the tag of
+the local id's string); `title_z` edits OID 0, which `hd_q1.*` never reports. NCBI writes its exception after the outfmt 0
+prolog and the reports of the batches before (`BATCH_SIZE=1` rows); `title_z` exits 0. Survey:
+`remaining-gaps-20261112/T/SURVEY_T5d.md`. Records that NCBI reads (fix 1 of item T5d, `make_t5.py NCBI_BIN --header-only utf8
+utf8id long longx`): `utf8` (the title a UTF8String; `utf8_z` at OID 0), `utf8id` (`-parse_seqids`, the local id's string a
+UTF8String), read with NCBI's warning `(803.10) ... UTF8String data for VisibleString member <member>` once per run, where the
+Seq-aligns of a batch first read the record (the `BATCH_SIZE=1` rows: in the second batch; `utf8_z` with `hd_q1.*`: none);
+`long` (the title's member tag in the long form, `bf 00`), read with no message; `longx` (`bf 20`), NCBI's unexpected member. `eof`
+(the record of OID 1 cut after its first byte): NCBI's `CEofException`, which the programs' `CATCH_ALL` takes as a
+`CIOException` without a post, so the run ends there with exit status 0.
+Probe: `remaining-gaps-20261112/T/fix1_t5d.md`. NCBI's other reads of a UTF8String header (fix 2 of item T5d, rows
+`db.t5d.*.fx*`, blastdbcmd cases `T534`-`T537`): `make_t5.py NCBI_BIN --fetch-only` writes the version 5 databases
+`pfx_utf8`, `pfx_utf8r`, `nfx_utf8`, `pfx_copy` and `nfx_copy` (`-parse_seqids`; hd0, which `hd_q0.*` matches, a weak
+match with a UTF8String title (hd2, a chance alignment of E-value about 6, or a weaker copy of hd0), hd1), the negative seqid
+lists `*fx_neg1.txt` and `*fx_neg2.txt`, and the version 4 database `pva_utf8` (`gb|HDA<n>.1|`, the UTF8String title at
+OID 1) with `pva_batch.txt`: under a negative seqid list with ids NCBI's traceback and composition-based redo read the
+header of every subject they fetch (the redo only those its early termination test leaves), and blastdbcmd's version check
+of `HDA1.2` reads HDA1.1's. Probe: `remaining-gaps-20261112/T/fix2_t5d.md`. NCBI's scope's read of another sequence
+that holds a reported sequence's Seq-align id (fix 3 of item T5d, rows `db.t5d.*.dup*`, blastdbcmd cases `T538`-`T540`):
+`make_t5.py NCBI_BIN --dup-only` writes the version 5 databases `pds`, `pda` (the subject `gb|DUP00001.1|`, hd0),
+`pdo_same` (that record, its title a UTF8String), `pdo_none` (`gb|DUP00001.1|`, hd1, a UTF8String title), their
+nucleotide `nds`, `ndo_same`, `ndo_none`, the version 4 `pds4` and `pdo4_same`, and `dup_batch.txt`. NCBI orders a
+list's volumes by path: `pdo_* pds` puts the other sequence first, whose header the data loader reads (`x_GetOid`)
+wherever the scope resolves the subject's id, with the warning; `pda pdo_none` the subject first, whose other holder
+is not read. Probe: `remaining-gaps-20261112/T/fix3_t5d.md`. Rows `db.t5d.*.dup.same.pf0.*` (fix 4 of item T5d): with
+`PRE_FETCH_SEQS_LIMIT=0` the warning comes inside the report, where it reads the subject (a tabular row, outfmt 0's
+description line, a JSON `Hit`; psiblast's PSSM before the first round's report where the report reads nothing),
+`db.t5d.blastp.dup.same.15` at the JSON prefetch, `db.t5d.blastp.dup.none.magic.6e` (`BLASTDB=../seqdb/taxdb/bad_magic`)
+before the taxonomy database's texts of opening of the same load. Probe: `remaining-gaps-20261112/T/fix4_t5d.md`.
+Rows `db.t5d.*.dup5*` (fix 5 of item T5d): `make_t5.py NCBI_BIN --dup5-only` writes `pdo5_same`, `pds5`
+(`gb|DUP00005.1|`, hd0, the copy's title a UTF8String), `ppig1` (`gnl|PIG|x001`, hd1: its lookup throws, and its
+Seq-id handle, packed 1, loads before DUP00005's, packed 5), `ppig5` (`gnl|PIG|x005`, one packed number with
+DUP00005's), `pdo5b_same`, `pdo5b_id`, `pds5b` (`gb|DUQ00005.1|`, hd2, the copy's title or accession a UTF8String),
+`pgo5`, `pgs5` (`gi|5`, hd0, the copy's title a UTF8String), `pplain` (no `-parse_seqids`: a list's lookup of a text
+id stops NCBI's prefetch), the nucleotide `ndo5_same`, `nds5`, `npig1`, and the queries `hd_q10.*` (q1, q0, q0b) and
+`hd_q02.*` (q0, q2). A prefetch whose loads end at the throwing lookup writes `Error pre-fetching sequence data` and
+no warning, which the next batch's prefetch writes; the reject rows are orders that NCBI takes from the addresses of
+its Seq-id infos and a report that reads the throwing subject. Probe: `remaining-gaps-20261112/T/fix5_t5d.md`.
 
 Rewritten ends that NCBI cannot decode (merge 4 of line RG item T5c with item T7; rows `db.t5.sfu.*`, `db.t5.sfux.*`):
 `t5/make_t5.py NCBI_BIN --sfu-only` writes `t5/psfu_100009` (version 4 without `-parse_seqids`, `-taxid 100009`; the

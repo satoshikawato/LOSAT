@@ -28,7 +28,7 @@ pub(super) use besthit::PrelimBestHit;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2510-2510
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:305-358,
 // 3690-3706; core/blast_hits.h:126-143:
-// new_hsp->num_ident = 0; /* filled after postredo evaluation */
+// Initializes `num_ident` to zero and fills it after post-redo evaluation.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct KappaHspPayload {
     pub bit_score: f64,
@@ -38,7 +38,8 @@ pub(super) struct KappaHspPayload {
     // Alignment length and gap counts follow the same gap_info operation lengths.
     pub num_positives: usize,
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:971-1021,1090-1095:
-    // if (m_QuerySeq[i] == m_SubjectSeq[i]) { ++num_ident; ++num_positives; }
+    // Matching query and subject display characters (`m_QuerySeq` and `m_SubjectSeq`)
+    // increment both `num_ident` and `num_positives`.
     // Report-time counts use sequence strings, after the core HSP counts above.
     pub report_num_ident: usize,
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478
@@ -200,8 +201,7 @@ impl KappaResultHitList {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:169-181:
-    // Int4 hsplist_count, hsplist_max;
-    // BlastHSPList** hsplist_array;
+    // Stores the bounded array of HSP lists (`hsplist_array`) with its current count and capacity.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:845-865
     /// `s_FilterBlastResults` of `-max_hsps` (`max_hsps`, 0 keeps every HSP) and
     /// `-qcov_hsp_perc` (`query_cov_hsp_perc`, 0 removes none) on the final hit list of a
@@ -345,9 +345,8 @@ fn sort_hsps_by_evalue(list: &mut KappaResultList) {
         list.hsps.hsps.sort_by(compare);
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1385-1455:
-        // return ScoreCompareHSPs(v1, v2); /* HSP pointer sort */
-        // Thus each
-        // bit score, identity count and edit script moves with its HSP.
+        // Sorts HSP pointers via `ScoreCompareHSPs` so each bit score, identity count,
+        // and edit script moves with its HSP.
         let mut paired: Vec<_> = std::mem::take(&mut list.hsps.hsps)
             .into_iter()
             .zip(std::mem::take(&mut list.payloads))

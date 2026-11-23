@@ -412,7 +412,7 @@ fn bf_scans_equal_the_reference_scans() {
                 if group.lookup.longest_chain <= 0 {
                     continue;
                 }
-                let unit = XUnit { f, k: 0, chunk, g };
+                let unit = pp.x_unit(&inp, f, 0, chunk, g);
                 let mut count = XCount::default();
                 let mut reference: Vec<InitHSP> = Vec::new();
                 pp.scan_unit::<_, _, false>(&unit, &inp, &mut scratch, &mut reference, &mut count);

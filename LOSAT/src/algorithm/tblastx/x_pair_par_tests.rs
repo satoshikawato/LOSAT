@@ -289,7 +289,7 @@ fn unit_lists<M: TbxScore>(pp: &XPairPar<M>, inp: &XSubject<'_>) -> Vec<Vec<Init
         if chunk.length >= inp.wordsize as usize {
             for (g, group) in pp.groups.iter().enumerate() {
                 if group.lookup.longest_chain > 0 {
-                    let unit = XUnit { f, k: 0, chunk, g };
+                    let unit = pp.x_unit(inp, f, 0, chunk, g);
                     init_hsps.extend(pp.run_unit::<false>(&unit, inp, &mut scratch));
                 }
             }
@@ -478,14 +478,7 @@ fn a_walk_past_a_nullb_into_another_group_is_seen_by_its_units() {
             length: subject.len(),
             overlap: 0,
         };
-        let units: Vec<XUnit> = (0..2)
-            .map(|g| XUnit {
-                f: 0,
-                k: 0,
-                chunk,
-                g,
-            })
-            .collect();
+        let units: Vec<XUnit> = (0..2).map(|g| pp.x_unit(&inp, 0, 0, chunk, g)).collect();
         // Each unit alone: the refusal and the P/P HSP the reference does not make.
         if !sliced {
             assert_ne!(unit_lists(&pp, &inp), reference, "masked {masked}");
@@ -1028,12 +1021,7 @@ fn masked_unit_tables_give_the_unmasked_units() {
             if pp.groups[g].lookup.longest_chain <= 0 {
                 continue;
             }
-            let unit = XUnit {
-                f: 0,
-                k: 0,
-                chunk,
-                g,
-            };
+            let unit = pp.x_unit(&inp, 0, 0, chunk, g);
             let mask = pp.x_unit_mask(&unit, window).expect("a masked table");
             assert!(plain.x_unit_mask(&unit, window).is_none());
             masked_units += 1;
@@ -1295,7 +1283,7 @@ fn unit_lists_batched<M: TbxScore>(pp: &XPairPar<M>, inp: &XSubject<'_>) -> Vec<
         if chunk.length >= inp.wordsize as usize {
             for (g, group) in pp.groups.iter().enumerate() {
                 if group.lookup.longest_chain > 0 {
-                    let unit = XUnit { f, k: 0, chunk, g };
+                    let unit = pp.x_unit(inp, f, 0, chunk, g);
                     init_hsps.extend(pp.run_unit_batched::<false>(&unit, inp, &mut scratch));
                 }
             }
@@ -2096,14 +2084,10 @@ fn list_units(
             if chunk.length < inp.wordsize as usize {
                 continue;
             }
+            let first = pp.x_unit(inp, f, k, *chunk, 0);
             for (g, group) in pp.groups.iter().enumerate() {
                 if group.lookup.longest_chain > 0 {
-                    units.push(XUnit {
-                        f,
-                        k,
-                        chunk: *chunk,
-                        g,
-                    });
+                    units.push(XUnit { g, ..first });
                 }
             }
         }
@@ -3019,7 +3003,7 @@ fn units_equal_the_masked_reference(
                 if pp.groups[g].lookup.longest_chain <= 0 {
                     continue;
                 }
-                let unit = XUnit { f, k: 0, chunk, g };
+                let unit = pp.x_unit(&inp, f, 0, chunk, g);
                 let sent = pp.x_unit_sent(&unit, &inp);
                 assert_eq!(sent, pp.sent);
                 units += 1;

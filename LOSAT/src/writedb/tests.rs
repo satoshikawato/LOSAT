@@ -1413,10 +1413,10 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
 /// The parsed `losat makeblastdb` arguments of a makeblastdb command line (the
 /// words after the program's name).
 pub(super) fn parse_makedb_words(words: &[String]) -> MakedbArgs {
-    use crate::cli::{Cli, Commands};
+    use crate::cli::Commands;
     let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
     argv.extend(words.iter().cloned());
-    match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+    match crate::cli::try_parse_from(argv) {
         Ok(cli) => match cli.command {
             Commands::Makedb(args) => args,
             _ => unreachable!("a makeblastdb command line"),
@@ -1464,6 +1464,68 @@ fn v5_markers(bytes: &[u8], dir: &str) -> Vec<u8> {
     lines.join(&b'\n')
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1963-2014
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:140-181
+/// `stderr`, NCBI's text from Linux of a run whose `-in` names an alias file with an `OIDLIST`
+/// value that starts with `/`, as NCBI's code writes it on Windows in the form of `v5_markers`
+/// (`\` written as `/`): a value starting with `/` is not absolute there, so NCBI joins it with
+/// `\` (`SeqDB_CombinePath` changes no separator of the value) to the alias file's directory and,
+/// where that names no file and `DBLIST` names a volume, to the directory of the first volume it
+/// names (`seqdb::alias::compute_masks`: `vol_names`; the volumes of these rows are beside their
+/// alias files' names), where on Linux the text quotes the value alone.
+fn oid_list_path_on_windows(stderr: &[u8], words: &[String]) -> Vec<u8> {
+    let input = words
+        .iter()
+        .position(|word| word == "-in")
+        .and_then(|at| words.get(at + 1));
+    let alias = input.and_then(|input| {
+        ["pal", "nal"]
+            .iter()
+            .map(|ext| PathBuf::from(format!("{input}.{ext}")))
+            .find(|path| path.is_file())
+    });
+    let Some(alias) = alias else {
+        return stderr.to_vec();
+    };
+    let text = std::fs::read_to_string(&alias).unwrap();
+    let key = |name: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(name)?.strip_prefix(' '))
+            .map(str::trim)
+    };
+    let (Some(list), Some(volumes)) = (key("OIDLIST"), key("DBLIST")) else {
+        return stderr.to_vec();
+    };
+    if !list.starts_with('/') {
+        return stderr.to_vec();
+    }
+    let names: Vec<PathBuf> = volumes
+        .split_whitespace()
+        .map(|name| alias.parent().unwrap().join(name))
+        .collect();
+    let volume = names.iter().find(|name| {
+        ["pin", "nin"]
+            .iter()
+            .any(|ext| PathBuf::from(format!("{}.{ext}", name.display())).is_file())
+    });
+    let directory = match volume {
+        Some(volume) => volume.parent().unwrap(),
+        None => alias.parent().unwrap(),
+    };
+    let directory = std::fs::canonicalize(directory).unwrap();
+    let directory = directory.to_string_lossy();
+    // Without the `\\?\` of a drive's path that Windows puts on `canonicalize`'s result.
+    let directory = directory
+        .strip_prefix(r"\\?\")
+        .filter(|plain| plain.as_bytes().get(1) == Some(&b':'))
+        .unwrap_or(&directory);
+    replace_bytes(
+        stderr,
+        format!("'{list}'").as_bytes(),
+        format!("'{}/{list}'", directory.replace('\\', "/")).as_bytes(),
+    )
+}
+
 /// Replays a case of `makeblastdb_v5_cases.rs` through the parser and `run_with` in a directory
 /// of its own: every run's exit status and streams, the log file and every file are
 /// makeblastdb's (the date of the database is the recorded one).
@@ -1499,12 +1561,18 @@ fn run_v5_case(case: &V5Case) {
             &mut err,
         );
         let (out, err) = (v5_markers(&out, &dir), v5_markers(&err, &dir));
+        // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
+        let expected_err = crate::wording::losat_bytes(run.stderr);
+        let expected_err = if cfg!(windows) {
+            oid_list_path_on_windows(&expected_err, &words)
+        } else {
+            expected_err.into_owned()
+        };
         assert!(
-            // NCBI's standard error in LOSAT's words (`crate::wording::losat_bytes`).
-            crate::wording::losat_bytes(run.stderr) == err,
+            expected_err == err,
             "{name} run {k}: standard error\n{}\nexpected\n{}",
             show(&err),
-            show(run.stderr)
+            show(&expected_err)
         );
         assert!(
             out == run.stdout,
@@ -2189,11 +2257,12 @@ fn s3a_gate() {
 /// The driver of the S3b and S3c gates of the makedb-v5 line
 /// (`makedb-v5-20261029/scripts/s3b_gate.py`, `s3c_gate.py --lib`): as `s3a_gate`, for the
 /// manifest named by `LOSAT_S3B_GATE_MANIFEST`. The words go through LOSAT's command line
-/// parser (a parser error is written as `main` writes it, with its exit code).
+/// reader (an argument error or a refusal is written as the command line writes it, with its
+/// exit status).
 #[test]
 #[ignore = "driver of an external gate (LOSAT_S3B_GATE_MANIFEST)"]
 fn s3b_gate() {
-    use crate::cli::{Cli, Commands};
+    use crate::cli::Commands;
     let manifest = std::env::var("LOSAT_S3B_GATE_MANIFEST").expect("LOSAT_S3B_GATE_MANIFEST");
     for line in std::fs::read_to_string(manifest).unwrap().lines() {
         let mut fields = line.split('\t');
@@ -2208,7 +2277,7 @@ fn s3b_gate() {
             let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
             argv.extend(parse_json_words(run));
             let (mut out, mut err) = (Vec::new(), Vec::new());
-            let status = match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+            let status = match crate::cli::try_parse_from(argv) {
                 Ok(cli) => {
                     let Commands::Makedb(args) = cli.command else {
                         unreachable!("a makeblastdb command line");
@@ -2223,14 +2292,17 @@ fn s3b_gate() {
                         &mut err,
                     )
                 }
-                Err(error) => {
-                    let message = crate::cli::render_message(&error);
-                    if error.use_stderr() {
-                        err.extend_from_slice(message.as_bytes());
-                    } else {
-                        out.extend_from_slice(message.as_bytes());
-                    }
-                    error.exit_code()
+                Err(crate::cli::ArgvError::Printed(text)) => {
+                    out.extend_from_slice(text.as_bytes());
+                    0
+                }
+                Err(crate::cli::ArgvError::Report(text)) => {
+                    err.extend_from_slice(&text);
+                    1
+                }
+                Err(crate::cli::ArgvError::Refused(text)) => {
+                    err.extend_from_slice(format!("Error: {text}\n").as_bytes());
+                    1
                 }
             };
             std::fs::write(dir.join(format!("so{k}.txt")), out).unwrap();

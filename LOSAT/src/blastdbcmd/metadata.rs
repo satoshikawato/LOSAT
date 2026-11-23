@@ -9,7 +9,7 @@ use crate::seqdb::date::iso8601_date_time;
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
 use crate::writedb::cout::cout;
 use crate::writedb::metadata::{db_files_metadata, metadata_user_path, write_metadata, DbMetadata};
-use crate::writedb::ofstream::Stream;
+use crate::writedb::ofstream::OfStream;
 
 use super::{database_error, refusal, Diag};
 
@@ -96,21 +96,16 @@ pub(super) fn metadata(
     let mut posts = Vec::new();
     let escaped = match out {
         OutputFile::File(file) => {
-            let mut stream = Stream::of_file(file);
+            let mut stream = OfStream::of_file(file);
             write_metadata(&mut stream, &metadata, super::TOOL.program, &mut posts)
         }
         OutputFile::Stdout(stdout) => {
             let mut stream = cout(stdout, NcbiStdio::cout());
             write_metadata(&mut stream, &metadata, super::TOOL.program, &mut posts)
         }
-        // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`), before
-        // the first byte.
-        OutputFile::Refused(reason) => {
-            return diag.refuse(&crate::seqmasks_io::run::unsupported(
-                &reason,
-                super::PROGRAM,
-            ))
-        }
+        // Refused when `-out` was opened (`super::output_refusal`); never a failed write of
+        // NCBI's serializer.
+        OutputFile::Refused(reason) => return diag.refuse(&super::output_refusal(&reason)),
     };
     diag.write_text(&posts);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247

@@ -50,6 +50,7 @@
 //! random sequences of every kind the masker distinguishes.
 
 use super::{DustMasker, MaskedInterval, NcbiLfgRandom, PerfectInterval, X_BASE_CODE, X_RING};
+use std::cell::Cell;
 use std::collections::VecDeque;
 
 /// No NCBI counterpart: the scalars of `XTripletWindow` (symdust.cpp:40-48 `triplets`), kept by
@@ -256,12 +257,25 @@ struct XIns {
     len: usize,
 }
 
-/// No NCBI counterpart: `find_perfect`'s two vectors, kept across its calls so that they are
-/// allocated once per range.
+/// No NCBI counterpart: `find_perfect`'s two vectors, kept across its calls and across the ranges
+/// a thread masks (`X_SCRATCH`).
 #[derive(Default)]
 struct XScratch {
     ins: Vec<XIns>,
     merged: Vec<PerfectInterval>,
+}
+
+thread_local! {
+    /// No NCBI counterpart: the `XScratch` of the ranges this thread masks. Each range takes it and
+    /// puts it back, so the merge allocates only while the vectors grow to the largest call the
+    /// thread has seen (a few KiB). Vectors of each range's own, allocated and grown again in every
+    /// range, raised the peak memory of the one-thread cDNA run by 100-124 KiB (line FM s2, rss6).
+    static X_SCRATCH: Cell<XScratch> = const {
+        Cell::new(XScratch {
+            ins: Vec::new(),
+            merged: Vec::new(),
+        })
+    };
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:123-141,161-163
@@ -660,7 +674,7 @@ impl DustMasker {
             thresholds: &self.thresholds,
         };
         let thr = x_tenth_thresholds(k);
-        let mut scratch = XScratch::default();
+        let mut scratch = X_SCRATCH.with(Cell::take);
 
         while stop > current_start + 2 {
             let mut perfect_list: VecDeque<PerfectInterval> = VecDeque::new();
@@ -772,6 +786,7 @@ impl DustMasker {
             }
         }
 
+        X_SCRATCH.with(|c| c.set(scratch));
         result
     }
 }

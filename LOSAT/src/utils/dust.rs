@@ -604,7 +604,8 @@ impl<'a> XTripletWindow<'a> {
             self.r_w -= self.c_w[old] as u32;
             self.num_diff -= (self.c_w[old] == 0) as u32;
 
-            // if (L == start) { ++L; rem_triplet_info(r_v, c_v, old); }
+            // When the suffix start equals the window start, advance it and drop the expired
+            // triplet from the suffix counts (`rem_triplet_info`).
             let at_start = (self.l == self.start) as usize;
             self.l += at_start;
             let suffix_count = self.c_v[old] - at_start as u8;
@@ -835,7 +836,7 @@ impl<'a> TripletWindow<'a> {
         Self::add_triplet(&mut self.r_v, &mut self.c_v, triplet);
 
         // Update suffix start if triplet count exceeds low_k
-        // NCBI: off = triplet_list_.size() - (L - start_) - 1
+        // Compute the deque offset of suffix start L from `triplet_list_` length and `start_`.
         // With push_front/pop_back, index 0 is newest, back() is oldest
         // So off maps position L to deque index near the back
         if self.c_v[triplet as usize] > self.low_k {

@@ -101,6 +101,6 @@ fn test_length_adjustment_db_num_seqs_effect() {
     let result_many_seqs = compute_length_adjustment_ncbi(100, 10000, 100, &params);
 
     // More sequences should generally result in different (often smaller) adjustment
-    // because the constraint K*(m-A)*(n-N*A) > MAX(m,n) is tighter
+    // because the constraint `K*(m-A)*(n-N*A) > max(m, n)` is tighter
     assert!(result_many_seqs.length_adjustment <= result_few_seqs.length_adjustment);
 }

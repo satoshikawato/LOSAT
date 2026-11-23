@@ -1,0 +1,204 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: excl
+           3 sequences; 364 total letters
+
+
+
+Query= qok1_nt qok1 in frame +1
+
+Length=372
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000
+
+
+Query= tks_W_nt tks_W in frame +1
+
+Length=240
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000
+
+
+Query= nohit02 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit03 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit04 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit05 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit06 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit07 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit08 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit09 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit10 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nohit11 CCCCGGGGAACC repeated
+
+Length=144
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+  Database: excl
+    Posted date:  Nov 21, 2026  3:21 AM
+  Number of letters in database: 364
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

@@ -578,6 +578,853 @@ class SettingSpanTest(unittest.TestCase):
         self.assertIsNone(checker.SETTING_SPAN_RE.match("=" + "-=" * 5000 + " +="))
 
 
+class UnbacktickedCodeTest(unittest.TestCase):
+    """Unbackticked C/C++ statements and expressions in comments (`UNBACKTICKED_QUOTE`)."""
+
+    CITE = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-9\n"
+
+    def unbackticked(
+        self,
+        text: str,
+        rel: str = "x.rs",
+        style: str = "slash",
+        functions: frozenset[str] = frozenset(),
+    ) -> list[tuple[int, str]]:
+        return [
+            (f.line, f.source)
+            for f in checker.check_text(rel, text.split("\n"), style, TABLE, None, functions)
+            if f.kind == "QUOTE"
+        ]
+
+    def assert_flagged(self, text: str, line_no: int = 1, msg: str | None = None) -> None:
+        self.assertEqual(self.unbackticked(text), [(line_no, checker.UNBACKTICKED_QUOTE)], msg)
+
+    def test_o4c_examples_fail_cited_or_uncited(self) -> None:
+        cases = (
+            # stage_d_results.rs:41
+            "// if (m_QuerySeq[i] == m_SubjectSeq[i]) { ++num_ident; ++num_positives; }\n",
+            # tblastn/search_gapped.rs:28-29
+            "// typedef struct BlastSeg { Int2 frame; Int4 offset, end, gapped_start; } BlastSeg;\n",
+            "// typedef struct BlastHSP { Int4 score; ... BlastSeg query, subject; } BlastHSP;\n",
+            # blastn/alignment/gapped.rs:1602-1603
+            "// if (score < score_gap_col) { script = SCRIPT_GAP_IN_B; score = score_gap_col; }\n",
+            "// if (score < score_gap_row) { script = SCRIPT_GAP_IN_A; score = score_gap_row; }\n",
+            # blastp/args.rs:123-124
+            "// if (program == eBlastp && compo_mode != eNoCompositionBasedStats &&\n",
+            "//     tolower(comp_stat_string[1]) == 'u') { opt.SetUnifiedP(1); }\n",
+        )
+        for line in cases:
+            self.assert_flagged(line, 1, line)
+            found = checker.check_text("x.rs", (self.CITE + line).split("\n"), "slash", TABLE)
+            self.assertEqual([f.line for f in found if f.kind == "QUOTE"], [2], line)
+            # Unbackticked quotes are left to the writer by `--fix` (when not cited CODE_LINE_RE).
+            lines = line.split("\n")
+            found_uncited = checker.check_text("x.rs", lines, "slash", TABLE)
+            self.assertEqual(checker.fix_lines(list(lines), "slash", found_uncited), lines, line)
+
+    def test_common_unbackticked_c_statement_and_expression_forms_fail(self) -> None:
+        for line in (
+            "// if (x > 0) { y = 1; }\n",
+            "// ++count;\n",
+            "// --count;\n",
+            "// if (a[i] == b[i]) break;\n",
+            "// NCBI: x = f(y);\n",
+            "// for (i = 0; i < n; ++i)\n",
+            "// return TRUE;\n",
+            "/// m_Args.push_back(arg) registers the option group.\n",
+            "//! NStr::StringToInt(id) parses the identifier.\n",
+            "/// new_node->leftend = (Int4) midpt + 1;\n",
+            "// Remove worse HSP from list: list_node->midptr = tmp_index\n",
+            "// score DESC (BLAST_CMP(hsp2->score, hsp1->score))\n",
+            "// NCBI: E = MAX(E, kSmallFloat)\n",
+            '// NCBI: snprintf(evalue_buf, sizeof(evalue_buf), "0.0");\n',
+            "// if (CheckInternalData() != 0) each result in this batch\n",
+            "// struct { Uint4 q_off; Uint4 s_off; } qs_offsets;\n",
+            "// if (!(b0|b1|b2)) { H2=H2_helper->ptr; H_hsp_xsum=H2->hsp_link.xsum[index]; }\n",
+            "// NCBI: if( weight_divisor == 0.0 || (sum_e /= weight_divisor) > INT4_MAX )\n",
+            "// hsp_array[i] && hsp_array[i+j] && hsp_array[i]->context == hsp_array[i+j]->context\n",
+            "// where query_start = query_info->contexts[context].query_offset\n",
+            "let x = 1; // if (a == b) { ++c; }\n",
+        ):
+            self.assert_flagged(line, 1, line)
+
+    def test_m1_to_m8_guard_holes_are_closed(self) -> None:
+        # M1: C/C++ tail after pinned citation or alongside a source file / foreign name.
+        m1_cases = (
+            '// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: m_Outfile << "\\n\\n";\n',
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: obj = BlastCompo_AlignmentNew(gap_align->score, rule, ...);\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: (Int4)(gap_x_dropoff*NCBIMATH_LN2/min_lambda),\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 BlastInitHitListReset(init_hitlist)\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 BlastHSPList* combined_hsp_list\n",
+            "// hsp->score = score; see blast_def.h\n",
+            "// for (i = 0; i < n; i++) { x.c = 1; }\n",
+            "// Reference: hsp->score = score;\n",
+            "// x = y; // libstdc++\n",
+        )
+        for line in m1_cases:
+            found = self.unbackticked(line)
+            self.assertEqual(len(found), 1, line)
+            self.assertEqual(found[0][0], 1, line)
+            self.assertIn(found[0][1], (checker.UNBACKTICKED_QUOTE, checker.CODE_AFTER_CITATION), line)
+
+        # M2: bare `file.c:NNN: <C statement>` without `c++/` prefix.
+        self.assert_flagged("// blast_aalookup.c:490: w = query + offset_list[2];\n", 1)
+        self.assert_flagged("// blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);\n", 1)
+
+        # M3: citation followed by C tail without semicolon.
+        m3_cases = (
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 - in_q_start != tree_q_start\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 - SIGN(subject.frame)\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2 - while (1)\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: cutoff_score = MIN(gap_trigger * scale_factor, cutoff_score_max)\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: kDustLevel=20, kDustWindow=64, kDustLinker=1.\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.\n",
+            '// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: kArgQuery("query"), kArgSubject("subject").\n',
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: Create(eBlastp, locality).\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: options.GetMatrixName(), as typed.\n",
+        )
+        for line in m3_cases:
+            self.assert_flagged(line, 1, line)
+
+        # M4: continuation lines of quoted C statements/enums/ternaries under a citation.
+        m4_call_close = self.CITE + "//     adjusted_subject, hsp, score_options, &align_length, sbp);\nfn f() {}\n"
+        self.assertEqual([ln for ln, _ in self.unbackticked(m4_call_close)], [2])
+        m4_self_ptr = self.CITE + "//     self->startFreqRatios, self->ungappedLambda);\nfn f() {}\n"
+        self.assertEqual([ln for ln, _ in self.unbackticked(m4_self_ptr)], [2])
+        m4_enum = self.CITE + "//     eQueryOnly,\n//     eQueryAndSubject,\n//     eQueryOnlyStrandIndifferent\n// };\nfn f() {}\n"
+        self.assertEqual([ln for ln, _ in self.unbackticked(m4_enum)], [2, 3, 4, 5])
+        m4_ternary = (
+            self.CITE
+            + "// cutoff_s = do_link_hsps ?\n"
+            + "// localScalingFactor = (compo_adjust_mode != eNoCompositionBasedStats)\n"
+            + "//                      ? SCALING_FACTOR : 1.0;\nfn f() {}\n"
+        )
+        self.assertEqual(sorted(ln for ln, _ in self.unbackticked(m4_ternary)), [2, 3, 4])
+        m4_open_return = self.CITE + "// return s_HSPIsContained(hsp, query_start, node->hsp, node->leftptr,\nfn f() {}\n"
+        self.assertEqual([ln for ln, _ in self.unbackticked(m4_open_return)], [2])
+        m4_default = self.CITE + "//     default: ...\nfn f() {}\n"
+        self.assertEqual([ln for ln, _ in self.unbackticked(m4_default)], [2])
+
+        # M5: C conditions with `||`, `&&`, `==`, `!=` and C marks / foreign names.
+        m5_cases = (
+            "// Calculate cutoff_score when !gapped_calculation || matrix_only_scoring.\n",
+            "// Guard ans2 with sv[0] != INT4_MIN.\n",
+            "// Skip removed items (linked_to==-1000) in path.\n",
+            "// Regardless of flag (cutoff[0]==0).\n",
+        )
+        for line in m5_cases:
+            self.assert_flagged(line, 1, line)
+
+        # M6: C if/while conditions without body or logical operators, plus C-only control forms.
+        m6_cases = (
+            "// NCBI line 727: if (sum>H_hsp_sum)\n",
+            "// if (!combined) adopt incoming; otherwise combine\n",
+            "// if (i+upset-1 < leftend) { recurse on [lend..rend] }\n",
+            "// In NCBI, the while (number_of_hsps > 0) loop processes ALL HSPs.\n",
+            "// if (a < b)\n",
+            "// while (x)\n",
+            "// if(x)\n",
+            "// do {\n",
+            "// goto done;\n",
+            "// case eBlastTypeBlastn:\n",
+            "// default:\n",
+        )
+        for line in m6_cases:
+            self.assert_flagged(line, 1, line)
+
+        # M7: assignments, casts, macros, stdlib calls, declarations, ternaries without `;`.
+        m7_cases = (
+            "// BLAST_GAP_X_DROPOFF_FINAL_NUCL = 100; `-xdrop_gap_final` replaces it\n",
+            "// max_dist = MIN(GREEDY_MAX_COST, max(len1, len2) / GREEDY_MAX_COST_FRACTION + 1)\n",
+            "// score = MININT at the start of the row.\n",
+            "true, // check_double = TRUE\n",
+            "false, // check_double = FALSE (not in two-hit block)\n",
+            "// lookup[(index) >> PV_ARRAY_BTS] |= (1U << (index & PV_ARRAY_MASK))\n",
+            "// Match NCBI: (Int4) ell_min (direct cast, not floor)\n",
+            "// qsort(hsp_array, ..., s_QueryOffsetCompareHSPs); delete equal starts;\n",
+            "// y = cond ? 1 : 2\n",
+            "// unsigned int n = 0;\n",
+            "// int i, j;\n",
+            "// double lambda = 0.267;\n",
+            "// char* buf = malloc(n);\n",
+            "// class CBlastFoo : public CObject {\n",
+            "// enum { eFoo = 1, eBar };\n",
+            "// try {\n",
+            "// #define PV_SET(a, i) ...\n",
+            "// #include <stdio.h>\n",
+            "// static_cast<int>(x)\n",
+            "// strcmp(a, b) == 0\n",
+            "// p == NULL\n",
+            "// hsp->score < cutoff\n",
+            "// (Uint1*) seq\n",
+            "// (BlastHSP*)malloc(n)\n",
+            "// memcpy(dst, src, n)\n",
+        )
+        for line in m7_cases:
+            self.assert_flagged(line, 1, line)
+        self.assertEqual(
+            self.unbackticked(
+                "# CBlastInput(..., GetQueryBatchSize()); GetNextSeqBatch; CLocalBlast.Run()\n",
+                "x.py",
+                "python",
+            ),
+            [(1, checker.UNBACKTICKED_QUOTE)],
+        )
+
+        # M8: backtick spans with C logical OR `||` must NOT be misclassified as Rust closures.
+        m8_spans = (
+            "`a->b || c->d`",
+            "`hsp_list->hspcnt == 0 || hsp_list->hsp_array == NULL`",
+            "`m_HitsSortOption > 0 || m_HspsSortOption > 0`",
+            "`seqlocs[0]->IsNull() || seqlocs[1]->IsNull()`",
+            "`m_IsBl2Seq || m_IsIterative`",
+            "`itr || GetSaveLastPssm()`",
+        )
+        for span in m8_spans:
+            self.assertEqual(
+                self.unbackticked(f"// Check {span} here.\n"),
+                [(1, checker.INLINE_EXPRESSION)],
+                span,
+            )
+        # Rust closures (`|a, b|`, `|| expr`) and FASTA Seq-ids (`pir||A12345`) still pass.
+        for ok_span in (
+            "`|a, b| a.score > b.score`",
+            "`let f = || x + 1;`",
+            "`pir||A12345`",
+        ):
+            self.assertEqual(self.unbackticked(f"// Rust {ok_span} here.\n"), [], ok_span)
+
+    def test_rust_pseudocode_passes_and_rust_tokens_cannot_exempt_c_lines(self) -> None:
+        # Genuine Rust pseudocode and safe prose mentions pass.
+        rust_ok = (
+            "// if x == y { return; }\n",
+            "// while i < n { i += 1; }\n",
+            "// } else { x = 1; }\n",
+            "// else { skip }\n",
+            "// x = if a > b { a } else { b };\n",
+            "// x = y;\n",
+            "// score = score + 1;\n",
+            "// node.left = node.right;\n",
+            "// return x;\n",
+            "// return;\n",
+            "// break;\n",
+            "// push(row);\n",
+            "// run_scan(q, s);\n",
+            "// a[i] == b[i] for every i\n",
+            "// N = (n - 1) * (m - 1);\n",
+            "// idx = (q << 5) | s;\n",
+            "// Stage A comparison-only C++ API oracle uses FindGeneticCode(32).\n",
+            "// calls MyStruct(a) via the tuple struct\n",
+            "// unsafe { *p = 0; }\n",
+        )
+        for line in rust_ok:
+            self.assertEqual(self.unbackticked(line), [], line)
+
+        # Rust tokens (`self`, `u8`, `Some(`, `<n>`) must NOT exempt C/C++ code on the same line.
+        c_with_rust_tokens = (
+            "// hsp->score = self->score;\n",
+            "// Int4 x = (u8)y;\n",
+            "// if (hsp->score > 0) { /* returns Some(x) */ ++n; }\n",
+            "// hsp->score = 0; /* <n> items */\n",
+        )
+        for line in c_with_rust_tokens:
+            self.assert_flagged(line, 1, line)
+
+    def test_block_comments_are_checked_cohesively_and_unclosed_backtick_is_resilient(self) -> None:
+        self.assert_flagged("/* if (m_QuerySeq[i] == m_SubjectSeq[i]) { ++num_ident; } */\nfn f() {}\n", 1)
+        self.assert_flagged("/*\n * hsp->score = score;\n */\nfn f() {}\n", 2)
+        bc_backtick = "/* `m_Input.GetChars(count)` */\nfn f() {}\n"
+        self.assertEqual(self.unbackticked(bc_backtick), [(1, checker.INLINE_EXPRESSION)])
+        # Multi-line backtick span inside `/* ... */` is checked cohesively (not misread per-line).
+        bc_multiline_ok = "/*\n * Observed label `Query= seq1\n * Length=100` in report.\n */\nfn f() {}\n"
+        self.assertEqual(self.unbackticked(bc_multiline_ok), [])
+        bc_multiline_bad = "/*\n * Uses `m_HitsSortOption > 0 ||\n * m_HspsSortOption > 0` here.\n */\nfn f() {}\n"
+        self.assertEqual(self.unbackticked(bc_multiline_bad), [(2, checker.INLINE_EXPRESSION)])
+        bc_nested_ok = "/* /* matrix row A */ A */\nconst ROW: [i32; 1] = [/*A*/ 4];\n"
+        self.assertEqual(self.unbackticked(bc_nested_ok), [])
+        in_string = 'let s = "/* if (a == b) { ++c; } */";\nlet r = r#"/* hsp->score = 1; */"#;\n'
+        self.assertEqual(self.unbackticked(in_string), [])
+        # A single unclosed backtick on line 1 must not blind subsequent lines in the same run.
+        unclosed_run = (
+            "// Typo with an unclosed `backtick here\n"
+            "// if (a == b) { ++c; }\n"
+            "// And balanced `ok` after.\n"
+            "fn f() {}\n"
+        )
+        self.assertEqual(self.unbackticked(unclosed_run), [(2, checker.UNBACKTICKED_QUOTE)])
+
+    def test_trailing_hash_comments_in_py_sh_toml_yml_are_checked(self) -> None:
+        self.assertEqual(
+            self.unbackticked("x = 1  # hsp->score = score;\n", "x.py", "python"),
+            [(1, checker.UNBACKTICKED_QUOTE)],
+        )
+        self.assertEqual(
+            self.unbackticked('url = "http://x#hsp->score = 1"\n', "x.py", "python"),
+            [],
+        )
+        for rel in ("x.sh", "x.toml", "x.yml"):
+            self.assertEqual(
+                self.unbackticked("x = 1  # hsp->score = score;\n", rel, "hash"),
+                [(1, checker.UNBACKTICKED_QUOTE)],
+                rel,
+            )
+            self.assertEqual(
+                self.unbackticked('s = "a # hsp->score = score;"\n', rel, "hash"),
+                [],
+                rel,
+            )
+            self.assertEqual(
+                self.unbackticked("s = 'a # hsp->score = score;'\n", rel, "hash"),
+                [],
+                rel,
+            )
+            self.assertEqual(
+                self.unbackticked("echo ${#arr[@]} # plain note\n", rel, "hash"),
+                [],
+                rel,
+            )
+
+    def test_valid_losat_comments_pass(self) -> None:
+        code = "fn f(x: i32, y: i32) { let _ = (x, y); }\n"
+        for line in (
+            "// let x = y;\n",
+            "// self.count = x + 1;\n",
+            "// a = b + c\n",
+            "// Length=100\n",
+            "// Score = 10 bits, Identities = 8/10\n",
+            "// (m_Pos = <n>)\n",
+            "// Cannot convert string '12x' to Uint8 (m_Pos = 2)\n",
+            "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:10-20\n",
+            "// No NCBI counterpart: debug print switch (LOSAT_DEBUG_COORDS, read once); it stays off.\n",
+            "// The reader opens nothing until a name is asked for ([`LazyTaxDb`]); it is lazy.\n",
+            "// NCBI's (Int4) of infinity is INT_MIN on x86-64, and the cutoff stays 1.\n",
+            "// query_blk->sequence (masked) drives the traceback score.\n",
+            "// Run cargo build --release --locked for the binary.\n",
+            "// Measured on dev (peaks in KiB; extra = T4 - T1;\n",
+            "// - k when n <= 5 or k < 3;\n",
+            "// CREATE INDEX name ON TaxidInfo(parent,taxid): no sort order.\n",
+            "// T->A, G->C, C->G, A->T = ACGT\n",
+            "// SeqId(warning) wraps a LOSAT warning.\n",
+            "// for (a coordinate, `length`, `gaps`, `gapopen` or `qframe`; the block's other fields fetch\n",
+        ):
+            self.assertEqual(
+                self.unbackticked(line + code, functions=frozenset({"SeqId"})),
+                [],
+                line,
+            )
+        # Python docstrings allow Python doctests and dotted constructor calls, while still
+        # rejecting unbackticked C/C++ statements.
+        py_ok = '"""\n>>> search = pylosat.Search("blastn")\nRandom from random.Random(20261019).\n"""\n'
+        self.assertEqual(self.unbackticked(py_ok, "x.py", "python"), [])
+        py_bad = '"""\nif (hsp->evalue > cutoff) { hsp_array[i] = Blast_HSPFree(hsp); }\n"""\n'
+        self.assertEqual(self.unbackticked(py_bad, "x.py", "python"), [(2, checker.UNBACKTICKED_QUOTE)])
+        # C-family files show their own syntax.
+        self.assertEqual(self.unbackticked("// if (a[i] == b[i]) { ++n; }\n", "x.ts", "slash"), [])
+
+    def assert_all_clean(self, items: tuple[str, ...]) -> None:
+        for ok in items:
+            self.assertEqual(self.unbackticked(ok), [], ok)
+
+    def test_groups_a_to_g_and_c_only_forms_are_flagged_while_rust_passes(self) -> None:
+        # Group A: quote prefix + pointer member / deref index / empty-arg call assignment.
+        for line in (
+            "/// NCBI: H->linked_set - TRUE if this HSP is part of a multi-HSP chain\n",
+            "// NCBI: matrix[*query & 0xff][*subject]\n",
+            "let total = hits.len(); // NCBI: hsp_list->hspcnt\n",
+            "// NCBI BLAST: word_params->cutoffs[context].x_dropoff_init\n",
+            "// NCBI: gap_trigger uses kbp_std[context]->Lambda/logK.\n",
+            "// NCBI: GetOffsetArraySize() = OFFSET_ARRAY_SIZE (4096) + lookup->longest_chain\n",
+            "// NCBI: ungapped_data->q_start is absolute query offset.\n",
+            "// NCBI line 750-752: kbp[H->hsp->context]->Lambda, kbp[H->hsp->context]->logK\n",
+        ):
+            self.assert_flagged(line, 1, line)
+        # Reworded backticked/prose forms pass.
+        self.assert_all_clean(
+            (
+                "/// Whether this HSP belongs to a multi-HSP chain (NCBI `H->linked_set`).\n",
+                "let hspcnt = 0; let n = (hspcnt + 5).max(1024); // NCBI: the larger of 1024 and `hspcnt + 5`\n",
+            )
+        )
+
+        # Group B: Nlm_* and acronym-leading CamelCase calls.
+        for line in (
+            "// - BSearchContextInfo(0, query_info) -> 0 (first context)\n",
+            "// ---- Nlm_StepBound(x, 400, resids_x, 1 / 0.95) * 0.95, then Nlm_AddVectors\n",
+            "// Nlm_EuclideanNorm(resids_x) runs element by element as resids_x[k] is formed.\n",
+        ):
+            self.assert_flagged(line, 1, line)
+
+        # Group C: ALL_CAPS macro calls (excluding LOSAT_*).
+        self.assert_flagged("// SET_HOUR(value % 12) stores 0 for 12, and AM adds nothing.\n", 1)
+        self.assertEqual(
+            self.unbackticked("# BOOST_AUTO_TEST_CASE(testHSPListSort). Ported cases.\n", "ci.yml", "hash"),
+            [(1, checker.UNBACKTICKED_QUOTE)],
+        )
+        self.assertEqual(self.unbackticked("// LOSAT_SOME_SWITCH(1) enables tracing.\n"), [])
+
+        # Group D: C++ class object declarations followed by prose.
+        for line in (
+            "// CRandom random(base_length); ambiguous ncbi4na bases are picked once\n",
+            "// CRandom random(base_length); each ambiguous 4na value consumes one GetRand().\n",
+        ):
+            self.assert_flagged(line, 1, line)
+
+        # Group E: named C++ enum / struct / union with trailing `;` (Rust enum/struct without `;` pass).
+        self.assert_flagged("// enum EScore { eForced, ePunct, eComma, eSpace, eNewline };\n", 1)
+        self.assert_flagged("// struct Foo { int x; };\n", 1)
+        self.assertEqual(self.unbackticked("// enum Foo { A, B }\n"), [])
+        self.assertEqual(self.unbackticked("// struct Foo { x: i32 }\n"), [])
+
+        # Group F: copied tail of an NCBI C block comment inside a line comment.
+        self.assert_flagged("//    argument can be shared between multiple threads */\n", 1)
+        self.assertEqual(self.unbackticked("// Matches web/** files.\n"), [])
+
+        # Group G: ASN.1 definitions outside backticks (backticked ASN.1 stays allowed).
+        for line in (
+            "// Annotdesc ::= CHOICE { name, title, comment, pub, user User-object, ... }\n",
+            "// Blast-def-line-set ::= SEQUENCE OF Blast-def-line\n",
+            "// Seq-id ::= CHOICE { ..., general Dbtag, ... }\n",
+            "// Dbtag ::= SEQUENCE { db VisibleString, tag Object-id }\n",
+            "// Object-id ::= CHOICE { id INTEGER, str VisibleString }\n",
+        ):
+            self.assert_flagged(line, 1, line)
+        self.assertEqual(self.unbackticked("// `Seq-descr ::= SET OF Seqdesc`\n"), [])
+
+        # C/C++-only forms (Small ④) and standalone cited calls (②a) and empty-init for (②b).
+        for line in (
+            "// hsp_list->Sort();\n",
+            "// this->x_Foo();\n",
+            "// m_Foo->Bar\n",
+            '// NCBI_THROW(CBlastException, eInvalidArgument, "bad");\n',
+            "// sfree(hsp_array);\n",
+            "// free(p);\n",
+            "// NCBI: sfree(hsp_array);\n",
+            "// NCBI: push(row);\n",
+            "// mask = 0xFFFFFFFFU;\n",
+            "// mask = 1UL;\n",
+            "// x = 1.0f;\n",
+            "// x = 1e-5f;\n",
+            "// mode = kBlastDefault;\n",
+            "// for (;;)\n",
+            "// for (; i < n; )\n",
+            "// for ( ;;) {\n",
+            "// for (auto& e : v) {\n",
+        ):
+            self.assert_flagged(line, 1, line)
+
+        # Uncited Rust pseudo-code, printf `%1.1f`, and non-C `for` forms pass.
+        self.assert_all_clean(
+            (
+                "// if x == y { return; }\n",
+                "// x = y;\n",
+                "// push(row);\n",
+                "// x += y;\n",
+                "// return -1;\n",
+                "// break;\n",
+                "// a[i] = b[i + 1];\n",
+                "// let m = 0xFFu32;\n",
+                "// let x = 1.0f32;\n",
+                "// let v = vec![1u32; n];\n",
+                "// fn f(a: u8) -> Option<(u8, u8)> {\n",
+                "// std::mem::swap(&mut a, &mut b);\n",
+                "// Box<dyn Fn(u8) -> u8> f;\n",
+                "// for i in 0..n { sum += v[i]; }\n",
+                "// for (a, b) in pairs { use_it(a, b); }\n",
+                "// for (a;\n",
+                "// %1.1f of an exact tie goes to the even digit.\n",
+                "// a -> b\n",
+                "// a=>b\n",
+                "// new() creates the table\n",
+            )
+        )
+
+    def test_block_comments_unified_checks_and_line_numbers(self) -> None:
+        # ②c: backslash-newline continuation inside a double-quoted string must keep line numbers exact.
+        multiline_str = (
+            "fn f() {\n"
+            '    let s = "abc \\\n'
+            'def";\n'
+            "    let x = 1;\n"
+            "    /*\n"
+            "     * hsp->score = score;\n"
+            "     */\n"
+            "}\n"
+        )
+        self.assertEqual(checker.block_comments(multiline_str.splitlines()), [[(6, "hsp->score = score;")]])
+        self.assertEqual(self.unbackticked(multiline_str), [(6, checker.UNBACKTICKED_QUOTE)])
+
+        # ②d: C block comment with cited NCBI code (matching ncbi_frame_trace.c shape) is caught.
+        c_probe = (
+            "/* Comparison-only probe.\n"
+            " * NCBI c++/src/algo/blast/core/blast_hits.c:2-9:\n"
+            " *   subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);\n"
+            " *   status = s_BlastSearchEngineOneContext(...);\n"
+            " *   Uint1* sequence; Int4 length;\n"
+            " */\n"
+            "int main(void) { return 0; }\n"
+        )
+        c_found = [(f.kind, f.line) for f in checker.check_text("probe.c", c_probe.splitlines(), "slash", TABLE)]
+        self.assertEqual(c_found, [("QUOTE", 3), ("QUOTE", 4), ("QUOTE", 5)])
+
+        # ②d: PIN, REF, LABEL, fence QUOTE, and inline backtick statement work inside `/* ... */`
+        # across Rust, C, C++, JS, and TS extensions, while uncited C/TS syntax respects NON_C_FAMILY.
+        for rel in ("a.rs", "a.c", "a.h", "a.hh", "a.cc", "a.cpp", "a.hpp", "a.js", "a.ts"):
+            pin_bc = "/* NCBI reference: c++/src/algo/blast/core/blast_hits.c:2 */\n"
+            self.assertEqual(
+                [f.kind for f in checker.check_text(rel, pin_bc.splitlines(), "slash", TABLE)],
+                ["PIN"],
+                rel,
+            )
+            ref_bc = "/* NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:99999 */\n"
+            self.assertEqual(
+                [f.kind for f in checker.check_text(rel, ref_bc.splitlines(), "slash", TABLE)],
+                ["REF"],
+                rel,
+            )
+            label_bc = "/* NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395 */\n"
+            self.assertEqual(
+                [f.kind for f in checker.check_text(rel, label_bc.splitlines(), "slash")],
+                ["LABEL"],
+                rel,
+            )
+            fence_bc = "/*\n * ```c\n * int x;\n * ```\n */\n"
+            self.assertEqual(
+                [(f.kind, f.line) for f in checker.check_text(rel, fence_bc.splitlines(), "slash", TABLE)],
+                [("QUOTE", 2)],
+                rel,
+            )
+            stmt_bc = "/* Note: `if (r < 1) return 0.;` here. */\n"
+            self.assertEqual(
+                [(f.kind, f.line, f.source) for f in checker.check_text(rel, stmt_bc.splitlines(), "slash", TABLE)],
+                [("QUOTE", 1, checker.INLINE_STATEMENT)],
+                rel,
+            )
+            uncited_bc = "/* if (a == b) { ++c; } */\n"
+            expected_uncited = [("QUOTE", 1)] if rel == "a.rs" else []
+            self.assertEqual(
+                [(f.kind, f.line) for f in checker.check_text(rel, uncited_bc.splitlines(), "slash", TABLE)],
+                expected_uncited,
+                rel,
+            )
+
+    def test_trailing_slash_and_hash_scanner_edge_cases(self) -> None:
+        # Small ⑤: all 5 trailing `//` forms are scanned while URLs in strings/raw-strings are skipped.
+        for line in (
+            "x;// hsp->score = score;\n",
+            "x; //hsp->score = score;\n",
+            "a && // hsp->score = score;\n",
+            '"s" // hsp->score = score;\n',
+            "'c' // hsp->score = score;\n",
+        ):
+            self.assert_flagged(line, 1, line)
+        self.assert_all_clean(
+            (
+                'let u = "https://example.com/hsp->score=1";\n',
+                'let r = r#"https://example.com/hsp->score=1"#;\n',
+                "let c = '/';\n",
+                'let u = "https://a"; // ok\n',
+            )
+        )
+
+        # Small ⑥: YAML apostrophe & doubled quote, TOML multiline strings, unparseable Python fallback.
+        self.assertEqual(
+            self.unbackticked("a: it's fine # hsp->score = score;\n", "x.yml", "hash"),
+            [(1, checker.UNBACKTICKED_QUOTE)],
+        )
+        self.assertEqual(
+            self.unbackticked("a: 'it''s # not a comment' # hsp->score = score;\n", "x.yml", "hash"),
+            [(1, checker.UNBACKTICKED_QUOTE)],
+        )
+        self.assertEqual(
+            self.unbackticked("a: 'it''s # hsp->score = score;'\n", "x.yml", "hash"),
+            [],
+        )
+        toml_ml = (
+            'desc = """\n'
+            "# hsp->score = 1;\n"
+            '""" # hsp->score = 2;\n'
+            "lit = '''\n"
+            "# hsp->score = 3;\n"
+            "''' # hsp->score = 4;\n"
+        )
+        self.assertEqual(
+            self.unbackticked(toml_ml, "x.toml", "hash"),
+            [(3, checker.UNBACKTICKED_QUOTE), (6, checker.UNBACKTICKED_QUOTE)],
+        )
+        broken_py = 'def broken(:\n    x = 1  # hsp->score = score;\n    s = "a # hsp->score = 1"\n'
+        self.assertEqual(
+            self.unbackticked(broken_py, "x.py", "python"),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+
+    def test_reflow_prose_shapes_do_not_false_positive(self) -> None:
+        # Small ⑦ (a)–(e): re-wrapped prose shapes must pass without breaking C true positives.
+        self.assert_all_clean(
+            (
+                # (a) `case word:` prose at line start
+                "// case sensitive: the names differ\n",
+                "// case c_xml_tab: the byte is a tab\n",
+                "// case 3: the query is empty and nothing is written\n",
+                # (b) prose under a citation containing `return` and ending with `;`
+                self.CITE + "// comparators return zero after context, endpoints, and score tie;\n",
+                # (c) prose under a citation starting with a C type word
+                self.CITE + "// long subject (query-group spans of about 1,000 letters, chunks of\n",
+                self.CITE + "// double check (the sum) before returning\n",
+                # (d) short citation tail with LOSAT variable + comparison/assignment, math formula, or backticked LHS
+                "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-9: q_length <= 11 returns the\n",
+                "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-9: frame_offsets[context+1] = offset after\n",
+                "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-9 op_cost = match_score + mismatch_penalty (both positive, so\n",
+                "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-9 E = K * searchsp *\n",
+                "// `eSeqId_<type>` = `e_<Type>` (Seq_id.hpp:221-244, `eSeqId_refseq` =\n",
+                # (e) library name lmdb++ at end of line
+                "// c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:103-110 lmdb++\n",
+                "// lmdb++\n",
+            )
+        )
+        # Bare LOSAT-variable comparison tail after citation passes when the variable is known in LOSAT.
+        known_cmp = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-9: q_length <= 11\n"
+        self.assertEqual(
+            [
+                f.line
+                for f in checker.check_text(
+                    "x.rs", known_cmp.splitlines(), "slash", TABLE, None, frozenset(), frozenset({"q_length"})
+                )
+                if f.kind == "QUOTE"
+            ],
+            [],
+        )
+        # True C `case` labels still fail (standalone and under a citation).
+        for bad in (
+            "// case eBlastp:\n",
+            "// case kFoo:\n",
+            "// case foo_bar:\n",
+            "// case NS::kFoo:\n",
+            "// case 3: return 1;\n",
+            "// case MY_ENUM: break;\n",
+        ):
+            self.assert_flagged(bad, 1, bad)
+            self.assertEqual(
+                [f.line for f in checker.check_text("x.rs", (self.CITE + bad).splitlines(), "slash", TABLE) if f.kind == "QUOTE"],
+                [2],
+                bad,
+            )
+
+    def test_comment_names_odd_backticks_and_escaped_char_literals(self) -> None:
+        # ① Comment text inside `/* ... */` or trailing comments must not enter `code_names` / `rust_names`.
+        self.assert_flagged("/* ZapFooBar */\n// see ZapFooBar(alpha, beta);\n", 2, "rs block comment name")
+        self.assert_flagged("let x = 1; // ZapFooBar\n// see ZapFooBar(alpha, beta);\n", 2, "rs trailing comment name")
+        self.assertEqual(
+            self.unbackticked("x=1  # ZapFooBar\n# see ZapFooBar(alpha, beta);\n", "x.sh", "hash"),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+        # Positive control: an actual Rust definition of `ZapFooBar` still exempts it as a LOSAT name.
+        self.assertEqual(
+            self.unbackticked("struct ZapFooBar;\n// see ZapFooBar(alpha, beta);\n", "x.rs", "slash"),
+            [],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.rs").write_text("/* ZapFooBar */\n", encoding="utf-8")
+            (root / "b.rs").write_text("// see ZapFooBar(alpha, beta);\n", encoding="utf-8")
+            found = checker.find(root, TABLE)
+            self.assertEqual([(f.path, f.line, f.kind) for f in found], [("b.rs", 1, "QUOTE")])
+
+        # ② Cited prose `case` lines (including short lowercase prose words) still pass, while
+        # cited `case kFoo:`, `case kFoo: return `x`;`, and C parameter declarations with Doxygen
+        # comments fail.
+        for prose_case in (
+            "// case sensitive: the names differ\n",
+            "// case sensitive: yes\n",
+            "// case insensitive:\n",
+            "// case study: foo\n",
+            "// case c_xml_tab: the byte is a tab\n",
+            "// case c_xml_tab: `Bad char [0x1] in string at line 8` for\n",
+            "// case 3: the query is empty and nothing is written\n",
+            "// Int4 values, so the reachable Int4 row length is rounded down\n",
+        ):
+            self.assertEqual(
+                checker.check_text("x.rs", (self.CITE + prose_case).splitlines(), "slash", TABLE),
+                [],
+                prose_case,
+            )
+        for cited_bad in (
+            "// case kFoo: return `x`;\n",
+            "// case done: break;\n",
+            "// case x: break;\n",
+            "// case std::ios::eofbit: break;\n",
+            "// Int4 foo(const unsigned long x,\n",
+            "//     Int4 query_length, /* the length of the query */\n",
+            "//     Int4 query_length, // the length of the query\n",
+            "//     Int4 query_length, //!< the length of the query\n",
+            "//     Int4 hitlist_size, ///< number of hits to keep in a list\n",
+            "//     Int4 query_length, /**< [in] Length of the query sequence */\n",
+        ):
+            self.assertEqual(
+                [f.line for f in checker.check_text("x.rs", (self.CITE + cited_bad).splitlines(), "slash", TABLE) if f.kind == "QUOTE"],
+                [2],
+                cited_bad,
+            )
+
+        # ③ Odd backticks (both multi-line and single-line) and paired GNU-style `` `foo' `` quotes
+        # must not swallow C code.
+        for single_odd in (
+            "// an odd ` tick then hsp_list->hspcnt = hsp_cnt; and `x` y\n",
+            "// Error: `foo' and hsp_list->hspcnt = hsp_cnt; see `x`\n",
+        ):
+            self.assertEqual(self.unbackticked(single_odd), [(1, checker.UNBACKTICKED_QUOTE)], single_odd)
+        self.assertEqual(
+            self.unbackticked("// Error: `foo' and plain prose see `x`\n"),
+            [],
+        )
+        self.assertEqual(
+            self.unbackticked("// see `foo' and hsp_list->hspcnt = hsp_cnt;\n// and `bar' too\n"),
+            [(1, checker.UNBACKTICKED_QUOTE)],
+        )
+        self.assertEqual(
+            self.unbackticked("// see `foo' here\n// hsp_list->hspcnt = hsp_cnt; and `bar' too\n"),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+        self.assertEqual(
+            self.unbackticked("// see `foo' here\n// and `bar' too, `don't` and `b'a'` stay intact\n"),
+            [],
+        )
+        odd_three = (
+            "// an odd ` tick here\n"
+            "// then hsp_list->hspcnt = hsp_cnt; and `x\n"
+            "// y` done\n"
+        )
+        self.assertEqual(
+            self.unbackticked(odd_three),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+        odd_two = (
+            "// `first\n"
+            "// second` then hsp_list->hspcnt = hsp_cnt; and odd `\n"
+        )
+        self.assertEqual(
+            self.unbackticked(odd_two),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+        odd_four = (
+            "// an odd ` tick here\n"
+            "// `a` note then hsp_list->hspcnt = hsp_cnt; trailing `b`\n"
+            "// `x\n"
+            "// y` done\n"
+        )
+        self.assertEqual(
+            self.unbackticked(odd_four),
+            [(2, checker.UNBACKTICKED_QUOTE)],
+        )
+        gnu_quote_prose = (
+            "// NCBI prints `String' when the option is missing\n"
+            "// and keeps `first\n"
+            "// second` wrapped across comment lines.\n"
+        )
+        self.assertEqual(self.unbackticked(gnu_quote_prose), [])
+
+        # ④ Escaped single-quote char literals `'\''` must not desynchronize `scan_slash_comments`.
+        self.assert_flagged(
+            "let a = ['\\'','\"']; // hsp_list->hspcnt = hsp_cnt;\n",
+            1,
+            "escaped single quote before double quote",
+        )
+        self.assert_flagged(
+            "let b = ['\\\\','\\'','\\n']; // hsp_list->hspcnt = hsp_cnt;\n",
+            1,
+            "escaped backslash and single quote",
+        )
+        self.assertEqual(
+            self.unbackticked("let a = ['\\'','\"']; // plain prose comment\n"),
+            [],
+        )
+
+    def test_unbackticked_regexes_are_linear_time(self) -> None:
+        import time
+
+        # Measure scaling ratio t(4n) / t(n) rather than brittle fixed wall-clock caps:
+        # O(n) scales ~4x whereas O(n^2) scales ~16x. Include all adversarial inputs:
+        # escaped-quote repeats, semi-brace-comment repeats, unclosed-for repeats,
+        # unclosed-method repeats, unclosed-struct repeats, and all R5 rules/scanners.
+        builders = (
+            ("plain_letters", "x.rs", "slash", lambda n: "// " + "a" * n + "\n"),
+            ("nested_if_parens", "x.rs", "slash", lambda n: "// if " + "(" * n + "a == b\n"),
+            ("repeated_and", "x.rs", "slash", lambda n: "// if (" + "a && " * (n // 5) + "\n"),
+            ("for_semis", "x.rs", "slash", lambda n: "// for (" + ";" * n + "\n"),
+            ("for_a_semi", "x.rs", "slash", lambda n: "// " + "for (a;" * (n // 7) + "\n"),
+            ("for_empty_spam", "x.rs", "slash", lambda n: "// " + "for ( " * (n // 6) + ";\n"),
+            ("for_a_spam", "x.rs", "slash", lambda n: "// " + "for ( a" * (n // 7) + ";\n"),
+            ("escaped_quote", "x.rs", "slash", lambda n: "// " + '"a\\' * (n // 3) + "\n"),
+            ("semi_brace_comment", "x.rs", "slash", lambda n: "// " + "; }/* " * (n // 6) + "\n"),
+            ("unclosed_method", "x.rs", "slash", lambda n: "// " + ".A(x" * (n // 4) + "\n"),
+            ("unclosed_camel", "x.rs", "slash", lambda n: "// " + "FooBar(x" * (n // 8) + "\n"),
+            ("unclosed_struct", "x.rs", "slash", lambda n: "// " + "struct { " * (n // 9) + "\n"),
+            ("nested_if_semi", "x.rs", "slash", lambda n: "// " + "if (;if (;" * (n // 10) + "\n"),
+            ("dotted_assign", "x.rs", "slash", lambda n: "// " + "a.b" * (n // 3) + " = 1\n"),
+            ("unclosed_quotes", "x.rs", "slash", lambda n: "// " + 'a"' * (n // 2) + "\n"),
+            ("indexed_var", "x.rs", "slash", lambda n: "// " + "x[0]" * (n // 4) + "\n"),
+            ("int4_stars", "x.rs", "slash", lambda n: "// " + "Int4 " + "*" * n + "\n"),
+            ("semi_brace_end", "x.rs", "slash", lambda n: "// " + "; " * (n // 2) + "}\n"),
+            ("return_spaces", "x.rs", "slash", lambda n: "// return" + " " * n + "x\n"),
+            ("stream_words", "x.rs", "slash", lambda n: "// " + "Stream" * (n // 6) + "\n"),
+            ("block_stars", "x.rs", "slash", lambda n: "/* " + "*" * n + " */\n"),
+            ("arrow_spam", "x.rs", "slash", lambda n: "// NCBI: " + "a[0]" * (n // 4) + "->1\n"),
+            ("macro_spam", "x.rs", "slash", lambda n: "// " + "A_B" * (n // 3) + "(\n"),
+            ("acronym_spam", "x.rs", "slash", lambda n: "// " + "ABcD" * (n // 4) + "(\n"),
+            ("cpp_decl_spam", "x.rs", "slash", lambda n: "// " + "; CAb x(" * (n // 8) + "\n"),
+            ("enum_spam", "x.rs", "slash", lambda n: "// " + "enum A { " * (n // 9) + "\n"),
+            ("asn1_spam", "x.rs", "slash", lambda n: "// " + "A-B " * (n // 4) + "::= 1\n"),
+            ("float_spam", "x.rs", "slash", lambda n: "// x = " + "1" * n + ".0\n"),
+            ("int_suffix_spam", "x.rs", "slash", lambda n: "// x = " + "1" * n + "\n"),
+            ("two_prose_spam", "x.rs", "slash", lambda n: "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2: x = " + "ab " * (n // 3) + "\n"),
+            ("block_slash_spam", "x.rs", "slash", lambda n: "/* " + "a" * n + " */\nlet x = 1; //" + "b" * n + "\n"),
+            ("backslash_str_spam", "x.rs", "slash", lambda n: 'let s = "' + "a\\\n" * (n // 3) + '"; /* x */\n'),
+            ("toml_ml_spam", "x.toml", "hash", lambda n: 'a = """' + "x" * n + '""" # y\n'),
+            ("yaml_quote_spam", "x.yml", "hash", lambda n: "a: " + "it's " * (n // 5) + "# y\n"),
+            ("odd_bt_spam", "x.rs", "slash", lambda n: "// odd `\n// " + "a `b` " * (n // 6) + "`x\n// y` done\n"),
+            ("escaped_char_spam", "x.rs", "slash", lambda n: "let a = [" + "'\\''," * (n // 5) + "'a']; // ok\n"),
+            ("c_decl_comment_spam", "x.rs", "slash", lambda n: self.CITE + "// Int4 values, " + "/* " * (n // 3) + "a b c d\n"),
+            ("case_bt_spam", "x.rs", "slash", lambda n: "// case kFoo: " + "`a` " * (n // 4) + "ok\n"),
+            ("gnu_quote_spam", "x.rs", "slash", lambda n: "// see " + "`a' " * (n // 4) + "ok\n"),
+        )
+        # Use process CPU time and an 8x size jump (linear ~8x vs quadratic ~64x) so host load
+        # preemption spikes never flake the bound.
+        n_small = 2000
+        n_large = 16000
+
+        def measure(rel: str, style: str, lines: list[str], reps: int = 3) -> float:
+            best = float("inf")
+            for _ in range(reps):
+                t0 = time.process_time()
+                checker.check_text(rel, lines, style, TABLE)
+                dt = time.process_time() - t0
+                if dt < best:
+                    best = dt
+            return best
+
+        for name, rel, style, build in builders:
+            small_lines = build(n_small).splitlines()
+            large_lines = build(n_large).splitlines()
+            t_small = measure(rel, style, small_lines)
+            t_large = measure(rel, style, large_lines)
+            # Only enforce ratio when small time is above noise floor (0.5 ms); otherwise confirm
+            # large time stays tiny (< 50 ms), which still rejects any O(n^2) blowup.
+            if t_small >= 0.0005:
+                ratio = t_large / t_small
+                self.assertLess(
+                    ratio,
+                    24.0,
+                    f"{name}: t({n_large})/t({n_small}) = {ratio:.2f} "
+                    f"({t_large*1000:.2f}ms / {t_small*1000:.2f}ms)",
+                )
+            else:
+                self.assertLess(
+                    t_large,
+                    0.050,
+                    f"{name}: t({n_large}) = {t_large*1000:.2f}ms (t({n_small})={t_small*1000:.3f}ms)",
+                )
+
+
 class FixTest(unittest.TestCase):
     def fixed(self, text: str, style: str = "slash") -> str:
         lines = text.split("\n")
@@ -657,6 +1504,29 @@ class FixTest(unittest.TestCase):
                 b"// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2\r\nfn f() {}\r\n",
             )
             self.assertEqual((root / "b.rs").read_bytes(), in_string.encode())
+
+    def test_fix_pins_trailing_comment_without_touching_string_literal(self) -> None:
+        # ②e: `--fix` must touch only the comment portion of a line, never string literals before it.
+        names = checker.base_names(TABLE)
+        lit = '"NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2"'
+        unpinned = "NCBI reference: blast_hits.c:2"
+        pinned_ref = "NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2"
+        cases = (
+            ("x.sh", "hash", f"msg={lit}", "#"),
+            ("x.toml", "hash", f"toml_msg = {lit}", "#"),
+            ("x.yml", "hash", f"msg: {lit}", "#"),
+            ("x.py", "python", f"py_msg = {lit}", "#"),
+            ("x.rs", "slash", f"let msg = {lit};", "//"),
+        )
+        for rel, style, lhs, marker in cases:
+            line = f"{lhs}  {marker} {unpinned}"
+            want = f"{lhs}  {marker} {pinned_ref}"
+            suffix = Path(rel).suffix
+            found = checker.check_text(rel, [line], style, TABLE)
+            self.assertEqual([f.kind for f in found], ["PIN"], rel)
+            fixed = checker.fix_lines([line], style, found, names, suffix=suffix)
+            self.assertEqual(fixed, [want], rel)
+            self.assertEqual(checker.check_text(rel, fixed, style, TABLE), [], rel)
 
     def test_fix_drops_a_blank_line_left_before_code(self) -> None:
         text = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2\n//\n// ```c\n// x;\n// ```\nfn f() {}\n"

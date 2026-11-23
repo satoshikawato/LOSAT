@@ -19,7 +19,7 @@ use crate::config::ScoringMatrix;
 use crate::core::psi::{
     create_pssm_with_options, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiOptions, PsiScoreBlk,
 };
-use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::ncbi_exception::NcbiException;
 use crate::report::serial::pssm::{PssmQuery, SeqData, SeqEntry, SeqInst, Seqdesc};
 use crate::utils::matrix::aa_char_to_ncbistdaa;
 
@@ -129,11 +129,9 @@ fn iupacaa_to_ncbistdaa(letter: u8) -> u8 {
 /// `CPsiBlastInputClustalW::x_ExtractQueryForPssm`: the first Bioseq, in the file's order, of
 /// the query's length whose letters as NCBIstdaa are the query's; `None` where no Bioseq is
 /// (a `*` in the query: IUPACaa has none). A Bioseq of that length that is a nucleotide one stops
-/// the run (`CSeqportUtil::Convert` cannot convert it).
+/// the run (`CSeqportUtil::Convert` cannot convert it: `writedb::convert::unknown_conversion`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/msa_pssm_input.cpp:189-201
-/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:225
-/// (The throw of a conversion that no function covers; NCBI BLAST+ 2.17.0, PS6 corpus `e.len1`, `n.q`.)
 fn query_bioseq<'a>(
     bioseqs: &'a [AlnBioseq],
     query: &[u8],
@@ -143,15 +141,7 @@ fn query_bioseq<'a>(
             continue;
         }
         if bioseq.mol == Mol::Nucleotide {
-            return Err(NcbiException::new(
-                ThrowSite {
-                    file: "src/util/sequtil/sequtil_convert_imp.cpp",
-                    line: 225,
-                    kind: "CSeqUtilException::Invalid coding",
-                    function: Some("ncbi::CSeqConvert_imp::Convert"),
-                },
-                "Unknown conversion.",
-            ));
+            return Err(crate::writedb::convert::unknown_conversion());
         }
         if bioseq
             .letters

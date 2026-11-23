@@ -141,7 +141,10 @@ pub fn second_parse(parsed: &ParsedIds, is_aa: bool, warn: Warn<'_>) -> Option<D
             ..BlastDefline::default()
         });
     }
-    Some(DeflineSet { deflines })
+    Some(DeflineSet {
+        deflines,
+        utf8: false,
+    })
 }
 
 /// The ids of one part of the second parse (`x_GetFastaReaderDeflines`, cited there).
@@ -263,6 +266,7 @@ pub(crate) fn deflines_of_bioseq(
             taxid: taxids.first().copied(),
             ..BlastDefline::default()
         }],
+        utf8: false,
     })
 }
 
@@ -315,6 +319,9 @@ pub(crate) fn bioseq_deflines(
                     .to_string(),
             ));
         }
+        // A UTF8String for a VisibleString (`set.utf8`) is read as one: makeprofiledb 2.17.0
+        // writes no warning 803.10 for it and writes the line again with a VisibleString
+        // (probe z_bh1u of line RG item T5d, merge 18, 2026-11-23).
         return Ok(BioseqDeflines { set, binary: true });
     }
     let title = descr

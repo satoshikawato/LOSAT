@@ -114,7 +114,7 @@ def main():
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:178-188
-# (*thread)->Join(&result); if (result) { retv = reinterpret_cast<Uint8>(result); }
+# Join each preliminary-search worker thread and propagate any non-null status result.
 # Record failed or partial orchestration before propagating the failure to CI.
 def run_benchmark(args, out):
     args.node = str(Path(shutil.which(args.node) or args.node).resolve())
@@ -186,7 +186,7 @@ def run_benchmark(args, out):
         common = ['-query', str(q), '-subject', str(s), '-outfmt', '6', *extra, '-out', '{output}']; common_args[name] = common
         oracle_args = common
         # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
-        #     (program == eTblastn || program == eTblastx)) { opt.SetDbGeneticCode(...); }
+        # Applies `SetDbGeneticCode` for `eTblastn` and `eTblastx`.
         # Retain the existing database oracle for the approved local-subject exception.
         if program == 'tblastx' and '-db_gencode' in extra and extra[extra.index('-db_gencode') + 1] != '1':
             db = out/'oracle-db'/name; db.parent.mkdir(exist_ok=True)

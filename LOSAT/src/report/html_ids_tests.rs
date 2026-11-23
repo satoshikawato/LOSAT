@@ -275,7 +275,11 @@ fn heading(report: &HtmlReport, lines: &[(&str, &str)], rank: usize) -> String {
             ..Default::default()
         })
         .collect();
-    let subject = ParsedSubject::new(crate::seqid::DeflineSet { deflines }).unwrap();
+    let subject = ParsedSubject::new(crate::seqid::DeflineSet {
+        deflines,
+        utf8: false,
+    })
+    .unwrap();
     let posts = std::cell::RefCell::new(Vec::new());
     let html = HtmlHeading {
         report,
@@ -417,6 +421,7 @@ fn a_registry_that_throws_skips_the_heading() {
             ids: ids("ref|XP_000101.1|"),
             ..Default::default()
         }],
+        utf8: false,
     })
     .unwrap();
     assert_eq!(

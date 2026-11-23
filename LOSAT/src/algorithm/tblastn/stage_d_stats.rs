@@ -9,7 +9,7 @@ use crate::stats::tables::KarlinParams;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_query_info.h:60-76:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1446-1467:
-// stat_length = seq_arg.seq->length; translated subjects use stat_length /= 3.
+// Uses the subject sequence length for statistics, dividing by 3 for translated subjects.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct LocalContextLength {
     pub length_adjustment: i64,
@@ -29,7 +29,7 @@ pub(super) struct LocalLinkParameters {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:902-999,302-383:
-// curr_cutoffs->cutoff_score = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+// Clamps each context's cutoff score to `cutoff_score_max`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct LocalContextCutoffs {
     pub hit_cutoff: i32,
@@ -296,7 +296,7 @@ pub(super) fn local_parameters_for_blocks(
     let mut prelim_evalue = options.expect_value;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:902-999:
-    //                                   query_length, avg_subject_length);
+    // Computes per-context hit-saving cutoffs from `query_length` and `avg_subject_length`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:931-946:
     let mut hit = Vec::with_capacity(query_contexts.len());
     for (context, (&(query_length, valid), params)) in
@@ -333,7 +333,7 @@ pub(super) fn local_parameters_for_blocks(
     // keeps the cutoffs of its e-value.
     if let Some(link_params) = link.filter(|_| gapped) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:950-976:
-        // concat_qlen = last.query_offset + last.query_length;
+        // Concatenated query length equals the last context's query offset plus its query length.
         let concat_qlen: usize = query_contexts
             .iter()
             .map(|(length, _)| length + 1)

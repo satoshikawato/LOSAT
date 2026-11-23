@@ -159,7 +159,12 @@ pub(super) fn query_stats(
         .enumerate()
         .map(|(q_idx, &valid)| match parameters.lengths.get(q_idx) {
             Some(length) if valid => {
-                let karlin = gapped.unwrap_or(ungapped_karlin[q_idx]);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:236-251
+                // The ancillary data keeps no gapped block whose Lambda is below 0 or a NaN (a
+                // PSSM file's can be), and the XML takes the query's ungapped block then.
+                let karlin = gapped
+                    .filter(|karlin| karlin.lambda >= 0.0)
+                    .unwrap_or(ungapped_karlin[q_idx]);
                 XmlStats {
                     hsp_len: length.length_adjustment as i32,
                     eff_space: length.eff_searchsp,

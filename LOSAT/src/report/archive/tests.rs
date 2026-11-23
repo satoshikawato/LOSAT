@@ -581,3 +581,29 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
         assert_eq!(check.gap.is_some(), gap, "{encoding:?}");
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:52-60 (cited at `ka_block`).
+#[test]
+fn a_block_of_a_lambda_below_zero_or_not_a_number_is_the_missing_one() {
+    let params = |lambda| KarlinParams {
+        lambda,
+        k: 0.041,
+        h: 0.14,
+        alpha: 0.0,
+        beta: 0.0,
+    };
+    for lambda in [f64::NAN, f64::NEG_INFINITY, -0.5] {
+        let block = ka_block(&params(lambda), true);
+        assert_eq!(
+            (block.lambda, block.k, block.h, block.gapped),
+            (-1.0, -1.0, -1.0, true)
+        );
+    }
+    let block = ka_block(&params(0.267), false);
+    assert_eq!(
+        (block.lambda, block.k, block.h, block.gapped),
+        (0.267, 0.041, 0.14, false)
+    );
+    // +inf is kept, as NCBI's test keeps it.
+    assert_eq!(ka_block(&params(f64::INFINITY), true).lambda, f64::INFINITY);
+}

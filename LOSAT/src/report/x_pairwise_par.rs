@@ -796,7 +796,7 @@ pub(super) fn end_here(
 /// (`ReportPlace::Load`); before the first alignment, with `-html`, the read of `./.ncbirc` that
 /// `x_InitAlignParams` makes after `GetDbType` loads the first alignment's subject, before that
 /// load where its Seq-align id is local (`GetDbType` does not load it; its heading does).
-fn alignment_start<S: QuerySections, W: Write>(
+fn alignment_start<S: QuerySections, W: io::Write>(
     sections: &S,
     position: usize,
     s_idx: u32,
@@ -822,7 +822,7 @@ fn alignment_start<S: QuerySections, W: Write>(
 /// the writers: the plain report's places are the loads that it reads alone (line RG T4a2 fix
 /// round 2, review c C5: an out-of-line call at each load of a plain run).
 #[inline]
-pub(crate) fn at_place<W: Write>(
+pub(crate) fn at_place<W: io::Write>(
     warnings: Option<&mut QueryWarnings<'_>>,
     links: Option<&super::html_ids::HtmlLinks>,
     query: usize,
@@ -842,7 +842,7 @@ pub(crate) fn at_place<W: Write>(
 /// for the report of `warnings`, `QueryWarnings::report`), the posts after the report written so
 /// far and the `GETURL_DEBUG` line. One that posts without warnings is LOSAT's internal error
 /// (`query_warnings::HTML_POSTS_WITHOUT_WARNINGS`).
-fn html_at_place<W: Write>(
+fn html_at_place<W: io::Write>(
     warnings: Option<&mut QueryWarnings<'_>>,
     links: Option<&super::html_ids::HtmlLinks>,
     post: super::html_ids::HtmlPost,

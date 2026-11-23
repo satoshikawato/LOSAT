@@ -419,8 +419,9 @@
   1.82 2026-11-22 (approved exception 26, makeprofiledb's word table past `Int4`, psiblast line item
   PS10a: the scaled word score threshold and the neighbouring-word score sums of `-dbtype rps` computed
   in 64 bits; proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's
-  rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; pending the
-  maintainer's acceptance; and the explicit rejections, rule 3, of `losat makeprofiledb`, Owner-delegated,
+  rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」, and accepted
+  by the maintainer on 2026-11-23 by marking PR #1497 ready for review, as the PR asked; and the explicit
+  rejections, rule 3, of `losat makeprofiledb`, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.81; first
   1.72, then 1.73, 1.74, 1.75, 1.76, 1.77, 1.78, 1.79, 1.80, 1.81 and 1.82 at the merges of dev that brought line NP
   items M5a and M5b's 1.72, then line RG item X4b-1's 1.73, line RG item D5b-3's 1.74, line NP item M5's 1.75, line
@@ -3260,9 +3261,10 @@ out of the search are not read.
 ## Approved exception 26 (makeprofiledb's word table past `Int4`, psiblast line item PS10a, version 1.82)
 
 Version 1.82, proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's
-rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; pending the
-maintainer's acceptance. Its version is in the list at the top; elsewhere it is cited by its number and
-name, "approved exception 26 (makeprofiledb's word table past `Int4`)". Psiblast line item PS10a.
+rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; accepted by the
+maintainer on 2026-11-23 by marking PR #1497 ready for review, as the PR asked. Its version is in the list at
+the top; elsewhere it is cited by its number and name, "approved exception 26 (makeprofiledb's word table
+past `Int4`)". Psiblast line item PS10a.
 
 25. **A word score threshold that, times the profile's scaling factor, does not fit `Int4`, and
     neighbouring-word score sums past `Int4`.** makeprofiledb indexes the words of every profile of a

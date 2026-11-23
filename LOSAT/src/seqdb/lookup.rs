@@ -9,9 +9,8 @@ use std::sync::OnceLock;
 use super::file::DbFile;
 use super::filter::{entries_accessions_to_oids, LmdbEntry};
 use super::isam::{seqdb_simplify_seqid, SeqDbIdType, SimplifiedAccession, StringIsam};
-use super::isam_num::NumericIsam;
+use super::isam_num::{ListIsam, NumericIsam, Opened};
 use super::lmdb_read::Env;
-use super::volume::with_extension;
 use super::{SeqDb, SeqDbError, SeqType};
 use crate::seqid::{label, ParsedSeqId};
 
@@ -31,12 +30,13 @@ pub struct IdLookup<'a> {
     utf8: super::Utf8Reads,
 }
 
-/// The ISAMs of each volume (GIs; for version 4 also the strings and the PIGs), each opened at
-/// the first lookup that reaches the volume.
+/// The ISAMs of each volume (GIs; for version 4 also the strings, the PIGs and the trace ids),
+/// each opened at the first lookup that reaches the volume.
 pub(super) struct VolumeIsams {
     gi: Vec<OnceLock<Option<NumericIsam>>>,
     strings: Vec<OnceLock<Option<StringIsam>>>,
     pig: Vec<OnceLock<Option<NumericIsam>>>,
+    ti: Vec<OnceLock<Option<Opened>>>,
     /// Whether a string ISAM keeps its index file in memory (`StringIsam::keep_index`), as NCBI
     /// maps it: the search programs' lookups of the reported sequences (`SeqDb::seqid_lookup`).
     index_in_memory: bool,
@@ -48,6 +48,7 @@ impl VolumeIsams {
             gi: cells(volumes),
             strings: cells(volumes),
             pig: cells(volumes),
+            ti: cells(volumes),
             index_in_memory,
         }
     }
@@ -218,8 +219,7 @@ impl IdLookup<'_> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2638-2722
     /// `CSeqDBVol::x_StringToOids` of the volume `at` without its final checks (the size of the
     /// number, then `x_CheckVersions`, which [`StringIsam::string_id_to_oids`] runs): the OIDs
-    /// local to the volume. A volume with a trace-id ISAM (`.nti`, which makeblastdb never
-    /// writes) is refused when a `ti` id reaches it.
+    /// local to the volume.
     fn volume_string_to_oids(
         &self,
         at: usize,
@@ -296,20 +296,26 @@ impl IdLookup<'_> {
                 None => Vec::new(),
             },
             SeqDbIdType::Ti => {
-                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:214-223
-                // The trace-id ISAM exists where `IndexExists` says so, as the string and PIG
-                // ISAMs (`isam::index_exists`: two regular files).
-                let index = with_extension(volume.base(), seqtype, "ti");
-                if super::isam::index_exists(&index, &with_extension(volume.base(), seqtype, "td"))
-                {
-                    return Err(SeqDbError::Unsupported {
-                        path: index,
-                        message: "an ISAM of trace ids".to_string(),
-                    });
-                }
-                match string_isam()? {
-                    Some(isam) => local(isam.string_to_oids(acc, true, false)?.oids),
-                    None => Vec::new(),
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2686-2709
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1222-1234
+                // A volume with a trace-id ISAM (`x_OpenTiFile`; makeblastdb writes none) looks
+                // the TI up there alone: one whose data file has another length than its index
+                // says finds nothing. A volume without one looks it up in its string ISAM.
+                let isam = opened(&self.isams.ti[at], || {
+                    NumericIsam::open_for_list(
+                        volume.base(),
+                        seqtype,
+                        ListIsam::Ti,
+                        volume.num_oids(),
+                    )
+                })?;
+                match isam {
+                    Some(Opened::Ready(isam)) => found(isam.id_to_oid(simplified.num_id)?),
+                    Some(Opened::Uninitialized) => Vec::new(),
+                    None => match string_isam()? {
+                        Some(isam) => local(isam.string_to_oids(acc, true, false)?.oids),
+                        None => Vec::new(),
+                    },
                 }
             }
             SeqDbIdType::Oid => vec![simplified.num_id as i32],

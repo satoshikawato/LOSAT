@@ -690,10 +690,13 @@ fn databases_that_need_unread_data_are_rejected() {
     }
     let db = SeqDb::open(&db_name("prot_v4"), SeqType::Protein).unwrap();
     assert!(!db.has_parsed_seqids().unwrap());
-    let (name, key) = ("alias_gilist", "GILIST");
+    // A GILIST without NSEQ and LENGTH is read where the database opens (the scan of its
+    // totals): its missing file is NCBI's memory map error.
+    let name = "alias_gilist";
     let error = open_error(name, SeqType::Protein);
     assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
+        matches!(&error, SeqDbError::MemoryMap(message)
+            if String::from_utf8_lossy(message).ends_with("some.gil'")),
         "{name}: {error}"
     );
     // NCBI counts prot_v4 twice here (30 sequences reported, 20 read): the volume is opened
@@ -1677,14 +1680,28 @@ fn every_filtering_alias_key_is_rejected() {
     let dir = temp_dir("keys");
     copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
     let name = dir.join("keyed").to_str().unwrap().to_string();
-    for key in [
-        "GILIST",
-        "TILIST",
-        "SEQIDLIST",
-        "TAXIDLIST",
-        "MEMB_BIT",
-        "MASKLIST",
-    ] {
+    // The id lists are read: a missing file is NCBI's memory map error, and a version 4
+    // database reads no TAXIDLIST (it still makes NCBI scan the totals).
+    for key in ["GILIST", "TILIST", "SEQIDLIST"] {
+        std::fs::write(
+            dir.join("keyed.pal"),
+            format!("TITLE t\nDBLIST prot_v4\n{key} 1\n"),
+        )
+        .unwrap();
+        let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
+        assert!(
+            matches!(&error, SeqDbError::MemoryMap(message)
+                if String::from_utf8_lossy(message).ends_with("/1'")),
+            "{key}: {error}"
+        );
+    }
+    std::fs::write(
+        dir.join("keyed.pal"),
+        "TITLE t\nDBLIST prot_v4\nTAXIDLIST 1\n",
+    )
+    .unwrap();
+    assert_eq!(SeqDb::open(&name, SeqType::Protein).unwrap().num_seqs(), 10);
+    for key in ["MEMB_BIT", "MASKLIST"] {
         std::fs::write(
             dir.join("keyed.pal"),
             format!("TITLE t\nDBLIST prot_v4\n{key} 1\n"),

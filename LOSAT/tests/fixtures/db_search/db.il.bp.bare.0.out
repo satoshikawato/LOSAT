@@ -1,0 +1,529 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: gi a or all
+           14 sequences; 1,708 total letters
+
+
+
+Query= q0
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000101.1 one                                                       214     1e-77
+
+
+>NP_000101.1 one
+ P10102.1 one alt
+Length=128
+
+ Score = 214 bits (544),  Expect = 1e-77, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   TIPYCCPAGQSSINLPTKTSLMFPTNYQYIVKWISHYPKCERNRGGVLPKGVWFQWHRDW  60
+           TIPYCCPAGQSSINLPTKTSLMFPTNYQYIVKWISHYPKCERNRGGVLPKGVWFQWHRDW
+Sbjct  1   TIPYCCPAGQSSINLPTKTSLMFPTNYQYIVKWISHYPKCERNRGGVLPKGVWFQWHRDW  60
+
+Query  61  MMQFRYWNNQAPHQGFKQELEPGSLHRIGPFGFWSMDEYQ  100
+           MMQFRYWNNQAPHQGFKQELEPGSLHRIGPFGFWSMDEYQ
+Sbjct  61  MMQFRYWNNQAPHQGFKQELEPGSLHRIGPFGFWSMDEYQ  100
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.140    0.513    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q1
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000103.1 two                                                       211     2e-76
+
+
+>NP_000103.1 two
+Length=117
+
+ Score = 211 bits (536),  Expect = 2e-76, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   MIRAHVVQIPWWYCPWTWFYAALCCQECHLAMKSSHAHTRWNARPPVCNRLSGCSISVVI  60
+           MIRAHVVQIPWWYCPWTWFYAALCCQECHLAMKSSHAHTRWNARPPVCNRLSGCSISVVI
+Sbjct  1   MIRAHVVQIPWWYCPWTWFYAALCCQECHLAMKSSHAHTRWNARPPVCNRLSGCSISVVI  60
+
+Query  61  PYASMHECHELMMRLLMYPMYTKSENEAMQIIVDVWDWFT  100
+           PYASMHECHELMMRLLMYPMYTKSENEAMQIIVDVWDWFT
+Sbjct  61  PYASMHECHELMMRLLMYPMYTKSENEAMQIIVDVWDWFT  100
+
+
+
+Lambda      K        H        a         alpha
+   0.330    0.134    0.519    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q2
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000104.1 three                                                     212     3e-77
+
+
+>NP_000104.1 three
+ XP_000105.1 three b
+Length=111
+
+ Score = 212 bits (540),  Expect = 3e-77, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   HHMWSKRVFLGHAPDNRATIAQFFVTTVVPWLPKASCGIERRMWKTGYHSRICVMAKNVL  60
+           HHMWSKRVFLGHAPDNRATIAQFFVTTVVPWLPKASCGIERRMWKTGYHSRICVMAKNVL
+Sbjct  1   HHMWSKRVFLGHAPDNRATIAQFFVTTVVPWLPKASCGIERRMWKTGYHSRICVMAKNVL  60
+
+Query  61  LFGFHFIQRKTLRVTKAHTNPYGDKFYDSLSQVQIDDFWR  100
+           LFGFHFIQRKTLRVTKAHTNPYGDKFYDSLSQVQIDDFWR
+Sbjct  61  LFGFHFIQRKTLRVTKAHTNPYGDKFYDSLSQVQIDDFWR  100
+
+
+
+Lambda      K        H        a         alpha
+   0.329    0.139    0.478    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q3
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P20106.1 six no gi                                                    213     2e-77
+
+
+>P20106.1 six no gi
+Length=126
+
+ Score = 213 bits (542),  Expect = 2e-77, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   SNDQLVKIKVIEAERWAASENDCRMTFTSSAISVRCREESNPVIVDLCALMHPNYDFSEG  60
+           SNDQLVKIKVIEAERWAASENDCRMTFTSSAISVRCREESNPVIVDLCALMHPNYDFSEG
+Sbjct  1   SNDQLVKIKVIEAERWAASENDCRMTFTSSAISVRCREESNPVIVDLCALMHPNYDFSEG  60
+
+Query  61  ADALRHCTYIFGYFEDHGPGKKSHCDRHVAMVHTTGWQFK  100
+           ADALRHCTYIFGYFEDHGPGKKSHCDRHVAMVHTTGWQFK
+Sbjct  61  ADALRHCTYIFGYFEDHGPGKKSHCDRHVAMVHTTGWQFK  100
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.134    0.435    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q4
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AAA00107.1 seven gb only                                              211     1e-76
+
+
+>AAA00107.1 seven gb only
+Length=118
+
+ Score = 211 bits (536),  Expect = 1e-76, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   GRSFADLGVVYSMNLKSWAQEFANKGTILTIWDNRNIGRHKGRLFWIPRMSNDARRCEMR  60
+           GRSFADLGVVYSMNLKSWAQEFANKGTILTIWDNRNIGRHKGRLFWIPRMSNDARRCEMR
+Sbjct  1   GRSFADLGVVYSMNLKSWAQEFANKGTILTIWDNRNIGRHKGRLFWIPRMSNDARRCEMR  60
+
+Query  61  MYGFNPLPWFKIGGPIAMTHATFEWTFFSDNYDCDILADA  100
+           MYGFNPLPWFKIGGPIAMTHATFEWTFFSDNYDCDILADA
+Sbjct  61  MYGFNPLPWFKIGGPIAMTHATFEWTFFSDNYDCDILADA  100
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.140    0.487    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q5
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AAA00108.1 eight                                                      211     8e-77
+
+
+>AAA00108.1 eight
+ Q30109.1 eight alt no gi
+Length=116
+
+ Score = 211 bits (538),  Expect = 8e-77, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   VCFELYLSYMANSSGNTTHYGLTCYTYDKEHRVSLYELFHGGIFIVTQFDMHGTGTMQLV  60
+           VCFELYLSYMANSSGNTTHYGLTCYTYDKEHRVSLYELFHGGIFIVTQFDMHGTGTMQLV
+Sbjct  1   VCFELYLSYMANSSGNTTHYGLTCYTYDKEHRVSLYELFHGGIFIVTQFDMHGTGTMQLV  60
+
+Query  61  CDNNSGPWFVMLHGRTHFKPVNTVHFRRREKDTRLSLIED  100
+           CDNNSGPWFVMLHGRTHFKPVNTVHFRRREKDTRLSLIED
+Sbjct  61  CDNNSGPWFVMLHGRTHFKPVNTVHFRRREKDTRLSLIED  100
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.140    0.452    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q6
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+loc7 seven local                                                      210     5e-76
+
+
+>loc7 seven local
+Length=130
+
+ Score = 210 bits (534),  Expect = 5e-76, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   LVQMYGEILACNIWEVLDVLMITGGDYNPTQSKRTIHRITQWLMNSPHPSNSEKRMEWTM  60
+           LVQMYGEILACNIWEVLDVLMITGGDYNPTQSKRTIHRITQWLMNSPHPSNSEKRMEWTM
+Sbjct  1   LVQMYGEILACNIWEVLDVLMITGGDYNPTQSKRTIHRITQWLMNSPHPSNSEKRMEWTM  60
+
+Query  61  NMENIKDAYEEIEGSTCGFEFSEPTNKSVRYPNEVISKPP  100
+           NMENIKDAYEEIEGSTCGFEFSEPTNKSVRYPNEVISKPP
+Sbjct  61  NMENIKDAYEEIEGSTCGFEFSEPTNKSVRYPNEVISKPP  100
+
+
+
+Lambda      K        H        a         alpha
+   0.314    0.131    0.406    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q7
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+1ABC_A ten pdb                                                        211     2e-76
+
+
+>1ABC_A ten pdb
+Length=123
+
+ Score = 211 bits (536),  Expect = 2e-76, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   WGFVAPFQDLDVTPSHTECDQRIAEFDYYRMWEHMWINKYVPGIPQICELWRASAWGPNA  60
+           WGFVAPFQDLDVTPSHTECDQRIAEFDYYRMWEHMWINKYVPGIPQICELWRASAWGPNA
+Sbjct  1   WGFVAPFQDLDVTPSHTECDQRIAEFDYYRMWEHMWINKYVPGIPQICELWRASAWGPNA  60
+
+Query  61  ILTFIPKTYSGHHFATYYYDIVSTPPVCITCGYDDWYIDR  100
+           ILTFIPKTYSGHHFATYYYDIVSTPPVCITCGYDDWYIDR
+Sbjct  61  ILTFIPKTYSGHHFATYYYDIVSTPPVCITCGYDDWYIDR  100
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.143    0.533    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q8
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000111.1 eleven                                                    213     4e-77
+
+
+>NP_000111.1 eleven
+Length=137
+
+ Score = 213 bits (542),  Expect = 4e-77, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   VAMINGCCCTGLMGPELMMSKDMNMKNFNWKMYRPVPSIMKRTYEKCWSVNHQTKDVPQA  60
+           VAMINGCCCTGLMGPELMMSKDMNMKNFNWKMYRPVPSIMKRTYEKCWSVNHQTKDVPQA
+Sbjct  1   VAMINGCCCTGLMGPELMMSKDMNMKNFNWKMYRPVPSIMKRTYEKCWSVNHQTKDVPQA  60
+
+Query  61  ITMAILMPSCNRFATKLDYQQAGCCIYTIDLSHNHHHVPN  100
+           ITMAILMPSCNRFATKLDYQQAGCCIYTIDLSHNHHHVPN
+Sbjct  61  ITMAILMPSCNRFATKLDYQQAGCCIYTIDLSHNHHHVPN  100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.134    0.458    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q9
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000112.1 twelve no gi                                              215     3e-78
+
+
+>NP_000112.1 twelve no gi
+Length=127
+
+ Score = 215 bits (548),  Expect = 3e-78, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   FVDWCQGNNMGQSSRMSIGTGYNRFRMMIALMMKAGETRVLRDRHNAKWHARLQPQYRVG  60
+           FVDWCQGNNMGQSSRMSIGTGYNRFRMMIALMMKAGETRVLRDRHNAKWHARLQPQYRVG
+Sbjct  1   FVDWCQGNNMGQSSRMSIGTGYNRFRMMIALMMKAGETRVLRDRHNAKWHARLQPQYRVG  60
+
+Query  61  EQTYNCDAEFHYIHFAWKQGSQQDKETTWAIHESVTHQFP  100
+           EQTYNCDAEFHYIHFAWKQGSQQDKETTWAIHESVTHQFP
+Sbjct  61  EQTYNCDAEFHYIHFAWKQGSQQDKETTWAIHESVTHQFP  100
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.132    0.442    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q10
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000113.1 thirteen                                                  213     2e-77
+
+
+>NP_000113.1 thirteen
+ NP_000114.1 thirteen alt no gi
+ AAA00115.1 thirteen alt3
+Length=120
+
+ Score = 213 bits (541),  Expect = 2e-77, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   QQNSWLHSNAMERQVYQYHSGYNIHCGTLSPTGTHKSLVNIFVRFLVERDIWDLRVAPNL  60
+           QQNSWLHSNAMERQVYQYHSGYNIHCGTLSPTGTHKSLVNIFVRFLVERDIWDLRVAPNL
+Sbjct  1   QQNSWLHSNAMERQVYQYHSGYNIHCGTLSPTGTHKSLVNIFVRFLVERDIWDLRVAPNL  60
+
+Query  61  QDKTTAHSQPMDNGEDWWNQCTSCCTEHWSQPTFFWNFDH  100
+           QDKTTAHSQPMDNGEDWWNQCTSCCTEHWSQPTFFWNFDH
+Sbjct  61  QDKTTAHSQPMDNGEDWWNQCTSCCTEHWSQPTFFWNFDH  100
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.132    0.475    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q11
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000116.1 fourteen                                                  214     7e-78
+
+
+>NP_000116.1 fourteen
+Length=119
+
+ Score = 214 bits (545),  Expect = 7e-78, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   KVRQQAPENVIMESLWTKWIKYDVQHWHTVEFGNEDSWGFNIWVRIFAYRMQQIKGCHHH  60
+           KVRQQAPENVIMESLWTKWIKYDVQHWHTVEFGNEDSWGFNIWVRIFAYRMQQIKGCHHH
+Sbjct  1   KVRQQAPENVIMESLWTKWIKYDVQHWHTVEFGNEDSWGFNIWVRIFAYRMQQIKGCHHH  60
+
+Query  61  LHGSTCRYNQTDSVSEHCHFIKQWYTNARAWEPVLPMVIG  100
+           LHGSTCRYNQTDSVSEHCHFIKQWYTNARAWEPVLPMVIG
+Sbjct  61  LHGSTCRYNQTDSVSEHCHFIKQWYTNARAWEPVLPMVIG  100
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.135    0.494    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q12
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000117.1 fifteen                                                   215     3e-78
+
+
+>NP_000117.1 fifteen
+Length=117
+
+ Score = 215 bits (547),  Expect = 3e-78, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   HPCRNGWSPVGLEKGVAVFKNWMMGWFRFMTVLRPHTERFIPNRPWCYMDGETFTKDSCQ  60
+           HPCRNGWSPVGLEKGVAVFKNWMMGWFRFMTVLRPHTERFIPNRPWCYMDGETFTKDSCQ
+Sbjct  1   HPCRNGWSPVGLEKGVAVFKNWMMGWFRFMTVLRPHTERFIPNRPWCYMDGETFTKDSCQ  60
+
+Query  61  PTVVMQYLEDPEQLTYRRAPNVYVHWGKGFWVGIDMNTCE  100
+           PTVVMQYLEDPEQLTYRRAPNVYVHWGKGFWVGIDMNTCE
+Sbjct  61  PTVVMQYLEDPEQLTYRRAPNVYVHWGKGFWVGIDMNTCE  100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.141    0.522    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+Query= q13
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000118.1 sixteen                                                   206     8e-75
+
+
+>NP_000118.1 sixteen
+Length=119
+
+ Score = 206 bits (525),  Expect = 8e-75, Method: Compositional matrix adjust.
+ Identities = 100/100 (100%), Positives = 100/100 (100%), Gaps = 0/100 (0%)
+
+Query  1   CWYCIENTAGQKFMCGTQANAQTESFWHTFGMTCNMGPRTRDYQTNGWIWKKIYTIRQKI  60
+           CWYCIENTAGQKFMCGTQANAQTESFWHTFGMTCNMGPRTRDYQTNGWIWKKIYTIRQKI
+Sbjct  1   CWYCIENTAGQKFMCGTQANAQTESFWHTFGMTCNMGPRTRDYQTNGWIWKKIYTIRQKI  60
+
+Query  61  NALFCNRGQKNMCTHNWNGTKRFGFIFHIIWAFVLRRAAW  100
+           NALFCNRGQKNMCTHNWNGTKRFGFIFHIIWAFVLRRAAW
+Sbjct  61  NALFCNRGQKNMCTHNWNGTKRFGFIFHIIWAFVLRRAAW  100
+
+
+
+Lambda      K        H        a         alpha
+   0.330    0.137    0.526    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 94752
+
+
+  Database: gi a or all
+    Posted date:  Nov 22, 2026  8:11 PM
+  Number of letters in database: 1,708
+  Number of sequences in database:  14
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -1,0 +1,14 @@
+Bioseq-set ::= {
+  seq-set {
+    seq { id { gi 1234, genbank { name "ABN", accession "AB000002", version 3 } }, descr { title "gi and gb" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { other { accession "NP_000009", version 1 } }, descr { title "protein accession in nucl" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { local id 42 }, descr { title "local int" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { general { db "MYDB", tag str "x9" } }, descr { title "general" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { pdb { mol "1ABC", chain-id "B" } }, descr { title "pdb chain" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } }
+  }
+}

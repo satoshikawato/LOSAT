@@ -45,6 +45,19 @@
 //! stays as it was), and
 //! `TwoStageLookup::contains_hit` and `count_hits` where the table has no chains.
 //!
+//! EXPERIMENT (LOSAT_X_DCQSAHEAD, in the strict set: on unless `LOSAT_X_DCQSAHEAD=0`): the place
+//! pass of a table built on the pool by `x_disc_lookup_par::csr_on_pool_steps` (LOSAT_X_DCSEEDLEAN's
+//! build, at two threads or more) brings in the line of `qs` each entry will be written to before
+//! it writes it. The place pass reads `offsets[cell]`, decrements it and writes `qs` there; it
+//! brought in the `offsets` element of the entry 16 places ahead, but not the `qs` line, and `qs`
+//! has one element per word (tens of MiB for a large query set), so a store's line was often not
+//! in the caches. Now the owner also reads the `offsets` element of the entry `QS_AHEAD` (8)
+//! places ahead (brought in 8 entries before) and brings in the `qs` line it points to. The
+//! entries are placed in the same order at the same places (the value read ahead only chooses
+//! which line is brought in), so the CSR is the same; only the bringing in is new (`prefetch`,
+//! nothing on targets without one). Its sides are DCSEEDLEAN's pooled build's: the serial build
+//! (one thread, no pool) and `csr_on_pool` (`LOSAT_X_DCSEEDLEAN=0`) place as before.
+//!
 //! The scans of a CSR table read their words through `Ring`: each word enters a FIFO of `RING`
 //! words and leaves it, unchanged and in order, `RING` words later. Every `GROUP` words, the
 //! group that just entered gets its `offsets[cell]` brought in, and the group `RING / 2` places
@@ -57,8 +70,8 @@
 //! chunk): a slot is read only after a word was written to it (`Ring::push`).
 //!
 //! With LOSAT_TIMING `main` prints `[TIMING] disc_lookup_csr: builds=<CSR tables> parallel=<on a
-//! pool> words=<their words>` (the build times are in `[TIMING] disc_lookup_build`, the CSR's in
-//! its `loop` or `pool_fill`).
+//! pool> words=<their words> qs_ahead=<tables whose place pass brought in qs ahead>` (the build
+//! times are in `[TIMING] disc_lookup_build`, the CSR's in its `loop` or `pool_fill`).
 
 use super::{build_unmasked_ranges, x_range_words, DiscWords, PvArrayType, PV_ARRAY_MASK};
 #[cfg(test)]
@@ -82,10 +95,39 @@ pub(super) fn on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCCSR"))
 }
 
+/// No NCBI counterpart: reads LOSAT_X_DCQSAHEAD once (a switch of the strict set: on unless
+/// `LOSAT_X_DCQSAHEAD=0`): the place pass of `csr_on_pool_steps` brings in `qs` ahead (module
+/// comment). It changes when lines are brought in, not what is written where, so it changes no
+/// value NCBI computes.
+pub(super) fn qs_ahead_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCQSAHEAD"))
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCQSAHEAD): how many entries before its place an
+/// entry's `qs` line is brought in; its `offsets` element was brought in `16 - QS_AHEAD` entries
+/// before that.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) const QS_AHEAD: usize = 8;
+
 // No NCBI counterpart: counters of the summary lines.
 static BUILDS: AtomicU64 = AtomicU64::new(0);
 static BUILDS_ON_POOL: AtomicU64 = AtomicU64::new(0);
 static BUILT_WORDS: AtomicU64 = AtomicU64::new(0);
+static BUILDS_QS_AHEAD: AtomicU64 = AtomicU64::new(0);
+
+/// No NCBI counterpart (counters only, LOSAT_X_DCQSAHEAD): a build whose place pass brought in
+/// `qs` ahead.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) fn count_qs_ahead() {
+    BUILDS_QS_AHEAD.fetch_add(1, Ordering::Relaxed);
+}
 
 /// The `[TIMING]` line (with LOSAT_TIMING, when a CSR was built), printed by `main` at exit.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
@@ -93,10 +135,11 @@ pub fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     if std::env::var_os("LOSAT_TIMING").is_some() && load(&BUILDS) > 0 {
         eprintln!(
-            "[TIMING] disc_lookup_csr: builds={} parallel={} words={}",
+            "[TIMING] disc_lookup_csr: builds={} parallel={} words={} qs_ahead={}",
             load(&BUILDS),
             load(&BUILDS_ON_POOL),
-            load(&BUILT_WORDS)
+            load(&BUILT_WORDS),
+            load(&BUILDS_QS_AHEAD)
         );
     }
 }

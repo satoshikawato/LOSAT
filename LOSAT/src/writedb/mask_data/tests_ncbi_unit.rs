@@ -191,7 +191,7 @@ fn mask_data_column() {
             // SetMaskData() is called when `i & 7` (not for the first sequence); calling it with
             // no ranges is the same as not calling it.
             if i & 7 != 0 {
-                db.set_mask_data(&ranges).unwrap();
+                db.set_mask_data(&ranges, &[]).unwrap();
             }
             expected.push(
                 ranges
@@ -302,7 +302,7 @@ fn undefined_algo_id() {
         algorithm_id: FILTER_PROGRAM_DUST,
         offsets: vec![(length as u32 / 3, length as u32)],
     }];
-    let error = db.set_mask_data(&ranges).unwrap_err();
+    let error = db.set_mask_data(&ranges, &[]).unwrap_err();
     assert!(is_write_db_exception(&error), "{error}");
     assert!(
         error
@@ -339,7 +339,7 @@ fn mask_data_bounds_error() {
         algorithm_id: FILTER_PROGRAM_DUST,
         offsets: vec![(length as u32 / 3, length as u32 + 1)],
     }];
-    let error = db.set_mask_data(&ranges).unwrap_err();
+    let error = db.set_mask_data(&ranges, &[]).unwrap_err();
     assert!(is_write_db_exception(&error), "{error}");
 
     db.close().unwrap();

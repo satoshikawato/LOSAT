@@ -72,7 +72,7 @@ fn file_failure(error: ArgException) -> Failure {
         Some(exception) => Failure::Caught(exception),
         None => Failure::Refused(unsupported(&format!(
             "the argument error '{}' inside the run",
-            error.message()
+            error.message_text()
         ))),
     }
 }

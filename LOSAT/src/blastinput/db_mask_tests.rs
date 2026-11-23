@@ -734,7 +734,7 @@ fn shape_of(
 // within the one or two bases after the last whole codon, with no other mask in the frame, or an
 // empty mask at 0: NCBI frees memory that it did not allocate and crashes) the frame is searched
 // as its chunks give it since M4b-3c (the Owner's answer Q4 = B of M4b, 2026-11-22,
-// PD-LOSAT-NCBI-DEFECTS exception 24; refused before as `FrameStartMask`). A sequence shorter
+// PD-LOSAT-NCBI-DEFECTS exception 27; refused before as `FrameStartMask`). A sequence shorter
 // than the shortest searched one is not searched, so never refused. The bounds of the length are
 // read where a mask may end past the sequence, the length otherwise. The second block holds the
 // cases of review F2 of M4b PR 2 (`M/m4b/scripts3/rule_check4.py`; NCBI BLAST+ 2.17.0 crashed on
@@ -764,7 +764,7 @@ fn translated_hard_masks_in_order_are_searched_also_where_a_frame_restarts_at_it
     assert_eq!(shape(&[(300, 390), (900, 960)], 960), None);
     assert_eq!(shape(&[(0, 50), (600, 700)], 1200), None);
     // Empty masks before it: the chunk after them starts at 0 as well, the frame's second chunk
-    // (an empty range at 0 before it: NCBI crashes, exception 24); in the minus frames the empty
+    // (an empty range at 0 before it: NCBI crashes, exception 27); in the minus frames the empty
     // ranges come last and the chunk from 0 is the first.
     assert_eq!(shape(&[(0, 0), (1000, 1200)], 1200), None);
     assert_eq!(shape(&[(0, 0), (0, 100)], 1200), None);
@@ -780,7 +780,7 @@ fn translated_hard_masks_in_order_are_searched_also_where_a_frame_restarts_at_it
     assert_eq!(shape(&[(4, 6)], 1200), None);
     assert_eq!(shape(&[(4, 6)], 1201), None);
     assert_eq!(shape(&[(1196, 1200)], 1200), None);
-    // NCBI's crash (exception 24): masks within the first two bases (the plus frames) or within
+    // NCBI's crash (exception 27): masks within the first two bases (the plus frames) or within
     // the bases after the last whole codon (the minus frames), alone or with a mask at the other
     // end (frame +1 with [1199, 1200); frame -1 with [0, 3), which frame -1 also reads as its part
     // from the start ending before its end, exception 21); another mask in the frame avoids it.

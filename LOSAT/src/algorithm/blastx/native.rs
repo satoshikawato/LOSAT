@@ -149,6 +149,16 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // subject that throws in an outfmt 13 or 14 report, `Xml2Document::failed`), which is
         // not an engine error.
         error
+    } else if error
+        .downcast_ref::<io::Error>()
+        .is_some_and(|e| crate::ncbi_exception::NcbiException::of_io_error(e).is_some())
+    {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+        // An exception of NCBI's that a report's writer raised (`NcbiException::into_io_error`:
+        // the `-html` registries, `formatter_registry::FormatterNcbirc` in the prolog and
+        // `InitConfig` at the first id link) is `CATCH_ALL`'s `CException` report, exit status 255
+        // (`cli::exit_on_native_error`), not a failed write.
+        error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
     } else if let Some(e) = error.downcast_ref::<io::Error>() {
@@ -362,11 +372,19 @@ fn run_inner(
     // A value that the early reading left to this handler (`EarlyFormat::Deferred`) fails here.
     let choice = choice.at_formatting_handler(&args.outfmt)?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
+    app::html_format_check(choice.number, Program::Blastx, args.html)?;
+    let html = app::html_links(
+        args.html,
+        Program::Blastx,
+        args.database_name(),
+        &[choice.number],
+    )?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
     stderr.write_all(&warnings_of(args, choice.number))?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
     let mut options = resolution.map_err(options_error)?;
+    options.html = html;
     options.query_range = query_range;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
     // The database of `-db` opens after the arguments (the query and output files) and the
@@ -699,16 +717,26 @@ fn run_inner(
         };
         super::blast_xml::xml2_writer(kind, &options, &subjects, &shown_run, files)
     }));
-    report::write_prolog(&mut *writer, &mut *stderr, &options, &subjects, &shown_run)
-        .map_err(report_error)?;
+    report::write_prolog(
+        &mut *writer,
+        &mut *stderr,
+        None,
+        &options,
+        &subjects,
+        &shown_run,
+    )
+    .map_err(report_error)?;
     if let Some(xml2) = xml2.borrow_mut().as_mut() {
         let mut start = Vec::new();
         xml2.document_mut().start(&mut start);
         writer.write_all(&start).map_err(output_error)?;
     }
     // NCBI writes the prolog out before it searches the first batch, so the warnings of the
-    // batch come after it when both streams go to one place.
-    writer.flush().map_err(output_error)?;
+    // batch come after it when both streams go to one place (a plain report: dev's flush;
+    // `pairwise::flushes_after_prolog`).
+    if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
+        writer.flush().map_err(output_error)?;
+    }
     super::x_timing::run(XRun::Prolog, x_t);
     let x_t = super::x_timing::lap();
     // The database's sequences, read in blocks where they are searched and checked where they are
@@ -1510,15 +1538,29 @@ pub(super) fn reported_batch(
 }
 
 /// Whether an error of a search ends the run as it is: LOSAT's refusal, not an error of NCBI's
-/// engine, or an error that has NCBI's report already (the exception of a query split size that
-/// NCBI cannot convert, `split::split_sizes`). The one list of both callers
-/// (`database_search_error`, `local::search_records`).
+/// engine, an error that has NCBI's report already (the exception of a query split size that
+/// NCBI cannot convert, `split::split_sizes`), or an error of a query batch's search after the
+/// reports of the batches before (`app::ErrorAfterBatchReports`: the failed or endless
+/// Smith-Waterman redo of `-use_sw_tback`, `kappa`), which `search_error_held` unwraps. The one
+/// list of both callers (`database_search_error`, `local::search_records`).
 pub(super) fn search_error_as_is(error: &anyhow::Error) -> bool {
     error.is::<super::parameters::SearchSpaceOverflow>()
         || error.is::<super::split::QuerySplitRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
         || error.is::<super::database::LongSubjectRefusal>()
         || error.is::<NativeError>()
+        || error.is::<crate::blastinput::app::ErrorAfterBatchReports>()
+}
+
+/// An error that ends the run as it is (`search_error_as_is`) as the run reports it: the error
+/// that an `app::ErrorAfterBatchReports` holds (NCBI's engine error `Traceback failed`, exit
+/// status 3, or LOSAT's refusal), any other as it is. The flow writes the reports of the
+/// batches before when it meets the batch's error, so the marker has done its work here.
+pub(super) fn search_error_held(error: anyhow::Error) -> anyhow::Error {
+    match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+        Ok(crate::blastinput::app::ErrorAfterBatchReports(held)) => held,
+        Err(error) => error,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:226-227
@@ -1543,7 +1585,7 @@ pub(super) fn database_search_error(
         Err(error) => error,
     };
     if search_error_as_is(&error) {
-        return error;
+        return search_error_held(error);
     }
     if error.is::<UnreadableSubjects>() {
         let kept = unreadable
@@ -2216,7 +2258,8 @@ fn reader_batch_skipped(results: &mut [BatchResults]) {
 
 // No NCBI counterpart: how LOSAT schedules the search of a reader batch (NCBI's query batch,
 // `BATCH_SIZE` letters). The search keeps units of at most 10002 letters (`batch_ranges` with
-// the constant), whatever `BATCH_SIZE` is: the flow and the waves schedule the units as they
+// the constant), whatever `BATCH_SIZE` is (with `-use_sw_tback` the reader batch is one unit,
+// `query_setup::unit_ranges`): the flow and the waves schedule the units as they
 // scheduled the batches of a run without `BATCH_SIZE`, and the report of a reader batch is
 // written when its last unit is searched. The values that NCBI takes of the whole query batch
 // (the split decision, the ungapped link cutoffs, the sum-statistics average length, the
@@ -2308,7 +2351,7 @@ impl XUnit {
         ahead: bool,
     ) -> Vec<XUnit> {
         let batch = std::sync::Arc::new(queries.to_vec());
-        let ranges = super::query_setup::batch_ranges(&batch, BATCH_SIZE);
+        let ranges = super::query_setup::unit_ranges(&batch, options);
         let count = ranges.len();
         let ahead = ahead
             && count == 1

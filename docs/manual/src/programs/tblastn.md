@@ -46,7 +46,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 
 `-in_pssm FILE` replaces `-query` and searches with a position-specific scoring matrix, as NCBI's PSI-TBLASTN does. `-in_pssm -` reads the PSSM from the standard input. The report header says `PSITBLASTN`.
 
-- The file is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`), such as `psiblast -out_pssm` writes. [psiblast](psiblast.md) describes what it accepts. A binary or XML PSSM, or a compressed file, is refused.
+- The file is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`), such as `psiblast -out_pssm` writes, or in its ASN.1 binary form. [psiblast](psiblast.md) describes what it accepts. An XML PSSM, or a compressed file, is refused.
 - The PSSM's scores replace the matrix, and its Karlin-Altschul values set the cutoffs, E-values and bit scores.
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.
@@ -80,6 +80,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-sum_stats` | `true` | Use sum statistics for groups of alignments |
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
 | `-window_size` | 40 | Two-hit window; 0 selects the one-hit method |
+| `-ungapped` | off | Search without gaps (with `-comp_based_stats 0`) |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
 | `-best_hit_overhang`, `-best_hit_score_edge` | off (0.1 for the one not given) | Keep only the best alignments for each region of the query (the Best Hit algorithm). Values above 0 and below 0.5; not with `-culling_limit` |
 | `-subject_besthit` | off | Keep only the best alignment of each subject for each part of the query |
@@ -122,13 +123,13 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `tblastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-ungapped`.
-- With `-use_sw_tback`, the rare query and subject pairs on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
-- An `-evalue` of 1.7976931348623157e308 or more.
+- `-use_sw_tback` with `-ungapped`, and with `-use_sw_tback` the rare query and subject pairs on which NCBI BLAST+ never finishes or crashes (see [What LOSAT refuses](../refusals.md)).
+- With `-ungapped`, a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`, or a matrix file that NCBI BLAST+ finds.
+- An infinite `-evalue` (`+inf`, `1e999`), and an `-evalue` of 1.7976931348623157e308 with composition-based statistics (`-comp_based_stats` 1 to 3).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
-- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback.
+- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation).
 - The `-in_pssm` settings listed [above](#searching-with-a-pssm).
 
 ## Examples

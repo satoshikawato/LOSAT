@@ -1,4 +1,4 @@
-import { PROGRAM_INPUTS, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type InputRole, type ProgramId, type SequenceKind } from 'losat/domain';
+import { PROGRAM_INPUTS, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type InputRole, type PrintedKind, type ProgramId, type SequenceKind } from 'losat/domain';
 // Program descriptors: the only place that lists what differs between programs in the UI
 // (plan §2.1 "O"). A descriptor says which engine options the search form shows, in which
 // section, where on the screen and under which label; the sections and labels are those of
@@ -653,6 +653,23 @@ export function searchSummary(program: ProgramDescriptor, task: string | undefin
   return searchSummaryParts(program, task)
     .map((part) => part.text)
     .join('');
+}
+
+/**
+ * The line beside "Run LOSAT" for a draft whose argv prints the command line's help or version in place of a search (line
+ * WQA's D20, 2026-11-23): what is printed and for which program, and that no search runs.
+ */
+export function printSummaryParts(
+  program: ProgramDescriptor,
+  kind: PrintedKind,
+): ReadonlyArray<{ readonly text: string; readonly strong?: true }> {
+  return [
+    { text: "Print the command line's " },
+    { text: kind, strong: true },
+    { text: ' for ' },
+    { text: program.label, strong: true },
+    { text: '. No search runs.' },
+  ];
 }
 
 /**

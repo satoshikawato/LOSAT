@@ -1,0 +1,127 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/of1/tns.fa).
+           6 sequences; 2,345 total letters
+
+
+
+Query= tnq protein query
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+t_fr two frames                                                       142     1e-68  2
+t_mins minus insertion                                                144     2e-65  2
+t_ins plus insertion                                                  101     1e-61  3
+t_mdel minus deletion                                                 134     1e-60  3
+t_pm both strands                                                     184     5e-51  1
+t_code alt codons                                                     136     1e-46  2
+
+
+
+Query_1    1    AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFSTHGTIWKHCMWKCWDTSFPT  60
+Subject_2  1    .........F........M....M.........D.....................       165
+Subject_2  250                                 .F*RRARYTVRLAV..R.VPALPH.V..   167
+Subject_2  167                                               ..............Y  211
+Subject_4  369                      ...........D..................G.........  250
+Subject_4  246                                                            .R  241
+Subject_3  1    ...V................A...................                      120
+Subject_3  133                                          ...........N........  192
+Subject_5  342  ...................................V..........W...            193
+Subject_5  192                                                          ....  181
+Subject_1  1    ...........................E...RP...........F.............K.  180
+Subject_6  1              ....I..........*.I..R........Y......R.I...R..R....  150
+
+Query_1    61   SKSHCVTCTSqqqqqqqqqqqqqqqqeqFSANDWFCRWRFCFKGWLINPDVPCPTKVRVD  120
+Subject_2  296                              ..........D....................N  391
+Subject_2  212  ..........                                                    241
+Subject_4  156                              ............................G..Y  61
+Subject_4  249  KPR.KSH.VT                                                    220
+Subject_4  240  H.........                                                    211
+Subject_3  193  ....I.....                                                    222
+Subject_3  277                              ......................            342
+Subject_5  96                               .....Q..Q..........P............  1
+Subject_5  180  ...P......                                                    151
+Subject_1  181  ..........                                                    210
+Subject_1  457                              ...........G.............R......  362
+Subject_1  541  ...R......                                                    512
+Subject_6  151  ..R.......                                                    180
+Subject_6  235                              ...T.TR..*.R.T.*........R.*.....  330
+
+Query_1    121  TYLNCGCCEVWDKEITESDAQNYIHEANAE  150
+Subject_2  392  ..........                      421
+Subject_4  60   ....................            1
+Subject_1  361  .................V............  272
+
+
+Lambda      K        H
+   0.326    0.135    0.513 
+
+
+Effective search space used: 87377
+
+
+Query= tnq2 second
+
+Length=110
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+t_mins minus insertion                                                166     4e-63  2
+t_fr two frames                                                       204     3e-57  1
+t_ins plus insertion                                                  160     1e-46  2
+t_code alt codons                                                     162     2e-44  1
+t_pm both strands                                                     158     2e-43  1
+t_mdel minus deletion                                                 126     7e-43  2
+
+
+
+Query_2    1    VCSFKTEDFSTFGTIWKHCMWKCWDTSFDTSKSHCATCTSEKTLYGDHIILQRIAVSVFS  60
+Subject_4  237                                 ....V....F...P....H......EQ..  151
+Subject_4  339  .D.........H........G.......P.KPR.KSH.VT                      220
+Subject_2  167                 .............PY.....V....S...P....H......EQ..  301
+Subject_2  91   ...D.......H.............                                     165
+Subject_2  211                V..R.V                                          194
+Subject_3  133            .H.........N......P.....IV....S...P....H......EQ..  282
+Subject_3  91   ..........                                                    120
+Subject_6  64    ........Y.H....R.I...R..R..P...R..V....S.S.P....H......EQ..  240
+Subject_1  541                                ...R.V....S...P...HH......EQ..  452
+Subject_1  100     ........H..F.............K......V....S...P....             237
+Subject_5  192                            ..P....P.V....S...P....H......EQ..  91
+Subject_5  252  .....V.....H....W...                                          193
+
+Query_2    61   ANDWRCRWRFCFKSWLINPYVPCPTKVRVDTYLNCGCCEVTGKVITESKA  110
+Subject_4  150  ....F........G.....D......G..Y..........WD.E....D.  1
+Subject_2  302  ....F...D....G.....D.........N..........            421
+Subject_3  283  ....F........G.....                                 339
+Subject_6  241  .T.T...*.R.T.*.....D..R.*.....                      330
+Subject_1  451  ....F....G...G.....D...R................WD.E...VD.  302
+Subject_5  90   ...QF.Q......G...P.D..........                      1
+
+
+Lambda      K        H
+   0.327    0.135    0.505 
+
+
+Effective search space used: 61916
+
+
+  Database: User specified sequence set (Input: tests/db_search/of1/tns.fa).
+    Posted date:  Unknown
+  Number of letters in database: 2,345
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

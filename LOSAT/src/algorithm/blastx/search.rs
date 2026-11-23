@@ -6,7 +6,7 @@ use super::{
         effective_lengths, ka_once_on, score_block_for, subject_parameters, ContextParameters,
     },
     preliminary::{purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
-    query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
+    query_setup::{unit_ranges, PreparedQueryBatch},
     reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{BxLookup, Diagonals},
     split::{split_queries, split_sizes, QueryChunk},
@@ -188,7 +188,7 @@ fn x_search_core(
             .and_then(|prep| prep.prepared.reader_shape.as_deref())
             .map_or(records.len(), |shape| shape.query_count),
     )?;
-    let ranges = batch_ranges(records, BATCH_SIZE);
+    let ranges = unit_ranges(records, options);
     // The units of a reader batch (`records`) are prepared first, together, and the values NCBI
     // takes of the whole query batch are reduced (`reader_batch.rs`); each unit is then searched
     // from its preparation. A caller that searches the units one by one has prepared them

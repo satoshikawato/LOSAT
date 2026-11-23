@@ -362,7 +362,7 @@ pub enum HardScan {
     /// (`common::translated_chunks::translated_db_mask_chunks`; PD-LOSAT-NCBI-DEFECTS exception
     /// 21, the Owner's answers Q1 = B and Q2 = B of M4b, 2026-11-21), and a frame whose masks
     /// leave it an empty first part before that branch is searched as its chunks give it, the
-    /// whole frame after the empty part (exception 24, the Owner's answer Q4 = B of M4b,
+    /// whole frame after the empty part (exception 27, the Owner's answer Q4 = B of M4b,
     /// 2026-11-22: NCBI BLAST+ 2.17.0 searches the frame and then frees memory that it did not
     /// allocate). Both engines join the chunks of a frame longer than `MAX_DBSEQ_LEN` across
     /// their overlap, as for an unmasked subject (no `LongRange`), and a chunk shorter than a word
@@ -634,7 +634,7 @@ impl HardMaskShape {
     /// searched as its frames' chunks give it (`common::translated_chunks::
     /// translated_db_mask_chunks`): a frame's first part that NCBI's "no chunking" branch scans
     /// past (exception 21, series NP, M4b-3) and one after an empty first part, on which NCBI
-    /// crashes (exception 24, M4b-3c).
+    /// crashes (exception 27, M4b-3c).
     fn of_frames(masks: &[(u32, u32)], length: usize, min_length: usize) -> Option<HardMaskShape> {
         if length < min_length {
             return None;

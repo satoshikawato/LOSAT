@@ -233,7 +233,7 @@ fn soft_chunk_scan_ranges(
 // pointer when it restores the subject and crashes, in every run. The empty chunk adds nothing (its
 // one word, if any, is a window or more behind every later hit on its diagonal), so LOSAT searches
 // the frame's chunks as they come, the masked bases masked as for every other mask (an approved
-// NCBI defect, PD-LOSAT-NCBI-DEFECTS exception 24: the Owner's answer Q4 = B of M4b, 2026-11-22).
+// NCBI defect, PD-LOSAT-NCBI-DEFECTS exception 27: the Owner's answer Q4 = B of M4b, 2026-11-22).
 /// The chunks of frame `frame` (+1..+3, -1..-3, of `frame_length` residues) of a database sequence
 /// with the nucleotide ranges `nucleotide_ranges` (the complement of its stored masks,
 /// `core::subject_split::complement_masks`), each with its scan ranges, in a search with

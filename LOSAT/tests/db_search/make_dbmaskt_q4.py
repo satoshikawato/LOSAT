@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Series NP, M4b-3c (2026-11-23): the inputs of the rows db.tmask.*.hard.te.{13,14,15,31}.*, *.tq4.* and their near
-rows (PD-LOSAT-NCBI-DEFECTS exception 24) in dbmaskt/ (README.md there), from dbmaskt/edge.fna and dbmaskt/qxe.fna.
+rows (PD-LOSAT-NCBI-DEFECTS exception 27) in dbmaskt/ (README.md there), from dbmaskt/edge.fna and dbmaskt/qxe.fna.
 
 A mask that leaves a reading frame an empty first part (within the first two bases of a sequence, within the one or
 two bases after its last whole codon, or an empty mask at 0) makes NCBI BLAST+ 2.17.0 crash in every run. The near

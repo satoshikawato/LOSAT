@@ -56,7 +56,7 @@ fn a_whole_frame_scans_to_the_frame_s_end_and_a_tail_masked_one_its_chunk() {
 fn a_frame_after_an_empty_first_part_scans_the_whole_frame() {
     // [0, 1) of 1,200 bases: the plus frames' ranges are (0, 0), (0, 400). The empty part's chunk
     // scans nothing; the chunk from 0 after it takes the "no chunking" branch (NCBI then frees
-    // memory that it did not allocate, PD-LOSAT-NCBI-DEFECTS exception 24) and scans the whole
+    // memory that it did not allocate, PD-LOSAT-NCBI-DEFECTS exception 27) and scans the whole
     // frame: 400 residues in frame +1, the 399 of frame +2 (its chunk ends on the sentinel).
     assert_eq!(
         hard_chunks(&[(0, 1)], 1200, 1),

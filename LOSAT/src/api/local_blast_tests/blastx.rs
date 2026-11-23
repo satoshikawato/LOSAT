@@ -59,6 +59,7 @@ fn try_run(
     let result = {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())
@@ -429,6 +430,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         let result = {
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
+                html_posts: None,
                 formats: vec![FormatOutput {
                     outfmt: "6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -459,6 +461,7 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
     let result = {
         let mut outputs = ReportOutputs {
             other_outfmts: &[],
+            html_posts: None,
             formats: vec![FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,

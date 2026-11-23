@@ -19,8 +19,9 @@ pub(crate) struct RegistryEntry {
     pub(crate) value: Vec<u8>,
 }
 
-/// What one read of a registry file gives.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What one read of a registry file gives (`Default`: the read of a stream that gives no line and
+/// reaches its end, an empty file).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct RegistryRead {
     /// The entries, in the order of the file (a later entry of the same section and name
     /// replaces an earlier one).
@@ -29,8 +30,8 @@ pub(crate) struct RegistryRead {
     /// its position), or `None`.
     pub(crate) error: Option<NcbiException>,
     /// The stream failed before the first line without reaching its end (a file of one byte that
-    /// starts a byte order mark, `text_encoding_form`): NCBI then posts
-    /// `ERROR_READING_THE_REGISTRY` (`error_reading_post`).
+    /// starts a byte order mark, `text_encoding_form`; a file whose first read fails,
+    /// `read_failed_stream`): NCBI then posts `ERROR_READING_THE_REGISTRY` (`error_reading_post`).
     pub(crate) stream_failed: bool,
     /// The entries that set a `[section] name` again while its value is not empty, in the order
     /// of the file, which NCBI warns of as it reads them (`RepeatedEntry`).
@@ -342,10 +343,7 @@ pub(crate) fn read_registry(bytes: &[u8], layer: Layer) -> Result<RegistryRead, 
 
 /// `read_registry` with the line ends of `ends`.
 fn read_registry_with(bytes: &[u8], layer: Layer, ends: LineEnds) -> Result<RegistryRead, String> {
-    let checks = match layer {
-        Layer::SystemWide => 1,
-        Layer::Application => 2,
-    };
+    let checks = checks_of(layer);
     let mut data = bytes;
     for check in 1..=checks {
         match text_encoding_form(data) {
@@ -356,19 +354,37 @@ fn read_registry_with(bytes: &[u8], layer: Layer, ends: LineEnds) -> Result<Regi
                         .to_string(),
                 );
             }
-            // Only the last check is followed by `x_Read`; an earlier one by a `Read` that
-            // returns at the failed stream.
-            Encoding::Failed => {
-                return Ok(RegistryRead {
-                    entries: Vec::new(),
-                    error: None,
-                    stream_failed: check == checks,
-                    repeated: Vec::new(),
-                });
-            }
+            Encoding::Failed => return Ok(failed_at_check(check, checks)),
         }
     }
     read_lines(data, ends)
+}
+
+/// The read into `layer` of a stream that fails at its first read: a file that opens and cannot
+/// be read (a directory, whose read fails with `EISDIR`), which the first check of a byte order
+/// mark finds failed as it finds a one-byte mark (`Encoding::Failed`). NCBI BLAST+ 2.17.0 with a
+/// directory `./.ncbirc` (line RG T4a2 fix round 2, `T/t4/fix2` probes `c1.dir.*`): `Error reading
+/// the registry after line 1` at each read of NCBI's formatter.
+pub(crate) fn read_failed_stream(layer: Layer) -> RegistryRead {
+    failed_at_check(1, checks_of(layer))
+}
+
+/// The number of byte order mark checks of a read into `layer`.
+fn checks_of(layer: Layer) -> usize {
+    match layer {
+        Layer::SystemWide => 1,
+        Layer::Application => 2,
+    }
+}
+
+/// The read of a stream that the check `check` of `checks` finds failed: only the last check is
+/// followed by `x_Read`, which posts the failed stream; an earlier one by a `Read` that returns
+/// at the failed stream.
+fn failed_at_check(check: usize, checks: usize) -> RegistryRead {
+    RegistryRead {
+        stream_failed: check == checks,
+        ..RegistryRead::default()
+    }
 }
 
 /// `IRWRegistry::x_Read` of the lines of `data`.

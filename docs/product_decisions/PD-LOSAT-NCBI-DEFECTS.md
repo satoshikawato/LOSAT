@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.83
+- Version: 1.84
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -426,11 +426,21 @@
   items M5a and M5b's 1.72, then line RG item X4b-1's 1.73, line RG item D5b-3's 1.74, line NP item M5's 1.75, line
   RG item X4b-2's 1.76, line RG item D3c-3a's 1.77, line RG item D5b-5's 1.78, line NP item O4c's 1.79, line PS
   item PS12c's 1.80 and line NP item M4c-1's 1.81, and after exception 25; the exception numbered 22 at first, then 24, 25 and 26);
-  1.83 2026-11-23 (BLASTP `-ungapped -comp_based_stats 0 -use_sw_tback`, line NP item O4b2-2: the explicit
+  1.83 2026-11-23 (approved exception 3 extended to BLASTP and BLASTX with `-db_hard_mask`: NCBI's
+  traceback reads one letter before and one letter past the hard-masked copy of a subject that has
+  masks, a copy that holds no sentinel byte, and ends with a crash (SIGSEGV) where the byte past the
+  copy happens to equal the fence byte twice; LOSAT reads the bytes past both ends of that copy as
+  the NULLBs of the mapped volume and writes the rows of NCBI's runs that do not meet the fence byte;
+  it changes no code and no output of LOSAT, the behaviour being on dev already; the no-effect entry
+  of `hard_ranges[1]` generalised to `hard_ranges[n]` after the last chunk; decided by the Owner on
+  2026-11-23 13:49 JST, question Q-ALIGNEX, words 「推奨通り」, option A (recommended); line NP item
+  M4b-AX; numbered after 1.82);
+  1.84 2026-11-23 (BLASTP `-ungapped -comp_based_stats 0 -use_sw_tback`, line NP item O4b2-2: the explicit
   rejection of decision D3 comes at the traceback of the first query batch that NCBI searches, after the
   reports of the batches before, the form of 1.76 and 1.79, instead of before the first byte; a run that
   searches no batch ends as NCBI's does; no new exception, rule 3; Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.82)
+  2026-09-29, restated 2026-10-07; numbered after 1.83; first 1.83, then 1.84 at the merge of dev that brought line NP
+  item M4b-AX's 1.83)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -523,7 +533,8 @@ Version 1.3, accepted by the maintainer on 2026-10-05 in Session S08+b (E2e), pl
 the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as recommended.
 
 3. **Approved exception (BLASTP, TBLASTN and BLASTX): a one-hit gapped start that reads past a
-   sequence.**
+   sequence; and (BLASTP and BLASTX with `-db_hard_mask`) the traceback's read past a hard-masked
+   copy of a subject.**
    With `-window_size 0` (one-hit) and a low `-threshold`, NCBI's ungapped extension can
    give a negative `Int4` length that `BlastGetStartForGappedAlignment` receives as
    `Uint4` (`aa_ungapped.c:1054,1083`, `blast_gapalign.c:3393-3437`): it scores only the
@@ -577,6 +588,35 @@ the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as re
    allocates and never sets, or past it (the TBLASTN item of version 1.18 below; fixture
    `db.x2.tblastn.pssmpast.rej`).
 
+   BLASTP and BLASTX with `-db_hard_mask` (version 1.83, decided by the Owner on 2026-11-23 13:49 JST,
+   line NP item M4b-AX; question Q-ALIGNEX, recommended option A, the Owner's words 「推奨通り」):
+   NCBI's traceback fetches a masked copy of each subject that has masks
+   (`seqsrc_seqdb.cpp:326-330, 346-353`), allocated at the sequence's length with no sentinel byte
+   for a protein (`seqdbvol.cpp:1633-1635`, `:1488`), where the mapped volume holds a NULLB before
+   and after every sequence. `ALIGN_EX` reads one letter past each end of its subject when a row
+   of its dynamic program reaches that end (`blast_gapalign.c:481-492, 555-578, 671-675`): the byte
+   before the copy (the allocator's header, 0 with glibc) and the byte after it (stale heap data).
+   That byte feeds only the fence test (`:571-576`) and a score that no cell uses. Where it equals
+   the fence byte (`FENCE_SENTRY`, 201; `blast_util.h:364`), the traceback is rolled back and
+   retried once (`blast_traceback.c:516-520, 701-709, 1651-1688`); where the retry reads that byte
+   again, NCBI formats preliminary HSPs that have no edit script and crashes (SIGSEGV,
+   `blast_seqalign.cpp:676-677`), sometimes after part of its rows. Whether it does depends on the
+   heap's history: the batch size, the layout of the query file, the process environment. With no
+   mask, with `-db_soft_mask`, or for a subject without a mask, NCBI reads the mapped volume's NULLBs
+   and does not meet this. LOSAT reads the bytes past both ends of a hard-masked subject as those
+   NULLBs, as this exception reads the letters past a sequence, and writes the rows of NCBI's runs
+   that do not meet the fence byte; its code and its output do not change with version 1.83.
+   TBLASTN and TBLASTX are not affected: their subject is a translation buffer with NULLBs
+   (`blast_util.c:438-453`). Evidence: with `MALLOC_PERTURB_=201` (glibc fills freed memory with that
+   byte) NCBI crashes (exit 139) on the overlapping-mask database (BLASTP self-search and BLASTX) and
+   on the database whose masks do not overlap (BLASTX); without it NCBI ends with exit 0 and
+   the bytes that LOSAT writes: BLASTX against the overlapping-mask database with `-window_size 0`,
+   23,074 rows at every batch size; BLASTP of that database against itself, 3,695 rows; BLASTP of
+   the other, 311 rows (`cmp`-equal). Under `-db_soft_mask` and without a mask NCBI does not crash
+   with `MALLOC_PERTURB_=201`. The kernel log shows 15 crashes of this form, at `s_BlastHSP2SeqAlign`
+   reading the missing edit script. So NCBI's output is either LOSAT's bytes or a crash, never other
+   rows: the value read feeds only the fence test and a score that is never used.
+
 Explicit rejections (rule 3):
 
 - `-evalue` infinite or of DBL_MAX or more (BLASTP, TBLASTN; decision D12): a hit list
@@ -610,7 +650,7 @@ Explicit rejections (rule 3):
   of the batch before, row `db.x4.chunk.gap_anchor.6`; rows `db.x4.chunk.empty.*` and
   `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
-  `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.83 at the first query batch NCBI searches), compressed-lookup thresholds that
+  `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.84 at the first query batch NCBI searches), compressed-lookup thresholds that
   exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
@@ -1638,7 +1678,10 @@ file would differ, and NCBI's programs still could not open the database).
   `LOSAT/src/writedb/gi_mask_tests.rs`.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
-  `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
+  `hard_ranges[n]` after the last chunk (version 1.83; version 1.82 and before named `[1]`; for a
+  masked subject `n` is the number of hard ranges, a read 4 bytes past the array of
+  `CSeqDB`; the overlap it chooses only merges HSPs that intersect across a chunk boundary, and
+  hard chunks are disjoint), the out-of-range `double` to `Int4`
   conversion (INT_MIN), and the catch in `BlastSetupPreliminarySearchEx` that never
   matches.
 - `losat blastn -use_index true` with a MegaBLAST index of only some database volumes (version
@@ -1979,6 +2022,9 @@ file would differ, and NCBI's programs still could not open the database).
   Version 1.48 extends BLASTP's approved exception 3, which reads the letters past a sequence as the
   sentinel, to TBLASTN's window (above).
 
+  Version 1.83 extends approved exception 3 once more, to the traceback's read past a hard-masked
+  copy of a subject in BLASTP and BLASTX (the BLASTP and BLASTX paragraph of exception 3 above).
+
 - BLASTX with `-window_size 0` (version 1.22, 2026-11-14, line RG item X2f, Owner-delegated;
   version 1.48): with a low `-threshold`, NCBI's one-hit ungapped extension can give a negative
   `Int4` length (`aa_ungapped.c:1054,1083`), which `BlastGetStartForGappedAlignment` reads as
@@ -2258,7 +2304,7 @@ file would differ, and NCBI's programs still could not open the database).
   does (exit 1, "-use_sw_tback with -ungapped, on which NCBI BLAST+ 2.17.0's tblastn crashes at every
   query batch it searches, is not supported by LOSAT's TBLASTN"; one producer of the text,
   `smith_waterman_match::sw_ungapped_error`; rows `db.tn.rej.ungapped.sw.*`, anchor
-  `db.tn.ungapped.ac.b1.nosw.7`). BLASTP refuses it in the same way since version 1.83 (line NP item
+  `db.tn.ungapped.ac.b1.nosw.7`). BLASTP refuses it in the same way since version 1.84 (line NP item
   O4b2-2; before, before the first byte: decision D3 above), with the same text for `blastp`: NCBI BLAST+
   2.17.0 from Bioconda, 2026-11-23, crashes at the first query batch it searches and reports the batches
   before it, whose queries give no Karlin-Altschul parameters (rows `db.ung.sw.*`). With `-use_sw_tback` LOSAT's BLASTX searches a query batch

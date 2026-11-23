@@ -123,7 +123,10 @@ fn ascii_letters_defined(object: &PssmWithParameters) -> bool {
         Some(SeqData::Ncbieaa(text)) => text
             .iter()
             .all(|&c| c.is_ascii_uppercase() || c == b'*' || c == b'-'),
-        Some(SeqData::Other(_)) | None => true,
+        Some(
+            SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_),
+        )
+        | None => true,
     }
 }
 
@@ -211,7 +214,10 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
             .iter()
             .map(|letter| LETTERS.iter().position(|c| c == letter).unwrap_or(0) as u8)
             .collect(),
-        Some(SeqData::Other(_)) | None => Vec::new(),
+        Some(
+            SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_),
+        )
+        | None => Vec::new(),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:253-255
     // A query with one letter more than its Seq-inst's `length` (searched as its first `length`

@@ -1,0 +1,3 @@
+lcl|cdd:5
+lcl|cdd:6
+NP_000302.1

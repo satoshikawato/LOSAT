@@ -276,6 +276,7 @@ fn tblastx_reports_of_consecutive_query_ranges_are_the_whole_report() {
                     )),
                     x_pool,
                     None,
+                    None,
                     &crate::report::db_subject::HitLoads::default(),
                 )
                 .unwrap();
@@ -336,7 +337,14 @@ fn tblastx_hsp_info_prints_the_linked_set_and_both_frames() {
 fn tblastx_rows_step_three_nucleotides_in_each_frame_direction() {
     let mut out = Vec::new();
     // The query's record has 300 nucleotides (frame -2 at 200).
-    write_tblastx_alignment(&mut out, &tblastx_hit(1), 300, &PairwiseConfig::default()).unwrap();
+    write_tblastx_alignment(
+        &mut out,
+        &tblastx_hit(1),
+        None,
+        300,
+        &PairwiseConfig::default(),
+    )
+    .unwrap();
     let text = String::from_utf8(out).unwrap();
     let lines: Vec<&str> = text.lines().collect();
     let row = "ACDEFGHIKL".repeat(6);
@@ -347,6 +355,94 @@ fn tblastx_rows_step_three_nucleotides_in_each_frame_direction() {
     assert_eq!(lines[4], "Query  20   M  18");
     assert_eq!(lines[5], "             ");
     assert_eq!(lines[6], "Sbjct  183  N  185");
+}
+
+// D5: NCBI BLAST+ 2.17.0's description rows of `-subject` records without parsed ids
+// (`blastp -subject ps_spec.faa -outfmt 0 -html`, probes `bp.s.f0.h` and, with
+// `T/t4/rc/localid/.ncbirc`, `bp.s.f0.rc_localid.h`): the title encoded after the cut on raw
+// bytes, the padding of raw bytes, the score link of `Subject_N`, and the local-id link.
+#[test]
+fn html_description_rows_are_ncbis() {
+    let mut first = tblastx_hit(1);
+    first.hit.bit_score = 313.0;
+    first.hit.e_value = 2e-109;
+    let mut third = tblastx_hit(1);
+    third.hit.s_idx = 2;
+    third.hit.bit_score = 247.0;
+    third.hit.e_value = 2e-87;
+    let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
+        [(0, vec![&first]), (2, vec![&third])].into_iter().collect();
+    let titles: std::collections::HashMap<u32, Vec<u8>> = [
+        (
+            0,
+            b"s1 a<b>c & d \"e\" &amp; &lt;f&gt; &#62; &auml; short".to_vec(),
+        ),
+        (
+            2,
+            [
+                &b"s3 "[..],
+                &[b'x'; 70],
+                b" & tail after a word of seventy letters",
+            ]
+            .concat(),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let rows = |file: Option<&[u8]>| {
+        let registry = crate::report::formatter_registry::InitConfig::of(
+            "blastp",
+            file.map(|bytes| (".ncbirc".into(), bytes.to_vec())),
+            false,
+        )
+        .unwrap();
+        let links = Arc::new(crate::report::html_ids::HtmlLinks {
+            registry,
+            db_name: Vec::new(),
+            nucleotide: false,
+            ncbirc: Default::default(),
+        });
+        let report = crate::report::html_ids::HtmlReport::new(&links, []);
+        let mut out = Vec::new();
+        write_blastn_description_table(
+            &mut out,
+            &[0, 2],
+            true,
+            &hits,
+            &titles,
+            &[],
+            &[],
+            false,
+            true,
+            None,
+            &mut crate::report::query_warnings::no_places,
+            Some(&report),
+            &crate::report::db_subject::HitLoads::default(),
+        )
+        .unwrap();
+        String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .skip(3)
+            .take(2)
+            .map(String::from)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        rows(None),
+        [
+            "s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109",
+            "s3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  <a href=#Subject_3>247</a>     2e-87 ",
+        ]
+    );
+    let file: &[u8] = b"[LOCAL_ID]\nTOOL_URL=http://local.example/<@seq_id@>?db=<@db_name@>&taxid=<@taxid@>&p=<@protocol@>&t=<@title@>\n";
+    assert_eq!(
+        rows(Some(file)),
+        [
+            "http://local.example/Subject_1?db=&taxid=0&p=https:&t=Subject_1</a>s1 a&lt;b&gt;c &amp; d &quot;e&quot; &amp; &lt;f&gt; &gt; ä short                                     <a href=#Subject_1>313</a>     2e-109",
+            "http://local.example/Subject_3?db=&taxid=0&p=https:&t=Subject_3</a>s3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  <a href=#Subject_3>247</a>     2e-87 ",
+        ]
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:829-836,961-965: the N column of
@@ -378,7 +474,8 @@ fn description_table_shows_the_linked_set_column() {
         true,
         false,
         None,
-        &mut crate::report::query_warnings::no_subject_reads,
+        &mut crate::report::query_warnings::no_places,
+        None,
         &crate::report::db_subject::HitLoads::default(),
     )
     .unwrap();
@@ -445,7 +542,8 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         false,
         true,
         columns,
-        &mut crate::report::query_warnings::no_subject_reads,
+        &mut crate::report::query_warnings::no_places,
+        None,
         &crate::report::db_subject::HitLoads::default(),
     )
     .unwrap();
@@ -494,7 +592,8 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         true,
         false,
         columns,
-        &mut crate::report::query_warnings::no_subject_reads,
+        &mut crate::report::query_warnings::no_places,
+        None,
         &crate::report::db_subject::HitLoads::default(),
     )
     .unwrap();
@@ -538,7 +637,8 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         false,
         true,
         columns,
-        &mut crate::report::query_warnings::no_subject_reads,
+        &mut crate::report::query_warnings::no_places,
+        None,
         &crate::report::db_subject::HitLoads::default(),
     )
     .unwrap();
@@ -587,7 +687,8 @@ fn sorthits_refuses_a_last_total_wider_than_its_column() {
             false,
             true,
             columns,
-            &mut crate::report::query_warnings::no_subject_reads,
+            &mut crate::report::query_warnings::no_places,
+            None,
             &crate::report::db_subject::HitLoads::default(),
         )
         .map(|()| out)
@@ -640,7 +741,8 @@ fn blastx_description_row_is_the_highest_bit_score() {
             &ids,
             show_sum_n,
             None,
-            &mut crate::report::query_warnings::no_subject_reads,
+            &mut crate::report::query_warnings::no_places,
+            None,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -768,6 +870,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
             0,
             None,
             pool,
+            None,
             &crate::report::db_subject::HitLoads::default(),
         )
         .unwrap_err();
@@ -885,7 +988,7 @@ fn query_lines_and_headings_wrap_bytes_as_ncbi() {
     ] {
         let title = reader_title(&defline);
         let mut out = Vec::new();
-        write_blastp_query_header(&mut out, &title, 330).unwrap();
+        write_blastp_query_header(&mut out, &title, 330, false).unwrap();
         assert_eq!(
             out,
             [&b"Query= "[..], &query_block, b"\nLength=330\n"].concat(),
@@ -945,7 +1048,8 @@ fn a_title_of_unknown_encoding_is_unknown_and_its_alignments_are_skipped() {
         false,
         false,
         None,
-        &mut crate::report::query_warnings::no_subject_reads,
+        &mut crate::report::query_warnings::no_places,
+        None,
         &crate::report::db_subject::HitLoads::default(),
     )
     .unwrap();
@@ -962,7 +1066,9 @@ fn a_title_of_unknown_encoding_is_unknown_and_its_alignments_are_skipped() {
         &hits[&0],
         &[0, 1],
         0..hits[&0].len(),
-        |_, _| panic!("no HSP is written"),
+        None,
+        &mut crate::report::query_warnings::no_places,
+        |_, _, _| panic!("no HSP is written"),
     )
     .unwrap();
     assert_eq!(
@@ -994,6 +1100,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
                 )],
                 ..Default::default()
             }],
+            utf8: false,
         })
         .unwrap();
         Some(Arc::new(if throws {
@@ -1047,7 +1154,8 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         false,
         false,
         None,
-        &mut crate::report::query_warnings::no_subject_reads,
+        &mut crate::report::query_warnings::no_places,
+        None,
         &loads,
     )
     .unwrap();
@@ -1062,6 +1170,42 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         "{:?}",
         String::from_utf8_lossy(rows[1])
     );
+    // With `-html` the row's link loads the subject again in the `catch` (`HtmlRows::end_at_thrown`):
+    // the run ends at the second row with the load's exception, after the first row.
+    let registry =
+        crate::report::formatter_registry::InitConfig::of("blastn", None, false).unwrap();
+    let links = Arc::new(crate::report::html_ids::HtmlLinks {
+        registry,
+        db_name: Vec::new(),
+        nucleotide: true,
+        ncbirc: Default::default(),
+    });
+    let report = crate::report::html_ids::HtmlReport::new(&links, []);
+    let mut html = Vec::new();
+    let error = write_blastn_description_table(
+        &mut html,
+        &[0, 1],
+        true,
+        &hits,
+        &titles,
+        &parsed,
+        &[],
+        false,
+        false,
+        None,
+        &mut crate::report::query_warnings::no_places,
+        Some(&report),
+        &loads,
+    )
+    .unwrap_err();
+    let exception = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();
+    assert_eq!(exception.what(), loads.thrown(1).unwrap().what());
+    // The two header lines, the blank line and the first row; nothing of the second.
+    let text = String::from_utf8(html).unwrap();
+    let lines: Vec<&str> = text.split_terminator('\n').collect();
+    assert_eq!(lines.len(), 4, "{text:?}");
+    assert!(lines[3].contains("NM_100000.1"), "{text:?}");
+    assert!(!text.contains("NM_100001"), "{text:?}");
     let mut out = Vec::new();
     write_database_subject_alignments_part(
         &mut out,
@@ -1071,7 +1215,9 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         &hits[&1],
         &[1, 2],
         0..2,
-        |_, _| panic!("no HSP is written"),
+        None,
+        &mut crate::report::query_warnings::no_places,
+        |_, _, _| panic!("no HSP is written"),
     )
     .unwrap();
     assert_eq!(
@@ -1166,6 +1312,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
         sort: Default::default(),
         view: PairwiseView::Pairwise,
         unreadable_query: None,
+        html: None,
     };
     let gapped_k = [0.041, 0.047, 0.041, 0.041];
     let write = |range: std::ops::Range<usize>, rows: &[PairwiseHit], out: &mut Vec<u8>| {
@@ -1186,6 +1333,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
             None,
             true,
             true,
+            None,
             None,
             None,
             &crate::report::db_subject::HitLoads::default(),

@@ -1572,8 +1572,8 @@ fn protein_start_offset_window_boundaries_follow_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-445:
-// retval = BlastGetOffsetsForGappedAlignment(query, subject, sbp, hsp, ...);
-// if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
+// Recomputes starting offsets via `BlastGetOffsetsForGappedAlignment`; when that fails,
+// frees the HSP (`Blast_HSPFree`) and continues to the next entry.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3259-3321: positive 11-residue window scores
 // choose a start; two nonpositive endpoint windows return FALSE.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:446-448: on TRUE, write q_start and s_start
@@ -1734,7 +1734,7 @@ fn compare_real_path_start_offset_with_ncbi(positive: bool) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-445:
-// if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
+// When start-offset lookup fails, frees the HSP (`Blast_HSPFree`) and skips it.
 #[test]
 fn real_path_start_offset_failure_deletion_matches_ncbi() {
     compare_real_path_start_offset_with_ncbi(false);
@@ -1895,8 +1895,8 @@ fn preliminary_append_cap_and_tie_match_ncbi_api() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953,4071-4091:
-// max_offset = BlastGetStartForGappedAlignment(...);
-// status = s_BlastProtGappedAlignment(...);
+// Finds the gapped start via `BlastGetStartForGappedAlignment` and runs
+// `s_BlastProtGappedAlignment`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:811-811
 fn compare_fixture(fixture_name: &str, oracle_name: &str, lowercase: bool) {
     let root = format!(
@@ -1974,10 +1974,10 @@ fn ambiguity_gapped_scores_offsets_and_order_match_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-552:
-// status = aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
+// Runs `GetGappedScore` on the initial hit list to build the gapped HSP list.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
-// max_offset = BlastGetStartForGappedAlignment(...);
-// status = s_BlastProtGappedAlignment(...);
+// Finds the gapped start via `BlastGetStartForGappedAlignment` and runs
+// `s_BlastProtGappedAlignment`.
 #[test]
 fn code32_api_gapped_scores_offsets_and_order_match_ncbi() {
     let fixture = concat!(
@@ -2046,7 +2046,7 @@ fn code32_api_gapped_scores_offsets_and_order_match_ncbi() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1677:
-// if (fence_hit) { /* refetch whole subject */ }
+// Refetches the whole subject when traceback hits a fence sentinel.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-589:
 #[test]
 fn full_translation_traceback_matches_ncbi_post_fence_scores_and_offsets() {
@@ -2511,7 +2511,7 @@ fn whole_windows_trace_as_the_whole_translation() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1154-1228:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1644-1684:
-// if (fence_hit) { /* refetch whole subject and retry the HSP list */ }
+// Refetches the whole subject and retries the HSP list when traceback hits a fence sentinel.
 #[test]
 fn long_multi_hsp_partial_windows_and_retry_match_ncbi() {
     let root = concat!(
@@ -5028,4 +5028,18 @@ fn ungapped_chunk_hsps_are_context_local_and_sorted_by_score() {
             (1, hsp(30, 2, 8, 4, 100, 106, 102)),
         ]
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3942-3945
+// The gapped start of a one-hit HSP whose seed lies at the chunk's offset -1 (its word starts one
+// letter before the chunk, masks stored out of order, M4b-T2) and whose HSP starts at 0: the seed's
+// `Uint4` wraps, so the start is the seed moved by the gapped start's distance from the query's seed
+// (16 letters: offset 15), not about 2^32 past the chunk. Before the chunk is an internal error.
+#[test]
+fn a_seed_before_the_chunk_gives_its_gapped_start_with_ncbis_wrap() {
+    let seed = (-1i32) as u32;
+    assert_eq!(x_gapped_subject_start(seed, 30, 14).unwrap(), 15);
+    assert_eq!(x_gapped_subject_start(seed, 15, 14).unwrap(), 0);
+    assert_eq!(x_gapped_subject_start(40, 30, 14).unwrap(), 56);
+    assert!(x_gapped_subject_start(seed, 14, 14).is_err());
 }

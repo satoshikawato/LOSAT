@@ -250,7 +250,7 @@ const COMPO_HEAP_INITIAL_CAPACITY: usize = 100;
 pub(crate) const COMPO_HEAP_EVALUE_STRETCH: f64 = 5.0;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1389-1403
-fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
+pub(crate) fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
     const EPSILON: f64 = 1.0e-180;
     if evalue1 < EPSILON && evalue2 < EPSILON {
         Ordering::Equal
@@ -754,6 +754,15 @@ impl BlastCompoHeap {
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:405-408
     pub(crate) fn filled_to_cutoff(&self) -> bool {
         self.x_ends_early && self.n >= self.heap_threshold && self.worst_evalue <= self.ecutoff
+    }
+
+    /// The heap's records (`array[1..=n]` of a list, `heapArray[1..=n]` of a heap).
+    pub(crate) fn records(&self) -> &[BlastCompoHeapRecord] {
+        self.array
+            .as_ref()
+            .or(self.heap_array.as_ref())
+            .and_then(|records| records.get(1..=self.n))
+            .unwrap_or(&[])
     }
 
     /// Whether `more` insertions can fill the heap to its cutoff (`filled_to_cutoff`): the bound

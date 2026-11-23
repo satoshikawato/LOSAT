@@ -1,0 +1,28 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: multidb na; multidb nnp
+           17 sequences; 11,514 total letters
+
+
+
+<b>Query=</b> pfo_f the letters of multidb/na's ENST00000335295.4 (HBB)
+
+Length=628
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+

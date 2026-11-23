@@ -573,6 +573,7 @@ pub(super) fn pssm_traceback(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     pool: &crate::utils::threading::SearchPool<'_>,
+    redone: &dyn Fn(&[crate::algorithm::blastp::hsp::BlastCompoHeap]),
     sorts_results: bool,
 ) -> Result<Vec<Option<BlastpHitList>>> {
     let psi = args
@@ -614,6 +615,7 @@ pub(super) fn pssm_traceback(
             link,
             preliminary_hit_lists,
             compact_hit_lists,
+            redone,
         )
         .map(seqalign_scores_of_lists);
     }
@@ -679,6 +681,7 @@ fn pssm_redo(
     link: Option<redo1::RedoLink>,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    redone: &dyn Fn(&[crate::algorithm::blastp::hsp::BlastCompoHeap]),
 ) -> Result<Vec<Option<BlastpHitList>>> {
     let has_lists = preliminary_hit_lists
         .iter()
@@ -734,6 +737,7 @@ fn pssm_redo(
         hitlist_size: args.traceback_hitlist_size(),
         inclusion_ethresh: args.inclusion_ethresh,
         link,
+        redone,
     }
     .run(preliminary_hit_lists, compact_hit_lists)
 }

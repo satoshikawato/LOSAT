@@ -499,6 +499,17 @@ fn run_queries(
                         // round 1's report did not place.
                         super::write_request_posts(args, &mut *outputs.diagnostics)?;
                     }
+                    // NCBI's warning of its first read of a UTF8String header, where the round's
+                    // Seq-aligns made it before the failure (once per run: a round before posted
+                    // its own).
+                    if let Some(posts) = subject_source.database().and_then(|database| {
+                        failure
+                            .utf8
+                            .as_ref()?
+                            .post(database.seqdb(), args.app.ncbi_name())
+                    }) {
+                        posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+                    }
                     return Err(failure.error);
                 }
                 return Err(error);
@@ -914,8 +925,8 @@ pub(super) fn round_outcome(
         }
         Some(FoundBefore { found, unsure })
     };
-    // NCBI makes the next PSSM after `Advance` when another round follows or the last PSSM is
-    // saved (`itr || GetSaveLastPssm()`), and after a round with alignments only.
+    // NCBI makes the next PSSM after `Advance` when another round follows (`itr`) or the last PSSM
+    // is saved (`GetSaveLastPssm`), and after a round with alignments only.
     let makes_next = if has_alignments {
         let mut after = io.state.clone();
         after.advance(set.clone());

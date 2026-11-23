@@ -26,7 +26,7 @@ impl Xml2Target {
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:121, :196
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:862-867
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2377, :2376-2377
-/// NCBI's `m_IsBl2Seq || m_IsIterative`: whether the XML2 and JSON documents of a search hold each
+/// NCBI's `m_IsBl2Seq` or `m_IsIterative`: whether the XML2 and JSON documents of a search hold each
 /// query's report back until a result of a query whose Seq-id does not match arrives (or the
 /// epilog): a search of subject records (`subject_search`: `-subject`, no database name) or of an
 /// iterative program (`iterative`: psiblast, tblastn `-in_pssm`). The one rule behind the writer's

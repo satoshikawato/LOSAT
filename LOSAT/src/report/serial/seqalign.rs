@@ -633,8 +633,8 @@ enum UserData {
 /// NCBI reference (598d8ae6): c++/src/objects/general/general.asn:128-136
 /// (`data`: `str` 0, `int` 1, `real` 2, `bool` 3, general.asn:136-140.)
 fn write_user_object<E: Encoder>(enc: &mut E, type_str: &[u8], label: &[u8], data: UserData) {
-    // Annotdesc ::= CHOICE { name, title, comment, pub, user User-object, ... }
-    // (objects/seq/seq.asn:440-445).
+    // `Annotdesc` choice variant `user` (`User-object`, index 4;
+    // objects/seq/seq.asn:440-445).
     enc.variant("Annotdesc", "user", 4);
     enc.begin_sequence("User-object");
     enc.member("type", 1);

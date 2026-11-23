@@ -689,6 +689,19 @@ pub(super) fn write_pairwise(
         protein_matrix: args.scoring.matrix,
         sort: view.report_sort(args.sort),
         view,
+        html: args.html.as_ref().map(|links| {
+            crate::report::html_ids::HtmlReport::new(
+                links,
+                listed_subjects.as_ref().zip(database).into_iter().flat_map(
+                    |(listed, database)| {
+                        listed
+                            .ordinals
+                            .iter()
+                            .map(move |&o| database.oid_map().oid(o))
+                    },
+                ),
+            )
+        }),
         // psiblast's PSSM query of the molecule `other` (`PsiSearch::query_other_coding`).
         unreadable_query: args
             .psi_search
@@ -741,7 +754,8 @@ pub(super) fn write_pairwise(
         database_name: blastp_scan_mode_definition(subject_input_label).into(),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267: options.GetMatrixName(), as typed.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267
+        // Matrix name from `GetMatrixName`, as typed.
         matrix_name: Some(args.matrix_name.clone()),
         gap_open: args.scoring.gap_open,
         gap_extend: args.scoring.gap_extend,
@@ -864,6 +878,8 @@ pub(super) fn write_pairwise(
                     },
                 }
             });
+        // Under `-html` the rows' masks of each HSP (`HtmlRowMasks`, the spans of outfmt 0).
+        let mut html_masks = None;
         if anchored_sequences.is_none()
             && (query_masks.is_some() || args.lcase_masking || db_subject_masks.is_some())
         {
@@ -875,10 +891,12 @@ pub(super) fn write_pairwise(
                 Default::default()
             };
             let no_masks = Default::default();
+            html_masks = args.html.is_some().then(Vec::new);
             set_row_masks(
                 rows.to_mut(),
                 query_masks.as_deref(),
                 [&lcase_masks, db_subject_masks.as_ref().unwrap_or(&no_masks)],
+                html_masks.as_mut(),
             );
         }
         // psiblast's rounds: the round's report (`psiblast_round`), without the
@@ -932,6 +950,7 @@ pub(super) fn write_pairwise(
             anchored_sequences
                 .as_ref()
                 .map(|sequences| sequences as &dyn crate::report::query_anchored::ReportSequences),
+            html_masks.as_deref(),
             hit_loads,
         )
         // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
@@ -1095,6 +1114,7 @@ pub(super) fn write_custom_tabular(
             hit_lists,
             &mut writer,
             warnings.as_mut(),
+            args.is_html,
         )?;
         writer.flush()?;
         return Ok(());

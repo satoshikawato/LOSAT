@@ -184,6 +184,13 @@ pub(crate) enum PsiError {
     /// Karlin-Altschul block could not be computed, [`PsiOptions::ungapped_block_missing`]),
     /// where NCBI crashes (SIGSEGV) before any other error of the scaling.
     NoUngappedKarlinBlock,
+    /// `_IMPALAScaleMatrix`'s status 1: `fillSfp` of a PSSM whose scores span
+    /// `kScoreMatrixScoreRange` (10000) or more (`stages::impala_scale_matrix`).
+    ImpalaScoreRange,
+    /// A scaling of makeprofiledb's engine that leaves C's defined behaviour in NCBI's code (a
+    /// score past `int`, a factor that grows without end, `fillSfp` without a score below
+    /// `BLAST_SCORE_MAX`): the caller refuses the PSSM (`stages::pssm_from_freq_ratios_engine`).
+    ScalingUndefined,
 }
 
 /// The `PSIBlastOptions` that the engine's stages read besides the pseudocount: the options of the
@@ -266,7 +273,8 @@ pub(crate) fn create_pssm_with_options(
     if options.ungapped_block_missing {
         return Err(PsiError::NoUngappedKarlinBlock);
     }
-    let ungapped = stages::scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, sbp)?;
+    let ungapped =
+        stages::scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, sbp, None)?;
     let gapped = KarlinBlk {
         k: stages::gapped_psi_k(ungapped, sbp),
         ..sbp.gap_psi
@@ -325,6 +333,36 @@ pub(crate) fn pssm_from_freq_ratios(
     sbp: &PsiScoreBlk,
 ) -> Result<(Vec<[i32; BLASTAA_SIZE]>, KarlinBlk), PsiError> {
     let (scores, ungapped) = stages::pssm_from_freq_ratios(query, freq_ratios, sbp)?;
+    Ok((
+        scores,
+        KarlinBlk {
+            k: stages::gapped_psi_k(ungapped, sbp),
+            ..sbp.gap_psi
+        },
+    ))
+}
+
+/// `CPssmEngine::Run` of a `CPsiBlastInputFreqRatios` (makeprofiledb's PSSMs of frequency ratios
+/// only, `stages::pssm_from_freq_ratios_engine`): the scores of `freq_ratios` (28 per position)
+/// for `query` (NCBIstdaa), scaled by `impala_scaling_factor` (`_IMPALAScaleMatrix`) or, at
+/// `kPSSM_NoImpalaScaling` (1.0), by `_PSIScaleMatrix`, and `kbp_gap_psi[0]` after the scaling
+/// (the lambda, kappa and h that `x_PSIMatrix2Asn1` keeps). `kbp_psi` is `kbp_psi[0]` of the
+/// engine's score block: the query's ungapped block.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:336-369
+pub(crate) fn pssm_from_freq_ratios_engine(
+    query: &[u8],
+    freq_ratios: &[[f64; BLASTAA_SIZE]],
+    sbp: &PsiScoreBlk,
+    kbp_psi: KarlinBlk,
+    impala_scaling_factor: f64,
+) -> Result<(Vec<[i32; BLASTAA_SIZE]>, KarlinBlk), PsiError> {
+    let (scores, ungapped) = stages::pssm_from_freq_ratios_engine(
+        query,
+        freq_ratios,
+        sbp,
+        kbp_psi,
+        impala_scaling_factor,
+    )?;
     Ok((
         scores,
         KarlinBlk {

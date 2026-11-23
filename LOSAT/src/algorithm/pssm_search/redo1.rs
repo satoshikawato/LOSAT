@@ -93,6 +93,10 @@ pub(crate) struct PssmRedo1<'a> {
     pub(crate) inclusion_ethresh: f64,
     /// psiblast's `-sum_stats true` (`do_link_hsps`), `None` without sum statistics.
     pub(crate) link: Option<RedoLink>,
+    /// Called with the heaps as the redo leaves them (the queries' batch is all of them), before
+    /// they become the final hit lists: the search notes there which subjects the redo's fetches
+    /// read (`blastp::blast_engine::database::ListedSubjects::note_fetched`).
+    pub(crate) redone: &'a dyn Fn(&[BlastCompoHeap]),
 }
 
 /// psiblast's `-sum_stats true` in the redo (`do_link_hsps`): the redone alignments' cutoff and
@@ -382,6 +386,7 @@ impl PssmRedo1<'_> {
                 }
             }
         }
+        (self.redone)(&heaps);
         Ok(fill_results_from_compo_heaps(self.hitlist_size, &mut heaps))
     }
 

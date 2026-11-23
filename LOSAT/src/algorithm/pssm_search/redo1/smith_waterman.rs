@@ -111,8 +111,8 @@ impl RedoMatch<'_> {
             &window_align,
             run.near_identical_cutoff,
         );
-        // NCBI's `NULL` for `subject_maybe_biased`: SEG runs (`(!subject_maybe_biased ||
-        // *subject_maybe_biased)`) and its answer is not kept, as for the X-drop redo's first range.
+        // NCBI's `NULL` for `subject_maybe_biased`: SEG runs whenever the pointer is null or
+        // points to true, and its answer is not kept, as for the X-drop redo's first range.
         let mut subject_maybe_biased = true;
         let subject_data = self.subject_range::<SwRedo>(
             run,

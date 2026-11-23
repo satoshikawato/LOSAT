@@ -1082,9 +1082,9 @@ fn search_pssm_query(
 /// NCBI's gapped tblastn with the Gumbel block never stops for the average subject length,
 /// also when every subject is without letters: its shortest subject is raised to
 /// `BLAST_SEQSRC_MINLENGTH` before the division by 3 (`run_local_search_with_pool` ports
-/// blast_setup.c:969-980 and seqsrc_multiseq.cpp:226-240). Without it (`-searchsp` or
-/// `OLD_FSC`; LOSAT rejects `-ungapped`) the average is used, and below one letter the batch
-/// fails (`stage_d_pipeline::SetupEngineError::SUBJECT_LENGTH_INVALID`).
+/// blast_setup.c:969-980 and seqsrc_multiseq.cpp:226-240). Without it (`-searchsp`, `OLD_FSC`
+/// or an ungapped search) the average is used, and below one letter the batch fails
+/// (`stage_d_pipeline::SetupEngineError::SUBJECT_LENGTH_INVALID`).
 fn before_prolog(
     subjects: &[FastaRecord],
     x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,

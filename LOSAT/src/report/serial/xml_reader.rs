@@ -937,9 +937,9 @@ impl<S: AsnSource> XmlReader<S> {
     }
 
     /// `CIStreamBuffer::GetInt4`, `GetUint4` (`signed` false) and `GetInt8` (`max`): `SkipWs`, then
-    /// the one port of the buffer's numbers (`asn_text_reader::buffer_number`). The end of the
-    /// input in `SkipWs` is the lexer's failure; the number's own stop is given to the caller,
-    /// whose stream reports it in its form.
+    /// the one port of the buffer's numbers (`asn_text_reader::buffer_number!`). The end of the
+    /// input in `SkipWs` or after the sign is the lexer's failure; the number's own stop is given
+    /// to the caller, whose stream reports it in its form.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:617-624
     pub(super) fn get_number(
         &mut self,
@@ -953,11 +953,42 @@ impl<S: AsnSource> XmlReader<S> {
             }
         };
         let start = self.pos - 1;
-        let number = buffer_number(&mut self.src, &mut self.pos, start, c, max, signed);
+        let number = self.number_from(start, c, max, signed);
         if number == Err(NumberStop::Eof) {
             return fail(EOF_MESSAGE);
         }
         Ok(number)
+    }
+
+    /// The number whose first byte `c` is at `start` (`buffer_number!`), or where it stops.
+    #[inline(always)]
+    fn number_from(
+        &mut self,
+        start: usize,
+        c: u8,
+        max: u64,
+        signed: bool,
+    ) -> std::result::Result<i64, NumberStop> {
+        buffer_number!(self, start, c, max, signed)
+    }
+
+    /// `PeekChar()` after a number's sign (`buffer_number!`): the end of the input stops the
+    /// number at `pos`.
+    #[inline]
+    fn char_at(&mut self, pos: usize) -> std::result::Result<u8, NumberStop> {
+        match self.src.byte_at(pos) {
+            Some(c) => Ok(c),
+            None => {
+                self.pos = pos;
+                Err(NumberStop::Eof)
+            }
+        }
+    }
+
+    /// Where a number stops, as it is (`buffer_number!`): `get_number`'s caller reports it.
+    #[inline(always)]
+    fn number_stop(&self, stop: NumberStop) -> NumberStop {
+        stop
     }
 
     /// `get_number` in rpsbproc's reader: a number's stop is a failure of the document.

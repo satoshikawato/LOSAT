@@ -201,7 +201,7 @@ fn tags_are_checked_as_ncbi_checks_them() {
 
 /// ENUMERATED values by the `value` attribute (`ReadEnum`, `FindValue`), numbers by
 /// `CIStreamBuffer`'s readers (their `CUtilException` with the line), one parser of the numbers
-/// for the text and XML streams (`asn_text_reader::buffer_number`).
+/// for the text and XML streams (`asn_text_reader::buffer_number!`).
 #[test]
 fn enumerated_values_and_numbers() {
     let interval = xml(named::SEQ_INTERVAL, "NCBI-Seqloc", INTERVAL);

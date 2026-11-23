@@ -577,7 +577,7 @@ impl<S: AsnSource> XmlInput<S> {
     }
 
     /// `GetInt4`, `GetUint4` (`signed` false) and `GetInt8` of NCBI's input buffer after
-    /// `BeginData` (`asn_text_reader::buffer_number`), whose errors are its `CUtilException` with
+    /// `BeginData` (`asn_text_reader::buffer_number!`), whose errors are its `CUtilException` with
     /// the line.
     fn number(&mut self, max: u64, signed: bool) -> R<i64> {
         let data = self.x.begin_data();

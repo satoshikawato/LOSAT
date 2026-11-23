@@ -154,7 +154,7 @@ pub(crate) const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
     function: Some("ncbi::CIStreamBuffer::NumberOverflow"),
 };
 
-/// Why NCBI's input buffer stops in a number (`buffer_number`).
+/// Why NCBI's input buffer stops in a number ([`buffer_number!`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NumberStop {
     /// The input ends after the sign (`PeekChar`'s `CEofException`).
@@ -167,76 +167,70 @@ pub(crate) enum NumberStop {
 
 /// `CIStreamBuffer::GetInt4`, `GetUint4` (`signed` false: only `+`; a `-` is "bad number", even
 /// for `-0`) and `GetInt8` after `SkipWs`, from `c`, the first byte that is not C's `isspace`, at
-/// `pos` of `src`: the sign, then the digits checked against `max` (`kMax_I4`, `kMax_UI4`,
-/// `kMax_I8`; one more for a negative number) as NCBI checks them, the digit that overflows taken
-/// before the check. The number, or why it stops; `at` (the caller's position) is set to the
-/// byte after the bytes taken at each exit, as the text reader set its own before. The one port
-/// of NCBI's numbers of an input buffer, for the ASN.1 text reader (`Reader::get_number`) and the
-/// XML reader (`xml_reader::XmlReader::get_number`), whose streams read them from the same buffer.
-/// The negation of the largest magnitude wraps to the least number (2^31 negated as an Int4 is
-/// the least Int4, likewise in 64 bits).
+/// `pos` of the reader `r`'s source: the sign, then the digits checked against `max` (`kMax_I4`,
+/// `kMax_UI4`, `kMax_I8`; one more for a negative number) as NCBI checks them, the digit that
+/// overflows taken before the check. The one port of NCBI's numbers of an input buffer, for the
+/// ASN.1 text reader (`Reader::get_number`) and the XML reader (`xml_reader::XmlReader`), whose
+/// streams read them from the same buffer. The number, with `r.pos` set to the byte after the
+/// bytes taken; where it stops, `r.pos` is set there and the expansion returns from the reader's
+/// function with `r.char_at(pos)`'s error (the input ends after the sign) or `r.number_stop`'s
+/// (no digit, [`NumberStop::Bad`]; past the range, [`NumberStop::Overflow`]). The negation of the
+/// largest magnitude wraps to the least number (2^31 negated as an Int4 is the least Int4,
+/// likewise in 64 bits).
+///
+/// A macro, expanded in each reader's function, rather than a function: inlined from a function
+/// of its own, the parser kept the sign byte past the read of the byte after it, one instruction
+/// more per number of the text reader (callgrind on `-in_pssm` of a text PSSM, line RG-F3 PR 2).
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
 // (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
-#[inline(always)]
-pub(crate) fn buffer_number<S: AsnSource + ?Sized>(
-    src: &mut S,
-    at: &mut usize,
-    pos: usize,
-    mut c: u8,
-    max: u64,
-    signed: bool,
-) -> std::result::Result<i64, NumberStop> {
-    let mut pos = pos + 1;
-    // The sign, a constant of each arm (`Some(negative)`): the sign byte is not kept past the
-    // read of the byte after it (one instruction less per number than a test of that byte).
-    let sign = match c {
-        b'-' if signed => Some(true),
-        b'+' => Some(false),
-        _ => None,
-    };
-    let negative = sign == Some(true);
-    if sign.is_some() {
-        c = match src.byte_at(pos) {
-            Some(c) => c,
-            None => {
-                *at = pos;
-                return Err(NumberStop::Eof);
+macro_rules! buffer_number {
+    ($r:ident, $pos:expr, $c:expr, $max:expr, $signed:expr) => {{
+        let mut pos: usize = $pos + 1;
+        let mut c: u8 = $c;
+        let max: u64 = $max;
+        let mut negative = false;
+        if ($signed && c == b'-') || c == b'+' {
+            negative = c == b'-';
+            c = $r.char_at(pos)?;
+            pos += 1;
+        }
+        if !c.is_ascii_digit() {
+            $r.pos = pos;
+            return Err($r.number_stop($crate::report::serial::asn_text_reader::NumberStop::Bad));
+        }
+        let mut n = u64::from(c - b'0');
+        let before_mul = max / 10;
+        let limit_add = max % 10 + u64::from(negative);
+        let mut overflow = false;
+        let (end, _) = $r.src.scan(pos, |d| {
+            if !d.is_ascii_digit() {
+                return false;
             }
-        };
-        pos += 1;
-    }
-    if !c.is_ascii_digit() {
-        *at = pos;
-        return Err(NumberStop::Bad);
-    }
-    let mut n = u64::from(c - b'0');
-    let before_mul = max / 10;
-    let limit_add = max % 10 + u64::from(negative);
-    let mut overflow = false;
-    let (end, _) = src.scan(pos, |d| {
-        if !d.is_ascii_digit() {
-            return false;
+            let d = u64::from(d - b'0');
+            if n > before_mul || (n == before_mul && d > limit_add) {
+                overflow = true;
+                return false;
+            }
+            n = n * 10 + d;
+            true
+        });
+        if overflow {
+            // The digit that overflows is taken before the check.
+            $r.pos = end + 1;
+            return Err(
+                $r.number_stop($crate::report::serial::asn_text_reader::NumberStop::Overflow)
+            );
         }
-        let d = u64::from(d - b'0');
-        if n > before_mul || (n == before_mul && d > limit_add) {
-            overflow = true;
-            return false;
-        }
-        n = n * 10 + d;
-        true
-    });
-    if overflow {
-        // The digit that overflows is taken before the check.
-        *at = end + 1;
-        return Err(NumberStop::Overflow);
-    }
-    *at = end;
-    Ok(if negative {
-        (n as i64).wrapping_neg()
-    } else {
-        n as i64
-    })
+        $r.pos = end;
+        Ok(if negative {
+            (n as i64).wrapping_neg()
+        } else {
+            n as i64
+        })
+    }};
 }
+pub(crate) use buffer_number;
+
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:420-436 (`FillBuffer` at the end of a
 // file: `NCBI_THROW` of a `CEofException` with `eEof` and `m_Error`, the error "end of file")
 /// The `CEofException` of NCBI's input buffer at the end of the input: what `SkipWhiteSpace`
@@ -1234,7 +1228,7 @@ impl<S: AsnSource> Reader<S> {
     }
 
     /// `GetInt4`, `GetUint4` (`signed` false) and `GetInt8` after `SkipWhiteSpace` (`ReadInt4`,
-    /// `ReadUint4`, `ReadInt8`): [`buffer_number`] after `SkipWs`, for the archive reader and the
+    /// `ReadUint4`, `ReadInt8`): [`buffer_number!`] after `SkipWs`, for the archive reader and the
     /// object streams (`asn_input`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:783-787
     pub(crate) fn get_number(&mut self, max: u64, signed: bool) -> Result<i64> {
@@ -1242,13 +1236,22 @@ impl<S: AsnSource> Reader<S> {
         let (pos, c) = self.white_space_at(self.pos)?;
         // `SkipWs` then `GetChar`: the first byte that is not C's `isspace`, taken.
         let (pos, c) = self.ws_at(pos, c)?;
-        match buffer_number(&mut self.src, &mut self.pos, pos, c, max, signed) {
-            Ok(n) => Ok(n),
-            Err(stop) => Err(self.number_stop(stop)),
+        buffer_number!(self, pos, c, max, signed)
+    }
+
+    /// `PeekChar()` at `pos`: the end of the text is [`AsnTextErrorKind::Eof`] at `pos`.
+    #[inline]
+    pub(crate) fn char_at(&mut self, pos: usize) -> Result<u8> {
+        match self.src.byte_at(pos) {
+            Some(c) => Ok(c),
+            None => {
+                self.pos = pos;
+                Err(self.end_of_text())
+            }
         }
     }
 
-    /// The error of a number that `buffer_number` stops in, at the position it stopped at.
+    /// The error of a number that [`buffer_number!`] stops in, at the position it stopped at.
     #[cold]
     #[inline(never)]
     fn number_stop(&self, stop: NumberStop) -> AsnTextError {

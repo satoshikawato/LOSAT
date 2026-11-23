@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.84
+- Version: 1.85
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -442,7 +442,12 @@
   where NCBI's engine counts it, after the errors of the lengths and the matrix that NCBI gives first;
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.83; first 1.79, then
   1.83 at the merge of dev that brought 1.78 to 1.82 (psiblast line item PS10a, line RG item D5b-5, line NP items
-  O4c and M4c-1, psiblast line item PS12c), then 1.84 at the merge of dev that brought line NP item M4b-AX's 1.83)
+  O4c and M4c-1, psiblast line item PS12c), then 1.84 at the merge of dev that brought line NP item M4b-AX's 1.83);
+  1.85 2026-11-22 (alias files with `GILIST`, `TILIST` and `SEQIDLIST`, line RG item D1c-1: an
+  explicit rejection of a `SEQIDLIST` token that NCBI warns about, kept under rule 2 by the
+  maintainer (Owner's answer 「Q-D1c-R2=A」, 2026-11-22 22:4x JST); numbered after 1.71; first
+  1.72, then 1.74, 1.78, 1.81, 1.82, 1.83 and 1.85 at the merges of dev that brought 1.72 and 1.73,
+  then 1.74 to 1.77, then 1.78 to 1.80, then 1.81, then 1.82, then 1.83 and 1.84)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2816,6 +2821,16 @@ file would differ, and NCBI's programs still could not open the database).
   allocator, not of its reader, refused as the reads past an OID list file's page above. Inside the array's last byte the
   clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
   first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
+
+- An alias file's `SEQIDLIST` over a version 4 database (version 1.85, 2026-11-22, line RG item
+  D1c-1; rule 2, the rejection kept by the maintainer: Owner's answer 「Q-D1c-R2=A」, 2026-11-22
+  22:4x JST), in a shape whose
+  NCBI result is deterministic but has no known use: a token of the list that NCBI warns about and
+  drops (a token of form feeds and vertical tabs alone: `WARNING:  <token> is not a valid seqid
+  string.` when NCBI reads the list, at its constructor's scan or at the search's first read under
+  `NSEQ` and `LENGTH`). LOSAT refuses (exit 1) where NCBI reads the list. A list that two volumes
+  or more translate, with an id that a second simplification changes, is read in NCBI's order:
+  the ids simplified again for each later volume and not sorted again (rows `db.il.bp.cv.*`).
 
 - `losat blastn -use_index true` of a megablast search (version 1.65, 2026-11-21, line RG item
   D5b-1, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07), where NCBI's

@@ -1533,15 +1533,17 @@ pub(super) fn scan_chunk<S: TbxScore>(
     // The one-hit word finder (`-window_size 0`) has a loop of its own, compiled out of
     // line (`x_out_of_line`) so that this function keeps the two-hit scan's code.
     if window == 0 {
-        // A chunk whose ranges start before it (masks stored out of order,
-        // `common::translated_chunks::scan_lead`) is the only one whose words can lie before it:
-        // only its loop tests for them (`AROUND`).
-        let around = x_soft_calls
-            .and_then(|calls| x_soft_chunk(calls, &chunk))
-            .is_some_and(|ranges| {
-                crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
-            });
         return x_out_of_line(|| {
+            // A chunk whose ranges start before it (masks stored out of order,
+            // `common::translated_chunks::scan_lead`) is the only one whose words can lie before
+            // it: only its loop tests for them (`AROUND`). The choice is made in this out-of-line
+            // call, so that the two-hit scan below keeps its code (inlined here, it cost
+            // `-db_soft_mask` two-hit searches 2.9 % more instructions).
+            let around = x_soft_calls
+                .and_then(|calls| x_soft_chunk(calls, &chunk))
+                .is_some_and(|ranges| {
+                    crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
+                });
             if around {
                 scan_chunk_one_hit::<S, true>(
                     frame,

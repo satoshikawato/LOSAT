@@ -912,7 +912,16 @@ fn write_blastx_tax_report(
         ShownSubjects::Database { reported, .. } => Some(reported.loads()),
         ShownSubjects::Fasta { .. } => None,
     };
-    let report = report_batch(&tax_queries, parsed, plain, true, loads, names, program)?;
+    let report = report_batch(
+        &tax_queries,
+        parsed,
+        plain,
+        true,
+        loads,
+        names,
+        program,
+        options.is_html,
+    )?;
     let mut q_idx = 0;
     for batch in batches {
         for qidx in 0..batch.queries.len() {

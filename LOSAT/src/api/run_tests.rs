@@ -140,3 +140,80 @@ fn the_run_writes_to_the_callers_outputs_and_the_errors_are_the_command_lines() 
         "{error}"
     );
 }
+
+/// `PROTEIN` back-translated, one codon per residue: a nucleotide sequence for the programs whose
+/// query or subjects are nucleotides.
+fn coding_sequence() -> Vec<u8> {
+    PROTEIN
+        .iter()
+        .flat_map(|residue| -> &[u8] {
+            match residue {
+                b'A' => b"GCT",
+                b'R' => b"CGT",
+                b'N' => b"AAT",
+                b'D' => b"GAT",
+                b'Q' => b"CAA",
+                b'E' => b"GAA",
+                b'G' => b"GGT",
+                b'H' => b"CAT",
+                b'I' => b"ATT",
+                b'L' => b"CTG",
+                b'K' => b"AAA",
+                b'M' => b"ATG",
+                b'F' => b"TTT",
+                b'P' => b"CCG",
+                b'S' => b"TCT",
+                b'T' => b"ACC",
+                b'V' => b"GTT",
+                b'Y' => b"TAT",
+                other => panic!("no codon for {}", char::from(*other)),
+            }
+            .as_slice()
+        })
+        .copied()
+        .collect()
+}
+
+/// A query and a subject of `program`, each the AsnA part (`PROTEIN`) or its coding sequence.
+fn self_pair(program: Program) -> (Vec<FastaRecord>, Vec<FastaRecord>) {
+    let dna = coding_sequence();
+    let (query, subject): (&[u8], &[u8]) = match program {
+        Program::Blastn | Program::Tblastx => (&dna, &dna),
+        Program::Blastx => (&dna, PROTEIN),
+        Program::Tblastn => (PROTEIN, &dna),
+        _ => (PROTEIN, PROTEIN),
+    };
+    (
+        vec![FastaRecord::new("Query_1", b"q", query)],
+        vec![FastaRecord::new("Subject_1", b"s", subject)],
+    )
+}
+
+// Line RG item T4a2: only the pairwise report reads `-html`'s links (`blastinput::app::html_links`),
+// so a call of outfmt 6 then 0 has them for its second format: that report is the HTML report of
+// outfmt 0 alone, in each of the five programs.
+#[test]
+fn the_html_links_reach_outfmt_0_in_any_place() {
+    for program in [
+        Program::Blastn,
+        Program::Blastp,
+        Program::Blastx,
+        Program::Tblastn,
+        Program::Tblastx,
+    ] {
+        let (query, subject) = self_pair(program);
+        let search = validate(program, &["-html"]).unwrap();
+        let alone = run_collect(&search, Inputs::new(&query, &subject), &["0"]).unwrap();
+        assert!(
+            alone.reports[0].bytes.starts_with(b"<HTML>"),
+            "{program}: {}",
+            String::from_utf8_lossy(&alone.reports[0].bytes)
+        );
+        let second = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"]).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&second.reports[1].bytes),
+            String::from_utf8_lossy(&alone.reports[0].bytes),
+            "{program}"
+        );
+    }
+}

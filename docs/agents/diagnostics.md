@@ -486,6 +486,7 @@ export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNDIAGPACK=1
 export LOSAT_X_TBNFLOWHELP=1
+export LOSAT_X_TBNHITSTEP=1
 export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKCTX=1
 export LOSAT_X_TBNLINKSETS=1
@@ -5875,6 +5876,21 @@ Scheduling (each value computed by one thread with the original function; order 
   threads x0.953 / x0.955 / x0.956 / x0.958 (8 of 8, 12 of 12 each faster; instructions x0.9987; `=0` x0.9992 /
   x1.0005 / x1.0002 / x0.9998); AP027131 `-subject` at 1 / 16 / 32 x0.991 / x0.995 / x0.990 (12, 7, 8 of 12 faster;
   `=0` x1.0001 / x1.0007 / x1.0000).
+- `LOSAT_X_TBNHITSTEP=1` tblastn (speed; in the strict set from the pull request that added it, 2026-11-23;
+  `=0` turns it off; `tblastn/x_tbn_hitbf.rs` `x_hits_steps`, `x_hit_step`, `XDiagCell::PACKED`, `x_hit_steps`;
+  `tblastn/search_init.rs` `x_pairs_bf_with`): the two-hit loop of the units (`x_hits_bf`: the too-far and overlap
+  outcomes without a branch) takes each hit's outcomes from one compare, two hits a step. With `dw = diff - wordsize`
+  and `k = window - wordsize`, a candidate is `dw` below `k` unsigned and too far is `dw >= k` signed whenever
+  `diff - wordsize` is exact: in 32 bits on a packed table (a flag-0 cell's last_hit in [0, 2^31), `s + offset` in
+  [window, 2^31) by `x_packs`), in 64 bits on `(last_hit, flag)` cells (any window, NCBI's wrapped `diff`). The loop
+  before compared `diff - wordsize` with `k` and `diff` with the window, with a copy of `diff` for the second. Cause
+  removed: retirement-bound, 18 issued µops per hit on the workstation's Ice Lake cores (the cell's store with an
+  index is two), of which the second compare, the copy and the loop's add and branch (once per hit) are 4; now 15
+  (the loop's control once per two hits). The hits taken and the cells left are those of `x_hits_bf` (unit tests
+  `x_hits_bf_takes_the_reference_outcomes`, against the reference's statements on random tables with windows up to
+  i32::MAX and wrapping offsets, and `x_hits_bf_on_packed_cells_equals_pair_cells` on both layouts;
+  `tests/tblastn_scan_byte.rs` `the_hit_steps_change_no_report`: the report of `=0` at one and four threads). Always:
+  every tblastn search whose two-hit window is above the word size.
 - `LOSAT_X_CHAINRUN=1` tblastn, blastx (speed; in the strict set from the pull request that added it, 2026-11-16;
   `=0` turns it off; `tblastx/x_scan_byte.rs` `write_avx2`, `copy_avx2_run`, `X_CHAIN_RUN`): the AVX2 copy of the scan on
   presence bytes (`LOSAT_X_TBNSCANBYTE`'s units, BLASTX's direct loop under `LOSAT_X_BXSCANBYTE`) writes the first 24

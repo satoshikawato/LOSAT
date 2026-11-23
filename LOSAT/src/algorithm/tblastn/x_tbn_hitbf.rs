@@ -32,6 +32,26 @@
 //! The loop runs for every offset array of the unit path (the former switch `LOSAT_X_TBNHITBF`
 //! graduated on 2026-10-26). TBLASTX's unit scan has a loop of this form under its own switch,
 //! LOSAT_X_TBXHITBF.
+//!
+//! EXPERIMENT (LOSAT_X_TBNHITSTEP, in the strict set): `x_hits_steps`, the same outcomes from one
+//! compare, two hits a step. With `dw = diff - wordsize` and `k = window - wordsize`, a candidate is
+//! `0 <= dw < k` (`dw` below `k` as an unsigned number) and too far is `diff >= window`, which is
+//! `dw >= k` whenever `diff - wordsize` is exact; so one compare of `dw` with `k` gives both, the
+//! unsigned outcome for the stop and the signed one for the cell's next value. The loop above
+//! takes two compares (`diff - wordsize` with `k`, `diff` with `window`) and a copy of `diff`.
+//! `diff - wordsize` is exact:
+//! - on a packed table (`u32` cells, `XDiagCell::PACKED`) in 32 bits. A flag-0 cell holds
+//!   last_hit in [0, 2^31) (31 bits), and the table keeps `s + diag_offset` in [window, 2^31)
+//!   (`search_init::x_packs`: offsets below INT4_MAX / 4 + window + the longest unit, a window of
+//!   at most 2^28, below 8.3 x 10^8 in all). So `diff` lies in (window - 2^31, 2^31) and
+//!   `diff - wordsize` above `window - wordsize - 2^31 >= 1 - 2^31`: neither wraps. A flag-1 cell
+//!   stops the loop whatever `dw` is.
+//! - on a `(last_hit, flag)` table (any window, offsets that may wrap) in 64 bits: `diff` is the
+//!   reference's wrapped `i32`, and `diff as i64 - wordsize` never wraps.
+//!
+//! Two hits a step: the step's control (one add, one decrement and its branch) is shared by the
+//! two hits, which are taken one after the other in order, as above. The hits after the last whole
+//! step are taken one by one.
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 
@@ -40,6 +60,10 @@ use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 /// its four bytes (`LOSAT_X_TBNDIAGPACK`: last_hit in bits 0-30, flag in bit 31; the table's
 /// values fit 31 bits without a sign, `search_init::x_packs`), or `(last_hit, flag)`.
 pub(super) trait XDiagCell: Copy {
+    /// Whether the table is packed (`u32` cells): a flag-0 cell holds last_hit in [0, 2^31), and
+    /// the table keeps `s + diag_offset` in [window, 2^31) (`search_init::x_packs`), so
+    /// `x_hits_steps` takes `diff - wordsize` in 32 bits (module doc).
+    const PACKED: bool;
     /// `(last_hit, flag)`.
     fn get(self) -> (i32, bool);
     /// Stores both `last_hit` and `flag`.
@@ -51,6 +75,8 @@ pub(super) trait XDiagCell: Copy {
 }
 
 impl XDiagCell for (i32, bool) {
+    const PACKED: bool = false;
+
     #[inline(always)]
     fn get(self) -> (i32, bool) {
         self
@@ -73,6 +99,8 @@ impl XDiagCell for (i32, bool) {
 }
 
 impl XDiagCell for u32 {
+    const PACKED: bool = true;
+
     #[inline(always)]
     fn get(self) -> (i32, bool) {
         ((self & 0x7fff_ffff) as i32, self >> 31 != 0)
@@ -101,6 +129,126 @@ impl XDiagCell for u32 {
 /// window and word size (module doc): `0 <= wordsize < window`.
 pub(super) fn fits(window: i32, word_size: usize) -> bool {
     i32::try_from(word_size).is_ok_and(|word_size| word_size < window)
+}
+
+// No NCBI counterpart: reads LOSAT_X_TBNHITSTEP once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNHITSTEP): whether the two-hit loop of the units is `x_hits_steps` (module
+/// doc). A switch of the strict set, on unless it is `0`.
+pub(super) fn x_hit_steps() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNHITSTEP"))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (module doc).
+/// `x_hits_bf`, or `x_hits_steps` when `STEPS` (LOSAT_X_TBNHITSTEP): the same hits taken, the same
+/// cells left.
+#[inline(always)]
+pub(super) fn x_hits<C: XDiagCell, const STEPS: bool>(
+    entries: &mut [C],
+    offset: i32,
+    window: i32,
+    word_size: i32,
+    pairs: &[BlastOffsetPair],
+) -> usize {
+    if STEPS {
+        x_hits_steps(entries, offset, window, word_size, pairs)
+    } else {
+        x_hits_bf(entries, offset, window, word_size, pairs)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (module doc).
+/// One hit of `x_hits_steps` on the cell `entry`: false (nothing written) for a flag-1 cell or a
+/// candidate, else the cell's next `last_hit` written and true. `k` is `window - wordsize`.
+///
+/// # Safety
+/// `entry` is a cell of the table.
+#[inline(always)]
+unsafe fn x_hit_step<C: XDiagCell>(
+    entry: *mut C,
+    s_off: u32,
+    offset: i32,
+    word_size: i32,
+    k: u32,
+) -> bool {
+    // SAFETY: (caller) a cell of the table.
+    let (last_hit, flag) = unsafe { entry.read() }.bf_read();
+    // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
+    // [C] diff = subject_offset - last_hit;
+    let s_diag = (s_off as i32).wrapping_add(offset);
+    let diff = s_diag.wrapping_sub(last_hit);
+    // diff - wordsize, exact in either width (module doc): below k unsigned = a candidate, at
+    // least k signed = too far.
+    let (candidate, too_far) = if C::PACKED {
+        let dw = diff.wrapping_sub(word_size);
+        ((dw as u32) < k, dw >= k as i32)
+    } else {
+        let dw = i64::from(diff) - i64::from(word_size);
+        ((dw as u64) < u64::from(k), dw >= i64::from(k))
+    };
+    // [C] if (diag_array[diag_coord].flag), or a hit past both tests.
+    if flag | candidate {
+        return false;
+    }
+    // [C] if (diff >= window) last_hit = subject_offset + diag_offset;
+    // [C] if (diff < wordsize) continue;
+    let next = if too_far { s_diag } else { last_hit };
+    // SAFETY: as above.
+    unsafe { (*entry).set_last_hit(next) };
+    true
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (module doc).
+/// EXPERIMENT (LOSAT_X_TBNHITSTEP): `x_hits_bf` with each hit's outcomes from one compare
+/// (`x_hit_step`), two hits a step (module doc). The same hits taken, the same cells left; the
+/// same conditions (`fits(window, word_size)`, `entries.len()` a power of two).
+#[inline(always)]
+pub(super) fn x_hits_steps<C: XDiagCell>(
+    entries: &mut [C],
+    offset: i32,
+    window: i32,
+    word_size: i32,
+    pairs: &[BlastOffsetPair],
+) -> usize {
+    debug_assert!(entries.is_empty() || entries.len().is_power_of_two());
+    debug_assert!(0 <= word_size && word_size < window);
+    let Some(last) = entries.len().checked_sub(1) else {
+        return 0;
+    };
+    // [C] diag_coord = (query_offset - subject_offset) & diag_mask; (diag_mask = length - 1)
+    let mask = last as u32;
+    // window - wordsize: the length of the candidate range of diff - wordsize.
+    let k = window.wrapping_sub(word_size) as u32;
+    let base = entries.as_mut_ptr();
+    let start = pairs.as_ptr();
+    let mut p = start;
+    // SAFETY: every pair read is one of `pairs` (the steps cover `2 * steps <= pairs.len()` of
+    // them, the rest loop stops at the end); every cell index is at most `mask` =
+    // `entries.len() - 1`.
+    unsafe {
+        let end = start.add(pairs.len());
+        let mut steps = pairs.len() / 2;
+        while steps != 0 {
+            for j in 0..2 {
+                let pair = p.add(j).read();
+                let entry = base.add((pair.q_off.wrapping_sub(pair.s_off) & mask) as usize);
+                if !x_hit_step(entry, pair.s_off, offset, word_size, k) {
+                    return p.add(j).offset_from(start) as usize;
+                }
+            }
+            p = p.add(2);
+            steps -= 1;
+        }
+        while p < end {
+            let pair = p.read();
+            let entry = base.add((pair.q_off.wrapping_sub(pair.s_off) & mask) as usize);
+            if !x_hit_step(entry, pair.s_off, offset, word_size, k) {
+                break;
+            }
+            p = p.add(1);
+        }
+        p.offset_from(start) as usize
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (module doc).

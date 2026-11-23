@@ -110,8 +110,9 @@ test("the engine's refusal of a form's value marks the field that holds it, unti
   await page.getByTestId('param-word_size').selectOption('other');
   const other = page.getByTestId('param-word_size-other');
   await other.fill('3');
-  // The engine's argument error: the usage, a line of 72 "=", and the posts.
-  const message = /Error: Argument "word_size"\. Illegal value, expected >=4:\s+`3'\s*$/;
+  // The engine's argument error: the usage, a line of 72 "=", and NCBI's two posts; the text ends with the second
+  // (`Error:  Argument ...`, two spaces).
+  const message = /Error:\s+Argument "word_size"\. Illegal value, expected >=4:\s+`3'\s*$/;
   await expect(page.getByTestId('argv-validation')).toHaveText(message);
   await expectRefused(other, message);
   // The text box after "Other" holds the value; the select beside it and the other fields are not marked.

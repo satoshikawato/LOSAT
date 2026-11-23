@@ -27,7 +27,6 @@ fn payload(num_ident: i32) -> KappaHspPayload {
         num_ident,
         num_positives: 0,
         report_num_ident: 0,
-        report_num_positives: 0,
         report_mismatches: 0,
         align_length: 0,
         mismatches: 0,

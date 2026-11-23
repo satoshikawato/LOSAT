@@ -32,6 +32,42 @@ pub struct ProteinOptionsCheck<'a> {
     pub x_dropoff: Option<f64>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3266
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4059-4061
+/// LOSAT's limit of `-evalue` for blastp, psiblast, rpsblast and tblastn (`program`, in
+/// capitals), checked where NCBI starts the search (decision D12 of
+/// docs/evidence/losat_web_e2e/AUTHORITY.md):
+///
+/// - An infinite value (`+inf`, `1e999`): NCBI's score cutoff of an e-value is the logarithm of
+///   0 converted to an `Int4`, a conversion out of range. Refused in every mode.
+/// - Exactly DBL_MAX (1.7976931348623157e308) with the composition-based redo
+///   (`composition_redo`: modes 1 to 3 after IDENTITY's reset): a list whose HSPs all fail the
+///   redo keeps the best e-value DBL_MAX, which passes `-evalue`, so NCBI puts the empty list
+///   into the hit list and crashes reading its first HSP (SIGSEGV) when the search keeps enough
+///   HSPs; LOSAT cannot tell beforehand. Without the redo (`-comp_based_stats 0`, IDENTITY,
+///   `-ungapped`) NCBI never inserts an empty list and runs: NCBI BLAST+ 2.17.0 gives the rows
+///   of 1.7976931348623156e308 there (blastp, psiblast and tblastn, gapped and ungapped, line
+///   O4c's review D1), so LOSAT searches it.
+pub(crate) fn check_evalue_limit(
+    evalue: f64,
+    composition_redo: bool,
+    program: &str,
+) -> anyhow::Result<()> {
+    let ncbi_program = program.to_ascii_lowercase();
+    if evalue > f64::MAX {
+        anyhow::bail!(
+            "an infinite -evalue ({evalue}), whose score cutoff NCBI BLAST+'s {ncbi_program} cannot hold in an integer, is not supported by LOSAT's {program}"
+        );
+    }
+    if evalue == f64::MAX && composition_redo {
+        anyhow::bail!(
+            "an -evalue of DBL_MAX ({evalue}) with composition-based statistics (-comp_based_stats 1 to 3), with which NCBI BLAST+'s {ncbi_program} crashes on some inputs, is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
+}
+
 /// NCBI's `BLAST_ValidateOptions` for blastp and tblastn, in its order, with NCBI's
 /// messages (`CInputException`): the scoring options, the lookup table options, the
 /// ungapped X-drop (`-xdrop_ungap`), the hit saving options and the word size of the

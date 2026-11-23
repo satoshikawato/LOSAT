@@ -2008,7 +2008,8 @@ pub enum AfterThrow {
     WritesRow,
     /// The pairwise report, outfmt 0: the `catch` of the description line writes it with the
     /// Seq-align id and `Unknown` (`ParsedSubject::thrown_description`) and the report goes on
-    /// (with `-html` the first such line ends the run, `PairwiseReads::html`); then `GetDbType` loads the subject of the first alignment shown, without a `catch` for an
+    /// (with `-html` the first such line ends the run, `PairwiseReads::html`); then `GetDbType`
+    /// loads the subject of the first alignment shown, without a `catch` for an
     /// id that is not local: where it throws, the run ends after the query's description lines
     /// (`alignment_end`); otherwise the `catch` of each alignment writes NCBI's skipped line in
     /// place of each alignment of a subject that throws (`report::pairwise::DatabaseHeading::

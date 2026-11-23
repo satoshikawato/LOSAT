@@ -22,6 +22,7 @@
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
+use super::profile::TracebackProfile;
 use super::traceback::{sort_by_score, swap_roles, RpsTraceScratch, RpsTraceback, RpsTraced};
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
@@ -139,18 +140,19 @@ impl RpsTraceback<'_> {
         };
         for list in lists {
             let oid = list.oid as usize;
-            let start = self.offsets[oid] as usize;
-            let length = (self.offsets[oid + 1] - self.offsets[oid] - 1) as usize;
             k_mark = Some(list.oid);
             if list.hsps.is_empty() {
                 continue;
             }
-            let consensus = &self.consensus.letters()?[start..start + length];
-            redo.files
-                .freq_ratios(start, length, &mut scratch.freq_bytes, &mut scratch.ratios)
-                .map_err(|error| {
-                    anyhow::anyhow!("a profile database whose .freq file cannot be read ({error}) is not supported by LOSAT's {program}")
-                })?;
+            // The profile as NCBI's traceback reads it (`TracebackProfile`): `L_pin` (its `.pin`
+            // length) the redo's query length, its `.psq` letters the redo's query, `L_pin`
+            // frequency-ratio rows from its offset (read A), then its composition (read B).
+            let profile =
+                TracebackProfile::new(list.oid, self.offsets, self.letters.of(list.oid)?, program);
+            let length = profile.length();
+            let consensus = profile.letters();
+            profile.freq_rows(redo.files, &mut scratch.freq_bytes, &mut scratch.ratios)?;
+            profile.composition()?;
             let Some(info) = PosMatrixInfo::new(
                 consensus,
                 &scratch.ratios,
@@ -198,7 +200,8 @@ impl RpsTraceback<'_> {
                 matrix,
                 std::mem::take(&mut scratch.gap),
             )
-            .with_bound_check();
+            .with_bound_check()
+            .with_profile_reads();
             if !context_0_valid {
                 run = run.without_valid_context();
             }
@@ -238,7 +241,10 @@ impl RpsTraceback<'_> {
                 Ok(kind.redo(&redo_match, &mut run, list.oid, &hsps, query))
             };
             let exceeded = run.bound_exceeded();
+            let fault = run.profile_fault();
             let (matrix, gap) = run.into_buffers();
+            // The redo's reads of the profile (reads C and D, `RedoRun::with_profile_reads`).
+            profile.redo_fault(fault)?;
             // The bound of every matrix the adjustments built (`RedoRun::with_bound_check`).
             if let Some(bound) = exceeded {
                 anyhow::bail!(

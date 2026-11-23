@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.85
+- Version: 1.87
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -452,7 +452,15 @@
   NCBIpna and NCBIpaa; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
   numbered after 1.84; first 1.80, then 1.84 at the merge of psiblast line item PS10c, which brought
   dev's 1.80 to 1.82 and PS10c's 1.83, then 1.85 at the merge of dev that brought line NP item
-  M4b-AX's 1.83 and PS10c's 1.84)
+  M4b-AX's 1.83 and PS10c's 1.84);
+  1.87 2026-11-23 (rule-3 rejections of RPSBLAST and RPSTBLASTN at the traceback of a profile whose
+  `.psq` letters differ from its `.rps` columns, psiblast line item PS10e: such a profile is searched
+  with its `.pin` length, and a query batch whose hit makes NCBI's traceback leave the profile's data
+  is refused; the refusal at the volume's open narrowed to offsets that do not ascend; and one
+  rule-2 rejection pending the maintainer's decision, RPSTBLASTN without composition-based
+  statistics on an alignment that starts past such a profile's letters; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.86, the number that PS10d's 1.85
+  takes at its merge of dev, whose 1.85 is line RG item D1c-1's)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2960,6 +2968,56 @@ file would differ, and NCBI's programs still could not open the database).
     past `int` are written as NCBI writes them (rule 2: rows RL01 to RL04, RL06 and RL07).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
+- RPSBLAST and RPSTBLASTN on a profile whose `.psq` letters (its `.pin` length `L_pin`) differ from
+  its `.rps` columns `L_rps` (version 1.87, 2026-11-23, psiblast line item PS10e, line PS
+  `DECISIONS.md` 97, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07).
+  makeprofiledb writes such a profile for a scored `.smp` whose `seq-data` is nucleotide-coded or has
+  more or fewer letters than its length (it reads no letter of a scored profile and checks only the
+  length). NCBI's preliminary stage reads the profile's `.rps` rows only; its traceback
+  (`s_RPSComputeTraceback`, `blast_traceback.c:1046-1316`) takes the profile's `.psq` letters as its
+  query and `L_pin` as the profile's length. LOSAT searches such a profile as NCBI does, with `L_pin`
+  in the traceback (the rows from the profile's offset, the composition, the words, the redo's
+  matrix and query, the e-value length; fixture rows `db.rps.odd.*` and `db.rpstbn.odd.*`), and
+  refuses the query batch (exit 1, "a hit on profile N of an RPS-BLAST volume, whose consensus has
+  L_pin letters in .psq for L_rps columns of scores in .rps (makeprofiledb writes it for a scored
+  profile whose seq-data is nucleotide-coded or has more or fewer letters than its length), where
+  NCBI BLAST+ 2.17.0's traceback READ, is not supported by LOSAT's RPSBLAST", one text for both
+  programs; `LOSAT/src/algorithm/rps_search/profile.rs`) at the first read where NCBI's traceback
+  leaves the profile's data, in NCBI's order (survey `PR/ps10e/SURVEY_ps10e.md` of the line's
+  records, its probes named here):
+  - A, the rows from the profile's offset: `L_pin` `.freq` row pointers with composition-based
+    statistics, `L_pin` `.rps` row pointers for RPSBLAST's rescale without them, of NCBI's `R + 1`
+    (`blast_traceback.c:968-982`; entry `R`, the row after the rows, read in the file's mapping): the
+    offset plus `L_pin` above `R + 1`, or a column of row `R` past the file's last page (probe
+    A_P23x3L_q3, SIGSEGV; row `db.rps.rej.odd.p23x3l.q3`). READ is "reads past its rows".
+  - B, the composition with composition-based statistics (`Blast_ReadAaComposition`,
+    `composition_adjustment.c:1162-1199`): a letter of 28 or more, such as the packed bytes of a
+    nucleotide-coded profile (B_SC_q2, SIGSEGV; rows `db.rps.rej.odd.sc.q2`, `.sc.q1q2`, `.sc2v.q2`,
+    `.hl.q12.m1`, `db.rpstbn.rej.odd.sc.nq2`). READ is "reads letter B past its composition tables".
+  - C, the near-identical test of the redo (`s_TestNearIdentical`, `blast_kappa.c:1259-1340`, on the
+    copy of `s_SequenceGetRange`, `:1671-1708`): a read past the copy's `L_pin + 2` bytes or past its
+    `L_pin - 7` words, or, below 8 letters, of the null word table at an offset other than 0
+    (`:1161-1166`). T_AA1_q1, Q_P16_q1, Q_P10_q1 and Q_P10_nq1 exit 0 with invalid reads under
+    valgrind; Q_P6_q1 ends with SIGSEGV (rows `db.rps.rej.odd.aa1.q1`, `.p16.q1`, `.p10.q1`, `.p6.q1`,
+    `db.rpstbn.rej.odd.p10.nq1`). READ is "reads past its copy of the consensus".
+  - D, an alignment that starts at or past `L_pin` in NCBI's heap matrix of `L_pin` rows: the redo's
+    (`s_RedoOneAlignment`, `blast_kappa.c:1924-1946`), and RPSBLAST's rescaled matrix without
+    composition-based statistics, whose rows the start of an HSP with both starts 0 also reads
+    (T_AA1_q1_c0, H_HL_q12_m6c0: SIGSEGV; rows `db.rps.rej.odd.aa1.q1c0`, `.hl.q12.m6c0`). READ is
+    "starts an alignment past the consensus".
+  - E, the identities and positives of an alignment traced without composition-based statistics
+    (`blast_traceback.c:589`, `blast_hits.c:796-812`): a profile letter of 28 or more in a
+    substituted column reads past the 28 rows of the score matrix (N_SC_nq2_c0, SIGSEGV; row
+    `db.rpstbn.rej.odd.sc.nq2c0`). READ is "reads letter B past its score matrix".
+
+  A profile whose `L_pin` is `L_rps` never meets them, and a hit that NCBI's preliminary e-value or
+  hit list leaves out of the traceback meets none (rows `db.rps.odd.sc.q2.e14`,
+  `db.rps.odd.hl.q12.m5c0`). The refusal at the volume's open that compared each profile's rows with
+  its `.pin` length (from series PR item PS11b) is narrowed to offsets that do not ascend, a profile
+  without its sentinel row ("a profile database whose .rps profile N has M rows (not even its
+  sentinel row) is not supported"). The preliminary tree's refusal of a concatenated length below the
+  rows (line RG item D1a-4) names this further cause: profiles whose `.pin` lengths are below their
+  `.rps` rows (N_AA1s_nqt2_c0, NCBI exit 4; row `db.rpstbn.rej.odd.aa1s.nqt2c0`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 
@@ -3363,9 +3421,9 @@ or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBI
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
 delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
-would port. The last four entries are not of these. The last (version 1.81, line NP item M4c-1), the one
-before it (version 1.60, line RG item D5a) and the one before that (version 1.54, line RG item X5)
-say so themselves. The one before those (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
+would port. The last five entries are not of these. The last (version 1.87, psiblast line item PS10e), the one
+before it (version 1.81, line NP item M4c-1), the one before that (version 1.60, line RG item D5a)
+and the one before those (version 1.54, line RG item X5) say so themselves. The one before them (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
 query's Seq-ids, not a database; it is Owner-delegated (standing instruction 2026-09-29, restated
 2026-10-07), not under the acceptance of 2026-11-02; and it has no row in PD-LOSAT-DATABASE-SEARCH.
 Version 1.45's rejection of well-formed BitMagic data was removed in version 1.58: line RG item
@@ -3453,6 +3511,22 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   B, to reproduce the C++ runtime's buffering, was not taken. Unit tests in `LOSAT/src/writedb/gi_mask_tests.rs`, cases `w25`, `w25b` and `m04`
   (refused) and `x11_1`, `x11_2` and `x12` (written in turn) of `LOSAT/tests/seqdb/gi_mask`
   (`make_gi_mask_fixtures.py`).
+
+- RPSTBLASTN without composition-based statistics, an alignment that starts at or past the `.psq`
+  letters of a profile whose letters are fewer than its `.rps` columns (version 1.87, 2026-11-23,
+  psiblast line item PS10e, the rule-3 entry of such profiles above; not of the database class
+  above; pending the maintainer's decision, the Owner question of the pull request). NCBI's rows
+  there are the mapped `.rps` rows from the profile's offset (`blast_traceback.c:1194-1198`), so its
+  run ends with exit 0 and a clean valgrind, but its gapped traceback skips the extension to the
+  right and ends the HSP before its start (`blast_gapalign.c:4618-4651`), counts the identities on
+  the `.psq` bytes after the profile's letters, and prints HSPs whose columns, scores and identities
+  disagree (probes N_AA1_nq1_c0: profile columns 1 to 10 of a 6-letter profile; N_AA1_nqt2_c0: a bit
+  score of 0.0 with an e-value of 3.38e-11, columns 26 to 31 of a 22-column profile; N_P6d_nq1_c0:
+  the archive's `num_ident` 9 where the tabular formats count 6). LOSAT refuses it for now with the
+  text of read D of that entry, "starts an alignment past the consensus" (row
+  `db.rpstbn.rej.odd.aa1.nq1c0`), as its own arm (`ProfileRead::StartInMapping` of
+  `LOSAT/src/algorithm/rps_search/profile.rs`), the one place to change if the maintainer decides to
+  reproduce NCBI's bytes.
 
 ## Ported (rule 4)
 

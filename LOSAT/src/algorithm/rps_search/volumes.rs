@@ -2,7 +2,7 @@
 //! items PS11b and PS12a): NCBI's order of the volumes and their first ordinal ids, the search
 //! units and their statistics under the alias files' keys (`RpsUnits`, line RG D1a-4), the set-up
 //! of one volume (its files, LOSAT's refusals of what NCBI's search does not reproducibly run, the
-//! consensus letters of its profiles), the masking of the letters that a profile has no column
+//! `.psq` letters of its profiles), the masking of the letters that a profile has no column
 //! for, the merge of the volumes' results and their ordinal ids for the reports. One owner for
 //! both programs (review A of PS12a, N3).
 
@@ -799,40 +799,42 @@ fn formatter_kept(
     )
 }
 
-/// The consensus letters of a volume's profiles at their offsets (the traceback's letters and the
-/// reports' identities), read when a search first needs them: NCBI reads a profile's sequence
-/// only when its list reaches the traceback, so a volume without `.psq` searches a batch that
-/// has no list, or no valid query, as NCBI does (review B of PS12a, S3).
+/// The `.psq` letters of a volume's profiles (`TracebackProfile::letters`: the traceback's and
+/// the redo's query, the reports' identities), read when a search first needs them: NCBI reads a
+/// profile's sequence only when its list reaches the traceback, so a volume without `.psq`
+/// searches a batch that has no list, or no valid query, as NCBI does (review B of PS12a, S3).
+/// Each profile's letters are its own (`L_pin` of them, its `.pin` length), whatever its `.rps`
+/// columns (series PR, item PS10e).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1176-1177
-pub(crate) struct Consensus<'a> {
+pub(crate) struct ProfileLetters<'a> {
     setup: &'a RpsVolumeSetup,
     volume: &'a Volume,
-    files: &'a RpsVolumeFiles,
-    letters: std::sync::OnceLock<Vec<u8>>,
+    block: std::sync::OnceLock<crate::seqdb::SequenceBlock>,
 }
 
-impl<'a> Consensus<'a> {
-    pub(crate) fn new(
-        setup: &'a RpsVolumeSetup,
-        volume: &'a Volume,
-        files: &'a RpsVolumeFiles,
-    ) -> Self {
+impl<'a> ProfileLetters<'a> {
+    pub(crate) fn new(setup: &'a RpsVolumeSetup, volume: &'a Volume) -> Self {
         Self {
             setup,
             volume,
-            files,
-            letters: std::sync::OnceLock::new(),
+            block: std::sync::OnceLock::new(),
         }
     }
 
-    /// The letters, read once (threads that ask together may each read them; one copy stays).
-    pub(crate) fn letters(&self) -> Result<&[u8]> {
-        if let Some(letters) = self.letters.get() {
-            return Ok(letters);
+    /// The letters of the profile `oid` of the volume; the volume's are read once (threads that
+    /// ask together may each read them; one copy stays).
+    pub(crate) fn of(&self, oid: u32) -> Result<&[u8]> {
+        if let Some(block) = self.block.get() {
+            return Ok(block.protein(oid as usize));
         }
-        let letters = self.setup.consensus(self.volume, self.files)?;
-        Ok(self.letters.get_or_init(|| letters))
+        let block = self
+            .volume
+            .read_block(0, self.volume.num_oids(), 0, 0)
+            .map_err(|error| {
+                crate::algorithm::common::database::database_error(error, self.setup.program)
+            })?;
+        Ok(self.block.get_or_init(|| block).protein(oid as usize))
     }
 }
 
@@ -875,7 +877,7 @@ impl RpsVolumeSetup {
     /// The files of `volume` (with its frequency ratios when `cbs`, composition-based
     /// statistics) after LOSAT's checks (`check`): `Ok(Err(error))` is NCBI's own error of the
     /// files, which the caller reports where NCBI's search raises it; `Err` is LOSAT's refusal.
-    /// The consensus letters come when the search needs them (`Consensus`).
+    /// The profiles' letters come when the search needs them (`ProfileLetters`).
     pub(crate) fn open(
         &mut self,
         volume: &Volume,
@@ -922,7 +924,7 @@ impl RpsVolumeSetup {
     }
 
     /// The files of `volume`, which `check` has checked in this run, opened again for a search
-    /// (the consensus letters: `Consensus`) without LOSAT's checks of `check` (series PR, item
+    /// (the profiles' letters: `ProfileLetters`) without LOSAT's checks of `check` (series PR, item
     /// PS12s, D6: `RpsVolumeFiles::open_checked`); NCBI's own errors of the files come where its
     /// search of a batch meets them.
     pub(crate) fn reopen(
@@ -1027,29 +1029,9 @@ impl RpsVolumeSetup {
             );
         }
         // (The concatenated length is refused, or not, by its unit where NCBI's engine first
-        // meets it: `RpsUnit::check_engine_length`.)
-        // The consensus letters at the profiles' offsets (the traceback's query letters, read
-        // as stored: `Blast_TracebackGetEncoding` gives `eBlastEncodingProtein`).
+        // meets it: `RpsUnit::check_engine_length`. The profiles' letters are read as stored,
+        // `Blast_TracebackGetEncoding` gives `eBlastEncodingProtein`: `ProfileLetters`.)
         Ok(())
-    }
-
-    /// The consensus letters of the volume's profiles at their offsets (`Consensus`).
-    fn consensus(&self, volume: &Volume, files: &RpsVolumeFiles) -> Result<Vec<u8>> {
-        let num_seqs = volume.num_oids();
-        let concat = files.rows().len();
-        let offsets = files.offsets();
-        let mut consensus = vec![0u8; concat];
-        if num_seqs > 0 {
-            let block = volume.read_block(0, num_seqs, 0, 0).map_err(|error| {
-                crate::algorithm::common::database::database_error(error, self.program)
-            })?;
-            for oid in 0..num_seqs as usize {
-                let letters = block.protein(oid);
-                let start = offsets[oid] as usize;
-                consensus[start..start + letters.len()].copy_from_slice(letters);
-            }
-        }
-        Ok(consensus)
     }
 }
 

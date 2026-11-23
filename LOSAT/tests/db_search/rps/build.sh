@@ -42,6 +42,18 @@
 #   the hits of those nine cells not in ascending order (reversed, rotated, first and last swapped; build_wide.py), which
 #   makeprofiledb never writes: the cell-order read of a table like it would lose hits of the later group.
 #
+# rps_odd_* (series PR, item PS10e): three profiles at most each, whose `.psq` letters (their `.pin` length L_pin) differ
+#   from their `.rps` columns L_rps, as makeprofiledb writes them for a scored profile whose seq-data is nucleotide-coded or
+#   has more or fewer letters than its length (make_odd.py writes the profiles, variants of the PS10 oracle's c1 c2 c3 of
+#   tests/fixtures/makeprofiledb/in, and the lists): sc (c2 nucleotide-coded), sc2v (sc with -max_smp_vol 2: volumes .00,
+#   .01 and rps_odd_sc2v.pal), hl (ten copies of c1, then c2 nucleotide-coded), aa1 and aa1s (c1 as 22 A: 6 letters below
+#   28; aa1s alone), p6 p10 p16 p21 p23 p24 (c1 with 6 to 24 letters for 22 columns), p23l p24l p23x3l (the last profile
+#   c3 with 21, 22 and 23 letters for 20 columns). makeprofiledb runs in OUT_DIR/odd with -in in/l_<set>.lst -out
+#   rps_odd_<set>, under env -i with TZ=UTC and, when FAKETIME_SO names an LD_PRELOAD shim whose time(), gettimeofday()
+#   and clock_gettime(CLOCK_REALTIME) return $FAKE_TIME (PS10d's probe/tools/faketime.c), the wall clock frozen at
+#   2026-11-21 05:07 UTC (FAKE_TIME=1795237620): a rebuild under the same shim gives the committed bytes.
+#   Usage: build.sh NCBI_BIN OUT_DIR odd    (only these sets; then: gzip -9 -n OUT_DIR/rps_odd_*)
+#
 # Usage: build.sh NCBI_BIN OUT_DIR    (then: gzip -9 -n OUT_DIR/rps_mini*.* and copy the .gz files here)
 set -euo pipefail
 N=$1
@@ -49,6 +61,24 @@ O=$2
 HERE=$(cd "$(dirname "$0")" && pwd)
 LOSAT=$(cd "$HERE/../../.." && pwd)
 mkdir -p "$O"
+build_odd() {
+  local odd="$O/odd" set preload=()
+  mkdir -p "$odd"
+  python3 -I "$HERE/make_odd.py" "$LOSAT/tests/fixtures/makeprofiledb/in" "$odd"
+  [ -n "${FAKETIME_SO:-}" ] && preload=(LD_PRELOAD="$FAKETIME_SO" FAKE_TIME=1795237620)
+  for set in sc sc2v hl aa1 aa1s p6 p10 p16 p21 p23 p24 p23l p24l p23x3l; do
+    local extra=()
+    [ "$set" = sc2v ] && extra=(-max_smp_vol 2)
+    (cd "$odd" && env -i PATH=/usr/bin:/bin TZ=UTC LC_ALL=C BLAST_USAGE_REPORT=false HOME="$odd" "${preload[@]}" \
+      "$N/makeprofiledb" -in "in/l_$set.lst" -out "rps_odd_$set" "${extra[@]}" < /dev/null)
+  done
+  mv "$odd"/rps_odd_* "$O/"
+}
+if [ "${3:-}" = odd ]; then
+  build_odd
+  ls -l "$O"
+  exit 0
+fi
 W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT
 cd "$W"
@@ -184,4 +214,5 @@ echo wide.smp > wide.txt
 "$N/makeprofiledb" -in wide.txt -out "$O/rps_wide" -title rps_wide -dbtype rps -threshold 20 -force
 rm "$O/rps_wide.freq"
 python3 "$HERE/build_wide.py" ungroup "$O/rps_wide.loo" "$O/rps_wide_ug.loo"
+build_odd
 ls -l "$O"

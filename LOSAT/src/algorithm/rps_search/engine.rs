@@ -409,8 +409,8 @@ impl RpsRun<'_> {
         Ok((x_drop_gapped, x_drop_final))
     }
 
-    /// Every query's traced results on the volume `files`, whose consensus letters are
-    /// `consensus` (at the profiles' offsets), in query order, on the scratch of the run's
+    /// Every query's traced results on the volume `files`, whose profiles' `.psq` letters are
+    /// `letters`, in query order, on the scratch of the run's
     /// workers (`workers`): the volume's refusals before the queries' cutoffs (`Err`), else the
     /// queries' results (`RpsVolumeResults`), which a caller reads batch by batch in the order
     /// NCBI's search of a batch meets its errors (the queries search at the same time on several
@@ -418,7 +418,7 @@ impl RpsRun<'_> {
     pub(crate) fn search_volume(
         &self,
         files: &RpsVolumeFiles,
-        consensus: &super::volumes::Consensus<'_>,
+        letters: &super::volumes::ProfileLetters<'_>,
         pool: &crate::utils::threading::SearchPool<'_>,
         workers: &RpsWorkers,
     ) -> Result<RpsVolumeResults> {
@@ -519,7 +519,8 @@ impl RpsRun<'_> {
         let traceback = RpsTraceback {
             rows,
             offsets,
-            consensus,
+            row_after_rows: files.row_after_rows(),
+            letters,
             alphabet: files.alphabet,
             scale,
             karlin_k: &files.aux.karlin_k,
@@ -538,6 +539,7 @@ impl RpsRun<'_> {
                 smith_waterman: self.options.use_sw_tback,
                 program: self.program,
             }),
+            program: self.program,
         };
         let prelim_karlin = KarlinParams {
             lambda: self.gapped.lambda / scale,
@@ -695,7 +697,7 @@ impl RpsRun<'_> {
                     .iter()
                     .any(|frame| frame.aa_seq_nomask.is_some())
                 {
-                    formatter_identities(hit_list, query, consensus.letters()?, offsets);
+                    formatter_identities(hit_list, query, |oid| letters.of(oid))?;
                 }
                 finish_volume_list(
                     hit_list,

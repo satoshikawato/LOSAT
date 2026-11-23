@@ -27,8 +27,8 @@ pub struct ReportSort {
 
 impl ReportSort {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1522-1530
-    /// Whether the report sorts each query's hits (`m_HitsSortOption > 0 || m_HspsSortOption >
-    /// 0`): a value of 0 (by E-value, the order of the search's results) sorts nothing.
+    /// Whether the report sorts each query's hits (when either `m_HitsSortOption` or `m_HspsSortOption`
+    /// is positive): a value of 0 (by E-value, the order of the search's results) sorts nothing.
     pub fn sorts(&self) -> bool {
         self.hits.is_some_and(|hits| hits > 0) || self.hsps.is_some_and(|hsps| hsps > 0)
     }

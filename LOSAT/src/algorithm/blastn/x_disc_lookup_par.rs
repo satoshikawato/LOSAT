@@ -1415,6 +1415,10 @@ pub(super) fn csr(
         // EXPERIMENT (LOSAT_X_DCSEEDLEAN): every build on a pool takes the steps.
         let csr = if seed_lean_on() {
             crate::utils::xreach::x_reach!("LOSAT_X_DCSEEDLEAN", true);
+            // EXPERIMENT (LOSAT_X_DCQSAHEAD): this build's place pass brings in `qs` ahead.
+            if super::x_dc_csr::qs_ahead_on() {
+                crate::utils::xreach::x_reach!("LOSAT_X_DCQSAHEAD", true);
+            }
             csr_on_pool_steps(
                 parts,
                 words,
@@ -1424,6 +1428,7 @@ pub(super) fn csr(
                 helper_array,
                 STEP_POSITIONS,
                 x_offsets,
+                super::x_dc_csr::qs_ahead_on(),
             )
         } else {
             csr_on_pool(
@@ -1440,6 +1445,10 @@ pub(super) fn csr(
         return (csr, true);
     }
     let _ = parts;
+    // EXPERIMENT (LOSAT_X_DCQSAHEAD): the serial build places as before.
+    if super::x_dc_csr::qs_ahead_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_DCQSAHEAD", false);
+    }
     let csr = super::x_dc_csr::build(
         words,
         cells,
@@ -1781,9 +1790,9 @@ unsafe fn read_lean_row(c: &StepCtx<'_, '_>, set: SharedBuckets, s0: usize, s1: 
 
 /// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): one pass of `csr_on_pool_steps`
 /// on thread `c.t`. Step `k` (`0 ..= chunks`) reads chunk `k` (if any) into row `c.t` of set
-/// `k % 2`, then applies `op` to each entry of column `c.t` of set `(k - 1) % 2` (chunk `k - 1`,
-/// if any: bucket `(0, t)` to `(parts - 1, t)`, each in order), with the cell of the entry 16
-/// places after it in its bucket (if any); a barrier ends each step.
+/// `k % 2`, then calls `op(es, j)` for each place `j` of each bucket `es` of column `c.t` of set
+/// `(k - 1) % 2` (chunk `k - 1`, if any: bucket `(0, t)` to `(parts - 1, t)`, each in order; `op`
+/// takes the bucket so that it can read the entries after `j`); a barrier ends each step.
 ///
 /// SAFETY: row `t` of a set is written only by reader `t` and column `t` read only by owner `t`;
 /// a set read at step `k` was written at step `k - 1` and is written again at step `k + 1`, with
@@ -1796,7 +1805,7 @@ unsafe fn read_lean_row(c: &StepCtx<'_, '_>, set: SharedBuckets, s0: usize, s1: 
 unsafe fn steps_pass(
     c: &StepCtx<'_, '_>,
     span: &impl Fn(usize, usize) -> (usize, usize),
-    mut op: impl FnMut(Entry, Option<u32>),
+    mut op: impl FnMut(&[Entry], usize),
 ) {
     let (t, parts) = (c.t, c.sets[0].parts);
     for k in 0..=c.chunks {
@@ -1811,7 +1820,7 @@ unsafe fn steps_pass(
                 // SAFETY: column `t` of set `(k - 1) % 2` is this owner's during step `k`.
                 let es = unsafe { set.at(a, t) };
                 for j in 0..es.len() {
-                    op(es[j], es.get(j + 16).map(|e| e.value));
+                    op(es, j);
                 }
             }
         }
@@ -1828,7 +1837,9 @@ unsafe fn steps_pass(
 /// chunk costs the slowest reading plus the slowest owner's work; here a step costs the slowest
 /// thread's reading and owner's work together (about as many barriers per pass: half-size
 /// chunks, one barrier each). The place pass prefetches the `offsets` element of the entry 16
-/// ahead, as the count pass does. Chunks of `chunk` positions (`STEP_POSITIONS`; the tests take
+/// ahead, as the count pass does; EXPERIMENT (LOSAT_X_DCQSAHEAD) with `qs_ahead` it also reads the
+/// `offsets` element of the entry `QS_AHEAD` ahead and brings in the `qs` line it points to
+/// (`x_dc_csr.rs` module comment). Chunks of `chunk` positions (`STEP_POSITIONS`; the tests take
 /// others).
 #[cfg(all(
     feature = "parallel",
@@ -1844,8 +1855,9 @@ fn csr_on_pool_steps(
     helper_array: &mut [u32],
     chunk: usize,
     x_offsets: Vec<u32>,
+    qs_ahead: bool,
 ) -> super::x_dc_csr::Csr {
-    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
+    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier, QS_AHEAD};
     let chunk = chunk.max(1);
     let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
     debug_assert!(
@@ -1864,6 +1876,9 @@ fn csr_on_pool_steps(
         *e = (r.start, if e.1 == 0 { r.end } else { e.1 });
     }
     assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
+    if qs_ahead {
+        super::x_dc_csr::count_qs_ahead();
+    }
     // `sum_cells` (x_dc_csr.rs) writes the helper word of every 2048 cells.
     assert!(pv_array_bts >= 5 && cells.is_multiple_of(2048) && helper_array.len() == cells >> 11);
     let (segments, total) = segments(words);
@@ -1929,11 +1944,11 @@ fn csr_on_pool_steps(
         unsafe {
             std::ptr::write_bytes(ob.ptr.add(c0), 0, c1 - c0);
             let mut got = 0u64;
-            steps_pass(&c, &span, |e, ahead| {
-                if let Some(cell) = ahead {
-                    prefetch(ob.ptr.wrapping_add(cell as usize));
+            steps_pass(&c, &span, |es, j| {
+                if let Some(ahead) = es.get(j + 16) {
+                    prefetch(ob.ptr.wrapping_add(ahead.value as usize));
                 }
-                let cell = e.value as usize;
+                let cell = es[j].value as usize;
                 ob.set(cell, ob.get(cell) + 1);
                 got += 1;
             });
@@ -1952,10 +1967,20 @@ fn csr_on_pool_steps(
                     pv_array_bts,
                 );
             }
-            steps_pass(&c, &span, |e, ahead| {
-                if let Some(cell) = ahead {
-                    prefetch(ob.ptr.wrapping_add(cell as usize));
+            steps_pass(&c, &span, |es, j| {
+                if let Some(ahead) = es.get(j + 16) {
+                    prefetch(ob.ptr.wrapping_add(ahead.value as usize));
                 }
+                // EXPERIMENT (LOSAT_X_DCQSAHEAD): the `qs` line of the entry `QS_AHEAD` ahead (its
+                // `offsets` element came in `16 - QS_AHEAD` entries ago); the value only chooses
+                // the line (a place between may lower it).
+                if qs_ahead {
+                    if let Some(ahead) = es.get(j + QS_AHEAD) {
+                        let e = ob.get(ahead.value as usize) as usize;
+                        prefetch(qb.ptr.wrapping_add(e.wrapping_sub(1)));
+                    }
+                }
+                let e = es[j];
                 let cell = e.value as usize;
                 let p = ob.get(cell) - 1;
                 ob.set(cell, p);

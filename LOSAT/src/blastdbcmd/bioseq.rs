@@ -135,6 +135,7 @@ fn target_set(set: &DeflineSet, target_id: &ParsedSeqId) -> Result<DeflineSet, S
     };
     Ok(DeflineSet {
         deflines: vec![set.deflines[index].clone()],
+        utf8: set.utf8,
     })
 }
 

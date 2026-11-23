@@ -2,7 +2,7 @@
 """Generate fixed TBLASTN subjects and fresh, comparison-only NCBI output.
 
 NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-855:
-        status = s_BlastSearchEngineOneContext(...);
+Runs preliminary search for each context via `s_BlastSearchEngineOneContext`.
 """
 from __future__ import annotations
 

@@ -784,10 +784,9 @@ pub struct BlastAdjustScoresResult {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:61,1204-1248:
-// left = start; for (i = left; i > 0; i--) if (subject_data[i-1] == eStopChar)
-//     { if (i + kCompositionMargin < left) left = i + kCompositionMargin; break; }
-// right = finish; for (i = right; i < length; i++)
-//     { if (i - kCompositionMargin > right) right = i - kCompositionMargin; break; }
+// Expand the composition interval outward from the alignment endpoints to the nearest stop
+// residue (`eStopChar`) on each side, stepping inward from each stop by `kCompositionMargin`
+// (20 residues) without shrinking inside the alignment range.
 pub(crate) fn blast_get_composition_range(
     subject_data: &[u8],
     start: usize,

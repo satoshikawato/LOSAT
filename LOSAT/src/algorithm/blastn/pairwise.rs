@@ -145,7 +145,8 @@ impl<'a> Rows<'a> {
 
 /// Every HSP of the final hit lists `hit_lists` (those of all queries of `rows`, or of a window
 /// of them), in the order of the tabular formats (queries, then the subjects and HSPs of each
-/// query as ranked), with its displayed rows.
+/// query as ranked), with its displayed rows; under `-html` (`html_masks`) each HSP's rows' masks
+/// are added to `html_masks` in the same order (`report::pairwise::HtmlRowMasks`).
 // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
 // shared post-processing makes every BLASTN run compile it in Wasm hosts.
 #[inline(never)]
@@ -153,6 +154,7 @@ pub(crate) fn pairwise_hits(
     hit_lists: &[Option<BlastnHitList>],
     rows: &Rows<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) -> Result<Vec<PairwiseHit>> {
     let hsp_lists = hit_lists
         .iter()
@@ -167,22 +169,32 @@ pub(crate) fn pairwise_hits(
     if let Some(pool) = x_pool {
         use rayon::prelude::*;
         let lists: Vec<&BlastnHspList> = hsp_lists.collect();
-        let rows_of_lists: Vec<Result<Vec<PairwiseHit>>> = pool.install(|| {
+        let html = html_masks.is_some();
+        type ListRows = (
+            Vec<PairwiseHit>,
+            Option<Vec<crate::report::query_anchored::HspMasks>>,
+        );
+        let rows_of_lists: Vec<Result<ListRows>> = pool.install(|| {
             lists
                 .par_iter()
                 .map_init(
                     crate::report::query_anchored::HspMasks::default,
                     |masks, hsp_list| {
                         let mut hits = Vec::with_capacity(hsp_list.hsps.len());
-                        rows.list(hsp_list, &mut hits, masks)?;
-                        Ok(hits)
+                        let mut list_masks = html.then(Vec::new);
+                        rows.list(hsp_list, &mut hits, masks, list_masks.as_mut())?;
+                        Ok((hits, list_masks))
                     },
                 )
                 .collect()
         });
         let mut hits = Vec::with_capacity(lists.iter().map(|list| list.hsps.len()).sum());
         for list_rows in rows_of_lists {
-            hits.append(&mut list_rows?);
+            let (mut list_hits, list_masks) = list_rows?;
+            hits.append(&mut list_hits);
+            if let (Some(table), Some(mut list_masks)) = (html_masks.as_deref_mut(), list_masks) {
+                table.append(&mut list_masks);
+            }
         }
         return Ok(hits);
     }
@@ -194,7 +206,7 @@ pub(crate) fn pairwise_hits(
     let mut hits = Vec::new();
     let mut masks = crate::report::query_anchored::HspMasks::default();
     for hsp_list in hsp_lists {
-        rows.list(hsp_list, &mut hits, &mut masks)?;
+        rows.list(hsp_list, &mut hits, &mut masks, html_masks.as_deref_mut())?;
     }
     Ok(hits)
 }
@@ -291,12 +303,14 @@ impl Rows<'_> {
     }
 
     /// The rows of every HSP of one subject's list, appended to `hits` in the list's order;
-    /// `masks` holds the masks of each HSP's rows while they are made (kept from row to row).
+    /// `masks` holds the masks of each HSP's rows while they are made (kept from row to row), which
+    /// go to `html_masks` under `-html` (`pairwise_hits`).
     fn list(
         &self,
         hsp_list: &BlastnHspList,
         hits: &mut Vec<PairwiseHit>,
         masks: &mut crate::report::query_anchored::HspMasks,
+        mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
     ) -> Result<()> {
         let (queries, subjects) = (self.queries, self.subjects);
         let list_subject_masks = self.subject_masks.as_deref().and_then(|subject_masks| {
@@ -348,6 +362,9 @@ impl Rows<'_> {
             }
             masks.lower_row(0, &mut query_row);
             masks.lower_row(1, &mut subject_row);
+            if let Some(table) = html_masks.as_deref_mut() {
+                table.push(masks.copy_rows());
+            }
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2601-2611
             // The gaps are the columns of the edit script's gap operations, not the gap
             // characters of the rows: a query letter past the query's end shows one too

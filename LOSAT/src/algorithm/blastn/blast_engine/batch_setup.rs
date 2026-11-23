@@ -24,7 +24,7 @@ use super::{
 };
 use crate::algorithm::blastn::coordination::{build_lookup_tables, TaskConfig};
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:342-344,370-374
-// new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+// Cap the ungapped word cutoff at each context's `cutoff_score_max` from `hit_params->cutoffs`.
 use crate::algorithm::blastn::ncbi_cutoffs::{
     cutoff_score_for_ungapped_extension, cutoff_score_max_from_evalue, gap_trigger_raw_score,
     GAP_TRIGGER_BIT_SCORE_NUCL,
@@ -484,8 +484,8 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:206-211;
     // c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181;
     // c++/src/algo/blast/core/blast_engine.c:1434-1445
-    // if (dbscan_mode) { ... m_iTotalLength += (Int8) (*iter)->length; }
-    // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
+    // In database-scan mode, NCBI sums subject lengths into `m_iTotalLength`; only when
+    // `db_length` is zero does `BLAST_OneSubjectUpdateParameters` recompute per-subject cutoffs.
     // The CLI subject set has a nonzero total length. Its context search
     // space is retained across subjects, just as for output statistics.
     for context_idx in 0..query_contexts.len() {
@@ -517,7 +517,7 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
             _ => hit_saving_cutoff,
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:342-374
-        // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+        // Cap the ungapped word cutoff at `cutoff_score_max` from `hit_params->cutoffs`.
         let gap_trigger = gap_trigger_raw_score(
             GAP_TRIGGER_BIT_SCORE_NUCL,
             &search_karlin_ref[context_idx].ungapped,

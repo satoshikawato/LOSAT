@@ -971,6 +971,25 @@ impl HspMasks {
         (!list.is_empty()).then_some((&list[..], self.frames[row]))
     }
 
+    /// The rows' lists and frames alone, without the buffers: the entry of the HSP in the table
+    /// of `-html`'s spans (`report::pairwise::HtmlRowMasks`), which the rows' builder copies once
+    /// it has set the HSP's rows (after `clear`, so that a row it does not set has no list).
+    pub(crate) fn copy_rows(&self) -> HspMasks {
+        HspMasks {
+            lists: self.lists.clone(),
+            frames: self.frames,
+            ..HspMasks::default()
+        }
+    }
+
+    /// Sets row `row`'s list and frame to those of `other`'s row `row`: the entry of the HSP in
+    /// the table of `-html`'s spans (`copy_rows`) for a row that a later pass of the builder sets
+    /// (BLASTX's subject rows, `x_soft_subject::x_set_subject_row_masks`).
+    pub(crate) fn copy_row_from(&mut self, row: usize, other: &HspMasks) {
+        self.lists[row].clone_from(&other.lists[row]);
+        self.frames[row] = other.frames[row];
+    }
+
     /// Empties both rows' lists (and the masks of `add_meeting`), for an HSP whose rows may not
     /// both be set (`set_row`).
     pub(crate) fn clear(&mut self) {

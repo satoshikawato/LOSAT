@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / 'LOSAT/tests'
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1984-2003
-# if (hsp->evalue > cutoff) { hsp_array[index] = Blast_HSPFree(hsp_array[index]); }
+# Discard HSPs whose E-value exceeds the cutoff via `Blast_HSPFree`.
 # A threshold sweep compares full raw rows, never only the number of HSPs.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -46,7 +46,7 @@ def main():
         assert oracle['status']=='PASS'
         records.append({**oracle,'evalue':threshold,'kind':'oracle'})
         # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1984-2003
-        # if (hsp->evalue > cutoff) { hsp_array[index] = Blast_HSPFree(hsp_array[index]); }
+        # Discard HSPs whose E-value exceeds the cutoff via `Blast_HSPFree`.
         for kind,n,prefix in prefixes:
             directory=out/f'e{threshold}'/kind
             result=execute([*prefix,'tblastx',*common,'-num_threads',str(n)],ROOT,directory,{**env,'LOSAT_WASI_THREADS_DEBUG':'1'},900)

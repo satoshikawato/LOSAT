@@ -1963,19 +1963,12 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
             bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
-        // An ungapped search has no `kbp_gap` array (blast_setup.c:517-527, cited at
-        // `call_setup::gapped_block`), and its traceback runs the Smith-Waterman redo all the
-        // same (blast_traceback.c:1486-1487 above), which reads it: NCBI BLAST+ 2.17.0's
-        // `blastp -ungapped -comp_based_stats 0 -use_sw_tback` ends with a segmentation fault
-        // (exit 139, task O4b). Refused by name before the refusal of `-comp_based_stats 0` below,
-        // which a later item lifts (X4-c0) while this one stays.
-        if args.ungapped {
-            bail!(
-                "-use_sw_tback with -ungapped (an ungapped search), with which NCBI BLAST+ 2.17.0's blastp crashes, is not supported by LOSAT's {program}"
-            );
-        }
-        if !args.comp_based_stats.is_enabled() {
+        // `-ungapped` (which only `-comp_based_stats 0` allows): NCBI crashes at the redo's set-up
+        // in the traceback of each query batch it searches, before any match is redone, and LOSAT
+        // refuses there (`redo_run::sw_ungapped_check`, in `run_call`), after the reports of the
+        // batches before, which have no valid context. A run without such a batch ends as NCBI's
+        // does.
+        if !args.ungapped && !args.comp_based_stats.is_enabled() {
             bail!(
                 "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's {program} yet"
             );
@@ -9943,6 +9936,7 @@ fn run_call(
     } else if args.ungapped {
         // `-ungapped`: NCBI skips the traceback (`perform_traceback` is the gapped mode,
         // blast_traceback.c:1526); the lists stay as the preliminary stage made them.
+        redo_run::sw_ungapped_check(args.use_sw_tback, &query_batches, &query_batch_skipped)?;
         let finish = traceback::UngappedFinish {
             contexts: &contexts,
             subjects,

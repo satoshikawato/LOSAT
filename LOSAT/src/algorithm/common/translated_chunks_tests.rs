@@ -50,3 +50,45 @@ fn a_whole_frame_scans_to_the_frame_s_end_and_a_tail_masked_one_its_chunk() {
         vec![(0, 367, vec![(0, 367)])]
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:145-215, 221-276, 805-830
+#[test]
+fn a_frame_after_an_empty_first_part_scans_the_whole_frame() {
+    // [0, 1) of 1,200 bases: the plus frames' ranges are (0, 0), (0, 400). The empty part's chunk
+    // scans nothing; the chunk from 0 after it takes the "no chunking" branch (NCBI then frees
+    // memory that it did not allocate, PD-LOSAT-NCBI-DEFECTS exception 27) and scans the whole
+    // frame: 400 residues in frame +1, the 399 of frame +2 (its chunk ends on the sentinel).
+    assert_eq!(
+        hard_chunks(&[(0, 1)], 1200, 1),
+        vec![(0, 0, vec![(0, 0)]), (0, 400, vec![(0, 400)])]
+    );
+    assert_eq!(
+        hard_chunks(&[(1, 2)], 1200, 2),
+        vec![(0, 0, vec![(0, 0)]), (0, 400, vec![(0, 399)])]
+    );
+    // The same chunks without the mask, as in the near input (one chunk of the whole frame).
+    assert_eq!(hard_chunks(&[], 1200, 1), vec![(0, 400, vec![(0, 400)])]);
+    // The other strand keeps an empty last part: frame -1's one chunk is the whole frame.
+    assert_eq!(
+        hard_chunks(&[(0, 1)], 1200, -1),
+        vec![(0, 400, vec![(0, 400)])]
+    );
+    // [1200, 1202) of 1,202 bases: the minus frames start with the empty part.
+    assert_eq!(
+        hard_chunks(&[(1200, 1202)], 1202, -1),
+        vec![(0, 0, vec![(0, 0)]), (0, 400, vec![(0, 400)])]
+    );
+    // [0, 3) and [1200, 1201) of 1,201 bases: frame -1's chunk after the empty part ends at the
+    // mask [0, 3) before the frame's end (399 of 400 residues) and scans its own letters
+    // (exception 21).
+    assert_eq!(
+        hard_chunks(&[(0, 3), (1200, 1201)], 1201, -1),
+        vec![(0, 0, vec![(0, 0)]), (0, 399, vec![(0, 399)])]
+    );
+    // An empty mask at 0 before a tail mask: frame +1's chunk after the empty part ends at the
+    // tail mask (exception 21).
+    assert_eq!(
+        hard_chunks(&[(0, 0), (1100, 1200)], 1200, 1),
+        vec![(0, 0, vec![(0, 0)]), (0, 366, vec![(0, 366)])]
+    );
+}

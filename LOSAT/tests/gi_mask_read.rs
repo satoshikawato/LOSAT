@@ -2,11 +2,13 @@
 //! the `.gni`/`.gno`/`.gnd` files) against NCBI BLAST+ 2.17.0 (the official Linux x64 release):
 //! `blastdbcmd` (`-info`, `-outfmt %m`, `-mask_sequence_with`), `blastn`, `blastp`, `blastx`,
 //! `tblastn` and `tblastx` with `-db_soft_mask` and `-db_hard_mask` (the protein programs' database
-//! masks read through the same `seqdb::mask` entry), and a plain search of each program family, on
-//! the databases that NCBI's makeblastdb built (`tests/seqdb/gi_mask_read`,
-//! `tests/seqdb/make_gi_mask_read_fixtures.py`).
+//! masks read through the same `seqdb::mask` entry), a plain search of each program family, and
+//! `makembindex` (`-db_mask`, `-show_filters`) on the databases that NCBI's makeblastdb built
+//! (`tests/seqdb/gi_mask_read`, `tests/seqdb/make_gi_mask_read_fixtures.py`), among them a data
+//! file past 64 KiB (`wide`) and `.nog` files cut or edited (`sv4n*`).
 //! The exit status, standard output and standard error of every case of `cases.tsv` equal NCBI's
-//! (its messages in LOSAT's words, `losat::wording::losat_output_bytes`).
+//! (its messages in LOSAT's words, `losat::wording::losat_output_bytes`); a makembindex row also
+//! makes or changes the files NCBI's did, with their bytes (`<case>.files`).
 //!
 //! Each case runs the `losat` binary in the directory the table names, under a root that holds
 //! the databases (`<R>` in the frozen files) and the queries, with the environment cleared of
@@ -27,8 +29,12 @@
 // the child process sees it.
 #![cfg(target_os = "linux")]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
+
+use crate::makembindex_fixtures::fnv1a64;
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/gi_mask_read")
@@ -134,9 +140,57 @@ fn root(label: &str) -> TempDir {
     root
 }
 
+/// Each file below `dir`: its `/`-separated path relative to it, its size and time of change.
+fn file_states(dir: &Path) -> BTreeMap<String, (u64, SystemTime)> {
+    let mut found = BTreeMap::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(at) = stack.pop() {
+        for entry in std::fs::read_dir(&at).unwrap() {
+            let path = entry.unwrap().path();
+            let meta = std::fs::metadata(&path).unwrap();
+            if meta.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let relative = path.strip_prefix(dir).unwrap();
+            let parts: Vec<String> = relative
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            found.insert(parts.join("/"), (meta.len(), meta.modified().unwrap()));
+        }
+    }
+    found
+}
+
+/// The files below `root` made or changed since `before`: `path<TAB>size<TAB>FNV-1a 64` lines.
+fn made_files(root: &Path, before: &BTreeMap<String, (u64, SystemTime)>) -> String {
+    let mut files = String::new();
+    for (path, state) in file_states(root) {
+        if before.get(&path) == Some(&state) {
+            continue;
+        }
+        let bytes = std::fs::read(root.join(&path)).unwrap();
+        files.push_str(&format!(
+            "{path}\t{}\t{:016x}\n",
+            bytes.len(),
+            fnv1a64(&bytes)
+        ));
+    }
+    files
+}
+
+/// What a case gave: exit status, standard output, standard error, and for a makembindex row the
+/// files it made or changed (`made_files`; empty for the other rows).
+type Output = (i32, Vec<u8>, Vec<u8>, String);
+
+fn is_makembindex(case: &Case) -> bool {
+    case.words[0] == "makembindex"
+}
+
 /// Runs `case` under `root` with `extra` words after its own: exit status, standard output and
-/// error, the root as `<R>`.
-fn run(root: &Path, case: &Case, extra: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
+/// error, the root as `<R>`, and the files it made (`Output`).
+fn run(root: &Path, case: &Case, extra: &[&str]) -> Output {
     let r = root.to_str().unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     command
@@ -157,7 +211,12 @@ fn run(root: &Path, case: &Case, extra: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
     if let Some((key, value)) = &case.env {
         command.env(key, value.replace("{R}", r));
     }
+    let before = is_makembindex(case).then(|| file_states(root));
     let output = command.output().expect("run losat");
+    let files = match &before {
+        Some(before) => made_files(root, before),
+        None => String::new(),
+    };
     let unroot = |bytes: Vec<u8>| {
         String::from_utf8_lossy(&bytes)
             .replace(r, "<R>")
@@ -167,11 +226,13 @@ fn run(root: &Path, case: &Case, extra: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
         output.status.code().unwrap_or(-1),
         unroot(output.stdout),
         unroot(output.stderr),
+        files,
     )
 }
 
-/// NCBI's frozen run of the case `name`, its messages in LOSAT's words.
-fn expected(name: &str) -> (i32, Vec<u8>, Vec<u8>) {
+/// NCBI's frozen run of `case`, its messages in LOSAT's words.
+fn expected(case: &Case) -> Output {
+    let name = &case.name;
     let dir = fixtures().join("expected");
     let read = |ext: &str| std::fs::read(dir.join(format!("{name}.{ext}"))).unwrap();
     let rc = String::from_utf8(read("rc"))
@@ -180,7 +241,11 @@ fn expected(name: &str) -> (i32, Vec<u8>, Vec<u8>) {
         .parse()
         .unwrap();
     let mapped = |bytes: Vec<u8>| losat::wording::losat_output_bytes(&bytes).into_owned();
-    (rc, mapped(read("stdout")), mapped(read("stderr")))
+    let files = match is_makembindex(case) {
+        true => String::from_utf8(read("files")).unwrap(),
+        false => String::new(),
+    };
+    (rc, mapped(read("stdout")), mapped(read("stderr")), files)
 }
 
 /// The date of the database masked: the text after `Date: ` (up to a tab or the end of the line)
@@ -217,24 +282,25 @@ fn first_difference(got: &[u8], want: &[u8]) -> String {
     "equal".to_string()
 }
 
-fn describe(got: &(i32, Vec<u8>, Vec<u8>), want: &(i32, Vec<u8>, Vec<u8>)) -> String {
+fn describe(got: &Output, want: &Output) -> String {
     format!(
-        "rc {} (NCBI {}), stdout {}, stderr {}",
+        "rc {} (NCBI {}), stdout {}, stderr {}, files {}",
         got.0,
         want.0,
         first_difference(&got.1, &want.1),
-        first_difference(&got.2, &want.2)
+        first_difference(&got.2, &want.2),
+        first_difference(got.3.as_bytes(), want.3.as_bytes())
     )
 }
 
 fn is_search(case: &Case) -> bool {
-    !["blastdbcmd", "makeblastdb"].contains(&case.words[0].as_str())
+    !["blastdbcmd", "makeblastdb", "makembindex"].contains(&case.words[0].as_str())
 }
 
 /// The rows `raw_*` copy a database with `makeblastdb -input_type blastdb` and read the copy back:
 /// the copy's date (`without_dates`), the log's clock (`current time: `) and the time the copy
 /// took (`added N sequences in S seconds.`) are masked.
-fn comparable(case: &Case, out: (i32, Vec<u8>, Vec<u8>)) -> (i32, Vec<u8>, Vec<u8>) {
+fn comparable(case: &Case, out: Output) -> Output {
     if !case.name.starts_with("raw_") {
         return out;
     }
@@ -253,7 +319,7 @@ fn comparable(case: &Case, out: (i32, Vec<u8>, Vec<u8>)) -> (i32, Vec<u8>, Vec<u
             }
         })
         .collect::<String>();
-    (out.0, stdout.into_bytes(), out.2)
+    (out.0, stdout.into_bytes(), out.2, out.3)
 }
 
 /// Every case of the table, and the searches again with `-num_threads 4`, whose reference is
@@ -266,7 +332,7 @@ fn readers_give_ncbi_s_output_on_ncbi_s_databases() {
         for db in &case.dbs {
             put_database(&root.0, db);
         }
-        let want = comparable(&case, expected(&case.name));
+        let want = comparable(&case, expected(&case));
         let got = comparable(&case, run(&root.0, &case, &[]));
         if got != want {
             problems.push(format!("{}: {}", case.name, describe(&got, &want)));
@@ -324,10 +390,10 @@ fn readers_give_ncbi_s_output_on_losat_s_databases() {
             continue;
         }
         ran += 1;
-        let want = comparable(&case, expected(&case.name));
-        let want = (want.0, without_dates(&want.1), want.2);
+        let want = comparable(&case, expected(&case));
+        let want = (want.0, without_dates(&want.1), want.2, want.3);
         let got = comparable(&case, run(&root.0, &case, &[]));
-        let got = (got.0, without_dates(&got.1), got.2);
+        let got = (got.0, without_dates(&got.1), got.2, got.3);
         if got != want {
             problems.push(format!("{}: {}", case.name, describe(&got, &want)));
         }

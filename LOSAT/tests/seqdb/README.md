@@ -197,14 +197,22 @@ alias file over the database and as `-db 'db db'`, a plain search of each progra
 2026-11-23) `blastp`, `blastx`, `tblastn` and `tblastx` with `-db_soft_mask` / `-db_hard_mask` by id (`-outfmt 6`)
 and by name (`-outfmt 0`) on the protein databases `m09`, `svp` and the nucleotide databases `m01`, `sv5`; the rows
 `raw_*` copy `m01`, `sv5` and `svp` with `makeblastdb -input_type blastdb` and read the copies back (`-info`, `%m`,
-a hard-masked search), from another directory, and with `-in 'db db'` (the rows run in order in one root). `gi_mask_read/db/<db>/`
-holds the databases (the root `<R>` in their text files), `gi_mask_read/expected/<case>.{rc,stdout,stderr}` the runs
-(the root as `<R>`), `gi_mask_read/in/` the queries. `bdc_m09_msw_0` (a protein in FASTA with masks) is approved
+a hard-masked search), from another directory, and with `-in 'db db'`; and (rows added 2026-11-24, review of
+line NP item M4c-2) `blastdbcmd` and `blastn` on `wide`, whose GI-mask data file holds 88,012 bytes (its third record
+crosses byte 65,536, the size of the chunks and windows that LOSAT reads), and on the variants of `sv4` in
+`gi_mask_read/variants.tsv`, whose `.nog` (the GI of each sequence) is cut inside its header, inside its entries,
+removed, or gives a count of 3 with two entries swapped, and `makembindex` with `-db_mask` by id and name, an
+unknown name and id, `-show_filters`, an old-style index, from another directory and on `d10` (the rows run in
+order in one root). `gi_mask_read/db/<db>/` holds the databases (the root `<R>` in their text files),
+`gi_mask_read/expected/<case>.{rc,stdout,stderr}` the runs (the root as `<R>`), and for a makembindex row
+`<case>.files` each file it made or changed (path, size, FNV-1a 64 digest), `gi_mask_read/in/` the queries. `bdc_m09_msw_0` (a protein in FASTA with masks) is approved
 difference 5 of PD-LOSAT-BLASTDBCMD-DEVIATIONS: NCBI's headers with the letters of NCBI's `-outfmt %s` run, NCBI's
 own FASTA in `bdc_m09_msw_0.ncbi_stdout`. `tests/gi_mask_read.rs` runs every case through the `losat` binary
 (searches also with `-num_threads 4`, whose reference is NCBI's `-num_threads 1` output, Owner decision DB-3) and on
 databases that `losat makeblastdb` builds;
-`src/seqdb/gi_mask_tests.rs` reads every GI of `gi_mask/db/big*` (1 to 1,100 GIs, one and four data volumes).
+`src/seqdb/gi_mask_tests.rs` reads every GI of `gi_mask/db/big*` (1 to 1,100 GIs, one and four data volumes),
+reads across the 64 KiB chunks, and reads the `.nog` of `gi_mask_read/db/sv4` and `big` cut where NCBI's program
+crashes (an empty file) or reads past its mapping (an entry past the 4 KiB page): LOSAT's refusals.
 
 ## Masks ordered by address, and the errors that come first (`mask_order/`)
 

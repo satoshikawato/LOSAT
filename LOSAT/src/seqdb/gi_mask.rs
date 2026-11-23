@@ -7,21 +7,30 @@
 //! the port; `mask.rs` dispatches to it where the database has GI masks, and
 //! `blastinput::db_mask` and `losat blastdbcmd` read them through `mask.rs`.
 //!
-//! NCBI maps the files and reads its arrays in place. LOSAT reads them in chunks of 64 KiB on
-//! first use (`MappedFile`), kept for the life of the database as NCBI's mapping keeps the pages
-//! it touched, so a search that reads the masks of every sequence reads each file once.
+//! NCBI maps the files and reads its arrays in place. LOSAT reads the index, offset and `.nog`
+//! files, whose reads are binary searches and one GI per sequence, in chunks of 64 KiB on first
+//! use (`MappedFile`), kept for the life of the database as NCBI's mapping keeps the pages it
+//! touched. A data file is read through the reader's window (`DataWindow`, one per
+//! `mask::MaskBlock`): makeblastdb writes the records of the sequences in their order, so a
+//! reader that asks for one sequence after another reads each part of the file once and keeps
+//! one window, not the file.
 //!
 //! Errors: NCBI's `CSeqDBException` texts are NCBI's ([`SeqDbError::NotFound`],
 //! [`SeqDbError::Format`], [`SeqDbError::Range`], [`SeqDbError::MemoryMap`]). A failed
 //! `SEQDB_FILE_ASSERT` (its text names a source line) is [`SeqDbError::Integrity`] in LOSAT's
 //! words; a read outside a file, where NCBI reads past its mapping, is [`SeqDbError::Format`] in
-//! LOSAT's words.
+//! LOSAT's words. The `.nog`, which NCBI reads without a check, reads as NCBI's mapping of it
+//! does (zeros to the end of its last page); NCBI's crash on an empty one is
+//! [`SeqDbError::NcbiCrashes`], and a GI past the mapping, where NCBI reads memory it never
+//! mapped, [`SeqDbError::Unsupported`]: LOSAT's refusals.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use super::column::Blob;
-use super::file::DbFile;
+use super::file::{mapped_length, DbFile};
+use super::mask::push_padded;
 use super::volume::{with_extension, Volume};
 use super::{SearchPath, SeqDbError, SeqType};
 
@@ -40,19 +49,29 @@ const FIXED_FIELD_BYTES: u64 = 32;
 /// The size of the chunks in which `MappedFile` reads a file.
 const CHUNK: u64 = 1 << 16;
 
+/// The least number of bytes of a data file that a [`DataWindow`] reads at once.
+const WINDOW: u64 = 1 << 16;
+
+/// What a [`MappedFile`] is, in LOSAT's errors of its reads.
+const INDEX_FILE: &str = "GI-mask index file";
+const OFFSET_FILE: &str = "GI-mask offset file";
+const NOG_FILE: &str = "GI file of the volume (.nog)";
+
 /// A file read in chunks on first use and kept, as NCBI's memory map of it.
 #[derive(Debug)]
 struct MappedFile {
     file: DbFile,
+    /// What the file is ([`INDEX_FILE`], ...), for the errors.
+    kind: &'static str,
     chunks: Box<[OnceLock<Box<[u8]>>]>,
 }
 
 impl MappedFile {
-    fn open(path: &Path) -> Result<Self, SeqDbError> {
+    fn open(path: &Path, kind: &'static str) -> Result<Self, SeqDbError> {
         let file = DbFile::open(path)?;
         let count = file.len().div_ceil(CHUNK);
         let chunks = (0..count).map(|_| OnceLock::new()).collect();
-        Ok(Self { file, chunks })
+        Ok(Self { file, kind, chunks })
     }
 
     fn len(&self) -> u64 {
@@ -82,7 +101,8 @@ impl MappedFile {
             return Err(SeqDbError::Format {
                 path: self.path().to_path_buf(),
                 message: format!(
-                    "a GI-mask read of bytes {start}..{end} is outside the file ({} bytes)",
+                    "a read of bytes {start}..{end} of the {} is outside the file ({} bytes)",
+                    self.kind,
                     self.len()
                 ),
             });
@@ -107,20 +127,82 @@ impl MappedFile {
         Ok(u32::from_ne_bytes(bytes))
     }
 
-    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:123-130
-    /// The two `SEQDB_FILE_ASSERT`s of `GetFileDataPtr` (with a lease and the range's start and
-    /// end), `what` naming the range in LOSAT's error.
+    /// [`check_range`] of this file.
     fn check_range(&self, start: i64, end: i64, what: &str) -> Result<(), SeqDbError> {
-        if start < end && end as u64 <= self.len() && end >= 0 {
-            return Ok(());
+        check_range(&self.file, start, end, what)
+    }
+
+    /// The `N` bytes at `at` as NCBI reads them through its mapping of the file, which it does
+    /// not check against the file's length (the `.nog`, `CSeqDBGiIndex::GetSeqGI`): the file's
+    /// bytes, then zeros to the end of its last page ([`mapped_length`]). `None` where they are
+    /// not all in that mapping (before the file, or past its last page).
+    fn mapped<const N: usize>(&self, at: i64) -> Result<Option<[u8; N]>, SeqDbError> {
+        let end = at.saturating_add(N as i64);
+        if at < 0 || end as u64 > mapped_length(self.len()) {
+            return Ok(None);
         }
-        Err(SeqDbError::Integrity {
-            path: self.path().to_path_buf(),
-            message: format!(
-                "{what} (bytes {start}..{end}) is empty or passes the end of the file ({} bytes)",
-                self.len()
-            ),
-        })
+        let mut bytes = [0u8; N];
+        let held = self.len().saturating_sub(at as u64).min(N as u64) as usize;
+        if held > 0 {
+            self.read_at(at, &mut bytes[..held])?;
+        }
+        Ok(Some(bytes))
+    }
+}
+
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:123-130
+/// The two `SEQDB_FILE_ASSERT`s of `GetFileDataPtr` (with a lease and the range's start and
+/// end) on `file`, `what` naming the range in LOSAT's error.
+fn check_range(file: &DbFile, start: i64, end: i64, what: &str) -> Result<(), SeqDbError> {
+    if start < end && end as u64 <= file.len() && end >= 0 {
+        return Ok(());
+    }
+    Err(SeqDbError::Integrity {
+        path: file.path().to_path_buf(),
+        message: format!(
+            "{what} (bytes {start}..{end}) is empty or passes the end of the file ({} bytes)",
+            file.len()
+        ),
+    })
+}
+
+/// The bytes of a GI-mask data file that one reader keeps from one record to the next (a
+/// `mask::MaskBlock` holds one): at least [`WINDOW`] bytes read at once from the start of a
+/// record, so that the records of the sequences one after the other, which makeblastdb writes in
+/// that order, take one read a window, and the reader holds a window, not the file. No NCBI
+/// counterpart: NCBI maps the data files.
+#[derive(Debug, Default)]
+pub(super) struct DataWindow {
+    /// The files ([`GiMaskFiles`]'s `id`) and the data volume the bytes are of; `None`: none.
+    of: Option<(u64, usize)>,
+    /// Where the bytes start in that file.
+    start: u64,
+    bytes: Vec<u8>,
+}
+
+impl DataWindow {
+    /// The `len` bytes at `start` of `file`, the data volume that `of` names, which holds them
+    /// (the caller checked the range).
+    fn get(
+        &mut self,
+        of: (u64, usize),
+        file: &DbFile,
+        start: u64,
+        len: u64,
+    ) -> Result<&[u8], SeqDbError> {
+        let held = self.of == Some(of)
+            && start >= self.start
+            && start + len <= self.start + self.bytes.len() as u64;
+        if !held {
+            let end = start.saturating_add(len.max(WINDOW)).min(file.len());
+            self.of = None;
+            self.bytes.resize((end - start) as usize, 0);
+            file.read_exact_at(&mut self.bytes, start)?;
+            self.of = Some(of);
+            self.start = start;
+        }
+        let from = (start - self.start) as usize;
+        Ok(&self.bytes[from..from + len as usize])
     }
 }
 
@@ -161,20 +243,17 @@ fn binary_search(
     Ok((false, idx))
 }
 
-/// `setw` of `width` with `left` alignment: `text`, then spaces up to `width` bytes.
-fn push_padded(out: &mut String, text: &str, width: usize) {
-    out.push_str(text);
-    for _ in text.len()..width {
-        out.push(' ');
-    }
-}
+/// The numbers of the opened [`GiMaskFiles`], each its own (the key of a [`DataWindow`]).
+static OPENED: AtomicU64 = AtomicU64::new(0);
 
 /// The opened files of one algorithm (`x_Open`, `x_ReadFields`).
 #[derive(Debug)]
 pub(super) struct GiMaskFiles {
+    /// This opening's own number (`OPENED`).
+    id: u64,
     index: MappedFile,
     offsets: MappedFile,
-    data: Vec<MappedFile>,
+    data: Vec<DbFile>,
     gi_size: i32,
     offset_size: i32,
     page_size: i32,
@@ -285,8 +364,8 @@ impl GiMaskFiles {
                 b"Could not open gi-mask index files.".to_vec(),
             ));
         };
-        let index = MappedFile::open(Path::new(&index_path))?;
-        let offsets = MappedFile::open(Path::new(&offset_path))?;
+        let index = MappedFile::open(Path::new(&index_path), INDEX_FILE)?;
+        let offsets = MappedFile::open(Path::new(&offset_path), OFFSET_FILE)?;
         let fields = read_fields(&index)?;
         let mut data = Vec::new();
         for vol in 0..fields.num_vols.max(0) {
@@ -298,9 +377,10 @@ impl GiMaskFiles {
             let Some(path) = search.resolve_file(&file) else {
                 return Err(SeqDbError::MemoryMap(super::oid_list::not_a_file("")));
             };
-            data.push(MappedFile::open(Path::new(&path))?);
+            data.push(DbFile::open(Path::new(&path))?);
         }
         Ok(Self {
+            id: OPENED.fetch_add(1, Ordering::Relaxed),
             index,
             offsets,
             data,
@@ -355,16 +435,18 @@ impl GiMaskFiles {
     // the data files (NCBI's debug-only `_ASSERT`, then an index past its vector) is a format
     // error in LOSAT's words; the sums are 64-bit, where NCBI's `int` ones could overflow.
     /// `GetMaskData` of the key `key` (the sequence's GI as a `Uint4`, `GiMasks::seq_gi_key`):
-    /// its ranges appended to `out` in the order stored, none without a record.
+    /// its ranges appended to `out` in the order stored, none without a record; the data file is
+    /// read through the reader's `window`.
     pub(super) fn ranges_into(
         &self,
         key: u32,
         out: &mut Vec<(u32, u32)>,
+        window: &mut DataWindow,
     ) -> Result<(), SeqDbError> {
         let Some((vol, off)) = self.locate(key)? else {
             return Ok(());
         };
-        let Some(data) = usize::try_from(vol).ok().and_then(|vol| self.data.get(vol)) else {
+        let Some(at) = usize::try_from(vol).ok().filter(|&at| at < self.data.len()) else {
             return Err(SeqDbError::Format {
                 path: self.index.path().to_path_buf(),
                 message: format!(
@@ -374,30 +456,101 @@ impl GiMaskFiles {
             });
         };
         let off = i64::from(off);
-        data.check_range(off, off + 4, "the count of a GI-mask record")?;
-        let mut count = [0u8; 4];
-        data.read_at(off, &mut count)?;
-        let n = i64::from(i32::from_ne_bytes(count));
-        let end = off + 8 * n + 4;
-        data.check_range(off + 4, end, "the ranges of a GI-mask record")?;
-        let mut bytes = vec![0u8; (end - off - 4) as usize];
-        data.read_at(off + 4, &mut bytes)?;
-        for pair in bytes.chunks_exact(8) {
-            out.push((
+        let count = self.record_bytes(at, off, off + 4, "the count of a GI-mask record", window)?;
+        let n = i64::from(i32::from_ne_bytes([count[0], count[1], count[2], count[3]]));
+        let what = "the ranges of a GI-mask record";
+        let pairs = self.record_bytes(at, off + 4, off + 8 * n + 4, what, window)?;
+        out.extend(pairs.chunks_exact(8).map(|pair| {
+            (
                 u32::from_ne_bytes([pair[0], pair[1], pair[2], pair[3]]),
                 u32::from_ne_bytes([pair[4], pair[5], pair[6], pair[7]]),
-            ));
-        }
+            )
+        }));
         Ok(())
+    }
+
+    /// The bytes `start..end` of the data volume `at` through `window`, after NCBI's checks of
+    /// the range (`what` names it); a range before the file, which those checks let through
+    /// where it ends inside the file and NCBI reads before its mapping, is a format error in
+    /// LOSAT's words.
+    fn record_bytes<'w>(
+        &self,
+        at: usize,
+        start: i64,
+        end: i64,
+        what: &str,
+        window: &'w mut DataWindow,
+    ) -> Result<&'w [u8], SeqDbError> {
+        let file = &self.data[at];
+        check_range(file, start, end, what)?;
+        if start < 0 {
+            return Err(SeqDbError::Format {
+                path: file.path().to_path_buf(),
+                message: format!("{what} (bytes {start}..{end}) starts before the file"),
+            });
+        }
+        window.get((self.id, at), file, start as u64, (end - start) as u64)
     }
 }
 
-/// The `.nog` file of a volume (`CSeqDBGiIndex`): the GI of each OID.
+/// The `.nog` file of a volume (`CSeqDBGiIndex`): the GI of each OID, read as NCBI reads it
+/// (`MappedFile::mapped`).
 #[derive(Debug)]
 struct GiIndex {
     file: MappedFile,
     size: i32,
     num_oids: i32,
+}
+
+impl GiIndex {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:52-71
+    // NCBI maps the file and reads the entry size and the count at bytes 8..16 of the mapping,
+    // with no check of its length: a file cut short reads as zeros to the end of its page (a
+    // count of 0 sends every sequence to its definition lines; an OID's entry cut off reads as
+    // GI 0), and a file of no bytes is mapped as a null pointer, which NCBI's read then faults
+    // on.
+    /// The `.nog` file at `path`, its header read as NCBI's first `GetSeqGI` reads it.
+    fn open(path: &Path) -> Result<Self, SeqDbError> {
+        let file = MappedFile::open(path, NOG_FILE)?;
+        let header = match file.mapped::<8>(8)? {
+            Some(header) => header,
+            None => {
+                return Err(SeqDbError::NcbiCrashes {
+                    path: path.to_path_buf(),
+                    message: format!(
+                        "the {NOG_FILE} has no bytes, which NCBI maps as a null pointer"
+                    ),
+                })
+            }
+        };
+        Ok(Self {
+            file,
+            size: i32::from_be_bytes([header[0], header[1], header[2], header[3]]),
+            num_oids: i32::from_be_bytes([header[4], header[5], header[6], header[7]]),
+        })
+    }
+
+    // The offset is 64-bit, where NCBI's `int` product of the OID and the entry size could
+    // overflow.
+    /// The GI of the sequence `vol_oid` (below the count) as a `Uint4`: big-endian at
+    /// `vol_oid * size + 32` of NCBI's mapping; LOSAT's refusal where that is outside it.
+    fn gi(&self, vol_oid: u32) -> Result<u32, SeqDbError> {
+        let at = i64::from(vol_oid) * i64::from(self.size) + 32;
+        match self.file.mapped::<4>(at)? {
+            Some(bytes) => Ok(u32::from_be_bytes(bytes)),
+            None => Err(SeqDbError::Unsupported {
+                path: self.file.path().to_path_buf(),
+                message: format!(
+                    "the GI of sequence {vol_oid} of the volume is read at offset {at} of the \
+                     {NOG_FILE}, which has {} bytes, outside the {} bytes of NCBI BLAST+'s \
+                     mapping of it: NCBI reads memory past its mapping there, whose bytes, or \
+                     whether NCBI faults, depend on its memory map",
+                    self.file.len(),
+                    mapped_length(self.file.len())
+                ),
+            }),
+        }
+    }
 }
 
 /// The GI masks of a database whose alias file names them (`CSeqDBGiMask`): one algorithm per
@@ -511,14 +664,7 @@ impl GiMasks {
         }
         let path = with_extension(volume.base(), self.seqtype, "og");
         let index = if super::alias::exists(&path) && volume.num_oids() != 0 {
-            let file = MappedFile::open(&path)?;
-            let mut header = [0u8; 8];
-            file.read_at(8, &mut header)?;
-            Some(GiIndex {
-                file,
-                size: i32::from_be_bytes([header[0], header[1], header[2], header[3]]),
-                num_oids: i32::from_be_bytes([header[4], header[5], header[6], header[7]]),
-            })
+            Some(GiIndex::open(&path)?)
         } else {
             None
         };
@@ -528,8 +674,10 @@ impl GiMasks {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:901-915
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:66-70
     // A `.nog` value comes from a `Uint4`, so it is never below 0 and is returned as it is (the
-    // -1 that makeblastdb writes for a sequence without a GI reads as 4294967295). The mask
-    // lookup takes the GI as a `Uint4` (`GI_TO`), so `INVALID_GI` is 4294967295 too (survey D3).
+    // -1 that makeblastdb writes for a sequence without a GI reads as 4294967295, a cut-off
+    // entry as 0). An OID at or past the `.nog`'s count (none in a file cut inside its header)
+    // takes the first GI of its definition lines. The mask lookup takes the GI as a `Uint4`
+    // (`GI_TO`), so `INVALID_GI` is 4294967295 too (survey D3).
     /// The key of the sequence `vol_oid` of the volume `at` (`volume`) in the GI masks:
     /// the GI of `x_GetSeqGI` of the OID, as a `Uint4`.
     pub(super) fn seq_gi_key(
@@ -540,10 +688,7 @@ impl GiMasks {
     ) -> Result<u32, SeqDbError> {
         if let Some(index) = self.gi_index(at, volume)? {
             if i64::from(vol_oid) < i64::from(index.num_oids) {
-                let offset = i64::from(vol_oid) * i64::from(index.size) + 32;
-                let mut bytes = [0u8; 4];
-                index.file.read_at(offset, &mut bytes)?;
-                return Ok(u32::from_be_bytes(bytes));
+                return index.gi(vol_oid);
             }
         }
         let set = volume.defline_set(vol_oid)?;

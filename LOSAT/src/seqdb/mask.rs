@@ -215,8 +215,9 @@ fn utf8_value<'a>(bytes: &'a [u8], path: &Path) -> Result<&'a str, SeqDbError> {
 }
 
 /// Pads `text` with spaces on the right to `width` bytes (`setw` of `width` with `left` alignment;
-/// text that is longer is not cut).
-fn push_padded(out: &mut String, text: &str, width: usize) {
+/// text that is longer is not cut): the one helper of the names tables of the mask columns and of
+/// the GI masks (`gi_mask`).
+pub(super) fn push_padded(out: &mut String, text: &str, width: usize) {
     out.push_str(text);
     for _ in text.len()..width {
         out.push(' ');
@@ -728,8 +729,10 @@ impl SeqDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2520-2523
-    // For each sequence the GI comes first, then `x_Open` of the algorithm (its files are kept
-    // once opened; a failed opening is tried again, as NCBI's is), then the lookup.
+    // For each sequence the GI comes first, then `x_Open` of the algorithm, then the lookup.
+    // NCBI keeps the files once opened and opens them again at the next sequence after a failed
+    // opening, which fails again on the same files: the block opens them at its first sequence
+    // whose GI is read, and a failure is the error of every later sequence whose GI is read.
     /// [`SeqDb::read_mask_block`] of a database with GI masks: the ranges of every sequence of
     /// `range`, or its error, into `block`.
     fn read_gi_mask_block(
@@ -743,11 +746,19 @@ impl SeqDb {
         block.ranges.clear();
         block.gi_spans.clear();
         let volume = &self.volumes[range.volume];
+        let mut files = None;
         for vol_oid in range.first..range.end {
             let start = block.ranges.len();
             let read = masks
                 .seq_gi_key(range.volume, volume, vol_oid)
-                .and_then(|key| masks.open(algo_id)?.ranges_into(key, &mut block.ranges));
+                .and_then(
+                    |key| match files.get_or_insert_with(|| masks.open(algo_id)) {
+                        Ok(files) => {
+                            files.ranges_into(key, &mut block.ranges, &mut block.gi_window)
+                        }
+                        Err(error) => Err(error.duplicate()),
+                    },
+                );
             let span = match read {
                 Ok(()) => Ok(start..block.ranges.len()),
                 Err(error) => {
@@ -973,6 +984,8 @@ pub struct MaskBlock {
     /// With GI masks (`SeqDb::read_gi_mask_block`), each sequence's part of `ranges` (which holds
     /// the ranges of all the block's sequences), or its error.
     gi_spans: Vec<Result<std::ops::Range<usize>, SeqDbError>>,
+    /// With GI masks, the bytes of the data file read last (`gi_mask::DataWindow`).
+    gi_window: super::gi_mask::DataWindow,
 }
 
 /// Where a [`MaskBlock`] read its masks from.
@@ -1006,7 +1019,8 @@ pub enum BlockMasks<'a> {
 pub enum BlockMaskError<'a> {
     /// The read of the block or of the sequence's blob (the block keeps it).
     Read(&'a SeqDbError),
-    /// The ranges of the sequence's blob.
+    /// The ranges of the sequence's blob; or a LOSAT internal error ([`SeqDbError::Internal`]):
+    /// a sequence outside the block read.
     Ranges(SeqDbError),
 }
 
@@ -1037,7 +1051,10 @@ impl MaskBlock {
                 return match self.gi_spans.get(vol_oid.wrapping_sub(first) as usize) {
                     Some(Ok(span)) => Ok(BlockMasks::Ranges(&self.ranges[span.clone()])),
                     Some(Err(error)) => Err(BlockMaskError::Read(error)),
-                    None => Ok(BlockMasks::NoMaskData),
+                    None => Err(BlockMaskError::Ranges(SeqDbError::Internal(format!(
+                        "LOSAT internal error: the masks of sequence {vol_oid} were asked for \
+                         outside the block read"
+                    )))),
                 };
             }
         }
@@ -1071,7 +1088,7 @@ impl MaskBlock {
             if let Some(Err(error)) = self.gi_spans.into_iter().nth(at) {
                 return error;
             }
-            return SeqDbError::Range(format!(
+            return SeqDbError::Internal(format!(
                 "LOSAT internal error: no GI-mask read error for sequence {vol_oid}"
             ));
         }

@@ -240,6 +240,10 @@ pub enum SeqDbError {
     MemoryMap(Vec<u8>),
     /// A request outside the database (ordinal id, block range).
     Range(String),
+    /// A LOSAT internal error: a caller asked for what it did not read (a sequence outside the
+    /// block of masks it read, `mask::MaskBlock`). LOSAT's words, never a database error of
+    /// NCBI's ([`SeqDbError::ncbi_message`] is `None`).
+    Internal(String),
     /// An exception of NCBI's C++ Toolkit that is not a `CSeqDBException`: the
     /// `CStringException` of an alias file value that does not convert (`alias::walk_totals`,
     /// `alias::compute_masks`). NCBI's programs report it as `Error: <what()>` with exit
@@ -265,7 +269,7 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::NotFound(message) | SeqDbError::MemoryMap(message) => {
                 f.write_str(&String::from_utf8_lossy(message))
             }
-            SeqDbError::Range(message) => f.write_str(message),
+            SeqDbError::Range(message) | SeqDbError::Internal(message) => f.write_str(message),
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
             }
@@ -343,6 +347,7 @@ impl SeqDbError {
                 message: message.clone(),
             },
             SeqDbError::Range(message) => SeqDbError::Range(message.clone()),
+            SeqDbError::Internal(message) => SeqDbError::Internal(message.clone()),
             SeqDbError::Ncbi(exception) => SeqDbError::Ncbi(exception.clone()),
             SeqDbError::TaxdbThrows {
                 path,
@@ -525,6 +530,7 @@ impl SeqDbError {
             | SeqDbError::Unsupported { .. }
             | SeqDbError::NcbiCrashes { .. }
             | SeqDbError::Range(_)
+            | SeqDbError::Internal(_)
             | SeqDbError::Ncbi(_)
             | SeqDbError::TaxdbThrows { .. } => None,
         }

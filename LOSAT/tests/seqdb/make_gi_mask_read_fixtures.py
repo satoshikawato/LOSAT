@@ -4,10 +4,11 @@
 A database that `makeblastdb -gi_mask` wrote keeps its masks in GI-indexed files named by the
 `MASKLIST` line of its alias file. This script builds such databases with NCBI BLAST+ 2.17.0's
 makeblastdb (the inputs of `make_gi_mask_fixtures.py`, the writer's fixtures) and freezes what NCBI's
-readers print on them: blastdbcmd (`-info`, `-outfmt %m`, `-mask_sequence_with`) and the search
-programs (blastn with `-db_soft_mask` / `-db_hard_mask`, and plain searches of every program family).
-NCBI is the comparison oracle only: the Rust test (`LOSAT/tests/gi_mask_read.rs`) reads the
-committed files and runs no NCBI program.
+readers print on them: blastdbcmd (`-info`, `-outfmt %m`, `-mask_sequence_with`), the search
+programs (`-db_soft_mask` / `-db_hard_mask`, and plain searches of every program family), makeblastdb
+`-input_type blastdb` and makembindex (`-db_mask`, `-show_filters`). NCBI is the comparison oracle
+only: the Rust test (`LOSAT/tests/gi_mask_read.rs`) reads the committed files and runs no NCBI
+program.
 
 usage: make_gi_mask_read_fixtures.py --ncbi-bin DIR --work DIR [--out LOSAT/tests/seqdb/gi_mask_read]
 
@@ -22,14 +23,21 @@ Owner's decision of 2026-11-20, 「Q6=B」; PD-LOSAT-NCBI-DEFECTS). `losat_singl
 that one change to NCBI's alias, so that NCBI's readers on the result are the oracle of LOSAT's
 readers on LOSAT's single-volume databases. Everything else is NCBI's bytes.
 
+The database `wide` (review S3 of M4c-2, 2026-11-24) has GI masks of 3,000, 5,000 and 3,000 ranges
+(`write_wide_inputs`): its data file holds more than 64 KiB, and the third record crosses byte
+65,536, where LOSAT's readers of the files change chunk and window. The variants `sv4n*` (review S4
+and N12) are copies of `sv4` whose `.nog` (the GI of each sequence, which NCBI reads through its
+mapping without a check) is cut or edited (`VARIANTS`).
+
 Output files:
   in/                 the queries `q.fa` (pieces of nucl.fa) and `pq.fa` (two records of prot.fa); the
                       databases' inputs are those of the writer's fixtures (`gi_mask/in/`, the same
-                      `write_inputs` and `write_masks`)
+                      `write_inputs` and `write_masks`) and of `write_wide_inputs`
   dbs.tsv             one row per database: name, what is done after the build (`-`, `losat-sv`:
                       `losat_single_volume_alias`, `alias`: also an alias file `al` over it made by
                       blastdb_aliastool), setup (as in make_gi_mask_fixtures.py), the words after
                       `makeblastdb`
+  variants.tsv        one row per variant: name, the database it copies, the change of its `.nog`
   db/<db>/            every file of the database (the inputs removed); in the text files (alias and
                       metadata) the root is `<R>`
   cases.tsv           one row per read: name, databases it needs (comma separated), the directory
@@ -42,9 +50,13 @@ Output files:
                       PD-LOSAT-BLASTDBCMD-DEVIATIONS (a mask on a protein in FASTA without a
                       range): NCBI's headers with the letters of NCBI's `-outfmt %s` run of the
                       same words, NCBI's own FASTA kept as `<case>.ncbi_stdout`
+  expected/<case>.files
+                      for the makembindex rows: each file the run made or changed under the root,
+                      `path<TAB>size<TAB>FNV-1a 64 digest` (16 hex digits), in path order
 """
 import argparse
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -95,6 +107,19 @@ DBS = [
     ("big", "losat-sv", "big.fa dust_big.asnb",
      ["-in", "big.fa", "-dbtype", "nucl", "-parse_seqids", "-out", "db", "-title", "t"] + V4
      + ["-mask_data", "dust_big.asnb", "-gi_mask", "-gi_mask_name", "big"]),
+    ("wide", "losat-sv", "wide.fa wide.asnt",
+     ["-in", "wide.fa", "-dbtype", "nucl", "-parse_seqids", "-out", "db", "-title", "t"] + V4
+     + ["-mask_data", "wide.asnt", "-gi_mask", "-gi_mask_name", "wd"]),
+]
+
+# name, the database copied, the change of its `db.nog` (`edit_nog`): sv4 has 12 sequences, so
+# its `.nog` is a header of 32 bytes and 12 entries of 4 bytes.
+VARIANTS = [
+    ("sv4n12", "sv4", "cut 12"),      # inside the header: the count reads 0
+    ("sv4n15", "sv4", "cut 15"),      # inside the count: its last byte reads 0
+    ("sv4n42", "sv4", "cut 42"),      # OIDs 0 and 1 whole, two bytes of OID 2's, then zeros
+    ("sv4nx", "sv4", "remove"),       # no .nog: the definition lines' GIs
+    ("sv4nf", "sv4", "count3swap"),   # a count of 3, the entries of OIDs 0 and 1 swapped
 ]
 
 FMT = "%o %a %g %m"
@@ -129,6 +154,10 @@ def with_letters_of(fasta, letters):
 
 def bdc(*words):
     return ["blastdbcmd"] + list(words)
+
+
+def mbi(*words):
+    return ["makembindex"] + list(words)
 
 
 def bn(*words):
@@ -288,7 +317,97 @@ def cases():
         ["makeblastdb", "-in", "db db", "-input_type", "blastdb", "-dbtype", "nucl", "-title", "t2",
          "-out", "copy2"])
     add("raw_m01_two_info", "m01", "m01", "-", bdc("-db", "copy2", "-info"))
+
+    # Records of a data file past 64 KiB (review S3), and the `.nog` cut or edited (S4, N12).
+    add("bdc_wide_m0", "wide", "wide", "-", bdc("-db", "db", "-entry", "all", "-outfmt", FMT + "0"))
+    add("bdc_wide_info", "wide", "wide", "-", bdc("-db", "db", "-info"))
+    add("bdc_wide_msw0", "wide", "wide", "-",
+        bdc("-db", "db", "-entry", "WD000003.1", "-mask_sequence_with", "0"))
+    for name, _, _ in VARIANTS:
+        add(f"bdc_{name}_m0", name, name, "-", bdc("-db", "db", "-entry", "all", "-outfmt", FMT + "0"))
+    add("bn_sv4n42_soft0_f6", "sv4n42", "sv4n42", "-", bn("-db", "db", "-db_soft_mask", "0", "-outfmt", "6"))
+    add("bn_sv4nf_hard0_f6", "sv4nf", "sv4nf", "-", bn("-db", "db", "-db_hard_mask", "0", "-outfmt", "6"))
+
+    # makembindex (review S2): a new style index opens each volume of `m01` alone (no MASKLIST
+    # there) and the one volume of `sv5` with it; an old style index opens the database; `d10`'s
+    # data volume 00 was never written. These rows write index files, listed in `<case>.files`.
+    nmer = ["-nmer", "8"]
+    old = ["-old_style_index", "true", "-iformat", "blastdb", "-output", "o"]
+    add("mbi_m01_id0", "m01", "m01", "-", mbi("-input", "db", "-db_mask", "0", *nmer))
+    add("mbi_m01_show", "m01", "m01", "-", mbi("-input", "db", "-show_filters"))
+    add("mbi_m01_old_m1", "m01", "m01", "-", mbi(*old, "-input", "db", "-db_mask", "m1", *nmer))
+    add("mbi_m01_old_show", "m01", "m01", "-", mbi(*old[:4], "-input", "db", "-show_filters"))
+    add("mbi_sv5_id0", "sv5", "sv5", "-", mbi("-input", "db", "-db_mask", "0", *nmer))
+    add("mbi_sv5_gm1", "sv5", "sv5", "-", mbi("-input", "db", "-db_mask", "gm1", *nmer))
+    add("mbi_sv5_nosuch", "sv5", "sv5", "-", mbi("-input", "db", "-db_mask", "nosuch", *nmer))
+    add("mbi_sv5_id7", "sv5", "sv5", "-", mbi("-input", "db", "-db_mask", "7", *nmer))
+    add("mbi_sv5_show", "sv5", "sv5", "-", mbi("-input", "db", "-show_filters"))
+    add("mbi_sv5_old_gm1", "sv5", "sv5", "-", mbi(*old, "-input", "db", "-db_mask", "gm1", *nmer))
+    add("mbi_sv5_parent", "sv5", ".", "-", mbi("-input", "sv5/db", "-db_mask", "0", *nmer))
+    add("mbi_d10_old0", "d10", "d10", "-", mbi(*old, "-input", "db", "-db_mask", "0", *nmer))
     return rows
+
+
+def write_wide_inputs(d):
+    """`wide.fa`: three sequences with GIs; `wide.asnt`: masks of 3,000, 5,000 and 3,000 ranges of
+    five letters, ten letters apart, so that the GI-mask data file has 88,012 bytes (records of
+    24,004, 40,004 and 24,004 bytes, the third from byte 64,008 to 88,012)."""
+    rng = random.Random(24)
+    counts = (3000, 5000, 3000)
+    fasta, ints = [], []
+    for k, n in enumerate(counts):
+        gi = 8001 + k
+        seq = "".join(rng.choice("ACGT") for _ in range(10 * n + 40))
+        fasta.append(">gi|%d|gb|WD%06d.1| wide %d\n%s\n" % (gi, k + 1, k + 1, writer.wrap(seq)))
+        ints.extend("      int { from %d, to %d, id gi %d }" % (10 * i + 2, 10 * i + 6, gi)
+                    for i in range(n))
+    (d / "wide.fa").write_text("".join(fasta))
+    (d / "wide.asnt").write_text(
+        "Blast-db-mask-info ::= {\n  algo-id 2,\n  algo-program dust,\n  algo-options \"wide\",\n"
+        "  masks {\n    masks {\n" + ",\n".join(ints) + "\n    },\n    more FALSE\n  }\n}\n")
+
+
+def edit_nog(path, edit):
+    """The change `edit` of a `.nog` (`VARIANTS`)."""
+    if edit == "remove":
+        path.unlink()
+        return
+    data = bytearray(path.read_bytes())
+    if edit.startswith("cut "):
+        data = data[:int(edit[4:])]
+    elif edit == "count3swap":
+        data[12:16] = (3).to_bytes(4, "big")
+        data[32:36], data[36:40] = data[36:40], data[32:36]
+    else:
+        raise SystemExit(f"unknown .nog change {edit}")
+    path.write_bytes(bytes(data))
+
+
+def fnv1a64(data):
+    h = 0xcbf29ce484222325
+    for b in data:
+        h = ((h ^ b) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def file_states(root):
+    """Each file under `root`: its path relative to it (with `/`) and (size, mtime)."""
+    out = {}
+    for path in root.rglob("*"):
+        if path.is_file():
+            st = path.stat()
+            out[path.relative_to(root).as_posix()] = (st.st_size, st.st_mtime_ns)
+    return out
+
+
+def made_files(root, before):
+    """The `.files` text of the files under `root` made or changed since `before`."""
+    lines = []
+    for name, state in sorted(file_states(root).items()):
+        if before.get(name) != state:
+            data = (root / name).read_bytes()
+            lines.append(f"{name}\t{len(data)}\t{fnv1a64(data):016x}\n")
+    return "".join(lines)
 
 
 def losat_single_volume_alias(db_dir, extension):
@@ -343,18 +462,29 @@ def build(bin_dir, root, inputs, out, env):
             if r.returncode != 0:
                 raise SystemExit(f"{name}: blastdb_aliastool rc {r.returncode}")
         rows.append("\t".join([name, after, setup_text] + words))
-        keep = out / "db" / name
-        for path in sorted(db_dir.rglob("*")):
-            if path.is_dir():
-                continue
-            target = keep / path.relative_to(db_dir)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if path.suffix in (".nal", ".pal", ".njs", ".pjs"):
-                text = path.read_bytes().decode("latin-1").replace(str(root), "<R>")
-                target.write_bytes(text.encode("latin-1"))
-            else:
-                shutil.copyfile(path, target)
+        keep_database(root, db_dir, out / "db" / name)
     (out / "dbs.tsv").write_text("".join(r + "\n" for r in rows))
+    rows = []
+    for name, base, edit in VARIANTS:
+        shutil.copytree(root / base, root / name)
+        edit_nog(root / name / "db.nog", edit)
+        rows.append("\t".join([name, base, edit]))
+        keep_database(root, root / name, out / "db" / name)
+    (out / "variants.tsv").write_text("".join(r + "\n" for r in rows))
+
+
+def keep_database(root, db_dir, keep):
+    """Every file of `db_dir` into `keep`, the root `<R>` in the text files."""
+    for path in sorted(db_dir.rglob("*")):
+        if path.is_dir():
+            continue
+        target = keep / path.relative_to(db_dir)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix in (".nal", ".pal", ".njs", ".pjs"):
+            text = path.read_bytes().decode("latin-1").replace(str(root), "<R>")
+            target.write_bytes(text.encode("latin-1"))
+        else:
+            shutil.copyfile(path, target)
 
 
 def read(bin_dir, root, out, env):
@@ -366,10 +496,13 @@ def read(bin_dir, root, out, env):
         if run_env != "-":
             k, _, v = run_env.partition("=")
             e[k] = v.replace("{R}", str(root))
+        before = file_states(root) if words[0] == "makembindex" else None
         result = subprocess.run([str(bin_dir / words[0])] + words[1:], cwd=root / cwd,
                                 capture_output=True, env=e)
         rows.append("\t".join([name, dbs, cwd, run_env] + argv))
         (exp / f"{name}.rc").write_text(f"{result.returncode}\n")
+        if before is not None:
+            (exp / f"{name}.files").write_text(made_files(root, before))
         stdout = result.stdout
         if name in DEVIATION_5:
             letters = subprocess.run([str(bin_dir / words[0])] + words[1:] + ["-outfmt", "%s"],
@@ -398,6 +531,7 @@ def main():
     inputs.mkdir(parents=True)
     writer.write_inputs(inputs)
     writer.write_masks(bin_dir, inputs)
+    write_wide_inputs(inputs)
     write_queries(inputs)
     if out.exists():
         shutil.rmtree(out)

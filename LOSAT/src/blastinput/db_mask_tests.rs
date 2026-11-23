@@ -946,7 +946,7 @@ fn protein_shapes_of_the_hard_masks() {
 /// `HardMaskShape::of_scan` of the protein programs on masks that overlap or nest, or are out of
 /// the order of their start (series NP, M4b-3b; the masks of probe 2 of M/m4b3b/NOTES_M4B3B.md, a
 /// sequence of 240 letters, word 3): searched also where the walk of the chunks' diagonal offsets
-/// leaves the sequence (each sequence on its own, PD-LOSAT-NCBI-DEFECTS exception 24: the search's
+/// leaves the sequence (each sequence on its own, PD-LOSAT-NCBI-DEFECTS exception 26: the search's
 /// `DiagonalWalk::start`), `WordPastEnd` where a short chunk's one word read past the sentinel can
 /// change a result; `PartsOutOfOrder` where a chunk that can hold
 /// alignments starts before the end of an earlier one, `Inverted` for a mask that ends before it

@@ -12,7 +12,7 @@
 //! finder reads of each chunk ([`ChunkWork`]), the margins by which the sequence's word hits
 //! reach past it ([`DiagonalMargins`]), and from them how the search moves the diagonal offset
 //! so that no entry of another sequence reaches a sequence's hits ([`DiagonalWalk::start`],
-//! [`DiagonalWalk::after`]: PD-LOSAT-NCBI-DEFECTS exception 24, the Owner's answer Q5 = B of M4b,
+//! [`DiagonalWalk::after`]: PD-LOSAT-NCBI-DEFECTS exception 26, the Owner's answer Q5 = B of M4b,
 //! 2026-11-22). [`NcbiWalk`] follows NCBI's one-thread offsets over the searched sequences before
 //! the search and names the sequences whose hits meet entries that no sequence wrote, which the
 //! search starts on such a table at NCBI's offset ([`HardStarts`], [`TableStart::New`]).
@@ -102,7 +102,7 @@ pub(crate) trait HardTable {
     /// The table cleared as `s_BlastDiagClear` clears it: every entry the window `window` less
     /// than 0, the offset the window.
     fn clear_table(&mut self, window: i32);
-    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 24 (the Owner's answer Q5 = B of M4b).
+    // No NCBI counterpart: PD-LOSAT-NCBI-DEFECTS exception 26 (the Owner's answer Q5 = B of M4b).
     /// The offset moved up by `by` between two sequences, so that no entry of one reaches the
     /// other's hits ([`DiagonalWalk::start`], [`DiagonalWalk::after`]).
     fn move_offset(&mut self, by: i32) -> Result<(), Self::Error>;
@@ -379,7 +379,7 @@ impl DiagonalWalk {
     /// How the search of a sequence of `length` letters whose hard chunks are `chunks` (in walk
     /// order) starts on a table at the diagonal offset `offset`, in a search with the word `word`
     /// and the window `window`, and the walk of its search (the margin of [`DiagonalWalk::after`]
-    /// comes from it). PD-LOSAT-NCBI-DEFECTS exception 24 (the Owner's answer Q5 = B of M4b,
+    /// comes from it). PD-LOSAT-NCBI-DEFECTS exception 26 (the Owner's answer Q5 = B of M4b,
     /// 2026-11-22 22:34 JST): the rows differ from NCBI's one-thread rows only where an entry of
     /// another sequence reaches a hit, and are the same at every thread count.
     /// - `ncbi`, a sequence whose hits meet the entries that no sequence wrote in NCBI's one-thread

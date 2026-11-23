@@ -2369,7 +2369,7 @@ for `qov2.faa` and for `qwpe.faa`, `qov2.faa`'s protein with `W-W`, whose `-` th
 `ov_r36` (overlaps 37 = window - word and 36), `ov_nb` (consecutive inverted chunks with different words) and `ov_lk` (two
 subjects, A with masks [40,200) [60,238): diagonal entries that outlive A reach B, 98 positions past A's end, 137 in the
 one-hit scan (`-window_size 0`); NCBI's rows of B depend on the thread order). LOSAT searches B with A's entries out of reach
-(PD-LOSAT-NCBI-DEFECTS exception 24, the Owner's answer Q5 = B of M4b, 2026-11-22; it refused `ov_lk` before). At the default
+(PD-LOSAT-NCBI-DEFECTS exception 26, the Owner's answer Q5 = B of M4b, 2026-11-22; it refused `ov_lk` before). At the default
 NCBI's rows are those of the near input `ov_lkn`; the rows at `-evalue 1000` and `-ungapped` expect NCBI's run of `ov_lkn`
 (`ncbi-near:`, rows `.hard.near.ov_lkn.*`): `make_dbmaskp_ov.py` (`near_db`) writes `ov_lkn.faa` (A, a spacer of 240 `X`, which
 no word of these queries hits, as they hold no `X`, then B; at least as long as the walk's margin less the window, `spacer_length`, here the database's average
@@ -2438,7 +2438,7 @@ threads (before that move, CI's build of 5fcc98420 lost the rows of one to four 
 
 6 of `ov_atha`'s 40 proteins (AT1G02550.1, AT1G02800.1, AT1G04080.2, AT1G04080.5, AT1G06760.1, AT1G09460.1) scan below
 their starts or leave diagonal entries past the next subject's start in the one-hit scan, which LOSAT refused before
-exception 24 (decision 52); NCBI's rows of `ov_atha` at `-window_size 0` equal those of its near input with a spacer of `X`
+exception 26 (decision 52); NCBI's rows of `ov_atha` at `-window_size 0` equal those of its near input with a spacer of `X`
 at each of the six boundaries (at 1 and 4 threads, BLASTP and BLASTX; `ncbi-parity-20261019/M/m4b3b/Q5B_PROGRESS.md`), so
 they are `ncbi` rows. `ov_athaw` (`make_dbmaskp_ovatha.py` too: the 34 other proteins, `segmasker` and `makeblastdb` as for
 `ov_atha`) has the one-hit rows `.ov_athaw.21.w0.6`. NCBI BLAST+ 2.17.0 gave the same stdout bytes at 1 thread twice and at 4 threads for every
@@ -2559,6 +2559,16 @@ chain 321, -191, 383, 65 or none, by makeblastdb from `gb|AB60000<n>.1|pdb|1AB<n
 deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPDB` reads the chain as
 `(unsigned char) m_PDBChain`: `Chain A` for 321, -191 and 65. The gb Seq-id lets NCBI load the sequence for its report
 (with the pdb one alone it prints `Unknown` and `no longer exists in database`).
+- `tn_amb_q.faa` / `tn_amb_s.fna` (rows `db.tn.amb.*`, line O4c): a protein of 80 random letters with an X, a B, a Z
+  and a W, and its back-translation with an `RAT` codon (D or N) at the X, the B and a D, an `SAR` codon (E or Q) at
+  the Z and `TGA` (a stop in code 1) at the W, between `CC` and `GG`; then (review X2 of line O4c) 32 more letters,
+  written by hand without repeats so that SEG keeps them and the alignments run through them, with an I, an L, a J and
+  an X against an `MTT` codon (I or L) and an A and an X against `NNN`. TBLASTN's search reads the ambiguous codons as
+  X, its reports as B, Z and J (`NNN` stays X in both): the identities and positives of the reports differ from the
+  Seq-aligns'.
+- `tn_ac_q.faa` (rows `db.tn.rej.ungapped.sw.ac.b1.*` and `db.tn.ungapped.ac.b1.nosw.7`, line O4c): a protein of W, C
+  and H alone, from which NCBI computes no ungapped Karlin-Altschul parameters (a query batch without a valid
+  context, which NCBI reports with a warning and does not search), then the five G of `nohit.faa`.
 
 ## Where some inputs come from (provenance)
 

@@ -39,7 +39,7 @@ LOSAT/tests/db_search (README.md there says how they were built).
   NCBI faults; exception 19: a hit list size whose preliminary size passes NCBI's Int4, with the near size
   1073741798; exception 23: BLASTX `-use_sw_tback`'s heap test in e-value mode past NCBI's
   array of a batch's heaps, with the near input that follows each query batch by queries without a hit, where
-  they add no byte: outfmt 6, or a batch that fails and writes nothing; exception 24: `-db_hard_mask` with
+  they add no byte: outfmt 6, or a batch that fails and writes nothing; exception 26: `-db_hard_mask` with
   overlapping masks after which NCBI's word hits reach diagonal entries of another subject, with the near database
   that holds a spacer of `X` between the two subjects under an alias with the database's statistics). The row has no
   frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row`). ROW_ID is

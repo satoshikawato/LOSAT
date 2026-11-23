@@ -594,8 +594,26 @@ fn read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
     values
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:133-140
+// NCBI's reader takes `MASKLIST` (the GI masks of `makeblastdb -gi_mask`) as a value of the alias
+// file and looks at it only after the whole tree is built; the GI-mask reader it then makes
+// opens no file until a mask is asked for (seqdbimpl.cpp:81-91, seqdbgimask.cpp:46-55). So
+// makeblastdb's own reads of a database (the removal of the old one, the metadata of the new
+// one) go through such an alias file as through any other.
+/// What the reader does with an alias file's `MASKLIST`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum MaskList {
+    /// Refused (`UNSUPPORTED_KEYS`): LOSAT's programs that read sequences do not read GI masks.
+    Refuse,
+    /// Passed over, as makeblastdb's reads pass it: the volumes and alias files are what they
+    /// are without it.
+    Pass,
+}
+
 struct Resolver<'a> {
     seqtype: SeqType,
+    /// `MASKLIST`: refused, or passed over by makeblastdb's own reads.
+    masklist: MaskList,
     /// Alias files being expanded, outermost first.
     recurse: Vec<String>,
     /// The directory where a volume named in an alias file is looked for
@@ -696,6 +714,7 @@ impl Resolver<'_> {
         for (key, value) in &values {
             match key.as_slice() {
                 b"DBLIST" => dblist = value,
+                b"MASKLIST" if self.masklist == MaskList::Pass => {}
                 other => {
                     if let Some(key) = UNSUPPORTED_KEYS.iter().find(|k| k.as_bytes() == other) {
                         return Err(unsupported(format!(
@@ -913,6 +932,7 @@ pub(super) fn resolve_in(
     }
     let mut resolver = Resolver {
         seqtype,
+        masklist: MaskList::Refuse,
         recurse: Vec::new(),
         local_dir: Some(search.cwd.clone()),
         search: Some(search),
@@ -997,15 +1017,18 @@ pub(super) fn resolve_in(
 /// it is): an alias file when `db_base.{p|n}al` exists, else the single
 /// volume `db_base.{p|n}in`. `local_copy` says where the volumes named in an
 /// alias file are looked for; `search` is the search path that a database which is not there
-/// names in NCBI's message (the files are looked for at `db_base` only).
+/// names in NCBI's message (the files are looked for at `db_base` only); `masklist` what is done
+/// with a `MASKLIST`.
 pub(super) fn resolve_one_name(
     db_base: &str,
     seqtype: SeqType,
     local_copy: LocalCopy<'_>,
     search: &SearchPath,
+    masklist: MaskList,
 ) -> Result<AliasTree, SeqDbError> {
     let mut resolver = Resolver {
         seqtype,
+        masklist,
         recurse: Vec::new(),
         local_dir: match local_copy {
             LocalCopy::CurrentDir => std::env::current_dir()
@@ -1067,7 +1090,13 @@ pub(crate) fn find_volume_paths(
     db_base: &str,
     seqtype: SeqType,
 ) -> Result<(Vec<String>, Vec<String>), SeqDbError> {
-    let tree = resolve_one_name(db_base, seqtype, LocalCopy::No, &SearchPath::current_dir()?)?;
+    let tree = resolve_one_name(
+        db_base,
+        seqtype,
+        LocalCopy::No,
+        &SearchPath::current_dir()?,
+        MaskList::Pass,
+    )?;
     let mut alias_files = std::collections::BTreeSet::new();
     collect_alias_files(&tree.root, &mut alias_files);
     Ok((tree.volumes, alias_files.into_iter().collect()))

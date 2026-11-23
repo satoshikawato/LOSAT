@@ -174,9 +174,12 @@ watch(
 );
 
 function runLabel(run: RunView): string {
-  const { number, program, query, subject } = run.snapshot;
+  const { number, program, query, subject, prints } = run.snapshot;
   const status = run.status === 'completed' ? '' : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
-  return `Run ${number} · ${programById(program).label} · ${query.name} vs ${subject.name}${status}`;
+  // The inputs are named as the user gave them (a compressed file by its own name). A run that prints the command line's help
+  // or version reads none, so it names none (line WQA's D21, the review of D20's F2, 2026-11-23).
+  const files = prints === undefined ? ` · ${query.name} vs ${subject.name}` : '';
+  return `Run ${number} · ${programById(program).label}${files}${status}`;
 }
 
 /**
@@ -193,7 +196,8 @@ const programText = computed(() => {
   if (run === undefined) return '';
   const task = loaded.value?.run.snapshot.runId === run.snapshot.runId ? loaded.value.task : undefined;
   const label = programById(run.snapshot.program).label;
-  return task === undefined ? label : `${label} (task ${task})`;
+  // A run that printed the command line's help or version used no task (line WQA's D20 round 3, 2026-11-23).
+  return task === undefined || run.snapshot.prints !== undefined ? label : `${label} (task ${task})`;
 });
 const units = computed(() => {
   const program = selected.value === undefined ? undefined : programById(selected.value.snapshot.program);
@@ -270,7 +274,7 @@ async function toAlignments(id: HspId): Promise<void> {
             <dt>Mode</dt>
             <dd class="results-program">
               <span data-testid="results-program">{{ programText }}</span>
-              <VerificationBadge v-if="loaded" :badge="loaded.badge" compact @details="view = 'details'" />
+              <VerificationBadge v-if="loaded?.badge" :badge="loaded.badge" compact @details="view = 'details'" />
             </dd>
             <dt>Options</dt>
             <dd class="run-inputs" data-testid="results-run-options">
@@ -280,23 +284,26 @@ async function toAlignments(id: HspId): Promise<void> {
                 · group run {{ selected.snapshot.group.position }} of {{ selected.snapshot.group.size }}
               </template>
             </dd>
-            <template v-if="selected.snapshot.query.records.length === 1">
-              <dt>Query ID</dt>
-              <dd data-testid="results-query-id">{{ recordName(selected.snapshot.query.records[0]!.id, 'query', 0, selected.record.shownIds) }}</dd>
-              <dt>Query Length</dt>
-              <dd data-testid="results-query-length">{{ withUnit(formatCount(selected.snapshot.query.records[0]!.length), units.query) }}</dd>
-            </template>
-            <template v-if="selected.snapshot.subject.records.length === 1">
-              <dt>Subject ID</dt>
-              <dd data-testid="results-subject-id">{{ recordName(selected.snapshot.subject.records[0]!.id, 'subject', 0, selected.record.shownIds) }}</dd>
-              <dt>Subject Length</dt>
-              <dd data-testid="results-subject-length">{{ withUnit(formatCount(selected.snapshot.subject.records[0]!.length), units.subject) }}</dd>
-            </template>
-            <template v-else>
-              <dt>Subjects</dt>
-              <dd data-testid="results-subjects">
-                {{ selected.snapshot.subject.name }}, {{ plural(selected.snapshot.subject.records.length, 'record') }}
-              </dd>
+            <!-- A run that printed the command line's help or version read no input (line WQA's D20, S3-1, 2026-11-23). -->
+            <template v-if="selected.snapshot.prints === undefined">
+              <template v-if="selected.snapshot.query.records.length === 1">
+                <dt>Query ID</dt>
+                <dd data-testid="results-query-id">{{ recordName(selected.snapshot.query.records[0]!.id, 'query', 0, selected.record.shownIds) }}</dd>
+                <dt>Query Length</dt>
+                <dd data-testid="results-query-length">{{ withUnit(formatCount(selected.snapshot.query.records[0]!.length), units.query) }}</dd>
+              </template>
+              <template v-if="selected.snapshot.subject.records.length === 1">
+                <dt>Subject ID</dt>
+                <dd data-testid="results-subject-id">{{ recordName(selected.snapshot.subject.records[0]!.id, 'subject', 0, selected.record.shownIds) }}</dd>
+                <dt>Subject Length</dt>
+                <dd data-testid="results-subject-length">{{ withUnit(formatCount(selected.snapshot.subject.records[0]!.length), units.subject) }}</dd>
+              </template>
+              <template v-else>
+                <dt>Subjects</dt>
+                <dd data-testid="results-subjects">
+                  {{ selected.snapshot.subject.name }}, {{ plural(selected.snapshot.subject.records.length, 'record') }}
+                </dd>
+              </template>
             </template>
           </template>
         </dl>

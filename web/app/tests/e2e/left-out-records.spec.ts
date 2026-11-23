@@ -148,8 +148,10 @@ test('a query with a record left out: the command names the file of the records 
   expect(names.subject).toBe('s.fa');
   const shown = `losat blastn -query ${names.query} -subject s.fa`;
   await expect(page.getByTestId('run-1-option')).toHaveText('Run 1 · BLASTN · q.fa, some records left out vs s.fa');
-  await expect(page.getByTestId('results-query-from')).toHaveText('q.fa without r2 (2 of 3 records)');
-  await expect(page.getByTestId('results-subject-from')).toHaveCount(0);
+  await shownThen(page, 'results-summary', 'results-header', browserName, async () => {
+    await expect(page.getByTestId('results-query-from')).toHaveText('q.fa without r2 (2 of 3 records)');
+    await expect(page.getByTestId('results-subject-from')).toHaveCount(0);
+  });
   await shownThen(page, 'run-details', 'run-details', browserName, async () => {
     await expect(page.getByTestId('run-argv')).toHaveText(`blastn -query ${names.query} -subject s.fa`);
     await expect(page.getByTestId('run-input-query')).toContainText(`${names.query}: 2 records, `);
@@ -171,7 +173,7 @@ test('a query with a record left out: the command names the file of the records 
   expect(file.name).toBe(names.query);
   expect(file.bytes.toString('utf8')).toBe(WITHOUT_R2);
   await page.getByTestId('results-download-all').click();
-  await expect(page.getByTestId('results-download-subject')).toHaveCount(0);
+  await shownThen(page, 'results-download-menu', 'download-menu', browserName, () => expect(page.getByTestId('results-download-subject')).toHaveCount(0));
   await page.keyboard.press('Escape');
   // Outputs offers it too.
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('outputs-query-download').click()]);

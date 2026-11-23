@@ -57,6 +57,8 @@ mod function_size_limit;
 mod library_api;
 #[path = "../library_examples.rs"]
 mod library_examples;
+#[path = "../library_html_posts.rs"]
+mod library_html_posts;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
 #[path = "../llvm_profile.rs"]

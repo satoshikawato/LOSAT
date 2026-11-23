@@ -901,8 +901,9 @@ impl<'a> XTwoHit<'a> {
         // The cells are taken out for the loop over them and put back (a move of the vector).
         let mut entries =
             std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
+        let around = self.x_around.is_some();
         let done = match &mut entries {
-            XDiagCells::Packed(cells) => self.one_hit_on(
+            XDiagCells::Packed(cells) if around => self.one_hit_on::<_, _, true>(
                 score,
                 cells,
                 frame,
@@ -911,7 +912,25 @@ impl<'a> XTwoHit<'a> {
                 pairs,
                 hits,
             ),
-            XDiagCells::Pair(cells) => self.one_hit_on(
+            XDiagCells::Packed(cells) => self.one_hit_on::<_, _, false>(
+                score,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) if around => self.one_hit_on::<_, _, true>(
+                score,
+                cells,
+                frame,
+                chunk_offset,
+                subject_sequence,
+                pairs,
+                hits,
+            ),
+            XDiagCells::Pair(cells) => self.one_hit_on::<_, _, false>(
                 score,
                 cells,
                 frame,
@@ -926,8 +945,14 @@ impl<'a> XTwoHit<'a> {
     }
 
     /// `x_pairs_one_hit` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`).
+    /// `AROUND`: the unit has the letters around its chunk (`x_set_around`), the only unit whose
+    /// words can lie before its chunk; the other units' loop has no test for them.
     #[allow(clippy::too_many_arguments)]
-    fn one_hit_on<S: super::score::TbnScore, C: super::x_tbn_hitbf::XDiagCell>(
+    fn one_hit_on<
+        S: super::score::TbnScore,
+        C: super::x_tbn_hitbf::XDiagCell,
+        const AROUND: bool,
+    >(
         &self,
         score: S,
         cells: &mut [C],
@@ -956,7 +981,11 @@ impl<'a> XTwoHit<'a> {
             // The scanner gives words inside the unit or, for masks stored out of order, before
             // its chunk (the extension on the letters around it), so the extension always runs
             // (`None` is a word past the slices, which NCBI's scan does not give).
-            let result = if s < 0 {
+            debug_assert!(
+                AROUND || s >= 0,
+                "a word before a unit without letters before it"
+            );
+            let result = if AROUND && s < 0 {
                 self.x_one_hit_around(score, q, s, self.x_dropoffs[context])
             } else {
                 score.one_hit(

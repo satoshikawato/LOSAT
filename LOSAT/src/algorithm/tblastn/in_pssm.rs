@@ -21,12 +21,21 @@ use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 
+/// The upper-case name of PSI-TBLASTN as a literal (for `concat!`): the one spelling of `PROGRAM`
+/// and of the program line of outfmt 7 (`tabular::PSI_PROGRAM_VERSION`).
+macro_rules! psi_tblastn_name {
+    () => {
+        "PSITBLASTN"
+    };
+}
+pub(super) use psi_tblastn_name;
+
 /// The program line of PSI-TBLASTN's reports (`Blast_ProgramNameFromType` of
 /// `eBlastTypePsiTblastn`, upper-cased by the formatter).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:690
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
-pub(super) const PROGRAM: &str = "PSITBLASTN";
+pub(super) const PROGRAM: &str = psi_tblastn_name!();
 
 /// The program type of a TBLASTN search (`RunRecord::program_type`): PSI-TBLASTN's with
 /// `-in_pssm` (`pssm`), whose reports name it and show no query masks

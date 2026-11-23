@@ -46,7 +46,11 @@ const PROGRAM: &str = "TBLASTN";
 /// The `# TBLASTN 2.17.0+` line of outfmt 7 (`NStr::ToUpper` of `m_Program`, a space and `version`).
 const PROGRAM_VERSION: &str = concat!("TBLASTN ", crate::wording::report_version!());
 /// The `# PSITBLASTN 2.17.0+` line of a PSSM search (`-in_pssm`, `in_pssm::PROGRAM`).
-const PSI_PROGRAM_VERSION: &str = concat!("PSITBLASTN ", crate::wording::report_version!());
+const PSI_PROGRAM_VERSION: &str = concat!(
+    super::in_pssm::psi_tblastn_name!(),
+    " ",
+    crate::wording::report_version!()
+);
 
 /// The program line of outfmt 7 (and 20's formatter): tblastn's, or PSI-TBLASTN's with
 /// `-in_pssm` (`pssm`).

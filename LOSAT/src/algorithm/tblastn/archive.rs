@@ -280,6 +280,9 @@ pub(super) struct ArchiveData<'a> {
     pub seg: Option<&'a SegParams>,
     pub mask_lowercase: bool,
     pub ranges: &'a ReportRanges<'a>,
+    /// The run's program type (`RunRecord::program_type`, `in_pssm::program_type`): PSI-TBLASTN's
+    /// results carry no query masks (`report::record::carries_query_masks`).
+    pub program_type: Option<crate::report::record::ProgramType>,
 }
 
 /// Calls `each` with the queries and the archive of each batch of `spans`, in order
@@ -301,8 +304,8 @@ fn for_each_batch(
         let first = span.start;
         let searched = !data.query_batch_skipped[first];
         // Only a searched batch has results masks (the search made them): they are computed per
-        // batch.
-        let masks = if searched {
+        // batch; a PSSM search's results have none.
+        let masks = if searched && crate::report::record::carries_query_masks(data.program_type) {
             query_record_masks(records, first, data.seg, data.mask_lowercase, data.ranges)
         } else {
             Vec::new()

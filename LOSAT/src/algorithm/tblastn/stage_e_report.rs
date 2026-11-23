@@ -699,6 +699,7 @@ pub(super) fn render(
         seg,
         mask_lowercase,
         ranges,
+        program_type: super::in_pssm::program_type(pssm.is_some()),
     };
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
         // A format that failed alone writes nothing more; the next takes the warnings.

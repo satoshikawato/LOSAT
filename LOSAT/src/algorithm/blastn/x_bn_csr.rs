@@ -66,9 +66,10 @@
 //! would be (`x_mb_lookup_once::csr`), otherwise here (`serial`). Its `hashtable` and `next_pos`
 //! are then empty: the CSR replaces them (`offsets` has two elements more than `hashtable`, `qs`
 //! one element per word where `next_pos` has one per query position), so the table takes no more
-//! memory. The batch loop's keep (LOSAT_X_MBLUTKEEP) holds no CSR: `offsets` is allocated by each
-//! build and freed with the table (BNLUTDROP, graduated, frees it before the traceback), and a build
-//! laid out as CSR frees the table the keep holds, so the loop never holds a kept table beside it.
+//! memory. In the batch loop a build takes the buffer of its `offsets` from the keep (LOSAT_X_MBLUTKEEP,
+//! `Keep::take_buffer`) and, with LOSAT_X_CSRQSKEEP, the kept `qs`, and the keep takes both back when
+//! the batch drops the table (BNLUTDROP, graduated, drops it before the traceback;
+//! `x_mb_lut_keep.rs`), so the loop never holds a kept table or `qs` beside the build's.
 //! Every reader of the chains of a contiguous table goes through `MbLookupTable::x_csr`: the strip
 //! scan of PAIRPAR (`x_pair_seed.rs`, `scan_strip_csr`), the reference scan of a two-stage table
 //! (`two_stage_scan.rs` `scan_two_stage_lookup`, its `x_on_word_csr`; the chains' `on_word` stays as
@@ -293,6 +294,7 @@ pub(super) fn build(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
+    x_qs: Option<Vec<u32>>,
 ) -> (Csr, bool) {
     let (csr, on_pool) = match super::x_mb_lookup_par::pool_threads() {
         Some(parts) => super::x_mb_lookup_once::csr(
@@ -303,6 +305,7 @@ pub(super) fn build(
             pv_array_bts,
             helper_array,
             x_offsets,
+            x_qs,
         ),
         None => (
             serial(
@@ -312,6 +315,7 @@ pub(super) fn build(
                 pv_array_bts,
                 helper_array,
                 x_offsets,
+                x_qs,
             ),
             false,
         ),
@@ -342,6 +346,7 @@ pub(super) fn serial(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
+    x_qs: Option<Vec<u32>>,
 ) -> Csr {
     // Once per table: the bounds the unchecked writes below rely on.
     assert!(cells.is_multiple_of(2048) && pv_array_bts >= 5);
@@ -355,6 +360,7 @@ pub(super) fn serial(
             pv_array_bts,
             helper_array,
             x_offsets,
+            x_qs,
         );
     }
     x_serial_unpacked(
@@ -364,6 +370,7 @@ pub(super) fn serial(
         pv_array_bts,
         helper_array,
         x_offsets,
+        x_qs,
     )
 }
 
@@ -375,6 +382,7 @@ pub(super) fn x_serial_unpacked(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
+    x_qs: Option<Vec<u32>>,
 ) -> Csr {
     assert!(cells.is_multiple_of(2048) && pv_array_bts >= 5);
     assert_eq!(helper_array.len(), cells >> 11);
@@ -423,7 +431,11 @@ pub(super) fn x_serial_unpacked(
         )
     };
     debug_assert_eq!(total as usize, n_words);
-    let mut qs: Vec<u32> = Vec::with_capacity(n_words);
+    // EXPERIMENT (LOSAT_X_CSRQSKEEP): `x_qs` is the batch loop's kept `qs`, taken when it has room
+    // for the words, or `None`. No NCBI counterpart (memory only). Either place pass below writes
+    // each of the places `0 .. n_words` once (the runs partition them) before anything reads one,
+    // so a kept `qs` needs no zeroing.
+    let mut qs: Vec<u32> = super::x_mb_lut_keep::qs_buffer(x_qs, n_words);
     let qb = qs.as_mut_ptr();
     if ascending {
         each_word(words, |cell, q_off_1| {
@@ -467,6 +479,7 @@ pub(super) fn x_serial_packed(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
+    x_qs: Option<Vec<u32>>,
 ) -> Csr {
     assert!(cells.is_multiple_of(2048) && pv_array_bts >= 5 && !words.ascending_cells);
     assert_eq!(helper_array.len(), cells >> 11);
@@ -474,8 +487,12 @@ pub(super) fn x_serial_packed(
     // `qs` has room for every position the loop reads (each word ends at one) and for the counts,
     // which take its first `cells` bytes, so the build frees nothing in the middle of a batch (a
     // freed block there is trimmed and faulted in again; with threads each trim interrupts them
-    // all).
-    let mut qs: Vec<u32> = Vec::with_capacity(positions(words).max(cells.div_ceil(4)));
+    // all). EXPERIMENT (LOSAT_X_CSRQSKEEP): `x_qs` is the batch loop's kept `qs`, taken when it has
+    // that room, or `None`. No NCBI counterpart (memory only). The counts' bytes are zeroed below
+    // before the count pass, and the place pass writes each of the places `0 .. n_words` once
+    // before anything reads one, so a kept `qs` needs no zeroing.
+    let mut qs: Vec<u32> =
+        super::x_mb_lut_keep::qs_buffer(x_qs, positions(words).max(cells.div_ceil(4)));
     let cb = qs.as_mut_ptr() as *mut u8;
     // SAFETY: `cells` bytes of the capacity, before the place pass writes any element.
     unsafe { std::ptr::write_bytes(cb, 0, cells) };

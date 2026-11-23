@@ -442,6 +442,7 @@ export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_BXW4CAP=1
 export LOSAT_X_CHAINRUN=1
 export LOSAT_X_CLUTPAIRS=1
+export LOSAT_X_CSRQSKEEP=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
 export LOSAT_X_DCQSAHEAD=1
@@ -3835,6 +3836,39 @@ Scheduling (each value computed by one thread with the original function; order 
   not act (dc-megablast, blastn and megablast of the 31,168 cDNAs, blastn of 5,000: x1.001-1.023, cycles x1.001-1.002,
   the same peaks); with `-db` the loop keeps (dc-megablast of the 31,168 cDNAs at 16 threads `RssAnon` 138 -> 131 MiB,
   x0.993; blastn of 5,000 88 -> 87, x0.994).
+- `LOSAT_X_CSRQSKEEP=1` (BLASTN megablast, blastn and dc-megablast, where a lookup table laid out as CSR (`LOSAT_X_DCCSR`,
+  `LOSAT_X_BNCSR`) takes its `offsets` through the batch loop's keep (`LOSAT_X_MBLUTKEEP`); in the strict set from the
+  pull request that added it, 2026-11-23: `LOSAT_X_CSRQSKEEP=0` turns it off) keeps the CSR's second array, `qs` (one
+  element per word of the batch's table), in the keep with the kept table (`blastn/x_mb_lut_keep.rs`, argument in its
+  header). NCBI allocates each batch's chains (`next_pos`, `blast_nalookup.c:685` and `:979`), which `qs` stands for,
+  and frees them with the table (`:1377`); a CSR build allocated `qs` per batch and the batch freed it with the CSR.
+  For the dc-megablast of 31,168 D. melanogaster cDNAs a full batch's `qs` is 37 MB, above glibc's largest mmap
+  threshold (32 MiB), so each build mapped it, faulted its pages in during the place pass (at one thread 91 % of the
+  search's page faults were in `x_dc_csr::build`) and unmapped it at the batch's end. Now a CSR whose `offsets` goes
+  back to the keep gives its `qs` back too when it is dropped (the keep holds the one with the most room; one with less
+  is freed with its CSR), and the next CSR build through the keep takes it where it allocated `qs` before when its
+  capacity holds the build's `qs` (`x_mb_lut_keep::qs_buffer`, the decision point); else it frees the kept one and then
+  allocates, as `Keep::take_buffer` does with a table too short. `Keep::release` frees it with the table after the
+  loop's last preliminary stage. One mechanism for every CSR build: `x_dc_csr::build`, `x_disc_lookup_par::csr_on_pool`
+  and `csr_on_pool_steps`, `x_bn_csr::x_serial_unpacked` and `x_serial_packed`, and both heads of
+  `x_mb_lookup_once::csr_on_pool`. Every build writes each element of `qs` that it uses before it reads one (its place
+  pass writes each place `0 .. words` once; a packed head's counts, which take the first bytes of the capacity until
+  then, are zeroed first), so a kept `qs` is not zeroed and the CSR is the fresh build's: every array and every report
+  is what it is without the switch. Memory: no build allocates a `qs` beside the kept one; between a CSR's drop and the
+  next CSR build the loop holds the `qs` it freed there before (through a batch's traceback, as the kept table, but not
+  in the loop's last batch, and through the chain builds of `CBatchSizeMixer`'s probe batches), and a smaller batch's
+  CSR uses the largest kept `qs` (the resident pages that earlier builds wrote). `[TIMING] x_mb_lut_keep: ... qs_kept=
+  qs_fresh=` counts the CSR builds through the keep that took the kept `qs` and those that allocated theirs (none kept,
+  or too small); both are 0 with `=0`. The unit tests of `x_mb_lut_keep_tests.rs` (a kept `qs` taken, one too small
+  freed, `release`, `=0`), `csrs_through_the_keep_share_its_qs` (`x_dc_csr_tests.rs`), and each CSR build's test on a
+  kept `qs` of stale values with exactly the room the fresh build allocated and with one element less
+  (`x_dc_csr::x_assert_same_on_a_kept_qs`: the same arrays, the kept buffer taken or freed) check it, and
+  `LOSAT/tests/blastn_csr_qs_keep.rs` compares the reports and the standard error (but its `[TIMING]` lines) with
+  `=0`'s for dc-megablast and megablast of several query batches at 1 and 4 threads and checks the counters. A probe
+  of line FD (commit e79ea6298, one process-wide `qs` instead of the keep's; workstation node 1, the cDNAs above
+  against 3 Mb of the D. melanogaster genome, `-subject`, outfmt 6) took 1.251 s against 1.319 s at 16 threads
+  (x0.948, cycles equal) and x0.983 at one, max RSS +0.4 % and -0.06 %.
+  Evidence: EVIDENCE-TODO.
 - `LOSAT_X_BNHITGROUP=1` (BLASTN, speed, every task, `-subject` and `-db`; in the strict set from the pull request that
   added it (feature/manyq-reads): on unless it is `0`) the preliminary stage's collector (`blastn/blast_engine/run.rs`
   `PrelimHitCollector::x_add_grouped`) keeps one list per query, made at the first subject with an HSP, and visits only

@@ -13,6 +13,11 @@ fn kept(keep: &Keep) -> Option<(usize, usize)> {
     kept.as_ref().map(|kept| (kept.table.len(), kept.dirty))
 }
 
+/// EXPERIMENT (LOSAT_X_CSRQSKEEP): the capacity of the kept `qs` (0 when none is kept).
+fn kept_qs(keep: &Keep) -> usize {
+    keep.qs.lock().unwrap().capacity()
+}
+
 /// The build's table (its first cells) and the other arrays and fields equal the fresh
 /// build's (both of 3-byte elements, LOSAT_X_MB24, or both not).
 fn assert_same(
@@ -113,6 +118,80 @@ fn a_release_frees_the_kept_table() {
         "a fresh table after a release"
     );
     assert_eq!(table, vec![0; 8]);
+}
+
+// EXPERIMENT (LOSAT_X_CSRQSKEEP): the keep holds the given-back `qs` with the most room (one with
+// less stays with its CSR, which frees it); a CSR build takes it, emptied, when its capacity holds
+// the build's elements, and otherwise frees it and allocates; the loop's first build finds none.
+#[test]
+fn a_kept_qs_goes_to_a_build_it_has_room_for() {
+    let keep = Keep::default();
+    let first = qs_buffer(keep.take_qs_when(true), 100);
+    assert!(
+        first.is_empty() && first.capacity() >= 100,
+        "none kept: a fresh qs"
+    );
+    let mut qs = vec![7u32; 100];
+    keep.give_back_qs_when(&mut qs, true);
+    assert_eq!((qs.capacity(), kept_qs(&keep)), (0, 100), "taken back");
+    let mut less = vec![5u32; 10];
+    keep.give_back_qs_when(&mut less, true);
+    assert_eq!(
+        (less.len(), kept_qs(&keep)),
+        (10, 100),
+        "less room: left to its CSR"
+    );
+    let mut more = vec![9u32; 200];
+    let ptr = more.as_ptr();
+    keep.give_back_qs_when(&mut more, true);
+    assert_eq!(
+        (more.capacity(), kept_qs(&keep)),
+        (0, 200),
+        "more room: kept instead"
+    );
+    let mut taken = qs_buffer(keep.take_qs_when(true), 200);
+    assert_eq!(
+        (taken.as_ptr(), taken.len(), kept_qs(&keep)),
+        (ptr, 0, 0),
+        "room for the build: the kept qs, emptied"
+    );
+    taken.resize(150, 3);
+    keep.give_back_qs_when(&mut taken, true);
+    let fresh = qs_buffer(keep.take_qs_when(true), 201);
+    assert!(
+        fresh.is_empty() && fresh.capacity() >= 201,
+        "too small: a fresh qs"
+    );
+    assert_eq!(kept_qs(&keep), 0, "the kept qs freed");
+}
+
+// EXPERIMENT (LOSAT_X_CSRQSKEEP): after the loop's last preliminary stage the keep frees its `qs`
+// with its table (`release`); a later build allocates its `qs` as the first build does.
+#[test]
+fn a_release_frees_the_kept_qs_with_the_table() {
+    let keep = Keep::default();
+    keep.give_back(vec![1; 8], 8);
+    let mut qs = vec![2u32; 64];
+    keep.give_back_qs_when(&mut qs, true);
+    assert_eq!((kept(&keep), kept_qs(&keep)), (Some((8, 8)), 64));
+    assert!(keep.release());
+    assert_eq!((kept(&keep), kept_qs(&keep)), (None, 0), "both freed");
+    let after = qs_buffer(keep.take_qs_when(true), 64);
+    assert!(after.is_empty() && after.capacity() >= 64);
+}
+
+// EXPERIMENT (LOSAT_X_CSRQSKEEP=0): a build gets no kept `qs` (`None`: it allocates its own, as
+// before the switch), and a dropped CSR's `qs` stays with the CSR, which frees it.
+#[test]
+fn with_the_qs_switch_off_no_qs_is_kept() {
+    let keep = Keep::default();
+    assert!(keep.take_qs_when(false).is_none());
+    let mut qs = vec![4u32; 32];
+    let ptr = qs.as_ptr();
+    keep.give_back_qs_when(&mut qs, false);
+    assert_eq!((qs.as_ptr(), qs.len(), kept_qs(&keep)), (ptr, 32, 0));
+    let own = qs_buffer(None, 32);
+    assert!(own.is_empty() && own.capacity() >= 32);
 }
 
 // LOSAT_X_MBCSR: the batches of a search can take either side of its size rule at 4^12 cells, so

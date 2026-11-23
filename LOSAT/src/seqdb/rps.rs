@@ -729,14 +729,18 @@ impl RpsVolumeFiles {
         let (read, zeros) = bytes.split_at_mut(in_file);
         freq.read_at(read, offset)?;
         zeros.fill(0);
-        out.extend(bytes.chunks_exact(self.alphabet * 4).map(|row| {
-            let mut ratios = [0.0f64; 28];
-            for (ratio, value) in ratios.iter_mut().zip(row.chunks_exact(4)) {
-                *ratio = f64::from(i32::from_le_bytes([value[0], value[1], value[2], value[3]]))
-                    / 1_000_000_000.0;
+        // Each row is written where it stays (its zeros, then its ratios over them), not built
+        // aside and copied in.
+        out.reserve(count);
+        for row in bytes.chunks_exact(self.alphabet * 4) {
+            out.push([0.0; 28]);
+            let Some(ratios) = out.last_mut() else {
+                break;
+            };
+            for (ratio, value) in ratios.iter_mut().zip(row.as_chunks::<4>().0) {
+                *ratio = f64::from(i32::from_le_bytes(*value)) / 1_000_000_000.0;
             }
-            ratios
-        }));
+        }
         Ok(true)
     }
 

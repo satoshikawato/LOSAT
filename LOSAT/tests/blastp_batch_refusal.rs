@@ -374,9 +374,114 @@ fn a_split_batch_without_a_valid_chunk_meets_the_tracebacks_setup() {
     }
 }
 
+// A split batch whose chunks have no valid context reads nothing; the next batch, split too, whose
+// first valid chunk reaches the read of the missing sequence file fails after the first batch's
+// report (`x4/chunk_gapvalid_tk.faa`: the gapvalid record, then the TK-TMK protein, one batch each;
+// NCBI 2.17.0 probe `s1_two` of line RG item X-bpgap fix round 6, n1 and n4: `Database memory map
+// file error`, exit status 3; row `db.x4.chunk.neg.gapvalid.tk.nopsq.7`).
+#[test]
+fn a_later_split_batch_reads_the_missing_file_after_the_reports_before() {
+    let nopsq = ["-db", "tests/db_search/arch_sprot_nopsq"];
+    let first = search_in(
+        "blastp",
+        "tests/fasta/x4/chunk_gapvalid.faa",
+        &nopsq,
+        "7",
+        1,
+        &GAP,
+    );
+    assert_eq!(first.code, Some(0), "{}", first.stderr);
+    let report = &first.stdout[..first
+        .stdout
+        .rfind("# BLAST processed")
+        .expect("outfmt 7's last line")];
+    let env = [("BATCH_SIZE", "1"), GAP[0], GAP[1]];
+    for threads in [1, 4] {
+        let run = search_in(
+            "blastp",
+            "tests/fasta/x4/chunk_gapvalid_tk.faa",
+            &nopsq,
+            "7",
+            threads,
+            &env,
+        );
+        assert_eq!(run.code, Some(3), "n{threads}: {}", run.stderr);
+        assert!(
+            run.stderr.ends_with("Database memory map file error\n"),
+            "n{threads}: {}",
+            run.stderr
+        );
+        assert_eq!(run.stdout, report, "n{threads}");
+    }
+}
+
+// A refused batch of two queries with one id (`q1c/avgdup_bp.faa` under `-parse_deflines`) searched
+// whole meets NCBI's setup in NCBI's order (line RG item X-bpgap fix round 6, NCBI 2.17.0 probes
+// `w2`-`w4`, `u4`, `u9`, `u12`): against `aliaskeys/p_nopsq_short` (no sequence file, an average of
+// 0 letters) the average subject length fails before the search's read without the Gumbel block
+// (`-searchsp`, an ungapped search) and the read fails with it; an ungapped search, which NCBI never
+// splits, is searched whole with sizes that would split it; a count of 0, on which NCBI crashes,
+// keeps the batch's refusal.
+#[test]
+fn a_refused_batch_meets_the_setup_checks_before_the_search_read() {
+    #[track_caller]
+    fn engine_error(run: Run, error: &str) {
+        assert_eq!(run.code, Some(3), "{}", run.stderr);
+        assert!(run.stderr.ends_with(error), "{}", run.stderr);
+        assert_eq!(run.stdout, "");
+    }
+    let refused = |subjects: &[&str], ungapped: bool, env: &[(&str, &str)]| {
+        let mut arguments = subjects.to_vec();
+        arguments.push("-parse_deflines");
+        if ungapped {
+            arguments.extend(["-ungapped", "-comp_based_stats", "0"]);
+        }
+        let query = "tests/db_search/q1c/avgdup_bp.faa";
+        search_in("blastp", query, &arguments, "6", 1, env)
+    };
+    let (too_short, unread) = (
+        "The average subject length is too short\n",
+        "Database memory map file error\n",
+    );
+    let short = ["-db", "tests/db_search/aliaskeys/p_nopsq_short"];
+    let again = [("CHUNK_SIZE", "150")];
+    let searchsp = [short[0], short[1], "-searchsp", "1000"];
+    engine_error(refused(&searchsp, false, &[]), too_short);
+    engine_error(refused(&short, false, &[]), unread);
+    engine_error(refused(&short, true, &[]), too_short);
+    let subjects = ["-subject", "tests/db_search/q1c/avg_s.faa"];
+    engine_error(refused(&subjects, true, &again), too_short);
+    let nopsq = ["-db", "tests/db_search/arch_sprot_nopsq"];
+    engine_error(refused(&nopsq, true, &again), unread);
+    let count_0 = refused(&["-db", "tests/db_search/aliaskeys/p_nseq0"], true, &[]);
+    assert_eq!(count_0.code, Some(1), "{}", count_0.stderr);
+    assert!(
+        count_0.stderr.contains("two query records have the Seq-id"),
+        "{}",
+        count_0.stderr
+    );
+}
+
+/// A query file in the temporary directory, removed when it is dropped (also where an assertion
+/// fails).
+struct QueryFile(String);
+
+impl std::ops::Deref for QueryFile {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Drop for QueryFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// A query file of the `index`-th record (from 0) of `source`, or of `letters` (`source` empty), in
 /// the temporary directory (`tag` names it).
-fn query_file(tag: &str, source: &str, index: usize, letters: &str) -> String {
+fn query_file(tag: &str, source: &str, index: usize, letters: &str) -> QueryFile {
     let text = if source.is_empty() {
         format!(">{tag}\n{letters}\n")
     } else {
@@ -385,7 +490,7 @@ fn query_file(tag: &str, source: &str, index: usize, letters: &str) -> String {
     };
     let file = std::env::temp_dir().join(format!("losat_bpgap_{tag}_{}.faa", std::process::id()));
     std::fs::write(&file, text).expect("write the query");
-    file.to_str().expect("a path").to_string()
+    QueryFile(file.to_str().expect("a path").to_string())
 }
 
 // The chunks' stops come before the errors of the setup of the batch's first chunk (NCBI 2.17.0 exits
@@ -434,8 +539,5 @@ fn the_chunk_stops_come_before_the_setup_failures() {
             (plain.stdout, plain.stderr),
             "{env:?}"
         );
-    }
-    for file in [ql, tk, all_x] {
-        let _ = std::fs::remove_file(file);
     }
 }

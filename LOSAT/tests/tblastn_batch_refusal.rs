@@ -43,8 +43,7 @@ const EMPTY_CHUNK: &str = "a query chunk without a query is not supported by LOS
 /// (NCBI searches on with the hits in the gaps lost: PD-LOSAT-NCBI-DEFECTS D13).
 const NEGATIVE_GAPS: &str =
     "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this \
-query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's \
-TBLASTN";
+query batch with NCBI BLAST+'s chunk ranges wrapped, which is not supported by LOSAT's TBLASTN";
 
 const SEARCH: [&str; 6] = ["-window_size", "0", "-seg", "no", "-evalue", "1e10"];
 

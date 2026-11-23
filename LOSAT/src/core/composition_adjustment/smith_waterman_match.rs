@@ -505,7 +505,7 @@ pub(crate) fn sw_batch_failed_error(program: &str, first_query_holds_match: bool
             program.to_ascii_uppercase()
         )
     } else {
-        crate::blastinput::app::engine_error("Traceback failed")
+        crate::blastinput::app::engine_error(crate::blastinput::app::TRACEBACK_FAILED)
     }
 }
 

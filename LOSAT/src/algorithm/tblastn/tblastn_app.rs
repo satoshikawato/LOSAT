@@ -2092,10 +2092,8 @@ fn search(
                     // failure; a reader error of NCBI's own fails it (the preliminary search's
                     // text, or with `-in_pssm` SeqDB's own error,
                     // `TblastnDatabase::pssm_search_read_failure`), LOSAT's refusal stops the run.
-                    Err(error)
-                        if error.is::<super::stage_d_pipeline::DatabaseReadReached>()
-                            && stores_error.is_some() =>
-                    {
+                    // (The search gives the marker only where the read fails: `stores_error`.)
+                    Err(error) if error.is::<super::stage_d_pipeline::DatabaseReadReached>() => {
                         let error = stores_error.take().expect("the database's read failure");
                         failed = Some((range, database_read_failure(error)?));
                         break;

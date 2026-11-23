@@ -760,7 +760,7 @@ Explicit rejections (rule 3):
   is not split and meets no stop; and a split batch whose chunks have no valid context ends with
   NCBI's `Traceback failed` (exit status 3) where the traceback's own setup of the batch fails the
   subject-length check, and reads nothing where the database's sequence file cannot be read (exit
-  status 0), in BLASTP and in TBLASTN. A refused batch of two queries with one id that NCBI splits
+  status 0), in BLASTP, psiblast and TBLASTN. A refused batch of two queries with one id that NCBI splits
   gives NCBI's error where its chunks reach the setup's failure, and the refusal where a chunk
   stops first.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,

@@ -5813,8 +5813,8 @@ fn psiblast_stop_at_invalid_query(
 /// (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
 /// `-export_search_strategy` the refusal (no request of the batch is written: `stop_batch` stays
 /// `None`), else NCBI's error of the set-up of the batch's records that are first in the scope
-/// (`refused_batch_setup_error`), else the refusal. NCBI's errors of the batches before come
-/// first: their searches fail before the stop is acted on.
+/// (`split_steps::refused_batch_setup_error`), else the refusal. NCBI's errors of the batches
+/// before come first: their searches fail before the stop is acted on.
 fn refused_batch_stop(
     args: &ResolvedBlastpArgs,
     database: Option<&database::BlastpDatabase>,
@@ -5840,7 +5840,7 @@ fn refused_batch_stop(
                 return None;
             }
             // NCBI's batch: each searched query, with its whole record where it is first in its
-            // scope (`split_steps::refused_split_batch_error`).
+            // scope (`split_steps::refused_batch_setup_error`).
             let batch: Vec<(&FastaRecord, Option<(&[u8], usize)>)> = (searched_done
                 ..searched.len())
                 .take_while(|&query| input.ordinal(query) < input_done + first.len())
@@ -5853,90 +5853,12 @@ fn refused_batch_stop(
                     )
                 })
                 .collect();
-            refused_batch_setup_error(args, database, subject_records, &batch)
+            split_steps::refused_batch_setup_error(args, database, subject_records, &batch)
         },
     );
     batches.scope_refusal = !error.is::<crate::cli::NativeError>();
     batches.stop = Some((warnings, error));
     batches
-}
-
-/// BLASTP's set-up of the query records `queries` of a batch whose searched queries have the
-/// lengths `batch_lengths` (`refused_batch_stop`): NCBI's error where a context of theirs is valid
-/// and the set-up fails for the subjects, as `run_call` fails the first searched batch (a database
-/// without sequences, `Database memory map file error`; the average subject length against
-/// `-searchsp` or `OLD_FSC`), or where the search's first read of the database then fails (a
-/// sequence file that cannot be opened, `BlastpDatabase::sequence_file_read_error`: `Database
-/// memory map file error`; line WQA D10 round 6, review 4 M2); `None` where it passes and where no
-/// context is valid. A batch that NCBI splits into chunks meets them in its chunks' steps
-/// (`split_steps::refused_split_batch_error`; NCBI 2.17.0 probes `d1`, `d2` of line RG item
-/// X-bpgap), where a chunk's stop keeps the refusal. `batch`: each searched query of NCBI's batch,
-/// with its whole record where it is first in its scope (the records set up).
-fn refused_batch_setup_error(
-    args: &ResolvedBlastpArgs,
-    database: Option<&database::BlastpDatabase>,
-    subject_records: &[FastaRecord],
-    batch: &[(&FastaRecord, Option<(&[u8], usize)>)],
-) -> Option<anyhow::Error> {
-    let sizes = protein_query_split_sizes(10000).ok()?;
-    let lengths: Vec<usize> = batch.iter().map(|(record, _)| record.seq().len()).collect();
-    if let Some(chunks) =
-        crate::algorithm::blastp::protein_query_split::split_protein_batch(&lengths, sizes)
-    {
-        return split_steps::refused_split_batch_error(
-            args,
-            database,
-            subject_records,
-            batch,
-            &chunks,
-            sizes,
-        );
-    }
-    let queries: Vec<FastaRecord> = batch
-        .iter()
-        .filter(|(_, whole)| whole.is_some())
-        .map(|&(record, _)| record.clone())
-        .collect();
-    let queries = queries.as_slice();
-    // `call_setup::call_lookup`'s validity: a context without letters is invalid.
-    let contexts = pssm_hooks::psi_contexts(args, &blastp_query_frames(args, queries));
-    if !contexts
-        .iter()
-        .any(|context| context.is_valid && context.aa_len > 0)
-    {
-        return None;
-    }
-    if database.is_some_and(database::BlastpDatabase::first_oid_read_fails) {
-        return Some(crate::blastinput::app::engine_error(
-            "Database memory map file error",
-        ));
-    }
-    let encoded: Vec<EncodedProtein> = match database {
-        Some(_) => Vec::new(),
-        None => subject_records
-            .iter()
-            .map(|record| encode_protein_sequence(record.seq()))
-            .collect(),
-    };
-    let extent = call_setup::db_extent(args, database, &encoded).ok()?;
-    if crate::stats::setup::setup_subject_length(
-        extent.total_db_len,
-        extent.num_subjects,
-        (!args.old_fsc).then_some((extent.cutoff_subject_length, false)),
-    )
-    .is_none()
-    {
-        return Some(crate::blastinput::app::engine_error(
-            "The average subject length is too short",
-        ));
-    }
-    let read_error = database?.sequence_file_read_error("BLASTP")?;
-    Some(
-        match read_error.downcast::<database::PreliminaryReadError>() {
-            Ok(read_error) => crate::blastinput::app::engine_error(read_error.0),
-            Err(error) => error,
-        },
-    )
 }
 
 /// psiblast: LOSAT's refusal of a subject set (`-subject`) none of whose sequences has letters

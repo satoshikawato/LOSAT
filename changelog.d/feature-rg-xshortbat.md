@@ -32,9 +32,17 @@
   without a query, before the database's errors (no sequences, a missing sequence file) and `-searchsp`'s average
   subject length error, as NCBI BLAST+ 2.17.0 does; a batch whose queries are all unsearchable is no longer refused
   for its pieces (NCBI BLAST+ does not search it).
-- A split `blastp` or `tblastn` batch none of whose pieces has searchable query letters now fails with NCBI BLAST+'s
-  `Traceback failed` where `-searchsp` leaves the subjects too short, and is reported where the database's sequence
-  file is missing (NCBI BLAST+ reads nothing for it); a later batch that reads the database then fails after its
-  report. Before, LOSAT gave the average subject length error or the database's error at that batch.
+- A split `blastp`, `psiblast` or `tblastn` batch none of whose pieces has searchable query letters now fails with
+  NCBI BLAST+'s `Traceback failed` where `-searchsp` leaves the subjects too short, and is reported where the
+  database's sequence file is missing (NCBI BLAST+ reads nothing for it); a later batch that reads the database
+  then fails after its report. Before, LOSAT gave the average subject length error or the database's error at that
+  batch.
 - A `blastp` batch that LOSAT refuses for two queries with one ID and that NCBI BLAST+ splits now gives NCBI BLAST+'s
   error of the batch's setup where its pieces reach it, as `tblastn` does.
+- A `blastp` batch that LOSAT refuses for two queries with one ID in an ungapped search (`-ungapped`) is no longer split
+  into pieces for its setup, as NCBI BLAST+ never splits an ungapped search: with `CHUNK_SIZE` values that would split
+  it, NCBI BLAST+ 2.17.0's error of the batch's setup (subjects too short, a missing sequence file) now comes, as
+  without them; before, LOSAT refused the batch. Over a database whose statistics count no sequence (`NSEQ 0`), where
+  NCBI BLAST+ crashes, LOSAT now refuses such a batch instead of giving `The average subject length is too short`.
+- The refusal of a negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` now reads the same in `blastn`,
+  `blastx`, `blastp`, `psiblast` and `tblastn`, without NCBI BLAST+'s internal type names.

@@ -1839,6 +1839,11 @@ Rows `db.archtitle.*.nosq.*` search databases without their sequence file:
   and `.nhr` are copies of `arch_tbn_snucl.nin` and `.nhr` (TBLASTN, BLASTN, TBLASTX). NCBI reads the sequence file first in
   the preliminary search of the first query batch with a valid context and fails that batch (`BLAST engine error: Database
   memory map file error`, exit 3); the batches before it are written.
+- `aliaskeys/p_nopsq_short.pal` (line RG item X-bpgap, fix round 6) is an alias over `arch_sprot_nopsq` with statistics of
+  2 letters in 3 sequences (`STATS_TOTLEN 2`, `STATS_NSEQ 3`): without the Gumbel block (`-searchsp`, `OLD_FSC`, an
+  ungapped search) the setup's average subject length (0) fails before the search's read of the missing sequence file,
+  and with it the read fails (rows `db.x4.chunk.avgdup.nps.*`). `../fasta/x4/chunk_gapvalid_tk.faa` is
+  `chunk_gapvalid.faa` then `chunk_tk.faa` (row `db.x4.chunk.neg.gapvalid.tk.nopsq.7`).
 - The queries `tests/fixtures/fasta_input/batch_title_unsearched.{prot.faa,nuc.fa}` and `batch_title_unsearched_next.*`
   hold `u1` and `u2`, 30 X (protein) or 90 N (nucleotide) only, which have no valid context, then the sequences of q2
   and q3 of `batch_title_first` as `q3` and `q4`; `café` is in the title of `u1` or of `q3`. With `BATCH_SIZE` 60 (180)

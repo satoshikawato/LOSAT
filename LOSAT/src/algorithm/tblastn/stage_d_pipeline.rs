@@ -44,8 +44,9 @@ use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
 };
 use crate::algorithm::blastp::protein_query_split::{
-    protein_chunk_part_in_record, split_batch_reaches_read, split_protein_batch, ChunkStep,
-    ProteinQueryChunk, SplitBatchSteps,
+    protein_chunk_part_in_record, split_batch_reaches_read, split_protein_batch,
+    splits_query_batches, ChunkStep, ProteinQueryChunk, SetupCheckFailure, SplitBatchSteps,
+    UnmetChecks,
 };
 use crate::algorithm::common::database::{FetchExcluded, FetchMarks};
 use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
@@ -2726,17 +2727,32 @@ fn split_batch_stop(refusal: anyhow::Error) -> anyhow::Error {
     anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(refusal))
 }
 
+/// The setup checks of a split batch (`preliminary_setup_checks`) as its chunks meet them
+/// (`SplitBatchSteps`): NCBI's engine errors of the setup (`SetupEngineError`), apart from LOSAT's
+/// refusal of a count of 0.
+fn split_setup_checks(checks: Result<()>) -> Result<(), SetupCheckFailure> {
+    checks.map_err(|error| {
+        if error.is::<SetupEngineError>() {
+            SetupCheckFailure::Engine(error)
+        } else {
+            SetupCheckFailure::Refusal(error)
+        }
+    })
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:233-252 (cited at
 // `SplitBatchSteps`)
 /// The error of the traceback's own setup of a split batch that meets the setup checks that no
-/// chunk met (`SplitBatchSteps::unmet_checks`): NCBI's engine error `Traceback failed` for an error
-/// of the setup (`SetupEngineError`); LOSAT's refusal of a count of 0 stays the refusal (line RG
-/// item X-bpgap, NCBI 2.17.0 probe `t2_qgv_short`).
-fn split_traceback_error(error: anyhow::Error) -> anyhow::Error {
-    if error.is::<SetupEngineError>() {
-        SetupEngineError(std::borrow::Cow::Borrowed("Traceback failed")).into()
-    } else {
-        error
+/// chunk met (`SplitBatchSteps::unmet_checks`): NCBI's engine error `Traceback failed` in
+/// TBLASTN's form of an engine error of the setup (`SetupEngineError`); LOSAT's refusal of a count
+/// of 0 stays the refusal (line RG item X-bpgap, NCBI 2.17.0 probe `t2_qgv_short`).
+fn split_traceback_error(unmet: UnmetChecks) -> anyhow::Error {
+    match unmet {
+        UnmetChecks::TracebackFailed => SetupEngineError(std::borrow::Cow::Borrowed(
+            crate::blastinput::app::TRACEBACK_FAILED,
+        ))
+        .into(),
+        UnmetChecks::Refusal(refusal) => refusal,
     }
 }
 
@@ -2769,10 +2785,11 @@ impl BatchSplit {
     // `blastp::blast_engine::psi_round::run_queries`)
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:60-61
     /// The split of the batch whose records are `records` (for the set-up alone, NCBI's batch:
-    /// `SetUpOnly::records`), or else `queries`. A PSSM query (`-in_pssm`: `CPsiBlast` searches the
-    /// PSSM's query through a `CObjMgrFree_QueryFactory`, psiblast_impl.cpp:115-119) is never split;
-    /// the sizes are still read, as NCBI's query splitter reads them first. NCBI does not split the
-    /// queries of an ungapped search (`gapped` false) either.
+    /// `SetUpOnly::records`), or else `queries`, by the one rule of whether NCBI splits a search's
+    /// batches (`splits_query_batches`): a PSSM query (`-in_pssm`: `CPsiBlast` searches the PSSM's
+    /// query through a `CObjMgrFree_QueryFactory`, psiblast_impl.cpp:115-119) is never split, nor
+    /// are the queries of an ungapped search (`gapped` false); the sizes are still read, as NCBI's
+    /// query splitter reads them first.
     fn of(
         queries: &[Vec<u8>],
         records: Option<&[BatchRecord]>,
@@ -2785,10 +2802,9 @@ impl BatchSplit {
             Some(records) => records.iter().map(|&(length, _)| length).collect(),
             None => queries.iter().map(Vec::len).collect(),
         };
-        let chunks = match profile.pssm {
-            None if gapped => split_protein_batch(&lengths, sizes),
-            _ => None,
-        };
+        let chunks = splits_query_batches(gapped, profile.pssm.is_some(), false)
+            .then(|| split_protein_batch(&lengths, sizes))
+            .flatten();
         Ok(Self { sizes, chunks })
     }
 
@@ -2868,7 +2884,7 @@ fn split_batch_reads(
         chunks,
         sizes,
         inputs.profile.subject_set.read_fails,
-        setup_checks,
+        split_setup_checks(setup_checks),
         &split_batch_stop,
     )?;
     let batch_eff_searchsp: Vec<i64> = batch_parameters
@@ -2894,7 +2910,7 @@ fn split_batch_reads(
     })?;
     // A batch whose chunks find nothing ends at the traceback's own setup of the batch.
     match steps.unmet_checks() {
-        Some(error) if !reads => Err(split_traceback_error(error)),
+        Some(unmet) if !reads => Err(split_traceback_error(unmet)),
         _ => Ok(reads),
     }
 }
@@ -2927,7 +2943,7 @@ fn split_preliminary_hitlists(
         chunks,
         sizes,
         inputs.profile.subject_set.read_fails,
-        setup_checks,
+        split_setup_checks(setup_checks),
         &split_batch_stop,
     )?;
     // The options' spaces of the chunks (`SplitQuery_SetEffectiveSearchSpace`): the batch's own,
@@ -3015,8 +3031,8 @@ fn split_preliminary_hitlists(
     }
     // Every chunk was searched or found nothing: the traceback's own setup of the batch meets the
     // setup checks that no chunk met (NCBI 2.17.0 probe `t2_qgv_short` of line RG item X-bpgap).
-    if let Some(error) = steps.unmet_checks() {
-        return Err(split_traceback_error(error));
+    if let Some(unmet) = steps.unmet_checks() {
+        return Err(split_traceback_error(unmet));
     }
     Ok(merged)
 }

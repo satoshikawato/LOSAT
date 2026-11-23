@@ -41,6 +41,19 @@ pub struct ProteinQueryChunk {
     pub context_offsets: Vec<i32>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:60-61
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:86-93
+/// Whether NCBI's query splitter (`CQuerySplitter`) splits the query batches of a search at all
+/// (`split_protein_batch` then decides by a batch's length): never those of an ungapped search
+/// (`gapped` false), of a PSSM query (`pssm_query`: `-in_pssm`, whose query factory is not
+/// `CObjMgr_QueryFactory` and makes one chunk) or against PSSM subjects (`pssm_subjects`:
+/// RPS-BLAST). The one rule of BLASTP's, psiblast's and TBLASTN's searches
+/// (`blast_engine::split_steps::splits_batches`, `tblastn::stage_d_pipeline`'s `BatchSplit`).
+pub(crate) fn splits_query_batches(gapped: bool, pssm_query: bool, pssm_subjects: bool) -> bool {
+    gapped && !pssm_query && !pssm_subjects
+}
+
 /// The query chunks of a protein batch with queries of `lengths` residues, or `None` when
 /// NCBI does not split it.
 ///
@@ -250,6 +263,39 @@ pub(crate) enum ReadFails {
     Search,
 }
 
+/// A failed setup check of a split batch (`SplitBatchSteps::new`), as its program makes it: NCBI's
+/// engine error of the setup (the subject length, the hit-saving parameters), which the
+/// traceback's own setup of a batch whose chunks found nothing meets as `Traceback failed`
+/// (`UnmetChecks::TracebackFailed`), or LOSAT's refusal there (a count of 0,
+/// `common::database::check_setup_count`), which stays the refusal.
+#[derive(Debug)]
+pub(crate) enum SetupCheckFailure {
+    Engine(anyhow::Error),
+    Refusal(anyhow::Error),
+}
+
+impl SetupCheckFailure {
+    /// The error that the first chunk with a valid context meets (`SplitBatchSteps::before_read`).
+    pub(crate) fn into_error(self) -> anyhow::Error {
+        match self {
+            SetupCheckFailure::Engine(error) | SetupCheckFailure::Refusal(error) => error,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:233-252 (cited at
+// `SplitBatchSteps`)
+/// The setup checks that no chunk with a valid context of a split batch met, as the traceback's
+/// own setup of the batch meets them after the last chunk (`SplitBatchSteps::unmet_checks`).
+#[derive(Debug)]
+pub(crate) enum UnmetChecks {
+    /// NCBI's engine error `Traceback failed` (`blastinput::app::TRACEBACK_FAILED`, exit status 3),
+    /// which the caller makes in its program's form of an engine error of the setup.
+    TracebackFailed,
+    /// LOSAT's refusal of the checks (a count of 0).
+    Refusal(anyhow::Error),
+}
+
 /// Where a chunk of a split batch goes after `SplitBatchSteps::before_read`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ChunkStep {
@@ -297,13 +343,14 @@ pub(crate) enum ChunkStep {
 ///   is reported as NCBI's.
 /// - `unmet_checks`, after the last chunk: the setup checks that no chunk with a valid context met
 ///   (each chunk without one), which the traceback's own setup of the whole batch meets, NCBI's
-///   `Traceback failed` (exit status 3) after the batch's preliminary search found nothing.
+///   `Traceback failed` (exit status 3) after the batch's preliminary search found nothing
+///   (`UnmetChecks`: the one owner of that error of BLASTP's, psiblast's and TBLASTN's).
 pub(crate) struct SplitBatchSteps<'s> {
     program: &'static str,
     sizes: SplitSizes,
     read_fails: Option<ReadFails>,
     /// The batch's setup checks, until the first chunk with a valid context meets them.
-    setup_checks: Option<anyhow::Result<()>>,
+    setup_checks: Option<Result<(), SetupCheckFailure>>,
     stop: &'s dyn Fn(anyhow::Error) -> anyhow::Error,
 }
 
@@ -316,7 +363,7 @@ impl<'s> SplitBatchSteps<'s> {
         chunks: &[ProteinQueryChunk],
         sizes: SplitSizes,
         read_fails: Option<ReadFails>,
-        setup_checks: anyhow::Result<()>,
+        setup_checks: Result<(), SetupCheckFailure>,
         stop: &'s dyn Fn(anyhow::Error) -> anyhow::Error,
     ) -> anyhow::Result<Self> {
         // `split_protein_batch` makes no part for a chunk that no query reaches.
@@ -354,7 +401,7 @@ impl<'s> SplitBatchSteps<'s> {
             return Ok(ChunkStep::Skip);
         }
         if let Some(checks) = self.setup_checks.take() {
-            checks?;
+            checks.map_err(SetupCheckFailure::into_error)?;
         }
         if self.read_fails.is_some() {
             return Ok(ChunkStep::End);
@@ -372,19 +419,22 @@ impl<'s> SplitBatchSteps<'s> {
     /// (`subjects_in_hand`: whether there is one): D13's refusal of the gaps.
     pub(crate) fn before_search(&self, subjects_in_hand: bool) -> anyhow::Result<()> {
         if self.gap_step_pending(subjects_in_hand) {
-            return Err((self.stop)(anyhow::anyhow!(
-                "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
-                self.program
+            return Err((self.stop)(anyhow::Error::msg(
+                crate::algorithm::blastn::query_split::negative_split_refusal(self.program),
             )));
         }
         Ok(())
     }
 
-    /// After the last chunk: the error of the batch's setup checks that no chunk with a valid
-    /// context met, which the traceback's own setup of the batch meets; the caller makes NCBI's
-    /// `Traceback failed` of its error of the setup, and a refusal (a count of 0) stays one.
-    pub(crate) fn unmet_checks(&mut self) -> Option<anyhow::Error> {
-        self.setup_checks.take().and_then(Result::err)
+    /// After the last chunk: the batch's setup checks that no chunk with a valid context met, which
+    /// the traceback's own setup of the batch meets: NCBI's `Traceback failed` for an engine error
+    /// of the setup, and a refusal (a count of 0) stays one.
+    pub(crate) fn unmet_checks(&mut self) -> Option<UnmetChecks> {
+        match self.setup_checks.take()? {
+            Ok(()) => None,
+            Err(SetupCheckFailure::Engine(_)) => Some(UnmetChecks::TracebackFailed),
+            Err(SetupCheckFailure::Refusal(refusal)) => Some(UnmetChecks::Refusal(refusal)),
+        }
     }
 }
 

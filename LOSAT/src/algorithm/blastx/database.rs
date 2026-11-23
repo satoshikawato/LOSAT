@@ -499,13 +499,14 @@ impl ReportedSubjects {
     /// batch (`HeaderReadError`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`). A title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `pairwise`, `StoredTitle::check_shown_source`). The rest of
-    /// the batch's reported sequences is `for_batch`.
+    /// the batch's reported sequences is `for_batch`. `one_by_one`: the reports may read the
+    /// reported sequences one by one (`shared::HeaderReader::new`).
     pub(crate) fn read_titles(
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
         pairwise: bool,
-        earlier: shared::EarlierUtf8,
+        (earlier, one_by_one): (shared::EarlierUtf8, bool),
     ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -513,7 +514,7 @@ impl ReportedSubjects {
         let mut parsed: BTreeMap<usize, Arc<ParsedSubject>> = BTreeMap::new();
         // The sources of the empty stored titles that NCBI makes from them.
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
-        let headers = shared::HeaderReader::new(&database.db);
+        let headers = shared::HeaderReader::new(&database.db, one_by_one);
         headers.note_earlier(earlier);
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
@@ -1100,13 +1101,12 @@ impl ReportedSubjects {
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-        rows: SubjectFetch,
+        (rows, format): (SubjectFetch, shared::PrefetchFormat),
         places: bool,
         rows_open: bool,
         pairwise: Option<crate::report::pairwise::PairwiseReading>,
     ) -> Result<()> {
-        if rows == SubjectFetch::Never && crate::algorithm::common::database::prefetch_always_off()
-        {
+        if rows == SubjectFetch::Never && shared::prefetch_always_off(format) {
             return Ok(());
         }
         for batch in batches {

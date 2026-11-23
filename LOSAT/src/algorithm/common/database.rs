@@ -1776,7 +1776,7 @@ pub(crate) struct HeaderReader<'a> {
     /// (`failed_holders`), or why it is not made.
     indexed_lookup:
         std::cell::OnceCell<std::result::Result<crate::seqdb::lookup::SeqidLookup<'a>, String>>,
-    /// Whether NCBI's formatters may read some reported sequences one by one
+    /// Whether NCBI's formatters or psiblast's PSSM may read some reported sequences one by one
     /// (`prefetch_may_be_off`), where the weak matches of its scope are looked for
     /// (`weakly_held`), which the reports refuse where a batch that reports the sequence has
     /// its prefetch off (`ParsedShown::one_by_one`).
@@ -1882,26 +1882,103 @@ pub(crate) fn lookup_texts_differ(db: &SeqDb, choices: &[&[i32]]) -> bool {
     })
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:727-753
-/// Whether NCBI's formatters may read a batch's reported sequences one by one, not all at once
-/// before its report: `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` (0, or one below
-/// the batch's number of Seq-aligns turns NCBI's prefetch off, [`prefetch_off`]; the readers of
-/// the headers do not count them, the reports of each batch do, [`BatchPrefetch`]). A value
-/// that is no integer stops NCBI before its report; LOSAT refuses it in
-/// `blastinput::app::check_search_environment` (not for outfmt 11, whose archive NCBI writes
-/// without the prefetch).
-pub(crate) fn prefetch_may_be_off() -> bool {
-    prefetch_seqs_limit().is_some_and(|limit| limit != i32::MAX)
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:715-753
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:279-288
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-266
+// NCBI's prefetch of a query batch's reported subjects (`BlastFormatter_PreFetchSequenceData`)
+// runs where `s_PreFetchSeqs` says so: never at `PRE_FETCH_SEQS_LIMIT` 0 or below one of the
+// batch's Seq-aligns, always at `INT_MAX`, else for every format that `s_IsPrefetchFormat` takes:
+// not the Seq-annots 8, 9 and 12, nor the archive 11. The applications but psiblast write the
+// archive without calling the prefetch (blastp's, and so tblastn's, tblastx's, rpsblast's,
+// blastn's and blastx's, cited at `blastinput::app::check_prefetch_environment`); psiblast's
+// rounds call it before their test of the archive.
+/// The first format of a run as NCBI's prefetch of each query batch asks it (`format_type`), with
+/// whether the application calls the prefetch before it writes the archive (psiblast): the one
+/// owner of whether a batch's prefetch runs ([`PrefetchFormat::batch_prefetches`]), which every
+/// question of it takes ([`BatchPrefetch`], [`batch_loads`], [`prefetches_subjects`],
+/// [`prefetch_off`], [`prefetch_may_be_off`]; review 5 of line DBID pfoff-4, M2: the batches'
+/// answer from the limit and the count alone took psiblast's outfmt 8, 9 and 11 for prefetched).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PrefetchFormat {
+    /// `-outfmt`'s number, as the programs give it to the formatter (the query-anchored 1 to 4
+    /// as 0, DECISIONS T3-4; the tables 10 and 20 as 6).
+    outfmt: i32,
+    /// Whether the application calls the prefetch before it writes the archive (psiblast).
+    archive_after_prefetch: bool,
+}
+
+impl PrefetchFormat {
+    /// The first format `outfmt` of a run of the application `app`.
+    pub(crate) fn of(outfmt: i32, app: crate::report::archive::options::RequestKind) -> Self {
+        Self {
+            outfmt,
+            archive_after_prefetch: app == crate::report::archive::options::RequestKind::Psiblast,
+        }
+    }
+
+    /// The format's number (`PrefetchFormat::of`).
+    pub(crate) fn outfmt(self) -> i32 {
+        self.outfmt
+    }
+
+    /// Whether a batch's prefetch reads its Seq-aligns (their subject ids and ranges,
+    /// `s_ExtractSeqidsAndRanges`) where the limit `limit` allows its count: the application
+    /// calls it for the format, which `s_IsPrefetchFormat` takes or which the limit `INT_MAX`
+    /// takes whatever it is.
+    fn reads_at(self, limit: Option<i32>) -> bool {
+        use crate::blastinput::app::output_format::{
+            ARCHIVE_FORMAT, ASN_BINARY, ASN_TEXT, JSON_SEQALIGN,
+        };
+        let called = self.outfmt != ARCHIVE_FORMAT || self.archive_after_prefetch;
+        called
+            && (limit == Some(i32::MAX)
+                || !matches!(
+                    self.outfmt,
+                    ASN_TEXT | ASN_BINARY | ARCHIVE_FORMAT | JSON_SEQALIGN
+                ))
+    }
+
+    /// Whether the prefetch of a batch of `seq_aligns` Seq-aligns runs at the limit `limit`
+    /// (`s_PreFetchSeqs`): the one rule.
+    fn runs_at(self, limit: Option<i32>, seq_aligns: usize) -> bool {
+        self.reads_at(limit) && !prefetch_off_at(limit, seq_aligns)
+    }
+
+    /// Whether a batch's prefetch reads its Seq-aligns where `PRE_FETCH_SEQS_LIMIT` allows its
+    /// count (`PrefetchFormat::reads_at`): the format's part of the rule.
+    pub(crate) fn reads_seq_aligns(self) -> bool {
+        self.reads_at(prefetch_seqs_limit())
+    }
+
+    /// Whether the prefetch of a query batch whose results hold `seq_aligns` Seq-aligns (one for
+    /// each HSP of a gapped search, the count of outfmt 7's `# N hits found`, one for each subject
+    /// of an ungapped one: [`subject_seq_aligns`]) runs: the one answer of every program.
+    pub(crate) fn batch_prefetches(self, seq_aligns: usize) -> bool {
+        self.runs_at(prefetch_seqs_limit(), seq_aligns)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:727-753 (cited at
+// `PrefetchFormat`)
+/// Whether NCBI's formatters, or psiblast's PSSM, may read a batch's reported sequences one by
+/// one, not all at once before its report: a batch's prefetch can be off for the first format
+/// `format` ([`PrefetchFormat::batch_prefetches`]: `PRE_FETCH_SEQS_LIMIT` is an integer other than
+/// `INT_MAX`, or the format is one that NCBI does not prefetch for; the readers of the headers do
+/// not count the Seq-aligns, the reports of each batch do, [`BatchPrefetch`]). A value that is no
+/// integer stops NCBI before its report; LOSAT refuses it in
+/// `blastinput::app::check_prefetch_environment` (not for an archive that NCBI writes without the
+/// prefetch).
+pub(crate) fn prefetch_may_be_off(format: PrefetchFormat) -> bool {
+    let limit = prefetch_seqs_limit();
+    !format.reads_at(limit) || limit.is_some_and(|limit| limit != i32::MAX)
 }
 
 /// Whether NCBI's prefetch is off for a query batch whose results hold `seq_aligns` Seq-aligns
-/// (one for each HSP of a gapped search, the count of outfmt 7's `# N hits found`, one for each
-/// subject of an ungapped one: [`subject_seq_aligns`]):
-/// `PRE_FETCH_SEQS_LIMIT` is an integer other than `INT_MAX` that is 0 or below `seq_aligns`.
-/// Its formatters then fetch the sequences that each query's report shows, after the query's
-/// own warnings, where the report reads them (`TabularSpec::subject_fetch`).
-pub(crate) fn prefetch_off(seq_aligns: usize) -> bool {
-    prefetch_off_at(prefetch_seqs_limit(), seq_aligns)
+/// in a run of the first format `format` ([`PrefetchFormat::batch_prefetches`]). Its formatters
+/// then fetch the sequences that each query's report shows, after the query's own warnings, where
+/// the report reads them (`TabularSpec::subject_fetch`).
+pub(crate) fn prefetch_off(format: PrefetchFormat, seq_aligns: usize) -> bool {
+    !format.batch_prefetches(seq_aligns)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-772 (cited at
@@ -1920,11 +1997,13 @@ pub(crate) enum BatchLoads {
     /// The prefetch ran: every subject of the batch's Seq-aligns, those that `s_PreFetchSeqs`
     /// counts (psiblast's traceback hit lists, before the formatter's cut to `-max_target_seqs`).
     Prefetched,
-    /// `PRE_FETCH_SEQS_LIMIT` turned the prefetch off ([`prefetch_off`]): the subjects that the
-    /// reports NCBI writes read, after the formatter's cut to the hitlist size (`PruneSeqalign`),
-    /// by the first format's rows (`TabularSpec::subject_fetch`; `Every` for a format that is not
-    /// a field list), and those that psiblast's PSSM reads; a report that NCBI's XML stream cut
-    /// before its hits loads nothing ([`XmlCuts`], [`LoadedBefore::subjects`]).
+    /// The prefetch did not run ([`prefetch_off`]: `PRE_FETCH_SEQS_LIMIT` turned it off, or the
+    /// format is one that NCBI does not prefetch for): the subjects that the reports NCBI writes
+    /// read, after the formatter's cut to the hitlist size (`PruneSeqalign`), by the first
+    /// format's rows (`TabularSpec::subject_fetch`; `Every` for a format that reads the subjects
+    /// and is not a field list, `Never` for the Seq-annots and the archive, which read nothing of
+    /// them), and those that psiblast's PSSM reads; a report that NCBI's XML stream cut before
+    /// its hits loads nothing ([`XmlCuts`], [`LoadedBefore::subjects`]).
     Read(crate::report::tabular::SubjectFetch),
 }
 
@@ -1968,27 +2047,31 @@ impl BatchLoads {
 }
 
 /// What NCBI's BLAST database data loader loads for a query batch with `seq_aligns` Seq-aligns
-/// ([`BatchLoads`]): `Prefetched` where its prefetch is on; where `PRE_FETCH_SEQS_LIMIT` turns it
-/// off ([`prefetch_off`]), what its reports read, `rows` (the first format's), which each program
-/// applies to the hit lists that its reports show (review 3 of line DBID loadord, H2; review 6,
-/// H1: psiblast's prefetched set holds its traceback beyond the reports' cut).
+/// in a run of the first format `format` ([`BatchLoads`]): `Prefetched` where its prefetch runs
+/// ([`PrefetchFormat::batch_prefetches`]); where it does not ([`prefetch_off`]), what its reports
+/// read, `rows` (the first format's), which each program applies to the hit lists that its
+/// reports show (review 3 of line DBID loadord, H2; review 6, H1: psiblast's prefetched set holds
+/// its traceback beyond the reports' cut; review 5 of line DBID pfoff-4, H2: psiblast's outfmt 8,
+/// 9 and 11 prefetch nothing).
 pub(crate) fn batch_loads(
+    format: PrefetchFormat,
     seq_aligns: usize,
     rows: crate::report::tabular::SubjectFetch,
 ) -> BatchLoads {
-    batch_loads_at(prefetch_seqs_limit(), seq_aligns, rows)
+    batch_loads_at(prefetch_seqs_limit(), format, seq_aligns, rows)
 }
 
 /// [`batch_loads`] with the limit `limit` (`prefetch_seqs_limit`).
 fn batch_loads_at(
     limit: Option<i32>,
+    format: PrefetchFormat,
     seq_aligns: usize,
     rows: crate::report::tabular::SubjectFetch,
 ) -> BatchLoads {
-    if prefetch_off_at(limit, seq_aligns) {
-        BatchLoads::Read(rows)
-    } else {
+    if format.runs_at(limit, seq_aligns) {
         BatchLoads::Prefetched
+    } else {
+        BatchLoads::Read(rows)
     }
 }
 
@@ -2004,13 +2087,15 @@ fn prefetch_off_at(limit: Option<i32>, seq_aligns: usize) -> bool {
 /// of what NCBI's BLAST database data loader loaded for them ([`batch_prefetch`]'s `before`,
 /// [`LoadedBefore::subjects`]): the hits of the call (`hits`, in each program's form: BLASTP's,
 /// BLASTN's and TBLASTN's final hit lists by query, TBLASTX's reported hits in report order), the
-/// queries of each batch (`spans`), which rows of the first format read a subject where a
-/// batch's prefetch is off (`rows`, `TabularSpec::subject_fetch`), and the outfmt 5 reports that
-/// NCBI's XML stream cuts before their hits (`cuts`, the call's [`XmlCuts`], which the texts that
-/// they leave ask too: [`XmlReportsBefore`]).
+/// queries of each batch (`spans`), the first format, whose prefetch the batches ask
+/// (`format`, [`PrefetchFormat`]), which rows of it read a subject where a batch's prefetch is
+/// off (`rows`, `TabularSpec::subject_fetch`), and the outfmt 5 reports that NCBI's XML stream
+/// cuts before their hits (`cuts`, the call's [`XmlCuts`], which the texts that they leave ask
+/// too: [`XmlReportsBefore`]).
 pub(crate) struct LoadedBefore<'a, T> {
     pub(crate) hits: &'a [T],
     pub(crate) spans: &'a [std::ops::Range<usize>],
+    pub(crate) format: PrefetchFormat,
     pub(crate) rows: crate::report::tabular::SubjectFetch,
     pub(crate) cuts: XmlCuts<'a>,
 }
@@ -2069,6 +2154,7 @@ impl<'a, T> LoadedBefore<'a, T> {
         let Self {
             hits,
             spans,
+            format,
             rows,
             cuts,
         } = self;
@@ -2078,7 +2164,7 @@ impl<'a, T> LoadedBefore<'a, T> {
                 let Some(held) = batch(hits, span.clone()) else {
                     return Vec::new();
                 };
-                let loads = batch_loads_at(limit, seq_aligns(span.clone(), held), rows);
+                let loads = batch_loads_at(limit, format, seq_aligns(span.clone(), held), rows);
                 loads
                     .report_spans(cuts, span.clone())
                     .filter_map(|queries| Some((queries.clone(), batch(hits, queries)?, loads)))
@@ -2100,17 +2186,20 @@ pub(crate) fn subject_seq_aligns(hsps: usize, gapped: bool) -> usize {
     }
 }
 
-/// Whether NCBI's prefetch is off for every query batch of the run: `PRE_FETCH_SEQS_LIMIT` is 0 or
-/// negative ([`prefetch_off`] of a batch without Seq-aligns). A run whose reports then read no
-/// subject looks no taxid up, so it has no refusal of NCBI's taxonomy cache to ask for.
-pub(crate) fn prefetch_always_off() -> bool {
-    prefetch_off(0)
+/// Whether NCBI's prefetch is off for every query batch of a run of the first format `format`:
+/// `PRE_FETCH_SEQS_LIMIT` is 0 or negative, or the format is one that NCBI does not prefetch for
+/// ([`prefetch_off`] of a batch without Seq-aligns). A run whose reports then read no subject
+/// looks no taxid up, so it has no refusal of NCBI's taxonomy cache to ask for.
+pub(crate) fn prefetch_always_off(format: PrefetchFormat) -> bool {
+    prefetch_off(format, 0)
 }
 
 /// Whether the prefetch of each query's batch reads the batch's reported subjects
-/// (`BatchPrefetch::reads`): NCBI counts each batch's Seq-aligns against a positive
-/// `PRE_FETCH_SEQS_LIMIT` ([`prefetch_off`]), so a batch above it reads nothing of its subjects
-/// before its reports, whose formatters then read them one by one. That matters for a call whose
+/// (`BatchPrefetch::reads`), by the one rule ([`PrefetchFormat::batch_prefetches`]): NCBI counts
+/// each batch's Seq-aligns against a positive `PRE_FETCH_SEQS_LIMIT` ([`prefetch_off`]), so a
+/// batch above it reads nothing of its subjects before its reports, whose formatters then read
+/// them one by one, as every batch of a format that NCBI does not prefetch for (psiblast's PSSM
+/// reads them so in outfmt 8, 9 and 11: review 5 of line DBID pfoff-4, H2 and H3). That matters for a call whose
 /// reports read nothing of the subjects ([`ParsedShown::prefetched`], refused by
 /// [`check_prefetched_parsed`]) and for the weak matches of NCBI's scope, which only such
 /// reads make ([`ParsedShown::one_by_one`]).
@@ -2127,7 +2216,7 @@ struct BatchStarts(Vec<Option<usize>>);
 enum Batches {
     /// Every batch prefetches (no limit, `INT_MAX`, a subject set, a test).
     Every,
-    /// No batch does (0 or below).
+    /// No batch does (0 or below, a format that NCBI does not prefetch for).
     None,
     /// Whether the batch of each query of the call prefetches (a positive limit); `None` for a
     /// query of no batch range, which is taken both ways ([`BatchPrefetch::reads`]).
@@ -2135,24 +2224,33 @@ enum Batches {
 }
 
 impl BatchPrefetch {
-    /// The batches of a call of `queries` queries (its hit lists, numbered from 0): `batches`,
-    /// the ranges of the queries of each batch numbered from `first` (the call's first query;
-    /// ranges before it are the batches written before), or the whole call as one batch where
-    /// `batches` is empty; `seq_aligns` counts the Seq-aligns of the hit lists of a range of
-    /// the call ([`subject_seq_aligns`]). A query of no range is taken both as prefetched and as
-    /// read one by one.
+    /// The batches of a call of `queries` queries (its hit lists, numbered from 0) of a run of the
+    /// first format `format`: `batches`, the ranges of the queries of each batch numbered from
+    /// `first` (the call's first query; ranges before it are the batches written before), or the
+    /// whole call as one batch where `batches` is empty; `seq_aligns` counts the Seq-aligns of the
+    /// hit lists of a range of the call ([`subject_seq_aligns`]). A query of no range is taken
+    /// both as prefetched and as read one by one.
     pub(crate) fn of(
+        format: PrefetchFormat,
         queries: usize,
         first: usize,
         batches: &[std::ops::Range<usize>],
         seq_aligns: impl Fn(std::ops::Range<usize>) -> usize,
     ) -> Self {
-        Self::at(prefetch_seqs_limit(), queries, first, batches, seq_aligns)
+        Self::at(
+            prefetch_seqs_limit(),
+            format,
+            queries,
+            first,
+            batches,
+            seq_aligns,
+        )
     }
 
     /// [`BatchPrefetch::of`] with the limit `limit` (`prefetch_seqs_limit`).
     fn at(
         limit: Option<i32>,
+        format: PrefetchFormat,
         queries: usize,
         first: usize,
         batches: &[std::ops::Range<usize>],
@@ -2173,17 +2271,18 @@ impl BatchPrefetch {
             starts[span(batch)].fill(Some(batch.start));
         }
         let starts = BatchStarts(starts);
-        if limit.is_none_or(|limit| limit == i32::MAX) {
-            return Self(Batches::Every, starts);
-        }
-        if prefetch_off_at(limit, 0) {
+        // No batch's count decides where every count gives the same answer.
+        if !format.runs_at(limit, 0) {
             return Self(Batches::None, starts);
+        }
+        if format.runs_at(limit, usize::MAX) {
+            return Self(Batches::Every, starts);
         }
         let mut on = vec![None; queries];
         for batch in batches {
             let span = span(batch);
             if !span.is_empty() {
-                let prefetches = !prefetch_off_at(limit, seq_aligns(span.clone()));
+                let prefetches = format.runs_at(limit, seq_aligns(span.clone()));
                 on[span].fill(Some(prefetches));
             }
         }
@@ -2453,15 +2552,16 @@ impl WeakMatches {
 }
 
 impl<'a> HeaderReader<'a> {
-    /// The reader of the headers of `db`.
-    pub(crate) fn new(db: &'a SeqDb) -> Self {
+    /// The reader of the headers of `db` for a run whose reports or PSSM may read the reported
+    /// sequences one by one (`one_by_one`: [`prefetch_may_be_off`] of its first format).
+    pub(crate) fn new(db: &'a SeqDb, one_by_one: bool) -> Self {
         Self {
             db,
             utf8: Default::default(),
             batches: std::cell::OnceCell::new(),
             lookup: std::cell::OnceCell::new(),
             indexed_lookup: std::cell::OnceCell::new(),
-            prefetch_off: prefetch_may_be_off(),
+            prefetch_off: one_by_one,
             taxdb: std::cell::OnceCell::new(),
             source_names: Default::default(),
             lookup_texts: std::cell::OnceCell::new(),
@@ -4285,7 +4385,7 @@ pub(crate) fn reports_may_refuse(
     let check_range = |mut kept: Kept,
                        range: &crate::seqdb::BlockRange|
      -> std::result::Result<Kept, ReportRefusal> {
-        let headers = HeaderReader::new(db);
+        let headers = HeaderReader::new(db, shown.one_by_one);
         let mut refusal = None;
         db.visit_sequence_headers(*range, |ordinal, header| {
             refusal = check(&mut kept, &headers, ordinal, header).err();
@@ -4319,7 +4419,7 @@ pub(crate) fn reports_may_refuse(
         Err(refusal) => return Some(refusal),
     };
     kept.keys.sort_unstable();
-    let headers = HeaderReader::new(db);
+    let headers = HeaderReader::new(db, shown.one_by_one);
     for shared_key in kept.keys.chunk_by(|a, b| a.0 == b.0) {
         let mut ordinals: Vec<u32> = shared_key.iter().map(|&(_, ordinal)| ordinal).collect();
         ordinals.dedup();
@@ -7581,22 +7681,6 @@ pub(crate) fn prefetch_warning(program: &str) -> Vec<u8> {
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753
-/// Whether NCBI's prefetch of a query batch reads the batch's Seq-aligns (their subject ids and
-/// ranges, `s_ExtractSeqidsAndRanges`) for the first format `outfmt`: every format but the
-/// archive (outfmt 11, which the apps write without calling the prefetch) and, unless
-/// `PRE_FETCH_SEQS_LIMIT=2147483647`, the Seq-annots 8, 9 and 12 (`s_IsPrefetchFormat`, cited at
-/// `blastx::native::reported_batch`); a batch whose prefetch is off ([`prefetch_off`]) reads
-/// nothing. Wider than [`prefetches_subjects`], which tells where the loads write the taxonomy
-/// database's texts.
-pub(crate) fn prefetch_reads_seq_aligns(outfmt: i32) -> bool {
-    match outfmt {
-        11 => false,
-        8 | 9 | 12 => prefetch_seqs_limit() == Some(i32::MAX),
-        _ => true,
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:781-784 (cited at
 // `ParsedSubject::prefetched`)
 /// The stop of NCBI's prefetch of one query batch's reported subjects `subjects` for a first
@@ -8974,30 +9058,32 @@ fn loader_keeps(
 }
 
 /// Whether the batches of a `-db` search prefetch their reported subjects though the first format
-/// `outfmt` writes the Seq-align ids alone: outfmt 8, 9 and 12 with
+/// `format` writes the Seq-align ids alone: outfmt 8, 9 and 12 with
 /// `PRE_FETCH_SEQS_LIMIT=2147483647` ([`prefetches_subjects`]; BLASTP's block search declines
 /// such a run, as it does a table of fields that read nothing of the subject on a database with
 /// parsed Seq-ids, whose definition lines it never takes).
-pub(crate) fn seq_annots_prefetch(outfmt: Option<i32>) -> bool {
-    matches!(outfmt, Some(8 | 9 | 12)) && prefetches_subjects(outfmt)
+pub(crate) fn seq_annots_prefetch(format: Option<PrefetchFormat>) -> bool {
+    format.is_some_and(|format| matches!(format.outfmt(), 8 | 9 | 12))
+        && prefetches_subjects(format)
 }
 
-/// Whether the first format of a call is one whose batches prefetch their reported subjects
-/// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0 to 7 and 17, and with
-/// `PRE_FETCH_SEQS_LIMIT=2147483647` the Seq-annots 8, 9 and 12 too (`s_PreFetchSeqs`, cited at
-/// [`prefetch_may_be_off`], returns before its test of the format). The query warnings, which
-/// the batch's messages go with, are written with the first format (the Seq-annots write only
-/// the reader's); the XML2 and JSON formats write theirs at each `Hit` (`TaxdbPrinter`), and the
-/// archive, which NCBI's apps but psiblast write without calling the prefetch, prefetches nothing
-/// (psiblast_app.cpp:262-264 prefetches before its test of the archive; LOSAT's PSIBLAST refuses
-/// outfmt 8, 9, 11 and 12).
-pub(crate) fn prefetches_subjects(outfmt: Option<i32>) -> bool {
-    match outfmt {
-        // `s_IsPrefetchFormat` takes the query-anchored formats 1 to 4 as 0 (DECISIONS T3-4); the
-        // limit's rule of the Seq-annots is that of the prefetch's reads.
-        Some(format @ (0..=9 | 12 | 17)) => prefetch_reads_seq_aligns(format),
-        _ => false,
-    }
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-266 (cited at
+// `PrefetchFormat`)
+/// Whether the first format `format` of a call is one whose batches prefetch their reported
+/// subjects where the limit allows ([`PrefetchFormat::reads_seq_aligns`]) and that shows no
+/// taxonomy of them (`prefetch_messages`): outfmt 0 to 7 and 17, with
+/// `PRE_FETCH_SEQS_LIMIT=2147483647` the Seq-annots 8, 9 and 12 too, and there psiblast's archive
+/// 11, whose rounds prefetch before their test of the archive. The query warnings, which the
+/// batch's messages go with, are written with the first format (the Seq-annots write only the
+/// reader's, the archive keeps them as its messages); the XML2 and JSON formats write theirs at
+/// each `Hit` (`TaxdbPrinter`), and the archive of the other applications, which write it without
+/// calling the prefetch, prefetches nothing.
+pub(crate) fn prefetches_subjects(format: Option<PrefetchFormat>) -> bool {
+    // `s_IsPrefetchFormat` takes the query-anchored formats 1 to 4 as 0 (DECISIONS T3-4); the
+    // limit's rule of the Seq-annots and of psiblast's archive is that of the prefetch's reads.
+    format.is_some_and(|format| {
+        matches!(format.outfmt(), 0..=9 | 11 | 12 | 17) && format.reads_seq_aligns()
+    })
 }
 
 /// How many taxonomy database entries cost as much to check as one database sequence: the

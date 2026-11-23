@@ -390,15 +390,16 @@ pub(crate) fn drop_unaligned(
 /// `titles` (`common::database::read_header`). A reader error of NCBI's own is a
 /// `HeaderReadError` (it fails the batch); LOSAT's refusals are errors of their own. The first
 /// read of a record with a UTF8String where a VisibleString is expected is returned
-/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.
+/// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there. `one_by_one`: the reports
+/// may read the reported sequences one by one (`shared::HeaderReader::new`).
 pub(crate) fn read_titles(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     first_query: usize,
-    earlier: shared::EarlierUtf8,
+    (earlier, one_by_one): (shared::EarlierUtf8, bool),
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
-    let headers = shared::HeaderReader::new(&database.db);
+    let headers = shared::HeaderReader::new(&database.db, one_by_one);
     headers.note_earlier(earlier);
     // A subject's HSPs follow each other: one look-up per run of them.
     let mut previous = None;
@@ -682,7 +683,8 @@ pub(crate) fn batch_prefetch(
 /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches before,
 /// whose reported hits are `before` (by ordinal id; `before_queries` queries, those of each batch
 /// `before_spans`), of the subjects that those reports load (`hit_loads` of the batches before
-/// alone, of `batches_prefetch`, the reports' own answer, with `after` and the hits' engine
+/// alone, of `batches_prefetch`, the reports' own answer, with `after`, the first format
+/// `format`, and the hits' engine
 /// `identities`, `hit_identities`; review 2 of line DBID pfoff-1, N-M2), which TBLASTX writes
 /// after the stop (the XML formats are not streamed, `report_stream`). `Ok`: the warning of a
 /// UTF8String header that a load of a batch that does not stop posts
@@ -693,13 +695,16 @@ pub(crate) fn batch_prefetch_stop(
     before: &[TblastxHsp],
     before_queries: usize,
     before_spans: &[std::ops::Range<usize>],
-    after: crate::report::db_subject::FormatThrow,
+    (after, format): (
+        crate::report::db_subject::FormatThrow,
+        shared::PrefetchFormat,
+    ),
     identities: &dyn Fn(&TblastxHsp) -> usize,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
 ) -> Result<Vec<u8>> {
-    let prefetch = batches_prefetch(before, before_queries, before_spans);
+    let prefetch = batches_prefetch(format, before, before_queries, before_spans);
     let loads = hit_loads(
         before,
         &prefetch,
@@ -720,7 +725,7 @@ pub(crate) fn batch_prefetch_stop(
 
 /// The run's record of the sequences that NCBI's BLAST database data loader loaded for a query
 /// batch whose reported hits are `ordered` (`shared::TaxdbRun::note_loaded`; [`loaded_subjects`]
-/// of the batch alone, `rows`: the first format's), for a later batch's stop: where the loop
+/// of the batch alone, `format` and `rows`: the first format's), for a later batch's stop: where the loop
 /// writes each batch's reports and drops its hits (`report_stream`), so that `batch_prefetch`'s
 /// `before` no longer holds them. The stream never writes outfmt 5 (`report_stream::Off`), so no
 /// report of the batch is cut (`shared::XmlCuts::NONE`); `queries` are the batch's queries as its
@@ -731,7 +736,7 @@ pub(crate) fn note_loaded(
     ordered: &[TblastxHsp],
     (start, queries): (usize, std::ops::Range<usize>),
     titles: &DatabaseTitles,
-    rows: SubjectFetch,
+    (format, rows): (shared::PrefetchFormat, SubjectFetch),
 ) {
     if database.parsed_seqids() {
         let batch = [queries];
@@ -740,6 +745,7 @@ pub(crate) fn note_loaded(
                 LoadedBefore {
                     hits: ordered,
                     spans: &batch,
+                    format,
                     rows,
                     cuts: shared::XmlCuts::NONE,
                 },
@@ -1020,22 +1026,40 @@ pub(crate) fn query_hits(ordered: &[TblastxHsp], queries: std::ops::Range<usize>
     &ordered[from..to.max(from)]
 }
 
+/// The first of the formats `formats` of a run as NCBI's prefetch of each query batch asks it
+/// (`shared::PrefetchFormat`, the one owner of whether a batch prefetches,
+/// `TblastxOutputFormat::prefetch_format`); a run writes at least one format, outfmt 0 stands for
+/// none.
+pub(crate) fn prefetch_format(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+) -> shared::PrefetchFormat {
+    formats.first().map_or(
+        shared::PrefetchFormat::of(
+            crate::blastinput::app::output_format::PAIRWISE,
+            crate::report::archive::options::RequestKind::Tblastx,
+        ),
+        |format| super::report::output_format(format.outfmt).prefetch_format(),
+    )
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (cited at
 // `common::database::prefetch_may_be_off`: `s_PreFetchSeqs` counts the Seq-aligns of one batch's
 // results against `PRE_FETCH_SEQS_LIMIT`)
 /// Whether the batch of each query of the reported hits `ordered` (in report order, by query of
-/// `queries` queries, numbered from 0) prefetches (`shared::BatchPrefetch::of`): `spans` are the
+/// `queries` queries, numbered from 0) of a run of the first format `format` prefetches
+/// (`shared::BatchPrefetch::of`): `spans` are the
 /// queries of each batch, whose Seq-aligns `seq_aligns_of` counts. The one producer of the
 /// prefetch that the reports' loads read (`hit_loads`), for both of its readers: the stop of a
 /// later batch, of the batches before it (`batch_prefetch_stop`), and the reports
 /// (`reported_subjects`), so the two cannot disagree on what the batches before loaded (review 2
 /// of line DBID pfoff-1, N-M2).
 fn batches_prefetch(
+    format: shared::PrefetchFormat,
     ordered: &[TblastxHsp],
     queries: usize,
     spans: &[std::ops::Range<usize>],
 ) -> shared::BatchPrefetch {
-    shared::BatchPrefetch::of(queries, 0, spans, |span| {
+    shared::BatchPrefetch::of(format, queries, 0, spans, |span| {
         seq_aligns_of(query_hits(ordered, span))
     })
 }
@@ -1047,7 +1071,7 @@ fn batches_prefetch(
 /// when a report reads letters, stores (`stores`, `read_reported`, which give the lengths; else
 /// `lengths`, `read_reported_lengths`) are kept for the reports. A reported sequence whose stored title LOSAT does not
 /// report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports
-/// `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
+/// `shown` (with the first format `format`, whose prefetch the batches ask) do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; where only the prefetch reads a subject, a batch whose
 /// prefetch is on reports it, `batches_prefetch` of the hits' `queries` queries and the queries of
 /// each batch `spans`; `after`: what the formats do after a subject whose lookup throws and how
@@ -1061,7 +1085,7 @@ pub(crate) fn reported_subjects(
     ordered: &mut [TblastxHsp],
     stores: Option<&ReportedStores>,
     read_lengths: &ReportedLengths,
-    shown: ParsedShown,
+    (shown, format): (ParsedShown, shared::PrefetchFormat),
     (after, pairwise): (
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
@@ -1073,7 +1097,7 @@ pub(crate) fn reported_subjects(
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
     ordinals.sort_unstable();
     ordinals.dedup();
-    let prefetch = batches_prefetch(ordered, queries, spans);
+    let prefetch = batches_prefetch(format, ordered, queries, spans);
     // What the batches read of each subject (`prefetch`: a batch whose Seq-aligns outnumber a
     // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them
     // one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes

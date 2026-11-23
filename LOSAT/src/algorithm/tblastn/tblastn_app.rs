@@ -1893,7 +1893,13 @@ fn search(
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
         // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
         // the search's batches (`database::fetch_excluded`), and their reads of headers.
-        let reads = super::database::CallReads::of(database, || query_input.batches(batch_size));
+        // The first format, whose prefetch each batch asks (`database::prefetch_format`).
+        let prefetch_format = super::database::prefetch_format(&outputs.formats);
+        let reads = super::database::CallReads::of(
+            database,
+            || query_input.batches(batch_size),
+            prefetch_format,
+        );
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -2147,12 +2153,8 @@ fn search(
             .formats
             .first()
             .map(|format| super::stage_e_report::format_number(format.outfmt));
-        let first_prefetches = first_number.is_some_and(|number| {
-            crate::algorithm::common::database::prefetches_subjects(Some(match number {
-                10 | 18 | 20 => 6,
-                number => number,
-            }))
-        });
+        let first_prefetches = first_number.is_some()
+            && crate::algorithm::common::database::prefetches_subjects(Some(prefetch_format));
         // The XML2 and JSON formats (13 to 16), whose prefetch NCBI runs too but which write the
         // taxonomy texts at each `Hit`: of the prefetch only its stop
         // (`shared::held_batch_prefetch_stop`).
@@ -2191,13 +2193,17 @@ fn search(
                 .map(|batch| batch.searched)
                 .filter(|searched| !searched.is_empty() && searched.end <= results.len())
                 .collect();
-            super::database::prefetch_stop(&titles, &results, &spans, resolved.gapped).filter(
-                |(span, _)| {
-                    failed
-                        .as_ref()
-                        .is_none_or(|(range, _)| span.start < range.start)
-                },
+            super::database::prefetch_stop(
+                &titles,
+                &results,
+                &spans,
+                (prefetch_format, resolved.gapped),
             )
+            .filter(|(span, _)| {
+                failed
+                    .as_ref()
+                    .is_none_or(|(range, _)| span.start < range.start)
+            })
         } else {
             None
         };
@@ -2463,7 +2469,8 @@ fn search(
                     // lookups are made here before any report is written, so the run's refusal
                     // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
                     // only there: a later batch that fetches still refuses before any byte.
-                    if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                    if crate::algorithm::common::database::prefetch_off(prefetch_format, seq_aligns)
+                    {
                         // No prefetch; no fetch writes without `taxdb.bti` or such a lookup.
                         if !taxdb_found && !database.scope_utf8_seen() {
                             continue;
@@ -2524,6 +2531,7 @@ fn search(
                         super::database::LoadedBefore {
                             hits: &results[..span.start],
                             spans: &batch_spans,
+                            format: prefetch_format,
                             rows: first_rows,
                             cuts: xml_cuts,
                         },
@@ -2567,6 +2575,7 @@ fn search(
                 super::database::LoadedBefore {
                     hits: &results,
                     spans: &batch_spans,
+                    format: prefetch_format,
                     rows: first_rows,
                     cuts: xml_cuts,
                 },

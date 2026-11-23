@@ -74,6 +74,7 @@ pub(super) struct ReportPrep<'a, 'o> {
     pub(super) psiblast_hits_found: &'a Option<Vec<usize>>,
     pub(super) filtered_empty: bool,
     pub(super) rps_multi_volume: bool,
+    pub(super) prefetch_format: crate::algorithm::common::database::PrefetchFormat,
     pub(super) batches_prefetch: bool,
     pub(super) prefetch_taxids: bool,
     pub(super) prefetch_only: bool,
@@ -180,7 +181,10 @@ fn xml2_scope_utf8(
         &mut SubjectReads,
         &[Option<BlastpHitList>],
     ),
-    seq_aligns: &dyn Fn(std::ops::Range<usize>) -> usize,
+    (format, seq_aligns): (
+        crate::algorithm::common::database::PrefetchFormat,
+        &dyn Fn(std::ops::Range<usize>) -> usize,
+    ),
     prefetched_ranks: &dyn Fn(std::ops::Range<usize>) -> Vec<usize>,
 ) -> Result<()> {
     let db = database.seqdb();
@@ -191,7 +195,7 @@ fn xml2_scope_utf8(
             db,
         );
         let span = batch.searched.clone();
-        if crate::algorithm::common::database::prefetch_off(seq_aligns(span.clone())) {
+        if crate::algorithm::common::database::prefetch_off(format, seq_aligns(span.clone())) {
             for query in span {
                 let shown = std::slice::from_ref(&hit_lists[query]);
                 let reads = titles.scope_utf8_hit_reads(
@@ -298,6 +302,7 @@ pub(super) fn prefetch_reported_subjects(
         pssm_reads,
         query_records,
         psi_found_before,
+        prefetch_format,
         ..
     } = *prep;
     // Whether the reports write the same where every load of a subject with a positive taxid throws
@@ -516,12 +521,22 @@ pub(super) fn prefetch_reported_subjects(
         let input = if xml_scope { 0..input.end } else { input };
         crate::blastinput::query_batch::QueryScope::of_shown_records(&ranges.input_records[input])
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:677-707
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:331-380
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
     // Which rows of the first format's report read the subjects' Bioseqs, which NCBI's
-    // formatters fetch one by one where `PRE_FETCH_SEQS_LIMIT` turns a batch's prefetch off: a
-    // custom tabular report's only for fields that read them (`TabularSpec::subject_fetch`).
+    // formatters fetch one by one where a batch's prefetch does not run: a custom tabular
+    // report's only for fields that read them (`TabularSpec::subject_fetch`); none of the
+    // Seq-annots (8, 9 and 12) and the archive (11), whose writers put the Seq-aligns as they are
+    // into the Seq-annot (`x_WrapAlignmentInSeqAnnot`, after `PruneSeqalign`, which compares the
+    // Seq-align ids) or the archive (`BlastBuildArchive`) and load no subject (review 5 of line
+    // DBID pfoff-4, M1); every row of the other formats.
     let rows = match format_plans.first() {
         Some(BlastpReport::CustomTabular(spec)) => {
             spec.subject_fetch(crate::blastinput::app::Program::Blastp)
+        }
+        Some(BlastpReport::Seqalign(_) | BlastpReport::Archive) => {
+            crate::report::tabular::SubjectFetch::Never
         }
         _ => crate::report::tabular::SubjectFetch::Every,
     };
@@ -574,6 +589,7 @@ pub(super) fn prefetch_reported_subjects(
         crate::algorithm::common::database::LoadedBefore {
             hits: &hit_lists[..start],
             spans: batch_ranges,
+            format: prefetch_format,
             rows,
             cuts: xml_cuts,
         }
@@ -652,7 +668,7 @@ pub(super) fn prefetch_reported_subjects(
                 query_batches,
                 after_throw.run(),
                 (&mut prefetch_posts, &mut subject_reads, hit_lists),
-                &|span| batch_seq_aligns(span),
+                (prefetch_format, &|span| batch_seq_aligns(span)),
                 &prefetched_ranks,
             )?;
         }
@@ -682,7 +698,7 @@ pub(super) fn prefetch_reported_subjects(
                 crate::algorithm::common::database::Utf8Read::reach(utf8_read, &batch.searched, db);
                 let lists = &hit_lists[batch.searched.clone()];
                 let seq_aligns = batch_seq_aligns(batch.searched.clone());
-                if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                if crate::algorithm::common::database::prefetch_off(prefetch_format, seq_aligns) {
                     if !prefetch_taxids && !scope_loads {
                         continue;
                     }
@@ -1365,6 +1381,7 @@ pub(super) fn shown_of<'a>(
 /// No NCBI counterpart: LOSAT's values between its Seq-aligns and its reports; NCBI's result set
 /// and formatter hold theirs (`report_values`).
 pub(super) struct ReportValues {
+    pub(super) prefetch_format: crate::algorithm::common::database::PrefetchFormat,
     pub(super) batches_prefetch: bool,
     pub(super) prefetch_taxids: bool,
     pub(super) prefetch_only: bool,
@@ -1377,6 +1394,23 @@ pub(super) struct ReportValues {
     pub(super) pssm_made: bool,
     pub(super) psiblast_hits_found: Option<Vec<usize>>,
     pub(super) engine_counts: EngineCounts,
+}
+
+/// The first format of a call of `app` (of `requested_formats`, its reports) as NCBI's prefetch of
+/// each query batch asks it (`shared::PrefetchFormat`, the one owner of whether a batch prefetches):
+/// the one producer of it for the call's batches (`report_values`) and its reads of the headers
+/// (`database::CallTitles::new`). A call writes at least one format; outfmt 0 stands for none.
+pub(super) fn prefetch_format(
+    app: BlastpApp,
+    requested_formats: &[BlastpReport],
+) -> crate::algorithm::common::database::PrefetchFormat {
+    requested_formats.first().map_or(
+        crate::algorithm::common::database::PrefetchFormat::of(
+            crate::blastinput::app::output_format::PAIRWISE,
+            app.request_kind(),
+        ),
+        |outfmt| outfmt.prefetch_format(app),
+    )
 }
 
 /// What the reports read of the Seq-aligns of the final hit lists, made from them before any
@@ -1435,12 +1469,13 @@ pub(super) fn report_values(
         }
         _ => None,
     };
+    let prefetch_format = prefetch_format(args.app, requested_formats);
     // Whether the batches prefetch the subjects of a database, and whether that looks their
     // taxids up (`prefetch_reported_subjects`'s `prefetch_messages`).
     let batches_prefetch = listed_titles.is_some()
         && requested_formats
             .first()
-            .is_some_and(|outfmt| outfmt.prefetches_subjects());
+            .is_some_and(|outfmt| outfmt.prefetches_subjects(args.app));
     let prefetch_taxids =
         batches_prefetch && database.is_some_and(|database| database.taxdb_found());
     // Whether that prefetch reads the subjects though the first format reads nothing of them
@@ -1475,10 +1510,12 @@ pub(super) fn report_values(
     // reports (`run_call`'s `output_result`). A refusal between here and the reports
     // (`refuse_unreportable` in `run_call`) or a report write error drops them: no PSSM file has
     // changed (`PssmFiles`).
-    // Whether each query's batch prefetches (`shared::BatchPrefetch`), by the Seq-aligns of its
-    // results, one for each HSP or, `-ungapped`, for each subject (`blastp_seq_aligns`;
-    // psiblast's and rpsblast's before the cut, as `psiblast_hits_found` below): a
-    // batch whose prefetch is off reads its subjects one by one, for the PSSM too. The rounds of
+    // Whether each query's batch prefetches (`shared::BatchPrefetch`), by the first format and
+    // the Seq-aligns of its results, one for each HSP or, `-ungapped`, for each subject
+    // (`blastp_seq_aligns`; psiblast's and rpsblast's before the cut, as `psiblast_hits_found`
+    // below): a batch whose prefetch is off, every batch of psiblast's outfmt 8, 9 and 11 but
+    // with `PRE_FETCH_SEQS_LIMIT=2147483647` (review 5 of line DBID pfoff-4, H2), reads its
+    // subjects one by one, for the PSSM too. The rounds of
     // one psiblast query share NCBI's scope, but every subject that a round whose prefetch is off
     // reads one by one is refused there (its reports and its PSSM, below), so no weak match
     // reaches a later round (review 2 of line DBID weakbatch, L1).
@@ -1487,6 +1524,7 @@ pub(super) fn report_values(
         .map(|batch| batch.searched.clone())
         .collect();
     let batch_prefetch = crate::algorithm::common::database::BatchPrefetch::of(
+        prefetch_format,
         hit_lists.len(),
         0,
         &batch_ranges,
@@ -1628,6 +1666,7 @@ pub(super) fn report_values(
         &mut engine_counts,
     );
     Ok(ReportValues {
+        prefetch_format,
         batches_prefetch,
         prefetch_taxids,
         prefetch_only,

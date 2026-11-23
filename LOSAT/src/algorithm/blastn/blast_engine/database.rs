@@ -715,19 +715,22 @@ impl BlastnDatabase {
         titles: &DatabaseTitles,
         before: &[Option<BlastnHitList>],
         spans: &[std::ops::Range<usize>],
-        after: crate::report::db_subject::FormatThrow,
+        (after, format): (
+            crate::report::db_subject::FormatThrow,
+            shared::PrefetchFormat,
+        ),
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
         reads: &mut [crate::report::query_warnings::QueryReads],
     ) -> Option<Result<crate::report::diag_log::Posts>> {
         let seq_aligns = seq_aligns_of(hit_lists, gapped);
-        if shared::prefetch_off(seq_aligns) {
+        if shared::prefetch_off(format, seq_aligns) {
             self.scope_utf8_hit_reads(titles, hit_lists, after.run(), reads);
             return None;
         }
         (seq_aligns > 0).then(|| {
-            let prefetch = batches_prefetch(before, 0, spans, gapped);
+            let prefetch = batches_prefetch(format, before, 0, spans, gapped);
             let loads = hit_loads(
                 before,
                 &prefetch,
@@ -763,7 +766,7 @@ impl BlastnDatabase {
         hit_lists: &[Option<BlastnHitList>],
         start: usize,
         gapped: bool,
-        rows: SubjectFetch,
+        (format, rows): (shared::PrefetchFormat, SubjectFetch),
     ) {
         if self.parsed_seqids() {
             *self
@@ -777,6 +780,7 @@ impl BlastnDatabase {
                     LoadedBefore {
                         hits: hit_lists,
                         spans: &batch,
+                        format,
                         rows,
                         cuts: shared::XmlCuts::NONE,
                     },
@@ -1659,13 +1663,13 @@ impl BlastnDatabase {
     /// (`shared::Utf8Read::of_read`). The error is `read_titles`'.
     pub(super) fn batch_titles(
         &self,
-        fetched: Option<crate::seqdb::SeqLocation>,
+        (fetched, one_by_one): (Option<crate::seqdb::SeqLocation>, bool),
         hit_lists: &mut [Option<BlastnHitList>],
         (titles, posts): (&mut DatabaseTitles, &mut crate::report::diag_log::Posts),
     ) -> Result<()> {
         let aligned = drop_unaligned(self, hit_lists);
         let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
-        let read = read_titles(self, hit_lists, earlier, titles);
+        let read = read_titles(self, hit_lists, (earlier, one_by_one), titles);
         let first = shared::Utf8Read::of_read(&read, Option::as_ref);
         if let Some(warning) = shared::Utf8Read::post_of(first, &self.db, "blastn") {
             posts.append(&warning);
@@ -1713,10 +1717,10 @@ pub(super) fn drop_unaligned(
 pub(super) fn read_titles(
     database: &BlastnDatabase,
     hit_lists: &[Option<BlastnHitList>],
-    earlier: shared::EarlierUtf8,
+    (earlier, one_by_one): (shared::EarlierUtf8, bool),
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
-    let headers = shared::HeaderReader::new(&database.db);
+    let headers = shared::HeaderReader::new(&database.db, one_by_one);
     headers.note_earlier(earlier);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
@@ -1776,9 +1780,22 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
         prefetched: output_formats
             .first()
             .is_some_and(|format| format.prefetches_subjects())
-            && !shared::prefetch_always_off(),
-        one_by_one: shared::prefetch_may_be_off(),
+            && !shared::prefetch_always_off(prefetch_format(output_formats)),
+        one_by_one: shared::prefetch_may_be_off(prefetch_format(output_formats)),
     }
+}
+
+/// The first of the formats `output_formats` of a run as NCBI's prefetch of each query batch asks
+/// it (`shared::PrefetchFormat`, the one owner of whether a batch prefetches); a run writes at
+/// least one format, outfmt 0 stands for none.
+pub(super) fn prefetch_format(output_formats: &[BlastnOutputFormat]) -> shared::PrefetchFormat {
+    output_formats.first().map_or(
+        shared::PrefetchFormat::of(
+            crate::blastinput::app::output_format::PAIRWISE,
+            crate::report::archive::options::RequestKind::Blastn,
+        ),
+        |format| format.prefetch_format(),
+    )
 }
 
 /// The Seq-aligns of the results `hit_lists` that NCBI's prefetch counts against
@@ -1813,12 +1830,13 @@ pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -
 /// (`BlastnDatabase::batch_prefetch_stop`), and the reports (`reported_subjects`), so the two
 /// cannot disagree on what the batches before loaded (review 2 of line DBID pfoff-1, N-M2).
 fn batches_prefetch(
+    format: shared::PrefetchFormat,
     hit_lists: &[Option<BlastnHitList>],
     first: usize,
     batches: &[std::ops::Range<usize>],
     gapped: bool,
 ) -> shared::BatchPrefetch {
-    shared::BatchPrefetch::of(hit_lists.len(), first, batches, |span| {
+    shared::BatchPrefetch::of(format, hit_lists.len(), first, batches, |span| {
         seq_aligns_of(&hit_lists[span], gapped)
     })
 }
@@ -2187,7 +2205,7 @@ pub(super) fn reported_subjects(
     titles: &DatabaseTitles,
     hit_lists: &mut [Option<BlastnHitList>],
     letters: bool,
-    shown: ParsedShown,
+    (shown, format): (ParsedShown, shared::PrefetchFormat),
     (after, pairwise): (
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
@@ -2210,7 +2228,7 @@ pub(super) fn reported_subjects(
     // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read
     // them one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes
     // NCBI's warning (`BlastnDatabase::batch_prefetch`).
-    let prefetch = batches_prefetch(hit_lists, first_query, batches, gapped);
+    let prefetch = batches_prefetch(format, hit_lists, first_query, batches, gapped);
     let reads = prefetch.reads(
         hit_lists
             .iter()

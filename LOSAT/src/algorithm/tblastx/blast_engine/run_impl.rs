@@ -3404,6 +3404,8 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // The first format, whose prefetch each batch asks (`database::prefetch_format`).
+    let prefetch_format = super::super::database::prefetch_format(&outputs.formats);
     // The query records that NCBI's scope holds at the prefetch of the batch of the input records
     // `input` (`shared::PrefetchQueries`, made only where the batch stops): those that NCBI's
     // reader added for the batch (the records that `-query_loc` drops included, numbered in the
@@ -3780,7 +3782,10 @@ fn run_batch_loop(
                 database,
                 ordered,
                 start,
-                earlier,
+                (
+                    earlier,
+                    crate::algorithm::common::database::prefetch_may_be_off(prefetch_format),
+                ),
                 &mut reports.titles.borrow_mut(),
             );
             match read {
@@ -3911,6 +3916,7 @@ fn run_batch_loop(
                 }};
             }
             let off = crate::algorithm::common::database::prefetch_off(
+                prefetch_format,
                 super::super::database::seq_aligns_of(ordered),
             );
             if xml2_prefetch && !run_loads.ended() && off {
@@ -3939,7 +3945,7 @@ fn run_batch_loop(
                     &done.hits,
                     done.searched.len(),
                     &done.spans,
-                    run_loads.answer(),
+                    (run_loads.answer(), prefetch_format),
                     &|hsp| {
                         super::super::database::hit_identities(
                             &reports.stores.borrow(),
@@ -3974,7 +3980,7 @@ fn run_batch_loop(
                 // (`report_stream::Off::TaxonomyCache`), so every report is then written after
                 // the loop and a later batch that fetches still refuses before any report (outfmt
                 // 0's prolog is written before the search).
-                if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                if crate::algorithm::common::database::prefetch_off(prefetch_format, seq_aligns) {
                     // No prefetch; without `taxdb.bti` the reports' fetches look nothing up, but
                     // a lookup that reads a UTF8String header posts a warning (`load_read_texts`).
                     if taxdb_found || database.db.scope_utf8_seen() {
@@ -4103,6 +4109,7 @@ fn run_batch_loop(
                         super::super::database::LoadedBefore {
                             hits: &done.hits,
                             spans: &done.spans,
+                            format: prefetch_format,
                             rows,
                             cuts: xml_cuts,
                         },
@@ -4201,7 +4208,7 @@ fn run_batch_loop(
                     &batch.hits,
                     (start, 0..end - start),
                     &reports.titles.borrow(),
-                    rows,
+                    (prefetch_format, rows),
                 );
             }
             debug_assert_eq!(reports.queries_written.get(), start);
@@ -4353,6 +4360,8 @@ impl BatchReports<'_> {
                     .iter()
                     .map(|format| report::output_format(format.outfmt))
                     .collect();
+                // The first format, whose prefetch the batches ask (`database::prefetch_format`).
+                let prefetch_format = super::super::database::prefetch_format(&outputs.formats);
                 let pairwise_shown = formats.iter().any(|format| format.is_pairwise());
                 let shown = crate::algorithm::common::database::ParsedShown {
                     tabular: formats.iter().any(|format| format.tabular_reads_subject()),
@@ -4377,8 +4386,12 @@ impl BatchReports<'_> {
                     prefetched: formats
                         .first()
                         .is_some_and(|format| format.prefetches_subjects())
-                        && !crate::algorithm::common::database::prefetch_always_off(),
-                    one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
+                        && !crate::algorithm::common::database::prefetch_always_off(
+                            prefetch_format,
+                        ),
+                    one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
+                        prefetch_format,
+                    ),
                 };
                 // The queries of each batch (`done.spans`, in the numbering of `hits`), whose
                 // prefetch decides the subjects that only the prefetch reads; the hits' engine
@@ -4393,7 +4406,7 @@ impl BatchReports<'_> {
                     &mut hits,
                     self.reads_letters.then_some(&*self.stores.borrow()),
                     &self.lengths.borrow(),
-                    shown,
+                    (shown, prefetch_format),
                     (
                         super::super::database::after_throw(
                             outputs.formats.iter().map(|format| format.outfmt),

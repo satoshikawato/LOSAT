@@ -179,24 +179,36 @@ impl BlastnOutputFormat {
     /// the call's first report, the taxonomy database's messages of that prefetch go with the
     /// query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
-        crate::algorithm::common::database::prefetches_subjects(match self {
-            BlastnOutputFormat::Pairwise(view) => Some(view.outfmt()),
-            BlastnOutputFormat::Xml => Some(5),
-            BlastnOutputFormat::Tabular => Some(6),
-            BlastnOutputFormat::TabularWithComments => Some(7),
-            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
-            // they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy names
-            // come with the rows (`report::tabular::TabularNames`).
-            BlastnOutputFormat::CustomTabular(spec) => Some(match spec.kind {
-                crate::report::tabular::TabularKind::Commented => 7,
-                _ => 6,
-            }),
-            BlastnOutputFormat::Sam(_) => Some(17),
-            BlastnOutputFormat::Seqalign(serial) => Some(serial.outfmt()),
-            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
-            // (`TaxdbPrinter`).
-            BlastnOutputFormat::Archive | BlastnOutputFormat::Xml2(_) => None,
-        })
+        // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
+        // (`TaxdbPrinter`).
+        crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format()))
+    }
+
+    /// The format as the first format of a BLASTN run that NCBI's prefetch of each query batch
+    /// asks (`common::database::PrefetchFormat`, the one owner of whether a batch prefetches).
+    pub(crate) fn prefetch_format(self) -> crate::algorithm::common::database::PrefetchFormat {
+        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, JSON, SAM, XML};
+        crate::algorithm::common::database::PrefetchFormat::of(
+            match self {
+                BlastnOutputFormat::Pairwise(view) => view.outfmt(),
+                BlastnOutputFormat::Xml => XML,
+                BlastnOutputFormat::Tabular => 6,
+                BlastnOutputFormat::TabularWithComments => 7,
+                // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and
+                // 20): they read the subjects as 6 and 7 do; the rows' own lookups of the
+                // taxonomy names come with the rows (`report::tabular::TabularNames`).
+                BlastnOutputFormat::CustomTabular(spec) => match spec.kind {
+                    crate::report::tabular::TabularKind::Commented => 7,
+                    _ => 6,
+                },
+                BlastnOutputFormat::Sam(_) => SAM,
+                BlastnOutputFormat::Seqalign(serial) => serial.outfmt(),
+                // The XML2 and JSON documents prefetch as each of 13 to 16 does.
+                BlastnOutputFormat::Xml2(_) => JSON,
+                BlastnOutputFormat::Archive => ARCHIVE_FORMAT,
+            },
+            crate::report::archive::options::RequestKind::Blastn,
+        )
     }
 
     /// Whether the format is the pairwise report of outfmt 0 to 4 (`Pairwise`): the same prolog,

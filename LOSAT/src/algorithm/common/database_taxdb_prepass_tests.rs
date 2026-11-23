@@ -98,7 +98,7 @@ fn a_reported_sequence_whose_seq_align_id_finds_another_record_first() {
         ),
     ] {
         let db = db_search(name, None, &cwd);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Parsed(subject) = read_header(&headers, 1, 0, "BLASTP").unwrap() else {
             panic!("{name}: a sequence with parsed Seq-ids");
         };
@@ -171,7 +171,7 @@ fn a_later_volume_whose_isam_does_not_open_leaves_the_other_holders_unknown() {
         SeqDb::open_in(&names, SeqType::Protein, &search).unwrap()
     };
     let subject_of = |db: &SeqDb, ordinal: u32| {
-        let headers = HeaderReader::new(db);
+        let headers = HeaderReader::new(db, false);
         match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
             ReportedHeader::Parsed(subject) => subject,
             _ => panic!("{ordinal}: a sequence with parsed Seq-ids"),
@@ -333,7 +333,7 @@ fn the_same_record_with_other_taxids_is_shown_apart_by_the_reports_of_taxids_onl
     ] {
         let taxdb = taxdb.map(|variant| root().join("seqdb/taxdb").join(variant));
         let db = db_search(name, taxdb.as_deref(), &cwd);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Parsed(subject) = read_header(&headers, ordinal, 0, "BLASTP").unwrap()
         else {
             panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
@@ -416,7 +416,7 @@ fn a_seq_align_id_of_any_kind_is_left_to_the_lookup() {
         ),
     ] {
         let db = db_search(name, None, &cwd);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Parsed(subject) = read_header(&headers, ordinal, 0, "BLASTP").unwrap()
         else {
             panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
@@ -462,7 +462,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
         ("ids/plook_v5", 6, Ok(None)),
     ] {
         let db = db_search(name, None, &cwd);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Parsed(subject) = read_header(&headers, ordinal, 0, "BLASTP").unwrap()
         else {
             panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
@@ -495,7 +495,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
     let search = SearchPath::new(&cwd, None, None).unwrap();
     let path = root().join("db_search/ids/nrefuse_v5");
     let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
-    let headers = HeaderReader::new(&db);
+    let headers = HeaderReader::new(&db, false);
     let ReportedHeader::Parsed(subject) = read_header(&headers, 0, 0, "TBLASTX").unwrap() else {
         panic!("nrefuse_v5 0: a sequence with parsed Seq-ids");
     };
@@ -552,7 +552,7 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
     let text = |posts: crate::report::diag_log::Posts| String::from_utf8(posts.text()).unwrap();
     for taxdb in [None, Some(taxdb.as_path())] {
         let db = open("ntag_t5", taxdb);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let parsed = |ordinal: u32| match read_header(&headers, ordinal, 0, "BLASTN").unwrap() {
             ReportedHeader::Parsed(subject) => subject,
             _ => panic!("ntag_t5 {ordinal}: a sequence with parsed Seq-ids"),
@@ -646,7 +646,7 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
     // A minus-strand Seq-align of a subject without a Bioseq fails after every load: the
     // texts of the batch, then the warning.
     let db = open("nlook_t4", Some(&taxdb));
-    let headers = HeaderReader::new(&db);
+    let headers = HeaderReader::new(&db, false);
     let parsed = |ordinal: u32| match read_header(&headers, ordinal, 0, "BLASTN").unwrap() {
         ReportedHeader::Parsed(subject) => subject,
         _ => panic!("nlook_t4 {ordinal}: a sequence with parsed Seq-ids"),
@@ -718,7 +718,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     };
     let headers_of =
         |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
-            let headers = HeaderReader::new(db);
+            let headers = HeaderReader::new(db, false);
             (0..db.num_seqs())
                 .map(
                     |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
@@ -1136,7 +1136,7 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
     type Headers = [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>];
     let headers_of =
         |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
-            let headers = HeaderReader::new(db);
+            let headers = HeaderReader::new(db, false);
             (0..db.num_seqs())
                 .map(
                     |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
@@ -1354,7 +1354,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
     type Headers = [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>];
     let headers_of =
         |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
-            let headers = HeaderReader::new(db);
+            let headers = HeaderReader::new(db, false);
             (0..db.num_seqs())
                 .map(
                     |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
@@ -1602,7 +1602,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
         })
         .collect();
     let db = SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap();
-    let headers = HeaderReader::new(&db);
+    let headers = HeaderReader::new(&db, false);
     let parsed: Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> = (0..db
         .num_seqs())
         .map(
@@ -1635,6 +1635,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
         LoadedBefore {
             hits: std::slice::from_ref(query),
             spans: &[0..1],
+            format: PrefetchFormat::of(6, crate::report::archive::options::RequestKind::Blastp),
             rows: Every,
             cuts,
         }
@@ -1766,7 +1767,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
     };
     let headers_of =
         |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
-            let headers = HeaderReader::new(db);
+            let headers = HeaderReader::new(db, false);
             (0..db.num_seqs())
                 .map(
                     |ordinal| match read_header(&headers, ordinal, 0, "BLASTN").unwrap() {
@@ -2089,7 +2090,7 @@ fn a_weak_match_is_refused_where_ncbi_may_read_the_reported_sequences_one_by_one
         for prefetch_off in [false, true] {
             let headers = HeaderReader {
                 prefetch_off,
-                ..HeaderReader::new(&db)
+                ..HeaderReader::new(&db, false)
             };
             let ReportedHeader::Parsed(subject) =
                 read_header(&headers, ordinal, 0, "BLASTP").unwrap()
@@ -2148,7 +2149,7 @@ fn a_stored_ordinal_id_of_another_number_is_not_fetched() {
         ("ids/pord_vx", 7, Err("gnl|BL_ORD_ID|12")),
     ] {
         let db = db_search(name, None, &cwd);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         match (read_header(&headers, ordinal, 0, "BLASTP").unwrap(), want) {
             (ReportedHeader::Stored(_), Ok(true)) => {}
             (ReportedHeader::Parsed(subject), Ok(false)) => {
@@ -2250,7 +2251,7 @@ fn an_empty_stored_title_is_made_from_the_name_of_its_taxid() {
         let search = SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None).unwrap();
         let path = root().join(name);
         let db = SeqDb::open_in(path.to_str().unwrap(), seq_type, &search).unwrap();
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Stored(stored) = read_header(&headers, 0, 0, "BLASTP").unwrap() else {
             panic!("{name}: a sequence without parsed Seq-ids");
         };
@@ -3048,7 +3049,7 @@ fn the_scope_holds_the_line_of_a_load_and_the_loader_every_line() {
         SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
     };
     let subject = |db: &SeqDb, ordinal: u32| -> Option<std::sync::Arc<ParsedSubject>> {
-        match read_header(&HeaderReader::new(db), ordinal, 0, "BLASTP").unwrap() {
+        match read_header(&HeaderReader::new(db, true), ordinal, 0, "BLASTP").unwrap() {
             ReportedHeader::Parsed(subject) => Some(subject),
             _ => None,
         }

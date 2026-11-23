@@ -1053,6 +1053,10 @@ pub(super) struct ReportedAsks {
     /// formats 13 to 16, which write the taxonomy texts at each `Hit`): a subject whose lookup
     /// fails on a file stops the run in it (`shared::batch_prefetch`, `batch_prefetch_stop`).
     prefetch_runs: bool,
+    /// Whether the reports may read the reported sequences one by one
+    /// (`common::database::prefetch_may_be_off` of the first format), for the reader of the
+    /// headers (`HeaderReader::new`).
+    one_by_one: bool,
     /// What the reports do with a subject whose lookup throws where a batch's prefetch is off
     /// (`FormatThrow::and` of the reports, for `HitLoads::of`).
     throw: crate::report::db_subject::FormatThrow,
@@ -1088,16 +1092,19 @@ impl ReportedAsks {
             } else {
                 crate::report::tabular::PrintedIds::default()
             },
-            // Outfmt 10 and 20 prefetch as 6 does (`reported_batch`).
-            prefetched: prefetches_subjects(Some(match options.outfmt {
-                10 | 18 | 20 => 6,
-                outfmt => i32::from(outfmt),
-            })) && !crate::algorithm::common::database::prefetch_always_off(),
-            prefetch_runs: (prefetches_subjects(Some(match options.outfmt {
-                10 | 18 | 20 => 6,
-                outfmt => i32::from(outfmt),
-            })) || matches!(options.outfmt, 13..=16))
-                && !crate::algorithm::common::database::prefetch_always_off(),
+            // Outfmt 10 and 20 prefetch as 6 does (`ResolvedOptions::prefetch_format`).
+            prefetched: prefetches_subjects(Some(options.prefetch_format()))
+                && !crate::algorithm::common::database::prefetch_always_off(
+                    options.prefetch_format(),
+                ),
+            prefetch_runs: (prefetches_subjects(Some(options.prefetch_format()))
+                || matches!(options.outfmt, 13..=16))
+                && !crate::algorithm::common::database::prefetch_always_off(
+                    options.prefetch_format(),
+                ),
+            one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
+                options.prefetch_format(),
+            ),
             throw: crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
                 .map_or(
                     crate::report::db_subject::FormatThrow::Refused(
@@ -1152,6 +1159,9 @@ impl ReportedAsks {
         asks.prefetch_runs = options
             .first()
             .is_some_and(|options| Self::of(options).prefetch_runs);
+        asks.one_by_one = options
+            .first()
+            .is_some_and(|options| Self::of(options).one_by_one);
         asks
     }
 
@@ -1168,6 +1178,7 @@ impl ReportedAsks {
             words: self.words.or(other.words),
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
+            one_by_one: self.one_by_one || other.one_by_one,
             throw: self.throw.and(other.throw),
             changed_by_load_throws: self.changed_by_load_throws || other.changed_by_load_throws,
         }
@@ -1219,7 +1230,13 @@ pub(super) fn batch_titles(
     let aligned = ReportedSubjects::drop_unaligned(database, results, gapped);
     let earlier = EarlierUtf8::of_batch(first_query, fetched, aligned);
     let x_t = super::x_timing::lap();
-    let titles = ReportedSubjects::read_titles(database, results, gapped, asks.pairwise, earlier);
+    let titles = ReportedSubjects::read_titles(
+        database,
+        results,
+        gapped,
+        asks.pairwise,
+        (earlier, asks.one_by_one),
+    );
     super::x_timing::run(XRun::Titles, x_t);
     if let Some(posts) = Utf8Read::post_of(
         Utf8Read::of_read(&titles, |titles| titles.utf8.as_ref()),
@@ -1236,6 +1253,8 @@ pub(super) fn batch_titles(
 pub(super) struct BatchPrefetch {
     /// The batch's Seq-aligns, which `PRE_FETCH_SEQS_LIMIT` counts.
     seq_aligns: usize,
+    /// The format, whose prefetch the batch asks (`ResolvedOptions::prefetch_format`).
+    format: crate::algorithm::common::database::PrefetchFormat,
     /// `PRE_FETCH_SEQS_LIMIT` turns it off (`common::database::prefetch_off`).
     pub(super) off: bool,
     /// It throws at a subject row whose range it cannot take before it loads anything and writes
@@ -1276,12 +1295,14 @@ pub(super) fn batch_prefetch(
             .iter()
             .map(|batch| batch.unlisted.iter().sum::<usize>())
             .sum::<usize>();
-    let off = crate::algorithm::common::database::prefetch_off(seq_aligns);
-    let fails = !off
-        && crate::algorithm::common::database::prefetch_reads_seq_aligns(i32::from(options.outfmt))
-        && super::empty_rows::prefetch_reads_unranged_row(results, options.gapped, loc);
+    let format = options.prefetch_format();
+    let off = crate::algorithm::common::database::prefetch_off(format, seq_aligns);
+    // A prefetch that runs reads the Seq-aligns (`PrefetchFormat::batch_prefetches`).
+    let fails =
+        !off && super::empty_rows::prefetch_reads_unranged_row(results, options.gapped, loc);
     BatchPrefetch {
         seq_aligns,
+        format,
         off,
         fails,
     }
@@ -1302,7 +1323,7 @@ impl BatchPrefetch {
         if self.fails {
             crate::algorithm::common::database::BatchLoads::Read(rows)
         } else {
-            crate::algorithm::common::database::batch_loads(self.seq_aligns, rows)
+            crate::algorithm::common::database::batch_loads(self.format, self.seq_aligns, rows)
         }
     }
 }
@@ -1458,10 +1479,7 @@ pub(super) fn reported_batch(
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
     // Outfmt 10 and 20 read the subjects as 6 and 7 do; the rows' own
     // lookups of the taxonomy names come with the rows (`tabular`).
-    let prefetch_format = match options.outfmt {
-        10 | 18 | 20 => 6,
-        outfmt => i32::from(outfmt),
-    };
+    let prefetch_format = options.prefetch_format();
     let mut reported = reported;
     if prefetch_fails {
         diagnostics.write_all(&database.prefetch_warning())?;
@@ -1502,7 +1520,7 @@ pub(super) fn reported_batch(
                 database,
                 results,
                 options.gapped,
-                rows,
+                (rows, prefetch_format),
                 places,
                 rows_open,
                 pairwise,

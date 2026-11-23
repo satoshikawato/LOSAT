@@ -2077,28 +2077,47 @@ impl BlastpReport {
         )
     }
 
+    /// The report as the first format of a run of `app` that NCBI's prefetch of each query batch
+    /// asks (`shared::PrefetchFormat`, the one owner of whether a batch prefetches).
+    fn prefetch_format(self, app: BlastpApp) -> crate::algorithm::common::database::PrefetchFormat {
+        use crate::blastinput::app::output_format::{
+            ARCHIVE_FORMAT, JSON, JSON_S, TABULAR, TABULAR_WITH_COMMENTS, XML, XML2, XML2_S,
+        };
+        use crate::report::blast_xml2::Xml2Kind;
+        crate::algorithm::common::database::PrefetchFormat::of(
+            match self {
+                BlastpReport::Pairwise(view) => view.outfmt(),
+                BlastpReport::Text(outfmt) => outfmt as i32,
+                // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and
+                // 20): they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy
+                // names come with the rows (`report::tabular::TabularNames`).
+                BlastpReport::CustomTabular(spec) => match spec.kind {
+                    crate::report::tabular::TabularKind::Commented => TABULAR_WITH_COMMENTS,
+                    _ => TABULAR,
+                },
+                BlastpReport::Xml => XML,
+                BlastpReport::Seqalign(serial) => serial.outfmt(),
+                BlastpReport::Xml2(kind) => match kind {
+                    Xml2Kind::Single16 => XML2_S,
+                    Xml2Kind::Single15 => JSON_S,
+                    Xml2Kind::Files14 => XML2,
+                    Xml2Kind::Files13 => JSON,
+                },
+                BlastpReport::Archive => ARCHIVE_FORMAT,
+            },
+            app.request_kind(),
+        )
+    }
+
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
     /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7; with
-    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
-    /// the call's first report, the taxonomy database's messages of that prefetch go with the
-    /// query warnings.
-    fn prefetches_subjects(self) -> bool {
-        crate::algorithm::common::database::prefetches_subjects(match self {
-            BlastpReport::Pairwise(view) => Some(view.outfmt()),
-            BlastpReport::Text(outfmt) => Some(outfmt as i32),
-            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
-            // they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy names
-            // come with the rows (`report::tabular::TabularNames`).
-            BlastpReport::CustomTabular(spec) => Some(match spec.kind {
-                crate::report::tabular::TabularKind::Commented => 7,
-                _ => 6,
-            }),
-            BlastpReport::Xml => Some(5),
-            BlastpReport::Seqalign(serial) => Some(serial.outfmt()),
-            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
-            // (`TaxdbPrinter`).
-            BlastpReport::Archive | BlastpReport::Xml2(_) => None,
-        })
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, and psiblast's archive 11,
+    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
+    /// messages of that prefetch go with the query warnings. The archive of the other
+    /// applications fetches nothing; XML2 and JSON write the messages at each `Hit`
+    /// (`TaxdbPrinter`).
+    fn prefetches_subjects(self, app: BlastpApp) -> bool {
+        crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format(app)))
     }
 
     /// Whether the report reads the sequence that NCBI's formatters find by a subject's Seq-align
@@ -2971,14 +2990,7 @@ fn psiblast_pssms(
         let alignments: Vec<PssmAlignment<'_>> = hit_list.hsplist_array[..count]
             .iter()
             .flat_map(|hsp_list| &hsp_list.hsps)
-            .map(|hsp| PssmAlignment {
-                subject: hsp.s_idx,
-                e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
-                q_start: hsp.q_start - 1 + q_shift,
-                s_start: hsp.s_start - 1,
-                q_length: hsp.q_end + 1 - hsp.q_start,
-                ops: hsp.gap_info.as_deref(),
-            })
+            .map(|hsp| PssmAlignment::of_hsp(hsp, q_shift))
             .collect();
         if alignments.is_empty() {
             continue;
@@ -6529,7 +6541,12 @@ fn search(
                         crate::algorithm::common::database::seq_annots_prefetch(
                             crate::blastinput::app::parse_formatting_string(outfmt)
                                 .ok()
-                                .map(|choice| choice.number),
+                                .map(|choice| {
+                                    crate::algorithm::common::database::PrefetchFormat::of(
+                                        choice.number,
+                                        args.app.request_kind(),
+                                    )
+                                }),
                         )
                     })
                 {
@@ -10306,7 +10323,11 @@ fn run_call(
         Some(listed) => &listed.encoded,
         None => subject_set,
     };
-    let reads = database::CallTitles::new(database, &query_batches);
+    let reads = database::CallTitles::new(
+        database,
+        &query_batches,
+        report_prep::prefetch_format(args.app, &requested_formats),
+    );
     let listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
     if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
@@ -10315,6 +10336,7 @@ fn run_call(
     let (subject_records, subject_titles, shown_subjects) =
         report_prep::shown_of(&listed_titles, subjects, subject_records, &subject_titles);
     let report_prep::ReportValues {
+        prefetch_format,
         batches_prefetch,
         prefetch_taxids,
         prefetch_only,
@@ -10481,6 +10503,7 @@ fn run_call(
         psiblast_hits_found: &psiblast_hits_found,
         filtered_empty,
         rps_multi_volume,
+        prefetch_format,
         batches_prefetch,
         prefetch_taxids,
         prefetch_only,

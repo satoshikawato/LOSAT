@@ -8792,8 +8792,11 @@ fn run_in_pool(
                 }
             }
             let read = (&mut titles, &mut warnings[start]);
+            let one_by_one = crate::algorithm::common::database::prefetch_may_be_off(
+                database::prefetch_format(&output_formats),
+            );
             if let Err(error) =
-                database.batch_titles(batch.fetched_utf8, &mut batch_hit_lists, read)
+                database.batch_titles((batch.fetched_utf8, one_by_one), &mut batch_hit_lists, read)
             {
                 let error = match error.downcast::<database::HeaderReadError>() {
                     Ok(failure) => failure.error,
@@ -8988,7 +8991,10 @@ fn run_in_pool(
                 // later batch's refusal comes after the reports of the batches before, as the
                 // stream's other refusals of a batch's reported subjects; without it every
                 // report is written after the loop, so the refusal comes before any report.
-                let prefetch = if crate::algorithm::common::database::prefetch_off(seq_aligns) {
+                let prefetch = if crate::algorithm::common::database::prefetch_off(
+                    database::prefetch_format(&output_formats),
+                    seq_aligns,
+                ) {
                     if !taxdb_found && !database.db.scope_utf8_seen() {
                         // No prefetch, and the reports' fetches look nothing up nor post a warning.
                         Ok(Posts::new())
@@ -9044,6 +9050,7 @@ fn run_in_pool(
                             database::LoadedBefore {
                                 hits: &hit_lists,
                                 spans: &batch_spans,
+                                format: database::prefetch_format(&output_formats),
                                 rows: first_rows,
                                 cuts: xml_cuts,
                             },
@@ -9070,7 +9077,10 @@ fn run_in_pool(
                     &titles,
                     &hit_lists,
                     &batch_spans,
-                    run_loads.answer(),
+                    (
+                        run_loads.answer(),
+                        database::prefetch_format(&output_formats),
+                    ),
                     &batch_hit_lists,
                     !args.ungapped,
                     &prefetch_queries,
@@ -9101,7 +9111,13 @@ fn run_in_pool(
             // prefetches' `before`): the run's record of what NCBI's data loader loaded for the
             // batch (`BlastnDatabase::note_loaded`; nothing for a database that cannot stop).
             if stream.acting() {
-                database.note_loaded(&titles, &batch_hit_lists, start, !args.ungapped, first_rows);
+                database.note_loaded(
+                    &titles,
+                    &batch_hit_lists,
+                    start,
+                    !args.ungapped,
+                    (database::prefetch_format(&output_formats), first_rows),
+                );
             }
         }
         // The batch numbers its queries from 0.
@@ -9742,7 +9758,10 @@ fn write_reports_untimed(
                 subjects.titles,
                 &mut hit_lists,
                 letters,
-                database::parsed_shown(output_formats),
+                (
+                    database::parsed_shown(output_formats),
+                    database::prefetch_format(output_formats),
+                ),
                 (
                     database::after_throw(
                         output_formats,

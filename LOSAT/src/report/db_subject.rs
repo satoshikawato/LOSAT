@@ -883,13 +883,7 @@ impl ParsedSubject {
     /// the holders that LOSAT cannot list (`FoundInstead::HoldersUnknown`, the reason of the first
     /// place whose list it cannot make).
     fn held_reason(&self, holder: Option<DbSequence>) -> String {
-        let unknown = [&self.failed_holders.loader, &self.failed_holders.scope]
-            .into_iter()
-            .find_map(|holders| match holders {
-                Holders::Unknown(why) => Some(why.clone()),
-                Holders::Listed(_) => None,
-            });
-        let found = match (holder, unknown) {
+        let found = match (holder, self.unlisted_holders()) {
             (Some(other), _) => FoundInstead::AlsoHeld(other),
             (None, why) => FoundInstead::HoldersUnknown {
                 instead: None,
@@ -897,6 +891,44 @@ impl ParsedSubject {
             },
         };
         self.found_reason(&found, false, None).unwrap_or_default()
+    }
+
+    /// Why LOSAT cannot list the sequences that NCBI may give for the Seq-align id without its
+    /// failing lookup: the reason of the first place (the loader's handles, the scope's ids) whose
+    /// list it cannot make; `None` where it lists both.
+    fn unlisted_holders(&self) -> Option<String> {
+        [&self.failed_holders.loader, &self.failed_holders.scope]
+            .into_iter()
+            .find_map(|holders| match holders {
+                Holders::Unknown(why) => Some(why.clone()),
+                Holders::Listed(_) => None,
+            })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:411-451 (cited at
+    // `algorithm::psiblast::pssm::input_msa`)
+    /// The reason of LOSAT's refusal of psiblast's PSSM read of this subject, whose lookup fails on
+    /// a file, where NCBI's scope gives its Seq-align id the sequence `holder`, loaded before
+    /// (`None`: a holder that LOSAT cannot list, `held_before`), and the read takes that sequence's
+    /// letters (its letters reach the end of an included Seq-align's range,
+    /// `ListedTitles::check_pssm_holds` of BLASTP). Not the words of a report that shows the
+    /// holder (`held_reason`): the PSSM reads by the id, also beyond `-max_target_seqs` and in
+    /// the formats that show no subject (review 5 of line DBID pfoff-4, L1).
+    pub fn pssm_held_reason(&self, holder: Option<DbSequence>) -> String {
+        let id = String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
+        match holder {
+            Some(other) => format!(
+                "has the Seq-align id {id}, whose lookup in the database fails, and which database sequence {other}, loaded before, also holds: psiblast's PSSM reads the subject by that id (also beyond -max_target_seqs), and NCBI BLAST+ 2.17.0 takes that sequence's letters for it"
+            ),
+            None => {
+                let why = self
+                    .unlisted_holders()
+                    .unwrap_or_else(|| "the sequences that hold it".to_owned());
+                format!(
+                    "has the Seq-align id {id}, whose lookup in the database fails, for which LOSAT cannot list {why}: psiblast's PSSM reads the subject by that id (also beyond -max_target_seqs), and where such a sequence was loaded before, NCBI BLAST+ 2.17.0 takes its letters for it"
+                )
+            }
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:393-406

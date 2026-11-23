@@ -557,14 +557,17 @@ pub(super) struct CallReads<'a> {
     excluded: Option<shared::FetchExcluded<'a>>,
     notes: BTreeMap<usize, crate::seqdb::Utf8Reads>,
     utf8: shared::CallUtf8,
+    one_by_one: bool,
 }
 
 impl<'a> CallReads<'a> {
     /// The reads of a call of `database` (`None`: the subjects are records) whose batches
-    /// `batches` makes (each with its searched queries).
+    /// `batches` makes (each with its searched queries), in a run of the first format `format`,
+    /// whose reports may read the reported sequences one by one (`shared::prefetch_may_be_off`).
     pub(super) fn of(
         database: Option<&'a TblastnDatabase>,
         batches: impl FnOnce() -> Vec<crate::blastinput::seq_range::RangedBatch>,
+        format: shared::PrefetchFormat,
     ) -> Self {
         let excluded = database.and_then(fetch_excluded);
         let notes = match excluded {
@@ -579,6 +582,7 @@ impl<'a> CallReads<'a> {
             excluded,
             notes,
             utf8: shared::CallUtf8::default(),
+            one_by_one: shared::prefetch_may_be_off(format),
         }
     }
 
@@ -644,7 +648,13 @@ impl<'a> CallReads<'a> {
             .map(|note| note.at);
         let aligned = drop_unaligned(database, hitlists);
         let earlier = shared::EarlierUtf8::of_batch(range.start, fetched, aligned);
-        let read = read_titles(database, hitlists, range.start, earlier, titles);
+        let read = read_titles(
+            database,
+            hitlists,
+            range.start,
+            (earlier, self.one_by_one),
+            titles,
+        );
         self.utf8.note(
             range.start,
             shared::Utf8Read::of_read(&read, Option::as_ref),
@@ -704,7 +714,7 @@ impl<'a> CallReads<'a> {
             let Some(hitlists) = results.get(span.clone()) else {
                 break;
             };
-            if shared::prefetch_off(seq_aligns_of(hitlists, reported.gapped)) {
+            if shared::prefetch_off(reported.format, seq_aligns_of(hitlists, reported.gapped)) {
                 for (query, hitlist) in span.clone().zip(hitlists) {
                     let subjects = hitlist.lists().iter().map(|list| {
                         let rank = list.oid as usize;
@@ -799,15 +809,16 @@ pub(super) fn drop_unaligned(
 /// index of the batch's first query. A reader error of NCBI's own is a `HeaderReadError` (it
 /// fails the batch); LOSAT's refusals are errors of their own. The first read of a record with a
 /// UTF8String where a VisibleString is expected (`shared::HeaderReader::first_utf8`) is returned:
-/// NCBI posts its warning there.
+/// NCBI posts its warning there. `one_by_one`: the reports may read the reported sequences one by
+/// one (`shared::HeaderReader::new`).
 pub(super) fn read_titles(
     database: &TblastnDatabase,
     hitlists: &[KappaResultHitList],
     first_query: usize,
-    earlier: shared::EarlierUtf8,
+    (earlier, one_by_one): (shared::EarlierUtf8, bool),
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
-    let headers = shared::HeaderReader::new(&database.db);
+    let headers = shared::HeaderReader::new(&database.db, one_by_one);
     headers.note_earlier(earlier);
     for (index, hitlist) in hitlists.iter().enumerate() {
         for list in hitlist.lists() {
@@ -861,6 +872,8 @@ pub(super) struct ReportedSubjects {
     /// Whether the search is gapped: the Seq-aligns that NCBI's prefetch counts are one for each
     /// HSP, else one for each subject (`seq_aligns_of`).
     pub(super) gapped: bool,
+    /// The first format, whose prefetch the batches ask (`prefetch_format`).
+    pub(super) format: shared::PrefetchFormat,
 }
 
 impl ReportedSubjects {
@@ -921,9 +934,9 @@ fn reported_ranks(hitlists: &[KappaResultHitList]) -> impl Iterator<Item = usize
 }
 
 /// The first of the query batches `batches` (the searched queries of each) of the final hit lists
-/// `hitlists` (subjects named by ordinal id, before `reported_subjects`) whose prefetch is on (its
-/// Seq-aligns of a nonzero score do not outnumber a positive `PRE_FETCH_SEQS_LIMIT`,
-/// `shared::prefetch_off`) and loads a subject whose lookup fails on a file with NCBI's exception
+/// `hitlists` (subjects named by ordinal id, before `reported_subjects`) whose prefetch is on in a
+/// run of the first format `format` (its Seq-aligns of a nonzero score do not outnumber a positive
+/// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`) and loads a subject whose lookup fails on a file with NCBI's exception
 /// (`ParsedSubject::prefetch_stops`), with the subjects that batch reports (ordinal id, and the
 /// definition lines of one with parsed Seq-ids, `titles`): NCBI's prefetch stops the run there
 /// (`shared::batch_prefetch`), before that batch's reports. The caller asks it where the first
@@ -932,7 +945,7 @@ pub(super) fn prefetch_stop(
     titles: &DatabaseTitles,
     hitlists: &[KappaResultHitList],
     batches: &[std::ops::Range<usize>],
-    gapped: bool,
+    (format, gapped): (shared::PrefetchFormat, bool),
 ) -> Option<(
     std::ops::Range<usize>,
     Vec<(u32, Option<Arc<ParsedSubject>>)>,
@@ -956,7 +969,7 @@ pub(super) fn prefetch_stop(
         let seq_aligns = lists()
             .map(|list| shared::subject_seq_aligns(scored(list), gapped))
             .sum();
-        if shared::prefetch_off(seq_aligns) {
+        if shared::prefetch_off(format, seq_aligns) {
             return None;
         }
         let subjects: Vec<(u32, Option<Arc<ParsedSubject>>)> = lists()
@@ -1002,11 +1015,9 @@ pub(super) fn seq_aligns_of(hitlists: &[KappaResultHitList], gapped: bool) -> us
 fn parsed_shown(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
 ) -> crate::algorithm::common::database::ParsedShown {
-    let numbers: Vec<i32> = formats
+    let pairwise = formats
         .iter()
-        .map(|format| super::stage_e_report::format_number(format.outfmt))
-        .collect();
-    let pairwise = numbers.iter().any(|number| (0..=4).contains(number));
+        .any(|format| (0..=4).contains(&super::stage_e_report::format_number(format.outfmt)));
     crate::algorithm::common::database::ParsedShown {
         stops_at_failed_lookup: formats.iter().any(|format| {
             matches!(
@@ -1061,14 +1072,32 @@ fn parsed_shown(
             ),
         // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (cited in
         // `tblastn_app::search`).
-        prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
-            |&number| match number {
-                10 | 18 | 20 => 6,
-                number => number,
-            },
-        )) && !crate::algorithm::common::database::prefetch_always_off(),
-        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
+        prefetched: shared::prefetches_subjects(Some(prefetch_format(formats)))
+            && !shared::prefetch_always_off(prefetch_format(formats)),
+        one_by_one: shared::prefetch_may_be_off(prefetch_format(formats)),
     }
+}
+
+/// The first of the formats `formats` of a run as NCBI's prefetch of each query batch asks it
+/// (`shared::PrefetchFormat`, the one owner of whether a batch prefetches): outfmt 10, 18 and 20
+/// as the tabular 6, which NCBI prefetches for alike (`s_IsPrefetchFormat`); a run writes at
+/// least one format, outfmt 0 stands for none.
+pub(super) fn prefetch_format(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+) -> shared::PrefetchFormat {
+    let number =
+        formats
+            .first()
+            .map_or(crate::blastinput::app::output_format::PAIRWISE, |format| {
+                match super::stage_e_report::format_number(format.outfmt) {
+                    10 | 18 | 20 => 6,
+                    number => number,
+                }
+            });
+    shared::PrefetchFormat::of(
+        number,
+        crate::report::archive::options::RequestKind::Tblastn,
+    )
 }
 
 /// What the formats `formats` do after a subject whose lookup throws where its batch's prefetch is
@@ -1177,7 +1206,8 @@ pub(super) fn reported_subjects(
     // What the batches read of each subject (a batch whose Seq-aligns outnumber a positive
     // `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them one by
     // one; `shared::BatchPrefetch`, `shared::BatchReads::shown`).
-    let prefetch = shared::BatchPrefetch::of(hitlists.len(), 0, batches, |span| {
+    let format = prefetch_format(formats);
+    let prefetch = shared::BatchPrefetch::of(format, hitlists.len(), 0, batches, |span| {
         seq_aligns_of(&hitlists[span], gapped)
     });
     let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {
@@ -1349,6 +1379,7 @@ pub(super) fn reported_subjects(
         sources,
         loads,
         gapped,
+        format,
     })
 }
 

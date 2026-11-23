@@ -442,6 +442,22 @@ impl ResolvedOptions {
             )
         })
     }
+
+    /// The format as NCBI's prefetch of each query batch asks it
+    /// (`common::database::PrefetchFormat`, the one owner of whether a batch prefetches): outfmt
+    /// 10, 18 and 20 as the tabular 6, which NCBI prefetches for alike (`s_IsPrefetchFormat`).
+    pub(crate) fn prefetch_format(&self) -> crate::algorithm::common::database::PrefetchFormat {
+        crate::algorithm::common::database::PrefetchFormat::of(
+            match self.outfmt {
+                10 | 18 | 20 => 6,
+                outfmt => i32::from(outfmt),
+            },
+            match self.rpstblastn {
+                Some(_) => crate::report::archive::options::RequestKind::Rpstblastn,
+                None => crate::report::archive::options::RequestKind::Blastx,
+            },
+        )
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:838-871

@@ -1,0 +1,1 @@
+{"seed": 1, "walk": 0, "browser": "chromium", "minOfferedLeftOut": 2, "steps": [{"kind": "remove", "args": [0, 0]}, {"kind": "open", "args": [0, 0.9, 0, 0.4, 0, 0.4]}, {"kind": "combine", "args": [0]}, {"kind": "records", "args": [0, 0, 0]}, {"kind": "records", "args": [0, 0.99, 0.99]}, {"kind": "run", "args": []}]}

@@ -31,7 +31,9 @@ use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{Input, Names, TextInput, R};
 use crate::report::serial::asn_text_reader::StreamSource;
 use crate::report::serial::asn_types::read::{ObjectStream, Post, ReadError, TypedReader};
-use crate::report::serial::asn_types::seq_id::{mandatory, read_seq_id};
+#[cfg(test)]
+use crate::report::serial::asn_types::seq_id::read_seq_id;
+use crate::report::serial::asn_types::seq_id::{mandatory, read_seq_id_into};
 use crate::report::serial::asn_types::table::named;
 use crate::seqid::model::ParsedSeqId;
 use crate::writedb::WriteDbError;
@@ -103,12 +105,13 @@ enum IdWalk {
 }
 
 impl IdWalk {
-    /// `x_UpdateId` of `id` and the address of `seq_id`, for a part.
-    fn update(&mut self, seq_id: ParsedSeqId) {
+    /// `x_UpdateId` of `id` and the address of the Seq-id in `seq_id`, for a part: the first
+    /// one is taken from the slot, a later one is compared where it is.
+    fn update(&mut self, seq_id: &mut Option<ParsedSeqId>) {
         match self {
-            IdWalk::Same(None) => *self = IdWalk::Same(Some(seq_id)),
+            IdWalk::Same(None) => *self = IdWalk::Same(seq_id.take()),
             // `Equals` compares the values: the typed Seq-ids are equal exactly when it does.
-            IdWalk::Same(Some(first)) if *first != seq_id => *self = IdWalk::Stopped,
+            IdWalk::Same(Some(first)) if seq_id.as_ref() != Some(first) => *self = IdWalk::Stopped,
             _ => {}
         }
     }
@@ -120,7 +123,7 @@ impl IdWalk {
             return;
         }
         match inner {
-            IdWalk::Same(Some(seq_id)) => self.update(seq_id),
+            IdWalk::Same(Some(seq_id)) => self.update(&mut Some(seq_id)),
             // `x_UpdateId` of `id` and `NULL` keeps `id`.
             IdWalk::Same(None) => {}
             stopped_or_null => *self = stopped_or_null,
@@ -143,60 +146,92 @@ const LIST_PACKED_INT: &str = "a Packed-seqint (packed-int)";
 
 /// The read of a mask file's object into makeblastdb's model, on the object stack of the table's
 /// reader (`asn_types::typed`): the members, variants and elements that makeblastdb uses are
-/// built here, the frames, members, pointer forms and errors are the reader's.
+/// built here, the frames, members, pointer forms and errors are the reader's. The Seq-id of a
+/// part is read into a slot of its Seq-loc (`read_seq_id_into`), where the walk takes or compares
+/// it (`IdWalk::update`); a part's Seq-id is a mandatory member, so the slot holds it when the
+/// part's class was read. The closures of the parts that a mask file repeats (a Seq-loc, an
+/// interval or point, an element of `packed-int`) are inlined into the typed calls, as the
+/// functions of the reader before them were.
 struct Build;
 
 impl Build {
-    /// A `Seq-interval` (of the type `ty`), and its Seq-id.
-    fn seq_interval<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<(MaskInterval, ParsedSeqId)> {
-        let (mut from, mut to, mut strand, mut id) = (0u32, 0u32, None, None);
-        r.class(ty, |r, index, ty| {
-            match index {
-                0 => from = r.integer(ty)? as u32,
-                1 => to = r.integer(ty)? as u32,
-                // The values of Na-strand are 0..=4 and 255.
-                2 => strand = Some(r.enumerated(ty)? as u8),
-                3 => id = Some(read_seq_id(r)?),
-                // fuzz-from, fuzz-to: read, not used.
-                _ => drop(r.value(ty)?),
-            }
-            Ok(())
-        })?;
-        Ok((MaskInterval { from, to, strand }, mandatory(id)))
+    /// A `Seq-interval` (of the type `ty`), its Seq-id in `id`.
+    fn seq_interval<I: Input>(
+        r: &mut TypedReader<I>,
+        ty: u16,
+        id: &mut Option<ParsedSeqId>,
+    ) -> R<MaskInterval> {
+        let (mut from, mut to, mut strand) = (0u32, 0u32, None);
+        *id = None;
+        r.class(
+            ty,
+            #[inline(always)]
+            |r, index, ty| {
+                match index {
+                    0 => from = r.integer(ty)? as u32,
+                    1 => to = r.integer(ty)? as u32,
+                    // The values of Na-strand are 0..=4 and 255.
+                    2 => strand = Some(r.enumerated(ty)? as u8),
+                    3 => read_seq_id_into(r, id)?,
+                    // fuzz-from, fuzz-to: read, not used.
+                    _ => drop(r.value(ty)?),
+                }
+                Ok(())
+            },
+        )?;
+        debug_assert!(
+            id.is_some(),
+            "ReadClassSequential has read every mandatory member"
+        );
+        Ok(MaskInterval { from, to, strand })
     }
 
-    /// A `Seq-point` (also the members `a` and `b` of a `Seq-bond`), and its Seq-id.
-    fn seq_point<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<(MaskInterval, ParsedSeqId)> {
-        let (mut point, mut strand, mut id) = (0u32, None, None);
-        r.class(ty, |r, index, ty| {
-            match index {
-                0 => point = r.integer(ty)? as u32,
-                1 => strand = Some(r.enumerated(ty)? as u8),
-                2 => id = Some(read_seq_id(r)?),
-                // fuzz: read, not used.
-                _ => drop(r.value(ty)?),
-            }
-            Ok(())
-        })?;
-        let interval = MaskInterval {
+    /// A `Seq-point` (also the members `a` and `b` of a `Seq-bond`), its Seq-id in `id`.
+    fn seq_point<I: Input>(
+        r: &mut TypedReader<I>,
+        ty: u16,
+        id: &mut Option<ParsedSeqId>,
+    ) -> R<MaskInterval> {
+        let (mut point, mut strand) = (0u32, None);
+        *id = None;
+        r.class(
+            ty,
+            #[inline(always)]
+            |r, index, ty| {
+                match index {
+                    0 => point = r.integer(ty)? as u32,
+                    1 => strand = Some(r.enumerated(ty)? as u8),
+                    2 => read_seq_id_into(r, id)?,
+                    // fuzz: read, not used.
+                    _ => drop(r.value(ty)?),
+                }
+                Ok(())
+            },
+        )?;
+        debug_assert!(
+            id.is_some(),
+            "ReadClassSequential has read every mandatory member"
+        );
+        Ok(MaskInterval {
             from: point,
             to: point,
             strand,
-        };
-        Ok((interval, mandatory(id)))
+        })
     }
 
-    /// A `Packed-seqpnt`: its points, and its Seq-id.
+    /// A `Packed-seqpnt`: its points, its Seq-id in `seq_id`.
     fn packed_seqpnt<I: Input>(
         r: &mut TypedReader<I>,
         ty: u16,
         parts: &mut Vec<MaskPart>,
-    ) -> R<ParsedSeqId> {
-        let (mut strand, mut seq_id, mut points) = (None, None, Vec::new());
+        seq_id: &mut Option<ParsedSeqId>,
+    ) -> R<()> {
+        let (mut strand, mut points) = (None, Vec::new());
+        *seq_id = None;
         r.class(ty, |r, member, ty| {
             match member {
                 0 => strand = Some(r.enumerated(ty)? as u8),
-                1 => seq_id = Some(read_seq_id(r)?),
+                1 => read_seq_id_into(r, seq_id)?,
                 3 => r.list(ty, |r, element| {
                     points.push(r.integer(element.expect("a list of numbers"))? as u32);
                     Ok(())
@@ -213,7 +248,11 @@ impl Build {
                 strand,
             })
         }));
-        Ok(mandatory(seq_id))
+        debug_assert!(
+            seq_id.is_some(),
+            "ReadClassSequential has read every mandatory member"
+        );
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3528-3620
@@ -231,83 +270,94 @@ impl Build {
         parts: &mut Vec<MaskPart>,
         walk: &mut IdWalk,
     ) -> R<()> {
-        r.choice(named::SEQ_LOC, |r, index, ty| {
-            match index {
-                SEQ_LOC_NULL => {
-                    r.null()?;
-                    parts.push(MaskPart::Null);
-                }
-                SEQ_LOC_EMPTY => {
-                    walk.update(read_seq_id(r)?);
-                    parts.push(MaskPart::Empty);
-                }
-                SEQ_LOC_WHOLE => {
-                    walk.update(read_seq_id(r)?);
-                    parts.push(MaskPart::Interval(MaskInterval {
-                        from: 0,
-                        to: u32::MAX - 1,
-                        strand: None,
-                    }));
-                }
-                SEQ_LOC_INT => {
-                    let (interval, seq_id) = Self::seq_interval(r, ty)?;
-                    walk.update(seq_id);
-                    parts.push(MaskPart::Interval(interval));
-                }
-                SEQ_LOC_PACKED_INT => r.list(ty, |r, element| {
-                    let Some(element) = element else {
-                        walk.null(null_element(r, LIST_PACKED_INT));
-                        return Ok(());
-                    };
-                    let (interval, seq_id) = Self::seq_interval(r, element)?;
-                    walk.update(seq_id);
-                    parts.push(MaskPart::Interval(interval));
-                    Ok(())
-                })?,
-                SEQ_LOC_PNT => {
-                    let (interval, seq_id) = Self::seq_point(r, ty)?;
-                    walk.update(seq_id);
-                    parts.push(MaskPart::Interval(interval));
-                }
-                SEQ_LOC_PACKED_PNT => {
-                    let seq_id = Self::packed_seqpnt(r, ty, parts)?;
-                    walk.update(seq_id);
-                }
-                SEQ_LOC_MIX | SEQ_LOC_EQUIV => {
-                    let list = if index == SEQ_LOC_MIX {
-                        LIST_MIX
-                    } else {
-                        LIST_EQUIV
-                    };
-                    r.list(ty, |r, element| {
-                        if element.is_none() {
-                            walk.null(null_element(r, list));
-                            return Ok(());
-                        }
-                        let mut inner = IdWalk::Same(None);
-                        Self::seq_loc_parts(r, parts, &mut inner)?;
-                        walk.nested(inner);
-                        Ok(())
-                    })?;
-                }
-                SEQ_LOC_BOND => {
-                    // `b` is an OPTIONAL `CRef<>` (`TypedReader::class`): a `NULL` leaves it
-                    // unset, which `x_CheckId` and `CSeq_loc_CI` skip (`CanGetB`, `IsSetB`).
-                    r.class(ty, |r, _, ty| {
-                        let (interval, seq_id) = Self::seq_point(r, ty)?;
-                        walk.update(seq_id);
+        let mut seq_id = None;
+        r.choice(
+            named::SEQ_LOC,
+            #[inline(always)]
+            |r, index, ty| {
+                match index {
+                    SEQ_LOC_NULL => {
+                        r.null()?;
+                        parts.push(MaskPart::Null);
+                    }
+                    SEQ_LOC_EMPTY => {
+                        read_seq_id_into(r, &mut seq_id)?;
+                        walk.update(&mut seq_id);
+                        parts.push(MaskPart::Empty);
+                    }
+                    SEQ_LOC_WHOLE => {
+                        read_seq_id_into(r, &mut seq_id)?;
+                        walk.update(&mut seq_id);
+                        parts.push(MaskPart::Interval(MaskInterval {
+                            from: 0,
+                            to: u32::MAX - 1,
+                            strand: None,
+                        }));
+                    }
+                    SEQ_LOC_INT => {
+                        let interval = Self::seq_interval(r, ty, &mut seq_id)?;
+                        walk.update(&mut seq_id);
                         parts.push(MaskPart::Interval(interval));
-                        Ok(())
-                    })?;
+                    }
+                    SEQ_LOC_PACKED_INT => r.list(
+                        ty,
+                        #[inline(always)]
+                        |r, element| {
+                            let Some(element) = element else {
+                                walk.null(null_element(r, LIST_PACKED_INT));
+                                return Ok(());
+                            };
+                            let interval = Self::seq_interval(r, element, &mut seq_id)?;
+                            walk.update(&mut seq_id);
+                            parts.push(MaskPart::Interval(interval));
+                            Ok(())
+                        },
+                    )?,
+                    SEQ_LOC_PNT => {
+                        let interval = Self::seq_point(r, ty, &mut seq_id)?;
+                        walk.update(&mut seq_id);
+                        parts.push(MaskPart::Interval(interval));
+                    }
+                    SEQ_LOC_PACKED_PNT => {
+                        Self::packed_seqpnt(r, ty, parts, &mut seq_id)?;
+                        walk.update(&mut seq_id);
+                    }
+                    SEQ_LOC_MIX | SEQ_LOC_EQUIV => {
+                        let list = if index == SEQ_LOC_MIX {
+                            LIST_MIX
+                        } else {
+                            LIST_EQUIV
+                        };
+                        r.list(ty, |r, element| {
+                            if element.is_none() {
+                                walk.null(null_element(r, list));
+                                return Ok(());
+                            }
+                            let mut inner = IdWalk::Same(None);
+                            Self::seq_loc_parts(r, parts, &mut inner)?;
+                            walk.nested(inner);
+                            Ok(())
+                        })?;
+                    }
+                    SEQ_LOC_BOND => {
+                        // `b` is an OPTIONAL `CRef<>` (`TypedReader::class`): a `NULL` leaves it
+                        // unset, which `x_CheckId` and `CSeq_loc_CI` skip (`CanGetB`, `IsSetB`).
+                        r.class(ty, |r, _, ty| {
+                            let interval = Self::seq_point(r, ty, &mut seq_id)?;
+                            walk.update(&mut seq_id);
+                            parts.push(MaskPart::Interval(interval));
+                            Ok(())
+                        })?;
+                    }
+                    _ => {
+                        // `feat`: read; `x_CheckId` fails, so the Seq-loc has no Seq-id.
+                        drop(r.value(ty)?);
+                        *walk = IdWalk::Stopped;
+                    }
                 }
-                _ => {
-                    // `feat`: read; `x_CheckId` fails, so the Seq-loc has no Seq-id.
-                    drop(r.value(ty)?);
-                    *walk = IdWalk::Stopped;
-                }
-            }
-            Ok(())
-        })
+                Ok(())
+            },
+        )
     }
 
     /// One `Seq-loc` of `masks`: the ranges `CSeq_loc_CI` visits and `CSeq_loc::GetId()`, or the

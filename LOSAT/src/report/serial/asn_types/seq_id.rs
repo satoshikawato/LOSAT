@@ -15,33 +15,50 @@ use crate::seqid::model::{
 /// A `Seq-id` of any alternative (the variants in the order of `seqid::model::SEQ_ID_ALTERNATIVES`,
 /// checked by `seq_id_tests`).
 pub(crate) fn read_seq_id<I: Input>(r: &mut TypedReader<I>) -> R<ParsedSeqId> {
-    r.choice(named::SEQ_ID, |r, index, ty| {
-        Ok(match index {
-            0 => ParsedSeqId::Local(object_id(r, ty)?),
-            1 => ParsedSeqId::Gibbsq(int4(r, ty)?),
-            2 => ParsedSeqId::Gibbmt(int4(r, ty)?),
-            3 => ParsedSeqId::Giim(giimport_id(r, ty)?),
-            4 => ParsedSeqId::Genbank(textseq_id(r, ty)?),
-            5 => ParsedSeqId::Embl(textseq_id(r, ty)?),
-            6 => ParsedSeqId::Pir(textseq_id(r, ty)?),
-            7 => ParsedSeqId::Swissprot(textseq_id(r, ty)?),
-            8 => ParsedSeqId::Patent(patent_seq_id(r, ty)?),
-            9 => ParsedSeqId::Other(textseq_id(r, ty)?),
-            10 => ParsedSeqId::General(dbtag(r, ty)?),
-            11 => ParsedSeqId::Gi(r.integer(ty)?),
-            12 => ParsedSeqId::Ddbj(textseq_id(r, ty)?),
-            13 => ParsedSeqId::Prf(textseq_id(r, ty)?),
-            14 => ParsedSeqId::Pdb(pdb_seq_id(r, ty)?),
-            15 => ParsedSeqId::Tpg(textseq_id(r, ty)?),
-            16 => ParsedSeqId::Tpe(textseq_id(r, ty)?),
-            17 => ParsedSeqId::Tpd(textseq_id(r, ty)?),
-            18 => ParsedSeqId::Gpipe(textseq_id(r, ty)?),
-            _ => ParsedSeqId::NamedAnnotTrack(textseq_id(r, ty)?),
-        })
-    })
+    let mut seq_id = None;
+    read_seq_id_into(r, &mut seq_id)?;
+    Ok(mandatory(seq_id))
+}
+
+/// `read_seq_id` into `slot`, whose earlier value it replaces: a reader of many Seq-ids (the
+/// masks of a mask file) keeps one slot and moves no Seq-id through the frames.
+pub(crate) fn read_seq_id_into<I: Input>(
+    r: &mut TypedReader<I>,
+    slot: &mut Option<ParsedSeqId>,
+) -> R<()> {
+    r.choice(
+        named::SEQ_ID,
+        #[inline(always)]
+        |r, index, ty| {
+            *slot = Some(match index {
+                0 => ParsedSeqId::Local(object_id(r, ty)?),
+                1 => ParsedSeqId::Gibbsq(int4(r, ty)?),
+                2 => ParsedSeqId::Gibbmt(int4(r, ty)?),
+                3 => ParsedSeqId::Giim(giimport_id(r, ty)?),
+                4 => ParsedSeqId::Genbank(textseq_id(r, ty)?),
+                5 => ParsedSeqId::Embl(textseq_id(r, ty)?),
+                6 => ParsedSeqId::Pir(textseq_id(r, ty)?),
+                7 => ParsedSeqId::Swissprot(textseq_id(r, ty)?),
+                8 => ParsedSeqId::Patent(patent_seq_id(r, ty)?),
+                9 => ParsedSeqId::Other(textseq_id(r, ty)?),
+                10 => ParsedSeqId::General(dbtag(r, ty)?),
+                11 => ParsedSeqId::Gi(r.integer(ty)?),
+                12 => ParsedSeqId::Ddbj(textseq_id(r, ty)?),
+                13 => ParsedSeqId::Prf(textseq_id(r, ty)?),
+                14 => ParsedSeqId::Pdb(pdb_seq_id(r, ty)?),
+                15 => ParsedSeqId::Tpg(textseq_id(r, ty)?),
+                16 => ParsedSeqId::Tpe(textseq_id(r, ty)?),
+                17 => ParsedSeqId::Tpd(textseq_id(r, ty)?),
+                18 => ParsedSeqId::Gpipe(textseq_id(r, ty)?),
+                _ => ParsedSeqId::NamedAnnotTrack(textseq_id(r, ty)?),
+            });
+            Ok(())
+        },
+    )
 }
 
 /// An INTEGER of Int4 storage (`ReadInt4`: the number fits).
+#[inline]
 fn int4<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<i32> {
     Ok(r.integer(ty)? as i32)
 }
@@ -54,13 +71,17 @@ pub(crate) fn mandatory<T>(value: Option<T>) -> T {
 
 /// An `Object-id`.
 pub(crate) fn object_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<ObjectId> {
-    r.choice(ty, |r, index, ty| {
-        Ok(if index == 0 {
-            ObjectId::Id(int4(r, ty)?)
-        } else {
-            ObjectId::Str(r.text(ty)?)
-        })
-    })
+    r.choice(
+        ty,
+        #[inline(always)]
+        |r, index, ty| {
+            Ok(if index == 0 {
+                ObjectId::Id(int4(r, ty)?)
+            } else {
+                ObjectId::Str(r.text(ty)?)
+            })
+        },
+    )
 }
 
 fn dbtag<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<Dbtag> {

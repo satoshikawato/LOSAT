@@ -1002,3 +1002,24 @@ fn literal_numbers() {
         "documents {differ:?} differ; read:\n{read_all}"
     );
 }
+
+/// `same_bytes` (the name lookups' compare) agrees with the slices' equality for every length up
+/// to past its longest word form, a byte changed at each position, and lengths that differ.
+#[test]
+fn same_bytes_is_slice_equality() {
+    for n in 0..=24usize {
+        let a: Vec<u8> = (0..n as u8).map(|i| b'a' + i).collect();
+        let same = a.to_vec();
+        assert!(super::same_bytes(&a, &same), "{n} bytes");
+        for at in 0..n {
+            let mut b = a.clone();
+            b[at] ^= 0x20;
+            assert!(!super::same_bytes(&a, &b), "{n} bytes, byte {at} changed");
+        }
+        assert!(
+            !super::same_bytes(&a, &[a.as_slice(), b"x"].concat()),
+            "{n} and {} bytes",
+            n + 1
+        );
+    }
+}

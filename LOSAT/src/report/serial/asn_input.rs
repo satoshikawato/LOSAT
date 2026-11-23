@@ -306,6 +306,10 @@ pub enum Encoding {
 pub(crate) trait Items {
     fn count(&self) -> usize;
     fn name(&self, index: usize) -> &'static str;
+    /// Whether the member or variant at `index` is named `id`.
+    fn is_named(&self, index: usize, id: &[u8]) -> bool {
+        self.name(index).as_bytes() == id
+    }
 }
 
 /// The named values of an ENUMERATED (`integer` false) or of an INTEGER with named values.
@@ -519,6 +523,7 @@ impl<S: AsnSource> TextInput<S> {
     /// searched from `pos` on; one that is not there is an error (`UnexpectedMember`, which lists
     /// them all). `choice`: an empty name is `BeginChoiceVariant`'s error.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1305-1314
+    #[inline(always)]
     fn find_member(&mut self, items: &(impl Items + ?Sized), pos: usize, choice: bool) -> R<usize> {
         let count = items.count();
         let member = self.r.member_or_tag().map_err(|e| self.fail(e))?;
@@ -538,7 +543,17 @@ impl<S: AsnSource> TextInput<S> {
                 if choice && id.is_empty() {
                     return Err(self.throw(BEGIN_CHOICE_VARIANT, "choice variant id expected"));
                 }
-                let found = (pos..count).find(|&i| items.name(i).as_bytes() == id);
+                // A plain loop: the lookup, with the compare it inlines, stays in the caller (an
+                // iterator's `find` is compiled as a function of its own).
+                let mut found = None;
+                let mut i = pos;
+                while i < count {
+                    if items.is_named(i, id) {
+                        found = Some(i);
+                        break;
+                    }
+                    i += 1;
+                }
                 (id, found)
             }
         };

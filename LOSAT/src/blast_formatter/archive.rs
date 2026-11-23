@@ -273,8 +273,8 @@ impl<'o> Output<'o> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:689-698
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:310-323
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:559-564
-    /// The insertion of the Seq-annot of `desc` and `aligns` in `format` into the stream
-    /// (`m_Outfile << MSerial_AsnText << annot`): an object stream of its own over the stream
+    /// The insertion of the Seq-annot of `desc` and `aligns` in `format` into the stream (it
+    /// takes the format, then the Seq-annot): an object stream of its own over the stream
     /// (`writedb::metadata::ObjectOStream`, no diagnostic prefix) takes the bytes
     /// (`write_streamed` through `AnnotSink`, then `EndOfWrite`), and its destructor closes it.
     /// A close that fails posts `802.4` (`ObjectOStream::destroy`); a write that threw then ends

@@ -10,7 +10,7 @@ Questions and answers for the problems people meet most. Each answer is based on
 Error: the NCBI BLAST+ option -html is not supported by LOSAT's BLASTN
 ```
 
-The command exits with status 1 and runs nothing. For an output format that NCBI writes and LOSAT does not (in `psiblast` or `tblastn -in_pssm`), see [Output formats](output-formats.md) and [`psiblast` refuses `-outfmt`](#psiblast-refuses--outfmt-such-as-xml-or-asn1).
+The command exits with status 1 and runs nothing. For an output format that NCBI writes and LOSAT does not (in `psiblast` or `tblastn -in_pssm`), see [Output formats](output-formats.md) and [`psiblast` refuses some `-outfmt` values](#psiblast-refuses-some--outfmt-values).
 
 **Why?** LOSAT stops with an error for each option and value it does not implement. It never ignores an option and never runs something else in its place, so a result you get is the result you asked for.
 
@@ -101,15 +101,15 @@ These apply when you run `losat.wasm` yourself. See [Platforms and WebAssembly](
 
 First check [Differences from NCBI BLAST+](differences.md). A few differences are on purpose, for example a local `tblastx` or `tblastn` subject translated with `-db_gencode`, the last digit of some full-precision values on macOS, and the `CL:` tag of SAM output. If your case is not covered there, it is a bug: please report it.
 
-## `psiblast` refuses `-outfmt` such as XML or ASN.1
+## `psiblast` refuses some `-outfmt` values
 
-`psiblast` supports `-outfmt 0`, `6`, `7`, `10` and `20` from a FASTA query, and `0`, `6` and `7` with `-in_pssm` or `-in_msa`.
+`psiblast` writes `-outfmt 0`, `5` to `11` and `20` from a FASTA query, `-in_pssm` or `-in_msa`, at any `-num_iterations`. `tblastn -in_pssm` writes `0` to `10` and `20`.
 
-- A format outside `0`, `6`, `7`, `10` and `20` (such as XML `-outfmt 5` or archive `-outfmt 11`) stops before any input is read, with any query: `Error: output format N is not supported by LOSAT's PSIBLAST`.
-- With `-in_pssm` or `-in_msa`, `-outfmt 10` and `20` stop after the PSSM or alignment is read: `Error: output format N with -in_pssm is not supported by LOSAT's PSIBLAST yet` (`-in_msa` when that is given).
-- Both exit with status 1.
+- A `psiblast` format `1` to `4`, `12` to `16` or `18` stops before the search: `Error: output format N is not supported by LOSAT's PSIBLAST yet` with a FASTA query, and `Error: output format N with -in_pssm is not supported by LOSAT's PSIBLAST yet` (`with -in_msa` for an alignment) with `-in_pssm` or `-in_msa`. The `-in_pssm` and `-in_msa` refusals come after the file is read, so a file that NCBI BLAST+ cannot read gets NCBI's error for it first.
+- A `tblastn -in_pssm` format `12` to `16` or `18` stops after the PSSM is read: `Error: output format N with -in_pssm is not supported by LOSAT's TBLASTN yet`. `-outfmt 11` stops there too, because NCBI's own run of it stops with a C++ exception whose report changes from run to run.
+- Each exits with status 1.
 
-Use NCBI BLAST+ `psiblast` if your workflow requires those formats.
+Use NCBI BLAST+ if your workflow requires those formats.
 
 ## `rpsblast` or `rpstblastn` rejects `-subject`
 

@@ -74,7 +74,10 @@ pub use crate::api::start::{CallerSink, CallerStart, ErrorSource};
 pub use crate::blastinput::ncbi_environment::{
     log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles, TextPlace,
 };
-pub use crate::report::run_files::{FileReceiver, RunFiles};
+pub use crate::report::run_files::{FileReceiver, FileStream, RunFiles};
+/// The names of the command line's programs (`losat <program>`, and the names that run one without
+/// its word): LOSAT Web's tool run tells a program that it does not run from a name that is none.
+pub use crate::utils::entry_names::ENTRY_NAMES as PROGRAMS;
 
 /// The NCBI application start of a run of `program` with the arguments `words` (after the
 /// program's name), as the command line's (`cli::main_entry`) in an environment of the
@@ -93,6 +96,69 @@ pub fn start_run(
         program, words, variables, files,
     );
     crate::api::start::begin_with(start, words, run_files, diagnostics)
+}
+
+/// Runs `windowmasker` with `words` (the command line after `losat windowmasker`) as the command
+/// line runs it in its working directory, and its exit status (the tool runs of ABI v2,
+/// `losat_web2_tool`; line NP WW3a, 2026-11-22): it opens its input files by name in the run's
+/// working directory, which LOSAT Web's host gives the engine (docs/web/abi_v2.md §3), reads `input`
+/// where the command line reads its standard input, writes its standard output to `out` and its
+/// standard error to `err`, and gives the files that it writes (`-out FILE`, `-logfile FILE`) to
+/// `run_files` (`RunFiles::Receiver`: each file as it is written when the receiver opens it,
+/// `FileReceiver::open`, else whole when the run ends; one file per path, also where the run opens
+/// it twice, `-out x -logfile x`, as the system shares it). The application start is the command
+/// line's (its environment and its registry files: the run's `.ncbirc`, the file of `-conffile`),
+/// and `-xmlhelp` prints NCBI's XML, as there.
+pub fn run_windowmasker(
+    words: &[&str],
+    run_files: &RunFiles,
+    input: &mut dyn std::io::Read,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> i32 {
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    crate::windowmasker::run_in(&words, run_files, input, out, err)
+}
+
+/// Checks the words of a `windowmasker` run as `run_windowmasker` runs them, up to where the tool
+/// reads its input or opens a file: the application start (which reads the registry files of the
+/// run's working directory, `.ncbirc`, the file of `-conffile`, as the command line does), the
+/// arguments (NCBI's reader and its checks), LOSAT's settings and the checks of the mode before its
+/// files (`-mk_counts` with `-ids` and `-exclude_ids`, or with `-infmt seqids`; `-convert -in -`)
+/// (LOSAT Web's validation of a tool's words, `losat_web2_validate`; line NP WW3a, D-WW3-7 and
+/// D-WW3-10, 2026-11-23). `Err` with what the command line writes for the words that it refuses:
+/// its standard error, then the file of `-logfile` where the argv has one, without the last line
+/// end.
+pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
+    use std::sync::{Arc, Mutex};
+    /// The file of `-logfile`, kept for the message.
+    #[derive(Default)]
+    struct Log(Mutex<Vec<u8>>);
+    impl FileReceiver for Log {
+        fn receive(&self, _name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend_from_slice(bytes);
+            Ok(())
+        }
+    }
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    let log = Arc::new(Log::default());
+    let mut err = Vec::new();
+    let status = crate::windowmasker::check_in(&words, &RunFiles::Receiver(log.clone()), &mut err);
+    if status == 0 {
+        return Ok(());
+    }
+    err.extend_from_slice(
+        &log.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    if err.last() == Some(&b'\n') {
+        err.pop();
+    }
+    Err(String::from_utf8_lossy(&err).into_owned())
 }
 
 // The checks of the options alone, without the inputs (the `validate` of ABI v2), and BLASTN's

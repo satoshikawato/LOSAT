@@ -15,8 +15,9 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::{
-    diag_target, log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed,
+    log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed,
 };
+use crate::report::run_files::{OpenFiles, RunFiles};
 use crate::report::serial::encoder::ReplacedChar;
 
 use args::{ArgException, Args, ArgsError};
@@ -409,6 +410,7 @@ pub(crate) fn run(
         // The command line's `-xmlhelp`: NCBI's XML without the arguments that LOSAT refuses
         // (of the programs of `ncbi_app`, makeprofiledb's `-binary` at its run, `ncbi_xmlhelp_tests`).
         (start, Some(crate::cli::xml_help_text)),
+        &RunFiles::Disk,
     );
     let _ = out.flush();
     let _ = err.flush();
@@ -461,23 +463,67 @@ pub(crate) fn run_with(
             return 1;
         }
     }
-    run_app(tool, words, (input, out, err), body, (&start, None))
+    run_app(
+        tool,
+        words,
+        (input, out, err),
+        body,
+        (&start, None),
+        &RunFiles::Disk,
+    )
 }
 
-/// The run of `run` and `run_with` after the application start `start` (whose usage report's
-/// messages the caller has written), with the writer of NCBI's XML of `-xmlhelp` that the command
-/// line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
-/// (`cli::xml_help_refusal`, line RG DECISIONS E2x-1), so the library does not carry the XML.
+/// `run_with` of a run whose files (`-logfile`, the files that the program opens by name for
+/// writing) go to `files`, and which writes NCBI's XML of `-xmlhelp` as the command line does:
+/// LOSAT Web's run of a tool (`web_adapter::run_windowmasker`, line NP WW3a, 2026-11-22), which
+/// reads its input files in the run's working directory and gives the files that it writes to its
+/// host (`RunFiles::Receiver`).
+pub(crate) fn run_in(
+    tool: &'static Tool,
+    words: &[OsString],
+    files: &RunFiles,
+    (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
+    body: Body,
+) -> i32 {
+    let start = ApplicationStart::of_process(tool.program, words);
+    match start.usage_report() {
+        Ok(text) => {
+            let _ = err.write_all(text.as_bytes());
+        }
+        Err(reason) => {
+            let _ = writeln!(err, "Error: {reason}");
+            return 1;
+        }
+    }
+    run_app(
+        tool,
+        words,
+        (input, out, err),
+        body,
+        (&start, Some(crate::cli::xml_help_text)),
+        files,
+    )
+}
+
+/// The run of `run`, `run_with` and `run_in` after the application start `start` (whose usage
+/// report's messages the caller has written), with the writer of NCBI's XML of `-xmlhelp` that the
+/// command line's `run` has (`xml_help`); the library API's run has none and refuses `-xmlhelp`
+/// (`cli::xml_help_refusal`, line RG DECISIONS E2x-1), so the library does not carry the XML. The
+/// run's files go to `files`: the file of `-logfile` and the files that the program opens by name
+/// (`Args::files`), through the run's `OpenFiles`.
 fn run_app(
     tool: &'static Tool,
     words: &[OsString],
     (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
     body: Body,
     (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
+    files: &RunFiles,
 ) -> i32 {
     // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
     // gets the usage report's messages when NCBI opens it, before `-version`.
-    let mut target = diag_target(log_file(words));
+    // The files that the run opens by name, which end when the run ends (`OpenFiles`).
+    let files = OpenFiles::new(files);
+    let mut target = files.log_target(log_file(words));
     start.write_log_setup(&mut target, err);
     let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
@@ -534,7 +580,7 @@ fn run_app(
         return diag.refuse(&refusal);
     }
     body(
-        &args,
+        &args.with_files(&files),
         &settings,
         &mut files::Cin::new(input),
         out,
